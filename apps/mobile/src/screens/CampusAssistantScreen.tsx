@@ -2,6 +2,9 @@ import { AssignmentReplyActions } from './AssignmentReplyActions';
 import { LegacyAssignmentReminders } from './LegacyAssignmentReminders';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Linking, ScrollView, Text, TextInput, View, type LayoutChangeEvent } from 'react-native';
+import type { AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
+import { AssistantWorkContextPicker } from './AssistantWorkContextPicker';
+import { OfficialLibraryReply } from './OfficialLibraryReply';
 import { AssistantConversationLayout, type AssistantPanel } from './AssistantConversationLayout';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
@@ -142,7 +145,7 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
   const initialScope = useRef(scope);
   const prompt = typeof route?.params?.prompt === 'string' ? route.params.prompt : '';
   return (
-    <AssistantConversation
+    <ScopedAssistantConversation
       key={scope}
       uid={uid}
       platformTimetable={platformTimetable}
@@ -169,17 +172,7 @@ type AssistantShortcut =
   | { kind: 'gap'; question: string }
   | { kind: 'selection'; question: string; checkedAt: string };
 
-function AssistantConversation({
-  uid,
-  platformTimetable,
-  platformContext,
-  courseworkRequests,
-  schoolId,
-  schoolName,
-  initialPrompt,
-  isScopeCurrent,
-  navigation,
-}: {
+type ConversationProps = {
   uid: string;
   platformTimetable?: PlatformTimetableAccess;
   platformContext?: string;
@@ -189,7 +182,41 @@ function AssistantConversation({
   initialPrompt: string;
   isScopeCurrent: () => boolean;
   navigation: ServiceScreenProps['navigation'];
+};
+
+function ScopedAssistantConversation(props: ConversationProps) {
+  const [taskProfile, setTaskProfile] = useState<AssistantRoleProfileId>('student');
+  const generation = useRef(0);
+  const version = generation.current;
+  const drafts = useRef(new Map<AssistantRoleProfileId, string>([['student', props.initialPrompt]]));
+  const current = () => generation.current === version && props.isScopeCurrent();
+  return <AssistantConversation {...props} key={taskProfile} taskProfile={taskProfile}
+    initialPrompt={drafts.current.get(taskProfile) ?? ''} isScopeCurrent={current}
+    onSelectProfile={(next, draft) => {
+      if (!props.platformTimetable || !current() || !props.platformTimetable.isCurrent() || next === taskProfile) return;
+      drafts.current.set(taskProfile, draft);
+      generation.current += 1;
+      setTaskProfile(next);
+    }} />;
+}
+
+function AssistantConversation({
+  taskProfile,
+  onSelectProfile,
+  uid,
+  platformTimetable,
+  platformContext,
+  courseworkRequests,
+  schoolId,
+  schoolName,
+  initialPrompt,
+  isScopeCurrent,
+  navigation,
+}: ConversationProps & {
+  taskProfile: AssistantRoleProfileId;
+  onSelectProfile: (next: AssistantRoleProfileId, draft: string) => void;
 }) {
+  const workContext = !!platformTimetable && taskProfile !== 'student';
   const [messages, setMessages] = useState<
     Array<CampusAssistantMessage & {
       requiresService?: boolean;
@@ -242,7 +269,7 @@ function AssistantConversation({
     ? activeShortcut.choice.reminder : undefined;
   const queryingGaps = activeShortcut?.kind === 'gap';
   const updatingReminder = reminderChoice === 'confirm' || reminderChoice === 'remove';
-  const queryingWork = !!platformTimetable && (activeShortcut?.kind === 'coursework' || (!activeShortcut && !!classCourseworkQuestion(busy ? pendingQuestion : draft, hasClass)));
+  const queryingWork = !!platformTimetable && !workContext && (activeShortcut?.kind === 'coursework' || (!activeShortcut && !!classCourseworkQuestion(busy ? pendingQuestion : draft, hasClass)));
   const queryingPublicCourses = !platformTimetable && mode === 'device' &&
     resolvePublicCourseAssistantIntent(busy ? pendingQuestion : draft, schoolId)?.kind === 'search';
   const quickActions = platformTimetable ? [] : getMobileQuickActions(draft);
@@ -267,7 +294,7 @@ function AssistantConversation({
   }, []);
   const changesDuringRead = useRef<Map<string, string> | null>(null);
   useEffect(() => {
-    if (!platformTimetable) return;
+    if (!platformTimetable || workContext) return;
     return subscribeNuniAssignmentChanges(({ accountId, context, workspaceId, assignmentId }) => {
       if (accountId !== platformTimetable.accountId || context !== platformContext || !platformTimetable.isCurrent()) return;
       changesDuringRead.current?.set(workspaceId, assignmentId);
@@ -277,11 +304,11 @@ function AssistantConversation({
           ? { ...message, courseworkRead: { ...read, changedAssignmentId: assignmentId } } : message;
       }));
     });
-  }, [platformContext, platformTimetable]);
+  }, [platformContext, platformTimetable, workContext]);
   const current = () => mounted.current && isScopeCurrent() && (!platformTimetable || platformTimetable.isCurrent());
   const calendarContext = { uid, schoolId, platformTimetable, isCurrent: current };
-  const courseworkBatchChecks = useMemo(() => courseworkRequests
-    ? createNuniCourseworkStudyBatchChecks(courseworkRequests) : undefined, [courseworkRequests]);
+  const courseworkBatchChecks = useMemo(() => courseworkRequests && !workContext
+    ? createNuniCourseworkStudyBatchChecks(courseworkRequests) : undefined, [courseworkRequests, workContext]);
   const calendarRecovery = useAssistantCalendarRecovery(calendarContext, (restored) => {
     if (!current()) return;
     setMessages((previous) => previous.map((message) => {
@@ -335,12 +362,22 @@ function AssistantConversation({
     message.calendarBatch ? [message.calendarBatch] : [])].flatMap((batch) => batch.steps.flatMap((step) =>
     step.state === 'recorded' && sameAssistantCalendarEvent(step.event, step.task.proposal.event)
       ? [step.task.proposal.mutationId] : [])));
-  const canSavePlans = Boolean(uid || platformTimetable);
+  const canSavePlans = !workContext && Boolean(uid || platformTimetable);
   const savedPlanScope = useMemo(() => canSavePlans ? { owner: timetableOwner, schoolId } : null,
     [canSavePlans, timetableOwner, schoolId]);
   const savedPlans = useSavedCampusPlans(savedPlanScope, current);
   const canStartPlanAction = () => current() && !lock.current && !syncLock.current &&
     !studyLock.current && !calendarBusy;
+  // Unsent reviews exist only in this thread. In-flight or uncertain writes must
+  // keep their original confirmation/recheck controls until they are reconciled.
+  const pendingProfileAction = messages.some(({ calendarTask, calendarBatch }) =>
+    calendarTask?.state === 'review' || (calendarTask?.state === 'unknown' && calendarTask.reason === 'unavailable') ||
+    calendarBatch?.state === 'review' || calendarBatch?.state === 'paused');
+  const profileLocked = busy || syncBusy || calendarBusy || savedPlans.busy || pendingProfileAction;
+  const selectProfile = (next: AssistantRoleProfileId) => {
+    if (profileLocked || !canStartPlanAction()) return;
+    onSelectProfile(next, draftRef.current);
+  };
   const selectPanel = (next: AssistantPanel) => {
     if (canStartPlanAction() && !savedPlans.busy) setPanel(next);
   };
@@ -442,7 +479,7 @@ function AssistantConversation({
     }
   };
   const briefPlan = async (question: string, savedPlanId?: string) => {
-    if ((!uid && !platformTimetable) || !canStartPlanAction()) return;
+    if (workContext || (!uid && !platformTimetable) || !canStartPlanAction()) return;
     const original = savedPlanId ? savedPlans.plans.find((saved) => saved.id === savedPlanId) : undefined;
     if (savedPlanId && !original) {
       setError('原計畫已不在清單中，請重新開啟已儲存計畫。');
@@ -499,7 +536,7 @@ function AssistantConversation({
       const reply = await askCampusAssistant({
         scope: { uid, schoolId },
         schoolName,
-        ...(platformTimetable ? { platformTimetable, courseworkRequests } : { senseSnapshot: snapshot }),
+        ...(platformTimetable ? { platformTimetable, taskProfile, courseworkRequests } : { senseSnapshot: snapshot }),
         messages: next,
         mode: 'device',
         isCurrent: planCurrent,
@@ -535,6 +572,7 @@ function AssistantConversation({
             courseworkList: reply.courseworkList,
             announcementRead: reply.announcementRead,
             publicCourseRead: reply.publicCourseRead,
+            libraryDirectory: reply.libraryDirectory,
           },
         ]);
         setActiveShortcut(null);
@@ -564,7 +602,7 @@ function AssistantConversation({
 
   const startPlanStudy = async (source: NuniPlanAssignmentSource, question: string) => {
     const focusedNavigation = navigation as NuniPlanAssignmentNavigation | undefined;
-    if (!platformTimetable || !courseworkRequests || !canStartPlanAction() ||
+    if (workContext || !platformTimetable || !courseworkRequests || !canStartPlanAction() ||
         focusedNavigation?.isFocused?.() === false) return;
     const selected = { ...source };
     const controller = new AbortController();
@@ -619,7 +657,7 @@ function AssistantConversation({
   const startPlanStudyBatch = async (sources: readonly NuniPlanAssignmentSource[],
     question = `替選取的 ${sources.length} 份作業各安排 30 分鐘準備時間`) => {
     const focusedNavigation = navigation as NuniPlanAssignmentNavigation | undefined;
-    if (!platformTimetable || !courseworkRequests || !canStartPlanAction() ||
+    if (workContext || !platformTimetable || !courseworkRequests || !canStartPlanAction() ||
         focusedNavigation?.isFocused?.() === false) return;
     const selected = sources.map((source) => ({ ...source }));
     const controller = new AbortController();
@@ -699,7 +737,7 @@ function AssistantConversation({
       const reply = await askCampusAssistant({
         scope: { uid, schoolId },
         schoolName,
-        ...(platformTimetable ? { platformTimetable, courseworkRequests,
+        ...(platformTimetable ? { platformTimetable, taskProfile, courseworkRequests,
           ...(shortcut?.kind === 'coursework' && { courseworkChoice: shortcut.choice }) } : { senseSnapshot: currentSense }),
         messages: next,
         isCurrent: current,
@@ -712,6 +750,10 @@ function AssistantConversation({
       const anchor = reply.classGapRead ?? (platformTimetable ? reply.savedClassRead ?? reply.courseworkRead?.anchor : undefined);
       if (anchor && (anchor.owner !== timetableOwner || anchor.schoolId !== schoolId)) {
         if (current()) setError('無法核對這筆課表，請再查一次。');
+        return;
+      }
+      if (reply.libraryDirectory && reply.libraryDirectory.schoolId !== schoolId) {
+        if (current()) setError('校園已變更，請重新查詢圖書館服務。');
         return;
       }
       if (reply.academicRead && (reply.academicRead.owner !== timetableOwner || reply.academicRead.schoolId !== schoolId)) {
@@ -774,6 +816,7 @@ function AssistantConversation({
             courseworkStudy: reply.courseworkStudy,
             announcementRead: reply.announcementRead,
             publicCourseRead: reply.publicCourseRead,
+            libraryDirectory: reply.libraryDirectory,
             proposals: reply.proposals,
           },
         ]);
@@ -990,8 +1033,8 @@ function AssistantConversation({
   );
   return (
     <AssistantConversationLayout
-      title={platformTimetable ? '課業助理' : '校園助理'}
-      subtitle={schoolName + ' · ' + (platformTimetable ? 'nuni 個人課表' : mode === 'device' ? '手機本地' : '校園連線')}
+      title={workContext ? '工作助理' : platformTimetable ? '課業助理' : '校園助理'}
+      subtitle={schoolName + ' · ' + (workContext ? '個人工作安排' : platformTimetable ? 'nuni 個人課表' : mode === 'device' ? '手機本地' : '校園連線')}
       panel={panel} onSelect={selectPanel} locked={busy || syncBusy || calendarBusy}
       chatScroll={chatScroll} onChatScrollPosition={onChatScrollPosition}
       onBack={() => {
@@ -1018,7 +1061,7 @@ function AssistantConversation({
             ref={composerInput}
             accessibilityLabel="詢問校園助理"
             value={draft} maxLength={1600} multiline editable={!studyBusy && !calendarBusy} onChangeText={editDraft}
-            placeholder={busy ? '可以先寫下一句，完成後再送出…' : platformTimetable ? '問課表、作業或安排這週…' : mode === 'device' ? '問課表、作業…' : '查校園資訊…'}
+            placeholder={busy ? '可以先寫下一句，完成後再送出…' : workContext ? '想找哪天的工作空檔？' : platformTimetable ? '問課表、作業或安排這週…' : mode === 'device' ? '問課表、作業…' : '查校園資訊…'}
             placeholderTextColor={aiTokens.muted}
             style={{ flex: 1, minWidth: 0, minHeight: 44, maxHeight: 96, borderWidth: 1,
               borderRadius: 12, borderColor: aiTokens.border, color: aiTokens.text,
@@ -1038,6 +1081,11 @@ function AssistantConversation({
         </View>
       ) : null}
     >
+      {platformTimetable ? (
+        <AssistantWorkContextPicker profileId={taskProfile} disabled={profileLocked}
+          onChange={selectProfile} onExample={editDraft}
+          showExamples={!messages.length && !draft.trim() && !profileLocked} />
+      ) : null}
       {canSavePlans && savedPlans.plans.length > 0 ? (
         <View style={{ marginHorizontal: 16, marginBottom: 8 }}>
           <AIButton label={`繼續已儲存的計畫（${savedPlans.plans.length}）`} variant="ghost"
@@ -1057,13 +1105,13 @@ function AssistantConversation({
         onRetry={() => { if (!busy && !syncBusy && !calendarBusy && current()) void calendarRecovery.reload(); }}
         onChange={changeCalendarTask} />
       <AssistantCalendarBatchRecovery
-        batches={calendarRecovery.batches.filter((batch) => !messages.some((message) => message.calendarBatch?.plan.id === batch.plan.id))}
+        batches={calendarRecovery.batches.filter((batch) => !workContext && !messages.some((message) => message.calendarBatch?.plan.id === batch.plan.id))}
         error={calendarRecovery.batchError} context={calendarContext} navigation={navigation}
         disabled={busy || syncBusy || calendarBusy}
         sourceChecks={courseworkBatchChecks}
         onRetry={() => { if (!busy && !syncBusy && !calendarBusy && current()) void calendarRecovery.reload(); }}
         onChange={changeCalendarBatch} />
-      {(uid || platformTimetable) && messages.length === 0 && !busy && !calendarBusy && !draft.trim() ? (
+      {!workContext && (uid || platformTimetable) && messages.length === 0 && !busy && !calendarBusy && !draft.trim() ? (
         <AICard title="安排個人行程">
           <Text style={{ color: aiTokens.textSecondary, fontSize: 15, lineHeight: 23 }}>
             輸入明確日期、時間與名稱，例如「幫我明天 19:00 到 20:00 安排英文讀書」。先核對草稿，再確認加入個人行事曆。
@@ -1072,7 +1120,7 @@ function AssistantConversation({
           <AIButton label="填寫多筆行程範例" variant="ghost" onPress={() => editDraft('幫我安排以下行程：\n明天 19:00 到 20:00 英文讀書\n後天 18:00 到 19:00 資料庫複習')} />
         </AICard>
       ) : null}
-      {panel === 'chat' && (uid || platformTimetable) && mode === 'device' && messages.length === 0 && !busy && !calendarBusy && !error && !draft.trim() ? (
+      {!workContext && panel === 'chat' && (uid || platformTimetable) && mode === 'device' && messages.length === 0 && !busy && !calendarBusy && !error && !draft.trim() ? (
         <AICard title={platformTimetable ? '我的上課安排' : '我的課業安排'}>
           <AssistantClassNowHint uid={uid} schoolId={schoolId} platformTimetable={platformTimetable}>
             {(upcoming) => (
@@ -1100,7 +1148,7 @@ function AssistantConversation({
           ) : null}
         </AICard>
       ) : null}
-      {platformTimetable && messages.length === 0 && !draft.trim() && !busy && !error ? (
+      {platformTimetable && !workContext && messages.length === 0 && !draft.trim() && !busy && !error ? (
         <AICard title="我的課表">
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <AIButton label="查看完整課表" variant="ghost" onPress={() => current() && safeNavigate(navigation, 'PersonalTimetable')} />
@@ -1154,10 +1202,15 @@ function AssistantConversation({
             : message.serviceSelection ? '功能入口'
             : message.courseworkRead ? courseworkReplyTitle(message.courseworkRead)
             : message.courseworkList ? '待交作業'
-            : message.tool === 'public-course-catalog' ? '公開開課查詢'
+            : message.libraryDirectory ? '圖書館服務' : message.tool === 'public-course-catalog' ? '公開開課查詢'
             : message.tool === 'school-directory' ? '學校聯絡資訊' : message.announcementRead ? '校園公告'
-            : message.savedClassRead ? savedClassReplyTitle(message.savedClassRead) : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : platformTimetable ? '課表助理' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
-            {message.publicCourseRead && !platformTimetable ? (
+            : message.savedClassRead ? savedClassReplyTitle(message.savedClassRead) : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : workContext ? '工作助理回覆' : message.tool ? '手機離線工具' : platformTimetable ? '課表助理' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
+            {message.libraryDirectory ? (
+              <View style={{ gap: 8 }}>
+                <Text selectable style={{ color: aiTokens.text, lineHeight: 24 }}>{message.content}</Text>
+                <OfficialLibraryReply directory={message.libraryDirectory} disabled={busy || syncBusy} isCurrent={current} />
+              </View>
+            ) : message.publicCourseRead && !platformTimetable ? (
               <PublicCourseAssistantReply read={message.publicCourseRead} content={message.content}
                 disabled={busy || syncBusy}
                 onOpenCatalog={typeof navigation?.navigate === 'function' ? () => {

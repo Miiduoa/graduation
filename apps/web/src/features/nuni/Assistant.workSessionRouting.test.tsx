@@ -71,3 +71,24 @@ it('routes a standalone work-slot request through the selected role and authenti
   expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
   expect(screen.queryByText(/請提供一個課名/)).toBeNull();
 });
+
+it.each(['student', 'teacher', 'merchant', 'club', 'school', 'platform'])(
+  'sends the complete catalog and library map request from %s to the scoped assistant', async taskProfile => {
+    const question = '查本校圖書館的館藏網址，這間圖書館在哪裡';
+    const requests: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/nuni/assistant/capability') return json({ enabled: true, ready: true, version: 2 });
+      if (url !== '/api/nuni/assistant/ask') throw new Error('Unexpected route: ' + url);
+      requests.push(JSON.parse(String(init?.body)));
+      return json({ version: 2, answer: '已核對蓋夏圖書館館藏入口與校園地圖。', steps: [], cards: [], dataRead: true });
+    }));
+    await act(async () => { render(<Assistant />); });
+    fireEvent.change(await screen.findByLabelText('目前要處理'), { target: { value: taskProfile } });
+    fireEvent.change(await screen.findByLabelText('問題'), { target: { value: question } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /同意在本次對話/ }));
+    fireEvent.click(screen.getByRole('button', { name: '送出' }));
+    await screen.findByText('已核對蓋夏圖書館館藏入口與校園地圖。');
+    expect(requests).toEqual([expect.objectContaining({ question, taskProfile, schoolId: 'pu', consent: true })]);
+    expect(browserRequest).not.toHaveBeenCalled();
+  },
+);

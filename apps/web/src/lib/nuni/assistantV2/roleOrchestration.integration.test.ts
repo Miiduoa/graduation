@@ -11,6 +11,7 @@ import { issueRoute } from './actions';
 import { createAdapter } from './adapter';
 import { V2Error } from './contracts';
 import { fixtureAdapter, FIXTURE_NOW as now, FIXTURE_SECRET as secret } from './fixtures';
+import { readCampusMap } from './campusMapAdapter';
 import { readPublicSocial } from './publicSocialAdapter';
 
 const model = vi.hoisted(() => vi.fn());
@@ -82,6 +83,74 @@ describe('role orchestration through the authenticated BFF', () => {
       expect(reply.cards).toEqual([]);
     },
   );
+
+  it.each(['student', 'teacher', 'merchant', 'club', 'school', 'platform'])(
+    '%s follows the official catalog to the same school’s library on the map', async profile => {
+      const f = setup('pu');
+      // With no Firestore client, the real map reader uses the bundled Providence
+      // source and explicitly marks partial coverage.
+      f.adapter.campusMap = vi.fn(args => readCampusMap({ schoolId: 'pu', args, now,
+        guard: { beforeRead: vi.fn(), afterRead: vi.fn() } }));
+      const response = await f.ask(profile, '查本校圖書館的館藏網址，這間圖書館在哪裡');
+      expect(response.status).toBe(200);
+      const reply = await response.json();
+      expect(reply).toMatchObject({ modelCalls: 0, cards: [] });
+      const plan = parseAssistantTaskPlan(reply.taskPlan);
+      expect(plan?.steps).toHaveLength(2);
+      const [catalog, map] = plan!.steps;
+      expect(catalog).toMatchObject({ serviceId: 'library', status: 'completed', href: '/library?schoolId=pu' });
+      expect(catalog.summary).toContain('https://webpacx.lib.pu.edu.tw/');
+      expect(map).toMatchObject({ serviceId: 'map', status: 'partial', dependsOn: [catalog.id] });
+      expect(map.summary).toContain('蓋夏圖書館');
+      expect(f.adapter.campusMap).toHaveBeenCalledExactlyOnceWith({ query: '蓋夏圖書館', limit: 5 });
+      expect(f.ledger).not.toHaveBeenCalled();
+      f.privateReads.forEach(read => expect(read).not.toHaveBeenCalled());
+      expect(f.writes).toHaveLength(0);
+    },
+  );
+
+  it('rechecks the catalog and its dependent map without replaying an independent read', async () => {
+    const f = setup('pu');
+    f.adapter.campusMap = vi.fn(async () => { throw new V2Error(503, 'CAMPUS_MAP_UNAVAILABLE'); });
+    const reply = await (await f.ask('merchant', '查本校圖書館的館藏網址，這間圖書館在哪裡，查學校電話')).json();
+    const mapStep = reply.taskPlan.steps[1];
+    expect(mapStep.status).toBe('blocked');
+    f.adapter.campusMap = vi.fn(args => readCampusMap({ schoolId: 'pu', args, now,
+      guard: { beforeRead: vi.fn(), afterRead: vi.fn() } }));
+    const retry = await f.send('retry', { token: reply.taskRetry.token, stepIds: [mapStep.id] });
+    expect(retry.status).toBe(200);
+    const resumed = await retry.json();
+    expect(resumed.taskPlan.steps.map((step: { serviceId: string }) => step.serviceId)).toEqual(['library', 'map']);
+    expect(f.adapter.campusMap).toHaveBeenCalledExactlyOnceWith({ query: '蓋夏圖書館', limit: 5 });
+    expect(resumed.cards).toEqual([]);
+    expect(f.writes).toHaveLength(0);
+  });
+
+  it('preserves the original campus scope in catalog and map links for the official Providence alias', async () => {
+    const f = setup('tw-pu');
+    f.adapter.campusMap = vi.fn(args => readCampusMap({ schoolId: 'tw-pu', args, now,
+      guard: { beforeRead: vi.fn(), afterRead: vi.fn() } }));
+    const response = await f.ask('teacher', '查本校圖書館的館藏網址，這間圖書館在哪裡');
+    expect(response.status).toBe(200);
+    const { taskPlan } = await response.json();
+    expect(taskPlan.steps[0]).toMatchObject({ status: 'completed', href: '/library?schoolId=tw-pu' });
+    expect(taskPlan.steps[1]).toMatchObject({ status: 'partial', href: '/map?' + new URLSearchParams({ schoolId: 'tw-pu', query: '蓋夏圖書館' }) });
+    expect(taskPlan.steps[1].summary).toContain('蓋夏圖書館');
+    expect(f.adapter.campusMap).toHaveBeenCalledExactlyOnceWith({ query: '蓋夏圖書館', limit: 5 });
+  });
+
+  it('does not send a guessed library to the map when the selected campus has no catalog', async () => {
+    const f = setup();
+    f.adapter.campusMap = vi.fn();
+    const response = await f.ask('student', '查本校圖書館的館藏網址，這間圖書館在哪裡，查校園公告');
+    expect(response.status).toBe(200);
+    const reply = await response.json();
+    expect(reply.taskPlan.steps.map((step: { status: string }) => step.status)).toEqual(['blocked', 'blocked', 'completed']);
+    expect(reply.answer).not.toContain('蓋夏');
+    expect(f.adapter.campusMap).not.toHaveBeenCalled();
+    expect(f.adapter.publicCampus).toHaveBeenCalledOnce();
+    expect(f.writes).toHaveLength(0);
+  });
 
   it.each([
     ['teacher', '備課'], ['merchant', '盤點'], ['club', '社團籌備'],

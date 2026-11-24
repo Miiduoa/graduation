@@ -89,9 +89,9 @@ const teachingOverview = capability('teaching-overview', '本人已授權授課�
   ['classroom'], ['get_teaching_overview']);
 const merchantOverview = capability('merchant-overview', '本人已授權門市的訂單與當班概況', 'query',
   ['merchant'], ['get_merchant_overview']);
-const publicCampusReading = capability('public-campus-reading', '公開校園公告、活動、交流與學校聯絡資訊', 'query',
-  ['announcements', 'events', 'public-social', 'school-info'],
-  ['get_campus_announcements', 'get_campus_events', 'get_public_social', 'get_school_info']);
+const publicCampusReading = capability('public-campus-reading', '公開校園公告、活動、交流、學校聯絡資訊與圖書館館藏入口', 'query',
+  ['announcements', 'events', 'public-social', 'school-info', 'library'],
+  ['get_campus_announcements', 'get_campus_events', 'get_public_social', 'get_school_info', 'get_library_catalog']);
 const teachingServices = capability('teaching-services', '授課、批改與請假核閱工作區', 'service',
   ['classroom', 'leave-review', 'teacher'], ['propose_open_page']);
 const merchantServices = capability('merchant-services', '門市訂單、菜單與營運工作區', 'service',

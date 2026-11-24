@@ -13,7 +13,7 @@ const RETRY_TTL_MS = 15 * 60 * 1000;
 const READ_TOOLS = new Set([
   'get_schedule', 'get_calendar', 'get_due_work', 'get_imported_academics', 'get_dining',
   'list_food_orders', 'get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map',
-  'get_public_social', 'get_school_info', 'get_teaching_overview', 'get_merchant_overview',
+  'get_public_social', 'get_school_info', 'get_library_catalog', 'get_teaching_overview', 'get_merchant_overview',
 ]);
 const READ_KINDS = new Set(['free-time', 'materials', 'clubs', 'transit', 'public-course', 'map-location']);
 const invalid = (): never => { throw new V2Error(409, 'TASK_RETRY_INVALID'); };

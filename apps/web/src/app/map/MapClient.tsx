@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { useLocationHash } from '@/lib/useLocationHash';
@@ -105,14 +106,17 @@ function MapContent({
 }) {
   const canFavorite = Boolean(uid || platformAccountId);
   const hash = useLocationHash();
+  // Only static public metadata uses the canonical ID. Remote locations,
+  // favorites, and links retain the actual selected campus.
+  const publicSchool = toPublicSchoolId(school) ?? school;
   const fallbackMapUrl = buildCampusMapSearchUrl(schoolName);
-  const officialMapUrl = getOfficialCampusMapUrl(school);
+  const officialMapUrl = getOfficialCampusMapUrl(publicSchool);
   // 有內建地點的學校先直接顯示，外部來源只是補充；外部卡住或失敗都不擋住清單。
-  const bundled = hasBundledCampusPlaces(school);
+  const bundled = hasBundledCampusPlaces(publicSchool);
   const initialPlaces = () => ({
     status: bundled ? ('ready' as const) : ('loading' as const),
     source: 'loading' as const,
-    locations: bundled ? withProvidenceCampusPlaces(school, []) : [],
+    locations: bundled ? withProvidenceCampusPlaces(publicSchool, []) : [],
   });
   const [placeState, setPlaceState] = useState<{
     status: 'loading' | 'error' | 'ready';
@@ -140,14 +144,14 @@ function MapContent({
           setPlaceState({
             status: 'ready',
             source: 'ready',
-            locations: withProvidenceCampusPlaces(school, loaded),
+            locations: withProvidenceCampusPlaces(publicSchool, loaded),
           });
       },
       () => {
         if (!active) return;
         setPlaceState((previous) =>
           bundled
-            ? { status: 'ready', source: 'error', locations: previous.locations.length ? previous.locations : withProvidenceCampusPlaces(school, []) }
+            ? { status: 'ready', source: 'error', locations: previous.locations.length ? previous.locations : withProvidenceCampusPlaces(publicSchool, []) }
             : { status: 'error', source: 'error', locations: [] },
         );
       },
@@ -155,7 +159,7 @@ function MapContent({
     return () => {
       active = false;
     };
-  }, [school, placeAttempt, bundled]);
+  }, [school, publicSchool, placeAttempt, bundled]);
   const [category, setCategory] = useState('全部');
   const initialQuery = normalizeCampusClassroomQuery(query);
   const [search, setSearch] = useState(initialQuery);
@@ -275,7 +279,7 @@ function MapContent({
     ? locations.find((location) => location.id === routeDraft.from)
     : null;
   const selectLocation = useCallback((location: MapLocation) => setSelection(location.id), []);
-  const walkFrom = myLocation ?? (school === 'pu' ? PROVIDENCE_WALK_ORIGIN : null);
+  const walkFrom = myLocation ?? (bundled ? PROVIDENCE_WALK_ORIGIN : null);
   const walkFromGate = Boolean(walkFrom && !myLocation);
   const mapLocations = useMemo(() => {
     const visible = new Map(filtered.map((location) => [location.id, location]));
@@ -566,7 +570,7 @@ function MapContent({
           找不到連結指定的地點，請搜尋地點名稱。
         </p>
       )}
-      {school === 'pu' && (
+      {bundled && (
         <section className={`card ${styles.source}`} aria-label="地圖資料來源">
           <details>
             <summary>靜宜地圖資料來源與步行分鐘算法</summary>
@@ -664,7 +668,7 @@ function MapContent({
                 {walkingEstimateLabel(distanceMeters(walkFrom, selected))}
               </p>
             )}
-            {isProvidencePendingVerification(school, selected) && (
+            {isProvidencePendingVerification(publicSchool, selected) && (
               <p role="status">這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。</p>
             )}
             <div className={styles.actions}>
@@ -681,17 +685,17 @@ function MapContent({
                   查看即時到站
                 </Link>
               )}
-              {providencePlaceSourceUrl(school, selected) && (
+              {providencePlaceSourceUrl(publicSchool, selected) && (
                 <a
                   className="btn"
-                  href={providencePlaceSourceUrl(school, selected)!}
+                  href={providencePlaceSourceUrl(publicSchool, selected)!}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   查看地點來源 ↗
                 </a>
               )}
-              {hasOfficialProvidenceLibraryGuide(school, selected) && (
+              {hasOfficialProvidenceLibraryGuide(publicSchool, selected) && (
                 <a
                   className="btn"
                   href={PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL}
@@ -812,7 +816,7 @@ function MapContent({
                 >
                   <span className={styles.locationName}>
                     {location.name}
-                    {isProvidencePendingVerification(school, location) && (
+                    {isProvidencePendingVerification(publicSchool, location) && (
                       <span className={styles.pending}>待確認</span>
                     )}
                   </span>

@@ -13,6 +13,7 @@ import { parseCampusMapArguments, parseCampusMapResult } from './campusMap';
 import { parseCampusMapCommand } from './campusMapRequest';
 import { parsePublicSocialArguments, parsePublicSocialResult } from './publicSocial';
 import { parseSchoolInfoArguments, parseSchoolInfoResult, readSchoolInfo } from './schoolInfo';
+import { parseLibraryCatalogArguments, parseLibraryCatalogResult, readLibraryCatalog } from './libraryCatalog';
 import { connectedServiceClauses, connectedServiceRead, connectedServiceReads, publicPostSourceReferenced } from './connectedServiceReads';
 import { isRoleWorkspaceTool, parseRoleWorkspaceResult } from './roleWorkspaceReads';
 import { parseTeachingArguments } from './teacherWorkspace';
@@ -67,6 +68,7 @@ const definitions: Record<string, [Obj, string[]]> = {
   get_merchant_overview: [{}, []],
   get_public_social: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
   get_school_info: [{ field: { enum: ['overview', 'address', 'phone', 'website'] } }, []],
+  get_library_catalog: [{}, []],
   get_campus_announcements: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
   get_campus_events: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
   get_campus_map: [{ query: { type: 'string', minLength: 1, maxLength: 120 },
@@ -473,15 +475,18 @@ export function studyWindow(question: string, answer = ''): { from: string; to: 
   return { from: '08:00', to: '22:00' };
 }
 export const toolNames = Object.keys(definitions);
+// Role overviews and the fixed library directory are deliberately not mixed with
+// the broader campus-info keyword tools for the same clause.
+const dedicatedRead = (name: string) => isRoleWorkspaceTool(name) || name === 'get_library_catalog';
 // One executable reader/proposal per explicitly requested domain takes precedence
 // over optional context and secondary tools when the eight-tool budget is full.
 function requestedToolDomains(question: string, simulation: boolean, schoolId = ''): [string, string][] {
   const connected = connectedServiceReads(question);
-  const roleReads = connected.filter(read => isRoleWorkspaceTool(read.tool));
-  if (roleReads.length) {
+  const dedicated = connected.filter(read => dedicatedRead(read.tool));
+  if (dedicated.length) {
     const remaining = connectedServiceClauses(question).filter(clause =>
-      !isRoleWorkspaceTool(connectedServiceRead(clause)?.tool || '')).join('，');
-    return [...roleReads.map(read => [read.label, read.tool] as [string, string]),
+      !dedicatedRead(connectedServiceRead(clause)?.tool || '')).join('，');
+    return [...dedicated.map(read => [read.label, read.tool] as [string, string]),
       ...(remaining ? requestedToolDomains(remaining, simulation, schoolId) : [])];
   }
   const campusMap = parseCampusMapCommand(question);
@@ -549,13 +554,13 @@ export function toolSelectionNotice(question: string, simulation: boolean, compl
 }
 export function selectTools(question: string, simulation: boolean, schoolId = ''): string[] {
   const connected = connectedServiceReads(question);
-  const roleReads = connected.filter(read => isRoleWorkspaceTool(read.tool));
-  if (roleReads.length) {
+  const dedicated = connected.filter(read => dedicatedRead(read.tool));
+  if (dedicated.length) {
     const remaining = connectedServiceClauses(question).filter(clause =>
-      !isRoleWorkspaceTool(connectedServiceRead(clause)?.tool || '')).join('，');
+      !dedicatedRead(connectedServiceRead(clause)?.tool || '')).join('，');
     const other = remaining ? selectTools(remaining, simulation, schoolId)
       .filter(name => !['get_today_context', 'propose_open_page'].includes(name)) : [];
-    return [...new Set([...roleReads.map(read => read.tool), ...other])].slice(0, 8);
+    return [...new Set([...dedicated.map(read => read.tool), ...other])].slice(0, 8);
   }
   const campusMap = parseCampusMapCommand(question);
   if (campusMap) return campusMap.kind === 'next-class'
@@ -693,6 +698,7 @@ export function validateTool(name: string, raw: unknown): Obj {
   if (name === 'get_campus_map') return { ...parseCampusMapArguments(a) };
   if (name === 'get_public_social') return { ...parsePublicSocialArguments(a) };
   if (name === 'get_school_info') return { ...parseSchoolInfoArguments(a) };
+  if (name === 'get_library_catalog') return { ...parseLibraryCatalogArguments(a) };
   if (name === 'propose_food_order') return { ...cartArgs(a) };
   for (const [key, value] of Object.entries(a)) {
     const spec = props[key] as Obj;
@@ -1061,11 +1067,13 @@ export function createTools(
           result.selected.locationId !== merchantRetryTarget.locationId)) return fail('FORBIDDEN_SCOPE', 403);
         return result;
       }
+      case 'get_library_catalog':
       case 'get_public_social':
       case 'get_school_info': {
         const requested = connectedServiceReads(readRequestQuestion);
         if (!requested.some(read => read.tool === name && canonical(read.args) === canonical(a)))
           return fail('PUBLIC_READ_QUERY_MISMATCH');
+        if (name === 'get_library_catalog') return parseLibraryCatalogResult(readLibraryCatalog(binding.schoolId, a, now), binding.schoolId, a);
         if (name === 'get_school_info') return parseSchoolInfoResult(readSchoolInfo(binding.schoolId, a, now), binding.schoolId, a);
         if (!adapter.publicSocial) return fail('PUBLIC_SOCIAL_UNAVAILABLE', 503);
         return parsePublicSocialResult(await adapter.publicSocial(a), binding.schoolId, a);
@@ -1583,7 +1591,7 @@ export function createTools(
         } : {}),
         nextStep:
           next[name] || `依 ${name} schema 補正參數後重試；日期 YYYY-MM-DD、時間 HH:mm，不猜 id`,
-        availableIds: (['get_public_courses', 'get_public_social', 'get_school_info', 'get_teaching_overview', 'get_merchant_overview'].includes(name) ? [] : ['list_food_orders', 'list_clubs', 'get_food_locations'].includes(name)
+        availableIds: (['get_public_courses', 'get_public_social', 'get_school_info', 'get_library_catalog', 'get_teaching_overview', 'get_merchant_overview'].includes(name) ? [] : ['list_food_orders', 'list_clubs', 'get_food_locations'].includes(name)
           ? tenantIds
           : name === 'get_dining'
             ? [...diningIds]
@@ -1682,7 +1690,7 @@ export function createTools(
         cleaned.requestedPickupAt = pickupAt(now, cleaned.requestedPickupAt, requestQuestion);
       // Public content readers do not reinterpret unsupported school, date or
       // endpoint fields as an unfiltered query for the bound campus.
-      if (['get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map', 'get_public_social', 'get_school_info', 'get_teaching_overview', 'get_merchant_overview'].includes(name)) validateTool(name, cleaned);
+      if (['get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map', 'get_public_social', 'get_school_info', 'get_library_catalog', 'get_teaching_overview', 'get_merchant_overview'].includes(name)) validateTool(name, cleaned);
       const ignored = Object.keys(cleaned).filter((k) => !(k in (definitions[name]?.[0] || {})));
       if (name === 'get_transit' && cleaned.action === 'campus') {
         for (const key of ['city', 'stopId']) if (key in cleaned) ignored.push(key);

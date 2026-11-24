@@ -26,7 +26,7 @@ export type CrossServiceOperation = {
   informationRead?: InformationRead;
   question?: string;
   publicCourseIntent?: PublicCourseAssistantIntent;
-  mapSource?: { kind: 'event'; index: number };
+  mapSource?: { kind: 'event'; index: number } | { kind: 'library' };
   eventIssue?: string;
   workSession?: AssistantWorkSessionIntent;
 };
@@ -164,6 +164,14 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
         args: { query: map.query, limit: 5 } });
       continue;
     }
+    if (map?.kind === 'previous-library') {
+      const source = requested.at(-1);
+      if (source?.tool !== 'get_library_catalog') return null;
+      const destination = add({ kind: 'map-location', label: '查這間圖書館的位置',
+        serviceId: 'map', args: {}, mapSource: { kind: 'library' } });
+      destination.dependsOn = [source.id];
+      continue;
+    }
     if (map?.kind === 'previous-event') {
       const source = requested.findLast(previous => previous.kind === 'read' && previous.tool === 'get_campus_events');
       if (!source) return null;
@@ -283,7 +291,7 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
     add({ kind: 'handoff', label: '', serviceId: services[0], args: {} });
   }
   const singleSourceRead = requested.length === 1 && requested[0].kind === 'read' &&
-    ['get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map', 'get_public_social', 'get_school_info', 'get_teaching_overview', 'get_merchant_overview'].includes(requested[0].tool || '');
+    ['get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map', 'get_public_social', 'get_school_info', 'get_library_catalog', 'get_teaching_overview', 'get_merchant_overview'].includes(requested[0].tool || '');
   const singleWorkSession = requested.length === 1 && Boolean(requested[0].workSession);
   if ((!singleSourceRead && !singleWorkSession && requested.length < 2) || requested.length > 12 || (!singleSourceRead && !singleWorkSession &&
       new Set(requested.map(op => op.workSession ? op.kind + ':' + op.workSession.title + ':' + JSON.stringify(op.args)
