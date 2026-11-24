@@ -698,7 +698,10 @@ function PersonalCalendarWorkspace({
       const row = personalEventRowFromDraft(draft, scoped.schoolId, baseline);
       const followSavedDate =
         !baseline ||
-        (monthList ? filterPersonalEvents([row], month).length === 0 : savedDate !== baseline.date);
+        (monthList
+          ? monthEvents.some((event) => event.id === baseline.id) &&
+            filterPersonalEvents([row], month).length === 0
+          : savedDate !== baseline.date);
       await action(row);
       if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
       // Preserve navigation during the write even if focus has since returned

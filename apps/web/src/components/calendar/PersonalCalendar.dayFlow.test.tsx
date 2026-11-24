@@ -415,6 +415,34 @@ it('編輯並儲存既有行程後保留整月列表與其他日期的行程及�
   );
 });
 
+it('整月列表開啟編輯器後先切月，只改標題並儲存時留在目前月份', async () => {
+  const stored = event('october-only', '十月行程', '2026-10-14');
+  seed([stored, event('november-only', '十一月行程', '2026-11-15')]);
+  render(<PersonalCalendar />);
+  await ready();
+  activate(screen.getByRole('button', { name: '列表' }));
+  const monthControl = screen.getByLabelText('查看月份') as HTMLInputElement;
+  fireEvent.change(monthControl, { target: { value: '2026-10' } });
+  await screen.findByRole('heading', { name: stored.title });
+  activate(editEvent(stored.title));
+
+  fireEvent.change(monthControl, { target: { value: '2026-11' } });
+  expect(screen.getByRole('heading', { name: '十一月行程' })).toBeTruthy();
+  expect(titleField().value).toBe(stored.title);
+  fireEvent.change(titleField(), { target: { value: '已修改十月行程' } });
+  activate(screen.getByRole('button', { name: '儲存修改' }));
+  await screen.findByText('個人行程已更新。');
+
+  expect(monthControl.value).toBe('2026-11');
+  expect(screen.getByRole('button', { name: '列表' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('heading', { name: '十一月行程' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '已修改十月行程' })).toBeNull();
+  expect(readPersonalImports(scope()).find((record) => record.id === stored.id)).toMatchObject({
+    title: '已修改十月行程',
+    date: stored.date,
+  });
+});
+
 it.each([false, true])(
   '整月列表儲存後，仍跨入當月的行程留在目前月份（改期：%s）',
   async (reschedule) => {
