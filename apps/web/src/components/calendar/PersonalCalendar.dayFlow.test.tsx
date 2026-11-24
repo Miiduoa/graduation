@@ -14,10 +14,11 @@ const state = vi.hoisted(() => ({
   accountId: 'calendar-flow-account',
   schoolId: 'pu',
   loading: false,
+  eventId: '',
 }));
 
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams(`campus=${state.schoolId}`),
+  useSearchParams: () => new URLSearchParams({ campus: state.schoolId, eventId: state.eventId }),
 }));
 vi.mock('next/link', () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
@@ -78,6 +79,7 @@ beforeEach(() => {
   state.accountId = 'calendar-flow-account';
   state.schoolId = 'pu';
   state.loading = false;
+  state.eventId = '';
   localStorage.clear();
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
     () => new DOMRect(20, 60, 100, 40),
@@ -617,7 +619,7 @@ it.each([false, true])(
 
 it.each([
   ['開啟編輯器', 140],
-  ['可視視窗平移', 280],
+  ['可視視窗縮放', 280],
   ['入場動畫結束', 140],
 ])(
   '手勢放大後，於%s時將仍聚焦的行程標題帶回可視範圍',
@@ -647,9 +649,10 @@ it.each([
     activate(screen.getByRole('button', { name: stored.title }));
     const title = titleField();
 
-    if (trigger === '可視視窗平移') {
-      viewport.offsetLeft = 220;
-      viewport.dispatchEvent(new Event('scroll'));
+    if (trigger === '可視視窗縮放') {
+      viewport.width = 160;
+      viewport.offsetLeft = 20;
+      viewport.dispatchEvent(new Event('resize'));
     }
     if (trigger === '入場動畫結束') {
       viewport.offsetLeft = 45;
@@ -668,6 +671,44 @@ it.each([
       .toBeLessThanOrEqual(viewport.offsetLeft + viewport.width);
   },
 );
+
+it.each([
+  ['新增', 'offsetLeft'],
+  ['新增', 'offsetTop'],
+  ['編輯', 'offsetLeft'],
+  ['編輯', 'offsetTop'],
+] as const)('放大後手動平移（%s，%s）保留標題焦點且不拉回視窗', async (mode, axis) => {
+  const viewport = Object.assign(new EventTarget(), {
+    offsetLeft: 0, offsetTop: 0, width: 180, height: 300, scale: 2,
+  });
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+  if (mode === '編輯') {
+    const stored = event('pan-editor-event', '合成行程', '2026-11-14');
+    seed([stored]);
+    state.eventId = stored.id;
+  }
+  render(<PersonalCalendar />);
+  await ready();
+  if (mode === '編輯') {
+    const row = await screen.findByRole('listitem', { current: true });
+    activate(within(row).getByRole('button', { name: '編輯' }));
+  } else {
+    activate(screen.getByRole('button', { name: '新增行程' }));
+  }
+
+  const title = titleField();
+  const scrollIntoView = vi.fn();
+  Object.defineProperty(title, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+  expect(document.activeElement).toBe(title);
+  vi.mocked(window.scrollBy).mockClear();
+
+  viewport[axis] = 90;
+  viewport.dispatchEvent(new Event('scroll'));
+
+  expect(scrollIntoView).not.toHaveBeenCalled();
+  expect(window.scrollBy).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(title);
+});
 
 it('remeasures the focused title after the soft keyboard shrinks the visual viewport', async () => {
   vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(640);

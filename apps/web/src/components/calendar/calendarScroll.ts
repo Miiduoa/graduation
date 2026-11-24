@@ -24,15 +24,16 @@ export function visibleViewport() {
   };
 }
 
-export function onVisibleViewportChange(onResize: () => void, onScroll = onResize) {
+export function onVisibleViewportChange(onResize: () => void, onScroll?: () => void) {
   const viewport = window.visualViewport;
   window.addEventListener('resize', onResize);
   viewport?.addEventListener('resize', onResize);
-  viewport?.addEventListener('scroll', onScroll, { passive: true });
+  // Panning changes viewport offsets. Only callers observing visibility need scroll events.
+  if (onScroll) viewport?.addEventListener('scroll', onScroll, { passive: true });
   return () => {
     window.removeEventListener('resize', onResize);
     viewport?.removeEventListener('resize', onResize);
-    viewport?.removeEventListener('scroll', onScroll);
+    if (onScroll) viewport?.removeEventListener('scroll', onScroll);
   };
 }
 
