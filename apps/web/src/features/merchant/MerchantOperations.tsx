@@ -86,6 +86,7 @@ export function MerchantOperations({
   onBack,
   onExpired,
   confirmedDetail,
+  confirmedListStatus,
   beginRequest,
   onChanged,
   onDenied,
@@ -107,6 +108,7 @@ export function MerchantOperations({
   onBack?(): void;
   onExpired(): void;
   confirmedDetail?: Detail | null;
+  confirmedListStatus?: string;
   beginRequest?(): number;
   onChanged(detail: Detail, verifiedAccess: boolean, revision: number): Detail | null | void;
   onMenuConfirmed?(detail: Detail): void;
@@ -125,6 +127,7 @@ export function MerchantOperations({
   const [entryVerified, setEntryVerified] = useState(false);
   const detail = entryVerified ? (confirmedDetail === undefined ? loadedDetail : confirmedDetail) : null;
   const [loading, setLoading] = useState(true);
+  const [readUnavailable, setReadUnavailable] = useState(false);
   const [fresh, setFresh] = useState(false);
   const [busy, setBusy] = useState<Action | null>(null);
   const [error, setError] = useState('');
@@ -191,7 +194,7 @@ export function MerchantOperations({
         (beginRequest
           ? null
           : workspaceDetail(
-              localConfirmations.merge(next, verifiedAccess ? 'read' : 'write', revision),
+              localConfirmations.merge(next, revision),
             ));
       if (!beginRequest) setDetail(merged);
       setFresh(!!merged);
@@ -227,6 +230,7 @@ export function MerchantOperations({
       readAfterWrite.current = false;
       const version = ++run.current;
       const revision = nextRevision();
+      setReadUnavailable(false);
       setLoading(true);
       setFresh(false);
       try {
@@ -255,7 +259,10 @@ export function MerchantOperations({
           setDetail(null);
           onDenied?.(tenantId, locationId, revision);
           setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
-        } else setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+        } else {
+          setReadUnavailable(true);
+          setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+        }
       } finally {
         if (active.current && version === run.current) setLoading(false);
       }
@@ -273,6 +280,7 @@ export function MerchantOperations({
   useLayoutEffect(() => {
     visibleRef.current = visible;
     setEntryVerified(false);
+    setReadUnavailable(false);
     if (!visible || suspended) return;
     let checkingAccess = true;
     if (lock.current) {
@@ -412,6 +420,9 @@ export function MerchantOperations({
       </div>
       {(loading || (!entryVerified && busy)) && <p role="status">正在確認門市資料…</p>}
       {error && <p role="alert">{error}</p>}
+      {!detail && confirmedDetail && readUnavailable && confirmedListStatus && (
+        <p role="status">{confirmedListStatus}</p>
+      )}
       {notice && <p role="status">{notice}</p>}
       {detail && draft && (
         <>

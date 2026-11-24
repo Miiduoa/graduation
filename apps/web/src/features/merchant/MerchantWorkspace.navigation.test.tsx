@@ -1028,3 +1028,124 @@ it.each([403, 404])(
     expect(screen.queryByText('服務方式')).toBeNull();
   },
 );
+
+it.each(['on the list', 'after browser Forward'])(
+  'keeps a later list confirmation while applications are pending and a pause receipt arrives %s',
+  async (receiptTiming) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const open = detail('store-a', true);
+    const paused = { ...open, locationStatus: 'closed', publicAccess: false };
+    let finishWrite!: (receipt: typeof paused) => void;
+    const write = new Promise<typeof paused>((resolve) => {
+      finishWrite = resolve;
+    });
+    let finishApplications!: (value: { applications: [] }) => void;
+    const applications = new Promise<{ applications: [] }>((resolve) => {
+      finishApplications = resolve;
+    });
+    let returning = false;
+    const readDetail = vi.fn(() => Promise.resolve(open));
+    const loadStores = vi.fn(() =>
+      Promise.resolve({
+        workspaces: [{ ...open, merchantName: returning ? '重新確認的餐坊' : open.merchantName }],
+      }),
+    );
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') return loadStores();
+      if (resource === 'merchant-applications' && returning) return applications;
+      if (resource === path) return readDetail();
+      if (resource === `${path}/availability`) return write;
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+    expect(mocks.request).toHaveBeenCalledWith(
+      `${path}/availability`,
+      'context-a',
+      { acceptingOrders: false },
+      undefined,
+    );
+
+    returning = true;
+    readDetail.mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
+    await act(async () => window.history.back());
+    await screen.findByRole('heading', { name: '重新確認的餐坊／一樓' });
+    expect(loadStores).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('正在載入店家資料…')).toBeTruthy();
+    if (receiptTiming === 'on the list') {
+      await act(async () => finishWrite(paused));
+      expect(screen.getByText('營業中')).toBeTruthy();
+      expect(screen.queryByText('暫停接單')).toBeNull();
+    }
+
+    await act(async () => window.history.forward());
+    if (receiptTiming === 'after browser Forward') {
+      await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+      await act(async () => finishWrite(paused));
+    }
+    await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+    expect(screen.getByText('營業中')).toBeTruthy();
+    expect(screen.queryByText('暫停接單')).toBeNull();
+    expect(screen.queryByText('服務方式')).toBeNull();
+
+    await act(async () => finishApplications({ applications: [] }));
+    expect(screen.getByText('營業中')).toBeTruthy();
+  },
+);
+
+it.each([403, 404])(
+  'reopens with only the newly verified lower-version detail after list denial %s',
+  async (status) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const previous = {
+      ...detail('store-a', true),
+      readinessVersion: 7,
+      merchantName: '先前的餐坊',
+      paymentMode: 'online-and-counter' as const,
+    };
+    const current: NuniMerchantWorkspaceDetail = {
+      ...detail('store-a', true),
+      readinessVersion: 6,
+      merchantName: '重新授權的餐坊',
+      locationStatus: 'closed',
+      publicAccess: false,
+      serviceModes: ['pickup', 'dine-in'],
+    };
+    let listDenied = false;
+    const readDetail = vi.fn<() => Promise<NuniMerchantWorkspaceDetail>>(() => Promise.resolve(previous));
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces')
+        return listDenied
+          ? Promise.reject(new NuniError(status, 'DENIED'))
+          : Promise.resolve({ workspaces: [previous] });
+      if (resource === path) return readDetail();
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    await screen.findByRole('heading', { name: '先前的餐坊／一樓' });
+    expect(screen.getByText('營業中')).toBeTruthy();
+
+    listDenied = true;
+    readDetail.mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
+    await act(async () => window.history.back());
+    await screen.findByText('目前無法確認店家資料，請重新載入。');
+    expect(readDetail).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+
+    readDetail.mockImplementation(() => Promise.resolve(current));
+    await act(async () => window.history.forward());
+    await screen.findByRole('heading', { name: '重新授權的餐坊／一樓' });
+    expect(readDetail).toHaveBeenCalledTimes(3);
+    expect(screen.getByText('暫停接單')).toBeTruthy();
+    expect(screen.queryByText('營業中')).toBeNull();
+    expect(screen.queryByText('先前的餐坊／一樓')).toBeNull();
+    const operations = screen.getByRole('region', { name: '接單狀態' });
+    expect(within(operations).getByText('自取、內用')).toBeTruthy();
+    expect(within(operations).getByText('現場櫃檯付款')).toBeTruthy();
+    expect(within(operations).queryByText('線上及櫃檯付款')).toBeNull();
+  },
+);

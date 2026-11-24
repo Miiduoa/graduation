@@ -240,9 +240,10 @@ function AccountWorkspace({
   onExpired: () => Promise<void>;
   onSwitchAccount: () => Promise<void>;
 }) {
-  const [{ overview, details, applicationsKnown }, setWorkspaceSnapshot] = useState({
+  const [{ overview, details, listedStatuses, applicationsKnown }, setWorkspaceSnapshot] = useState({
     overview: null as MerchantOverview | null,
     details: new Map<string, NuniMerchantWorkspaceDetail>(),
+    listedStatuses: new Map<string, string>(),
     applicationsKnown: false,
   });
   const [loading, setLoading] = useState(true);
@@ -299,6 +300,7 @@ function AccountWorkspace({
     setWorkspaceSnapshot({
       overview: confirmed.overview(),
       details: confirmed.verifiedDetails(),
+      listedStatuses: confirmed.listedStatuses(),
       applicationsKnown: confirmed.hasApplicationList(),
     });
   }, [confirmed]);
@@ -321,6 +323,12 @@ function AccountWorkspace({
     const isCurrent = () => mounted.current && enabled.current && run === generation.current;
     setLoading(true);
     setLoadError('');
+    const denied = (error: unknown) =>
+      error instanceof NuniError && [403, 404].includes(error.status);
+    const targets = new Map<string, Pick<NuniMerchantWorkspaceDetail, 'tenantId' | 'locationId'>>();
+    const addTargets = (items: Iterable<Pick<NuniMerchantWorkspaceDetail, 'tenantId' | 'locationId'>>) => {
+      for (const item of items) targets.set(workspaceKey(item), item);
+    };
     try {
       const [programs, submitted, stores] = await Promise.allSettled([
         view === 'workspace'
@@ -331,13 +339,32 @@ function AccountWorkspace({
         browserRequest('merchant-applications', context).then(
           (value) => parseMerchantOverview({ ...nuniRecord(value), programs: [] }).applications,
         ),
-        view === 'apply'
+        // Confirm the list as soon as it settles, independently of application progress.
+        (view === 'apply'
           ? Promise.resolve([])
-          : browserRequest('merchant-workspaces', context).then(parseMerchantWorkspaces),
+          : browserRequest('merchant-workspaces', context).then(parseMerchantWorkspaces)
+        ).then(
+          (rows) => {
+            if (isCurrent()) {
+              confirmed.mergeWorkspaceList(rows, listRevision);
+              publishOverview();
+            }
+            return rows;
+          },
+          (error: unknown) => {
+            if (isCurrent()) {
+              if (expired(error)) expire();
+              else {
+                addTargets(confirmed.knownWorkspaces());
+                confirmed.rejectWorkspaceList(listRevision, denied(error));
+                publishOverview();
+              }
+            }
+            throw error;
+          },
+        ),
       ]);
       if (!isCurrent()) return;
-      const denied = (error: unknown) =>
-        error instanceof NuniError && [403, 404].includes(error.status);
       for (const result of [programs, submitted, stores]) {
         if (result.status === 'rejected' && expired(result.reason)) {
           expire();
@@ -353,27 +380,10 @@ function AccountWorkspace({
       const operations = createMerchantOperations((path, input, method) =>
         browserRequest(path, context, input, method),
       );
-      const listedStores =
-        stores.status === 'fulfilled' ? stores.value : (confirmed.overview()?.workspaces ?? []);
-      const targets = new Map<string, Pick<NuniMerchantWorkspaceDetail, 'tenantId' | 'locationId'>>(
-        listedStores.map((item) => [workspaceKey(item), item]),
-      );
-      for (const item of confirmed.knownWorkspaces()) {
-        const key = workspaceKey(item);
-        if (!targets.has(key)) targets.set(key, item);
-      }
-      for (const item of visitedLocations.values()) {
-        const key = workspaceKey(item);
-        if (!targets.has(key)) targets.set(key, item);
-      }
-      if (stores.status === 'fulfilled') confirmed.mergeWorkspaceList(stores.value, listRevision);
-      else {
-        const listDenied = denied(stores.reason);
-        confirmed.rejectWorkspaceList(listRevision, listDenied);
-        if (listDenied) publishOverview();
-      }
+      addTargets(confirmed.knownWorkspaces());
+      addTargets(visitedLocations.values());
 
-      const refreshed = await Promise.all(
+      await Promise.all(
         [...targets.values()].map(async (item) => {
           const key = workspaceKey(item);
           if (
@@ -386,21 +396,25 @@ function AccountWorkspace({
           const revision = confirmed.beginRequest();
           try {
             const detail = await operations.get(item.tenantId, item.locationId);
-            return { key, revision, detail };
+            if (!isCurrent()) return;
+            confirmed.verify(key, revision, false);
+            confirmed.merge(detail, revision);
+            publishOverview();
           } catch (error) {
-            if (expired(error)) throw error;
-            if (denied(error)) return { key, revision, detail: null };
-            detailUnavailable = true;
+            if (!isCurrent()) return;
+            if (expired(error)) {
+              expire();
+            } else if (denied(error)) {
+              accessDenied = true;
+              confirmed.verify(key, revision, true);
+              publishOverview();
+            } else {
+              detailUnavailable = true;
+            }
           }
         }),
       );
       if (!isCurrent()) return;
-      for (const result of refreshed) {
-        if (!result) continue;
-        confirmed.verify(result.key, result.revision, !result.detail);
-        if (result.detail) confirmed.merge(result.detail, 'read', result.revision);
-        else accessDenied = true;
-      }
       publishOverview();
       if ([programs, submitted, stores].some((result) => result.status === 'rejected'))
         setLoadError('目前無法確認店家資料，請重新載入。');
@@ -522,7 +536,7 @@ function AccountWorkspace({
       if (!mounted.current || !enabled.current) return null;
       const key = workspaceKey(detail);
       if (verifiedAccess) confirmed.verify(key, revision, false);
-      confirmed.merge(detail, verifiedAccess ? 'read' : 'write', revision);
+      confirmed.merge(detail, revision);
       const confirmedDetail = confirmed.detailFor(key);
       if (confirmedDetail) setHasVerifiedLocation(true);
       publishOverview();
@@ -573,6 +587,7 @@ function AccountWorkspace({
           }
           onExpired={expire}
           confirmedDetail={details.get(key) ?? null}
+          confirmedListStatus={listedStatuses.get(key)}
           beginRequest={confirmed.beginRequest}
           onChanged={onWorkspaceChanged}
           onMenuConfirmed={onMenuConfirmed}

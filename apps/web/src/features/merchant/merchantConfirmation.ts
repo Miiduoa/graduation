@@ -1,46 +1,31 @@
-import type {
-  loadMerchantOverview,
-  NuniMerchantApplication,
-  NuniMerchantWorkspace,
+import {
+  merchantWorkspaceStateLabel,
+  type loadMerchantOverview,
+  type NuniMerchantApplication,
+  type NuniMerchantWorkspace,
 } from '@campus/shared/src/nuniMerchant';
 import type { NuniMerchantWorkspaceDetail } from '@campus/shared/src/nuniMerchantOperations';
 
 export type MerchantOverview = Awaited<ReturnType<typeof loadMerchantOverview>>;
 
-type Source = 'list' | 'read' | 'write';
 type Observation<T = NuniMerchantWorkspace> = { value: T; revision: number };
 type WorkspaceObservations = {
-  list?: Observation;
-  read?: Observation<NuniMerchantWorkspaceDetail>;
-  write?: Observation<NuniMerchantWorkspaceDetail>;
+  row?: Observation;
+  detail?: Observation<NuniMerchantWorkspaceDetail>;
 };
 type Confirmation = {
   row: NuniMerchantWorkspace;
   detail?: NuniMerchantWorkspaceDetail;
 };
 
-function versionOf(observation?: Observation) {
-  return observation ? (observation.value.readinessVersion ?? 0) : -1;
-}
-
-function isNewer(next: Observation, current?: Observation) {
-  const nextVersion = versionOf(next);
-  const currentVersion = versionOf(current);
-  return (
-    nextVersion > currentVersion ||
-    (nextVersion === currentVersion && next.revision >= (current?.revision ?? 0))
-  );
-}
-
-function latestObservation<T extends Observation>(...observations: (T | undefined)[]) {
-  return observations.reduce<T | undefined>(
-    (latest, observation) => observation && isNewer(observation, latest) ? observation : latest,
-    undefined,
-  );
-}
-
-function confirmedRow({ list, read, write }: WorkspaceObservations) {
-  return latestObservation(list, read, write)!.value;
+function latestObservation<T extends Observation>(current: T | undefined, next: T): T {
+  if (!current) return next;
+  const nextVersion = next.value.readinessVersion ?? 0;
+  const currentVersion = current.value.readinessVersion ?? 0;
+  return nextVersion > currentVersion ||
+    (nextVersion === currentVersion && next.revision > current.revision)
+    ? next
+    : current;
 }
 
 function availabilityOf(row: NuniMerchantWorkspace) {
@@ -53,8 +38,11 @@ function availabilityOf(row: NuniMerchantWorkspace) {
 }
 
 export function workspaceDetail({ row, detail }: Confirmation) {
-  // Use the confirmed availability with the detail's settings and expected version.
-  return detail ? { ...detail, ...availabilityOf(row) } : null;
+  if (!detail) return null;
+  // A list at a different version can confirm availability while settings still use the detail version.
+  return row.readinessVersion === detail.readinessVersion
+    ? { ...detail, ...row }
+    : { ...detail, ...availabilityOf(row) };
 }
 
 export const workspaceKey = ({
@@ -83,29 +71,22 @@ export function createMerchantConfirmations() {
       : row;
   }
 
-  function merge(next: NuniMerchantWorkspace, source: 'list', revision: number): Confirmation;
-  function merge(
-    next: NuniMerchantWorkspaceDetail,
-    source: 'read' | 'write',
-    revision: number,
-  ): Confirmation;
   function merge(
     next: NuniMerchantWorkspace | NuniMerchantWorkspaceDetail,
-    source: Source,
     revision: number,
   ): Confirmation {
     const key = workspaceKey(next);
     const entry = entries.get(key) ?? {};
-    const observation = { value: next, revision };
-    if (isNewer(observation, entry[source])) {
-      if (source === 'list') entry.list = observation;
-      else if ('applicationId' in next) entry[source] = { value: next, revision };
+    if (revision > listDenialRevision) {
+      entry.row = latestObservation(entry.row, { value: next, revision });
+      if ('applicationId' in next)
+        entry.detail = latestObservation(entry.detail, { value: next, revision });
+      entries.set(key, entry);
     }
-    entries.set(key, entry);
 
-    const row = confirmedRow(entry);
-    if (!row.missingRequirements.includes('menu')) menus.add(key);
-    const detail = latestObservation(entry.read, entry.write)?.value;
+    const row = entry.row?.value ?? next;
+    if (entry.row && !row.missingRequirements.includes('menu')) menus.add(key);
+    const detail = entry.detail?.value;
     return { row: withMenu(key, row), detail: detail && withMenu(key, detail) };
   }
 
@@ -116,10 +97,10 @@ export function createMerchantConfirmations() {
 
   function detailFor(key: string) {
     const entry = entries.get(key);
-    if (!entry || !hasVerifiedAccess(key)) return null;
-    const detail = latestObservation(entry.read, entry.write)?.value;
+    if (!entry?.row || !hasVerifiedAccess(key)) return null;
+    const detail = entry.detail?.value;
     return workspaceDetail({
-      row: confirmedRow(entry),
+      row: withMenu(key, entry.row.value),
       detail: detail && withMenu(key, detail),
     });
   }
@@ -162,13 +143,21 @@ export function createMerchantConfirmations() {
     mergeWorkspaceList(rows: NuniMerchantWorkspace[], revision: number) {
       includeVerifiedWorkspaces = false;
       lists.workspaces = rows;
-      for (const row of rows) merge(row, 'list', revision);
+      for (const row of rows) merge(row, revision);
     },
     rejectWorkspaceList(revision: number, denied: boolean) {
       includeVerifiedWorkspaces = !denied;
       if (denied) {
         delete lists.workspaces;
         listDenialRevision = revision;
+        for (const [key, entry] of entries) {
+          if (entry.detail && entry.detail.revision <= revision) delete entry.detail;
+          if (entry.row && entry.row.revision <= revision) {
+            menus.delete(key);
+            if (entry.detail) entry.row = entry.detail;
+            else entries.delete(key);
+          }
+        }
       }
     },
     mergeApplications,
@@ -188,7 +177,9 @@ export function createMerchantConfirmations() {
     knownWorkspaces(): Array<Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'> & Partial<NuniMerchantWorkspace>> {
       const found = new Map<string, Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'> & Partial<NuniMerchantWorkspace>>();
       for (const row of lists.workspaces ?? []) found.set(workspaceKey(row), row);
-      for (const [key, entry] of entries) found.set(key, confirmedRow(entry));
+      for (const [key, entry] of entries) {
+        if (entry.row) found.set(key, entry.row.value);
+      }
       for (const key of access.keys()) {
         if (found.has(key)) continue;
         const split = key.indexOf(':');
@@ -201,8 +192,7 @@ export function createMerchantConfirmations() {
       const workspaces = new Map((lists.workspaces ?? []).map((row) => [workspaceKey(row), row]));
       if (includeVerifiedWorkspaces) {
         for (const [key, entry] of entries) {
-          if (hasVerifiedAccess(key))
-            workspaces.set(key, confirmedRow(entry));
+          if (entry.row && hasVerifiedAccess(key)) workspaces.set(key, entry.row.value);
         }
       }
       if (!Object.keys(lists).length && !workspaces.size) return null;
@@ -210,13 +200,22 @@ export function createMerchantConfirmations() {
         programs: lists.programs ?? [],
         workspaces: [...workspaces].flatMap(([key, row]) => {
           const entry = entries.get(key);
-          return access.get(key)?.denied ? [] : [withMenu(key, entry ? confirmedRow(entry) : row)];
+          return access.get(key)?.denied ? [] : [withMenu(key, entry?.row?.value ?? row)];
         }),
         applications: [
           ...[...receipts.values()].reverse(),
           ...(lists.applications ?? []).filter((row) => !receipts.has(row.applicationId)),
         ],
       };
+    },
+    listedStatuses() {
+      const statuses = new Map<string, string>();
+      for (const listed of lists.workspaces ?? []) {
+        const key = workspaceKey(listed);
+        const row = entries.get(key)?.row?.value;
+        if (row && hasVerifiedAccess(key)) statuses.set(key, merchantWorkspaceStateLabel(row));
+      }
+      return statuses;
     },
     merge,
     confirmMenu,
@@ -225,7 +224,7 @@ export function createMerchantConfirmations() {
     detailFor,
     needsAccessRefresh(key: string) {
       const entry = entries.get(key);
-      return access.has(key) || !!entry?.read || !!entry?.write;
+      return access.has(key) || !!entry?.detail;
     },
     clear() {
       lists = {};
