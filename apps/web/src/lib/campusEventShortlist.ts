@@ -191,7 +191,13 @@ export function useCampusEventShortlist(schoolId: string) {
     // The user may have switched account or school while storage was working.
     if (activeSession.current !== session) return 'ignored';
     if (saveSucceeded) {
-      setFailure(null);
+      // A successful write must not silently discard another event's failed choice.
+      // Keep that retry available even if this write finishes after the failure.
+      setFailure((current) =>
+        current?.session === session && campusEventShortlistIdentity(current.event) === identity
+          ? null
+          : current,
+      );
       setNotice({
         session,
         message: saved ? `已收藏「${event.title}」。` : `已取消收藏「${event.title}」。`,

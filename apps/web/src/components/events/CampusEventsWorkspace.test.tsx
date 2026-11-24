@@ -280,3 +280,28 @@ it.each(['moved', 'pointer', 'keyboard'] as const)(
     expect(document.activeElement).toBe(mode === 'keyboard' ? feedback : browse);
   },
 );
+
+
+it('keeps a failed event choice available when a different event is saved successfully', async () => {
+  loadCampusEventPage.mockResolvedValue(page([event('first', '第一場講座'), event('second', '第二場講座')]));
+  mount(`/events?schoolId=${school}&campus=${school}`);
+  const first = await screen.findByRole('button', { name: '收藏「第一場講座」' });
+  const second = screen.getByRole('button', { name: '收藏「第二場講座」' });
+  await waitFor(() => expect(first.getAttribute('aria-disabled')).toBeNull());
+  const storage = Object.hasOwn(localStorage, 'setItem') ? localStorage : Storage.prototype;
+  const write = vi.spyOn(storage, 'setItem').mockImplementationOnce(() => {
+    throw new Error('quota');
+  });
+  fireEvent.click(first);
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  write.mockRestore();
+
+  fireEvent.click(second);
+  expect(await screen.findByText('已收藏「第二場講座」。')).toBeTruthy();
+  const alert = screen.getByRole('alert');
+  expect(screen.getByRole('button', { name: '收藏「第一場講座」' })).toBeTruthy();
+  fireEvent.click(within(alert).getByRole('button', { name: '重試' }));
+  expect(await screen.findByText('已收藏「第一場講座」。')).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(JSON.parse(storedFor(null)!).items).toEqual([saved('first', '第一場講座'), saved('second', '第二場講座')]);
+});
