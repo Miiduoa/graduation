@@ -45,20 +45,20 @@ record_attempt() {
     proc_identity \$group && [[ \$group == \$proc_group ]] || exit 1
     umask 077
     rm -f -- \"\$1\" || exit 1
-    (set -o noclobber; printf '%s %s %s\\n' \"\$group\" \"\$proc_start\" \"\$2\" > \"\$1\") || exit 1
+    (set -o noclobber; printf '%s %s %s %s\\n' \"\$group\" \"\$proc_start\" \"\$2\" \"\$proc_group\" > \"\$1\") || exit 1
     shift 2
     exec \"\$@\"" record-process-group "$attempt_dir/process-group" "$attempt_id")
 }
 
 read_attempt_record() {
-  local file="$1" nonce="$2" installer_group="$3" group start recorded_nonce extra
+  local file="$1" nonce="$2" installer_group="$3" pid start recorded_nonce group extra
   private_attempt_dir "${file%/*}" || return 1
   # In a private directory the unprivileged caller cannot swap the checked file.
   [[ ! -L "$file" && -f "$file" && "$(stat -c '%u:%a:%h' -- "$file")" == "$EUID:600:1" ]] || return 1
-  read -r group start recorded_nonce extra < "$file" || return 1
-  [[ "$group" =~ ^([2-9]|[1-9][0-9]+)$ && "$start" =~ ^[0-9]+$ &&
+  read -r pid start recorded_nonce group extra < "$file" || return 1
+  [[ "$pid" == "$group" && "$group" =~ ^([2-9]|[1-9][0-9]+)$ && "$start" =~ ^[0-9]+$ &&
     "$group" != "$installer_group" && "$recorded_nonce" == "$nonce" && -z "$extra" ]] || return 1
-  proc_signal_marked_group "$group" "$start" "PLAYWRIGHT_INSTALL_ATTEMPT=$nonce" KILL
+  proc_signal_marked_group "$pid" "$start" "$group" "PLAYWRIGHT_INSTALL_ATTEMPT=$nonce" KILL
 }
 
 kill_timed_out_group() {

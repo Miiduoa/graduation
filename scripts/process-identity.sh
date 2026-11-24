@@ -14,24 +14,25 @@ proc_identity() {
   proc_state="${fields[0]}"
 }
 
-# Return 2 when the leader has exited, so callers can check orphaned members.
+# 1: contradictory identity; 2: leader gone or stat unavailable;
+# 3: matching live stat but leader marker unavailable.
 proc_group_leader_matches() {
-  local group="$1" start="$2" marker="$3" marked=0
+  local pid="$1" start="$2" group="$3" marker="$4" marked=0 conflict=0
   local proc_group proc_start proc_state
-  [[ "$group" =~ ^([2-9]|[1-9][0-9]+)$ && "$start" =~ ^[0-9]+$ && -n "$marker" ]] || return 1
-  if ! proc_identity "$group"; then
-    [[ -d "/proc/$group" ]] && return 1
-    return 2
-  fi
+  [[ "$pid" == "$group" && "$group" =~ ^([2-9]|[1-9][0-9]+)$ &&
+    "$start" =~ ^[0-9]+$ && "$marker" =~ ^[A-Z_][A-Z_0-9]*= ]] || return 1
+  proc_identity "$pid" || return 2
   [[ "$proc_state" != Z && "$proc_state" != X ]] || return 2
   [[ "$proc_group" == "$group" && "$proc_start" == "$start" ]] || return 1
-  grep -zFxq -- "$marker" "/proc/$group/environ" 2>/dev/null && marked=1
-  if ! proc_identity "$group"; then
-    [[ -d "/proc/$group" ]] && return 1
-    return 2
+  if grep -zFxq -- "$marker" "/proc/$pid/environ" 2>/dev/null; then
+    marked=1
+  elif [[ "$?" == 1 ]] && grep -zEq -- "^${marker%%=*}=" "/proc/$pid/environ" 2>/dev/null; then
+    conflict=1
   fi
+  proc_identity "$pid" || return 2
   [[ "$proc_state" != Z && "$proc_state" != X ]] || return 2
-  [[ "$proc_group" == "$group" && "$proc_start" == "$start" && "$marked" == 1 ]]
+  [[ "$proc_group" == "$group" && "$proc_start" == "$start" && "$conflict" == 0 ]] || return 1
+  [[ "$marked" == 1 ]] || return 3
 }
 
 proc_group_members() {
@@ -46,7 +47,7 @@ proc_group_members() {
     # The marker is placed in the initial environment of the launched command.
     # Inheritance preserves provenance when the kernel reparents a survivor.
     grep -zFxq -- "$marker" "$entry/environ" 2>/dev/null || continue
-    proc_identity "$pid" && [[ "$proc_group" == "$group" && "$proc_start" == "$member_start" ]] || continue
+    proc_identity "$pid" && [[ "$proc_group" == "$group" && "$proc_start" == "$member_start" && "$proc_state" != Z && "$proc_state" != X ]] || continue
     [[ -n "$signal" ]] || return 0
     if ! kill "-$signal" -- "$pid" 2>/dev/null &&
       proc_identity "$pid" && [[ "$proc_group" == "$group" && "$proc_start" == "$member_start" &&
@@ -60,13 +61,15 @@ proc_group_members() {
 # A live leader must belong to this run before any member is signalled.
 # Signal marked members individually, including when the leader has exited.
 proc_signal_marked_group() {
-  local group="$1" start="$2" marker="$3" signal="${4:-}"
+  local pid="$1" start="$2" group="$3" marker="$4" signal="${5:-}"
   local status=0
-  proc_group_leader_matches "$group" "$start" "$marker" || status=$?
+  proc_group_leader_matches "$pid" "$start" "$group" "$marker" || status=$?
   case "$status" in
     0) [[ -n "$signal" ]] || return 0 ;;
-    2) ;; # Check surviving members below.
+    2|3) ;; # Check surviving members below.
     *) return 1 ;;
   esac
-  proc_group_members "$group" "$start" "$marker" "$signal"
+  proc_group_members "$group" "$start" "$marker" "$signal" && return 0
+  # A matching live stat is sufficient to retain a journal during inspection.
+  [[ -z "$signal" && "$status" == 3 ]]
 }
