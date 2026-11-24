@@ -5,6 +5,7 @@ const mockState = {
   enabled: true,
   invoke: jest.fn(),
   parcelNext: null as null | ((snap: unknown) => void),
+  collections: jest.fn(),
 };
 jest.mock('../firebase', () => ({
   getDb: () => ({}),
@@ -13,7 +14,7 @@ jest.mock('../firebase', () => ({
 }));
 jest.mock('firebase/functions', () => ({ httpsCallable: () => mockState.invoke }));
 jest.mock('firebase/firestore', () => ({
-  collection: (...args: unknown[]) => args,
+  collection: (...args: unknown[]) => { mockState.collections(...args); return args; },
   doc: (...args: unknown[]) => args,
   query: (...args: unknown[]) => args[0],
   where: () => ({}),
@@ -33,6 +34,19 @@ beforeEach(() => {
   mockState.configured = 'https://synthetic.invalid';
   mockState.enabled = true;
   mockState.invoke.mockReset();
+  mockState.collections.mockClear();
+});
+it('uses the notification source for both the parcel callable and the Firestore feeds', async () => {
+  mockState.invoke.mockResolvedValue({ data: { rows: [] } });
+  const stop = subscribeDormCloud('pu', 'resident', jest.fn(), 'tw-pu');
+  try {
+    await waitFor(() => expect(mockState.invoke).toHaveBeenCalledWith({ schoolId: 'tw-pu', action: 'parcels' }));
+    for (const collection of ['packages', 'repairRequests']) {
+      expect(mockState.collections).toHaveBeenCalledWith(expect.anything(), 'schools', 'tw-pu', collection);
+    }
+  } finally {
+    stop();
+  }
 });
 it('keeps the old Firestore path working without Functions', async () => {
   mockState.configured = null;

@@ -53,6 +53,9 @@ import { resolveDormitoryPublicGuide } from '@campus/shared/src/dormitoryGuide';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
+import { useAuth } from '../state/auth';
+import { hasReadySchoolSession } from '../app/SchoolSessionBoundary';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { useDormitoryOwner } from '../hooks/useDormLaundryReminder';
 import { laundryNotificationAllowed, refreshDormLaundryReminder } from '../services/dormLaundryReminder';
 import { parseDormRepairDictation } from '@campus/shared/src/dormRepairDictation';
@@ -123,7 +126,7 @@ function Field({
   );
 }
 
-type DormitoryRouteParams = { notificationView?: unknown; dormAnnouncementId?: unknown };
+type DormitoryRouteParams = { notificationView?: unknown; dormAnnouncementId?: unknown; sourceSchoolId?: unknown };
 
 export function dormNotificationView(value: unknown) {
   return value === 'parcels' || value === 'repairs' || value === 'announcements' || value === 'leave'
@@ -135,20 +138,41 @@ export function DormitoryScreen({ navigation, route }: {
   route?: { params?: DormitoryRouteParams };
 }) {
   const { school } = useSchool();
+  const auth = useAuth();
   const owner = useDormitoryOwner();
+  const [dismissedParams, setDismissedParams] = useState<DormitoryRouteParams>();
+  const params = route?.params === dismissedParams ? undefined : route?.params;
+  const notice = dormNotificationView(params?.notificationView);
+  const openWorkspace = () => {
+    if (navigation?.navigate) navigation.navigate('Dormitory');
+    else setDismissedParams(params);
+  };
   if (!owner) {
     return <AIDetailScreen title="宿舍" onBack={() => navigation?.goBack?.()}><AICard><Body>正在確認使用者…</Body></AICard></AIDetailScreen>;
+  }
+  const rawSource = notice ? params?.sourceSchoolId : undefined;
+  const sourceSchoolId = typeof rawSource === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(rawSource)
+    ? rawSource : undefined;
+  if (notice && (!hasReadySchoolSession(auth, school.id)
+    || (rawSource !== undefined && (!sourceSchoolId || toPublicSchoolId(sourceSchoolId) !== toPublicSchoolId(school.id)))
+    || (params?.dormAnnouncementId !== undefined && !sourceSchoolId))) {
+    return <AIDetailScreen title="宿舍通知" onBack={() => navigation?.goBack?.()}>
+      <AICard><Body>無法確認這則通知屬於目前的校園帳號，請從宿舍總覽查看自己的紀錄。</Body>
+        <AIButton label="查看宿舍總覽" onPress={openWorkspace} />
+      </AICard>
+    </AIDetailScreen>;
   }
   const key = dormStorageKey(owner, school.id);
   return (
     <DormitoryBody
-      key={key}
+      key={JSON.stringify([key, !!notice, sourceSchoolId])}
       storageKey={key}
       cloudUid={owner.startsWith('firebase:') ? owner.slice(9) : null}
       schoolId={school.id}
       schoolName={school.name}
-      routeParams={route?.params}
-      openWorkspace={navigation?.navigate ? () => navigation.navigate?.('Dormitory') : undefined}
+      routeParams={params}
+      sourceSchoolId={sourceSchoolId}
+      openWorkspace={openWorkspace}
       guest={owner === 'guest'}
       onBack={() => navigation?.goBack?.()}
     />
@@ -156,7 +180,7 @@ export function DormitoryScreen({ navigation, route }: {
 }
 
 function DormitoryBody({
-  storageKey, schoolId, schoolName, guest, onBack, cloudUid, routeParams, openWorkspace,
+  storageKey, schoolId, schoolName, guest, onBack, cloudUid, routeParams, sourceSchoolId, openWorkspace,
 }: {
   cloudUid: string | null;
   storageKey: string;
@@ -165,7 +189,8 @@ function DormitoryBody({
   guest: boolean;
   onBack: () => void;
   routeParams?: DormitoryRouteParams;
-  openWorkspace?: () => void;
+  sourceSchoolId?: string;
+  openWorkspace: () => void;
 }) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const [cloud, setCloud] = useState(() => emptyDormCloud(!cloudUid));
@@ -178,12 +203,12 @@ function DormitoryBody({
   useEffect(() => {
     if (!cloudUid) return;
     let active = true;
-    try { return subscribeDormCloud(schoolId, cloudUid, setCloud); }
+    try { return subscribeDormCloud(schoolId, cloudUid, setCloud, sourceSchoolId); }
     catch {
       void Promise.resolve().then(() => { if (active) setCloud({ ...emptyDormCloud(), packagesState: 'error', repairsState: 'error' }); });
       return () => { active = false; };
     }
-  }, [schoolId, cloudUid, cloudRetry, parcelNotification]);
+  }, [schoolId, cloudUid, cloudRetry, parcelNotification, sourceSchoolId]);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState('');
   const [notice, setNotice] = useState('');
@@ -191,7 +216,6 @@ function DormitoryBody({
   const [data, setData] = useState<DormWorkspace>(() => emptyDormWorkspace());
   const noticeView = dormNotificationView(routeParams?.notificationView);
   const [view, setView] = useState<ViewName>(noticeView ?? 'home');
-  const [dismissedNotice, setDismissedNotice] = useState<DormitoryRouteParams>();
   const scrollRef = useRef<ScrollView>(null);
   useEffect(() => {
     if (noticeView) {
@@ -536,18 +560,14 @@ function DormitoryBody({
   const flexRow: object = { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
   const pad: object = { paddingHorizontal: 16, marginTop: 16 };
 
-  const viewingNotice = view === noticeView && routeParams !== dismissedNotice;
+  const viewingNotice = view === noticeView;
   return (
     <AIDetailScreen title="宿舍" subtitle={schoolName} onBack={onBack} scrollRef={scrollRef}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
       <View style={{ ...pad, gap: 12 }}>
-        {viewingNotice && <AIButton label="查看宿舍總覽" variant="ghost" onPress={() => {
-          if (openWorkspace) return openWorkspace();
-          setDismissedNotice(routeParams);
-          setView('home');
-        }} />}
+        {viewingNotice && <AIButton label="查看宿舍總覽" variant="ghost" onPress={openWorkspace} />}
         {(view === 'announcements' || view === 'leave') && (
-          <DormWorkflow schoolId={schoolId} uid={cloudUid} residentSection={view} notificationParams={routeParams} />
+          <DormWorkflow schoolId={schoolId} sourceSchoolId={sourceSchoolId} uid={cloudUid} residentSection={view} notificationParams={routeParams} />
         )}
         {view === 'home' && <DormWorkflow schoolId={schoolId} uid={cloudUid} building={data.building} room={data.room} onTonightLeaveChange={setTonightLeave} onOwnRepairsChange={setOwnRepairs} />}
         {!viewingNotice && <>
@@ -708,7 +728,7 @@ function DormitoryBody({
               <Body>漏水、斷電或受困請先聯絡現場人員，勿等待報修紀錄。</Body>
               {guide ? <><Body>{guide.officePhone} 轉 {guide.officeExtensions}</Body><AIButton variant="ghost" label="致電服務台" onPress={() => void openPublicLink('tel:' + guide.officePhone)} /></> : <Body>請依住宿指南或宿舍現場公告撥打服務台電話。</Body>}
             </AICard>
-            <DormWorkflow key={viewingNotice ? 'notification' : 'workspace'} schoolId={schoolId} uid={cloudUid} building={data.building} room={data.room} notificationParams={viewingNotice ? routeParams : undefined} onTonightLeaveChange={setTonightLeave} onOwnRepairsChange={setOwnRepairs} />
+            <DormWorkflow key={viewingNotice ? 'notification' : 'workspace'} schoolId={schoolId} sourceSchoolId={sourceSchoolId} uid={cloudUid} building={data.building} room={data.room} notificationParams={viewingNotice ? routeParams : undefined} onTonightLeaveChange={setTonightLeave} onOwnRepairsChange={setOwnRepairs} />
             <AICard title="雲端報修備忘">
               <Body>此應用沒有將備忘送到學校。以下狀態僅是備忘標記，無法據此確認校方收件或設備修復；請依校方正式管道通報並確認。</Body>
               {cloud.repairsState === 'loading' && <Body>正在讀取報修紀錄…</Body>}

@@ -28,11 +28,7 @@ type FocusTarget = TextInput;
 const invoke = async <T,>(data: Record<string, unknown>): Promise<T> => {
   const user = getAuthInstance().currentUser;
   if (!user) throw new Error('請先登入。');
-  return postNuniWebFn('dormWorkflow', {
-    ...data,
-    schoolId: typeof data.schoolId === 'string'
-      ? (toPublicSchoolId(data.schoolId) ?? data.schoolId) : data.schoolId,
-  }, user.uid);
+  return postNuniWebFn('dormWorkflow', data, user.uid);
 };
 function Box({ children }: { children: React.ReactNode }) {
   return (
@@ -204,6 +200,7 @@ async function pickPhotos(schoolId: string, remaining: number): Promise<string[]
 }
 export function DormWorkflow({
   schoolId,
+  sourceSchoolId,
   uid,
   building = '',
   room = '',
@@ -216,6 +213,7 @@ export function DormWorkflow({
   onOwnRepairsChange,
 }: {
   schoolId: string;
+  sourceSchoolId?: string;
   uid?: string | null;
   submitOnly?: boolean;
   initialStaff?: boolean;
@@ -227,7 +225,8 @@ export function DormWorkflow({
   room?: string;
   draft?: { title: string; description: string; category: string; location: string };
 }) {
-  const capabilityKey = JSON.stringify([uid, schoolId]);
+  const documentSchoolId = sourceSchoolId ?? toPublicSchoolId(schoolId) ?? schoolId;
+  const capabilityKey = JSON.stringify([uid, schoolId, documentSchoolId]);
   const [capability, setCapability] = useState<{ key: string; config: DormWorkflowConfig } | null>(
     null,
   );
@@ -286,8 +285,8 @@ export function DormWorkflow({
   };
   const call = useCallback(
     async <T,>(data: Record<string, unknown>): Promise<T> =>
-      invoke<T>({ ...data, schoolId: toPublicSchoolId(schoolId) ?? schoolId }),
-    [schoolId],
+      invoke<T>({ ...data, schoolId: documentSchoolId }),
+    [documentSchoolId],
   );
   const refresh = useCallback(
     async (staff = staffMode) => {
@@ -520,7 +519,7 @@ export function DormWorkflow({
       {!!r.vendor && staff && <Label>廠商：{r.vendor}</Label>}
       {!!r.expectedDate && <Label>預計日期：{r.expectedDate}</Label>}
       {r.images?.map((url, i) => (
-        <TicketPhoto key={url} schoolId={schoolId} id={r.id} index={i} />
+        <TicketPhoto key={url} schoolId={documentSchoolId} id={r.id} index={i} />
       ))}
       {staff ? (
         <>
@@ -685,7 +684,7 @@ export function DormWorkflow({
                 onPress={() => {
                   const photoGeneration = generation.current;
                   setBusy(true);
-                  void pickPhotos(schoolId, 3 - images.length)
+                  void pickPhotos(documentSchoolId, 3 - images.length)
                     .then((photos) => {
                       if (photoGeneration === generation.current)
                         setImages((old) => [...old, ...photos].slice(0, 3));

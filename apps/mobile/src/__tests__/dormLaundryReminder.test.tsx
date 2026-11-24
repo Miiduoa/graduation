@@ -1,6 +1,8 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { DormitoryScreen } from '../screens/DormitoryScreen';
+import { resolveNotificationDestination } from '../utils/notificationDestination';
+import { subscribeDormCloud } from '../services/dormitoryCloud';
 import { useDormLaundryReminder } from '../hooks/useDormLaundryReminder';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
@@ -13,7 +15,10 @@ jest.mock('../services/dormitoryCloud', () => ({ subscribeDormCloud: jest.fn((_s
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(undefined) }));
 
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: 'pu', name: '靜宜大學' }, selectionReady: true }) }));
-jest.mock('../state/auth', () => ({ useAuth: () => ({ user: { uid: 'private-id' } }) }));
+jest.mock('../state/auth', () => ({ useAuth: () => ({ user: { uid: 'private-id' }, profile: { uid: 'private-id', schoolId: 'pu' } }) }));
+jest.mock('../firebase', () => ({ ...jest.requireActual('../firebase'), getAuthInstance: () => ({ currentUser: { uid: 'private-id' } }) }));
+const mockDormCall = jest.fn();
+jest.mock('../services/nuniWebFn', () => ({ postNuniWebFn: (_name: string, input: unknown) => mockDormCall(input) }));
 jest.mock('../state/nuniSession', () => ({ useOptionalNuniSession: () => null }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 
@@ -38,6 +43,7 @@ const write = (key: string, endAt: number | null, notify: boolean) =>
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  mockDormCall.mockImplementation(async ({ action }) => action === 'config' ? { enabled: false } : {});
   await AsyncStorage.clear();
   alarms.clear();
   alarms.set('unrelated', { title: '作業提醒' });
@@ -202,6 +208,32 @@ test('another dorm notification selects its section even when the dorm screen is
   await screen.findByText('雲端報修備忘');
   fireEvent.press(screen.getByText('查看宿舍總覽'));
   await screen.findByText('我的住宿備忘');
+});
+
+test('same-ID bulletins keep their original school collection and a direct cross-campus route cannot read it', async () => {
+  mockDormCall.mockImplementation(async ({ action, schoolId }) => action === 'config' ? { enabled: true }
+    : { announcements: [{ id: 'shared-id', title: schoolId + ' 公告', building: 'A', body: schoolId + ' 內文' }] });
+  function params(schoolId: string) {
+    const result = resolveNotificationDestination({ data: { type: 'announcement', channel: 'dormitory',
+      schoolId, dormAnnouncementId: 'shared-id' } }, { schoolId: 'pu' });
+    if (!result.ok || result.mode !== 'nested') throw new Error('Missing dorm route');
+    return result.params;
+  }
+  const view = render(<DormitoryScreen route={{ params: params('tw-pu') }} />);
+  await view.findByText('tw-pu 內文');
+  expect(mockDormCall).toHaveBeenCalledWith({ action: 'mine', schoolId: 'tw-pu' });
+  view.rerender(<DormitoryScreen route={{ params: params('pu') }} />);
+  expect(view.queryByText('tw-pu 內文')).toBeNull();
+  await view.findByText('pu 內文');
+  mockDormCall.mockClear();
+  jest.mocked(subscribeDormCloud).mockClear();
+  for (const sourceSchoolId of ['nthu', undefined]) {
+    view.rerender(<DormitoryScreen route={{ params: { notificationView: 'announcements', sourceSchoolId, dormAnnouncementId: 'shared-id' } }} />);
+    await view.findByText(/無法確認這則通知屬於目前的校園帳號/);
+    expect(view.queryByText('pu 內文')).toBeNull();
+    expect(mockDormCall).not.toHaveBeenCalled();
+    expect(subscribeDormCloud).not.toHaveBeenCalled();
+  }
 });
 
 test('a resident can start a timer after denying notifications, turn reminders on later, extend and clear it', async () => {

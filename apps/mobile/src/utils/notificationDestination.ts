@@ -174,7 +174,7 @@ export function resolveNotificationDestination(
     if (announcement?.ok === false) return announcement.destination;
     return {
       ok: true, mode: 'nested', tab: '校園', screen: 'Dormitory',
-      params: { notificationView, ...(announcement?.ok ? { dormAnnouncementId: announcement.id } : {}) },
+      params: { notificationView, sourceSchoolId: noticeSchoolId, ...(announcement?.ok ? { dormAnnouncementId: announcement.id } : {}) },
       summary,
     };
   }

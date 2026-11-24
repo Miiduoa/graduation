@@ -266,7 +266,7 @@ test.each([
 ])('routes dormitory %s (%s) to the resident view %s', (type, dormSection, notificationView) => {
   const data = { type, dormSection, channel: 'dormitory', schoolId: 'pu' };
   expect(resolveNotificationDestination({ data }, { schoolId: 'tw-pu' })).toMatchObject({
-    ok: true, mode: 'nested', tab: '校園', screen: 'Dormitory', params: { notificationView },
+    ok: true, mode: 'nested', tab: '校園', screen: 'Dormitory', params: { notificationView, sourceSchoolId: 'pu' },
   });
   expect(resolveNotificationDestination({ data }, { schoolId: 'nthu' })).toMatchObject({
     ok: false, code: 'school_mismatch',

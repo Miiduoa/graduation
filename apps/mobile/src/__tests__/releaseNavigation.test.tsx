@@ -1232,19 +1232,22 @@ test('Map has a dedicated dormitory workspace route', async () => {
 });
 
 test('opening a resident parcel notice keeps the current dorm draft on the back stack', async () => {
+  Object.assign(Constants.expoConfig!.extra!, {
+    release: { releasedSchoolIds: ['pu'], features: { enabled: true, sso: true } },
+  });
   const { view, navigation } = await mount(MapStack);
   act(() => navigation.navigate('Dormitory'));
   const draft = await view.findByLabelText('宿舍／學苑');
   fireEvent.changeText(draft, '尚未儲存的住宿備忘');
   const original = navigation.getCurrentRoute()?.key;
-  act(() => navigation.navigate('Dormitory', { notificationView: 'parcels' }));
+  act(() => navigation.navigate('Dormitory', { notificationView: 'parcels', sourceSchoolId: 'tw-pu' }));
   expect(navigation.getCurrentRoute()?.key).not.toBe(original);
   await view.findByText('校方登錄包裹');
   const noticeScreen = navigation.getCurrentRoute()?.key;
   fireEvent.press(view.getByText('查看宿舍總覽'));
   expect(navigation.getCurrentRoute()?.key).toBe(original);
   expect((await view.findByLabelText('宿舍／學苑')).props.value).toBe('尚未儲存的住宿備忘');
-  act(() => navigation.navigate('Dormitory', { notificationView: 'parcels' }));
+  act(() => navigation.navigate('Dormitory', { notificationView: 'parcels', sourceSchoolId: 'tw-pu' }));
   expect(navigation.getCurrentRoute()?.key).toBe(noticeScreen);
   await view.findByText('校方登錄包裹');
   act(() => navigation.goBack());
