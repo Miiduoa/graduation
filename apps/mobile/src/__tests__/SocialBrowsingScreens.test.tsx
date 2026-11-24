@@ -1367,6 +1367,64 @@ test('a committed subscription is displayed before board rows finish and survive
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
+test.each([
+  ['清單確認', '看板先失敗'],
+  ['清單確認', '訂閱清單先回傳'],
+  ['單板確認', '看板先失敗'],
+  ['單板確認', '訂閱清單先回傳'],
+  ['單板確認', '看板稍後成功'],
+])('%s的訂閱遇到清單缺口時依看板查詢結果處理（%s）', async (source, order) => {
+  const otherBoard = { ...board, id: 'board-b', name: '攝影社' };
+  jest.mocked(listBoards).mockResolvedValue([board, otherBoard]);
+  if (source === '清單確認') {
+    jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([board.id]);
+  }
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+  if (source === '單板確認') {
+    jest.mocked(subscribeToBoard).mockRejectedValueOnce(new Error('offline'));
+    jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
+    await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+  }
+  expect(view.getByLabelText('取消訂閱讀書會').props.accessibilityState.busy).toBe(false);
+
+  const rows = deferred<typeof board[]>();
+  const membership = deferred<Awaited<ReturnType<typeof readSubscribedBoardIds>>>();
+  jest.mocked(listBoards).mockReturnValueOnce(rows.promise);
+  jest.mocked(readSubscribedBoardIds).mockReturnValueOnce(membership.promise);
+  const confirmCount = jest.mocked(isSubscribedToBoard).mock.calls.length;
+  let refresh!: Promise<void>;
+  act(() => { refresh = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  const offline = Object.assign(new Error('offline'), { code: 'unavailable' });
+  if (order === '看板先失敗') {
+    await act(async () => { rows.reject(offline); });
+    expect(view.UNSAFE_getByType(RefreshControl).props.refreshing).toBe(false);
+  }
+  await act(async () => {
+    membership.resolve({ ids: [otherBoard.id], serverConfirmedIds: [otherBoard.id] });
+  });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+  expect(view.getByLabelText('取消訂閱攝影社')).toBeTruthy();
+
+  await act(async () => {
+    if (order === '看板稍後成功') rows.resolve([board, otherBoard]);
+    if (order === '訂閱清單先回傳') rows.reject(offline);
+    await refresh;
+  });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(confirmCount);
+  if (order === '看板稍後成功') {
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    return;
+  }
+
+  // 退訂與後續單板確認都失敗時，仍須回滾至原先的訂閱。
+  jest.mocked(unsubscribeFromBoard).mockRejectedValueOnce(offline);
+  jest.mocked(isSubscribedToBoard).mockRejectedValueOnce(offline);
+  await act(async () => { fireEvent.press(view.getByLabelText('取消訂閱讀書會')); });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+  expect(view.getByLabelText('取消訂閱攝影社')).toBeTruthy();
+});
+
 test('a committed subscription recovers while another board has an outstanding write', async () => {
   const otherBoard = { ...board, id: 'other', name: '電影社' };
   jest.mocked(listBoards).mockResolvedValue([board, otherBoard]);

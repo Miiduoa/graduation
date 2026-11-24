@@ -177,6 +177,7 @@ function BoardsContent() {
     overlappingReconciliations: Set<string>,
     uid: string,
     sid: string,
+    boardRowsSucceeded: boolean,
   ) => {
     const { serverRevisionAtDispatch } = membership;
     const keepLocal = new Set(pendingSubscriptionCounts.current.keys());
@@ -217,6 +218,17 @@ function BoardsContent() {
       ...confirmedSubscribedRef.current,
       ...boardWriteRevision.current.keys(),
     ]);
+    // Publish listed membership while rows are loading. Keep omissions out
+    // of both membership and sequencing until the board read succeeds.
+    const deferredOmissions = new Set<string>();
+    if (!boardRowsSucceeded) {
+      for (const id of tracked) {
+        if (!subscribedIds.has(id) && !keepLocal.has(id)) {
+          deferredOmissions.add(id);
+          keepLocalMembership.add(id);
+        }
+      }
+    }
     const nextConfirmed = new Set(subscribedIds);
     for (const id of keepLocalMembership) {
       if (confirmedSubscribedRef.current.has(id)) nextConfirmed.add(id);
@@ -224,12 +236,13 @@ function BoardsContent() {
     }
     confirmedSubscribedRef.current = nextConfirmed;
     const applied = ++serverReadRevision.current;
+    const markListApplied = (id: string) => {
+      boardServerAppliedRevision.current.set(id, applied);
+      confirmedByBoardRead.current.delete(id);
+      deferredListMembership.current.delete(id);
+    };
     for (const id of tracked) {
-      if (!keepLocal.has(id)) {
-        boardServerAppliedRevision.current.set(id, applied);
-        confirmedByBoardRead.current.delete(id);
-        deferredListMembership.current.delete(id);
-      }
+      if (!keepLocal.has(id) && !deferredOmissions.has(id)) markListApplied(id);
     }
     applySubscribed((previous) => {
       const next = new Set(subscribedIds);
@@ -266,6 +279,27 @@ function BoardsContent() {
         void reconcileBoardSubscriptionRef.current(id, uid, sid);
       }
     }
+    if (deferredOmissions.size === 0) return;
+    return () => {
+      const omissions = [...deferredOmissions].filter((id) =>
+        !pendingSubscriptionCounts.current.has(id) &&
+        !pendingServerConfirmCounts.current.has(id) &&
+        (boardWriteRevision.current.get(id) ?? 0) <= membership.writeRevisionAtDispatch &&
+        (boardConfirmationAppliedAt.current.get(id) ?? 0) <= serverRevisionAtDispatch
+      );
+      if (omissions.length === 0) return;
+      const confirmed = new Set(confirmedSubscribedRef.current);
+      for (const id of omissions) {
+        confirmed.delete(id);
+        markListApplied(id);
+      }
+      confirmedSubscribedRef.current = confirmed;
+      applySubscribed((previous) => {
+        const next = new Set(previous);
+        for (const id of omissions) next.delete(id);
+        return next;
+      });
+    };
   }, [applySubscribed]);
 
   const load = useCallback(async () => {
@@ -302,19 +336,24 @@ function BoardsContent() {
         ...awaitingServerConfirm.current.keys(),
         ...pendingServerConfirmCounts.current.keys(),
       ]);
+      let boardRowsSucceeded = false;
+      let applyDeferredOmissions: (() => void) | undefined;
       // Apply each result on arrival. Either read can revoke access to both.
       await Promise.all([
         listBoards(sid, 120).then((rows) => {
-          if (isCurrent()) setBoards(rows);
+          if (!isCurrent()) return;
+          boardRowsSucceeded = true;
+          setBoards(rows);
+          applyDeferredOmissions?.();
         }).catch(handleError),
         readSubscribedBoardIds(uid, sid).then(({ ids, serverConfirmedIds }) => {
           if (!isCurrent()) return;
-          applySubscriptionList({
+          applyDeferredOmissions = applySubscriptionList({
             subscribedIds: new Set(ids),
             serverConfirmedIds: new Set(serverConfirmedIds),
             writeRevisionAtDispatch,
             serverRevisionAtDispatch,
-          }, overlappingReconciliations, uid, sid);
+          }, overlappingReconciliations, uid, sid, boardRowsSucceeded);
           subscriptionReadyRef.current = true;
           setSubscriptionReady(true);
         }).catch(handleError),
