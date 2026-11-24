@@ -745,6 +745,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
 
     let intersection: IntersectionObserver | null = null;
+    // Entries stamped before this instant were queued prior to an explicit
+    // overlay resume and must not re-pause the recovered scene.
+    let ignoreObserverBefore = 0;
     const disconnectObserver = () => {
       const previous = intersection;
       intersection = null;
@@ -766,7 +769,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           const hostEntries = entries.filter((entry) => {
             try {
               const target = entry.target;
-              return !target || target === host;
+              if (target && target !== host) return false;
+              // A report queued before the most recent overlay tap must not
+              // undo the recovery, even when delivered alongside fresh entries.
+              if (ignoreObserverBefore > 0) {
+                const observedAt = entry.time;
+                if (Number.isFinite(observedAt) && observedAt < ignoreObserverBefore) return false;
+              }
+              return true;
             } catch {
               return false;
             }
@@ -915,6 +925,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       // An explicit overlay tap must not stay blocked by a stale hidden
       // observer entry after the keyboard has already been dismissed.
       if (visibility === 'hidden') visibility = 'unknown';
+      try { ignoreObserverBefore = performance.now(); }
+      catch { ignoreObserverBefore = 0; }
+      // The visitor explicitly resumed. A later blur must not treat a fresh
+      // post-resume hidden observer entry as leftover keyboard occlusion.
+      keyboardOccludedCanvas = false;
+      // Drop queued reports and request a fresh intersection measurement.
+      try {
+        intersection?.unobserve(host);
+        intersection?.observe(host);
+      } catch { /* Partial WebViews may omit unobserve. */ }
       syncVisibility();
     };
     const container = sceneContainer.current;

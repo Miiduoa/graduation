@@ -1139,3 +1139,84 @@ describe('official Providence classroom codes with cross-checked POI identities'
     }
   });
 });
+
+describe('campus archive names for the existing Providence building pins', () => {
+  it.each([
+    ['pu-zhishan', 'Zhi Shan Hall'],
+    ['pu-xijia', 'Schultz Hall'],
+    ['pu-sigao', 'St. Bosco Hall'],
+    ['pu-monastery', 'Our Lady of Providence Convent'],
+  ])('recognizes the published %s as %s without adding a new destination', (id, english) => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find((item) => item.id === id)!;
+    expect(place).toBeDefined();
+    // Name-only lookup is not a claim of room availability or public access.
+    const result = resolveCampusClassroom({
+      schoolId: 'pu', query: english, locations: PROVIDENCE_CAMPUS_PLACES,
+    });
+    expect(result.status).toBe('matched');
+    expect(result.matches).toEqual([place]);
+    expect(result.matches[0]).toBe(place);
+    const imported = { ...place, name: english };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: place.name, locations: [imported],
+    }).matches[0]).toBe(imported);
+    for (const invalid of [
+      { ...place, id: 'synthetic-unsourced-hall' },
+      { ...place, name: 'Unverified building' },
+      { ...place, lat: place.lat + 1 },
+      { ...place, category: '公車站' },
+      { ...place, schoolId: 'another-school' },
+    ]) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query: english, locations: [invalid],
+      }).status).toBe('unmatched');
+    }
+    expect(resolveCampusClassroom({
+      schoolId: 'another-school', query: english, locations: [place],
+    }).status).toBe('unmatched');
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: english, locations: [place, { ...place }],
+    }).status).toBe('unmatched');
+  });
+
+  it('supports synthetic room notation for Zhi Shan Hall but not a floor-only request', () => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find((item) => item.id === 'pu-zhishan')!;
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'Ｚｈｉ Ｓｈａｎ Ｈａｌｌ ３０３', locations: PROVIDENCE_CAMPUS_PLACES,
+    }).matches).toEqual([place]);
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'Zhi Shan Hall 3F', locations: [place],
+    }).status).toBe('unmatched');
+  });
+});
+
+describe('floor ranges do not establish a classroom destination', () => {
+  it('rejects consecutive floor markers for building names and official codes', () => {
+    const zhugu = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+    const renyuan = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-renyuan')!;
+    expect(zhugu).toBeDefined();
+    expect(renyuan).toBeDefined();
+    // Synthetic timetable wording, not a verified floor or classroom.
+    for (const [prefix, place, schoolId] of [
+      ['主顧樓', zhugu, 'pu'],
+      ['Providence Hall ', zhugu, 'pu'],
+      ['PH', zhugu, 'pu'],
+      ['AK', renyuan, 'pu'],
+      ['主顧樓', hall, 'another-school'],
+    ] as const) {
+      for (const suffix of ['3F4F', '3F 4F', '3F-4F', '3F/4F',
+        '3樓4F', 'B1F B2F', '３Ｆ４Ｆ', '3F 4F教室']) {
+        const query = prefix + suffix;
+        const result = resolveCampusClassroom({ schoolId, query, locations: [place] });
+        expect(result.status, schoolId + ': ' + query).toBe('unmatched');
+        expect(result.matches, query).toEqual([]);
+      }
+      for (const suffix of ['303F', '3F303', '3F 303F', '3樓303', 'B1F12']) {
+        const query = prefix + suffix;
+        const result = resolveCampusClassroom({ schoolId, query, locations: [place] });
+        expect(result.status, query).toBe('matched');
+        expect(result.matches[0], query).toBe(place);
+      }
+    }
+  });
+});
