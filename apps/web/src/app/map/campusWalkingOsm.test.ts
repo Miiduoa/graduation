@@ -254,16 +254,19 @@ describe('OSM campus walking discovery (not routing approval)', () => {
     expect(parse({ ...input, elements: [...input.elements, { ...node(6, 10.001, 20.001), timestamp: '2026-11-25T00:00:00Z' }] })).toBeNull();
   });
 
-  it('bounds raw member scans even for discarded outside duplicate ways', () => {
+  it('excludes tunnels at the raw member limit and counts discarded outside ways', () => {
     const input = payload();
     const outside = [node(6, 10.015, 20.002), node(7, 10.016, 20.002)];
-    // The original fixture has five references. Four repeated outside ways
-    // reach the separate 16,000-reference budget without retaining their edges.
-    const outsideWays = [3998, 3998, 3998, 4001].map(length =>
+    const tunnel = way(104, [1, 5], { tunnel: 'building_passage' });
+    // The fixture and tunnel use seven references. The repeated outside ways
+    // fill the remaining 15,993 references without adding edges.
+    const outsideWays = [3998, 3998, 3998, 3999].map(length =>
       way(103, Array.from({ length }, (_, i) => 6 + i % 2)),
     );
-    const atLimit = [...input.elements, ...outside, ...outsideWays];
-    expect(parse({ ...input, elements: atLimit })).toEqual(parse(input));
+    const atLimit = [...input.elements, tunnel, ...outside, ...outsideWays];
+    const result = parse({ ...input, elements: atLimit })!;
+    expect(result.graph).toEqual(parse(input)!.graph);
+    expect(result.ways.map(({ id }) => id)).toEqual([101, 102, 104]);
     expect(parse({ ...input, elements: [...atLimit, way(0, [6])] })).toBeNull();
 
     // An oversized member list must be rejected before any member is inspected.
