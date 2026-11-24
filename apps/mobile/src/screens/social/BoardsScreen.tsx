@@ -66,7 +66,7 @@ export function BoardsScreen() {
 
 type SubscriptionListRead = {
   subscribedIds: ReadonlySet<string>;
-  serverConfirmed: boolean;
+  serverConfirmedIds: ReadonlySet<string>;
   writeRevisionAtDispatch: number;
   writeRevisionAtDelivery: number;
   serverRevisionAtDispatch: number;
@@ -169,144 +169,157 @@ function BoardsContent() {
     applySubscribed(() => new Set());
   }, [applySubscribed]);
 
+  const applySubscriptionList = useCallback((
+    membership: SubscriptionListRead,
+    overlappingReconciliations: Set<string>,
+    uid: string,
+    sid: string,
+  ) => {
+    const { serverRevisionAtDispatch } = membership;
+    const keepLocal = new Set(pendingSubscriptionCounts.current.keys());
+    const { subscribedIds } = membership;
+    for (const id of awaitingServerConfirm.current.keys()) overlappingReconciliations.add(id);
+    for (const id of pendingServerConfirmCounts.current.keys()) overlappingReconciliations.add(id);
+    // Both successful and failed writes can settle before a list spanning
+    // the write and its confirmation finishes.
+    for (const [id, revision] of boardWriteRevision.current) {
+      if (revision > membership.writeRevisionAtDispatch) overlappingReconciliations.add(id);
+    }
+    // Keep the entire overlap out of list sequencing, including omissions
+    // that agree with a rollback while a server confirmation is in flight.
+    for (const id of overlappingReconciliations) keepLocal.add(id);
+    for (const [id, appliedAt] of boardConfirmationAppliedAt.current) {
+      if (appliedAt > serverRevisionAtDispatch) keepLocal.add(id);
+    }
+    // Positive membership from a server list dispatched after the writes
+    // settled can update the UI during reconciliation. Keep the overlap out
+    // of list sequencing so an in-flight single-board read can still apply.
+    const keepLocalMembership = new Set(keepLocal);
+    for (const id of membership.serverConfirmedIds) {
+      if (
+        keepLocal.has(id) &&
+        !pendingSubscriptionCounts.current.has(id) &&
+        !confirmedByBoardRead.current.has(id) &&
+        (boardWriteRevision.current.get(id) ?? 0) <= membership.writeRevisionAtDispatch &&
+        (boardConfirmationAppliedAt.current.get(id) ?? 0) <= serverRevisionAtDispatch
+      ) {
+        keepLocalMembership.delete(id);
+        deferredListMembership.current.delete(id);
+      }
+    }
+    const tracked = new Set([
+      ...subscribedIds,
+      ...keepLocal,
+      ...subscribedRef.current,
+      ...confirmedSubscribedRef.current,
+      ...boardWriteRevision.current.keys(),
+    ]);
+    const nextConfirmed = new Set(subscribedIds);
+    for (const id of keepLocalMembership) {
+      if (confirmedSubscribedRef.current.has(id)) nextConfirmed.add(id);
+      else nextConfirmed.delete(id);
+    }
+    confirmedSubscribedRef.current = nextConfirmed;
+    const applied = ++serverReadRevision.current;
+    for (const id of tracked) {
+      if (!keepLocal.has(id)) {
+        boardServerAppliedRevision.current.set(id, applied);
+        confirmedByBoardRead.current.delete(id);
+        deferredListMembership.current.delete(id);
+      }
+    }
+    applySubscribed((previous) => {
+      const next = new Set(subscribedIds);
+      for (const id of keepLocalMembership) {
+        if (previous.has(id)) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+    for (const id of keepLocal) {
+      keepLocalFromStaleList.current.add(id);
+      // A list superseded by a single-board confirmation can trigger a
+      // new server read. Only that successful read can replace the
+      // confirmed state during reconciliation.
+      if (
+        keepLocalMembership.has(id) &&
+        !confirmedByBoardRead.current.has(id) &&
+        (boardConfirmationAppliedAt.current.get(id) ?? 0) <= membership.serverRevisionAtDispatch
+      ) {
+        deferredListMembership.current.set(id, membership);
+      }
+      // Recheck overlaps regardless of membership: a pending confirmation
+      // can still change the state, even when the list agrees with the rollback.
+      // An omission from the capped list cannot establish cancellation on its own.
+      const listed = subscribedIds.has(id);
+      const listClaimsUnkeptSubscription = listed && !nextConfirmed.has(id);
+      const listOmitsConfirmed = !listed && nextConfirmed.has(id) && confirmedByBoardRead.current.has(id);
+      const needsConfirmation =
+        overlappingReconciliations.has(id) ||
+        listClaimsUnkeptSubscription ||
+        (!listOmitsConfirmed && lastSettledWriteSucceeded.current.has(id));
+      if (!pendingSubscriptionCounts.current.has(id) && needsConfirmation) {
+        keepLocalFromStaleList.current.delete(id);
+        void reconcileBoardSubscriptionRef.current(id, uid, sid);
+      }
+    }
+  }, [applySubscribed]);
+
   const load = useCallback(async () => {
     const version = ++loadVersion.current;
-    const subscriptionRevisionAtStart = subscriptionRevision.current;
-    const overlappingReconciliations = new Set([
-      ...awaitingServerConfirm.current.keys(),
-      ...pendingServerConfirmCounts.current.keys(),
-    ]);
-    setLoadError('');
-    try {
-      if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
-        clearBoardAccess();
-        return;
-      }
-      const serverRevisionAtDispatch = serverReadRevision.current;
-      const [rows, membership] = await Promise.all([
-        listBoards(school.id, 120),
-        readSubscribedBoardIds(auth.user.uid, school.id).then(
-          ({ ids, serverConfirmed }): SubscriptionListRead => ({
-            subscribedIds: new Set(ids),
-            serverConfirmed,
-            writeRevisionAtDispatch: subscriptionRevisionAtStart,
-            writeRevisionAtDelivery: subscriptionRevision.current,
-            serverRevisionAtDispatch,
-          }),
-        ),
-      ]);
-      if (loadVersion.current !== version) return;
-      setBoards(rows);
-      const keepLocal = new Set(pendingSubscriptionCounts.current.keys());
-      const { subscribedIds } = membership;
-      for (const id of awaitingServerConfirm.current.keys()) overlappingReconciliations.add(id);
-      for (const id of pendingServerConfirmCounts.current.keys()) overlappingReconciliations.add(id);
-      // Both successful and failed writes can settle before a list spanning
-      // the write and its confirmation finishes.
-      for (const [id, revision] of boardWriteRevision.current) {
-        if (revision > membership.writeRevisionAtDispatch) overlappingReconciliations.add(id);
-      }
-      // Keep the entire overlap out of list sequencing, including omissions
-      // that agree with a rollback while a server confirmation is in flight.
-      for (const id of overlappingReconciliations) keepLocal.add(id);
-      for (const [id, appliedAt] of boardConfirmationAppliedAt.current) {
-        if (appliedAt > serverRevisionAtDispatch) keepLocal.add(id);
-      }
-      // Positive membership from a server list dispatched after the writes
-      // settled can update the UI during reconciliation. Keep the overlap out
-      // of list sequencing so an in-flight single-board read can still apply.
-      const keepLocalMembership = new Set(keepLocal);
-      if (membership.serverConfirmed) {
-        for (const id of subscribedIds) {
-          if (
-            keepLocal.has(id) &&
-            !pendingSubscriptionCounts.current.has(id) &&
-            !confirmedByBoardRead.current.has(id) &&
-            (boardWriteRevision.current.get(id) ?? 0) <= membership.writeRevisionAtDispatch &&
-            (boardConfirmationAppliedAt.current.get(id) ?? 0) <= serverRevisionAtDispatch
-          ) {
-            keepLocalMembership.delete(id);
-            deferredListMembership.current.delete(id);
-          }
-        }
-      }
-      const tracked = new Set([
-        ...subscribedIds,
-        ...keepLocal,
-        ...subscribedRef.current,
-        ...confirmedSubscribedRef.current,
-        ...boardWriteRevision.current.keys(),
-      ]);
-      const nextConfirmed = new Set(subscribedIds);
-      for (const id of keepLocalMembership) {
-        if (confirmedSubscribedRef.current.has(id)) nextConfirmed.add(id);
-        else nextConfirmed.delete(id);
-      }
-      confirmedSubscribedRef.current = nextConfirmed;
-      const applied = ++serverReadRevision.current;
-      for (const id of tracked) {
-        if (!keepLocal.has(id)) {
-          boardServerAppliedRevision.current.set(id, applied);
-          confirmedByBoardRead.current.delete(id);
-          deferredListMembership.current.delete(id);
-        }
-      }
-      applySubscribed((previous) => {
-        const next = new Set(subscribedIds);
-        for (const id of keepLocalMembership) {
-          if (previous.has(id)) next.add(id);
-          else next.delete(id);
-        }
-        return next;
-      });
-      for (const id of keepLocal) {
-        keepLocalFromStaleList.current.add(id);
-        // A confirmation may have already invalidated this snapshot while
-        // the board rows were still loading. It can trigger a new server read
-        // below, but cannot serve as a fallback for that read. Once a
-        // single-board result applies, only another successful read can
-        // replace it during reconciliation.
-        if (
-          keepLocalMembership.has(id) &&
-          !confirmedByBoardRead.current.has(id) &&
-          (boardConfirmationAppliedAt.current.get(id) ?? 0) <= membership.serverRevisionAtDispatch
-        ) {
-          deferredListMembership.current.set(id, membership);
-        }
-        // Recheck overlaps regardless of membership: a pending confirmation
-        // can still change the state, even when the list agrees with the rollback.
-        // An omission from the capped list cannot establish cancellation on its own.
-        const listed = subscribedIds.has(id);
-        const listClaimsUnkeptSubscription = listed && !nextConfirmed.has(id);
-        const listOmitsConfirmed = !listed && nextConfirmed.has(id) && confirmedByBoardRead.current.has(id);
-        const needsConfirmation =
-          overlappingReconciliations.has(id) ||
-          listClaimsUnkeptSubscription ||
-          (!listOmitsConfirmed && lastSettledWriteSucceeded.current.has(id));
-        if (
-          !pendingSubscriptionCounts.current.has(id) &&
-          needsConfirmation &&
-          auth.user?.uid &&
-          school?.id
-        ) {
-          keepLocalFromStaleList.current.delete(id);
-          void reconcileBoardSubscriptionRef.current(id, auth.user.uid, school.id);
-        }
-      }
-    } catch (cause) {
-      if (loadVersion.current !== version) return;
+    const generation = accessGeneration.current;
+    const isCurrent = () =>
+      loadVersion.current === version && accessGeneration.current === generation;
+    const handleError = (cause: unknown) => {
+      if (!isCurrent()) return;
       const code = (cause as { code?: string })?.code ?? '';
       if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
         clearBoardAccess();
+        setLoading(false);
+        setRefreshing(false);
       }
       setLoadError('暫時無法更新看板。請確認網路與登入狀態，再試一次。');
+    };
+
+    setLoadError('');
+    try {
+      const uid = auth.user?.uid;
+      const sid = school?.id;
+      if (isFirebaseMockMode() || !sid || !uid) {
+        clearBoardAccess();
+        return;
+      }
+      const writeRevisionAtDispatch = subscriptionRevision.current;
+      const serverRevisionAtDispatch = serverReadRevision.current;
+      const overlappingReconciliations = new Set([
+        ...awaitingServerConfirm.current.keys(),
+        ...pendingServerConfirmCounts.current.keys(),
+      ]);
+      // Apply each result on arrival. Either read can revoke access to both.
+      await Promise.all([
+        listBoards(sid, 120).then((rows) => {
+          if (isCurrent()) setBoards(rows);
+        }).catch(handleError),
+        readSubscribedBoardIds(uid, sid).then(({ ids, serverConfirmedIds }) => {
+          if (!isCurrent()) return;
+          applySubscriptionList({
+            subscribedIds: new Set(ids),
+            serverConfirmedIds: new Set(serverConfirmedIds),
+            writeRevisionAtDispatch,
+            writeRevisionAtDelivery: subscriptionRevision.current,
+            serverRevisionAtDispatch,
+          }, overlappingReconciliations, uid, sid);
+        }).catch(handleError),
+      ]);
+    } catch (cause) {
+      handleError(cause);
     } finally {
       if (loadVersion.current === version) {
         setLoading(false);
         setRefreshing(false);
       }
     }
-  }, [school?.id, auth.user?.uid, applySubscribed, clearBoardAccess]);
+  }, [school?.id, auth.user?.uid, applySubscriptionList, clearBoardAccess]);
 
   // Re-read one board's subscription after a failed write without touching the
   // list refresh pipeline (loadVersion, error banner, spinner), so an in-flight

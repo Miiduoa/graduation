@@ -101,7 +101,7 @@ export async function isSubscribedToBoard(
 }
 
 /** 保留快照來源，供看板畫面調解訂閱寫入與清單刷新。 */
-export function readSubscribedBoardIds(uid: string, schoolId: string) {
+export async function readSubscribedBoardIds(uid: string, schoolId: string) {
   return querySubscribedBoardIds(getDb(), uid, schoolId);
 }
 
@@ -113,12 +113,18 @@ async function querySubscribedBoardIds(db: Firestore, uid: string, schoolId: str
       limit(100),
     ),
   );
-  return {
-    ids: snap.docs
-      .map((d) => (d.data() as { boardId?: string }).boardId)
-      .filter((x): x is string => !!x),
-    serverConfirmed: !snap.metadata.fromCache && !snap.metadata.hasPendingWrites,
-  };
+  const ids: string[] = [];
+  const serverConfirmedIds: string[] = [];
+  for (const subscription of snap.docs) {
+    const { boardId } = subscription.data() as { boardId?: string };
+    if (!boardId) continue;
+    ids.push(boardId);
+    // A server snapshot can include local writes to other documents.
+    if (!snap.metadata.fromCache && !subscription.metadata.hasPendingWrites) {
+      serverConfirmedIds.push(boardId);
+    }
+  }
+  return { ids, serverConfirmedIds };
 }
 
 /** 取得使用者所有訂閱看板 ID（用於 Feed 的「我訂閱」過濾） */

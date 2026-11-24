@@ -28,21 +28,16 @@ test('other existing consumers retain their optional-read contract', async () =>
 });
 
 
-test.each([
-  [false, false, true],
-  [true, false, false],
-  [false, true, false],
-])('subscription list snapshot carries server provenance (cache: %s, pending writes: %s)', async (
-  fromCache,
-  hasPendingWrites,
-  serverConfirmed,
-) => {
+test.each([false, true])('subscription provenance is per document (cache: %s)', async (fromCache) => {
   jest.mocked(getDocs).mockResolvedValueOnce({
-    docs: [{ data: () => ({ boardId: 'board' }) }],
-    metadata: { fromCache, hasPendingWrites },
+    docs: [
+      { data: () => ({ boardId: 'committed' }), metadata: { hasPendingWrites: false } },
+      { data: () => ({ boardId: 'pending' }), metadata: { hasPendingWrites: true } },
+    ],
+    metadata: { fromCache, hasPendingWrites: true },
   } as Awaited<ReturnType<typeof getDocs>>);
   await expect(readSubscribedBoardIds('alice', 'pu')).resolves.toEqual({
-    ids: ['board'],
-    serverConfirmed,
+    ids: ['committed', 'pending'],
+    serverConfirmedIds: fromCache ? [] : ['committed'],
   });
 });
