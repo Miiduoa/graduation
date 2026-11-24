@@ -66,10 +66,25 @@ export NO_PROXY="${NO_PROXY:-},127.0.0.1,localhost"
 node -e 'if (!process.versions.node.startsWith("22.")) throw new Error("Use the repository Node 22 runtime.")'
 command -v java >/dev/null || { echo 'Java 21 is required for the Firestore emulator.' >&2; exit 1; }
 
-TRONCLASS_RUNTIME_DIR="${TRONCLASS_RUNTIME_DIR:-${TMPDIR:-/tmp}/campus-tronclass-emulator-$UID}"
+if [ -n "${TRONCLASS_RUNTIME_DIR:-}" ]; then
+  if [ -L "$TRONCLASS_RUNTIME_DIR" ] || [ ! -d "$TRONCLASS_RUNTIME_DIR" ]; then
+    echo 'TRONCLASS_RUNTIME_DIR must be a directory owned by this user, not a symbolic link.' >&2
+    exit 1
+  fi
+  if [ "$(stat -c '%u' "$TRONCLASS_RUNTIME_DIR")" != "$(id -u)" ]; then
+    echo 'TRONCLASS_RUNTIME_DIR must be owned by the current user.' >&2
+    exit 1
+  fi
+  chmod 700 "$TRONCLASS_RUNTIME_DIR"
+else
+  TRONCLASS_RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/campus-tronclass-emulator.XXXXXX")"
+  chmod 700 "$TRONCLASS_RUNTIME_DIR"
+fi
+if [ -L "$TRONCLASS_RUNTIME_DIR" ]; then
+  echo 'Refusing a symbolic link runtime directory.' >&2
+  exit 1
+fi
 export TRONCLASS_RUNTIME_DIR
-mkdir -p "$TRONCLASS_RUNTIME_DIR"
-chmod 700 "$TRONCLASS_RUNTIME_DIR"
 for TRONCLASS_KEY_NAME in bff-session tronclass-session; do
   node - "$TRONCLASS_RUNTIME_DIR/$TRONCLASS_KEY_NAME.key" <<'NODE'
 const fs = require('node:fs');
