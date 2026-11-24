@@ -874,6 +874,7 @@ function V2Conversation({
     // Free the composer immediately so the next thought can be typed during a slow response.
     // The sent content remains captured in `current` and can be recovered on failure.
     if (!selection && !tronClassSelection) setQuestion('');
+    let planWithMain = false;
     try {
       if (tronClass) {
         try {
@@ -904,7 +905,10 @@ function V2Conversation({
               setRecoverableQuestion(previous => previous === current ? '' : previous);
               return;
             }
-          }
+            // Queries the Agent cannot serve when the flag is off go back to the
+            // original planner, matching merge-base behaviour.
+            planWithMain = true;
+          } else {
           setTurns(previous => [...previous, { question: current,
             reply: { answer: reason.message, steps: [], cards: [], dataRead: true },
             tronClass: {
@@ -912,8 +916,9 @@ function V2Conversation({
               unconnected: reason.status === 401 || /RECONNECT_REQUIRED|NOT_CONNECTED|BINDING_CHANGED/.test(reason.code),
               ...(compoundClause ? { compound: true as const } : {}),
             } }]);
+          }
         }
-        return;
+        if (!planWithMain) return;
       }
       if (publicCourseIntent) {
         const result = await answerPublicCourseQuestion({

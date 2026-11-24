@@ -586,3 +586,90 @@ describe('write occurrences in TronClass requests', () => {
     expect(tronClassCompoundClauses('不要繳交檢查玩課雲作業用的附件，只查校園公告，查創課教材')).toEqual(['查創課教材']);
   });
 });
+
+describe('r28 structural regressions and function-word variants', () => {
+  it.each([
+    '請勿讀玩課雲作業',
+    '不要讀玩課雲作業',
+    '別讀玩課雲作業',
+    '不要看玩課雲作業',
+    '不要顯示玩課雲作業',
+    '不要確認玩課雲作業',
+  ])('does not authorize a negated read in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+  });
+
+  it.each([
+    '查玩課雲作業準備區公告',
+    '查玩課雲關於作業的公告',
+    '查玩課雲公告「作業，繳交提醒」',
+    '查玩課雲公告「作業繳交提醒」',
+  ])('classifies %s as a notice after resolving the data type', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'announcements', pendingOnly: false });
+  });
+
+  it('keeps a later notice or material read after a relative query inside a negated write', () => {
+    expect(parseTronClassAgentIntent('不要繳交我剛查看過的玩課雲作業，只查校園公告')).toBeNull();
+    expect(tronClassCompoundClauses('不要繳交我剛查看過的玩課雲作業，只查校園公告')).toEqual([]);
+    expect(tronClassCompoundClauses('不要繳交我剛查看過的玩課雲作業，只查校園公告，查創課教材')).toEqual(['查創課教材']);
+  });
+
+  it.each([
+    '查玩課雲作業，最後交附件',
+    '查玩課雲作業，後交附件',
+    '查玩課雲作業，再交附件',
+  ])('keeps a write after a function word with the planner in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '查玩課雲作業最後交附件',
+    '查玩課雲作業後交附件',
+    '查玩課雲作業再交附件',
+  ])('blocks the unpunctuated write after a function word in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+  });
+
+  it('keeps the course read when 交 is inside a course name', () => {
+    expect(parseTronClassAgentIntent('查玩課雲外交課程')?.intent).toBe('courses');
+  });
+
+  it('still prepares a homework draft when the last data type is homework', () => {
+    expect(parseTronClassAgentIntent('幫我準備 TronClass 資料庫作業')).toEqual({ intent: 'prepare', pendingOnly: false });
+  });
+
+  const functionPrefixes = ['剛', '剛才', '已經', '已', '最後', '後', '所'];
+  const functionSuffixes = ['過', '了', '的'];
+  const queryVerbs = ['查', '看', '讀'];
+  const negations = ['不要', '請勿', '別'];
+
+  it.each(
+    negations.flatMap(negation => queryVerbs.flatMap(verb => [
+      `${negation}${verb}玩課雲作業`,
+      ...functionPrefixes.map(prefix => `${negation}${prefix}${verb}玩課雲作業`),
+      ...functionSuffixes.map(suffix => `${negation}${verb}${suffix}玩課雲作業`),
+    ])),
+  )('fuzz: a negated query with a function word does not authorize %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+  });
+
+  it.each(
+    ['最後', '後', '再', '也', '並', '已'].flatMap(prefix =>
+      ['交', '繳'].map(verb => `查玩課雲作業，${prefix}${verb}附件`)),
+  )('fuzz: a write after a function word stays with the planner in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each(
+    ['剛查看過的', '剛查看的', '已查看過的', '所查看的', '剛才看過的'].map(
+      relative => `不要繳交我${relative}玩課雲作業，只查校園公告`,
+    ),
+  )('fuzz: a relative query inside a negated object does not start a read in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+});
