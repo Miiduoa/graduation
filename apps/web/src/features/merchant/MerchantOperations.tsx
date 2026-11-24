@@ -236,8 +236,10 @@ export function MerchantOperations({
 
   const accept = (next: Detail, revision: number) => {
     const confirmation = confirmDetail(next, false, revision);
-    showDetail(confirmation?.detail ?? null);
-    return confirmation?.won ? confirmation.detail : null;
+    // A rejected write receipt leaves the current freshness and access checks in effect.
+    if (!confirmation) return null;
+    showDetail(confirmation.detail);
+    return confirmation.won ? confirmation.detail : null;
   };
 
   const revokeDetail = useCallback(

@@ -1053,13 +1053,18 @@ it.each([
   },
 );
 
-it('discards a v7 pause notice when an earlier background read confirms v8 reopening', async () => {
+it.each([
+  { backgroundFirst: false },
+  { backgroundFirst: true },
+])('keeps v8 reopening over a v7 pause receipt (background first: $backgroundFirst)', async ({ backgroundFirst }) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const open = { ...detail('store-a', true), readinessVersion: 7 };
   const paused = { ...open, locationStatus: 'closed', publicAccess: false };
   const reopened = { ...open, readinessVersion: 8 };
   let finishBackground!: (value: typeof reopened) => void;
   const background = new Promise<typeof reopened>((resolve) => { finishBackground = resolve; });
+  let finishPause!: (value: typeof paused) => void;
+  const pause = new Promise<typeof paused>((resolve) => { finishPause = resolve; });
   const readDetail = vi.fn()
     .mockResolvedValueOnce(open)
     .mockReturnValueOnce(background)
@@ -1067,7 +1072,7 @@ it('discards a v7 pause notice when an earlier background read confirms v8 reope
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
     if (resource === path) return readDetail();
-    if (resource === `${path}/availability`) return Promise.resolve(paused);
+    if (resource === `${path}/availability`) return pause;
     return respond(resource);
   });
 
@@ -1078,12 +1083,25 @@ it('discards a v7 pause notice when an earlier background read confirms v8 reope
   await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
   await act(async () => window.history.forward());
   fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
-  await screen.findByText('門市狀態已更新：暫停接單。');
+  if (backgroundFirst) {
+    await act(async () => finishBackground(reopened));
+    expect(screen.getByText('營業中')).toBeTruthy();
+    await act(async () => finishPause(paused));
+  } else {
+    await act(async () => finishPause(paused));
+    await screen.findByText('門市狀態已更新：暫停接單。');
+    await act(async () => finishBackground(reopened));
+  }
 
-  await act(async () => finishBackground(reopened));
+  expect(readDetail).toHaveBeenCalledTimes(3);
   expect(screen.getByText('營業中')).toBeTruthy();
   expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
   expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
+
+  fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
+  await screen.findByRole('region', { name: '門市訂單工作台' });
+  expect(screen.queryByText('正在重新確認門市，確認後會接回訂單工作台。')).toBeNull();
+  expect(readDetail).toHaveBeenCalledTimes(3);
 });
 
 it.each([
