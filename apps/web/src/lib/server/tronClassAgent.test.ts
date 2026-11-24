@@ -134,15 +134,15 @@ describe('scoped deterministic TronClass Agent tools', () => {
     expect(f.prepare).not.toHaveBeenCalled();
   });
 
-  it('produces one real downloadable action for one literal matching target', async () => {
+  it('does not auto-ask a download whose question mentions a file name', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: '幫我下載 TronClass「資料庫」的講義.pdf' });
-    expect(result.actions).toEqual([{ kind: 'download_material', id: 'material:101:301:class-file', courseId: 101,
-      activityId: 301, uploadKey: 'class-file', name: '講義.pdf', revision, automatic: true }]);
-    expect(result.answer).not.toContain('下載完成');
+    await expect(f.service.ask(owner, { question: '幫我下載 TronClass「資料庫」的講義.pdf' })).rejects.toMatchObject({
+      code: 'TRONCLASS_INVALID_INPUT', status: 422,
+    });
+    expect(f.read).not.toHaveBeenCalled();
   });
 
-  it.each(['下載 TronClass 最新的講義', '下載 TronClass 第三週講義', '下載 TronClass 不存在.pdf'])('does not automatically select an unrelated sole file for %s', async (question) => {
+  it.each(['下載 TronClass 最新的講義', '下載 TronClass 第三週講義'])('does not automatically select an unrelated sole file for %s', async (question) => {
     const f = fixture();
     const result = await f.service.ask(owner, { question, courseId: 101 });
     expect(result.actions).toHaveLength(1);
@@ -154,8 +154,9 @@ describe('scoped deterministic TronClass Agent tools', () => {
     const display = await f.service.ask(owner, { question: 'TronClass「資料庫」教材' });
     expect(display.actions[0]).toMatchObject({ automatic: false });
     f.read.mockResolvedValue({ ...snapshot, partial: true });
-    const partial = await f.service.ask(owner, { question: '下載 TronClass 講義.pdf', courseId: 101 });
-    expect(partial.actions[0]).toMatchObject({ automatic: false });
+    await expect(f.service.ask(owner, { question: '下載 TronClass 講義.pdf', courseId: 101 })).rejects.toMatchObject({
+      code: 'TRONCLASS_INVALID_INPUT', status: 422,
+    });
   });
 
   it('offers choices for multiple files and omits denied or foreign download URLs', async () => {
@@ -171,13 +172,14 @@ describe('scoped deterministic TronClass Agent tools', () => {
     expect(result.actions.every((action) => action.kind === 'download_material' && !action.automatic)).toBe(true);
   });
 
-  it('selects an exact file before a general material title with multiple attachments', async () => {
+  it('does not auto-select an exact file name mentioned in the question', async () => {
     const f = fixture();
     f.read.mockResolvedValue({ ...snapshot, materials: [{ ...material, files: [...material.files,
       { name: '另一份.pdf', allowDownload: true, downloadHref: 'https://tronclass.pu.edu.tw/api/uploads/another-file/blob' }] }] });
-    const result = await f.service.ask(owner, { question: '下載 TronClass 第一週教材的講義.pdf', courseId: 101 });
-    expect(result.actions).toHaveLength(1);
-    expect(result.actions[0]).toMatchObject({ uploadKey: 'class-file', automatic: true });
+    await expect(f.service.ask(owner, { question: '下載 TronClass 第一週教材的講義.pdf', courseId: 101 })).rejects.toMatchObject({
+      code: 'TRONCLASS_INVALID_INPUT', status: 422,
+    });
+    expect(f.read).not.toHaveBeenCalled();
   });
 
   it('prepares the chosen assignment inline but never inherits future school write permission', async () => {

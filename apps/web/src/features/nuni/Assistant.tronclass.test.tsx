@@ -314,7 +314,7 @@ it('downloads a unique requested file once through the Agent endpoint, including
   const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:agent-lecture');
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   render(<StrictMode><Assistant cloudEnabled={false} /></StrictMode>);
-  await ask('下載 TronClass 講義.pdf');
+  await ask('下載 TronClass 講義');
   await screen.findByText(/已開始下載 講義.pdf/);
   expect(fetch.mock.calls.map(call => call[0])).toEqual(['/api/tronclass/agent', '/api/tronclass/agent/download']);
   expect(create).toHaveBeenCalledTimes(1);
@@ -377,7 +377,7 @@ it('cancels student-source downloads on a role change and requires a new query a
   const create = vi.spyOn(URL, 'createObjectURL');
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   render(<Assistant cloudEnabled={false} />);
-  await ask('下載 TronClass 講義.pdf');
+  await ask('下載 TronClass 講義');
   await waitFor(() => expect(finishDownload).toBeTypeOf('function'));
   const selector = screen.getByLabelText('目前要處理');
   fireEvent.change(selector, { target: { value: 'teacher' } });
@@ -427,7 +427,7 @@ it('aborts an earlier turn’s pending download after permissions are revoked in
   const create = vi.spyOn(URL, 'createObjectURL');
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   render(<Assistant cloudEnabled={false} />);
-  await ask('下載 TronClass 講義.pdf');
+  await ask('下載 TronClass 講義');
   await waitFor(() => expect(finishDownload).toBeTypeOf('function'));
   await ask('TronClass 作業');
   await screen.findByRole('heading', { name: '私人期中報告' });
@@ -476,7 +476,7 @@ it('discards an old pending ask through revoke and regrant, while a fresh reques
   await ask('TronClass 作業');
   fireEvent.click(await screen.findByRole('button', { name: '管理 TronClass 助理權限' }));
   await screen.findByRole('checkbox', { name: /讀取課程、作業/ });
-  await ask('下載 TronClass 講義.pdf');
+  await ask('下載 TronClass 講義');
   await waitFor(() => expect(finishAsk).toBeTypeOf('function'));
   fireEvent.click(screen.getByRole('checkbox', { name: /讀取課程、作業/ }));
   fireEvent.click(screen.getByRole('button', { name: '儲存助理權限' }));
@@ -491,7 +491,7 @@ it('discards an old pending ask through revoke and regrant, while a fresh reques
   expect(create).not.toHaveBeenCalled();
   expect(fetch.mock.calls.filter(([url]) => url === '/api/tronclass/agent/download')).toHaveLength(0);
   expect(screen.queryByText('已找到要求的講義。')).toBeNull();
-  await ask('下載 TronClass 講義.pdf');
+  await ask('下載 TronClass 講義');
   await screen.findByText(/已開始下載 講義.pdf/);
   expect(create).toHaveBeenCalledTimes(1);
   expect(click).toHaveBeenCalledTimes(1);
@@ -520,7 +520,7 @@ it.each(['denied', 'updated'] as const)('invalidates an old pending file when a 
   const create = vi.spyOn(URL, 'createObjectURL');
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   render(<Assistant cloudEnabled={false} />);
-  await ask('下載 TronClass 講義.pdf');
+  await ask('下載 TronClass 講義');
   await waitFor(() => expect(finishDownload).toBeTypeOf('function'));
   await ask('TronClass 課程');
   await screen.findByText(observed === 'denied' ? '授權已在其他地方關閉。' : '已依更新後的權限查詢課程。');

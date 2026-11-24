@@ -1090,8 +1090,8 @@ describe('three-way sentence classification', () => {
     ['我不打算查玩課雲作業', { parse: null, compounds: [] }],
     ['我不願意查詢玩課雲作業', { parse: null, compounds: [] }],
     ['查玩課雲作業，寄附件給老師', { parse: null, compounds: [] }],
-    ['下載 TronClass 不存在.pdf', { parse: { intent: 'download' as const, pendingOnly: false }, compounds: [] }],
-    ['下載 TronClass「不存在.pdf」', { parse: { intent: 'download' as const, pendingOnly: false }, compounds: [] }],
+    ['下載 TronClass 不存在.pdf', { parse: null, compounds: [] }],
+    ['下載 TronClass「不存在.pdf」', { parse: null, compounds: [] }],
   ])('classifies the r30–r40 example %s as correct or ambiguous, never wrong', (question, expected) => {
     expectCorrectOrAmbiguous(question, expected);
     const classified = classifyTronClassSentence(question);
@@ -1122,19 +1122,17 @@ describe('three-way sentence classification', () => {
   });
 
   it('masks words inside a filename so they cannot choose a data type or action', () => {
-    expect(classifyTronClassSentence('下載 TronClass（期末 公告 說明.pdf）')).toEqual({
-      outcome: 'clearly-read',
-      intent: { intent: 'download', pendingOnly: false },
-    });
-    expect(parseTronClassAgentIntent('下載 TronClass（期末 公告 說明.pdf）')).toEqual({
-      intent: 'download', pendingOnly: false,
-    });
-    expect(canAnswerTronClassQuestion('下載 TronClass（期末 公告 說明.pdf）')).toBe(true);
-    expect(classifyTronClassSentence('下載 TronClass 不存在公告.pdf')).toEqual({
-      outcome: 'clearly-read',
-      intent: { intent: 'download', pendingOnly: false },
-    });
-    expect(parseTronClassAgentIntent('下載 TronClass 不存在公告.pdf')).toEqual({ intent: 'download', pendingOnly: false });
+    for (const question of [
+      '下載 TronClass（期末 公告 說明.pdf）',
+      '下載 TronClass 不存在公告.pdf',
+      '下載 TronClass（期末（公告）說明.pdf）',
+    ]) {
+      expect(classifyTronClassSentence(question)?.outcome).not.toBe('clearly-read');
+      expect(parseTronClassAgentIntent(question)?.intent).not.toBe('announcements');
+      expect(parseTronClassAgentIntent(question)?.intent).not.toBe('homework');
+      expect(canAnswerTronClassQuestion(question)).toBe(false);
+      expect(tronClassCompoundClauses(question)).toEqual([]);
+    }
   });
 
   it.each(['不想查玩課雲作業', '不能查玩課雲作業', '不再查玩課雲作業'])(
@@ -1147,13 +1145,13 @@ describe('three-way sentence classification', () => {
     },
   );
 
-  it('still auto-reads a download whose file name contains a lone 不', () => {
-    expect(classifyTronClassSentence('下載 TronClass 不存在.pdf')).toEqual({
+  it('does not auto-read a download once a file name is mentioned', () => {
+    expect(classifyTronClassSentence('下載 TronClass 不存在.pdf')?.outcome).not.toBe('clearly-read');
+    expect(parseTronClassAgentIntent('下載 TronClass 不存在.pdf')).toBeNull();
+    expect(canAnswerTronClassQuestion('下載 TronClass 不存在.pdf')).toBe(false);
+    expect(classifyTronClassSentence('下載 TronClass 最新的講義')).toEqual({
       outcome: 'clearly-read',
       intent: { intent: 'download', pendingOnly: false },
-    });
-    expect(parseTronClassAgentIntent('下載 TronClass 不存在.pdf')).toEqual({
-      intent: 'download', pendingOnly: false,
     });
   });
 
@@ -1191,11 +1189,37 @@ describe('three-way sentence classification', () => {
     }
   });
 
-  it('keeps a quoted or extension-bearing 不 in a file name as a download read', () => {
-    expect(classifyTronClassSentence('下載 TronClass（不存在.pdf）')).toEqual({
+  it('keeps a quoted or extension-bearing 不 as a file mention, not an auto-read or a negation', () => {
+    for (const question of ['下載 TronClass（不存在.pdf）', '下載 TronClass「不存在.pdf」']) {
+      expect(classifyTronClassSentence(question)?.outcome).not.toBe('clearly-read');
+      expect(parseTronClassAgentIntent(question)).toBeNull();
+      expect(canAnswerTronClassQuestion(question)).toBe(false);
+    }
+  });
+
+  it('does not auto-read the r44 review examples', () => {
+    for (const question of [
+      '查玩課雲作業（捎予老師）',
+      '查玩課雲作業：捎附件予校園老師.pdf',
+      '下載 TronClass（期末（公告）說明.pdf）',
+      '查玩課雲作業 槑／捎附件予校園老師.pdf',
+      '查玩課雲作業（未交',
+    ]) {
+      expect(classifyTronClassSentence(question)?.outcome).not.toBe('clearly-read');
+      expect(parseTronClassAgentIntent(question)?.intent).not.toBe('homework');
+      expect(parseTronClassAgentIntent(question)?.intent).not.toBe('announcements');
+      expect(canAnswerTronClassQuestion(question)).toBe(false);
+      expect(tronClassCompoundClauses(question)).toEqual([]);
+    }
+  });
+
+  it('still auto-reads when the only brackets are known read tokens', () => {
+    expect(classifyTronClassSentence('查玩課雲（未交作業）')).toEqual({
       outcome: 'clearly-read',
-      intent: { intent: 'download', pendingOnly: false },
+      intent: { intent: 'homework', pendingOnly: true },
     });
+    expect(parseTronClassAgentIntent('查玩課雲（未交作業）')).toEqual({ intent: 'homework', pendingOnly: true });
+    expect(canAnswerTronClassQuestion('查玩課雲（未交作業）')).toBe(true);
   });
 
   it('moves a clearly-read sentence to ambiguous when an unknown token is inserted, never to a write or auto-read', () => {
@@ -1204,7 +1228,7 @@ describe('three-way sentence classification', () => {
       '查玩課雲沒交的作業',
       '查玩課雲外交作業',
       '把玩課雲外交作業列出',
-      '下載 TronClass 不存在.pdf',
+      '下載 TronClass 最新的講義',
       '查玩課雲尚未提交的作業',
     ];
     for (const seed of seeds) {
@@ -1242,24 +1266,27 @@ describe('three-way sentence classification', () => {
   });
 
   it('never auto-reads when punctuation or an unknown token is inserted into or next to a filename', () => {
-    const seed = '下載 TronClass 不存在.pdf';
-    expect(classifyTronClassSentence(seed)?.outcome).toBe('clearly-read');
-    const probes = ['：', ':', '，', ',', '、', '；', ';', '/', '／', '\\', '鎕', '寄', 'foo', '槑'];
+    expect(classifyTronClassSentence('下載 TronClass 不存在.pdf')?.outcome).not.toBe('clearly-read');
+    const probes = ['：', ':', '，', ',', '、', '；', ';', '/', '／', '\\', '鎕', '寄', 'foo', '槑', '（', '）'];
     for (const probe of probes) {
       for (const question of [
         `下載 TronClass 不存在${probe}.pdf`,
         `下載 TronClass 不存在.pdf${probe}`,
         `下載 TronClass ${probe}不存在.pdf`,
         `下載 TronClass 不${probe}存在.pdf`,
+        `下載 TronClass（期末${probe}公告 說明.pdf）`,
         `查玩課雲作業 ${probe}，寄給老師.pdf`,
         `查玩課雲作業 ${probe}：寄給老師.pdf`,
+        `查玩課雲作業（${probe}捎予老師）`,
       ]) {
         const classified = classifyTronClassSentence(question);
         const parsed = parseTronClassAgentIntent(question);
+        expect(classified?.outcome).not.toBe('clearly-read');
         expect(parsed?.intent).not.toBe('homework');
         expect(parsed?.intent).not.toBe('announcements');
-        expect(parsed == null || parsed.intent === 'download' || parsed.intent === 'unsupported').toBe(true);
-        if (classified?.outcome === 'clearly-write') expect(question.includes('寄給')).toBe(true);
+        expect(parsed?.intent).not.toBe('download');
+        expect(canAnswerTronClassQuestion(question) === false || parsed?.intent === 'unsupported').toBe(true);
+        if (classified?.outcome === 'clearly-write') expect(question.includes('寄給') || question.includes('寄')).toBe(true);
         expect(tronClassCompoundClauses(question)).toEqual([]);
       }
     }
