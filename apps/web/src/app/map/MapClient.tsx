@@ -45,6 +45,7 @@ import {
 } from '@campus/shared/src/campusMapLookup';
 import {
   MAX_CAMPUS_CLASSROOM_QUERY_LENGTH,
+  campusPlaceNameMatchesQuery,
   normalizeCampusClassroomQuery,
   resolveCampusClassroom,
 } from '@campus/shared/src/campusClassroomLookup';
@@ -248,7 +249,9 @@ function MapContent({
     const matched = locations.filter(
       (location) =>
         (category === '全部' || location.category === category) &&
-        (locationMatchesSearch(location, search) || classroomIds.has(location.id)) &&
+        (locationMatchesSearch(location, search) ||
+          campusPlaceNameMatchesQuery(location.name, search) ||
+          classroomIds.has(location.id)) &&
         (!onlyFavorites || (favorites.status === 'ready' && favorites.ids.has(location.id))) &&
         (!nearbyOnly || !myLocation || distanceMeters(myLocation, location) <= 1000),
     );
@@ -261,7 +264,8 @@ function MapContent({
   // A missing explicit destination must not silently turn into another building.
   // A later source update can make a room ambiguous; derive this instead of retaining a guess.
   const classroomPlace = classroomLinkActive && classroom.status === 'matched' ? classroom.matches[0] : null;
-  const selectedId = selection ?? (focus ? focusedPlace?.id : classroomPlace?.id);
+  const automaticClassroomId = sourcePending ? undefined : classroomPlace?.id;
+  const selectedId = selection ?? (focus ? focusedPlace?.id : automaticClassroomId);
   const selected = locations.find((location) => location.id === selectedId) ?? null;
   const deepLinkRoute = useMemo<[MapLocation, MapLocation] | null>(() => {
     const ids = route?.split(',').map((id) => id.trim());
