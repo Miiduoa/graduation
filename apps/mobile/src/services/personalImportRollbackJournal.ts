@@ -33,7 +33,6 @@ async function openWriteLockDatabase(): Promise<IDBDatabase | undefined> {
     });
   } catch {
     // Some browser configurations allow localStorage while disabling IndexedDB.
-    // The journal still checks ownership and the primary bytes before restoring.
     return undefined;
   }
 }
@@ -99,47 +98,78 @@ async function readWebRollback(key: string): Promise<string | undefined> {
   }
 }
 
-export function prepareWebPersonalImportRollback(
+export function hasWebPersonalImportCommit(raw: string | null): boolean {
+  if (!raw) return false;
+  try {
+    const value = JSON.parse(raw);
+    return value?.version === 1 && typeof value.webCommit === 'string';
+  } catch {
+    // The ledger parser reports invalid primary data if there is no recovery copy.
+    return false;
+  }
+}
+
+const abandonedStageAge = 24 * 60 * 60 * 1000;
+
+export async function commitWebPersonalImports(
   key: string,
-  original: string | null,
   before: string | null,
   attempted: string,
-) {
+  assertWritable: () => void,
+  recovery?: { raw: string | null },
+): Promise<string> {
   const storage = window.localStorage;
-  const backupKey = webJournalKey(key);
+  const id = createPersonalImportId();
+  const committed = JSON.stringify({ ...JSON.parse(attempted), webCommit: id });
+  const conflict = () => new Error('匯入資料已在另一個分頁更新，請重新載入。');
+  const publish = () => {
+    assertWritable();
+    // The primary stays authoritative until this single publication. Its new
+    // generation also retires legacy recovery data without clearing shared keys.
+    storage.setItem(key, committed);
+    if (storage.getItem(key) !== committed) throw conflict();
+    return committed;
+  };
+  if (!recovery) {
+    if (storage.getItem(key) !== before) throw conflict();
+    return publish();
+  }
+
+  const prefix = `${webJournalKey(key)}:stage:`;
+  const now = Date.now();
+  for (const entry of Object.keys(storage)) {
+    if (!entry.startsWith(prefix)) continue;
+    const started = Number(entry.slice(prefix.length).split(':', 1)[0]);
+    // A suspended writer must recheck its stage before publishing.
+    if (started < now - abandonedStageAge) storage.removeItem(entry);
+  }
+
+  const stageKey = `${prefix}${now}:${id}`;
   const encoded = JSON.stringify({
-    id: createPersonalImportId(),
-    original,
+    id,
+    original: recovery.raw,
     before: fingerprint(before),
     attempted: fingerprint(attempted),
   } satisfies WebRollback);
-  storage.setItem(backupKey, encoded);
-  const ownsJournal = () => storage.getItem(backupKey) === encoded;
-  if (!ownsJournal()) throw new Error('無法確認匯入資料的還原副本已寫入。');
+  const ownsStage = () => storage.getItem(stageKey) === encoded;
+  try {
+    await AsyncStorage.setItem(stageKey, encoded);
+    assertWritable();
+    if (!ownsStage() || storage.getItem(key) !== before) throw conflict();
 
-  return {
-    async commit(assertWritable: () => void) {
-      const current = await AsyncStorage.getItem(key);
-      assertWritable();
-      if (current !== attempted || !ownsJournal()) {
-        throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
+    return publish();
+  } finally {
+    // Even if another tab publishes here, this key belongs only to this attempt.
+    // No failure path writes the primary or clears a shared recovery key.
+    try {
+      if (ownsStage()) {
+        const current = storage.getItem(key);
+        if (current === before || current === committed) storage.removeItem(stageKey);
       }
-      storage.removeItem(backupKey);
-    },
-    async rollback() {
-      if (!ownsJournal()) return;
-      const current = await AsyncStorage.getItem(key);
-      if (!ownsJournal() || (current !== before && current !== attempted)) return;
-
-      if (current !== original) {
-        if (original === null) await AsyncStorage.removeItem(key);
-        else await AsyncStorage.setItem(key, original);
-      }
-      if (await AsyncStorage.getItem(key) === original && ownsJournal()) {
-        storage.removeItem(backupKey);
-      }
-    },
-  };
+    } catch {
+      // An abandoned stage is inert and can be reclaimed by a later write.
+    }
+  }
 }
 
 function journalFiles(key: string) {

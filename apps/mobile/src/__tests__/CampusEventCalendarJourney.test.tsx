@@ -252,21 +252,26 @@ test('清除檢查點時 Firebase 已切換，還原舊帳本且不發出變更�
   }
 });
 
-test('同帳校驗證期間隱藏內容，返回後保留編輯與取消狀態', async () => {
+test.each([true, false])('同帳校重驗期間保留編輯與取消狀態（暫無 Nuni session：%s）', async (sessionMissing) => {
   const view = await openDraft();
   fireEvent.changeText(view.getByLabelText('標題'), '與社團一起觀星');
   mockVerifying = true;
+  if (sessionMissing) mockPlatformSession = null;
   view.rerender(<Journey />);
   await view.findByText('正在確認帳號與校園…');
   expect(view.queryByRole('button', { name: '儲存行程' })).toBeNull();
   expect(view.queryByLabelText('標題')).toBeNull();
+  expect(view.queryByText('請回到目前校園的活動頁重新開啟草稿。')).toBeNull();
   mockVerifying = false;
+  mockPlatformSession = { platformAccountId: 'account-a' };
   view.rerender(<Journey />);
   expect((await view.findByLabelText('標題')).props.value).toBe('與社團一起觀星');
   fireEvent.press(await view.findByRole('button', { name: '取消', disabled: false }));
   mockVerifying = true;
+  if (sessionMissing) mockPlatformSession = null;
   view.rerender(<Journey />);
   mockVerifying = false;
+  mockPlatformSession = { platformAccountId: 'account-a' };
   view.rerender(<Journey />);
   expect(view.queryByLabelText('標題')).toBeNull();
   expect((await loadPersonalImports(mockScope)).records).toHaveLength(0);

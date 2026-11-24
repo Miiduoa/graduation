@@ -112,10 +112,11 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
     : !sessionRejected && firebaseUid
       ? `firebase:${firebaseUid}`
       : null;
+  const nuniRevalidating = platform.loading && !platform.session && !sessionRejected;
   const knownOwner = scope?.owner ?? (firebaseChanged ? null : observedOwner);
   const ownerSignedOut = (owner: string | undefined) =>
     firebaseSignedOut && !!owner?.startsWith('firebase:');
-  return { knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseSessionLost, ownerSignedOut, workspaceUid };
+  return { knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseSessionLost, ownerSignedOut, workspaceUid, nuniRevalidating };
 }
 
 /** A separate stack entry keeps a campus suggestion from replacing an open personal draft. */
@@ -128,7 +129,7 @@ export function CampusEventCalendarDraftScreen() {
       >
     >();
   const scope = usePersonalImportScope();
-  const { knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseSessionLost, ownerSignedOut } =
+  const { knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseSessionLost, ownerSignedOut, nuniRevalidating } =
     useCalendarAccount(scope);
   const { school, schoolId, selectionReady } = useSchool();
   const campusEvent = params?.campusEvent;
@@ -136,7 +137,9 @@ export function CampusEventCalendarDraftScreen() {
   const schoolCleared = !!selectionReady && !knownSchoolId;
   const schoolChanged =
     !!campusEvent && !!selectionReady && !!knownSchoolId && knownSchoolId !== campusEvent.schoolId;
-  const ownerChanged = !!knownOwner && knownOwner !== campusEvent?.owner;
+  // A Firebase fallback cannot identify a Nuni draft while Nuni is revalidating.
+  const awaitingDraftOwner = !scope && nuniRevalidating && campusEvent?.owner.startsWith('nuni:');
+  const ownerChanged = !awaitingDraftOwner && !!knownOwner && knownOwner !== campusEvent?.owner;
   const scopeChanged =
     !!scope && (scope.owner !== campusEvent?.owner || scope.schoolId !== campusEvent.schoolId);
   const invalidated =

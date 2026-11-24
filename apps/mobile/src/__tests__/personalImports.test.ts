@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
+import { sha256 } from 'js-sha256';
 import {
   meetupWindows,
   emptyPersonalEventDraft,
@@ -42,6 +43,25 @@ beforeEach(async () => {
   jest.clearAllMocks();
 });
 
+function useWebStorage() {
+  const previousPlatform = Platform.OS;
+  Platform.OS = 'web';
+  window.localStorage.clear();
+  // Expo Web's AsyncStorage uses the same localStorage entries as direct reads.
+  const getItem = jest.mocked(AsyncStorage.getItem);
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  const nativeGet = getItem.getMockImplementation()!;
+  const nativeSet = setItem.getMockImplementation()!;
+  getItem.mockImplementation(async (key) => window.localStorage.getItem(key));
+  setItem.mockImplementation(async (key, value) => window.localStorage.setItem(key, value));
+  return () => {
+    getItem.mockImplementation(nativeGet);
+    setItem.mockImplementation(nativeSet);
+    window.localStorage.clear();
+    Platform.OS = previousPlatform;
+  };
+}
+
 test('append is durable, duplicate-safe, and isolated by account and school', async () => {
   const first = await appendPersonalImports(scope, [row('a')]);
   expect(first.added).toBe(1);
@@ -73,75 +93,96 @@ test('Web reads an existing ledger without touching the unsupported Expo documen
 });
 
 test('Web leaves the primary ledger intact when the recovery copy cannot be stored', async () => {
+  const cleanup = useWebStorage();
   const { ledger } = await appendPersonalImports(scope, [row('original')]);
-  const originalPlatform = Platform.OS;
-  Platform.OS = 'web';
+  const key = personalImportStorageKey(scope);
+  const before = window.localStorage.getItem(key);
   const storeBackup = jest.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
     throw new DOMException('Quota exceeded', 'QuotaExceededError');
   });
-  const setItem = jest.mocked(AsyncStorage.setItem);
-  setItem.mockClear();
   try {
     await expect(editPersonalImport(scope, ledger.records[0], row('original', '統計'), {
       canContinue: () => true,
     })).rejects.toThrow('Quota exceeded');
     expect(storeBackup).toHaveBeenCalledTimes(1);
-    expect(setItem).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(key)).toBe(before);
     await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
   } finally {
     storeBackup.mockRestore();
-    Platform.OS = originalPlatform;
+    cleanup();
   }
 });
 
-test.each(['new writer', 'primary-only writer'])(
-  'Web keeps a newer commit from a %s when an older guarded write rolls back',
-  async (writer) => {
+test.each(['before rollback', 'before rollback using the legacy primary', 'after rollback checks'])(
+  'Web keeps a newer commit completed %s without Web Locks or IndexedDB',
+  async (timing) => {
+    const cleanup = useWebStorage();
+    expect(navigator.locks).toBeUndefined();
+    expect(globalThis.indexedDB).toBeUndefined();
+    const storage = window.localStorage;
     const key = personalImportStorageKey(scope);
     const { ledger } = await appendPersonalImports(scope, [row('original')]);
     let otherTab!: typeof import('../services/personalImports');
     jest.isolateModules(() => {
       otherTab = require('../services/personalImports');
     });
-
-    const originalPlatform = Platform.OS;
-    Platform.OS = 'web';
     const setItem = jest.mocked(AsyncStorage.setItem);
     const write = setItem.getMockImplementation()!;
+    const removeItem = Storage.prototype.removeItem;
     let resume!: () => void;
     const paused = new Promise<void>((resolve) => { resume = resolve; });
-    let signalStaged!: () => void;
-    const staged = new Promise<void>((resolve) => { signalStaged = resolve; });
+    let signalStaged!: (stageKey: string) => void;
+    const staged = new Promise<string>((resolve) => { signalStaged = resolve; });
     let verified = true;
     setItem.mockImplementationOnce(async (storageKey, raw) => {
       await write(storageKey, raw);
-      signalStaged();
+      signalStaged(storageKey);
       await paused;
     });
 
     const rejected = expect(editPersonalImport(scope, ledger.records[0], row('original', '分頁 A'), {
       canContinue: () => verified,
     })).rejects.toThrow('帳號或學校已切換');
+    let cleanupSpy: jest.SpyInstance | undefined;
     try {
-      await staged;
-      const newer = writer === 'new writer'
-        ? await otherTab.editPersonalImport(scope, ledger.records[0], row('original', '分頁 B'), {
+      const stageKey = await staged;
+      let newer = { ...ledger, records: [{ ...ledger.records[0], title: '分頁 B' }] };
+      const newerRaw = JSON.stringify({ ...newer, webCommit: 'tab-b' });
+      const otherStageKey = stageKey + '-tab-b';
+      if (timing === 'before rollback') {
+        newer = await otherTab.editPersonalImport(scope, ledger.records[0], row('original', '分頁 B'), {
           canContinue: () => true,
-        })
-        : { ...ledger, records: [{ ...ledger.records[0], title: '分頁 B' }] };
-      const newerRaw = JSON.stringify(newer);
-      if (writer === 'primary-only writer') await AsyncStorage.setItem(key, newerRaw);
+        });
+      } else if (timing === 'before rollback using the legacy primary') {
+        storage.setItem(key, JSON.stringify(newer));
+      } else {
+        cleanupSpy = jest.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+          this: Storage,
+          entry,
+        ) {
+          if (entry === stageKey) {
+            // B publishes after A has verified both the primary and its stage.
+            storage.setItem(key, newerRaw);
+            storage.setItem(otherStageKey, '分頁 B 的新副本');
+          }
+          removeItem.call(this, entry);
+        });
+      }
 
       verified = false;
       resume();
       await rejected;
-      expect(await AsyncStorage.getItem(key)).toBe(newerRaw);
+      if (timing === 'after rollback checks') {
+        expect(cleanupSpy).toHaveBeenCalledWith(stageKey);
+        expect(storage.getItem(key)).toBe(newerRaw);
+        expect(storage.getItem(otherStageKey)).toBe('分頁 B 的新副本');
+      }
       await expect(otherTab.loadPersonalImports(scope)).resolves.toEqual(newer);
     } finally {
       resume();
       await rejected;
-      window.localStorage.clear();
-      Platform.OS = originalPlatform;
+      cleanupSpy?.mockRestore();
+      cleanup();
     }
   },
 );
@@ -323,15 +364,29 @@ test('a restart recovers a revoked deletion after both AsyncStorage rollback wri
   expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['統計']);
 });
 
-test('Web recovers a revoked write after restart and can retry without Expo files', async () => {
-  const originalPlatform = Platform.OS;
+test('Web preserves the ledger after revocation and can retry after restart without Expo files', async () => {
+  const cleanup = useWebStorage();
   const document = Object.getOwnPropertyDescriptor(Paths, 'document')!;
-  Platform.OS = 'web';
   Object.defineProperty(Paths, 'document', {
     get: () => { throw new TypeError('Expo 網頁預覽沒有文件目錄'); },
   });
   try {
-    const { ledger } = await failedDeletionRollback(true);
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    const key = personalImportStorageKey(scope);
+    const before = window.localStorage.getItem(key);
+    let verified = true;
+    const setItem = jest.mocked(AsyncStorage.setItem);
+    const write = setItem.getMockImplementation()!;
+    setItem.mockImplementationOnce(async (storageKey, value) => {
+      await write(storageKey, value);
+      verified = false;
+    });
+    await expect(deletePersonalImport(scope, ledger.records[0], {
+      canContinue: () => true,
+      canCommitFirstWrite: () => verified,
+    })).rejects.toThrow('目前無法確認行事曆可寫入');
+    expect(window.localStorage.getItem(key)).toBe(before);
+
     let restarted!: typeof import('../services/personalImports');
     jest.isolateModules(() => {
       restarted = require('../services/personalImports');
@@ -339,11 +394,36 @@ test('Web recovers a revoked write after restart and can retry without Expo file
     await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
     await restarted.deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
     await expect(restarted.loadPersonalImports(scope)).resolves.toMatchObject({ records: [] });
-    expect(window.localStorage.length).toBe(0);
+    expect(Object.keys(window.localStorage)).toEqual([key]);
   } finally {
-    window.localStorage.clear();
-    Platform.OS = originalPlatform;
+    cleanup();
     Object.defineProperty(Paths, 'document', document);
+  }
+});
+
+test('Web retries from a legacy marked copy and retires it when the new ledger commits', async () => {
+  const cleanup = useWebStorage();
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    const storage = window.localStorage;
+    const key = personalImportStorageKey(scope);
+    const original = JSON.stringify(ledger);
+    const attempted = JSON.stringify({ ...ledger, records: [], batches: [] });
+    const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+    storage.setItem(key, attempted);
+    storage.setItem(journal, JSON.stringify({
+      id: 'legacy',
+      original,
+      before: sha256(original),
+      attempted: sha256(attempted),
+    }));
+
+    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+    await deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
+    expect(storage.getItem(journal)).toContain('legacy');
+    await expect(loadPersonalImports(scope)).resolves.toEqual({ version: 1, records: [], batches: [] });
+  } finally {
+    cleanup();
   }
 });
 

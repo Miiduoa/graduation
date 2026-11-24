@@ -232,6 +232,14 @@ it('saves new and edited events on Web with an existing AsyncStorage ledger', as
   const originalPlatform = Platform.OS;
   const document = Object.getOwnPropertyDescriptor(Paths, 'document')!;
   Platform.OS = 'web';
+  const key = personalImportStorageKey(scope);
+  window.localStorage.setItem(key, JSON.stringify(existing));
+  const getItem = jest.mocked(AsyncStorage.getItem);
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  const nativeGet = getItem.getMockImplementation()!;
+  const nativeSet = setItem.getMockImplementation()!;
+  getItem.mockImplementation(async (entry) => window.localStorage.getItem(entry));
+  setItem.mockImplementation(async (entry, value) => window.localStorage.setItem(entry, value));
   Object.defineProperty(Paths, 'document', {
     get: () => { throw new TypeError('Expo 網頁預覽沒有文件目錄'); },
   });
@@ -245,8 +253,10 @@ it('saves new and edited events on Web with an existing AsyncStorage ledger', as
       ...existing.records,
       expect.objectContaining({ title: '網頁修改行程' }),
     ]);
-    expect(window.localStorage.length).toBe(0);
+    expect(Object.keys(window.localStorage)).toEqual([key]);
   } finally {
+    getItem.mockImplementation(nativeGet);
+    setItem.mockImplementation(nativeSet);
     window.localStorage.clear();
     Platform.OS = originalPlatform;
     Object.defineProperty(Paths, 'document', document);

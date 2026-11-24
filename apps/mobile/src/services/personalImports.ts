@@ -3,9 +3,10 @@ import { Platform } from 'react-native';
 import { findCatalogSameSlotChange } from './publicCourseTimetableImport';
 import {
   clearPersonalImportRollback,
+  commitWebPersonalImports,
+  hasWebPersonalImportCommit,
   preparePersonalImportRollback,
   readPersonalImportRollback,
-  prepareWebPersonalImportRollback,
   withPersonalImportWriteLock,
 } from './personalImportRollbackJournal';
 import {
@@ -162,9 +163,12 @@ export async function loadPersonalImports(
       continue;
     }
     const sequence = writeSequence;
-    const recovery = await readRecovery(key, scope);
+    const web = Platform.OS === 'web';
+    const webPrimary = web ? await AsyncStorage.getItem(key) : null;
+    const recovery = hasWebPersonalImportCommit(webPrimary) ? null : await readRecovery(key, scope);
     if (sequence !== writeSequence) continue;
     if (recovery) return recovery.ledger;
+    if (web) return parseLedger(webPrimary, scope);
     const [stored] = await Promise.allSettled([AsyncStorage.getItem(key)]);
     // A guarded write or a recovery may have changed the authoritative bytes during these reads.
     if (sequence !== writeSequence) continue;
@@ -177,7 +181,8 @@ function parseLedger(raw: string | null, scope: PersonalImportScope): PersonalIm
   if (!raw) return empty();
   let value: PersonalImportLedger;
   try {
-    value = JSON.parse(raw) as PersonalImportLedger;
+    const { webCommit: _webCommit, ...ledger } = JSON.parse(raw);
+    value = ledger as PersonalImportLedger;
   } catch {
     throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
   }
@@ -259,7 +264,7 @@ export function mutatePersonalImportLedger<T>(
       assertWritable();
       const web = Platform.OS === 'web';
       const webPrimary = web ? await AsyncStorage.getItem(key) : null;
-      const recovery = await readRecovery(key, scope);
+      const recovery = hasWebPersonalImportCommit(webPrimary) ? null : await readRecovery(key, scope);
       let primaryRaw = web || recovery ? webPrimary : await AsyncStorage.getItem(key);
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
@@ -273,27 +278,13 @@ export function mutatePersonalImportLedger<T>(
         // even if the recovered version no longer fits in AsyncStorage.
         const needsJournal = typeof guard !== 'function' || (recovery !== null && !hasPersisted);
         const write = async () => {
+          let writtenRaw = raw;
           if (web) {
-            const currentRaw = await AsyncStorage.getItem(key);
-            assertWritable();
-            if (currentRaw !== primaryRaw) {
-              throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
-            }
-          }
-          if (!needsJournal) {
+            writtenRaw = await commitWebPersonalImports(
+              key, primaryRaw, raw, assertWritable, needsJournal ? { raw: persistedRaw } : undefined,
+            );
+          } else if (!needsJournal) {
             await AsyncStorage.setItem(key, raw);
-          } else if (web) {
-            const journal = prepareWebPersonalImportRollback(key, persistedRaw, primaryRaw, raw);
-            try {
-              await AsyncStorage.setItem(key, raw);
-              assertWritable();
-              await AsyncStorage.multiRemove([recoveryKey(key)]);
-              assertWritable();
-              await journal.commit(assertWritable);
-            } catch (error) {
-              await journal.rollback();
-              throw error;
-            }
           } else {
             assertWritable();
             const commit = preparePersonalImportRollback(key, persistedRaw);
@@ -310,7 +301,7 @@ export function mutatePersonalImportLedger<T>(
             }
           }
           hasPersisted = true;
-          primaryRaw = raw;
+          primaryRaw = writtenRaw;
           persistedRaw = raw;
           persisted = ledger;
           for (const listener of listeners) {
@@ -321,7 +312,7 @@ export function mutatePersonalImportLedger<T>(
             }
           }
         };
-        if (!needsJournal) return write();
+        if (!web && !needsJournal) return write();
         // Readers wait until the write commits or rollback establishes the verified ledger.
         await trackWrite(key, write);
       };
