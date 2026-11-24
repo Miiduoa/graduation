@@ -507,6 +507,35 @@ it('rejects multiple strict session updates instead of silently selecting one', 
   })).rejects.toMatchObject({ kind: 'unverified' });
 });
 
+it.each([
+  'misc=value, session=deleted; Max-Age=0; Path=/',
+  'misc=value; Path=/, session=; Max-Age=0; Path=/',
+  'misc=value; Expires=Thu, 01 Jan 1970 00:00:00 GMT, session=deleted; Max-Age=0; Path=/',
+  'misc=value, session=rotated; Path=/',
+])('rejects a folded profile cookie update after an unrelated first cookie (%s)', async (setCookie) => {
+  const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+    ? jsonResponse(200, {}, { 'set-cookie': 'session=old; Path=/' })
+    : jsonResponse(200, { id: 44, login_name: 's1234567' }, { 'set-cookie': setCookie }));
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true,
+  })).rejects.toMatchObject({ kind: 'unverified', stage: 'verify', code: 'IDENTITY_EVIDENCE_UNAVAILABLE' });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('accepts normal Expires date commas during strict session rotation', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+  const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+    ? jsonResponse(200, {}, { 'set-cookie': 'session=old; Expires=Tue, 01 Jan 2030 00:00:00 GMT; Path=/' })
+    : jsonResponse(200, { id: 44, login_name: 's1234567' }, {
+      'set-cookie': 'session=rotated; Expires=Tue, 01 Jan 2030 00:00:00 GMT; Path=/',
+    }));
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true,
+  })).resolves.toMatchObject({ cookies: { session: 'rotated' }, identityEvidence: { subject: '44' } });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
 it('rejects a second live session scope introduced by the profile response', async () => {
   const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
     ? jsonResponse(200, {}, { 'set-cookie': 'session=old; Path=/' })

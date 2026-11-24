@@ -183,6 +183,9 @@ function mergeStrictTronClassCookies(
   const origin = new URL(requestUrl);
   let sessionUpdates = 0;
   for (const line of lines) {
+    // A folded header can hide a session update behind an unrelated first cookie.
+    // Normal Expires date commas have no following cookie-pair and remain valid.
+    if (/,\s*[^;,=\s]+=/.test(line)) reject();
     const [pair, ...attributes] = line.split(';').map(part => part.trim());
     const separator = pair.indexOf('=');
     const name = pair.slice(0, separator);
@@ -190,8 +193,7 @@ function mergeStrictTronClassCookies(
     const session = name.toLowerCase() === 'session';
     if (session && (name !== 'session' || ++sessionUpdates > 1)) reject();
     const invalid = () => { if (session) reject(); };
-    if (separator <= 0 || !COOKIE_NAME.test(name) || !COOKIE_VALUE.test(value) ||
-        /,\s*[^;,=\s]+=/.test(line)) { invalid(); continue; }
+    if (separator <= 0 || !COOKIE_NAME.test(name) || !COOKIE_VALUE.test(value)) { invalid(); continue; }
     const scoped = new Map<string, string>();
     let malformed = false;
     for (const attribute of attributes) {
