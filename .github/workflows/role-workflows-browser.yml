@@ -41,7 +41,7 @@ jobs:
   role-workflows:
     name: Role entry, recovery and merchant journeys
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 40
     env:
       TZ: Asia/Taipei
       NEXT_TELEMETRY_DISABLED: '1'
@@ -61,10 +61,21 @@ jobs:
           python-version: '3.12'
       - name: Install locked workspace dependencies
         run: pnpm install --frozen-lockfile
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-1.57.0
+          restore-keys: |
+            ${{ runner.os }}-admin-playwright-1.57.0
+            ${{ runner.os }}-playwright-
       - name: Install browser and Chinese fonts
-        timeout-minutes: 10
+        timeout-minutes: 25
         run: |
+          set -euo pipefail
           python -m pip install playwright==1.57.0
+          sudo apt-get -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 -o Acquire::Retries=5 update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 -o Acquire::Retries=5 install -y fonts-noto-cjk
           bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk
       - name: Bundle actual role components with isolated API
         run: node scripts/qa/role-workflows/build.mjs
