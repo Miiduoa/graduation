@@ -111,10 +111,9 @@ function comparable(value: string): string {
 export function campusMapMatchDetails(
   schoolId: string, query: string, location: CampusMapPlaceLike,
 ): { match: CampusMapMatch; alias: boolean } | null {
+  if (comparable(query) === comparable(location.name)) return { match: 'place', alias: false };
   const room = resolveCampusClassroom({ schoolId, query, locations: [location] });
-  const alias = room.matchKind === 'alias';
-  if (comparable(query) === comparable(location.name)) return { match: 'place', alias };
-  if (room.matchKind) return { match: 'building', alias };
+  if (room.matchKind) return { match: 'building', alias: room.matchKind === 'alias' };
   return locationMatchesSearch(location, query) ? { match: 'search', alias: false } : null;
 }
 

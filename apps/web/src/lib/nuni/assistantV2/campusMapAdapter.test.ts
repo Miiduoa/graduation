@@ -124,11 +124,23 @@ describe('map reader uses the current page sources', () => {
     });
   });
 
+  it('preserves a published place name alongside another place with the same building name', async () => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find(item => item.id === 'pu-library')!;
+    const name = 'Luking Library';
+    const library = doc(place.id, { ...place, name });
+    const teachingHall = doc('imported-building', published({ name: '教學館', building: name }));
+    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([library, teachingHall]) as never);
+    expect(await read(name)).toMatchObject({
+      resolution: 'ambiguous', partial: false, items: [
+        { id: place.id, match: 'place' }, { id: 'imported-building', match: 'building' },
+      ],
+    });
+  });
+
   it.each([
     ['pu-renyuan', 'AK', 'AK303', false, 'building'],
     ['pu-renyuan', 'AK303', 'AK303', false, 'place'],
     ['pu-wenxing', 'Bishop Kupfer Hall', 'Bishop Kupfer Hall 303', true, 'building'],
-    ['pu-library', 'Luking Library', 'Luking Library', true, 'place'],
   ])('prefers the direct name over the catalog match for %s (%s)', async (id, name, query, rename, match) => {
     const place = PROVIDENCE_CAMPUS_PLACES.find(item => item.id === id)!;
     const catalog = doc(id, { ...place, name: rename ? name : place.name });
