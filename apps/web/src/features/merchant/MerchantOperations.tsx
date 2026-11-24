@@ -353,7 +353,12 @@ export function MerchantOperations({
         if (!current()) return;
         if (!merged) {
           // A rejected refresh cannot replace a successful GET for this entry.
-          if (afterWrite && entryAccessRevision.current > observedRevocation.current) {
+          const confirmedRevision = entryAccessRevision.current;
+          if (
+            afterWrite &&
+            confirmedRevision >= accessRevision.current &&
+            confirmedRevision > Math.max(failedReadRevision.current, observedRevocation.current)
+          ) {
             setEntryVerified(true);
             setFresh(true);
             return;
@@ -870,8 +875,10 @@ export function MerchantOperations({
                           ? onMenuConfirmed(detail, revision, receipt.createdItems)
                           : localConfirmations.confirmMenu(draftKey, revision, receipt.createdItems);
                         setMenuConfirmed(false);
-                        if (accepted) setNotice({ value: receipt.createdItems, revision });
-                        await read();
+                        if (!accepted) return;
+                        setNotice({ value: receipt.createdItems, revision });
+                        // The mutation's post-write read owns access for a re-entered view.
+                        if (!readAfterWrite.current) await read();
                       });
                     }}
                   >

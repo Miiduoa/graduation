@@ -35,7 +35,7 @@ function summarizeRow(
     merchantStatus: operating.merchantStatus,
     locationStatus: operating.locationStatus,
     publicAccess: operating.publicAccess,
-    missingRequirements: row.missingRequirements ?? versioned?.missingRequirements ?? [],
+    missingRequirements: versioned?.missingRequirements ?? row.missingRequirements ?? [],
   };
 }
 
@@ -187,8 +187,10 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       entry.versionedRow = versioned;
       workspaceKeysAwaitingConfirmation.delete(key);
     }
-    // A versioned response can confirm menu requirements even when legacy metadata wins.
-    const requirementsObservation = next.readinessVersion === undefined ? row : entry.versionedRow;
+    // Use the same requirements source for the card and for invalidating receipts.
+    const requirementsObservation = entry.versionedRow?.value.missingRequirements === undefined
+      ? row
+      : entry.versionedRow;
     if (requirementsObservation?.revision === revision && next.missingRequirements?.includes('menu')) {
       discardMenuReceipt(key);
     }
@@ -245,14 +247,17 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const draft = drafts.get(key);
     const entry = entries.get(key);
     const row = entry?.row;
-    if (!draft || !entry || !row || revision <= (receiptFloors.get(key) ?? 0)) return false;
+    if (
+      !draft || !entry || !row ||
+      revision <= Math.max(row.revision, entry.versionedRow?.revision ?? 0, receiptFloors.get(key) ?? 0)
+    ) return false;
     // The receipt has no readiness version. Apply it to the known row in request order.
+    const versioned = entry.versionedRow?.value;
+    const summary = summarizeRow(row.value, versioned);
     const next = {
-      ...row.value,
-      missingRequirements: summarizeRow(
-        row.value,
-        entry.versionedRow?.value,
-      ).missingRequirements.filter((item) => item !== 'menu'),
+      ...summary,
+      readinessVersion: versioned?.readinessVersion,
+      missingRequirements: summary.missingRequirements.filter((item) => item !== 'menu'),
     };
     if (merge(next, revision)?.row?.value !== next) return false;
     draft.menuReceipt = createdItems;

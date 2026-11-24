@@ -2051,6 +2051,19 @@ it.each([
     await waitFor(() => expect(readApplications).toHaveBeenCalledTimes(2));
     const link = await screen.findByRole('link', { name: '管理門市：一樓' });
     const row = within(link.closest('li')!);
+    if (listVersion === undefined) {
+      expect(row.getByText('待完成：確認營運設定與條款')).toBeTruthy();
+      expect(row.queryByText(/建立菜單/)).toBeNull();
+      const detailReadsBeforeForward = readDetail.mock.calls.length;
+      await act(async () => window.history.forward());
+      await waitFor(() => expect(readDetail.mock.calls.length).toBeGreaterThan(detailReadsBeforeForward));
+      await act(async () => finishApplications({ applications: [] }));
+      readDetail.mockResolvedValue({ ...initial, missingRequirements: ['settings'], publishedMenuItems: 1 });
+      fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+      await screen.findByText(/已建立 1 項首次菜單/);
+      expect(screen.queryByText(/建立有庫存的首次菜單/)).toBeNull();
+      return;
+    }
     expect(row.queryByText(/確認營運設定與條款/)).toBeNull();
     expect(row.getByText('待完成：建立菜單')).toBeTruthy();
     if (!receiptFirst) {
@@ -2070,7 +2083,7 @@ it.each([
       readDetail.mockResolvedValue({
         ...initial,
         ...missingMenu,
-        readinessVersion: listVersion ?? detailVersion,
+        readinessVersion: listVersion,
       });
       fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
     }
@@ -2079,6 +2092,106 @@ it.each([
     expect(screen.queryByText(/目前有 \d+ 項有庫存的上架品項/)).toBeNull();
   },
 );
+
+function submitFirstMenu() {
+  fireEvent.change(screen.getByLabelText('品項 1 名稱'), { target: { value: '蔬菜便當' } });
+  fireEvent.change(screen.getByLabelText('品項 1 售價（元）'), { target: { value: '85' } });
+  fireEvent.change(screen.getByLabelText('品項 1 初始庫存'), { target: { value: '20' } });
+  fireEvent.click(screen.getByLabelText(/我已確認品項、元售價/));
+  fireEvent.click(screen.getByRole('button', { name: '確認建立並上架菜單' }));
+}
+
+const firstMenuReceipt = {
+  menuVersionId: 'food-menu_12345678-1234-1234-1234-123456789abc',
+  createdItems: 1,
+};
+
+it('restores operations after a losing menu receipt and a stale post-write read', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const initial = { ...detail(), readinessVersion: 7 };
+  const reentered = { ...detail('store-a', true), readinessVersion: 8 };
+  let finishMenu!: (value: typeof firstMenuReceipt) => void;
+  const writeMenu = vi.fn(() => new Promise<typeof firstMenuReceipt>((resolve) => {
+    finishMenu = resolve;
+  }));
+  let finishRefresh!: (value: typeof initial) => void;
+  const refresh = new Promise<typeof initial>((resolve) => { finishRefresh = resolve; });
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(initial)
+    .mockResolvedValueOnce(initial)
+    .mockResolvedValueOnce(reentered)
+    .mockReturnValueOnce(refresh);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [initial] });
+    if (resource === path) return readDetail();
+    if (resource === `${path}/initial-menu`) return writeMenu();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByLabelText('品項 1 名稱');
+  submitFirstMenu();
+  expect(writeMenu).toHaveBeenCalledTimes(1);
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+  await act(async () => window.history.forward());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+  await act(async () => finishMenu(firstMenuReceipt));
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
+  expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
+  await act(async () => finishRefresh(initial));
+
+  expect(screen.getByText('營業中')).toBeTruthy();
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
+  expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
+  await screen.findByRole('region', { name: '門市訂單工作台' });
+  expect(readDetail).toHaveBeenCalledTimes(4);
+});
+
+it('keeps confirmed menu requirements and the receipt through a legacy list and a detail 503', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const initial = { ...detail(), readinessVersion: 7 };
+  const published = {
+    ...initial, readinessVersion: 8, missingRequirements: ['settings'], publishedMenuItems: 1,
+  };
+  const legacy = { ...initial, readinessVersion: undefined, missingRequirements: ['menu'] };
+  const readStores = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [initial] })
+    .mockResolvedValue({ workspaces: [legacy] });
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(initial)
+    .mockResolvedValueOnce(published)
+    .mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'))
+    .mockResolvedValue(published);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readStores();
+    if (resource === path) return readDetail();
+    if (resource === `${path}/initial-menu`) return Promise.resolve(firstMenuReceipt);
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByLabelText('品項 1 名稱');
+  submitFirstMenu();
+  await screen.findByText('目前有 1 項有庫存的上架品項。首次菜單只能建立一次。');
+  expect(screen.getByText(/已建立 1 項首次菜單/)).toBeTruthy();
+
+  await act(async () => window.history.back());
+  await screen.findByText('目前無法更新部分門市資料，請重新載入。');
+  const link = screen.getByRole('link', { name: '管理門市：一樓' });
+  const row = within(link.closest('li')!);
+  expect(row.getByText('待完成：確認營運設定與條款')).toBeTruthy();
+  expect(row.queryByText(/建立菜單/)).toBeNull();
+  expect(readDetail).toHaveBeenCalledTimes(3);
+
+  await act(async () => window.history.forward());
+  await screen.findByText(/已建立 1 項首次菜單/);
+  expect(screen.queryByText(/建立有庫存的首次菜單/)).toBeNull();
+});
 
 it('keeps a confirmed empty store list when both the list and detail refresh fail', async () => {
   const path = 'merchant-workspaces/campus-one/store-a';

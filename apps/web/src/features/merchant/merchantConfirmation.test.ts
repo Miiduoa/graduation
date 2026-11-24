@@ -74,6 +74,7 @@ it('combines legacy list metadata with the operating state of a delayed versione
     merchantStatus: 'suspended',
     locationStatus: 'suspended',
     publicAccess: false,
+    missingRequirements: [],
   };
   expect(confirmed.confirmDetail(detail, detailRevision, true)).toEqual({ detail, won: false });
   expect(confirmed.overview()?.workspaces).toEqual([suspendedRow]);
