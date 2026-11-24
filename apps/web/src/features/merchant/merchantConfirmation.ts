@@ -12,7 +12,6 @@ type Observation<T = NuniMerchantWorkspace> = { value: T; revision: number; vers
 export type DetailConfirmation = { detail: NuniMerchantWorkspaceDetail; won: boolean };
 
 type WorkspaceObservations = {
-  confirmedRevision: number;
   row?: Observation;
   versionedRow?: Observation;
   detail?: Observation<NuniMerchantWorkspaceDetail>;
@@ -109,7 +108,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   }
 
   function revoke(key: string, revision: number) {
-    if (revision <= Math.max(revokedThrough(key), entries.get(key)?.confirmedRevision ?? 0)) return;
+    // Only the winning observation can supersede a detail denial.
+    if (revision <= Math.max(revokedThrough(key), entries.get(key)?.row?.revision ?? 0)) return;
     revocations.set(key, revision);
     discardWorkspace(key, revision);
     return revision;
@@ -123,7 +123,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   function merge(next: NuniMerchantWorkspace, revision: number) {
     const key = workspaceKey(next);
     if (revision <= Math.max(listRevocation, revokedThrough(key))) return;
-    const entry = entries.get(key) ?? { confirmedRevision: 0 };
+    const entry = entries.get(key) ?? {};
     const floor = revokedVersionFloors.get(key);
     // Revocation removes the data, but a retry still needs a current readiness version.
     if (floor !== undefined && next.readinessVersion !== undefined && next.readinessVersion < floor) {
@@ -131,12 +131,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     }
     const observation = latestObservation(entry.row, next, revision);
     const row = { ...observation, version: observation.version ?? floor };
-    if (row.revision === revision) {
-      // Only accepted workspace data can supersede an outstanding denial.
-      entry.confirmedRevision = Math.max(entry.confirmedRevision, revision);
-      if (next.missingRequirements.includes('menu')) {
-        discardMenuReceipt(key);
-      }
+    if (row.revision === revision && next.missingRequirements.includes('menu')) {
+      discardMenuReceipt(key);
     }
     if (next.readinessVersion !== undefined) {
       // Versioned operating state keeps its own order when legacy rows update the list.
@@ -193,14 +189,12 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     if (!entry?.row || !entry.detail || !hasVerifiedAccess(key)) return null;
     const detail = entry.detail.value;
     if (detail.readinessVersion !== entry.row.version) return null;
-    const row = entry.row.value;
-    if (row.readinessVersion !== detail.readinessVersion) {
-      // A legacy row can win list ordering while the last versioned row still
-      // supplies the confirmed operating state for the matching detail.
-      const versioned = entry.versionedRow?.value;
-      if (versioned?.readinessVersion !== detail.readinessVersion) return detail;
-      return withOperatingState(detail, versioned);
-    }
+    // Legacy list metadata is rendered separately. Project the matching
+    // versioned row's operating state and requirements together onto the detail.
+    const row = entry.row.value.readinessVersion === detail.readinessVersion
+      ? entry.row.value
+      : entry.versionedRow?.value;
+    if (row?.readinessVersion !== detail.readinessVersion) return detail;
     return {
       ...detail,
       ...row,
@@ -293,7 +287,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         if (revision <= Math.max(listedRevision, listRevocation)) return;
         for (const key of new Set([...entries.keys(), ...revocations.keys(), ...drafts.keys()])) {
           // Preserve a newer confirmation and its existing access state.
-          if ((entries.get(key)?.confirmedRevision ?? 0) > revision) {
+          if ((entries.get(key)?.row?.revision ?? 0) > revision) {
             revocations.set(key, revokedThrough(key));
             if (listedMembership()?.has(key) || (includeVerifiedWorkspaces && hasVerifiedAccess(key))) {
               retainedWorkspaceKeys.add(key);

@@ -132,6 +132,80 @@ function confirmMenu() {
   fireEvent.click(screen.getByLabelText(/我已確認品項、元售價/));
 }
 
+it('revokes access when a newer list request loses to an earlier higher-version detail', () => {
+  const confirmed = createMerchantConfirmations(drafts);
+  const v5 = { ...initial(), readinessVersion: 5 };
+  const key = workspaceKey(v5);
+  confirmed.mergeWorkspaceList([v5], confirmed.beginRequest());
+  confirmed.confirmDetail(v5, confirmed.beginRequest(), true);
+  const detailA = confirmed.beginRequest();
+  const detailB = confirmed.beginRequest();
+  const listC = confirmed.beginRequest();
+
+  confirmed.mergeWorkspaceList([{ ...v5, readinessVersion: 6 }], listC);
+  expect(confirmed.overview()?.workspaces[0]?.readinessVersion).toBe(6);
+  expect(confirmed.confirmDetail({ ...v5, readinessVersion: 7 }, detailA, true)?.won).toBe(true);
+  expect(confirmed.verifiedListedRows().get(key)?.readinessVersion).toBe(7);
+
+  expect(confirmed.revoke(key, detailB)).toBe(detailB);
+  expect(confirmed.overview()?.workspaces).toEqual([]);
+  expect(confirmed.verifiedListedRows().has(key)).toBe(false);
+  expect(confirmed.verifiedDetails().has(key)).toBe(false);
+  expect(confirmed.confirmDetail({ ...v5, readinessVersion: 6 }, confirmed.beginRequest(), true))
+    .toBeNull();
+});
+
+it('keeps a confirmed missing menu after a legacy list and an unavailable detail read', async () => {
+  ready();
+  current = { ...current, readinessVersion: 7 };
+  const confirmed = createMerchantConfirmations(drafts);
+  const key = workspaceKey(current);
+  const workspace = () => (
+    <MerchantOperations
+      context="account-a"
+      tenantId={current.tenantId}
+      locationId={current.locationId}
+      drafts={drafts}
+      suspended={false}
+      beginRequest={confirmed.beginRequest}
+      confirmedDetail={confirmed.verifiedDetails().get(key) ?? null}
+      onBack={vi.fn()}
+      onChanged={(detail, verifiedAccess, revision) =>
+        confirmed.confirmDetail(detail, revision, verifiedAccess)
+      }
+      onExpired={onExpired}
+    />
+  );
+  const mounted = render(workspace());
+  await waitFor(() => expect(confirmed.verifiedDetails().has(key)).toBe(true));
+  mounted.rerender(workspace());
+  await screen.findByText(/目前有 1 項有庫存的上架品項/);
+  expect(confirmed.confirmMenu(key, confirmed.beginRequest(), 1)).toBe(true);
+
+  const missingMenu = { ...current, missingRequirements: ['menu'] };
+  confirmed.mergeWorkspaceList([missingMenu], confirmed.beginRequest());
+  expect(drafts.get(key)?.menuReceipt).toBeNull();
+  expect(confirmed.verifiedDetails().get(key)?.publishedMenuItems).toBe(0);
+  mounted.rerender(workspace());
+  expect(screen.queryByText(/目前有 \d+ 項有庫存的上架品項/)).toBeNull();
+
+  confirmed.mergeWorkspaceList([{ ...missingMenu, readinessVersion: undefined }], confirmed.beginRequest());
+  mounted.rerender(workspace());
+  const activation = screen.getByLabelText(/我已確認門市、營運方式及菜單/) as HTMLInputElement;
+  expect(activation.disabled).toBe(true);
+  request.mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'));
+  fireEvent.click(button('重新讀取門市狀態'));
+  await screen.findByRole('alert');
+  expect(confirmed.verifiedDetails().get(key)).toMatchObject({
+    missingRequirements: ['menu'],
+    publishedMenuItems: 0,
+  });
+  expect(screen.getByRole('button', { name: '確認建立並上架菜單' })).toBeTruthy();
+  expect(screen.queryByText(/目前有 \d+ 項有庫存的上架品項/)).toBeNull();
+  expect(activation.disabled).toBe(true);
+  expect(button('確認啟用門市').disabled).toBe(true);
+});
+
 it.each(['legacy list first', 'versioned suspension first'])(
   'keeps the order desk closed with a suspended v7 confirmation (%s)',
   async (order) => {
