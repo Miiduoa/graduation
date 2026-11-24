@@ -72,13 +72,16 @@ export function CampusEvidencePlanCard({
   useEffect(() => {
     spacePressedStep.current = null;
   }, [disabled, plan]);
-  const assignmentAction = (assignment: CampusAssignmentIdentity & NuniPlanActivityIdentity) => {
+  const assignmentAction = (
+    assignment: CampusAssignmentIdentity & NuniPlanActivityIdentity,
+    titleFormat?: CampusAssignmentIdentity['titleFormat'],
+  ) => {
     if (historical) return null;
     if (renderAssignmentAction) return renderAssignmentAction(assignment);
     if (assignment.kind === 'quiz') return null;
     return reminderContext && navigation ? (
       <CampusAssignmentOpenButton
-        assignment={assignment}
+        assignment={{ ...assignment, titleFormat }}
         context={reminderContext}
         navigation={navigation}
         disabled={disabled}
@@ -158,7 +161,8 @@ export function CampusEvidencePlanCard({
             <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
               依據：{EVIDENCE_LABEL[step.evidence]}
             </Text>
-            {step.evidence === 'authorized-assignments' || step.evidence === 'authorized-quizzes' ? assignmentAction(step) : null}
+            {step.evidence === 'authorized-assignments' || step.evidence === 'authorized-quizzes'
+              ? assignmentAction(step, 'preview') : null}
             {onOpenRoute ? (
               <AIButton
                 label={'開啟' + ROUTE_LABEL[step.route] + '核對'}
@@ -171,7 +175,7 @@ export function CampusEvidencePlanCard({
             {!historical && reminderContext && step.kind !== 'quiz' ? (
               <CampusAssignmentReminderAction
                 key={step.id + ':' + step.dueAt}
-                step={step}
+                step={{ ...step, titleFormat: 'preview' }}
                 snapshot={reminderContext.snapshot}
                 userId={reminderContext.userId}
                 schoolId={reminderContext.schoolId}
