@@ -98,6 +98,7 @@ jobs:
           node --test scripts/demo/seed-account-demo.test.mjs
           node --test scripts/test-env/tronclass-launcher.test.mjs scripts/test-env/seed.test.cjs
           bash scripts/qa/browser/install-playwright.test.sh
+          python3 scripts/verify-android-page-sizes.test.py
           python3 deploy/nuni-api/food-ordering/build_test.py
           python3 scripts/platform-lost-found/prepare_test.py
           python3 deploy/nuni-api/assistant-permissions/prepare_test.py

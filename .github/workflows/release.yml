@@ -96,6 +96,7 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
           node --test scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs apps/mobile/scripts/prepare-native-release.test.cjs apps/mobile/scripts/app-release-config.test.cjs apps/mobile/scripts/widget-extension.test.cjs
+          python3 scripts/verify-android-page-sizes.test.py
           pnpm --filter mobile test --ci
           pnpm --filter web test
           pnpm --filter functions test --runInBand
@@ -254,6 +255,22 @@ jobs:
       - name: Verify the completed Android artifact
         id: artifact
         run: node scripts/verify-eas-build.mjs "$RUNNER_TEMP/eas-build-android.json"
+
+      - name: Verify Android 16 KiB page compatibility
+        if: inputs.profile == 'production' || inputs.profile == 'production-device'
+        run: |
+          set -euo pipefail
+          download=(curl --fail --silent --show-error --globoff --location --retry 2 --proto '=https' --proto-redir '=https')
+          artifact_url=$(jq -er '.[0].artifacts | .applicationArchiveUrl // .buildUrl' "$RUNNER_TEMP/eas-build-android.json")
+          artifact="$RUNNER_TEMP/app-release.apk"
+          if [[ "$BUILD_PROFILE" == production ]]; then
+            artifact="$RUNNER_TEMP/app-release.aab"
+            "${download[@]}" https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar -o "$RUNNER_TEMP/bundletool.jar"
+            printf '%s  %s\n' a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29 "$RUNNER_TEMP/bundletool.jar" | sha256sum -c -
+          fi
+          "${download[@]}" "$artifact_url" -o "$artifact"
+          sha256sum "$artifact"
+          python3 scripts/verify-android-page-sizes.py "$artifact" --bundletool "$RUNNER_TEMP/bundletool.jar"
 
       - name: Preserve Android build receipt
         if: always()
