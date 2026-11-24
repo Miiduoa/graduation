@@ -895,3 +895,58 @@ exec /bin/ps "$@"
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('launcher exits with 143 when the wrapper stalls before spawning', async () => {
+  const { spawn } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-stalled-wrapper-'));
+  const childPidFile = path.join(dir, 'child.pid');
+  const grandchildPidFile = path.join(dir, 'grandchild.pid');
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+  const proc = spawn('bash', [script], {
+    env: {
+      ...process.env,
+      TRONCLASS_RUNTIME_DIR: dir,
+      TRONCLASS_SIGNAL_SELFTEST: '1',
+      TRONCLASS_SELFTEST_CHILD: childPidFile,
+      TRONCLASS_SELFTEST_GRANDCHILD: grandchildPidFile,
+      TRONCLASS_TEST_DELAY_SPAWN_MS: '60000',
+    },
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  let wrapperLine = '';
+  proc.stdout.on('data', chunk => { wrapperLine += String(chunk); });
+  let timer;
+  try {
+    const startupDeadline = Date.now() + 5000;
+    while (Date.now() < startupDeadline) {
+      if (/WRAPPER_PID=\d+/.test(wrapperLine) && existsSync(path.join(dir, 'selftest.log'))) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.match(wrapperLine, /WRAPPER_PID=\d+/);
+    assert.ok(existsSync(path.join(dir, 'selftest.log')));
+    assert.equal(existsSync(childPidFile), false);
+    const exited = new Promise((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error('Launcher cleanup timed out')), 12000);
+      proc.once('exit', (code, signal) => resolve({ code, signal }));
+    });
+    assert.ok(proc.kill('SIGTERM'));
+    assert.deepEqual(await exited, { code: 143, signal: null });
+    assert.equal(existsSync(childPidFile), false);
+    assert.equal(existsSync(grandchildPidFile), false);
+    const wrapperPid = Number(wrapperLine.match(/WRAPPER_PID=(\d+)/)[1]);
+    assert.throws(() => process.kill(wrapperPid, 0), { code: 'ESRCH' });
+  } finally {
+    clearTimeout(timer);
+    if (proc.exitCode === null && proc.signalCode === null) {
+      const wrapper = wrapperLine.match(/WRAPPER_PID=(\d+)/);
+      if (wrapper) {
+        try { process.kill(Number(wrapper[1]), 'SIGKILL'); } catch (error) {
+          if (error.code !== 'ESRCH') throw error;
+        }
+      }
+      proc.kill('SIGKILL');
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

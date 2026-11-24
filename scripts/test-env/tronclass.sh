@@ -340,11 +340,11 @@ tronclass_stop_logged() {
       fi
     done
   }
-  # If this run has not recorded a child group yet, wait for the wrapper to
-  # spawn it before signalling the wrapper itself, so a late detached group
-  # is still captured for the later wait and KILL rounds.
+  # Give a late detached child time to appear before signalling the wrapper.
+  local spawn_deadline=$((SECONDS + 6))
   tronclass_discover_wrapper_children
-  while [ "${#records[@]}" -eq 0 ] && [ -n "$wrapper" ] && kill -0 "$wrapper" 2>/dev/null; do
+  while [ "${#records[@]}" -eq 0 ] && [ -n "$wrapper" ] &&
+    [ "$SECONDS" -lt "$spawn_deadline" ] && kill -0 "$wrapper" 2>/dev/null; do
     sleep 0.1
     tronclass_discover_wrapper_children
   done
