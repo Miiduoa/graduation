@@ -287,6 +287,8 @@ describe('tronClassScraper', () => {
   test.each([
     [{ total: '1', page: '1', page_size: '50' }, 1, '1', '50'],
     [{ total: '002', page: '1', page_size: '50' }, 2, '1', '50'],
+    [{ total: '', page: '1', page_size: '50' }, 0, '1', '50'],
+    [{ total: '  ', page: '1', page_size: '50' }, 0, '1', '50'],
     [{ total: 1, page: 1, page_size: 50 }, 1, 1, 50],
     [{}, null, 1, 50],
     [{ total: null, page: null, page_size: null }, null, 1, 50],

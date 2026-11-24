@@ -994,7 +994,8 @@ function homeworkPaginationNumber(value, required = true) {
     if (typeof value === 'number') {
       return Number.isSafeInteger(value) && value >= 0 ? value : null;
     }
-    if (typeof value === 'string' && value.trim() !== '') {
+    if (typeof value === 'string') {
+      // Merge-base Number("") and Number("  ") are 0; keep that contract.
       const parsed = Number(value);
       return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
     }
