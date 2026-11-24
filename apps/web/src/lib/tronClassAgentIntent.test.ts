@@ -1208,6 +1208,7 @@ describe('three-way sentence classification', () => {
       '準備 TronClass 作業（期末.pdf）',
       '準備 TronClass 作業（捎予老師）',
       '查玩課雲作業，校園公告（不要查作業）',
+      '查玩課雲作業（準備）',
     ]) {
       expect(classifyTronClassSentence(question)?.outcome).not.toBe('clearly-read');
       expect(parseTronClassAgentIntent(question)?.intent).not.toBe('homework');
@@ -1217,13 +1218,11 @@ describe('three-way sentence classification', () => {
     }
   });
 
-  it('still auto-reads when the only brackets are known read tokens', () => {
-    expect(classifyTronClassSentence('查玩課雲（未交作業）')).toEqual({
-      outcome: 'clearly-read',
-      intent: { intent: 'homework', pendingOnly: true },
-    });
-    expect(parseTronClassAgentIntent('查玩課雲（未交作業）')).toEqual({ intent: 'homework', pendingOnly: true });
-    expect(canAnswerTronClassQuestion('查玩課雲（未交作業）')).toBe(true);
+  it('does not auto-read when the sentence contains any brackets, even known read tokens', () => {
+    expect(classifyTronClassSentence('查玩課雲（未交作業）')?.outcome).not.toBe('clearly-read');
+    expect(parseTronClassAgentIntent('查玩課雲（未交作業）')).toBeNull();
+    expect(canAnswerTronClassQuestion('查玩課雲（未交作業）')).toBe(false);
+    expect(tronClassCompoundClauses('查玩課雲（未交作業）')).toEqual([]);
   });
 
   it('moves a clearly-read sentence to ambiguous when an unknown token is inserted, never to a write or auto-read', () => {
@@ -1267,6 +1266,40 @@ describe('three-way sentence classification', () => {
         expect(compounds).toEqual([]);
       }
     }
+  });
+
+  it('treats any brackets as confirmation, not an auto-read, and ignores command words inside them', () => {
+    const seeds = ['幫我查 TronClass 未繳作業', '下載 TronClass 最新的講義', '查玩課雲沒交的作業'];
+    for (const seed of seeds) {
+      expect(classifyTronClassSentence(seed)?.outcome).toBe('clearly-read');
+    }
+    const probes = ['（', '）', '(', ')', '【', '】', '[', ']'];
+    for (const seed of seeds) {
+      for (const probe of probes) {
+        const questions = new Set([
+          `${seed}${probe}`,
+          `${probe}${seed}`,
+          `查玩課雲作業（${probe}準備）`,
+        ]);
+        if (seed.includes('玩課雲')) questions.add(seed.replace('玩課雲', `玩課雲${probe}`));
+        if (seed.includes('TronClass')) questions.add(seed.replace('TronClass', `TronClass${probe}`));
+        for (const question of questions) {
+          const classified = classifyTronClassSentence(question);
+          const parsed = parseTronClassAgentIntent(question);
+          expect(classified?.outcome).not.toBe('clearly-read');
+          expect(parsed?.intent).not.toBe('homework');
+          expect(parsed?.intent).not.toBe('announcements');
+          expect(parsed?.intent).not.toBe('prepare');
+          expect(parsed?.intent).not.toBe('download');
+          expect(canAnswerTronClassQuestion(question)).toBe(false);
+          expect(tronClassCompoundClauses(question)).toEqual([]);
+        }
+      }
+    }
+    expect(classifyTronClassSentence('查玩課雲作業（準備）')?.outcome).not.toBe('clearly-read');
+    expect(parseTronClassAgentIntent('查玩課雲作業（準備）')).toBeNull();
+    expect(canAnswerTronClassQuestion('查玩課雲作業（準備）')).toBe(false);
+    expect(tronClassCompoundClauses('查玩課雲作業（準備）')).toEqual([]);
   });
 
   it('never auto-reads when punctuation or an unknown token is inserted into or next to a filename', () => {
