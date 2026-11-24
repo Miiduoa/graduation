@@ -571,6 +571,40 @@ test('a late list snapshot taken during a failed write never restores the unconf
   expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
 });
 
+test('a pull-to-refresh started during a failed write cannot apply a cache gap over the rollback', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  const write = deferred();
+  jest.mocked(unsubscribeFromBoard).mockImplementationOnce(() => write.promise);
+  fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
+
+  const rows = deferred<typeof board[]>();
+  const subs = deferred<string[]>();
+  jest.mocked(listBoards).mockImplementationOnce(() => rows.promise as any);
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
+  let refreshPromise!: Promise<void>;
+  await act(async () => {
+    refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+  });
+
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
+  await act(async () => { write.reject(new Error('offline')); });
+  expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  // Cache miss / capped list omits the board after the rollback already landed.
+  await act(async () => {
+    rows.resolve([board]);
+    subs.resolve([]);
+    await refreshPromise;
+  });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
 test('two native presses before a rerender toggle from the newest choice', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const view = render(<BoardsScreen />);

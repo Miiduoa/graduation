@@ -89,6 +89,8 @@ function BoardsContent() {
   // their local state; every other board still takes the server snapshot.
   const subscriptionRevision = useRef(0);
   const boardWriteRevision = useRef(new Map<string, number>());
+  // Last list revision that applied this board from the server (not keepLocal).
+  const boardServerAppliedRevision = useRef(new Map<string, number>());
   // Latest tap per board; only its outcome may roll back or alert.
   const latestIntent = useRef(new Map<string, number>());
   const intentCounter = useRef(0);
@@ -143,6 +145,10 @@ function BoardsContent() {
       }
       confirmedSubscribedRef.current = nextConfirmed;
       appliedReadRevision.current += 1;
+      const applied = appliedReadRevision.current;
+      for (const id of new Set([...subs, ...keepLocal, ...subscribedRef.current])) {
+        if (!keepLocal.has(id)) boardServerAppliedRevision.current.set(id, applied);
+      }
       applySubscribed((previous) => {
         const next = new Set(subs);
         for (const id of keepLocal) {
@@ -174,7 +180,7 @@ function BoardsContent() {
   // pull-to-refresh is never discarded. Best effort: errors keep the rollback.
   const reconcileBoardSubscription = useCallback(async (boardId: string, uid: string, sid: string) => {
     const revisionAtRead = subscriptionRevision.current;
-    const appliedReadAtStart = appliedReadRevision.current;
+    const boardServerAppliedAtStart = boardServerAppliedRevision.current.get(boardId) ?? 0;
     // latestIntent only moves forward and is never restored after a failed
     // write, so an older re-read cannot clobber a newer one for this board.
     const intentAtStart = latestIntent.current.get(boardId);
@@ -185,7 +191,9 @@ function BoardsContent() {
       if (!mounted.current) return;
       if (pendingSubscriptionCounts.current.has(boardId)) return;
       if ((boardWriteRevision.current.get(boardId) ?? -1) > revisionAtRead) return;
-      if (appliedReadRevision.current !== appliedReadAtStart) return;
+      // A newer list may have applied other boards while this one stayed local.
+      // Only a list that applied this board from the server supersedes the re-read.
+      if ((boardServerAppliedRevision.current.get(boardId) ?? 0) > boardServerAppliedAtStart) return;
       if (latestIntent.current.get(boardId) !== intentAtStart) return;
       const nextConfirmed = new Set(confirmedSubscribedRef.current);
       if (serverSubscribed) nextConfirmed.add(boardId);
@@ -297,7 +305,10 @@ function BoardsContent() {
         else pendingSubscriptionCounts.current.delete(b.id);
         subscriptionRevision.current += 1;
         const isLatest = latestIntent.current.get(b.id) === intent;
-        if (!failed && isLatest) boardWriteRevision.current.set(b.id, subscriptionRevision.current);
+        // Advance this board's write generation on success or failure so a
+        // pull-to-refresh that started during the write cannot apply a cache
+        // gap over the rollback. Only a newer write supersedes this generation.
+        if (isLatest) boardWriteRevision.current.set(b.id, subscriptionRevision.current);
         if (!failed && (lastConfirmedIntent.current.get(b.id) ?? 0) < intent) {
           lastConfirmedIntent.current.set(b.id, intent);
           const nextConfirmed = new Set(confirmedSubscribedRef.current);
