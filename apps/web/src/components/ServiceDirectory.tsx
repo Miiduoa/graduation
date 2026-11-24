@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useDirectoryVisit } from './DirectoryVisit';
 import { CampusIcon } from './CampusIcon';
 import { useSchoolLmsReadonlyEnabled } from './SchoolLmsReadonlyProvider';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
@@ -26,6 +27,7 @@ type DirectoryReturn = {
   journey: ServiceJourney;
   url: string;
   scope: string;
+  ownerToken?: string;
   serviceHref: string;
 };
 
@@ -43,6 +45,7 @@ function directoryReturnState(state: unknown): DirectoryReturn | null {
     (value.journey === 'life' || value.journey === 'connect') &&
     typeof value.url === 'string' &&
     typeof value.scope === 'string' &&
+    (value.ownerToken === undefined || typeof value.ownerToken === 'string') &&
     typeof value.serviceHref === 'string'
     ? (value as DirectoryReturn)
     : null;
@@ -62,9 +65,17 @@ function captureDirectoryReturn(event: PopStateEvent) {
   publishDirectoryReturn(saved?.url === currentDirectoryUrl() ? saved : null);
 }
 
+function cancelDirectoryReturn() {
+  if (pendingReturn) publishDirectoryReturn(null);
+}
+
 function subscribeDirectoryReturn(listener: () => void) {
   if (observedWindow !== window) {
     observedWindow?.removeEventListener('popstate', captureDirectoryReturn);
+    for (const event of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
+      observedWindow?.removeEventListener(event, cancelDirectoryReturn, true);
+      window.addEventListener(event, cancelDirectoryReturn, { capture: true, passive: true });
+    }
     observedWindow = window;
     pendingReturn = null;
     // The directory is unmounted while its service is open. Keep one observer
@@ -77,6 +88,17 @@ function subscribeDirectoryReturn(listener: () => void) {
 
 const getPendingDirectoryReturn = () => pendingReturn;
 const getServerDirectoryReturn = () => null;
+
+function focusServiceRow(directory: HTMLElement | null, serviceHref: string) {
+  const target = Array.from(directory?.querySelectorAll<HTMLAnchorElement>('a[data-service-href]') ?? [])
+    .find((link) => link.dataset.serviceHref === serviceHref);
+  if (!target) return;
+  const parent = target.closest('details');
+  if (parent) parent.open = true;
+  target.focus({ preventScroll: true });
+  target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+  return target;
+}
 
 function ServiceRow({
   service,
@@ -121,11 +143,11 @@ function ServiceRow({
           <div className={styles.serviceTitle}>
             <Heading id={`${id}-name`}>{service.name}</Heading>
             {recommended && <span className={styles.recommended}>從這裡開始</span>}
+            <span id={`${id}-access`} className={styles.access}>
+              {SERVICE_ACCESS[service.access]}
+            </span>
           </div>
           <p id={`${id}-description`}>{service.text}</p>
-          <span id={`${id}-access`} className={styles.access}>
-            {SERVICE_ACCESS[service.access]}
-          </span>
         </div>
         <CampusIcon name="arrow" size={18} />
       </Link>
@@ -170,6 +192,7 @@ export function ServiceDirectory({
   const queryString = params?.toString() || '';
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const scope = useCampusNavigationSearch(params);
+  const visit = useDirectoryVisit();
   const id = useId();
   const composing = useRef(false);
   const search = useRef<HTMLInputElement>(null);
@@ -230,18 +253,26 @@ export function ServiceDirectory({
         : '服務目錄';
 
   useEffect(() => {
+    if (!visit?.restoreRow) return;
+    focusServiceRow(directory.current, visit.restoreRow);
+    visit.finishReturn();
+  }, [visit]);
+
+  useEffect(() => {
     if (
       !historyReturn ||
       getPendingDirectoryReturn() !== historyReturn ||
       historyReturn.journey !== journey
     )
       return;
+    if (visit && visit.ownerToken === undefined) return;
     const current = directoryReturnState(window.history.state);
     if (
       current?.token !== historyReturn.token ||
       current.url !== currentDirectoryUrl() ||
       current.url !== historyReturn.url ||
-      current.scope !== scope
+      current.scope !== scope ||
+      (visit && (!visit.ownerToken || current.ownerToken !== visit.ownerToken))
     ) {
       publishDirectoryReturn(null);
       return;
@@ -250,16 +281,21 @@ export function ServiceDirectory({
     // popstate. A new entry, changed campus or edited filters cannot opt in.
     if (new URL(current.url, window.location.origin).searchParams.toString() !== queryString)
       return;
-    const target = Array.from(
-      directory.current?.querySelectorAll<HTMLAnchorElement>('a[data-service-href]') ?? [],
-    ).find((link) => link.dataset.serviceHref === current.serviceHref);
+    const target = focusServiceRow(directory.current, current.serviceHref);
+    if (target && window.location.hash) {
+      // A native fragment restoration can blur the link immediately after the
+      // router mounts it. Respect any new user input during that frame.
+      const frame = window.requestAnimationFrame(() => {
+        if (getPendingDirectoryReturn() !== historyReturn) return;
+        if (document.activeElement === document.body && target.isConnected && currentDirectoryUrl() === current.url) {
+          focusServiceRow(directory.current, current.serviceHref);
+        }
+        publishDirectoryReturn(null);
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
     publishDirectoryReturn(null);
-    if (!target) return;
-    const parent = target.closest('details');
-    if (parent) parent.open = true;
-    target.focus({ preventScroll: true });
-    target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
-  }, [historyReturn, journey, queryString, schoolLmsEnabled, scope]);
+  }, [historyReturn, journey, queryString, schoolLmsEnabled, scope, visit]);
 
   function rememberReturn(event: MouseEvent<HTMLAnchorElement>, serviceHref: string) {
     if (
@@ -273,6 +309,14 @@ export function ServiceDirectory({
     )
       return;
     publishDirectoryReturn(null);
+    const returnParams = new URLSearchParams(scope);
+    writeJourneyFilters(returnParams, filters);
+    const ownerToken = visit?.remember({
+      journey,
+      serviceHref,
+      destination: campusServiceHref(serviceHref, scope).split('#', 1)[0]!,
+      returnHref: campusServiceHref('/' + journey, returnParams.toString()),
+    });
     try {
       window.history.replaceState(
         {
@@ -282,6 +326,7 @@ export function ServiceDirectory({
             journey,
             url: currentDirectoryUrl(),
             scope,
+            ownerToken,
             serviceHref,
           } satisfies DirectoryReturn,
         },
@@ -412,8 +457,8 @@ export function ServiceDirectory({
                 </button>
               )}
             </div>
-            <button type="submit" className={styles.searchSubmit} aria-controls={resultsId}>
-              查看結果
+            <button type="submit" className={styles.searchSubmit} aria-controls={resultsId} aria-label="查看結果">
+              <CampusIcon name="search" size={19} /><span>查看結果</span>
             </button>
           </div>
         </form>
@@ -444,7 +489,7 @@ export function ServiceDirectory({
       </div>
 
       <section id={resultsId} aria-label="服務搜尋結果">
-        <div className={styles.sectionHeading}>
+        <div className={`${styles.sectionHeading} ${styles.resultsHeading}`}>
           <div className={styles.resultsSummary}>
             <h2
               ref={resultsHeading}
@@ -492,7 +537,7 @@ export function ServiceDirectory({
               if (services.length === 0) return null;
               return (
                 <section key={group.id} aria-labelledby={`${id}-${group.id}`}>
-                  <div className={styles.sectionHeading}>
+                  <div className={`${styles.sectionHeading} ${styles.groupHeading}`}>
                     <div>
                       <h3 id={`${id}-${group.id}`}>{group.label}</h3>
                       <p>{group.description}</p>

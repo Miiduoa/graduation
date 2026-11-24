@@ -11,11 +11,14 @@ import {
 import { PRIMARY_DESTINATIONS, primaryNavigationSection } from '@/lib/primaryNavigation';
 import { teacherCourseWorkspacePath } from '@/lib/campusNavigationLinks';
 import { useSchoolLmsReadonlyEnabled } from './SchoolLmsReadonlyProvider';
+import { backToDirectoryIfAdjacent, useDirectoryVisit } from './DirectoryVisit';
+import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
 import styles from './ServiceBreadcrumbs.module.css';
 
 /** A stable way back to the section, including when a detail page was opened from a link. */
 export function ServiceBreadcrumbs({ title }: { title?: string }) {
   const pathname = usePathname();
+  const visit = useDirectoryVisit();
   const params = useSearchParams();
   const context = useCampusNavigationSearch(params);
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
@@ -24,6 +27,7 @@ export function ServiceBreadcrumbs({ title }: { title?: string }) {
   );
   if (!pathname || !section || section.href === pathname || section.id === 'today') return null;
 
+  const origin = visit?.origin?.journey === section.id ? visit.origin : null;
   const services = visibleCampusServices(schoolLmsEnabled);
   const service = services
     .filter((item) => campusServiceMatches(item.href, pathname, params))
@@ -54,7 +58,22 @@ export function ServiceBreadcrumbs({ title }: { title?: string }) {
     <nav className={styles.breadcrumbs} aria-label="目前位置">
       <ol>
         <li>
-          <Link href={campusServiceHref(section.href, context)}>{section.label}</Link>
+          <Link
+            href={origin?.returnHref ?? campusServiceHref(section.href, context)}
+            replace={origin ? true : undefined}
+            onClick={(event) => {
+              if (!origin || !isCurrentTabNavigationClick(event, event.currentTarget)) return;
+              // Use Back when the browser confirms the immediately preceding entry.
+              // Otherwise the link itself is a known directory URL with its filters.
+              if (backToDirectoryIfAdjacent(origin)) {
+                event.preventDefault();
+              } else {
+                visit?.beginReturn();
+              }
+            }}
+          >
+            {origin ? `返回${section.label}目錄` : section.label}
+          </Link>
         </li>
         {showParent && parent.name !== currentLabel ? (
           <li>
