@@ -175,6 +175,34 @@ export function revealForFocus(element: HTMLElement, horizontalContainer?: HTMLE
   return isVisible(element);
 }
 
+export function focusWhenRevealed(element: HTMLElement, horizontalContainer?: HTMLElement) {
+  if (!element.isConnected || !revealForFocus(element, horizontalContainer)) return false;
+  element.focus({ preventScroll: true });
+  return true;
+}
+
+export function retryFocusOnViewportChange(
+  origin: Element | null,
+  attempt: () => void,
+  cancel: () => void,
+) {
+  const stillOwnsFocus = () =>
+    document.activeElement === origin ||
+    (origin?.isConnected === false && document.activeElement === document.body);
+  const checkFocus = () => {
+    if (!stillOwnsFocus()) cancel();
+  };
+  const unsubscribe = onVisibleViewportChange(() => {
+    if (stillOwnsFocus()) attempt();
+    else cancel();
+  });
+  document.addEventListener('focusin', checkFocus);
+  return () => {
+    unsubscribe();
+    document.removeEventListener('focusin', checkFocus);
+  };
+}
+
 function applyScrollMargins(element: HTMLElement, { top, bottom }: ReturnType<typeof measureStickyInsets>) {
   document.documentElement.style.setProperty('--calendar-sticky-header-height', `${top}px`);
   document.documentElement.style.setProperty('--calendar-sticky-footer-height', `${bottom}px`);

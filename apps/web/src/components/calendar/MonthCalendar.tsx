@@ -6,10 +6,7 @@ import {
   type PersonalImportRecord,
 } from '@campus/shared';
 import { monthCalendarKeyboardDate } from './monthCalendarNavigation';
-import {
-  revealForFocus,
-  scrollVerticallyIntoView,
-} from './calendarScroll';
+import { focusWhenRevealed, retryFocusOnViewportChange } from './calendarScroll';
 import styles from './MonthCalendar.module.css';
 
 export function MonthCalendar({
@@ -44,7 +41,7 @@ export function MonthCalendar({
   const dateButtons = useRef(new Map<string, HTMLButtonElement>());
   const pendingFocus = useRef<{
     date: string;
-    origin: HTMLButtonElement;
+    origin: HTMLElement;
   } | null>(null);
   const days = useMemo(() => buildMonthCalendar(records, month), [records, month]);
   const selectedCellIndex = days.findIndex((day) => day?.date === selectedDate);
@@ -59,13 +56,7 @@ export function MonthCalendar({
   const focusDate = useCallback((date: string) => {
     const requested = dateButtons.current.get(date);
     const viewport = viewportRef.current;
-    if (!requested || !viewport) return;
-    if (revealForFocus(requested, viewport)) {
-      requested.focus({ preventScroll: true });
-    } else if (document.activeElement === document.body) {
-      viewport.focus({ preventScroll: true });
-      scrollVerticallyIntoView(viewport, { align: 'start' });
-    }
+    return !!(requested && viewport && focusWhenRevealed(requested, viewport));
   }, []);
 
   useLayoutEffect(() => {
@@ -73,40 +64,72 @@ export function MonthCalendar({
     revealWeek(selectedCellIndex);
   }, [month, selectedDate, selectedCellIndex, dateRevealRevision, revealWeek]);
 
-  useLayoutEffect(() => {
-    const requested = pendingFocus.current;
-    if (!requested || !requested.date.startsWith(`${month}-`)) return;
-    pendingFocus.current = null;
-    if (document.activeElement !== requested.origin && document.activeElement !== document.body)
-      return;
-    focusDate(requested.date);
-  }, [month, focusDate]);
-
-  const moveDate = (event: KeyboardEvent<HTMLButtonElement>, date: string) => {
+  const moveDate = useCallback((event: KeyboardEvent | globalThis.KeyboardEvent, date: string) => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    if (
-      ![
-        'ArrowLeft',
-        'ArrowRight',
-        'ArrowUp',
-        'ArrowDown',
-        'Home',
-        'End',
-        'PageUp',
-        'PageDown',
-      ].includes(event.key)
-    )
-      return;
-    event.preventDefault();
     const target = monthCalendarKeyboardDate(date, event.key);
-    if (!target || target === date) return;
+    if (!target) return;
+    event.preventDefault();
+    if (target === date) return;
     if (target.startsWith(`${month}-`)) {
-      focusDate(target);
-    } else if (onMonthChange) {
-      pendingFocus.current = { date: target, origin: event.currentTarget };
+      if (focusDate(target)) pendingFocus.current = null;
+      else if (pendingFocus.current) pendingFocus.current.date = target;
+    } else if (onMonthChange && document.activeElement instanceof HTMLElement) {
+      pendingFocus.current = { date: target, origin: document.activeElement };
       onMonthChange(target.slice(0, 7));
     }
-  };
+  }, [month, focusDate, onMonthChange]);
+
+  useLayoutEffect(() => {
+    const requested = pendingFocus.current;
+    if (!requested) return;
+    if (
+      !requested.date.startsWith(`${month}-`) ||
+      (document.activeElement !== requested.origin &&
+        (requested.origin.isConnected || document.activeElement !== document.body)) ||
+      focusDate(requested.date)
+    ) {
+      pendingFocus.current = null;
+      return;
+    }
+
+    const viewport = viewportRef.current;
+    if (
+      viewport &&
+      document.activeElement === document.body &&
+      focusWhenRevealed(viewport) &&
+      focusDate(requested.date)
+    ) {
+      pendingFocus.current = null;
+      return;
+    }
+
+    // The old date button is gone. Keep navigation available while neither the
+    // target nor its scrollport can receive focus.
+    const origin = document.activeElement;
+    if (origin instanceof HTMLElement) requested.origin = origin;
+    const continueNavigation = (event: globalThis.KeyboardEvent) => {
+      if (
+        pendingFocus.current === requested &&
+        document.activeElement === origin &&
+        (event.target === viewport || event.target === document.body || event.target === document)
+      ) {
+        moveDate(event, requested.date);
+      }
+    };
+    const cancel = () => {
+      if (pendingFocus.current === requested) pendingFocus.current = null;
+      stopWatching();
+    };
+    const stopRetry = retryFocusOnViewportChange(origin, () => {
+      if (pendingFocus.current === requested && focusDate(requested.date)) cancel();
+    }, cancel);
+    const stopWatching = () => {
+      stopRetry();
+      document.removeEventListener('keydown', continueNavigation);
+    };
+    document.addEventListener('keydown', continueNavigation);
+    return stopWatching;
+  }, [month, focusDate, moveDate]);
 
   return (
     <section className={styles.calendar} aria-label="每月行程">

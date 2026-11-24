@@ -494,3 +494,52 @@ it('外部選日移到左側時只捲回必要距離，不搶焦點或重設已�
   expect(viewport.scrollLeft).toBe(20);
   expect(document.activeElement).toBe(outside);
 });
+
+it.each(['重試原日期', '繼續按方向鍵', '移走焦點'])(
+  '跨月目標與月格皆在水平畫面外時可%s',
+  (action) => {
+    const viewport = Object.assign(new EventTarget(), {
+      offsetLeft: 450, offsetTop: 0, width: 240, height: 400,
+    });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this.classList.contains(styles.viewport)) return new DOMRect(20, 50, 200, 250);
+      if (this.classList.contains(styles.date)) return new DOMRect(40, 90, 44, 40);
+      return originalBounds.call(this);
+    });
+
+    function Calendar() {
+      const [month, setMonth] = useState(baseProps.month);
+      return (
+        <>
+          <button type="button">其他控制</button>
+          <MonthCalendar {...baseProps} month={month} onMonthChange={setMonth} />
+        </>
+      );
+    }
+    render(<Calendar />);
+    const origin = focusDate('2028-01-31');
+    fireEvent.keyDown(origin, { key: 'ArrowRight' });
+    expect(origin.isConnected).toBe(false);
+    expect(screen.getByRole('region', { name: '2028-02 月格，週日起始' })).toBeTruthy();
+    expect(document.activeElement).toBe(document.body);
+
+    const outside = screen.getByRole('button', { name: '其他控制' });
+    if (action === '移走焦點') outside.focus();
+    if (action === '繼續按方向鍵') {
+      const key = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+      fireEvent(document.body, key);
+      expect(key.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(document.body);
+    }
+
+    viewport.offsetLeft = 0;
+    viewport.dispatchEvent(new Event('scroll'));
+    expect(document.activeElement).toBe(
+      action === '移走焦點'
+        ? outside
+        : screen.getByRole('button', { name: action === '繼續按方向鍵' ? '2028-02-02' : '2028-02-01' }),
+    );
+  },
+);

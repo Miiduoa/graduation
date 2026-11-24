@@ -2,12 +2,14 @@
 
 import { MonthCalendar } from './MonthCalendar';
 import {
+  focusWhenRevealed,
   isHorizontallyVisible,
   isVisible,
   measureStickyInsets,
   onVisibleViewportChange,
-  scrollVerticallyIntoView,
   revealForFocus,
+  retryFocusOnViewportChange,
+  scrollVerticallyIntoView,
 } from './calendarScroll';
 
 import Link from 'next/link';
@@ -357,10 +359,10 @@ function PersonalCalendarWorkspace({
   const dueUid = user?.uid ?? null;
   const dueStatus = dues.uid === dueUid ? dues.status : 'idle';
   const [dueRetry, setDueRetry] = useState(0);
-  const changeMonth = (value: string) => {
+  const changeMonth = useCallback((value: string) => {
     setMonth(value);
     setSelectedDate('');
-  };
+  }, []);
 
   useEffect(() => {
     if (authLoading || nuniLoading || (!user?.uid && !nuniAccountId)) return;
@@ -442,7 +444,8 @@ function PersonalCalendarWorkspace({
   const requestId = useRef(0);
   const viewRevision = useRef(0);
   const locatedRequest = useRef<string | null>(null);
-  const focusedRequest = useRef<string | null>(null);
+  const cancelLinkedFocus = useRef<(() => void) | null>(null);
+  const settledFocusRequest = useRef<string | null>(null);
   const linkedEventElement = useRef<HTMLLIElement | null>(null);
   // The URL selects an existing row in this owner's ledger. It never supplies event contents.
   const linkedEvent =
@@ -456,7 +459,7 @@ function PersonalCalendarWorkspace({
 
   useEffect(() => {
     locatedRequest.current = null;
-    focusedRequest.current = null;
+    settledFocusRequest.current = null;
   }, [requestedEventId]);
 
   useEffect(() => {
@@ -472,7 +475,7 @@ function PersonalCalendarWorkspace({
     if (
       paused ||
       !requestedEventId ||
-      focusedRequest.current === requestedEventId ||
+      settledFocusRequest.current === requestedEventId ||
       calendarView !== 'list' ||
       selectedDate !== linkedEventDate
     )
@@ -480,17 +483,31 @@ function PersonalCalendarWorkspace({
     const row = linkedEventElement.current;
     if (!row) return;
 
-    const revealLinkedEvent = () => {
-      if (focusedRequest.current === requestedEventId || !row.isConnected || !revealForFocus(row))
-        return;
-      row.focus({ preventScroll: true });
-      focusedRequest.current = requestedEventId;
+    let stopRetry: (() => void) | undefined;
+    const cleanup = () => {
+      stopRetry?.();
+      cancelLinkedFocus.current = null;
     };
-    revealLinkedEvent();
-    if (focusedRequest.current !== requestedEventId) {
-      return onVisibleViewportChange(revealLinkedEvent);
+    const settle = () => {
+      settledFocusRequest.current = requestedEventId;
+      cleanup();
+    };
+    const revealLinkedEvent = () => {
+      if (focusWhenRevealed(row)) settle();
+    };
+
+    if (mode !== 'idle') {
+      settle();
+      return;
     }
-  }, [paused, ledger.loading, requestedEventId, linkedEventDate, calendarView, selectedDate]);
+    const origin = document.activeElement;
+    revealLinkedEvent();
+    if (settledFocusRequest.current !== requestedEventId) {
+      stopRetry = retryFocusOnViewportChange(origin, revealLinkedEvent, settle);
+      cancelLinkedFocus.current = settle;
+    }
+    return cleanup;
+  }, [paused, ledger.loading, requestedEventId, linkedEventDate, calendarView, selectedDate, mode]);
 
   useLayoutEffect(() => {
     active.current = true;
@@ -544,8 +561,7 @@ function PersonalCalendarWorkspace({
     }
     if (mode !== 'idle') return;
     if (target === 'saved') {
-      dayHeadingRef.current?.focus({ preventScroll: true });
-      if (dayHeadingRef.current) scrollVerticallyIntoView(dayHeadingRef.current);
+      if (dayHeadingRef.current) focusWhenRevealed(dayHeadingRef.current);
       return;
     }
     const trigger = returnFocusRef.current;
@@ -556,15 +572,13 @@ function PersonalCalendarWorkspace({
       !trigger.closest('[hidden]') &&
       !trigger.matches(':disabled') &&
       window.getComputedStyle(trigger).visibility === 'visible' &&
-      isHorizontallyVisible(trigger)
+      isHorizontallyVisible(trigger) &&
+      focusWhenRevealed(trigger)
     ) {
-      trigger.focus({ preventScroll: true });
-      scrollVerticallyIntoView(trigger);
       return;
     }
     const fallback = createButtonRef.current;
-    fallback?.focus({ preventScroll: true });
-    if (fallback) scrollVerticallyIntoView(fallback);
+    if (fallback) focusWhenRevealed(fallback);
   }, [paused, mode, editorRevision, month, selectedDate]);
 
   const revealDayAgenda = useCallback(() => {
@@ -578,7 +592,7 @@ function PersonalCalendarWorkspace({
       return;
     }
     const heading = dayHeadingRef.current;
-    if (heading && revealForFocus(heading)) heading.focus({ preventScroll: true });
+    if (heading) focusWhenRevealed(heading);
   }, []);
 
   useLayoutEffect(() => {
@@ -637,6 +651,7 @@ function PersonalCalendarWorkspace({
     if (!mayDiscardDraft()) return;
     const next = emptyPersonalEventDraft();
     next.date = selectedDate || (next.date.startsWith(month) ? next.date : `${month}-01`);
+    cancelLinkedFocus.current?.();
     setInitialDraft(next);
     returnFocusRef.current = trigger ?? createButtonRef.current;
     pendingFocus.current = 'editor';
@@ -661,6 +676,7 @@ function PersonalCalendarWorkspace({
     }
     if (!mayDiscardDraft()) return;
     const next = draftFromPersonalEvent(row);
+    cancelLinkedFocus.current?.();
     setInitialDraft(next);
     returnFocusRef.current =
       trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);

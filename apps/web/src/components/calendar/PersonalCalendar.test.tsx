@@ -802,3 +802,41 @@ it('responds to a new eventId without changing either event or entering edit mod
   expect(screen.queryByLabelText('標題')).toBeNull();
   expect(readPersonalImports({ owner: context.owner, schoolId: context.schoolId })).toHaveLength(2);
 });
+
+it.each(['移動焦點', '開始編輯'])(
+  '深連結首次揭露失敗後，使用者%s會取消定位重試',
+  async (action) => {
+    const target = focusEvent();
+    seedFocusedEvents([target]);
+    context.search = `eventId=${target.id}`;
+    const viewport = Object.assign(new EventTarget(), {
+      offsetLeft: 260, offsetTop: 80, width: 180, height: 240,
+    });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+    vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+      if (this.matches('li[aria-current="true"]')) return new DOMRect(40, 100, 140, 60);
+      return originalBounds.call(this);
+    });
+
+    render(<PersonalCalendar />);
+    const row = (await screen.findByRole('heading', { name: target.title })).closest('li');
+    expect(row?.getAttribute('aria-current')).toBe('true');
+    expect(window.scrollBy).toHaveBeenCalledWith({ left: -220, top: 0, behavior: 'instant' });
+    expect(document.activeElement).toBe(document.body);
+
+    const outside = screen.getByRole('button', { name: '回今天' });
+    if (action === '開始編輯') {
+      // A click can open the editor without moving focus to the edit button first.
+      fireEvent.click(within(row!).getByRole('button', { name: /編輯/ }));
+    } else {
+      outside.focus();
+      outside.blur();
+    }
+    const expected = action === '開始編輯' ? screen.getByRole('textbox', { name: '標題' }) : document.body;
+    expect(document.activeElement).toBe(expected);
+    viewport.offsetLeft = 0;
+    viewport.dispatchEvent(new Event('resize'));
+    expect(document.activeElement).toBe(expected);
+  },
+);

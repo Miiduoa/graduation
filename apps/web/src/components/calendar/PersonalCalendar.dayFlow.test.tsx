@@ -1162,3 +1162,35 @@ it.each(['selected date', 'document.body'])(
     expect(window.confirm).not.toHaveBeenCalled();
   },
 );
+
+it.each([true, false])('單日儲存後只在標題雙軸可見時交接焦點（可揭露=%s）', async (canReveal) => {
+  render(<PersonalCalendar />);
+  await ready();
+  activate(screen.getByRole('button', { name: '2026-11-14' }));
+  activate(screen.getByRole('button', { name: '新增行程' }));
+  fireEvent.change(titleField(), { target: { value: '單日儲存的合成安排' } });
+
+  const heading = dayHeading('2026-11-14');
+  const viewport = Object.assign(new EventTarget(), {
+    offsetLeft: 260, offsetTop: 40, width: 180, height: 240,
+  });
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+  let left = 40;
+  let top = 320;
+  vi.spyOn(heading, 'getBoundingClientRect').mockImplementation(() => new DOMRect(left, top, 140, 40));
+  const focus = vi.spyOn(heading, 'focus');
+  vi.mocked<(options: ScrollToOptions) => void>(window.scrollBy).mockImplementation((options) => {
+    expect(focus).not.toHaveBeenCalled();
+    if (canReveal) {
+      left -= options.left ?? 0;
+      top -= options.top ?? 0;
+    }
+  });
+
+  activate(screen.getByRole('button', { name: '儲存行程' }));
+  await screen.findByText(personalImportSavedNotice(1));
+
+  expect(window.scrollBy).toHaveBeenCalledWith({ left: -220, top: 80, behavior: 'instant' });
+  expect(focus).toHaveBeenCalledTimes(canReveal ? 1 : 0);
+  expect(document.activeElement === heading).toBe(canReveal);
+});
