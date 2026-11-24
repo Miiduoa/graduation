@@ -66,7 +66,12 @@ const SUBMIT_VERB_SOURCE = [
   '[交繳]',
 ].join('|');
 const OTHER_WRITE_VERB_SOURCE = '發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名|退選|選課|\\b(?:delete|post|reply|withdraw)\\b';
-const WRITE_VERB = new RegExp(`(${SUBMIT_VERB_SOURCE})|${OTHER_WRITE_VERB_SOURCE}`, 'giu');
+const WRITE_AT_TOKEN = new RegExp(`^(?:(${SUBMIT_VERB_SOURCE})|${OTHER_WRITE_VERB_SOURCE})`, 'iu');
+const PREFIX_ANCHOR_WINDOW = 160;
+
+function suffixForEndAnchor(text: string): string {
+  return text.length <= PREFIX_ANCHOR_WINDOW ? text : text.slice(-PREFIX_ANCHOR_WINDOW);
+}
 const WRITE_NEGATION_SOURCE = `(?:${NEGATION_SOURCE})\\s*(?:(?:幫我|替我|代我|自動|直接)\\s*)*`;
 const WRITE_NEGATION = new RegExp(`${WRITE_NEGATION_SOURCE}$`, 'iu');
 // 把／將 may place the object before the verb:「不要把玩課雲作業貼上」.
@@ -76,6 +81,7 @@ const NEGATED_WRITE_START = new RegExp(NEGATED_WRITE_SOURCE, 'giu');
 const STARTS_NEGATED_WRITE = new RegExp(`^${NEGATED_WRITE_SOURCE}`, 'iu');
 const NOUN_COMPOUNDS = [
   '交通資訊', '交通', '交流', '交換', '交易', '交際', '交響', '交友', '交集', '交往',
+  '外交',
   '交界', '交替', '交錯', '交叉', '交會', '交織', '交情', '交遊', '交涉', '交戰',
   '交鋒', '交口', '交加', '交匯', '交管', '交白',
   '調查',
@@ -109,6 +115,7 @@ const FUNCTION_CUES = [
 ];
 const DOMAIN_NOUNS = [
   '作業', '報告', '附件', '檔案', '作品', '心得', '講義', '考卷', '表單',
+  '學習單', '課堂報告', '課堂', '學習',
   '公告', '通知', '教材', '課程', '課表', '修訂稿', '舊版', '新版', '這份', '那份',
   '發布時間', '發佈時間', '發文時間', '發布日期', '發佈日期', '發文日期',
   '作業準備區', '作業準備', '準備區', '下載區', '下載說明',
@@ -172,12 +179,11 @@ function splitClauses(text: string): string[] {
   return clauses;
 }
 
-function isInWordWriteMorpheme(text: string, from: number, clauseHasQuery: boolean): boolean {
-  const after = text.slice(from + 2);
-  // A leftover content character plus 交／繳 is in-word when this clause is a
-  // query (外交作業／外交課程). A new clause must not inherit a previous 查.
-  if (!clauseHasQuery && !/^(?:課|程|生|系|部|際|學|官)/u.test(after)) return false;
-  return true;
+function isInWordWriteMorpheme(_text: string, _from: number, clauseHasQuery: boolean): boolean {
+  // Verb vs noun is decided by the lexicon (外交, 交通, …), not by the next
+  // character. A leftover 交／繳 syllable is in-word only while a query still
+  // governs the clause, so「務必速交學習單／課堂報告」stay writes.
+  return clauseHasQuery;
 }
 
 const QUERY_CONTEXT_HOLD_CUES = new Set(['供', '正在', '正']);
@@ -212,6 +218,8 @@ function tokenize(text: string): Token[] {
     if (HAN_CHAR.test(ch) && HAN_CHAR.test(next) && /[查看交繳]/.test(next) &&
       !/[查看交繳]/.test(ch) &&
       !startsKnownQuery(text, from) && !startsKnownWrite(text, from) &&
+      !startsKnownQuery(text, from + 1) && !startsKnownWrite(text, from + 1) &&
+      !LEXICON.some(item => text.startsWith(item.value, from + 1)) &&
       ( /[查看]/.test(next) || isInWordWriteMorpheme(text, from, state.clauseHasQuery) )) {
       noteToken(tokens, { value: ch + next, start: from, end: from + 2, kind: 'noun' }, state);
       index += 2;
@@ -286,16 +294,32 @@ function collectModifierSpans(tokens: Token[]): Array<{ start: number; end: numb
       const value = tokens[cursor]!.value;
       if (value === '供') supply.push(cursor);
       if (value === '用的' || (value === '用' && tokens[cursor + 1]?.value === '的')) {
-        if (supply.length > 0 && cursor > supply[0]!) {
-          spans.push({ start: supply[0]!, end: cursor });
-        }
-        supply.length = 0;
+        const start = supply.pop();
+        if (start !== undefined && cursor > start) spans.push({ start, end: cursor });
       }
       if (value === '正在' || value === '正') progressive.push(cursor);
-      if (value === '中' && isProgressiveCloser(tokens, cursor, end) && progressive.length > 0 &&
-        cursor > progressive[0]!) {
-        spans.push({ start: progressive[0]!, end: cursor });
-        progressive.length = 0;
+      if (value === '中' && isProgressiveCloser(tokens, cursor, end)) {
+        const start = progressive.pop();
+        if (start !== undefined && cursor > start) spans.push({ start, end: cursor });
+      }
+    }
+    const lastSupplyClose = [...Array(end - index + 1).keys()].map(offset => index + offset)
+      .reverse().find(cursor => {
+        const value = tokens[cursor]!.value;
+        return value === '用的' || (value === '用' && tokens[cursor + 1]?.value === '的');
+      });
+    const lastProgressiveClose = [...Array(end - index + 1).keys()].map(offset => index + offset)
+      .reverse().find(cursor => tokens[cursor]!.value === '中' && isProgressiveCloser(tokens, cursor, end));
+    while (supply.length > 0) {
+      const start = supply.pop()!;
+      if (lastSupplyClose !== undefined && lastSupplyClose > start) {
+        spans.push({ start, end: lastSupplyClose });
+      }
+    }
+    while (progressive.length > 0) {
+      const start = progressive.pop()!;
+      if (lastProgressiveClose !== undefined && lastProgressiveClose > start) {
+        spans.push({ start, end: lastProgressiveClose });
       }
     }
     index = end + 1;
@@ -435,20 +459,24 @@ function readGovernsStatus(segment: string): boolean {
 
 /** Classify each occurrence using its own context in the original request. */
 function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
-  for (const match of text.matchAll(WRITE_VERB)) {
-    const before = text.slice(0, match.index);
-    if (WRITE_NEGATION.test(before)) continue;
+  const tokens = tokensFor(text);
+  for (const token of tokens) {
+    if (token.kind === 'noun') continue;
+    const matched = WRITE_COMPOUND_SET.has(token.value)
+      ? { 0: token.value, 1: token.value, length: 2 } as Pick<RegExpExecArray, 0 | 1 | 'length'>
+      : WRITE_AT_TOKEN.exec(text.slice(token.start));
+    if (!matched) continue;
+    const before = text.slice(0, token.start);
+    const beforeTail = suffixForEndAnchor(before);
+    if (WRITE_NEGATION.test(beforeTail)) continue;
     // Writes hold only at a word boundary. Field nouns such as「發布時間」stay reads.
     // A write compound such as「轉交」is the word, even if the regex matched only「交」.
-    const covering = tokenCovering(text, match.index);
-    if (!covering || covering.kind === 'noun') continue;
-    if (covering.start !== match.index && !WRITE_COMPOUND_SET.has(covering.value)) continue;
-    if (!match[1]) return 'unsupported';
+    if (!matched[1]) return 'unsupported';
 
-    const after = text.slice(match.index + match[0].length).trimStart();
+    const after = text.slice(token.start + matched[0].length).trimStart();
     const segment = before.split(/[,;。?!、:\r\n]/u).at(-1)!.trimStart();
-    if (ADDITIVE_CUE.test(before)) return STATUS_NOUN.test(after) ? 'planner' : 'unsupported';
-    if (WRITE_CUE.test(before)) return 'unsupported';
+    if (ADDITIVE_CUE.test(beforeTail)) return STATUS_NOUN.test(after) ? 'planner' : 'unsupported';
+    if (WRITE_CUE.test(beforeTail)) return 'unsupported';
     if (segment.includes('把')) return 'unsupported';
     if ((GOVERNED_STATUS.test(after) || SUBMISSION_QUESTION.test(after)) &&
       (readGovernsStatus(segment) || HOMEWORK_SUBJECT.test(segment))) continue;
@@ -456,10 +484,10 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
       (readGovernsStatus(segment) || HOMEWORK_SUBJECT.test(segment) || LMS_SUBJECT.test(segment))) continue;
 
     // Preserve homework filters such as「尚未提交的作業」.
-    const statusPrefix = before.match(STATUS_PREFIX);
+    const statusPrefix = beforeTail.match(STATUS_PREFIX);
     if (statusPrefix && HOMEWORK_STATUS_SUFFIX.test(after)) {
-      const filterContext = before.slice(0, statusPrefix.index);
-      if (!ADDITIVE_CUE.test(filterContext) && !WRITE_CUE.test(filterContext)) continue;
+      const filterContext = before.slice(0, before.length - beforeTail.length + (statusPrefix.index ?? 0));
+      if (!ADDITIVE_CUE.test(suffixForEndAnchor(filterContext)) && !WRITE_CUE.test(suffixForEndAnchor(filterContext))) continue;
     }
     return 'unsupported';
   }

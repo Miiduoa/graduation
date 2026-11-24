@@ -496,6 +496,7 @@ jobs:
     name: Build Web
     # Match the OS supported by the pinned Chromium tooling used by browser checks.
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     needs: [security-gates, lint-and-typecheck]
     steps:
       - name: Checkout
@@ -567,8 +568,18 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-1.57.0
+          restore-keys: |
+            ${{ runner.os }}-admin-playwright-1.57.0
+            ${{ runner.os }}-playwright-
       - name: Install TronClass browser test tools
+        timeout-minutes: 25
         run: |
+          set -euo pipefail
           python -m pip install playwright==1.57.0
           bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk
 
