@@ -190,6 +190,10 @@ function parseLedger(raw: string | null, scope: PersonalImportScope): PersonalIm
   let value: PersonalImportLedger;
   try {
     const { webCommit: _webCommit, ...ledger } = parsePersonalImportStorageJson(raw);
+    // The Web calendar stores records and sync state without an Expo undo stack.
+    if (Platform.OS === 'web' && 'sync' in ledger && !('batches' in ledger)) {
+      ledger.batches = [];
+    }
     value = ledger as PersonalImportLedger;
   } catch {
     throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');

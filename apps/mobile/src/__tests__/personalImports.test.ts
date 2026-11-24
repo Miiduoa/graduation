@@ -3,6 +3,10 @@ import { File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
 import { sha256 } from 'js-sha256';
 import {
+  readPersonalImports as readWebCalendarImports,
+  savePersonalImportBatch as saveWebCalendarBatch,
+} from '../../../web/src/lib/personalImports';
+import {
   meetupWindows,
   emptyPersonalEventDraft,
   personalEventRowFromDraft,
@@ -25,6 +29,7 @@ import {
   selectPersonalTimetableCourses,
   undoLastPersonalImport,
 } from '../services/personalImports';
+import { hasWebPersonalImportCommit } from '../services/personalImportRollbackJournal';
 
 const scope = { owner: 'nuni:account-a', schoolId: 'pu' };
 const row = (id: string, title = '微積分'): PersonalImportRow => ({
@@ -407,6 +412,11 @@ test.each([
           throw new DOMException('Quota exceeded', 'QuotaExceededError');
         }
         setItem.call(this, entry, value);
+        if (this === storage && entry === key && (hasJournal || hasCheckpoint)) {
+          expect(hasWebPersonalImportCommit(this.getItem(key))).toBe(true);
+          expect(this.getItem(journal)).toBe(hasJournal ? original : null);
+          expect(this.getItem(checkpoint)).toBe(hasCheckpoint ? original : null);
+        }
       });
       const guard = { canContinue: () => true };
       const edit = () => mutatePersonalImportLedger(scope, guard, (current) => {
@@ -416,15 +426,21 @@ test.each([
       });
       await expect(edit()).rejects.toMatchObject({ name: 'QuotaExceededError' });
       expect(storage.getItem(key)).toBe(primary);
+      expect(storage.getItem(journal)).toBe(hasJournal ? original : null);
+      expect(storage.getItem(checkpoint)).toBe(hasCheckpoint ? original : null);
       await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
 
       primaryCapacity = primary.length;
       const edited = await edit();
       expect(edited.records[0].title).toBe(editedTitle);
-      expect(storage.getItem(key)).toHaveLength(JSON.stringify(edited).length);
+      const stored = storage.getItem(key)!;
+      expect(stored).toHaveLength(JSON.stringify(edited).length);
+      // The merge-base Expo reader parses the primary directly as a v1 ledger.
+      expect(JSON.parse(stored)).toEqual(edited);
+      expect(readWebCalendarImports(scope)).toEqual(edited.records);
       await expect(loadPersonalImports(scope)).resolves.toEqual(edited);
-      expect(storage.getItem(journal)).toBe(hasJournal ? original : null);
-      expect(storage.getItem(checkpoint)).toBe(hasCheckpoint ? original : null);
+      expect(storage.getItem(journal)).toBeNull();
+      expect(storage.getItem(checkpoint)).toBeNull();
       expect(quota.mock.calls.some(([entry]) =>
         entry.startsWith('campus.personal-imports.stage.v2:'))).toBe(false);
       expect(Object.keys(window.sessionStorage)).toEqual([]);
@@ -436,6 +452,47 @@ test.each([
     }
   },
 );
+
+test('a Web calendar save after an Expo commit cannot revive stale recovery data', async () => {
+  const cleanup = useWebStorage();
+  const restoreLocks = withoutWebWriteLocks();
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+  const multiGet = jest.mocked(AsyncStorage.multiGet);
+  const nativeMultiGet = multiGet.getMockImplementation()!;
+  multiGet.mockImplementation(async (keys) =>
+    keys.map((entry) => [entry, storage.getItem(entry)]));
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: async (_key: string, write: () => unknown) => write() },
+  });
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    const original = JSON.stringify(ledger);
+    storage.setItem(key, original);
+    storage.setItem(checkpoint, original);
+    storage.setItem(journal, original);
+    const edited = await editPersonalImport(scope, ledger.records[0], row('original', 'Expo 更新'), {
+      canContinue: () => true,
+    });
+    expect(JSON.parse(storage.getItem(key)!).webCommit).toEqual(expect.any(String));
+
+    await saveWebCalendarBatch(scope, [{ ...row('web', 'Web 新增'), dayOfWeek: 2 }]);
+    expect(JSON.parse(storage.getItem(key)!)).not.toHaveProperty('webCommit');
+    const webRecords = readWebCalendarImports(scope);
+    expect(webRecords).toEqual(expect.arrayContaining(edited.records));
+    expect(webRecords.map(({ title }) => title)).toEqual(['Expo 更新', 'Web 新增']);
+    expect((await loadPersonalImports(scope)).records).toEqual(webRecords);
+    expect(storage.getItem(checkpoint)).toBeNull();
+    expect(storage.getItem(journal)).toBeNull();
+  } finally {
+    multiGet.mockImplementation(nativeMultiGet);
+    restoreLocks();
+    cleanup();
+  }
+});
 
 test.each([false, true])('Web without locks reclaims legacy localStorage stages at quota (other ledger: %s)', async (foreign) => {
   const cleanup = useWebStorage();
@@ -987,7 +1044,7 @@ test('Web retries from a legacy marked copy and retires it when the new ledger c
 
     await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
     await deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
-    expect(storage.getItem(journal)).toContain('legacy');
+    expect(storage.getItem(journal)).toBeNull();
     await expect(loadPersonalImports(scope)).resolves.toEqual({ version: 1, records: [], batches: [] });
   } finally {
     cleanup();
