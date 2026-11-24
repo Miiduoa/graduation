@@ -73,6 +73,8 @@ export const SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY =
   '分享課表要用學校帳號登入，網站的學校帳號登入還沒開放；課表先存在這台瀏覽器。';
 
 type TimetableView = 'grid' | 'week' | 'day';
+// Focus is requested only after a confirmed change and is consumed by the next committed render.
+type CommittedFocus = { kind: 'course'; id: string } | { kind: 'add' };
 const compactTimetableQuery = '(max-width: 600px)';
 
 function subscribeToCompactLayout(onChange: () => void) {
@@ -228,6 +230,9 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   const [busy, setBusy] = useState(false);
   const savingRef = useRef(false);
   const activeRef = useRef(false);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const addCourseRef = useRef<HTMLButtonElement>(null);
+  const focusAfterCommit = useRef<CommittedFocus | null>(null);
   const [loadError, setLoadError] = useState('');
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [shareBusy, setShareBusy] = useState(false);
@@ -238,6 +243,21 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       activeRef.current = false;
     };
   }, []);
+  const editorOpen = editing !== null;
+  // Wait for the editor to release focus and the saved course to appear in its new position.
+  useEffect(() => {
+    const request = focusAfterCommit.current;
+    if (editorOpen || !request) return;
+    focusAfterCommit.current = null;
+    if (!activeRef.current) return;
+    const savedCourse =
+      request.kind === 'course'
+        ? Array.from(
+            workspaceRef.current?.querySelectorAll<HTMLElement>('[data-course-focus-id]') ?? [],
+          ).find((element) => element.dataset.courseFocusId === request.id)
+        : undefined;
+    (savedCourse ?? addCourseRef.current)?.focus();
+  }, [editorOpen]);
   const [notice, setNotice] = useState('');
   const [importMode, setImportMode] = useState<ImportMode>('merge');
   const [drafts, setDrafts] = useState<ImportDraft[]>([]);
@@ -703,6 +723,8 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       ? timetable.courses.map((item) => (item.id === cleaned.id ? cleaned : item))
       : [...timetable.courses, cleaned];
     if (await persist({ ...timetable, courses: next }, '課程已更新。')) {
+      focusAfterCommit.current = { kind: 'course', id: cleaned.id };
+      if (view === 'day' && cleaned.day > 0) setDay(cleaned.day);
       setEditing(null);
       if (savesToManual) {
         setImportTerm('manual');
@@ -718,8 +740,10 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         { ...timetable, courses: timetable.courses.filter((item) => item.id !== id) },
         '已從課表拿掉這門課。',
       )
-    )
+    ) {
+      focusAfterCommit.current = { kind: 'add' };
       setEditing(null);
+    }
   };
 
   const confirmImport = async () => {
@@ -831,7 +855,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
   };
 
   return (
-    <div className={movement.workspace}>
+    <div className={movement.workspace} ref={workspaceRef}>
       {invites.length > 0 && (
         <section className={styles.panel} aria-label="邀約">
           <h2>有人約你</h2>
@@ -913,6 +937,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           </label>
         )}
         <button
+          ref={addCourseRef}
           type="button"
           className="btn"
           disabled={busy}
@@ -994,6 +1019,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
                       type="button"
                       className={`${styles.course} ${movement.courseCard}`}
                       key={course.id}
+                      data-course-focus-id={course.id}
                       onClick={() => openCourse(course)}
                     >
                       <time>{courseTimeLabel(course, periodProfile)}</time>
@@ -1023,6 +1049,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
                 <button
                   type="button"
                   className={`${styles.course} ${movement.courseCard}`}
+                  data-course-focus-id={course.id}
                   onClick={() => openCourse(course)}
                 >
                   <time>{periodRangeLabel(course.start, course.end, periodProfile)}</time>

@@ -13,6 +13,7 @@ import {
   WEEKDAY_LABELS,
   type PersonalImportRecord,
 } from '@campus/shared';
+import { TimetableCloudSaveError } from '@/lib/timetable/store';
 import { PersonalTimetable } from './PersonalTimetable';
 
 const mocks = vi.hoisted(() => ({
@@ -484,9 +485,7 @@ describe('personal timetable data retention', () => {
     fireEvent.click(editor.getByRole('button', { name: '儲存' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect((screen.getByLabelText('顯示自行匯入的學期') as HTMLSelectElement).value).toBe('manual');
-    expect(screen.getAllByRole('button', { name: /編輯 剛新增的統計學/ }).length).toBeGreaterThan(
-      0,
-    );
+    expect(document.activeElement).toBe(screen.getAllByRole('button', { name: /編輯 剛新增的統計學/ })[0]);
     const savedNotice = screen.getByText(/已切換至手動課表/);
     expect(savedNotice.getAttribute('role')).toBe('status');
     expect(savedNotice.textContent).toContain('課程已更新。');
@@ -602,6 +601,7 @@ describe('personal timetable data retention', () => {
     const nextEditor = addCourse('新帳號草稿');
     await act(async () => pending.resolve({ stored: 'cloud' }));
     expect((nextEditor.getByLabelText('課名') as HTMLInputElement).value).toBe('新帳號草稿');
+    expect(document.activeElement).toBe(nextEditor.getByLabelText('課名'));
     expect(mocks.save.mock.calls[0][0]).toBe('alice');
   });
 
@@ -838,5 +838,118 @@ describe('direct timetable editing', () => {
       target: { value: 'bob' },
     });
     expect(screen.getAllByRole('button', { name: '約吃飯' }).length).toBeGreaterThan(0);
+  });
+});
+
+describe('focus after confirmed timetable changes', () => {
+  const saveEditor = () =>
+    fireEvent.click(
+      within(screen.getByRole('region', { name: '編輯課程' })).getByRole('button', { name: '儲存' }),
+    );
+  const editorClosed = () => waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  const savedButton = (name: string) => screen.getAllByRole('button', { name: new RegExp(`編輯 ${name}`) })[0];
+
+  it('focuses the first grid period of an edited course, not its focused continuation opener', async () => {
+    await ready();
+    const opener = screen.getByRole('button', { name: /編輯 原本課程.*第 2 節，續堂/ });
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.change(screen.getByLabelText('課名'), { target: { value: '改名課程' } });
+    saveEditor();
+    await editorClosed();
+    expect(document.activeElement).toBe(savedButton('改名課程'));
+    expect(document.activeElement?.getAttribute('aria-label')).not.toContain('續堂');
+  });
+
+  it('focuses a new course after its empty-cell opener disappears', async () => {
+    await ready();
+    const opener = screen.getByRole('button', { name: `${WEEKDAY_LABELS[2]}第 7 節新增課程` });
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.change(screen.getByLabelText('課名'), { target: { value: '新格位課程' } });
+    saveEditor();
+    await editorClosed();
+    expect(opener.isConnected).toBe(false);
+    expect(document.activeElement).toBe(savedButton('新格位課程'));
+  });
+
+  it('focuses the saved course in the week list', async () => {
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '一週' }));
+    const opener = screen.getByRole('button', { name: '新增課程' });
+    opener.focus();
+    addCourse('一週新課');
+    saveEditor();
+    await editorClosed();
+    const week = screen.getByRole('region', { name: '一週課程' });
+    expect(document.activeElement).toBe(within(week).getByRole('button', { name: /一週新課/ }));
+  });
+
+  it('shows the changed day before focusing a course in the single-day view', async () => {
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '單日' }));
+    fireEvent.click(screen.getByRole('button', { name: /原本課程/ }));
+    fireEvent.change(within(screen.getByRole('region', { name: '編輯課程' })).getByLabelText('星期'), {
+      target: { value: '3' },
+    });
+    saveEditor();
+    await editorClosed();
+    expect((screen.getByLabelText('上課日') as HTMLSelectElement).value).toBe('3');
+    const saved = screen.getByRole('button', { name: /原本課程/ });
+    expect(document.activeElement).toBe(saved);
+  });
+
+  it.each([
+    ['device-only', () => mocks.save.mockResolvedValue({ stored: 'local' }), /已存在這台裝置/],
+    [
+      'cloud-failed',
+      () => mocks.save.mockRejectedValue(new TimetableCloudSaveError('cloud')),
+      /雲端同步沒有成功/,
+    ],
+  ])('keeps the %s receipt visible while focusing the saved course', async (_name, arrange, receipt) => {
+    arrange();
+    await ready();
+    addCourse('保留收據課程');
+    saveEditor();
+    await editorClosed();
+    expect(screen.getByRole('status').textContent).toMatch(receipt);
+    expect(document.activeElement).toBe(savedButton('保留收據課程'));
+  });
+
+  it('focuses the stable add action after a confirmed deletion', async () => {
+    await ready();
+    const opener = savedButton('原本課程');
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole('button', { name: '刪除' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認刪除' }));
+    await editorClosed();
+    expect(screen.queryByRole('button', { name: /編輯 原本課程/ })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '新增課程' }));
+  });
+
+  it('keeps default focus restoration when an unchanged editor is cancelled', async () => {
+    await ready();
+    const opener = savedButton('原本課程');
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('keeps focus in the editor for validation and failed saves', async () => {
+    mocks.save.mockRejectedValueOnce(new Error('response lost'));
+    await ready();
+    const editor = addCourse('');
+    fireEvent.click(editor.getByRole('button', { name: '儲存' }));
+    const name = editor.getByRole('textbox', { name: /課名/ });
+    expect(document.activeElement).toBe(name);
+    fireEvent.change(name, { target: { value: '失敗後保留' } });
+    fireEvent.click(editor.getByRole('button', { name: '儲存' }));
+    await waitFor(() => expect(editor.getByRole('status').textContent).toMatch(/無法確認儲存結果/));
+    expect(screen.getByRole('region', { name: '編輯課程' })).toBeTruthy();
+    expect(document.activeElement).toBe(name);
+    expect(mocks.save).toHaveBeenCalledOnce();
   });
 });

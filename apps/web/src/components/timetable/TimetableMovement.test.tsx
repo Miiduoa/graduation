@@ -117,6 +117,22 @@ describe('workspace safety', () => {
     fireEvent.click(editor.getByRole('button', { name: '儲存' }));
     await waitFor(() => expect(mocks.save).toHaveBeenCalledOnce());
     expect(mocks.save.mock.calls[0][1].courses).toEqual([{ ...course, day: 2, start: 6, end: 8 }]);
+    await waitFor(() => expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: `編輯 資料庫，${WEEKDAY_LABELS[1]}第 6 節` }),
+    ));
+  });
+  it('focuses the first course after the empty-state action disappears', async () => {
+    mocks.load.mockResolvedValue(stored([]));
+    render(<PersonalTimetable />);
+    const opener = await screen.findByRole('button', { name: '手動新增課程' });
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.change(screen.getByLabelText('課名'), { target: { value: '第一門課' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(opener.isConnected).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /編輯 第一門課/ }));
   });
   it.each(['empty', 'partial'])('blocks planning and invitations for a %s own timetable', async (mode) => {
     mocks.load.mockResolvedValue(stored(mode === 'empty' ? [] : [course, { ...course, id: 'pending', day: 0 }]));
