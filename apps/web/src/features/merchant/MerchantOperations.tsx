@@ -22,7 +22,7 @@ import {
   type MerchantWorkspaceQueue,
 } from '@/lib/merchantWorkspaceNavigation';
 
-import { createMerchantConfirmations, workspaceDetail, workspaceKey } from './merchantConfirmation';
+import { createMerchantConfirmations, workspaceKey } from './merchantConfirmation';
 
 type Detail = NuniMerchantWorkspaceDetail;
 type SettingDraft = Omit<NuniMerchantSettingsInput, 'termsVersion' | 'expectedVersion'> & {
@@ -111,8 +111,8 @@ export function MerchantOperations({
   confirmedListStatus?: string;
   beginRequest?(): number;
   onChanged(detail: Detail, verifiedAccess: boolean, revision: number): Detail | null | void;
-  onMenuConfirmed?(detail: Detail): void;
-  onDenied?(tenantId: string, locationId: string, revision: number): void;
+  onMenuConfirmed?(detail: Detail, revision: number): void;
+  onDenied?(tenantId: string, locationId: string): void;
 }) {
   const draftKey = JSON.stringify([tenantId, locationId]);
   const saved = drafts.get(draftKey);
@@ -186,16 +186,14 @@ export function MerchantOperations({
   const accept = useCallback(
     (next: Detail, verifiedAccess: boolean, revision: number) => {
       if (drafts.get(draftKey)?.menuReceipt != null) {
-        if (onMenuConfirmed) onMenuConfirmed(next);
-        else if (!beginRequest) localConfirmations.confirmMenu(workspaceKey(next));
+        if (onMenuConfirmed) onMenuConfirmed(next, revision);
+        else if (!beginRequest) localConfirmations.confirmMenu(workspaceKey(next), revision);
       }
       const merged =
         changed.current(next, verifiedAccess, revision) ??
         (beginRequest
           ? null
-          : workspaceDetail(
-              localConfirmations.merge(next, revision),
-            ));
+          : localConfirmations.confirmDetail(next, revision, verifiedAccess));
       if (!beginRequest) setDetail(merged);
       setFresh(!!merged);
       setMenuConfirmed(false);
@@ -204,6 +202,14 @@ export function MerchantOperations({
     },
     [beginRequest, draftKey, drafts, localConfirmations, onMenuConfirmed],
   );
+
+  const revokeDetail = useCallback(() => {
+    if (!beginRequest) localConfirmations.revoke(workspaceKey({ tenantId, locationId }));
+    onDenied?.(tenantId, locationId);
+    setDetail(null);
+    setFresh(false);
+    setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
+  }, [beginRequest, localConfirmations, locationId, onDenied, tenantId]);
 
   const checkAccess = useCallback(
     async (current: () => boolean) => {
@@ -215,14 +221,11 @@ export function MerchantOperations({
         if (!current() || !(failure instanceof NuniError)) return;
         if (failure.status === 401 || failure.code === 'SESSION_CHANGED') expire.current();
         else if ([403, 404].includes(failure.status)) {
-          onDenied?.(tenantId, locationId, revision);
-          setDetail(null);
-          setFresh(false);
-          setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
+          revokeDetail();
         }
       }
     },
-    [nextRevision, locationId, onDenied, operations, tenantId],
+    [nextRevision, locationId, operations, revokeDetail, tenantId],
   );
 
   const read = useCallback(
@@ -256,9 +259,7 @@ export function MerchantOperations({
           setDetail(null);
           expire.current();
         } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-          setDetail(null);
-          onDenied?.(tenantId, locationId, revision);
-          setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
+          revokeDetail();
         } else {
           setReadUnavailable(true);
           setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
@@ -267,7 +268,7 @@ export function MerchantOperations({
         if (active.current && version === run.current) setLoading(false);
       }
     },
-    [operations, tenantId, locationId, accept, drafts, draftKey, onDenied, nextRevision],
+    [operations, tenantId, locationId, accept, drafts, draftKey, revokeDetail, nextRevision],
   );
   useLayoutEffect(() => {
     if (!suspended) {
@@ -335,10 +336,7 @@ export function MerchantOperations({
         setFresh(false);
         expire.current();
       } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-        onDenied?.(tenantId, locationId, revision);
-        setDetail(null);
-        setFresh(false);
-        setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
+        revokeDetail();
       } else if (failure instanceof NuniError && failure.status === 409) {
         if (action === 'menu') setMenuBlocked(true);
         await read();
@@ -689,7 +687,7 @@ export function MerchantOperations({
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (!menuConfirmed || menuBlocked) return;
-                      void mutate('menu', async (current) => {
+                      void mutate('menu', async (current, revision) => {
                         const receipt = await operations.createInitialMenu(tenantId, locationId, {
                           items: menu.map((item) => ({
                             name: item.name.trim(),
@@ -703,8 +701,8 @@ export function MerchantOperations({
                           })),
                         });
                         if (!current()) return;
-                        if (onMenuConfirmed) onMenuConfirmed(detail);
-                        else if (!beginRequest) localConfirmations.confirmMenu(workspaceKey(detail));
+                        if (onMenuConfirmed) onMenuConfirmed(detail, revision);
+                        else if (!beginRequest) localConfirmations.confirmMenu(workspaceKey(detail), revision);
                         setMenuReceipt(receipt.createdItems);
                         setMenuConfirmed(false);
                         setNotice(

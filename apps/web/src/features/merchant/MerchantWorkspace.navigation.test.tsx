@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
+import type { NuniMerchantWorkspace } from '@campus/shared/src/nuniMerchant';
 import type { NuniMerchantWorkspaceDetail } from '@campus/shared/src/nuniMerchantOperations';
 import { queueFixture, shiftFixture } from '@/features/food/foodTestFixtures';
 import { merchantApplicationsHref, merchantWorkspaceHref } from '@/lib/merchantWorkspaceNavigation';
@@ -616,11 +617,11 @@ it.each([2, 3])(
   },
 );
 
-it('uses the later same-version list when the detail refresh fails without a write', async () => {
+it.each([1, undefined])('uses the later list (version %s) when the detail refresh fails', async (readinessVersion) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const open = detail('store-a', true);
-  const paused = { ...open, locationStatus: 'closed', publicAccess: false };
-  let listed = open;
+  const paused = { ...open, readinessVersion, locationStatus: 'closed', publicAccess: false };
+  let listed: NuniMerchantWorkspace = open;
   const readDetail = vi.fn(() => Promise.resolve(open));
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [listed] });
@@ -638,6 +639,8 @@ it('uses the later same-version list when the detail refresh fails without a wri
   await screen.findByText('暫停接單');
   await screen.findByText('目前無法更新部分門市資料，請重新載入。');
   expect(readDetail).toHaveBeenCalledTimes(2);
+  expect(screen.getByText('尚未公開')).toBeTruthy();
+  expect(screen.queryByText('允許公開瀏覽')).toBeNull();
   expect(screen.queryByText('營業中')).toBeNull();
 });
 
@@ -1149,3 +1152,116 @@ it.each([403, 404])(
     expect(within(operations).queryByText('線上及櫃檯付款')).toBeNull();
   },
 );
+
+it.each([403, 404])(
+  'discards a newer background detail when the earlier list request returns %s',
+  async (status) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const open = detail('store-a', true);
+    const background = {
+      ...open,
+      readinessVersion: 7,
+      merchantName: '撤銷前的餐坊',
+      paymentMode: 'online-and-counter',
+    };
+    const recovered = {
+      ...open,
+      readinessVersion: 6,
+      merchantName: '重新授權的餐坊',
+      locationStatus: 'closed',
+      publicAccess: false,
+      serviceModes: ['pickup', 'dine-in'],
+    };
+    let finishWrite!: (receipt: NuniMerchantWorkspaceDetail) => void;
+    const write = new Promise<NuniMerchantWorkspaceDetail>((resolve) => {
+      finishWrite = resolve;
+    });
+    let denyList!: (error: NuniError) => void;
+    const list = new Promise<never>((_, reject) => {
+      denyList = reject;
+    });
+    const readList = vi.fn()
+      .mockResolvedValueOnce({ workspaces: [open] })
+      .mockReturnValueOnce(list);
+    const readDetail = vi.fn()
+      .mockResolvedValueOnce(open)
+      .mockResolvedValueOnce(background)
+      .mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'))
+      .mockResolvedValueOnce(recovered);
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') return readList();
+      if (resource === path) return readDetail();
+      if (resource === `${path}/availability`) return write;
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readList).toHaveBeenCalledTimes(2));
+    expect(readDetail).toHaveBeenCalledTimes(1);
+
+    await act(async () => finishWrite({ ...open, locationStatus: 'closed', publicAccess: false }));
+    await screen.findByRole('heading', { name: '撤銷前的餐坊／一樓' });
+    expect(readDetail).toHaveBeenCalledTimes(2);
+
+    await act(async () => denyList(new NuniError(status, 'DENIED')));
+    await screen.findByText('目前無法確認店家資料，請重新載入。');
+    expect(readDetail).toHaveBeenCalledTimes(3);
+    expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+
+    await act(async () => window.history.forward());
+    await screen.findByRole('heading', { name: '重新授權的餐坊／一樓' });
+    expect(readDetail).toHaveBeenCalledTimes(4);
+    expect(screen.getByText('暫停接單')).toBeTruthy();
+    expect(screen.queryByText('營業中')).toBeNull();
+    expect(screen.queryByText('撤銷前的餐坊／一樓')).toBeNull();
+    expect(screen.getByText('自取、內用')).toBeTruthy();
+    expect(screen.getByText('現場櫃檯付款')).toBeTruthy();
+  },
+);
+
+it.each([403, 404])('recovers with a lower-version detail after a manual read returns %s', async (status) => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const previous = {
+    ...detail('store-a', true),
+    readinessVersion: 7,
+    merchantName: '撤銷前的餐坊',
+    paymentMode: 'online-and-counter',
+  };
+  const recovered = {
+    ...detail('store-a', true),
+    readinessVersion: 6,
+    merchantName: '重新授權的餐坊',
+    locationStatus: 'closed',
+    publicAccess: false,
+    serviceModes: ['pickup', 'dine-in'],
+  };
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(previous)
+    .mockRejectedValueOnce(new NuniError(status, 'DENIED'))
+    .mockResolvedValueOnce(recovered);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [previous] });
+    if (resource === path) return readDetail();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByRole('heading', { name: '撤銷前的餐坊／一樓' });
+
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+  await screen.findByText(/目前無法取得這間門市的管理權限/);
+  expect(screen.queryByText('服務方式')).toBeNull();
+  expect(screen.queryByText('撤銷前的餐坊／一樓')).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+  await screen.findByRole('heading', { name: '重新授權的餐坊／一樓' });
+  expect(readDetail).toHaveBeenCalledTimes(3);
+  expect(screen.getByText('暫停接單')).toBeTruthy();
+  expect(screen.queryByText('營業中')).toBeNull();
+  expect(screen.getByText('自取、內用')).toBeTruthy();
+  expect(screen.getByText('現場櫃檯付款')).toBeTruthy();
+});

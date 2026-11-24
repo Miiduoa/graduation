@@ -8,7 +8,7 @@ import type { NuniMerchantWorkspaceDetail } from '@campus/shared/src/nuniMerchan
 
 export type MerchantOverview = Awaited<ReturnType<typeof loadMerchantOverview>>;
 
-type Observation<T = NuniMerchantWorkspace> = { value: T; revision: number };
+type Observation<T = NuniMerchantWorkspace> = { value: T; revision: number; version?: number };
 type WorkspaceObservations = {
   row?: Observation;
   detail?: Observation<NuniMerchantWorkspaceDetail>;
@@ -18,14 +18,20 @@ type Confirmation = {
   detail?: NuniMerchantWorkspaceDetail;
 };
 
-function latestObservation<T extends Observation>(current: T | undefined, next: T): T {
-  if (!current) return next;
-  const nextVersion = next.value.readinessVersion ?? 0;
-  const currentVersion = current.value.readinessVersion ?? 0;
-  return nextVersion > currentVersion ||
-    (nextVersion === currentVersion && next.revision > current.revision)
-    ? next
-    : current;
+function latestObservation<T extends NuniMerchantWorkspace>(
+  current: Observation<T> | undefined,
+  value: T,
+  revision: number,
+): Observation<T> {
+  // Legacy rows can update availability by request order without lowering the known version.
+  const version = value.readinessVersion ?? current?.version;
+  if (current) {
+    const order = version !== undefined && current.version !== undefined
+      ? version - current.version
+      : 0;
+    if ((order || revision - current.revision) <= 0) return current;
+  }
+  return { value, revision, version };
 }
 
 function availabilityOf(row: NuniMerchantWorkspace) {
@@ -37,7 +43,7 @@ function availabilityOf(row: NuniMerchantWorkspace) {
   };
 }
 
-export function workspaceDetail({ row, detail }: Confirmation) {
+function workspaceDetail({ row, detail }: Confirmation) {
   if (!detail) return null;
   // A list at a different version can confirm availability while settings still use the detail version.
   return row.readinessVersion === detail.readinessVersion
@@ -55,14 +61,28 @@ export function createMerchantConfirmations() {
   let includeVerifiedWorkspaces = false;
   const receipts = new Map<string, NuniMerchantApplication>();
   const entries = new Map<string, WorkspaceObservations>();
-  let listDenialRevision = 0;
-  const access = new Map<string, { request: number; denied: boolean }>();
+  let listRevocation = 0;
+  const revocations = new Map<string, number>();
+  const verified = new Map<string, number>();
   const menus = new Set<string>();
   let request = 0;
+  const beginRequest = () => ++request;
 
-  function verify(key: string, revision: number, denied: boolean) {
-    if (revision < (access.get(key)?.request ?? 0)) return;
-    access.set(key, { request: revision, denied });
+  function revokedThrough(key: string) {
+    return Math.max(listRevocation, revocations.get(key) ?? 0);
+  }
+
+  function revoke(key?: string) {
+    // A denial invalidates data already observed and every request issued before it arrived.
+    if (key === undefined) {
+      listRevocation = request;
+      entries.clear();
+      menus.clear();
+    } else {
+      revocations.set(key, request);
+      entries.delete(key);
+      menus.delete(key);
+    }
   }
 
   function withMenu<T extends NuniMerchantWorkspace>(key: string, row: T): T {
@@ -71,28 +91,28 @@ export function createMerchantConfirmations() {
       : row;
   }
 
-  function merge(
-    next: NuniMerchantWorkspace | NuniMerchantWorkspaceDetail,
-    revision: number,
-  ): Confirmation {
+  function merge(next: NuniMerchantWorkspace, revision: number) {
     const key = workspaceKey(next);
+    if (revision <= revokedThrough(key)) return;
     const entry = entries.get(key) ?? {};
-    if (revision > listDenialRevision) {
-      entry.row = latestObservation(entry.row, { value: next, revision });
-      if ('applicationId' in next)
-        entry.detail = latestObservation(entry.detail, { value: next, revision });
-      entries.set(key, entry);
-    }
+    entry.row = latestObservation(entry.row, next, revision);
+    entries.set(key, entry);
+    if (!entry.row.value.missingRequirements.includes('menu')) menus.add(key);
+    return entry;
+  }
 
-    const row = entry.row?.value ?? next;
-    if (entry.row && !row.missingRequirements.includes('menu')) menus.add(key);
-    const detail = entry.detail?.value;
-    return { row: withMenu(key, row), detail: detail && withMenu(key, detail) };
+  function confirmDetail(next: NuniMerchantWorkspaceDetail, revision: number, verifiesAccess: boolean) {
+    const key = workspaceKey(next);
+    const entry = merge(next, revision);
+    if (entry) {
+      entry.detail = latestObservation(entry.detail, next, revision);
+      if (verifiesAccess && revision > (verified.get(key) ?? 0)) verified.set(key, revision);
+    }
+    return detailFor(key);
   }
 
   function hasVerifiedAccess(key: string) {
-    const verification = access.get(key);
-    return !!verification && !verification.denied && verification.request > listDenialRevision;
+    return (verified.get(key) ?? 0) > revokedThrough(key);
   }
 
   function detailFor(key: string) {
@@ -105,8 +125,8 @@ export function createMerchantConfirmations() {
     });
   }
 
-  function confirmMenu(key: string) {
-    menus.add(key);
+  function confirmMenu(key: string, revision: number) {
+    if (revision > revokedThrough(key)) menus.add(key);
   }
 
   function mergeApplications(rows: NuniMerchantApplication[]) {
@@ -145,19 +165,11 @@ export function createMerchantConfirmations() {
       lists.workspaces = rows;
       for (const row of rows) merge(row, revision);
     },
-    rejectWorkspaceList(revision: number, denied: boolean) {
+    rejectWorkspaceList(denied: boolean) {
       includeVerifiedWorkspaces = !denied;
       if (denied) {
         delete lists.workspaces;
-        listDenialRevision = revision;
-        for (const [key, entry] of entries) {
-          if (entry.detail && entry.detail.revision <= revision) delete entry.detail;
-          if (entry.row && entry.row.revision <= revision) {
-            menus.delete(key);
-            if (entry.detail) entry.row = entry.detail;
-            else entries.delete(key);
-          }
-        }
+        revoke();
       }
     },
     mergeApplications,
@@ -180,7 +192,7 @@ export function createMerchantConfirmations() {
       for (const [key, entry] of entries) {
         if (entry.row) found.set(key, entry.row.value);
       }
-      for (const key of access.keys()) {
+      for (const key of new Set([...verified.keys(), ...revocations.keys()])) {
         if (found.has(key)) continue;
         const split = key.indexOf(':');
         if (split <= 0) continue;
@@ -200,7 +212,8 @@ export function createMerchantConfirmations() {
         programs: lists.programs ?? [],
         workspaces: [...workspaces].flatMap(([key, row]) => {
           const entry = entries.get(key);
-          return access.get(key)?.denied ? [] : [withMenu(key, entry?.row?.value ?? row)];
+          if (revocations.has(key) && !hasVerifiedAccess(key)) return [];
+          return [withMenu(key, entry?.row?.value ?? row)];
         }),
         applications: [
           ...[...receipts.values()].reverse(),
@@ -217,22 +230,22 @@ export function createMerchantConfirmations() {
       }
       return statuses;
     },
-    merge,
+    confirmDetail,
     confirmMenu,
-    beginRequest: () => ++request,
-    verify,
-    detailFor,
+    beginRequest,
+    revoke,
     needsAccessRefresh(key: string) {
       const entry = entries.get(key);
-      return access.has(key) || !!entry?.detail;
+      return verified.has(key) || revocations.has(key) || !!entry?.detail;
     },
     clear() {
       lists = {};
       includeVerifiedWorkspaces = false;
-      listDenialRevision = 0;
+      listRevocation = 0;
       receipts.clear();
       entries.clear();
-      access.clear();
+      revocations.clear();
+      verified.clear();
       menus.clear();
     },
   };

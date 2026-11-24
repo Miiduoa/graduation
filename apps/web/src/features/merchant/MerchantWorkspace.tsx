@@ -356,7 +356,7 @@ function AccountWorkspace({
               if (expired(error)) expire();
               else {
                 addTargets(confirmed.knownWorkspaces());
-                confirmed.rejectWorkspaceList(listRevision, denied(error));
+                confirmed.rejectWorkspaceList(denied(error));
                 publishOverview();
               }
             }
@@ -397,8 +397,7 @@ function AccountWorkspace({
           try {
             const detail = await operations.get(item.tenantId, item.locationId);
             if (!isCurrent()) return;
-            confirmed.verify(key, revision, false);
-            confirmed.merge(detail, revision);
+            confirmed.confirmDetail(detail, revision, true);
             publishOverview();
           } catch (error) {
             if (!isCurrent()) return;
@@ -406,7 +405,7 @@ function AccountWorkspace({
               expire();
             } else if (denied(error)) {
               accessDenied = true;
-              confirmed.verify(key, revision, true);
+              confirmed.revoke(key);
               publishOverview();
             } else {
               detailUnavailable = true;
@@ -534,10 +533,7 @@ function AccountWorkspace({
   const onWorkspaceChanged = useCallback(
     (detail: NuniMerchantWorkspaceDetail, verifiedAccess: boolean, revision: number) => {
       if (!mounted.current || !enabled.current) return null;
-      const key = workspaceKey(detail);
-      if (verifiedAccess) confirmed.verify(key, revision, false);
-      confirmed.merge(detail, revision);
-      const confirmedDetail = confirmed.detailFor(key);
+      const confirmedDetail = confirmed.confirmDetail(detail, revision, verifiedAccess);
       if (confirmedDetail) setHasVerifiedLocation(true);
       publishOverview();
       return confirmedDetail;
@@ -546,18 +542,18 @@ function AccountWorkspace({
   );
 
   const onWorkspaceDenied = useCallback(
-    (tenantId: string, locationId: string, revision: number) => {
+    (tenantId: string, locationId: string) => {
       if (!mounted.current || !enabled.current) return;
-      confirmed.verify(workspaceKey({ tenantId, locationId }), revision, true);
+      confirmed.revoke(workspaceKey({ tenantId, locationId }));
       publishOverview();
     },
     [publishOverview, confirmed],
   );
 
   const onMenuConfirmed = useCallback(
-    (detail: NuniMerchantWorkspaceDetail) => {
+    (detail: NuniMerchantWorkspaceDetail, revision: number) => {
       if (!mounted.current || !enabled.current) return;
-      confirmed.confirmMenu(workspaceKey(detail));
+      confirmed.confirmMenu(workspaceKey(detail), revision);
       publishOverview();
     },
     [confirmed, publishOverview],
