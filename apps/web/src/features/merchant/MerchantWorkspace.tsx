@@ -573,10 +573,10 @@ function AccountWorkspace({
   const onWorkspaceChanged = useCallback(
     (detail: NuniMerchantWorkspaceDetail, verifiedAccess: boolean, revision: number) => {
       if (!mounted.current || !enabled.current) return null;
-      const confirmedDetail = confirmed.confirmDetail(detail, revision, verifiedAccess);
-      if (confirmedDetail) setHasVerifiedLocation(true);
+      const confirmation = confirmed.confirmDetail(detail, revision, verifiedAccess);
+      if (confirmation) setHasVerifiedLocation(true);
       publishOverview();
-      return confirmedDetail;
+      return confirmation;
     },
     [publishOverview, confirmed],
   );

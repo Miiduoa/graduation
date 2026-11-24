@@ -67,7 +67,7 @@ it('keeps a newer legacy list readable without merging it into the delayed detai
   const detailRevision = confirmed.beginRequest();
   confirmed.mergeWorkspaceList([legacyRow], confirmed.beginRequest());
 
-  expect(confirmed.confirmDetail(detail, detailRevision, true)).toEqual(detail);
+  expect(confirmed.confirmDetail(detail, detailRevision, true)).toEqual({ detail, won: false });
   expect(confirmed.overview()?.workspaces).toEqual([legacyRow]);
 
   const lowerVersion = { ...detail, readinessVersion: 6 };
@@ -77,7 +77,7 @@ it('keeps a newer legacy list readable without merging it into the delayed detai
 
   const sameVersion = { ...detail, missingRequirements: ['settings'] };
   expect(confirmed.confirmDetail(sameVersion, confirmed.beginRequest(), true))
-    .toMatchObject(sameVersion);
+    .toEqual({ detail: sameVersion, won: true });
   expect(confirmed.overview()?.workspaces).toMatchObject([sameVersion]);
 });
 

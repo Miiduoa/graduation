@@ -1034,6 +1034,39 @@ it.each([
   },
 );
 
+it('discards a v7 pause notice when an earlier background read confirms v8 reopening', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const open = { ...detail('store-a', true), readinessVersion: 7 };
+  const paused = { ...open, locationStatus: 'closed', publicAccess: false };
+  const reopened = { ...open, readinessVersion: 8 };
+  let finishBackground!: (value: typeof reopened) => void;
+  const background = new Promise<typeof reopened>((resolve) => { finishBackground = resolve; });
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(open)
+    .mockReturnValueOnce(background)
+    .mockResolvedValue(open);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
+    if (resource === path) return readDetail();
+    if (resource === `${path}/availability`) return Promise.resolve(paused);
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByRole('button', { name: '暫停接單' });
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+  await act(async () => window.history.forward());
+  fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+  await screen.findByText('門市狀態已更新：暫停接單。');
+
+  await act(async () => finishBackground(reopened));
+  expect(screen.getByText('營業中')).toBeTruthy();
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
+  expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
+});
+
 it.each([403, 404])('revokes a confirmed store after a later stale list precedes detail denial %s', async (status) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const open = { ...detail('store-a', true), readinessVersion: 6 };

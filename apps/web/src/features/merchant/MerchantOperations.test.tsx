@@ -132,54 +132,133 @@ function confirmMenu() {
   fireEvent.click(screen.getByLabelText(/我已確認品項、元售價/));
 }
 
-it('keeps the order desk closed when a newer unversioned list arrives before a suspended detail', async () => {
-  const confirmed = createMerchantConfirmations(drafts);
-  const suspended = { ...initial(), activated: true, readinessVersion: 7 };
-  const pending = deferred<NuniMerchantWorkspaceDetail>();
-  request.mockReturnValue(pending.promise);
-  const orders = () => (
-    <MerchantOperations
-      context="account-a"
-      tenantId={suspended.tenantId}
-      locationId={suspended.locationId}
-      suspended={false}
-      drafts={drafts}
-      beginRequest={confirmed.beginRequest}
-      onChanged={(detail, verifiedAccess, revision) =>
-        confirmed.confirmDetail(detail, revision, verifiedAccess)
-      }
-      onExpired={onExpired}
-      confirmedDetail={confirmed.verifiedDetails().get(workspaceKey(suspended)) ?? null}
-      navigation={{
-        section: 'orders',
-        queue: 'active',
-        backHref: '/merchant/workspace',
-        onNavigate: vi.fn(),
-      }}
-    />
-  );
-  const mounted = render(orders());
-  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
-  confirmed.mergeWorkspaceList(
-    [
-      {
-        ...suspended,
-        readinessVersion: undefined,
-        merchantStatus: 'active',
-        locationStatus: 'open',
-        publicAccess: true,
-        missingRequirements: [],
-      },
-    ],
-    confirmed.beginRequest(),
-  );
-  await act(async () => pending.resolve(suspended));
-  mounted.rerender(orders());
+it.each(['legacy list first', 'versioned suspension first'])(
+  'keeps the order desk closed with a suspended v7 confirmation (%s)',
+  async (order) => {
+    const confirmed = createMerchantConfirmations(drafts);
+    const suspended = { ...initial(), activated: true, readinessVersion: 7 };
+    const openDetail = {
+      ...suspended,
+      merchantStatus: 'active',
+      locationStatus: 'open',
+      publicAccess: true,
+      missingRequirements: [],
+    };
+    const legacyRow = { ...openDetail, readinessVersion: undefined };
+    const pending = deferred<NuniMerchantWorkspaceDetail>();
+    request.mockImplementation((path) =>
+      path === base ? pending.promise : Promise.resolve({ orders: [] }),
+    );
+    const orders = () => (
+      <MerchantOperations
+        context="account-a"
+        tenantId={suspended.tenantId}
+        locationId={suspended.locationId}
+        suspended={false}
+        drafts={drafts}
+        beginRequest={confirmed.beginRequest}
+        onChanged={(detail, verifiedAccess, revision) =>
+          confirmed.confirmDetail(detail, revision, verifiedAccess)
+        }
+        onExpired={onExpired}
+        confirmedDetail={confirmed.verifiedDetails().get(workspaceKey(suspended)) ?? null}
+        navigation={{
+          section: 'orders',
+          queue: 'active',
+          backHref: '/merchant/workspace',
+          onNavigate: vi.fn(),
+        }}
+      />
+    );
+    const mounted = render(orders());
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    if (order === 'legacy list first') {
+      confirmed.mergeWorkspaceList([legacyRow], confirmed.beginRequest());
+      await act(async () => pending.resolve(suspended));
+    } else {
+      await act(async () => pending.resolve(openDetail));
+      confirmed.mergeWorkspaceList([suspended], confirmed.beginRequest());
+      mounted.rerender(orders());
+      expect(screen.getByRole('heading', { name: '這間門市尚未開放訂單工作台' })).toBeTruthy();
+      confirmed.mergeWorkspaceList([legacyRow], confirmed.beginRequest());
+    }
+    mounted.rerender(orders());
 
-  expect(screen.getByRole('heading', { name: '這間門市尚未開放訂單工作台' })).toBeTruthy();
-  expect(screen.queryByRole('region', { name: '門市訂單工作台' })).toBeNull();
-  expect(request.mock.calls.map(([path]) => path)).toEqual([base]);
-});
+    expect(screen.getByRole('heading', { name: '這間門市尚未開放訂單工作台' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: '門市訂單工作台' })).toBeNull();
+    if (order === 'legacy list first') expect(request.mock.calls.map(([path]) => path)).toEqual([base]);
+  },
+);
+
+it.each(['settings form', 'counter payment'])(
+  'only reports a winning settings receipt and hides it after a newer version (%s)',
+  async (entry) => {
+    const confirmed = createMerchantConfirmations(drafts);
+    const form = entry === 'settings form';
+    if (!form) {
+      current = {
+        ...current,
+        activated: true,
+        paymentMode: 'online-and-counter',
+        managerConfirmed: true,
+        termsVersion: 'merchant-terms-v1',
+      };
+    }
+    const key = workspaceKey(current);
+    const workspace = () => (
+      <MerchantOperations
+        context="account-a"
+        tenantId={current.tenantId}
+        locationId={current.locationId}
+        suspended={false}
+        drafts={drafts}
+        beginRequest={confirmed.beginRequest}
+        onChanged={(detail, verifiedAccess, revision) =>
+          confirmed.confirmDetail(detail, revision, verifiedAccess)
+        }
+        onExpired={onExpired}
+        confirmedDetail={confirmed.verifiedDetails().get(key) ?? null}
+        receiptFloorFor={(version) => confirmed.workspaceReceiptFloor(key, version)}
+      />
+    );
+    const mounted = render(workspace());
+    await waitFor(() => expect(confirmed.verifiedDetails().has(key)).toBe(true));
+    mounted.rerender(workspace());
+    await screen.findByText('米飯店／一樓門市');
+    if (form) fireEvent.click(screen.getByLabelText(/我確認營運資訊正確/));
+    const submit = form ? '儲存營運設定' : '確認改為櫃檯付款';
+    const success = form ? '營運設定已儲存。' : '已改為現場櫃檯付款。';
+    const pending = deferred<NuniMerchantWorkspaceDetail>();
+    request.mockImplementationOnce(() => pending.promise);
+    fireEvent.click(button(submit));
+    confirmed.confirmDetail({ ...current, readinessVersion: 2 }, confirmed.beginRequest(), true);
+    const receipt: NuniMerchantWorkspaceDetail = {
+      ...current,
+      readinessVersion: 2,
+      managerConfirmed: true,
+      termsVersion: 'merchant-terms-v1',
+      paymentMode: 'counter-only',
+    };
+    await act(async () => pending.resolve(receipt));
+    mounted.rerender(workspace());
+
+    expect(screen.queryByText(success)).toBeNull();
+    if (form) {
+      expect(drafts.get(key)?.settings?.agreed).toBe(true);
+      fireEvent.click(button('改用目前設定'));
+      fireEvent.click(screen.getByLabelText(/我確認營運資訊正確/));
+    }
+
+    request.mockResolvedValueOnce({ ...receipt, readinessVersion: 3 });
+    fireEvent.click(button(submit));
+    await waitFor(() => expect(confirmed.verifiedDetails().get(key)?.readinessVersion).toBe(3));
+    mounted.rerender(workspace());
+    await screen.findByText(success);
+    confirmed.confirmDetail({ ...receipt, readinessVersion: 4 }, confirmed.beginRequest(), true);
+    mounted.rerender(workspace());
+    expect(screen.queryByText(success)).toBeNull();
+  },
+);
 
 it('completes settings, one-time menu, confirmed activation and pause/resume with server receipts', async () => {
   await open();

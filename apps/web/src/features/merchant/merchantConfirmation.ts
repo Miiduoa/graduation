@@ -9,9 +9,12 @@ import type { NuniMerchantWorkspaceDetail } from '@campus/shared/src/nuniMerchan
 export type MerchantOverview = Awaited<ReturnType<typeof loadMerchantOverview>>;
 
 type Observation<T = NuniMerchantWorkspace> = { value: T; revision: number; version?: number };
+export type DetailConfirmation = { detail: NuniMerchantWorkspaceDetail; won: boolean };
+
 type WorkspaceObservations = {
   confirmedRevision: number;
   row?: Observation;
+  versionedRow?: Observation;
   detail?: Observation<NuniMerchantWorkspaceDetail>;
 };
 function latestObservation<T extends NuniMerchantWorkspace>(
@@ -118,10 +121,13 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       if (next.missingRequirements.includes('menu')) {
         discardMenuReceipt(key);
       }
-      // A legacy list can update the displayed row before a versioned detail confirms the change.
-      const previous = entry.row?.value.readinessVersion === undefined ? entry.detail : entry.row;
+    }
+    if (next.readinessVersion !== undefined) {
+      // Versioned operating state keeps its own order when legacy rows update the list.
+      const previous = entry.versionedRow;
+      const versioned = latestObservation(previous, next, revision);
       if (
-        next.readinessVersion !== undefined &&
+        versioned.revision === revision &&
         previous &&
         merchantWorkspaceStateLabel(previous.value) !== merchantWorkspaceStateLabel(next)
       ) {
@@ -135,13 +141,18 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
           advanceReceiptFloor(key, revision - 1);
         }
       }
+      entry.versionedRow = versioned;
     }
     entry.row = row;
     entries.set(key, entry);
     return entry;
   }
 
-  function confirmDetail(next: NuniMerchantWorkspaceDetail, revision: number, verifiesAccess: boolean) {
+  function confirmDetail(
+    next: NuniMerchantWorkspaceDetail,
+    revision: number,
+    verifiesAccess: boolean,
+  ): DetailConfirmation | null {
     const key = workspaceKey(next);
     const version = entries.get(key)?.row?.version;
     // A stale detail must not confirm access or supersede an outstanding denial.
@@ -150,7 +161,11 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     if (!entry || next.readinessVersion !== entry.row?.version) return null;
     entry.detail = latestObservation(entry.detail, next, revision);
     if (verifiesAccess && revision > (verified.get(key) ?? 0)) verified.set(key, revision);
-    return detailFor(key);
+    const detail = detailFor(key);
+    return detail && {
+      detail,
+      won: entry.row.revision === revision && entry.detail.revision === revision,
+    };
   }
 
   function hasVerifiedAccess(key: string) {
@@ -163,9 +178,14 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const detail = entry.detail.value;
     if (detail.readinessVersion !== entry.row.version) return null;
     const row = entry.row.value;
-    // The known version floor orders responses. Only an explicitly versioned row
-    // can contribute fields to the matching detail snapshot.
-    if (row.readinessVersion !== detail.readinessVersion) return detail;
+    if (row.readinessVersion !== detail.readinessVersion) {
+      // A legacy row can win list ordering while the last versioned row still
+      // supplies the confirmed operating state for the matching detail.
+      const versioned = entry.versionedRow?.value;
+      if (versioned?.readinessVersion !== detail.readinessVersion) return detail;
+      const { activated, merchantStatus, locationStatus, publicAccess } = versioned;
+      return { ...detail, activated, merchantStatus, locationStatus, publicAccess };
+    }
     return {
       ...detail,
       ...row,
