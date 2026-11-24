@@ -31,6 +31,16 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function directoryText(value: unknown) {
+  return typeof value === 'string' ? value.trim() || undefined : undefined;
+}
+
+function directoryTerms(value: unknown) {
+  return Array.isArray(value)
+    ? value.flatMap((entry) => directoryText(entry) || [])
+    : undefined;
+}
+
 async function loadCatalog(): Promise<BrowseSchool[]> {
   const response = await fetch('/api/schools', {
     cache: 'no-store',
@@ -59,6 +69,10 @@ async function loadCatalog(): Promise<BrowseSchool[]> {
     return {
       id: school.id,
       name: school.name,
+      shortName: directoryText(school.shortName),
+      code: directoryText(school.code),
+      aliases: directoryTerms(school.aliases),
+      domains: directoryTerms(school.domains),
       ...(school.status === 'open' || school.status === 'not-open'
         ? { status: school.status }
         : {}),
