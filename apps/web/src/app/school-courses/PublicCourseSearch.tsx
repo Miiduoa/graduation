@@ -442,8 +442,19 @@ function PublicCourseSearchForm({
 
   // Match native's source-freshness guidance: a successful search does not
   // establish that the university has published an up-to-date offering.
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    const update = () => setNow(Date.now());
+    update();
+    window.addEventListener('focus', update);
+    document.addEventListener('visibilitychange', update);
+    return () => {
+      window.removeEventListener('focus', update);
+      document.removeEventListener('visibilitychange', update);
+    };
+  }, []);
   const fetchedAt = result?.status === 'ready' ? result.fetchedAt : undefined;
-  const fetchAgeMs = fetchedAt ? Date.now() - Date.parse(fetchedAt) : null;
+  const fetchAgeMs = fetchedAt && now !== null ? now - Date.parse(fetchedAt) : null;
   const fetchIsOld = fetchAgeMs !== null && fetchAgeMs > 24 * 60 * 60 * 1000;
   // Allow a small client/server clock skew without presenting false warnings.
   const fetchIsFuture = fetchAgeMs !== null && fetchAgeMs < -5 * 60 * 1000;
