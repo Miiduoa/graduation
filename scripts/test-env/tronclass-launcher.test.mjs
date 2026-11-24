@@ -839,7 +839,7 @@ test('launcher startup unlinks a leftover FIFO pgid without blocking', async () 
   }
 });
 
-test('launcher cleanup tracks a group spawned after the first child scan', async () => {
+test('launcher cleanup tracks a group spawned after the initial two-second polling window', async () => {
   const { spawn } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
   const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-latespawn-'));
@@ -847,14 +847,22 @@ test('launcher cleanup tracks a group spawned after the first child scan', async
   const grandchildPidFile = path.join(dir, 'grandchild.pid');
   const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
   try {
+    // Let the fixture finish installing its signal handlers before discovery.
+    writeFileSync(path.join(dir, 'ps'), `#!/bin/bash
+if [[ "$*" == *--ppid* && ! -s "$TRONCLASS_SELFTEST_GRANDCHILD" ]]; then
+  exit 1
+fi
+exec /bin/ps "$@"
+`, { mode: 0o755 });
     const proc = spawn('bash', [script], {
       env: {
         ...process.env,
+        PATH: `${dir}:${process.env.PATH}`,
         TRONCLASS_RUNTIME_DIR: dir,
         TRONCLASS_SIGNAL_SELFTEST: '1',
         TRONCLASS_SELFTEST_CHILD: childPidFile,
         TRONCLASS_SELFTEST_GRANDCHILD: grandchildPidFile,
-        TRONCLASS_TEST_DELAY_SPAWN_MS: '800',
+        TRONCLASS_TEST_DELAY_SPAWN_MS: '3000',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -869,7 +877,7 @@ test('launcher cleanup tracks a group spawned after the first child scan', async
     assert.equal(existsSync(childPidFile), false);
     proc.kill('SIGTERM');
     const exited = await new Promise(resolve => {
-      const timer = setTimeout(() => resolve('timeout'), 6000);
+      const timer = setTimeout(() => resolve('timeout'), 9000);
       proc.on('exit', (code, signal) => {
         clearTimeout(timer);
         resolve({ code, signal });
@@ -878,13 +886,10 @@ test('launcher cleanup tracks a group spawned after the first child scan', async
     assert.notEqual(exited, 'timeout');
     assert.equal(exited.code, 143);
     await new Promise(resolve => setTimeout(resolve, 200));
-    if (existsSync(childPidFile)) {
-      const childPid = Number(readFileSync(childPidFile, 'utf8').trim());
-      assert.throws(() => process.kill(childPid, 0));
-    }
-    if (existsSync(grandchildPidFile)) {
-      const grandchildPid = Number(readFileSync(grandchildPidFile, 'utf8').trim());
-      assert.throws(() => process.kill(grandchildPid, 0));
+    for (const pidFile of [childPidFile, grandchildPidFile]) {
+      assert.ok(existsSync(pidFile), `Expected ${path.basename(pidFile)} to appear after SIGTERM`);
+      const pid = Number(readFileSync(pidFile, 'utf8').trim());
+      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

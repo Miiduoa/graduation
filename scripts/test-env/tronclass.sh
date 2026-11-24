@@ -320,10 +320,7 @@ tronclass_stop_logged() {
   local log="$2"
   local sig="${3:-TERM}"
   local memory="$4"
-  # Signal only the group recorded in memory by this run. Never consult a
-  # sidecar from a previous run. If the child group is not known yet, only
-  # signal this wrapper and its current children, and keep those discovered
-  # groups for the later wait and KILL rounds.
+  # Keep this run's discovered groups for the later wait and KILL rounds.
   [ -n "$wrapper" ] || [ -n "$memory" ] || return 0
   local memory_record=""
   [ -n "$memory" ] && memory_record="$(tronclass_parse_record "$memory" 2>/dev/null || true)"
@@ -346,19 +343,12 @@ tronclass_stop_logged() {
   # If this run has not recorded a child group yet, wait for the wrapper to
   # spawn it before signalling the wrapper itself, so a late detached group
   # is still captured for the later wait and KILL rounds.
-  if [ -z "$memory_record" ] && [ -n "$wrapper" ]; then
-    local wait_i
-    for wait_i in $(seq 1 20); do
-      tronclass_discover_wrapper_children
-      if [ "${#records[@]}" -gt 0 ]; then
-        break
-      fi
-      kill -0 "$wrapper" 2>/dev/null || break
-      sleep 0.1
-    done
-  else
+  tronclass_discover_wrapper_children
+  while [ "${#records[@]}" -eq 0 ] && [ -n "$wrapper" ] && kill -0 "$wrapper" 2>/dev/null; do
+    sleep 0.1
     tronclass_discover_wrapper_children
-  fi
+  done
+  tronclass_discover_wrapper_children
   local record
   for record in "${records[@]+"${records[@]}"}"; do
     tronclass_signal_record "$record" "$sig"
