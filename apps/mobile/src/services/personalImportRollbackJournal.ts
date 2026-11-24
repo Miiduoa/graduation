@@ -316,9 +316,8 @@ async function readWebRollback(key: string, verifiedPrimary?: string): Promise<s
     }
     const current = fingerprint(verifiedPrimary ?? await AsyncStorage.getItem(key));
     if (storage.getItem(backupKey) !== encoded) continue;
-    return current === journal.before || current === journal.attempted
-      ? journal.original ?? 'null'
-      : undefined;
+    if (current !== journal.before && current !== journal.attempted) return undefined;
+    return typeof journal.original === 'string' ? journal.original : 'null';
   }
 }
 
