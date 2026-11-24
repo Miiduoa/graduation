@@ -48,3 +48,17 @@ proc_signal_group() {
     proc_group_members "$group" "$start" "$marker" "$signal"
   fi
 }
+
+# Privileged cleanup validates a live leader and signals only marked members.
+# The launcher uses proc_signal_group for its already-verified group records.
+proc_signal_marked_group() {
+  local group="$1" start="$2" marker="$3" signal="$4"
+  local proc_group proc_start proc_state
+  if proc_identity "$group"; then
+    [[ "$proc_group" == "$group" && "$proc_start" == "$start" ]] || return 0
+    if [[ "$proc_state" != Z && "$proc_state" != X ]]; then
+      grep -zFxq -- "$marker" "/proc/$group/environ" 2>/dev/null || return 0
+    fi
+  fi
+  proc_group_members "$group" "$start" "$marker" "$signal"
+}

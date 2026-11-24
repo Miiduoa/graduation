@@ -52,9 +52,15 @@ MOCK
 cat > "$mock_dir/bin/sudo" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "$1" == timeout || ( "$1" == bash && "$4" == signal-process-group ) ]]
+case "$1" in
+  mktemp) exec "$@" ;;
+  env|bash) ;;
+  *) exit 1 ;;
+esac
 export MOCK_ROOT=1
 if [[ "$1" == bash ]]; then
+  if [[ "$4" == clean-attempt-dir ]]; then exec "$@"; fi
+  [[ "$4" == signal-process-group ]]
   # Model an unrelated member of a reused numeric group at the stat
   # boundary. A positive PID signal still reaches the real test process.
   code="$3"
@@ -68,9 +74,42 @@ if [[ "$1" == bash ]]; then
       real_proc_identity "$1" || return 1
       if [[ "$1" == "$MOCK_REUSED_MEMBER_PID" ]]; then proc_group="$mock_group"; fi
     }
-    mock_group="$1"
-    proc_signal_group "$@"'
-    code="${code/'proc_signal_group "$@"'/$injection}"
+    read -r mock_group _ < "$1"
+    read_attempt_record "$@"'
+    code="${code/'read_attempt_record "$@"'/$injection}"
+  fi
+  if [[ -n "${MOCK_RECORD_ATTACK:-}" ]]; then
+    record="$5"
+    nonce="$6"
+    leader_marker="$nonce"
+    if [[ "$MOCK_RECORD_ATTACK" == marker ]]; then leader_marker=unrelated; fi
+    # The member carries the expected nonce in every case, including when
+    # its still-live leader does not.
+    PLAYWRIGHT_INSTALL_ATTEMPT="$leader_marker" setsid bash -c '
+      PLAYWRIGHT_INSTALL_ATTEMPT="$1" /bin/sleep 30 &
+      member="$!"
+      until grep -zFxq "PLAYWRIGHT_INSTALL_ATTEMPT=$1" "/proc/$member/environ"; do /bin/sleep 0.01; done
+      PLAYWRIGHT_INSTALL_ATTEMPT=unrelated /bin/sleep 30 &
+      unmarked="$!"
+      until grep -zFxq "PLAYWRIGHT_INSTALL_ATTEMPT=unrelated" "/proc/$unmarked/environ"; do /bin/sleep 0.01; done
+      echo "$unmarked" > "$2.unmarked.child-pid"
+      echo "$member" > "$2.member.child-pid"
+      echo "$$" > "$2.leader.child-pid"
+      wait
+    ' fixture "$nonce" "$MOCK_LOCK" &
+    "$REAL_TIMEOUT" 3s bash -c '
+      until [[ -s "$1.leader.child-pid" ]]; do /bin/sleep 0.01; done
+    ' fixture-ready "$MOCK_LOCK"
+    group="$(cat "$MOCK_LOCK.leader.child-pid")"
+    start="$(awk "{print \$22}" "/proc/$group/stat")"
+    rm -f -- "$record"
+    target="$record"
+    if [[ "$MOCK_RECORD_ATTACK" == symlink ]]; then
+      target="$MOCK_LOCK.record-target"
+      ln -s "$target" "$record"
+    fi
+    (umask 077; printf "%s %s %s\n" "$group" "$start" "$nonce" > "$target")
+    if [[ "$MOCK_RECORD_ATTACK" == replaced ]]; then chmod 666 "$record"; fi
   fi
   exec bash -c '
     kill() { printf "sudo:kill:%s\n" "$*" >> "$MOCK_LOG"; builtin kill "$@"; }
@@ -79,6 +118,9 @@ if [[ "$1" == bash ]]; then
     eval "$code"
   ' signal-test "$code" "${@:5}"
 fi
+[[ "$1" == env && "$2" == PLAYWRIGHT_INSTALL_ATTEMPT=* && "$3" == timeout ]]
+export "$2"
+shift 2
 args=("$@")
 if [[ "${args[6]:-}" == record-process-group ]]; then args[8]=attempt-id; fi
 line="${args[*]}"
@@ -309,6 +351,30 @@ if bash "$script_dir/install-playwright.sh" --unsupported >/dev/null 2>&1; then
 fi
 [[ ! -s "$MOCK_LOG" ]]
 
+# Test the elevated record reader with real, still-live process groups.
+# Each rejected record would otherwise identify a marked member correctly.
+for mode in replaced symlink marker valid; do
+  export MOCK_RECORD_ATTACK="$mode" MOCK_TIMEOUT_FAILS=1 MOCK_LOCK="$mock_dir/record-$mode"
+  : > "$MOCK_LOG"
+  bash "$script_dir/install-playwright.sh" --fonts-noto-cjk > "$mock_dir/record-output.log" 2>&1
+  leader="$(cat "$MOCK_LOCK.leader.child-pid")"
+  member="$(cat "$MOCK_LOCK.member.child-pid")"
+  if [[ "$mode" == valid ]]; then
+    grep -qx "sudo:kill:-KILL -- $leader" "$MOCK_LOG"
+    grep -qx "sudo:kill:-KILL -- $member" "$MOCK_LOG"
+  else
+    [[ "$(grep -c '^sudo:kill:' "$MOCK_LOG" || true)" == 0 ]]
+    kill -0 "$leader" "$member"
+  fi
+  unmarked="$(cat "$MOCK_LOCK.unmarked.child-pid")"
+  kill -0 "$unmarked"
+  [[ "$(grep -cx "sudo:kill:-KILL -- $unmarked" "$MOCK_LOG" || true)" == 0 ]]
+  kill -KILL "$leader" "$member" "$unmarked" 2>/dev/null || true
+  rm -f "$MOCK_LOCK.leader.child-pid" "$MOCK_LOCK.member.child-pid" "$MOCK_LOCK.unmarked.child-pid"
+done
+unset MOCK_RECORD_ATTACK
+export MOCK_TIMEOUT_FAILS=0
+
 # A real timeout must kill the lock holder across the simulated sudo session,
 # then repair interrupted dpkg state before the next apt attempt can succeed.
 # Run with the host's timeout and with a modelled child-only timeout, so the
@@ -431,4 +497,4 @@ assert_recovery_deadlines 1
 [[ "$(grep -c '^python:-m playwright install chromium$' "$MOCK_LOG" || true)" -eq 0 ]]
 grep -q 'could not recover interrupted package configuration' "$mock_dir/repair-output.log"
 
-echo 'Browser installation bounded retry tests: 16/16 passed'
+echo 'Browser installation bounded retry tests: 20/20 passed'

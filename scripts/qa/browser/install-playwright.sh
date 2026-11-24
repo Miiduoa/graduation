@@ -12,35 +12,58 @@ fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/../../process-identity.sh"
 
-# Record the timeout group before exec. Its PGID is the leader PID. Some timeout implementations only
-# kill their direct child, leaving package helpers holding the dpkg/apt lock.
-attempt_dir="$(mktemp -d)"
-trap 'rm -rf "$attempt_dir"' EXIT
-attempt_group_file="$attempt_dir/process-group"
+# sudo creates the record directory under the system sticky directory.
+# Keep it private to the elevated attempts and never use the caller's TMPDIR.
+attempt_dir=''
 proc_identity "$$"
 installer_group="$proc_group"
 
+private_attempt_dir() {
+  local dir="$1"
+  [[ ! -L /tmp && "$(stat -c '%u:%a' -- /tmp)" == 0:1777 &&
+    "$dir" =~ ^/tmp/playwright-install\.[a-zA-Z0-9]{10}$ && ! -L "$dir" && -d "$dir" &&
+    "$(stat -c '%u:%a' -- "$dir")" == "$EUID:700" ]]
+}
+
+cleanup_attempt_dir() {
+  [[ -n "$attempt_dir" ]] || return 0
+  sudo bash -c "$(declare -f private_attempt_dir)
+    private_attempt_dir \"\$1\" && rm -f -- \"\$1/process-group\" && rmdir -- \"\$1\"" clean-attempt-dir "$attempt_dir"
+}
+trap cleanup_attempt_dir EXIT
+
 record_attempt() {
-  IFS= read -r attempt_id < /proc/sys/kernel/random/uuid
-  : > "$attempt_group_file"
-  record_group=(bash -c "$(declare -f proc_identity)
+  if [[ -z "$attempt_dir" ]]; then
+    attempt_dir="$(sudo mktemp -d /tmp/playwright-install.XXXXXXXXXX)" || return 1
+    [[ "$attempt_dir" =~ ^/tmp/playwright-install\.[a-zA-Z0-9]{10}$ ]] || { attempt_dir=''; return 1; }
+  fi
+  IFS= read -r attempt_id < /proc/sys/kernel/random/uuid || return 1
+  record_group=(bash -c "$(declare -f proc_identity private_attempt_dir)
+    private_attempt_dir \"\${1%/*}\" || exit 1
     proc_identity \$\$ || exit 1
     group=\$proc_group
     proc_identity \$group && [[ \$group == \$proc_group ]] || exit 1
-    printf '%s %s\\n' \"\$group\" \"\$proc_start\" > \"\$1\" || exit 1
-    export PLAYWRIGHT_INSTALL_ATTEMPT=\"\$2\"
+    umask 077
+    rm -f -- \"\$1\" || exit 1
+    (set -o noclobber; printf '%s %s %s\\n' \"\$group\" \"\$proc_start\" \"\$2\" > \"\$1\") || exit 1
     shift 2
-    exec \"\$@\"" record-process-group "$attempt_group_file" "$attempt_id")
+    exec \"\$@\"" record-process-group "$attempt_dir/process-group" "$attempt_id")
+}
+
+read_attempt_record() {
+  local file="$1" nonce="$2" installer_group="$3" group start recorded_nonce extra
+  private_attempt_dir "${file%/*}" || return 1
+  # In a private directory the unprivileged caller cannot swap the checked file.
+  [[ ! -L "$file" && -f "$file" && "$(stat -c '%u:%a:%h' -- "$file")" == "$EUID:600:1" ]] || return 1
+  read -r group start recorded_nonce extra < "$file" || return 1
+  [[ "$group" =~ ^([2-9]|[1-9][0-9]+)$ && "$start" =~ ^[0-9]+$ &&
+    "$group" != "$installer_group" && "$recorded_nonce" == "$nonce" && -z "$extra" ]] || return 1
+  proc_signal_marked_group "$group" "$start" "PLAYWRIGHT_INSTALL_ATTEMPT=$nonce" KILL
 }
 
 kill_timed_out_group() {
-  local group start extra
-  read -r group start extra < "$attempt_group_file" || return 0
-  [[ "$group" =~ ^([2-9]|[1-9][0-9]+)$ && "$start" =~ ^[0-9]+$ &&
-    "$group" != "$installer_group" && -z "$extra" ]] || return 0
-  # Read privileged /proc environments and recheck identity after elevation.
-  "$@" bash -c "$(declare -f proc_identity proc_group_leader_matches proc_group_members proc_signal_group)
-    proc_signal_group \"\$@\"" signal-process-group "$group" "$start" "PLAYWRIGHT_INSTALL_ATTEMPT=$attempt_id" KILL || true
+  "$@" bash -c "$(declare -f proc_identity proc_group_members proc_signal_marked_group private_attempt_dir read_attempt_record)
+    read_attempt_record \"\$@\"" signal-process-group "$attempt_dir/process-group" "$attempt_id" "$installer_group" || true
 }
 
 retry_install() {
@@ -57,12 +80,13 @@ retry_install() {
   for attempt in 1 2 3; do
     # sudo can start a separate session. Run timeout *after* elevation so it
     # owns and can signal the entire privileged apt process group on expiry.
-    local -a probe=()
+    local -a probe=() environment=()
     if (( ${#elevation[@]} )); then
-      record_attempt
+      record_attempt || return 1
       probe=("${record_group[@]}")
+      environment=(env "PLAYWRIGHT_INSTALL_ATTEMPT=$attempt_id")
     fi
-    if "${elevation[@]}" timeout --kill-after=5s "$deadline" "${probe[@]}" "$@"; then
+    if "${elevation[@]}" "${environment[@]}" timeout --kill-after=5s "$deadline" "${probe[@]}" "$@"; then
       return 0
     else
       install_status=$?
@@ -86,8 +110,8 @@ retry_install() {
         # The recovery command is bounded the same way as an install attempt:
         # record its process group so a timeout implementation that kills only
         # the direct child cannot leave dpkg helpers holding the package lock.
-        record_attempt
-        if "${elevation[@]}" timeout --kill-after=5s "${remaining}s" "${record_group[@]}" dpkg --configure -a; then
+        record_attempt || return 1
+        if "${elevation[@]}" env "PLAYWRIGHT_INSTALL_ATTEMPT=$attempt_id" timeout --kill-after=5s "${remaining}s" "${record_group[@]}" dpkg --configure -a; then
           recovered=1
           break
         else
