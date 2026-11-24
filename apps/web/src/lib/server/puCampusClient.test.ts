@@ -424,6 +424,64 @@ it('accepts TronClass login only after profile returns this account', async () =
   });
 });
 
+it('collects strict native profile evidence only in the explicit student candidate mode', async () => {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url.endsWith('/api/login')) return jsonResponse(200, { id: 999 }, { 'set-cookie': 'session=old; Path=/' });
+    if (url.endsWith('/api/profile')) return jsonResponse(200, {
+      id: 44, login_name: 's1234567', role: 'teacher',
+    }, { 'set-cookie': 'session=rotated; Path=/' });
+    throw new Error('unexpected URL');
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  const result = await gateway.loginTronClass('s1234567', SECRET, { route: 'student', requireStudentIdentityEvidence: true });
+  expect(result).toMatchObject({
+    userId: 44, role: '', cookies: { session: 'rotated' },
+    identityEvidence: { schoolId: 'pu', issuer: 'https://tronclass.pu.edu.tw', source: 'authenticated-profile', subject: '44' },
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(await gateway.loginTronClass('s1234567', SECRET, { route: 'student' })).not.toHaveProperty('identityEvidence');
+});
+
+it.each([
+  { id: undefined, login_name: 's1234567' },
+  { id: '44', login_name: 's1234567' },
+  { id: 44, login_name: 's1234568' },
+  { id: 44, email: 's1234567@pu.edu.tw' },
+])('does not substitute login JSON or email for strict profile evidence (%o)', async (profile) => {
+  const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+    ? jsonResponse(200, { id: 44 }, { 'set-cookie': 'session=old; Path=/' })
+    : jsonResponse(200, profile));
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true,
+  })).rejects.toMatchObject({ kind: 'unverified' });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('rejects non-JSON profile content and a revoked profile cookie in strict mode', async () => {
+  for (const profile of [
+    htmlResponse(200, JSON.stringify({ id: 44, login_name: 's1234567' })),
+    jsonResponse(200, { id: 44, login_name: 's1234567' }, { 'set-cookie': 'session=; Max-Age=0; Path=/' }),
+  ]) {
+    const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+      ? jsonResponse(200, { id: 44 }, { 'set-cookie': 'session=old; Path=/' }) : profile);
+    await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+      route: 'student', requireStudentIdentityEvidence: true,
+    })).rejects.toMatchObject({ kind: 'unverified' });
+  }
+});
+
+it('does not enter the legacy CAS fallback or send credentials to a substituted origin for identity evidence', async () => {
+  const fetchMock = vi.fn(async () => jsonResponse(400, { error: 'native not available' }));
+  const options = { route: 'student' as const, requireStudentIdentityEvidence: true };
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, options))
+    .rejects.toMatchObject({ kind: 'unverified', code: 'IDENTITY_EVIDENCE_UNAVAILABLE' });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  fetchMock.mockClear();
+  await expect(createPuCampusGateway({ fetch: fetchMock, lmsOrigin: 'https://other.example' }).loginTronClass('s1234567', SECRET, options))
+    .rejects.toMatchObject({ kind: 'unverified' });
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
 it('reads student info even if the portal HTML still has a maintenance comment', async () => {
   const gateway = createPuCampusGateway({
     fetch: async () =>

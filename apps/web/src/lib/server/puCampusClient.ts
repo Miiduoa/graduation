@@ -11,6 +11,7 @@ import {
   studentLoginHopTimeoutMs,
 } from '../schoolLoginTimeouts';
 import { createPuRelayFetch, normalizeRelayHostname, normalizeRelayTarget } from './puEdgeRelay';
+import { parseTronClassStudentIdentityEvidence, type TronClassProfileEvidence } from './tronClassIdentityEvidence';
 
 const ALCAT_ORIGIN = 'https://alcat.pu.edu.tw';
 const TRONCLASS_ORIGIN = 'https://tronclass.pu.edu.tw';
@@ -70,6 +71,8 @@ export type TronClassSession = {
   userId: number | null;
   userName: string;
   role: string;
+  /** Server-only profile evidence, not permission to mint a platform session. */
+  identityEvidence?: TronClassProfileEvidence;
 };
 
 export type TronClassCourse = {
@@ -84,6 +87,8 @@ export type TronClassLoginOptions = {
   /** 單跳上限，需與總預算分開；未傳時等於 gateway 預設逾時。 */
   hopTimeoutMs?: number;
   route?: CampusLoginRoute;
+  /** Candidate native-login path: no HTML/login-body fallback, no implicit student role. */
+  requireStudentIdentityEvidence?: boolean;
 };
 
 export type StudentLoginOptions = {
@@ -112,6 +117,7 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 type SentPage = {
   status: number;
+  contentType: string | null;
   html: string;
   cookies: CookieJar;
   json: unknown;
@@ -578,6 +584,7 @@ export function createPuCampusGateway(
           : null;
       return {
         status: response.status,
+        contentType: response.headers.get('content-type'),
         html,
         cookies: mergeCookies(init.cookies || {}, response.headers),
         location,
@@ -749,6 +756,7 @@ export function createPuCampusGateway(
     route: CampusLoginRoute,
     timeoutMsRemaining: number,
     unauthorized: 'credentials' | 'missing' = 'missing',
+    requireStudentIdentityEvidence = false,
   ): Promise<TronClassSession | null> {
     const profilePage = await send(`${lmsOrigin}/api/profile`, {
       cookies,
@@ -767,6 +775,23 @@ export function createPuCampusGateway(
       return null;
     }
     const profileData = authenticatedJson(profilePage);
+    if (requireStudentIdentityEvidence) {
+      // The general compatibility parser may recover IDs from the login response or HTML.
+      // That is not sufficient evidence for a new account identity.
+      const evidence = profilePage.status === 200 &&
+        profilePage.url === TRONCLASS_ORIGIN + '/api/profile' &&
+        /^application\/json(?:\s*;|$)/i.test(profilePage.contentType ?? '') &&
+        sessionCookieValue(profilePage.cookies)
+        ? parseTronClassStudentIdentityEvidence(profileData, account) : null;
+      if (!evidence) return null;
+      return {
+        cookies: profilePage.cookies,
+        userId: Number(evidence.subject),
+        userName: displayNameFrom(profileData!, account),
+        role: '', // LMS profile evidence does not establish school membership or any role.
+        identityEvidence: evidence,
+      };
+    }
     if (profileData && identityBelongsToAccount(account, profileData)) {
       return {
         cookies,
@@ -941,12 +966,18 @@ export function createPuCampusGateway(
 
     async loginTronClass(account, password, options = {}) {
       const started = Date.now();
-      const budget = options.timeoutMs;
+      const strict = options.requireStudentIdentityEvidence === true;
+      const budget = strict ? options.timeoutMs ?? DEFAULT_TIMEOUT_MS : options.timeoutMs;
       const hopCap = options.hopTimeoutMs ?? timeoutMs;
       const leftover = () => (budget == null ? hopCap : budget - (Date.now() - started));
       const remaining = () => Math.max(1, Math.min(hopCap, leftover()));
       const route = options.route || 'teacher';
       try {
+        if (strict && (lmsOrigin !== TRONCLASS_ORIGIN || identityOrigin !== IDENTITY_ORIGIN ||
+            route !== 'student' || !Number.isSafeInteger(budget) || budget! <= 0 || budget! > 60_000 ||
+            !Number.isSafeInteger(hopCap) || hopCap <= 0)) {
+          throw new PuCampusError('unverified', '目前無法驗證校園帳號', { route, stage: 'verify', code: 'IDENTITY_EVIDENCE_UNAVAILABLE' });
+        }
         const posted = await send(`${lmsOrigin}/api/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -958,6 +989,9 @@ export function createPuCampusGateway(
           throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'submit' });
         }
         if (posted.status === 200 && sessionCookieValue(posted.cookies)) {
+          if (strict && leftover() <= 0) throw new PuCampusError('timeout', '學校系統無回應', {
+            route, stage: 'verify', code: 'DEADLINE',
+          });
           const loginData = asRecord(posted.json);
           const session = await readTronClassProfile(
             posted.cookies,
@@ -966,10 +1000,18 @@ export function createPuCampusGateway(
             route,
             remaining(),
             'credentials',
+            strict,
           );
-          if (session) return session;
-          throw new PuCampusError('unverified', '暫時無法驗證老師身分', { route, stage: 'verify' });
+          if (session && (!strict || leftover() > 0)) return session;
+          throw new PuCampusError('unverified', strict ? '目前無法驗證校園帳號' : '暫時無法驗證老師身分', {
+            route, stage: 'verify', ...(strict ? { code: 'IDENTITY_EVIDENCE_UNAVAILABLE' } : {}),
+          });
         }
+        // The existing CAS compatibility flow is intentionally not an account proof.
+        // Integrate the separately reviewed origin-isolated CAS flow from #616 before extending this mode.
+        if (strict) throw new PuCampusError('unverified', '目前無法驗證校園帳號', {
+          route, stage: 'verify', code: 'IDENTITY_EVIDENCE_UNAVAILABLE',
+        });
         const nativeFallback = new PuCampusError('unavailable', '學校系統無回應', {
           route,
           stage: 'submit',
