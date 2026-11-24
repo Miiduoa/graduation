@@ -412,6 +412,7 @@ function PersonalCalendarWorkspace({
   const titleRef = useRef<HTMLInputElement | null>(null);
   const createButtonRef = useRef<HTMLButtonElement | null>(null);
   const dayHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const dayAgendaRef = useRef<HTMLDivElement | null>(null);
   const pendingDayReveal = useRef<string | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const pendingFocus = useRef<'editor' | 'return' | 'saved' | null>(null);
@@ -518,13 +519,13 @@ function PersonalCalendarWorkspace({
     const requestedDate = pendingDayReveal.current;
     pendingDayReveal.current = null;
     if (requestedDate && requestedDate === selectedDate && !paused) {
-      dayHeadingRef.current?.scrollIntoView?.({ block: 'start', behavior: 'instant' });
+      dayAgendaRef.current?.scrollIntoView?.({ block: 'start', behavior: 'instant' });
     }
   }, [paused, selectedDate]);
 
   const selectMonthDay = (date: string) => {
     if (date === selectedDate) {
-      dayHeadingRef.current?.scrollIntoView?.({ block: 'start', behavior: 'instant' });
+      dayAgendaRef.current?.scrollIntoView?.({ block: 'start', behavior: 'instant' });
       return;
     }
     pendingDayReveal.current = date;
@@ -874,28 +875,6 @@ function PersonalCalendarWorkspace({
             disabled={!canMutate}
           />
         )}
-        {selectedDate && (
-          <div className={workspaceStyles.daySummary}>
-            <div>
-              <h3 ref={dayHeadingRef} tabIndex={-1}>
-                {selectedDate} 的行程
-              </h3>
-              {ledger.ready && (
-                <p>{events.length ? `${events.length} 筆個人行程` : '尚無個人行程'}</p>
-              )}
-            </div>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                setSelectedDate('');
-                setCalendarView('list');
-              }}
-            >
-              查看整月列表
-            </button>
-          </div>
-        )}
         {ledger.error && (
           <p role="alert">
             {ledger.error} 讀取失敗時不會清空或覆寫現有資料；請稍後重試，暫時無法新增或刪除。
@@ -983,57 +962,81 @@ function PersonalCalendarWorkspace({
           </section>
         )}
 
-        {paused || ledger.loading ? (
-          <p role="status">正在讀取行程…</p>
-        ) : ledger.error ? null : !events.length ? (
-          <p className={styles.empty}>
-            {selectedDate
-              ? visibleDues.length
-                ? '這一天還沒有行程；下方仍可查看作業截止。'
-                : CALENDAR_DUE_EMPTY_DAY
-              : '這個月還沒有行程。'}
-            {!selectedDate && (
-              <>
-                按「新增行程」直接建立，或<Link href={importHref}>從截圖或檔案匯入</Link>。
-              </>
-            )}
-          </p>
-        ) : calendarView === 'list' || selectedDate ? (
-          <ul className={`${styles.saved} ${workspaceStyles.agenda}`} aria-label="個人行程列表">
-            {events.map((event) => (
-              <li
-                key={event.id}
-                ref={event.id === requestedEventId ? linkedEventElement : undefined}
-                tabIndex={event.id === requestedEventId ? -1 : undefined}
-                aria-current={event.id === requestedEventId ? 'true' : undefined}
+        <div ref={dayAgendaRef}>
+          {selectedDate && (
+            <div className={workspaceStyles.daySummary}>
+              <div>
+                <h3 ref={dayHeadingRef} tabIndex={-1}>
+                  {selectedDate} 的行程
+                </h3>
+                {ledger.ready && (
+                  <p>{events.length ? `${events.length} 筆個人行程` : '尚無個人行程'}</p>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setSelectedDate('');
+                  setCalendarView('list');
+                }}
               >
-                <div>
-                  <time dateTime={event.date}>
-                    {event.date}
-                    {event.endDate && event.endDate !== event.date
-                      ? ` 至 ${event.endDate}${event.allDay ? '（不含結束日）' : ''}`
-                      : ''}
-                  </time>
-                  <h3>{event.title}</h3>
-                  <p>
-                    {event.allDay ? '全天' : `${event.startTime}–${event.endTime}`} ·{' '}
-                    {event.location || '地點未填'}
-                  </p>
-                  <small>{personalEventSourceLabel(event)}</small>
-                </div>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={!ledger.ready || saving}
-                  aria-pressed={selectedId === event.id && mode === 'edit'}
-                  onClick={(click) => openEdit(event, click.currentTarget)}
+                查看整月列表
+              </button>
+            </div>
+          )}
+          {paused || ledger.loading ? (
+            <p role="status">正在讀取行程…</p>
+          ) : ledger.error ? null : !events.length ? (
+            <p className={styles.empty}>
+              {selectedDate
+                ? visibleDues.length
+                  ? '這一天還沒有行程；下方仍可查看作業截止。'
+                  : CALENDAR_DUE_EMPTY_DAY
+                : '這個月還沒有行程。'}
+              {!selectedDate && (
+                <>
+                  按「新增行程」直接建立，或<Link href={importHref}>從截圖或檔案匯入</Link>。
+                </>
+              )}
+            </p>
+          ) : calendarView === 'list' || selectedDate ? (
+            <ul className={`${styles.saved} ${workspaceStyles.agenda}`} aria-label="個人行程列表">
+              {events.map((event) => (
+                <li
+                  key={event.id}
+                  ref={event.id === requestedEventId ? linkedEventElement : undefined}
+                  tabIndex={event.id === requestedEventId ? -1 : undefined}
+                  aria-current={event.id === requestedEventId ? 'true' : undefined}
                 >
-                  編輯
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+                  <div>
+                    <time dateTime={event.date}>
+                      {event.date}
+                      {event.endDate && event.endDate !== event.date
+                        ? ` 至 ${event.endDate}${event.allDay ? '（不含結束日）' : ''}`
+                        : ''}
+                    </time>
+                    <h3>{event.title}</h3>
+                    <p>
+                      {event.allDay ? '全天' : `${event.startTime}–${event.endTime}`} ·{' '}
+                      {event.location || '地點未填'}
+                    </p>
+                    <small>{personalEventSourceLabel(event)}</small>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={!ledger.ready || saving}
+                    aria-pressed={selectedId === event.id && mode === 'edit'}
+                    onClick={(click) => openEdit(event, click.currentTarget)}
+                  >
+                    編輯
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       </section>
 
       <section

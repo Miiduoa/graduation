@@ -25,7 +25,12 @@ export function MonthCalendar({
   onMonthChange?: (month: string) => void;
   disabled: boolean;
 }) {
+  const [expandedMonth, setExpandedMonth] = useState(month);
   const [expanded, setExpanded] = useState<string[]>([]);
+  if (expandedMonth !== month) {
+    setExpandedMonth(month);
+    setExpanded([]);
+  }
   const today = emptyPersonalEventDraft().date;
   const descriptionId = useId();
   const viewportRef = useRef<HTMLDivElement | null>(null);

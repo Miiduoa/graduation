@@ -91,6 +91,23 @@ async def assert_multiweek_titles(page, config, report):
     await expect(page.get_by_label('標題', exact=True)).to_have_value(title)
     await page.get_by_role('button', name='取消', exact=True).click()
 
+    next_week = grid.get_by_role('button', name='2028-04-16', exact=True).locator('..')
+    for expanded_cell in (cell, next_week):
+        await expanded_cell.get_by_role('button', name='還有 1 筆', exact=True).click()
+        expanded, = await title_lines(expanded_cell.get_by_role('button', name=title, exact=True))
+        assert expanded['visible'] > 4 and expanded['visible'] == expanded['full'], expanded
+
+    await set_month(page, '2028-05')
+    await expect(page.get_by_role('region', name='2028-05 月格，週日起始', exact=True)).to_be_visible()
+    await set_month(page, '2028-04')
+    await expect(long_events).to_have_count(15)
+    for expanded_cell in (cell, next_week):
+        await expect(expanded_cell.get_by_role('button', name='還有 1 筆', exact=True)).to_have_attribute(
+            'aria-expanded', 'false')
+    lines = await title_lines(long_events)
+    assert all(3.9 <= row['visible'] <= 4.1 and row['full'] > 4 for row in lines), lines
+    report['checks'].append('Returning to a month restores all unselected titles to four-line previews')
+
     await day.click()
     await expect(day).to_have_attribute('aria-pressed', 'true')
     heading = page.get_by_role('heading', name='2028-04-09 的行程', exact=True)
@@ -109,6 +126,27 @@ async def assert_multiweek_titles(page, config, report):
     await day.click()
     await expect(heading).to_be_in_viewport(ratio=1)
     report['checks'].append('Narrow multiweek titles have bounded previews, expand in full, open directly and reveal the full day agenda on selection and reselection')
+
+    await long_event.click()
+    editor = page.get_by_role('region', name='編輯行程', exact=True)
+    draft = editor.get_by_label('標題', exact=True)
+    await draft.fill('保留尚未儲存的行程草稿')
+
+    other_day = grid.get_by_role('button', name='2028-04-17', exact=True)
+    other_heading = page.get_by_role('heading', name='2028-04-17 的行程', exact=True)
+    other_agenda_title = page.get_by_role(
+        'heading', name='跨校專題小組進度討論與期末成果展示準備', exact=True)
+    for _ in range(2):
+        await other_day.click()
+        await expect(other_day).to_have_attribute('aria-pressed', 'true')
+        await expect(other_heading).to_be_in_viewport(ratio=1)
+        await expect(other_agenda_title).to_be_in_viewport(ratio=1)
+        await expect(draft).to_have_value('保留尚未儲存的行程草稿')
+
+    page.once('dialog', lambda dialog: dialog.accept())
+    await editor.get_by_role('button', name='取消', exact=True).click()
+    await expect(editor).to_have_count(0)
+    report['checks'].append('Selecting another day and reselecting it reveal the full agenda title with a dirty editor still open')
 
 
 async def assert_complete_field_value(page, label, value, text, report):
