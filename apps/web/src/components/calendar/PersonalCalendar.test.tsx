@@ -742,53 +742,76 @@ it.each(['可視視窗平移', '頁面捲動'])('行程深連結等待%s，確�
   expect(scroll).toHaveBeenCalledTimes(source === '頁面捲動' ? 1 : 2);
 });
 
-it.each(['保留焦點', '移到其他控制項', '移到其他控制項後離開'])(
-  '深連結首次揭露失敗後，帳號重新驗證期間%s',
-  async (action) => {
-    const target = focusEvent();
-    seedFocusedEvents([target]);
-    context.search = `eventId=${target.id}`;
-    const viewport = Object.assign(new EventTarget(), {
-      offsetLeft: 260, offsetTop: 80, width: 180, height: 240,
-    });
-    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
-    const scroll = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
-    vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
-      if (this.matches('li[aria-current="true"]')) return new DOMRect(40, 100, 140, 60);
-      return originalBounds.call(this);
-    });
+it.each([
+  ['頁面本體', '保留焦點'],
+  ['頁面本體', '移到其他控制項'],
+  ['頁面本體', '移到其他控制項後離開'],
+  ['月份欄位', '因工作區隱藏而失焦'],
+  ['月份欄位', '隱藏後移到其他控制項'],
+  ['月份欄位', '隱藏後移到其他控制項又回到頁面本體'],
+  ['月份欄位', '隱藏前主動離開'],
+])('深連結從%s等待揭露時，重新驗證前後%s', async (origin, action) => {
+  const target = focusEvent();
+  seedFocusedEvents([target]);
+  const viewport = Object.assign(new EventTarget(), {
+    offsetLeft: 260, offsetTop: 80, width: 180, height: 240,
+  });
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+  const scroll = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+    if (this.matches('li[aria-current="true"]')) return new DOMRect(40, 100, 140, 60);
+    return originalBounds.call(this);
+  });
 
-    function Page() {
-      return (
-        <>
-          <button type="button">其他控制項</button>
-          <PersonalCalendar />
-        </>
-      );
-    }
-    const view = render(<Page />);
-    await screen.findByText(`已定位到「${target.title}」。`);
-    expect(scroll).toHaveBeenCalledExactlyOnceWith({ left: -220, top: 0, behavior: 'instant' });
-    expect(document.activeElement).toBe(document.body);
-
-    context.loading = true;
+  function Page() {
+    return (
+      <>
+        <button type="button">其他控制項</button>
+        <PersonalCalendar />
+      </>
+    );
+  }
+  const search = `eventId=${target.id}`;
+  if (origin === '頁面本體') context.search = search;
+  const view = render(<Page />);
+  const monthControl = await screen.findByLabelText('查看月份');
+  if (origin === '月份欄位') {
+    monthControl.focus();
+    context.search = search;
     view.rerender(<Page />);
-    expect(screen.queryByRole('heading', { name: target.title })).toBeNull();
-    const outside = screen.getByRole('button', { name: '其他控制項' });
-    if (action !== '保留焦點') outside.focus();
-    if (action === '移到其他控制項後離開') outside.blur();
-    const focusDuringPause = document.activeElement;
-    viewport.offsetLeft = 0;
-    viewport.dispatchEvent(new Event('resize'));
-    expect(document.activeElement).toBe(focusDuringPause);
+  }
+  await screen.findByText(`已定位到「${target.title}」。`);
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ left: -220, top: 0, behavior: 'instant' });
+  expect(document.activeElement).toBe(origin === '月份欄位' ? monthControl : document.body);
 
-    context.loading = false;
-    view.rerender(<Page />);
-    const row = (await screen.findByRole('heading', { name: target.title })).closest('li');
-    expect(row?.getAttribute('aria-current')).toBe('true');
-    expect(document.activeElement).toBe(action === '保留焦點' ? row : focusDuringPause);
-  },
-);
+  if (action === '隱藏前主動離開') monthControl.blur();
+  context.loading = true;
+  view.rerender(<Page />);
+  expect(screen.queryByRole('heading', { name: target.title })).toBeNull();
+  const outside = screen.getByRole('button', { name: '其他控制項' });
+  expect(monthControl.isConnected).toBe(true);
+  expect(monthControl.closest('[hidden]')).toBeTruthy();
+  // JSDOM does not reset focus when an ancestor becomes hidden.
+  if (document.activeElement === monthControl) monthControl.blur();
+  expect(document.activeElement).toBe(document.body);
+  if (action.includes('移到其他控制項')) outside.focus();
+  if (action === '移到其他控制項後離開' || action === '隱藏後移到其他控制項又回到頁面本體') {
+    outside.blur();
+  }
+  const focusDuringPause = document.activeElement;
+  viewport.offsetLeft = 0;
+  viewport.dispatchEvent(new Event('resize'));
+  expect(document.activeElement).toBe(focusDuringPause);
+
+  context.loading = false;
+  view.rerender(<Page />);
+  const list = await screen.findByRole('list', { name: '個人行程列表' });
+  const row = list.querySelector('li[aria-current="true"]');
+  expect(row).toBeTruthy();
+  expect(screen.getByLabelText('查看月份')).toBe(monthControl);
+  const shouldHandoff = action === '保留焦點' || action === '因工作區隱藏而失焦';
+  expect(document.activeElement).toBe(shouldHandoff ? row : focusDuringPause);
+});
 
 it.each([
   ['another owner', 'platform:two', 'pu'],

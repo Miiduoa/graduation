@@ -221,6 +221,7 @@ export function PersonalCalendar() {
   const nuni = useOptionalNuniSession();
   const school = useOptionalSelectedSchool();
   const params = useSearchParams();
+  const workspaceBoundary = useRef<HTMLDivElement>(null);
   const explicitSchool =
     params?.get('campus')?.trim() ||
     params?.get('schoolId')?.trim() ||
@@ -311,11 +312,12 @@ export function PersonalCalendar() {
         <p role="status">正在確認個人行程的儲存位置…</p>
       ) : null}
       {visible && (
-        <div hidden={paused}>
+        <div ref={workspaceBoundary} hidden={paused}>
           <PersonalCalendarWorkspace
             key={visible.scopeKey}
             context={visible}
             paused={paused}
+            workspaceBoundary={workspaceBoundary}
             requestedEventId={params?.get('eventId') ?? null}
           />
         </div>
@@ -327,10 +329,12 @@ export function PersonalCalendar() {
 function PersonalCalendarWorkspace({
   context,
   paused,
+  workspaceBoundary,
   requestedEventId,
 }: {
   context: ReturnType<typeof usePersonalImportScope>;
   paused: boolean;
+  workspaceBoundary: RefObject<HTMLDivElement | null>;
   requestedEventId: string | null;
 }) {
   const { user, loading: authLoading } = useAuth();
@@ -448,7 +452,10 @@ function PersonalCalendarWorkspace({
   const requestId = useRef(0);
   const viewRevision = useRef(0);
   const locatedRequest = useRef<string | null>(null);
-  const linkedFocusOrigin = useRef<{ element: Element | null } | null>(null);
+  const linkedFocusOrigin = useRef<{
+    element: Element | null;
+    state: 'focused' | 'blurred' | 'hidden';
+  } | null>(null);
   const stopLinkedFocusRetry = useRef<(() => void) | null>(null);
   const settledFocusRequest = useRef<string | null>(null);
   const linkedEventElement = useRef<HTMLLIElement | null>(null);
@@ -478,11 +485,23 @@ function PersonalCalendarWorkspace({
     // The focus origin belongs to the URL request and survives workspace suspension.
     const checkFocus = () => {
       const origin = linkedFocusOrigin.current;
-      if (origin && !stillOwnsFocus(origin.element)) cancelLinkedFocus();
+      if (!origin) return;
+      if (document.activeElement === origin.element) origin.state = 'focused';
+      else if (!stillOwnsFocus(origin.element, origin.state === 'hidden')) cancelLinkedFocus();
     };
-    document.addEventListener('focusin', checkFocus);
-    return () => document.removeEventListener('focusin', checkFocus);
-  }, [requestedEventId, cancelLinkedFocus]);
+    const recordBlur = (event: FocusEvent) => {
+      const origin = linkedFocusOrigin.current;
+      if (origin && event.target === origin.element && !workspaceBoundary.current?.hidden) {
+        origin.state = 'blurred';
+      }
+    };
+    document.addEventListener('focusin', checkFocus, true);
+    document.addEventListener('focusout', recordBlur, true);
+    return () => {
+      document.removeEventListener('focusin', checkFocus, true);
+      document.removeEventListener('focusout', recordBlur, true);
+    };
+  }, [requestedEventId, cancelLinkedFocus, workspaceBoundary]);
 
   useEffect(() => {
     if (paused || !ledger.ready || !requestedEventId || !linkedEventDate) return;
@@ -509,10 +528,13 @@ function PersonalCalendarWorkspace({
       cancelLinkedFocus();
       return;
     }
-    const origin = (linkedFocusOrigin.current ??= { element: document.activeElement });
+    const origin = (linkedFocusOrigin.current ??= {
+      element: document.activeElement,
+      state: 'focused',
+    });
     const revealLinkedEvent = (mode: 'reveal' | 'visible') => {
       if (suspended.current) return;
-      if (!stillOwnsFocus(origin.element)) {
+      if (!stillOwnsFocus(origin.element, origin.state === 'hidden')) {
         cancelLinkedFocus();
         return;
       }
@@ -546,8 +568,18 @@ function PersonalCalendarWorkspace({
   }, []);
   useLayoutEffect(() => {
     suspended.current = paused;
-    if (paused) pendingFocus.current = null;
-  }, [paused]);
+    if (!paused) return;
+    pendingFocus.current = null;
+    const origin = linkedFocusOrigin.current;
+    // Hiding the workspace can drop focus before layout effects, even without a blur event.
+    if (
+      origin?.state === 'focused' &&
+      workspaceBoundary.current?.contains(origin.element) &&
+      stillOwnsFocus(origin.element, true)
+    ) {
+      origin.state = 'hidden';
+    }
+  }, [paused, workspaceBoundary]);
 
   useLayoutEffect(() => {
     viewRevision.current += 1;

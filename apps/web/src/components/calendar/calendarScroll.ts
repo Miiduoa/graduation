@@ -218,9 +218,11 @@ export function retryFocusWhileOwned(
   };
 }
 
-export function stillOwnsFocus(origin: Element | null) {
-  return document.activeElement === origin ||
-    (origin?.isConnected === false && document.activeElement === document.body);
+export function stillOwnsFocus(origin: Element | null, allowBodyFallback = false) {
+  return (
+    document.activeElement === origin ||
+    (document.activeElement === document.body && (allowBodyFallback || origin?.isConnected === false))
+  );
 }
 
 export function onFocusRetryOpportunity(retry: (mode: 'reveal' | 'visible') => void) {
