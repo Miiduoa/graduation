@@ -100,7 +100,7 @@ export function MerchantOperations({
   };
   onBack?(): void;
   onExpired(): void;
-  onChanged(detail: Detail): void;
+  onChanged(detail: Detail, confirmedWrite: boolean): void;
 }) {
   const draftKey = JSON.stringify([tenantId, locationId]);
   const saved = drafts.get(draftKey);
@@ -167,11 +167,11 @@ export function MerchantOperations({
     };
   }, [suspended, invalidate]);
 
-  const accept = useCallback((next: Detail) => {
+  const accept = useCallback((next: Detail, confirmedWrite: boolean) => {
     setDetail(next);
     setFresh(true);
     setActivationConfirmed(false);
-    changed.current(next);
+    changed.current(next, confirmedWrite);
   }, []);
 
   const read = useCallback(
@@ -183,7 +183,7 @@ export function MerchantOperations({
       try {
         const next = await operations.get(tenantId, locationId);
         if (!active.current || version !== run.current) return;
-        accept(next);
+        accept(next, false);
         if (!readAfterWrite.current) setEntryVerified(true);
         // A count of zero cannot prove a non-idempotent menu request failed:
         // an existing menu may have no remaining sellable stock.
@@ -479,7 +479,7 @@ export function MerchantOperations({
                       expectedVersion: draft.baseVersion,
                     });
                     if (!current()) return;
-                    accept(next);
+                    accept(next, true);
                     setSettings(null);
                     setNotice('營運設定已儲存。');
                   });
@@ -585,7 +585,7 @@ export function MerchantOperations({
                       expectedVersion: detail.readinessVersion,
                     });
                     if (!current()) return;
-                    accept(next);
+                    accept(next, true);
                     setNotice('已改為現場櫃檯付款。');
                   })
                 }
@@ -783,7 +783,7 @@ export function MerchantOperations({
                       void mutate('activate', async (current) => {
                         const next = await operations.activate(tenantId, locationId);
                         if (!current()) return;
-                        accept(next);
+                        accept(next, true);
                         setNotice(`門市狀態已更新：${merchantWorkspaceStateLabel(next)}。`);
                       })
                     }
@@ -808,7 +808,7 @@ export function MerchantOperations({
                           detail.locationStatus === 'closed',
                         );
                         if (!current()) return;
-                        accept(next);
+                        accept(next, true);
                         setNotice(`門市狀態已更新：${merchantWorkspaceStateLabel(next)}。`);
                       })
                     }

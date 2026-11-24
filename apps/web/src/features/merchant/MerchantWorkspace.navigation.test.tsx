@@ -316,44 +316,69 @@ it('ignores a delayed old-store response after moving to a different store', asy
   expect(screen.queryByRole('heading', { name: '餐坊／一樓', level: 2 })).toBeNull();
 });
 
-it('keeps confirmed paused status when the return list read delivers an older open status', async () => {
-  active = true;
-  const open = detail('store-a', true);
-  const paused = { ...open, locationStatus: 'closed', publicAccess: false };
-  let finishWrite!: (receipt: typeof paused) => void;
-  let finishList!: (response: { workspaces: NuniMerchantWorkspaceDetail[] }) => void;
-  const write = new Promise<typeof paused>((resolve) => {
-    finishWrite = resolve;
-  });
-  const staleList = new Promise<{ workspaces: NuniMerchantWorkspaceDetail[] }>((resolve) => {
-    finishList = resolve;
-  });
-  mocks.request.mockImplementation((path) =>
-    path === 'merchant-workspaces' ? Promise.resolve({ workspaces: [open] }) : respond(path),
-  );
-  render(<MerchantWorkspace view="workspace" />);
-  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
-  const pause = await screen.findByRole('button', { name: '暫停接單' });
-  mocks.request.mockImplementation((path) => {
-    if (path.endsWith('/availability')) return write;
-    if (path === 'merchant-workspaces') return staleList;
-    return respond(path);
-  });
+it.each(['before returning', 'during the return read'])(
+  'keeps paused status confirmed %s when the list delivers an older open status',
+  async (receiptTiming) => {
+    active = true;
+    const open = detail('store-a', true);
+    const paused = { ...open, locationStatus: 'closed', publicAccess: false };
+    let finishWrite!: (receipt: typeof paused) => void;
+    let finishList!: (response: { workspaces: NuniMerchantWorkspaceDetail[] }) => void;
+    const write = new Promise<typeof paused>((resolve) => {
+      finishWrite = resolve;
+    });
+    const staleList = new Promise<{ workspaces: NuniMerchantWorkspaceDetail[] }>((resolve) => {
+      finishList = resolve;
+    });
+    mocks.request.mockImplementation((path) =>
+      path === 'merchant-workspaces' ? Promise.resolve({ workspaces: [open] }) : respond(path),
+    );
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    const pause = await screen.findByRole('button', { name: '暫停接單' });
+    mocks.request.mockImplementation((path) => {
+      if (path.endsWith('/availability')) return write;
+      if (path === 'merchant-workspaces') return staleList;
+      return respond(path);
+    });
 
-  fireEvent.click(pause);
-  await act(async () => window.history.back());
-  await screen.findByText('正在載入店家資料…');
-  expect(screen.getByText('營業中')).toBeTruthy();
-  expect(mocks.request.mock.calls.filter(([path]) => path === 'merchant-workspaces')).toHaveLength(
-    2,
-  );
-  await act(async () => finishWrite(paused));
-  await screen.findByText('暫停接單');
-  await act(async () => finishList({ workspaces: [open, detail('store-b')] }));
-  expect(screen.getByRole('link', { name: '管理門市：二樓' })).toBeTruthy();
-  expect(screen.getByText('暫停接單')).toBeTruthy();
-  expect(screen.queryByText('營業中')).toBeNull();
-});
+    fireEvent.click(pause);
+    if (receiptTiming === 'before returning') {
+      await act(async () => finishWrite(paused));
+      await screen.findByText('門市狀態已更新：暫停接單。');
+    }
+    await act(async () => window.history.back());
+    await screen.findByText('正在載入店家資料…');
+    if (receiptTiming === 'during the return read') {
+      expect(screen.getByText('營業中')).toBeTruthy();
+      await act(async () => finishWrite(paused));
+    }
+    expect(
+      mocks.request.mock.calls.filter(([path]) => path === 'merchant-workspaces'),
+    ).toHaveLength(2);
+    await screen.findByText('暫停接單');
+    await act(async () => finishList({ workspaces: [open, detail('store-b')] }));
+    expect(screen.getByRole('link', { name: '管理門市：二樓' })).toBeTruthy();
+    expect(screen.getByText('暫停接單')).toBeTruthy();
+    expect(screen.queryByText('營業中')).toBeNull();
+
+    const secondStore = detail('store-b');
+    mocks.request.mockImplementation((path) =>
+      path === 'merchant-workspaces'
+        ? Promise.resolve({ workspaces: [secondStore] })
+        : respond(path),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+    await waitFor(() => expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull());
+
+    mocks.request.mockImplementation((path) =>
+      path === 'merchant-workspaces' ? Promise.resolve({ workspaces: [open] }) : respond(path),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+    await screen.findByText('營業中');
+    expect(screen.queryByText('暫停接單')).toBeNull();
+  },
+);
 
 it.each(['receipt', 'unknown', 'unknown while on the list'] as const)(
   'keeps an availability write locked across browser history and handles its %s',

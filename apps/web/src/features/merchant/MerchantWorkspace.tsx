@@ -262,6 +262,8 @@ function AccountWorkspace({
   }, [location.status, showApplications, listPath]);
   const generation = useRef(0);
   const listUpdates = useRef<OverviewUpdates | null>(null);
+  // A confirmed write must survive the list loader unmounting during navigation.
+  const confirmedWorkspaces = useRef<OverviewUpdates['workspaces']>(new Map());
   const mounted = useRef(true);
   const busyRef = useRef(false);
   const enabled = useRef(false);
@@ -276,6 +278,7 @@ function AccountWorkspace({
     listUpdates.current = null;
   }, []);
   const expire = useCallback(() => {
+    confirmedWorkspaces.current.clear();
     setInvalidSession(true);
     setOverview(null);
     setDraft(emptyDraft());
@@ -295,6 +298,17 @@ function AccountWorkspace({
       );
       if (mounted.current && enabled.current && run === generation.current) {
         const { application } = updates;
+        const confirmed = confirmedWorkspaces.current;
+        const workspaces = data.workspaces.map((item) => {
+          const key = `${item.tenantId}:${item.locationId}`;
+          return confirmed.get(key) ?? updates.workspaces.get(key) ?? item;
+        });
+        const authorizedKeys = new Set(
+          data.workspaces.map((item) => `${item.tenantId}:${item.locationId}`),
+        );
+        for (const key of confirmed.keys()) {
+          if (!authorizedKeys.has(key)) confirmed.delete(key);
+        }
         setOverview({
           ...data,
           applications:
@@ -302,17 +316,17 @@ function AccountWorkspace({
             !data.applications.some((item) => item.applicationId === application.applicationId)
               ? [application, ...data.applications]
               : data.applications,
-          // Keep newer confirmations for stores still authorized by this list.
-          workspaces: data.workspaces.map(
-            (item) => updates.workspaces.get(`${item.tenantId}:${item.locationId}`) ?? item,
-          ),
+          workspaces,
         });
       }
     } catch (error) {
       if (mounted.current && enabled.current && run === generation.current) {
         if (expired(error)) expire();
         else {
-          if (error instanceof NuniError && [403, 404].includes(error.status)) setOverview(null);
+          if (error instanceof NuniError && [403, 404].includes(error.status)) {
+            confirmedWorkspaces.current.clear();
+            setOverview(null);
+          }
           setLoadError('目前無法確認店家資料，請重新載入。');
         }
       }
@@ -353,9 +367,10 @@ function AccountWorkspace({
   const selected = overview?.programs.find((item) => item.tenantId === draft.tenantId);
   const update = (field: keyof Draft, value: string) =>
     setDraft((current) => ({ ...current, [field]: value }));
+  const submissionBlocked = loading || (!!loadError && !pending);
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!enabled.current || busyRef.current || !overview || loading || loadError) return;
+    if (!enabled.current || busyRef.current || !overview || submissionBlocked) return;
     setSubmitError('');
     setNotice('');
     let payload: NuniMerchantApplicationInput;
@@ -454,8 +469,9 @@ function AccountWorkspace({
               : undefined
           }
           onExpired={expire}
-          onChanged={(detail) => {
+          onChanged={(detail, confirmedWrite) => {
             if (!mounted.current || !enabled.current) return;
+            if (confirmedWrite) confirmedWorkspaces.current.set(key, detail);
             listUpdates.current?.workspaces.set(key, detail);
             setOverview((current) =>
               current
@@ -561,7 +577,7 @@ function AccountWorkspace({
       {loadError && <p role="alert">{loadError}</p>}
       {notice && <p role="status">{notice}</p>}
       {overview && (
-        <div className={styles.stack} hidden={view === 'apply' && (loading || !!loadError)}>
+        <div className={styles.stack} hidden={view === 'apply' && submissionBlocked}>
           {view !== 'apply' && nextStep && (view === 'workspace' || hasMerchantRecords) && (
             <section className={styles.nextTask} aria-labelledby="merchant-next-step-title">
               <p className={styles.eyebrow}>下一步</p>
@@ -869,7 +885,7 @@ function AccountWorkspace({
                     type="submit"
                     variant="primary"
                     loading={busy}
-                    disabled={loading || !!loadError}
+                    disabled={submissionBlocked}
                   >
                     {busy ? '正在確認收件…' : pending ? '重試同一份申請' : '送出進駐申請'}
                   </Button>

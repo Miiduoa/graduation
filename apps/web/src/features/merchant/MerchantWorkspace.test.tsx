@@ -585,6 +585,7 @@ it('prioritizes the actual authorized store for a returning operator and retains
 it.each([
   { scenario: 'no programs remain open', refreshedPrograms: [] },
   { scenario: 'only another program remains open', refreshedPrograms: programs.slice(1) },
+  { scenario: 'the return read temporarily fails', refreshedPrograms: null },
 ])('retries after a store visit when $scenario', async ({ refreshedPrograms }) => {
   window.history.replaceState(null, '', '/merchant');
   const store = {
@@ -617,13 +618,16 @@ it.each([
     sourceLine: null,
   };
   let showStore = false;
-  let openPrograms = programs;
+  let openPrograms: typeof programs | null = programs;
   let submissionAttempts = 0;
   mocks.request.mockImplementation((path, context, input) => {
     if (path === 'merchant-applications' && input && ++submissionAttempts === 1) {
       return Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
     }
-    if (path === 'merchant-onboarding-programs') return Promise.resolve({ programs: openPrograms });
+    if (path === 'merchant-onboarding-programs')
+      return openPrograms
+        ? Promise.resolve({ programs: openPrograms })
+        : Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
     if (path === 'merchant-workspaces' && showStore)
       return Promise.resolve({ workspaces: [store] });
     if (path === 'merchant-workspaces/campus-one/location-1') return Promise.resolve(store);
@@ -661,6 +665,7 @@ it.each([
   fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
   expect(window.location.pathname).toBe('/merchant');
   await waitFor(() => expect(programReads()).toBe(readsBeforeReturn + 1));
+  if (!refreshedPrograms) await screen.findByText('目前無法確認店家資料，請重新載入。');
   await screen.findByText(/尚未確認是否收件/);
   expect((screen.getByLabelText('對外品牌名稱') as HTMLInputElement).value).toBe('更新餐坊');
   const retry = screen.getByRole('button', { name: '重試同一份申請' });
