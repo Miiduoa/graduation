@@ -87,7 +87,7 @@ export function MerchantOperations({
   onExpired,
   confirmedDetail,
   confirmedListRow,
-  receiptFloor = 0,
+  receiptFloorFor,
   accessRevocation = 0,
   beginRequest,
   onChanged,
@@ -111,7 +111,7 @@ export function MerchantOperations({
   onExpired(): void;
   confirmedDetail?: Detail | null;
   confirmedListRow?: NuniMerchantWorkspace;
-  receiptFloor?: number;
+  receiptFloorFor?(readinessVersion?: number): number;
   accessRevocation?: number;
   beginRequest?(): number;
   onChanged(detail: Detail, verifiedAccess: boolean, revision: number): Detail | null | void;
@@ -135,7 +135,7 @@ export function MerchantOperations({
   const [fresh, setFresh] = useState(false);
   const [busy, setBusy] = useState<Action | null>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState<{ value: string | number; revision: number } | null>(null);
+  const [notice, setNotice] = useState<{ value: string | number; revision: number; readinessVersion?: number } | null>(null);
   const [uncertain, setUncertain] = useState<Action | null>(saved?.uncertain ?? null);
   const [settings, setSettings] = useState<SettingDraft | null>(saved?.settings ?? null);
   const [menu, setMenu] = useState<MenuDraft[]>(saved?.menu ?? [newItem()]);
@@ -143,7 +143,9 @@ export function MerchantOperations({
   const menuReceipt = saved?.menuReceipt ?? null;
   const [localConfirmations] = useState(() => createMerchantConfirmations(drafts));
   const nextRevision = beginRequest ?? localConfirmations.beginRequest;
-  const noticeFloor = beginRequest ? receiptFloor : localConfirmations.workspaceReceiptFloor(draftKey);
+  const noticeFloor = receiptFloorFor
+    ? receiptFloorFor(notice?.readinessVersion)
+    : localConfirmations.workspaceReceiptFloor(draftKey, notice?.readinessVersion);
   const visibleNotice = detail && notice && notice.revision > noticeFloor ? notice.value : null;
   const [menuBlocked, setMenuBlocked] = useState(saved?.menuBlocked ?? false);
   const [activationConfirmed, setActivationConfirmed] = useState(false);
@@ -947,6 +949,7 @@ export function MerchantOperations({
                           setNotice({
                             value: `門市狀態已更新：${merchantWorkspaceStateLabel(confirmed)}。`,
                             revision,
+                            readinessVersion: confirmed.readinessVersion,
                           });
                       })
                     }
@@ -976,6 +979,7 @@ export function MerchantOperations({
                           setNotice({
                             value: `門市狀態已更新：${merchantWorkspaceStateLabel(confirmed)}。`,
                             revision,
+                            readinessVersion: confirmed.readinessVersion,
                           });
                       })
                     }

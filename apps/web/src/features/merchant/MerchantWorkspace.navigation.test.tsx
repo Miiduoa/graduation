@@ -979,13 +979,18 @@ it.each([403, 404])('does not restore a pause notice after list denial %s and re
   expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
 });
 
-it.each([true, false])(
-  'discards a pause notice when the list and detail confirm a newer open store (versioned list: %s)',
-  async (versionedList) => {
+it.each([
+  { versionedList: true, readinessVersion: 8 },
+  { versionedList: false, readinessVersion: 8 },
+  { versionedList: true, readinessVersion: 7 },
+  { versionedList: false, readinessVersion: 7 },
+])(
+  'discards a displayed pause notice after list and detail confirm reopening at version $readinessVersion (versioned list: $versionedList)',
+  async ({ versionedList, readinessVersion: reopenedVersion }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const open = { ...detail('store-a', true), readinessVersion: 6 };
     const paused = { ...open, readinessVersion: 7, locationStatus: 'closed', publicAccess: false };
-    const reopened = { ...open, readinessVersion: 8 };
+    const reopened = { ...open, readinessVersion: reopenedVersion };
     let current = open;
     const readDetail = vi.fn(() => Promise.resolve(current));
     mocks.request.mockImplementation((resource) => {
@@ -1016,6 +1021,53 @@ it.each([true, false])(
     expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
   },
 );
+
+it.each([403, 404])('revokes a confirmed store after a later stale list precedes detail denial %s', async (status) => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const open = { ...detail('store-a', true), readinessVersion: 6 };
+  const paused = { ...open, readinessVersion: 7, locationStatus: 'closed', publicAccess: false };
+  let denyDetail!: (error: NuniError) => void;
+  const pendingDetail = new Promise<never>((_, reject) => { denyDetail = reject; });
+  const readList = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [open] })
+    .mockResolvedValueOnce({ workspaces: [paused] })
+    .mockResolvedValue({ workspaces: [open] });
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(open)
+    .mockResolvedValueOnce(paused)
+    .mockReturnValueOnce(pendingDetail)
+    .mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === path) return readDetail();
+    if (resource === `${path}/availability`) return Promise.resolve(paused);
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+  await screen.findByText('門市狀態已更新：暫停接單。');
+
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+  await act(async () => window.history.forward());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+  await act(async () => window.history.back());
+  await screen.findByText('目前無法更新部分門市資料，請重新載入。');
+  expect(readList).toHaveBeenCalledTimes(3);
+  expect(screen.getByText('暫停接單')).toBeTruthy();
+
+  await act(async () => denyDetail(new NuniError(status, 'DENIED')));
+  expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+  expect(screen.queryByText('暫停接單')).toBeNull();
+
+  readDetail.mockResolvedValue(paused);
+  await act(async () => window.history.forward());
+  await screen.findByText('暫停接單');
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '恢復接單' }).disabled).toBe(false);
+  expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
+});
 
 it.each([403, 404])('revokes access and the pause notice after stale detail precedes list denial %s', async (status) => {
   const path = 'merchant-workspaces/campus-one/store-a';

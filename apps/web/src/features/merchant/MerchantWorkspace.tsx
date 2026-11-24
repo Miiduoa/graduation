@@ -626,7 +626,7 @@ function AccountWorkspace({
           onExpired={expire}
           confirmedDetail={details.get(key) ?? null}
           confirmedListRow={verifiedListedRows.get(key)}
-          receiptFloor={confirmed.workspaceReceiptFloor(key)}
+          receiptFloorFor={(version) => confirmed.workspaceReceiptFloor(key, version)}
           accessRevocation={revocations.details.get(key) ?? revocations.list}
           beginRequest={confirmed.beginRequest}
           onChanged={onWorkspaceChanged}
