@@ -71,7 +71,7 @@ if [ -n "${TRONCLASS_RUNTIME_DIR:-}" ]; then
     echo 'TRONCLASS_RUNTIME_DIR must be a directory owned by this user, not a symbolic link.' >&2
     exit 1
   fi
-  if [ "$(stat -c '%u' "$TRONCLASS_RUNTIME_DIR")" != "$(id -u)" ]; then
+  if [[ ! -O "$TRONCLASS_RUNTIME_DIR" ]]; then
     echo 'TRONCLASS_RUNTIME_DIR must be owned by the current user.' >&2
     exit 1
   fi

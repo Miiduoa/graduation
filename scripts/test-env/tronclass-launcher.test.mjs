@@ -90,15 +90,17 @@ process.exit(73);
     writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
 process.exit(0);
 `, { mode: 0o700 });
-    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+    const runLauncher = (env = {}) => spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
       encoding: 'utf8',
       env: {
         PATH: `${dir}:${process.env.PATH}`,
         TRONCLASS_LAUNCHER_CAPTURE: capture,
         TMPDIR: dir,
         HOME: dir,
+        ...env,
       },
     });
+    const result = runLauncher();
     assert.equal(result.error, undefined);
     assert.equal(result.status, 73, result.stderr);
     const observed = JSON.parse(readFileSync(capture, 'utf8'));
@@ -109,6 +111,9 @@ process.exit(0);
     assert.equal(info.mode & 0o777, 0o700);
     assert.equal(info.isDirectory(), true);
     assert.equal(lstatSync(observed.dir).isSymbolicLink(), false);
+    const reused = runLauncher({ TRONCLASS_RUNTIME_DIR: observed.dir });
+    assert.equal(reused.status, 73, reused.stderr);
+    assert.equal(JSON.parse(readFileSync(capture, 'utf8')).dir, observed.dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
