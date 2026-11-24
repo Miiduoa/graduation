@@ -100,6 +100,27 @@ export async function isSubscribedToBoard(
   return !snap.empty;
 }
 
+/** 保留快照來源，供看板畫面調解訂閱寫入與清單刷新。 */
+export function readSubscribedBoardIds(uid: string, schoolId: string) {
+  return querySubscribedBoardIds(getDb(), uid, schoolId);
+}
+
+async function querySubscribedBoardIds(db: Firestore, uid: string, schoolId: string) {
+  const snap = await getDocs(
+    query(
+      collection(db, 'schools', schoolId, 'boardSubs'),
+      where('userId', '==', uid),
+      limit(100),
+    ),
+  );
+  return {
+    ids: snap.docs
+      .map((d) => (d.data() as { boardId?: string }).boardId)
+      .filter((x): x is string => !!x),
+    serverConfirmed: !snap.metadata.fromCache && !snap.metadata.hasPendingWrites,
+  };
+}
+
 /** 取得使用者所有訂閱看板 ID（用於 Feed 的「我訂閱」過濾） */
 export async function listSubscribedBoardIds(
   uid: string,
@@ -108,16 +129,7 @@ export async function listSubscribedBoardIds(
 ): Promise<string[]> {
   const db = getDb();
   try {
-    const snap = await getDocs(
-      query(
-        collection(db, 'schools', schoolId, 'boardSubs'),
-        where('userId', '==', uid),
-        limit(100),
-      ),
-    );
-    return snap.docs
-      .map((d) => (d.data() as { boardId?: string }).boardId)
-      .filter((x): x is string => !!x);
+    return (await querySubscribedBoardIds(db, uid, schoolId)).ids;
   } catch (error) {
     if (options.throwOnError) throw error;
     return [];

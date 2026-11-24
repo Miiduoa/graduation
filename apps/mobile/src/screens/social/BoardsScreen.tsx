@@ -29,7 +29,7 @@ import { useAuth } from '../../state/auth';
 import { isFirebaseMockMode } from '../../firebase';
 import {
   listBoards,
-  listSubscribedBoardIds,
+  readSubscribedBoardIds,
   isSubscribedToBoard,
   subscribeToBoard,
   unsubscribeFromBoard,
@@ -66,6 +66,8 @@ export function BoardsScreen() {
 
 type SubscriptionListRead = {
   subscribedIds: ReadonlySet<string>;
+  serverConfirmed: boolean;
+  writeRevisionAtDispatch: number;
   writeRevisionAtDelivery: number;
   serverRevisionAtDispatch: number;
 };
@@ -110,7 +112,7 @@ function BoardsContent() {
   // lands. A later list may still be served from cache and omit the board.
   const awaitingServerConfirm = useRef(new Map<string, number>());
   const pendingServerConfirmCounts = useRef(new Map<string, number>());
-  // List membership skipped by keepLocal after a successful write. If the
+  // List membership skipped by keepLocal during reconciliation. If the
   // follow-up from-server re-check fails, a list that already included a newer
   // subscription must still be applied.
   const deferredListMembership = useRef(new Map<string, SubscriptionListRead>());
@@ -183,9 +185,11 @@ function BoardsContent() {
       const serverRevisionAtDispatch = serverReadRevision.current;
       const [rows, membership] = await Promise.all([
         listBoards(school.id, 120),
-        listSubscribedBoardIds(auth.user.uid, school.id, { throwOnError: true }).then(
-          (subs): SubscriptionListRead => ({
-            subscribedIds: new Set(subs),
+        readSubscribedBoardIds(auth.user.uid, school.id).then(
+          ({ ids, serverConfirmed }): SubscriptionListRead => ({
+            subscribedIds: new Set(ids),
+            serverConfirmed,
+            writeRevisionAtDispatch: subscriptionRevisionAtStart,
             writeRevisionAtDelivery: subscriptionRevision.current,
             serverRevisionAtDispatch,
           }),
@@ -200,7 +204,7 @@ function BoardsContent() {
       // Both successful and failed writes can settle before a list spanning
       // the write and its confirmation finishes.
       for (const [id, revision] of boardWriteRevision.current) {
-        if (revision > subscriptionRevisionAtStart) overlappingReconciliations.add(id);
+        if (revision > membership.writeRevisionAtDispatch) overlappingReconciliations.add(id);
       }
       // Keep the entire overlap out of list sequencing, including omissions
       // that agree with a rollback while a server confirmation is in flight.
@@ -333,10 +337,15 @@ function BoardsContent() {
     } catch {
       if (!canApply() || deferredListMembership.current.get(boardId) !== deferredMembership) return;
       deferredListMembership.current.delete(boardId);
+      // A committed server list dispatched after the write settled can
+      // establish membership even when both the write and confirmation failed.
+      const freshServerMembership =
+        deferredMembership?.serverConfirmed &&
+        deferredMembership.writeRevisionAtDispatch >= (boardWriteRevision.current.get(boardId) ?? 0);
       if (
         deferredMembership?.subscribedIds.has(boardId) &&
         deferredMembership.writeRevisionAtDelivery >= (lastSuccessfulUnsubscribeRevision.current.get(boardId) ?? 0) &&
-        lastSettledWriteSucceeded.current.has(boardId) &&
+        (freshServerMembership || lastSettledWriteSucceeded.current.has(boardId)) &&
         !confirmedSubscribedRef.current.has(boardId)
       ) {
         const nextConfirmed = new Set(confirmedSubscribedRef.current);
@@ -350,7 +359,7 @@ function BoardsContent() {
         });
         return;
       }
-      // Keep the pre-tap rollback or confirmed write; the next refresh will reconcile.
+      // Keep the current membership; the next refresh will reconcile.
     } finally {
       const remaining = (pending.get(boardId) ?? 1) - 1;
       if (remaining > 0) pending.set(boardId, remaining);

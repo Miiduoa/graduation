@@ -1,5 +1,5 @@
 import { getDocs, getDocsFromServer, orderBy, where } from 'firebase/firestore';
-import { listSubscribedBoardIds } from '../../services/boards';
+import { listSubscribedBoardIds, readSubscribedBoardIds } from '../../services/boards';
 import { listActiveStoriesForSchool } from '../../services/stories';
 
 jest.mock('../../firebase', () => ({ getDb: () => ({}) }));
@@ -25,4 +25,24 @@ test('optional story reads fail closed without a school-only retry', async () =>
 test('other existing consumers retain their optional-read contract', async () => {
   await expect(listSubscribedBoardIds('alice', 'pu')).resolves.toEqual([]);
   await expect(listActiveStoriesForSchool('pu')).resolves.toEqual([]);
+});
+
+
+test.each([
+  [false, false, true],
+  [true, false, false],
+  [false, true, false],
+])('subscription list snapshot carries server provenance (cache: %s, pending writes: %s)', async (
+  fromCache,
+  hasPendingWrites,
+  serverConfirmed,
+) => {
+  jest.mocked(getDocs).mockResolvedValueOnce({
+    docs: [{ data: () => ({ boardId: 'board' }) }],
+    metadata: { fromCache, hasPendingWrites },
+  } as Awaited<ReturnType<typeof getDocs>>);
+  await expect(readSubscribedBoardIds('alice', 'pu')).resolves.toEqual({
+    ids: ['board'],
+    serverConfirmed,
+  });
 });

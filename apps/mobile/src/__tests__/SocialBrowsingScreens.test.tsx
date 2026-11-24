@@ -9,7 +9,7 @@ import { BoardsScreen } from '../screens/social/BoardsScreen';
 import { CommunityScreen } from '../screens/CommunityScreen';
 import { fetchRecentCampusPosts, toggleCampusPostLike } from '../services/feed';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
-import { listBoards, listSubscribedBoardIds, isSubscribedToBoard, subscribeToBoard, unsubscribeFromBoard } from '../services/boards';
+import { listBoards, listSubscribedBoardIds, readSubscribedBoardIds, isSubscribedToBoard, subscribeToBoard, unsubscribeFromBoard } from '../services/boards';
 import { listActiveStoriesForSchool, markStoryViewed } from '../services/stories';
 import { listFollowingIds, followUser } from '../services/follows';
 import {
@@ -67,6 +67,7 @@ jest.mock('../services/feed', () => ({
 jest.mock('../services/boards', () => ({
   listBoards: jest.fn(),
   listSubscribedBoardIds: jest.fn(async () => []),
+  readSubscribedBoardIds: jest.fn(),
   isSubscribedToBoard: jest.fn(async () => false),
   subscribeToBoard: jest.fn(),
   unsubscribeFromBoard: jest.fn(),
@@ -139,6 +140,10 @@ beforeEach(async () => {
   jest.mocked(fetchRecentCampusPosts).mockResolvedValue([]);
   jest.mocked(listBoards).mockResolvedValue([]);
   jest.mocked(listSubscribedBoardIds).mockResolvedValue([]);
+  jest.mocked(readSubscribedBoardIds).mockReset().mockImplementation(async (uid, schoolId) => ({
+    ids: await listSubscribedBoardIds(uid, schoolId, { throwOnError: true }),
+    serverConfirmed: true,
+  }));
   jest.mocked(isSubscribedToBoard).mockReset().mockResolvedValue(false);
   jest.mocked(listActiveStoriesForSchool).mockResolvedValue([]);
   jest.mocked(listFollowingIds).mockResolvedValue([]);
@@ -1118,6 +1123,56 @@ test('an older failed re-check leaves the newer write’s list membership availa
   await act(async () => { secondRead.reject(new Error('offline')); });
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
+
+test.each([false, true])(
+  'only a fresh committed list can recover a failed subscribe when confirmations fail (overlap from server: %s)',
+  async (overlapFromServer) => {
+    jest.mocked(listBoards).mockResolvedValue([board]);
+    const view = render(<BoardsScreen />);
+    await view.findByText('讀書會');
+
+    const write = deferred();
+    jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
+    jest.mocked(isSubscribedToBoard).mockRejectedValue(new Error('offline'));
+    fireEvent.press(view.getByLabelText('訂閱讀書會'));
+
+    const refresh = () => view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+    const rows = deferred<typeof board[]>();
+    jest.mocked(listBoards).mockImplementationOnce(() => rows.promise);
+    jest.mocked(readSubscribedBoardIds).mockResolvedValueOnce({
+      ids: ['board'],
+      serverConfirmed: overlapFromServer,
+    });
+    let overlappingRefresh!: Promise<void>;
+    await act(async () => { overlappingRefresh = refresh(); });
+
+    await act(async () => { write.reject(new Error('offline')); });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+
+    await act(async () => { rows.resolve([board]); await overlappingRefresh; });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+
+    jest.mocked(readSubscribedBoardIds).mockResolvedValueOnce({
+      ids: ['board'],
+      serverConfirmed: false,
+    });
+    await act(async () => { await refresh(); });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(3);
+
+    for (const confirmationCount of [4, 5]) {
+      jest.mocked(readSubscribedBoardIds).mockResolvedValueOnce({
+        ids: ['board'],
+        serverConfirmed: true,
+      });
+      await act(async () => { await refresh(); });
+      expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+      expect(isSubscribedToBoard).toHaveBeenCalledTimes(confirmationCount);
+    }
+  },
+);
 
 test('a successful write clears rollback protection from an earlier failed write', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
