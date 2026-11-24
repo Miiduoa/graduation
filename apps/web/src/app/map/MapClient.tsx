@@ -252,15 +252,6 @@ function MapContent({
   const classroomPlace = classroomLinkActive && classroom.status === 'matched' ? classroom.matches[0] : null;
   const selectedId = selection ?? (focus ? focusedPlace?.id : classroomPlace?.id);
   const selected = locations.find((location) => location.id === selectedId) ?? null;
-  const returnParams = new URLSearchParams({ schoolId: school });
-  if (route) returnParams.set('route', route);
-  const returnFocus = selection ?? focus ?? selectedId;
-  if (returnFocus) returnParams.set('focus', returnFocus);
-  const returnQuery = normalizeCampusClassroomQuery(search);
-  if (returnQuery) returnParams.set('query', returnQuery);
-  const returnUrl = encodeURIComponent(`/map?${returnParams}${hash}`);
-  const platformLoginHref = `/login?returnUrl=${returnUrl}`;
-  const schoolLoginHref = `/login?reconnect=school&returnUrl=${returnUrl}`;
   const deepLinkRoute = useMemo<[MapLocation, MapLocation] | null>(() => {
     const ids = route?.split(',').map((id) => id.trim());
     if (!ids || ids.length !== 2 || ids[0] === ids[1]) return null;
@@ -274,6 +265,23 @@ function MapContent({
     const to = locations.find((location) => location.id === routeDraft.to);
     return from && to && from.id !== to.id ? [from, to] : null;
   }, [deepLinkRoute, routeDraft, locations]);
+  const returnParams = new URLSearchParams({ schoolId: school });
+  // Preserve the currently confirmed route, not the original link after a manual change.
+  // A pending source can still resolve an untouched deep link. Never serialize GPS.
+  if (routeLocations) {
+    const ids = routeLocations.map((place) => place.id);
+    if (ids.every((id) => id && id.trim() === id && !id.includes(',')))
+      returnParams.set('route', ids.join(','));
+  } else if (routeDraft === null && sourcePending && route) {
+    returnParams.set('route', route);
+  }
+  const returnFocus = selection ?? focus ?? selectedId;
+  if (returnFocus) returnParams.set('focus', returnFocus);
+  const returnQuery = normalizeCampusClassroomQuery(search);
+  if (returnQuery) returnParams.set('query', returnQuery);
+  const returnUrl = encodeURIComponent(`/map?${returnParams}${hash}`);
+  const platformLoginHref = `/login?returnUrl=${returnUrl}`;
+  const schoolLoginHref = `/login?reconnect=school&returnUrl=${returnUrl}`;
   const pendingRoutePlaces = routeLocations?.filter((place) => isProvidencePendingVerification(school, place)) ?? [];
   const routeStart = routeDraft?.from
     ? locations.find((location) => location.id === routeDraft.from)
@@ -433,9 +441,12 @@ function MapContent({
     <div className={`pageStack ${styles.page}`} data-map-first-screen="true">
       {publicTask && publicTask.schoolId === school && <PublicNavigationTask port={publicTask} />}
       {routeStart && !routeLocations && (
-        <p className={styles.notice} role="status">
-          已設定「{routeStart.name}」為起點。請選擇其他地點，再按「設為終點」。
-        </p>
+        <div className={styles.notice}>
+          <p role="status">已設定「{routeStart.name}」為起點。請選擇其他地點，再按「設為終點」。</p>
+          <button className="btn" onClick={() => setRouteDraft({ from: null, to: null })}>
+            取消起點
+          </button>
+        </div>
       )}
       {routeLocations && (
         <section className={`card ${styles.route}`} aria-label="步行導航">
