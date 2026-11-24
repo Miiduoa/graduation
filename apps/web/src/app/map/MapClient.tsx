@@ -250,7 +250,8 @@ function MapContent({
   // A missing explicit destination must not silently turn into another building.
   // A later source update can make a room ambiguous; derive this instead of retaining a guess.
   const classroomPlace = classroomLinkActive && classroom.status === 'matched' ? classroom.matches[0] : null;
-  const selectedId = selection ?? (focus ? focusedPlace?.id : classroomPlace?.id);
+  const automaticClassroomId = sourcePending ? undefined : classroomPlace?.id;
+  const selectedId = selection ?? (focus ? focusedPlace?.id : automaticClassroomId);
   const selected = locations.find((location) => location.id === selectedId) ?? null;
   const returnParams = new URLSearchParams({ schoolId: school });
   if (route) returnParams.set('route', route);

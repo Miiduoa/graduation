@@ -359,8 +359,7 @@ function primarySourcedNames(published: CampusMapPlaceLike): string[] {
 function isSourcedBuildingLabel(school: string, published: CampusMapPlaceLike, suppliedLabel: unknown): boolean {
   const label = comparisonText(suppliedLabel);
   if (!label) return false;
-  const names = [...primarySourcedNames(published), ...(PROVIDENCE_ENGLISH_ALIASES.get(published.id) ?? [])];
-  if (names.some((name) => comparisonText(name) === label)) return true;
+  if (primarySourcedNames(published).some((name) => comparisonText(name) === label)) return true;
   return VERIFIED_CLASSROOM_BUILDING_CODES.some(
     (entry) =>
       entry.schoolId === school &&
@@ -479,12 +478,14 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     // Once the supplied name is verified, use the catalog name for attribution's
     // exact-name check while preserving its coordinate check and the original POI.
     const published = school === 'pu' ? PUBLISHED_PROVIDENCE_PLACES.get(location.id) : undefined;
+    const aliases = published ? PROVIDENCE_ENGLISH_ALIASES.get(published.id) : undefined;
     if (
       published &&
       // Source identity and source category are both necessary: a matching
       // ID/name/coordinate does not make a restaurant a classroom building.
       (isExplicitNonClassroomCategory(published.category) ||
-        !isSourcedBuildingLabel(school, published, location.name) ||
+        (!isSourcedBuildingLabel(school, published, location.name) &&
+          !aliases?.some((name) => campusPlaceNameMatchesQuery(name, location.name))) ||
         !providencePlaceSourceUrl(school, { ...location, name: published.name }))
     ) continue;
     // A nearby transit stop can be named after a hall or carry its building
@@ -503,21 +504,26 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
       primaryMatches.push(location);
     } else if (
       published &&
-      (PROVIDENCE_ENGLISH_ALIASES.get(published.id)?.some((name) => nameMatchesRoom(comparable, name)) ||
+      (aliases?.some((name) => nameMatchesRoom(comparable, name)) ||
         matchesSourcedProvidenceCode(comparable, published))
     ) {
       aliasMatches.push(location);
     }
   }
   const matches = primaryMatches.length > 0 ? primaryMatches : aliasMatches;
-  if (primaryMatches.length === 0 && aliasMatches.length === 1) {
-    const [match] = aliasMatches;
-    const published = PUBLISHED_PROVIDENCE_PLACES.get(match.id);
+  if (matches.length === 1) {
+    const [match] = matches;
+    const published = school === 'pu' ? PUBLISHED_PROVIDENCE_PLACES.get(match.id) : undefined;
+    const building = sourcedBuildingLabel(school, published, match.building);
+    const matchesPublicLabelOrLegacyCode = primaryMatches.length > 0 &&
+      (!published || isSourcedBuildingLabel(school, published, match.name)) &&
+      [match.name, building].some((name) =>
+        nameMatchesRoom(comparable, name) || nameMatchesVerifiedCode(school, comparable, name)
+      );
     // A public name can claim the full query even when its place is ineligible
-    // for classroom navigation. New official codes must also yield to that name.
-    // Merge-base PH matches are primary, so this alias-only branch does not apply.
+    // for classroom navigation. Catalog-only names and codes yield to that name.
     if (
-      published &&
+      !matchesPublicLabelOrLegacyCode &&
       locations.some((location) =>
         location && typeof location === 'object' && location.id !== match.id &&
         comparisonText(location.name) === comparable

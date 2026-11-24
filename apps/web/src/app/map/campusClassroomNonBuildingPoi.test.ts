@@ -1258,20 +1258,30 @@ describe('floor ranges do not establish a classroom destination', () => {
   });
 });
 
-describe('new official codes yield to an exact public name on another place', () => {
-  it('does not unique-match AK303 when a bus stop uses that public name', () => {
+describe('catalog names and codes yield to an exact public name on another place', () => {
+  it.each(['AK303', 'Anthony Kuo Hall 303'])('does not unique-match %s when a bus stop uses that public name', (query) => {
     const place = PROVIDENCE_CAMPUS_PLACES.find((item) => item.id === 'pu-renyuan')!;
-    const stop = { ...place, id: 'synthetic-ak-bus-stop', name: 'AK303', category: '公車站' };
+    const stop = { ...place, id: 'synthetic-ak-bus-stop', name: query, category: '公車站' };
     const result = resolveCampusClassroom({
-      schoolId: 'pu', query: 'AK303', locations: [place, stop],
+      schoolId: 'pu', query, locations: [place, stop],
     });
     expect(result.status).toBe('unmatched');
     expect(result.matches).toEqual([]);
     const alone = resolveCampusClassroom({
-      schoolId: 'pu', query: 'AK303', locations: [place],
+      schoolId: 'pu', query, locations: [place],
     });
     expect(alone.status).toBe('matched');
     expect(alone.matches).toEqual([place]);
+  });
+
+  it('keeps legacy PH303 and direct public name matches in the presence of a bus stop', () => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find((item) => item.id === 'pu-zhugu')!;
+    for (const query of ['PH303', '主顧樓303']) {
+      const stop = { ...place, id: 'synthetic-zhugu-bus-stop', name: query, category: '公車站' };
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [place, stop],
+      })).toMatchObject({ status: 'matched', matches: [place] });
+    }
   });
 });
 
