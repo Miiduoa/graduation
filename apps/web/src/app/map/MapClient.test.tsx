@@ -128,6 +128,14 @@ it('resolves classroom deep links to a unique real building while retaining the 
   expect(map.locations.map((place: MapLocation) => place.id)).toContain('pu-zhugu');
   const destination = new URL(screen.getByRole('link', { name: '從目前位置導航' }).getAttribute('href')!);
   expect(destination.searchParams.get('destination')).toBe(`${map.selected.lat},${map.selected.lng}`);
+  const detail = screen.getByRole('region', { name: '地點詳情' });
+  const apple = within(detail).getByRole('link', { name: '使用 Apple 地圖從目前位置導航' });
+  const appleUrl = new URL(apple.getAttribute('href')!);
+  expect(appleUrl.hostname).toBe('maps.apple.com');
+  expect(appleUrl.searchParams.get('daddr')).toBe(destination.searchParams.get('destination'));
+  expect(appleUrl.searchParams.has('saddr')).toBe(false);
+  expect(appleUrl.searchParams.get('dirflg')).toBe('w');
+  expect(document.getElementById(apple.getAttribute('aria-describedby')!)?.textContent).toContain('並非已核實的校舍入口或室內教室');
   expect(screen.queryByText(/樓層：3|三樓教室|3F/)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '關閉地點詳情' }));
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
@@ -326,6 +334,16 @@ it('resolves deep links from loaded places and hands walking directions to a rea
   expect(destination.searchParams.get('origin')).toBe('24.22495,120.56535');
   expect(destination.searchParams.get('destination')).toBe('24.2275,120.5635');
   expect(destination.searchParams.get('travelmode')).toBe('walking');
+  const routeCard = screen.getByRole('region', { name: '步行導航' });
+  const apple = within(routeCard).getByRole('link', { name: '使用 Apple 地圖規劃路線' });
+  const appleUrl = new URL(apple.getAttribute('href')!);
+  expect(appleUrl.hostname).toBe('maps.apple.com');
+  expect(appleUrl.searchParams.get('saddr')).toBe(destination.searchParams.get('origin'));
+  expect(appleUrl.searchParams.get('daddr')).toBe(destination.searchParams.get('destination'));
+  expect(appleUrl.searchParams.get('dirflg')).toBe('w');
+  const routeWarning = document.getElementById(apple.getAttribute('aria-describedby')!);
+  expect(routeWarning?.textContent).toContain('不代表已核實的建築入口');
+  expect(within(routeCard).getByRole('link', { name: '開啟步行導航' }).getAttribute('aria-describedby')).toBe(routeWarning?.id);
   expect(screen.queryByText(/AI 規劃路線|開放中/)).toBeNull();
   expect(screen.getAllByText(/每分鐘 80 公尺/).length).toBeGreaterThan(0);
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('library');
@@ -491,8 +509,12 @@ it('lets visitors choose a campus starting point and destination without locatio
   expect(screen.getByText(/兩地直線距離約/)).toBeTruthy();
   const markerState = JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
   expect(markerState.route.map((entry: MapLocation) => entry.id)).toEqual(['library', 'gate']);
+  const apple = new URL(screen.getByRole('link', { name: '使用 Apple 地圖規劃路線' }).getAttribute('href')!);
+  expect(apple.searchParams.get('saddr')).toBe(url.searchParams.get('origin'));
+  expect(apple.searchParams.get('daddr')).toBe(url.searchParams.get('destination'));
   fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
   expect(screen.queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '使用 Apple 地圖規劃路線' })).toBeNull();
 });
 
 it('obtains position only on request and orders nearby locations by measured straight-line distance', async () => {
