@@ -2,12 +2,15 @@ import Constants from 'expo-constants';
 import {
   isSchoolLoginEntryAvailable,
   isStudentIdLoginAvailable,
+  loadSchoolLoginProviderKinds,
   resetSchoolLoginProviderCache,
   setSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
+import { nuniPlatformRequest } from '../services/nuniClient';
 import { signInWithStudentId } from '../services/studentIdAuth';
 import { setTCSavedCredentials } from '../services/tronClassClient';
 
+jest.mock('../services/nuniClient', () => ({ nuniPlatformRequest: jest.fn() }));
 jest.mock('../services/mockAuth', () => ({ saveMockAuthSession: jest.fn() }));
 jest.mock('../services/puDirectScraper', () => ({
   puLogin: jest.fn(),
@@ -80,4 +83,22 @@ test('accepted SSO still refuses to send a different school credentials to Provi
     signInWithStudentId({ schoolId: 'other-school', studentId: 's123', password: 'secret' }),
   ).rejects.toThrow('帳號連線尚未開放');
   expect(setTCSavedCredentials).not.toHaveBeenCalled();
+});
+
+test('a temporary provider error can recover on the next lookup', async () => {
+  jest.mocked(nuniPlatformRequest)
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce({ kinds: ['school-issued'] });
+  await expect(loadSchoolLoginProviderKinds()).resolves.toEqual([]);
+  await expect(loadSchoolLoginProviderKinds()).resolves.toEqual(['school-issued']);
+  expect(nuniPlatformRequest).toHaveBeenCalledTimes(2);
+});
+
+test('retry refreshes a cached unavailable provider and keeps a usable result', async () => {
+  setSchoolLoginProviderKinds(['google-consumer']);
+  jest.mocked(nuniPlatformRequest).mockResolvedValueOnce({ kinds: ['school-issued'] });
+  await expect(loadSchoolLoginProviderKinds()).resolves.toEqual(['google-consumer']);
+  await expect(loadSchoolLoginProviderKinds({ recheckUnavailable: true })).resolves.toEqual(['school-issued']);
+  await expect(loadSchoolLoginProviderKinds({ recheckUnavailable: true })).resolves.toEqual(['school-issued']);
+  expect(nuniPlatformRequest).toHaveBeenCalledTimes(1);
 });

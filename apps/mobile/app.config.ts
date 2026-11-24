@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { googleIosInfoPlist } from './scripts/configure-nuni-google.cjs';
 
 type AppEnvironment = 'development' | 'preview' | 'production';
@@ -87,7 +89,61 @@ function requirePositiveInteger(
   return parsed;
 }
 
-export default ({ config }: any) => {
+type AndroidFirebaseClient = {
+  client_info?: {
+    android_client_info?: { package_name?: string };
+    mobilesdk_app_id?: string;
+  };
+  api_key?: { current_key?: string }[];
+};
+
+function resolveAndroidGoogleServicesFile(
+  projectRoot: string,
+  configuredFile: string | undefined,
+  packageName: string,
+  firebase: { projectId?: string; messagingSenderId?: string },
+  releaseLike: boolean,
+): string | undefined {
+  const platform = process.env.EAS_BUILD_PLATFORM;
+  if (platform === 'ios' || (!platform && process.env.EXPO_OS === 'ios')) return undefined;
+  const file = process.env.GOOGLE_SERVICES_JSON?.trim() || configuredFile || './google-services.json';
+  const path = resolve(projectRoot, file);
+  if (!existsSync(path)) {
+    if (releaseLike && process.env.EAS_BUILD === 'true' && platform === 'android') {
+      throw new Error('[app.config] Android release builds require the GOOGLE_SERVICES_JSON file or apps/mobile/google-services.json.');
+    }
+    return undefined;
+  }
+  let data: { project_info?: { project_id?: string; project_number?: string }; client?: AndroidFirebaseClient[] } | null;
+  try {
+    if (!statSync(path).isFile()) throw new Error();
+    data = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    throw new Error('[app.config] Android Firebase configuration must be a readable google-services.json file.');
+  }
+  const project = data?.project_info;
+  if (
+    typeof project?.project_id !== 'string' || !project.project_id.trim() ||
+    typeof project.project_number !== 'string' || !/^\d+$/.test(project.project_number) ||
+    (firebase.projectId && project.project_id !== firebase.projectId) ||
+    (firebase.messagingSenderId && project.project_number !== firebase.messagingSenderId)
+  ) {
+    throw new Error('[app.config] Android Firebase project and sender must match the app Firebase configuration.');
+  }
+  const client = Array.isArray(data?.client)
+    ? data.client.find(entry => entry?.client_info?.android_client_info?.package_name === packageName)
+    : undefined;
+  const appId = client?.client_info?.mobilesdk_app_id;
+  const prefix = `1:${project.project_number}:android:`;
+  const hasClientKey = Array.isArray(client?.api_key) &&
+    client.api_key.some(key => typeof key?.current_key === 'string' && key.current_key.trim());
+  if (typeof appId !== 'string' || !appId.startsWith(prefix) || !appId.slice(prefix.length).trim() || !hasClientKey) {
+    throw new Error('[app.config] Android Firebase configuration requires a native app ID and client API key for the selected Android package.');
+  }
+  return file;
+}
+
+export default ({ config, projectRoot = __dirname }: any) => {
   const appEnv = normalizeAppEnv(process.env.APP_ENV);
   const isProduction = appEnv === 'production';
   const isReleaseLike = appEnv === 'preview' || appEnv === 'production';
@@ -176,6 +232,9 @@ export default ({ config }: any) => {
     process.env.ANDROID_PACKAGE_NAME?.trim() ||
     config.android?.package ||
     (isProduction ? 'com.campus.app' : 'com.campus.app.dev');
+  const googleServicesFile = resolveAndroidGoogleServicesFile(
+    projectRoot, config.android?.googleServicesFile, androidPackage, firebase, isReleaseLike,
+  );
   const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim();
   if (
     googleIosClientId ===
@@ -319,6 +378,7 @@ export default ({ config }: any) => {
     },
     android: {
       ...(config.android ?? {}),
+      ...(googleServicesFile ? { googleServicesFile } : {}),
       adaptiveIcon: {
         foregroundImage:
           config.android?.adaptiveIcon?.foregroundImage ?? './assets/adaptive-icon.png',

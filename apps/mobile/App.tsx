@@ -68,11 +68,11 @@ import { MessagesStack } from './src/screens/MessagesStack';
 import { MeStack } from './src/screens/MeStack';
 import { OnboardingScreen, hasSeenOnboarding } from './src/screens/OnboardingScreen';
 import { PreAuthStack } from './src/screens/PreAuthStack';
-import { SchoolSessionBoundary, hasReadySchoolSession } from './src/app/SchoolSessionBoundary';
+import { hasReadySchoolSession } from './src/app/SchoolSessionBoundary';
 import { preAuthLinking } from './src/app/preAuthLinking';
 import { StudentCardLinkHandler } from './src/app/StudentCardLinkHandler';
 import { parseStudentCardDeepLink } from './src/app/studentCardDeepLink';
-import { usePushNotifications } from './src/app/usePushNotifications';
+import { DormNotificationHandoff } from './src/app/DormNotificationHandoff';
 import { useAIAmbientAwareness } from './src/app/useAIAmbientAwareness';
 import { useAIBrainLifecycle } from './src/app/useAIBrain';
 import { HeaderDrawerHost } from './src/components/HeaderDrawer';
@@ -601,9 +601,9 @@ function AppTabNavigator() {
 
 function AppNavigation() {
   return (
-    <SchoolSessionBoundary publicContent={<PublicNavigation />}>
+    <DormNotificationHandoff publicContent={<PublicNavigation />}>
       <SchoolNavigation />
-    </SchoolSessionBoundary>
+    </DormNotificationHandoff>
   );
 }
 
@@ -650,12 +650,6 @@ function SchoolNavigation() {
   authTeachingRef.current = isTeachingRole(auth.profile?.role);
 
   useSubmittedAssignmentReminders(auth.user?.uid, school.id);
-  usePushNotifications(
-    rootNavigationRef,
-    auth.user?.uid,
-    auth.profile?.role,
-    school.id,
-  );
   useAIAmbientAwareness();
   useAIBrainLifecycle();
   useProactiveAIReporter();

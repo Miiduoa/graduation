@@ -24,6 +24,10 @@ on:
         required: true
         type: boolean
         default: false
+      build_only_sha:
+        description: 'Optional exact production commit for a build without a draft release or store submission'
+        required: false
+        type: string
       release_notes:
         description: 'Release notes (optional)'
         required: false
@@ -75,6 +79,7 @@ jobs:
           BUILD_PLATFORM: ${{ inputs.platform }}
           BUILD_PROFILE: ${{ inputs.profile }}
           SUBMIT_TO_STORE: ${{ inputs.submit }}
+          BUILD_ONLY_SHA: ${{ inputs.build_only_sha }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -272,7 +277,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [preflight, build-ios, build-android]
     if: >-
-      always() && inputs.profile == 'production' && needs.preflight.result == 'success' &&
+      always() && inputs.profile == 'production' && !inputs.build_only_sha && needs.preflight.result == 'success' &&
       (inputs.platform == 'android' || needs.build-ios.result == 'success') &&
       (inputs.platform == 'ios' || needs.build-android.result == 'success')
     permissions:

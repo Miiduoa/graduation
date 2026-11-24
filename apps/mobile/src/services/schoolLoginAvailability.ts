@@ -30,8 +30,11 @@ export function isSchoolLoginEntryAvailable(schoolId = PROVIDENCE_UNIVERSITY_SCH
   return isStudentIdLoginAvailable(schoolId) && hasUsableSchoolLoginProvider(providerCache?.kinds);
 }
 
-export async function loadSchoolLoginProviderKinds(): Promise<string[]> {
-  if (providerCache) return providerCache.kinds;
+export async function loadSchoolLoginProviderKinds(
+  { recheckUnavailable = false }: { recheckUnavailable?: boolean } = {},
+): Promise<string[]> {
+  if (providerCache && (!recheckUnavailable || hasUsableSchoolLoginProvider(providerCache.kinds)))
+    return providerCache.kinds;
   try {
     const value = await nuniPlatformRequest('providers');
     const kinds =
@@ -41,7 +44,6 @@ export async function loadSchoolLoginProviderKinds(): Promise<string[]> {
     providerCache = { kinds };
     return kinds;
   } catch {
-    providerCache = { kinds: [] };
     return [];
   }
 }

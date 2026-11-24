@@ -1074,6 +1074,24 @@ describe('firestore security rules', () => {
     });
   }
 
+  test('dorm notification recipients can mark read or delete while the server controls the tap receipt', async () => {
+    const id = 'dorm_' + 'a'.repeat(64);
+    const inbox = (uid) => `users/${uid}/notifications/${id}`;
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob']) {
+        await db.doc('users/' + uid).set({ status: 'active' });
+        await db.doc(inbox(uid)).set({ read: false, data: { deliveryKey: 'receipt-' + uid } });
+      }
+    });
+    const db = testEnv.authenticatedContext('bob').firestore();
+    await assertSucceeds(db.doc(inbox('bob')).get());
+    await assertFails(db.doc(inbox('alice')).get());
+    await assertFails(db.doc(inbox('bob')).update({ 'data.deliveryKey': 'receipt-alice' }));
+    await assertSucceeds(db.doc(inbox('bob')).update({ read: true, readAt: serverTimestamp() }));
+    await assertSucceeds(db.doc(inbox('bob')).delete());
+    await assertFails(db.doc(inbox('bob')).set({ read: true, data: { deliveryKey: 'receipt-alice' } }));
+  });
+
   test('feedback is private and can only be written by the server', async () => {
     await seedFirestore(async (db) => {
       await db
