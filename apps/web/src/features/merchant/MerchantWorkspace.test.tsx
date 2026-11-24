@@ -582,7 +582,10 @@ it('prioritizes the actual authorized store for a returning operator and retains
   expect(screen.queryByRole('heading', { name: '開始申請第一間門市' })).toBeNull();
 });
 
-it('keeps the application draft and pending submission across same-tab store visits', async () => {
+it.each([
+  { scenario: 'no programs remain open', refreshedPrograms: [] },
+  { scenario: 'only another program remains open', refreshedPrograms: programs.slice(1) },
+])('retries after a store visit when $scenario', async ({ refreshedPrograms }) => {
   window.history.replaceState(null, '', '/merchant');
   const store = {
     tenantId: 'campus-one',
@@ -614,8 +617,13 @@ it('keeps the application draft and pending submission across same-tab store vis
     sourceLine: null,
   };
   let showStore = false;
+  let openPrograms = programs;
+  let submissionAttempts = 0;
   mocks.request.mockImplementation((path, context, input) => {
-    if (input) return Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
+    if (path === 'merchant-applications' && input && ++submissionAttempts === 1) {
+      return Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
+    }
+    if (path === 'merchant-onboarding-programs') return Promise.resolve({ programs: openPrograms });
     if (path === 'merchant-workspaces' && showStore)
       return Promise.resolve({ workspaces: [store] });
     if (path === 'merchant-workspaces/campus-one/location-1') return Promise.resolve(store);
@@ -646,15 +654,21 @@ it('keeps the application draft and pending submission across same-tab store vis
   await screen.findByText(/尚未確認是否收件/);
 
   await openStore();
+  openPrograms = refreshedPrograms;
+  const programReads = () =>
+    mocks.request.mock.calls.filter(([path]) => path === 'merchant-onboarding-programs').length;
+  const readsBeforeReturn = programReads();
   fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
   expect(window.location.pathname).toBe('/merchant');
+  await waitFor(() => expect(programReads()).toBe(readsBeforeReturn + 1));
   await screen.findByText(/尚未確認是否收件/);
   expect((screen.getByLabelText('對外品牌名稱') as HTMLInputElement).value).toBe('更新餐坊');
   const retry = screen.getByRole('button', { name: '重試同一份申請' });
   await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
   fireEvent.click(retry);
-  await waitFor(() => expect(mocks.request.mock.calls.filter((call) => call[2])).toHaveLength(2));
+  await screen.findByText(/申請已收件/);
   const writes = mocks.request.mock.calls.filter((call) => call[2]);
+  expect(writes).toHaveLength(2);
   expect(writes[0][2]).toMatchObject({ brandName: '更新餐坊' });
   expect(writes[1][2]).toEqual(writes[0][2]);
 });

@@ -369,6 +369,7 @@ function AccountWorkspace({
           idempotencyKey: `merchant-apply-${crypto.randomUUID()}`,
         });
       if (
+        !pending &&
         !overview.programs.some(
           (program) =>
             program.tenantId === payload.tenantId &&
@@ -702,7 +703,7 @@ function AccountWorkspace({
           ) : (
             <section className={styles.panel} aria-labelledby="merchant-apply-title">
               <h3 id="merchant-apply-title">申請進駐</h3>
-              {overview.programs.length === 0 ? (
+              {!pending && overview.programs.length === 0 ? (
                 <p>目前沒有場域開放進駐申請。</p>
               ) : (
                 <form
