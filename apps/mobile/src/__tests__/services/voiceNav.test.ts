@@ -104,4 +104,15 @@ describe('voice navigation mute lifecycle', () => {
     expect(setItem).toHaveBeenCalledWith('@voiceNav:mute', '1');
     await expect(voiceNav.isMuted()).resolves.toBe(true);
   });
+
+  it('contains native stop rejection when replacing an announcement', async () => {
+    stopSpeech.mockRejectedValueOnce(new Error('native stop failed'));
+    await expect(voiceNav.speak('下一站')).resolves.toBeUndefined();
+    expect(speak).toHaveBeenCalledWith('下一站', {
+      language: 'zh-TW',
+      pitch: 1.0,
+      rate: 1.0,
+    });
+  });
+
 });
