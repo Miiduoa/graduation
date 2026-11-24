@@ -42,6 +42,7 @@ import {
   personalImportStorageKey,
   subscribePersonalImports,
   type PersonalImportScope,
+  type PersonalImportWriteGuard,
 } from '../services/personalImports';
 import { shareICalContent } from '../services/ical';
 import type { CampusEventCalendarDraft } from '../services/campusEventCalendarDraft';
@@ -213,6 +214,7 @@ function PersonalCalendarWorkspace({
   const loggingOut = !!platformSession.pendingLogout || (!platformSession.session && !!platformSession.error);
   const active = useRef(true);
   const readSequence = useRef(0);
+  const latestRead = useRef({ ledger: 0, reminders: 0 });
   const resolvedKey = scope ? personalImportStorageKey(scope) : '';
   const verifiedKey = resolvedKey === scopeKey && !loggingOut ? resolvedKey : '';
   const currentScope = useRef({ resolvedKey, verifiedKey, loggingOut });
@@ -255,30 +257,37 @@ function PersonalCalendarWorkspace({
   }, []);
 
   useLayoutEffect(() => {
+    // A return to the same account and school still starts a new verification.
     currentScope.current = { resolvedKey, verifiedKey, loggingOut };
-    // Invalidate reads across revalidation even when the workspace key stays the same.
-    readSequence.current += 1;
   }, [resolvedKey, verifiedKey, loggingOut]);
 
   useLayoutEffect(() => {
     ledgerReady.current = ready;
   }, [ready]);
 
+  const beginRead = useCallback((resource: keyof typeof latestRead.current, expected: string) => {
+    const verification = currentScope.current;
+    if (!active.current || verification.verifiedKey !== expected) return;
+    const sequence = ++readSequence.current;
+    latestRead.current[resource] = sequence;
+    return () =>
+      active.current &&
+      currentScope.current === verification &&
+      latestRead.current[resource] === sequence;
+  }, []);
+
   const refreshReminders = useCallback(async () => {
-    if (!scope) {
-      setReminders({});
-      setReminderBlocked(null);
-      return;
-    }
-    const expected = personalImportStorageKey(scope);
+    if (!scope) return;
+    const isCurrentRead = beginRead('reminders', personalImportStorageKey(scope));
+    if (!isCurrentRead) return;
     try {
       const entries = await listPersonalEventReminderEntries(scope);
-      if (!active.current || currentScope.current.verifiedKey !== expected) return;
+      if (!isCurrentRead()) return;
       setReminders(entries);
       const runtime = getPersonalEventReminderRuntimeFailure(scope);
       setReminderBlocked(runtime?.message ?? null);
     } catch (error) {
-      if (!active.current || currentScope.current.verifiedKey !== expected) return;
+      if (!isCurrentRead()) return;
       if (error instanceof PersonalEventReminderJournalCorruptError) {
         // Preserve corrupt raw storage; do not replace with empty success.
         setReminderBlocked(reminderStatusCopy('corrupt_blocked'));
@@ -289,7 +298,7 @@ function PersonalCalendarWorkspace({
       publishPersonalEventReminderRuntimeFailure(scope, message);
       setReminderBlocked(message || PERSONAL_EVENT_REMINDER_STORAGE_FAILURE_MESSAGE);
     }
-  }, [scope]);
+  }, [beginRead, scope]);
 
   const refresh = useCallback(async () => {
     if (!active.current) return;
@@ -297,11 +306,8 @@ function PersonalCalendarWorkspace({
       if (!currentScope.current.verifiedKey) setLoad({ status: 'loading' });
       return;
     }
-    const expected = personalImportStorageKey(scope);
-    if (currentScope.current.verifiedKey !== expected) return;
-    // Focus, storage notifications and mutation completions all supersede older reads.
-    const sequence = ++readSequence.current;
-    const isCurrentRead = () => active.current && sequence === readSequence.current;
+    const isCurrentRead = beginRead('ledger', personalImportStorageKey(scope));
+    if (!isCurrentRead) return;
     try {
       const ledger = await loadPersonalImports(scope);
       if (!isCurrentRead()) return;
@@ -321,7 +327,7 @@ function PersonalCalendarWorkspace({
       });
     }
     await refreshReminders();
-  }, [scope, refreshReminders]);
+  }, [beginRead, scope, refreshReminders]);
 
   useFocusEffect(
     useCallback(() => {
@@ -417,10 +423,11 @@ function PersonalCalendarWorkspace({
   const mutationLock = useRef(false);
   const runMutation = async (
     scoped: PersonalImportScope,
-    action: (canContinue: () => boolean) => Promise<string>,
-    requestedScope = currentScope.current,
+    action: (guard: PersonalImportWriteGuard) => Promise<string>,
+    confirmationScope?: typeof currentScope.current,
   ) => {
     if (!active.current || mutationLock.current) return;
+    const requestedScope = confirmationScope ?? currentScope.current;
     const expected = personalImportStorageKey(scoped);
     if (
       requestedScope !== currentScope.current ||
@@ -437,12 +444,16 @@ function PersonalCalendarWorkspace({
       return active.current && !latest.loggingOut &&
         (!latest.resolvedKey || latest.resolvedKey === expected);
     };
+    // A destructive confirmation belongs to a single uninterrupted verification.
+    const guard = confirmationScope
+      ? { canContinue, canStartWrite: () => currentScope.current === confirmationScope }
+      : canContinue;
     mutationLock.current = true;
     setSaving(true);
     setFormError('');
     setNotice('');
     try {
-      const result = await action(canContinue);
+      const result = await action(guard);
       if (!canContinue()) return;
       setNotice(result);
       cancelForm();
@@ -465,9 +476,9 @@ function PersonalCalendarWorkspace({
       setFormError(draftIssues[0].message);
       return;
     }
-    void runMutation(scope, async (canContinue) => {
+    void runMutation(scope, async (guard) => {
       const row = personalEventRowFromDraft(draft, scope.schoolId, null);
-      const { added } = await appendPersonalImports(scope, [row], canContinue);
+      const { added } = await appendPersonalImports(scope, [row], guard);
       return added
         ? personalImportSavedNotice(added, load.status === 'ready' && load.syncEnabled)
         : '個人行事曆已經有這筆行程。';
@@ -483,9 +494,9 @@ function PersonalCalendarWorkspace({
       setFormError(draftIssues[0].message);
       return;
     }
-    void runMutation(scope, async (canContinue) => {
+    void runMutation(scope, async (guard) => {
       const row = personalEventRowFromDraft(draft, scope.schoolId, baseline);
-      await editPersonalImport(scope, baseline, row, canContinue);
+      await editPersonalImport(scope, baseline, row, guard);
       return '個人行程已更新。';
     });
   };
@@ -501,8 +512,8 @@ function PersonalCalendarWorkspace({
         onPress: () => {
           void runMutation(
             scope,
-            async (canContinue) => {
-              await deletePersonalImport(scope, baseline, canContinue);
+            async (guard) => {
+              await deletePersonalImport(scope, baseline, guard);
               return '已刪除這筆個人行程。';
             },
             confirmationScope,

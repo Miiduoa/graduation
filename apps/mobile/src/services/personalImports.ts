@@ -114,9 +114,17 @@ export async function loadPersonalImports(
   return value;
 }
 
+/** A verified operation may require uninterrupted verification up to its first write. */
+export type PersonalImportWriteGuard =
+  | (() => boolean)
+  | {
+      canContinue: () => boolean;
+      canStartWrite: () => boolean;
+    };
+
 export function mutatePersonalImportLedger<T>(
   scope: PersonalImportScope,
-  active: () => boolean,
+  guard: PersonalImportWriteGuard,
   update: (
     ledger: PersonalImportLedger,
     checkpoint: (ledger: PersonalImportLedger) => Promise<void>,
@@ -125,19 +133,28 @@ export function mutatePersonalImportLedger<T>(
     | Promise<{ ledger: PersonalImportLedger; result: T }>,
   source: ImportChange['source'] = 'local',
 ): Promise<T> {
+  const canContinue = typeof guard === 'function' ? guard : guard.canContinue;
   const key = personalImportStorageKey(scope);
   const previous = locks.get(key) || Promise.resolve();
   const task = previous
     .catch(() => undefined)
     .then(async () => {
-      if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
+      let hasPersisted = false;
+      const assertWritable = () => {
+        if (!canContinue()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
+        if (!hasPersisted && typeof guard !== 'function' && !guard.canStartWrite()) {
+          throw new Error('目前無法確認行事曆可寫入，請稍後再試。');
+        }
+      };
+      assertWritable();
       const current = await loadPersonalImports(scope);
-      if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
+      assertWritable();
       let persisted = current;
       const checkpoint = async (ledger: PersonalImportLedger) => {
-        if (!active()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
+        assertWritable();
         if (JSON.stringify(persisted) === JSON.stringify(ledger)) return;
         await AsyncStorage.setItem(key, JSON.stringify(ledger));
+        hasPersisted = true;
         persisted = ledger;
         for (const listener of listeners) {
           try {
@@ -164,10 +181,10 @@ const mutate = mutatePersonalImportLedger;
 export function appendPersonalImports(
   scope: PersonalImportScope,
   rows: PersonalImportRow[],
-  active = () => true,
+  guard: PersonalImportWriteGuard = () => true,
   options: { restoreBackup?: boolean; protectCatalogTimetableSlots?: boolean; expectedRecordsJson?: string } = {},
 ) {
-  return mutate(scope, active, (current) => {
+  return mutate(scope, guard, (current) => {
     if (rows.some((row) => row.schoolId !== scope.schoolId))
       throw new Error('資料的學校與目前選擇不同。');
     // A conflict acknowledgement is valid only for the exact records reviewed.
@@ -222,9 +239,9 @@ export function editPersonalImport(
   scope: PersonalImportScope,
   before: PersonalImportRecord,
   next: PersonalImportRow,
-  active = () => true,
+  guard: PersonalImportWriteGuard = () => true,
 ) {
-  return mutate(scope, active, (current) => {
+  return mutate(scope, guard, (current) => {
     const index = current.records.findIndex((row) => row.id === before.id);
     if (index < 0 || JSON.stringify(current.records[index]) !== JSON.stringify(before)) {
       throw new Error('這筆資料已變更，請重新載入後編輯。');
@@ -263,9 +280,9 @@ export function editPersonalImport(
 export function deletePersonalImport(
   scope: PersonalImportScope,
   before: PersonalImportRecord,
-  active = () => true,
+  guard: PersonalImportWriteGuard = () => true,
 ) {
-  return mutate(scope, active, (current) => {
+  return mutate(scope, guard, (current) => {
     const found = current.records.find((row) => row.id === before.id);
     if (!found || JSON.stringify(found) !== JSON.stringify(before)) {
       throw new Error('這筆資料已變更，請重新載入後再移除。');
@@ -284,9 +301,9 @@ export function deletePersonalImport(
 export function undoLastPersonalImport(
   scope: PersonalImportScope,
   expectedBatchId: string,
-  active = () => true,
+  guard: PersonalImportWriteGuard = () => true,
 ) {
-  return mutate(scope, active, (current) => {
+  return mutate(scope, guard, (current) => {
     const last = current.batches[current.batches.length - 1];
     if (!last || last.id !== expectedBatchId)
       throw new Error('匯入紀錄已更新，請重新載入後再撤回。');

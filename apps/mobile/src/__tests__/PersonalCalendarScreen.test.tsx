@@ -9,6 +9,8 @@ import {
   type PersonalImportRecord,
 } from '@campus/shared';
 import PersonalCalendarScreen from '../screens/PersonalCalendarScreen';
+import { PersonalEventReminderJournalCorruptError } from '../services/personalEventReminderJournal';
+import { reminderStatusCopy, type PersonalEventReminderEntry } from '../services/personalEventReminderModel';
 import { shareICalContent } from '../services/ical';
 jest.mock('../services/ical', () => ({ shareICalContent: jest.fn(async () => undefined) }));
 import {
@@ -109,7 +111,7 @@ const mockEnableTimed = jest.fn();
 const mockEnableAllDay = jest.fn();
 const mockDisableReminder = jest.fn();
 const mockRetryReminder = jest.fn();
-const mockListReminders = jest.fn(async () => ({}));
+const mockListReminders = jest.fn(async (): Promise<Record<string, PersonalEventReminderEntry>> => ({}));
 const mockOpenReminderSettings = jest.fn();
 
 jest.mock('../services/personalEventReminders', () => ({
@@ -559,6 +561,98 @@ it.each(['during revalidation', 'after revalidation'])(
     expect((await loadPersonalImports(scope)).records.map((row) => row.title)).toEqual([
       '待確認的行程',
     ]);
+  },
+);
+
+it.each(['during revalidation', 'after recovery'])(
+  'keeps an event when a confirmed deletion reaches its first write check %s',
+  async (when) => {
+    const view = await fillAndSave('首次寫入前重驗');
+    const scope = mockScope!;
+    const stored = await AsyncStorage.getItem(personalImportStorageKey(scope));
+    const read = deferred<string | null>();
+    const getItem = jest.mocked(AsyncStorage.getItem);
+    getItem.mockClear();
+    getItem.mockImplementationOnce(() => read.promise);
+    fireEvent.press(view.getByText('首次寫入前重驗'));
+    fireEvent.press(view.getByText('刪除這筆'));
+    await waitFor(() => expect(getItem).toHaveBeenLastCalledWith(personalImportStorageKey(scope)));
+    const deletion = jest.mocked(deletePersonalImport).mock.results[0].value;
+
+    mockScope = null;
+    view.rerender(<PersonalCalendarScreen />);
+    if (when === 'after recovery') {
+      mockScope = scope;
+      view.rerender(<PersonalCalendarScreen />);
+    }
+    await act(async () => {
+      read.resolve(stored);
+      await expect(deletion).rejects.toThrow('目前無法確認行事曆可寫入');
+    });
+
+    expect(await AsyncStorage.getItem(personalImportStorageKey(scope))).toBe(stored);
+    expect(view.queryByText('已刪除這筆個人行程。')).toBeNull();
+  },
+);
+
+it.each(['recovered success', 'recovered error', 'success without revalidation'])(
+  'ignores an older enabled reminder read after %s',
+  async (outcome) => {
+    const view = await fillAndSave('提醒讀取競態');
+    const scope = mockScope!;
+    const { records: [record] } = await loadPersonalImports(scope);
+    fireEvent.press(view.getByText(record.title));
+    const read = deferred<Record<string, PersonalEventReminderEntry>>();
+    mockListReminders.mockClear();
+    mockListReminders.mockImplementationOnce(() => read.promise);
+    const actual = jest.requireActual<typeof import('../services/personalImports')>(
+      '../services/personalImports',
+    );
+    const notifyLedger = (location: string) => actual.mutatePersonalImportLedger(
+      scope,
+      () => true,
+      (ledger) => ({
+        ledger: { ...ledger, records: ledger.records.map((row) => ({ ...row, location })) },
+        result: undefined,
+      }),
+    );
+
+    await act(async () => { await notifyLedger('第一次讀取'); });
+    expect(mockListReminders).toHaveBeenCalledTimes(1);
+
+    if (outcome === 'recovered error') {
+      mockListReminders.mockRejectedValueOnce(new PersonalEventReminderJournalCorruptError(scope));
+    }
+    if (outcome === 'success without revalidation') {
+      await act(async () => { await notifyLedger('第二次讀取'); });
+    } else {
+      mockScope = null;
+      view.rerender(<PersonalCalendarScreen />);
+      mockScope = scope;
+      view.rerender(<PersonalCalendarScreen />);
+    }
+    await waitFor(() => expect(mockListReminders).toHaveBeenCalledTimes(2));
+    const expectedStatus = outcome === 'recovered error'
+      ? reminderStatusCopy('corrupt_blocked')
+      : '此裝置提醒：關閉';
+    expect(view.getAllByText(expectedStatus).length).toBeGreaterThan(0);
+
+    await act(async () => {
+      read.resolve({
+        [record.id]: {
+          eventId: record.id,
+          revision: 'rev',
+          preference: { enabled: true, mode: 'timed', leadMinutes: 10 },
+          lookupToken: 'tok',
+          osIdentifier: 'per-evtrem.tok',
+          intentGeneration: 1,
+          status: 'scheduled',
+          updatedAt: new Date().toISOString(),
+        },
+      });
+    });
+    expect(view.getAllByText(expectedStatus).length).toBeGreaterThan(0);
+    expect(view.queryByRole('button', { name: '關閉此裝置提醒' })).toBeNull();
   },
 );
 
