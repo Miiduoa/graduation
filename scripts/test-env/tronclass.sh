@@ -221,16 +221,21 @@ tronclass_parse_record() {
 tronclass_record_matches() {
   local pid="$1"
   local start="$2"
-  [ -n "$pid" ] || return 1
+  # Reject PID 0 (kill -- -0 signals the caller's group), PID 1, and records
+  # that never stored a start-time.
+  case "$pid" in
+    ''|0|1) return 1 ;;
+  esac
+  [ -n "$start" ] || return 1
   local live
   live="$(tronclass_proc_starttime "$pid" 2>/dev/null || true)"
   if [ -n "$live" ]; then
-    [ -n "$start" ] && [ "$live" = "$start" ]
+    [ "$live" = "$start" ]
     return $?
   fi
-  # Leader is gone. Only signal the leftover group if this PID is unused
-  # (not reused by a new process).
-  [ -n "$pid" ] && [ ! -e "/proc/$pid" ]
+  # Leader is gone. Only signal the leftover group if this PID number is
+  # unused (not reused by a new process).
+  [ ! -e "/proc/$pid" ]
 }
 
 tronclass_read_record_file() {
@@ -284,11 +289,13 @@ tronclass_stop_logged() {
   local log="$2"
   local sig="${3:-TERM}"
   local memory="$4"
+  # Only stop processes this invocation started. A leftover sidecar from a
+  # previous run in a reused runtime directory must not be used alone.
+  [ -n "$wrapper" ] || [ -n "$memory" ] || return 0
   local file_record="" memory_record=""
   [ -n "$log" ] && file_record="$(tronclass_read_record_file "${log}.pgid" 2>/dev/null || true)"
   [ -n "$memory" ] && memory_record="$(tronclass_parse_record "$memory" 2>/dev/null || true)"
   local record="${memory_record:-$file_record}"
-  [ -n "$wrapper" ] || [ -n "$record" ] || return 0
   tronclass_signal_record "$record" "$sig"
   if [ -n "$wrapper" ]; then
     local child

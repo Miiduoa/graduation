@@ -647,3 +647,50 @@ test('launcher still stops the group when the pgid sidecar is a symbolic link', 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('launcher cleanup does not kill a previous run from a leftover matching web.pgid', async () => {
+  const { spawn } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-leftover-'));
+  const childPidFile = path.join(dir, 'child.pid');
+  const grandchildPidFile = path.join(dir, 'grandchild.pid');
+  const victim = spawn('sleep', ['30'], { stdio: 'ignore', detached: true });
+  victim.unref();
+  const start = readFileSync(`/proc/${victim.pid}/stat`, 'utf8');
+  const startTime = start.slice(start.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
+  writeFileSync(path.join(dir, 'web.log.pgid'), `${victim.pid} ${startTime}\n`);
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+  try {
+    const proc = spawn('bash', [script], {
+      env: {
+        ...process.env,
+        TRONCLASS_RUNTIME_DIR: dir,
+        TRONCLASS_SIGNAL_SELFTEST: '1',
+        TRONCLASS_SELFTEST_CHILD: childPidFile,
+        TRONCLASS_SELFTEST_GRANDCHILD: grandchildPidFile,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const started = Date.now();
+    while (Date.now() - started < 5000) {
+      if (existsSync(childPidFile) && existsSync(grandchildPidFile)) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    proc.kill('SIGTERM');
+    const exited = await new Promise(resolve => {
+      const timer = setTimeout(() => resolve('timeout'), 5000);
+      proc.on('exit', (code, signal) => {
+        clearTimeout(timer);
+        resolve({ code, signal });
+      });
+    });
+    assert.notEqual(exited, 'timeout');
+    process.kill(victim.pid, 0);
+    victim.kill('SIGKILL');
+    await new Promise(resolve => setTimeout(resolve, 50));
+  } finally {
+    try { process.kill(-victim.pid, 'SIGKILL'); } catch (error) { /* already exited */ }
+    try { process.kill(victim.pid, 'SIGKILL'); } catch (error) { /* already exited */ }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
