@@ -120,7 +120,12 @@ describe('trusted OSM walking segment audit bridge', () => {
     const data = candidates();
     data.nodes[1].lat = data.nodes[0].lat;
     data.nodes[1].lng = data.nodes[0].lng;
-    data.graph.nodes[1] = { id: 2, lat: data.nodes[1].lat, lng: data.nodes[1].lng };
+    data.graph = {
+      ...data.graph,
+      nodes: data.graph.nodes.map(node => node.id === 2
+        ? { ...node, lat: data.nodes[1].lat, lng: data.nodes[1].lng }
+        : node),
+    };
     expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)).toBeNull();
   });
 
