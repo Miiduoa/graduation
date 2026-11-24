@@ -990,16 +990,10 @@ function httpError(status) {
 function homeworkPaginationNumber(value, required = true) {
   if (value === undefined || value === null) return null;
   if (!required) {
-    // Legacy callers used Number() so totals such as "002" stay usable.
-    if (typeof value === 'number') {
-      return Number.isSafeInteger(value) && value >= 0 ? value : null;
-    }
-    if (typeof value === 'string') {
-      // Merge-base Number("") and Number("  ") are 0; keep that contract.
-      const parsed = Number(value);
-      return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
-    }
-    return null;
+    // Legacy callers used Number() on any non-null value, so totals such as
+    // "002", "", whitespace, false, and [] stay usable as 2, 0, 0, 0, and 0.
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
   }
   const parsed = typeof value === 'number' ? value
     : typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : NaN;

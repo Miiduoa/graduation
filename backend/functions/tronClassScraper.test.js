@@ -289,6 +289,9 @@ describe('tronClassScraper', () => {
     [{ total: '002', page: '1', page_size: '50' }, 2, '1', '50'],
     [{ total: '', page: '1', page_size: '50' }, 0, '1', '50'],
     [{ total: '  ', page: '1', page_size: '50' }, 0, '1', '50'],
+    [{ total: false, page: '1', page_size: '50' }, 0, '1', '50'],
+    [{ total: [], page: '1', page_size: '50' }, 0, '1', '50'],
+    [{ total: [50], page: '1', page_size: '50' }, 50, '1', '50'],
     [{ total: 1, page: 1, page_size: 50 }, 1, 1, 50],
     [{}, null, 1, 50],
     [{ total: null, page: null, page_size: null }, null, 1, 50],
@@ -561,7 +564,7 @@ describe('tronClassScraper', () => {
     });
   });
 
-  test.each([false, 'invalid', [50]])(
+  test.each(['invalid', {}])(
     'legacy homework page treats an unusable total as absent instead of rejecting a valid array: %p',
     async total => {
       const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
