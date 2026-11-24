@@ -407,6 +407,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   // An observer pause caused by scrolling must not steal focus from directions or POI controls.
   const restoreFocusAfterPause = useRef(false);
   const sceneWasSuspended = useRef(false);
+  // Remember a stale visual-viewport signature only for an explicit restart or
+  // overlay touch. Effect remounts (for example when outlines arrive) must not
+  // re-arm it after focus or keyboard intersection already cleared it.
+  const ignoredViewportRef = useRef<string | null>(null);
   const view = useMemo(() => ({
     selectedId,
     overhead,
@@ -676,14 +680,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
     const isPinchZoomed = (viewport: VisualViewport) =>
       Number.isFinite(viewport.scale) && viewport.scale > 1.01;
-    // Manual restart always wins over a visual viewport that may be stale.
-    let ignoredViewport: string | null = null;
-    if (manualStart > 0) {
-      try {
-        const viewport = window.visualViewport;
-        if (viewport) ignoredViewport = viewportSignature(viewport);
-      } catch { /* Partial WebViews: nothing to ignore. */ }
-    }
     const isTextEntryTarget = (element: Element | null): boolean => {
       if (!element) return false;
       const tag = element.tagName;
@@ -707,15 +703,15 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // us to ignore this exact viewport size. Clear that cache as soon as
         // an intersection begins so later focus/viewport checks stay honest.
         if (keyboardOverlayIntersectsCanvas()) {
-          ignoredViewport = null;
+          ignoredViewportRef.current = null;
           if (!clipToDialog) return false;
         }
         // The visitor explicitly restarted 3D while the viewport read this
         // way. Ignore it as an occlusion signal until it changes, an editable
         // gains focus, or a keyboard overlaps. Positive geometry can still
         // recover a hidden observation inside both the viewport and dialog.
-        if (ignoredViewport !== null) {
-          if (viewportSignature(viewport) !== ignoredViewport) ignoredViewport = null;
+        if (ignoredViewportRef.current !== null) {
+          if (viewportSignature(viewport) !== ignoredViewportRef.current) ignoredViewportRef.current = null;
           else if (!clipToDialog) return null;
         }
         const visible = intersectsVisibleCanvas(left, top, left + width, top + height);
@@ -866,7 +862,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       // was ignored only for the visitor's explicit restart.
       if (event.type === 'focusin' && event.target instanceof Element &&
           isTextEntryTarget(event.target)) {
-        ignoredViewport = null;
+        ignoredViewportRef.current = null;
       }
       for (const delay of [0, 350]) {
         const id = window.setTimeout(() => {
@@ -893,7 +889,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         const viewport = window.visualViewport;
         if (viewport) {
           if (isPinchZoomed(viewport) || keyboardOverlayIntersectsCanvas()) return;
-          ignoredViewport = viewportSignature(viewport);
+          ignoredViewportRef.current = viewportSignature(viewport);
         }
       } catch { /* Partial WebViews: nothing to ignore. */ }
       syncVisibility();
@@ -959,6 +955,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     catch { /* Legacy WebViews may not implement scrolling. */ }
     // Keep focus inside the map when its start control disappears.
     try { host?.focus(); } catch { /* Focus is advisory. */ }
+    // Record the current (possibly stale) geometry before the scene remounts.
+    try {
+      const viewport = window.visualViewport;
+      if (viewport) {
+        ignoredViewportRef.current = [
+          viewport.offsetLeft, viewport.offsetTop, viewport.width, viewport.height,
+          viewport.scale,
+        ].join(':');
+      }
+    } catch { /* Partial WebViews: nothing to ignore. */ }
     onManualStart();
   };
   const paused = status === 'ready' && renderSuspended;

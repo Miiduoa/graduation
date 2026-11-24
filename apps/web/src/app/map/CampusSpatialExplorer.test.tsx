@@ -3124,6 +3124,90 @@ it('keeps 3D paused after a manual restart once the search field is focused agai
   }
 });
 
+
+it('keeps 3D paused after delayed outlines remount a manually restarted scene with a focused search field', async () => {
+  const { library, body } = sourcedLibraryFootprintFixture();
+  const nearby = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id !== library.id);
+  if (!nearby) throw new Error('Missing a second Providence place for destination search');
+  let resolveFootprints!: (response: Response) => void;
+  vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise<Response>((resolve) => {
+    resolveFootprints = resolve;
+  })));
+  const keyboard = Object.assign(new EventTarget(), { boundingRect: new DOMRect() });
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: keyboard } }));
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0, scale: 1,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  render(<CampusSpatialExplorer school="pu" locations={[library, nearby]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 400, 320, 150));
+  try {
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+    showKeyboard();
+    viewport.height = 200;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    const restart = within(dialog).getByRole('button', { name: '重新啟動立體畫面' });
+    fireEvent.pointerDown(restart);
+    fireEvent.click(restart);
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    const rebuilt = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    const rebuiltBounds = vi.spyOn(rebuilt, 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(0, 400, 320, 150));
+    try {
+      const search = within(dialog).getByRole('searchbox', { name: '搜尋導覽地點' });
+      act(() => search.focus());
+      keyboard.boundingRect = new DOMRect(0, 200, 320, 400);
+      act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      keyboard.boundingRect = new DOMRect();
+      act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+      act(() => intersection?.([observerEntry(rebuilt, true)], {} as IntersectionObserver));
+      expect(document.activeElement).toBe(search);
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+      // Outlines arriving remount the WebGL effect. A previous manual restart
+      // must not re-arm the ignored viewport while the search field is focused
+      // and the shrunken visual viewport still excludes the canvas.
+      await act(async () => resolveFootprints(jsonResponse(body)));
+      await waitFor(() => expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy());
+      const afterOutlines = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+      const afterBounds = vi.spyOn(afterOutlines, 'getBoundingClientRect')
+        .mockReturnValue(new DOMRect(0, 400, 320, 150));
+      try {
+        // Give the remounted effect a visible observer and a resize, the same
+        // path that would auto-resume if ignoredViewport were re-armed.
+        await act(async () => intersection?.([observerEntry(afterOutlines, true)], {} as IntersectionObserver));
+        await act(async () => fireEvent.resize(window));
+        expect(document.activeElement).toBe(search);
+        expect(viewport.height).toBe(200);
+        expect(scene.setActive).toHaveBeenLastCalledWith(false);
+        expect(
+          within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })
+          ?? within(dialog).getByRole('button', { name: '手動開啟立體畫面' }),
+        ).toBeTruthy();
+      } finally {
+        afterBounds.mockRestore();
+      }
+    } finally {
+      rebuiltBounds.mockRestore();
+    }
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('pauses when a focused field shrinks the visual viewport over only the dialog-clipped canvas', async () => {
   vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: undefined } }));
   const viewport = Object.assign(new EventTarget(), {
