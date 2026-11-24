@@ -1,3 +1,4 @@
+import { toPublicSchoolId } from './schoolIds';
 import {
   PROVIDENCE_BUS_STOPS,
   PROVIDENCE_CAMPUS_PLACES,
@@ -10,13 +11,14 @@ export const MAX_CAMPUS_CLASSROOM_QUERY_LENGTH = 120;
  * 120-character query cap or a trailing `/ Temporary` can be sliced away. */
 export const MAX_CAMPUS_CATEGORY_LENGTH = 2000;
 
+function withoutClassroomControlCharacters(text: string): string {
+  return text.replace(/[\p{Cc}\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/gu, ' ');
+}
+
 /** Keep the supplied room wording; normalization for matching happens separately. */
 export function normalizeCampusClassroomQuery(value: unknown): string {
   if (typeof value !== 'string') return '';
-  const text = value
-    .replace(/[\p{Cc}\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const text = withoutClassroomControlCharacters(value).replace(/\s+/g, ' ').trim();
   return Array.from(text).slice(0, MAX_CAMPUS_CLASSROOM_QUERY_LENGTH).join('').trim();
 }
 
@@ -44,19 +46,22 @@ export type CampusClassroomResolution<T extends CampusMapPlaceLike> = {
   query: string;
   status: 'empty' | 'unmatched' | 'matched' | 'ambiguous';
   matches: readonly T[];
+  matchKind?: 'primary' | 'catalog' | 'alias';
 };
 
 function comparisonText(value: unknown): string {
   return normalizeCampusClassroomQuery(value).normalize('NFKC').toLocaleLowerCase('zh-TW');
 }
 
-/** Two consecutive floor markers without a room are ambiguous, not a room.
- * For example 3F-4F or 3樓4F can describe a floor range. Do not choose a
- * building destination from that notation alone. A three-digit room such
- * as 303F is still valid, and no floor or room position is inferred. */
-function hasOnlyTwoFloorMarkers(suffix: string): boolean {
-  const floor = '(?:b?\\d{1,2}\\s*f|(?:地下|地上)?(?:\\d{1,2}|[一二三四五六七八九十]{1,3})樓)';
-  return new RegExp('^[\\s:：,，·#/–—-]*' + floor + '[\\s,，:：·/–—-]*' + floor + '(?:\\s*(?:教室|室))?$', 'u').test(suffix);
+function comparablePublicName(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return withoutClassroomControlCharacters(value).normalize('NFKC').toLocaleLowerCase('zh-TW')
+    .replace(/\s+/g, ' ').trim();
+}
+
+export function campusPlaceNameMatchesQuery(name: string, query: string): boolean {
+  const comparableQuery = comparablePublicName(query);
+  return Boolean(comparableQuery) && comparablePublicName(name) === comparableQuery;
 }
 
 /** This only recognizes a suffix as room wording; it does not decode its building or floor. */
@@ -66,7 +71,7 @@ function isRoomSuffix(value: string): boolean {
   const floor = '(?:b?\\d{1,2}\\s*f|(?:地下|地上)?(?:\\d{1,2}|[一二三四五六七八九十]{1,3})樓)';
   // Bare 3F / B1F is a floor designation, even if the generic room
   // pattern could interpret its final F as an alphabetic room suffix.
-  if (hasOnlyTwoFloorMarkers(suffix) || new RegExp(`^${floor}(?:\\s*(?:教室|室))?$`, 'u').test(suffix)) return false;
+  if (new RegExp(`^${floor}(?:\\s*(?:教室|室))?$`, 'u').test(suffix)) return false;
   if (new RegExp(`^${room}$`, 'u').test(suffix)) return true;
   // A timetable may explicitly write floor and room together (3F303 / 3樓303).
   // Accept only an immediately following numeric room, not arbitrary letter suffixes;
@@ -316,33 +321,39 @@ const PUBLISHED_PROVIDENCE_ENGLISH_NAMES = new Map<string, readonly string[]>([
   ['pu-zhugu', ['Providence Hall']],
   ['pu-renyuan', ['Anthony Kuo Hall']],
   ['pu-boduo', ['St. Peter Hall']],
-  // Official admissions contact (checked 2026-11-24):
-  // https://hstopu.pu.edu.tw/p/412-1105-1496.php
-  ['pu-wenxing', ['Wen Xing Hall', 'Bishop Kupfer Hall']],
+  ['pu-wenxing', ['Wen Xing Hall']],
   ['pu-gelun', ['Theodore Guerin Hall']],
   ['pu-fangji', ['St. Francis Hall']],
   ['pu-siyuan', ['Si Yuan Hall']],
   ['pu-jingan', ['Jing An Hall']],
+  ['pu-library', ['Gaesia Library']],
+  // campusPois.js uses "Chapel"; the mobile catalog uses the full title.
+  ['pu-chapel', ['Chapel', 'Chapel of Our Lady of Providence']],
+  ['pu-jingyuan', ['Jingyuan Cafeteria']],
+  ['pu-yiyuan', ['Yiyuan Cafeteria']],
+  ['pu-gym', ['John Paul II Sports Hall']],
+  ['pu-health', ['Health Center']],
+  ['pu-parking-moto', ['Motorcycle Parking']],
+]);
+
+// Additional official names serve as fallbacks when a primary match is absent.
+const PROVIDENCE_ENGLISH_ALIASES = new Map<string, readonly string[]>([
+  // Official admissions contact (checked 2026-11-24):
+  // https://hstopu.pu.edu.tw/p/412-1105-1496.php
+  ['pu-wenxing', ['Bishop Kupfer Hall']],
   // Official bilingual facilities page (checked 2026-11-24):
   // https://dpcd.pu.edu.tw/p/412-1047-3561.php
-  ['pu-library', ['Gaesia Library', 'Luking Library']],
+  ['pu-library', ['Luking Library']],
+  ['pu-gym', ['John Paul II Stadium']],
   // Official university archives campus directory (checked 2026-11-24):
   // https://c067.pu.edu.tw/p/412-1121-4218.php
   ['pu-zhishan', ['Zhi Shan Hall']],
   ['pu-xijia', ['Schultz Hall']],
   ['pu-sigao', ['St. Bosco Hall']],
   ['pu-monastery', ['Our Lady of Providence Convent']],
-  // campusPois.js uses "Chapel"; the mobile catalog uses the full title.
-  ['pu-chapel', ['Chapel', 'Chapel of Our Lady of Providence']],
-  ['pu-jingyuan', ['Jingyuan Cafeteria']],
-  ['pu-yiyuan', ['Yiyuan Cafeteria']],
-  // Same official facilities page identifies the sports hall as Stadium.
-  ['pu-gym', ['John Paul II Sports Hall', 'John Paul II Stadium']],
-  ['pu-health', ['Health Center']],
-  ['pu-parking-moto', ['Motorcycle Parking']],
 ]);
 
-function officialSourcedNames(published: CampusMapPlaceLike): string[] {
+function catalogBuildingNames(published: CampusMapPlaceLike): string[] {
   const names = [published.name];
   const catalogEnglish = PUBLISHED_PROVIDENCE_ENGLISH_NAMES.get(published.id);
   if (catalogEnglish) names.push(...catalogEnglish);
@@ -356,7 +367,7 @@ function officialSourcedNames(published: CampusMapPlaceLike): string[] {
 function isSourcedBuildingLabel(school: string, published: CampusMapPlaceLike, suppliedLabel: unknown): boolean {
   const label = comparisonText(suppliedLabel);
   if (!label) return false;
-  if (officialSourcedNames(published).some((name) => comparisonText(name) === label)) return true;
+  if (catalogBuildingNames(published).some((name) => comparisonText(name) === label)) return true;
   return VERIFIED_CLASSROOM_BUILDING_CODES.some(
     (entry) =>
       entry.schoolId === school &&
@@ -395,12 +406,11 @@ const VERIFIED_PROVIDENCE_CODE_BY_PLACE_ID = new Map<string, string>([
 ]);
 
 function matchesVerifiedCodeRoomSuffix(suffix: string): boolean {
-  return !hasOnlyTwoFloorMarkers(suffix) && !VERIFIED_CODE_FLOOR_ONLY_SUFFIX.test(suffix) &&
+  return !VERIFIED_CODE_FLOOR_ONLY_SUFFIX.test(suffix) &&
     (VERIFIED_CODE_ROOM_SUFFIX.test(suffix) || VERIFIED_CODE_FLOOR_ROOM_SUFFIX.test(suffix));
 }
 
-function matchesSourcedProvidenceCode(query: string, published: CampusMapPlaceLike | undefined): boolean {
-  if (!published) return false;
+function matchesSourcedProvidenceCode(query: string, published: CampusMapPlaceLike): boolean {
   const code = VERIFIED_PROVIDENCE_CODE_BY_PLACE_ID.get(published.id);
   return code !== undefined && query.startsWith(code) &&
     matchesVerifiedCodeRoomSuffix(query.slice(code.length));
@@ -421,20 +431,27 @@ function nameMatchesVerifiedCode(school: string, query: string, suppliedName: un
  * The caller supplies only the current school's published map locations. This helper never
  * loads a fallback campus, guesses an alphabetic building code, or derives a floor from a room
  * number. A result refers to the original POI object and its existing coordinates.
+ * Callers that classify individual candidates can supply the full campus batch
+ * as publicNameLocations so exact public names still take precedence.
  */
 export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
   schoolId,
   query: rawQuery,
   locations,
+  publicNameLocations = locations,
 }: {
   schoolId: string | null | undefined;
   query: unknown;
   locations: readonly T[];
+  publicNameLocations?: readonly CampusMapPlaceLike[];
 }): CampusClassroomResolution<T> {
   const query = normalizeCampusClassroomQuery(rawQuery);
   if (!query) return { query, status: 'empty', matches: [] };
   const school = validSchoolId(schoolId);
   if (!school) return { query, status: 'unmatched', matches: [] };
+  // Only catalog metadata uses the public alias. Candidate school markers
+  // still have to match the exact bound school above and below.
+  const publicSchool = toPublicSchoolId(school)!;
   const comparable = comparisonText(query);
   // Imported map records are runtime data even when TypeScript callers use the
   // CampusMapPlaceLike interface. A single null row or a numeric ID must not
@@ -451,13 +468,16 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     if (!isCandidateInSchoolScope(location, school)) continue;
     counts.set(location.id, (counts.get(location.id) ?? 0) + 1);
   }
-  const matches = locations.filter((location) => {
+  const primaryMatches: T[] = [];
+  const catalogMatches: T[] = [];
+  const aliasMatches: T[] = [];
+  for (const location of locations) {
     // An invalid row is never a destination. Still count duplicate *string*
     // IDs above, even when the other row is malformed, to fail closed rather
     // than let a broken import impersonate a published building ID.
     if (!location || typeof location !== 'object' ||
         typeof location.id !== 'string' || !location.id.trim() ||
-        counts.get(location.id) !== 1) return false;
+        counts.get(location.id) !== 1) continue;
     if (
       !Number.isFinite(location.lat) ||
       !Number.isFinite(location.lng) ||
@@ -467,43 +487,69 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
       // classroom destination. Do not reject genuine equator/meridian points.
       (location.lat === 0 && location.lng === 0)
     )
-      return false;
-    if (!isCandidateInSchoolScope(location, school)) return false;
+      continue;
+    if (!isCandidateInSchoolScope(location, school)) continue;
     // Recheck the existing sourced identity rather than trusting a reused ID.
     // Classroom identity accepts normalized names and verified bilingual aliases.
     // Once the supplied name is verified, use the catalog name for attribution's
     // exact-name check while preserving its coordinate check and the original POI.
-    const published = school === 'pu' ? PUBLISHED_PROVIDENCE_PLACES.get(location.id) : undefined;
+    const published = publicSchool === 'pu' ? PUBLISHED_PROVIDENCE_PLACES.get(location.id) : undefined;
+    const aliases = published ? PROVIDENCE_ENGLISH_ALIASES.get(published.id) : undefined;
     if (
       published &&
       // Source identity and source category are both necessary: a matching
       // ID/name/coordinate does not make a restaurant a classroom building.
       (isExplicitNonClassroomCategory(published.category) ||
-        !isSourcedBuildingLabel(school, published, location.name) ||
-        !providencePlaceSourceUrl(school, { ...location, name: published.name }))
-    ) return false;
+        (!isSourcedBuildingLabel(publicSchool, published, location.name) &&
+          !aliases?.some((name) => campusPlaceNameMatchesQuery(name, location.name))) ||
+        !providencePlaceSourceUrl(publicSchool, { ...location, name: published.name }))
+    ) continue;
     // A nearby transit stop can be named after a hall or carry its building
     // field in Firestore. Never promote that stop into a classroom destination.
-    if (hasTransitStopIdentity(location, school) || isExplicitNonClassroomCategory(location.category) ||
-        closerToPublishedStopThanSourcedHall(school, location, published)) return false;
+    if (hasTransitStopIdentity(location, publicSchool) || isExplicitNonClassroomCategory(location.category) ||
+        closerToPublishedStopThanSourcedHall(publicSchool, location, published)) continue;
     // A sourced clinic, chapel or sports POI must not navigate to another
     // building through an unsourced Firestore `building` override.
-    const building = sourcedBuildingLabel(school, published, location.building);
-    return (
-      nameMatchesRoom(comparable, location.name) ||
-      nameMatchesRoom(comparable, building) ||
-      // Use existing catalog aliases only after the published identity, scope,
-      // coordinates and non-building checks above passed. A bilingual timetable
-      // can refer to the same POI without changing its stored name or position.
-      (published !== undefined && officialSourcedNames(published).some((name) => nameMatchesRoom(comparable, name))) ||
-      matchesSourcedProvidenceCode(comparable, published) ||
-      nameMatchesVerifiedCode(school, comparable, location.name) ||
-      nameMatchesVerifiedCode(school, comparable, building)
-    );
-  });
+    const building = sourcedBuildingLabel(publicSchool, published, location.building);
+    // Only public fields accepted by the existing resolver and legacy codes
+    // can outrank names supplied by the catalog.
+    if (
+      (!published || isSourcedBuildingLabel(publicSchool, published, location.name)) &&
+      [location.name, building].some((name) =>
+        nameMatchesRoom(comparable, name) || nameMatchesVerifiedCode(publicSchool, comparable, name)
+      )
+    ) {
+      primaryMatches.push(location);
+    } else if (published && catalogBuildingNames(published).some((name) => nameMatchesRoom(comparable, name))) {
+      catalogMatches.push(location);
+    } else if (
+      published &&
+      (aliases?.some((name) => nameMatchesRoom(comparable, name)) ||
+        matchesSourcedProvidenceCode(comparable, published))
+    ) {
+      aliasMatches.push(location);
+    }
+  }
+  const matchKind = primaryMatches.length ? 'primary' : catalogMatches.length ? 'catalog' : 'alias';
+  const matches = matchKind === 'primary' ? primaryMatches : matchKind === 'catalog' ? catalogMatches : aliasMatches;
+  if (matches.length === 1 && matchKind !== 'primary') {
+    const [match] = matches;
+    // A public name can claim the full query even when its place is ineligible
+    // for classroom navigation. Catalog-only names and codes yield to that name.
+    const publicNameQuery = comparablePublicName(rawQuery);
+    if (
+      publicNameLocations.some((location) =>
+        location && typeof location === 'object' && location.id !== match.id &&
+        comparablePublicName(location.name) === publicNameQuery
+      )
+    ) {
+      return { query, status: 'unmatched', matches: [] };
+    }
+  }
   return {
     query,
     status: matches.length === 1 ? 'matched' : matches.length > 1 ? 'ambiguous' : 'unmatched',
     matches,
+    ...(matches.length ? { matchKind } : {}),
   };
 }
