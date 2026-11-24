@@ -94,6 +94,13 @@ export function hasWalkingRestriction(way: Tags, from: Tags, to: Tags): boolean 
   return restrictsWalking(way) || restrictsWalking(from) || restrictsWalking(to);
 }
 
+// An identity is ambiguous if either occurrence can contribute to the graph.
+function hasInScopeDuplicate(scopes: Map<number, boolean>, id: number, inside: boolean): boolean {
+  if (scopes.has(id)) return inside || scopes.get(id) === true;
+  scopes.set(id, inside);
+  return false;
+}
+
 /** Reject partial, stale or malformed Overpass JSON. Exact OSM node identity,
  * not coordinate proximity, defines connectivity. Out-of-bounds segments are
  * omitted without clipping, snapping or jumping over missing nodes.
@@ -110,49 +117,67 @@ export function parseCampusWalkingOsmCandidates(
       baseMs > now + MAX_CLOCK_SKEW_MS || now - baseMs > MAX_LAG_MS ||
       !Array.isArray(root.elements) || root.elements.length > MAX_NODES + MAX_EDGES) return null;
 
+  const nodeScopes = new Map<number, boolean>();
   const nodes = new Map<number, CandidateNode>();
-  const ways = new Map<number, CandidateWay>();
-  let references = 0;
+  const rawWays: Record<string, unknown>[] = [];
   for (const raw of root.elements) {
     const item = record(raw);
-    if (!item || !positiveId(item.id)) return null;
+    if (!item) return null;
+    if (item.type === 'way') {
+      rawWays.push(item);
+      continue;
+    }
+    if (item.type !== 'node' || typeof item.lat !== 'number' || typeof item.lon !== 'number' ||
+        !Number.isFinite(item.lat) || !Number.isFinite(item.lon) ||
+        Math.abs(item.lat) > 90 || Math.abs(item.lon) > 180) return null;
+    if (!positiveId(item.id)) return null;
+    const node = { id: item.id, lat: item.lat, lng: item.lon };
+    const inside = inBounds(node, bounds);
+    if (hasInScopeDuplicate(nodeScopes, node.id, inside)) return null;
+    if (nodeScopes.size > MAX_NODES) return null;
+    if (!inside) continue;
     const rev = revision(item, baseMs);
     if (!rev) return null;
-    if (item.type === 'node') {
-      if (typeof item.lat !== 'number' || typeof item.lon !== 'number' ||
-          !Number.isFinite(item.lat) || !Number.isFinite(item.lon) ||
-          Math.abs(item.lat) > 90 || Math.abs(item.lon) > 180) return null;
-      const parsed = { id: item.id, lat: item.lat, lng: item.lon, ...rev };
-      if (nodes.has(item.id)) {
-        const existing = nodes.get(item.id)!;
-        // Duplicate identities outside campus are not candidates; do not drop
-        // the rest of the batch. In-bounds duplicates remain unresolvable.
-        if (inBounds(existing, bounds) || inBounds(parsed, bounds)) return null;
-        continue;
-      }
-      if (nodes.size >= MAX_NODES) return null;
-      nodes.set(item.id, parsed);
-    } else if (item.type === 'way') {
-      if (ways.has(item.id) || !HIGHWAYS.includes(rev.tags.highway) ||
-          !Array.isArray(item.nodes) || item.nodes.length < 2 ||
-          item.nodes.length > MAX_EDGES + 1 || !item.nodes.every(positiveId)) return null;
-      references += item.nodes.length - 1;
-      if (references > MAX_EDGES) return null;
-      ways.set(item.id, { id: item.id, nodes: [...item.nodes], ...rev });
-    } else return null;
+    nodes.set(node.id, { ...node, ...rev });
+  }
+
+  const wayScopes = new Map<number, boolean>();
+  const ways = new Map<number, CandidateWay>();
+  let references = 0;
+  for (const item of rawWays) {
+    if (!Array.isArray(item.nodes) || item.nodes.length < 2 ||
+        item.nodes.length > MAX_EDGES + 1 || !item.nodes.every(positiveId)) return null;
+    references += item.nodes.length - 1;
+    if (references > MAX_EDGES || item.nodes.some(id => !nodeScopes.has(id))) return null;
+
+    // A way contributes only segments with two consecutive in-bounds nodes.
+    const inside = item.nodes.some((id, i, ids) =>
+      i > 0 && nodeScopes.get(ids[i - 1]) && nodeScopes.get(id));
+    if (!positiveId(item.id)) return null;
+    const repeated = wayScopes.has(item.id);
+    if (hasInScopeDuplicate(wayScopes, item.id, inside)) return null;
+    if (repeated) {
+      ways.delete(item.id);
+      continue;
+    }
+    const rev = revision(item, baseMs);
+    if (!rev || !HIGHWAYS.includes(rev.tags.highway)) {
+      if (inside) return null;
+      continue;
+    }
+    ways.set(item.id, { id: item.id, nodes: [...item.nodes], ...rev });
   }
 
   const edges: WalkingEdge[] = [];
   const seen = new Set<string>();
   for (const way of ways.values()) {
-    if (way.nodes.some(id => !nodes.has(id))) return null;
-    if (excludesWalkingWay(way.tags)) continue;
+    if (!wayScopes.get(way.id) || excludesWalkingWay(way.tags)) continue;
     for (let i = 1; i < way.nodes.length; i += 1) {
-      const a = nodes.get(way.nodes[i - 1])!;
-      const b = nodes.get(way.nodes[i])!;
+      const a = nodes.get(way.nodes[i - 1]);
+      const b = nodes.get(way.nodes[i]);
       // Out-of-bounds segments are not candidates; do not fail the whole batch
       // because a skipped way has duplicate or coincident nodes.
-      if (!inBounds(a, bounds) || !inBounds(b, bounds)) continue;
+      if (!a || !b) continue;
       const key = [way.id, Math.min(a.id, b.id), Math.max(a.id, b.id)].join(':');
       if (a.id === b.id || seen.has(key) || (a.lat === b.lat && a.lng === b.lng)) return null;
       seen.add(key);
@@ -162,7 +187,7 @@ export function parseCampusWalkingOsmCandidates(
         access: hasWalkingRestriction(way.tags, a.tags, b.tags) ? 'restricted' : 'unknown' });
     }
   }
-  const inside = [...nodes.values()].filter(n => inBounds(n, bounds));
+  const inside = [...nodes.values()];
   return {
     osmBaseAt, attribution: ATTRIBUTION, nodes: inside, ways: [...ways.values()],
     graph: { schoolId, osmBaseAt, nodes: inside.map(({ id, lat, lng }) => ({ id, lat, lng })), edges },

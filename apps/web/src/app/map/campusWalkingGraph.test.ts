@@ -82,7 +82,11 @@ describe('audited outdoor campus walking graph', () => {
   });
 
   it('does not route reviewed-open segments after their review expires', () => {
-    expect(route(graph, 1, 3, Date.parse('2026-12-01T00:00:00Z'))).toBeNull();
+    const validUntil = '2026-11-25T08:00:00Z';
+    const expiry = Date.parse(validUntil);
+    const expiring = { ...graph, edges: graph.edges.map(edge => ({ ...edge, validUntil })) };
+    expect(route(expiring, 1, 3, expiry - 1)?.nodes.map(n => n.id)).toEqual([1, 2, 3]);
+    expect(route(expiring, 1, 3, expiry)).toBeNull();
     const missingExpiry = { ...graph, edges: graph.edges.map(({ validUntil: _validUntil, ...edge }) => edge) };
     expect(route(missingExpiry)).toBeNull();
   });

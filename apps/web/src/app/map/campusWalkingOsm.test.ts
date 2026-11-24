@@ -43,8 +43,14 @@ describe('OSM campus walking discovery (not routing approval)', () => {
     expect(result.graph.edges.map(e => [e.from, e.to, e.access])).toEqual([
       [1, 2, 'unknown'], [2, 3, 'restricted'], [4, 5, 'unknown'],
     ]);
-    expect(findCampusWalkingRoute(result.graph, 'fixture', bounds, 1, 2)).toBeNull();
-    expect(findCampusWalkingRoute(result.graph, 'other', bounds, 1, 2)).toBeNull();
+    expect(findCampusWalkingRoute(result.graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+    const currentExpiry = new Date(now + 60_000).toISOString();
+    const unreviewed = {
+      ...result.graph,
+      edges: result.graph.edges.map(edge => ({ ...edge, validUntil: currentExpiry })),
+    };
+    expect(findCampusWalkingRoute(unreviewed, 'fixture', bounds, 1, 2, now)).toBeNull();
+    expect(findCampusWalkingRoute(result.graph, 'other', bounds, 1, 2, now)).toBeNull();
   });
 
   it('does not join non-identical nodes or jump across the campus boundary', () => {
@@ -80,6 +86,30 @@ describe('OSM campus walking discovery (not routing approval)', () => {
     expect(result.graph.osmBaseAt).toBe(base);
   });
 
+  it('keeps campus segments despite repeated ways and invalid revisions outside campus', () => {
+    const outsideA = { ...node(6, 10.015, 20.002), version: 0 };
+    const outsideB = { ...node(7, 10.016, 20.002), timestamp: 'invalid' };
+    const outsideWay = way(103, [6, 7]);
+    const input = {
+      ...payload(),
+      elements: [outsideWay, ...payload().elements, { ...outsideWay, version: 0 }, outsideA, outsideB],
+    };
+    expect(parse(input)).toEqual(parse());
+  });
+
+  it('rejects a repeated way identity when either occurrence has a campus segment', () => {
+    const outside = [node(6, 10.015, 20.002), node(7, 10.016, 20.002)];
+    const campusWay = way(103, [1, 5]);
+    const outsideWay = way(103, [6, 7]);
+    for (const duplicates of [[campusWay, campusWay], [outsideWay, campusWay], [campusWay, outsideWay]]) {
+      expect(parse({ ...payload(), elements: [...payload().elements, ...outside, ...duplicates] })).toBeNull();
+    }
+    expect(parse({
+      ...payload(),
+      elements: [...payload().elements, { ...campusWay, timestamp: 'invalid' }],
+    })).toBeNull();
+  });
+
   it('excludes highway areas and indoor ways and flags tagged restrictions', () => {
     const input = { ...payload(), elements: [...payload().elements,
       way(103, [1, 2, 1], { area: 'yes' }),
@@ -113,7 +143,6 @@ describe('OSM campus walking discovery (not routing approval)', () => {
     expect(parse({ ...input, osm3s: { timestamp_osm_base: '2026-11-31T08:00:00Z' } })).toBeNull();
     expect(parse({ ...input, elements: [...input.elements, way(103, [1, 999])] })).toBeNull();
     expect(parse({ ...input, elements: [...input.elements, node(1, 10.003, 20.003)] })).toBeNull();
-    expect(parse({ ...input, elements: [...input.elements, way(101, [1, 5])] })).toBeNull();
     expect(parse({ ...input, elements: [...input.elements, way(103, [2, 4])] })).toBeNull();
     expect(parse({ ...input, elements: [...input.elements, way(103, [1, 2, 1])] })).toBeNull();
     expect(parse({ ...input, elements: [...input.elements, { ...node(6, 10.001, 20.001), version: 0 }] })).toBeNull();
