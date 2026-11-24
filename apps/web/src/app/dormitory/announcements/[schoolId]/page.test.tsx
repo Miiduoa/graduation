@@ -1,5 +1,6 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
+import type { DormWorkflowRows } from '@campus/shared/src/dormWorkflow';
 import Page from './page';
 
 const state = vi.hoisted(() => ({
@@ -27,7 +28,7 @@ vi.mock('@/lib/signInOptions', () => ({ useSignInOptions: () => ({ studentId: tr
 
 const self = { id: 'a1', building: '甲棟', title: '宿舍供水時間', body: '僅對現行名冊開放的內文', publishedAt: Date.UTC(2026, 10, 23, 18, 0) };
 const other = { id: 'a2', building: '乙棟', title: '其他公告', body: '其他公告全文' };
-const rows = (...announcements: Array<typeof self>) => Response.json({ result: { announcements } });
+const rows = (...announcements: NonNullable<DormWorkflowRows['announcements']>) => Response.json({ result: { announcements } });
 beforeEach(() => {
   state.uid = 'alice';
   state.campus = 'pu';
@@ -59,12 +60,24 @@ it('only shows the identified resident announcement from mine and uses the exact
 
 it('opens the authorized list from older inbox entries without including any body', async () => {
   state.id = null;
-  state.fetch.mockResolvedValue(rows(self));
+  state.fetch.mockResolvedValue(rows(self, other));
   await mount();
-  expect((await screen.findByRole('link', { name: self.title })).getAttribute('href')).toBe(
-    '/dormitory/announcements/pu?campus=pu&schoolId=pu&dormAnnouncementId=a1',
-  );
+  const current = await screen.findByRole('link', { name: self.title });
+  expect(current.getAttribute('href')).toBe('/dormitory/announcements/pu?campus=pu&schoolId=pu&dormAnnouncementId=a1');
+  expect(within(current.closest('li')!).getByText(/發布於 2026\/11\/24 02:00/)).toBeTruthy();
+  const older = screen.getByRole('link', { name: other.title });
+  expect(within(older.closest('li')!).getByText('發布時間未提供')).toBeTruthy();
   expect(screen.queryByText(self.body)).toBeNull();
+});
+
+it('shows a legacy announcement with no publication time on its detail page', async () => {
+  state.id = other.id;
+  state.fetch.mockResolvedValue(rows(other));
+  await mount();
+  await screen.findByRole('heading', { name: other.title });
+  expect(screen.getByText(other.body)).toBeTruthy();
+  expect(screen.getByText('發布時間未提供')).toBeTruthy();
+  expect(screen.queryByText(/^發布於/)).toBeNull();
 });
 
 it('keeps the exact announcement through the school sign-in link without fetching for a guest', async () => {
