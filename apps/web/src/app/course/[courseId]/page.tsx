@@ -2,7 +2,6 @@
 import { PRIVATE_IMAGE_TYPES, safePrivateFileName } from '@campus/shared/src/privateFileAccess';
 
 import { use, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { PRIVATE_FILE_UPLOADS_PER_MINUTE, PRIVATE_FILE_UPLOAD_RATE_MESSAGE } from '@campus/shared/src/privateFileUploads';
 import { privateFilesEnabled, privateGroupAssignmentPath, uploadPrivateFile, claimPrivateFile } from '@/lib/privateFiles';
 import { PrivateAttachment } from '@/components/PrivateAttachment';
@@ -341,7 +340,9 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
   const readIds = useMaterialReadIds(uid);
   const hashId = hash.replace(/^#/, '').split('#')[0];
   const linked = parseCourseWorkHash(hash);
-  const weekHash = hashId === 'week';
+  const sectionHash = ['week', 'course-materials-title', 'assignments'].includes(hashId)
+    ? hashId
+    : '';
   const submitHash = hashId.endsWith('-submit') ? hashId : '';
   useLayoutEffect(() => {
     active.current = true;
@@ -372,10 +373,14 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
     void load();
   }, [load]);
   useEffect(() => {
-    if (course && weekHash && revealed.current !== 'week') {
+    // A new destination can later return to the same work; background refreshes cannot.
+    revealed.current = '';
+  }, [hash]);
+  useEffect(() => {
+    if (course && sectionHash && revealed.current !== sectionHash) {
       const frame = window.requestAnimationFrame(() => {
-        if (!landOnCourseWork('week')) return;
-        revealed.current = 'week';
+        if (!landOnCourseWork(sectionHash)) return;
+        revealed.current = sectionHash;
       });
       return () => window.cancelAnimationFrame(frame);
     }
@@ -412,7 +417,16 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [course, courseId, linked, uid, weekHash, submitHash]);
+  }, [course, courseId, linked, uid, sectionHash, submitHash]);
+  function revisitTarget(event: React.MouseEvent<HTMLAnchorElement>, target: string) {
+    if (
+      event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey ||
+      event.shiftKey || event.altKey || event.currentTarget.hash !== window.location.hash
+    ) return;
+    // Native hash navigation emits no change when the current shortcut is chosen again.
+    // Keep the anchor's URL/history behavior, while restoring its keyboard reading position.
+    landOnCourseWork(target);
+  }
   function refresh() {
     if (!active.current) return;
     // Keep same-scope forms mounted while the server refreshes sibling submissions.
@@ -467,9 +481,9 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
             </div>
           </div>
           <nav className={courseStyles.jumpNavigation} aria-label="課程內容捷徑">
-            <a href="#week">本週待辦</a>
-            <a href="#course-materials-title">教材櫃</a>
-            <a href="#assignments">作業與評量</a>
+            <a href="#week" onClick={(event) => revisitTarget(event, 'week')}>本週待辦</a>
+            <a href="#course-materials-title" onClick={(event) => revisitTarget(event, 'course-materials-title')}>教材櫃</a>
+            <a href="#assignments" onClick={(event) => revisitTarget(event, 'assignments')}>作業與評量</a>
           </nav>
           <section
             className={`${styles.section} ${styles.courseWorkTarget}`}
@@ -483,7 +497,11 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
               <ul className={styles.list}>
                 {weekAssignments(course.assignments).map((item) => (
                   <li key={item.id}>
-                    <a href={`#assignment-${encodeURIComponent(item.id)}`} className={styles.task}>
+                    <a
+                      href={`#${workKind(item)}-${encodeURIComponent(item.id)}`}
+                      className={styles.task}
+                      onClick={(event) => revisitTarget(event, `${workKind(item)}-${item.id}`)}
+                    >
                       <strong>{item.title}</strong>
                       {item.dueAt ? (
                         <span className={courseStyles.dueDate}>
@@ -499,7 +517,7 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
             )}
           </section>
           <section className={styles.section} aria-labelledby="course-materials-title">
-            <h2 id="course-materials-title">教材櫃</h2>
+            <h2 id="course-materials-title" className={styles.courseWorkTarget} tabIndex={-1}>教材櫃</h2>
             <p className={styles.sectionNote}>依單元或週次整理教材，開啟項目即可閱讀。</p>
             {linked?.kind === 'material' && !course.modules.some((item) => item.id === linked.id) ? (
               <p role="status" className={styles.notice}>
@@ -553,7 +571,7 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
               <p>尚未發布課程單元。</p>
             )}
           </section>
-          <h2 id="assignments" className={styles.section}>
+          <h2 id="assignments" className={`${styles.section} ${styles.courseWorkTarget}`} tabIndex={-1}>
             作業與評量
           </h2>
           {linked &&
