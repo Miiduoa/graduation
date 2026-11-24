@@ -1,5 +1,12 @@
 /* eslint-disable @typescript-eslint/no-var-requires */
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 type VoiceNav = typeof import('../../services/voiceNav');
+
+const mockStopSpeech = jest.fn();
+const mockSpeak = jest.fn();
+
+jest.mock('expo-speech', () => ({ stop: mockStopSpeech, speak: mockSpeak }), { virtual: true });
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -13,29 +20,21 @@ function deferred<T>() {
 
 describe('voice navigation mute lifecycle', () => {
   let voiceNav: VoiceNav;
-  const getItem = jest.fn();
-  const setItem = jest.fn();
-  const stopSpeech = jest.fn();
-  const speak = jest.fn();
+  const getItem = jest.mocked(AsyncStorage.getItem);
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  const stopSpeech = mockStopSpeech;
+  const speak = mockSpeak;
 
   beforeEach(() => {
-    jest.resetModules();
     getItem.mockReset().mockResolvedValue(null);
     setItem.mockReset().mockResolvedValue(undefined);
     stopSpeech.mockReset().mockResolvedValue(undefined);
     speak.mockReset();
-    jest.doMock('@react-native-async-storage/async-storage', () => ({
-      __esModule: true,
-      default: { getItem, setItem },
-    }));
-    jest.doMock('expo-speech', () => ({ stop: stopSpeech, speak }), { virtual: true });
-    voiceNav = require('../../services/voiceNav');
-  });
-
-  afterEach(() => {
-    jest.dontMock('@react-native-async-storage/async-storage');
-    jest.dontMock('expo-speech');
-    jest.resetModules();
+    // Isolate only the service singleton. Resetting the entire Jest registry
+    // or unmocking AsyncStorage breaks the shared aiLocalAgent setup hook.
+    jest.isolateModules(() => {
+      voiceNav = require('../../services/voiceNav');
+    });
   });
 
   it('shares one initial preference read across simultaneous callers', async () => {
@@ -114,5 +113,4 @@ describe('voice navigation mute lifecycle', () => {
       rate: 1.0,
     });
   });
-
 });
