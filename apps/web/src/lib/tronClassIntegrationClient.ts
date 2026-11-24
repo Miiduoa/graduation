@@ -240,10 +240,26 @@ export function parseTronClassResult(action: string, value: unknown, input: Reco
         (item) =>
           isRecord(item) &&
           (item.courseId === null || isId(item.courseId)) &&
-          ['courses', 'homework', 'materials', 'announcements'].includes(String(item.area)) &&
+          typeof item.area === 'string' &&
+          ['courses', 'homework', 'materials', 'announcements'].includes(item.area) &&
           isText(item.message),
         1000,
       )
+    )
+      return invalidResponse();
+    const snapshot = value as TronClassSnapshot;
+    const courses = new Set(snapshot.courses.map((course) => course.id));
+    const homework = new Set(snapshot.homework.map((row) => `${row.courseId}:${row.id}`));
+    // Match native: partial sync may report missing courses as errors, but
+    // their private content must not cross the response boundary.
+    const outsideCourseScope = (row: { courseId: number | null }) =>
+      row.courseId !== null && !courses.has(row.courseId);
+    if (
+      courses.size !== snapshot.courses.length ||
+      homework.size !== snapshot.homework.length ||
+      snapshot.homework.some((row) => !courses.has(row.courseId)) ||
+      snapshot.announcements.some(outsideCourseScope) ||
+      snapshot.materials.some(outsideCourseScope)
     )
       return invalidResponse();
   } else if (action === 'prepare') {
