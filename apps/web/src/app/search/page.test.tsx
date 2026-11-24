@@ -1366,9 +1366,13 @@ describe('continuing a search after opening a service', () => {
     },
   );
 
-  it.each(['?campus=pu&q=公車', '#results'])(
-    'restores the clicked result when a same-page application push (%s) precedes the Router commit',
-    async (url) => {
+  it.each([
+    ['?campus=pu&q=公車', 'record'],
+    ['#results', 'record'],
+    ['?campus=pu&q=公車', 'array'],
+  ])(
+    'restores the clicked result when a same-page application push (%s, %s) precedes the Router commit',
+    async (url, shape) => {
       move(librarySearch);
       const view = renderAfterFrame();
       const result = screen.getByRole('link', { name: /^圖書館/ });
@@ -1376,16 +1380,19 @@ describe('continuing a search after opening a service', () => {
       fireEvent.click(result);
       const original = window.history.state;
 
-      window.history.pushState(
-        {
-          __NA: true,
-          __PRIVATE_NEXTJS_INTERNALS_TREE: structuredClone(original.__PRIVATE_NEXTJS_INTERNALS_TREE),
-        },
-        '',
-        url,
-      );
+      const data = Object.assign(shape === 'array' ? ['compact'] : {}, {
+        __NA: true,
+        __PRIVATE_NEXTJS_INTERNALS_TREE: structuredClone(original.__PRIVATE_NEXTJS_INTERNALS_TREE),
+      });
+      window.history.pushState(data, '', url);
       const intervening = window.history.state;
+      expect(intervening.__campusSearchHistoryEntry).toEqual(expect.any(String));
       expect(intervening.__campusSearchHistoryEntry).not.toBe(original.__campusSearchHistoryEntry);
+      expect(intervening.__campusSearchResultReturn).toEqual(original.__campusSearchResultReturn);
+      if (shape === 'array') {
+        expect(Array.isArray(intervening)).toBe(true);
+        expect(intervening[0]).toBe('compact');
+      }
       expect(scroll).not.toHaveBeenCalled();
       const pushedUrl = window.location.href;
       commitNavigation(href);

@@ -213,30 +213,36 @@ async def check_search_return(page, config, report, capture):
 
     # Insert a native application push between the fixture's Router dispatch
     # and its marked commit. Back must land on the intervening search entry.
-    await page.evaluate("""() => {
-      const trackedPush = history.pushState;
-      const routerPush = Symbol.for('nuni.app-router.history-push');
-      history.pushState = function (data, unused, url) {
-        if (data?.[routerPush]) {
-          history.pushState = trackedPush;
-          trackedPush.call(this, {
-            __NA: true,
-            __PRIVATE_NEXTJS_INTERNALS_TREE: structuredClone(
-              history.state.__PRIVATE_NEXTJS_INTERNALS_TREE
-            ),
-          }, '', '#results');
-        }
-        trackedPush.call(this, data, unused, url);
-      };
-    }""")
-    await library.press('Enter')
-    await page.wait_for_url(target_url)
-    await expect(form).to_have_count(0)
-    await page.go_back()
-    assert page.url == source_url + '#results'
-    await expect(field).to_have_value('借書')
-    await assert_results_visible(page, library, report)
-    report['checks'].append('Search: Back from a committed result restores focus after an intervening application push')
+    for shape in ['record', 'array']:
+        pushed_url = await page.evaluate("""shape => {
+          const trackedPush = history.pushState;
+          const routerPush = Symbol.for('nuni.app-router.history-push');
+          const target = new URL(location.href);
+          if (shape === 'array') target.searchParams.set('q', '公車');
+          else target.hash = 'results';
+          history.pushState = function (data, unused, url) {
+            if (data?.[routerPush]) {
+              history.pushState = trackedPush;
+              const state = Object.assign(shape === 'array' ? ['compact'] : {}, {
+                __NA: true,
+                __PRIVATE_NEXTJS_INTERNALS_TREE: structuredClone(
+                  history.state.__PRIVATE_NEXTJS_INTERNALS_TREE
+                ),
+              });
+              trackedPush.call(this, state, '', target);
+            }
+            trackedPush.call(this, data, unused, url);
+          };
+          return target.href;
+        }""", shape)
+        await library.press('Enter')
+        await page.wait_for_url(target_url)
+        await expect(form).to_have_count(0)
+        await page.go_back()
+        assert page.url == pushed_url
+        await expect(field).to_have_value('借書')
+        await assert_results_visible(page, library, report)
+        report['checks'].append(f'Search: Back from a committed result restores focus after an intervening application push with a {shape}')
 
     await form.get_by_role('button', name='清除搜尋', exact=True).click()
     await expect(field).to_be_focused()

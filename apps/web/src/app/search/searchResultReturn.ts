@@ -129,15 +129,17 @@ function installHistoryTracking() {
       const routerCommit = push && isRouterPush(data);
       const changesPage = url != null && new URL(url, window.location.href).pathname !== previousPath;
       const replacesPage = !push && changesPage;
+      const record = isHistoryRecord(data);
+      const copiedState = !record && hasSearchHistoryFields(data);
       // A same-page application push can become the entry immediately behind
-      // the pending result. Give it its own snapshot binding after the write succeeds.
+      // the pending result. Bind the current snapshot to its new key after the write succeeds.
       const carriesReturn =
         push && !routerCommit && !changesPage &&
-        (data == null || isHistoryRecord(data)) &&
+        !copiedState &&
         searchEntry && isSearchResultNavigationPending(searchEntry.saved.token);
-      // Normalize copies and replacements of keyed entries before serialization.
-      const cloned = data != null && !isHistoryRecord(data) &&
-        ((!push && previousKey !== null) || hasSearchHistoryFields(data));
+      // Normalize any payload that needs entry metadata before serialization.
+      const cloned = data != null && !record &&
+        (carriesReturn || (!push && previousKey !== null) || copiedState);
       const writesReturn =
         data != null && Object.getOwnPropertyDescriptor(data, WRITE_SEARCH_RETURN)?.value === true;
       let state = cloned ? cloneHistoryState(data) : data;
