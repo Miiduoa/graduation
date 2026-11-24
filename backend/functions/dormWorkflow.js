@@ -430,11 +430,17 @@ function createDormWorkflowHandler({
           return candidates;
         });
       }
+      const inboxNotificationId = 'dorm_' + digest([schoolId, ref.id]);
       const notify = async (hash) => {
         const id = current.get(hash);
         const attempt = attempts.doc(hash);
         const notification = { title: '宿舍公告', body: '開啟宿舍頁查看本棟公告。' };
-        const destination = { type: 'announcement', schoolId, channel: 'dormitory', dormAnnouncementId: ref.id };
+        // This opaque value belongs to one resident and one publication. It lets the
+        // app match a lock-screen tap to the signed-in account's private inbox.
+        const destination = {
+          type: 'announcement', schoolId, channel: 'dormitory', dormAnnouncementId: ref.id,
+          inboxNotificationId, deliveryKey: randomUUID(),
+        };
         // The inbox item and exclusive provider attempt commit together. A retry after
         // a user reads or deletes the item must not recreate it or reset its timestamp.
         const claimed = await db.runTransaction(async (tx) => {
@@ -442,7 +448,7 @@ function createDormWorkflowHandler({
           let eligible = false;
           if (id) {
             const user = db.collection('users').doc(id);
-            const inbox = user.collection('notifications').doc('dorm_' + digest([schoolId, ref.id]));
+            const inbox = user.collection('notifications').doc(inboxNotificationId);
             const [account, member, existing] = await tx.getAll(user, school.collection('members').doc(id), inbox);
             const profile = account.data();
             const status = member.data()?.status;
@@ -454,11 +460,16 @@ function createDormWorkflowHandler({
                 const row = doc.data();
                 return row.active !== false && row.building === building;
               });
-              if (eligible && !existing.exists) {
-                tx.create(inbox, {
-                  ...notification, type: 'announcement', read: false, schoolId,
-                  createdAt: FieldValue.serverTimestamp(), data: destination,
-                });
+              if (eligible) {
+                if (existing.exists) {
+                  // Preserve read state and timestamps if an inbox row predates this claim.
+                  tx.update(inbox, { data: destination });
+                } else {
+                  tx.create(inbox, {
+                    ...notification, type: 'announcement', read: false, schoolId,
+                    createdAt: FieldValue.serverTimestamp(), data: destination,
+                  });
+                }
               }
             }
           }
