@@ -273,14 +273,18 @@ function BoardsContent() {
     const generation = accessGeneration.current;
     const isCurrent = () =>
       loadVersion.current === version && accessGeneration.current === generation;
+    const finishLoading = () => {
+      if (loadVersion.current !== version) return;
+      setLoading(false);
+      setRefreshing(false);
+    };
     const handleError = (cause: unknown) => {
       if (!isCurrent()) return;
       const code = (cause as { code?: string })?.code ?? '';
       if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
         clearBoardAccess();
-        setLoading(false);
-        setRefreshing(false);
       }
+      finishLoading();
       setLoadError('暫時無法更新看板。請確認網路與登入狀態，再試一次。');
     };
 
@@ -318,10 +322,7 @@ function BoardsContent() {
     } catch (cause) {
       handleError(cause);
     } finally {
-      if (loadVersion.current === version) {
-        setLoading(false);
-        setRefreshing(false);
-      }
+      finishLoading();
     }
   }, [school?.id, auth.user?.uid, applySubscriptionList, clearBoardAccess]);
 

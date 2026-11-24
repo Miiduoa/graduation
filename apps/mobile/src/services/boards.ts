@@ -64,6 +64,31 @@ export function boardSubscriptionId(uid: string, boardId: string) {
   return `${uid}_${boardId}`;
 }
 
+// A pending delete can remove a document from a query before Firestore
+// acknowledges it, leaving no document metadata to inspect.
+const subscriptionConfirmationStates = new Map<string, {
+  pendingDeletes: number;
+  activeReads: number;
+  deleteRevision: number;
+}>();
+
+function getSubscriptionConfirmationState(path: string) {
+  const state = subscriptionConfirmationStates.get(path) ?? {
+    pendingDeletes: 0,
+    activeReads: 0,
+    deleteRevision: 0,
+  };
+  subscriptionConfirmationStates.set(path, state);
+  return state;
+}
+
+function clearIdleSubscriptionConfirmationState(path: string) {
+  const state = subscriptionConfirmationStates.get(path);
+  if (state && state.pendingDeletes === 0 && state.activeReads === 0) {
+    subscriptionConfirmationStates.delete(path);
+  }
+}
+
 export async function subscribeToBoard(uid: string, schoolId: string, boardId: string) {
   const db = getDb();
   await setDoc(doc(db, 'schools', schoolId, 'boardSubs', boardSubscriptionId(uid, boardId)), {
@@ -76,7 +101,17 @@ export async function subscribeToBoard(uid: string, schoolId: string, boardId: s
 
 export async function unsubscribeFromBoard(uid: string, schoolId: string, boardId: string) {
   const db = getDb();
-  await deleteDoc(doc(db, 'schools', schoolId, 'boardSubs', boardSubscriptionId(uid, boardId)));
+  const subscription = doc(db, 'schools', schoolId, 'boardSubs', boardSubscriptionId(uid, boardId));
+  const path = subscription.path;
+  const state = getSubscriptionConfirmationState(path);
+  state.pendingDeletes += 1;
+  state.deleteRevision += 1;
+  try {
+    await deleteDoc(subscription);
+  } finally {
+    state.pendingDeletes -= 1;
+    clearIdleSubscriptionConfirmationState(path);
+  }
 }
 
 export async function isSubscribedToBoard(
@@ -86,18 +121,31 @@ export async function isSubscribedToBoard(
   options: { fromServer?: boolean } = {},
 ): Promise<boolean> {
   const db = getDb();
-  const read = options.fromServer ? getDocsFromServer : getDocs;
+  const subscriptionQuery = query(
+    collection(db, 'schools', schoolId, 'boardSubs'),
+    where('userId', '==', uid),
+    where('boardId', '==', boardId),
+    limit(1),
+  );
+  if (!options.fromServer) return !(await getDocs(subscriptionQuery)).empty;
+
+  const path = doc(db, 'schools', schoolId, 'boardSubs', boardSubscriptionId(uid, boardId)).path;
+  const state = getSubscriptionConfirmationState(path);
+  const { pendingDeletes, deleteRevision } = state;
+  state.activeReads += 1;
   // Failed-write reconciliation must hit the server. A cache miss would look
   // like "not subscribed" and overwrite the rollback after a failed unsubscribe.
-  const snap = await read(
-    query(
-      collection(db, 'schools', schoolId, 'boardSubs'),
-      where('userId', '==', uid),
-      where('boardId', '==', boardId),
-      limit(1),
-    ),
-  );
-  return !snap.empty;
+  try {
+    const snap = await getDocsFromServer(subscriptionQuery);
+    const overlapsDelete = pendingDeletes > 0 || state.deleteRevision !== deleteRevision;
+    if (snap.metadata.fromCache || snap.metadata.hasPendingWrites || (snap.empty && overlapsDelete)) {
+      throw new Error('伺服器尚未確認此看板的訂閱狀態');
+    }
+    return !snap.empty;
+  } finally {
+    state.activeReads -= 1;
+    clearIdleSubscriptionConfirmationState(path);
+  }
 }
 
 /** 保留快照來源，供看板畫面調解訂閱寫入與清單刷新。 */

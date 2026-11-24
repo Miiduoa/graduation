@@ -1277,11 +1277,16 @@ test.each([false, true])(
 );
 
 test('an initial subscription read failure disables writes until a membership refresh arrives', async () => {
-  jest.mocked(listBoards).mockResolvedValue([board]);
+  const initialRows = deferred<typeof board[]>();
+  jest.mocked(listBoards).mockReturnValueOnce(initialRows.promise);
   jest.mocked(readSubscribedBoardIds).mockRejectedValueOnce(
     Object.assign(new Error('offline'), { code: 'unavailable' }),
   );
   const view = render(<BoardsScreen />);
+  await view.findByRole('alert');
+  expect(view.UNSAFE_queryByType(ActivityIndicator)).toBeNull();
+  expect(view.UNSAFE_getByType(FlatList)).toBeTruthy();
+  await act(async () => { initialRows.resolve([board]); });
   const unknown = await view.findByLabelText('訂閱狀態未確認讀書會');
   expect(unknown.props.accessibilityState.disabled).toBe(true);
   expect(view.queryByLabelText('訂閱讀書會')).toBeNull();
@@ -1301,6 +1306,35 @@ test('an initial subscription read failure disables writes until a membership re
   expect(view.getByLabelText('取消訂閱讀書會').props.accessibilityState.disabled).toBeFalsy();
   expect(view.getByText('已訂閱')).toBeTruthy();
   await act(async () => { rows.resolve([board]); await refresh; });
+});
+
+test.each(['看板', '訂閱'])('%s查詢先遇到網路錯誤時結束下拉刷新，並套用稍後成功的查詢', async (failedRead) => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByLabelText('訂閱讀書會');
+
+  const rows = deferred<typeof board[]>();
+  const membership = deferred<Awaited<ReturnType<typeof readSubscribedBoardIds>>>();
+  jest.mocked(listBoards).mockReturnValueOnce(rows.promise);
+  jest.mocked(readSubscribedBoardIds).mockReturnValueOnce(membership.promise);
+  let refresh!: Promise<void>;
+  act(() => { refresh = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  expect(view.UNSAFE_getByType(RefreshControl).props.refreshing).toBe(true);
+
+  const offline = Object.assign(new Error('offline'), { code: 'unavailable' });
+  await act(async () => {
+    if (failedRead === '看板') rows.reject(offline);
+    else membership.reject(offline);
+  });
+  expect(view.getByRole('alert')).toBeTruthy();
+  expect(view.UNSAFE_getByType(RefreshControl).props.refreshing).toBe(false);
+
+  await act(async () => {
+    if (failedRead === '看板') membership.resolve({ ids: [board.id], serverConfirmedIds: [board.id] });
+    else rows.resolve([{ ...board, name: '電影社' }]);
+    await refresh;
+  });
+  expect(view.getByLabelText(failedRead === '看板' ? '取消訂閱讀書會' : '訂閱電影社')).toBeTruthy();
 });
 
 test('a committed subscription is displayed before board rows finish and survives their network failure', async () => {
