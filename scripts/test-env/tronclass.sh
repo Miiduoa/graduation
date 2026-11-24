@@ -76,10 +76,15 @@ tronclass_physical_dir() {
     /*) ;;
     *) target="$TRONCLASS_PROJECT_ROOT/$target" ;;
   esac
-  local acc="/" part next
-  local rest="${target#/}"
-  local IFS='/'
-  for part in $rest; do
+  local acc="/" part next rest="${target#/}"
+  while [ -n "$rest" ]; do
+    if [ "$rest" = "${rest#*/}" ]; then
+      part="$rest"
+      rest=""
+    else
+      part="${rest%%/*}"
+      rest="${rest#*/}"
+    fi
     [ -z "$part" ] && continue
     if [ "$part" = "." ]; then continue; fi
     if [ "$part" = ".." ]; then

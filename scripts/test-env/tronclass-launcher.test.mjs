@@ -274,3 +274,40 @@ process.exit(0);
     rmSync(expected, { recursive: true, force: true });
   }
 });
+
+test('launcher does not glob a literal * path component against the repository root', () => {
+  const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
+  const decoy = path.join(repoRoot, 'r36-glob-decoy');
+  rmSync(decoy, { recursive: true, force: true });
+  mkdirSync(decoy, { mode: 0o700 });
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-glob-'));
+  const real = path.join(dir, 'real');
+  mkdirSync(path.join(real, 'runtime'), { recursive: true, mode: 0o700 });
+  const star = path.join(dir, '*');
+  symlinkSync(real, star);
+  const runtime = path.join(star, 'runtime');
+  try {
+    writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
+if (process.argv.includes('-e')) process.exit(0);
+process.exit(0);
+`, { mode: 0o700 });
+    writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
+process.exit(0);
+`, { mode: 0o700 });
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        TMPDIR: dir,
+        HOME: dir,
+        TRONCLASS_RUNTIME_DIR: runtime,
+      },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /symbolic link/i);
+    assert.equal(lstatSync(decoy).isDirectory(), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(decoy, { recursive: true, force: true });
+  }
+});
