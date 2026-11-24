@@ -79,6 +79,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
     '查玩課雲未交作業，查玩課雲『外交』課程，查校園公告',
     '查玩課雲外交教材，查未交作業',
     '查『外交』作業，查玩課雲未交作業和校園公告',
+    '查玩課雲『外交』未交作業和查公車',
   ])('uses the original compound course scope for %s', async (compoundQuestion) => {
     const f = fixture();
     const courses = [{ ...course, name: '外交' }, snapshot.courses[1]];
@@ -94,6 +95,22 @@ describe('scoped deterministic TronClass Agent tools', () => {
       [owner, { courseId: 101, include: { homework: true, announcements: false, materials: false } }],
     ]);
     expect(result.snapshot?.homework).toEqual([privateHomework]);
+  });
+
+  it.each([
+    ['查玩課雲『外交』作業和查玩課雲交通作業', '查玩課雲『外交』作業'],
+    ['查玩課雲交通作業和查玩課雲『外交』作業', '查玩課雲交通作業'],
+  ])('confirms conflicting homework courses without reading homework for %s', async (compoundQuestion, question) => {
+    const f = fixture();
+    const courses = [{ ...course, name: '外交' }, { ...snapshot.courses[1]!, name: '交通' }];
+    f.read.mockResolvedValue({ ...snapshot, courses, homework: [] });
+    expect(tronClassCompoundClauses(compoundQuestion)).toEqual([question]);
+    const result = await f.service.ask(owner, { question, compoundQuestion });
+    expect(result.selection).toBe('course');
+    expect(result.snapshot?.homework).toEqual([]);
+    expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
+      include: { homework: false, announcements: false, materials: false },
+    });
   });
 
   it.each([

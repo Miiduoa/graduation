@@ -1878,8 +1878,11 @@ function parseTronClassCompound(question: string) {
     const target = parseReadRequest(clause);
     const continuation = target.hasOutsideQuotes(TRONCLASS_CONTINUATION) &&
       !tokensFor(clause).some(isNegatorToken);
-    if (target.hasOutsideQuotes(OTHER_SERVICE_OR_SCHEDULE)) continue;
-    if (target.hasOutsideQuotes(TRONCLASS_KEYWORD)) {
+    const explicitSource = target.hasOutsideQuotes(TRONCLASS_KEYWORD);
+    // A service word can be part of the course name in an explicit LMS read.
+    const explicitHomeworkScope = explicitSource && target.intent === 'homework' ? target.courseScope() : undefined;
+    if (!explicitHomeworkScope && target.hasOutsideQuotes(OTHER_SERVICE_OR_SCHEDULE)) continue;
+    if (explicitSource) {
       context = true;
       candidate = clause;
     } else if (continuation) {
@@ -1899,7 +1902,7 @@ function parseTronClassCompound(question: string) {
     const bare = candidate.replace(/[?!.。]+$/u, '').trim();
     if (tronClassExplicitNavigationQuestion(candidate) || isTronClassNavigationTarget(bare) ||
       isTronClassNavigationTarget(bare.replace(/^(?:(?:請|麻煩)?(?:幫我|替我)?(?:開啟|打開|開|前往|進入))\s*/u, ''))) continue;
-    courseScopes.push(target.courseScope());
+    courseScopes.push(explicitHomeworkScope ?? target.courseScope());
     const parsed = parseTronClassAgentIntent(candidate);
     if (!parsed || parsed.intent === 'capabilities') continue;
     const key = `${parsed.intent}:${parsed.pendingOnly}:${parsed.unsupportedReason ?? ''}`;

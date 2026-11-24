@@ -103,6 +103,7 @@ it.each([
 it.each([
   ['玩課雲作業，查公車', []],
   ['玩課雲作業和查公車', []],
+  ['開啟玩課雲作業和查公車', []],
   ['玩課雲作業，查校園公告', []],
   ['開啟玩課雲作業，安排今天下午作業準備30分鐘', []],
   ['開啟玩課雲作業，查一下還沒交的有哪些', ['查一下還沒交的有哪些 玩課雲']],
@@ -132,8 +133,10 @@ it.each([
   expect(screen.getByText('跨服務規劃結果')).toBeTruthy();
 });
 
-it('retains the original compound request when retrying a homework supplement', async () => {
-  const question = '查玩課雲未交作業和校園公告';
+it.each([
+  ['查玩課雲未交作業和校園公告', '查玩課雲未交作業'],
+  ['查玩課雲『外交』作業和查玩課雲交通作業', '查玩課雲『外交』作業'],
+])('retains the original compound request when retrying a homework supplement for %s', async (question, clause) => {
   const calls: Record<string, unknown>[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
@@ -150,7 +153,7 @@ it('retains the original compound request when retrying a homework supplement', 
   await ask(question);
   fireEvent.click(await screen.findByRole('button', { name: '重新查詢 TronClass' }));
   await waitFor(() => expect(calls).toEqual(Array.from({ length: 2 }, () => ({
-    action: 'ask', question: '查玩課雲未交作業', compoundQuestion: question,
+    action: 'ask', question: clause, compoundQuestion: question,
   }))));
   expect(screen.getByText('校園公告結果')).toBeTruthy();
   expect(screen.queryByText('私人期中報告')).toBeNull();
