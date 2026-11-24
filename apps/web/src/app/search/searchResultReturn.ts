@@ -15,6 +15,7 @@ import {
 const HISTORY_ENTRY_KEY = '__campusSearchHistoryEntry';
 const SEARCH_RETURN_STATE = '__campusSearchResultReturn';
 const HISTORY_STATE_PAYLOAD = '__campusSearchHistoryPayload';
+const NEXT_HISTORY_FIELDS = ['__NA', '__PRIVATE_NEXTJS_INTERNALS_TREE'] as const;
 const WRITE_SEARCH_RETURN = Symbol();
 type ResultKind = 'service' | 'suggested' | 'assistant';
 type SearchReturn = {
@@ -93,7 +94,7 @@ function onHistoryPush(
   }
 }
 
-function isHistoryRecord(data: unknown) {
+function isHistoryRecord(data: unknown): data is Record<string, unknown> {
   if (!data || typeof data !== 'object') return false;
   const prototype = Object.getPrototypeOf(data);
   return prototype === Object.prototype || prototype === null;
@@ -104,23 +105,35 @@ function isRouterHistoryWrite(data: unknown, marker: symbol) {
     Object.getOwnPropertyDescriptor(data, marker)?.value === true;
 }
 
-function cloneHistoryState(data: unknown) {
-  const cloned = structuredClone(data);
-  if (isHistoryRecord(cloned) || Array.isArray(cloned)) return cloned;
-  // Branded values such as Map serialize their payload but drop own properties.
-  // Keep the payload intact in a record that can also carry the entry metadata.
-  const record: Record<string, unknown> = { [HISTORY_STATE_PAYLOAD]: cloned };
+function readNextHistoryFields(data: unknown) {
+  const fields: Partial<Record<(typeof NEXT_HISTORY_FIELDS)[number], unknown>> = {};
   if (data && typeof data === 'object') {
-    const fields = data as Record<string, unknown>;
-    for (const key of ['__NA', '__PRIVATE_NEXTJS_INTERNALS_TREE']) {
-      if (key in fields) record[key] = fields[key];
+    for (const key of NEXT_HISTORY_FIELDS) {
+      if (key in data) fields[key] = (data as Record<string, unknown>)[key];
     }
   }
-  return record;
+  return fields;
+}
+
+function cloneHistoryState(
+  data: unknown,
+): Record<string, unknown> | (unknown[] & { [SEARCH_RETURN_STATE]?: SearchReturn }) {
+  const cloned: unknown = structuredClone(data);
+  if (isHistoryRecord(cloned)) return cloned;
+  if (Array.isArray(cloned)) return cloned;
+  // Branded values such as Map serialize their payload but drop own properties.
+  // Keep the payload intact in a record that can also carry the entry metadata.
+  return { [HISTORY_STATE_PAYLOAD]: cloned, ...readNextHistoryFields(data) };
 }
 
 function installHistoryTracking() {
   trackedEntryKey = readEntryKey(window.history.state);
+  // History caches the deserialized state for the active entry. Its identity
+  // ties these fields to that entry even before the first search key is written.
+  let nativeState: {
+    value: unknown;
+    nextFields: ReturnType<typeof readNextHistoryFields>;
+  } | null = null;
   for (const method of ['pushState', 'replaceState'] as const) {
     const original = window.history[method];
     window.history[method] = function (
@@ -139,6 +152,11 @@ function installHistoryTracking() {
       const routerReplace = !push && isRouterHistoryWrite(data, APP_ROUTER_HISTORY_REPLACE);
       const changesPage = url != null && new URL(url, window.location.href).pathname !== previousPath;
       const replacesPage = !push && changesPage;
+      const nextFields = changesPage ? {} : {
+        ...(nativeState?.value === previousState ? nativeState?.nextFields : {}),
+        ...readNextHistoryFields(previousState),
+        ...readNextHistoryFields(data),
+      };
       const record = isHistoryRecord(data);
       const copiedState = !record && hasSearchHistoryFields(data);
       // A same-page application push can become the entry immediately behind
@@ -157,6 +175,9 @@ function installHistoryTracking() {
         const current = state as Record<string, unknown> | null | undefined;
         if (push || replacesPage || previousKey || hasSearchHistoryFields(current) || writesReturn) {
           const fields = cloned && current ? current : { ...current };
+          // Next cannot copy its router tree from a serialized Map. Restore it
+          // before the snapshot is written so Back can traverse within this document.
+          if (nativeState?.value === previousState) Object.assign(fields, nextFields);
           const saved = replacesPage || (push && !carriesReturn)
             ? null
             : writesReturn && !push
@@ -175,6 +196,9 @@ function installHistoryTracking() {
         }
       }
       original.call(this, state, unused, url);
+      nativeState = !cloned && state != null && !isHistoryRecord(state)
+        ? { value: this.state, nextFields }
+        : null;
       // A router replace can run during traversal, before our popstate observer.
       // Keep the departing key until that observer has compared the two entries.
       if (push || previousKey === trackedEntryKey) trackedEntryKey = readEntryKey(this.state);

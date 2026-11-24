@@ -52,7 +52,11 @@ async def check_search_history(origin):
             # A fresh document starts with a Next entry and no search return key.
             await page.goto(f'{origin}/search?campus=pu&q=借書&category=campus')
             await expect(campus).to_be_visible()
+            await page.wait_for_function("""() =>
+              history.state?.__NA === true && history.state.__PRIVATE_NEXTJS_INTERNALS_TREE
+            """)
             await page.evaluate("""() => {
+              window.__searchHistoryTestDocument = true;
               const payload = new Map([['view', { mode: 'compact' }]]);
               history.replaceState(payload, '');
               if (!(history.state instanceof Map) || history.state.__campusSearchHistoryEntry) {
@@ -63,6 +67,14 @@ async def check_search_history(origin):
             await page.wait_for_url('**/library?*')
             await page.go_back()
             await expect(field).to_have_value('借書')
+            await expect(page.get_by_role('button', name='校園生活', exact=True)).to_have_attribute(
+                'aria-pressed', 'true',
+            )
+            await expect(library).to_be_focused()
+            assert await page.evaluate("""() => window.__searchHistoryTestDocument === true""")
+            assert await page.evaluate("""() =>
+              history.state.__NA === true && !!history.state.__PRIVATE_NEXTJS_INTERNALS_TREE
+            """)
             assert await page.evaluate("""() =>
               history.state.__campusSearchHistoryPayload?.get('view')
             """) == {'mode': 'compact'}
