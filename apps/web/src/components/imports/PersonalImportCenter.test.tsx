@@ -360,7 +360,24 @@ it('does not rewrite an unchanged imported record when the editor is submitted w
   expect(kept).toEqual(original);
   expect(kept?.batchId).toBe(original.batchId);
   expect(kept?.importedAt).toBe(original.importedAt);
-  expect((within(dialog).getByRole('button', { name: '儲存修改' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((within(dialog).getByRole('button', { name: '儲存修改' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('validates an unchanged imported record when the editor is submitted with Enter', async () => {
+  const first = (await savedRecordsForEditing())[0];
+  await changePersonalImport(context, first, { ...first, linkedCourseId: 'course-not-joined' });
+  const original = readPersonalImports(context).find((row) => row.id === first.id)!;
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  const dialog = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  const form = within(dialog).getByRole('form', { name: '修改個人紀錄' });
+  expect((within(dialog).getByRole('button', { name: '儲存修改' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.submit(form);
+  expect(within(dialog).getByRole('alert').textContent).toContain('課程連結尚未確認');
+  const kept = readPersonalImports(context).find((row) => row.id === original.id);
+  expect(kept).toEqual(original);
+  expect(kept?.batchId).toBe(original.batchId);
+  expect(kept?.importedAt).toBe(original.importedAt);
 });
 
 it('keeps a failed saved-record save and its error inside the editor', async () => {

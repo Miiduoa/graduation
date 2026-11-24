@@ -527,7 +527,7 @@ function PersonalRecordEditor({
             <button className="btn" type="button" disabled={busy} onClick={requestClose}>
               取消編輯
             </button>
-            <button className="btn primary" type="submit" disabled={busy || !dirty}>
+            <button className="btn primary" type="submit" disabled={busy}>
               {busy ? '儲存中…' : '儲存修改'}
             </button>
           </div>
