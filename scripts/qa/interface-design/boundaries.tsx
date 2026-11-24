@@ -1,7 +1,7 @@
 import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent } from 'react';
 import type { LinkProps } from 'next/link';
 
-import { APP_ROUTER_HISTORY_PUSH } from '../../../apps/web/src/app/search/searchResultNavigation';
+import { APP_ROUTER_HISTORY_PUSH, APP_ROUTER_HISTORY_REPLACE } from '../../../apps/web/src/app/search/searchResultNavigation';
 import { onRouterTransitionStart } from '../../../apps/web/src/instrumentation-client';
 
 // Only data providers, Next routing and network boundaries are replaced. Product
@@ -63,8 +63,8 @@ export function navigate(href: string, type: 'push' | 'replace' = 'push') {
   const currentUrl = location.pathname + location.search + location.hash;
   const push = type === 'push' && destinationUrl !== currentUrl;
   const entry = routerState(destination);
+  Object.defineProperty(entry, push ? APP_ROUTER_HISTORY_PUSH : APP_ROUTER_HISTORY_REPLACE, { value: true });
   if (push) {
-    Object.defineProperty(entry, APP_ROUTER_HISTORY_PUSH, { value: true });
     history.pushState(entry, '', destinationUrl);
   } else {
     history.replaceState(entry, '', destinationUrl);

@@ -170,10 +170,12 @@ function ServiceDirectory() {
     if (isHistoryArrival && queryString !== restoring.queryString) return;
     historyRestoration.current = null;
     if (filterArrival) {
-      // A history traversal can restore this entry’s filters independently of result focus.
+      // Apply this entry’s filter update independently of result focus.
       restoredFilters.current = { scope: draftScope, queryString };
       editedFilters.current = null;
-      setFilters({ scope: draftScope, ...filterArrival.saved.filters });
+      const next =
+        filterArrival.saved?.filters ?? readCampusServiceFilters(new URLSearchParams(queryString));
+      setFilters({ scope: draftScope, ...next });
       setRestoredExpanded(
         restoreDirectorySearch('search', '/search', storageScope)?.expanded ?? [],
       );

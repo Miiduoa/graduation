@@ -8,7 +8,7 @@ import { onRouterTransitionStart } from '@/instrumentation-client';
 import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SearchPage from './page';
-import { APP_ROUTER_HISTORY_PUSH } from './searchResultNavigation';
+import { APP_ROUTER_HISTORY_PUSH, APP_ROUTER_HISTORY_REPLACE } from './searchResultNavigation';
 import { visibleCampusServices } from '@/lib/campusServices';
 import { DIRECTORY_SEARCH_STORAGE_KEY } from '@/lib/campusDirectorySearch';
 
@@ -1187,7 +1187,9 @@ describe('continuing a search after opening a service', () => {
     expect(entry).toMatchObject(nextState);
     replaceHistoryForTraversal(entry, '', librarySearch);
     // The Router can replace the arriving state before our popstate listener runs.
-    move(librarySearch, entry);
+    const routerEntry = structuredClone(entry);
+    Object.defineProperty(routerEntry, APP_ROUTER_HISTORY_REPLACE, { value: true });
+    move(librarySearch, routerEntry);
     act(() => window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state })));
     const view = renderAfterFrame();
     const library = screen.getByRole('link', { name: /^圖書館/ });
@@ -1239,7 +1241,7 @@ describe('continuing a search after opening a service', () => {
     router.search = window.location.search;
     const url = new URL(window.location.href);
     url.searchParams.set('q', '公車');
-    window.history.replaceState(null, '', url);
+    act(() => window.history.replaceState(null, '', url));
     expect(window.history.state).toMatchObject({
       __campusSearchHistoryEntry: entry.__campusSearchHistoryEntry,
       __campusSearchResultReturn: entry.__campusSearchResultReturn,
@@ -1408,7 +1410,34 @@ describe('continuing a search after opening a service', () => {
       expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
       expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
       expect(scroll).toHaveBeenCalledTimes(1);
+      if (shape === 'array') {
+        router.search = window.location.search;
+        const routerEntry = structuredClone(nextState);
+        Object.defineProperty(routerEntry, APP_ROUTER_HISTORY_REPLACE, { value: true });
+        act(() => move(pushedUrl, routerEntry));
+        expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+        act(() => window.history.replaceState(null, '', pushedUrl));
+        expect(window.location.href).toBe(pushedUrl);
+        expect(window.history.state).toMatchObject({
+          __campusSearchHistoryEntry: intervening.__campusSearchHistoryEntry,
+          __campusSearchResultReturn: intervening.__campusSearchResultReturn,
+        });
+        expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('公車');
+        expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
+        expect(screen.queryByRole('link', { name: /^圖書館/ })).toBeNull();
+        router.search = null;
+      }
       returned.unmount();
+
+      if (shape === 'array') {
+        await go(1);
+        expect(window.location.pathname).toBe('/library');
+        await go(-1);
+        const restored = renderAfterFrame();
+        expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+        expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+        restored.unmount();
+      }
 
       await go(-1);
       expect(window.location.pathname + window.location.search).toBe(librarySearch);
@@ -1416,7 +1445,7 @@ describe('continuing a search after opening a service', () => {
       renderAfterFrame();
       expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
       expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
-      expect(scroll).toHaveBeenCalledTimes(1);
+      expect(scroll).toHaveBeenCalledTimes(shape === 'array' ? 2 : 1);
     },
   );
 

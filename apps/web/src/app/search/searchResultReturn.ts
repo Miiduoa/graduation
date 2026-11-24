@@ -6,6 +6,7 @@ import { SERVICE_CATEGORIES, type ServiceCategory } from '@/lib/campusServices';
 
 import {
   APP_ROUTER_HISTORY_PUSH,
+  APP_ROUTER_HISTORY_REPLACE,
   consumeSearchResultNavigation,
   isSearchResultNavigationPending,
   markSearchResultNavigation,
@@ -23,7 +24,7 @@ type SearchReturn = {
   href: string;
   kind: ResultKind;
 };
-type FilterArrival = { saved: SearchReturn; queryString: string };
+type FilterArrival = { entryKey: string; queryString: string; saved: SearchReturn | null };
 
 let observedWindow: Window | undefined;
 const emptyReturnState: { pending: SearchReturn | null; arrival: FilterArrival | null } = {
@@ -91,9 +92,9 @@ function isHistoryRecord(data: unknown) {
   return prototype === Object.prototype || prototype === null;
 }
 
-function isRouterPush(data: unknown) {
+function isRouterHistoryWrite(data: unknown, marker: symbol) {
   return isHistoryRecord(data) &&
-    Object.getOwnPropertyDescriptor(data, APP_ROUTER_HISTORY_PUSH)?.value === true;
+    Object.getOwnPropertyDescriptor(data, marker)?.value === true;
 }
 
 function cloneHistoryState(data: unknown) {
@@ -126,7 +127,7 @@ function installHistoryTracking() {
       const searchEntry = readSearchEntry(previousState);
       const previousPath = window.location.pathname;
       const push = method === 'pushState';
-      const routerCommit = push && isRouterPush(data);
+      const routerCommit = push && isRouterHistoryWrite(data, APP_ROUTER_HISTORY_PUSH);
       const changesPage = url != null && new URL(url, window.location.href).pathname !== previousPath;
       const replacesPage = !push && changesPage;
       const record = isHistoryRecord(data);
@@ -177,8 +178,16 @@ function installHistoryTracking() {
         // Bind the new URL only after the browser accepts the same-page replacement.
         searchEntry.entries.searchUrl = currentUrl();
         const { arrival, pending } = returnState;
-        // A query edit can supersede the traversal before its filters are applied.
-        if (arrival && !matchesRouterUrl(arrival.queryString)) publishReturn(pending, null);
+        if (url != null && previousKey && !isRouterHistoryWrite(data, APP_ROUTER_HISTORY_REPLACE)) {
+          // An explicit URL replacement supersedes the traversal even when the query is identical.
+          publishReturn(null, {
+            entryKey: previousKey,
+            queryString: currentQueryString(),
+            saved: null,
+          });
+        } else if (arrival && !matchesRouterUrl(arrival.queryString)) {
+          publishReturn(pending, null);
+        }
       } else if (replacesPage && previousKey) {
         searchEntriesByKey.delete(previousKey);
         for (const armed of searchEntriesByKey.values()) {
@@ -224,8 +233,12 @@ function readCurrentReturn(expected: SearchReturn) {
   return current?.token === expected.token ? current : null;
 }
 
+function currentQueryString() {
+  return new URLSearchParams(window.location.search).toString();
+}
+
 function matchesRouterUrl(queryString: string) {
-  return new URLSearchParams(window.location.search).toString() === queryString;
+  return currentQueryString() === queryString;
 }
 
 function publishReturn(pending: SearchReturn | null, arrival = returnState.arrival) {
@@ -235,7 +248,7 @@ function publishReturn(pending: SearchReturn | null, arrival = returnState.arriv
 }
 
 export function finishSearchFilterArrival(arrival: FilterArrival) {
-  // Acknowledging this traversal leaves the entry snapshot available for another Back.
+  // Acknowledging the filter update leaves the entry snapshot available for another Back.
   if (returnState.arrival === arrival) publishReturn(returnState.pending, null);
 }
 
@@ -248,7 +261,7 @@ function captureReturn(event: PopStateEvent) {
   const saved = entry?.saved ?? null;
   publishReturn(
     departedKey !== null && departedKey === entry?.entries.destinationKey ? saved : null,
-    saved ? { saved, queryString: new URLSearchParams(window.location.search).toString() } : null,
+    saved && entryKey ? { saved, entryKey, queryString: currentQueryString() } : null,
   );
 }
 
@@ -356,9 +369,9 @@ export function useSearchResultReturn({
     arrival &&
     ready &&
     !blocked &&
-    arrival.saved.scope === scope &&
+    arrival.entryKey === getSearchHistoryEntryKey() &&
     arrival.queryString === queryString &&
-    readCurrentReturn(arrival.saved) &&
+    (!arrival.saved || (arrival.saved.scope === scope && readCurrentReturn(arrival.saved))) &&
     matchesRouterUrl(queryString)
       ? arrival
       : null;

@@ -1,5 +1,6 @@
-// The pinned Next HistoryUpdater patch marks its own push before invoking History.
+// The pinned Next HistoryUpdater patch marks its own writes before invoking History.
 export const APP_ROUTER_HISTORY_PUSH = Symbol.for('nuni.app-router.history-push');
+export const APP_ROUTER_HISTORY_REPLACE = Symbol.for('nuni.app-router.history-replace');
 
 // Link.onNavigate and Next's transition-start hook run in the same call stack.
 // Only that dispatch can claim the intent. Every later dispatch supersedes it.

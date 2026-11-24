@@ -243,6 +243,27 @@ async def check_search_return(page, config, report, capture):
         await expect(field).to_have_value('借書')
         await assert_results_visible(page, library, report)
         report['checks'].append(f'Search: Back from a committed result restores focus after an intervening application push with a {shape}')
+        if shape == 'array':
+            await page.evaluate("""url => {
+              const previous = history.state;
+              history.replaceState(null, '', url);
+              if (history.state.__campusSearchHistoryEntry !== previous.__campusSearchHistoryEntry ||
+                  history.state.__campusSearchResultReturn?.token !== previous.__campusSearchResultReturn.token) {
+                throw new Error('Same-URL replacement lost the search entry metadata');
+              }
+            }""", pushed_url)
+            assert page.url == pushed_url
+            await expect(field).to_have_value('公車')
+            await expect(results.get_by_role('heading', name='公車', exact=True)).to_be_visible()
+            await expect(library).to_have_count(0)
+            await page.go_forward()
+            await page.wait_for_url(target_url)
+            await expect(form).to_have_count(0)
+            await page.go_back()
+            assert page.url == pushed_url
+            await expect(field).to_have_value('借書')
+            await assert_results_visible(page, library, report)
+            report['checks'].append('Search: a same-URL replacement reapplies URL filters after the array insertion return, and Forward/Back restores the saved filters and focus again')
 
     await form.get_by_role('button', name='清除搜尋', exact=True).click()
     await expect(field).to_be_focused()
