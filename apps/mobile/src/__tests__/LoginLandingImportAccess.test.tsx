@@ -4,10 +4,12 @@ import { fireEventAsync, renderAsync } from '@testing-library/react-native';
 import type { useNuniSession } from '../state/nuniSession';
 import LoginLandingScreen from '../screens/LoginLandingScreen';
 import { safeNavigate } from '../utils/safeNavigate';
+import { loadSchoolLoginProviderKinds } from '../services/schoolLoginAvailability';
 
 const mockNavigation = { navigate: jest.fn() };
 let mockAuth: ReturnType<typeof useNuniSession>;
 let mockProviderAvailable = false;
+let mockAvailabilityState: 'unknown' | 'loading' | 'error' | undefined;
 let mockSchool = { id: 'pu', name: '靜宜大學' };
 
 jest.mock('@react-navigation/native', () => ({
@@ -25,7 +27,9 @@ jest.mock('../ui/useThemeStyleSheet', () => ({
   useThemeStyleSheet: <T,>(create: () => T) => create(),
 }));
 jest.mock('../services/schoolLoginAvailability', () => ({
-  isSchoolLoginEntryAvailable: () => mockProviderAvailable,
+  getSchoolLoginAvailabilityState: (schoolId: string) => schoolId !== 'pu'
+    ? 'unavailable' : mockAvailabilityState ?? (mockProviderAvailable ? 'available' : 'unavailable'),
+  isSchoolLoginEntryAvailable: (schoolId: string) => schoolId === 'pu' && mockProviderAvailable,
   loadSchoolLoginProviderKinds: jest.fn(async () => []),
 }));
 jest.mock('../components/SchoolBrowsingControl', () => ({
@@ -40,6 +44,7 @@ jest.mock('../components/TodayTimetablePanel', () => ({
 beforeEach(() => {
   jest.clearAllMocks();
   mockProviderAvailable = false;
+  mockAvailabilityState = undefined;
   mockSchool = { id: 'pu', name: '靜宜大學' };
   mockAuth = {
     session: null,
@@ -59,6 +64,33 @@ beforeEach(() => {
 function landing() {
   return renderAsync(<LoginLandingScreen />);
 }
+
+it('checks the newly selected school without keeping the previous school entry', async () => {
+  mockProviderAvailable = true;
+  const view = await landing();
+  expect(loadSchoolLoginProviderKinds).toHaveBeenLastCalledWith('pu');
+  expect(view.getByTestId('school-login-start')).toBeTruthy();
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  await view.rerenderAsync(<LoginLandingScreen />);
+  expect(loadSchoolLoginProviderKinds).toHaveBeenLastCalledWith('nthu');
+  expect(view.queryByTestId('school-login-start')).toBeNull();
+  expect(view.getByTestId('school-import-start')).toBeTruthy();
+});
+
+it('offers a retry after a failed availability check without claiming the school is closed', async () => {
+  mockAvailabilityState = 'error';
+  const view = await landing();
+  expect(view.queryByText('尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。')).toBeNull();
+  expect(view.queryByTestId('school-login-start')).toBeNull();
+  jest.mocked(loadSchoolLoginProviderKinds).mockImplementationOnce(async () => {
+    mockAvailabilityState = undefined;
+    mockProviderAvailable = true;
+    return ['student-id'];
+  });
+  await fireEventAsync.press(view.getByTestId('school-login-check-retry'));
+  expect(view.queryByTestId('school-login-check-retry')).toBeNull();
+  expect(view.getByTestId('school-login-start')).toBeTruthy();
+});
 
 it('lets the school picker handle the first result tap while its keyboard is open', async () => {
   const view = await landing();

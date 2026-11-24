@@ -11,6 +11,7 @@ import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
 import { TodayTimetablePanel } from '../components/TodayTimetablePanel';
 import { SchoolPortalImportEntry } from '../components/SchoolPortalImport';
 import {
+  getSchoolLoginAvailabilityState,
   isSchoolLoginEntryAvailable,
   loadSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
@@ -52,8 +53,11 @@ export default function LoginLandingScreen() {
   const s = useThemeStyleSheet(createStyles);
   const [showWorkEntries, setShowWorkEntries] = useState(false);
   const [, refreshProviders] = useState(0);
+  const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
   const hasSchool = selectionReady !== false && Boolean(school.id);
   const schoolEntry = hasSchool && isSchoolLoginEntryAvailable(school.id);
+  const schoolLoginState = hasSchool ? getSchoolLoginAvailabilityState(school.id) : 'unavailable';
+  const checkingSchoolLogin = schoolLoginState === 'unknown' || schoolLoginState === 'loading';
   const platformReady = !!auth.session && !auth.loading && !auth.error && !auth.pendingLogout;
   const schoolFirst = schoolEntry && !platformReady && !auth.loading && !auth.error && !auth.pendingLogout;
   const catalogTronClass = hasSchool ? getSchoolTronClassEntry(school.id, school.name) : null;
@@ -77,13 +81,15 @@ export default function LoginLandingScreen() {
   useEffect(() => {
     if (!hasSchool) return;
     let active = true;
-    void loadSchoolLoginProviderKinds().then(() => {
+    const pending = loadSchoolLoginProviderKinds(school.id);
+    refreshProviders((revision) => revision + 1);
+    void pending.then(() => {
       if (active) refreshProviders((revision) => revision + 1);
     });
     return () => {
       active = false;
     };
-  }, [hasSchool]);
+  }, [hasSchool, school.id, availabilityAttempt]);
   const schoolPanel = hasSchool ? (
     <View style={s.schoolPanel}>
       <Text accessibilityRole="header" style={s.title}>
@@ -92,8 +98,22 @@ export default function LoginLandingScreen() {
       <Text style={s.body} testID={schoolEntry ? undefined : 'school-login-hint'}>
         {schoolEntry
           ? '驗證校園身分後，依學校授權取得可用的校園與課程資料。Google 帳號仍可使用平台交流與課班服務。'
-          : '尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。'}
+          : schoolLoginState === 'error'
+            ? '暫時無法確認學校登入方式，請重新確認。你仍可匯入自己的資料或使用公開資訊。'
+            : checkingSchoolLogin
+              ? '正在確認學校登入方式；你也可以先匯入自己的課表、成績或活動。'
+              : '尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。'}
       </Text>
+      {schoolLoginState === 'error' ? (
+        <Pressable
+          testID="school-login-check-retry"
+          accessibilityRole="button"
+          style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
+          onPress={() => setAvailabilityAttempt((attempt) => attempt + 1)}
+        >
+          <Text style={s.schoolButtonText}>重新確認學校登入</Text>
+        </Pressable>
+      ) : null}
       {schoolEntry ? (
         <Pressable
           testID="school-login-start"

@@ -85,6 +85,7 @@ jest.mock('../components/SchoolBrowsingControl', () => ({ SchoolBrowsingControl:
 jest.mock('../components/SchoolPortalImport', () => ({ SchoolPortalImportEntry: () => null }));
 jest.mock('../components/TodayTimetablePanel', () => ({ TodayTimetablePanel: () => null }));
 jest.mock('../services/schoolLoginAvailability', () => ({
+  getSchoolLoginAvailabilityState: () => 'unavailable',
   isSchoolLoginEntryAvailable: () => false, loadSchoolLoginProviderKinds: async () => [],
 }));
 jest.mock('../firebase', () => ({

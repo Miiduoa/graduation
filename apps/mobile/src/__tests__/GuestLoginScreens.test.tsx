@@ -19,6 +19,7 @@ import { applyTheme, createLightTheme, createDarkTheme, clearSchoolTheme } from 
 import { Button } from '../ui/components';
 
 const mockNavigation = { navigate: jest.fn() };
+const originalFetch = globalThis.fetch;
 const mockRefreshProfile = jest.fn();
 let mockAuthUser: { uid: string; displayName?: string; email?: string } | null = null;
 let mockAuthProfile: {
@@ -90,6 +91,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   jest.useRealTimers();
+  globalThis.fetch = originalFetch;
   jest.restoreAllMocks();
   resetSchoolLoginProviderCache();
   act(() => applyTheme('light'));
@@ -123,6 +125,53 @@ test('the school source guide reflects the E-campus pause and the current LMS bu
   view.rerender(<SSOLoginScreen />);
   expect(view.getByText(/玩課雲連線成功後會顯示課程清單的讀取結果/)).toBeTruthy();
   expect(view.queryByText('此版本尚未開啟玩課雲課程連線。')).toBeNull();
+});
+
+test('school availability failures can be retried without signing in or claiming closure', async () => {
+  resetSchoolLoginProviderCache();
+  const request = jest.fn()
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify({ google: false, studentId: true }),
+    } as Response);
+  globalThis.fetch = request as typeof fetch;
+  const view = render(<SSOLoginScreen />);
+  expect(view.getByText('確認學校登入方式')).toBeTruthy();
+  expect(view.queryByTestId('student-password-input')).toBeNull();
+  await view.findByText('無法確認學校登入方式');
+  expect(view.queryByText('學校連線尚未開放')).toBeNull();
+  expect(view.getByRole('button', { name: '用 Google 帳號登入' })).toBeEnabled();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '重新確認學校登入' })));
+  expect(await view.findByTestId('student-id-input')).toBeTruthy();
+  expect(view.queryByText('無法確認學校登入方式')).toBeNull();
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(request.mock.calls.every(([url]) => url === 'https://nuni.tw/api/nuni/sign-in-options?schoolId=pu')).toBe(true);
+  expect(signInWithStudentId).not.toHaveBeenCalled();
+  expect(signInWithCredential).not.toHaveBeenCalled();
+});
+
+test('a late Providence capability cannot open credentials after changing schools', async () => {
+  resetSchoolLoginProviderCache();
+  let finish!: (value: Response) => void;
+  const request = jest.fn().mockImplementationOnce(
+    () => new Promise((resolve) => { finish = resolve; }),
+  );
+  globalThis.fetch = request as typeof fetch;
+  const view = render(<SSOLoginScreen />);
+  expect(view.getByText('確認學校登入方式')).toBeTruthy();
+  mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
+  view.rerender(<SSOLoginScreen />);
+  expect(view.getByText('學校連線尚未開放')).toBeTruthy();
+  await act(async () => finish({
+    ok: true,
+    text: async () => JSON.stringify({ google: true, studentId: true }),
+  } as Response));
+  expect(view.queryByTestId('student-id-input')).toBeNull();
+  expect(view.queryByTestId('student-password-input')).toBeNull();
+  expect(view.queryByText('重新確認學校登入')).toBeNull();
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(signInWithStudentId).not.toHaveBeenCalled();
 });
 
 test('a pending school request keeps both the form and platform navigation locked', () => {

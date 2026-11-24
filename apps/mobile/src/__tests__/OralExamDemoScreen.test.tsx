@@ -22,6 +22,7 @@ jest.mock('../state/school', () => ({
 jest.mock('../components/SchoolBrowsingControl', () => ({ SchoolBrowsingControl: () => null }));
 jest.mock('../components/TodayTimetablePanel', () => ({ TodayTimetablePanel: () => null }));
 jest.mock('../services/schoolLoginAvailability', () => ({
+  getSchoolLoginAvailabilityState: () => 'unavailable',
   isSchoolLoginEntryAvailable: () => false,
   loadSchoolLoginProviderKinds: jest.fn(async () => []),
 }));
