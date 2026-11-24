@@ -272,10 +272,10 @@ describe('tronClassScraper', () => {
     expect(https.request).toHaveBeenCalledTimes(1);
   });
 
-  test('rejects a homework page longer than the requested page size', async () => {
+  test('integration rejects a homework page longer than the requested page size', async () => {
     const homework = Array.from({ length: 51 }, (_, index) => ({ id: 20001 + index }));
     mockHttpsResponse({ body: JSON.stringify({ homework_activities: homework, total: 51 }) });
-    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).rejects.toMatchObject({
+    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, {})).rejects.toMatchObject({
       code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
     });
   });
@@ -510,7 +510,7 @@ describe('tronClassScraper', () => {
   });
 
 
-  test('legacy homework page caps the array by the requested page size, not the school page_size', async () => {
+  test('legacy homework page keeps rows within the requested page size when school page_size is smaller', async () => {
     const homework = [{ id: 20001 }, { id: 20002 }];
     mockHttpsResponse({
       body: JSON.stringify({ homework_activities: homework, total: 2, page: 1, page_size: 1 }),
@@ -527,6 +527,16 @@ describe('tronClassScraper', () => {
     });
     await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, '1', 50)).resolves.toEqual({
       homework_activities: homework, total: 21, page: 1, page_size: 20,
+    });
+  });
+
+  test.each([2, '2'])('legacy homework page truncates an oversized response to the requested size %s', async (pageSize) => {
+    const homework = [{ id: 20001 }, { id: 20002 }, { id: 20003 }];
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: homework, total: 5, page: 2, page_size: 3 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 2, pageSize)).resolves.toEqual({
+      homework_activities: homework.slice(0, 2), total: 5, page: 2, page_size: 3,
     });
   });
 
