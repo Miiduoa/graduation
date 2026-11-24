@@ -549,6 +549,50 @@ it('lets visitors choose a campus starting point and destination without locatio
   expect(screen.queryByRole('link', { name: '使用 Apple 地圖規劃路線' })).toBeNull();
 });
 
+it('keeps both login returns in sync with manually changed and cleared routes', async () => {
+  state.user = null;
+  render(<MapClient school="pu" route="gate,library" focus="library" />);
+  await sourceSettled();
+  const returnRoutes = () => ['用 Google 帳號收藏', '查看學校帳號的既有收藏'].map((name) => {
+    const login = new URL(screen.getByRole('link', { name }).getAttribute('href')!, window.location.origin);
+    const destination = new URL(login.searchParams.get('returnUrl')!, window.location.origin);
+    expect(destination.searchParams.get('schoolId')).toBe('pu');
+    return destination.searchParams.get('route');
+  });
+  expect(returnRoutes()).toEqual(['gate,library', 'gate,library']);
+  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  expect(returnRoutes()).toEqual([null, null]);
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  expect(returnRoutes()).toEqual([null, null]);
+  fireEvent.click(screen.getByRole('button', { name: '取消起點' }));
+  expect(screen.queryByText(/已設定「蓋夏圖書館」為起點/)).toBeNull();
+  expect(returnRoutes()).toEqual([null, null]);
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  expect(screen.queryByRole('button', { name: '設為終點' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為終點' }));
+  expect(returnRoutes()).toEqual(['library,gate', 'library,gate']);
+  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  expect(returnRoutes()).toEqual([null, null]);
+});
+
+it('preserves a pending untouched route link but drops it when the source cannot resolve it', async () => {
+  state.user = null;
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" route="gate,unknown" />);
+  const returnRoute = () => {
+    const login = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
+    return new URL(login.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('route');
+  };
+  expect(returnRoute()).toBe('gate,unknown');
+  await act(async () => source.resolve([library, gate]));
+  expect(returnRoute()).toBeNull();
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+});
+
 it('obtains position only on request and orders nearby locations by measured straight-line distance', async () => {
   state.user = null;
   const far = { ...library, id: 'far', name: '遠方校舍', lat: 24.26, lng: 120.59 };
