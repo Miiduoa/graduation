@@ -83,7 +83,7 @@ const NOUN_COMPOUNDS = [
 ];
 const QUERY_VERBS = [
   '告訴我', '查詢', '查看', '顯示', '列出', '確認', '查一下', '看一下', '讀一下',
-  '讀取', '下載', '準備', '代理', '查', '看', '讀',
+  '讀取', '調閱', '瀏覽', '檢視', '下載', '準備', '代理', '查', '看', '讀', '閱',
   'read', 'fetch', 'download', 'prepare',
 ];
 const QUERY_COMPOUNDS = QUERY_VERBS.filter(value => value.length > 1);
@@ -97,6 +97,8 @@ const FUNCTION_CUES = [
   '我們', '你們', '他們', '她們', '我', '你', '您', '他', '她', '它',
   '尚未', '還沒', '未', '待', '已經', '已', '沒',
   '剛才', '剛剛', '剛', '最後', '之後', '後', '曾經', '所', '過', '了',
+  '正在', '正', '供',
+  '務必', '一定', '趕緊', '立刻', '馬上', '盡快', '快',
   '去', '來', '再', '也', '又', '都', '就', '才', '還', '先', '並', '且', '跟', '而',
   '想', '要', '能', '可以', '可', '會',
 ];
@@ -136,16 +138,21 @@ function startsKnownWrite(text: string, index: number): boolean {
   return WRITE_COMPOUNDS.some(value => text.startsWith(value, index));
 }
 
-const WRITE_OBJECT_START = /^(?:作業|報告|附件|檔案|作品|心得|講義|考卷|表單|修訂稿|這份|那份|出去|上去|一下|給|完|掉|了)/u;
-
-function hasGoverningQuery(text: string, index: number): boolean {
-  return tokenize(text.slice(0, index)).some(token => token.kind === 'query' || QUERY_START.has(token.value));
+function currentClauseHasQuery(tokens: Token[]): boolean {
+  let start = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) start = i + 1;
+  }
+  return tokens.slice(start).some(token => token.kind === 'query' || QUERY_START.has(token.value));
 }
 
-function isInWordWriteMorpheme(text: string, from: number): boolean {
+function isInWordWriteMorpheme(text: string, from: number, tokens: Token[]): boolean {
   const after = text.slice(from + 2);
-  if (WRITE_OBJECT_START.test(after)) return false;
-  return hasGoverningQuery(text, from) || /^(?:課|程|生|系|部|際|學|官)/u.test(after);
+  // A leftover content character plus 交／繳 is in-word when this clause is a
+  // query (外交作業／外交課程). A new clause must not inherit a previous 查.
+  if (!currentClauseHasQuery(tokens) && !/^(?:課|程|生|系|部|際|學|官)/u.test(after)) return false;
+  return true;
 }
 
 function tokenize(text: string): Token[] {
@@ -167,7 +174,7 @@ function tokenize(text: string): Token[] {
     if (HAN_CHAR.test(ch) && HAN_CHAR.test(next) && /[查看交繳]/.test(next) &&
       !/[查看交繳]/.test(ch) &&
       !startsKnownQuery(text, from) && !startsKnownWrite(text, from) &&
-      ( /[查看]/.test(next) || isInWordWriteMorpheme(text, from) )) {
+      ( /[查看]/.test(next) || isInWordWriteMorpheme(text, from, tokens) )) {
       tokens.push({ value: ch + next, start: from, end: from + 2, kind: 'noun' });
       index += 2;
       continue;
@@ -189,8 +196,9 @@ function isRelativeQuery(tokens: Token[], token: Token): boolean {
   const at = tokens.indexOf(token);
   const next = tokens[at + 1]?.value;
   const prev = tokens[at - 1]?.value;
-  return next === '的' || next === '過' || next === '了' ||
-    prev === '剛' || prev === '剛才' || prev === '剛剛' || prev === '所' || prev === '已' || prev === '已經' || prev === '曾經';
+  return next === '的' || next === '過' || next === '了' || next === '中' ||
+    prev === '剛' || prev === '剛才' || prev === '剛剛' || prev === '所' || prev === '已' || prev === '已經' ||
+    prev === '曾經' || prev === '正在' || prev === '正' || prev === '供';
 }
 
 function nextNegatedWriteStop(text: string, from: number): number {
@@ -466,9 +474,10 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
   const preparation = /(?:準備|預覽|草稿|起草|prepare|draft)/i.test(text) && /(?:作業|homework|assignment)/i.test(text);
   if (preparation && /(?:下載|download)/i.test(text)) return { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' };
   if (/(?:測驗|考試|問卷)/.test(text)) return { intent: 'unsupported', pendingOnly: false };
-  if (/(?:下載|download)/i.test(text)) return { intent: 'download', pendingOnly: false };
   const dataIntent = lastDataTypeIntent(text);
-  if (dataIntent === 'announcements' || dataIntent === 'materials' || dataIntent === 'courses') {
+  if (dataIntent === 'announcements') return { intent: 'announcements', pendingOnly: false };
+  if (/(?:下載|download)/i.test(text)) return { intent: 'download', pendingOnly: false };
+  if (dataIntent === 'materials' || dataIntent === 'courses') {
     return { intent: dataIntent, pendingOnly: false };
   }
   if (preparation) return { intent: 'prepare', pendingOnly };

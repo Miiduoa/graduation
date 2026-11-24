@@ -665,11 +665,42 @@ describe('r28 structural regressions and function-word variants', () => {
   });
 
   it.each(
-    ['剛查看過的', '剛查看的', '已查看過的', '所查看的', '剛才看過的'].map(
+    ['剛查看過的', '剛查看的', '已查看過的', '所查看的', '剛才看過的', '正在查看中的'].map(
       relative => `不要繳交我${relative}玩課雲作業，只查校園公告`,
     ),
   )('fuzz: a relative query inside a negated object does not start a read in %s', question => {
     expect(parseTronClassAgentIntent(question)).toBeNull();
     expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '請勿調閱玩課雲作業',
+    '不要繳交供確認玩課雲作業用的資料，只查校園公告',
+  ])('does not authorize a negated or attributive read in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '查玩課雲作業，務必交 PDF',
+    '查玩課雲作業，快交最新版',
+  ])('does not let a later write inherit a previous clause query in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('keeps a homework read when 交 is inside a course name', () => {
+    expect(parseTronClassAgentIntent('查玩課雲外交作業')).toEqual({ intent: 'homework', pendingOnly: false });
+  });
+
+  it('classifies a notice that mentions a download area by the last data type', () => {
+    expect(parseTronClassAgentIntent('查玩課雲資料庫課程下載區公告')).toEqual({ intent: 'announcements', pendingOnly: false });
+  });
+
+  it('tokenizes a long write-heavy string without exponential work', () => {
+    const question = `查玩課雲${'必交必繳'.repeat(80)}作業`;
+    const started = Date.now();
+    parseTronClassAgentIntent(question);
+    expect(Date.now() - started).toBeLessThan(200);
   });
 });
