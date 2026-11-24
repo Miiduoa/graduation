@@ -41,17 +41,18 @@ export function useMerchantWorkspaceRoute(enabled: boolean) {
   const navigate = useCallback((event: MouseEvent<HTMLAnchorElement>) => {
     if (!isCurrentTabNavigationClick(event, event.currentTarget)) return;
     const destination = new URL(event.currentTarget.href);
-    // Let Next handle an actual route change. Within this page, keep the same
-    // account-owned draft caches while giving Back and Forward real entries.
-    if (
-      destination.origin !== window.location.origin ||
-      destination.pathname !== '/merchant/workspace' ||
-      window.location.pathname !== destination.pathname
-    )
-      return;
+    if (destination.origin !== window.location.origin) return;
+    const source = window.location.pathname;
     const target = readMerchantWorkspaceLocation(destination.searchParams);
-    const href =
-      target.status === 'selected'
+    const toWorkspace = destination.pathname === '/merchant/workspace';
+    const withinWorkspace = source === '/merchant/workspace' && toWorkspace;
+    const fromOverview = source === '/merchant' && toWorkspace && target.status === 'selected';
+    const toOverview = source === '/merchant/workspace' && destination.pathname === '/merchant';
+    if (!withinWorkspace && !fromOverview && !toOverview) return;
+    // Keep the mounted account workspace across the overview and store views.
+    const href = toOverview
+      ? '/merchant'
+      : target.status === 'selected'
         ? merchantWorkspaceHref(target)
         : isApplicationsView(destination.searchParams)
           ? merchantApplicationsHref

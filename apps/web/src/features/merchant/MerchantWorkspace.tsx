@@ -41,9 +41,12 @@ import {
   type MerchantWorkspaceLocation,
 } from '@/lib/merchantWorkspaceNavigation';
 import { useMerchantWorkspaceRoute } from '@/lib/useMerchantWorkspaceRoute';
-import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
 
 type Overview = Awaited<ReturnType<typeof loadMerchantOverview>>;
+type OverviewUpdates = {
+  workspaces: Map<string, Overview['workspaces'][number]>;
+  application?: Overview['applications'][number];
+};
 type Draft = Omit<NuniMerchantApplicationInput, 'idempotencyKey'>;
 const emptyDraft = (): Draft => ({
   tenantId: '',
@@ -236,9 +239,6 @@ function AccountWorkspace({
   const [notice, setNotice] = useState('');
   const [submitError, setSubmitError] = useState('');
   const [pending, setPending] = useState<NuniMerchantApplicationInput | null>(null);
-  const [heldNavigation, setHeldNavigation] = useState<{ href: string; message: string } | null>(
-    null,
-  );
   const selectedLocation = location.status === 'selected' ? location : null;
   const locationKey = selectedLocation
     ? `${selectedLocation.tenantId}:${selectedLocation.locationId}`
@@ -254,12 +254,14 @@ function AccountWorkspace({
   const locationLinks = useRef(new Map<string, HTMLAnchorElement>());
   const locationsHeading = useRef<HTMLHeadingElement>(null);
   const applicationsHeading = useRef<HTMLHeadingElement>(null);
-  const listHref = useRef('/merchant/workspace');
+  const listPath = view === 'overview' ? '/merchant' : '/merchant/workspace';
+  const listHref = useRef(listPath);
   useLayoutEffect(() => {
     if (location.status === 'list')
-      listHref.current = showApplications ? merchantApplicationsHref : '/merchant/workspace';
-  }, [location.status, showApplications]);
+      listHref.current = showApplications ? merchantApplicationsHref : listPath;
+  }, [location.status, showApplications, listPath]);
   const generation = useRef(0);
+  const listUpdates = useRef<OverviewUpdates | null>(null);
   const mounted = useRef(true);
   const busyRef = useRef(false);
   const enabled = useRef(false);
@@ -271,6 +273,7 @@ function AccountWorkspace({
   }, [suspended, invalidSession]);
   const invalidate = useCallback(() => {
     ++generation.current;
+    listUpdates.current = null;
   }, []);
   const expire = useCallback(() => {
     setInvalidSession(true);
@@ -281,6 +284,8 @@ function AccountWorkspace({
   }, [onExpired]);
   const load = useCallback(async () => {
     const run = ++generation.current;
+    const updates: OverviewUpdates = { workspaces: new Map() };
+    listUpdates.current = updates;
     setLoading(true);
     setLoadError('');
     try {
@@ -288,7 +293,21 @@ function AccountWorkspace({
         (path, input) => browserRequest(path, context, input),
         view,
       );
-      if (mounted.current && enabled.current && run === generation.current) setOverview(data);
+      if (mounted.current && enabled.current && run === generation.current) {
+        const { application } = updates;
+        setOverview({
+          ...data,
+          applications:
+            application &&
+            !data.applications.some((item) => item.applicationId === application.applicationId)
+              ? [application, ...data.applications]
+              : data.applications,
+          // Keep newer confirmations for stores still authorized by this list.
+          workspaces: data.workspaces.map(
+            (item) => updates.workspaces.get(`${item.tenantId}:${item.locationId}`) ?? item,
+          ),
+        });
+      }
     } catch (error) {
       if (mounted.current && enabled.current && run === generation.current) {
         if (expired(error)) expire();
@@ -298,7 +317,10 @@ function AccountWorkspace({
         }
       }
     } finally {
-      if (mounted.current && run === generation.current) setLoading(false);
+      if (run === generation.current) {
+        listUpdates.current = null;
+        if (mounted.current) setLoading(false);
+      }
     }
   }, [context, expire, view]);
   useEffect(() => {
@@ -368,6 +390,7 @@ function AccountWorkspace({
         await browserRequest('merchant-applications', context, payload),
       );
       if (!mounted.current || !enabled.current) return;
+      if (listUpdates.current) listUpdates.current.application = application;
       setOverview((current) =>
         current
           ? {
@@ -383,7 +406,6 @@ function AccountWorkspace({
       );
       setPending(null);
       setDraft(emptyDraft());
-      setHeldNavigation(null);
       setNotice('申請已收件。審核通過後仍需完成營運設定，才會開放店家服務。');
     } catch (error) {
       if (!mounted.current || !enabled.current) return;
@@ -433,6 +455,7 @@ function AccountWorkspace({
           onExpired={expire}
           onChanged={(detail) => {
             if (!mounted.current || !enabled.current) return;
+            listUpdates.current?.workspaces.set(key, detail);
             setOverview((current) =>
               current
                 ? {
@@ -513,25 +536,6 @@ function AccountWorkspace({
     draft.serviceModes.length !== 1 ||
     draft.serviceModes[0] !== 'pickup';
   const nextStep = overview ? merchantOverviewNextStep(overview) : null;
-  const openLocation = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (
-      isCurrentTabNavigationClick(event, event.currentTarget) &&
-      (busyRef.current || pending || hasApplicationDraft)
-    ) {
-      // Unlike a store's cached work, the onboarding form belongs to this
-      // page. Keep its original submission key and draft before changing route.
-      event.preventDefault();
-      setHeldNavigation({
-        href: event.currentTarget.getAttribute('href')!,
-        message:
-          busyRef.current || pending
-            ? '進駐申請尚未確認完成，請先核對這份申請，或在新分頁開啟門市。'
-            : '進駐資料尚未送出，這份草稿仍保留。請先完成申請，或在新分頁開啟門市。',
-      });
-      return;
-    }
-    onNavigate(event);
-  };
   const list = (
     <div className={styles.stack}>
       {(view === 'apply' || (view === 'overview' && overview && !hasMerchantRecords)) && (
@@ -555,14 +559,6 @@ function AccountWorkspace({
       {loading && <p role="status">正在載入店家資料…</p>}
       {loadError && <p role="alert">{loadError}</p>}
       {notice && <p role="status">{notice}</p>}
-      {heldNavigation && (
-        <div className={styles.nextTask} role="status">
-          <p>{heldNavigation.message}</p>
-          <Link href={heldNavigation.href} target="_blank" rel="noopener noreferrer">
-            在新分頁開啟門市
-          </Link>
-        </div>
-      )}
       {overview && (
         <div className={styles.stack} hidden={view === 'apply' && (loading || !!loadError)}>
           {view !== 'apply' && nextStep && (view === 'workspace' || hasMerchantRecords) && (
@@ -626,7 +622,7 @@ function AccountWorkspace({
                           tenantId: item.tenantId,
                           locationId: item.locationId,
                         })}
-                        onClick={openLocation}
+                        onClick={onNavigate}
                       >
                         管理門市：{item.locationName}
                       </Link>
@@ -676,7 +672,7 @@ function AccountWorkspace({
                                     tenantId: workspace.tenantId,
                                     locationId: workspace.locationId,
                                   })}
-                                  onClick={openLocation}
+                                  onClick={onNavigate}
                                 >
                                   前往管理門市：{workspace.locationName}
                                 </Link>

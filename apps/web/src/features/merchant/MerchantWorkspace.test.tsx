@@ -582,52 +582,79 @@ it('prioritizes the actual authorized store for a returning operator and retains
   expect(screen.queryByRole('heading', { name: '開始申請第一間門市' })).toBeNull();
 });
 
-it('keeps a drafted or uncertain application in place when opening a store would leave its page', async () => {
+it('keeps the application draft and pending submission across same-tab store visits', async () => {
   window.history.replaceState(null, '', '/merchant');
+  const store = {
+    tenantId: 'campus-one',
+    tenantName: '第一校園',
+    merchantName: '餐坊',
+    locationId: 'location-1',
+    locationName: '第一門市',
+    campusName: '主校區',
+    merchantStatus: 'active',
+    locationStatus: 'open',
+    activated: true,
+    publicAccess: true,
+    missingRequirements: [],
+    applicationId: 'application-1',
+    merchantId: 'merchant-1',
+    campusId: 'main-campus',
+    serviceModes: ['pickup'],
+    paymentMode: 'counter-only',
+    onlinePaymentAvailable: false,
+    paymentCapabilityState: 'not-requested',
+    managerConfirmed: true,
+    termsVersion: 'merchant-terms-v1',
+    readinessVersion: 1,
+    publishedMenuItems: 1,
+    merchantMode: 'full',
+    merchantModeLabel: '接單服務',
+    sourceLabel: '',
+    sourceUpdatedAt: null,
+    sourceLine: null,
+  };
   let showStore = false;
   mocks.request.mockImplementation((path, context, input) => {
     if (input) return Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
     if (path === 'merchant-workspaces' && showStore)
-      return Promise.resolve({
-        workspaces: [
-          {
-            tenantId: 'campus-one',
-            tenantName: '第一校園',
-            merchantName: '餐坊',
-            locationId: 'location-1',
-            locationName: '第一門市',
-            campusName: '主校區',
-            merchantStatus: 'active',
-            locationStatus: 'open',
-            activated: true,
-            publicAccess: true,
-            missingRequirements: [],
-          },
-        ],
-      });
+      return Promise.resolve({ workspaces: [store] });
+    if (path === 'merchant-workspaces/campus-one/location-1') return Promise.resolve(store);
     return respond(path, context, input);
   });
   render(<MerchantWorkspace />);
   await fillApplication();
   showStore = true;
   fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
-  const store = await screen.findByRole('link', { name: '管理門市：第一門市' });
-  fireEvent.click(store);
+  const openStore = async () => {
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：第一門市' }));
+    expect(window.location.pathname + window.location.search).toBe(
+      '/merchant/workspace?tenant=campus-one&location=location-1',
+    );
+    await screen.findByRole('heading', { name: '餐坊／第一門市', level: 2 });
+    expect(screen.queryByLabelText('對外品牌名稱')).toBeNull();
+  };
+
+  await openStore();
+  await act(async () => window.history.back());
+  const brand = (await screen.findByLabelText('對外品牌名稱')) as HTMLInputElement;
   expect(window.location.pathname).toBe('/merchant');
-  expect(screen.getByText(/進駐資料尚未送出/)).toBeTruthy();
-  expect((screen.getByLabelText('對外品牌名稱') as HTMLInputElement).value).toBe('測試餐坊');
-  fireEvent.click(screen.getByRole('button', { name: '送出進駐申請' }));
+  expect(brand.value).toBe('測試餐坊');
+  fireEvent.change(brand, { target: { value: '更新餐坊' } });
+  const submit = screen.getByRole('button', { name: '送出進駐申請' });
+  await waitFor(() => expect(submit.hasAttribute('disabled')).toBe(false));
+  fireEvent.click(submit);
   await screen.findByText(/尚未確認是否收件/);
-  fireEvent.click(store);
+
+  await openStore();
+  fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
   expect(window.location.pathname).toBe('/merchant');
-  expect(screen.getByText(/進駐申請尚未確認完成/)).toBeTruthy();
-  const separate = screen.getByRole('link', { name: '在新分頁開啟門市' });
-  expect(separate.getAttribute('target')).toBe('_blank');
-  expect(separate.getAttribute('href')).toBe(
-    '/merchant/workspace?tenant=campus-one&location=location-1',
-  );
-  fireEvent.click(screen.getByRole('button', { name: '重試同一份申請' }));
+  await screen.findByText(/尚未確認是否收件/);
+  expect((screen.getByLabelText('對外品牌名稱') as HTMLInputElement).value).toBe('更新餐坊');
+  const retry = screen.getByRole('button', { name: '重試同一份申請' });
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+  fireEvent.click(retry);
   await waitFor(() => expect(mocks.request.mock.calls.filter((call) => call[2])).toHaveLength(2));
   const writes = mocks.request.mock.calls.filter((call) => call[2]);
+  expect(writes[0][2]).toMatchObject({ brandName: '更新餐坊' });
   expect(writes[1][2]).toEqual(writes[0][2]);
 });
