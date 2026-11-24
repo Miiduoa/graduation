@@ -348,7 +348,7 @@ export default ({ config, projectRoot = __dirname }: any) => {
     splash: {
       image: config.splash?.image ?? './assets/splash-icon.png',
       resizeMode: 'contain',
-      backgroundColor: '#000000',
+      backgroundColor: '#FAF8F2',
     },
     assetBundlePatterns: ['**/*'],
     ios: {
@@ -382,7 +382,7 @@ export default ({ config, projectRoot = __dirname }: any) => {
       adaptiveIcon: {
         foregroundImage:
           config.android?.adaptiveIcon?.foregroundImage ?? './assets/adaptive-icon.png',
-        backgroundColor: '#000000',
+        backgroundColor: '#FAF8F2',
       },
       package: androidPackage,
       versionCode,

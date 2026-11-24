@@ -270,12 +270,9 @@ export function TodayTimetablePanel({
   );
   return (
     <View style={s.panel} testID="today-timetable">
-      <View style={s.headingRow}>
-        <View style={s.headingAccent} accessibilityElementsHidden />
-        <Text accessibilityRole="header" style={s.heading}>
-          今天的課表
-        </Text>
-      </View>
+      <Text accessibilityRole="header" style={s.heading}>
+        今天的課表
+      </Text>
       {!scopeKey ? (
         <Text style={s.detail}>正在確認帳號，暫時不顯示個人課表。</Text>
       ) : !visible || visible.status === 'loading' ? (
@@ -392,30 +389,26 @@ const createStyles = () =>
   StyleSheet.create({
     panel: {
       gap: 10,
-      padding: 18,
-      marginVertical: 14,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: 14,
-      backgroundColor: theme.colors.surface,
+      paddingTop: 18,
+      paddingBottom: 8,
+      marginVertical: 10,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
     },
-    headingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 3 },
-    headingAccent: { width: 3, height: 19, backgroundColor: theme.colors.accent, borderRadius: 2 },
-    heading: { color: theme.colors.text, fontSize: 19, lineHeight: 27, fontWeight: '600', flex: 1 },
+    heading: { color: theme.colors.text, fontSize: 20, lineHeight: 28, fontWeight: '600' },
     detail: { color: theme.colors.textSecondary, fontSize: 14, lineHeight: 22 },
     note: { color: theme.colors.muted, fontSize: 12, lineHeight: 19 },
     course: {
       paddingVertical: 14,
-      paddingHorizontal: 14,
-      gap: 6,
-      borderLeftWidth: 2,
+      paddingLeft: 14,
+      gap: 4,
+      borderLeftWidth: StyleSheet.hairlineWidth,
       borderLeftColor: theme.colors.border,
     },
     currentCourse: {
-      backgroundColor: theme.colors.focusSurface,
+      borderLeftWidth: 2,
+      paddingLeft: 12,
       borderLeftColor: theme.colors.accent,
-      borderTopRightRadius: 8,
-      borderBottomRightRadius: 8,
     },
     time: {
       color: theme.colors.accent,

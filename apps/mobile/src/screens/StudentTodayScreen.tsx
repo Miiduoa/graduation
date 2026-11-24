@@ -21,6 +21,7 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { rootNavigateNested } from '../app/rootNavigation';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { pageTitleFont } from '../ui/styles';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { navigateFromInboxTask, resolveInboxAction } from '../services/inboxActions';
 import { hasTCSession } from '../services/tronClassClient';
@@ -323,9 +324,9 @@ export default function StudentTodayScreen() {
         }
       >
         <View style={s.dayHeader}>
-          <Text accessibilityRole="header" style={s.heading}>今天</Text>
-          <View style={s.dateBlock}>
+          <View style={s.dayTitleBlock}>
             <Text style={s.date}>{formatTodayHeaderDate(now)}</Text>
+            <Text accessibilityRole="header" style={s.heading}>今天</Text>
             {updatedAt ? <Text style={s.updated}>{formatUpdatedAt(updatedAt)}</Text> : null}
           </View>
           {profile?.role === 'student' && (
@@ -333,9 +334,9 @@ export default function StudentTodayScreen() {
               accessibilityRole="button"
               accessibilityLabel="開啟數位學生證"
               onPress={() => rootNavigateNested('我的', 'StudentCard')}
-              style={s.studentCard}
+              style={({ pressed }) => [s.studentCard, pressed && s.rowPressed]}
             >
-              <Ionicons name="id-card-outline" size={19} color={theme.colors.text} />
+              <Ionicons name="id-card-outline" size={17} color={theme.colors.accent} />
               <Text style={s.studentCardLabel}>學生證</Text>
             </Pressable>
           )}
@@ -346,14 +347,18 @@ export default function StudentTodayScreen() {
           <>
             {priority && reminder?.task?.assignmentId?.trim() && reminder.task.groupId.trim() ? (
               <View style={s.reminder}>
-                <Text accessibilityRole="header" style={s.sectionTitle}>nuni 提醒</Text>
-                <Text style={s.rowTitle}>{priority.title}</Text>
-                <Text style={s.rowMeta}>{priority.reason}</Text>
-                <Pressable accessibilityRole="button"
+                <Text accessibilityRole="header" style={s.reminderTitle}>nuni 提醒</Text>
+                <Text style={s.reminderHeading}>{priority.title}</Text>
+                <Text style={s.reminderReason}>{priority.reason}</Text>
+                <Pressable
+                  accessibilityRole="button"
                   accessibilityLabel={`查看提醒的${reminder.task.kind === 'quiz' ? '測驗' : '作業'}，${reminder.title}`}
                   onPress={() => { if (activeReminder.current === reminder) openTodo(reminder, true); }}
-                  style={({ pressed }) => [s.textButton, pressed && s.pressed]}>
-                  <Text style={s.link}>{reminder.task.kind === 'quiz' ? '查看測驗' : '查看作業'}</Text>
+                  style={({ pressed }) => [s.reminderAction, pressed && s.reminderActionPressed]}
+                >
+                  <Text style={s.reminderActionText}>
+                    {reminder.task.kind === 'quiz' ? '查看測驗' : '查看作業'}
+                  </Text>
                 </Pressable>
               </View>
             ) : null}
@@ -471,6 +476,13 @@ function TodayClassList({
                   <Text style={[s.time, ended && s.endedTitle]}>{formatClock(item.startAt)}</Text>
                   <Text style={s.rowMeta}>{formatClock(item.endAt)}</Text>
                 </View>
+                <View
+                  style={[
+                    s.timeRail,
+                    ongoing ? s.timeRailOngoing : ended ? s.timeRailEnded : undefined,
+                  ]}
+                  accessibilityElementsHidden
+                />
                 <View style={s.rowBody}>
                   {!!label && <Text style={[s.classStatus, ongoing && s.ongoing]}>{label}</Text>}
                   <Text style={[s.rowTitle, ended && s.endedTitle]}>{item.title}</Text>
@@ -481,7 +493,7 @@ function TodayClassList({
             );
           })}
           {classes.length > visible.length && (
-            <Text style={s.rowMeta}>還有 {classes.length - visible.length} 堂課，可在完整課表查看。</Text>
+            <Text style={s.overflowNote}>還有 {classes.length - visible.length} 堂課，可在完整課表查看。</Text>
           )}
         </View>
       )}
@@ -562,8 +574,15 @@ function TodoList({
                   accessibilityLabel={`${item.title}，${item.courseName}`}
                   accessibilityValue={{ text: due }}
                   onPress={() => onOpen(item)}
-                  style={({ pressed }) => [s.row, s.todoBody, pressed && s.pressed]}
+                  style={({ pressed }) => [s.row, s.todoBody, pressed && s.rowPressed]}
                 >
+                  <View
+                    style={[
+                      s.todoMarker,
+                      overdue ? s.todoMarkerOverdue : soon ? s.todoMarkerSoon : undefined,
+                    ]}
+                    accessibilityElementsHidden
+                  />
                   <View style={s.rowBody}>
                     <Text style={s.rowTitle}>{item.title}</Text>
                     {!!item.courseName && <Text style={s.rowMeta}>{item.courseName}</Text>}
@@ -571,9 +590,13 @@ function TodoList({
                   </View>
                 </Pressable>
                 {direct && (
-                  <Pressable accessibilityRole="button" accessibilityLabel={`${direct.label}，${item.title}`}
-                    onPress={() => onOpen(item, true)} style={({ pressed }) => [s.inlineAction, pressed && s.pressed]}>
-                    <Text style={s.link}>{direct.label}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${direct.label}，${item.title}`}
+                    onPress={() => onOpen(item, true)}
+                    style={({ pressed }) => [s.inlineAction, pressed && s.rowPressed]}
+                  >
+                    <Text style={s.inlineActionText}>{direct.label}</Text>
                   </Pressable>
                 )}
               </View>
@@ -597,58 +620,116 @@ function TodoList({
   );
 }
 
-const createStyles = () => {
-  const dark = theme.mode === 'dark';
-  const text = dark ? '#F2F3F1' : '#252729';
-  const muted = dark ? '#A5AAA7' : '#686C70';
-  const border = dark ? '#292B2D' : '#E6E7E8';
-
-  return StyleSheet.create({
-    page: { flex: 1, backgroundColor: dark ? theme.colors.bg : '#FFFFFF' },
-    dayHeader: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 8,
-      marginBottom: 4,
-    },
-    dateBlock: { flexShrink: 1, alignItems: 'flex-end', gap: 2 },
+const createStyles = () =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: theme.colors.bg },
     content: {
-      paddingHorizontal: 20,
-      paddingTop: 22,
+      paddingHorizontal: 22,
+      paddingTop: 18,
       width: '100%',
       maxWidth: 680,
       alignSelf: 'center',
-      gap: 24,
+      gap: 26,
+    },
+    dayHeader: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'flex-end',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingBottom: 16,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
+    },
+    dayTitleBlock: {
+      flexShrink: 1,
+      gap: 2,
     },
     studentCard: {
-      flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 14,
-      borderRadius: 14, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      minHeight: 44,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
     },
-    studentCardLabel: { fontSize: 15, fontWeight: '600', color: theme.colors.text },
+    studentCardLabel: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
     date: {
-      color: muted,
+      color: theme.colors.textSecondary,
       fontSize: 13,
       lineHeight: 19,
+      fontWeight: '500',
       fontVariant: ['tabular-nums'],
     },
     heading: {
-      color: text,
-      fontSize: 28,
-      lineHeight: 36,
+      fontFamily: pageTitleFont,
+      color: theme.colors.text,
+      fontSize: 32,
+      lineHeight: 40,
       fontWeight: '700',
+      letterSpacing: -0.6,
     },
     updated: {
-      color: muted,
+      color: theme.colors.muted,
       fontSize: 12,
       lineHeight: 18,
       fontVariant: ['tabular-nums'],
+      marginTop: 2,
     },
-    section: { gap: 2 },
+    section: { gap: 6 },
     reminder: {
-      gap: 4, padding: 14, borderRadius: 14, borderColor: border, borderWidth: 1,
+      gap: 6,
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderLeftWidth: 3,
+      borderLeftColor: theme.colors.accent,
       backgroundColor: theme.colors.surface,
+    },
+    reminderTitle: {
+      color: theme.colors.accent,
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: '600',
+    },
+    reminderHeading: {
+      color: theme.colors.text,
+      fontSize: 17,
+      lineHeight: 24,
+      fontWeight: '700',
+    },
+    reminderReason: {
+      color: theme.colors.textSecondary,
+      fontSize: 13,
+      lineHeight: 20,
+      fontVariant: ['tabular-nums'],
+    },
+    reminderAction: {
+      minHeight: 44,
+      alignSelf: 'flex-start',
+      justifyContent: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      marginTop: 6,
+      borderRadius: 8,
+      backgroundColor: theme.colors.accent,
+    },
+    reminderActionPressed: {
+      backgroundColor: theme.colors.accentHover,
+    },
+    reminderActionText: {
+      color: theme.colors.onAccent,
+      fontSize: 14,
+      fontWeight: '600',
     },
     sectionHeader: {
       flexDirection: 'row',
@@ -657,68 +738,166 @@ const createStyles = () => {
       gap: 12,
     },
     sectionTitle: {
-      color: muted,
-      fontSize: 14,
-      lineHeight: 22,
-      fontWeight: '500',
+      color: theme.colors.text,
+      fontSize: 16,
+      lineHeight: 23,
+      fontWeight: '700',
+      letterSpacing: -0.2,
     },
-    list: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: border },
+    list: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
+    },
     row: {
       minHeight: 68,
       paddingVertical: 14,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 14,
+      gap: 12,
     },
-    rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: border },
-    timeColumn: { minWidth: 52, flexShrink: 0, gap: 3 },
+    rowBorder: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+    },
+    timeColumn: {
+      minWidth: 48,
+      flexShrink: 0,
+      gap: 2,
+    },
     time: {
-      color: text,
-      fontWeight: '500',
+      color: theme.colors.text,
+      fontWeight: '600',
       fontSize: 15,
       lineHeight: 21,
       fontVariant: ['tabular-nums'],
     },
-    classStatus: { color: muted, fontSize: 12, lineHeight: 17 },
-    ongoing: { color: theme.colors.accent, fontWeight: '600' },
-    todoRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 10 },
-    todoBody: { flexGrow: 1, flexShrink: 1, flexBasis: 160 },
+    timeRail: {
+      width: 3,
+      alignSelf: 'stretch',
+      borderRadius: 2,
+      backgroundColor: theme.colors.border,
+      marginVertical: 2,
+    },
+    timeRailOngoing: {
+      backgroundColor: theme.colors.accent,
+    },
+    timeRailEnded: {
+      backgroundColor: 'transparent',
+    },
+    classStatus: {
+      color: theme.colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: '500',
+    },
+    ongoing: {
+      color: theme.colors.accent,
+      fontWeight: '600',
+    },
+    todoRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      columnGap: 10,
+    },
+    todoBody: {
+      flexGrow: 1,
+      flexShrink: 1,
+      flexBasis: 160,
+    },
+    todoMarker: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: theme.colors.border,
+      marginTop: 2,
+    },
+    todoMarkerSoon: {
+      backgroundColor: theme.colors.accent,
+    },
+    todoMarkerOverdue: {
+      backgroundColor: theme.colors.danger,
+    },
     inlineAction: {
       minHeight: 44,
       minWidth: 44,
       justifyContent: 'center',
       alignItems: 'center',
-      paddingHorizontal: 8,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
     },
-    rowBody: { flex: 1, minWidth: 0, gap: 3 },
-    rowTitle: { color: text, fontSize: 16, lineHeight: 23, fontWeight: '600' },
+    inlineActionText: {
+      color: theme.colors.accent,
+      fontWeight: '600',
+      fontSize: 13,
+      lineHeight: 19,
+    },
+    rowBody: { flex: 1, minWidth: 0, gap: 2 },
+    rowTitle: {
+      color: theme.colors.text,
+      fontSize: 16,
+      lineHeight: 23,
+      fontWeight: '600',
+    },
     rowMeta: {
-      color: muted,
+      color: theme.colors.muted,
       fontSize: 13,
       lineHeight: 19,
       fontVariant: ['tabular-nums'],
     },
+    overflowNote: {
+      color: theme.colors.muted,
+      fontSize: 13,
+      lineHeight: 19,
+      paddingVertical: 10,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+    },
     dueSoon: { color: theme.colors.accent, fontWeight: '600' },
     overdue: { color: theme.colors.danger, fontWeight: '600' },
-    endedTitle: { color: muted },
+    endedTitle: { color: theme.colors.muted },
     leaving: { opacity: 0 },
-    more: { minHeight: 44, justifyContent: 'center' },
-    empty: { color: muted, fontSize: 14, lineHeight: 22, paddingVertical: 8 },
-    textButton: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
-    link: { color: theme.colors.accent, fontWeight: '500', fontSize: 13, lineHeight: 19 },
-    skeletonHeading: {
-      width: '30%',
-      height: 20,
-      borderRadius: 3,
-      backgroundColor: theme.colors.surface2,
-      marginBottom: 20,
+    more: {
+      minHeight: 44,
+      justifyContent: 'center',
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
     },
-    skeletonLine: {
-      height: 40,
-      borderRadius: 3,
+    empty: {
+      color: theme.colors.muted,
+      fontSize: 14,
+      lineHeight: 22,
+      paddingVertical: 10,
+    },
+    textButton: {
+      minHeight: 44,
+      justifyContent: 'center',
+      alignSelf: 'flex-start',
+    },
+    link: {
+      color: theme.colors.accent,
+      fontWeight: '600',
+      fontSize: 13,
+      lineHeight: 19,
+    },
+    skeletonHeading: {
+      width: '32%',
+      height: 18,
+      borderRadius: 4,
       backgroundColor: theme.colors.surface2,
       marginBottom: 16,
     },
+    skeletonLine: {
+      height: 44,
+      borderRadius: 4,
+      backgroundColor: theme.colors.surface2,
+      marginBottom: 12,
+    },
+    rowPressed: { backgroundColor: theme.colors.surfaceInteractive },
     pressed: { opacity: 0.65 },
   });
-};

@@ -280,10 +280,8 @@ export function DmsScreen(props: any) {
     return (
       <Screen>
         <View style={s.emptyContainer}>
-          <View style={s.emptyIcon}>
-            <Ionicons name="chatbubbles-outline" size={40} color={theme.colors.accent} />
-          </View>
-          <Text style={s.emptyTitle}>尚未登入</Text>
+          <Ionicons name="chatbubbles-outline" size={36} color={theme.colors.textSecondary} />
+          <Text accessibilityRole="header" style={s.emptyTitle}>尚未登入</Text>
           <Text style={s.emptySubtitle}>登入後即可使用私訊功能</Text>
           <Button text="前往登入" kind="primary" onPress={() => nav?.navigate?.('我的')} />
         </View>
@@ -303,14 +301,14 @@ export function DmsScreen(props: any) {
     return (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${item.peerName}${unread ? '，未讀訊息' : ''}，${preview}`}
+        accessibilityLabel={`${item.peerName}${unread ? '，未讀訊息' : ''}${item.peerOnline ? '，在線' : ''}，${preview}`}
         onPress={() => nav?.navigate?.('Chat', { peerId, conversationId: item.id })}
-        style={({ pressed }) => [s.row, unread && s.unreadRow, pressed && { opacity: 0.7 }]}
+        style={({ pressed }) => [s.row, pressed && s.rowPressed]}
       >
         {/* 頭像 */}
         <View style={s.avatarBox}>
           <View style={s.avatar}>
-            <Text style={s.avatarText}>{initials}</Text>
+            <Text style={s.avatarText} maxFontSizeMultiplier={1.3}>{initials}</Text>
           </View>
           {item.peerOnline && <View style={s.onlineDot} />}
         </View>
@@ -322,9 +320,12 @@ export function DmsScreen(props: any) {
               {item.peerName}
             </Text>
             {unread && <View style={s.unreadDot} accessibilityLabel="未讀" />}
-            <Text style={s.rowTime}>{item.timeLabel}</Text>
+            <Text style={s.rowTime} maxFontSizeMultiplier={1.3}>{item.timeLabel}</Text>
           </View>
-          <Text style={s.rowPreview} numberOfLines={1}>
+          <Text
+            style={[s.rowPreview, unread && s.unreadPreview, item.peerTyping && s.typingPreview]}
+            numberOfLines={1}
+          >
             {preview}
           </Text>
         </View>
@@ -336,19 +337,27 @@ export function DmsScreen(props: any) {
     <Screen>
       <View style={{ flex: 1 }}>
         {/* 搜尋列 */}
-        <View style={[s.searchBar, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
-          <View style={[s.searchBox, { flex: 1 }]}>
-            <Ionicons name="search" size={16} color={theme.colors.muted} />
+        <View style={s.searchBar}>
+          <View style={s.searchBox}>
+            <Ionicons name="search" size={18} color={theme.colors.textSecondary} />
             <TextInput
+              accessibilityLabel="搜尋對話"
               value={searchQuery}
               onChangeText={setSearchQuery}
               placeholder="搜尋對話（暱稱或內文）"
-              placeholderTextColor={theme.colors.muted}
+              placeholderTextColor={theme.colors.textSecondary}
+              returnKeyType="search"
+              autoCorrect={false}
               style={s.searchInput}
             />
             {searchQuery.length > 0 && (
-              <Pressable onPress={() => setSearchQuery('')}>
-                <Ionicons name="close-circle" size={16} color={theme.colors.muted} />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="清除搜尋"
+                onPress={() => setSearchQuery('')}
+                style={s.iconButton}
+              >
+                <Ionicons name="close-circle" size={18} color={theme.colors.textSecondary} />
               </Pressable>
             )}
           </View>
@@ -356,37 +365,17 @@ export function DmsScreen(props: any) {
             accessibilityRole="button"
             accessibilityLabel="好友與邀請"
             onPress={() => nav?.navigate?.('FriendsManage')}
-            style={({ pressed }) => ({
-              width: 42,
-              height: 42,
-              borderRadius: 12,
-              backgroundColor: theme.colors.surface,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: pressed ? 0.75 : 1,
-            })}
+            style={({ pressed }) => [s.iconButton, pressed && s.rowPressed]}
           >
-            <Ionicons name="people-outline" size={20} color={theme.colors.accent} />
+            <Ionicons name="people-outline" size={22} color={theme.colors.text} />
           </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="搜尋聯絡人並加好友"
             onPress={() => nav?.navigate?.('FriendSearch')}
-            style={({ pressed }) => ({
-              width: 42,
-              height: 42,
-              borderRadius: 12,
-              backgroundColor: theme.colors.accentSoft,
-              borderWidth: 1,
-              borderColor: theme.colors.accent + '40',
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: pressed ? 0.75 : 1,
-            })}
+            style={({ pressed }) => [s.iconButton, pressed && s.rowPressed]}
           >
-            <Ionicons name="person-add-outline" size={20} color={theme.colors.accent} />
+            <Ionicons name="person-add-outline" size={22} color={theme.colors.accent} />
           </Pressable>
         </View>
 
@@ -395,9 +384,12 @@ export function DmsScreen(props: any) {
             accessibilityRole="button"
             accessibilityState={{ selected: !onlyUnread }}
             onPress={() => setOnlyUnread(false)}
-            style={[s.filterChip, !onlyUnread && s.filterChipActive]}
+            style={s.filterChip}
           >
-            <Text style={[s.filterText, !onlyUnread && s.filterTextActive]}>
+            <Text
+              maxFontSizeMultiplier={1.4}
+              style={[s.filterText, !onlyUnread && s.filterTextActive, !onlyUnread && s.filterUnderline]}
+            >
               全部 {rows.length}
             </Text>
           </Pressable>
@@ -405,17 +397,20 @@ export function DmsScreen(props: any) {
             accessibilityRole="button"
             accessibilityState={{ selected: onlyUnread }}
             onPress={() => setOnlyUnread(true)}
-            style={[s.filterChip, onlyUnread && s.filterChipActive]}
+            style={s.filterChip}
           >
-            <Text style={[s.filterText, onlyUnread && s.filterTextActive]}>
+            <Text
+              maxFontSizeMultiplier={1.4}
+              style={[s.filterText, onlyUnread && s.filterTextActive, onlyUnread && s.filterUnderline]}
+            >
               未讀 {unreadCount}
             </Text>
           </Pressable>
         </View>
         {loadError && loadedScope === scope ? (
           <View style={s.emptyContainer}>
-            <Ionicons name="cloud-offline-outline" size={36} color={theme.colors.muted} />
-            <Text style={s.emptyTitle}>無法載入對話</Text>
+            <Ionicons name="cloud-offline-outline" size={32} color={theme.colors.textSecondary} />
+            <Text accessibilityRole="header" style={s.emptyTitle}>無法載入對話</Text>
             <Text style={s.emptySubtitle}>{loadError}</Text>
             <Button text="重新連線" kind="primary" onPress={() => setRefreshKey((value) => value + 1)} />
           </View>
@@ -426,6 +421,8 @@ export function DmsScreen(props: any) {
             data={filteredRows}
             keyExtractor={(c) => c.id}
             renderItem={renderItem}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             contentContainerStyle={{
               paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
             }}
@@ -444,8 +441,8 @@ export function DmsScreen(props: any) {
             )}
             ListEmptyComponent={
               <View style={s.emptyContainer}>
-                <Ionicons name="chatbubble-ellipses-outline" size={48} color={theme.colors.border} />
-                <Text style={s.emptyTitle}>
+                <Ionicons name="chatbubble-ellipses-outline" size={36} color={theme.colors.textSecondary} />
+                <Text accessibilityRole="header" style={s.emptyTitle}>
                   {searchQuery ? '找不到符合的對話' : onlyUnread ? '目前沒有未讀訊息' : '尚未開始對話'}
                 </Text>
                 <Text style={s.emptySubtitle}>
@@ -480,107 +477,118 @@ export function DmsScreen(props: any) {
 
 const createStyles = () => StyleSheet.create({
   searchBar: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingLeft: 16,
+    paddingRight: 8,
+    paddingTop: 4,
     backgroundColor: theme.colors.bg,
   },
   searchBox: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.surface2,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    minHeight: 44,
     gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
   },
   searchInput: {
     flex: 1,
+    minWidth: 0,
+    minHeight: 44,
     color: theme.colors.text,
-    fontSize: 14,
+    fontSize: 16,
     paddingVertical: 0,
+  },
+  iconButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   filterRow: {
     flexDirection: 'row',
-    gap: 8,
+    flexWrap: 'wrap',
+    columnGap: 20,
     paddingHorizontal: 16,
-    paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
   },
   filterChip: {
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    backgroundColor: theme.colors.surface,
+    minHeight: 44,
+    justifyContent: 'center',
   },
-  filterChipActive: { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accent },
-  filterText: { color: theme.colors.textSecondary, fontWeight: '600', fontSize: 13 },
-  filterTextActive: { color: theme.colors.text, fontWeight: '700' },
-  unreadRow: { backgroundColor: theme.colors.accentSoft },
+  filterText: { color: theme.colors.textSecondary, fontWeight: '600', fontSize: 14, lineHeight: 20 },
+  filterTextActive: { color: theme.colors.accent, fontWeight: '800' },
+  filterUnderline: {
+    textDecorationLine: 'underline',
+    textDecorationColor: theme.colors.accent,
+  },
   unreadName: { fontWeight: '800' },
+  unreadPreview: { color: theme.colors.text, fontWeight: '600' },
+  typingPreview: { color: theme.colors.accent, fontWeight: '600' },
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.colors.accent, marginLeft: 6 },
-  resetButton: { backgroundColor: theme.colors.accentSoft, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 18, marginTop: 8 },
-  resetText: { color: theme.colors.accent, fontWeight: '700' },
+  resetButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, marginTop: 4 },
+  resetText: {
+    color: theme.colors.accent,
+    fontWeight: '700',
+    fontSize: 15,
+    textDecorationLine: 'underline',
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 64,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 10,
     gap: 12,
   },
+  rowPressed: { backgroundColor: theme.colors.surface2 },
   avatarBox: { position: 'relative' },
   avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: theme.colors.accentSoft,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: theme.colors.surface2,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
-    color: theme.colors.accent,
-    fontSize: 20,
+    color: theme.colors.text,
+    fontSize: 18,
     fontWeight: '700',
   },
   onlineDot: {
     position: 'absolute',
-    bottom: 1,
-    right: 1,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#34C759',
+    bottom: 0,
+    right: 0,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: theme.colors.success,
     borderWidth: 2,
     borderColor: theme.colors.bg,
   },
-  rowContent: { flex: 1 },
-  rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  rowName: { color: theme.colors.text, fontSize: 16, fontWeight: '600', flex: 1 },
-  rowTime: { color: theme.colors.muted, fontSize: 12, marginLeft: 8 },
-  rowPreview: { color: theme.colors.muted, fontSize: 14 },
+  rowContent: { flex: 1, minWidth: 0 },
+  rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },
+  rowName: { color: theme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600', flex: 1 },
+  rowTime: { color: theme.colors.textSecondary, fontSize: 12, lineHeight: 16, marginLeft: 8 },
+  rowPreview: { color: theme.colors.textSecondary, fontSize: 14, lineHeight: 20 },
   separator: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: theme.colors.border,
-    marginLeft: 80,
+    marginLeft: 72,
   },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 40,
-    paddingTop: 80,
-    gap: 12,
+    padding: 32,
+    paddingTop: 56,
+    gap: 10,
   },
-  emptyIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: theme.colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  emptyTitle: { color: theme.colors.text, fontSize: 18, fontWeight: '700' },
-  emptySubtitle: { color: theme.colors.muted, fontSize: 14, textAlign: 'center' },
+  emptyTitle: { color: theme.colors.text, fontSize: 20, lineHeight: 26, fontWeight: '800', textAlign: 'center' },
+  emptySubtitle: { color: theme.colors.textSecondary, fontSize: 14, lineHeight: 20, textAlign: 'center' },
 });

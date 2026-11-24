@@ -18,15 +18,17 @@
                         <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
                         <subviews>
                             <imageView id="EXPO-SplashScreen" userLabel="SplashScreenLegacy" image="SplashScreenLegacy" contentMode="scaleAspectFit" clipsSubviews="true" userInteractionEnabled="false" translatesAutoresizingMaskIntoConstraints="false">
-                                <rect key="frame" x="0" y="0" width="414" height="736"/>
+                                <rect key="frame" x="148.5" y="378" width="96" height="96"/>
+                                <constraints>
+                                    <constraint firstAttribute="width" constant="96" id="splash-width"/>
+                                    <constraint firstAttribute="height" constant="96" id="splash-height"/>
+                                </constraints>
                             </imageView>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="Rmq-lb-GrQ"/>
                         <constraints>
-                            <constraint firstItem="EXPO-SplashScreen" firstAttribute="top" secondItem="EXPO-ContainerView" secondAttribute="top" id="83fcb9b545b870ba44c24f0feeb116490c499c52"/>
-                            <constraint firstItem="EXPO-SplashScreen" firstAttribute="leading" secondItem="EXPO-ContainerView" secondAttribute="leading" id="61d16215e44b98e39d0a2c74fdbfaaa22601b12c"/>
-                            <constraint firstItem="EXPO-SplashScreen" firstAttribute="trailing" secondItem="EXPO-ContainerView" secondAttribute="trailing" id="f934da460e9ab5acae3ad9987d5b676a108796c1"/>
-                            <constraint firstItem="EXPO-SplashScreen" firstAttribute="bottom" secondItem="EXPO-ContainerView" secondAttribute="bottom" id="d6a0be88096b36fb132659aa90203d39139deda9"/>
+                            <constraint firstItem="EXPO-SplashScreen" firstAttribute="centerX" secondItem="EXPO-ContainerView" secondAttribute="centerX" id="splash-center-x"/>
+                            <constraint firstItem="EXPO-SplashScreen" firstAttribute="centerY" secondItem="EXPO-ContainerView" secondAttribute="centerY" id="splash-center-y"/>
                         </constraints>
                         <color key="backgroundColor" name="SplashScreenBackground"/>
                     </view>
@@ -37,12 +39,12 @@
         </scene>
     </scenes>
     <resources>
-        <image name="SplashScreenLegacy" width="414" height="736"/>
+        <image name="SplashScreenLegacy" width="512" height="512"/>
         <systemColor name="systemBackgroundColor">
             <color white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
         </systemColor>
         <namedColor name="SplashScreenBackground">
-            <color alpha="1.000" blue="0.180392156862745" green="0.101960784313725" red="0.101960784313725" customColorSpace="sRGB" colorSpace="custom"/>
+            <color alpha="1.000" blue="0.949020" green="0.972549" red="0.980392" customColorSpace="sRGB" colorSpace="custom"/>
         </namedColor>
     </resources>
 </document>

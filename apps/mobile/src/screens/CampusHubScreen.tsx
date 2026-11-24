@@ -5,6 +5,7 @@ import { AIScreen } from '../ui/aiFirst';
 import { AppActionIcon } from '../ui/AppActionIcon';
 import type { GeneratedButtonIconId } from '../ui/generatedButtonIcons';
 import { theme } from '../ui/theme';
+import { pageTitleFont } from '../ui/styles';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useSchool } from '../state/school';
 import { supportsLegacyTransportHub } from '../features/campusTransportScope';
@@ -274,7 +275,6 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
         <Text accessibilityRole="header" style={s.heading}>
           生活
         </Text>
-        <Text style={s.subtitle}>找地方、吃點東西，把校園的事安排好。</Text>
       </View>
       <View style={[s.searchBox, searchFocused && s.searchFocused]}>
         <Ionicons name="search-outline" size={20} color={theme.colors.muted} />
@@ -319,7 +319,7 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
         const collapsible = !keyword && !isFrequent;
         const expanded = !collapsible || expandedSections.has(section.title);
         return (
-          <View key={section.title} style={s.section}>
+          <View key={section.title} style={[s.section, collapsible && s.accordionSection]}>
             {collapsible ? (
               <Pressable
                 accessibilityRole="button"
@@ -339,17 +339,20 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
                 <Text style={s.sectionCount}>{section.items.length}</Text>
                 <Ionicons
                   name={expanded ? 'chevron-up' : 'chevron-down'}
-                  size={18}
+                  size={17}
                   color={theme.colors.muted}
                 />
               </Pressable>
             ) : (
-              <Text accessibilityRole="header" style={s.sectionTitle}>
-                {section.title}
-              </Text>
+              <View style={s.sectionHeaderRow}>
+                <Text accessibilityRole="header" style={s.sectionTitle}>
+                  {section.title}
+                </Text>
+                <Text style={s.sectionCount}>{section.items.length}</Text>
+              </View>
             )}
             {expanded ? (
-              <View style={isFrequent ? s.quickGrid : s.serviceList}>
+              <View style={[s.serviceList, collapsible && s.accordionList]}>
                 {section.items.map((item, index) => (
                   <Pressable
                     key={item.screen}
@@ -364,15 +367,16 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
                     }
                     onPress={() => openService(item)}
                     style={({ pressed }) => [
-                      isFrequent ? s.quickCard : s.serviceRow,
-                      !isFrequent && index > 0 && s.rowBorder,
+                      s.serviceRow,
+                      collapsible && s.accordionRow,
+                      index > 0 && s.rowBorder,
                       pressed && s.pressed,
                     ]}
                   >
-                    <View style={isFrequent ? s.quickIcon : s.rowIcon}>
+                    <View style={s.rowIcon} accessibilityElementsHidden>
                       <AppActionIcon
                         name={item.icon}
-                        size={isFrequent ? 23 : 21}
+                        size={20}
                         fallback="ionicon"
                         color={theme.colors.accent}
                       />
@@ -381,9 +385,7 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
                       <Text style={s.serviceTitle}>{item.label}</Text>
                       <Text style={s.serviceDetail}>{item.description}</Text>
                     </View>
-                    {!isFrequent ? (
-                      <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
-                    ) : null}
+                    <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
                   </Pressable>
                 ))}
               </View>
@@ -393,11 +395,13 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
       })}
       {quickActions.length > 0 ? (
         <View style={s.section}>
-          <Text accessibilityRole="header" style={s.sectionTitle}>
-            可以直接做
-          </Text>
+          <View style={s.sectionHeaderRow}>
+            <Text accessibilityRole="header" style={s.sectionTitle}>
+              可以直接做
+            </Text>
+          </View>
           <View style={s.serviceList}>
-            {quickActions.map((action) => (
+            {quickActions.map((action, index) => (
               <Pressable
                 key={action.destination}
                 accessibilityRole="button"
@@ -408,24 +412,27 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
                     fallbackMessage: '目前無法開啟對應服務，請稍後重試。',
                   });
                 }}
-                style={({ pressed }) => [s.serviceRow, pressed && s.pressed]}
+                style={({ pressed }) => [
+                  s.serviceRow,
+                  index > 0 && s.rowBorder,
+                  pressed && s.pressed,
+                ]}
               >
                 <View style={s.serviceCopy}>
                   <Text style={s.serviceTitle}>{action.label}</Text>
                   <Text style={s.serviceDetail}>{action.description}</Text>
                 </View>
-                <Ionicons name="arrow-forward" size={18} color={theme.colors.accent} />
+                <Ionicons name="arrow-forward" size={17} color={theme.colors.accent} />
               </Pressable>
             ))}
           </View>
-          <Text style={s.subtitle}>這裡只會開啟功能，變更或提交仍需你確認。</Text>
+          <Text style={s.helperNote}>這裡只會開啟功能，變更或提交仍需你確認。</Text>
         </View>
       ) : null}
       {matchCount === 0 && quickActions.length === 0 ? (
         <View style={s.emptyState}>
-          <Ionicons name="search-outline" size={28} color={theme.colors.muted} />
           <Text style={s.emptyTitle}>找不到「{query.trim()}」相關的服務</Text>
-          <Text style={s.subtitle}>試試「圖書館」、「公車」或「公告」。</Text>
+          <Text style={s.serviceDetail}>試試「圖書館」、「公車」或「公告」。</Text>
           <Pressable
             accessibilityRole="button"
             onPress={() => setQuery('')}
@@ -441,126 +448,150 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
 
 const createStyles = () =>
   StyleSheet.create({
-    content: { width: '100%', maxWidth: 720, alignSelf: 'center', paddingHorizontal: 20 },
-    header: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingTop: 12 },
-    intro: { paddingTop: 22, paddingBottom: 20, gap: 6 },
-    heading: {
-      color: theme.colors.text,
-      fontSize: 30,
-      lineHeight: 38,
-      fontWeight: '700',
-      letterSpacing: -0.5,
+    content: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 22 },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingTop: 12,
     },
-    subtitle: { color: theme.colors.muted, fontSize: 14, lineHeight: 23 },
+    intro: { paddingTop: 22, paddingBottom: 18, gap: 6 },
+    heading: {
+      fontFamily: pageTitleFont,
+      color: theme.colors.text,
+      fontSize: 32,
+      lineHeight: 40,
+      fontWeight: '700',
+      letterSpacing: -0.6,
+    },
+    subtitle: { color: theme.colors.muted, fontSize: 14, lineHeight: 22 },
     searchBox: {
-      minHeight: 50,
+      minHeight: 48,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 10,
       paddingHorizontal: 14,
       borderWidth: 1,
       borderColor: theme.colors.border,
-      borderRadius: 12,
+      borderRadius: 10,
       backgroundColor: theme.colors.surface,
     },
     searchFocused: { borderColor: theme.colors.accent },
     searchInput: {
       flex: 1,
       minWidth: 0,
-      minHeight: 50,
+      minHeight: 48,
       color: theme.colors.text,
       fontSize: 15,
-      paddingVertical: 12,
+      paddingVertical: 11,
     },
     clearSearch: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
-    searchCaption: { color: theme.colors.muted, fontSize: 12, lineHeight: 20, paddingTop: 12 },
-    section: { marginTop: 24 },
+    searchCaption: {
+      color: theme.colors.muted,
+      fontSize: 12,
+      lineHeight: 19,
+      paddingTop: 10,
+      fontVariant: ['tabular-nums'],
+    },
+    section: { marginTop: 26 },
+    accordionSection: {
+      marginTop: 0,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
+    },
+    sectionHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      gap: 8,
+      marginBottom: 8,
+    },
     sectionTitle: {
       color: theme.colors.textSecondary,
       fontSize: 13,
-      lineHeight: 20,
+      lineHeight: 19,
       fontWeight: '600',
-      marginBottom: 10,
     },
     sectionToggle: {
-      minHeight: 48,
+      minHeight: 54,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 10,
-      paddingVertical: 12,
-      paddingHorizontal: 14,
-      marginBottom: 10,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: 12,
-      backgroundColor: theme.colors.surface,
+      paddingVertical: 13,
+      paddingHorizontal: 2,
     },
     sectionToggleTitle: {
       flex: 1,
       minWidth: 0,
       color: theme.colors.text,
-      fontSize: 15,
-      lineHeight: 22,
-      fontWeight: '600',
+      fontSize: 16,
+      lineHeight: 23,
+      fontWeight: '700',
+      letterSpacing: -0.2,
     },
-    sectionCount: { color: theme.colors.muted, fontSize: 13, lineHeight: 20 },
-    quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-    quickCard: {
-      flexBasis: '45%',
-      flexGrow: 1,
-      minWidth: 130,
-      minHeight: 122,
-      padding: 16,
-      gap: 12,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.surface,
+    sectionCount: {
+      color: theme.colors.muted,
+      fontSize: 12,
+      lineHeight: 18,
+      fontVariant: ['tabular-nums'],
     },
-    quickIcon: { width: 38, height: 38, justifyContent: 'center' },
     serviceList: {
-      backgroundColor: theme.colors.surface,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: 14,
-      overflow: 'hidden',
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
+    },
+    accordionList: {
+      borderBottomWidth: 0,
     },
     serviceRow: {
-      minHeight: 74,
-      paddingHorizontal: 16,
-      paddingVertical: 14,
+      minHeight: 60,
+      paddingHorizontal: 2,
+      paddingVertical: 13,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 14,
     },
-    rowIcon: { width: 26, alignItems: 'center' },
+    accordionRow: {
+      paddingLeft: 6,
+    },
+    rowIcon: { width: 24, alignItems: 'center' },
     rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border },
-    serviceCopy: { flex: 1, minWidth: 0, gap: 3 },
+    serviceCopy: { flex: 1, minWidth: 0, gap: 2 },
     serviceTitle: { color: theme.colors.text, fontSize: 15, lineHeight: 22, fontWeight: '600' },
-    serviceDetail: { color: theme.colors.muted, fontSize: 12, lineHeight: 20 },
-    moreServices: {
-      marginTop: 20,
-      minHeight: 60,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      paddingVertical: 12,
-      paddingHorizontal: 4,
+    serviceDetail: { color: theme.colors.muted, fontSize: 13, lineHeight: 20 },
+    helperNote: {
+      color: theme.colors.muted,
+      fontSize: 12,
+      lineHeight: 19,
+      marginTop: 8,
     },
     pressed: { backgroundColor: theme.colors.surfaceInteractive },
-    emptyState: { paddingVertical: 36, alignItems: 'center', gap: 12 },
+    emptyState: {
+      paddingVertical: 32,
+      paddingHorizontal: 4,
+      alignItems: 'flex-start',
+      gap: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+      marginTop: 18,
+    },
     emptyTitle: {
       color: theme.colors.text,
       fontSize: 16,
       lineHeight: 24,
       fontWeight: '600',
-      textAlign: 'center',
     },
     resetSearch: {
       minHeight: 44,
-      paddingHorizontal: 16,
+      paddingHorizontal: 14,
+      marginTop: 6,
       justifyContent: 'center',
       borderRadius: 8,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
     },
     link: { color: theme.colors.accent, fontSize: 14, fontWeight: '600' },
   });

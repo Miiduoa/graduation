@@ -6,6 +6,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -17,6 +18,8 @@ import { useUnsavedQuizExit } from '../hooks/useUnsavedQuizExit';
 import { useDataSource } from '../hooks/useDataSource';
 import type { Question, Quiz, Submission } from '../data/types';
 import { publishedAssignmentGrade } from '../data/assignmentGrade';
+import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 
 type RouteProps = {
   route?: {
@@ -36,6 +39,7 @@ function asText(value: unknown, fallback = ''): string {
 }
 
 export function QuizTakingScreen(props: RouteProps) {
+  useThemeVersion();
   const auth = useAuth();
   const { school } = useSchool();
   const params = props.route?.params ?? {};
@@ -60,6 +64,7 @@ function QuizAttempt({ uid, schoolId, groupId, quizId }: {
   groupId: string;
   quizId: string;
 }) {
+  useThemeVersion();
   const navigation = useNavigation();
   const ds = useDataSource();
   const mounted = useRef(false);
@@ -187,89 +192,166 @@ function QuizAttempt({ uid, schoolId, groupId, quizId }: {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
+      style={{ flex: 1, backgroundColor: theme.colors.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
-        <Text style={{ fontSize: 18, fontWeight: '700', color: '#1C1C1E' }}>
-          {quiz?.title ?? '課程評量'}
-        </Text>
-        {quiz?.description ? (
-          <Text style={{ marginTop: 8, fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
-            {quiz.description}
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: theme.layout.screenHorizontalPadding,
+          paddingTop: 16,
+          paddingBottom: 80,
+        }}
+      >
+        <View
+          style={{
+            paddingBottom: 16,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.colors.separator,
+          }}
+        >
+          <Text
+            accessibilityRole="header"
+            style={{ fontSize: 20, fontWeight: '700', color: theme.colors.text, lineHeight: 26 }}
+          >
+            {quiz?.title ?? '課程評量'}
           </Text>
-        ) : null}
-        {overdue ? (
-          <Text style={{ marginTop: 8, color: '#D70015' }}>已截止</Text>
-        ) : null}
+          {quiz?.description ? (
+            <Text style={{ marginTop: 8, fontSize: 14, color: theme.colors.textSecondary, lineHeight: 22 }}>
+              {quiz.description}
+            </Text>
+          ) : null}
+          {overdue ? (
+            <Text style={{ marginTop: 8, fontSize: 13, fontWeight: '600', color: theme.colors.danger }}>
+              已截止
+            </Text>
+          ) : null}
+        </View>
 
         {loading ? (
-          <ActivityIndicator color="#003F8A" style={{ marginTop: 24 }} accessibilityLabel="讀取評量" />
+          <ActivityIndicator color={theme.colors.accent} style={{ marginTop: 24 }} accessibilityLabel="讀取評量" />
         ) : error ? (
-          <View style={{ marginTop: 16 }}>
-            <Text style={{ color: '#D70015', lineHeight: 22 }}>{error}</Text>
-            <Pressable onPress={() => void load()} style={{ marginTop: 12 }}>
-              <Text style={{ color: '#003F8A', fontWeight: '600' }}>重新讀取</Text>
+          <View style={{ marginTop: 16, gap: 8 }}>
+            <Text style={{ color: theme.colors.danger, lineHeight: 22 }}>{error}</Text>
+            <Pressable
+              onPress={() => void load()}
+              accessibilityRole="button"
+              style={({ pressed }) => ({
+                alignSelf: 'flex-start',
+                minHeight: 44,
+                justifyContent: 'center',
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <Text style={{ color: theme.colors.accent, fontWeight: '600', fontSize: 15 }}>重新讀取</Text>
             </Pressable>
           </View>
         ) : submittedAt ? (
-          <View style={{ marginTop: 16 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E' }}>已繳交</Text>
+          <View
+            style={{
+              marginTop: 16,
+              backgroundColor: theme.colors.surface,
+              borderRadius: theme.radius.lg,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              padding: 16,
+              gap: 12,
+            }}
+          >
+            <Text style={{ fontSize: 14, fontWeight: '700', color: theme.colors.success }}>已繳交</Text>
             {questions.length > 0 ? (
-              questions.map((question) => (
-                <Text key={question.id} style={{ marginTop: 8, color: '#3C3C43', lineHeight: 22 }}>
-                  {question.prompt}
-                  {'\n'}
-                  {formatAnswer(answers[question.id])}
-                </Text>
+              questions.map((question, idx) => (
+                <View
+                  key={question.id}
+                  style={{
+                    paddingTop: idx === 0 ? 0 : 12,
+                    borderTopWidth: idx === 0 ? 0 : StyleSheet.hairlineWidth,
+                    borderTopColor: theme.colors.separator,
+                  }}
+                >
+                  <Text style={{ color: theme.colors.textSecondary, lineHeight: 22 }}>
+                    {question.prompt}
+                    {'\n'}
+                    {formatAnswer(answers[question.id])}
+                  </Text>
+                </View>
               ))
             ) : (
-              <Text style={{ marginTop: 8, color: '#3C3C43', lineHeight: 22 }}>
+              <Text style={{ color: theme.colors.textSecondary, lineHeight: 22 }}>
                 {freeText || '（無文字內容）'}
               </Text>
             )}
             {grade ? (
-              <View accessibilityLabel="作業評分" style={{ marginTop: 16 }}>
-                <Text style={{ fontWeight: '700' }}>
+              <View
+                accessibilityLabel="作業評分"
+                style={{
+                  marginTop: 4,
+                  paddingTop: 12,
+                  borderTopWidth: StyleSheet.hairlineWidth,
+                  borderTopColor: theme.colors.separator,
+                }}
+              >
+                <Text style={{ fontWeight: '700', color: theme.colors.text }}>
                   教師已評分：{grade.score}
                   {quiz?.points != null ? ` / ${quiz.points}` : ''} 分
                 </Text>
                 {grade.feedback ? (
-                  <Text style={{ marginTop: 6, color: '#3C3C43' }}>{grade.feedback}</Text>
+                  <Text style={{ marginTop: 6, color: theme.colors.textSecondary, lineHeight: 20 }}>
+                    {grade.feedback}
+                  </Text>
                 ) : null}
               </View>
             ) : null}
           </View>
         ) : (
-          <View style={{ marginTop: 16, gap: 16 }}>
+          <View style={{ marginTop: 16, gap: 18 }}>
             {questions.length > 0 ? (
-              questions.map((question) => (
-                <QuestionField
+              questions.map((question, idx) => (
+                <View
                   key={question.id}
-                  question={question}
-                  value={edits[question.id] ?? savedAnswers[question.id]}
-                  disabled={submitting}
-                  onChange={(value) => editAnswer(question.id, value)}
-                />
+                  style={{
+                    paddingTop: idx === 0 ? 0 : 16,
+                    borderTopWidth: idx === 0 ? 0 : StyleSheet.hairlineWidth,
+                    borderTopColor: theme.colors.separator,
+                  }}
+                >
+                  <QuestionField
+                    question={question}
+                    value={edits[question.id] ?? savedAnswers[question.id]}
+                    disabled={submitting}
+                    onChange={(value) => editAnswer(question.id, value)}
+                  />
+                </View>
               ))
             ) : (
               <View>
-                <Text style={{ fontSize: 14, fontWeight: '600', marginBottom: 6 }}>作答內容</Text>
+                <Text
+                  style={{
+                    fontSize: 14,
+                    fontWeight: '600',
+                    color: theme.colors.text,
+                    marginBottom: 8,
+                  }}
+                >
+                  作答內容
+                </Text>
                 <TextInput
                   value={freeText}
                   editable={!submitting}
                   onChangeText={(value) => editAnswer('response', value)}
                   placeholder="依教師說明作答"
+                  placeholderTextColor={theme.colors.muted}
                   multiline
                   accessibilityLabel="作答內容"
                   style={{
-                    backgroundColor: '#fff',
-                    borderRadius: 12,
+                    backgroundColor: theme.colors.surface,
+                    color: theme.colors.text,
+                    borderRadius: theme.radius.md,
                     padding: 12,
                     minHeight: 140,
+                    fontSize: 14,
                     textAlignVertical: 'top',
                     borderWidth: 1,
-                    borderColor: '#E5E5EA',
+                    borderColor: theme.colors.border,
                   }}
                 />
               </View>
@@ -279,18 +361,21 @@ function QuizAttempt({ uid, schoolId, groupId, quizId }: {
               disabled={submitting}
               accessibilityRole="button"
               accessibilityLabel="繳交評量"
-              style={{
-                padding: 14,
-                borderRadius: 12,
-                backgroundColor: '#003F8A',
+              style={({ pressed }) => ({
+                minHeight: 48,
+                justifyContent: 'center',
                 alignItems: 'center',
-                opacity: submitting ? 0.6 : 1,
-              }}
+                borderRadius: theme.radius.md,
+                backgroundColor: theme.colors.accent,
+                opacity: submitting || pressed ? 0.7 : 1,
+              })}
             >
               {submitting ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={theme.colors.onAccent} />
               ) : (
-                <Text style={{ color: '#fff', fontWeight: '700' }}>繳交評量</Text>
+                <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 15 }}>
+                  繳交評量
+                </Text>
               )}
             </Pressable>
           </View>
@@ -320,21 +405,26 @@ function QuestionField({
   if (question.type === 'short_answer' || question.type === 'essay') {
     return (
       <View>
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>{question.prompt}</Text>
+        <Text style={{ fontWeight: '600', fontSize: 15, color: theme.colors.text, marginBottom: 8 }}>
+          {question.prompt}
+        </Text>
         <TextInput
           editable={!disabled}
           value={selected}
           onChangeText={onChange}
           multiline={question.type === 'essay'}
+          placeholderTextColor={theme.colors.muted}
           accessibilityLabel={question.prompt}
           style={{
-            backgroundColor: '#fff',
-            borderRadius: 12,
+            backgroundColor: theme.colors.surface,
+            color: theme.colors.text,
+            borderRadius: theme.radius.md,
             padding: 12,
+            fontSize: 14,
             minHeight: question.type === 'essay' ? 120 : 44,
             textAlignVertical: 'top',
             borderWidth: 1,
-            borderColor: '#E5E5EA',
+            borderColor: theme.colors.border,
           }}
         />
       </View>
@@ -342,30 +432,45 @@ function QuestionField({
   }
   return (
     <View>
-      <Text style={{ fontWeight: '600', marginBottom: 6 }}>{question.prompt}</Text>
-      {(question.options ?? []).map((option) => {
-        const active = selected === option.value;
-        return (
-          <Pressable
-            key={option.id}
-            disabled={disabled}
-            accessibilityState={{ disabled, selected: active }}
-            onPress={() => onChange(option.value)}
-            accessibilityRole="button"
-            accessibilityLabel={option.label}
-            style={{
-              marginTop: 6,
-              padding: 12,
-              borderRadius: 10,
-              borderWidth: 1,
-              borderColor: active ? '#003F8A' : '#E5E5EA',
-              backgroundColor: active ? '#E8F1FF' : '#fff',
-            }}
-          >
-            <Text style={{ color: '#1C1C1E' }}>{option.label}</Text>
-          </Pressable>
-        );
-      })}
+      <Text style={{ fontWeight: '600', fontSize: 15, color: theme.colors.text, marginBottom: 8 }}>
+        {question.prompt}
+      </Text>
+      <View style={{ gap: 8 }}>
+        {(question.options ?? []).map((option) => {
+          const active = selected === option.value;
+          return (
+            <Pressable
+              key={option.id}
+              disabled={disabled}
+              accessibilityState={{ disabled, selected: active }}
+              onPress={() => onChange(option.value)}
+              accessibilityRole="button"
+              accessibilityLabel={option.label}
+              style={({ pressed }) => ({
+                minHeight: 44,
+                justifyContent: 'center',
+                paddingHorizontal: 14,
+                paddingVertical: 10,
+                borderRadius: theme.radius.md,
+                borderWidth: 1,
+                borderColor: active ? theme.colors.accent : theme.colors.border,
+                backgroundColor: active ? theme.colors.accentSoft : theme.colors.surface,
+                opacity: pressed && !disabled ? 0.85 : 1,
+              })}
+            >
+              <Text
+                style={{
+                  color: theme.colors.text,
+                  fontSize: 14,
+                  fontWeight: active ? '600' : '400',
+                }}
+              >
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }

@@ -1,15 +1,18 @@
 import { AssignmentReplyActions } from './AssignmentReplyActions';
 import { LegacyAssignmentReminders } from './LegacyAssignmentReminders';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Linking, ScrollView, Text, TextInput, View, type LayoutChangeEvent } from 'react-native';
+import {
+  Linking, ScrollView, StyleSheet, Text, TextInput, View,
+  type LayoutChangeEvent,
+} from 'react-native';
 import type { AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
 import { AssistantWorkContextPicker } from './AssistantWorkContextPicker';
 import { OfficialLibraryReply } from './OfficialLibraryReply';
 import { AssistantConversationLayout, type AssistantPanel } from './AssistantConversationLayout';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
-import { AICard, AIButton, aiTokens } from '../ui/aiFirst';
-import { getThemeVersion, subscribeToTheme } from '../ui/theme';
+import { AIButton, aiTokens } from '../ui/aiFirst';
+import { getThemeVersion, subscribeToTheme, theme } from '../ui/theme';
 import { NuniCourseworkReply, courseworkReplyTitle } from './NuniCourseworkReply';
 import { NuniCourseworkStudyAction } from './NuniCourseworkStudyAction';
 import { readNuniPlanCourseworkStudy } from '../features/nuniPlanCourseworkStudy';
@@ -116,6 +119,34 @@ function isTransientCampusSyncError(error: unknown): boolean {
   }
   // Only a clearly transient failure may reuse a still-valid in-memory snapshot.
   return /network|offline|unavailable|deadline-exceeded|timeout|timed out|connection/.test(code + ' ' + message);
+}
+
+/** Flat reply/section: a hairline rule and a quiet heading instead of a boxed card. */
+function AssistantBlock({ title, badge, badgeTone = 'muted', children }: {
+  title?: string;
+  badge?: string;
+  badgeTone?: 'ai' | 'success' | 'warning' | 'danger' | 'muted';
+  children: React.ReactNode;
+}) {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
+  return (
+    <View style={{
+      marginHorizontal: 16, marginBottom: 8, paddingTop: 12, gap: 8,
+      borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: aiTokens.border,
+    }}>
+      {title || badge ? (
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 8 }}>
+          {title ? (
+            <Text style={{ flexShrink: 1, color: aiTokens.textSecondary, fontSize: 13, fontWeight: '600' }}>
+              {title}
+            </Text>
+          ) : null}
+          {badge ? <Text style={{ color: aiTokens[badgeTone], fontSize: 12 }}>{badge}</Text> : null}
+        </View>
+      ) : null}
+      <View style={{ gap: 8 }}>{children}</View>
+    </View>
+  );
 }
 
 export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps) {
@@ -918,7 +949,7 @@ function AssistantConversation({
   const campusTools = platformTimetable ? savedPlanTools : (
     <>
       {savedPlanTools}
-      <AICard
+      <AssistantBlock
         title="工作模式"
         badge={mode === 'device' ? '手機內推論' : '校園連線'}
         badgeTone={mode === 'device' ? 'success' : 'ai'}
@@ -974,7 +1005,7 @@ function AssistantConversation({
             </Text>
           )}
         </View>
-      </AICard>
+      </AssistantBlock>
       <LegacyAssignmentReminders key={`${uid}:${schoolId}`} uid={uid} schoolId={schoolId} snapshot={sense} isCurrent={current} />
       {mode === 'device' ? (
         <CampusSenseDashboard
@@ -1002,7 +1033,7 @@ function AssistantConversation({
           onClear={() => { setSense(null); setSenseError(''); setActiveShortcut(null); setError(''); }}
         />
       ) : null}
-      <AICard>
+      <AssistantBlock>
         <Text style={{ color: aiTokens.muted, lineHeight: 24 }}>
           {mode === 'device'
             ? `目前瀏覽：${schoolName}。手機 AI 能協助整理文字、規劃任務和建議服務入口；沒有連線時，不能取得即時學校資料或代替你完成申請。`
@@ -1028,7 +1059,7 @@ function AssistantConversation({
             ) : null}
           </View>
         ) : null}
-      </AICard>
+      </AssistantBlock>
     </>
   );
   return (
@@ -1044,7 +1075,7 @@ function AssistantConversation({
       tools={campusTools}
       toolsLabel={platformTimetable ? '已儲存計畫' : '校園工具'}
       composer={canAsk ? (
-        <View style={{ backgroundColor: aiTokens.surface }}>
+        <View style={{ backgroundColor: aiTokens.bg }}>
           {showJumpToLatest ? (
             <View style={{ alignItems: 'flex-end', paddingHorizontal: 12, paddingTop: 8 }}>
               <AIButton label="回到最新回覆" variant="ghost" size="sm"
@@ -1056,7 +1087,7 @@ function AssistantConversation({
             </View>
           ) : null}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12,
-            paddingVertical: 8, borderTopWidth: 1, borderColor: aiTokens.border }}>
+            paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderColor: aiTokens.border }}>
           <TextInput
             ref={composerInput}
             accessibilityLabel="詢問校園助理"
@@ -1064,8 +1095,8 @@ function AssistantConversation({
             placeholder={busy ? '可以先寫下一句，完成後再送出…' : workContext ? '想找哪天的工作空檔？' : platformTimetable ? '問課表、作業或安排這週…' : mode === 'device' ? '問課表、作業…' : '查校園資訊…'}
             placeholderTextColor={aiTokens.muted}
             style={{ flex: 1, minWidth: 0, minHeight: 44, maxHeight: 96, borderWidth: 1,
-              borderRadius: 12, borderColor: aiTokens.border, color: aiTokens.text,
-              backgroundColor: aiTokens.panel, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 }}
+              borderRadius: theme.radius.lg, borderColor: aiTokens.border, color: aiTokens.text,
+              backgroundColor: aiTokens.surface, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 }}
           />
           {calendarBusy ? <AIButton label="核對行程中…" size="sm" disabled /> : updatingReminder && busy ? <AIButton label="處理提醒中…" size="sm" disabled /> : busy && mode === 'device' ? (
             <AIButton label={syncBusy ? '取消這次同步' : platformTimetable && activeShortcut?.kind === 'brief' ? '取消這次規劃'
@@ -1093,9 +1124,9 @@ function AssistantConversation({
         </View>
       ) : null}
       {!uid && mode === 'campus' && (
-        <AICard title="校園即時查詢需要登入">
+        <AssistantBlock title="校園即時查詢需要登入">
           <AIButton label="改問手機助理" onPress={() => changeMode('device')} />
-        </AICard>
+        </AssistantBlock>
       )}
       <AssistantCalendarRecovery
         tasks={calendarRecovery.tasks.filter((task) => !batchOperationIds.has(task.proposal.mutationId) &&
@@ -1112,16 +1143,16 @@ function AssistantConversation({
         onRetry={() => { if (!busy && !syncBusy && !calendarBusy && current()) void calendarRecovery.reload(); }}
         onChange={changeCalendarBatch} />
       {!workContext && (uid || platformTimetable) && messages.length === 0 && !busy && !calendarBusy && !draft.trim() ? (
-        <AICard title="安排個人行程">
+        <AssistantBlock title="安排個人行程">
           <Text style={{ color: aiTokens.textSecondary, fontSize: 15, lineHeight: 23 }}>
             輸入明確日期、時間與名稱，例如「幫我明天 19:00 到 20:00 安排英文讀書」。先核對草稿，再確認加入個人行事曆。
           </Text>
           <AIButton label="填寫行程範例" variant="ghost" onPress={() => editDraft('幫我明天 19:00 到 20:00 安排英文讀書')} />
           <AIButton label="填寫多筆行程範例" variant="ghost" onPress={() => editDraft('幫我安排以下行程：\n明天 19:00 到 20:00 英文讀書\n後天 18:00 到 19:00 資料庫複習')} />
-        </AICard>
+        </AssistantBlock>
       ) : null}
       {!workContext && panel === 'chat' && (uid || platformTimetable) && mode === 'device' && messages.length === 0 && !busy && !calendarBusy && !error && !draft.trim() ? (
-        <AICard title={platformTimetable ? '我的上課安排' : '我的課業安排'}>
+        <AssistantBlock title={platformTimetable ? '我的上課安排' : '我的課業安排'}>
           <AssistantClassNowHint uid={uid} schoolId={schoolId} platformTimetable={platformTimetable}>
             {(upcoming) => (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
@@ -1146,19 +1177,19 @@ function AssistantConversation({
             <NuniStudyPlanActions disabled={busy || syncBusy || calendarBusy}
               onToday={() => void briefPlan(TODAY_BRIEF)} onWeek={() => void briefPlan(WEEK_BRIEF)} />
           ) : null}
-        </AICard>
+        </AssistantBlock>
       ) : null}
       {platformTimetable && !workContext && messages.length === 0 && !draft.trim() && !busy && !error ? (
-        <AICard title="我的課表">
+        <AssistantBlock title="我的課表">
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <AIButton label="查看完整課表" variant="ghost" onPress={() => current() && safeNavigate(navigation, 'PersonalTimetable')} />
             <AIButton label="匯入課表" variant="ghost" onPress={() => current() && safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })} />
             <AIButton label="查看所有功能" variant="ghost" onPress={() => void send({ kind: 'services', question: '你能做什麼？' })} />
           </View>
-        </AICard>
+        </AssistantBlock>
       ) : null}
       {!platformTimetable && canAsk && messages.length === 0 && !busy && !error ? (
-        <AICard title={draft.trim() ? '繼續你的提問' : '想先處理哪件事？'}>
+        <AssistantBlock title={draft.trim() ? '繼續你的提問' : '想先處理哪件事？'}>
           <Text style={{ color: aiTokens.textSecondary, fontSize: 15, lineHeight: 22 }}>
             {draft.trim() ? '可以修改輸入欄裡的問題，再按送出。'
               : mode === 'device' ? '先選一個問題，或直接輸入。用手機鍵盤的麥克風也能口述。'
@@ -1178,12 +1209,12 @@ function AssistantConversation({
               ))}
             </View>
           )}
-        </AICard>
+        </AssistantBlock>
       ) : null}
       {messages.map((message, index) => message.role === 'user' ? (
         <View key={index} style={{ alignSelf: 'flex-end', maxWidth: '85%', marginRight: 16,
-          marginVertical: 8, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 16,
-          backgroundColor: aiTokens.aiSoft }}>
+          marginTop: 16, marginBottom: 8, paddingVertical: 8, paddingHorizontal: 12,
+          borderRadius: theme.radius.lg, backgroundColor: aiTokens.panel }}>
           <Text style={{ color: aiTokens.textSecondary, fontSize: 12 }}>你的問題</Text>
           <Text selectable style={{ color: aiTokens.text, fontSize: 16, lineHeight: 24 }}>{message.content}</Text>
         </View>
@@ -1197,7 +1228,7 @@ function AssistantConversation({
         </View>
       ) : (
         <View key={index} onLayout={(event) => revealReply(index, event)}>
-          <AICard title={message.courseworkStudy ? '作業準備行程' : message.calendarBatch ? '多筆個人行程' : message.tool === 'calendar-action' ? '個人行程'
+          <AssistantBlock title={message.courseworkStudy ? '作業準備行程' : message.calendarBatch ? '多筆個人行程' : message.tool === 'calendar-action' ? '個人行程'
             : message.tool === 'saved-academics' ? '成績與學分紀錄'
             : message.serviceSelection ? '功能入口'
             : message.courseworkRead ? courseworkReplyTitle(message.courseworkRead)
@@ -1510,12 +1541,12 @@ function AssistantConversation({
                 這是先前的任務建議。若要確認執行狀態，請到對應服務頁面核對。
               </Text>
             ) : null}
-          </AICard>
+          </AssistantBlock>
         </View>
       ))}
       {busy && (
         <View onLayout={scrollToEntry}>
-          <AICard title={updatingReminder ? '正在處理作業提醒…' : platformTimetable && activeShortcut?.kind === 'brief' ? '正在整理學習計畫…'
+          <AssistantBlock title={updatingReminder ? '正在處理作業提醒…' : platformTimetable && activeShortcut?.kind === 'brief' ? '正在整理學習計畫…'
             : activeShortcut?.kind === 'plan-study-batch' ? '正在核對作業並安排整體準備時間…'
             : activeShortcut?.kind === 'plan-study' ? '正在核對計畫中的作業…'
             : queryingWork ? '正在核對課程與作業…' : syncBusy ? '正在同步校園資料…' : queryingGaps ? '正在查手機課表的空堂…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
@@ -1529,14 +1560,15 @@ function AssistantConversation({
                   : '正在核對校園資料的讀取權限…'}
               </Text>
             ) : null}
-          </AICard>
+          </AssistantBlock>
         </View>
       )}
       {mode === 'device' && senseError ? (
         <Text accessibilityRole="alert" style={{ marginHorizontal: 16, color: aiTokens.textSecondary }}>{senseError}</Text>
       ) : null}
       {canAsk && quickActions.length > 0 && typeof navigation?.navigate === 'function' ? (
-        <View style={{ marginHorizontal: 16, gap: 10, padding: 12, borderRadius: 12, backgroundColor: aiTokens.panel }}>
+        <View style={{ marginHorizontal: 16, gap: 10, paddingTop: 12,
+          borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: aiTokens.border }}>
           <Text style={{ color: aiTokens.text, fontWeight: '700' }}>
             也可以直接使用對應服務
           </Text>
@@ -1558,8 +1590,8 @@ function AssistantConversation({
         </View>
       ) : null}
       {recoverableQuestion && recoverableQuestion !== draft && !busy ? (
-        <View style={{ marginHorizontal: 16, padding: 12, borderWidth: 1,
-          borderColor: aiTokens.border, borderRadius: 14, backgroundColor: aiTokens.panel, gap: 8 }}>
+        <View style={{ marginHorizontal: 16, paddingLeft: 12, borderLeftWidth: 2,
+          borderLeftColor: aiTokens.ai, gap: 8 }}>
           <Text accessibilityRole="text" style={{ color: aiTokens.textSecondary, fontSize: 13 }}>
             另一個問題也已保留，切換時不會覆蓋目前草稿。
           </Text>

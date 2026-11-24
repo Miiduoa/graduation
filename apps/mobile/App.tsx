@@ -6,11 +6,12 @@ import { useOfflineSyncToasts } from './src/app/useOfflineSyncToasts';
 import { useSubmittedAssignmentReminders } from './src/app/useSubmittedAssignmentReminders';
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { AppActionIcon } from './src/ui/AppActionIcon';
 import {
   ActivityIndicator,
+  StyleSheet,
   View,
   Text,
   AppState,
@@ -20,9 +21,9 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
-import { BlurView } from 'expo-blur';
 import { StatusBar } from 'expo-status-bar';
 
+import { useThemeVersion } from './src/ui/useThemeStyleSheet';
 import { theme, softShadowStyle } from './src/ui/theme';
 import { SchoolProvider, useSchool } from './src/state/school';
 import { FavoritesProvider } from './src/state/favorites';
@@ -289,7 +290,7 @@ function TokenExpiredModal() {
                 flex: 1,
                 paddingVertical: 13,
                 borderRadius: theme.radius.md,
-                backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface2,
+                backgroundColor: pressed ? theme.colors.surfaceInteractiveStrong : theme.colors.surface2,
                 borderWidth: 1,
                 borderColor: theme.colors.border,
                 alignItems: 'center',
@@ -426,9 +427,8 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   );
 }
 
-const TAB_BAR_PILL_PADDING_V = 6;
-
-function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+function CampusTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+  useThemeVersion();
   const insets = useSafeAreaInsets();
   const permissions = usePermissions();
   // 訊息 Tab 上的紅色未讀徽章：即時訂閱我自己 DM 未讀數
@@ -465,31 +465,20 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           });
           if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
         }}
-        style={({ pressed }) => ({
-          flex: 1,
-          justifyContent: 'center',
-          transform: [{ scale: pressed ? 0.95 : 1 }],
-        })}
+        onLongPress={() => navigation.emit({ type: 'tabLongPress', target: route.key })}
+        style={({ pressed }) => [
+          tabStyles.item,
+          { backgroundColor: pressed ? theme.colors.surfaceInteractive : 'transparent' },
+        ]}
       >
-        <View
-          style={{
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 3,
-            paddingVertical: 8,
-            paddingHorizontal: 4,
-            borderRadius: theme.radius.md,
-            backgroundColor: focused ? theme.colors.chromeTabItemActive : 'transparent',
-            minHeight: 54,
-          }}
-        >
+        <View style={tabStyles.content}>
+          <View style={[tabStyles.indicator, { backgroundColor: focused ? theme.colors.accent : 'transparent' }]} />
           <View>
             <AppActionIcon
               name={iconName}
-              size={focused ? 22 : 20}
+              size={21}
               fallback="ionicon"
-              color={focused ? theme.colors.accent : theme.colors.muted}
-              style={{ opacity: focused ? 1 : 0.66 }}
+              color={focused ? theme.colors.accent : theme.colors.textSecondary}
             />
             {showUnreadBadge ? (
               <View
@@ -502,23 +491,23 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                   height: 16,
                   paddingHorizontal: 4,
                   borderRadius: 8,
-                  backgroundColor: '#ef4444',
+                  backgroundColor: theme.colors.danger,
                   alignItems: 'center',
                   justifyContent: 'center',
                   borderWidth: 1.5,
-                  borderColor: theme.colors.chromeTabBar,
+                  borderColor: theme.colors.surface,
                 }}
               >
-                <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>{badgeLabel}</Text>
+                <Text style={{ color: theme.colors.onDanger, fontSize: 9, fontWeight: '700' }}>{badgeLabel}</Text>
               </View>
             ) : null}
           </View>
           <Text
             style={{
-              fontSize: 10,
-              lineHeight: 13,
-              fontWeight: focused ? '700' : '600',
-              color: focused ? theme.colors.accent : theme.colors.muted,
+              fontSize: 11,
+              lineHeight: 15,
+              fontWeight: focused ? '700' : '500',
+              color: focused ? theme.colors.accent : theme.colors.textSecondary,
               letterSpacing: 0,
             }}
           >
@@ -531,55 +520,35 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 
   return (
     <View
-      style={{
-        position: 'absolute',
-        bottom: Math.max(insets.bottom, 8) + 6,
-        left: 14,
-        right: 14,
-        minHeight: 76,
-      }}
-      pointerEvents="box-none"
+      style={[
+        tabStyles.bar,
+        {
+          paddingBottom: Math.max(insets.bottom, 4),
+          paddingLeft: Math.max(insets.left, 6),
+          paddingRight: Math.max(insets.right, 6),
+          backgroundColor: theme.colors.surface,
+          borderTopColor: theme.colors.border,
+        },
+      ]}
     >
-      {/* 底部入口：今天｜課務｜生活｜交流｜我的 */}
-      <View
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          borderRadius: theme.radius.lg,
-          overflow: 'hidden',
-        }}
-        pointerEvents="none"
-      >
-        <BlurView
-          intensity={70}
-          tint={theme.mode === 'dark' ? 'dark' : 'light'}
-          style={{ flex: 1 }}
-        />
-      </View>
-      <View
-        style={{
-          flex: 1,
-          position: 'relative',
-          flexDirection: 'row',
-          alignItems: 'stretch',
-          overflow: 'hidden',
-          borderRadius: theme.radius.lg,
-          paddingVertical: TAB_BAR_PILL_PADDING_V,
-          paddingHorizontal: 8,
-          borderWidth: 1,
-          borderColor: theme.colors.chromeTabBorder,
-          backgroundColor: theme.colors.chromeTabBar,
-          ...softShadowStyle(theme.shadows.soft),
-        }}
-      >
-        {visibleRoutes.map(renderTab)}
-      </View>
+      {visibleRoutes.map(renderTab)}
     </View>
   );
 }
+
+const tabStyles = StyleSheet.create({
+  bar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  item: { flex: 1, minHeight: 56 },
+  content: { alignItems: 'center', gap: 3, paddingBottom: 4, paddingHorizontal: 2 },
+  indicator: { width: 20, height: 2, marginBottom: 4 },
+});
 
 /**
  * 主導覽：今天｜課務｜生活｜交流｜我的（沿用訊息 route key）。
@@ -589,7 +558,7 @@ function AppTabNavigator() {
     <Tab.Navigator
       id={undefined}
       initialRouteName="Today"
-      tabBar={(props) => <FloatingTabBar {...props} />}
+      tabBar={(props) => <CampusTabBar {...props} />}
       screenOptions={() => ({
         headerShown: false,
         sceneStyle: { backgroundColor: theme.colors.bg },
@@ -612,20 +581,27 @@ function AppNavigation() {
   );
 }
 
-function PublicNavigation() {
-  const handoff = useGuestCampusHandoff();
-  const { schoolId } = useSchool();
-  const navTheme = {
-    ...DefaultTheme,
+function useCampusNavigationTheme() {
+  useThemeVersion();
+  const baseTheme = theme.mode === 'dark' ? DarkTheme : DefaultTheme;
+  return {
+    ...baseTheme,
     colors: {
-      ...DefaultTheme.colors,
+      ...baseTheme.colors,
       background: theme.colors.bg,
       card: theme.colors.surface,
       text: theme.colors.text,
       border: theme.colors.border,
       primary: theme.colors.accent,
+      notification: theme.colors.danger,
     },
   };
+}
+
+function PublicNavigation() {
+  const handoff = useGuestCampusHandoff();
+  const { schoolId } = useSchool();
+  const navTheme = useCampusNavigationTheme();
   useEffect(() => {
     return () => {
       markPublicNavigationUnready();
@@ -773,17 +749,7 @@ function SchoolNavigation() {
     [],
   );
 
-  const navTheme = {
-    ...DefaultTheme,
-    colors: {
-      ...DefaultTheme.colors,
-      background: theme.colors.bg,
-      card: theme.colors.surface,
-      text: theme.colors.text,
-      border: theme.colors.border,
-      primary: theme.colors.accent,
-    },
-  };
+  const navTheme = useCampusNavigationTheme();
 
   useEffect(() => {
     return () => {
@@ -890,6 +856,7 @@ function SchoolNavigation() {
 }
 
 function AppInner() {
+  useThemeMode();
   const [isCheckingOnboarding, setIsCheckingOnboarding] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
@@ -937,7 +904,6 @@ function AppInner() {
     AsyncStorage.setItem('campus.demoMode.v1', 'normal').catch(() => void 0);
   }, []);
 
-  useThemeMode();
 
   if (isCheckingOnboarding) {
     return <FullScreenLoader message="準備你的校園體驗…" />;
@@ -1059,13 +1025,17 @@ class AppErrorBoundary extends React.Component<
   }
 }
 
+function AppStatusBar() {
+  const { mode } = useThemeMode();
+  return <StatusBar style={mode === 'dark' ? 'light' : 'dark'} translucent />;
+}
+
 export default function App() {
   return (
     <SafeAreaProvider>
-      {/* iOS: status bar 字色隨主題自動切換（亮底深字、暗底白字）；translucent 讓內容貼齊頂部 */}
-      <StatusBar style="auto" translucent />
       <AppErrorBoundary>
         <ThemeProvider>
+          <AppStatusBar />
           <AccessibilityProvider>
             <PreferencesProvider>
               <I18nProvider>

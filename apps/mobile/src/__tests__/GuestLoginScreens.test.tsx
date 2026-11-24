@@ -512,7 +512,7 @@ test('the guest school-login entry always follows the selected university', () =
 test('a direct school login route cannot show Providence credentials while browsing NTHU', () => {
   mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
   const view = render(<SSOLoginScreen />);
-  expect(view.getByText('nuni · 國立清華大學')).toBeTruthy();
+  expect(view.getByText('國立清華大學')).toBeTruthy();
   expect(view.getByText(SCHOOL_LOGIN_BIND_HINT)).toBeTruthy();
   expect(view.queryByTestId('student-id-input')).toBeNull();
   expect(view.queryByTestId('student-password-input')).toBeNull();

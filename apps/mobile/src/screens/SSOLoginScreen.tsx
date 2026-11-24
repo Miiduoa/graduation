@@ -32,7 +32,7 @@ import {
   isSchoolLoginEntryAvailable,
   loadSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
-import { Screen, Button, AnimatedCard } from '../ui/components';
+import { Screen, Button } from '../ui/components';
 import { SchoolPortalImportEntry } from '../components/SchoolPortalImport';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -56,6 +56,29 @@ type SSOLoginScreenProps = {
 };
 
 type LoginAttempt = { provider: 'school' | 'platform' };
+
+function LoginSection({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children?: React.ReactNode;
+}) {
+  const styles = useThemeStyleSheet(createStyles);
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text accessibilityRole="header" style={styles.sectionTitle}>
+          {title}
+        </Text>
+        {subtitle ? <Text style={styles.note}>{subtitle}</Text> : null}
+      </View>
+      {children}
+    </View>
+  );
+}
 
 export function SSOLoginScreen(props: SSOLoginScreenProps) {
   const { school } = useSchool();
@@ -264,7 +287,7 @@ function SchoolLoginContent(
         keyboardDismissMode="on-drag"
       >
         <View style={styles.intro}>
-          <Text style={styles.eyebrow}>nuni · {schoolName}</Text>
+          <Text style={styles.schoolName}>{schoolName}</Text>
           <Text accessibilityRole="header" style={styles.heading}>
             從你的課程開始。
           </Text>
@@ -272,7 +295,7 @@ function SchoolLoginContent(
         </View>
 
         {schoolLoginAvailable ? (
-          <AnimatedCard title="學校帳號登入" subtitle="使用靜宜 E 校園帳號與密碼">
+          <LoginSection title="學校帳號登入" subtitle="使用靜宜 E 校園帳號與密碼">
             <View style={styles.fields}>
               <View style={styles.field}>
                 <Text nativeID="student-id-label" style={styles.label}>
@@ -331,11 +354,11 @@ function SchoolLoginContent(
                 <Text style={styles.note}>玩課雲：課程、教材與作業；使用相同帳密</Text>
               </View>
             </View>
-          </AnimatedCard>
+          </LoginSection>
         ) : (
-          <AnimatedCard title="學校連線尚未開放">
+          <LoginSection title="學校連線尚未開放">
             <Text style={styles.body}>{SCHOOL_LOGIN_BIND_HINT}</Text>
-          </AnimatedCard>
+          </LoginSection>
         )}
 
         {isBusy ? (
@@ -410,7 +433,7 @@ function SchoolLoginContent(
           onOpenRecords={(kind) => safeNavigate(nav, 'PersonalImport', { kind })}
         />
 
-        <AnimatedCard
+        <LoginSection
           title="不用學校帳號，也能匯入"
           subtitle="讀取你自己下載的校務資料"
         >
@@ -423,9 +446,9 @@ function SchoolLoginContent(
             onPress={() => nav.navigate?.('PersonalImport')}
             disabled={formLocked}
           />
-        </AnimatedCard>
+        </LoginSection>
 
-        <AnimatedCard title="Google 帳號" subtitle="和網頁版使用同一個帳號">
+        <LoginSection title="Google 帳號" subtitle="和網頁版使用同一個帳號">
           <Button
             text="用 Google 帳號登入"
             kind="secondary"
@@ -435,7 +458,7 @@ function SchoolLoginContent(
           <Text style={styles.note}>
             用於加入課程、繳交作業與校園社群。學校課表與成績仍需連線學校帳號。
           </Text>
-        </AnimatedCard>
+        </LoginSection>
         <Text style={styles.note}>已同步的資料可離線查看，更新內容時仍需網路連線。</Text>
       </ScrollView>
     </Screen>
@@ -454,7 +477,15 @@ const createStyles = () =>
       gap: theme.layout.sectionGap,
     },
     intro: { gap: theme.space.sm, paddingVertical: theme.space.md },
-    eyebrow: { ...theme.typography.labelSmall, color: theme.colors.textSecondary },
+    schoolName: { ...theme.typography.label, color: theme.colors.textSecondary },
+    section: {
+      gap: theme.space.md,
+      paddingTop: theme.space.lg,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+    },
+    sectionHeader: { gap: theme.space.xs },
+    sectionTitle: { ...theme.typography.h3, color: theme.colors.text },
     heading: { ...theme.typography.h1, color: theme.colors.text },
     body: { ...theme.typography.body, color: theme.colors.textSecondary },
     fields: { gap: theme.space.md },
@@ -462,10 +493,10 @@ const createStyles = () =>
     sourceTitle: { ...theme.typography.labelSmall, color: theme.colors.textSecondary },
     resultPanel: {
       gap: theme.space.md,
-      padding: theme.space.md,
-      borderWidth: 1,
+      paddingVertical: theme.space.md,
+      borderTopWidth: 1,
+      borderBottomWidth: 1,
       borderColor: theme.colors.border,
-      borderRadius: theme.radius.md,
     },
     resultHeading: { flexDirection: 'row', alignItems: 'center', gap: theme.space.sm },
     resultRow: {
@@ -483,7 +514,7 @@ const createStyles = () =>
       paddingHorizontal: theme.space.md,
       paddingVertical: theme.space.sm,
       borderWidth: 1,
-      borderColor: theme.colors.border,
+      borderColor: theme.colors.muted,
       borderRadius: theme.radius.md,
       backgroundColor: theme.colors.bg,
       color: theme.colors.text,
@@ -494,19 +525,19 @@ const createStyles = () =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: theme.space.md,
-      padding: theme.space.md,
-      borderRadius: theme.radius.md,
-      backgroundColor: theme.colors.accentSoft,
+      paddingVertical: theme.space.md,
+      borderTopWidth: 1,
+      borderBottomWidth: 1,
+      borderColor: theme.colors.border,
     },
     statusContent: { flex: 1, minWidth: 0, gap: theme.space.xs },
     statusTitle: { ...theme.typography.label, color: theme.colors.text },
     errorPanel: {
       gap: theme.space.md,
-      padding: theme.space.md,
-      borderRadius: theme.radius.md,
-      borderWidth: 1,
+      paddingVertical: theme.space.md,
+      borderTopWidth: 1,
+      borderBottomWidth: 1,
       borderColor: theme.colors.danger,
-      backgroundColor: theme.colors.dangerSoft,
     },
     error: { ...theme.typography.bodySmall, color: theme.colors.danger },
   });

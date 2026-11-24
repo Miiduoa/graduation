@@ -65,7 +65,7 @@ import { ADMIN_TABS, AdminTabBar, type AdminTabKey } from './admin/AdminTabBar';
 import { AdminDataStatusRow, AdminListFeedback, AdminSurface } from './admin/AdminSurface';
 import {
   ADMIN_PAGE_SIZES,
-  adminWorkbenchStyles as adminStyles,
+  useAdminWorkbenchStyles,
   formatDataStatus,
   memberRoleLabel,
   type MemberRole,
@@ -204,6 +204,7 @@ function FormInput(props: {
   placeholder?: string;
   multiline?: boolean;
 }) {
+  const adminStyles = useAdminWorkbenchStyles();
   return (
     <View style={adminStyles.formField}>
       <Text style={adminStyles.formLabel}>{props.label}</Text>
@@ -226,6 +227,7 @@ function FormInput(props: {
 }
 
 export function AdminDashboardScreen(props: any) {
+  const adminStyles = useAdminWorkbenchStyles();
   const nav = props?.navigation;
   const { school } = useSchool();
   const auth = useAuth();

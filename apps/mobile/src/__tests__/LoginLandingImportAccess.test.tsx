@@ -177,7 +177,7 @@ it.each([false, true])('opens the platform without selecting or verifying a scho
   const sessionBeforeNavigation = mockAuth.session;
   const view = await landing();
   expect(view.getByText(signedIn ? '回到我的課程' : '登入或建立帳號')).toBeTruthy();
-  if (!signedIn) expect(view.getByText('和網頁版使用同一個 Google 帳號，加入平台課程、繳交作業或查看自己的訂單，不必先綁定學校。')).toBeTruthy();
+  if (!signedIn) expect(view.getByText('用 Google 帳號修課、交作業及查看訂單。網頁與 App 使用同一個帳號。')).toBeTruthy();
   await fireEventAsync.press(view.getByTestId('login-start'));
   expect(safeNavigate).toHaveBeenCalledTimes(1);
   if (signedIn) expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace', { tab: 'courses' });
@@ -195,7 +195,7 @@ it('a verified Google account resumes named tasks before setup without querying 
     expiresAt: Date.now() + 60_000,
   };
   const view = await landing();
-  expect(view.getByText('今天先處理哪件事？')).toBeTruthy();
+  expect(view.getByRole('header', { name: '我的校園' })).toBeTruthy();
   expect(view.queryByText('Google 帳號')).toBeNull();
   expect(view.getAllByTestId('today-timetable-panel')).toHaveLength(1);
   expect(view.getAllByTestId('public-PersonalCalendar')).toHaveLength(1);
