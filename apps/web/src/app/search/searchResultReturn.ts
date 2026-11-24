@@ -75,17 +75,16 @@ function onHistoryPush(
   searchEntry: ReturnType<typeof readSearchEntry>,
   entryKey: string | null,
   routerCommit: boolean,
-  sourceHash: string,
 ) {
-  const navigationToken = routerCommit ? consumeSearchResultNavigation() : null;
+  const navigation = routerCommit ? consumeSearchResultNavigation() : null;
   // Only a traversal between the linked entries can start another restore.
   publishReturn(null, null);
   if (searchEntry) {
     const { saved, entries } = searchEntry;
     if (
-      routerCommit &&
-      saved.token === navigationToken &&
-      matchesResultDestination(saved.href, sourceHash)
+      navigation &&
+      saved.token === navigation.token &&
+      matchesResultDestination(saved.href, navigation.sourceHash)
     ) {
       entries.destinationKey = entryKey;
     } else if (window.location.pathname !== '/search') {
@@ -135,7 +134,6 @@ function installHistoryTracking() {
       const searchEntry = readSearchEntry(previousState);
       const previousPath = window.location.pathname;
       const previousHref = window.location.href;
-      const previousHash = window.location.hash;
       const push = method === 'pushState';
       const routerCommit = push && isRouterHistoryWrite(data, APP_ROUTER_HISTORY_PUSH);
       const changesPage = url != null && new URL(url, window.location.href).pathname !== previousPath;
@@ -183,7 +181,7 @@ function installHistoryTracking() {
             destinationKey: null,
           });
         }
-        onHistoryPush(searchEntry, trackedEntryKey, routerCommit, previousHash);
+        onHistoryPush(searchEntry, trackedEntryKey, routerCommit);
       } else if (!replacesPage && searchEntry && !writesReturn) {
         // Bind the new URL only after the browser accepts the same-page replacement.
         searchEntry.entries.searchUrl = currentUrl();

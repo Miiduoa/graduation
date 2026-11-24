@@ -5,7 +5,7 @@ export const APP_ROUTER_HISTORY_REPLACE = Symbol.for('nuni.app-router.history-re
 // Link.onNavigate and Next's transition-start hook run in the same call stack.
 // Only that dispatch can claim the intent. Every later dispatch supersedes it.
 let intent: string | null = null;
-let navigating: string | null = null;
+let navigating: { token: string; sourceHash: string } | null = null;
 
 export function markSearchResultNavigation(token: string) {
   intent = token;
@@ -15,16 +15,19 @@ export function markSearchResultNavigation(token: string) {
 }
 
 export function startSearchResultNavigation(type: 'push' | 'replace' | 'traverse') {
-  navigating = type === 'push' ? intent : null;
+  // Capture the fragment before application history writes can move the source entry.
+  navigating = type === 'push' && intent !== null
+    ? { token: intent, sourceHash: window.location.hash }
+    : null;
   intent = null;
 }
 
 export function isSearchResultNavigationPending(token: string) {
-  return navigating === token;
+  return navigating?.token === token;
 }
 
 export function consumeSearchResultNavigation() {
-  const token = navigating;
+  const navigation = navigating;
   navigating = null;
-  return token;
+  return navigation;
 }

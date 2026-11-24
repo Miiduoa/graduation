@@ -1241,6 +1241,47 @@ describe('continuing a search after opening a service', () => {
     expect(document.activeElement === screen.getByRole('link', { name: /^圖書館/ })).toBe(restoresFocus);
   });
 
+  it.each([
+    ['#results', true],
+    ['#other', false],
+  ])('pairs a commit with %s against the fragment at navigation start after a copied array push', (hash, restoresFocus) => {
+    move(`${librarySearch}#results`);
+    const view = renderAfterFrame();
+    const result = screen.getByRole('link', { name: /^圖書館/ });
+    const target = new URL(result.href);
+    expect(target.hash).toBe('');
+    fireEvent.click(result);
+    const original = window.history.state;
+
+    window.history.pushState(Object.assign([], original), '', '#other');
+    const intervening = window.history.state;
+    expect(Array.isArray(intervening)).toBe(true);
+    expect(intervening.__campusSearchHistoryEntry).toEqual(expect.any(String));
+    expect(intervening.__campusSearchHistoryEntry).not.toBe(original.__campusSearchHistoryEntry);
+    expect(intervening.__campusSearchResultReturn).toEqual(original.__campusSearchResultReturn);
+    const pushedUrl = window.location.href;
+    expect(window.location.hash).toBe('#other');
+
+    target.hash = hash;
+    commitNavigation(target.pathname + target.search + target.hash);
+    expect(window.location.href).toBe(target.href);
+    expect(window.history.state.__campusSearchHistoryEntry).toEqual(expect.any(String));
+    expect(window.history.state.__campusSearchHistoryEntry).not.toBe(
+      intervening.__campusSearchHistoryEntry,
+    );
+    view.unmount();
+
+    traverse(pushedUrl, intervening);
+    expect(window.location.href).toBe(pushedUrl);
+    expect(window.history.state).toEqual(intervening);
+    renderAfterFrame();
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+    expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(document.activeElement === screen.getByRole('link', { name: /^圖書館/ })).toBe(restoresFocus);
+  });
+
   it('Forward and Back can resume the same entry again without replaying it on a fresh visit', async () => {
     const entry = leaveLibrary();
     await go(-1);
