@@ -105,7 +105,7 @@ it.each([
   ['玩課雲作業和查公車', []],
   ['玩課雲作業，查校園公告', []],
   ['開啟玩課雲作業，安排今天下午作業準備30分鐘', []],
-  ['開啟玩課雲作業，查一下還沒交的有哪些', ['玩課雲查一下還沒交的有哪些']],
+  ['開啟玩課雲作業，查一下還沒交的有哪些', ['查一下還沒交的有哪些 玩課雲']],
   ['查玩課雲未交作業和校園公告', ['查玩課雲未交作業']],
   ['幫我查 TronClass 未交作業，然後查公車', ['幫我查 TronClass 未交作業']],
 ])('keeps the whole multi-clause request %s on the existing cross-service plan and adds its TronClass clauses %j', async (question, clauses) => {
