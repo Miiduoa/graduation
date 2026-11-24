@@ -121,7 +121,7 @@ test('cannot authorize an exact destination from a 140-character server-capped t
   expect(resolveCampusAssignmentTarget({ assignment: { ...assignment, title }, snapshot: value, scope, now }))
     .toBeNull();
   expect(resolveCampusAssignmentTarget({
-    assignment: { ...assignment, title: title.slice(0, 130) }, snapshot: value, scope, now,
+    assignment: { ...assignment, title: title.slice(0, 130), titleFormat: 'preview' }, snapshot: value, scope, now,
   })).toBeNull();
   // A shorter title known to be complete is still reachable.
   const fullTitle = '長'.repeat(139);

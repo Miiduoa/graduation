@@ -4,6 +4,8 @@ import { parseCampusAssignmentSource } from './campusAssignmentSource';
 /** Display identity is not authority; it must match exactly one current source row. */
 export interface CampusAssignmentIdentity {
   title: string;
+  /** Plan steps carry the rendered preview. Replies and agenda rows carry the summary title. */
+  titleFormat?: 'preview';
   groupName?: string;
   dueAt?: string | null;
 }
@@ -12,8 +14,26 @@ export interface CampusAssignmentTarget {
   params: { groupId: string; assignmentId: string };
 }
 
+function normalizeTitle(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
 export function campusAssignmentDisplayTitle(value: string): string {
-  return value.replace(/\s+/g, ' ').trim().slice(0, 130);
+  return normalizeTitle(value).slice(0, 130);
+}
+
+export function findUniqueCampusAssignment(
+  assignment: CampusAssignmentIdentity,
+  items: CampusSenseSnapshot['assignments']['items'],
+) {
+  if (typeof assignment.title !== 'string' || !assignment.title.trim()) return null;
+  const isPreview = assignment.titleFormat === 'preview';
+  const title = isPreview ? assignment.title : normalizeTitle(assignment.title);
+  const matches = items.filter((row) =>
+    (isPreview ? campusAssignmentDisplayTitle(row.title) : normalizeTitle(row.title)) === title &&
+    row.groupName === (assignment.groupName ?? '') &&
+    row.dueAt === (assignment.dueAt ?? null));
+  return matches.length === 1 ? matches[0] : null;
 }
 
 /**
@@ -30,20 +50,11 @@ export function resolveCampusAssignmentTarget(input: {
   const now = input.now ?? Date.now();
   if (!Number.isFinite(now)) return null;
   const snapshot = validCampusSenseSnapshot(input.snapshot, input.scope, now);
-  if (!snapshot || snapshot.assignments.status !== 'available' ||
-      typeof input.assignment.title !== 'string' || !input.assignment.title.trim()) return null;
-  // The source payload can be cut to 140 characters. A 140-character row
-  // might be an incomplete title, so it cannot authorize a precise handoff.
-  // The 130-character UI preview is never a source identity.
-  const title = input.assignment.title.replace(/\s+/g, ' ').trim();
-  const matches = snapshot.assignments.items.filter((row) =>
-    row.title.length < 140 &&
-    row.title.replace(/\s+/g, ' ').trim() === title &&
-    row.groupName === (input.assignment.groupName ?? '') &&
-    row.dueAt === (input.assignment.dueAt ?? null));
-  // Same-title tasks must never pick whichever happens to appear first.
-  if (matches.length !== 1) return null;
-  const source = parseCampusAssignmentSource(matches[0].source);
+  if (!snapshot || snapshot.assignments.status !== 'available') return null;
+  const row = findUniqueCampusAssignment(input.assignment, snapshot.assignments.items);
+  // A server-capped row can contribute to ambiguity, but cannot authorize a handoff.
+  if (!row || row.title.length >= 140) return null;
+  const source = parseCampusAssignmentSource(row.source);
   if (!source) return null;
   return {
     route: 'HomeworkSubmit',
