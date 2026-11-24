@@ -30,6 +30,8 @@ describe('submitted boolean', () => {
     expect(isHomeworkSubmitted({ submitted: 'submitted' })).toBe(false);
     expect(isHomeworkTodo(LMS_FIXTURE_HOMEWORK_DONE)).toBe(false);
     expect(isHomeworkTodo(LMS_FIXTURE_HOMEWORK_OPEN)).toBe(true);
+    expect(isHomeworkTodo({})).toBe(false);
+    expect(isHomeworkTodo({ submitted: 'false' })).toBe(false);
   });
 });
 
@@ -47,6 +49,7 @@ describe('timezone display', () => {
 describe('deadline axis', () => {
   it('keeps submitted homework off the todo axis and overdue out of today', () => {
     const axis = selectDeadlineAxis([
+      { ...LMS_FIXTURE_HOMEWORK_OPEN, id: 90001, submitted: null },
       { ...LMS_FIXTURE_HOMEWORK_OPEN, deadline: LMS_FIXTURE_HOMEWORK_OPEN.deadline },
       { ...LMS_FIXTURE_HOMEWORK_DONE, deadline: LMS_FIXTURE_HOMEWORK_DONE.deadline },
       { ...LMS_FIXTURE_HOMEWORK_WEEK, deadline: LMS_FIXTURE_HOMEWORK_WEEK.deadline },

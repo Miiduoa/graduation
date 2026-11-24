@@ -22,6 +22,7 @@ import {
   LMS_CONNECTING_RETRY_LIMIT,
   lmsConnectingRetryDelayMs,
 } from '@/lib/lmsConnectingRetry';
+import { homeworkSubmissionLabel } from '@campus/shared/src/puLmsReadonly';
 import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
 import styles from '@/components/academic/academic.module.css';
 import lmsStyles from './schoolLms.module.css';
@@ -44,12 +45,13 @@ function areaLabel(area: string) {
 }
 
 function HomeworkCard({ item, schoolId }: { item: LmsHomeworkItem; schoolId: string }) {
+  const statusStyle = item.submitted === null ? '' : item.submitted ? lmsStyles.done : lmsStyles.todo;
   return (
     <li>
       <div className={lmsStyles.heading}>
         <h3>{item.title}</h3>
-        <span className={`${lmsStyles.badge} ${item.submitted ? lmsStyles.done : lmsStyles.todo}`}>
-          {item.submitted ? '已交' : '未交'}
+        <span className={`${lmsStyles.badge} ${statusStyle}`}>
+          {homeworkSubmissionLabel(item.submitted)}
         </span>
       </div>
       <p className={lmsStyles.meta}>{item.courseName} · {item.deadlineLabel || '截止時間未提供'}</p>
@@ -98,6 +100,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
   const connecting = isLmsConnectingRetryReason(reason);
   const needsLogin = reason === 'reconnect' || reason === 'permission';
   const homework = useMemo(() => snapshot?.homework.filter((item) => !courseId || item.courseId === courseId) ?? [], [snapshot, courseId]);
+  const unknownSubmissions = homework.filter((item) => item.submitted === null).length;
   const announcements = useMemo(() => snapshot?.announcements.filter((item) => !courseId || item.courseId === courseId) ?? [], [snapshot, courseId]);
   const materials = useMemo(() => snapshot?.materials.filter((item) => !courseId || item.courseId === courseId) ?? [], [snapshot, courseId]);
   const axis = useMemo(
@@ -201,6 +204,9 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
             ) : null}
             {view === 'axis' ? (
               <div className={lmsStyles.axis}>
+                {unknownSubmissions > 0 && (
+                  <p className={styles.note}>有 {unknownSubmissions} 筆作業的繳交狀態待確認，請在「全部作業」核對。</p>
+                )}
                 <section>
                   <h2>已逾期</h2>
                   {axis.overdue.length ? (
@@ -209,7 +215,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
                         <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} schoolId={schoolId} />
                       ))}
                     </ul>
-                  ) : <p className={styles.note}>目前沒有逾期未交的作業。</p>}
+                  ) : <p className={styles.note}>目前沒有已確認逾期未交的作業。</p>}
                 </section>
                 <section>
                   <h2>今天截止</h2>
@@ -219,7 +225,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
                         <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} schoolId={schoolId} />
                       ))}
                     </ul>
-                  ) : <p className={styles.note}>今天沒有未交且尚未截止的作業。</p>}
+                  ) : <p className={styles.note}>目前沒有已確認未交且今天即將截止的作業。</p>}
                 </section>
                 <section>
                   <h2>七天內截止</h2>
@@ -229,7 +235,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
                         <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} schoolId={schoolId} />
                       ))}
                     </ul>
-                  ) : <p className={styles.note}>七天內沒有其他未交作業。</p>}
+                  ) : <p className={styles.note}>七天內沒有其他已確認未交的作業。</p>}
                 </section>
               </div>
             ) : null}
