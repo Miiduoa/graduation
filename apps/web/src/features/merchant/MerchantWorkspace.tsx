@@ -27,6 +27,7 @@ import {
   validateMerchantApplicationInput,
   type MerchantOverviewView,
   type NuniMerchantApplicationInput,
+  type NuniMerchantWorkspace,
 } from '@campus/shared/src/nuniMerchant';
 import {
   createMerchantOperations,
@@ -241,12 +242,12 @@ function AccountWorkspace({
   onSwitchAccount: () => Promise<void>;
 }) {
   const [
-    { overview, details, listedStatuses, listedWorkspaceTenants, applicationsKnown, revocations },
+    { overview, details, verifiedListedRows, listedWorkspaceTenants, applicationsKnown, revocations },
     setWorkspaceSnapshot,
   ] = useState({
     overview: null as MerchantOverview | null,
     details: new Map<string, NuniMerchantWorkspaceDetail>(),
-    listedStatuses: new Map<string, string>(),
+    verifiedListedRows: new Map<string, NuniMerchantWorkspace>(),
     revocations: { list: 0, details: new Map<string, number>() },
     listedWorkspaceTenants: undefined as ReadonlySet<string> | undefined,
     applicationsKnown: false,
@@ -314,7 +315,7 @@ function AccountWorkspace({
     setWorkspaceSnapshot({
       overview: nextOverview,
       details: confirmed.verifiedDetails(),
-      listedStatuses: confirmed.listedStatuses(),
+      verifiedListedRows: confirmed.verifiedListedRows(),
       revocations: confirmed.workspaceRevocations(),
       listedWorkspaceTenants: confirmed.listedWorkspaceTenants(),
       applicationsKnown: confirmed.hasApplicationList(),
@@ -624,7 +625,7 @@ function AccountWorkspace({
           }
           onExpired={expire}
           confirmedDetail={details.get(key) ?? null}
-          confirmedListStatus={listedStatuses.get(key)}
+          confirmedListRow={verifiedListedRows.get(key)}
           receiptFloor={confirmed.workspaceReceiptFloor(key)}
           accessRevocation={revocations.details.get(key) ?? revocations.list}
           beginRequest={confirmed.beginRequest}

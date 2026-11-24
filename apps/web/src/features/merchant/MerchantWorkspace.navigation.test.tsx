@@ -898,42 +898,85 @@ it('uses the successful detail for same-version availability without a write rec
   await screen.findByText('暫停接單');
 });
 
-it('keeps a newer paused list row when a successful detail returns an older open version', async () => {
-  const open = { ...detail('store-a', true), paymentMode: 'online-and-counter' };
-  const paused = { ...open, readinessVersion: 2, locationStatus: 'closed', publicAccess: false };
+it('requires a detail matching the winning list version before sending settings', async () => {
+  const open: NuniMerchantWorkspaceDetail = { ...detail('store-a', true), paymentMode: 'online-and-counter', readinessVersion: 6 };
+  const paused: NuniMerchantWorkspaceDetail = {
+    ...open,
+    readinessVersion: 7,
+    locationStatus: 'closed',
+    publicAccess: false,
+    serviceModes: ['pickup', 'dine-in'],
+  };
   let row = open;
+  let detailResponse = open;
   const path = 'merchant-workspaces/campus-one/store-a';
-  mocks.request.mockImplementation((resource) => {
+  const writeSettings = vi.fn<(input: unknown) => Promise<never>>()
+    .mockRejectedValue(new NuniError(409, 'CONFLICT'));
+  mocks.request.mockImplementation((resource, _context, input) => {
     if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [row] });
-    if (resource === path) return Promise.resolve(open);
-    if (resource === `${path}/settings`)
-      return Promise.reject(new NuniError(409, 'CONFLICT'));
+    if (resource === path) return Promise.resolve(detailResponse);
+    if (resource === `${path}/settings`) return writeSettings(input);
     return respond(resource);
   });
+
   render(<MerchantWorkspace view="workspace" />);
   fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
   await screen.findByRole('button', { name: '暫停接單' });
   row = paused;
-  fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+  await act(async () => window.history.back());
   await screen.findByText('暫停接單');
-  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+
+  await act(async () => window.history.forward());
+  await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
   expect(screen.getByText('暫停接單')).toBeTruthy();
   expect(screen.queryByText('營業中')).toBeNull();
-  expect(mocks.request.mock.calls.filter(([resource]) => resource === path)).toHaveLength(3);
-  fireEvent.click(screen.getByRole('link', { name: '管理門市：一樓' }));
-  await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
-  const resume = await screen.findByRole<HTMLButtonElement>('button', { name: '恢復接單' });
-  expect(resume.disabled).toBe(false);
-  expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
-  expect(screen.queryByText(/目前無法取得這間門市的管理權限/)).toBeNull();
+  expect(screen.queryByRole('button', { name: '恢復接單' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '確認改為櫃檯付款' })).toBeNull();
+  expect(writeSettings).not.toHaveBeenCalled();
+
+  detailResponse = paused;
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+  await screen.findByText('自取、內用');
   fireEvent.click(screen.getByRole('button', { name: '確認改為櫃檯付款' }));
   await screen.findByText(/門市資料已變更/);
-  expect(mocks.request).toHaveBeenCalledWith(
-    `${path}/settings`,
-    'context-a',
-    expect.objectContaining({ serviceModes: ['pickup'], expectedVersion: 1 }),
-    'PUT',
+  expect(writeSettings).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ serviceModes: ['pickup', 'dine-in'], expectedVersion: 7 }),
   );
+});
+
+it.each([403, 404])('does not restore a pause notice after list denial %s and renewed access', async (status) => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const open = detail('store-a', true);
+  const paused = { ...open, readinessVersion: 2, locationStatus: 'closed', publicAccess: false };
+  const reopened = { ...open, readinessVersion: 3 };
+  let listDenied = false;
+  const readDetail = vi.fn().mockResolvedValue(open);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces')
+      return listDenied
+        ? Promise.reject(new NuniError(status, 'DENIED'))
+        : Promise.resolve({ workspaces: [open] });
+    if (resource === path) return readDetail();
+    if (resource === `${path}/availability`) return Promise.resolve(paused);
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+  await screen.findByText('門市狀態已更新：暫停接單。');
+
+  listDenied = true;
+  readDetail.mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
+  await act(async () => window.history.back());
+  await screen.findByText('目前無法確認店家資料，請重新載入。');
+  expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+
+  readDetail.mockResolvedValue(reopened);
+  await act(async () => window.history.forward());
+  await screen.findByText('營業中');
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
+  expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
 });
 
 it.each([
@@ -1678,13 +1721,19 @@ it.each([
 
     const detailReadsBeforeForward = readDetail.mock.calls.length;
     await act(async () => window.history.forward());
-    await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
-    await waitFor(() => expect(readDetail.mock.calls.length).toBeGreaterThan(detailReadsBeforeForward));
-    expect(screen.getByText('待完成：建立有庫存的首次菜單')).toBeTruthy();
+    await screen.findByText('待完成：建立有庫存的首次菜單');
+    expect(readDetail.mock.calls.length).toBeGreaterThan(detailReadsBeforeForward);
     expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
     await act(async () => finishApplications({ applications: [] }));
     expect(screen.queryByText(/目前有 \d+ 項有庫存的上架品項/)).toBeNull();
-    expect(screen.getByLabelText('品項 1 名稱')).toBeTruthy();
+    if (listVersion === 7) {
+      expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
+      readDetail.mockResolvedValue({ ...initial, ...missingMenu, readinessVersion: listVersion });
+      fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+    }
+    const menuName = await screen.findByLabelText<HTMLInputElement>('品項 1 名稱');
+    expect(menuName.value).toBe('蔬菜便當');
+    expect(screen.queryByText(/目前有 \d+ 項有庫存的上架品項/)).toBeNull();
   },
 );
 

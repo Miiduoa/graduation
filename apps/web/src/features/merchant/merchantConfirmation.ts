@@ -1,5 +1,4 @@
 import {
-  merchantWorkspaceStateLabel,
   type loadMerchantOverview,
   type NuniMerchantApplication,
   type NuniMerchantWorkspace,
@@ -64,18 +63,23 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     return revocations.get(key) ?? listRevocation;
   }
 
-  function discardWorkspace(key: string) {
+  function discardWorkspaceReceipts(key: string, revision: number) {
+    const draft = drafts.get(key);
+    if (draft) draft.menuReceipt = null;
+    receiptFloors.set(key, Math.max(receiptFloors.get(key) ?? 0, revision));
+  }
+
+  function discardWorkspace(key: string, revision: number) {
     const version = entries.get(key)?.row?.version;
     if (version !== undefined) revokedVersionFloors.set(key, version);
     entries.delete(key);
-    const draft = drafts.get(key);
-    if (draft) draft.menuReceipt = null;
+    discardWorkspaceReceipts(key, revision);
   }
 
   function revoke(key: string, revision: number) {
     if (revision <= Math.max(revokedThrough(key), entries.get(key)?.confirmedRevision ?? 0)) return;
     revocations.set(key, revision);
-    discardWorkspace(key);
+    discardWorkspace(key, revision);
     return revision;
   }
 
@@ -107,7 +111,10 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const key = workspaceKey(next);
     const entry = merge(next, revision);
     if (entry) {
-      entry.detail = latestObservation(entry.detail, next, revision);
+      // A successful read can confirm access independently of its readiness version.
+      if (next.readinessVersion === entry.row?.version) {
+        entry.detail = latestObservation(entry.detail, next, revision);
+      }
       if (verifiesAccess && revision > (verified.get(key) ?? 0)) verified.set(key, revision);
     }
     return detailFor(key);
@@ -121,8 +128,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const entry = entries.get(key);
     if (!entry?.row || !entry.detail || !hasVerifiedAccess(key)) return null;
     const detail = entry.detail.value;
+    if (detail.readinessVersion !== entry.row.version) return null;
     const row = entry.row.value;
-    // The winning requirements also govern the menu count. Settings use the detail version.
+    // A legacy row may omit its version. Use the confirmed detail version for the matched snapshot.
     return {
       ...detail,
       ...row,
@@ -202,10 +210,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
           }),
         );
         // An omitted store keeps its draft and readiness history, but loses its receipts.
-        for (const [key, draft] of drafts) {
+        for (const key of drafts.keys()) {
           if (listedWorkspaces.has(key)) continue;
-          draft.menuReceipt = null;
-          receiptFloors.set(key, revision);
+          discardWorkspaceReceipts(key, revision);
         }
       }
       for (const row of rows) merge(row, revision);
@@ -222,7 +229,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
             }
           } else {
             if (revocations.has(key)) revocations.set(key, Math.max(revokedThrough(key), revision));
-            discardWorkspace(key);
+            discardWorkspace(key, revision);
             retainedWorkspaceKeys.delete(key);
           }
         }
@@ -299,13 +306,13 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         ],
       };
     },
-    listedStatuses() {
-      const statuses = new Map<string, string>();
+    verifiedListedRows() {
+      const rows = new Map<string, NuniMerchantWorkspace>();
       for (const key of listedWorkspaces?.keys() ?? []) {
         const row = entries.get(key)?.row?.value;
-        if (row && hasVerifiedAccess(key)) statuses.set(key, merchantWorkspaceStateLabel(row));
+        if (row && hasVerifiedAccess(key)) rows.set(key, row);
       }
-      return statuses;
+      return rows;
     },
     confirmDetail,
     confirmMenu,

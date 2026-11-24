@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { NuniError } from '@campus/shared/src/nuni';
-import { merchantWorkspaceStateLabel } from '@campus/shared/src/nuniMerchant';
+import { merchantWorkspaceStateLabel, type NuniMerchantWorkspace } from '@campus/shared/src/nuniMerchant';
 import { isMerchantWorkspaceOperational } from '@campus/shared/src/merchantJourney';
 import {
   createMerchantOperations,
@@ -86,7 +86,7 @@ export function MerchantOperations({
   onBack,
   onExpired,
   confirmedDetail,
-  confirmedListStatus,
+  confirmedListRow,
   receiptFloor = 0,
   accessRevocation = 0,
   beginRequest,
@@ -110,7 +110,7 @@ export function MerchantOperations({
   onBack?(): void;
   onExpired(): void;
   confirmedDetail?: Detail | null;
-  confirmedListStatus?: string;
+  confirmedListRow?: NuniMerchantWorkspace;
   receiptFloor?: number;
   accessRevocation?: number;
   beginRequest?(): number;
@@ -136,9 +136,6 @@ export function MerchantOperations({
   const [busy, setBusy] = useState<Action | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState<{ value: string | number; revision: number } | null>(null);
-  useLayoutEffect(() => {
-    setNotice(null);
-  }, [receiptFloor]);
   const visibleNotice = detail && notice && notice.revision > receiptFloor ? notice.value : null;
   const [uncertain, setUncertain] = useState<Action | null>(saved?.uncertain ?? null);
   const [settings, setSettings] = useState<SettingDraft | null>(saved?.settings ?? null);
@@ -225,7 +222,10 @@ export function MerchantOperations({
         ? onDenied?.(tenantId, locationId, revision)
         : localConfirmations.revoke(draftKey, revision);
       if (revoked === undefined) return;
-      if (!beginRequest) setDetail(null);
+      if (!beginRequest) {
+        setDetail(null);
+        setNotice((current) => current && current.revision > revoked ? current : null);
+      }
       if (updateView) {
         accessRevision.current = Math.max(accessRevision.current, revoked);
         setFresh(false);
@@ -244,6 +244,7 @@ export function MerchantOperations({
         return false;
       // Session invalidation applies even after navigation retires the request's view.
       localConfirmations.clear();
+      setNotice(null);
       setDetail(null);
       setFresh(false);
       expire.current();
@@ -289,7 +290,11 @@ export function MerchantOperations({
         const merged = confirmDetail(next, true, revision);
         if (!current()) return;
         showDetail(merged);
-        if (!merged) return;
+        if (!merged) {
+          setReadUnavailable(true);
+          setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+          return;
+        }
         if (!readAfterWrite.current) setEntryVerified(true);
         // A count of zero cannot prove a non-idempotent menu request failed:
         // an existing menu may have no remaining sellable stock.
@@ -428,6 +433,10 @@ export function MerchantOperations({
 
   if (!visible) return null;
   if (suspended) return <p role="status">正在重新確認帳號，門市資料暫時隱藏。</p>;
+  const summary = detail ?? (!loading && (entryVerified || readUnavailable) ? confirmedListRow : null);
+  const missingRequirements = summary?.missingRequirements
+    .map((item) => requirements[item] ?? '請向場域管理者確認')
+    .join('、');
   const draft = settings ?? (detail ? settingsOf(detail) : null);
   const settingsChanged =
     !!settings && !!detail && settings.baseVersion !== detail.readinessVersion;
@@ -482,8 +491,11 @@ export function MerchantOperations({
       </div>
       {(loading || (!entryVerified && busy)) && <p role="status">正在確認門市資料…</p>}
       {error && <p role="alert">{error}</p>}
-      {!detail && confirmedDetail && readUnavailable && confirmedListStatus && (
-        <p role="status">{confirmedListStatus}</p>
+      {!detail && summary && (
+        <div role="status">
+          <p>{merchantWorkspaceStateLabel(summary)}</p>
+          {missingRequirements && <p>待完成：{missingRequirements}</p>}
+        </div>
       )}
       {typeof visibleNotice === 'number'
         ? menuReceipt !== null && (
@@ -500,14 +512,7 @@ export function MerchantOperations({
               {detail.tenantName} · {detail.campusName}
             </p>
             <p>{merchantWorkspaceStateLabel(detail)}</p>
-            {detail.missingRequirements.length > 0 && (
-              <p>
-                待完成：
-                {detail.missingRequirements
-                  .map((item) => requirements[item] ?? '請向場域管理者確認')
-                  .join('、')}
-              </p>
-            )}
+            {missingRequirements && <p>待完成：{missingRequirements}</p>}
           </section>
 
           {navigation && (
