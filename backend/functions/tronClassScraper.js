@@ -990,11 +990,21 @@ function httpError(status) {
 function homeworkPaginationNumber(value, required = true) {
   if (value === undefined || value === null) return null;
   if (!required) {
-    // Number() only for primitives (and arrays, whose Number() never throws).
-    // Other objects pass through as unusable rather than throwing TypeError, so
-    // a legacy page such as {"toString": null} can still be returned as-is.
+    // Number() only for primitives, and for arrays whose elements are also
+    // primitives (Number([]) is 0, Number([50]) is 50). Other objects, and
+    // arrays such as [{"toString": null}], must not call Number() because
+    // stringification can throw; treat them as unusable so the legacy caller
+    // can still return the raw page field.
     const typ = typeof value;
-    if (typ === 'number' || typ === 'string' || typ === 'boolean' || typ === 'bigint' || Array.isArray(value)) {
+    if (typ === 'number' || typ === 'string' || typ === 'boolean' || typ === 'bigint') {
+      const parsed = Number(value);
+      return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+    }
+    if (Array.isArray(value) && value.every((item) => {
+      const itemType = typeof item;
+      return itemType === 'number' || itemType === 'string' || itemType === 'boolean' || itemType === 'bigint' ||
+        item === null || item === undefined;
+    })) {
       const parsed = Number(value);
       return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
     }
@@ -1025,8 +1035,8 @@ async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize =
   // as null can make a short or empty response appear complete and hide remaining
   // assignments. Legacy callers keep the older missing-total compatibility.
   const total = homeworkPaginationNumber(data.total, strict);
-  const sourcePage = homeworkPaginationNumber(data.page, strict);
-  const sourcePageSize = homeworkPaginationNumber(data.page_size, strict);
+  const sourcePage = strict ? homeworkPaginationNumber(data.page, true) : null;
+  const sourcePageSize = strict ? homeworkPaginationNumber(data.page_size, true) : null;
   const requestedPage = homeworkPaginationNumber(page, false);
   const requestedPageSize = homeworkPaginationNumber(pageSize, false);
   // Legacy and integration alike cap the array by the requested page size, matching
