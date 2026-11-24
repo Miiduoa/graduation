@@ -225,6 +225,32 @@ test('production workflows fail closed unless the run is on main', () => {
   assertFailsOffMain(announcements.jobs.sync.steps[0]);
 });
 
+test('Android production artifacts pass the native page-size gate before Play submission', () => {
+  const steps = parseWorkflow('release.yml').jobs['build-android'].steps;
+  const receipt = steps.findIndex((step) => step.id === 'artifact');
+  const gate = steps.findIndex((step) =>
+    step.run?.includes('scripts/verify-android-page-sizes.py'),
+  );
+  const submit = steps.findIndex((step) => step.run?.includes('eas submit --platform android'));
+  assert.ok(receipt >= 0 && receipt < gate && gate < submit);
+  assert.match(
+    steps[receipt].run,
+    /verify-eas-build\.mjs "\$RUNNER_TEMP\/eas-build-android\.json"/,
+  );
+  assert.match(
+    steps[gate].run,
+    /\.applicationArchiveUrl \/\/ \.buildUrl' "\$RUNNER_TEMP\/eas-build-android\.json"/,
+  );
+  assert.notEqual(steps[gate]['continue-on-error'], true);
+  for (const [profile, required] of [
+    ['production', true],
+    ['production-device', true],
+    ['preview', false],
+  ]) {
+    assert.equal(vm.runInNewContext(steps[gate].if, { inputs: { profile } }), required);
+  }
+});
+
 test('production build-only dispatch runs both guarded builds without creating a draft or submitting', () => {
   const release = parseWorkflow('release.yml');
   const input = release.on.workflow_dispatch.inputs.build_only_sha;
