@@ -44,18 +44,19 @@ export function GuestCampusHandoffProvider({
   enabled: boolean;
   children: ReactNode;
 }) {
-  const currentIdentity = useRef<string | null>(null);
+  const generation = useMemo(() => ({ identity, enabled }), [identity, enabled]);
+  const active = useRef<typeof generation | null>(null);
   const handoff = useMemo(
-    () => (enabled ? createHandoff(() => currentIdentity.current === identity) : null),
-    [identity, enabled],
+    () => (generation.enabled ? createHandoff(() => active.current === generation) : null),
+    [generation],
   );
   useLayoutEffect(() => {
-    currentIdentity.current = enabled ? identity : null;
+    active.current = generation;
     return () => {
-      currentIdentity.current = null;
+      active.current = null;
       handoff?.clear();
     };
-  }, [identity, enabled, handoff]);
+  }, [generation, handoff]);
   return <Context.Provider value={handoff}>{children}</Context.Provider>;
 }
 

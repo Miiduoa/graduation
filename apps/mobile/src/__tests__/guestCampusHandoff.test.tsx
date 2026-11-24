@@ -55,3 +55,19 @@ test('a cancelled selection, another account or a privileged session cannot repl
   view.rerender(app('other-account', 'pu'));
   expect(current!.consume('pu', 'LoginLanding')).toBeUndefined();
 });
+
+test('a former identity generation stays revoked when the same account or public mode returns', () => {
+  const view = render(app('account-a', 'no-school'));
+  const firstA = current!;
+  view.rerender(app('account-b', 'pu'));
+  view.rerender(app('account-a', 'pu'));
+  firstA.remember(destination);
+  expect(firstA.consume('pu', 'LoginLanding')).toBeUndefined();
+  const secondA = current!;
+  view.rerender(app('account-a', 'pu', false));
+  view.rerender(app('account-a', 'pu'));
+  secondA.remember(destination);
+  expect(secondA.consume('pu', 'LoginLanding')).toBeUndefined();
+  current!.remember(destination);
+  expect(current!.consume('pu', 'LoginLanding')).toBe('Library');
+});
