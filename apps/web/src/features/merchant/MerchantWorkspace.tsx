@@ -50,7 +50,6 @@ import { useMerchantWorkspaceRoute } from '@/lib/useMerchantWorkspaceRoute';
 
 import {
   createMerchantConfirmations,
-  workspaceDetail,
   workspaceKey,
   type MerchantOverview,
 } from './merchantConfirmation';
@@ -241,7 +240,11 @@ function AccountWorkspace({
   onExpired: () => Promise<void>;
   onSwitchAccount: () => Promise<void>;
 }) {
-  const [overview, setOverview] = useState<MerchantOverview | null>(null);
+  const [{ overview, details, applicationsKnown }, setWorkspaceSnapshot] = useState({
+    overview: null as MerchantOverview | null,
+    details: new Map<string, NuniMerchantWorkspaceDetail>(),
+    applicationsKnown: false,
+  });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [detailError, setDetailError] = useState('');
@@ -280,7 +283,6 @@ function AccountWorkspace({
   }
   const generation = useRef(0);
   const [confirmed] = useState(createMerchantConfirmations);
-  const [applicationsKnown, setApplicationsKnown] = useState(false);
   const mounted = useRef(true);
   const busyRef = useRef(false);
   const enabled = useRef(false);
@@ -294,8 +296,11 @@ function AccountWorkspace({
     ++generation.current;
   }, []);
   const publishOverview = useCallback(() => {
-    setApplicationsKnown(confirmed.hasApplicationList());
-    setOverview(confirmed.overview());
+    setWorkspaceSnapshot({
+      overview: confirmed.overview(),
+      details: confirmed.verifiedDetails(),
+      applicationsKnown: confirmed.hasApplicationList(),
+    });
   }, [confirmed]);
   const clearOverview = useCallback(() => {
     confirmed.clear();
@@ -517,11 +522,11 @@ function AccountWorkspace({
       if (!mounted.current || !enabled.current) return null;
       const key = workspaceKey(detail);
       if (verifiedAccess) confirmed.verify(key, revision, false);
-      const merged = confirmed.merge(detail, verifiedAccess ? 'read' : 'write', revision);
-      const allowed = !confirmed.denied(key);
-      if (allowed) setHasVerifiedLocation(true);
+      confirmed.merge(detail, verifiedAccess ? 'read' : 'write', revision);
+      const confirmedDetail = confirmed.detailFor(key);
+      if (confirmedDetail) setHasVerifiedLocation(true);
       publishOverview();
-      return allowed ? workspaceDetail(merged) : null;
+      return confirmedDetail;
     },
     [publishOverview, confirmed],
   );
@@ -567,6 +572,7 @@ function AccountWorkspace({
               : undefined
           }
           onExpired={expire}
+          confirmedDetail={details.get(key) ?? null}
           beginRequest={confirmed.beginRequest}
           onChanged={onWorkspaceChanged}
           onMenuConfirmed={onMenuConfirmed}

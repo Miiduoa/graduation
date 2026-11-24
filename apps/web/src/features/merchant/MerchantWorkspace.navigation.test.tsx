@@ -610,10 +610,36 @@ it.each([2, 3])(
     fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
     await screen.findByRole('link', { name: '管理門市：一樓' });
     await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
-    expect(screen.getByText('營業中')).toBeTruthy();
-    expect(screen.queryByText('暫停接單')).toBeNull();
+    const expected = readinessVersion === 2 ? '暫停接單' : '營業中';
+    expect(screen.getByText(expected)).toBeTruthy();
+    expect(screen.queryByText(readinessVersion === 2 ? '營業中' : '暫停接單')).toBeNull();
   },
 );
+
+it('uses the later same-version list when the detail refresh fails without a write', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const open = detail('store-a', true);
+  const paused = { ...open, locationStatus: 'closed', publicAccess: false };
+  let listed = open;
+  const readDetail = vi.fn(() => Promise.resolve(open));
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [listed] });
+    if (resource === path) return readDetail();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByText('營業中');
+
+  listed = paused;
+  readDetail.mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
+  await act(async () => window.history.back());
+  await screen.findByText('暫停接單');
+  await screen.findByText('目前無法更新部分門市資料，請重新載入。');
+  expect(readDetail).toHaveBeenCalledTimes(2);
+  expect(screen.queryByText('營業中')).toBeNull();
+});
 
 it.each([
   { confirmation: 'the detail succeeds', detailFails: false },
@@ -962,5 +988,43 @@ it.each([403, 404])(
     await screen.findByText('目前無法確認店家資料，請重新載入。');
     expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
     expect(screen.queryByRole('link', { name: '管理門市：二樓' })).toBeNull();
+  },
+);
+
+
+it.each([403, 404])(
+  'hides cached operations on browser forward after the list returns %s',
+  async (status) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const open = detail('store-a', true);
+    let listDenied = false;
+    const readDetail = vi.fn(() => Promise.resolve(open));
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces')
+        return listDenied
+          ? Promise.reject(new NuniError(status, 'DENIED'))
+          : Promise.resolve({ workspaces: [open] });
+      if (resource === path) return readDetail();
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+    expect(screen.getByText('服務方式')).toBeTruthy();
+
+    listDenied = true;
+    readDetail.mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
+    await act(async () => window.history.back());
+    await screen.findByText('目前無法確認店家資料，請重新載入。');
+    await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
+    expect(readDetail).toHaveBeenCalledTimes(2);
+
+    await act(async () => window.history.forward());
+    await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+    expect(readDetail).toHaveBeenCalledTimes(3);
+    expect(screen.queryByRole('heading', { name: '餐坊／一樓' })).toBeNull();
+    expect(screen.queryByText('營業中')).toBeNull();
+    expect(screen.queryByText('服務方式')).toBeNull();
   },
 );

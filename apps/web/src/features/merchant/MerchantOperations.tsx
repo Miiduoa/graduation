@@ -85,6 +85,7 @@ export function MerchantOperations({
   navigation,
   onBack,
   onExpired,
+  confirmedDetail,
   beginRequest,
   onChanged,
   onDenied,
@@ -105,6 +106,7 @@ export function MerchantOperations({
   };
   onBack?(): void;
   onExpired(): void;
+  confirmedDetail?: Detail | null;
   beginRequest?(): number;
   onChanged(detail: Detail, verifiedAccess: boolean, revision: number): Detail | null | void;
   onMenuConfirmed?(detail: Detail): void;
@@ -121,7 +123,7 @@ export function MerchantOperations({
   );
   const [loadedDetail, setDetail] = useState<Detail | null>(null);
   const [entryVerified, setEntryVerified] = useState(false);
-  const detail = entryVerified ? loadedDetail : null;
+  const detail = entryVerified ? (confirmedDetail === undefined ? loadedDetail : confirmedDetail) : null;
   const [loading, setLoading] = useState(true);
   const [fresh, setFresh] = useState(false);
   const [busy, setBusy] = useState<Action | null>(null);
@@ -191,7 +193,7 @@ export function MerchantOperations({
           : workspaceDetail(
               localConfirmations.merge(next, verifiedAccess ? 'read' : 'write', revision),
             ));
-      setDetail(merged);
+      if (!beginRequest) setDetail(merged);
       setFresh(!!merged);
       setMenuConfirmed(false);
       setActivationConfirmed(false);
@@ -293,7 +295,7 @@ export function MerchantOperations({
     action: Action,
     task: (current: () => boolean, revision: number) => Promise<void>,
   ) {
-    if (!active.current || lock.current || loading || uncertain || !fresh || !entryVerified) return;
+    if (!active.current || lock.current || loading || uncertain || !fresh || !detail) return;
     lock.current = true;
     const mutation = ++mutationRun.current;
     const version = ++run.current;

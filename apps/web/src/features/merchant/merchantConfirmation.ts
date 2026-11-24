@@ -32,14 +32,15 @@ function isNewer(next: Observation, current?: Observation) {
   );
 }
 
+function latestObservation<T extends Observation>(...observations: (T | undefined)[]) {
+  return observations.reduce<T | undefined>(
+    (latest, observation) => observation && isNewer(observation, latest) ? observation : latest,
+    undefined,
+  );
+}
+
 function confirmedRow({ list, read, write }: WorkspaceObservations) {
-  const version = Math.max(versionOf(list), versionOf(read), versionOf(write));
-  const writeRevision = versionOf(write) === version ? write!.revision : 0;
-  // At the same version, a successful detail takes precedence over the list
-  // among confirmations initiated after the latest write at that version.
-  if (read && versionOf(read) === version && read.revision > writeRevision) return read.value;
-  if (list && versionOf(list) === version && list.revision > writeRevision) return list.value;
-  return write!.value;
+  return latestObservation(list, read, write)!.value;
 }
 
 function availabilityOf(row: NuniMerchantWorkspace) {
@@ -104,9 +105,23 @@ export function createMerchantConfirmations() {
 
     const row = confirmedRow(entry);
     if (!row.missingRequirements.includes('menu')) menus.add(key);
-    const detail =
-      entry.write && isNewer(entry.write, entry.read) ? entry.write.value : entry.read?.value;
+    const detail = latestObservation(entry.read, entry.write)?.value;
     return { row: withMenu(key, row), detail: detail && withMenu(key, detail) };
+  }
+
+  function hasVerifiedAccess(key: string) {
+    const verification = access.get(key);
+    return !!verification && !verification.denied && verification.request > listDenialRevision;
+  }
+
+  function detailFor(key: string) {
+    const entry = entries.get(key);
+    if (!entry || !hasVerifiedAccess(key)) return null;
+    const detail = latestObservation(entry.read, entry.write)?.value;
+    return workspaceDetail({
+      row: confirmedRow(entry),
+      detail: detail && withMenu(key, detail),
+    });
   }
 
   function confirmMenu(key: string) {
@@ -132,6 +147,14 @@ export function createMerchantConfirmations() {
 
   return {
     hasApplicationList: () => lists.applications !== undefined,
+    verifiedDetails() {
+      const details = new Map<string, NuniMerchantWorkspaceDetail>();
+      for (const key of entries.keys()) {
+        const detail = detailFor(key);
+        if (detail) details.set(key, detail);
+      }
+      return details;
+    },
     setPrograms(programs?: MerchantOverview['programs']) {
       if (programs) lists.programs = programs;
       else delete lists.programs;
@@ -178,8 +201,7 @@ export function createMerchantConfirmations() {
       const workspaces = new Map((lists.workspaces ?? []).map((row) => [workspaceKey(row), row]));
       if (includeVerifiedWorkspaces) {
         for (const [key, entry] of entries) {
-          const verification = access.get(key);
-          if (verification && !verification.denied && verification.request > listDenialRevision)
+          if (hasVerifiedAccess(key))
             workspaces.set(key, confirmedRow(entry));
         }
       }
@@ -200,7 +222,7 @@ export function createMerchantConfirmations() {
     confirmMenu,
     beginRequest: () => ++request,
     verify,
-    denied: (key: string) => access.get(key)?.denied === true,
+    detailFor,
     needsAccessRefresh(key: string) {
       const entry = entries.get(key);
       return access.has(key) || !!entry?.read || !!entry?.write;
