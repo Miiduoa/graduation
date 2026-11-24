@@ -37,10 +37,11 @@ import {
   markPublicNavigationUnready,
   publicNavigationRef,
 } from './src/app/publicNavigation';
-import { NuniSessionProvider } from './src/state/nuniSession';
+import { NuniSessionProvider, useNuniSession } from './src/state/nuniSession';
 import { ThemeProvider, useThemeMode } from './src/state/theme';
 import { NotificationsProvider } from './src/state/notifications';
 import { SearchHistoryProvider } from './src/state/searchHistory';
+import { GuestCampusHandoffProvider, useGuestCampusHandoff } from './src/app/guestCampusHandoff';
 import { ScheduleProvider } from './src/state/schedule';
 import { PreferencesProvider } from './src/state/preferences';
 import { AccessibilityProvider } from './src/state/accessibility';
@@ -364,6 +365,8 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   const { schoolId: selectedSchoolId, selectionReady } = useSchool();
   const schoolId = selectionReady ? selectedSchoolId : null;
   const schoolSessionReady = hasReadySchoolSession(auth, schoolId);
+  const platform = useNuniSession();
+  const guestIdentity = JSON.stringify([auth.user?.uid ?? null, platform.session?.platformAccountId ?? null]);
   const userId = schoolSessionReady ? auth.user!.uid : null;
   const appState = useRef(AppState.currentState);
 
@@ -411,11 +414,13 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   return (
     <SearchHistoryProvider userId={userId} schoolId={schoolId}>
       <FavoritesProvider userId={userId} schoolId={schoolId}>
-        <ScheduleProvider>
-          {schoolSessionReady ? <SyncStatusHandler /> : null}
-          {schoolSessionReady ? <TokenErrorHandler /> : null}
-          {children}
-        </ScheduleProvider>
+        <GuestCampusHandoffProvider identity={guestIdentity} enabled={!schoolSessionReady}>
+          <ScheduleProvider>
+            {schoolSessionReady ? <SyncStatusHandler /> : null}
+            {schoolSessionReady ? <TokenErrorHandler /> : null}
+            {children}
+          </ScheduleProvider>
+        </GuestCampusHandoffProvider>
       </FavoritesProvider>
     </SearchHistoryProvider>
   );
@@ -608,6 +613,8 @@ function AppNavigation() {
 }
 
 function PublicNavigation() {
+  const handoff = useGuestCampusHandoff();
+  const { schoolId } = useSchool();
   const navTheme = {
     ...DefaultTheme,
     colors: {
@@ -631,6 +638,8 @@ function PublicNavigation() {
       linking={preAuthLinking}
       onReady={() => {
         markPublicNavigationReady();
+        const destination = handoff?.consume(schoolId, publicNavigationRef.getCurrentRoute()?.name);
+        if (destination) publicNavigationRef.navigate(destination);
       }}
     >
       <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>

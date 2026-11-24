@@ -140,8 +140,9 @@ jest.mock('../screens/CampusContentScreens', () => {
 });
 jest.mock('../components/TodayTimetablePanel', () => ({ TodayTimetablePanel: () => null }));
 jest.mock('../components/SchoolBrowsingControl', () => ({
-  SchoolBrowsingControl: () => {
-    const { Text } = require('react-native');
+  SchoolBrowsingControl: ({ destination }: { destination?: { title: string; onCancel: () => void } }) => {
+    const { Button, Text } = require('react-native');
+    if (destination) return <Button title={`取消開啟${destination.title}`} onPress={destination.onCancel} />;
     return <Text testID="school-browsing-control">瀏覽校園</Text>;
   },
 }));
@@ -640,14 +641,24 @@ test('a direct library route waits for school selection and resumes the original
   setBrowsingSchoolId('');
   const { view, navigation, onUnhandledAction } = renderPublicStack();
   await view.findByTestId('login-landing');
-  expect(view.queryByTestId('public-Library')).toBeNull();
-  act(() => navigation.navigate('Library' as never));
-  await view.findByText('先選擇要瀏覽的學校');
+  fireEvent.press(view.getByTestId('public-Library'));
+  await view.findByText('取消開啟圖書館');
   expect(view.queryByTestId('public-library-screen')).toBeNull();
   expect(navigation.getCurrentRoute()?.name).toBe('Library');
   act(() => setBrowsingSchoolId('nthu'));
   await view.findByTestId('public-library-screen');
   expect(navigation.getCurrentRoute()?.name).toBe('Library');
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test('cancelling the guest service picker returns to the originating landing screen without opening a service', async () => {
+  setBrowsingSchoolId('');
+  const { view, navigation, onUnhandledAction } = renderPublicStack();
+  fireEvent.press(await view.findByTestId('public-BusSchedule'));
+  fireEvent.press(await view.findByText('取消開啟公車查詢'));
+  await view.findByTestId('login-landing');
+  expect(navigation.getCurrentRoute()?.name).toBe('LoginLanding');
+  expect(view.queryByTestId('public-bus-screen')).toBeNull();
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 

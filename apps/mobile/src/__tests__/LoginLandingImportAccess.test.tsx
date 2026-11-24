@@ -71,7 +71,7 @@ it('lets the school picker handle the first result tap while its keyboard is ope
   expect(view.UNSAFE_getByType(ScrollView).props.keyboardShouldPersistTaps).toBe('handled');
 });
 
-it('prioritizes the Google account entry before school import and public services', async () => {
+it('offers guest shortcuts before account setup and keeps school imports after the account entry', async () => {
   const view = await landing();
   const tree = JSON.stringify(view.toJSON());
   const importIndex = tree.indexOf('"testID":"school-import-start"');
@@ -80,8 +80,8 @@ it('prioritizes the Google account entry before school import and public service
   expect(importIndex).toBeGreaterThanOrEqual(0);
   expect(accountIndex).toBeGreaterThanOrEqual(0);
   expect(importIndex).toBeGreaterThan(accountIndex);
-  expect(servicesIndex).toBeGreaterThan(importIndex);
-  expect(servicesIndex).toBeGreaterThan(accountIndex);
+  expect(servicesIndex).toBeGreaterThanOrEqual(0);
+  expect(servicesIndex).toBeLessThan(accountIndex);
   expect(view.getAllByTestId(/^public-/)).toHaveLength(11);
   expect(view.getByTestId('public-StudentCard').props.accessibilityLabel).toBe('數位學生證');
   expect(safeNavigate).not.toHaveBeenCalled();

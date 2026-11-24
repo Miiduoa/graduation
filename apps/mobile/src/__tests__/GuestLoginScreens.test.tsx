@@ -546,7 +546,7 @@ test('changing university cancels the old credential form and drops its late res
 test('public landing shows the current browsing campus and opens its library without school login', () => {
   const view = render(<LoginLandingScreen />);
   expect(view.getByText('瀏覽校園')).toBeTruthy();
-  expect(view.getByText('靜宜大學')).toBeTruthy();
+  expect(view.getByLabelText('目前瀏覽靜宜大學，選擇其他學校')).toBeTruthy();
   expect(view.getByTestId('public-Library')).toBeTruthy();
   fireEvent.press(view.getByTestId('public-Library'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Library');

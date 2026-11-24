@@ -3,6 +3,8 @@ import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
+import { useGuestCampusHandoff } from '../app/guestCampusHandoff';
+import { guestCampusServices } from './guestCampusServices';
 import LoginLandingScreen from './LoginLandingScreen';
 import { GoogleMapsLikeScreen } from './GoogleMapsLikeScreen';
 import BusAiFirstScreen from './BusAiFirstScreen';
@@ -19,30 +21,44 @@ import { CourseCatalogScreen } from './CourseCatalogScreen';
 import { HealthScreen } from './HealthScreen';
 import { DormitoryScreen } from './DormitoryScreen';
 import { PlatformLostFoundScreen } from './PlatformLostFoundScreen';
-import { UnavailableFeatureScreen, type ServiceScreenProps } from './UnavailableFeatureScreen';
+import type { ServiceScreenProps } from './UnavailableFeatureScreen';
 import type { PreAuthStackParamList } from './preAuthTypes';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { AIButton } from '../ui/aiFirst';
 import { useNuniSession } from '../state/nuniSession';
 import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 import { useSchool } from '../state/school';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 
 const Stack = createNativeStackNavigator<PreAuthStackParamList, undefined>();
 
-/** Public guest stack may only deep-link into registered PreAuth routes. */
-const PUBLIC_UNAVAILABLE_ACTIONS = [{ label: '查看校方公告', route: '公告總覽' }];
-
 function PublicCareerScreen(props: ServiceScreenProps) {
   const { CareerScreen } = require('./CareerScreen') as typeof import('./CareerScreen');
   return <CareerScreen navigation={props.navigation} />;
 }
 
-function PublicSchoolRoute({ children, onHome }: { children: React.ReactNode; onHome: () => void }) {
+function PublicSchoolRoute({ children, route, onCancel, onHome }: {
+  children: React.ReactNode;
+  route: keyof PreAuthStackParamList;
+  onCancel: () => void;
+  onHome: () => void;
+}) {
   const { school, selectionReady } = useSchool();
+  const handoff = useGuestCampusHandoff();
+  const service = guestCampusServices.find((item) => item.route === route);
+  // When the canonical scope did not remount navigation, this route already resumed in place.
+  React.useEffect(() => { if (school.id && service) handoff?.clear(); }, [school.id, service, handoff]);
   if (selectionReady === false) return <ActivityIndicator accessibilityLabel="正在讀取選校設定" />;
   if (school.id) return <>{children}</>;
+  if (service) {
+    return <SchoolBrowsingControl destination={{
+      title: service.title,
+      onChoose: (schoolId) => handoff?.remember({ route: service.route, schoolId }),
+      onCancel: () => { handoff?.clear(); onCancel(); },
+    }} />;
+  }
   return (
     <SafeAreaView style={{ flex: 1, padding: 20, backgroundColor: theme.colors.bg }}>
       <View style={{ gap: 14 }}>
@@ -62,6 +78,7 @@ function PublicSchoolRoute({ children, onHome }: { children: React.ReactNode; on
  */
 export function PreAuthStack() {
   useThemeMode();
+  const reducedMotion = useReducedMotion();
   const platform = useNuniSession();
   const platformReady = !!platform.session && !platform.loading && !platform.error && !platform.pendingLogout;
 
@@ -70,10 +87,14 @@ export function PreAuthStack() {
       initialRouteName="LoginLanding"
       screenLayout={({ children, route, navigation }) =>
         route.name === 'LoginLanding' || route.name === 'NuniWorkspace' || route.name === 'TronClassWorkspace' || route.name === 'OralExamDemo' ? <>{children}</> : (
-          <PublicSchoolRoute onHome={() => navigation.navigate('LoginLanding')}>{children}</PublicSchoolRoute>
+          <PublicSchoolRoute
+            route={route.name}
+            onCancel={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('LoginLanding')}
+            onHome={() => navigation.navigate('LoginLanding')}
+          >{children}</PublicSchoolRoute>
         )
       }
-      screenOptions={createStackScreenOptions()}
+      screenOptions={{ ...createStackScreenOptions(), ...(reducedMotion ? { animation: 'none' as const } : {}) }}
       id={undefined}
     >
       <Stack.Screen

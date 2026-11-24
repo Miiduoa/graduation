@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
+import { guestCampusServices } from './guestCampusServices';
 import { safeNavigate } from '../utils/safeNavigate';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
@@ -33,6 +35,7 @@ async function openStaffLogin(path: '/auth/account?method=school' | '/admin/logi
 
 export default function LoginLandingScreen() {
   const navigation = useNavigation();
+  const { fontScale, width } = useWindowDimensions();
   const auth = useNuniSession();
   const { school, selectionReady } = useSchool();
   const s = useThemeStyleSheet(createStyles);
@@ -102,14 +105,39 @@ export default function LoginLandingScreen() {
           </View>
         )}
         <View style={s.intro}>
-          <Text style={s.school}>{platformReady && hasSchool ? `${school.name} · 今天` : '課程・校園・每天的事'}</Text>
+          {(hasSchool || platformReady) && (
+            <Text style={s.school}>{hasSchool ? (platformReady ? `${school.name} · 今天` : school.name) : '課程・校園・每天的事'}</Text>
+          )}
           <Text accessibilityRole="header" style={s.heading}>
-            {platformReady ? '今天先處理哪件事？' : '把自己的校園資料，整理在一起'}
+            {platformReady ? '今天先處理哪件事？' : '校園服務'}
           </Text>
           <Text style={s.body}>
             {platformReady ? '從課程、訂單或自己的安排接著做。教學與門市工作可由上方工作入口進入。'
-              : '使用 Google 帳號即可加入平台課程、繳交作業與查看自己的訂單，不必先綁定學校。選擇學校後，可另外匯入自己的課表、成績與活動；校園地圖、公車與公開資訊不必登入。'}
+              : hasSchool ? '校園公開資訊免登入。' : '免登入。先選服務，再選擇要瀏覽的學校。'}
           </Text>
+          {!platformReady && (
+            <View style={s.quickActions}>
+              {guestCampusServices.map(({ route, title, icon }) => (
+                <Pressable
+                  key={route}
+                  testID={`public-${route}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={title}
+                  style={({ pressed }) => [s.quickAction, { flexBasis: Math.min(width - 48, 92 * Math.max(1, fontScale)) }, pressed && s.quickActionPressed]}
+                  onPress={() => safeNavigate(navigation, route)}
+                >
+                  <View
+                    style={s.quickIcon}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                  >
+                    <Ionicons name={icon} size={30} color={theme.colors.accent} />
+                  </View>
+                  <Text style={s.quickLabel}>{title}</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
           {platformReady && (
             <Pressable
               accessibilityRole="button"
@@ -284,7 +312,8 @@ export default function LoginLandingScreen() {
                   ['Dormitory', '宿舍服務', `查看${school.name}報修管道與入住事項；設備問題只存成個人備忘`],
                   ['Career', '職涯資訊', `前往${school.name}職涯與就業輔導公開資訊`],
                 ] as const
-              ).map(([route, title, detail], index) => (
+              ).filter(([route]) => platformReady || !guestCampusServices.some((service) => service.route === route))
+              .map(([route, title, detail], index) => (
                 <Pressable
                   key={route}
                   testID={`public-${route}`}
@@ -293,13 +322,15 @@ export default function LoginLandingScreen() {
                   style={({ pressed }) => [s.publicButton, pressed && s.rowPressed]}
                   onPress={() => safeNavigate(navigation, route)}
                 >
-                  <Text
-                    style={s.serviceNumber}
-                    accessibilityElementsHidden
-                    importantForAccessibility="no"
-                  >
-                    {String(index + 1).padStart(2, '0')}
-                  </Text>
+                  {platformReady ? (
+                    <Text
+                      style={s.serviceNumber}
+                      accessibilityElementsHidden
+                      importantForAccessibility="no"
+                    >
+                      {String(index + 1).padStart(2, '0')}
+                    </Text>
+                  ) : null}
                   <View style={s.serviceCopy}>
                     <Text style={s.publicTitle}>{title}</Text>
                     <Text style={s.publicDetail}>{detail}</Text>
@@ -440,6 +471,40 @@ const createStyles = () =>
       fontSize: 12,
       fontVariant: ['tabular-nums'],
       width: 24,
+    },
+    quickActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 20 },
+    quickAction: {
+      flexGrow: 1,
+      maxWidth: '100%',
+      minHeight: 116,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+      paddingVertical: 16,
+      paddingHorizontal: 8,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+    },
+    quickActionPressed: {
+      backgroundColor: theme.colors.surfaceInteractive,
+      borderColor: theme.colors.accent,
+    },
+    quickIcon: {
+      width: 56,
+      height: 56,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.colors.accentSoft,
+    },
+    quickLabel: {
+      color: theme.colors.text,
+      textAlign: 'center',
+      fontSize: 15,
+      lineHeight: 22,
+      fontWeight: '600',
     },
     serviceCopy: { flex: 1, minWidth: 0 },
     serviceArrow: { color: theme.colors.accent, fontSize: 22 },
