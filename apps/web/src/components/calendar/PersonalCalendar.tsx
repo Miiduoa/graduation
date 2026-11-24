@@ -4,6 +4,7 @@ import { MonthCalendar } from './MonthCalendar';
 import {
   isHorizontallyVisible,
   measureStickyInsets,
+  onVisibleViewportChange,
   scrollVerticallyIntoView,
 } from './calendarScroll';
 
@@ -500,6 +501,15 @@ function PersonalCalendarWorkspace({
     title.focus({ preventScroll: true });
     scrollVerticallyIntoView(title);
   };
+
+  useEffect(() => {
+    if (paused || mode === 'idle') return;
+    const reveal = () => {
+      const title = titleRef.current;
+      if (title) scrollVerticallyIntoView(title);
+    };
+    return onVisibleViewportChange(reveal);
+  }, [paused, mode, editorRevision]);
 
   useLayoutEffect(() => {
     if (paused || !pendingFocus.current) return;

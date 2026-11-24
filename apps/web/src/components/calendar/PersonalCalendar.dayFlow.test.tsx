@@ -92,6 +92,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  Reflect.deleteProperty(window, 'visualViewport');
 });
 
 function event(id: string, title: string, date: string): PersonalImportRecord {
@@ -472,6 +473,52 @@ it.each([
   });
   expect(title.getBoundingClientRect().top).toBeGreaterThanOrEqual(80);
   expect(title.getBoundingClientRect().bottom).toBeLessThanOrEqual(568);
+});
+
+it('remeasures the focused title after the soft keyboard shrinks the visual viewport', async () => {
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(640);
+  const listeners = new Map<string, Set<() => void>>();
+  const viewport = {
+    height: 640,
+    width: 320,
+    offsetTop: 0,
+    offsetLeft: 0,
+    addEventListener: vi.fn((name: string, listener: () => void) => {
+      const bag = listeners.get(name) ?? new Set();
+      bag.add(listener);
+      listeners.set(name, bag);
+    }),
+    removeEventListener: vi.fn((name: string, listener: () => void) => {
+      listeners.get(name)?.delete(listener);
+    }),
+  };
+  Object.defineProperty(window, 'visualViewport', {
+    configurable: true,
+    writable: true,
+    value: viewport,
+  });
+  const stored = event('existing', '合成行程', '2026-11-14');
+  seed([stored]);
+  render(<PersonalCalendar />);
+  await ready();
+  activate(screen.getByRole('button', { name: '列表' }));
+  let pageOffset = 0;
+  vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+    if (this.matches('input[type="text"]')) return new DOMRect(20, 500 - pageOffset, 100, 40);
+    return new DOMRect(20, 100, 100, 40);
+  });
+  vi.mocked<(options: ScrollToOptions) => void>(window.scrollBy).mockImplementation((options) => {
+    pageOffset += options.top ?? 0;
+  });
+
+  activate(editEvent(stored.title));
+  expect(document.activeElement).toBe(titleField());
+  expect(window.scrollBy).not.toHaveBeenCalled();
+
+  viewport.height = 400;
+  for (const listener of listeners.get('resize') ?? []) listener();
+  expect(window.scrollBy).toHaveBeenCalledWith({ left: 0, top: 140, behavior: 'instant' });
+  expect(titleField().getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
 });
 
 it('follows a rescheduled event into its new month while preserving its identity and provenance', async () => {
