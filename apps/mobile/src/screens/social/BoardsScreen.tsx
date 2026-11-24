@@ -132,11 +132,9 @@ function BoardsContent() {
   // from the newest optimistic state instead of a stale closure.
   const subscribedRef = useRef<Set<string>>(new Set());
   const applySubscribed = useCallback((update: (previous: Set<string>) => Set<string>) => {
-    setSubscribed((previous) => {
-      const next = update(previous);
-      subscribedRef.current = next;
-      return next;
-    });
+    const next = update(subscribedRef.current);
+    subscribedRef.current = next;
+    setSubscribed(next);
   }, []);
   const [pendingSubscriptions, setPendingSubscriptions] = useState<ReadonlySet<string>>(new Set());
   const mounted = useRef(true);
@@ -337,14 +335,21 @@ function BoardsContent() {
         ...pendingServerConfirmCounts.current.keys(),
       ]);
       let boardRowsSucceeded = false;
+      let subscriptionListSucceeded = false;
       let applyDeferredMembership: (() => void) | undefined;
+      const completeSubscriptionLoad = () => {
+        if (!boardRowsSucceeded || !subscriptionListSucceeded) return;
+        applyDeferredMembership?.();
+        subscriptionReadyRef.current = true;
+        setSubscriptionReady(true);
+      };
       // Apply each result on arrival. Either read can revoke access to both.
       await Promise.all([
         listBoards(sid, 120).then((rows) => {
           if (!isCurrent()) return;
           boardRowsSucceeded = true;
           setBoards(rows);
-          applyDeferredMembership?.();
+          completeSubscriptionLoad();
         }).catch(handleError),
         readSubscribedBoardIds(uid, sid).then(({ ids, serverConfirmedIds }) => {
           if (!isCurrent()) return;
@@ -354,8 +359,8 @@ function BoardsContent() {
             writeRevisionAtDispatch,
             serverRevisionAtDispatch,
           }, overlappingReconciliations, uid, sid, boardRowsSucceeded);
-          subscriptionReadyRef.current = true;
-          setSubscriptionReady(true);
+          subscriptionListSucceeded = true;
+          completeSubscriptionLoad();
         }).catch(handleError),
       ]);
     } catch (cause) {
@@ -484,7 +489,7 @@ function BoardsContent() {
         if (!uid) Alert.alert('請登入', '登入後即可訂閱看板');
         return;
       }
-      if (!subscriptionReadyRef.current) return;
+      if (!subscriptionReadyRef.current && !boardServerAppliedRevision.current.has(b.id)) return;
       const generation = accessGeneration.current;
       const wasSub = subscribedRef.current.has(b.id);
       const target = !wasSub;
@@ -494,10 +499,6 @@ function BoardsContent() {
       subscriptionRevision.current += 1;
       boardWriteRevision.current.set(b.id, subscriptionRevision.current);
       setPendingSubscriptions(new Set(pendingSubscriptionCounts.current.keys()));
-      const optimistic = new Set(subscribedRef.current);
-      if (target) optimistic.add(b.id);
-      else optimistic.delete(b.id);
-      subscribedRef.current = optimistic;
       applySubscribed((previous) => {
         const next = new Set(previous);
         if (target) next.add(b.id);
@@ -671,7 +672,9 @@ function BoardsContent() {
             const b = item.board;
             const isSub = subscribed.has(b.id);
             const isPending = pendingSubscriptions.has(b.id);
-            const subscriptionLabel = subscriptionReady ? (isSub ? '已訂閱' : '訂閱') : '訂閱狀態未確認';
+            // A partial load can establish membership for individual boards.
+            const canToggleSubscription = subscriptionReady || boardServerAppliedRevision.current.has(b.id);
+            const subscriptionLabel = canToggleSubscription ? (isSub ? '已訂閱' : '訂閱') : '訂閱狀態未確認';
             return (
               <Pressable
                 style={styles.row}
@@ -713,17 +716,17 @@ function BoardsContent() {
                 <Pressable
                   hitSlop={8}
                   accessibilityRole="button"
-                  accessibilityLabel={`${subscriptionReady && isSub ? '取消訂閱' : subscriptionLabel}${b.name}`}
-                  accessibilityHint={subscriptionReady
+                  accessibilityLabel={`${canToggleSubscription && isSub ? '取消訂閱' : subscriptionLabel}${b.name}`}
+                  accessibilityHint={canToggleSubscription
                     ? (isPending ? '正在同步訂閱狀態，可再點一次撤銷' : '向伺服器更新本校看板訂閱')
                     : '重新讀取看板以取得訂閱狀態'}
-                  accessibilityState={{ busy: isPending, disabled: !subscriptionReady }}
-                  disabled={!subscriptionReady}
+                  accessibilityState={{ busy: isPending, disabled: !canToggleSubscription }}
+                  disabled={!canToggleSubscription}
                   onPress={(e) => {
                     e?.stopPropagation?.();
                     void onToggleSubscribe(b);
                   }}
-                  style={[styles.subBtn, isSub && styles.subBtnOn, (isPending || !subscriptionReady) && { opacity: 0.65 }]}
+                  style={[styles.subBtn, isSub && styles.subBtnOn, (isPending || !canToggleSubscription) && { opacity: 0.65 }]}
                 >
                   <Ionicons
                     name={isSub ? 'notifications' : 'notifications-outline'}

@@ -1277,6 +1277,7 @@ test.each([false, true])(
 );
 
 test('an initial subscription read failure disables writes until a membership refresh arrives', async () => {
+  const cachedBoard = { ...board, id: 'cached', name: '電影社' };
   const initialRows = deferred<typeof board[]>();
   jest.mocked(listBoards).mockReturnValueOnce(initialRows.promise);
   jest.mocked(readSubscribedBoardIds).mockRejectedValueOnce(
@@ -1286,7 +1287,7 @@ test('an initial subscription read failure disables writes until a membership re
   await view.findByRole('alert');
   expect(view.UNSAFE_queryByType(ActivityIndicator)).toBeNull();
   expect(view.UNSAFE_getByType(FlatList)).toBeTruthy();
-  await act(async () => { initialRows.resolve([board]); });
+  await act(async () => { initialRows.resolve([board, cachedBoard]); });
   const unknown = await view.findByLabelText('訂閱狀態未確認讀書會');
   expect(unknown.props.accessibilityState.disabled).toBe(true);
   expect(view.queryByLabelText('訂閱讀書會')).toBeNull();
@@ -1297,7 +1298,7 @@ test('an initial subscription read failure disables writes until a membership re
   const rows = deferred<typeof board[]>();
   jest.mocked(listBoards).mockReturnValueOnce(rows.promise);
   jest.mocked(readSubscribedBoardIds).mockResolvedValueOnce({
-    ids: [board.id],
+    ids: [board.id, cachedBoard.id],
     serverConfirmedIds: [board.id],
   });
   let refresh!: Promise<void>;
@@ -1305,7 +1306,57 @@ test('an initial subscription read failure disables writes until a membership re
   expect(view.UNSAFE_getByType(RefreshControl).props.refreshing).toBe(true);
   expect(view.getByLabelText('取消訂閱讀書會').props.accessibilityState.disabled).toBeFalsy();
   expect(view.getByText('已訂閱')).toBeTruthy();
-  await act(async () => { rows.resolve([board]); await refresh; });
+  expect(view.getByLabelText('訂閱狀態未確認電影社').props.accessibilityState.disabled).toBe(true);
+  await act(async () => { rows.resolve([board, cachedBoard]); await refresh; });
+  expect(view.getByLabelText('取消訂閱電影社').props.accessibilityState.disabled).toBe(false);
+});
+
+test.each(['成功', '失敗'])('快取訂閱先返回時維持停用（看板查詢%s）', async (boardResult) => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  jest.mocked(readSubscribedBoardIds).mockRejectedValueOnce(new Error('offline'));
+  const view = render(<BoardsScreen />);
+  await view.findByLabelText('訂閱狀態未確認讀書會');
+
+  const rows = deferred<typeof board[]>();
+  jest.mocked(listBoards).mockReturnValueOnce(rows.promise);
+  jest.mocked(readSubscribedBoardIds).mockResolvedValueOnce({
+    ids: [board.id],
+    serverConfirmedIds: [],
+  });
+  let refresh!: Promise<void>;
+  await act(async () => { refresh = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+
+  const expectSubscriptionDisabled = () => {
+    const button = view.getByLabelText('訂閱狀態未確認讀書會');
+    expect(button.props.accessibilityState.disabled).toBe(true);
+    expect(view.queryByLabelText('訂閱讀書會')).toBeNull();
+    fireEvent.press(button);
+    expect(subscribeToBoard).not.toHaveBeenCalled();
+    expect(unsubscribeFromBoard).not.toHaveBeenCalled();
+  };
+  expectSubscriptionDisabled();
+
+  await act(async () => {
+    if (boardResult === '成功') rows.resolve([board]);
+    else rows.reject(new Error('offline'));
+    await refresh;
+  });
+  expect(view.UNSAFE_getByType(RefreshControl).props.refreshing).toBe(false);
+
+  if (boardResult === '失敗') {
+    expectSubscriptionDisabled();
+    expect(view.getByRole('alert')).toBeTruthy();
+    jest.mocked(readSubscribedBoardIds).mockResolvedValueOnce({
+      ids: [board.id],
+      serverConfirmedIds: [],
+    });
+    await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  }
+  const unsubscribe = view.getByLabelText('取消訂閱讀書會');
+  expect(unsubscribe.props.accessibilityState.disabled).toBe(false);
+  await act(async () => { fireEvent.press(unsubscribe); });
+  expect(unsubscribeFromBoard).toHaveBeenCalledWith(expect.any(String), expect.any(String), board.id);
+  expect(subscribeToBoard).not.toHaveBeenCalled();
 });
 
 test.each(['看板', '訂閱'])('%s查詢先遇到網路錯誤時結束下拉刷新，並套用稍後成功的查詢', async (failedRead) => {
