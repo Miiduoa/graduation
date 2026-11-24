@@ -240,11 +240,15 @@ function AccountWorkspace({
   onExpired: () => Promise<void>;
   onSwitchAccount: () => Promise<void>;
 }) {
-  const [{ overview, details, listedStatuses, applicationsKnown, revocations }, setWorkspaceSnapshot] = useState({
+  const [
+    { overview, details, listedStatuses, workspacesKnown, applicationsKnown, revocations },
+    setWorkspaceSnapshot,
+  ] = useState({
     overview: null as MerchantOverview | null,
     details: new Map<string, NuniMerchantWorkspaceDetail>(),
     listedStatuses: new Map<string, string>(),
     revocations: { list: 0, details: new Map<string, number>() },
+    workspacesKnown: false,
     applicationsKnown: false,
   });
   const [loading, setLoading] = useState(true);
@@ -305,6 +309,7 @@ function AccountWorkspace({
       details: confirmed.verifiedDetails(),
       listedStatuses: confirmed.listedStatuses(),
       revocations: confirmed.workspaceRevocations(),
+      workspacesKnown: confirmed.hasWorkspaceList(),
       applicationsKnown: confirmed.hasApplicationList(),
     });
   }, [confirmed]);
@@ -683,11 +688,13 @@ function AccountWorkspace({
     draft.serviceModes.length !== 1 ||
     draft.serviceModes[0] !== 'pickup';
   const nextStep =
-    overview && (!loadError || hasMerchantRecords) ? merchantOverviewNextStep(overview) : null;
+    overview && (hasMerchantRecords || (workspacesKnown && !loadError))
+      ? merchantOverviewNextStep(overview)
+      : null;
   const list = (
     <div className={styles.stack}>
       {(view === 'apply' ||
-        (view === 'overview' && overview && !loadError && !hasMerchantRecords)) && (
+        (view === 'overview' && overview && workspacesKnown && !loadError && !hasMerchantRecords)) && (
         <section className={styles.intro}>
           <h2>店家如何進駐</h2>
           <p>請準備店名、營業地點及聯絡方式。已經申請過的店家可以直接查看審核進度。</p>
@@ -730,16 +737,18 @@ function AccountWorkspace({
                 已授權門市
               </h3>
               {overview.workspaces.length === 0 ? (
-                <>
-                  {!loadError && (
-                    <p>
-                      這個帳號目前沒有已核准的門市。如果你是店員，請向門市負責人確認工作帳號與接單方式。
-                    </p>
-                  )}
-                  {view === 'workspace' && (
-                    <Button onClick={() => void onSwitchAccount()}>登出並切換店家帳號</Button>
-                  )}
-                </>
+                workspacesKnown && (
+                  <>
+                    {!loadError && (
+                      <p>
+                        這個帳號目前沒有已核准的門市。如果你是店員，請向門市負責人確認工作帳號與接單方式。
+                      </p>
+                    )}
+                    {view === 'workspace' && (
+                      <Button onClick={() => void onSwitchAccount()}>登出並切換店家帳號</Button>
+                    )}
+                  </>
+                )
               ) : (
                 <ul className={styles.list}>
                   {overview.workspaces.map((item) => (

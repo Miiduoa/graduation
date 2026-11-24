@@ -13,11 +13,6 @@ type WorkspaceObservations = {
   row?: Observation;
   detail?: Observation<NuniMerchantWorkspaceDetail>;
 };
-type Confirmation = {
-  row: NuniMerchantWorkspace;
-  detail?: NuniMerchantWorkspaceDetail;
-};
-
 function latestObservation<T extends NuniMerchantWorkspace>(
   current: Observation<T> | undefined,
   value: T,
@@ -32,23 +27,6 @@ function latestObservation<T extends NuniMerchantWorkspace>(
     if ((order || revision - current.revision) <= 0) return current;
   }
   return { value, revision, version };
-}
-
-function availabilityOf(row: NuniMerchantWorkspace) {
-  return {
-    activated: row.activated,
-    merchantStatus: row.merchantStatus,
-    locationStatus: row.locationStatus,
-    publicAccess: row.publicAccess,
-  };
-}
-
-function workspaceDetail({ row, detail }: Confirmation) {
-  if (!detail) return null;
-  // A list at a different version can confirm availability while settings still use the detail version.
-  return row.readinessVersion === detail.readinessVersion
-    ? { ...detail, ...row }
-    : { ...detail, ...availabilityOf(row) };
 }
 
 export const workspaceKey = ({
@@ -124,8 +102,10 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
 
   function detailFor(key: string) {
     const entry = entries.get(key);
-    if (!entry?.row || !hasVerifiedAccess(key)) return null;
-    return workspaceDetail({ row: entry.row.value, detail: entry.detail?.value });
+    if (!entry?.row || !entry.detail || !hasVerifiedAccess(key)) return null;
+    const detail = entry.detail.value;
+    // Use the winning workspace observation for all shared fields. Settings use the detail version.
+    return { ...detail, ...entry.row.value, readinessVersion: detail.readinessVersion };
   }
 
   function confirmMenu(key: string, revision: number, createdItems: number) {
@@ -162,6 +142,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   }
 
   return {
+    hasWorkspaceList: () => listedWorkspaces !== undefined,
     hasApplicationList: () => lists.applications !== undefined,
     verifiedDetails() {
       const details = new Map<string, NuniMerchantWorkspaceDetail>();
