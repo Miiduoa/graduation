@@ -830,4 +830,47 @@ describe('r28 structural regressions and function-word variants', () => {
     expect(tronClassCompoundClauses(question)).toEqual([]);
     expect(Date.now() - started).toBeLessThan(200);
   });
+
+  it.each([
+    '查玩課雲作業務必速交學習單',
+    '查玩課雲作業務必先行交學習單',
+    '查玩課雲作業務必速交課堂報告',
+  ])('does not treat a write plus a known object noun as an in-word noun in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '查玩課雲作業，務必速交學習單',
+    '查玩課雲作業，務必先行交課堂報告',
+  ])('hands a later write after a known object noun to the planner without a compound read in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('keeps 外交作業 and 外交課程 as lexicon nouns under a query', () => {
+    expect(parseTronClassAgentIntent('查玩課雲外交作業')).toEqual({ intent: 'homework', pendingOnly: false });
+    expect(parseTronClassAgentIntent('查玩課雲外交課程')?.intent).toBe('courses');
+  });
+
+  it('closes only the inner 供…用的 and keeps the outer span for later 確認', () => {
+    const question = '不要繳交供老師參考供助教審閱用的範本並確認玩課雲作業用的資料，只查校園公告';
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('closes only the inner 正在…中 and keeps the outer span for later 確認', () => {
+    const question = '不要繳交我正在閱讀助教正在編輯中的筆記並確認玩課雲作業中的摘要，只查校園公告';
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('scans a long write-command request in a single token pass', () => {
+    const question = `查玩課雲${'外交作業'.repeat(180)}務必速交課堂報告`;
+    expect(question.length).toBeLessThanOrEqual(1000);
+    const started = Date.now();
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(200);
+  });
 });
