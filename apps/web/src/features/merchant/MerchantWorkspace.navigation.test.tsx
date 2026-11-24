@@ -215,12 +215,18 @@ it('requires confirmation again after returning to a store with a first-menu dra
   expect(mocks.request.mock.calls.filter((call) => call[2])).toHaveLength(0);
 });
 
-it.each(['automatic', 'manual'] as const)(
-  'keeps the first menu complete on a stale workspace list after a successful %s detail read',
-  async (readMode) => {
+it.each([
+  { readMode: 'automatic', returnStatus: 503 },
+  { readMode: 'manual', returnStatus: 503 },
+  { readMode: 'unavailable', returnStatus: 503 },
+  { readMode: 'automatic', returnStatus: 403 },
+  { readMode: 'automatic', returnStatus: 404 },
+] as const)(
+  'keeps the first menu complete on a stale workspace list (post-write read: $readMode, return status: $returnStatus)',
+  async ({ readMode, returnStatus }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     let published = false;
-    let detailUnavailable = readMode === 'manual';
+    let detailStatus: number | null = readMode === 'automatic' ? null : 503;
     mocks.request.mockImplementation((requestPath) => {
       if (requestPath === `${path}/initial-menu`) {
         published = true;
@@ -231,8 +237,8 @@ it.each(['automatic', 'manual'] as const)(
       }
       if (requestPath === path && published) {
         // The return refresh only has the stale list and the last verified detail.
-        return detailUnavailable
-          ? Promise.reject(new NuniError(503, 'UPSTREAM_ERROR'))
+        return detailStatus
+          ? Promise.reject(new NuniError(detailStatus, 'DETAIL_UNAVAILABLE'))
           : Promise.resolve({
               ...detail(),
               publishedMenuItems: 1,
@@ -257,19 +263,35 @@ it.each(['automatic', 'manual'] as const)(
           screen.getByRole<HTMLButtonElement>('button', { name: '重新讀取門市狀態' }).disabled,
         ).toBe(false),
       );
-      detailUnavailable = false;
+      detailStatus = null;
       fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
     }
     await screen.findByText(/已建立 1 項首次菜單/);
+    if (readMode === 'unavailable')
+      await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
     expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
 
-    detailUnavailable = true;
+    detailStatus = returnStatus;
     fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
     await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
     expect(
       mocks.request.mock.calls.filter(([route]) => route === 'merchant-workspaces'),
     ).toHaveLength(2);
-    const store = screen.getByRole('link', { name: '管理門市：一樓' }).closest('li')!;
+    const locations = screen.getByRole('region', { name: '已授權門市' });
+    const storeLink = () => within(locations).queryByRole('link', { name: '管理門市：一樓' });
+    if (returnStatus === 403 || returnStatus === 404) {
+      expect(storeLink()).toBeNull();
+      expect(screen.getByRole('alert').textContent).toContain('管理權限');
+
+      detailStatus = 503;
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+      expect(storeLink()).toBeNull();
+
+      detailStatus = null;
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+    }
+
+    const store = storeLink()!.closest('li')!;
     expect(within(store).getByText('待完成：確認營運設定與條款')).toBeTruthy();
     expect(within(store).queryByText(/建立菜單/)).toBeNull();
   },

@@ -84,6 +84,7 @@ export function MerchantOperations({
   onBack,
   onExpired,
   onChanged,
+  onDenied,
 }: {
   context: string;
   tenantId: string;
@@ -100,7 +101,8 @@ export function MerchantOperations({
   };
   onBack?(): void;
   onExpired(): void;
-  onChanged(detail: Detail): void;
+  onChanged(detail: Detail, verifiedAccess: boolean): void;
+  onDenied?(tenantId: string, locationId: string): void;
 }) {
   const draftKey = JSON.stringify([tenantId, locationId]);
   const saved = drafts.get(draftKey);
@@ -167,12 +169,12 @@ export function MerchantOperations({
     };
   }, [suspended, invalidate]);
 
-  const accept = useCallback((next: Detail) => {
+  const accept = useCallback((next: Detail, verifiedAccess = false) => {
     setDetail(next);
     setFresh(true);
     setMenuConfirmed(false);
     setActivationConfirmed(false);
-    changed.current(next);
+    changed.current(next, verifiedAccess);
   }, []);
 
   const read = useCallback(
@@ -184,7 +186,7 @@ export function MerchantOperations({
       try {
         const next = await operations.get(tenantId, locationId);
         if (!active.current || version !== run.current) return;
-        accept(next);
+        accept(next, true);
         if (!readAfterWrite.current) setEntryVerified(true);
         // A count of zero cannot prove a non-idempotent menu request failed:
         // an existing menu may have no remaining sellable stock.
@@ -203,13 +205,14 @@ export function MerchantOperations({
         ) {
           expire.current();
         } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
+          onDenied?.(tenantId, locationId);
           setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
         } else setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
       } finally {
         if (active.current && version === run.current) setLoading(false);
       }
     },
-    [operations, tenantId, locationId, accept, drafts, draftKey],
+    [operations, tenantId, locationId, accept, drafts, draftKey, onDenied],
   );
   useLayoutEffect(() => {
     if (!suspended) {
@@ -630,6 +633,15 @@ export function MerchantOperations({
                           })),
                         });
                         if (!current()) return;
+                        changed.current(
+                          {
+                            ...detail,
+                            missingRequirements: detail.missingRequirements.filter(
+                              (requirement) => requirement !== 'menu',
+                            ),
+                          },
+                          false,
+                        );
                         setMenuReceipt(receipt.createdItems);
                         setMenuConfirmed(false);
                         setNotice(

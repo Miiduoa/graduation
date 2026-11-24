@@ -45,11 +45,18 @@ import {
 import { useMerchantWorkspaceRoute } from '@/lib/useMerchantWorkspaceRoute';
 
 type Overview = Awaited<ReturnType<typeof loadMerchantOverview>>;
-type ConfirmedMerchantData = {
-  workspaces: Map<string, Overview['workspaces'][number]>;
-  applications: Map<string, Overview['applications'][number]>;
+type ConfirmedWorkspace = {
+  detail?: Overview['workspaces'][number];
+  denied?: boolean;
 };
-const workspaceKey = ({ tenantId, locationId }: Overview['workspaces'][number]) =>
+type ConfirmedMerchantData = {
+  workspaces: Map<string, ConfirmedWorkspace>;
+  applications: Map<
+    string,
+    { receipt: Overview['applications'][number]; reviewed?: Overview['applications'][number] }
+  >;
+};
+const workspaceKey = ({ tenantId, locationId }: Pick<Overview['workspaces'][number], 'tenantId' | 'locationId'>) =>
   `${tenantId}:${locationId}`;
 type Draft = Omit<NuniMerchantApplicationInput, 'idempotencyKey'>;
 const emptyDraft = (): Draft => ({
@@ -298,9 +305,12 @@ function AccountWorkspace({
     setOverview(
       data && {
         ...data,
-        workspaces: data.workspaces.map((item) => workspaces.get(workspaceKey(item)) ?? item),
+        workspaces: data.workspaces.flatMap((item) => {
+          const entry = workspaces.get(workspaceKey(item));
+          return entry?.denied ? [] : [entry?.detail ?? item];
+        }),
         applications: [
-          ...[...applications.values()].reverse(),
+          ...[...applications.values()].reverse().map(({ receipt, reviewed }) => reviewed ?? receipt),
           ...data.applications.filter((item) => !applications.has(item.applicationId)),
         ],
       },
@@ -370,38 +380,52 @@ function AccountWorkspace({
         }),
       );
       if (isCurrent()) {
-        const authorizedKeys = new Set(data.workspaces.map(workspaceKey));
-        for (const key of workspaces.keys()) {
-          if (!authorizedKeys.has(key)) workspaces.delete(key);
-        }
+        let accessDenied = false;
         for (const [key, detail] of refreshed) {
-          // Keep any detail or write receipt accepted while the list was loading.
-          if (workspaces.get(key) !== initialWorkspaces.get(key)) continue;
-          if (detail) workspaces.set(key, detail);
-          else workspaces.delete(key);
+          const entry = workspaces.get(key);
+          if (!detail) {
+            // A denial controls visibility even if a write was confirmed in the meantime.
+            workspaces.set(key, { ...entry, denied: true });
+            accessDenied = true;
+          } else if (entry === initialWorkspaces.get(key)) {
+            workspaces.set(key, { detail });
+          }
         }
-        for (const { applicationId } of data.applications) {
-          const receipt = initialApplications.get(applicationId);
-          // Only a list requested after the receipt can take over tracking this application.
-          if (receipt && applications.get(applicationId) === receipt)
-            applications.delete(applicationId);
+        for (const row of data.applications) {
+          const entry = initialApplications.get(row.applicationId);
+          if (!entry || applications.get(row.applicationId) !== entry) continue;
+          const { receipt } = entry;
+          // The application API exposes the submission time, not a review revision.
+          // Review progress for this submission can follow a submitted receipt.
+          if (
+            receipt.state === 'submitted' &&
+            row.state !== 'submitted' &&
+            row.tenantId === receipt.tenantId &&
+            Date.parse(row.submittedAt) === Date.parse(receipt.submittedAt)
+          )
+            applications.set(row.applicationId, { receipt, reviewed: row });
         }
         listed.current = data;
         publishOverview();
         if (programsUnavailable) setLoadError('目前無法確認店家資料，請重新載入。');
+        else if (accessDenied)
+          setLoadError('目前無法取得部分門市的管理權限，請重新載入。');
       }
     } catch (error) {
       if (isCurrent()) {
         if (expired(error)) expire();
         else {
-          if (error instanceof NuniError && [403, 404].includes(error.status)) clearOverview();
+          if (error instanceof NuniError && [403, 404].includes(error.status)) {
+            listed.current = null;
+            publishOverview();
+          }
           setLoadError('目前無法確認店家資料，請重新載入。');
         }
       }
     } finally {
       if (run === generation.current && mounted.current) setLoading(false);
     }
-  }, [clearOverview, context, expire, operationDrafts, publishOverview, view]);
+  }, [context, expire, operationDrafts, publishOverview, view]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -471,7 +495,7 @@ function AccountWorkspace({
         await browserRequest('merchant-applications', context, payload),
       );
       if (!mounted.current || !enabled.current) return;
-      confirmed.current.applications.set(application.applicationId, application);
+      confirmed.current.applications.set(application.applicationId, { receipt: application });
       publishOverview();
       setPending(null);
       setDraft(emptyDraft());
@@ -500,10 +524,23 @@ function AccountWorkspace({
   }
 
   const onWorkspaceChanged = useCallback(
-    (detail: Overview['workspaces'][number]) => {
+    (detail: Overview['workspaces'][number], verifiedAccess: boolean) => {
       if (!mounted.current || !enabled.current) return;
       setHasVerifiedLocation(true);
-      confirmed.current.workspaces.set(workspaceKey(detail), detail);
+      const key = workspaceKey(detail);
+      const { workspaces } = confirmed.current;
+      workspaces.set(key, { detail, denied: !verifiedAccess && workspaces.get(key)?.denied });
+      publishOverview();
+    },
+    [publishOverview],
+  );
+
+  const onWorkspaceDenied = useCallback(
+    (tenantId: string, locationId: string) => {
+      if (!mounted.current || !enabled.current) return;
+      const key = workspaceKey({ tenantId, locationId });
+      const { workspaces } = confirmed.current;
+      workspaces.set(key, { ...workspaces.get(key), denied: true });
       publishOverview();
     },
     [publishOverview],
@@ -533,6 +570,7 @@ function AccountWorkspace({
           }
           onExpired={expire}
           onChanged={onWorkspaceChanged}
+          onDenied={onWorkspaceDenied}
         />
       ))}
       {content}

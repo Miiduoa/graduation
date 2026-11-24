@@ -612,15 +612,19 @@ const continuityStore = {
   sourceLine: null,
 };
 
-it('keeps an application receipt received inside a store across stale list reloads', async () => {
+it('keeps an application receipt received inside a store when a reload loses a previously listed row', async () => {
   window.history.replaceState(null, '', '/merchant');
   let showStore = false;
+  let listedApplications: (typeof application)[] = [];
   let finishApplication!: (receipt: typeof application) => void;
   const receipt = new Promise<typeof application>((resolve) => {
     finishApplication = resolve;
   });
   mocks.request.mockImplementation((path, context, input) => {
-    if (path === 'merchant-applications' && input) return receipt;
+    if (path === 'merchant-applications') {
+      if (input) return receipt;
+      return Promise.resolve({ applications: listedApplications });
+    }
     if (path === 'merchant-workspaces' && showStore)
       return Promise.resolve({ workspaces: [continuityStore] });
     if (path === 'merchant-workspaces/campus-one/location-1')
@@ -639,11 +643,22 @@ it('keeps an application receipt received inside a store across stale list reloa
   await screen.findByRole('heading', { name: '餐坊／第一門市', level: 2 });
   await act(async () => finishApplication(application));
 
+  listedApplications = [application];
   fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
   await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
   expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
+  listedApplications = [];
   await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
   expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
+
+  const applications = screen.getByRole('region', { name: '申請進度' });
+  listedApplications = [{ ...application, state: 'under-review', reviewerNote: '已開始審核' }];
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+  expect(within(applications).getByText('審核說明：已開始審核')).toBeTruthy();
+
+  listedApplications = [application];
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+  expect(within(applications).getByText('審核說明：已開始審核')).toBeTruthy();
 });
 
 it.each([
