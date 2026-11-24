@@ -246,21 +246,12 @@ TRONCLASS_HEALTH_PID=''
 unset TRONCLASS_LAUNCHING_LOG
 tronclass_proc_starttime() {
   local pid="$1"
-  [ -r "/proc/$pid/stat" ] || return 1
-  awk '{
-    start = index($0, "(");
-    rest = substr($0, start);
-    closepos = 0;
-    for (i = length(rest); i > 0; i--) if (substr(rest, i, 1) == ")") { closepos = i; break; }
-    n = split(substr(rest, closepos + 1), f, /[[:space:]]+/);
-    # fields after comm: 3=state ... 22=starttime => index 20 after leading empty split
-    idx = 0;
-    for (i = 1; i <= n; i++) if (f[i] != "") {
-      idx++;
-      if (idx == 20) { print f[i]; exit 0; }
-    }
-    exit 1;
-  }' "/proc/$pid/stat"
+  local stat fields
+  stat="$(<"/proc/$pid/stat")" || return 1
+  # The comm field may contain spaces or closing parentheses.
+  read -ra fields <<< "${stat##*) }"
+  [[ "${fields[19]:-}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "${fields[19]}"
 }
 
 tronclass_parse_record() {
@@ -275,21 +266,28 @@ tronclass_parse_record() {
 tronclass_record_matches() {
   local pid="$1"
   local start="$2"
-  # Reject PID 0 (kill -- -0 signals the caller's group), PID 1, and records
-  # that never stored a start-time.
-  case "$pid" in
-    ''|0|1) return 1 ;;
-  esac
-  [ -n "$start" ] || return 1
+  [[ "$pid" =~ ^([2-9]|[1-9][0-9]+)$ && "$start" =~ ^[0-9]+$ ]] || return 1
   local live
-  live="$(tronclass_proc_starttime "$pid" 2>/dev/null || true)"
-  if [ -n "$live" ]; then
+  live="$(tronclass_proc_starttime "$pid" 2>/dev/null)" && [ "$live" = "$start" ]
+}
+
+tronclass_group_matches() {
+  local pid="$1" start="$2"
+  [[ "$pid" =~ ^([2-9]|[1-9][0-9]+)$ && "$start" =~ ^[0-9]+$ ]] || return 1
+  local live
+  if live="$(tronclass_proc_starttime "$pid" 2>/dev/null)"; then
     [ "$live" = "$start" ]
-    return $?
+  else
+    # A living group keeps its PGID reserved even after its recorded leader
+    # exits. In that case only the group may be signalled.
+    [ ! -e "/proc/$pid" ]
   fi
-  # Leader is gone. Only signal the leftover group if this PID number is
-  # unused (not reused by a new process).
-  [ ! -e "/proc/$pid" ]
+}
+
+tronclass_signal_wrapper() {
+  local pid="$1" start="$2" sig="$3"
+  tronclass_record_matches "$pid" "$start" || return 0
+  kill "-$sig" "$pid" 2>/dev/null || true
 }
 
 tronclass_read_record_file() {
@@ -301,9 +299,10 @@ tronclass_read_record_file() {
 }
 
 tronclass_capture_child_record() {
-  local wrapper="$1"
+  local wrapper="$1" wrapper_start="$2"
   local i child start
   for i in $(seq 1 40); do
+    tronclass_record_matches "$wrapper" "$wrapper_start" || return 1
     child="$(ps -o pid= --ppid "$wrapper" 2>/dev/null | awk 'NF { print $1; exit }')"
     if [ -n "$child" ]; then
       start="$(tronclass_proc_starttime "$child" 2>/dev/null || true)"
@@ -326,9 +325,8 @@ tronclass_signal_record() {
   [ -n "$parsed" ] || return 0
   read -r run pid start <<< "$parsed"
   [ "$run" = "${TRONCLASS_RUN_ID:-}" ] || return 0
-  tronclass_record_matches "$pid" "$start" || return 0
-  kill "-$sig" -- "-$pid" 2>/dev/null || true
-  kill "-$sig" "$pid" 2>/dev/null || true
+  tronclass_group_matches "$pid" "$start" || return 0
+  kill "-$sig" -- "-$pid" 2>/dev/null || tronclass_signal_wrapper "$pid" "$start" "$sig"
 }
 
 tronclass_group_alive_record() {
@@ -337,7 +335,7 @@ tronclass_group_alive_record() {
   parsed="$(tronclass_parse_record "$record" "$TRONCLASS_RUN_ID" 2>/dev/null || true)"
   [ -n "$parsed" ] || return 1
   read -r run pid start <<< "$parsed"
-  tronclass_record_matches "$pid" "$start" || return 1
+  tronclass_group_matches "$pid" "$start" || return 1
   if [ -e "/proc/$pid" ]; then
     return 0
   fi
@@ -348,7 +346,7 @@ tronclass_stop_logged() {
   local wrapper="$1"
   local log="$2"
   local sig="${3:-TERM}"
-  local memory="$4"
+  local memory="$4" wrapper_start="$5"
   # Keep this run's discovered groups for the later wait and KILL rounds.
   local memory_record=""
   [ -n "$memory" ] && memory_record="$(tronclass_parse_record "$memory" "$TRONCLASS_RUN_ID" 2>/dev/null || true)"
@@ -372,14 +370,14 @@ tronclass_stop_logged() {
     if [ -z "$sidecar_record" ] && [ -n "$log" ] &&
       child_record="$(tronclass_read_record_file "$log.pgid.$TRONCLASS_RUN_ID" 2>/dev/null)"; then
       read -r run pid start <<< "$child_record"
-      if tronclass_record_matches "$pid" "$start" && kill -0 -- "-$pid" 2>/dev/null; then
+      if tronclass_group_matches "$pid" "$start" && kill -0 -- "-$pid" 2>/dev/null; then
         sidecar_record="$child_record"
         if [[ " ${records[*]} " != *" $sidecar_record "* ]]; then
           tronclass_remember_group "$sidecar_record"
         fi
       fi
     fi
-    [ -n "$wrapper" ] || return 0
+    tronclass_record_matches "$wrapper" "$wrapper_start" || return 0
     parents+=("$wrapper")
     while [ "${#parents[@]}" -gt 0 ]; do
       walk_pid="${parents[0]}"
@@ -389,10 +387,7 @@ tronclass_stop_logged() {
         [ "$child" = "$wrapper" ] || parents+=("$child")
         [ "$pgid" != "$launcher_pgid" ] || continue
         group_start="$(tronclass_proc_starttime "$pgid" 2>/dev/null || true)"
-        if [ -z "$group_start" ]; then
-          [ ! -e "/proc/$pgid" ] || continue
-          group_start=0
-        fi
+        [ -n "$group_start" ] || continue
         child_record="$TRONCLASS_RUN_ID $pgid $group_start"
         for existing in "${records[@]}"; do
           [ "$existing" = "$child_record" ] && continue 2
@@ -420,7 +415,7 @@ tronclass_stop_logged() {
   tronclass_discover_groups
   if [ -z "$wrapper" ] && [ "${#records[@]}" -eq 0 ]; then return 0; fi
   while [ "${#records[@]}" -eq 0 ] && [ -n "$wrapper" ] &&
-    [ "$EPOCHSECONDS" -lt "$records_deadline" ] && kill -0 "$wrapper" 2>/dev/null; do
+    [ "$EPOCHSECONDS" -lt "$records_deadline" ] && tronclass_record_matches "$wrapper" "$wrapper_start"; do
     sleep 0.1
     tronclass_discover_groups
   done
@@ -429,12 +424,13 @@ tronclass_stop_logged() {
   for record in "${records[@]+"${records[@]}"}"; do
     tronclass_signal_record "$record" "$sig"
   done
-  [ -n "$wrapper" ] && kill "-$sig" "$wrapper" 2>/dev/null || true
+  tronclass_signal_wrapper "$wrapper" "$wrapper_start" "$sig"
   local wrapper_exit_polls=0
   while :; do
     tronclass_discover_groups
     local wrapper_alive=0 group_alive=0 leader_alive=0 run pid start
-    [ -n "$wrapper" ] && kill -0 "$wrapper" 2>/dev/null && wrapper_alive=1
+    [ -n "$wrapper" ] && kill -0 "$wrapper" 2>/dev/null &&
+      tronclass_record_matches "$wrapper" "$wrapper_start" && wrapper_alive=1
     for record in "${records[@]+"${records[@]}"}"; do
       if tronclass_group_alive_record "$record"; then
         group_alive=1
@@ -457,14 +453,14 @@ tronclass_stop_logged() {
   for record in "${records[@]+"${records[@]}"}"; do
     tronclass_signal_record "$record" KILL
   done
-  [ -n "$wrapper" ] && kill -KILL "$wrapper" 2>/dev/null || true
+  tronclass_signal_wrapper "$wrapper" "$wrapper_start" KILL
   [ -n "$wrapper" ] && wait "$wrapper" 2>/dev/null || true
 }
 
 cleanup() {
   local sig="${1:-}"
   trap - EXIT INT TERM
-  local child launch_signal=TERM pending_cleaned='' jobs=() job cleanup_records
+  local child launch_signal=TERM pending_cleaned='' jobs=() job cleanup_records child_start
   cleanup_records="$(mktemp -d "$TRONCLASS_RUNTIME_DIR/.cleanup.XXXXXXXX")" || cleanup_records=""
   tronclass_kill_discovered_groups() {
     [ -n "$cleanup_records" ] || return 0
@@ -477,25 +473,36 @@ cleanup() {
     done
   }
   TRONCLASS_CLEANUP_DEADLINE=$((EPOCHSECONDS + 6))
+  local pid start entry
+  local wrappers=(
+    "$TRONCLASS_WEB_PID ${TRONCLASS_WEB_START:-}"
+    "$TRONCLASS_EMULATOR_PID ${TRONCLASS_EMULATOR_START:-}"
+    "$TRONCLASS_SELFTEST_WRAPPER ${TRONCLASS_SELFTEST_START:-}"
+    "$TRONCLASS_SEED_PID ${TRONCLASS_SEED_START:-}"
+    "$TRONCLASS_ACCEPTANCE_PID ${TRONCLASS_ACCEPTANCE_START:-}"
+    "$TRONCLASS_HEALTH_PID ${TRONCLASS_HEALTH_START:-}"
+  )
   if [ -n "${TRONCLASS_LAUNCHING_LOG:-}" ]; then
     [ "$TRONCLASS_LAUNCHING_LOG" != "$emulator_log" ] || launch_signal=INT
-    # The trap can run after fork and before the assignment of $!. At this
-    # point only one launch is in flight. Exclude the already recorded jobs.
+    # A trap can run between fork and start-time registration. Only an
+    # immediate child of this launcher can be registered in that window.
     for child in $(exec pgrep -P "$$"); do
-      case "$child" in
-        "$TRONCLASS_WEB_PID"|"$TRONCLASS_EMULATOR_PID"|"$TRONCLASS_SELFTEST_WRAPPER"|"$TRONCLASS_SEED_PID"|"$TRONCLASS_ACCEPTANCE_PID"|"$TRONCLASS_HEALTH_PID") continue ;;
-      esac
-      tronclass_stop_logged "$child" "$TRONCLASS_LAUNCHING_LOG" "$launch_signal" "" &
+      for entry in "${wrappers[@]}"; do
+        read -r pid start <<< "$entry"
+        if [ "$child" = "$pid" ] && [ -n "$start" ]; then continue 2; fi
+      done
+      child_start="$(tronclass_proc_starttime "$child" 2>/dev/null)" || continue
+      tronclass_stop_logged "$child" "$TRONCLASS_LAUNCHING_LOG" "$launch_signal" "" "$child_start" &
       jobs+=("$!")
       pending_cleaned="$TRONCLASS_LAUNCHING_LOG"
     done
   fi
-  [ "$pending_cleaned" = "$web_log" ] || { tronclass_stop_logged "$TRONCLASS_WEB_PID" "$web_log" TERM "${TRONCLASS_WEB_RECORD:-}" & jobs+=("$!"); }
-  [ "$pending_cleaned" = "$emulator_log" ] || { tronclass_stop_logged "$TRONCLASS_EMULATOR_PID" "$emulator_log" INT "${TRONCLASS_EMULATOR_RECORD:-}" & jobs+=("$!"); }
-  [ "$pending_cleaned" = "$selftest_log" ] || { tronclass_stop_logged "$TRONCLASS_SELFTEST_WRAPPER" "$selftest_log" TERM "${TRONCLASS_SELFTEST_RECORD:-}" & jobs+=("$!"); }
-  [ "$pending_cleaned" = "$seed_log" ] || { tronclass_stop_logged "$TRONCLASS_SEED_PID" "$seed_log" TERM "${TRONCLASS_SEED_RECORD:-}" & jobs+=("$!"); }
-  [ "$pending_cleaned" = "$acceptance_log" ] || { tronclass_stop_logged "$TRONCLASS_ACCEPTANCE_PID" "$acceptance_log" TERM "${TRONCLASS_ACCEPTANCE_RECORD:-}" & jobs+=("$!"); }
-  [ "$pending_cleaned" = "$health_log" ] || { tronclass_stop_logged "$TRONCLASS_HEALTH_PID" "$health_log" TERM "${TRONCLASS_HEALTH_RECORD:-}" & jobs+=("$!"); }
+  [ "$pending_cleaned" = "$web_log" ] || { tronclass_stop_logged "$TRONCLASS_WEB_PID" "$web_log" TERM "${TRONCLASS_WEB_RECORD:-}" "${TRONCLASS_WEB_START:-}" & jobs+=("$!"); }
+  [ "$pending_cleaned" = "$emulator_log" ] || { tronclass_stop_logged "$TRONCLASS_EMULATOR_PID" "$emulator_log" INT "${TRONCLASS_EMULATOR_RECORD:-}" "${TRONCLASS_EMULATOR_START:-}" & jobs+=("$!"); }
+  [ "$pending_cleaned" = "$selftest_log" ] || { tronclass_stop_logged "$TRONCLASS_SELFTEST_WRAPPER" "$selftest_log" TERM "${TRONCLASS_SELFTEST_RECORD:-}" "${TRONCLASS_SELFTEST_START:-}" & jobs+=("$!"); }
+  [ "$pending_cleaned" = "$seed_log" ] || { tronclass_stop_logged "$TRONCLASS_SEED_PID" "$seed_log" TERM "${TRONCLASS_SEED_RECORD:-}" "${TRONCLASS_SEED_START:-}" & jobs+=("$!"); }
+  [ "$pending_cleaned" = "$acceptance_log" ] || { tronclass_stop_logged "$TRONCLASS_ACCEPTANCE_PID" "$acceptance_log" TERM "${TRONCLASS_ACCEPTANCE_RECORD:-}" "${TRONCLASS_ACCEPTANCE_START:-}" & jobs+=("$!"); }
+  [ "$pending_cleaned" = "$health_log" ] || { tronclass_stop_logged "$TRONCLASS_HEALTH_PID" "$health_log" TERM "${TRONCLASS_HEALTH_RECORD:-}" "${TRONCLASS_HEALTH_START:-}" & jobs+=("$!"); }
   local deadline_reached=0
   for job in "${jobs[@]}"; do
     while kill -0 "$job" 2>/dev/null; do
@@ -517,10 +524,10 @@ cleanup() {
   fi
   [ -z "$cleanup_records" ] || rm -rf -- "$cleanup_records"
   unset TRONCLASS_CLEANUP_DEADLINE
-  local pid
-  for pid in "$TRONCLASS_WEB_PID" "$TRONCLASS_EMULATOR_PID" "$TRONCLASS_SELFTEST_WRAPPER"     "$TRONCLASS_SEED_PID" "$TRONCLASS_ACCEPTANCE_PID" "$TRONCLASS_HEALTH_PID"; do
+  for entry in "${wrappers[@]}"; do
+    read -r pid start <<< "$entry"
     [ -n "$pid" ] || continue
-    kill -KILL "$pid" 2>/dev/null || true
+    tronclass_signal_wrapper "$pid" "$start" KILL
     # Reap here: stop_logged now runs in a subshell and cannot wait(2) these
     # children, so a just-killed wrapper would otherwise remain a zombie
     # visible to kill -0 after the launcher exits.
@@ -596,7 +603,7 @@ for stale_sidecar in "$TRONCLASS_RUNTIME_DIR"/*.log.pgid "$TRONCLASS_RUNTIME_DIR
     continue
   fi
   if [ "$stale_run" = "$TRONCLASS_RUN_ID" ] ||
-    { tronclass_record_matches "$stale_pid" "$stale_start" && kill -0 -- "-$stale_pid" 2>/dev/null; }; then
+    { tronclass_group_matches "$stale_pid" "$stale_start" && kill -0 -- "-$stale_pid" 2>/dev/null; }; then
     continue
   fi
   rm -f -- "$stale_sidecar" 2>/dev/null || true
@@ -808,13 +815,14 @@ if [ "${TRONCLASS_SIGNAL_SELFTEST:-}" = '1' ]; then
   TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$selftest_log" \
     node -e 'const fs=require("node:fs"); const {spawn}=require("node:child_process"); const g=spawn(process.execPath,["-e","process.on(\"SIGTERM\",()=>{});process.on(\"SIGINT\",()=>{});require(\"node:fs\").writeFileSync(process.env.TRONCLASS_SELFTEST_GRANDCHILD,String(process.pid));setInterval(()=>{},1000);"],{stdio:"ignore"}); fs.writeFileSync(process.env.TRONCLASS_SELFTEST_CHILD,String(process.pid)); process.on("SIGTERM",()=>process.exit(0)); process.on("SIGINT",()=>process.exit(0)); setInterval(()=>{},1000);' &
   TRONCLASS_SELFTEST_WRAPPER=$!
+  TRONCLASS_SELFTEST_START="$(tronclass_proc_starttime "$TRONCLASS_SELFTEST_WRAPPER" 2>/dev/null || true)"
   unset TRONCLASS_LAUNCHING_LOG
   echo "WRAPPER_PID=$TRONCLASS_SELFTEST_WRAPPER"
   unset TRONCLASS_RUN_LOGGED_EXEC
   if [ -n "${TRONCLASS_TEST_PAUSE_BEFORE_CAPTURE:-}" ]; then
     sleep "$TRONCLASS_TEST_PAUSE_BEFORE_CAPTURE"
   fi
-  TRONCLASS_SELFTEST_RECORD="$(tronclass_capture_child_record "$TRONCLASS_SELFTEST_WRAPPER" || true)"
+  TRONCLASS_SELFTEST_RECORD="$(tronclass_capture_child_record "$TRONCLASS_SELFTEST_WRAPPER" "$TRONCLASS_SELFTEST_START" || true)"
   wait "$TRONCLASS_SELFTEST_WRAPPER"
   exit 0
 fi
@@ -826,9 +834,10 @@ TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$emulator_log" \
   node node_modules/firebase-tools/lib/bin/firebase.js emulators:start \
   --project "$TEST_PROJECT_ID" --config firebase.test.json --only auth,firestore &
 TRONCLASS_EMULATOR_PID=$!
+TRONCLASS_EMULATOR_START="$(tronclass_proc_starttime "$TRONCLASS_EMULATOR_PID" 2>/dev/null || true)"
 unset TRONCLASS_LAUNCHING_LOG
 unset TRONCLASS_RUN_LOGGED_EXEC
-TRONCLASS_EMULATOR_RECORD="$(tronclass_capture_child_record "$TRONCLASS_EMULATOR_PID" || true)"
+TRONCLASS_EMULATOR_RECORD="$(tronclass_capture_child_record "$TRONCLASS_EMULATOR_PID" "$TRONCLASS_EMULATOR_START" || true)"
 TRONCLASS_EMULATOR_READY=false
 for _ in $(seq 1 90); do
   if ! kill -0 "$TRONCLASS_EMULATOR_PID" 2>/dev/null; then
@@ -849,12 +858,13 @@ fi
 TRONCLASS_LAUNCHING_LOG="$seed_log"
 TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$seed_log" node scripts/test-env/seed.cjs --missing-only &
 TRONCLASS_SEED_PID=$!
+TRONCLASS_SEED_START="$(tronclass_proc_starttime "$TRONCLASS_SEED_PID" 2>/dev/null || true)"
 unset TRONCLASS_LAUNCHING_LOG
 unset TRONCLASS_RUN_LOGGED_EXEC
-TRONCLASS_SEED_RECORD="$(tronclass_capture_child_record "$TRONCLASS_SEED_PID" || true)"
+TRONCLASS_SEED_RECORD="$(tronclass_capture_child_record "$TRONCLASS_SEED_PID" "$TRONCLASS_SEED_START" || true)"
 wait "$TRONCLASS_SEED_PID"
 TRONCLASS_SEED_PID=''
-unset TRONCLASS_SEED_RECORD
+unset TRONCLASS_SEED_START TRONCLASS_SEED_RECORD
 node scripts/build-functions-shared.cjs
 node scripts/import-ai/prepare-assets.mjs
 echo "Full Web: $WEB_PUBLIC_ORIGIN/login?returnUrl=%2Ftronclass&schoolId=pu&reconnect=school"
@@ -870,19 +880,22 @@ TRONCLASS_LAUNCHING_LOG="$web_log"
 TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$web_log" \
   node ../../node_modules/next/dist/bin/next dev --webpack -p "$TEST_WEB_PORT" -H "$TEST_HOST" &
 TRONCLASS_WEB_PID=$!
+TRONCLASS_WEB_START="$(tronclass_proc_starttime "$TRONCLASS_WEB_PID" 2>/dev/null || true)"
 unset TRONCLASS_LAUNCHING_LOG
 unset TRONCLASS_RUN_LOGGED_EXEC
-TRONCLASS_WEB_RECORD="$(tronclass_capture_child_record "$TRONCLASS_WEB_PID" || true)"
+TRONCLASS_WEB_RECORD="$(tronclass_capture_child_record "$TRONCLASS_WEB_PID" "$TRONCLASS_WEB_START" || true)"
 if [ "${TRONCLASS_VERIFY_RUNTIME:-}" = '1' ] && [ "$TRONCLASS_INTEGRATION_ENABLED" = true ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
   TRONCLASS_LAUNCHING_LOG="$acceptance_log"
   TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$acceptance_log" node scripts/test-env/verify-tronclass.cjs &
   TRONCLASS_ACCEPTANCE_PID=$!
+  TRONCLASS_ACCEPTANCE_START="$(tronclass_proc_starttime "$TRONCLASS_ACCEPTANCE_PID" 2>/dev/null || true)"
   unset TRONCLASS_LAUNCHING_LOG
   unset TRONCLASS_RUN_LOGGED_EXEC
-  TRONCLASS_ACCEPTANCE_RECORD="$(tronclass_capture_child_record "$TRONCLASS_ACCEPTANCE_PID" || true)"
+  TRONCLASS_ACCEPTANCE_RECORD="$(tronclass_capture_child_record "$TRONCLASS_ACCEPTANCE_PID" "$TRONCLASS_ACCEPTANCE_START" || true)"
   wait "$TRONCLASS_ACCEPTANCE_PID"
   TRONCLASS_ACCEPTANCE_PID=''
+  unset TRONCLASS_ACCEPTANCE_START
   unset TRONCLASS_ACCEPTANCE_RECORD
   echo "Verified real emulator authentication and Firestore persistence; see $TRONCLASS_RUNTIME_DIR/acceptance.json."
 fi
@@ -891,11 +904,13 @@ if [ "${TRONCLASS_CHECK_HEALTH:-}" = '1' ]; then
   TRONCLASS_LAUNCHING_LOG="$health_log"
   TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$health_log" node scripts/test-env/health-tronclass.cjs &
   TRONCLASS_HEALTH_PID=$!
+  TRONCLASS_HEALTH_START="$(tronclass_proc_starttime "$TRONCLASS_HEALTH_PID" 2>/dev/null || true)"
   unset TRONCLASS_LAUNCHING_LOG
   unset TRONCLASS_RUN_LOGGED_EXEC
-  TRONCLASS_HEALTH_RECORD="$(tronclass_capture_child_record "$TRONCLASS_HEALTH_PID" || true)"
+  TRONCLASS_HEALTH_RECORD="$(tronclass_capture_child_record "$TRONCLASS_HEALTH_PID" "$TRONCLASS_HEALTH_START" || true)"
   wait "$TRONCLASS_HEALTH_PID"
   TRONCLASS_HEALTH_PID=''
+  unset TRONCLASS_HEALTH_START
   unset TRONCLASS_HEALTH_RECORD
   echo "Verified read-only health and login page requests; see $TRONCLASS_RUNTIME_DIR/health.json."
 fi

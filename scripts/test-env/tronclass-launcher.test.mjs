@@ -638,6 +638,90 @@ test('launcher cleanup kills a process-group descendant after the wrapper exits'
   }
 });
 
+test('launcher skips a reused wrapper PID and kills its registered detached group', { timeout: 12000 }, async () => {
+  const { spawn } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const { once } = await import('node:events');
+  const { setTimeout: delay } = await import('node:timers/promises');
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-wrapper-reuse-'));
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+  const grandchildFile = path.join(dir, 'grandchild.pid');
+  const childFile = path.join(dir, 'child.pid');
+  const registeredFile = path.join(dir, 'registered');
+  const replacementFile = path.join(dir, 'replacement');
+  const victimReady = path.join(dir, 'victim-ready');
+  const original = readFileSync(script, 'utf8');
+  // Supply the replacement PID while retaining the exited wrapper's start
+  // time. This models PID reuse without relying on kernel PID allocation.
+  const stubbornLeader = original.replace(
+    'process.on("SIGTERM",()=>process.exit(0)); process.on("SIGINT",()=>process.exit(0));',
+    'process.on("SIGTERM",()=>{}); process.on("SIGINT",()=>{});',
+  );
+  assert.notEqual(stubbornLeader, original);
+  const fixture = stubbornLeader.replace('  wait "$TRONCLASS_SELFTEST_WRAPPER"\n', () => `
+    printf '%s %s\n' "$TRONCLASS_SELFTEST_WRAPPER" "$TRONCLASS_SELFTEST_START" > "$WRAPPER_REGISTERED"
+    while [ ! -s "$WRAPPER_REPLACEMENT" ]; do sleep 0.02; done
+    builtin kill -KILL "$TRONCLASS_SELFTEST_WRAPPER"
+    wait "$TRONCLASS_SELFTEST_WRAPPER" 2>/dev/null || true
+    read -r TRONCLASS_SELFTEST_WRAPPER < "$WRAPPER_REPLACEMENT"
+    kill -TERM "$$"
+  `);
+  assert.notEqual(fixture, stubbornLeader);
+  const launcher = spawn('bash', ['-c', fixture, script], {
+    env: {
+      ...process.env,
+      TRONCLASS_RUNTIME_DIR: dir,
+      TRONCLASS_SIGNAL_SELFTEST: '1',
+      TRONCLASS_SELFTEST_CHILD: childFile,
+      TRONCLASS_SELFTEST_GRANDCHILD: grandchildFile,
+      WRAPPER_REGISTERED: registeredFile,
+      WRAPPER_REPLACEMENT: replacementFile,
+    },
+    stdio: 'ignore',
+  });
+  const launcherExited = once(launcher, 'exit');
+  let victim;
+  let victimExited;
+  let leader;
+  let grandchild;
+  try {
+    const deadline = Date.now() + 4000;
+    while (![registeredFile, childFile, grandchildFile].every(existsSync) && Date.now() < deadline) await delay(20);
+    const [wrapper, wrapperStart] = readFileSync(registeredFile, 'utf8').trim().split(' ');
+    assert.match(wrapperStart, /^\d+$/);
+    leader = Number(readFileSync(childFile, 'utf8'));
+    grandchild = Number(readFileSync(grandchildFile, 'utf8'));
+    process.kill(-leader, 0);
+    victim = spawn(process.execPath, ['-e', `
+      process.on('SIGTERM', () => {});
+      process.on('SIGINT', () => {});
+      require('node:fs').writeFileSync(process.argv[1], '');
+      setInterval(() => {}, 1000);
+    `, victimReady], { detached: true, stdio: 'ignore' });
+    victimExited = once(victim, 'exit');
+    while (!existsSync(victimReady) && Date.now() < deadline) await delay(20);
+    assert.ok(existsSync(victimReady));
+    const stat = readFileSync(`/proc/${victim.pid}/stat`, 'utf8');
+    assert.notEqual(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[19], wrapperStart);
+    writeFileSync(replacementFile, `${victim.pid}\n`);
+    assert.deepEqual(await launcherExited, [143, null]);
+    assert.equal(existsSync(`/proc/${wrapper}`), false);
+    process.kill(-victim.pid, 0);
+    const reapDeadline = Date.now() + 1000;
+    while (existsSync(`/proc/${grandchild}`) && Date.now() < reapDeadline) await delay(20);
+    assert.throws(() => process.kill(-leader, 0), { code: 'ESRCH' });
+    assert.throws(() => process.kill(grandchild, 0), { code: 'ESRCH' });
+  } finally {
+    if (launcher.exitCode === null && launcher.signalCode === null) launcher.kill('SIGTERM');
+    if (victim?.exitCode === null && victim.signalCode === null) victim.kill('SIGKILL');
+    await Promise.all([launcherExited, victimExited]);
+    for (const pid of [leader, grandchild]) {
+      if (pid && existsSync(`/proc/${pid}`)) process.kill(pid, 'SIGKILL');
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('launcher recovers a current-run sidecar after the leader exits before capture', async (t) => {
   const { spawn } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
