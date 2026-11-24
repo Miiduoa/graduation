@@ -476,6 +476,38 @@ test('a list started after a failed subscribe cannot omit a subscription confirm
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
+test('an overlapping list that includes the board rechecks after the first confirmation succeeds', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  const firstConfirm = deferred<boolean>();
+  const secondConfirm = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard)
+    .mockImplementationOnce(() => firstConfirm.promise)
+    .mockImplementationOnce(() => secondConfirm.promise);
+  jest.mocked(subscribeToBoard).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+
+  const subs = deferred<string[]>();
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
+  let refreshPromise!: Promise<void>;
+  act(() => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+
+  await act(async () => { firstConfirm.resolve(true); });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  // Another device cancels after the first read, but the list still includes the board.
+  await act(async () => { subs.resolve(['board']); await refreshPromise; });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+  expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  await act(async () => { secondConfirm.resolve(false); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+});
+
 test('a later overlapping list that omits a board does not overwrite the first successful confirm', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const view = render(<BoardsScreen />);
@@ -787,7 +819,7 @@ test('a pull-to-refresh started during a failed write cannot apply a cache gap o
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
-test('a newer server list that omits the board beats an older failed-write re-read', async () => {
+test('an overlapping list omission leaves the pending failed-write confirmation eligible to apply', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const view = render(<BoardsScreen />);
   await view.findByText('讀書會');
@@ -802,13 +834,14 @@ test('a newer server list that omits the board beats an older failed-write re-re
   expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
   expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
 
-  // Other device subscribed then left; the newer list confirms it is gone.
+  // The list has a cache gap while the first single-board read is pending.
   jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([]);
   await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
   expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
 
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
   await act(async () => { reRead.resolve(true); });
-  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
 test('a successful write still keeps a later list subscription if the re-check fails', async () => {

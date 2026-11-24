@@ -171,12 +171,9 @@ function BoardsContent() {
       const { subscribedIds } = membership;
       for (const id of awaitingServerConfirm.current.keys()) overlappingConfirmations.add(id);
       for (const id of pendingServerConfirmCounts.current.keys()) overlappingConfirmations.add(id);
-      for (const id of overlappingConfirmations) {
-        // Cache-backed membership cannot replace a rollback or a single-board
-        // result that landed during this refresh. A matching omission with no
-        // known subscription can still take the normal list path.
-        if (confirmedSubscribedRef.current.has(id) || subscribedIds.has(id)) keepLocal.add(id);
-      }
+      // Keep the entire overlap out of list sequencing, including omissions
+      // that agree with a rollback while a server confirmation is in flight.
+      for (const id of overlappingConfirmations) keepLocal.add(id);
       const tracked = new Set([
         ...subscribedIds,
         ...keepLocal,
@@ -215,17 +212,20 @@ function BoardsContent() {
           awaitingServerConfirm.current.has(id) &&
           nextConfirmed.has(id) &&
           !subscribedIds.has(id);
-        // A list that includes a subscription kept locally as unsubscribed
-        // (for example after a failed write) may be newer than the rollback.
-        // An omission alone must not trigger another re-read when a
-        // single-board read already confirmed the current subscription.
-        const listClaimsUnkeptSubscription = subscribedIds.has(id) && !nextConfirmed.has(id);
-        const listOmitsConfirmed = !subscribedIds.has(id) && confirmedByBoardRead.current.has(id);
+        // A listed subscription during an overlap can be stale even when it
+        // agrees with the first confirmation. An omission alone leaves a
+        // subscription established by a single-board read in place.
+        const listed = subscribedIds.has(id);
+        const listedDuringOverlap = listed && overlappingConfirmations.has(id);
+        const listClaimsUnkeptSubscription = listed && !nextConfirmed.has(id);
+        const listOmitsConfirmed = !listed && confirmedByBoardRead.current.has(id);
         if (
           !pendingSubscriptionCounts.current.has(id) &&
+          !listOmitsConfirmed &&
           (keptRollback ||
+            listedDuringOverlap ||
             listClaimsUnkeptSubscription ||
-            (lastSettledWriteSucceeded.current.has(id) && !listOmitsConfirmed)) &&
+            lastSettledWriteSucceeded.current.has(id)) &&
           auth.user?.uid &&
           school?.id
         ) {
