@@ -24,10 +24,14 @@ type LinkTransaction = {
   verifier: string; context: string; callback: string; expiresAt: number;
 };
 
+// Read access remains available when the provider cannot accept new linking requests.
+export function googleAccountManagementEnabled(): boolean {
+  return nuniEnabled() && process.env.NUNI_GOOGLE_ACCOUNT_LINK_ENABLED === 'true';
+}
+
 // Separate, default-off server flag. The candidate API and approved OAuth redirect must also be ready.
 export function googleAccountLinkEnabled(): boolean {
-  return nuniEnabled() &&
-    process.env.NUNI_GOOGLE_ACCOUNT_LINK_ENABLED === 'true' &&
+  return googleAccountManagementEnabled() &&
     process.env.PLATFORM_GOOGLE_LOGIN_ENABLED === 'true' &&
     !!process.env.PLATFORM_GOOGLE_CLIENT_SECRET?.trim();
 }

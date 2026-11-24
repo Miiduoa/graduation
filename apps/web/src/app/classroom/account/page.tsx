@@ -1,6 +1,6 @@
 import { NuniApp } from '@/features/nuni/NuniApp';
-import { googleAccountLinkEnabled } from '@/lib/nuni/googleAccountLink';
+import { googleAccountManagementEnabled } from '@/lib/nuni/googleAccountLink';
 
 export default function ClassroomPage() {
-  return <NuniApp googleLinkEnabled={googleAccountLinkEnabled()} />;
+  return <NuniApp googleLinkEnabled={googleAccountManagementEnabled()} />;
 }

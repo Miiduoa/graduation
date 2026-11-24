@@ -117,6 +117,45 @@ test("Google link candidate PostgreSQL and Fastify contract",{timeout:60000},asy
       assert.deepEqual(await credentials(subject),[]);
     }
   });
+  await t.test("inventory reads the authenticated account without changing pending link state",async()=>{
+    const actor=await makeActor(),other=await makeActor(),subject="inventory-"+randomUUID();
+    let verificationCount=0;
+    const service=createGoogleLinkService({db,verifier:{verify:async()=>{verificationCount++;return verified(subject);}}});
+    const expected={platformAccountId:actor.platformAccountId,currentMethod:"apple",methods:["apple"],googleLink:"available"};
+    const transactions=()=>db.transaction(async tx=>(await tx.query("SELECT * FROM platform_google_link_transactions WHERE platform_account_id=$1",[actor.platformAccountId])).rows);
+    assert.deepEqual(await service.status(actor),expected);
+    assert.deepEqual(await transactions(),[]);
+    const input=await begin(service,actor),pending=await transactions();
+    assert.equal(pending.length,1);
+    assert.deepEqual(await service.status(actor),expected);
+    assert.deepEqual(await transactions(),pending);
+    assert.equal(verificationCount,0);
+    await assert.rejects(()=>service.status({...actor,sessionHash:other.sessionHash}),{code:"GOOGLE_LINK_REAUTH_REQUIRED"});
+    await assert.rejects(()=>service.status({...actor,platformAccountId:other.platformAccountId}),{code:"GOOGLE_LINK_INVALID"});
+    assert.deepEqual(await service.status(other),{...expected,platformAccountId:other.platformAccountId});
+    await service.complete(actor,input);
+    assert.deepEqual(await service.status(actor),{...expected,methods:["google","apple"],googleLink:"linked"});
+    // A read from the second account does not disclose the first account's new credential.
+    assert.deepEqual(await service.status(other),{...expected,platformAccountId:other.platformAccountId});
+    assert.equal(verificationCount,1);
+  });
+  await t.test("inventory reports step-up, revoked credentials and logout from real database state",async()=>{
+    const actor=await makeActor(),subject="inventory-revocation-"+randomUUID();
+    const service=createGoogleLinkService({db,verifier:verifier(subject)});
+    await db.transaction(tx=>tx.query("UPDATE platform_account_sessions SET created_at=clock_timestamp()-interval '10 minutes' WHERE token_sha256=$1",[actor.sessionHash]));
+    assert.equal((await service.status(actor)).googleLink,"reauth-required");
+    await assert.rejects(()=>service.start(actor),{code:"GOOGLE_LINK_REAUTH_REQUIRED"});
+    await db.transaction(tx=>tx.query("UPDATE platform_account_sessions SET created_at=clock_timestamp() WHERE token_sha256=$1",[actor.sessionHash]));
+    const input=await begin(service,actor);await service.complete(actor,input);
+    await db.transaction(tx=>tx.query("UPDATE platform_account_credentials SET state='revoked' WHERE platform_account_id=$1 AND method='google'",[actor.platformAccountId]));
+    assert.deepEqual(await service.status(actor),{platformAccountId:actor.platformAccountId,currentMethod:"apple",methods:["apple"],googleLink:"unavailable"});
+    await db.transaction(tx=>tx.query("UPDATE platform_account_credentials SET state='revoked' WHERE id=$1",[actor.credentialId]));
+    await assert.rejects(()=>service.status(actor),{code:"GOOGLE_LINK_INVALID"});
+    const loggedOut=await makeActor();await db.transaction(tx=>tx.query("DELETE FROM platform_account_sessions WHERE token_sha256=$1",[loggedOut.sessionHash]));
+    await assert.rejects(()=>service.status(loggedOut),{code:"GOOGLE_LINK_REAUTH_REQUIRED"});
+    const closed=await makeActor();await db.transaction(tx=>tx.query("UPDATE platform_accounts SET state='closed' WHERE id=$1",[closed.platformAccountId]));
+    await assert.rejects(()=>service.status(closed),{code:"GOOGLE_LINK_INVALID"});
+  });
   await t.test("actual HTTP route binds to current session instead of request JSON",async()=>{
     const actor=await makeActor(),subject="http-"+randomUUID();
     const service=createGoogleLinkService({db,verifier:verifier(subject)});
@@ -129,6 +168,16 @@ test("Google link candidate PostgreSQL and Fastify contract",{timeout:60000},asy
       assert.equal(registerGoogleLinkRoutes(app,{enabled:true,accounts,service}),true);
       const prefix="/v1/auth/platform/account-links/google/";
       const request=(path,payload,authorization=actor.authorization)=>app.inject({method:"POST",url:prefix+path,headers:{authorization},payload});
+      const status=(options={})=>app.inject({method:"GET",url:prefix+"status",headers:{authorization:actor.authorization},...options});
+      const initialStatus=await status();assert.equal(initialStatus.statusCode,200);
+      assert.deepEqual(initialStatus.json(),{platformAccountId:actor.platformAccountId,currentMethod:"apple",methods:["apple"],googleLink:"available"});
+      assert.match(initialStatus.headers["cache-control"],/no-store/u);
+      assert.equal(initialStatus.headers["referrer-policy"],"no-referrer");
+      assert.equal((await status({url:prefix+"status?account=other"})).statusCode,422);
+      assert.equal((await status({payload:{platformAccountId:"other"}})).statusCode,422);
+      assert.equal((await status({headers:{authorization:"Platform ps_"+"z".repeat(43)}})).statusCode,401);
+      assert.equal((await status({method:"HEAD"})).statusCode,404);
+      assert.equal((await request("status",{})).statusCode,404);
       assert.equal((await request("start",{},"Platform ps_"+"z".repeat(43))).statusCode,401);
       assert.equal((await request("start",{platformAccountId:"other"})).statusCode,422);
       const start=await request("start",{});assert.equal(start.statusCode,200);
@@ -138,6 +187,12 @@ test("Google link candidate PostgreSQL and Fastify contract",{timeout:60000},asy
       assert.equal(complete.statusCode,200);
       assert.deepEqual(complete.json(),{status:"linked",platformAccountId:actor.platformAccountId});
       assert.deepEqual(await credentials(subject),[{platform_account_id:actor.platformAccountId,state:"active"}]);
+      const linkedStatus=await status();assert.equal(linkedStatus.statusCode,200);
+      assert.deepEqual(linkedStatus.json(),{platformAccountId:actor.platformAccountId,currentMethod:"apple",methods:["google","apple"],googleLink:"linked"});
+      await db.transaction(tx=>tx.query("DELETE FROM platform_account_sessions WHERE token_sha256=$1",[actor.sessionHash]));
+      const loggedOutStatus=await status();assert.equal(loggedOutStatus.statusCode,401);
+      assert.equal(loggedOutStatus.json().platformAccountId,undefined);
+      assert.match(loggedOutStatus.headers["cache-control"],/no-store/u);
     }finally{await app.close();}
   });
 });

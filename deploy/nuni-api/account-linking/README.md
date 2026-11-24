@@ -1,6 +1,6 @@
 # Unified account: Google linking candidate
 
-Status: isolated server-side candidate; no API route, no feature flag enabled, no migration applied, no existing sessions or users touched.
+Status: isolated server-side and Web candidate. Dedicated API adapters and a Web account-management page are implemented, but the API is not registered in the production host, the feature flag is default-off, and the candidate schema is not a production migration. No production accounts or sessions are changed by this work.
 
 ## Source and decision
 
@@ -32,12 +32,32 @@ Only explicit opt-in registers three POST endpoints under `/v1/auth/platform/acc
 
 This remains an isolated adapter, not a registered production route. Host integration must add the exact route classifier to its campus-auth bypass while retaining Platform authentication inside the handler; enable the existing rate limiter, enforce header/body redaction, and verify actual host middleware/ACLs. Web state/PKCE, confirmation, school credential proof, account migration and full deployment remain gated. Run both fixture suites with `node --test deploy/nuni-api/account-linking/google-link-service.test.mjs deploy/nuni-api/account-linking/google-link-routes.test.mjs`. The service suite contains 15 scenarios; the route suite contains 10 fixture checks, not actual Fastify injection or PostgreSQL evidence.
 
-## Actual database acceptance gate (not yet executed)
+## Actual database acceptance gate
 
-The Security Gates workflow now invokes both Node fixture suites and `google-link-postgres.ci.mjs` using the existing CI loopback PostgreSQL and previously installed pinned Fastify/pg test dependencies. The script rejects any non-test connection string, creates a unique random schema, executes the actual candidate DDL on a synthetic subset of migration 146, and drops only its own schema. Four scenarios exercise concurrent ownership conflicts, duplicate callback serialization, cancellation/logout during verification, and actual Fastify HTTP injection. The verifier and account resolver are fixtures: these tests are not live Google verification, complete production-schema compatibility, host rate-limiter testing or proof that the API is deployed. No changes to production packaging, credential methods or grants. The exact new CI head must pass before any integration is considered.
+The Security Gates workflow invokes both Node fixture suites and `google-link-postgres.ci.mjs` using the existing CI loopback PostgreSQL and pinned Fastify/pg test dependencies. The script rejects any non-test connection string, creates a unique random schema, executes the actual candidate DDL on a synthetic subset of migration 146, and drops only its own schema. The original four database scenarios passed on exact commit `322e93bdf59836ab2038ec35423819ef0f5de5e9`: [Security Gates log](https://github.com/Miiduoa/graduation/actions/runs/45424218896/job/138561031951). These cover concurrent ownership conflicts, duplicate callback serialization, cancellation/logout during verification, and actual Fastify HTTP injection.
+
+The inventory increment adds two database scenarios and expands HTTP assertions. They must pass again on the resulting commit; the previous head's success is not evidence for new code. The verifier and account resolver are fixtures: these tests are not live Google verification, complete production-schema compatibility, host rate-limiter testing or proof that the API is deployed. Production packaging, credential methods and grants are unchanged.
 
 ## Web browser candidate (default off)
 
 The separate Next.js routes at `/auth/platform/link/google/{start,callback}` and the gated account-management page use the existing encrypted cookie and current platform session, not ordinary Google login. Start requires an exact same-origin form, explicit consent and current session context. OAuth uses a separate five-minute sealed link cookie, fixed Google trust roots, PKCE-S256, state, nonce and a fixed dedicated callback. The callback requires the same session, never revokes or replaces a platform session or normal login cookie, and routes provider access-denied to the matching cancellation transaction. No link write or token exchange is automatically retried. Ambiguous responses and not-pending cancellations remain unknown; stale callbacks never clear a potentially newer link cookie. Link cookie expires naturally and backend transaction is single-use. The page does not treat its URL result as authoritative proof of an existing credential; a verified credential inventory is still required.
 
-`NUNI_GOOGLE_ACCOUNT_LINK_ENABLED` defaults off. No production flag, OAuth registration or API deployment is changed here. Only enable in isolated staging once the dedicated API is registered and the exact callback is approved. The candidate still supports only already verified platform credentials until school issuer proof, school-credential model, actual account migration, authenticated credential inventory, rate-limit/ACL review and end-to-end tests are complete. Test: `pnpm --filter web exec vitest run src/lib/nuni/googleAccountLink.test.ts`. These are mocked HTTP transport tests using real Next request/cookie primitives, not live OAuth or browser acceptance. Exact-head CI is required.
+`NUNI_GOOGLE_ACCOUNT_LINK_ENABLED` defaults off. No production flag, OAuth registration or API deployment is changed here. Only enable in isolated staging once the dedicated API is registered and the exact callback is approved. The candidate still supports only already verified platform credentials until school issuer proof, school-credential model, actual account migration, rate-limit/ACL review and end-to-end tests are complete. Tests use mocked HTTP transport with real Next request/cookie primitives; they do not establish live OAuth acceptance. Exact-head CI is required.
+
+## Authenticated inventory and return verification (2026-11-25)
+
+`GET /v1/auth/platform/account-links/google/status` resolves the current Platform bearer and then rechecks the account, current verified credential and unexpired session inside a read transaction. It returns only the account ID, current method, supported active methods and the current Google-link capability. It never returns a provider subject, credential ID, email, nonce or token. Account-first read locks follow the mutation's lock ordering. An old but valid session may still read; the five-minute step-up rule only marks a new link as `reauth-required`. Operators may inspect their own methods. Inactive, ambiguous or untrusted Google history never enables replacement through this feature.
+
+The Web BFF at `/api/nuni/account/login-methods` requires the encrypted session and matching `X-Campus-Session`. It accepts no account selector, query string or request body; performs one fixed, bounded, uncached upstream GET; projects the response through the same pure parser used by the client; and returns the current session context. The management view remains readable if the Google provider or client secret is disabled, while starting a new link remains unavailable. The separate candidate rollout flag still gates both.
+
+After any callback, the page reads this inventory before showing linked methods or a new-link form. URL result values cannot establish success. An unknown response followed by an unlinked snapshot does not prove the earlier write failed: the user may recheck without writing, or explicitly start a new transaction that replaces the unfinished one. New consent is required after every refresh or identity change. Account/session changes, revalidation, pending logout, page hiding and return all invalidate the prior inventory and consent. Aborted or late requests cannot restore another account's state. A read failure offers only a read retry; no callback or write is replayed automatically.
+
+Targeted reproduction from the repository root:
+
+```sh
+node --test deploy/nuni-api/account-linking/google-link-service.test.mjs deploy/nuni-api/account-linking/google-link-routes.test.mjs
+pnpm --filter web exec vitest run src/lib/nuni/googleAccountLink.test.ts src/lib/nuni/accountLoginMethods.test.ts src/app/auth/platform/link/google/GoogleLinkEntry.test.tsx
+pnpm --filter web typecheck
+```
+
+The PostgreSQL/Fastify acceptance script runs in the existing Security Gates job with its isolated service and explicit test connection. The status route is additive and uses existing account tables; it does not require a new inventory table or schema migration. Production host registration, middleware/rate-limit integration, real OAuth callbacks, school issuer proof and cross-store migration remain separate delivery gates.

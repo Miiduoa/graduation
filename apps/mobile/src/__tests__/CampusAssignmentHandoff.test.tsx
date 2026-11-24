@@ -134,6 +134,42 @@ test('daily and undated task entries retain exact assignment navigation', () => 
   });
 });
 
+test.each(['exact', 'capped'])('a plan preview refuses a collision with a %s summary', (kind) => {
+  const preview = '長'.repeat(130);
+  const value = snapshot();
+  value.assignments.items[0].title = preview + '補充';
+  value.assignments.items.push({
+    ...assignment,
+    title: kind === 'exact' ? preview : preview + '長'.repeat(10),
+    source: { kind: 'group-assignment', groupId: 'course_1', assignmentId: 'work_2' },
+  });
+  value.assignments.count = 2;
+  const previewPlan = plan();
+  previewPlan.steps[0].title = preview;
+  const navigate = jest.fn();
+  const view = render(<CampusEvidencePlanCard plan={previewPlan} disabled={false}
+    navigation={{ navigate }} reminderContext={context(value)} />);
+  expect(view.queryByText('查看這份作業')).toBeNull();
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+test('a unique 131-character summary opens from its 130-character plan preview', () => {
+  const preview = '長'.repeat(130);
+  const value = snapshot();
+  value.assignments.items[0].title = preview + '題';
+  const previewPlan = plan();
+  previewPlan.steps[0].title = preview;
+  const navigate = jest.fn();
+  const view = render(<CampusEvidencePlanCard plan={previewPlan} disabled={false}
+    navigation={{ navigate }} reminderContext={context(value)} />);
+  fireEvent.press(view.getByText('查看這份作業'));
+  expect(navigate).toHaveBeenCalledWith('學習', {
+    initial: false,
+    screen: 'HomeworkSubmit',
+    params: { groupId: 'course_1', assignmentId: 'work_1' },
+  });
+});
+
 test('the full assistant wires sync, local plan and exact homework handoff', async () => {
   jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(snapshot());
   jest.mocked(askCampusAssistant).mockResolvedValueOnce({

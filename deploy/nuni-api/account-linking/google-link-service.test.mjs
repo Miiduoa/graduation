@@ -1,22 +1,29 @@
 import test from "node:test";
+import assert from "node:assert/strict";
 import { createGoogleLinkService } from "./google-link-service.mjs";
 // This suite uses a transactional SQL fixture, not PostgreSQL or real Google.
 function makeFixture(createService, crypto) {
   const actor={platformAccountId:"pa_00000000-0000-4000-8000-000000000001",credentialId:"pac_00000000-0000-4000-8000-000000000001",sessionHash:"a".repeat(64)};
   const googleIssuer="https://accounts.google.com";
   const state={
-    active:true,fresh:true,operator:false,enabled:true,
+    active:true,fresh:true,operator:false,enabled:true,sessionActive:true,credentialActive:true,
+    currentCredential:{id:actor.credentialId,account:actor.platformAccountId,method:"apple",provider_issuer:"https://appleid.apple.com",provider_subject:"apple-subject",state:"active",verified_at:"2026-01-01T00:00:00Z"},
     provider:{issuer:googleIssuer,client_id:"test.apps.googleusercontent.com",jwks_uri:"https://www.googleapis.com/oauth2/v3/certs",authorization_endpoint:"https://accounts.google.com/o/oauth2/v2/auth",token_endpoint:"https://oauth2.googleapis.com/token"},
     transactions:[],credentials:[],identity:{method:"google",providerIssuer:googleIssuer,providerSubject:"google-subject",email:"same@example.test",emailVerified:true},
-    verifyCalls:0,beforeVerify:null
+    verifyCalls:0,beforeVerify:null,queries:[]
   };
   const db={transaction:async run=>{
     const tx={query:async (sql,args=[])=>{
       const tag=sql.match(/\/\* link:([a-z-]+) \*\//u)?.[1];
+      state.queries.push(tag);
       const one=(v)=>({rows:v?[v]:[]});
       if(tag==="account")return one(state.active&&args[0]===actor.platformAccountId?{id:args[0]}:null);
-      if(tag==="credential")return one(args[0]===actor.credentialId&&args[1]===actor.platformAccountId?{id:args[0],method:"apple"}:null);
-      if(tag==="session")return one(state.fresh&&args[0]===actor.sessionHash?{token_sha256:args[0]}:null);
+      if(tag==="credential")return one(state.credentialActive&&args[0]===actor.credentialId&&args[1]===actor.platformAccountId?{id:args[0],method:"apple"}:null);
+      if(tag==="session")return one(state.sessionActive&&state.fresh&&args[0]===actor.sessionHash?{token_sha256:args[0]}:null);
+      if(tag==="status-account")return one(state.active&&args[0]===actor.platformAccountId?{id:args[0]}:null);
+      if(tag==="status-credential")return one(state.credentialActive&&args[0]===actor.credentialId&&args[1]===actor.platformAccountId?{...state.currentCredential}:null);
+      if(tag==="status-session")return one(state.sessionActive&&args[0]===actor.sessionHash&&args[1]===actor.platformAccountId&&args[2]===actor.credentialId?{fresh:state.fresh}:null);
+      if(tag==="status-methods")return {rows:[state.currentCredential,...state.credentials].filter(x=>x.account===args[0]&&["google","apple"].includes(x.method)).slice(0,17)};
       if(tag==="operator")return one(state.operator?{one:1}:null);
       if(tag==="provider")return one(state.enabled?{...state.provider}:null);
       if(tag==="replace"){state.transactions=[];return one(null);}
@@ -35,7 +42,7 @@ function makeFixture(createService, crypto) {
       if(tag==="own-google")return {rows:state.credentials.filter(x=>x.account===args[0]&&x.method==="google")};
       if(tag==="insert"){
         if(state.credentials.some(x=>x.provider_issuer===args[2]&&x.provider_subject===args[3]))return one(null);
-        state.credentials.push({id:args[0],account:args[1],method:"google",provider_issuer:args[2],provider_subject:args[3],state:"active",email:args[4]});
+        state.credentials.push({id:args[0],account:args[1],method:"google",provider_issuer:args[2],provider_subject:args[3],state:"active",email:args[4],verified_at:"2026-01-01T00:00:00Z"});
         return one({id:args[0]});
       }
       throw Error("unexpected SQL "+tag);
@@ -115,5 +122,83 @@ test("Google link candidate behavioral contract", async t => {
   const passed = await exercise(createGoogleLinkService);
   for (const name of passed) t.diagnostic(name);
   if (passed.length !== 15) throw Error("missing checks");
+});
+
+test("authenticated login-method inventory", async t => {
+  const fixture=()=>makeFixture(createGoogleLinkService);
+  const google=(f,overrides={})=>({id:"pac_00000000-0000-4000-8000-000000000002",account:f.actor.platformAccountId,
+    method:"google",provider_issuer:"https://accounts.google.com",provider_subject:"private-google-subject",
+    state:"active",verified_at:"2026-01-01T00:00:00Z",email:"private@example.test",...overrides});
+  await t.test("reads only this account's verified active methods without changing pending work",async()=>{
+    const f=fixture(),{actor,state,service,begin}=f;
+    state.credentials.push(google(f,{account:"other-account"}));
+    const beforeStart=await service.status(actor);
+    assert.deepEqual(beforeStart,{platformAccountId:actor.platformAccountId,currentMethod:"apple",methods:["apple"],googleLink:"available"});
+    assert.deepEqual(state.transactions,[]);
+    const input=await begin(),pending=structuredClone(state.transactions);
+    state.queries=[];
+    assert.deepEqual(await service.status(actor),beforeStart);
+    assert.deepEqual(state.transactions,pending);
+    assert.equal(state.verifyCalls,0);
+    assert.deepEqual(state.queries,["status-account","status-credential","status-session","status-methods","operator","provider"]);
+    state.credentials=[];
+    assert.equal((await service.complete(actor,input)).status,"linked");
+    const linked=await service.status(actor);
+    assert.deepEqual(linked,{platformAccountId:actor.platformAccountId,currentMethod:"apple",methods:["google","apple"],googleLink:"linked"});
+    assert.equal(JSON.stringify(linked).includes("private"),false);
+    assert.equal(Object.hasOwn(linked,"credentialId"),false);
+  });
+  await t.test("an older active session can read but must reauthenticate before linking",async()=>{
+    const {actor,state,service}=fixture();state.fresh=false;
+    assert.equal((await service.status(actor)).googleLink,"reauth-required");
+    assert.deepEqual(state.transactions,[]);
+    await assert.rejects(()=>service.start(actor),{code:"GOOGLE_LINK_REAUTH_REQUIRED"});
+  });
+  await t.test("linked status survives old sessions and provider unavailability",async()=>{
+    const f=fixture();f.state.credentials.push(google(f));f.state.fresh=false;f.state.enabled=false;
+    assert.equal((await f.service.status(f.actor)).googleLink,"linked");
+  });
+  await t.test("the current Google method is reported from its verified credential",async()=>{
+    const f=fixture();f.state.currentCredential=google(f,{id:f.actor.credentialId});
+    assert.deepEqual(await f.service.status(f.actor),{platformAccountId:f.actor.platformAccountId,currentMethod:"google",methods:["google"],googleLink:"linked"});
+  });
+  await t.test("operator restriction and provider failures never advertise a new link",async()=>{
+    const {actor,state,service}=fixture();state.operator=true;
+    assert.equal((await service.status(actor)).googleLink,"restricted");
+    state.operator=false;state.enabled=false;
+    assert.equal((await service.status(actor)).googleLink,"unavailable");
+    state.enabled=true;state.provider.issuer="https://untrusted.example";
+    assert.equal((await service.status(actor)).googleLink,"unavailable");
+  });
+  await t.test("revoked, unverified, malformed, conflicting or duplicate Google history cannot be replaced",async()=>{
+    for(const rows of [[{state:"revoked"}],[{verified_at:null}],[{provider_issuer:"https://untrusted.example"}],
+      [{provider_subject:" "}],[{}, {provider_subject:"another-google"}],[{}, {state:"revoked",provider_subject:"old-google"}]]){
+      const f=fixture();f.state.credentials.push(...rows.map(row=>google(f,row)));
+      assert.equal((await f.service.status(f.actor)).googleLink,"unavailable");
+      assert.deepEqual(f.state.transactions,[]);
+    }
+  });
+  await t.test("cross-account and cross-session substitutions cannot query another account",async()=>{
+    const {actor,service}=fixture();
+    await assert.rejects(()=>service.status({...actor,platformAccountId:"pa_00000000-0000-4000-8000-000000000009"}),{code:"GOOGLE_LINK_INVALID"});
+    await assert.rejects(()=>service.status({...actor,credentialId:"pac_00000000-0000-4000-8000-000000000009"}),{code:"GOOGLE_LINK_INVALID"});
+    await assert.rejects(()=>service.status({...actor,sessionHash:"b".repeat(64)}),{code:"GOOGLE_LINK_REAUTH_REQUIRED"});
+  });
+  await t.test("closed accounts and revoked sessions or credentials immediately lose the read",async()=>{
+    for(const field of ["active","credentialActive","sessionActive"]){
+      const {actor,state,service}=fixture();state[field]=false;
+      await assert.rejects(()=>service.status(actor),{code:field==="sessionActive"?"GOOGLE_LINK_REAUTH_REQUIRED":"GOOGLE_LINK_INVALID"});
+    }
+  });
+  await t.test("untrusted current proof is rejected even if the resolver supplied an account",async()=>{
+    for(const change of [{method:"school"},{provider_issuer:"https://other.example"},{verified_at:null},{state:"revoked"}]){
+      const {actor,state,service}=fixture();Object.assign(state.currentCredential,change);
+      await assert.rejects(()=>service.status(actor),{code:"GOOGLE_LINK_INVALID"});
+    }
+  });
+  await t.test("excessive inventory fails without returning a partial linked-method list",async()=>{
+    const f=fixture();f.state.credentials=Array.from({length:16},(_,i)=>google(f,{provider_subject:"subject-"+i}));
+    await assert.rejects(()=>f.service.status(f.actor),{code:"GOOGLE_LINK_UNAVAILABLE"});
+  });
 });
 

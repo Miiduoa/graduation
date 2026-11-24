@@ -621,9 +621,9 @@ function NuniContent({ googleLinkEnabled }: { googleLinkEnabled: boolean }) {
         <Link className={styles.button} href={campusServiceHref('/classroom', campusSearch)}>
           前往我的課程
         </Link>
-        {googleLinkEnabled && !loading && !error && !pendingLogout && !session.isPlatformOperator && (
+        {googleLinkEnabled && !loading && !error && !pendingLogout && (
           <Link className={styles.button} href="/auth/platform/link/google">
-            管理 Google 登入方式
+            管理登入方式
           </Link>
         )}
         {!error && !pendingLogout && (

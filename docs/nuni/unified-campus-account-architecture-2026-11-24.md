@@ -1,6 +1,6 @@
 # nuni unified account and campus data architecture (proposed)
 
-Status: proposed; first entry UX increment only. Base: `322d42e045c4dfc23f46abe69a6da84046500e6f`. Do not enable new identity or data access from this document.
+Status: proposed architecture with isolated account-linking, identity-evidence and authenticated-inventory candidates. Initial base: `322d42e045c4dfc23f46abe69a6da84046500e6f`. Do not enable new identity or data access from this document.
 
 ## Current evidence
 
@@ -37,3 +37,9 @@ Reviewed main `ca73d802600c5e14bf1572b6f08a09c943080083` and #616 head `6d1120e2
 Main's existing TronClass gateway can accept a CAS HTML fallback and substitute a login-response ID when a profile lacks an ID. New internal `requireStudentIdentityEvidence` mode rejects those compatibility fallbacks. It demands the fixed PU native login path, authenticated HTTP 200 JSON profile, nonempty session after profile response, a direct positive safe-integer profile id and matching explicit login identifiers (not email or input alone). It returns only tenant/issuer/source/subject evidence separately from roles. No provider role is projected. It does not activate login, add platform credentials, persist passwords or issue tokens. No production caller uses this mode. It intentionally rejects native failure instead of invoking the legacy CAS transport; integrating the origin-isolated #616 CAS path, approved issuer and stable subject/role lifecycle, rate-limit/cancellation review and controlled live proof remain mandatory. Current examples of login-name alias shapes are synthetic fixtures, not proof that every live PU profile contains those fields.
 
 Test candidates: `pnpm --filter web exec vitest run src/lib/server/tronClassIdentityEvidence.test.ts src/lib/server/puCampusClient.test.ts`. No live requests, production flags, database changes, or account migration are performed by this increment. Tests and latest CI must execute on the exact resulting head before any use.
+
+## Account status and callback recovery increment (2026-11-25)
+
+The Google-link candidate now has an authenticated, read-only inventory from existing platform account/credential/session tables through a bounded Web BFF. The account-management page identifies the current Google/Apple method, displays active linked methods, and derives availability from server state. It does not interpret callback URL messages as proof of linkage. Unknown completion can be followed by a read without replaying a write; a new link requires new consent and replaces the prior unfinished transaction under the existing account lock.
+
+This closes the candidate's missing observable return path, not the school-to-platform migration. A valid older session and an operator can inspect their own methods; stricter freshness and privilege rules continue to control adding a method. No credential subjects, email addresses, tokens or pending-transaction secrets are exposed. Account or session switching, revalidation, logout and page restoration discard stale inventory and consent. The candidate API remains unregistered in production and its rollout flag remains off. #791's school-entry and personal-course changes remain separate; the five overlapping login UI files still need an explicit integration review before combining the two PRs.

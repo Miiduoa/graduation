@@ -72,7 +72,68 @@ export function createGoogleLinkService({ db, verifier, crypto = nodeCrypto }) {
     if (row.rows.length !== 1) invalid();
     return args;
   }
+  function trustedCredential(row) {
+    const expectedIssuer = row?.method === "google" ? issuer :
+      row?.method === "apple" ? "https://appleid.apple.com" : null;
+    return expectedIssuer !== null && row.provider_issuer === expectedIssuer &&
+      row.state === "active" && row.verified_at != null &&
+      typeof row.provider_subject === "string" && row.provider_subject.length > 0 &&
+      row.provider_subject.length <= 255 && row.provider_subject.trim() === row.provider_subject &&
+      !/[\u0000-\u001f\u007f]/u.test(row.provider_subject);
+  }
   return {
+    async status(rawActor) {
+      const actor = actorShape(rawActor);
+      return db.transaction(async tx => {
+        // Read-only, account-first locks keep closure/revocation from overtaking this snapshot.
+        // A status read does not require step-up and never creates or consumes a link request.
+        const account = await tx.query(`/* link:status-account */ SELECT id FROM platform_accounts
+          WHERE id=$1 AND state='active' FOR SHARE`, [actor.platformAccountId]);
+        if (account.rows.length !== 1) invalid();
+        const current = await tx.query(`/* link:status-credential */
+          SELECT id,method,provider_issuer,provider_subject,state,verified_at FROM platform_account_credentials
+          WHERE id=$1 AND platform_account_id=$2 AND state='active' FOR SHARE`,
+          [actor.credentialId, actor.platformAccountId]);
+        if (current.rows.length !== 1 || !trustedCredential(current.rows[0])) invalid();
+        const session = await tx.query(`/* link:status-session */
+          SELECT created_at>clock_timestamp()-interval '5 minutes' AS fresh FROM platform_account_sessions
+          WHERE token_sha256=$1 AND platform_account_id=$2 AND credential_id=$3
+            AND expires_at>clock_timestamp() AND created_at<=clock_timestamp() FOR SHARE`,
+          [actor.sessionHash, actor.platformAccountId, actor.credentialId]);
+        if (session.rows.length !== 1) fail("GOOGLE_LINK_REAUTH_REQUIRED", 401);
+        // Include inactive rows: their existence prevents a replacement through the link service.
+        const credentials = await tx.query(`/* link:status-methods */
+          SELECT id,method,provider_issuer,provider_subject,state,verified_at FROM platform_account_credentials
+          WHERE platform_account_id=$1 AND method IN ('google','apple') ORDER BY method,id LIMIT 17 FOR SHARE`,
+          [actor.platformAccountId]);
+        const rows = credentials.rows;
+        // Bounded inventory must not present a truncated or ambiguous account as linkable.
+        if (rows.length >= 17) unavailable();
+        const google = rows.filter(row => row.method === "google");
+        const linked = google.length === 1 && trustedCredential(google[0]);
+        const methods = ["google", "apple"].filter(method =>
+          rows.some(row => row.method === method && trustedCredential(row)));
+        // A current verified credential must be present in the inventory under the same account.
+        // A malformed/ambiguous Google history can still be viewed, but never linked again here.
+        if (!rows.some(row => row.id === actor.credentialId) || !methods.includes(current.rows[0].method)) invalid();
+        let googleLink = linked ? "linked" : google.length ? "unavailable" : "available";
+        if (googleLink === "available") {
+          const operator = await tx.query(`/* link:operator */ SELECT 1 FROM platform_operator_assignments
+            WHERE platform_account_id=$1 AND state='active' AND role_key='platform-operator' FOR SHARE`,
+            [actor.platformAccountId]);
+          if (operator.rows.length) googleLink = "restricted";
+          else if (session.rows[0].fresh !== true) googleLink = "reauth-required";
+          else {
+            try { await provider(tx); }
+            catch (error) {
+              if (error instanceof GoogleLinkError && error.code === "GOOGLE_LINK_UNAVAILABLE") googleLink = "unavailable";
+              else throw error;
+            }
+          }
+        }
+        return { platformAccountId: actor.platformAccountId, currentMethod: current.rows[0].method, methods, googleLink };
+      });
+    },
     async start(rawActor) {
       const actor = actorShape(rawActor);
       const transactionId = "gl_" + crypto.token();
