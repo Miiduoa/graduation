@@ -18,22 +18,24 @@ export function PersonalImportAuthorityProvider({ children }: { children: React.
     signInGeneration,
     revokedOwner: null as string | null,
   });
-  const retainedOwner = nuniSignedOut ? null : nuniOwner ?? previous.current.nuniOwner;
+  const verifiedNuniOwner = !loading && !pendingLogout && !error ? nuniOwner : null;
+  const retainedOwner = nuniSignedOut ? null : verifiedNuniOwner ?? previous.current.nuniOwner;
+  const verifiedGeneration = verifiedNuniOwner ? signInGeneration : previous.current.signInGeneration;
   const hadFirebaseUser = !!firebaseUid || (firebaseLoading && previous.current.hadFirebaseUser);
   const firebaseJustSignedOut = !firebaseUid && !firebaseLoading && previous.current.hadFirebaseUser;
-  const freshNuniSession = !!nuniOwner && (
-    nuniOwner !== previous.current.nuniOwner ||
-    signInGeneration !== previous.current.signInGeneration
+  const freshNuniSession = !!verifiedNuniOwner && (
+    verifiedNuniOwner !== previous.current.nuniOwner ||
+    verifiedGeneration !== previous.current.signInGeneration
   );
-  const revokedOwner = firebaseJustSignedOut
-    ? nuniOwner ?? previous.current.nuniOwner
-    : firebaseUid || freshNuniSession
-      ? null
+  const revokedOwner = firebaseUid || freshNuniSession
+    ? null
+    : firebaseJustSignedOut
+      ? previous.current.nuniOwner ?? nuniOwner
       : previous.current.revokedOwner;
 
   useLayoutEffect(() => {
-    previous.current = { hadFirebaseUser, nuniOwner: retainedOwner, revokedOwner, signInGeneration };
-  }, [hadFirebaseUser, retainedOwner, revokedOwner, signInGeneration]);
+    previous.current = { hadFirebaseUser, nuniOwner: retainedOwner, revokedOwner, signInGeneration: verifiedGeneration };
+  }, [hadFirebaseUser, retainedOwner, revokedOwner, verifiedGeneration]);
 
   return <RevokedNuniOwner.Provider value={revokedOwner}>{children}</RevokedNuniOwner.Provider>;
 }

@@ -748,6 +748,56 @@ it('loads and saves the guest ledger on the same screen after Firebase and Nuni 
   expect((await loadPersonalImports(accountScope)).records).toEqual([]);
 });
 
+it.each(['new owner', 'same owner'])(
+  'accepts a verified Nuni login for a %s while Firebase signs out and revokes the old save',
+  async (transition) => {
+    mockUseLiveScope = true;
+    mockAuth = { user: { uid: 'student-a' }, loading: false };
+    mockSignInGeneration = 1;
+    const oldScope = mockScope!;
+    const newScope = transition === 'same owner' ? oldScope : { ...oldScope, owner: 'nuni:account-b' };
+    await appendPersonalImports(newScope, [
+      personalEventRowFromDraft(
+        { ...emptyPersonalEventDraft(), title: '新登入帳本的既有行程', allDay: true },
+        newScope.schoolId,
+      ),
+    ]);
+    const view = render(<PersonalCalendarScreen />, { wrapper: PersonalImportAuthorityProvider });
+    await fillDraft(view, '登出前排隊的草稿');
+    const key = personalImportStorageKey(oldScope);
+    const stored = await AsyncStorage.getItem(key);
+    const read = deferred<string | null>();
+    const getItem = jest.mocked(AsyncStorage.getItem);
+    getItem.mockClear();
+    getItem.mockImplementationOnce(() => read.promise);
+    fireEvent.press(view.getByRole('button', { name: '儲存行程' }));
+    await waitFor(() => expect(getItem).toHaveBeenCalledWith(key));
+    const save = jest.mocked(appendPersonalImports).mock.results.at(-1)!.value;
+
+    mockAuth = { user: null, loading: false };
+    mockSession = { platformAccountId: newScope.owner.slice('nuni:'.length) };
+    if (transition === 'same owner') mockSignInGeneration = 2;
+    view.rerender(<PersonalCalendarScreen />);
+    view.rerender(<PersonalCalendarScreen />);
+    expect(view.queryByLabelText('標題')).toBeNull();
+    await act(async () => {
+      read.resolve(stored);
+      await expect(save).rejects.toThrow('帳號或學校已切換');
+    });
+    expect(await AsyncStorage.getItem(key)).toBe(stored);
+
+    await waitUntilEditable(view);
+    fireEvent.press(view.getByText('列表'));
+    expect(view.getByText('新登入帳本的既有行程')).toBeTruthy();
+    await fillDraft(view, '登入後新增的行程');
+    fireEvent.press(view.getByRole('button', { name: '儲存行程' }));
+    await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
+    expect((await loadPersonalImports(newScope)).records.map(({ title }) => title)).toEqual(
+      expect.arrayContaining(['新登入帳本的既有行程', '登入後新增的行程']),
+    );
+  },
+);
+
 it.each(['', '已登出；裝置上的 Google 帳號選擇狀態尚未清除。'])(
   'accepts a fresh Nuni-only login for the same account after both sessions sign out (%j)',
   async (logoutNotice) => {

@@ -150,3 +150,50 @@ it('leaves the complete envelope untouched when sync storage fails or the accoun
   await expect(withPersonalImportSyncLock(scope, async (state) => ({ state: { ...state, records: [] }, result: undefined }))).rejects.toThrow('裝置空間不足');
   expect(localStorage.getItem(personalImportsStorageKey(scope))).toBe(before);
 });
+
+it.each([false, true])('uses the only available checkpoint before saving (wrapped: %s)', async (wrapped) => {
+  const key = personalImportsStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  await savePersonalImportBatch(scope, rows());
+  const original = localStorage.getItem(key)!;
+  localStorage.setItem(checkpoint, wrapped ? JSON.stringify(original) : original);
+  localStorage.removeItem(key);
+
+  expect(readPersonalImports(scope).map(({ title }) => title)).toEqual(['資料庫']);
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n英文,2,90'));
+  expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({
+    version: 1,
+    records: [expect.objectContaining({ title: '資料庫' }), expect.objectContaining({ title: '英文' })],
+  });
+  expect(localStorage.getItem(checkpoint)).toBeNull();
+});
+
+it('preserves a recovery copy that was not used as the basis for a save', async () => {
+  const key = personalImportsStorageKey(scope);
+  await savePersonalImportBatch(scope, rows());
+  const checkpoint = localStorage.getItem(key)!;
+  localStorage.removeItem(key);
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n英文,2,90'));
+  localStorage.setItem(key + ':checkpoint', checkpoint);
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n微積分,2,90'));
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n演算法,2,90'));
+  expect(localStorage.getItem(key + ':checkpoint')).toBe(checkpoint);
+});
+
+it('keeps a checkpoint replaced during sync and refuses to publish from the earlier snapshot', async () => {
+  const { withPersonalImportSyncLock } = await import('./personalImports');
+  const key = personalImportsStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  await savePersonalImportBatch(scope, rows());
+  const original = localStorage.getItem(key)!;
+  localStorage.setItem(checkpoint, original);
+  localStorage.removeItem(key);
+  const replacement = JSON.stringify(original);
+  await expect(withPersonalImportSyncLock(scope, async (state) => {
+    expect(state.records.map(({ title }) => title)).toEqual(['資料庫']);
+    localStorage.setItem(checkpoint, replacement);
+    return { state: { ...state, sync: { ...state.sync, enabled: true } }, result: undefined };
+  })).rejects.toThrow();
+  expect(localStorage.getItem(key)).toBeNull();
+  expect(localStorage.getItem(checkpoint)).toBe(replacement);
+});

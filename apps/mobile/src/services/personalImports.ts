@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { personalImportCheckpointKey } from '@campus/shared/src/imports/browserRecovery';
+import { personalImportCheckpointKey, unwrapPersonalImportCheckpoint } from '@campus/shared/src/imports/browserRecovery';
 import { findCatalogSameSlotChange } from './publicCourseTimetableImport';
 import {
   clearPersonalImportRollback,
@@ -98,7 +98,7 @@ async function readLegacyCheckpoint(
   if (encoded !== null) {
     try {
       // Older builds wrapped the original ledger in a second layer of JSON.
-      const raw: unknown = encoded.trimStart().startsWith('{') ? encoded : JSON.parse(encoded);
+      const raw: unknown = unwrapPersonalImportCheckpoint(encoded);
       if (raw === null) return { raw: null, ledger: empty() };
       if (typeof raw === 'string' && raw.trimStart().startsWith('{')) {
         return { raw, ledger: parseLedger(raw, scope) };

@@ -13,8 +13,7 @@ import { Platform } from 'react-native';
 
 const markerSuffix = '.rollback.pending';
 const legacyStagePattern = /^campus\.personal-imports\.rollback\.v1:([a-f0-9]{64}):stage:\d+:[^:]+$/;
-// Continue reading the two compact encodings written by earlier builds.
-const legacyCompactWebCommit = '\t';
+// Continue reading the compact version field written by earlier builds.
 const compactVersionKey = '$commit';
 
 const fingerprint = (raw: string | null) => sha256(raw ?? 'null');
@@ -337,21 +336,7 @@ export function parsePersonalImportStorageJson(raw: string) {
   return value;
 }
 
-export function hasWebPersonalImportCommit(raw: string | null): boolean {
-  if (!raw) return false;
-  try {
-    const value = JSON.parse(raw);
-    if (value?.[compactVersionKey] === 1 && !('version' in value)) return true;
-    return value?.version === 1 && (
-      typeof value.webCommit === 'string' ||
-      raw.endsWith(compactWebCommitSuffix) ||
-      (raw.endsWith(legacyCompactWebCommit) && raw === JSON.stringify(value) + legacyCompactWebCommit)
-    );
-  } catch {
-    // The ledger parser reports invalid primary data if there is no recovery copy.
-    return false;
-  }
-}
+export { hasWebPersonalImportCommit } from '@campus/shared/src/imports/browserRecovery';
 
 function sweepSessionStages(storage: Storage): void {
   for (const entry of Object.keys(storage)) {

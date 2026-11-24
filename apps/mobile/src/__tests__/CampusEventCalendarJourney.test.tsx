@@ -38,6 +38,7 @@ jest.mock('../state/nuniSession', () => ({
     pendingLogout: false,
     loading: mockVerifying,
     session: mockPlatformSession,
+    signInGeneration: mockSignInGeneration,
   }),
 }));
 jest.mock('../services/publicCampusContent', () => ({
@@ -67,6 +68,7 @@ const activity = {
 };
 let mockScope: PersonalImportScope;
 let mockVerifying: boolean;
+let mockSignInGeneration: number;
 let mockUseLiveScope: boolean;
 let mockPlatformSession: { platformAccountId: string } | null;
 let mockAuth: { user: { uid: string } | null; loading: boolean };
@@ -108,6 +110,7 @@ function JourneyStack({ openOldDraft }: { openOldDraft: boolean }) {
 beforeEach(async () => {
   mockScope = { owner: 'nuni:account-a', schoolId: 'pu' };
   mockVerifying = false;
+  mockSignInGeneration = 1;
   mockUseLiveScope = false;
   mockPlatformSession = { platformAccountId: 'account-a' };
   mockAuth = { user: { uid: 'student' }, loading: false };
@@ -228,7 +231,8 @@ test.each([
   expect(view.queryByLabelText('標題')).toBeNull();
 });
 
-test('Firebase 先登出時，在 Nuni 仍回傳舊範圍期間撤銷排隊的活動草稿寫入', async () => {
+test.each([false, true])('Firebase 登出撤銷排隊的活動草稿寫入（同時登入 Nuni：%s）', async (signsInAgain) => {
+  mockUseLiveScope = true;
   const view = await openDraft();
   const key = personalImportStorageKey(mockScope);
   const getItem = jest.mocked(AsyncStorage.getItem);
@@ -242,6 +246,7 @@ test('Firebase 先登出時，在 Nuni 仍回傳舊範圍期間撤銷排隊的�
   await waitFor(() => expect(getItem).toHaveBeenCalledWith(key));
 
   mockAuth = { user: null, loading: false };
+  if (signsInAgain) mockSignInGeneration += 1;
   view.rerender(<Journey />);
   await act(async () => {
     finishRead(null);

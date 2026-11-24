@@ -16,7 +16,10 @@ import {
 } from '@campus/shared/src/imports/sync';
 import {
   capturePersonalImportBrowserRecovery,
+  hasWebPersonalImportCommit,
   serializePersonalImportBrowserCommit,
+  personalImportCheckpointKey,
+  unwrapPersonalImportCheckpoint,
 } from '@campus/shared/src/imports/browserRecovery';
 import type { PersonalImportLocalState } from '@campus/shared/src/imports/syncEngine';
 
@@ -28,21 +31,46 @@ export function personalImportsStorageKey(scope: PersonalImportScope) {
   return `campus.personal-imports.v1:${encodeURIComponent(scope.owner)}:${encodeURIComponent(scope.schoolId)}`;
 }
 
-function writePersonalImportLedger(scope: PersonalImportScope, state: PersonalImportLocalState) {
+function readPersonalImportLedger(scope: PersonalImportScope) {
   const key = personalImportsStorageKey(scope);
+  let primary = localStorage.getItem(key);
   const recovery = capturePersonalImportBrowserRecovery(localStorage, key);
-  // A page may close before retiring the old copies. Keep a version-compatible
-  // commit marker in the primary when those copies could still be present.
-  const ledger = { version: 1 as const, ...state };
-  const published = recovery.hasCopies
-    ? serializePersonalImportBrowserCommit(ledger)
-    : JSON.stringify(ledger);
-  localStorage.setItem(key, published);
-  recovery.retire(published);
+  const checkpointKey = personalImportCheckpointKey(key);
+  const checkpoint = primary === null ? recovery.checkpoint : null;
+  const establishedCommit = recovery.hasCopies && hasWebPersonalImportCommit(primary);
+  const canRetire = (entry: string, raw: string) =>
+    establishedCommit || (entry === checkpointKey && raw === checkpoint);
+  const supersedesCheckpoint = recovery.checkpoint === null ||
+    canRetire(checkpointKey, recovery.checkpoint);
+  const raw = checkpoint === null ? primary : unwrapPersonalImportCheckpoint(checkpoint);
+  if (raw !== null && typeof raw !== 'string') {
+    throw new Error('這份匯入紀錄暫時讀不到，原始資料仍保留。');
+  }
+  return {
+    raw,
+    write(state: PersonalImportLocalState) {
+      // Keep a v1 commit marker while legacy recovery data may still exist.
+      const ledger = { version: 1 as const, ...state };
+      const published = recovery.hasCopies && supersedesCheckpoint
+        ? serializePersonalImportBrowserCommit(ledger)
+        : JSON.stringify(ledger);
+      if (localStorage.getItem(key) !== primary ||
+          (primary === null && localStorage.getItem(checkpointKey) !== checkpoint)) {
+        throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
+      }
+      localStorage.setItem(key, published);
+      if (localStorage.getItem(key) !== published) {
+        throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
+      }
+      // A prior commit supersedes leftover recovery data. Otherwise retire
+      // only the checkpoint this mutation actually used as its input.
+      recovery.retire(published, canRetire);
+      primary = published;
+    },
+  };
 }
 
-export function readPersonalImports(scope: PersonalImportScope): PersonalImportRecord[] {
-  const raw = localStorage.getItem(personalImportsStorageKey(scope));
+function parsePersonalImportRecords(scope: PersonalImportScope, raw: string | null): PersonalImportRecord[] {
   if (!raw) return [];
   try {
     const data: unknown = JSON.parse(raw);
@@ -80,11 +108,18 @@ export function readPersonalImports(scope: PersonalImportScope): PersonalImportR
   }
 }
 
-export function readPersonalImportSyncState(scope: PersonalImportScope): PersonalImportSyncState {
-  const raw = localStorage.getItem(personalImportsStorageKey(scope));
+function parseLedgerSyncState(scope: PersonalImportScope, raw: string | null): PersonalImportSyncState {
   const value = raw ? JSON.parse(raw).sync : undefined;
   if (value === undefined) return { enabled: false, base: null };
   return parsePersonalImportSyncState(value, scope.schoolId);
+}
+
+export function readPersonalImports(scope: PersonalImportScope): PersonalImportRecord[] {
+  return parsePersonalImportRecords(scope, readPersonalImportLedger(scope).raw);
+}
+
+export function readPersonalImportSyncState(scope: PersonalImportScope): PersonalImportSyncState {
+  return parseLedgerSyncState(scope, readPersonalImportLedger(scope).raw);
 }
 
 export async function withPersonalImportSyncLock<T>(
@@ -98,15 +133,16 @@ export async function withPersonalImportSyncLock<T>(
   if (!navigator.locks) throw new Error('目前瀏覽器無法安全同步，請使用最新版瀏覽器。');
   return navigator.locks.request(personalImportsStorageKey(scope), async () => {
     if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
+    const ledger = readPersonalImportLedger(scope);
     let persisted: PersonalImportLocalState = {
-      records: readPersonalImports(scope),
-      sync: readPersonalImportSyncState(scope),
+      records: parsePersonalImportRecords(scope, ledger.raw),
+      sync: parseLedgerSyncState(scope, ledger.raw),
     };
     const checkpoint = async (state: PersonalImportLocalState) => {
       if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
       if (JSON.stringify(persisted) === JSON.stringify(state)) return;
       try {
-        writePersonalImportLedger(scope, state);
+        ledger.write(state);
       } catch {
         throw new Error('裝置空間不足，這次同步未能保存；原資料仍保留，請先下載備份。');
       }
@@ -129,11 +165,12 @@ async function mutate<T>(
     throw new Error('目前瀏覽器無法安全儲存。請用最新版瀏覽器開啟 HTTPS 網站後重試；草稿還在。');
   return navigator.locks.request(personalImportsStorageKey(scope), () => {
     if (!active()) throw new Error('帳號或校園已切換，請重新開啟匯入。');
-    const { rows, result } = action(readPersonalImports(scope));
+    const ledger = readPersonalImportLedger(scope);
+    const { rows, result } = action(parsePersonalImportRecords(scope, ledger.raw));
     if (rows.length > PERSONAL_IMPORT_LIMIT)
       throw new Error('這台裝置已存滿 2,000 筆，請先匯出備份並移除不再需要的紀錄。');
     try {
-      writePersonalImportLedger(scope, { records: rows, sync: readPersonalImportSyncState(scope) });
+      ledger.write({ records: rows, sync: parseLedgerSyncState(scope, ledger.raw) });
     } catch {
       throw new Error('這次沒有存成，可能是裝置空間不足或瀏覽器禁止儲存。草稿還在，請稍後再試。');
     }

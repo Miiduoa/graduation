@@ -13,6 +13,26 @@ export function serializePersonalImportBrowserCommit({ version, ...ledger }: { v
   return JSON.stringify({ ...ledger, version });
 }
 
+export function hasWebPersonalImportCommit(raw: string | null): boolean {
+  if (!raw) return false;
+  try {
+    const value = JSON.parse(raw);
+    if (value?.['$commit'] === 1 && !('version' in value)) return true;
+    return value?.version === 1 && (
+      typeof value.webCommit === 'string' ||
+      raw.endsWith(personalImportBrowserCommitSuffix) ||
+      (raw.endsWith('\t') && raw === JSON.stringify(value) + '\t')
+    );
+  } catch {
+    // The ledger parser reports invalid primary data if there is no recovery copy.
+    return false;
+  }
+}
+
+export function unwrapPersonalImportCheckpoint(encoded: string): unknown {
+  return encoded.trimStart().startsWith('{') ? encoded : JSON.parse(encoded);
+}
+
 export function capturePersonalImportBrowserRecovery(storage: Storage, key: string) {
   const copies = [personalImportWebJournalKey(key), personalImportCheckpointKey(key)]
     .map((entry) => ({ entry, raw: storage.getItem(entry) }))
@@ -20,9 +40,11 @@ export function capturePersonalImportBrowserRecovery(storage: Storage, key: stri
 
   return {
     hasCopies: copies.length > 0,
-    retire(published: string) {
+    checkpoint: copies.find(({ entry }) => entry === personalImportCheckpointKey(key))?.raw ?? null,
+    retire(published: string, canRetire = (_entry: string, _raw: string) => true) {
       for (const { entry, raw } of copies) {
-        if (storage.getItem(key) === published && storage.getItem(entry) === raw) {
+        if (raw !== null && canRetire(entry, raw) &&
+            storage.getItem(key) === published && storage.getItem(entry) === raw) {
           storage.removeItem(entry);
         }
       }
