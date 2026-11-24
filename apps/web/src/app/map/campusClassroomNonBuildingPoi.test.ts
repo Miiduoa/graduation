@@ -1189,3 +1189,34 @@ describe('campus archive names for the existing Providence building pins', () =>
     }).status).toBe('unmatched');
   });
 });
+
+describe('floor ranges do not establish a classroom destination', () => {
+  it('rejects consecutive floor markers for building names and official codes', () => {
+    const zhugu = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+    const renyuan = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-renyuan')!;
+    expect(zhugu).toBeDefined();
+    expect(renyuan).toBeDefined();
+    // Synthetic timetable wording, not a verified floor or classroom.
+    for (const [prefix, place, schoolId] of [
+      ['主顧樓', zhugu, 'pu'],
+      ['Providence Hall ', zhugu, 'pu'],
+      ['PH', zhugu, 'pu'],
+      ['AK', renyuan, 'pu'],
+      ['主顧樓', hall, 'another-school'],
+    ] as const) {
+      for (const suffix of ['3F4F', '3F 4F', '3F-4F', '3F/4F',
+        '3樓4F', 'B1F B2F', '３Ｆ４Ｆ', '3F 4F教室']) {
+        const query = prefix + suffix;
+        const result = resolveCampusClassroom({ schoolId, query, locations: [place] });
+        expect(result.status, schoolId + ': ' + query).toBe('unmatched');
+        expect(result.matches, query).toEqual([]);
+      }
+      for (const suffix of ['303F', '3F303', '3F 303F', '3樓303', 'B1F12']) {
+        const query = prefix + suffix;
+        const result = resolveCampusClassroom({ schoolId, query, locations: [place] });
+        expect(result.status, query).toBe('matched');
+        expect(result.matches[0], query).toBe(place);
+      }
+    }
+  });
+});
