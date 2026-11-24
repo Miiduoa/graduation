@@ -86,6 +86,7 @@
 }
 
 .grid .date {
+  scroll-margin-top: var(--calendar-sticky-header-height, 0px);
   position: relative;
   display: flex;
   flex-direction: column;

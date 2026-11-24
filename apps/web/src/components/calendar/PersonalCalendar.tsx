@@ -1,6 +1,7 @@
 'use client';
 
 import { MonthCalendar } from './MonthCalendar';
+import { scrollVerticallyIntoView } from './calendarScroll';
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -201,14 +202,6 @@ function downloadIcs(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function scrollVerticallyIntoView(element: HTMLElement) {
-  const rect = element.getBoundingClientRect();
-  if (rect.height <= 0) return;
-  const margin = 8;
-  if (rect.top < margin) window.scrollBy(0, rect.top - margin);
-  else if (rect.bottom > window.innerHeight - margin)
-    window.scrollBy(0, rect.bottom - (window.innerHeight - margin));
-}
 
 export function PersonalCalendar() {
   const context = usePersonalImportScope();

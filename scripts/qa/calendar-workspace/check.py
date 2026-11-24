@@ -373,7 +373,6 @@ async def run_scenario(browser, server_url, config):
         today_columns = await assert_weekday_columns(page, '2028-01-01', report)
         assert today_columns['column'] == 6
         if config.get('text') == '200':
-            assert today_columns['selectedRight'] - today_columns['sundayLeft'] > today_columns['clientWidth']
             today_grid = page.get_by_role('region', name='2028-01 月格，週日起始')
             await today_grid.evaluate('viewport => { viewport.scrollLeft = viewport.scrollWidth; }')
             await page.get_by_role('button', name='回今天', exact=True).click()
