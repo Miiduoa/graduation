@@ -12,6 +12,7 @@ import {
 } from '../schoolLoginTimeouts';
 import { createPuRelayFetch, normalizeRelayHostname, normalizeRelayTarget } from './puEdgeRelay';
 import { parseTronClassStudentIdentityEvidence, type TronClassProfileEvidence } from './tronClassIdentityEvidence';
+import { canonicalizePuStudentId } from './puIdentity';
 
 const ALCAT_ORIGIN = 'https://alcat.pu.edu.tw';
 const TRONCLASS_ORIGIN = 'https://tronclass.pu.edu.tw';
@@ -781,7 +782,8 @@ export function createPuCampusGateway(
       const evidence = profilePage.status === 200 &&
         profilePage.url === TRONCLASS_ORIGIN + '/api/profile' &&
         /^application\/json(?:\s*;|$)/i.test(profilePage.contentType ?? '') &&
-        sessionCookieValue(profilePage.cookies)
+        Object.keys(profilePage.cookies).filter(key => key.toLowerCase() === 'session').length === 1 &&
+        typeof profilePage.cookies.session === 'string' && /^[\x21-\x3a\x3c-\x7e]+$/u.test(profilePage.cookies.session)
         ? parseTronClassStudentIdentityEvidence(profileData, account) : null;
       if (!evidence) return null;
       return {
@@ -974,8 +976,10 @@ export function createPuCampusGateway(
       const route = options.route || 'teacher';
       try {
         if (strict && (lmsOrigin !== TRONCLASS_ORIGIN || identityOrigin !== IDENTITY_ORIGIN ||
-            route !== 'student' || !Number.isSafeInteger(budget) || budget! <= 0 || budget! > 60_000 ||
-            !Number.isSafeInteger(hopCap) || hopCap <= 0)) {
+            route !== 'student' || typeof account !== 'string' || account.length > 128 ||
+            !canonicalizePuStudentId(account) || typeof password !== 'string' || !password ||
+            password.length > 1024 || typeof budget !== 'number' || !Number.isSafeInteger(budget) ||
+            budget <= 0 || budget > 60_000 || !Number.isSafeInteger(hopCap) || hopCap <= 0)) {
           throw new PuCampusError('unverified', '目前無法驗證校園帳號', { route, stage: 'verify', code: 'IDENTITY_EVIDENCE_UNAVAILABLE' });
         }
         const posted = await send(`${lmsOrigin}/api/login`, {

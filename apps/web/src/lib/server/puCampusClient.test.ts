@@ -461,6 +461,7 @@ it('rejects non-JSON profile content and a revoked profile cookie in strict mode
   for (const profile of [
     htmlResponse(200, JSON.stringify({ id: 44, login_name: 's1234567' })),
     jsonResponse(200, { id: 44, login_name: 's1234567' }, { 'set-cookie': 'session=; Max-Age=0; Path=/' }),
+    jsonResponse(200, { id: 44, login_name: 's1234567' }, { 'set-cookie': 'SESSION=ambiguous; Path=/' }),
   ]) {
     const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
       ? jsonResponse(200, { id: 44 }, { 'set-cookie': 'session=old; Path=/' }) : profile);
@@ -478,6 +479,11 @@ it('does not enter the legacy CAS fallback or send credentials to a substituted 
   expect(fetchMock).toHaveBeenCalledTimes(1);
   fetchMock.mockClear();
   await expect(createPuCampusGateway({ fetch: fetchMock, lmsOrigin: 'https://other.example' }).loginTronClass('s1234567', SECRET, options))
+    .rejects.toMatchObject({ kind: 'unverified' });
+  expect(fetchMock).not.toHaveBeenCalled();
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('teacher', SECRET, options))
+    .rejects.toMatchObject({ kind: 'unverified' });
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', '', options))
     .rejects.toMatchObject({ kind: 'unverified' });
   expect(fetchMock).not.toHaveBeenCalled();
 });
