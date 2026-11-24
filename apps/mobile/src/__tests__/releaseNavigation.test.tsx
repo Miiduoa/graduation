@@ -1284,6 +1284,21 @@ test('HomeworkSubmit mounts the live text submission page', async () => {
   expect(view.getByText('HomeworkSubmitScreen')).toBeTruthy();
   expect(view.queryByText(/此入口尚未提供線上繳交/)).toBeNull();
 });
+test.each([
+  ['QuizTaking', 'QuizTakingScreen'],
+  ['HomeworkSubmit', 'HomeworkSubmitScreen'],
+])('%s stays mounted during a same-account profile refresh', async (route, label) => {
+  const { view, navigation } = await mount(LearnStack);
+  act(() => navigation.navigate(route, { courseId: 'course-a', hwId: 'hw-a', quizId: 'quiz-a' }));
+  const before = view.getByText(label);
+  view.rerender(
+    <mockAuthContext.Provider value={{ ...mockAuth, profile: { ...mockAuth.profile } }}>
+      <NavigationContainer ref={navigation}><LearnStack /></NavigationContainer>
+    </mockAuthContext.Provider>,
+  );
+  expect(view.getByText(label)).toBe(before);
+});
+
 test('assignment deep links open the live text submission page', async () => {
   const { view, navigation } = await mount(MessagesStack);
   act(() => navigation.navigate('AssignmentDetail', { assignmentId: 'A001', groupId: 'G001' }));
