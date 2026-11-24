@@ -4,7 +4,7 @@
 // mocked fetch. Only public emulator fixture identities are used here.
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
-const fs = require('node:fs');
+const { writeRuntimeReport } = require('./write-runtime-report.cjs');
 const path = require('node:path');
 
 const projectId = process.env.TEST_PROJECT_ID;
@@ -95,7 +95,7 @@ async function main() {
       accountIsolationVerified: true, productionWorkersDisabled: true,
       productionStoresAbsent: true, schoolLoginPerformed: false, schoolWritesPerformed: false };
     if (process.env.TRONCLASS_RUNTIME_DIR) {
-      fs.writeFileSync(path.join(process.env.TRONCLASS_RUNTIME_DIR, 'acceptance.json'), JSON.stringify(report, null, 2));
+      writeRuntimeReport(process.env.TRONCLASS_RUNTIME_DIR, 'acceptance.json', report);
     }
     console.log(JSON.stringify(report));
   } finally {

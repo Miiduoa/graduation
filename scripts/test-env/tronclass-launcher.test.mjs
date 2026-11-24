@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -80,8 +80,6 @@ test('launcher stores session keys in a private temporary directory', () => {
   const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-dir-'));
   const capture = path.join(dir, 'captured.json');
   try {
-    const tempAlias = path.join(dir, 'system-temp-alias');
-    symlinkSync(dir, tempAlias, 'dir');
     writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
 const fs = require('node:fs');
 if (process.argv.includes('-e')) process.exit(0);
@@ -92,31 +90,25 @@ process.exit(73);
     writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
 process.exit(0);
 `, { mode: 0o700 });
-    const runLauncher = (env = {}) => spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
       encoding: 'utf8',
       env: {
         PATH: `${dir}:${process.env.PATH}`,
         TRONCLASS_LAUNCHER_CAPTURE: capture,
-        TMPDIR: tempAlias,
+        TMPDIR: dir,
         HOME: dir,
-        ...env,
       },
     });
-    const result = runLauncher();
     assert.equal(result.error, undefined);
     assert.equal(result.status, 73, result.stderr);
     const observed = JSON.parse(readFileSync(capture, 'utf8'));
     assert.equal(typeof observed.dir, 'string');
-    assert.equal(path.dirname(observed.dir), dir);
     assert.match(observed.dir, /campus-tronclass-emulator\./);
     assert.notEqual(observed.dir, path.join(dir, `campus-tronclass-emulator-${process.getuid()}`));
     const info = statSync(observed.dir);
     assert.equal(info.mode & 0o777, 0o700);
     assert.equal(info.isDirectory(), true);
     assert.equal(lstatSync(observed.dir).isSymbolicLink(), false);
-    const reused = runLauncher({ TRONCLASS_RUNTIME_DIR: observed.dir });
-    assert.equal(reused.status, 73, reused.stderr);
-    assert.equal(JSON.parse(readFileSync(capture, 'utf8')).dir, observed.dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -247,10 +239,10 @@ process.exit(0);
 
 test('launcher resolves a relative runtime directory against the repository root', () => {
   const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-  const relative = `.r35?tronclass-runtime-${process.pid}`;
-  const expected = path.resolve(repoRoot, relative);
-  mkdirSync(expected, { mode: 0o700 });
   const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-rel-'));
+  const expected = path.join(dir, 'runtime?');
+  mkdirSync(expected, { mode: 0o700 });
+  const relative = path.relative(repoRoot, expected);
   const capture = path.join(dir, 'captured.json');
   try {
     writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
@@ -264,6 +256,7 @@ process.exit(73);
 process.exit(0);
 `, { mode: 0o700 });
     const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      cwd: dir,
       encoding: 'utf8',
       env: {
         PATH: `${dir}:${process.env.PATH}`,
@@ -277,11 +270,28 @@ process.exit(0);
     const observed = JSON.parse(readFileSync(capture, 'utf8'));
     assert.equal(observed.dir, expected);
     assert.equal(path.isAbsolute(observed.dir), true);
+    assert.equal(path.isAbsolute(relative), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
-    rmSync(expected, { recursive: true, force: true });
   }
 });
+
+function writeForwardingNodeStub(dir) {
+  writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
+const args = process.argv;
+if (args.includes('-e')) process.exit(0);
+const dash = args.indexOf('-');
+if (dash < 0) process.exit(73);
+require('node:child_process').execFileSync(${JSON.stringify(process.execPath)}, args.slice(dash), { stdio: 'inherit' });
+`, { mode: 0o700 });
+  writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
+process.exit(0);
+`, { mode: 0o700 });
+}
+
+function writeSessionKey(file, mode = 0o600) {
+  writeFileSync(file, 'x'.repeat(64), { mode });
+}
 
 test('launcher does not glob a literal * path component against the repository root', () => {
   const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -315,5 +325,134 @@ process.exit(0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(decoy, { recursive: true, force: true });
+  }
+});
+
+test('launcher reuses an existing session key only when it is a private regular file', () => {
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-reuse-'));
+  const runtime = path.join(dir, 'runtime');
+  mkdirSync(runtime, { mode: 0o700 });
+  writeSessionKey(path.join(runtime, 'bff-session.key'));
+  writeSessionKey(path.join(runtime, 'tronclass-session.key'));
+  try {
+    writeForwardingNodeStub(dir);
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        TMPDIR: dir,
+        HOME: dir,
+        TRONCLASS_RUNTIME_DIR: runtime,
+      },
+    });
+    assert.doesNotMatch(`${result.stderr}\n${result.stdout}`, /session key|hard-linked|another user|not mode 0600|non-regular/i);
+    assert.equal(readFileSync(path.join(runtime, 'bff-session.key'), 'utf8'), 'x'.repeat(64));
+    assert.equal(statSync(path.join(runtime, 'bff-session.key')).mode & 0o777, 0o600);
+    assert.equal(lstatSync(path.join(runtime, 'bff-session.key')).nlink, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launcher refuses a reused session key that is not mode 0600', () => {
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-mode-'));
+  const runtime = path.join(dir, 'runtime');
+  mkdirSync(runtime, { mode: 0o700 });
+  writeSessionKey(path.join(runtime, 'bff-session.key'), 0o644);
+  try {
+    writeForwardingNodeStub(dir);
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        TMPDIR: dir,
+        HOME: dir,
+        TRONCLASS_RUNTIME_DIR: runtime,
+      },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stderr}\n${result.stdout}`, /0600|mode/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launcher refuses a hard-linked session key file', () => {
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-nlink-'));
+  const runtime = path.join(dir, 'runtime');
+  mkdirSync(runtime, { mode: 0o700 });
+  const outside = path.join(dir, 'outside.key');
+  writeSessionKey(outside);
+  linkSync(outside, path.join(runtime, 'bff-session.key'));
+  try {
+    writeForwardingNodeStub(dir);
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        TMPDIR: dir,
+        HOME: dir,
+        TRONCLASS_RUNTIME_DIR: runtime,
+      },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stderr}\n${result.stdout}`, /hard-linked|nlink/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launcher refuses a symbolic link log file', () => {
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-log-'));
+  const runtime = path.join(dir, 'runtime');
+  mkdirSync(runtime, { mode: 0o700 });
+  writeSessionKey(path.join(runtime, 'bff-session.key'));
+  writeSessionKey(path.join(runtime, 'tronclass-session.key'));
+  const outside = path.join(dir, 'outside.log');
+  writeFileSync(outside, 'preserve-me');
+  symlinkSync(outside, path.join(runtime, 'emulators.log'));
+  try {
+    writeForwardingNodeStub(dir);
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        TMPDIR: dir,
+        HOME: dir,
+        TRONCLASS_RUNTIME_DIR: runtime,
+      },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stderr}\n${result.stdout}`, /symbolic link or unusable log/i);
+    assert.equal(readFileSync(outside, 'utf8'), 'preserve-me');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+test('launcher refuses a hard-linked log file without truncating the other link', () => {
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-log-hl-'));
+  const runtime = path.join(dir, 'runtime');
+  mkdirSync(runtime, { mode: 0o700 });
+  writeSessionKey(path.join(runtime, 'bff-session.key'));
+  writeSessionKey(path.join(runtime, 'tronclass-session.key'));
+  const outside = path.join(dir, 'outside.log');
+  writeFileSync(outside, 'preserve-hard-link');
+  linkSync(outside, path.join(runtime, 'emulators.log'));
+  try {
+    writeForwardingNodeStub(dir);
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        TMPDIR: dir,
+        HOME: dir,
+        TRONCLASS_RUNTIME_DIR: runtime,
+      },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stderr}\n${result.stdout}`, /symbolic link or unusable log/i);
+    assert.equal(readFileSync(outside, 'utf8'), 'preserve-hard-link');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

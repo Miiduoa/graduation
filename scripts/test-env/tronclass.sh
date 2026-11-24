@@ -145,8 +145,29 @@ function assertNoSymlinkComponent(targetPath, missingOk) {
 }
 
 assertNoSymlinkComponent(path.dirname(target), false);
-if (fs.existsSync(target)) assertNoSymlinkComponent(target, false);
-if (!fs.existsSync(target)) fs.writeFileSync(target, randomBytes(48).toString('base64url'), { mode: 0o600, flag: 'wx' });
+let existing;
+try { existing = fs.lstatSync(target); }
+catch (error) {
+  if (!error || error.code !== 'ENOENT') throw error;
+  existing = null;
+}
+if (existing) {
+  assertNoSymlinkComponent(target, false);
+  if (existing.isSymbolicLink() || !existing.isFile()) {
+    throw new Error('Refusing a non-regular session key file.');
+  }
+  if (existing.uid !== process.getuid()) {
+    throw new Error('Refusing a session key file owned by another user.');
+  }
+  if (existing.nlink !== 1) {
+    throw new Error('Refusing a hard-linked session key file.');
+  }
+  if ((existing.mode & 0o777) !== 0o600) {
+    throw new Error('Refusing a session key file that is not mode 0600.');
+  }
+} else {
+  fs.writeFileSync(target, randomBytes(48).toString('base64url'), { mode: 0o600, flag: 'wx' });
+}
 assertNoSymlinkComponent(target, false);
 const resolvedKey = fs.realpathSync(target);
 const resolvedDir = fs.realpathSync(runtimeDir);
@@ -155,7 +176,6 @@ if (!resolvedKey.startsWith(prefix)) {
   throw new Error('Refusing a session key path outside the runtime directory.');
 }
 if (!/^[A-Za-z0-9_-]{64}$/.test(fs.readFileSync(resolvedKey, 'utf8'))) throw new Error('Invalid local session key file.');
-fs.chmodSync(resolvedKey, 0o600);
 NODE
 done
 export BFF_SESSION_SECRET="$(<"$TRONCLASS_RUNTIME_DIR/bff-session.key")"
@@ -173,11 +193,59 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+tronclass_run_logged() {
+  local log="$1"
+  shift
+  node - "$log" "$@" <<'NODE'
+const fs = require('node:fs');
+const { spawn } = require('node:child_process');
+const logPath = process.argv[2];
+const argv = process.argv.slice(3);
+function refuseLog() {
+  process.stderr.write('Refusing a symbolic link or unusable log file.\n');
+  process.exit(1);
+}
+try {
+  const existing = fs.lstatSync(logPath);
+  if (!existing.isFile() || existing.nlink !== 1 || existing.uid !== process.getuid()) refuseLog();
+} catch (error) {
+  if (error && error.code !== 'ENOENT') refuseLog();
+}
+const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW;
+let fd;
+try {
+  fd = fs.openSync(logPath, flags, 0o600);
+} catch (error) {
+  refuseLog();
+}
+const info = fs.fstatSync(fd);
+if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
+  fs.closeSync(fd);
+  refuseLog();
+}
+fs.ftruncateSync(fd, 0);
+const child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd] });
+fs.closeSync(fd);
+const stop = (signal) => {
+  try { child.kill(signal); } catch (error) { /* the child may have already exited */ }
+};
+process.on('SIGINT', () => stop('SIGINT'));
+process.on('SIGTERM', () => stop('SIGTERM'));
+child.on('exit', (code, signal) => {
+  if (signal) {
+    try { process.kill(process.pid, signal); } catch (error) { process.exit(1); }
+    return;
+  }
+  process.exit(code ?? 1);
+});
+NODE
+}
+
 # Keep Firebase data in the running emulator; restarting Next retains it.
 # Do not automatically export school sessions after a live binding test.
-node node_modules/firebase-tools/lib/bin/firebase.js emulators:start \
-  --project "$TEST_PROJECT_ID" --config firebase.test.json --only auth,firestore \
-  >"$TRONCLASS_RUNTIME_DIR/emulators.log" 2>&1 &
+tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/emulators.log" \
+  node node_modules/firebase-tools/lib/bin/firebase.js emulators:start \
+  --project "$TEST_PROJECT_ID" --config firebase.test.json --only auth,firestore &
 TRONCLASS_EMULATOR_PID=$!
 TRONCLASS_EMULATOR_READY=false
 for _ in $(seq 1 90); do
@@ -196,7 +264,7 @@ if [ "$TRONCLASS_EMULATOR_READY" != true ]; then
   exit 1
 fi
 
-node scripts/test-env/seed.cjs --missing-only >"$TRONCLASS_RUNTIME_DIR/seed.log" 2>&1
+tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/seed.log" node scripts/test-env/seed.cjs --missing-only
 node scripts/build-functions-shared.cjs
 node scripts/import-ai/prepare-assets.mjs
 echo "Full Web: $WEB_PUBLIC_ORIGIN/login?returnUrl=%2Ftronclass&schoolId=pu&reconnect=school"
@@ -208,17 +276,17 @@ else
   echo 'School binding is disabled. Use synthetic fixtures only.'
 fi
 cd apps/web
-node ../../node_modules/next/dist/bin/next dev --webpack -p "$TEST_WEB_PORT" -H "$TEST_HOST" \
-  >"$TRONCLASS_RUNTIME_DIR/web.log" 2>&1 &
+tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/web.log" \
+  node ../../node_modules/next/dist/bin/next dev --webpack -p "$TEST_WEB_PORT" -H "$TEST_HOST" &
 TRONCLASS_WEB_PID=$!
 if [ "${TRONCLASS_VERIFY_RUNTIME:-}" = '1' ] && [ "$TRONCLASS_INTEGRATION_ENABLED" = true ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
-  node scripts/test-env/verify-tronclass.cjs >"$TRONCLASS_RUNTIME_DIR/acceptance.log" 2>&1
+  tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/acceptance.log" node scripts/test-env/verify-tronclass.cjs
   echo "Verified real emulator authentication and Firestore persistence; see $TRONCLASS_RUNTIME_DIR/acceptance.json."
 fi
 if [ "${TRONCLASS_CHECK_HEALTH:-}" = '1' ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
-  node scripts/test-env/health-tronclass.cjs >"$TRONCLASS_RUNTIME_DIR/health.log" 2>&1
+  tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/health.log" node scripts/test-env/health-tronclass.cjs
   echo "Verified read-only health and login page requests; see $TRONCLASS_RUNTIME_DIR/health.json."
 fi
 wait "$TRONCLASS_WEB_PID"

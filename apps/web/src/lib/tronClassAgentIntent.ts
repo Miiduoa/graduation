@@ -50,35 +50,38 @@ const LMS_SOURCE = '(?:玩課雲|創課|tron\\s*class)';
 // when it names TronClass data and nothing that belongs to another service.
 const TRONCLASS_CONTINUATION = /(?:作業|教材|講義|附件|檔案|未交|未繳|待交|待繳|還沒交|還沒繳|沒交|沒繳|homework|assignments?|materials?|handouts?)/i;
 const OTHER_SERVICE_OR_SCHEDULE = /(?:頁面|畫面|入口|校園|學校|系上|社團|公車|交通|課表|成績|行事曆|日曆|空堂|時段|安排|排程|提醒|設定|失物|餐|活動|地圖|教室|今天|明天|後天|早上|上午|中午|下午|晚上|分鐘|小時|\d{1,2}\s*[:：點])/u;
-const NEGATION_SOURCE = "不要|別|勿|不准|禁止|無須|不用|不需要|\\b(?:do\\s+not|don't|never)\\b";
-const NEGATED = new RegExp(NEGATION_SOURCE, 'i');
-const NEGATIONS = new RegExp(NEGATION_SOURCE, 'gi');
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Single negator table consumed by the tokenizer. Longest match wins. */
+export const TRONCLASS_NEGATORS = [
+  'do not', "don't", 'never',
+  '不需要', '不需', '不必', '不用', '不要', '不得', '不准', '不許',
+  '無需', '無須', '毋須', '毋需',
+  '先不要', '先不', '暫不要', '暫不',
+  '沒有',
+  '禁止',
+  '別', '勿', '免', '甭', '莫',
+  '沒', '未',
+  '不',
+] as const;
+
+const NEGATOR_SET = new Set<string>(TRONCLASS_NEGATORS);
+const NEGATION_SOURCE = TRONCLASS_NEGATORS
+  .slice()
+  .sort((a, b) => b.length - a.length)
+  .map(value => {
+    const source = escapeRegex(value).replace(/ /g, '\\s+');
+    return /[A-Za-z']/.test(value) ? `\\b${source}\\b` : source;
+  })
+  .join('|');
 const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
-const PLACEMENT_VERB_SOURCE = '放[入到進上]|貼[上到入]|丟[到給入]|塞[入進到]|投[入進到]|搬[到去]';
-const SUBMIT_VERB_SOURCE = [
-  '重新(?:繳交|提交|上傳|上載)|繳交|提交|送出|交出|上傳|上載',
-  '補交|補繳|遲交|重交|重繳|上繳|遞交|呈交|交付|繳回|交回|附上|夾帶|送件|寄出',
-  // Object may come before the verb, as in「把附件回傳／傳給老師」.
-  '回傳|傳給|傳到|傳回|傳送|傳去|送給|送到|寄給|寄到|遞給|遞到|轉給|轉到|轉寄',
-  PLACEMENT_VERB_SOURCE,
-  '\\b(?:submit|upload|resubmit|hand\\s+in|turn\\s+in|send\\s+(?:in|to|back)|forward)\\b',
-  // Short verbs also form commands with a preceding object or no object.
-  '[交繳]',
-].join('|');
-const OTHER_WRITE_VERB_SOURCE = '發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名|退選|選課|\\b(?:delete|post|reply|withdraw)\\b';
-const WRITE_AT_TOKEN = new RegExp(`^(?:(${SUBMIT_VERB_SOURCE})|${OTHER_WRITE_VERB_SOURCE})`, 'iu');
 const PREFIX_ANCHOR_WINDOW = 160;
 
 function suffixForEndAnchor(text: string): string {
   return text.length <= PREFIX_ANCHOR_WINDOW ? text : text.slice(-PREFIX_ANCHOR_WINDOW);
 }
-const WRITE_NEGATION_SOURCE = `(?:${NEGATION_SOURCE})\\s*(?:(?:幫我|替我|代我|自動|直接)\\s*)*`;
-const WRITE_NEGATION = new RegExp(`${WRITE_NEGATION_SOURCE}$`, 'iu');
-// 把／將 may place the object before the verb:「不要把玩課雲作業貼上」.
-const NEGATED_BA_FILL = '(?:(?:把|將)\\s*(?:(?![，,；;。！!？?\\r\\n]|然後|接著|接下來|順便|並且|另外|同時).){0,40}?)?';
-const NEGATED_WRITE_SOURCE = `${WRITE_NEGATION_SOURCE}${NEGATED_BA_FILL}(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})`;
-const NEGATED_WRITE_START = new RegExp(NEGATED_WRITE_SOURCE, 'giu');
-const STARTS_NEGATED_WRITE = new RegExp(`^${NEGATED_WRITE_SOURCE}`, 'iu');
 const NOUN_COMPOUNDS = [
   '交通資訊', '交通', '交流', '交換', '交易', '交際', '交響', '交友', '交集', '交往',
   '外交',
@@ -93,7 +96,6 @@ const QUERY_VERBS = [
 ];
 const QUERY_COMPOUNDS = QUERY_VERBS.filter(value => value.length > 1);
 const QUERY_START = new Set(QUERY_VERBS);
-const NEGATED_QUERY_VERBS = [...QUERY_VERBS].sort((a, b) => b.length - a.length);
 const ACTION_CUES = ['只要', '只', '改成', '改查', '而是'];
 const CLAUSE_CUES = ['然後', '接著', '順便', '並且', '另外', '同時', '也幫我', '再幫我', '並幫我'];
 const WRITE_CUE_WORDS = [
@@ -104,15 +106,24 @@ const WRITE_CUE_WORD_SET = new Set(WRITE_CUE_WORDS);
 const FUNCTION_CUES = [
   '記得', '立即', '接下來',
   '幫我', '替我', '代我', '幫忙', '請', '麻煩', '直接', '自動',
-  '不要', '不用', '不需要', '無須', '不准', '禁止', '別', '勿',
   '我們', '你們', '他們', '她們', '我', '你', '您', '他', '她', '它',
-  '尚未', '還沒', '未', '待', '已經', '已', '沒',
+  '尚未', '還沒', '待', '已經', '已',
   '剛才', '剛剛', '剛', '最後', '之後', '後', '曾經', '所', '過', '了',
   '正在', '正', '供',
+  '把', '將',
   '務必', '一定', '趕緊', '立刻', '馬上', '盡快', '快',
   '去', '來', '再', '也', '又', '都', '就', '才', '還', '先', '並', '且', '跟', '而',
   '想', '要', '能', '可以', '可', '會',
 ];
+const STATUS_WRITE_COMPOUNDS = [
+  '尚未提交', '尚未繳交', '尚未繳', '尚未交',
+  '還沒提交', '還沒繳交', '還沒繳', '還沒交',
+  '未提交', '未繳交', '未繳', '未交',
+  '沒提交', '沒繳交', '沒繳', '沒交',
+  '待提交', '待繳交', '待繳', '待交',
+];
+const STATUS_PARTICLES = ['有沒有', '有無', '過了嗎', '了沒', '了嗎'];
+
 const DOMAIN_NOUNS = [
   '作業', '報告', '附件', '檔案', '作品', '心得', '講義', '考卷', '表單',
   '學習單', '課堂報告', '課堂', '學習',
@@ -129,21 +140,50 @@ const WRITE_COMPOUNDS = [
   '補交', '補繳', '遲交', '重交', '重繳', '上繳', '遞交', '呈交', '交付', '繳回', '交回',
   '轉交', '代交', '面交', '附上', '夾帶', '送件', '寄出', '回傳', '傳給', '傳到', '傳回',
   '傳送', '傳去', '送給', '送到', '寄給', '寄到', '遞給', '遞到', '轉給', '轉到', '轉寄',
-  '放入', '放到', '放進', '放上', '貼上', '貼到', '丟到', '塞進', '投入', '搬到',
+  '放入', '放到', '放進', '放上', '貼上', '貼到', '貼入', '丟到', '丟給', '丟入',
+  '塞入', '塞進', '塞到', '投入', '投進', '投到', '搬到', '搬去',
 ];
+const OTHER_WRITE_VERBS = [
+  '發布', '發佈', '發文', '回覆', '回復', '留言', '刪除', '撤回', '填答', '評分',
+  '簽到', '簽退', '點名', '退選', '選課',
+  'delete', 'post', 'reply', 'withdraw',
+  'submit', 'upload', 'resubmit',
+  'hand in', 'turn in', 'send in', 'send to', 'send back', 'forward',
+];
+const WRITE_VERB_SET = new Set<string>([...WRITE_COMPOUNDS, ...OTHER_WRITE_VERBS, '交', '繳']);
 const WRITE_COMPOUND_SET = new Set(WRITE_COMPOUNDS);
+const WRITE_VERB_PATTERN_SOURCE = [...WRITE_VERB_SET]
+  .slice()
+  .sort((a, b) => b.length - a.length)
+  .map(value => {
+    const source = escapeRegex(value).replace(/ /g, '\\s+');
+    return /[A-Za-z']/.test(value) ? `\\b${source}\\b` : source;
+  })
+  .join('|');
+const WRITE_NEGATION_SOURCE = `(?:${NEGATION_SOURCE})\\s*(?:(?:幫我|替我|代我|自動|直接)\\s*)*`;
+const NEGATED_BA_FILL = '(?:(?:把|將)\\s*(?:(?![，,；;。！!？?\\r\\n]|然後|接著|接下來|順便|並且|另外|同時).){0,40}?)?';
+const NEGATED_WRITE_SOURCE = `${WRITE_NEGATION_SOURCE}${NEGATED_BA_FILL}(?:${WRITE_VERB_PATTERN_SOURCE})`;
+const BA_MARKERS = new Set(['把', '將']);
+const BA_OBJECT_WORDS = new Set([
+  '附件', '檔案', '檔', '文件', '作業', '報告', '截圖', '作品', '心得', '講義', '考卷', '表單', '修訂稿',
+]);
+const WRITE_HELPERS = new Set(['幫我', '替我', '代我', '自動', '直接', '請', '麻煩']);
 const PREPARE_ACTIONS = new Set(['準備', '預覽', '草稿', '起草', 'prepare', 'draft']);
 const DOWNLOAD_ACTIONS = new Set(['下載', 'download']);
 const HAN_CHAR = /[\p{Script=Han}]/u;
 
-type TokenKind = 'noun' | 'query' | 'cue' | 'conj' | 'punct' | 'other';
+type TokenKind = 'noun' | 'query' | 'cue' | 'conj' | 'punct' | 'neg' | 'write' | 'other';
 type Token = { value: string; start: number; end: number; kind: TokenKind };
 
 const LEXICON: { value: string; kind: TokenKind }[] = [
-  ...WRITE_COMPOUNDS.map(value => ({ value, kind: 'other' as const })),
+  ...WRITE_COMPOUNDS.map(value => ({ value, kind: 'write' as const })),
+  ...STATUS_WRITE_COMPOUNDS.map(value => ({ value, kind: 'other' as const })),
+  ...STATUS_PARTICLES.map(value => ({ value, kind: 'other' as const })),
+  ...OTHER_WRITE_VERBS.map(value => ({ value, kind: 'write' as const })),
   ...DOMAIN_NOUNS.map(value => ({ value, kind: 'noun' as const })),
   ...NOUN_COMPOUNDS.map(value => ({ value, kind: 'noun' as const })),
   ...QUERY_COMPOUNDS.map(value => ({ value, kind: 'query' as const })),
+  ...[...TRONCLASS_NEGATORS].map(value => ({ value, kind: 'neg' as const })),
   ...ACTION_CUES.map(value => ({ value, kind: 'cue' as const })),
   ...CLAUSE_CUES.map(value => ({ value, kind: 'cue' as const })),
   ...FUNCTION_CUES.map(value => ({ value, kind: 'cue' as const })),
@@ -184,11 +224,41 @@ const QUERY_CONTEXT_HOLD_CUES = new Set(['供', '正在', '正']);
 function noteToken(tokens: Token[], token: Token, state: { clauseHasQuery: boolean }): void {
   tokens.push(token);
   if (isClauseBoundaryToken(token) || WRITE_CUE_WORD_SET.has(token.value) ||
+    token.kind === 'neg' || token.kind === 'write' ||
     (token.kind === 'cue' && !QUERY_CONTEXT_HOLD_CUES.has(token.value))) {
     state.clauseHasQuery = false;
   } else if (token.kind === 'query' || QUERY_START.has(token.value)) {
     state.clauseHasQuery = true;
   }
+}
+
+
+function lexiconMatchLength(text: string, index: number, value: string): number {
+  if (!/^[A-Za-z']/.test(value)) return text.startsWith(value, index) ? value.length : 0;
+  const matched = new RegExp(`^${escapeRegex(value).replace(/ /g, '\\s+')}(?![A-Za-z])`, 'i').exec(text.slice(index));
+  return matched ? matched[0].length : 0;
+}
+
+function isWhitespaceToken(token: Token): boolean {
+  return /^\s+$/u.test(token.value);
+}
+
+function isWriteVerbToken(token: Token): boolean {
+  return token.kind !== 'noun' && (token.kind === 'write' || WRITE_VERB_SET.has(token.value));
+}
+
+function isNegatorToken(token: Token): boolean {
+  return token.kind === 'neg' || NEGATOR_SET.has(token.value);
+}
+
+function isWriteNegatedAt(tokens: Token[], writeAt: number): boolean {
+  for (let index = writeAt - 1; index >= 0; index -= 1) {
+    const token = tokens[index]!;
+    if (isWhitespaceToken(token)) continue;
+    if (WRITE_HELPERS.has(token.value)) continue;
+    return isNegatorToken(token);
+  }
+  return false;
 }
 
 function tokenize(text: string): Token[] {
@@ -197,10 +267,14 @@ function tokenize(text: string): Token[] {
   let index = 0;
   while (index < text.length) {
     const from = index;
-    const entry = LEXICON.find(item => text.startsWith(item.value, index));
+    let matchedLength = 0;
+    const entry = LEXICON.find(item => {
+      matchedLength = lexiconMatchLength(text, index, item.value);
+      return matchedLength > 0;
+    });
     if (entry) {
-      noteToken(tokens, { value: entry.value, start: from, end: from + entry.value.length, kind: entry.kind }, state);
-      index += entry.value.length;
+      noteToken(tokens, { value: entry.value, start: from, end: from + matchedLength, kind: entry.kind }, state);
+      index += matchedLength;
       continue;
     }
     const ch = text[index]!;
@@ -245,20 +319,6 @@ function tokensFor(text: string): Token[] {
     if (oldest !== undefined) tokenCache.delete(oldest);
   }
   return tokens;
-}
-
-function tokenCovering(text: string, index: number): Token | undefined {
-  const tokens = tokensFor(text);
-  let low = 0;
-  let high = tokens.length - 1;
-  while (low <= high) {
-    const mid = (low + high) >> 1;
-    const token = tokens[mid]!;
-    if (index < token.start) high = mid - 1;
-    else if (index >= token.end) low = mid + 1;
-    else return token;
-  }
-  return undefined;
 }
 
 function isModifierBoundaryToken(token: Token): boolean {
@@ -385,10 +445,13 @@ function nextNegatedWriteStop(text: string, from: number): number {
       return offset;
     }
     if (token.kind === 'conj') {
-      const skipped = text.slice(token.end).match(/^(?:(?:請|幫我|替我|代我|直接|自動)\s*)*/u)?.[0].length ?? 0;
-      const at = token.end + skipped;
-      const write = new RegExp(`^(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})`, 'iu').exec(text.slice(at));
-      if (write && tokenCovering(text, at)?.kind !== 'noun') return offset;
+      let next = i + 1;
+      while (next < tokens.length &&
+        (isWhitespaceToken(tokens[next]!) || WRITE_HELPERS.has(tokens[next]!.value))) {
+        next += 1;
+      }
+      const following = tokens[next];
+      if (following && isWriteVerbToken(following)) return offset;
     }
     if (/^(?:and|then|also)\b/i.test(text.slice(token.start))) return offset;
   }
@@ -400,14 +463,23 @@ const QUOTE_PAIRS: Array<readonly [string, string]> = [
 ];
 
 function readRoutingText(text: string): string {
+  const tokens = tokensFor(text);
   let result = '';
   let start = 0;
-  for (const match of text.matchAll(NEGATED_WRITE_START)) {
-    if (match.index < start) continue;
-    const end = match.index + match[0].length;
-    const boundary = nextNegatedWriteStop(text, end);
-    result += text.slice(start, match.index) + ' ';
-    start = boundary < 0 ? text.length : end + boundary;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token.start < start) continue;
+    if (!isNegatorToken(token) || !isNegatedWriteFrom(tokens, index)) continue;
+    let writeEnd = token.end;
+    for (let next = index + 1; next < tokens.length; next += 1) {
+      if (isWriteVerbToken(tokens[next]!)) {
+        writeEnd = tokens[next]!.end;
+        break;
+      }
+    }
+    const boundary = nextNegatedWriteStop(text, writeEnd);
+    result += text.slice(start, token.start) + ' ';
+    start = boundary < 0 ? text.length : writeEnd + boundary;
   }
   return result + text.slice(start);
 }
@@ -428,12 +500,12 @@ const GOVERNED_STATUS = new RegExp(
 const SUBMISSION_QUESTION = new RegExp(`^(?:了沒|了嗎|沒|過了嗎)${STATUS_BOUNDARY_SOURCE}`, 'u');
 const DEADLINE_SUFFIX_SOURCE = `(?:作業\\s*(?:的\\s*)?)?(?:期限|截止(?:日(?:期)?|時間)?|deadline\\b)(?:\\s*(?:是)?(?:什麼時候|哪一天|哪天|嗎|呢))?${STATUS_BOUNDARY_SOURCE}`;
 const SUBMISSION_DEADLINE = new RegExp(`^${DEADLINE_SUFFIX_SOURCE}`, 'iu');
-const SUBMISSION_DEADLINE_QUERY = new RegExp(`(?:${SUBMIT_VERB_SOURCE})\\s*${DEADLINE_SUFFIX_SOURCE}`, 'iu');
+const SUBMISSION_DEADLINE_QUERY = new RegExp(`(?:${WRITE_VERB_PATTERN_SOURCE})\\s*${DEADLINE_SUFFIX_SOURCE}`, 'iu');
 const HOMEWORK_STATUS_SUFFIX = new RegExp(
   `^\\s*(?:的?作業)?\\s*的?(?:有哪些)?(?:${STATUS_BOUNDARY_SOURCE}|\\s*(?=${CLAUSE_SEPARATOR.source}|${NEGATED_WRITE_SOURCE}))`, 'iu',
 );
 const STATUS_EXPLANATION = new RegExp(
-  `((?:${SUBMIT_VERB_SOURCE})${STATUS_NOUN_SOURCE})\\s*(?:如何|怎麼樣)${STATUS_BOUNDARY_SOURCE}`, 'giu',
+  `((?:${WRITE_VERB_PATTERN_SOURCE})${STATUS_NOUN_SOURCE})\\s*(?:如何|怎麼樣)${STATUS_BOUNDARY_SOURCE}`, 'giu',
 );
 
 const LMS_SUBJECT = new RegExp(`^${LMS_SOURCE}\\s*(?:的\\s*)?$`, 'iu');
@@ -459,32 +531,43 @@ function readGovernsStatus(segment: string): boolean {
     STATUS_FILLER.test(filler.slice(course.index + course[0].length));
 }
 
+function isSubmitWriteToken(token: Token): boolean {
+  return WRITE_COMPOUND_SET.has(token.value) || token.value === '交' || token.value === '繳';
+}
+
+function isBaClausePunct(token: Token): boolean {
+  return token.kind === 'punct' && /[,;。！!？?、]/u.test(token.value);
+}
+
 /** Classify each occurrence using its own context in the original request. */
-function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
+function writeCommandRoute(text: string): 'planner' | 'unsupported' | 'ambiguous' | null {
   const tokens = tokensFor(text);
   let lastPunctEnd = 0;
-  for (const token of tokens) {
+  let clauseHasBa = false;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
     if (token.kind === 'punct') {
       lastPunctEnd = token.end;
+      clauseHasBa = false;
       continue;
     }
-    if (token.kind === 'noun') continue;
-    const matched = WRITE_COMPOUND_SET.has(token.value)
-      ? { 0: token.value, 1: token.value, length: 2 } as Pick<RegExpExecArray, 0 | 1 | 'length'>
-      : WRITE_AT_TOKEN.exec(text.slice(token.start));
-    if (!matched) continue;
+    if (BA_MARKERS.has(token.value)) {
+      if (!isWriteNegatedAt(tokens, index)) clauseHasBa = true;
+      continue;
+    }
+    if (token.kind === 'noun' || !isWriteVerbToken(token)) continue;
+    if (isWriteNegatedAt(tokens, index)) continue;
+    // Field nouns such as「發布時間」are consumed as nouns and never reach here.
+    // Other writes such as「刪除」are never status filters.
+    if (!isSubmitWriteToken(token)) return 'unsupported';
+
     const before = text.slice(0, token.start);
     const beforeTail = suffixForEndAnchor(before);
-    if (WRITE_NEGATION.test(beforeTail)) continue;
-    // Writes hold only at a word boundary. Field nouns such as「發布時間」stay reads.
-    // A write compound such as「轉交」is the word, even if the regex matched only「交」.
-    if (!matched[1]) return 'unsupported';
-
-    const after = text.slice(token.start + matched[0].length).trimStart();
+    const after = text.slice(token.end).trimStart();
     const segment = text.slice(lastPunctEnd, token.start).trimStart();
     if (ADDITIVE_CUE.test(beforeTail)) return STATUS_NOUN.test(after) ? 'planner' : 'unsupported';
     if (WRITE_CUE.test(beforeTail)) return 'unsupported';
-    if (segment.includes('把')) return 'unsupported';
+    if (clauseHasBa) return 'unsupported';
     if ((GOVERNED_STATUS.test(after) || SUBMISSION_QUESTION.test(after)) &&
       (readGovernsStatus(segment) || HOMEWORK_SUBJECT.test(segment))) continue;
     if (SUBMISSION_DEADLINE.test(after) &&
@@ -498,47 +581,162 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
     }
     return 'unsupported';
   }
-  // 把／將 clauses can use a transfer verb that the list above has not named yet.
-  // If the object is a submission item and a transfer or placement verb follows, treat it as a write.
-  if (hasBaObjectWrite(text)) return 'unsupported';
+  const ba = baConstructionState(text);
+  if (ba === 'unresolved') return 'ambiguous';
+  if (ba === 'write') return 'unsupported';
   return null;
 }
 
-const BA_OBJECT = '(?:附件|檔案?|文件|作業|報告|截圖|作品|心得|講義|考卷|表單|修訂稿)';
-const BA_TRANSFER = `(?:回傳|傳(?:給|到|回|去|送)|送(?:給|到|出|件)|寄(?:給|到|出)|遞(?:給|到|交)|轉(?:給|到|寄)|[交繳]|上[傳載]|提交|${PLACEMENT_VERB_SOURCE})`;
-const BA_NEGATION = new RegExp(`${WRITE_NEGATION_SOURCE}$`, 'iu');
-const BA_QUERY = /(?:查詢|查看|確認|顯示|列出|告訴我|查|看)/u;
-const BA_OBJECT_RE = new RegExp(BA_OBJECT, 'u');
-const BA_TRANSFER_RE = new RegExp(BA_TRANSFER, 'u');
 
-function hasBaObjectWrite(text: string): boolean {
-  for (const token of tokensFor(text)) {
-    if (token.value !== '把' && token.value !== '將') continue;
-    const before = text.slice(0, token.start);
-    if (BA_NEGATION.test(suffixForEndAnchor(before))) continue;
-    // Keep colons inside the same 把／將 command, as in「把附件：放到作業區」.
-    let restEnd = text.length;
-    for (const later of tokensFor(text)) {
-      if (later.start > token.start && later.kind === 'punct' && /[,;。！!？?、]/u.test(later.value)) {
-        restEnd = later.start;
-        break;
-      }
+function baSpanKind(tokens: Token[], baAt: number, end: number): 'write' | 'query' | 'unresolved' | 'none' {
+  let objectAt = -1;
+  for (let index = baAt + 1; index < end; index += 1) {
+    const token = tokens[index]!;
+    if (isWhitespaceToken(token) || token.value === ':' || token.value === '：') continue;
+    if (BA_OBJECT_WORDS.has(token.value) || token.kind === 'noun') {
+      objectAt = index;
+      break;
     }
-    const segmentRest = text.slice(token.end, restEnd);
-    const object = BA_OBJECT_RE.exec(segmentRest);
-    if (!object) continue;
-    if (BA_TRANSFER_RE.test(segmentRest)) return true;
-    const afterObject = segmentRest.slice(object.index + object[0].length).replace(/^[\s:：]+/u, '');
-    if (!afterObject) return true;
-    if (BA_QUERY.test(afterObject) && !BA_TRANSFER_RE.test(afterObject)) continue;
-    return true;
+    if (isWriteVerbToken(token) || token.kind === 'query' || QUERY_START.has(token.value) ||
+      isClauseBoundaryToken(token) || isBaClausePunct(token)) {
+      break;
+    }
+  }
+  if (objectAt < 0) return 'none';
+  let sawWrite = false;
+  let sawQuery = false;
+  let sawContent = false;
+  for (let index = objectAt + 1; index < end; index += 1) {
+    const token = tokens[index]!;
+    if (isWhitespaceToken(token) || token.value === ':' || token.value === '：') continue;
+    sawContent = true;
+    if (isWriteVerbToken(token)) sawWrite = true;
+    else if (token.kind === 'query' || QUERY_START.has(token.value)) sawQuery = true;
+  }
+  if (sawWrite && !sawQuery) return 'write';
+  if (sawQuery && !sawWrite) return 'query';
+  if (sawWrite && sawQuery) return 'unresolved';
+  if (!sawContent) return 'unresolved';
+  return 'unresolved';
+}
+
+function baConstructionState(text: string): 'write' | 'query' | 'none' | 'unresolved' {
+  const tokens = tokensFor(text);
+  let baAt = -1;
+  let result: 'write' | 'query' | 'none' = 'none';
+  const finish = (end: number): 'unresolved' | null => {
+    if (baAt < 0) return null;
+    const kind = baSpanKind(tokens, baAt, end);
+    baAt = -1;
+    if (kind === 'unresolved') return 'unresolved';
+    if (kind === 'write') result = 'write';
+    else if (kind === 'query' && result !== 'write') result = 'query';
+    return null;
+  };
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (isBaClausePunct(token)) {
+      if (finish(index) === 'unresolved') return 'unresolved';
+      continue;
+    }
+    if (BA_MARKERS.has(token.value) && !isWriteNegatedAt(tokens, index)) baAt = index;
+  }
+  if (finish(tokens.length) === 'unresolved') return 'unresolved';
+  return result;
+}
+
+type NegationScan = 'clear' | 'negated-write' | 'negated-query' | 'unresolved';
+
+function isClauseScanBoundary(token: Token): boolean {
+  return token.kind === 'punct' || (token.kind === 'cue' && (CLAUSE_CUES.includes(token.value) || ACTION_CUES.includes(token.value)));
+}
+
+/** Single-pass linear scan: every negator in the clause is considered; never jump to the clause end. */
+function scanNegation(tokens: Token[], interior: boolean[]): NegationScan {
+  let result: NegationScan = 'clear';
+  let pending: 'open' | 'ba' | null = null;
+  let lastNegator: string | null = null;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (isClauseScanBoundary(token)) {
+      if (pending) return 'unresolved';
+      continue;
+    }
+    if (isNegatorToken(token)) {
+      if (pending === 'open') return 'unresolved';
+      pending = pending ?? 'open';
+      lastNegator = token.value;
+      continue;
+    }
+    if (!pending) continue;
+    if (isWhitespaceToken(token) || token.value === ':' || token.value === '：') continue;
+    if (WRITE_HELPERS.has(token.value) || token.kind === 'cue') continue;
+    if (BA_MARKERS.has(token.value)) {
+      pending = 'ba';
+      continue;
+    }
+    if (pending === 'ba' && (BA_OBJECT_WORDS.has(token.value) || token.kind === 'noun' || token.kind === 'other')) {
+      continue;
+    }
+    if (interior[index] && !isWriteVerbToken(token) && token.kind !== 'query' && !QUERY_START.has(token.value)) {
+      continue;
+    }
+    if (isWriteVerbToken(token)) {
+      if (result !== 'negated-query') result = 'negated-write';
+      pending = null;
+      continue;
+    }
+    if (token.kind === 'query' || QUERY_START.has(token.value)) {
+      result = 'negated-query';
+      pending = null;
+      continue;
+    }
+    if (pending === 'ba') continue;
+    // A lone 不／未／沒 inside a file or title (不存在.pdf) is not a speech-act negator.
+    if (pending === 'open' && (lastNegator === '不' || lastNegator === '未' || lastNegator === '沒')) {
+      pending = null;
+      lastNegator = null;
+      continue;
+    }
+    return 'unresolved';
+  }
+  if (pending) return 'unresolved';
+  return result;
+}
+
+function writeLexiconAndRegexDisagree(text: string): boolean {
+  const tokens = tokensFor(text);
+  const pattern = new RegExp(WRITE_VERB_PATTERN_SOURCE, 'giu');
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const writeToken = tokens.some(token => token.start === start && token.end === end && isWriteVerbToken(token));
+    const consumedAsNonWrite = tokens.some(token =>
+      token.start <= start && token.end >= end && (token.kind === 'noun' || token.kind === 'other'));
+    if (!writeToken && !consumedAsNonWrite) return true;
   }
   return false;
 }
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function isNegatedWriteFrom(tokens: Token[], negAt: number): boolean {
+  let seenBa = false;
+  for (let index = negAt + 1; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (isWhitespaceToken(token)) continue;
+    if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) return false;
+    if (WRITE_HELPERS.has(token.value)) continue;
+    if (BA_MARKERS.has(token.value)) {
+      seenBa = true;
+      continue;
+    }
+    if (isWriteVerbToken(token)) return true;
+    if (!seenBa) return false;
+  }
+  return false;
 }
+
+
+
 
 function textWithoutQuotedSpans(text: string): string {
   let result = text;
@@ -555,11 +753,10 @@ function keywordOnlyInsideQuotes(text: string): boolean {
 /** Examples, translations, quotes, general explanations and negated reads do not authorize a private read. */
 function authorizesPrivateRead(original: string): boolean {
   if (keywordOnlyInsideQuotes(original)) return false;
-  for (const match of original.matchAll(NEGATIONS)) {
-    const rest = original.slice(match.index);
-    if (!STARTS_NEGATED_WRITE.test(rest) &&
-      new RegExp(`^.{0,80}(?:${NEGATED_QUERY_VERBS.map(escapeRegex).join('|')})`, 'i').test(rest)) return false;
-  }
+  const tokens = tokensFor(original);
+  const interior = modifierInteriorIndex(tokens);
+  const negation = scanNegation(tokens, interior);
+  if (negation === 'negated-query' || negation === 'unresolved') return false;
   // Terminal status questions ask for the current state.
   const explanationText = original.replace(STATUS_EXPLANATION, '$1');
   return !(/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|解釋|釋義|備註|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(explanationText) ||
@@ -573,9 +770,7 @@ function authorizesPrivateRead(original: string): boolean {
  * the original planner instead of reading beside an unhandled write.
  */
 function wholeRequestAllowsCompoundRead(question: string): boolean {
-  const original = question.normalize('NFKC').trim();
-  const unquoted = textWithoutQuotedSpans(original);
-  return !writeCommandRoute(unquoted) && authorizesPrivateRead(original);
+  return classifyTronClassSentence(question)?.outcome === 'clearly-read';
 }
 
 /**
@@ -604,7 +799,7 @@ export function tronClassCompoundClauses(question: string): string[] {
       if (!TRONCLASS_KEYWORD.test(readRoutingText(clause))) continue;
       context = true;
       candidate = clause;
-    } else if (context && TRONCLASS_CONTINUATION.test(clause) && !OTHER_SERVICE_OR_SCHEDULE.test(clause) && !NEGATED.test(clause)) {
+    } else if (context && TRONCLASS_CONTINUATION.test(clause) && !OTHER_SERVICE_OR_SCHEDULE.test(clause) && !tokensFor(clause).some(isNegatorToken)) {
       candidate = `玩課雲${clause}`;
     }
     if (!candidate || OTHER_SERVICE_OR_SCHEDULE.test(candidate.replace(TRONCLASS_KEYWORD, ''))) continue;
@@ -645,23 +840,12 @@ export type TronClassAgentQueryIntent = {
   unsupportedReason?: 'multiple_actions';
 };
 
-/**
- * This router sees only the user's current message. Course descriptions, notices,
- * history and model output must never be passed to it as commands.
- */
-export function parseTronClassAgentIntent(question: string): TronClassAgentQueryIntent | null {
-  if (typeof question !== 'string' || !question.trim() || question.length > 1000 ||
-    !TRONCLASS_KEYWORD.test(question)) return null;
-  const original = question.normalize('NFKC').trim();
-  if (isExistingTronClassNavigation(original)) return null;
-  const unquoted = textWithoutQuotedSpans(original);
-  const writeRoute = writeCommandRoute(unquoted);
-  if (!authorizesPrivateRead(original)) return null;
-  if (writeRoute === 'planner' || isMultiClauseRequest(original)) return null;
-  if (writeRoute) return { intent: 'unsupported', pendingOnly: false };
-  const text = textWithoutQuotedSpans(readRoutingText(original));
-  // Keywords that only appeared inside a negated write or a quotation do not authorize a private read.
-  if (!TRONCLASS_KEYWORD.test(text)) return null;
+export type TronClassSentenceClass =
+  | { outcome: 'clearly-read'; intent: TronClassAgentQueryIntent }
+  | { outcome: 'clearly-write'; intent: TronClassAgentQueryIntent | null }
+  | { outcome: 'ambiguous' };
+
+function readIntentOf(text: string): TronClassAgentQueryIntent {
   if (/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i.test(text)) {
     return { intent: 'capabilities', pendingOnly: false };
   }
@@ -682,6 +866,55 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
   if (SUBMISSION_DEADLINE_QUERY.test(text)) return { intent: 'homework', pendingOnly: false };
   if (dataIntent) return { intent: dataIntent, pendingOnly: false };
   return { intent: 'capabilities', pendingOnly: false };
+}
+
+/**
+ * Classify a TronClass sentence as a clearly auto-readable request, a clearly
+ * routed write (existing write or planner consent flow), or ambiguous. Ambiguous
+ * requests never auto-read homework and never auto-write; they stay with the
+ * existing planner / consent prompt so the student can confirm.
+ */
+export function classifyTronClassSentence(question: string): TronClassSentenceClass | null {
+  if (typeof question !== 'string' || !question.trim() || question.length > 1000 ||
+    !TRONCLASS_KEYWORD.test(question)) return null;
+  const original = question.normalize('NFKC').trim();
+  if (isExistingTronClassNavigation(original)) return null;
+  const unquoted = textWithoutQuotedSpans(original);
+  const tokens = tokensFor(original);
+  const interior = modifierInteriorIndex(tokens);
+  if (scanNegation(tokens, interior) === 'unresolved') return { outcome: 'ambiguous' };
+  if (baConstructionState(unquoted) === 'unresolved') return { outcome: 'ambiguous' };
+  if (writeLexiconAndRegexDisagree(unquoted)) return { outcome: 'ambiguous' };
+  const writeRoute = writeCommandRoute(unquoted);
+  if (writeRoute === 'ambiguous') return { outcome: 'ambiguous' };
+  if (!authorizesPrivateRead(original)) {
+    // Translation, quotation, explanation, or a negated query is not a write
+    // command, even if a write-verb token appears as an example word.
+    return { outcome: 'ambiguous' };
+  }
+  if (writeRoute === 'planner') return { outcome: 'clearly-write', intent: null };
+  if (writeRoute === 'unsupported') return { outcome: 'clearly-write', intent: { intent: 'unsupported', pendingOnly: false } };
+  const text = textWithoutQuotedSpans(readRoutingText(original));
+  if (!TRONCLASS_KEYWORD.test(text)) return { outcome: 'ambiguous' };
+  const intent = readIntentOf(text);
+  if (intent.intent === 'unsupported' || intent.intent === 'prepare') {
+    return { outcome: 'clearly-write', intent };
+  }
+  return { outcome: 'clearly-read', intent };
+}
+
+/**
+ * This router sees only the user's current message. Course descriptions, notices,
+ * history and model output must never be passed to it as commands.
+ */
+export function parseTronClassAgentIntent(question: string): TronClassAgentQueryIntent | null {
+  const classified = classifyTronClassSentence(question);
+  if (!classified || classified.outcome === 'ambiguous') return null;
+  // Multi-clause requests stay with the planner; clearly-read clauses may still
+  // be supplemented through tronClassCompoundClauses.
+  if (isMultiClauseRequest(question.normalize('NFKC').trim())) return null;
+  if (classified.outcome === 'clearly-write') return classified.intent;
+  return classified.intent;
 }
 
 export function canAnswerTronClassQuestion(question: string): boolean {
