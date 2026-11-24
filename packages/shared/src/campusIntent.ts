@@ -42,7 +42,8 @@ export const CAMPUS_QUICK_DESTINATIONS = [
 export type CampusQuickDestination = (typeof CAMPUS_QUICK_DESTINATIONS)[number];
 
 export function suggestCampusDestinations(input: string): CampusQuickDestination[] {
-  const normalized = input.slice(0, 160).normalize('NFKC').toLocaleLowerCase('zh-TW');
+  const normalized = input.slice(0, 160).normalize('NFKC').toLocaleLowerCase('zh-TW')
+    .replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
   const phrase = normalized.replace(/\s+/g, '');
   if (!phrase) return [];
 
