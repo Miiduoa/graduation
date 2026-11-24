@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
@@ -18,6 +18,7 @@ import {
   loadMapLocations,
   setMapFavorite,
   walkingDirectionsUrl,
+  appleWalkingDirectionsUrl,
   distanceMeters,
   formatDistance,
   type MapCoordinate,
@@ -58,6 +59,17 @@ type MapProps = {
   query?: string;
 };
 type FavoritesState = { status: 'loading' | 'error' | 'ready'; ids: Set<string> };
+type RouteDraft = { from: MapLocation | null; to: MapLocation | null };
+
+// A manually confirmed marker must not silently move when the live source replaces it.
+function confirmedRoutePlace(locations: readonly MapLocation[], chosen: MapLocation | null) {
+  if (!chosen) return null;
+  const matches = locations.filter((place) => place.id === chosen.id);
+  if (matches.length !== 1) return null;
+  const place = matches[0];
+  return place.name === chosen.name && place.category === chosen.category &&
+    place.lat === chosen.lat && place.lng === chosen.lng ? place : null;
+}
 
 export default function MapClient(props: MapProps) {
   const { user, loading, error } = useAuth();
@@ -161,13 +173,15 @@ function MapContent({
   const initialQuery = normalizeCampusClassroomQuery(query);
   const [search, setSearch] = useState(initialQuery);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const routeNoteId = useId();
+  const detailNoteId = useId();
   const [selection, setSelection] = useState<string | null>(null);
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [nearbyOnly, setNearbyOnly] = useState(false);
   const [myLocation, setMyLocation] = useState<MapCoordinate | null>(null);
   const [positionStatus, setPositionStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [positionError, setPositionError] = useState('');
-  const [routeDraft, setRouteDraft] = useState<{ from: string | null; to: string | null } | null>(null);
+  const [routeDraft, setRouteDraft] = useState<RouteDraft | null>(null);
   const [favorites, setFavorites] = useState<FavoritesState>({ status: 'loading', ids: new Set() });
   const [favoriteAttempt, setFavoriteAttempt] = useState(0);
   const [pending, setPending] = useState<string | null>(null);
@@ -253,15 +267,6 @@ function MapContent({
   const automaticClassroomId = sourcePending ? undefined : classroomPlace?.id;
   const selectedId = selection ?? (focus ? focusedPlace?.id : automaticClassroomId);
   const selected = locations.find((location) => location.id === selectedId) ?? null;
-  const returnParams = new URLSearchParams({ schoolId: school });
-  if (route) returnParams.set('route', route);
-  const returnFocus = selection ?? focus ?? selectedId;
-  if (returnFocus) returnParams.set('focus', returnFocus);
-  const returnQuery = normalizeCampusClassroomQuery(search);
-  if (returnQuery) returnParams.set('query', returnQuery);
-  const returnUrl = encodeURIComponent(`/map?${returnParams}${hash}`);
-  const platformLoginHref = `/login?returnUrl=${returnUrl}`;
-  const schoolLoginHref = `/login?reconnect=school&returnUrl=${returnUrl}`;
   const deepLinkRoute = useMemo<[MapLocation, MapLocation] | null>(() => {
     const ids = route?.split(',').map((id) => id.trim());
     if (!ids || ids.length !== 2 || ids[0] === ids[1]) return null;
@@ -269,24 +274,44 @@ function MapContent({
     const to = locations.find((location) => location.id === ids[1]);
     return from && to ? [from, to] : null;
   }, [route, locations]);
+  const routeStart = confirmedRoutePlace(locations, routeDraft?.from ?? null);
+  const routeEnd = confirmedRoutePlace(locations, routeDraft?.to ?? null);
+  const routeNeedsConfirmation = Boolean(
+    (routeDraft?.from && !routeStart) || (routeDraft?.to && !routeEnd),
+  );
   const routeLocations = useMemo<[MapLocation, MapLocation] | null>(() => {
     if (routeDraft === null) return deepLinkRoute;
-    const from = locations.find((location) => location.id === routeDraft.from);
-    const to = locations.find((location) => location.id === routeDraft.to);
-    return from && to && from.id !== to.id ? [from, to] : null;
-  }, [deepLinkRoute, routeDraft, locations]);
-  const routeStart = routeDraft?.from
-    ? locations.find((location) => location.id === routeDraft.from)
-    : null;
+    return routeStart && routeEnd && routeStart.id !== routeEnd.id ? [routeStart, routeEnd] : null;
+  }, [deepLinkRoute, routeDraft, routeStart, routeEnd]);
+  const returnParams = new URLSearchParams({ schoolId: school });
+  // Preserve the currently confirmed route, not the original link after a manual change.
+  // A pending source can still resolve an untouched deep link. Never serialize GPS.
+  if (routeLocations) {
+    const ids = routeLocations.map((place) => place.id);
+    if (ids.every((id) => id && id.trim() === id && !id.includes(',')))
+      returnParams.set('route', ids.join(','));
+  } else if (routeDraft === null && route && placeState.source !== 'ready') {
+    // Official source failure is temporary. Keep an untouched deep-link route
+    // in login return URLs so it can be restored if the source later recovers.
+    returnParams.set('route', route);
+  }
+  const returnFocus = selection ?? focus ?? selectedId;
+  if (returnFocus) returnParams.set('focus', returnFocus);
+  const returnQuery = normalizeCampusClassroomQuery(search);
+  if (returnQuery) returnParams.set('query', returnQuery);
+  const returnUrl = encodeURIComponent(`/map?${returnParams}${hash}`);
+  const platformLoginHref = `/login?returnUrl=${returnUrl}`;
+  const schoolLoginHref = `/login?reconnect=school&returnUrl=${returnUrl}`;
+  const pendingRoutePlaces = routeLocations?.filter((place) => isProvidencePendingVerification(school, place)) ?? [];
   const selectLocation = useCallback((location: MapLocation) => setSelection(location.id), []);
   const walkFrom = myLocation ?? (school === 'pu' ? PROVIDENCE_WALK_ORIGIN : null);
   const walkFromGate = Boolean(walkFrom && !myLocation);
   const mapLocations = useMemo(() => {
     const visible = new Map(filtered.map((location) => [location.id, location]));
-    for (const location of [...(routeLocations ?? []), ...(selected ? [selected] : [])])
+    for (const location of [...(routeLocations ?? []), ...(routeStart ? [routeStart] : []), ...(selected ? [selected] : [])])
       visible.set(location.id, location);
     return [...visible.values()];
-  }, [filtered, selected, routeLocations]);
+  }, [filtered, selected, routeLocations, routeStart]);
 
   function locate() {
     const request = ++positionGeneration.current;
@@ -432,10 +457,21 @@ function MapContent({
   return (
     <div className={`pageStack ${styles.page}`} data-map-first-screen="true">
       {publicTask && publicTask.schoolId === school && <PublicNavigationTask port={publicTask} />}
-      {routeStart && !routeLocations && (
-        <p className={styles.notice} role="status">
-          已設定「{routeStart.name}」為起點。請選擇其他地點，再按「設為終點」。
-        </p>
+      {routeNeedsConfirmation && (
+        <div className={styles.notice}>
+          <p role="status">原先選擇的地點已變更或無法確認，請重新選擇起點及終點。</p>
+          <button className="btn" onClick={() => setRouteDraft({ from: null, to: null })}>
+            清除待確認路線
+          </button>
+        </div>
+      )}
+      {routeStart && !routeLocations && !routeNeedsConfirmation && (
+        <div className={styles.notice}>
+          <p role="status">已設定「{routeStart.name}」為起點。請選擇其他地點，再按「設為終點」。</p>
+          <button className="btn" onClick={() => setRouteDraft({ from: null, to: null })}>
+            取消起點
+          </button>
+        </div>
       )}
       {routeLocations && (
         <section className={`card ${styles.route}`} aria-label="步行導航">
@@ -448,15 +484,31 @@ function MapContent({
               兩地直線距離約 {formatDistance(distanceMeters(routeLocations[0], routeLocations[1]))}；
               實際步行路線與時間以地圖服務為準。
             </p>
+            <p id={routeNoteId}>
+              起點與終點均為地點標記，不代表已核實的建築入口、可通行道路或無障礙動線。
+              {pendingRoutePlaces.length > 0 && (
+                <strong>「{pendingRoutePlaces.map((place) => place.name).join('」、「')}」只有單一資料來源，位置待再次確認。</strong>
+              )}
+            </p>
           </div>
           <div className={styles.actions}>
             <a
               className="btn primary"
               href={walkingDirectionsUrl(routeLocations[1], routeLocations[0])}
+              aria-describedby={routeNoteId}
               target="_blank"
               rel="noopener noreferrer"
             >
               開啟步行導航
+            </a>
+            <a
+              className="btn"
+              href={appleWalkingDirectionsUrl(routeLocations[1], routeLocations[0])}
+              aria-describedby={routeNoteId}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              使用 Apple 地圖規劃路線
             </a>
             <button className="btn" onClick={() => setRouteDraft({ from: null, to: null })}>
               清除路線
@@ -668,17 +720,30 @@ function MapContent({
                 {walkingEstimateLabel(distanceMeters(walkFrom, selected))}
               </p>
             )}
-            {isProvidencePendingVerification(school, selected) && (
-              <p role="status">這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。</p>
-            )}
+            <p id={detailNoteId}>
+              導航目的地為地點標記，並非已核實的校舍入口或室內教室；請依現場指標確認。
+              {isProvidencePendingVerification(school, selected) && (
+                <strong>這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。</strong>
+              )}
+            </p>
             <div className={styles.actions}>
               <a
                 className="btn"
+                aria-describedby={detailNoteId}
                 href={walkingDirectionsUrl(selected, myLocation ?? undefined)}
                 target="_blank"
                 rel="noopener noreferrer"
               >
                 從目前位置導航
+              </a>
+              <a
+                className="btn"
+                aria-describedby={detailNoteId}
+                href={appleWalkingDirectionsUrl(selected, myLocation ?? undefined)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                使用 Apple 地圖從目前位置導航
               </a>
               {isBusStopLocation(selected) && (
                 <Link className="btn primary" href={`/bus?schoolId=${encodeURIComponent(school)}`}>
@@ -708,17 +773,17 @@ function MapContent({
               <button
                 className="btn"
                 onClick={() => {
-                  setRouteDraft({ from: selected.id, to: null });
+                  setRouteDraft({ from: selected, to: null });
                   setNotice('');
                 }}
               >
                 設為起點
               </button>
-              {routeStart && routeStart.id !== selected.id && (
+              {routeStart && !routeNeedsConfirmation && routeStart.id !== selected.id && (
                 <button
                   className="btn"
                   onClick={() => {
-                    setRouteDraft({ from: routeStart.id, to: selected.id });
+                    setRouteDraft({ from: routeStart, to: selected });
                     setNotice('');
                   }}
                 >
