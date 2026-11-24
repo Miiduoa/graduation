@@ -425,7 +425,6 @@ function isWriteNegatedAt(tokens: Token[], writeAt: number): boolean {
 
 const PUNCT_CHAR = /[，,；;。！!？?\r\n：:()（）\[\]【】《》〈〉「」『』“”‘’"'·…]/u;
 const FILE_EXTENSION = /\.[A-Za-z][A-Za-z0-9]{0,7}$/u;
-const BARE_FILENAME_ANYWHERE = /[\p{L}\p{N}_-]+\.[A-Za-z][A-Za-z0-9]{0,7}(?![A-Za-z0-9])/u;
 const BARE_FILENAME_BODY = /^[\p{L}\p{N}_-]+$/u;
 const NESTED_BRACKET_PAIRS: Array<readonly [string, string]> = [
   ['（', '）'], ['(', ')'], ['【', '】'], ['[', ']'], ['《', '》'], ['〈', '〉'],
@@ -500,7 +499,7 @@ function typographicQuoteSpan(text: string, index: number): { open: number; inne
 
 
 function hasFilenameCandidate(text: string): boolean {
-  if (BARE_FILENAME_ANYWHERE.test(text)) return true;
+  if (precomputedBareFilenames(text).size > 0) return true;
   if (tokensFor(text).some(token => token.kind === 'filename')) return true;
   let index = 0;
   while (index < text.length) {
@@ -572,12 +571,48 @@ function precomputedQuotedFilenames(text: string): Map<number, { open: number; i
   return found;
 }
 
+function isBareFilenameBodyChar(ch: string): boolean {
+  const code = ch.charCodeAt(0);
+  if (ch === '_' || ch === '-') return true;
+  if (code >= 48 && code <= 57) return true;
+  if (isAsciiLetterCode(code)) return true;
+  return HAN_CHAR.test(ch) || /[\p{L}\p{N}]/u.test(ch);
+}
+
 function precomputedBareFilenames(text: string): Map<number, number> {
   const found = new Map<number, number>();
-  const pattern = new RegExp(BARE_FILENAME_ANYWHERE.source, 'gu');
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(text))) {
-    if (isValidFilenameValue(match[0], false)) found.set(match.index, match[0].length);
+  let index = 0;
+  while (index < text.length) {
+    if (text[index] !== '.') {
+      index += 1;
+      continue;
+    }
+    if (index + 1 >= text.length || !isAsciiLetterCode(text.charCodeAt(index + 1))) {
+      index += 1;
+      continue;
+    }
+    let extEnd = index + 2;
+    const extLimit = Math.min(text.length, index + 9);
+    while (extEnd < extLimit && (
+      isAsciiLetterCode(text.charCodeAt(extEnd)) ||
+      (text.charCodeAt(extEnd) >= 48 && text.charCodeAt(extEnd) <= 57)
+    )) extEnd += 1;
+    if (extEnd < text.length && (
+      isAsciiLetterCode(text.charCodeAt(extEnd)) ||
+      (text.charCodeAt(extEnd) >= 48 && text.charCodeAt(extEnd) <= 57)
+    )) {
+      index += 1;
+      continue;
+    }
+    let start = index;
+    while (start > 0 && isBareFilenameBodyChar(text[start - 1]!)) start -= 1;
+    if (start === index) {
+      index = extEnd;
+      continue;
+    }
+    const value = text.slice(start, extEnd);
+    if (isValidFilenameValue(value, false)) found.set(start, extEnd - start);
+    index = extEnd;
   }
   return found;
 }
@@ -1071,13 +1106,19 @@ function scanNegation(tokens: Token[], interior: boolean[]): NegationScan {
 
 function writeLexiconAndRegexDisagree(text: string): boolean {
   const tokens = tokensFor(text);
+  const covering: Array<Token | undefined> = new Array(text.length);
+  for (const token of tokens) {
+    const last = Math.min(token.end, text.length);
+    for (let index = token.start; index < last; index += 1) covering[index] = token;
+  }
   const pattern = new RegExp(WRITE_VERB_PATTERN_SOURCE, 'giu');
   for (const match of text.matchAll(pattern)) {
     const start = match.index ?? 0;
     const end = start + match[0].length;
-    const writeToken = tokens.some(token => token.start === start && token.end === end && isWriteVerbToken(token));
-    const consumedAsNonWrite = tokens.some(token =>
-      token.start <= start && token.end >= end && (token.kind === 'noun' || token.kind === 'other' || token.kind === 'filename'));
+    const token = covering[start];
+    const writeToken = !!token && token.start === start && token.end === end && isWriteVerbToken(token);
+    const consumedAsNonWrite = !!token && token.start <= start && token.end >= end &&
+      (token.kind === 'noun' || token.kind === 'other' || token.kind === 'filename');
     if (!writeToken && !consumedAsNonWrite) return true;
   }
   return false;
@@ -1154,18 +1195,29 @@ function typographicQuoteMask(text: string): boolean[] {
 
 function dataTypeMask(text: string): boolean[] {
   const mask = typographicQuoteMask(text);
-  const mark = (start: number, end: number) => {
-    for (let index = start; index < end && index < mask.length; index += 1) mask[index] = true;
+  const delta = new Array<number>(text.length + 1).fill(0);
+  const add = (start: number, end: number) => {
+    if (end <= start) return;
+    const from = Math.max(0, start);
+    const to = Math.min(text.length, end);
+    if (to <= from) return;
+    delta[from] += 1;
+    delta[to] -= 1;
   };
   for (const token of tokensFor(text)) {
-    if (token.kind === 'filename') mark(token.start, token.end);
+    if (token.kind === 'filename') add(token.start, token.end);
   }
   const scan = bracketsFor(text);
   if (!scan.balanced) {
-    mark(scan.firstOpen, text.length);
-    return mask;
+    add(scan.firstOpen, text.length);
+  } else {
+    for (const span of scan.spans) add(span.start, span.end);
   }
-  for (const span of scan.spans) mark(span.start, span.end);
+  let depth = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    depth += delta[index]!;
+    if (depth > 0) mask[index] = true;
+  }
   return mask;
 }
 
@@ -1367,6 +1419,10 @@ function visibleCommandTokens(text: string): Token[] {
   return tokensFor(text).filter(token => token.kind !== 'filename' && !tokenIsProtected(token, mask));
 }
 
+const PREPARE_MODIFIER_PREFIX = new Set([
+  '的', '之', '已', '已經', '剛', '剛才', '剛剛', '所', '曾', '曾經', '正', '正在', '才',
+]);
+
 function prepareWordRole(tokens: Token[], index: number): 'command' | 'modifier' | 'doubt' | 'none' {
   const token = tokens[index]!;
   if (!isPrepareActionValue(token.value)) return 'none';
@@ -1374,9 +1430,14 @@ function prepareWordRole(tokens: Token[], index: number): 'command' | 'modifier'
   const next = nextSignificantToken(tokens, index);
   const prev = previousSignificantToken(tokens, index);
   if (next && (next.value === '的' || next.value === '之')) return 'modifier';
-  // 玩課雲準備作業: a prepare word between nouns is a modifier or at least not a proven command.
-  if (next && next.kind === 'noun' && prev && prev.kind === 'noun') return 'doubt';
-  return 'command';
+  if (prev && (prev.value === '的' || prev.value === '之')) return 'modifier';
+  // 已準備作業、玩課雲準備作業: a descriptive or attributive prefix is not a command.
+  if (prev && (prev.kind === 'noun' || PREPARE_MODIFIER_PREFIX.has(prev.value))) return 'doubt';
+  if (!prev || isClauseBoundaryToken(prev) || WRITE_HELPERS.has(prev.value) ||
+    prev.kind === 'cue' || prev.kind === 'conj') {
+    return 'command';
+  }
+  return 'doubt';
 }
 
 function visiblePrepareRole(text: string, role: 'command' | 'modifier' | 'doubt'): boolean {
@@ -1464,6 +1525,9 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   // A query verb plus a prepare command in the same sentence is not a proven
   // read or a proven prepare; confirmation must run before either action.
   if (hasDoubtfulPrepare(original)) return { outcome: 'ambiguous' };
+  if (visiblePrepareRole(original, 'modifier') && !hasNonPrepareQueryCommand(original)) {
+    return { outcome: 'ambiguous' };
+  }
   if (hasHonoredPrepareCommand(original) && hasNonPrepareQueryCommand(original)) {
     return { outcome: 'ambiguous' };
   }
