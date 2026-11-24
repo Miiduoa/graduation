@@ -1486,6 +1486,42 @@ describe('continuing a search after opening a service', () => {
     expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
   });
 
+  it('keeps an IME draft when rewriting the same fragment but reapplies a full URL', async () => {
+    const entry = leaveLibrary();
+    await go(-1);
+    renderAfterFrame();
+    act(() => move('?campus=pu&q=公車#results'));
+    const href = window.location.href;
+    const search = screen.getByRole<HTMLInputElement>('searchbox');
+    expect(search.value).toBe('公車');
+
+    fireEvent.compositionStart(search);
+    fireEvent.change(search, { target: { value: '公' } });
+    act(() => window.history.replaceState(window.history.state, '', '#results'));
+    expect(window.location.href).toBe(href);
+    expect(search.value).toBe('公');
+
+    act(() => window.history.replaceState(window.history.state, '', href));
+    expect(window.location.href).toBe(href);
+    expect(search.value).toBe('公車');
+    expect(window.history.state).toMatchObject({
+      __campusSearchHistoryEntry: entry.__campusSearchHistoryEntry,
+      __campusSearchResultReturn: entry.__campusSearchResultReturn,
+    });
+  });
+
+  it('assigns a history key when replacing a keyless initial search with another page', () => {
+    renderAfterFrame();
+    expect(window.location.pathname).toBe('/search');
+    expect(window.history.state).not.toHaveProperty('__campusSearchHistoryEntry');
+    expect(window.history.state).not.toHaveProperty('__campusSearchResultReturn');
+
+    act(() => window.history.replaceState(null, '', '/library'));
+    expect(window.location.pathname).toBe('/library');
+    expect(window.history.state).toHaveProperty('__campusSearchHistoryEntry', expect.any(String));
+    expect(window.history.state).not.toHaveProperty('__campusSearchResultReturn');
+  });
+
   it.each(['map', 'array'] as const)(
     'restores focus after a same-page replace with a fresh %s',
     async (shape) => {

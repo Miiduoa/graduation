@@ -141,13 +141,13 @@ function installHistoryTracking() {
         searchEntry && isSearchResultNavigationPending(searchEntry.saved.token);
       // Normalize any payload that needs entry metadata before serialization.
       const cloned = data != null && !record &&
-        (carriesReturn || (!push && previousKey !== null) || copiedState);
+        (carriesReturn || replacesPage || (!push && previousKey !== null) || copiedState);
       const writesReturn =
         data != null && Object.getOwnPropertyDescriptor(data, WRITE_SEARCH_RETURN)?.value === true;
       let state = cloned ? cloneHistoryState(data) : data;
       if (cloned || state == null || isHistoryRecord(state)) {
         const current = state as Record<string, unknown> | null | undefined;
-        if (push || previousKey || hasSearchHistoryFields(current) || writesReturn) {
+        if (push || replacesPage || previousKey || hasSearchHistoryFields(current) || writesReturn) {
           const fields = cloned && current ? current : { ...current };
           const saved = replacesPage || (push && !carriesReturn)
             ? null
@@ -181,8 +181,9 @@ function installHistoryTracking() {
         const { arrival, pending } = returnState;
         const nextHref = window.location.href;
         const changesOnlyFragment =
-          previousHref !== nextHref &&
-          previousHref.split('#', 1)[0] === nextHref.split('#', 1)[0];
+          (typeof url === 'string' && url.trimStart().startsWith('#')) ||
+          (previousHref !== nextHref &&
+            previousHref.split('#', 1)[0] === nextHref.split('#', 1)[0]);
         if (
           url != null &&
           previousKey &&
