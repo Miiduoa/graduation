@@ -1,23 +1,25 @@
-/* eslint-disable */
 import React, { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
 import {
-  View,
-  Text,
+  AccessibilityInfo,
   Animated,
+  Platform,
   Pressable,
-  Modal,
   ScrollView,
-  Dimensions,
   StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getThemeVersion, subscribeToTheme, theme } from './theme';
 import { useThemeStyleSheet } from './useThemeStyleSheet';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
-import { getOfflineQueueLength } from '../services/offline';
+import { useReducedMotion } from '../hooks/useReducedMotion';
+import { useAnimatedValue } from '../hooks/useAnimatedValue';
+import { getOfflineQueueLength, isSyncing, subscribeToSyncEvents } from '../services/offline';
 
-const OFFLINE_GUIDE_KEY = '@offline_guide_shown';
 const OFFLINE_TIPS_DISMISSED_KEY = '@offline_tips_dismissed';
 
 type BannerType = 'offline' | 'reconnected' | 'syncing';
@@ -34,10 +36,16 @@ function BannerView({
   type,
   message,
   onDismiss,
+  renderAction,
+  announce,
 }: {
   type: BannerType;
   message?: string;
   onDismiss?: () => void;
+  /** 在橫幅右側渲染額外操作，會收到目前橫幅的前景色 */
+  renderAction?: (color: string) => React.ReactNode;
+  /** 僅由 NetworkStatusBanner 開啟，避免其他使用處重複播報 */
+  announce?: boolean;
 }) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const getConfig = () => {
@@ -66,27 +74,40 @@ function BannerView({
     }
   };
   const config = getConfig();
+  const hasControls = Boolean(onDismiss || renderAction);
   return (
     <View
       style={{
         backgroundColor: config.bgColor,
-        paddingVertical: 10,
+        // 有可點擊控制項時由 44pt 觸控目標撐開高度
+        paddingVertical: hasControls ? 0 : 10,
         paddingHorizontal: 16,
+        minHeight: 44,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
       }}
     >
-      <Ionicons name={config.icon} size={18} color={config.color} />
-      <Text style={{ color: config.color, flex: 1, fontWeight: '600', fontSize: 13 }}>
+      <Ionicons
+        accessible={false}
+        importantForAccessibility="no"
+        name={config.icon}
+        size={18}
+        color={config.color}
+      />
+      <Text
+        accessibilityLiveRegion={announce ? 'polite' : undefined}
+        style={{ color: config.color, flex: 1, fontWeight: '600', fontSize: 14 }}
+      >
         {config.text}
       </Text>
+      {renderAction?.(config.color)}
       {onDismiss && (
         <Pressable
           onPress={onDismiss}
-          hitSlop={10}
           accessibilityRole="button"
           accessibilityLabel="關閉網路狀態提示"
+          style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
         >
           <Ionicons name="close" size={18} color={config.color} />
         </Pressable>
@@ -105,95 +126,200 @@ export function OfflineBanner({
   return <BannerView type={type} message={message} onDismiss={onDismiss} />;
 }
 
-export function NetworkStatusBanner() {
-  const styles = useThemeStyleSheet(createStyles);
-  const { isConnected, isOnline, showReconnectedBanner, dismissReconnectedBanner, wasOffline } =
-    useNetworkStatus();
+function useBannerQueue() {
   const [pendingCount, setPendingCount] = useState(0);
-  const [showTips, setShowTips] = useState(false);
-  const [tipsDismissed, setTipsDismissed] = useState(false);
-
-  // 檢查離線佇列中的待同步項目
+  const [syncing, setSyncing] = useState(isSyncing);
   useEffect(() => {
-    const checkQueue = async () => {
-      try {
-        const count = await getOfflineQueueLength();
-        setPendingCount(count);
-      } catch {
-        // 忽略錯誤
-      }
+    let version = 0;
+    const refresh = () => {
+      const current = ++version;
+      setSyncing(isSyncing());
+      void getOfflineQueueLength().then(
+        (count) => {
+          if (version === current) setPendingCount(count);
+        },
+        () => {},
+      );
     };
-
-    checkQueue();
-    const interval = setInterval(checkQueue, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // 檢查是否已關閉提示
-  useEffect(() => {
-    AsyncStorage.getItem(OFFLINE_TIPS_DISMISSED_KEY).then((value) => {
-      setTipsDismissed(value === 'true');
+    const unsubscribe = subscribeToSyncEvents((event) => {
+      if (event.type === 'queued' && event.queueLength !== undefined) {
+        ++version;
+        setPendingCount(event.queueLength);
+      } else {
+        refresh();
+      }
     });
+    refresh();
+    // Silent additions and manual clears do not publish a sync event.
+    const timer = setInterval(refresh, 10000);
+    return () => {
+      ++version;
+      unsubscribe();
+      clearInterval(timer);
+    };
   }, []);
+  return { pendingCount, syncing };
+}
 
-  const dismissTips = useCallback(async () => {
-    setShowTips(false);
-    setTipsDismissed(true);
-    await AsyncStorage.setItem(OFFLINE_TIPS_DISMISSED_KEY, 'true');
-  }, []);
+function DisclosureChevron({ expanded, color }: { expanded: boolean; color: string }) {
+  const reducedMotion = useReducedMotion();
+  const progress = useAnimatedValue(expanded ? 1 : 0);
+  const previous = useRef(expanded);
 
-  if (!isConnected) {
+  useEffect(() => {
+    const changed = previous.current !== expanded;
+    previous.current = expanded;
+    const toValue = expanded ? 1 : 0;
+    if (!changed || reducedMotion) {
+      progress.setValue(toValue);
+      return;
+    }
+    const turn = Animated.timing(progress, {
+      toValue,
+      duration: 150,
+      useNativeDriver: true,
+      isInteraction: false,
+    });
+    turn.start();
+    return () => turn.stop();
+  }, [expanded, reducedMotion, progress]);
+
+  const rotate = progress.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
+  return (
+    <Animated.View
+      accessible={false}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={{ transform: [{ rotate }] }}
+    >
+      <Ionicons name="chevron-down" size={16} color={color} />
+    </Animated.View>
+  );
+}
+
+function VisibleNetworkBanner({
+  isOffline,
+  tipsDismissed,
+  dismissTips,
+  dismissReconnectedBanner,
+}: {
+  isOffline: boolean;
+  tipsDismissed: boolean;
+  dismissTips: () => void;
+  dismissReconnectedBanner: () => void;
+}) {
+  const styles = useThemeStyleSheet(createStyles);
+  const { height } = useWindowDimensions();
+  const { pendingCount, syncing } = useBannerQueue();
+  const [showTips, setShowTips] = useState(false);
+  useEffect(() => {
+    if (!isOffline) setShowTips(false);
+    if (Platform.OS === 'ios') {
+      AccessibilityInfo.announceForAccessibilityWithOptions(
+        isOffline ? '目前處於離線模式' : '已重新連線',
+        { queue: true },
+      );
+    }
+  }, [isOffline]);
+
+  if (isOffline) {
+    const message = pendingCount > 0 ? `離線模式 · ${pendingCount} 項待同步` : undefined;
+
+    // 已永久關閉說明：只剩不可互動的狀態橫幅
+    if (tipsDismissed) {
+      return <BannerView type="offline" message={message} announce />;
+    }
+
     return (
       <View>
-        <Pressable onPress={() => !tipsDismissed && setShowTips(!showTips)}>
-          <BannerView
-            type="offline"
-            message={pendingCount > 0 ? `離線模式 · ${pendingCount} 項待同步` : undefined}
-          />
-        </Pressable>
+        <BannerView
+          type="offline"
+          message={message}
+          announce
+          renderAction={(color) => (
+            <Pressable
+              onPress={() => setShowTips((open) => !open)}
+              accessibilityRole="button"
+              accessibilityLabel="離線模式說明"
+              accessibilityState={{ expanded: showTips }}
+              style={styles.disclosureButton}
+            >
+              <Text style={[styles.disclosureLabel, { color }]}>說明</Text>
+              <DisclosureChevron expanded={showTips} color={color} />
+            </Pressable>
+          )}
+        />
 
-        {/* 離線提示擴展面板 */}
-        {showTips && !tipsDismissed && (
-          <View style={styles.tipsContainer}>
-            <View style={styles.tipsHeader}>
-              <Text style={styles.tipsTitle}>離線模式說明</Text>
-              <Pressable onPress={dismissTips} hitSlop={10}>
-                <Text style={styles.tipsClose}>不再顯示</Text>
-              </Pressable>
-            </View>
-            <View style={styles.tipItem}>
-              <Ionicons name="checkmark-circle" size={16} color={theme.colors.success} />
-              <Text style={styles.tipText}>可以瀏覽已快取的公告、活動、地圖</Text>
-            </View>
-            <View style={styles.tipItem}>
-              <Ionicons name="checkmark-circle" size={16} color={theme.colors.success} />
-              <Text style={styles.tipText}>可以查看已下載的課表</Text>
-            </View>
-            <View style={styles.tipItem}>
-              <Ionicons name="time" size={16} color={theme.colors.warning} />
-              <Text style={styles.tipText}>新的操作會在連線後自動同步</Text>
-            </View>
-            <View style={styles.tipItem}>
-              <Ionicons name="close-circle" size={16} color={theme.colors.danger} />
-              <Text style={styles.tipText}>部分即時功能暫時無法使用</Text>
-            </View>
-          </View>
+        {showTips && (
+          <ScrollView
+            style={{ maxHeight: height * 0.4, flexGrow: 0 }}
+            contentContainerStyle={styles.tipsContainer}
+          >
+            <Text style={styles.tipText}>離線時可以查看已快取的資料和已下載的課表。</Text>
+            <Text style={styles.tipText}>
+              標示「待同步」的變更會在連線後嘗試送出。其他需要網路的操作，請連線後再試。
+            </Text>
+            <Pressable
+              onPress={dismissTips}
+              accessibilityRole="button"
+              accessibilityLabel="不再顯示離線模式說明"
+              style={styles.tipsCloseButton}
+            >
+              <Text style={styles.tipsClose}>不再顯示說明</Text>
+            </Pressable>
+          </ScrollView>
         )}
       </View>
     );
   }
 
-  if (showReconnectedBanner) {
-    return (
-      <BannerView
-        type={pendingCount > 0 ? 'syncing' : 'reconnected'}
-        message={pendingCount > 0 ? `正在同步 ${pendingCount} 項變更...` : undefined}
-        onDismiss={dismissReconnectedBanner}
-      />
-    );
-  }
+  const message = syncing
+    ? '已重新連線 · 正在同步'
+    : pendingCount > 0
+      ? `已重新連線 · ${pendingCount} 項待同步`
+      : undefined;
+  return (
+    <BannerView
+      type={syncing ? 'syncing' : 'reconnected'}
+      message={message}
+      onDismiss={dismissReconnectedBanner}
+      announce
+    />
+  );
+}
 
-  return null;
+export function NetworkStatusBanner() {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
+  const { isOffline, showReconnectedBanner, dismissReconnectedBanner } = useNetworkStatus();
+  const [tipsDismissed, setTipsDismissed] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    void AsyncStorage.getItem(OFFLINE_TIPS_DISMISSED_KEY).then(
+      (value) => {
+        if (mounted && value === 'true') setTipsDismissed(true);
+      },
+      () => {},
+    );
+    return () => {
+      mounted = false;
+    };
+  }, []);
+  const dismissTips = useCallback(() => {
+    setTipsDismissed(true);
+    void AsyncStorage.setItem(OFFLINE_TIPS_DISMISSED_KEY, 'true').catch(() => {});
+  }, []);
+
+  if (!isOffline && !showReconnectedBanner) return null;
+  return (
+    <SafeAreaView edges={['top', 'left', 'right']} style={{ backgroundColor: theme.colors.bg }}>
+      <VisibleNetworkBanner
+        isOffline={isOffline}
+        tipsDismissed={tipsDismissed}
+        dismissTips={dismissTips}
+        dismissReconnectedBanner={dismissReconnectedBanner}
+      />
+    </SafeAreaView>
+  );
 }
 
 const createStyles = () =>
@@ -201,43 +327,45 @@ const createStyles = () =>
     tipsContainer: {
       backgroundColor: theme.colors.surface2,
       paddingHorizontal: 16,
-      paddingVertical: 12,
+      paddingTop: 12,
+      gap: 4,
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.border,
-    },
-    tipsHeader: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 10,
-    },
-    tipsTitle: {
-      color: theme.colors.text,
-      fontWeight: '700',
-      fontSize: 13,
     },
     tipsClose: {
       color: theme.colors.muted,
       fontSize: 12,
     },
-    tipItem: {
+    tipsCloseButton: {
+      minHeight: 44,
+      minWidth: 44,
+      alignSelf: 'flex-start',
+      justifyContent: 'center',
+    },
+    disclosureButton: {
+      minHeight: 44,
+      minWidth: 44,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
-      marginBottom: 6,
+      justifyContent: 'center',
+      gap: 2,
+    },
+    disclosureLabel: {
+      fontSize: 12,
+      fontWeight: '600',
     },
     tipText: {
       color: theme.colors.muted,
-      fontSize: 12,
-      flex: 1,
+      fontSize: 14,
+      lineHeight: 21,
     },
   });
 
 export function OfflineIndicator() {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
-  const { isConnected } = useNetworkStatus();
+  const { isOffline } = useNetworkStatus();
 
-  if (isConnected) return null;
+  if (!isOffline) return null;
 
   return (
     <View
