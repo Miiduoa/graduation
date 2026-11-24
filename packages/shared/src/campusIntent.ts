@@ -65,7 +65,7 @@ export function suggestCampusDestinations(input: string): CampusQuickDestination
   if (/\bwow\s*class\b|\btron\s*class\b|玩課雲/.test(normalized)) result.push('/school-courses');
   if (locationQuestion && !busQuestion) result.push('/map');
   match(/公車|巴士|站牌|到站|搭車|幾號車/, '/bus', englishBus);
-  match(/交作業|繳作業|繳交作業|交報告|繳報告|作業|測驗|教材|上傳作業/, '/classroom', /\b(?:homework|assignments?|course materials?|quizzes?)\b/);
+  match(/交作業|繳作業|繳交作業|交報告|繳報告|作業|測驗|教材|上傳作業/, '/classroom', /\b(?:homework|assignments?|course materials?|quiz(?:zes)?)\b/);
   match(/課表|上什麼課|哪堂課|下堂課|空堂|排課|下一節課/, '/timetable', /\b(?:timetable|class schedule|next class)\b/);
   if (!locationQuestion) match(/借書|續借|館藏|找書|圖書館/, '/library', /\b(?:library|borrow books?|library catalog|renew books?)\b/);
   match(/分數|成績|評分|學期成績/, '/grades');
