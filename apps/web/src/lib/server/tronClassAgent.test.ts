@@ -58,14 +58,14 @@ describe('scoped deterministic TronClass Agent tools', () => {
   it('requires download scope before even resolving a requested attachment', async () => {
     const f = fixture();
     f.grants.require.mockResolvedValueOnce(grant).mockRejectedValueOnce(new NuniError(403, 'TRONCLASS_AGENT_PERMISSION_REQUIRED'));
-    await expect(f.service.ask(owner, { question: '下載 TronClass 資料庫講義' })).rejects.toMatchObject({ status: 403 });
+    await expect(f.service.ask(owner, { question: '下載 TronClass「資料庫」講義' })).rejects.toMatchObject({ status: 403 });
     expect(f.read).not.toHaveBeenCalled();
   });
 
   it('rejects a new grant version acquired between two scope checks', async () => {
     const f = fixture();
     f.grants.require.mockResolvedValueOnce(grant).mockResolvedValueOnce({ ...grant, version: 'c'.repeat(32) });
-    await expect(f.service.ask(owner, { question: '下載 TronClass 資料庫講義' })).rejects.toMatchObject({ code: 'TRONCLASS_AGENT_PERMISSION_CHANGED' });
+    await expect(f.service.ask(owner, { question: '下載 TronClass「資料庫」講義' })).rejects.toMatchObject({ code: 'TRONCLASS_AGENT_PERMISSION_CHANGED' });
     expect(f.read).not.toHaveBeenCalled();
   });
 
@@ -123,7 +123,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('resolves one exact course title and renders notice text as data only', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: 'TronClass 資料庫公告' });
+    const result = await f.service.ask(owner, { question: 'TronClass「資料庫」公告' });
     expect(f.read.mock.calls).toEqual([
       [owner, { include: { homework: false, announcements: false, materials: false } }],
       [owner, { courseId: 101, include: { homework: false, announcements: true, materials: false } }],
@@ -136,7 +136,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('produces one real downloadable action for one literal matching target', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: '幫我下載 TronClass 資料庫的講義.pdf' });
+    const result = await f.service.ask(owner, { question: '幫我下載 TronClass「資料庫」的講義.pdf' });
     expect(result.actions).toEqual([{ kind: 'download_material', id: 'material:101:301:class-file', courseId: 101,
       activityId: 301, uploadKey: 'class-file', name: '講義.pdf', revision, automatic: true }]);
     expect(result.answer).not.toContain('下載完成');
@@ -151,7 +151,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('never downloads automatically from a partial listing or a materials-only question', async () => {
     const f = fixture();
-    const display = await f.service.ask(owner, { question: 'TronClass 資料庫教材' });
+    const display = await f.service.ask(owner, { question: 'TronClass「資料庫」教材' });
     expect(display.actions[0]).toMatchObject({ automatic: false });
     f.read.mockResolvedValue({ ...snapshot, partial: true });
     const partial = await f.service.ask(owner, { question: '下載 TronClass 講義.pdf', courseId: 101 });
@@ -212,7 +212,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('does not run either operation in a compound download and prepare request', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: '下載 TronClass 資料庫教材並準備作業' });
+    const result = await f.service.ask(owner, { question: '下載 TronClass「資料庫」教材並準備作業' });
     expect(result.intent).toBe('unsupported');
     expect(result.answer).toContain('先選擇');
     expect(f.read).not.toHaveBeenCalled();
@@ -261,10 +261,10 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('never asks the source to read homework when answering announcements or materials', async () => {
     const f = fixture();
-    await f.service.ask(owner, { question: 'TronClass 資料庫公告' });
+    await f.service.ask(owner, { question: 'TronClass「資料庫」公告' });
     expect(f.read.mock.calls.every((call) => call[1]?.include?.homework !== true)).toBe(true);
     f.read.mockClear();
-    await f.service.ask(owner, { question: 'TronClass 資料庫教材' });
+    await f.service.ask(owner, { question: 'TronClass「資料庫」教材' });
     expect(f.read.mock.calls.every((call) => call[1]?.include?.homework !== true)).toBe(true);
     expect(f.read.mock.calls.some((call) => call[1]?.include?.materials === true)).toBe(true);
   });
