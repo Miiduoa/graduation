@@ -113,12 +113,12 @@ const FUNCTION_CUES = [
   '幫我', '替我', '代我', '幫忙', '請', '麻煩', '直接', '自動',
   '我們', '你們', '他們', '她們', '我', '你', '您', '他', '她', '它',
   '待', '已經', '已',
-  '剛才', '剛剛', '剛', '最後', '之後', '後', '曾經', '所', '過', '了',
+  '剛才', '剛剛', '剛', '最後', '之後', '後', '曾經', '曾', '所', '過', '了', '好了', '罷了', '業已', '早已', '早就',
   '正在', '正', '供',
   '把', '將',
   '務必', '一定', '趕緊', '立刻', '馬上', '盡快', '快',
   '去', '來', '再', '也', '又', '都', '就', '才', '還', '先', '並', '且', '跟', '而',
-  '想', '要', '能', '可以', '可', '會',
+  '想', '要', '能', '可以', '可', '會', '現在',
 ];
 const STATUS_WRITE_COMPOUNDS = [
   '尚未提交', '尚未繳交', '尚未繳', '尚未交',
@@ -1269,44 +1269,69 @@ function hasDomainOrLmsSubstance(text: string): boolean {
   });
 }
 
-const ACTION_STATUS_PREFIXES = new Set([
-  '已', '已經', '尚未', '還沒', '未', '沒', '待', '剛', '剛才', '剛剛', '曾經', '過', '正在', '正',
+const ACTION_COMPLETION_MARKERS = new Set([
+  '已', '已經', '曾', '曾經', '剛', '剛才', '剛剛', '業已', '早已', '早就',
+  '過', '了', '完', '好了', '罷了', '過了嗎', '了嗎', '了沒',
 ]);
-const ACTION_STATUS_SUFFIXES = new Set(['過', '了', '完', '過了嗎', '了嗎', '了沒']);
+const DESCRIPTIVE_ACTION_PREFIXES = new Set(['尚未', '還沒', '未', '沒', '待', '正在', '正']);
 
-const EXPERIENCE_PREFIX_INTERVENERS = new Set([
-  '我', '你', '他', '她', '它', '我們', '你們', '他們', '她們',
-  '也', '又', '都', '就', '才', '還', '先', '再', ...WRITE_HELPERS,
-]);
+const ACTION_SUBJECTS = new Set(['我', '我們', '你', '您', '你們', '他', '她', '它', '他們', '她們']);
 
 function hasDescriptiveAction(text: string): boolean {
-  let statusPrefix = false;
+  const tokens = visibleCommandTokens(text).filter(token => !isWhitespaceToken(token));
+  let descriptivePrefix = false;
   let experiencePrefix = false;
-  let sawAction = false;
-  for (const token of visibleCommandTokens(text)) {
+  let submissionStatus = false;
+  let subject: string | undefined;
+  let request = false;
+  let declarativeModal = false;
+  let readOnlyStatus: boolean | undefined;
+  for (const [index, token] of tokens.entries()) {
     if (token.kind === 'punct' && CLAUSE_PUNCT.test(token.value)) {
-      statusPrefix = false;
+      descriptivePrefix = false;
       experiencePrefix = false;
-      sawAction = false;
+      submissionStatus = false;
+      subject = undefined;
+      request = false;
+      declarativeModal = false;
       continue;
     }
-    // A submission/status predicate owns its following particles, as in
-    // 「查作業交了沒」. Its command or status role is decided by writeCommandRoute.
-    if (isWriteVerbToken(token)) sawAction = false;
-    if (sawAction && ACTION_STATUS_SUFFIXES.has(token.value)) return true;
-    if (ACTION_STATUS_PREFIXES.has(token.value)) statusPrefix = true;
-    if (token.kind !== 'noun' && (token.kind === 'query' || isPrepareActionValue(token.value) ||
-      DOWNLOAD_ACTIONS.has(token.value.toLowerCase()))) {
-      if (statusPrefix || experiencePrefix) return true;
-      sawAction = true;
+    const write = isWriteVerbToken(token);
+    const action = write || (token.kind !== 'noun' && (token.kind === 'query' ||
+      isPrepareActionValue(token.value) || DOWNLOAD_ACTIONS.has(token.value.toLowerCase())));
+    // A governed submission status can own aspect particles, as in
+    // 「查作業交過了嗎」 or 「查作業繳交進度了沒」.
+    if (ACTION_COMPLETION_MARKERS.has(token.value)) {
+      const next = tokens[index + 1];
+      const submissionFilter = (token.value === '已' || token.value === '已經') &&
+        next && isWriteVerbToken(next) && isSubmitWriteToken(next) &&
+        HOMEWORK_STATUS_SUFFIX.test(text.slice(next.end).trimStart());
+      const submissionQuestion = submissionStatus &&
+        (SUBMISSION_QUESTION.test(text.slice(token.start)) || GOVERNED_STATUS.test(text.slice(token.start)));
+      if (!submissionFilter && !submissionQuestion) return true;
+      readOnlyStatus ??= writeCommandRoute(text) === null;
+      if (!readOnlyStatus) return true;
+      continue;
     }
-    // Standalone 有 can govern a verb across particles, while a nominal
-    // complement ends that scope. 有沒有 and 有哪些 are separate tokens.
-    if (token.value === '有') {
-      experiencePrefix = true;
-    } else if (!isWhitespaceToken(token) && !EXPERIENCE_PREFIX_INTERVENERS.has(token.value)) {
-      experiencePrefix = false;
+    if (action) {
+      if (experiencePrefix || (!request && (subject !== undefined || declarativeModal))) return true;
+      if (descriptivePrefix) {
+        if (!write || !isSubmitWriteToken(token)) return true;
+        readOnlyStatus ??= writeCommandRoute(text) === null;
+        if (!readOnlyStatus) return true;
+        descriptivePrefix = false;
+      }
     }
+    if (ACTION_SUBJECTS.has(token.value)) subject = token.value;
+    if (WRITE_HELPERS.has(token.value) || PREPARE_REQUEST_CUES.has(token.value) ||
+      ((token.value === '要' || token.value === '想') && (subject === '我' || subject === undefined))) request = true;
+    if (token.value === '會') declarativeModal = true;
+    if (DESCRIPTIVE_ACTION_PREFIXES.has(token.value)) descriptivePrefix = true;
+    // 有沒有 and 有哪些 are atomic. Standalone 有 is only evidence of
+    // experience if an action follows in the clause, regardless of interveners.
+    if (token.value === '有') experiencePrefix = true;
+    submissionStatus = (write && isSubmitWriteToken(token) && !isWriteNegatedAt(tokens, index)) ||
+      (submissionStatus && STATUS_NOUN.test(token.value));
   }
   return false;
 }
@@ -1543,9 +1568,10 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   const original = question.normalize('NFKC').trim();
   if (isExistingTronClassNavigation(original)) return null;
   if (hasUnclosedQuote(original)) return { outcome: 'ambiguous' };
+  const unquotedText = textWithoutQuotedSpans(original);
+  if (hasDescriptiveAction(unquotedText)) return { outcome: 'ambiguous' };
   const text = textWithoutQuotedSpans(readRoutingText(original));
-  if (hasDescriptiveAction(text)) return { outcome: 'ambiguous' };
-  const unquoted = textWithoutFilenameTokens(textWithoutQuotedSpans(original));
+  const unquoted = textWithoutFilenameTokens(unquotedText);
   const tokens = tokensFor(original);
   const interior = modifierInteriorIndex(tokens);
   const negation = scanNegation(tokens, interior);
