@@ -21,6 +21,12 @@ function makeFixture(createService, crypto) {
       if(tag==="provider")return one(state.enabled?{...state.provider}:null);
       if(tag==="replace"){state.transactions=[];return one(null);}
       if(tag==="create"){state.transactions.push({args:[...args],consumed:false,expired:false});return one(null);}
+      if(tag==="cancel"){
+        const index=state.transactions.findIndex(x=>!x.consumed&&!x.expired&&args.every((v,i)=>v===x.args[i]));
+        if(index<0)return one(null);
+        state.transactions.splice(index,1);
+        return one({token_sha256:args[0]});
+      }
       if(tag==="pending"||tag==="consume"){
         const row=state.transactions.find(x=>!x.consumed&&!x.expired&&x.args.every((v,i)=>v===args[i]));
         if(row&&tag==="consume")row.consumed=true;
@@ -86,11 +92,28 @@ async function exercise(createService, crypto) {
   await run("raw input cannot select a target account and unverified email is not stored",async({actor,state,service,begin})=>{
     const input=await begin();await rejects(()=>service.complete(actor,{...input,platformAccountId:"other"}),"GOOGLE_LINK_INVALID");state.identity.emailVerified=false;equal((await service.complete(actor,input)).status,"linked");equal(state.credentials[0].email,null);
   });
+  await run("cancel only the current pending transaction, even if Google is disabled",async({actor,state,service,begin})=>{
+    const old=await begin(),current=await begin();
+    const body=x=>({transactionId:x.transactionId,nonce:x.nonce});
+    equal((await service.cancel(actor,body(old))).status,"not-pending");
+    state.enabled=false;equal((await service.cancel(actor,body(current))).status,"cancelled");
+    state.enabled=true;await rejects(()=>service.complete(actor,current),"GOOGLE_LINK_INVALID");equal(state.credentials.length,0);
+  });
+  await run("cancel during verification cannot link",async({actor,state,service,begin})=>{
+    const input=await begin();
+    state.beforeVerify=async()=>{equal((await service.cancel(actor,{transactionId:input.transactionId,nonce:input.nonce})).status,"cancelled");};
+    await rejects(()=>service.complete(actor,input),"GOOGLE_LINK_INVALID");equal(state.credentials.length,0);
+  });
+  await run("cancel after completion never unlinks the credential",async({actor,state,service,begin})=>{
+    const input=await begin();await service.complete(actor,input);
+    equal((await service.cancel(actor,{transactionId:input.transactionId,nonce:input.nonce})).status,"not-pending");
+    equal(state.credentials.length,1);
+  });
   return results;
 }
 test("Google link candidate behavioral contract", async t => {
   const passed = await exercise(createGoogleLinkService);
   for (const name of passed) t.diagnostic(name);
-  if (passed.length !== 12) throw Error("missing checks");
+  if (passed.length !== 15) throw Error("missing checks");
 });
 

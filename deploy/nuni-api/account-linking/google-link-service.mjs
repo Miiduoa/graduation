@@ -93,6 +93,23 @@ export function createGoogleLinkService({ db, verifier, crypto = nodeCrypto }) {
       return { transactionId, nonce, clientId: p.client_id, issuer, authorizationEndpoint, tokenEndpoint,
         expiresInSeconds: ttl, scopes: ["openid","email","profile"] };
     },
+    async cancel(rawActor, rawInput) {
+      const actor = actorShape(rawActor);
+      if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput) ||
+          Object.keys(rawInput).sort().join(",") !== "nonce,transactionId" ||
+          typeof rawInput.transactionId !== "string" || !/^gl_[A-Za-z0-9_-]{43}$/u.test(rawInput.transactionId) ||
+          typeof rawInput.nonce !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(rawInput.nonce)) invalid();
+      const input = { transactionId: rawInput.transactionId, nonce: rawInput.nonce };
+      return db.transaction(async tx => {
+        await requireFreshActor(tx, actor);
+        // Cancellation remains possible when Google is disabled. Never undo a completed link.
+        const deleted = await tx.query(`/* link:cancel */ DELETE FROM platform_google_link_transactions
+          WHERE token_sha256=$1 AND platform_account_id=$2 AND credential_id=$3 AND session_sha256=$4
+            AND nonce_sha256=$5 AND consumed_at IS NULL AND expires_at>clock_timestamp() RETURNING token_sha256`,
+          [hash(input.transactionId), actor.platformAccountId, actor.credentialId, actor.sessionHash, hash(input.nonce)]);
+        return { status: deleted.rows.length === 1 ? "cancelled" : "not-pending" };
+      });
+    },
     async complete(rawActor, rawInput) {
       const actor = actorShape(rawActor);
       const input = inputShape(rawInput);
