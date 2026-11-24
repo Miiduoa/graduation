@@ -990,10 +990,15 @@ function httpError(status) {
 function homeworkPaginationNumber(value, required = true) {
   if (value === undefined || value === null) return null;
   if (!required) {
-    // Legacy callers used Number() on any non-null value, so totals such as
-    // "002", "", whitespace, false, and [] stay usable as 2, 0, 0, 0, and 0.
-    const parsed = Number(value);
-    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+    // Number() only for primitives (and arrays, whose Number() never throws).
+    // Other objects pass through as unusable rather than throwing TypeError, so
+    // a legacy page such as {"toString": null} can still be returned as-is.
+    const typ = typeof value;
+    if (typ === 'number' || typ === 'string' || typ === 'boolean' || typ === 'bigint' || Array.isArray(value)) {
+      const parsed = Number(value);
+      return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+    }
+    return null;
   }
   const parsed = typeof value === 'number' ? value
     : typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : NaN;

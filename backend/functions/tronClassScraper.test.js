@@ -564,7 +564,16 @@ describe('tronClassScraper', () => {
     });
   });
 
-  test.each(['invalid', {}])(
+  test('legacy homework page keeps an object page value instead of throwing', async () => {
+    const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
+    const page = { toString: null };
+    mockHttpsResponse({ body: JSON.stringify({ homework_activities: homework, total: 1, page, page_size: 50 }) });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1)).resolves.toEqual({
+      homework_activities: homework, total: 1, page, page_size: 50,
+    });
+  });
+
+  test.each(['invalid', {}, { toString: null }])(
     'legacy homework page treats an unusable total as absent instead of rejecting a valid array: %p',
     async total => {
       const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
