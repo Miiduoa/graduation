@@ -1,5 +1,5 @@
 const { dormName } = require('./dormName');
-const { randomUUID } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
 const { createAuthzHelpers } = require('./authz');
@@ -318,14 +318,9 @@ function createDormWorkflowHandler({
         .getSignedUrl({ action: 'read', expires: Date.now() + 60000 });
       return { url };
     }
-    const list = async (name, own = false) => {
-      let q = school.collection(name);
-      if (own) q = q.where('userId', '==', uid);
-      const snap = await q.get();
-      return snap.docs
-        .map((d) => ({ id: d.id, ...serialize(d.data()) }))
-        .filter((row) => name !== 'dormResidents' || row.active !== false)
-        .filter((row) => own || canAccessBuilding(row));
+    const listOwn = async (name) => {
+      const snap = await school.collection(name).where('userId', '==', uid).get();
+      return snap.docs.map((d) => ({ id: d.id, ...serialize(d.data()) }));
     };
     if (action === 'mine') {
       const roster = await school.collection('dormResidents').where('userId', '==', uid).get();
@@ -340,8 +335,9 @@ function createDormWorkflowHandler({
           .get();
         announcements.push(
           ...snap.docs.map((d) => {
-            const { building, title, body } = d.data();
-            return { id: d.id, building, title, body };
+            const { building, title, body, createdAt } = d.data();
+            const publishedAt = createdAt?.toMillis?.() ?? (Number(createdAt) || 0);
+            return { id: d.id, building, title, body, publishedAt };
           }),
         );
       }
@@ -349,16 +345,16 @@ function createDormWorkflowHandler({
       const studentIds = roster.docs.flatMap((d) => [d.id, d.data().studentId]);
       studentIds.push(identity.data()?.studentId);
       return {
-        leaves: (await list('dormLeaves', true)).map((row) =>
+        leaves: (await listOwn('dormLeaves')).map((row) =>
           ownRow({
             ...row,
             applicantName: dormName(row.applicantName, row.studentId, ...studentIds),
           }),
         ),
-        repairs: (await list('dormRepairs', true))
+        repairs: (await listOwn('dormRepairs'))
           .filter((r) => r.workflow === 'dorm_staff')
           .map(ownRow),
-        announcements,
+        announcements: announcements.sort((a, b) => b.publishedAt - a.publishedAt || a.id.localeCompare(b.id)),
       };
     }
     if (action === 'announce') {
@@ -367,28 +363,144 @@ function createDormWorkflowHandler({
       inBuilding({ building });
       const title = required(input.title, 120),
         body = required(input.body, 2000);
-      const residents = (await list('dormResidents')).filter((r) => r.building === building);
-      const ref = await school
-        .collection('dormAnnouncements')
-        .add({ building, title, body, createdBy: uid, createdAt: FieldValue.serverTimestamp() });
-      let delivered = 0;
-      const recipients = [...new Set(residents.map((r) => r.userId))];
-      for (let offset = 0; offset < recipients.length; offset += 20)
-        await Promise.all(
-          recipients.slice(offset, offset + 20).map(async (id) => {
-            try {
-              await sendPushToUser(
-                id,
-                { title, body },
-                { type: 'announcement', schoolId, channel: 'dormitory' },
-              );
-              delivered++;
-            } catch {
-              /* announcement remains available */
+      const key = input.key === undefined ? null : required(input.key, 200);
+      const softDeadline = Date.now() + 20_000;
+      const collection = school.collection('dormAnnouncements');
+      const digest = (values) => createHash('sha256').update(JSON.stringify(values)).digest('hex');
+      const ref = key ? collection.doc(digest([uid, key])) : collection.doc();
+      // The private ledger is outside the collection read by residents. It stores only
+      // per-announcement recipient digests, never roster IDs, account IDs or push tokens.
+      const ledger = db.collection('_dormAnnouncementDispatch').doc(digest([schoolId, ref.id]));
+      const audience = ledger.collection('audience');
+      const attempts = ledger.collection('attempts');
+      const rosterQuery = school.collection('dormResidents').where('building', '==', building);
+      const recipientMap = (roster) => {
+        const ids = new Map();
+        for (const doc of roster.docs) {
+          const row = doc.data();
+          if (row.active !== false && typeof row.userId === 'string' && row.userId.trim() && !row.userId.includes('/')) {
+            ids.set(digest([ref.id, row.userId]), row.userId);
+          }
+        }
+        return ids;
+      };
+      const publication = await db.runTransaction(async (tx) => {
+        const previous = await tx.get(ref);
+        if (previous.exists) {
+          const row = previous.data();
+          if (row.building !== building || row.title !== title || row.body !== body)
+            throw new HttpsError('failed-precondition', '公告內容已變更，請重新預覽。');
+          // Older publications have no recoverable snapshot; their push may already have run.
+          if (row.pushSummary || row.pushJournalVersion !== 1)
+            return { receipt: { success: true, id: ref.id, ...row.pushSummary } };
+          return { recipients: row.pushRecipientCount };
+        }
+        const current = recipientMap(await tx.get(rosterQuery));
+        const hashes = [...current.keys()];
+        for (let offset = 0; offset < hashes.length; offset += 1000) {
+          tx.create(audience.doc(String(offset)), { hashes: hashes.slice(offset, offset + 1000) });
+        }
+        tx.create(ref, {
+          building, title, body, createdBy: uid, createdAt: FieldValue.serverTimestamp(),
+          pushJournalVersion: 1, pushRecipientCount: hashes.length,
+        });
+        return { recipients: hashes.length, current };
+      });
+      if (publication.receipt) return publication.receipt;
+      const { recipients } = publication;
+      const [current, chunks, previousAttempts] = await Promise.all([
+        publication.current || rosterQuery.get().then(recipientMap), audience.get(), attempts.get(),
+      ]);
+      const attempted = new Set(previousAttempts.docs.map((doc) => doc.id));
+      const hashes = chunks.docs.flatMap((doc) => doc.data().hashes);
+      if (hashes.length !== recipients)
+        throw new HttpsError('unavailable', '公告已發布，推播名單暫時無法確認。');
+      const remaining = hashes.filter((hash) => !attempted.has(hash));
+      const batchSize = 20;
+      let work = remaining;
+      if (key && remaining.length > batchSize) {
+        work = await db.runTransaction(async (tx) => {
+          const checkpoint = await tx.get(ledger);
+          const start = hashes.indexOf(checkpoint.data()?.resumeAfter) + 1;
+          const ordered = hashes.slice(start).concat(hashes.slice(0, start));
+          const candidates = ordered.filter((hash) => !attempted.has(hash)).slice(0, 60);
+          // Rotate past at least one batch, including residents whose preflight
+          // read keeps failing, so those residents cannot starve the rest.
+          tx.set(ledger, { resumeAfter: candidates[batchSize - 1] }, { merge: true });
+          return candidates;
+        });
+      }
+      const notify = async (hash) => {
+        const id = current.get(hash);
+        const attempt = attempts.doc(hash);
+        const notification = { title: '宿舍公告', body: '開啟宿舍頁查看本棟公告。' };
+        const destination = { type: 'announcement', schoolId, channel: 'dormitory', dormAnnouncementId: ref.id };
+        // The inbox item and exclusive provider attempt commit together. A retry after
+        // a user reads or deletes the item must not recreate it or reset its timestamp.
+        const claimed = await db.runTransaction(async (tx) => {
+          if ((await tx.get(attempt)).exists) return false;
+          let eligible = false;
+          if (id) {
+            const user = db.collection('users').doc(id);
+            const inbox = user.collection('notifications').doc('dorm_' + digest([schoolId, ref.id]));
+            const [account, member, existing] = await tx.getAll(user, school.collection('members').doc(id), inbox);
+            const profile = account.data();
+            const status = member.data()?.status;
+            if (account.exists && (!profile.status || profile.status === 'active') &&
+              !profile.accountDeletionInProgress && !profile.notificationDeliveryDisabled &&
+              member.exists && (!status || status === 'active')) {
+              const activeRoster = await tx.get(school.collection('dormResidents').where('userId', '==', id));
+              eligible = activeRoster.docs.some((doc) => {
+                const row = doc.data();
+                return row.active !== false && row.building === building;
+              });
+              if (eligible && !existing.exists) {
+                tx.create(inbox, {
+                  ...notification, type: 'announcement', read: false, schoolId,
+                  createdAt: FieldValue.serverTimestamp(), data: destination,
+                });
+              }
             }
-          }),
-        );
-      return { success: true, id: ref.id, delivered, recipients: residents.length };
+          }
+          // A crash after this write can leave the provider outcome unknown.
+          // The claim never expires, which prevents a second send.
+          tx.create(attempt, { state: eligible ? 'sending' : 'skipped' });
+          return eligible;
+        });
+        if (!claimed) return;
+        let state = 'unconfirmed';
+        try {
+          const result = await sendPushToUser(id, notification, destination, 'announcements');
+          if (result?.accepted > 0) state = 'accepted';
+          else if (result?.status === 'skipped') state = 'skipped';
+          else if (result?.status === 'failed' && result.failed > 0 &&
+            !result.warnings?.some((warning) => warning.endsWith('_request_failed'))) state = 'rejected';
+        } catch {
+          // Transport failure does not prove that the provider rejected the message.
+        }
+        await db.runTransaction(async (tx) => { tx.update(attempt, { state }); });
+      };
+      for (let offset = 0; offset < work.length; offset += batchSize) {
+        if (key && offset > 0 && Date.now() >= softDeadline) break;
+        // A failed eligibility read leaves the recipient pending. A failed receipt
+        // write leaves an already claimed recipient unconfirmed. Other residents proceed.
+        await Promise.allSettled(work.slice(offset, offset + batchSize).map(notify));
+      }
+      const recorded = await attempts.get();
+      const states = recorded.docs.map((doc) => doc.data().state);
+      const acceptedRecipients = states.filter((state) => state === 'accepted').length;
+      const pendingRecipients = recipients - states.length;
+      const unconfirmedRecipients = states.filter((state) => state === 'sending' || state === 'unconfirmed').length;
+      const summary = { acceptedRecipients, delivered: acceptedRecipients, recipients, pendingRecipients, unconfirmedRecipients };
+      if (pendingRecipients === 0 && !states.includes('sending')) {
+        // A terminal summary is immutable. Another worker may still resolve a 'sending' attempt.
+        try {
+          await db.runTransaction(async (tx) => { tx.update(ref, { pushSummary: summary }); });
+        } catch {
+          // Individual receipts are durable; a replay can rebuild this cached summary.
+        }
+      }
+      return { success: true, id: ref.id, ...summary };
     }
     if (action === 'workspace') {
       if (!repairs && !packages) staff('repairs');
@@ -721,7 +833,7 @@ function createDormWorkflowHandler({
                 : LABELS[input.status] || '維修安排已更新',
             body: '請開啟宿舍查看最新紀錄。',
           },
-          { type: 'repair', schoolId, channel: 'dormitory' },
+          { type: 'repair', schoolId, channel: 'dormitory', ...(action === 'decideLeave' ? { dormSection: 'leave' } : {}) },
         );
       } catch {
         /* record remains authoritative */

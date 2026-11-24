@@ -26,7 +26,7 @@ COPY backend/functions/dormWorkflow.js backend/functions/authz.js backend/functi
 RUN ln -s ../../apps/web/node_modules backend/functions/node_modules
 COPY backend/functions/campusStoryAccessBinding.js ./backend/functions/
 COPY backend/functions/campusAnnouncements/catalog.js ./backend/functions/campusAnnouncements/
-COPY backend/functions/lib/puGradeDocument.js backend/functions/lib/puCreditSummary.js backend/functions/lib/puCourseTime.js backend/functions/lib/taipeiDay.js backend/functions/lib/puSessionStore.js backend/functions/lib/puCampusTransport.js ./backend/functions/lib/
+COPY backend/functions/lib/notificationService.js backend/functions/lib/puGradeDocument.js backend/functions/lib/puCreditSummary.js backend/functions/lib/puCourseTime.js backend/functions/lib/taipeiDay.js backend/functions/lib/puSessionStore.js backend/functions/lib/puCampusTransport.js ./backend/functions/lib/
 
 # These are public browser settings. Never pass server credentials as build args.
 ARG NEXT_PUBLIC_FIREBASE_API_KEY
