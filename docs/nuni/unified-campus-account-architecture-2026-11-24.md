@@ -1,0 +1,31 @@
+# nuni unified account and campus data architecture (proposed)
+
+Status: proposed; first entry UX increment only. Base: `322d42e045c4dfc23f46abe69a6da84046500e6f`. Do not enable new identity or data access from this document.
+
+## Current evidence
+
+- Web `/login` uses Firebase school sign-in in `signInPuStudentId.ts` and a separate Google platform session through `lib/nuni/oauth.ts`. Student school login currently proves portal credentials before attempting LMS in a background step, not a TronClass-first platform identity.
+- `/auth/account` is a separate discovery/role entry; native `SSOLoginScreen` and `LoginLandingScreen` keep school and platform paths separate. The mobile landing formerly advertised a school route as closed even when its release/provider check offered the route.
+- `schoolStudentIdLoginEnabled.ts` defaults closed; no existing gate is changed here. Existing Google OAuth starts a login, not a verified account-link transaction. PR #616 is a draft integration, not proof of live primary sign-in or production write authorization.
+
+## Product decision
+
+One nuni account, multiple independently verified sign-in identities and campus connections. Registration is implicit after verified first sign-in and explicit acceptance of required terms. Default to campus sign-in for a selected supported school where the capability is verified. Google remains available for guests who want platform features, nonintegrated schools, merchants, and other roles. Guest public access remains unchanged. Keep task-specific return targets.
+
+## Account and connector boundaries
+
+1. Use a stable opaque platform account ID. Store provider subject and issuer/tenant as a unique verified identity key; use provider-issued immutable identifiers, not a typed school ID, email, display name, or a student role inferred from coursework. Distinguish a school identity from a campus data connection and from platform role/membership.
+2. Prefer official school OAuth/OIDC/SAML or an approved integration; if no accepted authentication contract exists, keep that tenant's direct login unavailable and offer manual import / Google. TronClass is an LMS, not a universal campus system. Authenticate through approved issuer and validate issuer, audience, subject, nonce/state, token/session expiry and tenant; never broaden scopes or treat an unverified cookie/HTML success as a platform proof. Do not persist plaintext credentials, log secrets, bypass MFA or institutional policy.
+3. Linking is an authenticated, short-lived, single-use transaction bound to the initiating nuni account and session. Reauthenticate both sides as appropriate. Unique constraints and atomic transaction prohibit provider subjects attached to multiple accounts; existing ownership conflict blocks linking instead of merging automatically by email. Separate explicit recovery/migration handles verified ownership of two existing accounts. Unlink requires an alternative verified sign-in or safe account closure; revoke relevant sessions/connections and clear cached data on request. Use scoped audit events without secrets.
+4. Existing school Firebase UID and Google platform account are migration inputs, not automatically equivalent. Inventory cross-store references and roles; prove both identities before mapping; preserve existing data and permissions without granting access from an ID prefix. Prepare reversible, idempotent migration, reconciliation, and rollback before introducing primary school sign-in.
+5. First session can complete while optional authorized data sync proceeds. Show independently verified source/scope/status, last successful refresh, partial failure, stale state, reauth and revocation. Initial scope should be minimal (profile, courses, assignments, announcements where supported); add schedule, grades, credits, leave, dorm, library, finance only from separately verified authorized sources. No unrestricted site crawl or assumption that all data exist in TronClass. Private file retrieval requires ownership and source authorization; production writes remain disabled until the existing contract gate is proven. Agent uses canonical account + authorized campus data projections, never raw credentials or session tokens; mutations require appropriate permission and confirmation.
+6. Expose one account center: linked sign-in methods, data connections per school, sync scopes, last update, recovery, disconnect/export/delete. A successful Google login alone does not grant school access. Staff and merchant privileges retain explicit authorization; don't infer them from the login provider.
+
+## Delivery and acceptance
+
+- Increment A (this PR): prioritize an offered campus entry on generic web login and signed-out native landing; keep Google/task recovery and manual import; correct contradictory available-route copy. No change to authentication, scopes, storage, migration, provider flags or school credentials.
+- Increment B: trace existing auth account persistence and school source contracts (including #616 latest exact head), establish approved issuer proof and implement a gated canonical identity/link transaction and cross-provider conflict tests. Test forged issuer/subject, cross-tenant replay, expiry, state/nonce reuse, cancellation, concurrency, duplicate link, account switch and existing ownership.
+- Increment C: guarded migration/reconciliation in staging, data source sync scopes and status, account center; verify legacy sign-in, unlink, logout, data revocation, account deletion and multi-school/user isolation; prove live school sign-in only with authorized controlled accounts.
+- Increment D: end-to-end Web/Mobile login to first useful dashboard, Google link/relogin with same platform account, correct data scopes, AI tools, accessibility and rollback. Keep old entry and production gates until evidence on exact SHA and required review.
+
+This document is not a claim that TronClass supports OIDC for a specific tenant, that primary login is implemented, or that all campus data is accessible.

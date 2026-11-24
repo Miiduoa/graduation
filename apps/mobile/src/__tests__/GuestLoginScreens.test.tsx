@@ -482,11 +482,11 @@ test('a release without school SSO keeps public and platform entries, but does n
 test('the guest school-login entry always follows the selected university', () => {
   const view = render(<LoginLandingScreen />);
   expect(view.getByTestId('school-login-start')).toBeTruthy();
-  expect(view.getByText('學校帳號（尚未開放）')).toBeTruthy();
-  expect(view.getByText('學號登入（尚未開放）')).toBeTruthy();
+  expect(view.getByText('學校帳號')).toBeTruthy();
+  expect(view.getByText('前往學校帳號登入')).toBeTruthy();
   expect(
     view.getByText(
-      '尚未開放學號直接登入；你仍可匯入自己取得的課表、成績與活動，或以 Google 帳號使用平台交流與課班服務。',
+      '手動匯入仍可獨立使用，不需要登入學校；校方資料的連線狀態與平台帳號分別確認。',
     ),
   ).toBeTruthy();
   expect(view.queryByText(/可直接使用 e 校園帳號/)).toBeNull();

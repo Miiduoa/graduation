@@ -82,6 +82,32 @@ it('prioritizes the Google account entry before school import and public service
   expect(safeNavigate).not.toHaveBeenCalled();
 });
 
+it('prioritizes an offered school entry for a signed-out student without moving manual import ahead of Google', async () => {
+  mockProviderAvailable = true;
+  const view = await landing();
+  const tree = JSON.stringify(view.toJSON());
+  expect(view.getAllByTestId('school-login-start')).toHaveLength(1);
+  expect(tree.indexOf('"testID":"school-login-start"')).toBeLessThan(tree.indexOf('"testID":"login-start"'));
+  expect(tree.indexOf('"testID":"login-start"')).toBeLessThan(tree.indexOf('"testID":"school-import-start"'));
+  expect(view.getByText('前往學校帳號登入')).toBeTruthy();
+  expect(view.queryByText('學號登入（尚未開放）')).toBeNull();
+  await fireEventAsync.press(view.getByTestId('school-login-start'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'SSOLogin');
+  expect(mockAuth.signIn).not.toHaveBeenCalled();
+});
+
+it('keeps recovery above school entry and never starts either login automatically', async () => {
+  mockProviderAvailable = true;
+  mockAuth = { ...mockAuth, pendingLogout: true };
+  const view = await landing();
+  const tree = JSON.stringify(view.toJSON());
+  expect(view.getAllByTestId('school-login-start')).toHaveLength(1);
+  expect(tree.indexOf('"testID":"login-start"')).toBeLessThan(tree.indexOf('"testID":"school-login-start"'));
+  expect(view.getByText('處理未完成的登出')).toBeTruthy();
+  expect(safeNavigate).not.toHaveBeenCalled();
+  expect(mockAuth.signIn).not.toHaveBeenCalled();
+});
+
 it('provides a named header shortcut to the platform workspace without starting sign-in', async () => {
   const view = await landing();
   const shortcut = view.getByTestId('platform-workspace-start');

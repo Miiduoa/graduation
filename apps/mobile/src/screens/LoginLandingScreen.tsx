@@ -41,6 +41,18 @@ export default function LoginLandingScreen() {
   const hasSchool = selectionReady !== false && Boolean(school.id);
   const schoolEntry = hasSchool && isSchoolLoginEntryAvailable(school.id);
   const platformReady = !!auth.session && !auth.loading && !auth.error && !auth.pendingLogout;
+  // Do not displace an existing session or a pending platform recovery with school setup.
+  const schoolFirst = schoolEntry && !auth.session && !auth.loading && !auth.error && !auth.pendingLogout;
+  const schoolSignIn = (
+    <Pressable
+      testID="school-login-start"
+      accessibilityRole="button"
+      style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
+      onPress={() => safeNavigate(navigation, 'SSOLogin')}
+    >
+      <Text style={s.schoolButtonText}>前往學校帳號登入</Text>
+    </Pressable>
+  );
   useEffect(() => {
     if (!hasSchool) return;
     let active = true;
@@ -108,7 +120,9 @@ export default function LoginLandingScreen() {
           </Text>
           <Text style={s.body}>
             {platformReady ? '從課程、訂單或自己的安排接著做。教學與門市工作可由上方工作入口進入。'
-              : '使用 Google 帳號即可加入平台課程、繳交作業與查看自己的訂單，不必先綁定學校。選擇學校後，可另外匯入自己的課表、成績與活動；校園地圖、公車與公開資訊不必登入。'}
+              : schoolFirst
+                ? '先驗證你的學校帳號，或使用 Google 帳號進入平台。目前兩種登入仍分別運作。'
+                : '使用 Google 帳號即可加入平台課程、繳交作業與查看自己的訂單，不必先綁定學校。選擇學校後，可另外匯入自己的課表、成績與活動；校園地圖、公車與公開資訊不必登入。'}
           </Text>
           {platformReady && (
             <Pressable
@@ -120,6 +134,13 @@ export default function LoginLandingScreen() {
             </Pressable>
           )}
         </View>
+        {schoolFirst && (
+          <View style={s.schoolPanel}>
+            <Text accessibilityRole="header" style={s.title}>學校帳號</Text>
+            <Text style={s.body}>前往 {school.name} 的帳號驗證。實際登入及可取得的資料，仍依校方與服務開放狀態為準。</Text>
+            {schoolSignIn}
+          </View>
+        )}
         <View style={s.panel}>
           <Text accessibilityRole="header" style={s.title}>
             {platformReady ? '我的 nuni' : 'Google 帳號'}
@@ -228,23 +249,14 @@ export default function LoginLandingScreen() {
         {hasSchool && (
           <View style={s.schoolPanel}>
             <Text accessibilityRole="header" style={s.title}>
-              {schoolEntry ? '學校帳號（尚未開放）' : '從學校資料開始'}
+              {schoolEntry && !schoolFirst ? '學校帳號與資料' : '從學校資料開始'}
             </Text>
             <Text style={s.body} testID={schoolEntry ? undefined : 'school-login-hint'}>
               {schoolEntry
-                ? '尚未開放學號直接登入；你仍可匯入自己取得的課表、成績與活動，或以 Google 帳號使用平台交流與課班服務。'
+                ? '手動匯入仍可獨立使用，不需要登入學校；校方資料的連線狀態與平台帳號分別確認。'
                 : '尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。'}
             </Text>
-            {schoolEntry ? (
-              <Pressable
-                testID="school-login-start"
-                accessibilityRole="button"
-                style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
-                onPress={() => safeNavigate(navigation, 'SSOLogin')}
-              >
-                <Text style={s.schoolButtonText}>學號登入（尚未開放）</Text>
-              </Pressable>
-            ) : null}
+            {schoolEntry && !schoolFirst ? schoolSignIn : null}
             <SchoolPortalImportEntry
               onOpenRecords={(kind) => safeNavigate(navigation, 'PersonalImport', { kind })}
             />

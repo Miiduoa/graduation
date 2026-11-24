@@ -286,6 +286,28 @@ it('keeps Google usable while the separate school-login lookup fails', () => {
   expect(replace).not.toHaveBeenCalled();
 });
 
+it.each([
+  { selectedSchoolId: 'pu', available: true, lookupError: false, first: true },
+  { selectedSchoolId: 'pu', available: false, lookupError: false, first: false },
+  { selectedSchoolId: 'pu', available: true, lookupError: true, first: false },
+  { selectedSchoolId: null, available: true, lookupError: false, first: false },
+])('prioritizes school on general entry only with an explicitly selected, available campus (%o)', ({
+  selectedSchoolId, available, lookupError, first,
+}) => {
+  state.user = null;
+  state.studentId = available;
+  state.selectedSchoolId = selectedSchoolId;
+  state.optionsError = lookupError;
+  state.params = new URLSearchParams({ returnUrl: '/' });
+  render(<LoginPage />);
+  const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+  const platform = screen.getByTestId('platform-sign-in');
+  expect(school.open).toBe(first);
+  expect(Boolean(school.compareDocumentPosition(platform) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(first);
+  expect(signIn).not.toHaveBeenCalled();
+  expect(replace).not.toHaveBeenCalled();
+});
+
 it('only expands optional school sign-in when the person chooses it', () => {
   state.user = null;
   state.studentId = true;

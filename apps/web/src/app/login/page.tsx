@@ -95,6 +95,17 @@ function LoginForm({
   // School destinations stay school-only; Google must not appear to fulfill them.
   const hideGoogle = schoolTask;
   const taskPath = new URL(destination, 'https://campus.local').pathname;
+  // A general entry can prioritize the selected campus only after its capability is known.
+  // Existing platform tasks and school-only tasks keep their own authentication boundaries.
+  const schoolFirst =
+    !schoolTask &&
+    taskPath === '/' &&
+    !!selectedSchoolId &&
+    schoolDirectoryReady &&
+    !selection?.requestedUnavailable &&
+    !options.loading &&
+    !options.error &&
+    schoolAvailable;
   const publicDestination = isPublicCampusPath(taskPath);
   const merchantTask =
     !reconnect && ['/merchant', '/merchant/apply', '/merchant/workspace'].includes(taskPath);
@@ -197,6 +208,20 @@ function LoginForm({
       </SiteShell>
     );
   }
+  const platformSignIn = !hideGoogle ? (
+    <NuniSignIn
+      key="platform-sign-in"
+      returnUrl={destination}
+      issue={issue}
+      disabled={busy}
+      onStart={() => {
+        if (busyRef.current) return false;
+        busyRef.current = 'platform';
+        setPlatformBusy(true);
+        return true;
+      }}
+    />
+  ) : null;
   return (
     <SiteShell
       title={
@@ -211,7 +236,9 @@ function LoginForm({
           ? '驗證學校帳號後，返回你原本的頁面。'
           : schoolTask
             ? '這個頁面要用學校帳號，Google 帳號無法代替。'
-            : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入。'
+            : schoolFirst
+              ? '先驗證你的學校帳號，或使用 Google 帳號進入平台。目前兩種登入仍分別運作。'
+              : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入。'
       }
     >
       <div className={loginStyles.flow}>
@@ -219,29 +246,18 @@ function LoginForm({
           <p className={loginStyles.continuation}>登入後會回到你原本的頁面，接著完成剛才的事。</p>
         )}
         <div className={`${styles.loginLayout} ${loginStyles.methods}`}>
-          {!hideGoogle && (
-            <NuniSignIn
-              returnUrl={destination}
-              issue={issue}
-              disabled={busy}
-              onStart={() => {
-                if (busyRef.current) return false;
-                busyRef.current = 'platform';
-                setPlatformBusy(true);
-                return true;
-              }}
-            />
-          )}
+          {!schoolFirst && platformSignIn}
           <details
             className={`${styles.loginHelp} ${styles.schoolConnection}`}
+            key="school-connection"
             aria-label="學校帳號登入"
-            open={schoolTask}
+            open={schoolTask || schoolFirst}
           >
             <summary>
               <div className={styles.methodHeading}>
                 <div>
                   <span className={styles.methodEyebrow}>學校帳號 · 本人授權</span>
-                  <h2>{schoolTask ? '確認你的學校帳號' : '需要校務資料時再連線'}</h2>
+                  <h2>{schoolTask ? '確認你的學校帳號' : schoolFirst ? '使用學校帳號繼續' : '需要校務資料時再連線'}</h2>
                 </div>
                 <span className={styles.methodStatus}>依服務開放</span>
               </div>
@@ -390,6 +406,7 @@ function LoginForm({
               ← 返回首頁
             </Link>
           </details>
+          {schoolFirst && platformSignIn}
         </div>
         {!schoolTask && <AccountRoleLinks showSchool />}
         <section className={styles.guestAccess} aria-labelledby="guest-access-title">
