@@ -451,7 +451,7 @@ test.each([true, false])('a list started after a failed subscribe verifies its c
   }
 });
 
-test('a list started after a failed subscribe cannot omit a subscription confirmed while it was loading', async () => {
+test('a list omission delivered before confirmation does not trigger another read when rows arrive later', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const view = render(<BoardsScreen />);
   await view.findByText('讀書會');
@@ -463,18 +463,56 @@ test('a list started after a failed subscribe cannot omit a subscription confirm
   expect(view.getByLabelText('訂閱讀書會').props.accessibilityState.busy).toBe(false);
   expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
 
-  const subs = deferred<string[]>();
-  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
+  const rows = deferred<typeof board[]>();
+  jest.mocked(listBoards).mockImplementationOnce(() => rows.promise);
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([]);
   let refreshPromise!: Promise<void>;
-  act(() => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  await act(async () => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
 
   await act(async () => { firstConfirm.resolve(true); });
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 
-  await act(async () => { subs.resolve([]); await refreshPromise; });
+  await act(async () => { rows.resolve([board]); await refreshPromise; });
   expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
+
+test.each([false, 'offline'] as const)(
+  'a list omission delivered after confirmation of a failed unsubscribe rechecks the board (%s)',
+  async (result) => {
+    jest.mocked(listBoards).mockResolvedValue([board]);
+    jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+    const view = render(<BoardsScreen />);
+    await view.findByLabelText('取消訂閱讀書會');
+
+    const write = deferred();
+    const subs = deferred<string[]>();
+    const secondConfirm = deferred<boolean>();
+    jest.mocked(unsubscribeFromBoard).mockImplementationOnce(() => write.promise);
+    jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
+    jest.mocked(isSubscribedToBoard)
+      .mockResolvedValueOnce(true)
+      .mockImplementationOnce(() => secondConfirm.promise);
+
+    fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
+    let refreshPromise!: Promise<void>;
+    act(() => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+    await act(async () => { write.reject(new Error('offline')); });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+    expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+    await act(async () => { subs.resolve([]); await refreshPromise; });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+    expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
+    expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+    await act(async () => {
+      if (result === 'offline') secondConfirm.reject(new Error(result));
+      else secondConfirm.resolve(result);
+    });
+    expect(view.getByLabelText(result === false ? '訂閱讀書會' : '取消訂閱讀書會')).toBeTruthy();
+  },
+);
 
 test.each(['during confirmation', 'during write, IDs last', 'during write, rows last'])(
   'a list started %s rechecks listed membership after the first confirmation succeeds',
@@ -904,11 +942,13 @@ test('a pull-to-refresh started during a failed write cannot apply a cache gap o
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 
   // Cache miss / capped list omits the board after the rollback already landed.
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
   await act(async () => {
     rows.resolve([board]);
     subs.resolve([]);
     await refreshPromise;
   });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 

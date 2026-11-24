@@ -68,6 +68,7 @@ type SubscriptionListRead = {
   subscribedIds: ReadonlySet<string>;
   writeRevisionAtDelivery: number;
   serverRevisionAtDispatch: number;
+  serverRevisionAtDelivery: number;
 };
 
 function BoardsContent() {
@@ -192,6 +193,7 @@ function BoardsContent() {
             subscribedIds: new Set(subs),
             writeRevisionAtDelivery: subscriptionRevision.current,
             serverRevisionAtDispatch,
+            serverRevisionAtDelivery: ++serverReadRevision.current,
           }),
         ),
       ]);
@@ -255,19 +257,25 @@ function BoardsContent() {
           nextConfirmed.has(id) &&
           !subscribedIds.has(id);
         // A listed subscription during an overlap can be stale even when it
-        // agrees with the first confirmation. An omission alone leaves a
-        // subscription established by a single-board read in place.
+        // agrees with the first confirmation. The capped list can also omit
+        // a confirmed subscription. Recheck an overlapping omission if the
+        // IDs arrived after that confirmation, even when rows arrive later.
         const listed = subscribedIds.has(id);
         const listedDuringOverlap = listed && overlappingReconciliations.has(id);
         const listClaimsUnkeptSubscription = listed && !nextConfirmed.has(id);
         const listOmitsConfirmed = !listed && confirmedByBoardRead.current.has(id);
-        if (
-          !pendingSubscriptionCounts.current.has(id) &&
-          !listOmitsConfirmed &&
-          (keptRollback ||
+        const omissionArrivedAfterConfirmation =
+          overlappingReconciliations.has(id) &&
+          membership.serverRevisionAtDelivery > (boardConfirmationAppliedAt.current.get(id) ?? 0);
+        const needsConfirmation = listOmitsConfirmed
+          ? omissionArrivedAfterConfirmation
+          : keptRollback ||
             listedDuringOverlap ||
             listClaimsUnkeptSubscription ||
-            lastSettledWriteSucceeded.current.has(id)) &&
+            lastSettledWriteSucceeded.current.has(id);
+        if (
+          !pendingSubscriptionCounts.current.has(id) &&
+          needsConfirmation &&
           auth.user?.uid &&
           school?.id
         ) {
