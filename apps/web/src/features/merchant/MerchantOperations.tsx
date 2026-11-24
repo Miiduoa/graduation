@@ -87,6 +87,7 @@ export function MerchantOperations({
   onExpired,
   confirmedDetail,
   confirmedListStatus,
+  receiptFloor = 0,
   accessRevocation = 0,
   beginRequest,
   onChanged,
@@ -110,6 +111,7 @@ export function MerchantOperations({
   onExpired(): void;
   confirmedDetail?: Detail | null;
   confirmedListStatus?: string;
+  receiptFloor?: number;
   accessRevocation?: number;
   beginRequest?(): number;
   onChanged(detail: Detail, verifiedAccess: boolean, revision: number): Detail | null | void;
@@ -133,7 +135,11 @@ export function MerchantOperations({
   const [fresh, setFresh] = useState(false);
   const [busy, setBusy] = useState<Action | null>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState<string | number>('');
+  const [notice, setNotice] = useState<{ value: string | number; revision: number } | null>(null);
+  useLayoutEffect(() => {
+    setNotice(null);
+  }, [receiptFloor]);
+  const visibleNotice = detail && notice && notice.revision > receiptFloor ? notice.value : null;
   const [uncertain, setUncertain] = useState<Action | null>(saved?.uncertain ?? null);
   const [settings, setSettings] = useState<SettingDraft | null>(saved?.settings ?? null);
   const [menu, setMenu] = useState<MenuDraft[]>(saved?.menu ?? [newItem()]);
@@ -372,7 +378,7 @@ export function MerchantOperations({
     if (action === 'menu') setMenuBlocked(true);
     setBusy(action);
     setError('');
-    setNotice('');
+    setNotice(null);
     const revision = nextRevision();
     try {
       await task(current, revision);
@@ -472,11 +478,11 @@ export function MerchantOperations({
       {!detail && confirmedDetail && readUnavailable && confirmedListStatus && (
         <p role="status">{confirmedListStatus}</p>
       )}
-      {typeof notice === 'number'
+      {typeof visibleNotice === 'number'
         ? menuReceipt !== null && (
-            <p role="status">已建立 {notice} 項首次菜單。啟用前請再確認門市資料。</p>
+            <p role="status">已建立 {visibleNotice} 項首次菜單。啟用前請再確認門市資料。</p>
           )
-        : notice && <p role="status">{notice}</p>}
+        : visibleNotice && <p role="status">{visibleNotice}</p>}
       {detail && draft && (
         <>
           <section className={styles.intro} aria-label="門市現況">
@@ -608,7 +614,7 @@ export function MerchantOperations({
                     if (!current()) return;
                     accept(next, false, revision);
                     setSettings(null);
-                    setNotice('營運設定已儲存。');
+                    setNotice({ value: '營運設定已儲存。', revision });
                   });
                 }}
               >
@@ -713,7 +719,7 @@ export function MerchantOperations({
                     });
                     if (!current()) return;
                     accept(next, false, revision);
-                    setNotice('已改為現場櫃檯付款。');
+                    setNotice({ value: '已改為現場櫃檯付款。', revision });
                   })
                 }
               >
@@ -760,7 +766,7 @@ export function MerchantOperations({
                           ? onMenuConfirmed(detail, revision, receipt.createdItems)
                           : localConfirmations.confirmMenu(draftKey, revision, receipt.createdItems);
                         setMenuConfirmed(false);
-                        if (accepted) setNotice(receipt.createdItems);
+                        if (accepted) setNotice({ value: receipt.createdItems, revision });
                         await read();
                       });
                     }}
@@ -912,7 +918,10 @@ export function MerchantOperations({
                         if (!current()) return;
                         const confirmed = accept(next, false, revision);
                         if (confirmed)
-                          setNotice(`門市狀態已更新：${merchantWorkspaceStateLabel(confirmed)}。`);
+                          setNotice({
+                            value: `門市狀態已更新：${merchantWorkspaceStateLabel(confirmed)}。`,
+                            revision,
+                          });
                       })
                     }
                   >
@@ -938,7 +947,10 @@ export function MerchantOperations({
                         if (!current()) return;
                         const confirmed = accept(next, false, revision);
                         if (confirmed)
-                          setNotice(`門市狀態已更新：${merchantWorkspaceStateLabel(confirmed)}。`);
+                          setNotice({
+                            value: `門市狀態已更新：${merchantWorkspaceStateLabel(confirmed)}。`,
+                            revision,
+                          });
                       })
                     }
                   >

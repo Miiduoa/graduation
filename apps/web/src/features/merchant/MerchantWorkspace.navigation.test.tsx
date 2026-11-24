@@ -1672,6 +1672,93 @@ it('keeps a confirmed empty store list when both the list and detail refresh fai
   expect(screen.queryByRole('link', { name: /管理門市：一樓/ })).toBeNull();
 });
 
+it('adopts a pending empty list after a newer list and detail refresh return 503', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const unavailable = new NuniError(503, 'UNAVAILABLE');
+  let finishList!: (value: { workspaces: [] }) => void;
+  const pendingList = new Promise<{ workspaces: [] }>((resolve) => {
+    finishList = resolve;
+  });
+  const readList = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [detail()] })
+    .mockReturnValueOnce(pendingList)
+    .mockRejectedValueOnce(unavailable);
+  const readDetail = vi.fn().mockResolvedValueOnce(detail()).mockRejectedValue(unavailable);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === path) return readDetail();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  const manage = await screen.findByRole('link', { name: '管理門市：一樓' });
+  fireEvent.click(manage);
+  await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readList).toHaveBeenCalledTimes(2));
+  await act(async () => window.history.forward());
+  await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+  const readsBeforeBack = readDetail.mock.calls.length;
+  await act(async () => window.history.back());
+  await screen.findByText('目前無法確認店家資料，請重新載入。');
+  expect(readDetail).toHaveBeenCalledTimes(readsBeforeBack + 1);
+  expect(readList).toHaveBeenCalledTimes(3);
+  expect(screen.getByRole('link', { name: '管理門市：一樓' })).toBeTruthy();
+
+  await act(async () => finishList({ workspaces: [] }));
+  await screen.findByRole('button', { name: '登出並切換店家帳號' });
+  expect(screen.queryByRole('heading', { name: '餐坊／一樓' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+});
+
+it('discards the initial menu receipt when a confirmed empty list removes the store', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const initial = detail();
+  const published = { ...initial, missingRequirements: ['settings'], publishedMenuItems: 1 };
+  const unavailable = new NuniError(503, 'UNAVAILABLE');
+  const readList = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [initial] })
+    .mockResolvedValue({ workspaces: [] });
+  const readDetail = vi.fn().mockResolvedValueOnce(initial).mockResolvedValue(published);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === path) return readDetail();
+    if (resource === `${path}/initial-menu`)
+      return Promise.resolve({
+        menuVersionId: 'food-menu_12345678-1234-1234-1234-123456789abc',
+        createdItems: 1,
+      });
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  fireEvent.change(await screen.findByLabelText('品項 1 名稱'), { target: { value: '蔬菜便當' } });
+  fireEvent.change(screen.getByLabelText('品項 1 售價（元）'), { target: { value: '85' } });
+  fireEvent.change(screen.getByLabelText('品項 1 初始庫存'), { target: { value: '20' } });
+  fireEvent.click(screen.getByLabelText(/我已確認品項、元售價/));
+  fireEvent.click(screen.getByRole('button', { name: '確認建立並上架菜單' }));
+  await screen.findByText(/已建立 1 項首次菜單/);
+
+  readDetail.mockRejectedValue(unavailable);
+  await act(async () => window.history.back());
+  await screen.findByText(/這個帳號目前沒有已核准的門市/);
+  await screen.findByText(/目前無法更新部分門市資料/);
+  const readsBeforeForward = readDetail.mock.calls.length;
+  await act(async () => window.history.forward());
+  await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+  expect(readDetail).toHaveBeenCalledTimes(readsBeforeForward + 1);
+  expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
+  expect(screen.queryByRole('heading', { name: '餐坊／一樓' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '儲存營運設定' })).toBeNull();
+
+  readDetail.mockResolvedValue(published);
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+  await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+  expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
+});
+
 it.each([403, 404])('ignores a retired application list denial (%s) after a newer success', async (status) => {
   let rejectFirst!: (error: NuniError) => void;
   const first = new Promise<never>((_, reject) => {

@@ -49,8 +49,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const receipts = new Map<string, NuniMerchantApplication>();
   const entries = new Map<string, WorkspaceObservations>();
   let listRevocation = 0;
-  let listRevision = 0;
-  let listedRevision = 0; // A failed refresh does not renew list membership.
+  let listedRevision = 0;
+  const receiptFloors = new Map<string, number>();
   // Store-specific revocations override the list default for stores with newer confirmations.
   const revocations = new Map<string, number>();
   const verified = new Map<string, number>();
@@ -125,7 +125,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   function confirmMenu(key: string, revision: number, createdItems: number) {
     const draft = drafts.get(key);
     const row = entries.get(key)?.row;
-    if (!draft || !row) return false;
+    if (!draft || !row || revision <= (receiptFloors.get(key) ?? 0)) return false;
     // The receipt has no readiness version. Apply it to the known row in request order.
     const next = {
       ...row.value,
@@ -174,8 +174,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     },
     mergeWorkspaceList(rows: NuniMerchantWorkspace[], revision: number) {
       if (revision <= listRevocation) return;
-      if (revision > listRevision) {
-        listRevision = revision;
+      if (revision > listedRevision) {
         listedRevision = revision;
         includeVerifiedWorkspaces = false;
         retainedWorkspaceKeys.clear();
@@ -185,6 +184,12 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
             return [workspaceKey(identity), identity];
           }),
         );
+        // An omitted store keeps its draft and readiness history, but loses its receipts.
+        for (const [key, draft] of drafts) {
+          if (listedWorkspaces.has(key)) continue;
+          draft.menuReceipt = null;
+          receiptFloors.set(key, revision);
+        }
       }
       for (const row of rows) merge(row, revision);
     },
@@ -205,15 +210,14 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
           }
         }
         listRevocation = revision;
-        listRevision = Math.max(listRevision, revision);
         listedWorkspaces = undefined;
         includeVerifiedWorkspaces = false;
-      } else if (revision > Math.max(listRevision, listRevocation)) {
-        listRevision = revision;
+      } else if (revision > listRevocation) {
         // A verified direct entry can fill in only when list membership is unknown.
         includeVerifiedWorkspaces = listedWorkspaces === undefined;
       }
     },
+    workspaceReceiptFloor: (key: string) => receiptFloors.get(key) ?? 0,
     workspaceRevocations: () => ({ list: listRevocation, details: new Map(revocations) }),
     mergeApplications,
     rejectApplications(revision: number) {
@@ -299,7 +303,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       listedWorkspaces = undefined;
       includeVerifiedWorkspaces = false;
       listRevocation = 0;
-      listRevision = 0;
+      receiptFloors.clear();
       listedRevision = 0;
       applicationRevocation = 0;
       applicationListRevision = 0;
