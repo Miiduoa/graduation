@@ -50,6 +50,15 @@ function comparisonText(value: unknown): string {
   return normalizeCampusClassroomQuery(value).normalize('NFKC').toLocaleLowerCase('zh-TW');
 }
 
+/** Two consecutive floor markers without a room are ambiguous, not a room.
+ * For example 3F-4F or 3樓4F can describe a floor range. Do not choose a
+ * building destination from that notation alone. A three-digit room such
+ * as 303F is still valid, and no floor or room position is inferred. */
+function hasOnlyTwoFloorMarkers(suffix: string): boolean {
+  const floor = '(?:b?\\d{1,2}\\s*f|(?:地下|地上)?(?:\\d{1,2}|[一二三四五六七八九十]{1,3})樓)';
+  return new RegExp('^[\\s:：,，·#/–—-]*' + floor + '[\\s,，:：·/–—-]*' + floor + '(?:\\s*(?:教室|室))?$', 'u').test(suffix);
+}
+
 /** This only recognizes a suffix as room wording; it does not decode its building or floor. */
 function isRoomSuffix(value: string): boolean {
   const suffix = value.replace(/^[\s:：,，·#/–—-]+/, '').trim();
@@ -57,7 +66,7 @@ function isRoomSuffix(value: string): boolean {
   const floor = '(?:b?\\d{1,2}\\s*f|(?:地下|地上)?(?:\\d{1,2}|[一二三四五六七八九十]{1,3})樓)';
   // Bare 3F / B1F is a floor designation, even if the generic room
   // pattern could interpret its final F as an alphabetic room suffix.
-  if (new RegExp(`^${floor}(?:\\s*(?:教室|室))?$`, 'u').test(suffix)) return false;
+  if (hasOnlyTwoFloorMarkers(suffix) || new RegExp(`^${floor}(?:\\s*(?:教室|室))?$`, 'u').test(suffix)) return false;
   if (new RegExp(`^${room}$`, 'u').test(suffix)) return true;
   // A timetable may explicitly write floor and room together (3F303 / 3樓303).
   // Accept only an immediately following numeric room, not arbitrary letter suffixes;
@@ -317,6 +326,12 @@ const PUBLISHED_PROVIDENCE_ENGLISH_NAMES = new Map<string, readonly string[]>([
   // Official bilingual facilities page (checked 2026-11-24):
   // https://dpcd.pu.edu.tw/p/412-1047-3561.php
   ['pu-library', ['Gaesia Library', 'Luking Library']],
+  // Official university archives campus directory (checked 2026-11-24):
+  // https://c067.pu.edu.tw/p/412-1121-4218.php
+  ['pu-zhishan', ['Zhi Shan Hall']],
+  ['pu-xijia', ['Schultz Hall']],
+  ['pu-sigao', ['St. Bosco Hall']],
+  ['pu-monastery', ['Our Lady of Providence Convent']],
   // campusPois.js uses "Chapel"; the mobile catalog uses the full title.
   ['pu-chapel', ['Chapel', 'Chapel of Our Lady of Providence']],
   ['pu-jingyuan', ['Jingyuan Cafeteria']],
@@ -380,7 +395,7 @@ const VERIFIED_PROVIDENCE_CODE_BY_PLACE_ID = new Map<string, string>([
 ]);
 
 function matchesVerifiedCodeRoomSuffix(suffix: string): boolean {
-  return !VERIFIED_CODE_FLOOR_ONLY_SUFFIX.test(suffix) &&
+  return !hasOnlyTwoFloorMarkers(suffix) && !VERIFIED_CODE_FLOOR_ONLY_SUFFIX.test(suffix) &&
     (VERIFIED_CODE_ROOM_SUFFIX.test(suffix) || VERIFIED_CODE_FLOOR_ROOM_SUFFIX.test(suffix));
 }
 
