@@ -373,8 +373,7 @@ function AccountWorkspace({
             }
           }),
           (error) => {
-            if (denied(error)) {
-              confirmed.rejectApplications();
+            if (denied(error) && confirmed.rejectApplications(listRevision)) {
               setNotice('');
               publishOverview();
             }

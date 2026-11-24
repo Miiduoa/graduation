@@ -1641,3 +1641,69 @@ it.each([
     expect(screen.getByLabelText('品項 1 名稱')).toBeTruthy();
   },
 );
+
+it('keeps a confirmed empty store list when both the list and detail refresh fail', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const unavailable = new NuniError(503, 'UNAVAILABLE');
+  const readList = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [detail()] })
+    .mockResolvedValueOnce({ workspaces: [] })
+    .mockRejectedValue(unavailable);
+  const readDetail = vi.fn().mockResolvedValueOnce(detail()).mockRejectedValue(unavailable);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === path) return readDetail();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+  fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+  await screen.findByText(/這個帳號目前沒有已核准的門市/);
+
+  await screen.findByText(/目前無法更新部分門市資料/);
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  await screen.findByText('目前無法確認店家資料，請重新載入。');
+  expect(screen.getByRole('button', { name: '登出並切換店家帳號' })).toBeTruthy();
+  expect(readList).toHaveBeenCalledTimes(3);
+  expect(readDetail).toHaveBeenCalledTimes(3);
+  expect(screen.queryByText('餐坊／一樓')).toBeNull();
+  expect(screen.queryByRole('link', { name: /管理門市：一樓/ })).toBeNull();
+});
+
+it.each([403, 404])('ignores a retired application list denial (%s) after a newer success', async (status) => {
+  let rejectFirst!: (error: NuniError) => void;
+  const first = new Promise<never>((_, reject) => {
+    rejectFirst = reject;
+  });
+  const readApplications = vi.fn()
+    .mockReturnValueOnce(first)
+    .mockResolvedValue({
+      applications: [
+        {
+          tenantId: 'campus-one',
+          applicationId: 'application-1',
+          brandName: '測試餐坊',
+          locationName: '餐廳櫃位',
+          state: 'under-review',
+          reviewerNote: '已開始審核',
+          submittedAt: '2026-10-09T02:00:00.000Z',
+        },
+      ],
+    });
+  mocks.request.mockImplementation((resource) =>
+    resource === 'merchant-applications' ? readApplications() : respond(resource),
+  );
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+  await act(async () => window.history.back());
+  await screen.findByText('審核說明：已開始審核');
+  expect(readApplications).toHaveBeenCalledTimes(2);
+
+  await act(async () => rejectFirst(new NuniError(status, 'DENIED')));
+  expect(screen.getByRole('heading', { name: '測試餐坊／餐廳櫃位' })).toBeTruthy();
+  expect(screen.getByText('審核說明：已開始審核')).toBeTruthy();
+});

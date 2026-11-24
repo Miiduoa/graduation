@@ -89,3 +89,27 @@ it('learns the version floor from an older request without replacing the winning
     .toMatchObject(sameVersion);
   expect(confirmed.overview()?.workspaces).toMatchObject([sameVersion]);
 });
+
+it('preserves a newer application receipt until a subsequent denial', () => {
+  const confirmed = createMerchantConfirmations(new Map());
+  const receipt = {
+    tenantId: 'campus-one',
+    applicationId: 'application-1',
+    brandName: '餐坊',
+    locationName: '一樓',
+    state: 'submitted' as const,
+    reviewerNote: '',
+    submittedAt: '2026-10-09T02:00:00.000Z',
+  };
+
+  confirmed.mergeApplications([], confirmed.beginRequest());
+  const earlierList = confirmed.beginRequest();
+  const write = confirmed.beginRequest();
+  expect(confirmed.confirmApplication(receipt, write)).toBe(true);
+  expect(confirmed.rejectApplications(earlierList)).toBe(false);
+  expect(confirmed.overview()?.applications).toEqual([receipt]);
+
+  expect(confirmed.rejectApplications(confirmed.beginRequest())).toBe(true);
+  expect(confirmed.overview()).toBeNull();
+  expect(confirmed.confirmApplication(receipt, write)).toBe(false);
+});

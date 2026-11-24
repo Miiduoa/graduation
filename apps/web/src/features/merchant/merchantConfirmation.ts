@@ -56,6 +56,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const verified = new Map<string, number>();
   let applicationRevocation = 0;
   let applicationListRevision = 0;
+  let applicationReceiptRevision = 0;
   let request = 0;
   const beginRequest = () => ++request;
 
@@ -209,15 +210,21 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         includeVerifiedWorkspaces = false;
       } else if (revision > Math.max(listRevision, listRevocation)) {
         listRevision = revision;
-        includeVerifiedWorkspaces = true;
+        // A verified direct entry can fill in only when list membership is unknown.
+        includeVerifiedWorkspaces = listedWorkspaces === undefined;
       }
     },
     workspaceRevocations: () => ({ list: listRevocation, details: new Map(revocations) }),
     mergeApplications,
-    rejectApplications() {
-      applicationRevocation = beginRequest();
+    rejectApplications(revision: number) {
+      if (
+        revision <= Math.max(applicationRevocation, applicationListRevision, applicationReceiptRevision)
+      )
+        return false;
+      applicationRevocation = revision;
       delete lists.applications;
       receipts.clear();
+      return true;
     },
     confirmApplication(receipt: NuniMerchantApplication, revision: number) {
       if (revision <= applicationRevocation) return false;
@@ -232,6 +239,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
             current.state !== 'submitted' &&
             receipt.state === 'submitted'));
       receipts.set(receipt.applicationId, useCurrent ? current : receipt);
+      applicationReceiptRevision = Math.max(applicationReceiptRevision, revision);
       return true;
     },
     knownWorkspaces(): Array<Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'> & Partial<NuniMerchantWorkspace>> {
@@ -295,6 +303,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       listedRevision = 0;
       applicationRevocation = 0;
       applicationListRevision = 0;
+      applicationReceiptRevision = 0;
       receipts.clear();
       retainedWorkspaceKeys.clear();
       entries.clear();
