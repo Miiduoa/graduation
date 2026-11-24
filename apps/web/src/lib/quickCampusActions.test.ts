@@ -145,3 +145,28 @@ it.each([
 it.each(['business plan', 'busyness', 'libraryish', 'where is my wallet'])('does not guess from a partial word or ungrounded location (%s)', phrase => {
   expect(getQuickCampusActions(phrase)).toEqual([]);
 });
+
+it.each([
+  [
+    "class   schedule",
+    "/timetable"
+  ],
+  [
+    "Where’s the library?",
+    "/map"
+  ],
+  [
+    "campus\t events",
+    "/events"
+  ],
+  [
+    "quiz",
+    "/classroom"
+  ],
+  [
+    "quizzes",
+    "/classroom"
+  ]
+])('normalizes spoken and pasted search text %s', (phrase, href) => {
+  expect(getQuickCampusActions(phrase)[0]?.href).toBe(href);
+});
