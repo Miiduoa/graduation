@@ -1,4 +1,4 @@
-import { campusPlaceNameMatchesQuery, resolveCampusClassroom } from '@campus/shared/src/campusClassroomLookup';
+import { campusPlaceNameMatchesQuery, resolveCampusClassroom, type CampusClassroomResolution } from '@campus/shared/src/campusClassroomLookup';
 import { getOfficialCampusMapUrl } from '@campus/shared/src/campusMapLookup';
 import {
   isProvidencePendingVerification,
@@ -102,16 +102,21 @@ export function boundedTransitStopMarker(place: object): { transitStopIds: strin
   return hasMarker ? { transitStopIds: [...BOUNDED_TRANSIT_STOP_MARKER] } : {};
 }
 
+export type CampusMapMatchDetails = {
+  match: CampusMapMatch;
+  matchKind?: CampusClassroomResolution<CampusMapPlaceLike>['matchKind'];
+};
+
 /** Reuse the map's room-to-building and text matching, without decoding a
  * classroom number into a floor or inventing a route. */
 export function campusMapMatchDetails(
   schoolId: string, query: string, location: CampusMapPlaceLike,
   publicNameLocations: readonly CampusMapPlaceLike[] = [location],
-): { match: CampusMapMatch; alias: boolean } | null {
-  if (campusPlaceNameMatchesQuery(location.name, query)) return { match: 'place', alias: false };
+): CampusMapMatchDetails | null {
+  if (campusPlaceNameMatchesQuery(location.name, query)) return { match: 'place', matchKind: 'primary' };
   const room = resolveCampusClassroom({ schoolId, query, locations: [location], publicNameLocations });
-  if (room.matchKind) return { match: 'building', alias: room.matchKind === 'alias' };
-  return locationMatchesSearch(location, query) ? { match: 'search', alias: false } : null;
+  if (room.matchKind) return { match: 'building', matchKind: room.matchKind };
+  return locationMatchesSearch(location, query) ? { match: 'search' } : null;
 }
 
 export function campusMapMatch(schoolId: string, query: string, location: CampusMapPlaceLike): CampusMapMatch | null {
@@ -183,7 +188,7 @@ export function parseCampusMapResult(raw: unknown, schoolId: string, requested: 
     for (const item of items) {
       const details = campusMapMatchDetails(schoolId, args.query, item, items);
       const validMatch = details && (item.match === details.match ||
-        (item.match === 'search' && details.alias && locationMatchesSearch(item, args.query)));
+        (item.match === 'search' && details.matchKind && details.matchKind !== 'primary' && locationMatchesSearch(item, args.query)));
       if (new Set(item.facilities).size !== item.facilities.length || !validMatch)
         throw new Error('Invalid map match');
     }

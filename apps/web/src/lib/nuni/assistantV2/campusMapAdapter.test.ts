@@ -105,20 +105,25 @@ describe('map reader uses the current page sources', () => {
     expect(await read('任垣樓501', guard(), 'pu', 1)).toMatchObject({ resolution: 'partial', partial: true, items: [{ id: 'first' }] });
   });
 
-  it('preserves ambiguity when an existing English name collides with another building', async () => {
+  it('prefers a public building field over catalog English and preserves public-name ambiguity', async () => {
     const place = PROVIDENCE_CAMPUS_PLACES.find(item => item.id === 'pu-renyuan')!;
     const name = 'Anthony Kuo Hall';
     const query = name + ' 303';
-    const catalog = doc(place.id, { ...place, name });
+    const catalog = doc(place.id, place);
     const direct = doc('imported-building', published({ name: '教學館', building: name }));
     vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([catalog, direct]) as never);
+    expect(await read(query)).toMatchObject({
+      resolution: 'matched', partial: false, items: [{ id: 'imported-building', match: 'building' }],
+    });
+
+    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([doc(place.id, { ...place, name }), direct]) as never);
     expect(await read(query)).toMatchObject({
       resolution: 'ambiguous', partial: false, items: [
         { id: 'imported-building', match: 'building' }, { id: place.id, match: 'building' },
       ],
     });
 
-    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([doc(place.id, place)]) as never);
+    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([catalog]) as never);
     expect(await read(query)).toMatchObject({
       resolution: 'matched', partial: false, items: [{ id: place.id, match: 'building' }],
     });

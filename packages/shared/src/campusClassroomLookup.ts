@@ -45,7 +45,7 @@ export type CampusClassroomResolution<T extends CampusMapPlaceLike> = {
   query: string;
   status: 'empty' | 'unmatched' | 'matched' | 'ambiguous';
   matches: readonly T[];
-  matchKind?: 'primary' | 'alias';
+  matchKind?: 'primary' | 'catalog' | 'alias';
 };
 
 function comparisonText(value: unknown): string {
@@ -352,7 +352,7 @@ const PROVIDENCE_ENGLISH_ALIASES = new Map<string, readonly string[]>([
   ['pu-monastery', ['Our Lady of Providence Convent']],
 ]);
 
-function primarySourcedNames(published: CampusMapPlaceLike): string[] {
+function catalogBuildingNames(published: CampusMapPlaceLike): string[] {
   const names = [published.name];
   const catalogEnglish = PUBLISHED_PROVIDENCE_ENGLISH_NAMES.get(published.id);
   if (catalogEnglish) names.push(...catalogEnglish);
@@ -366,7 +366,7 @@ function primarySourcedNames(published: CampusMapPlaceLike): string[] {
 function isSourcedBuildingLabel(school: string, published: CampusMapPlaceLike, suppliedLabel: unknown): boolean {
   const label = comparisonText(suppliedLabel);
   if (!label) return false;
-  if (primarySourcedNames(published).some((name) => comparisonText(name) === label)) return true;
+  if (catalogBuildingNames(published).some((name) => comparisonText(name) === label)) return true;
   return VERIFIED_CLASSROOM_BUILDING_CODES.some(
     (entry) =>
       entry.schoolId === school &&
@@ -465,6 +465,7 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     counts.set(location.id, (counts.get(location.id) ?? 0) + 1);
   }
   const primaryMatches: T[] = [];
+  const catalogMatches: T[] = [];
   const aliasMatches: T[] = [];
   for (const location of locations) {
     // An invalid row is never a destination. Still count duplicate *string*
@@ -506,13 +507,17 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     // A sourced clinic, chapel or sports POI must not navigate to another
     // building through an unsourced Firestore `building` override.
     const building = sourcedBuildingLabel(school, published, location.building);
-    const primaryNames = published ? primarySourcedNames(published) : [location.name, building];
+    // Only public fields accepted by the existing resolver and legacy codes
+    // can outrank names supplied by the catalog.
     if (
-      primaryNames.some((name) => nameMatchesRoom(comparable, name)) ||
-      nameMatchesVerifiedCode(school, comparable, location.name) ||
-      nameMatchesVerifiedCode(school, comparable, building)
+      (!published || isSourcedBuildingLabel(school, published, location.name)) &&
+      [location.name, building].some((name) =>
+        nameMatchesRoom(comparable, name) || nameMatchesVerifiedCode(school, comparable, name)
+      )
     ) {
       primaryMatches.push(location);
+    } else if (published && catalogBuildingNames(published).some((name) => nameMatchesRoom(comparable, name))) {
+      catalogMatches.push(location);
     } else if (
       published &&
       (aliases?.some((name) => nameMatchesRoom(comparable, name)) ||
@@ -521,21 +526,14 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
       aliasMatches.push(location);
     }
   }
-  const matches = primaryMatches.length > 0 ? primaryMatches : aliasMatches;
-  if (matches.length === 1) {
+  const matchKind = primaryMatches.length ? 'primary' : catalogMatches.length ? 'catalog' : 'alias';
+  const matches = matchKind === 'primary' ? primaryMatches : matchKind === 'catalog' ? catalogMatches : aliasMatches;
+  if (matches.length === 1 && matchKind !== 'primary') {
     const [match] = matches;
-    const published = school === 'pu' ? PUBLISHED_PROVIDENCE_PLACES.get(match.id) : undefined;
-    const building = sourcedBuildingLabel(school, published, match.building);
-    const matchesPublicLabelOrLegacyCode = primaryMatches.length > 0 &&
-      (!published || isSourcedBuildingLabel(school, published, match.name)) &&
-      [match.name, building].some((name) =>
-        nameMatchesRoom(comparable, name) || nameMatchesVerifiedCode(school, comparable, name)
-      );
     // A public name can claim the full query even when its place is ineligible
     // for classroom navigation. Catalog-only names and codes yield to that name.
     const publicNameQuery = comparablePublicName(rawQuery);
     if (
-      !matchesPublicLabelOrLegacyCode &&
       publicNameLocations.some((location) =>
         location && typeof location === 'object' && location.id !== match.id &&
         comparablePublicName(location.name) === publicNameQuery
@@ -548,6 +546,6 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     query,
     status: matches.length === 1 ? 'matched' : matches.length > 1 ? 'ambiguous' : 'unmatched',
     matches,
-    ...(matches.length ? { matchKind: primaryMatches.length ? 'primary' : 'alias' } : {}),
+    ...(matches.length ? { matchKind } : {}),
   };
 }

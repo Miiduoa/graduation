@@ -14,7 +14,7 @@ import { V2Error } from './contracts';
 import {
   boundedTransitStopMarker, campusMapHref, campusMapMatchDetails, campusMapResolution, campusMapSourcePath,
   parseCampusMapArguments, parseCampusMapResult, validCampusMapSchool, type CampusMapArguments,
-  type CampusMapItem, type CampusMapRead, type CampusMapSource,
+  type CampusMapMatchDetails, type CampusMapItem, type CampusMapRead, type CampusMapSource,
 } from './campusMap';
 
 /** One bounded query plus an optional legacy query. Every query is accounted
@@ -119,11 +119,11 @@ export async function readCampusMap(input: {
     return [];
   });
   if (!unique.length && hasBundledCampusPlaces(schoolId)) source = 'bundled-providence';
-  const matches: { item: CampusMapItem; alias: boolean }[] = [];
+  const matches: { item: CampusMapItem; matchKind: CampusMapMatchDetails['matchKind'] }[] = [];
   for (const place of places) {
     const details = campusMapMatchDetails(schoolId, args.query, place, places);
     if (!details) continue;
-    const { match, alias } = details;
+    const { match, matchKind } = details;
     const itemSource = publishedIds.has(place.id) ? source : 'bundled-providence';
     const sourceUrl = providencePlaceSourceUrl(schoolId, place);
     const item: CampusMapItem = { ...place, schoolId, facilities: place.facilities ?? [],
@@ -131,11 +131,13 @@ export async function readCampusMap(input: {
       href: campusMapHref(schoolId, args.query, place.id), match,
       verification: sourceUrl ? isProvidencePendingVerification(schoolId, place) ? 'single-source' : 'cross-checked' : 'published',
       ...(sourceUrl ? { sourceUrl } : {}) };
-    matches.push({ item, alias });
+    matches.push({ item, matchKind });
   }
-  const hasPrimary = matches.some(({ item, alias }) => !alias && item.match !== 'search');
-  const candidates = matches.flatMap(({ item, alias }): CampusMapItem[] => {
-    if (!hasPrimary || !alias || item.match !== 'building') return [item];
+  const hasPrimary = matches.some(({ matchKind }) => matchKind === 'primary');
+  const hasCatalog = matches.some(({ matchKind }) => matchKind === 'catalog');
+  const candidates = matches.flatMap(({ item, matchKind }): CampusMapItem[] => {
+    const yields = matchKind === 'catalog' ? hasPrimary : matchKind === 'alias' && (hasPrimary || hasCatalog);
+    if (!yields) return [item];
     return locationMatchesSearch(item, args.query) ? [{ ...item, match: 'search' }] : [];
   });
   const rank = { place: 0, building: 1, search: 2 };

@@ -1038,17 +1038,23 @@ describe('bilingual timetable lookup uses the existing sourced building identity
     }).status).toBe('unmatched');
   });
 
-  it('preserves ambiguity when an existing English name collides with another building', () => {
+  it('prefers public fields over a catalog-only English name and preserves public-field ambiguity', () => {
     const location = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-renyuan')!;
     const imported = { ...location, name: 'Anthony Kuo Hall' };
     const collision = { ...location, id: 'synthetic-other-hall', name: '教學館', building: imported.name };
     const query = 'Anthony Kuo Hall 303';
+    expect(location.name).toBe('任垣樓');
     expect(resolveCampusClassroom({
-      schoolId: 'pu', query, locations: [imported, collision],
-    })).toMatchObject({ status: 'ambiguous', matchKind: 'primary', matches: [imported, collision] });
+      schoolId: 'pu', query, locations: [location, collision],
+    })).toMatchObject({ status: 'matched', matchKind: 'primary', matches: [collision] });
+    for (const direct of [imported, { ...location, building: imported.name }]) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [direct, collision],
+      })).toMatchObject({ status: 'ambiguous', matchKind: 'primary', matches: [direct, collision] });
+    }
     expect(resolveCampusClassroom({
       schoolId: 'pu', query, locations: [location],
-    })).toMatchObject({ status: 'matched', matchKind: 'primary', matches: [location] });
+    })).toMatchObject({ status: 'matched', matchKind: 'catalog', matches: [location] });
   });
 });
 

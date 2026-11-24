@@ -284,6 +284,29 @@ it.each(['AK303', 'Anthony Kuo Hall 303'])(
   },
 );
 
+it.each([
+  ['任垣樓', 'teaching-hall'],
+  ['Anthony Kuo Hall', null],
+])('uses the public classroom matches when Renyuan Hall is named %s', async (name, selectedId) => {
+  const hall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-renyuan')!;
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" query="Anthony Kuo Hall 303" />);
+
+  await act(async () => source.resolve([
+    { ...hall, name },
+    { ...hall, id: 'teaching-hall', name: '教學館', building: 'Anthony Kuo Hall' },
+  ]));
+
+  const map = JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(map.selected?.id ?? null).toBe(selectedId);
+  if (selectedId) {
+    expect(map.locations.map((place: MapLocation) => place.id)).toEqual([selectedId]);
+  } else {
+    expect(screen.getByText(/有多個相符地點/)).toBeTruthy();
+  }
+});
+
 it('clears an automatic classroom when a source retry brings in a conflicting public name', async () => {
   const source = deferred<MapLocation[]>();
   vi.mocked(loadMapLocations)
