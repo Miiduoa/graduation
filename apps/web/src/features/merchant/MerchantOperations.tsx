@@ -89,7 +89,9 @@ const initialAccess = {
 
 type AccessAction =
   | { type: 'entry-reset' | 'read-started' | 'read-finished' | 'verified' | 'locked' }
-  | { type: 'read-failed'; afterWrite: boolean };
+  | { type: 'read-failed'; hideDetail: boolean };
+
+type DetailReadMode = 'regular' | 'after-write' | 'after-confirmed-write';
 
 function accessReducer(state: typeof initialAccess, action: AccessAction): typeof initialAccess {
   switch (action.type) {
@@ -106,7 +108,7 @@ function accessReducer(state: typeof initialAccess, action: AccessAction): typeo
     case 'read-failed':
       return {
         ...state,
-        entryVerified: !action.afterWrite && state.entryVerified,
+        entryVerified: !action.hideDetail && state.entryVerified,
         fresh: false,
         readUnavailable: true,
       };
@@ -368,7 +370,10 @@ export function MerchantOperations({
   );
 
   const read = useCallback(
-    async (reconcile = true, afterWrite = false) => {
+    async (reconcile = true, mode: DetailReadMode = 'regular') => {
+      // A confirmed receipt may remain visible with the previously verified detail
+      // during an outage. Only a successful read can restore the controls.
+      const hideDetail = mode === 'after-write';
       readAfterWrite.current = false;
       const session = sessionRun.current;
       const version = ++run.current;
@@ -389,7 +394,7 @@ export function MerchantOperations({
           // Check the shared confirmation before React publishes its next snapshot.
           const confirmedRevision = entryAccessRevision.current;
           if (
-            afterWrite &&
+            mode !== 'regular' &&
             confirmedRevision >= accessRevision.current &&
             confirmedRevision > Math.max(failedReadRevision.current, observedRevocation.current) &&
             (beginRequest ? getConfirmedDetail?.(draftKey) : localConfirmations.detailFor(draftKey))
@@ -398,7 +403,7 @@ export function MerchantOperations({
             setError((current) => current === detailReadError ? '' : current);
             return;
           }
-          updateAccess({ type: 'read-failed', afterWrite });
+          updateAccess({ type: 'read-failed', hideDetail });
           setError(detailReadError);
           return;
         }
@@ -423,7 +428,7 @@ export function MerchantOperations({
           // entry access after this read failed.
           failedReadRevision.current = revision;
           entryAccessRevision.current = 0;
-          updateAccess({ type: 'read-failed', afterWrite });
+          updateAccess({ type: 'read-failed', hideDetail });
           setError(detailReadError);
         }
       } finally {
@@ -523,7 +528,7 @@ export function MerchantOperations({
       } else if (failure instanceof NuniError && failure.status === 409) {
         if (action === 'menu') setMenuBlocked(true);
         // A conflict always requires post-write reconciliation, even on the same entry.
-        await read(true, true);
+        await read(true, 'after-write');
         if (active.current && session === sessionRun.current)
           setError((current) =>
             current || '門市資料已變更。請確認重新讀取的狀態，再決定下一步；草稿仍保留。',
@@ -542,7 +547,7 @@ export function MerchantOperations({
         lock.current = false;
         if (active.current) {
           setBusy(null);
-          if (readAfterWrite.current) void read(false, true);
+          if (readAfterWrite.current) void read(false, 'after-write');
         }
       }
     }
@@ -914,8 +919,8 @@ export function MerchantOperations({
                         setMenuConfirmed(false);
                         if (!accepted) return;
                         setNotice({ value: receipt.createdItems, revision });
-                        // The mutation's post-write read owns access for a re-entered view.
-                        if (!readAfterWrite.current) await read();
+                        // Re-entered views refresh when the mutation settles.
+                        if (!readAfterWrite.current) await read(true, 'after-confirmed-write');
                       });
                     }}
                   >

@@ -641,6 +641,31 @@ it('never blindly resends an uncertain one-time menu, even when a reload reports
   expect(screen.queryByRole('button', { name: '確認建立並上架菜單' })).toBeNull();
 });
 
+it('restores operations after a confirmed menu receipt is followed by an older detail', async () => {
+  current = { ...current, readinessVersion: 8 };
+  await open();
+  fillMenu();
+  confirmMenu();
+  request.mockImplementation(async (path, context, input) => {
+    if (path === base) return { ...initial(), readinessVersion: 7 };
+    return response(path, context, input);
+  });
+  fireEvent.click(button('確認建立並上架菜單'));
+  await screen.findByText('已建立 1 項首次菜單。啟用前請再確認門市資料。');
+  await waitFor(() => expect(button('重新讀取門市狀態').disabled).toBe(false));
+  expect(request.mock.calls.filter(([path]) => path === base)).toHaveLength(2);
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByRole('button', { name: '確認建立並上架菜單' })).toBeNull();
+
+  fireEvent.click(screen.getByLabelText(/我確認營運資訊正確/));
+  expect(button('儲存營運設定').disabled).toBe(false);
+  fireEvent.click(button('儲存營運設定'));
+  await screen.findByText('營運設定已儲存。');
+  expect(request.mock.calls.find(([path]) => path.endsWith('/settings'))?.[2]).toMatchObject({
+    expectedVersion: 8,
+  });
+});
+
 it('keeps a confirmed menu receipt when its following detail read fails', async () => {
   await open();
   fillMenu();
