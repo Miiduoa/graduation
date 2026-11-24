@@ -36,6 +36,32 @@ function matchesNode(review: ReviewedNode, node: ReviewedNode | undefined): bool
     review.lat === node.lat && review.lng === node.lng;
 }
 
+// An audit may narrow mapped pedestrian access, never contradict it.
+// Generic one-way tags on paths/steps are ambiguous without a foot-specific tag.
+// https://wiki.openstreetmap.org/wiki/Key:oneway
+function permitsAuditedDirection(
+  tags: Record<string, string>, direction: WalkingEdge['direction'],
+): boolean {
+  if (Object.keys(tags).some(k => /^(?:foot|access|oneway)(?::[^:]+)*:conditional$/.test(k))) return false;
+  let forward = true;
+  let reverse = true;
+  const oneway = tags['oneway:foot'];
+  if (oneway === 'yes' || oneway === '1' || oneway === 'true') reverse = false;
+  else if (oneway === '-1') forward = false;
+  else if (oneway !== undefined && !['no', '0', 'false'].includes(oneway)) return false;
+  else if (oneway === undefined &&
+      ['footway', 'path', 'steps', 'pedestrian'].includes(tags.highway) &&
+      tags.oneway !== undefined && !['no', '0', 'false'].includes(tags.oneway)) return false;
+  const explicitlyOpen = ['yes', 'designated', 'permissive'];
+  for (const prefix of ['foot', 'access']) {
+    const f = tags[prefix + ':forward'];
+    const r = tags[prefix + ':backward'];
+    if (f !== undefined && !explicitlyOpen.includes(f)) forward = false;
+    if (r !== undefined && !explicitlyOpen.includes(r)) reverse = false;
+  }
+  return (direction === 'reverse' || forward) && (direction === 'forward' || reverse);
+}
+
 /** Internal bridge from parsed OSM discovery to the route solver.
  * Audits must be supplied by a trusted, separately reviewed server-side
  * catalogue; this checks identity/freshness, not the truth of an evidence URL.
@@ -83,7 +109,10 @@ export function applyCampusWalkingSegmentAudits(
         audit.wayVersion !== way.version ||
         !way.nodes.some((id, i) => id === edge.from && way.nodes[i + 1] === edge.to) ||
         !['both', 'forward', 'reverse'].includes(audit.direction) ||
-        !evidenceLink(audit.evidenceUrl)) return blocked;
+        !evidenceLink(audit.evidenceUrl) ||
+        !permitsAuditedDirection(way.tags, audit.direction) ||
+        !permitsAuditedDirection(from.tags, 'both') ||
+        !permitsAuditedDirection(to.tags, 'both')) return blocked;
 
     const reviewed = utcMillis(audit.reviewedAt);
     const expiry = utcMillis(audit.validUntil);
