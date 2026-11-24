@@ -506,7 +506,7 @@ function PersonalCalendarWorkspace({
     if (paused || mode === 'idle') return;
     const reveal = () => {
       const title = titleRef.current;
-      if (title) scrollVerticallyIntoView(title);
+      if (title && document.activeElement === title) scrollVerticallyIntoView(title);
     };
     return onVisibleViewportChange(reveal);
   }, [paused, mode, editorRevision]);
@@ -677,7 +677,16 @@ function PersonalCalendarWorkspace({
     const ticket = ++requestId.current;
     const scoped = { ...scope };
     const savedFromView = viewRevision.current;
-    const preserveMonthList = mode === 'edit' && calendarView === 'list' && !selectedDate;
+    const viewedMonth = month;
+    const originalMonth = baseline?.date.slice(0, 7);
+    const savedMonth = draft.date.slice(0, 7);
+    // Stay on the month-list being viewed unless the user rescheduled the
+    // event into a different month than both the original date and the view.
+    const preserveMonthList =
+      mode === 'edit' &&
+      calendarView === 'list' &&
+      !selectedDate &&
+      !(savedMonth !== viewedMonth && originalMonth !== undefined && savedMonth !== originalMonth);
     writing.current = true;
     setSaving(true);
     setFormError('');

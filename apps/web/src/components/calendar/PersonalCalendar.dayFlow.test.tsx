@@ -521,6 +521,66 @@ it('remeasures the focused title after the soft keyboard shrinks the visual view
   expect(titleField().getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
 });
 
+it('does not scroll the title back when another editor field has focus during a visual viewport change', async () => {
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(640);
+  const listeners = new Map<string, Set<() => void>>();
+  const viewport = {
+    height: 640,
+    width: 320,
+    offsetTop: 0,
+    offsetLeft: 0,
+    addEventListener: vi.fn((name: string, listener: () => void) => {
+      const bag = listeners.get(name) ?? new Set();
+      bag.add(listener);
+      listeners.set(name, bag);
+    }),
+    removeEventListener: vi.fn((name: string, listener: () => void) => {
+      listeners.get(name)?.delete(listener);
+    }),
+  };
+  Object.defineProperty(window, 'visualViewport', {
+    configurable: true,
+    writable: true,
+    value: viewport,
+  });
+  const stored = event('existing', '合成行程', '2026-11-14');
+  seed([stored]);
+  render(<PersonalCalendar />);
+  await ready();
+  activate(screen.getByRole('button', { name: '列表' }));
+  activate(editEvent(stored.title));
+  expect(document.activeElement).toBe(titleField());
+  const location = screen.getByLabelText('地點（選填）') as HTMLInputElement;
+  location.focus();
+  expect(document.activeElement).toBe(location);
+  vi.mocked(window.scrollBy).mockClear();
+  viewport.height = 400;
+  for (const listener of listeners.get('resize') ?? []) listener();
+  expect(window.scrollBy).not.toHaveBeenCalled();
+});
+
+it('在整月列表把行程改到另一個月後跟隨新的月份', async () => {
+  const stored = event('existing', '整月列表改期的合成行程', '2026-11-14');
+  seed([stored, event('november-only', '十一月行程', '2026-11-15')]);
+  render(<PersonalCalendar />);
+  await ready();
+  activate(screen.getByRole('button', { name: '列表' }));
+  await screen.findByRole('heading', { name: '十一月行程' });
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-11');
+  activate(editEvent(stored.title));
+  fireEvent.change(formDate(), { target: { value: '2026-12-02' } });
+  activate(screen.getByRole('button', { name: '儲存修改' }));
+  await screen.findByText('個人行程已更新。');
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-12');
+  expect(screen.getByRole('heading', { name: stored.title })).toBeTruthy();
+  await waitFor(() => expect(document.activeElement).toBe(dayHeading('2026-12-02')));
+  expect(readPersonalImports(scope()).find((row) => row.id === stored.id)).toMatchObject({
+    id: stored.id,
+    source: stored.source,
+    date: '2026-12-02',
+  });
+});
+
 it('follows a rescheduled event into its new month while preserving its identity and provenance', async () => {
   const stored = event('existing', '跨月改期的合成行程', '2026-11-14');
   seed([stored]);

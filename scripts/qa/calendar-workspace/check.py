@@ -410,19 +410,22 @@ async def run_scenario(browser, server_url, config):
         await expect(page.get_by_role('heading', name='小組討論與專題進度整理', exact=True)).to_be_visible()
         await expect(page.get_by_role('heading', name='實作報告繳交', exact=True)).to_be_visible()
         await page.get_by_role('button', name='列表', exact=True).click()
-        await expect(day_heading(page, '2028-01-18')).to_be_visible()
-        await expect(page.get_by_role('heading', name='月底整理', exact=True)).to_have_count(0)
+        await expect(page.get_by_role('list', name='個人行程列表', exact=True)).to_be_visible()
+        await expect(page.get_by_role('heading', name='小組討論與專題進度整理', exact=True)).to_be_visible()
+        await expect(page.get_by_role('heading', name='實作報告繳交', exact=True)).to_be_visible()
+        # Toolbar list clears the single-day filter, so other events in the month appear.
+        await expect(page.get_by_role('heading', name='月底整理', exact=True)).to_be_visible()
         month_control = page.get_by_role('button', name='月格', exact=True)
         await month_control.scroll_into_view_if_needed()
         await month_control.focus()
-        scroll_before_month = await page.evaluate('window.scrollY')
         await month_control.click()
+        await expect(page.get_by_role('button', name='2028-01-18', exact=True)).to_be_visible()
+        await expect(page.get_by_role('button', name='2028-01-18', exact=True)).not_to_have_attribute('aria-pressed', 'true')
+        report['checks'].append('Toolbar list clears the day filter, keeps the same month, and still shows that day\'s events plus the rest of the month')
+        # Re-select the day so later create checks still use 2028-01-18.
+        await choose_date(page, '2028-01-18')
         await expect(page.get_by_role('button', name='2028-01-18', exact=True)).to_have_attribute('aria-pressed', 'true')
-        report['checks'].append('Switching month/list preserves the chosen day and its personal events plus course deadlines')
-        # Do not click or focus the selected date first: that would let the
-        # browser repair the product's horizontal position and hide a regression.
-        await assert_selected_day_revealed(page, '2028-01-18', scroll_before_month, report)
-        report['checks'].append('Returning to month view preserves Sunday and shows the selected column as far as the viewport permits without moving focus')
+        report['checks'].append('Choosing the same day again after a cleared list filter restores the day agenda')
         await capture('day')
 
         await page.get_by_role('button', name='新增行程', exact=True).click()
