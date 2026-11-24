@@ -17,6 +17,7 @@ function mockVisibleDates() {
 }
 
 afterEach(() => {
+  Reflect.deleteProperty(window, 'visualViewport');
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -185,7 +186,8 @@ it('PageDown 跨到閏年短月保留焦點，只有選取後才改當日內容'
 it.each([
   { origin: '2028-10-27', key: 'End', expected: '2028-10-28', width: 609, next: null },
   { origin: '2028-10-23', key: 'Home', expected: '2028-10-22', width: 609, next: null },
-  { origin: '2028-09-28', key: 'PageDown', expected: '2028-10-26', width: 541, next: null },
+  { origin: '2028-09-28', key: 'PageDown', expected: '2028-10-28', width: 541, next: null },
+  { origin: '2023-10-30', key: 'PageUp', expected: '2023-09-30', width: 541, next: null },
   { origin: '2028-10-27', key: 'ArrowRight', expected: '2028-10-28', width: 609, next: '2028-10-29' },
   { origin: '2028-10-29', key: 'ArrowLeft', expected: '2028-10-28', width: 609, next: '2028-10-27' },
   { origin: '2023-09-29', key: 'ArrowRight', expected: '2023-09-30', width: 609, next: '2023-10-01' },
@@ -252,13 +254,10 @@ it.each([
   } finally {
     document.removeEventListener('focusin', scrollAtFocus);
   }
-  if (key === 'PageDown') {
-    expect(horizontalScroll).not.toHaveBeenCalled();
-  } else {
-    const expectedScroll = key === 'Home' ? 4 : 83;
-    expect(horizontalScroll).toHaveBeenCalledExactlyOnceWith(expectedScroll);
-    expect(scrollAtFocus).toHaveLastReturnedWith(expectedScroll);
-  }
+  const changesMonthByPage = key === 'PageDown' || key === 'PageUp';
+  const expectedScroll = key === 'Home' ? 4 : 612 - viewportWidth;
+  expect(horizontalScroll).toHaveBeenCalledExactlyOnceWith(expectedScroll);
+  expect(scrollAtFocus).toHaveLastReturnedWith(expectedScroll);
   expect(pageScroll).toHaveBeenCalledExactlyOnceWith({ left: 0, top: 100, behavior: 'instant' });
   expect(onDate).not.toHaveBeenCalled();
 
@@ -276,12 +275,51 @@ it.each([
     fireEvent.keyDown(focused, { key });
     expect(document.activeElement).toBe(screen.getByRole('button', { name: next }));
     expect(onDate).not.toHaveBeenCalled();
-  } else if (key === 'PageDown') {
-    const sunday = within(viewport).getByText('日', { exact: true });
-    expect(viewport.scrollLeft).toBe(0);
-    expect(sunday.getBoundingClientRect().left).toBeGreaterThanOrEqual(bounds.left);
-    expect(sunday.getBoundingClientRect().right).toBeLessThanOrEqual(bounds.right);
+  } else if (changesMonthByPage) {
+    fireEvent.click(focused);
+    expect(onDate).toHaveBeenCalledExactlyOnceWith(expected);
   }
+});
+
+it('手勢放大時七欄沒有水平溢位，End 先平移可視視窗再聚焦週六', () => {
+  const visualViewport = { offsetLeft: 120, offsetTop: 30, width: 300, height: 640 };
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: visualViewport });
+  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(616);
+  vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(616);
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this.classList.contains(styles.viewport)) return new DOMRect(40, 0, 616, 500);
+    if (this.classList.contains(styles.date)) {
+      const column = new Date(this.getAttribute('aria-label')!).getUTCDay();
+      return new DOMRect(44 + column * 88, 100, 80, 40);
+    }
+    return originalBounds.call(this);
+  });
+  render(
+    <>
+      <style>{`.${styles.viewport} { overflow-x: auto; }`}</style>
+      <MonthCalendar {...baseProps} />
+    </>,
+  );
+  const viewport = screen.getByRole('region', { name: '2028-01 月格，週日起始' });
+  const origin = focusDate('2028-01-12');
+  const target = within(viewport).getByRole('button', { name: '2028-01-15' });
+  const targetRight = target.getBoundingClientRect().right;
+  expect(targetRight).toBeGreaterThan(visualViewport.offsetLeft + visualViewport.width);
+  const pan = vi.fn(() => {
+    expect(document.activeElement).toBe(origin);
+    visualViewport.offsetLeft = targetRight - visualViewport.width;
+  });
+  Object.defineProperty(target, 'scrollIntoView', { value: pan });
+
+  fireEvent.keyDown(origin, { key: 'End' });
+
+  expect(pan).toHaveBeenCalledExactlyOnceWith({
+    block: 'nearest', inline: 'nearest', behavior: 'instant',
+  });
+  expect(viewport.scrollLeft).toBe(0);
+  expect(document.activeElement).toBe(target);
+  expect(target.getBoundingClientRect().left).toBeGreaterThanOrEqual(visualViewport.offsetLeft);
+  expect(targetRight).toBeLessThanOrEqual(visualViewport.offsetLeft + visualViewport.width);
 });
 
 it('外部月份或日期更新不搶走目前控制的焦點', () => {

@@ -252,6 +252,18 @@ async def assert_weekday_columns(page, date, report):
     return state
 
 
+async def assert_date_horizontally_visible(button):
+    state = await button.evaluate('''button => {
+      const grid = button.closest('[role="region"]');
+      const gridLeft = grid.getBoundingClientRect().left + grid.clientLeft;
+      const {offsetLeft, width} = window.visualViewport;
+      const {left, right} = button.getBoundingClientRect();
+      return {left, right, visibleLeft: Math.max(gridLeft, offsetLeft),
+        visibleRight: Math.min(gridLeft + grid.clientWidth, offsetLeft + width)};
+    }''')
+    assert state['visibleLeft'] <= state['left'] < state['right'] <= state['visibleRight'], state
+
+
 async def assert_selected_day_revealed(page, date, previous_scroll_y, report):
     state = await assert_weekday_columns(page, date, report)
     assert abs(state['windowScrollY'] - previous_scroll_y) <= 1, (
@@ -519,9 +531,33 @@ async def run_scenario(browser, server_url, config):
         await page.get_by_role('button', name='2028-09-28', exact=True).focus()
         await page.keyboard.press('PageDown')
         await expect(page.get_by_label('查看月份', exact=True)).to_have_value('2028-10')
-        await expect(page.get_by_role('button', name='2028-10-28', exact=True)).to_be_focused()
-        await assert_weekday_columns(page, '2028-10-28', report)
-        report['checks'].append('Keyboard month change onto a Saturday keeps Sunday fully visible')
+        saturday = page.get_by_role('button', name='2028-10-28', exact=True)
+        await expect(saturday).to_be_focused()
+        await assert_date_horizontally_visible(saturday)
+        await page.keyboard.press('Enter')
+        await expect(saturday).to_have_attribute('aria-pressed', 'true')
+        report['checks'].append('PageDown reveals and focuses the computed Saturday, and Enter selects it')
+        if config['name'] == 'desktop-light':
+            wednesday = page.get_by_role('button', name='2028-10-25', exact=True)
+            await wednesday.focus()
+            await wednesday.evaluate('button => button.scrollIntoView({block: "start"})')
+            cdp = await context.new_cdp_session(page)
+            try:
+                await cdp.send('Emulation.setPageScaleFactor', {'pageScaleFactor': 1.5})
+                await assert_date_horizontally_visible(wednesday)
+                assert await saturday.evaluate('''button => {
+                  const grid = button.closest('[role="region"]');
+                  const {offsetLeft, width} = window.visualViewport;
+                  return grid.scrollWidth === grid.clientWidth &&
+                    button.getBoundingClientRect().right > offsetLeft + width;
+                }'''), 'Pinch zoom must clip Saturday even though the month grid fits'
+                await page.keyboard.press('End')
+                await expect(saturday).to_be_focused()
+                await assert_date_horizontally_visible(saturday)
+                report['checks'].append('End pans the pinch-zoomed viewport before focusing Saturday')
+            finally:
+                await cdp.send('Emulation.setPageScaleFactor', {'pageScaleFactor': 1})
+                await cdp.detach()
         await set_month(page, '2028-02')
         await page.get_by_role('button', name='2028-02-29', exact=True).focus()
         await page.keyboard.press('ArrowRight')

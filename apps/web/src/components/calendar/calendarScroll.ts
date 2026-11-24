@@ -70,9 +70,7 @@ export function measureStickyInsets() {
   return { top: stickyHeaderOffset(), bottom: stickyFooterOffset() };
 }
 
-export function isHorizontallyVisible(element: HTMLElement) {
-  const rect = element.getBoundingClientRect();
-  if (rect.width <= 0) return false;
+function horizontalVisibleBounds(element: HTMLElement) {
   const visible = visibleViewport();
   let left = visible.left;
   let right = visible.right;
@@ -83,7 +81,13 @@ export function isHorizontallyVisible(element: HTMLElement) {
     left = Math.max(left, clipLeft);
     right = Math.min(right, clipLeft + ancestor.clientWidth);
   }
-  return rect.left >= left && rect.right <= right;
+  return { left, right };
+}
+
+export function isHorizontallyVisible(element: HTMLElement) {
+  const rect = element.getBoundingClientRect();
+  const { left, right } = horizontalVisibleBounds(element);
+  return rect.width > 0 && rect.left >= left && rect.right <= right;
 }
 
 export function verticalVisibleBounds(insets: ReturnType<typeof measureStickyInsets>) {
@@ -92,21 +96,23 @@ export function verticalVisibleBounds(insets: ReturnType<typeof measureStickyIns
 }
 
 export function scrollHorizontallyIntoView(element: HTMLElement, viewport: HTMLElement) {
-  const maxScroll = viewport.scrollWidth - viewport.clientWidth;
-  if (maxScroll <= 0) return;
-  const visible = visibleViewport();
-  const viewportLeft = viewport.getBoundingClientRect().left + viewport.clientLeft;
-  const left = Math.max(visible.left, viewportLeft);
-  const right = Math.min(visible.right, viewportLeft + viewport.clientWidth);
   const rect = element.getBoundingClientRect();
-  if (right <= left || rect.width <= 0) return;
+  if (rect.width <= 0) return false;
+  const { left, right } = horizontalVisibleBounds(element);
+  const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+  if (right > left && maxScroll > 0) {
+    const distance =
+      rect.left < left || rect.width > right - left
+        ? Math.floor(rect.left - left)
+        : Math.max(0, Math.ceil(rect.right - right));
+    const target = Math.max(0, Math.min(maxScroll, viewport.scrollLeft + distance));
+    if (target !== viewport.scrollLeft) viewport.scrollLeft = target;
+  }
 
-  const distance =
-    rect.left < left || rect.width > right - left
-      ? Math.floor(rect.left - left)
-      : Math.max(0, Math.ceil(rect.right - right));
-  const target = Math.max(0, Math.min(maxScroll, viewport.scrollLeft + distance));
-  if (target !== viewport.scrollLeft) viewport.scrollLeft = target;
+  if (isHorizontallyVisible(element)) return true;
+  // At pinch zoom the browser can pan the visual viewport even when the grid fits.
+  element.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+  return isHorizontallyVisible(element);
 }
 
 export function scrollVerticallyIntoView(
