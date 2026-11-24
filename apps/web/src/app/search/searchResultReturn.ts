@@ -47,9 +47,12 @@ function currentUrl() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
 
-function appUrl(href: string) {
+function matchesResultDestination(href: string, sourceHash: string) {
   const url = new URL(href, window.location.origin);
-  return `${url.pathname}${url.search}${url.hash}`;
+  const { pathname, search, hash } = window.location;
+  if (url.pathname !== pathname || url.search !== search) return false;
+  // Next Link can carry the current fragment into a target without one.
+  return url.hash === hash || (!url.href.includes('#') && hash === sourceHash);
 }
 
 function readEntryKey(state: unknown) {
@@ -72,13 +75,18 @@ function onHistoryPush(
   searchEntry: ReturnType<typeof readSearchEntry>,
   entryKey: string | null,
   routerCommit: boolean,
+  sourceHash: string,
 ) {
   const navigationToken = routerCommit ? consumeSearchResultNavigation() : null;
   // Only a traversal between the linked entries can start another restore.
   publishReturn(null, null);
   if (searchEntry) {
     const { saved, entries } = searchEntry;
-    if (routerCommit && saved.token === navigationToken && appUrl(saved.href) === currentUrl()) {
+    if (
+      routerCommit &&
+      saved.token === navigationToken &&
+      matchesResultDestination(saved.href, sourceHash)
+    ) {
       entries.destinationKey = entryKey;
     } else if (window.location.pathname !== '/search') {
       entries.destinationKey = null;
@@ -127,6 +135,7 @@ function installHistoryTracking() {
       const searchEntry = readSearchEntry(previousState);
       const previousPath = window.location.pathname;
       const previousHref = window.location.href;
+      const previousHash = window.location.hash;
       const push = method === 'pushState';
       const routerCommit = push && isRouterHistoryWrite(data, APP_ROUTER_HISTORY_PUSH);
       const changesPage = url != null && new URL(url, window.location.href).pathname !== previousPath;
@@ -174,7 +183,7 @@ function installHistoryTracking() {
             destinationKey: null,
           });
         }
-        onHistoryPush(searchEntry, trackedEntryKey, routerCommit);
+        onHistoryPush(searchEntry, trackedEntryKey, routerCommit, previousHash);
       } else if (!replacesPage && searchEntry && !writesReturn) {
         // Bind the new URL only after the browser accepts the same-page replacement.
         searchEntry.entries.searchUrl = currentUrl();

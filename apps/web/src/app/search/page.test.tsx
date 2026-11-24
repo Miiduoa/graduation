@@ -1212,6 +1212,35 @@ describe('continuing a search after opening a service', () => {
     expect(window.history.state).toEqual(entry);
   });
 
+  it.each([
+    ['#results', true],
+    ['#unrelated', false],
+  ])('restores focus only for the inherited source fragment on a commit with %s', (hash, restoresFocus) => {
+    const source = `${librarySearch}#results`;
+    move(source);
+    const view = renderAfterFrame();
+    const link = screen.getByRole('link', { name: /^圖書館/ });
+    const target = new URL(link.href);
+    expect(target.hash).toBe('');
+    fireEvent.click(link);
+    const entry = window.history.state;
+    view.unmount();
+
+    expect(window.location.hash).toBe('#results');
+    target.hash = hash;
+    commitNavigation(target.href);
+    expect(window.location.hash).toBe(hash);
+    expect(window.history.state.__campusSearchHistoryEntry).toEqual(expect.any(String));
+    expect(window.history.state.__campusSearchHistoryEntry).not.toBe(entry.__campusSearchHistoryEntry);
+
+    traverse(source, entry);
+    expect(window.location.hash).toBe('#results');
+    expect(window.history.state).toEqual(entry);
+    renderAfterFrame();
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+    expect(document.activeElement === screen.getByRole('link', { name: /^圖書館/ })).toBe(restoresFocus);
+  });
+
   it('Forward and Back can resume the same entry again without replaying it on a fresh visit', async () => {
     const entry = leaveLibrary();
     await go(-1);
