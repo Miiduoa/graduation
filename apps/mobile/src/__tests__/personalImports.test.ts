@@ -111,6 +111,13 @@ test.each([
     }
     return entries;
   });
+  const getItem = jest.mocked(AsyncStorage.getItem);
+  const nativeGetItem = getItem.getMockImplementation()!;
+  getItem.mockImplementation(async (storageKey) => {
+    const value = await nativeGetItem(storageKey);
+    if (value !== null && byteLength(value) > limit) throw new Error(message);
+    return value;
+  });
   try {
     expect(await loadPersonalImports(scope)).toEqual(ledger);
     await deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
@@ -118,6 +125,7 @@ test.each([
     expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
   } finally {
     multiGet.mockImplementation(nativeMultiGet);
+    getItem.mockImplementation(nativeGetItem);
   }
 });
 
@@ -127,7 +135,7 @@ test('reads the primary ledger when the checkpoint cannot be parsed', async () =
   expect(await loadPersonalImports(scope)).toEqual(ledger);
 });
 
-test('a temporary checkpoint read failure after restart blocks reads and guarded writes until recovery', async () => {
+async function failedDeletionRollback() {
   const key = personalImportStorageKey(scope);
   const checkpoint = key + ':checkpoint';
   const { ledger } = await appendPersonalImports(scope, [row('original')]);
@@ -154,10 +162,21 @@ test('a temporary checkpoint read failure after restart blocks reads and guarded
   const deletedRaw = (await AsyncStorage.getItem(key))!;
   expect(JSON.parse(deletedRaw).records).toEqual([]);
   expect(await AsyncStorage.getItem(checkpoint)).toBe(originalRaw);
+  return { key, checkpoint, ledger, originalRaw, deletedRaw };
+}
 
+const androidRowLimitError = () => new Error('Row too big to fit into CursorWindow');
+
+test.each(['batch', 'single key'])('a temporary checkpoint read failure (%s) after restart blocks reads and guarded writes until recovery', async (phase) => {
+  const { key, checkpoint, ledger, originalRaw, deletedRaw } = await failedDeletionRollback();
   const failure = new Error('disk I/O error');
   const multiGet = jest.mocked(AsyncStorage.multiGet);
-  multiGet.mockRejectedValueOnce(failure).mockRejectedValueOnce(failure);
+  if (phase === 'batch') {
+    multiGet.mockRejectedValueOnce(failure).mockRejectedValueOnce(failure);
+  } else {
+    multiGet.mockRejectedValueOnce(androidRowLimitError()).mockRejectedValueOnce(androidRowLimitError());
+    jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(failure).mockRejectedValueOnce(failure);
+  }
   const guard = { canContinue: () => true };
   await expect(loadPersonalImports(scope)).rejects.toBe(failure);
   await expect(appendPersonalImports(scope, [row('new', '統計')], guard)).rejects.toBe(failure);
@@ -168,6 +187,62 @@ test('a temporary checkpoint read failure after restart blocks reads and guarded
   await appendPersonalImports(scope, [row('new', '統計')], guard);
   expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['微積分', '統計']);
   expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
+});
+
+test('a coalesced Android read failure from another key preserves a readable checkpoint after restart', async () => {
+  const { key, checkpoint, ledger, originalRaw, deletedRaw } = await failedDeletionRollback();
+  const otherKey = personalImportStorageKey({ ...scope, owner: 'nuni:account-b' });
+  const multiGet = jest.mocked(AsyncStorage.multiGet);
+  const nativeMultiGet = multiGet.getMockImplementation()!;
+  const getItem = jest.mocked(AsyncStorage.getItem);
+  const failure = androidRowLimitError();
+  const failedBatch = jest.fn();
+  let batch: { keys: Set<string>; done: Promise<void> } | undefined;
+  multiGet.mockImplementation(async (keys) => {
+    if (!batch) {
+      const batchKeys = new Set<string>();
+      const done = new Promise<void>((resolve, reject) => {
+        setTimeout(() => {
+          batch = undefined;
+          if (batchKeys.has(otherKey)) {
+            failedBatch([...batchKeys]);
+            reject(failure);
+          } else {
+            resolve();
+          }
+        }, 0);
+      });
+      batch = { keys: batchKeys, done };
+    }
+    const { keys: batchKeys, done } = batch;
+    for (const storageKey of keys) batchKeys.add(storageKey);
+    await done;
+    return nativeMultiGet(keys);
+  });
+
+  try {
+    getItem.mockClear();
+    const read = loadPersonalImports(scope);
+    const otherRead = expect(AsyncStorage.multiGet([otherKey])).rejects.toBe(failure);
+    await expect(read).resolves.toEqual(ledger);
+    await otherRead;
+    expect(failedBatch).toHaveBeenCalledWith([checkpoint, otherKey]);
+    expect(getItem).not.toHaveBeenCalledWith(key);
+    expect(await AsyncStorage.getItem(key)).toBe(deletedRaw);
+    expect(await AsyncStorage.getItem(checkpoint)).toBe(originalRaw);
+
+    getItem.mockClear();
+    const write = appendPersonalImports(scope, [row('new', '統計')], { canContinue: () => true });
+    const concurrentRead = expect(AsyncStorage.multiGet([otherKey])).rejects.toBe(failure);
+    await write;
+    await concurrentRead;
+    expect(failedBatch).toHaveBeenLastCalledWith([otherKey, checkpoint]);
+    expect(getItem).not.toHaveBeenCalledWith(key);
+    expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['微積分', '統計']);
+    expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
+  } finally {
+    multiGet.mockImplementation(nativeMultiGet);
+  }
 });
 
 const creditStates = [

@@ -37,6 +37,14 @@ const pendingRestorations = new Map<string, Recovery>();
 let writeSequence = 0;
 const recoveryKey = (key: string) => `${key}:checkpoint`;
 
+function isStorageRowTooLarge(error: unknown): boolean {
+  // Android AsyncStorage forwards the SQLite exception message without its class.
+  return (
+    error instanceof Error &&
+    /^(?:SQLiteBlobTooBigException\b|Row too big to fit into CursorWindow\b)/.test(error.message)
+  );
+}
+
 async function readRecovery(
   key: string,
   scope: PersonalImportScope,
@@ -44,19 +52,21 @@ async function readRecovery(
   const pending = pendingRestorations.get(key);
   if (pending) return { ...pending, ledger: parseLedger(pending.raw, scope) };
 
+  const checkpoint = recoveryKey(key);
   let encoded: string | null;
   try {
-    [[, encoded]] = await AsyncStorage.multiGet([recoveryKey(key)]);
+    [[, encoded]] = await AsyncStorage.multiGet([checkpoint]);
   } catch (error) {
-    // Android AsyncStorage forwards the SQLite exception message without its class.
-    // A legacy wrapped ledger can exceed the row limit even when the primary fits.
-    if (
-      error instanceof Error &&
-      /^(?:SQLiteBlobTooBigException\b|Row too big to fit into CursorWindow\b)/.test(error.message)
-    ) {
-      return null;
+    if (!isStorageRowTooLarge(error)) throw error;
+    // JS multiGet coalesces requests and can report another key's error.
+    // getItem issues its own native read, so only its error identifies this row.
+    try {
+      encoded = await AsyncStorage.getItem(checkpoint);
+    } catch (checkpointError) {
+      // A legacy wrapped ledger can exceed the row limit even when the primary fits.
+      if (isStorageRowTooLarge(checkpointError)) return null;
+      throw checkpointError;
     }
-    throw error;
   }
   if (encoded === null) return null;
 
