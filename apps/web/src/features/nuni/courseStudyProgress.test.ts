@@ -139,7 +139,7 @@ describe('portable study progress', () => {
     expect(() => parseCourseStudyProgress(serializeCourseStudyProgress(data()), expected as CourseStudyProgressScope)).toThrow();
   });
 
-  it.each([0, 3, -1, 1.5, '1', '2', null])('rejects unsupported versions without inventing a migration (%s)', (version) => {
+  it.each([0, 4, -1, 1.5, '1', '2', null])('rejects unsupported versions without inventing a migration (%s)', (version) => {
     expect(() => parseCourseStudyProgress(changed((value) => Reflect.set(value, 'version', version)), scope)).toThrow(/版本/);
   });
 
@@ -292,12 +292,73 @@ describe('source and passage integrity', () => {
 });
 
 describe('lesson and draft validation', () => {
+  it.each(['主\u200e鍵', '\ud83d', '\u200b'])('round-trips legacy reading citations (%#) with notes and drafts', (quote) => {
+    for (const version of [1, 2]) {
+      const legacy = envelope();
+      legacy.version = version;
+      legacy.source.sections[0].text += quote;
+      legacy.passageLengths[0][0] += quote.length;
+      const lesson = mode(legacy).lessons[0];
+      lesson.response.sourceQuote = quote;
+      lesson.attempt = '保留試答草稿  ';
+      if (version === 2) {
+        lesson.response.steps = [
+          { title: '核對主鍵', explanation: '確認主鍵的用途。', sourceQuote: response.sourceQuote },
+          { title: '再讀原文', explanation: '比對教材文字。', sourceQuote: quote },
+        ];
+      }
+
+      const restored = parseCourseStudyProgress(JSON.stringify(legacy), scope);
+      expect(restored.passages).toEqual(legacy.passages);
+      expect(parseCourseStudyProgress(serializeCourseStudyProgress(restored), scope)).toEqual(restored);
+    }
+  });
+
+  it('round-trips a legacy zero-width reveal and preserves the rest of the reading backup', () => {
+    // The base writer used attempt.trim(), so this was a valid v2 backup.
+    const legacy = envelope();
+    mode(legacy).lessons[0].attempt = '\u200b';
+    mode(legacy).lessons[0].answerVisible = true;
+    expect(mode(legacy).lessons[0].attempt.trim()).toBeTruthy();
+    const restored = parseCourseStudyProgress(JSON.stringify(legacy), scope);
+    const expected = data();
+    Object.assign(expected.passages['0:0'].modes.understand.lessons[0], {
+      attempt: '\u200b', answerVisible: true,
+    });
+    expect(restored).toEqual(expected);
+    expect(parseCourseStudyProgress(serializeCourseStudyProgress(restored), scope)).toEqual(expected);
+  });
+
+  it('preserves legacy reveals in v1/v2 when trim accepts an invisible draft', () => {
+    for (const version of [1, 2]) {
+      for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f', '\ufff9', '\ufffa', '\ufffb']) {
+        const saved = envelope();
+        saved.version = version;
+        mode(saved).lessons[0].attempt = invisible;
+        mode(saved).lessons[0].answerVisible = true;
+        const restored = parseCourseStudyProgress(JSON.stringify(saved), scope);
+        expect(restored.passages['0:0'].modes.understand.lessons[0]).toMatchObject({
+          attempt: invisible, answerVisible: true,
+        });
+      }
+      for (const visible of ['主鍵', 'x²+y²', '👩‍💻', 'e\u0301', '⠃']) {
+        const saved = envelope();
+        saved.version = version;
+        mode(saved).lessons[0].attempt = visible;
+        mode(saved).lessons[0].answerVisible = true;
+        const restored = parseCourseStudyProgress(JSON.stringify(saved), scope);
+        expect(restored.passages['0:0'].modes.understand.lessons[0]).toMatchObject({
+          attempt: visible, answerVisible: true,
+        });
+      }
+    }
+  });
+
   it.each([
     (value: Envelope) => { value.passages['0:0'].note = '字'.repeat(2001); },
     (value: Envelope) => { mode(value).question = '字'.repeat(501); },
     (value: Envelope) => { mode(value).lessons[0].question = '字'.repeat(501); },
     (value: Envelope) => { mode(value).lessons[0].attempt = '字'.repeat(2001); },
-    (value: Envelope) => { mode(value).lessons[0].answerVisible = true; },
     (value: Envelope) => { Reflect.set(value.passages['0:0'], 'needsReview', 'yes'); },
     (value: Envelope) => { Reflect.deleteProperty(value.passages['0:0'].modes, 'practice'); },
     (value: Envelope) => { Reflect.set(value.passages['0:0'].modes, 'other', emptyStudyPassage().modes.understand); },

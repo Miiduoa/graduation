@@ -128,11 +128,12 @@ async def clears(page):
 
 
 async def assert_native_tab_boundary(page, key, expected):
-    # Native dialog traversal may visit browser chrome at a document boundary.
+    # Native modal focus may pass through browser chrome and then the dialog
+    # element itself before reaching the first/last descendant control.
     # https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation
-    # Accept that transition only when the document lost focus and BODY is its
-    # active element. A second key must return to the exact dialog boundary.
-    for step in (1, 2):
+    # Require the exact expected endpoint within four key presses; never accept
+    # focus on an arbitrary page element or silently skip a lost modal state.
+    for step in (1, 2, 3, 4):
         await page.keyboard.press(key)
         state = await expected.evaluate("""expected => {
           const active = document.activeElement;
@@ -143,6 +144,7 @@ async def assert_native_tab_boundary(page, key, expected):
             activeName: active?.getAttribute('aria-label') || active?.textContent?.trim().slice(0, 80),
             insideDialog: Boolean(dialog?.contains(active)),
             expectedActive: active === expected,
+            dialogRootFocused: active === dialog,
             nativeModal: Boolean(dialog?.matches(':modal')),
           };
         }""")
@@ -151,8 +153,11 @@ async def assert_native_tab_boundary(page, key, expected):
         assert state["nativeModal"], f"Dialog stopped being modal during {key}: {state}"
         if state["documentFocused"] and state["expectedActive"] and state["insideDialog"]:
             return
-        assert step == 1 and not state["documentFocused"] and state["activeTag"] == "BODY", (
-            f"{key} did not reach the expected dialog control or an unfocused browser boundary: {state}"
+        browser_boundary = not state["documentFocused"] and state["activeTag"] == "BODY"
+        modal_root_boundary = (state["documentFocused"] and state["dialogRootFocused"]
+                               and state["insideDialog"] and state["activeTag"] == "DIALOG")
+        assert step < 4 and (browser_boundary or modal_root_boundary), (
+            f"{key} did not reach the expected dialog control through safe native boundaries: {state}"
         )
 
 
@@ -651,7 +656,27 @@ async def desktop(page, requests, resources):
     graphics = await assert_webgl(page)
     layout = await assert_layout(page)
     await page.screenshot(path=str(OUT / "desktop-overview.png"))
+    search = dialog.get_by_role("searchbox", name="搜尋導覽地點", exact=True)
+    clear_search = dialog.get_by_role("button", name="清除地點搜尋", exact=True)
+    await expect(clear_search).to_be_disabled()
+    await search.fill(LIBRARY["name"])
+    await expect(selector_for(page)).to_have_value("")
+    await expect(selector_for(page).locator(f'option[value="{LIBRARY["id"]}"]')).to_have_count(1)
+    await expect(selector_for(page).locator(f'option[value="{ZHUGU["id"]}"]')).to_have_count(0)
+    await expect(dialog.get_by_role("link", name="開啟步行導航", exact=True)).to_have_count(0)
     await selector_for(page).select_option(LIBRARY["id"])
+    await search.fill("不存在的合成測試地點")
+    await expect(dialog.get_by_text("沒有符合的地點，請調整關鍵字。", exact=False)).to_be_visible()
+    await expect(selector_for(page)).to_have_value(LIBRARY["id"])
+    await assert_navigation(page)
+    await expect(clear_search).to_be_enabled()
+    await clear_search.click()
+    await expect(search).to_have_value("")
+    await expect(search).to_be_focused()
+    await expect(clear_search).to_be_disabled()
+    await expect(selector_for(page).locator(f'option[value="{ZHUGU["id"]}"]')).to_have_count(1)
+    await expect(selector_for(page)).to_have_value(LIBRARY["id"])
+    await assert_navigation(page)
     await assert_layout(page)
     last = dialog.get_by_role("link", name="查看地點資料來源 ↗", exact=True)
     await last.focus()

@@ -163,6 +163,16 @@
 .sourceValueList li { min-width: 0; }
 .sourceValueRow { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
 .sourceValueList meter { display: block; width: 100%; height: 18px; margin-top: 4px; }
+.sourceLineJump {
+  display: inline-block; box-sizing: border-box; min-width: 0; max-width: 100%;
+  white-space: normal; overflow-wrap: anywhere; min-height: 44px; margin: 2px 0;
+  padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 8px;
+  background: var(--surface); color: var(--text); font: inherit; font-size: 13px;
+  cursor: pointer; text-align: start;
+}
+.sourceLineJump:focus-visible, .sourceTable tbody tr:focus {
+  outline: 2px solid var(--brand); outline-offset: 2px;
+}
 
 
 /* Selectable source lines work with long-press even without clipboard permission. */
@@ -171,6 +181,9 @@
 .sourceTableSelection summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
 .sourceTableSelection textarea { display: block; width: 100%; min-width: 0; box-sizing: border-box; padding: 10px; resize: vertical; font: 16px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); white-space: pre; overflow: auto; }
 .sourceTableSelection textarea:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.sourceTableSelection .sourceExcerptWithHeader {
+  min-width: 0; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere;
+}
 
 .sourceTableSelection button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 14px; margin: 6px 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; cursor: pointer; }
 .sourceTableSelection button:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
