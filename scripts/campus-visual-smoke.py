@@ -1252,31 +1252,45 @@ async def check_career_directory_return(page):
     )).to_have_count(0)
     breadcrumb = page.get_by_role('navigation', name='目前位置', exact=True)
     await expect(breadcrumb).to_have_count(1)
-    back = breadcrumb.get_by_role('link', name='生活', exact=True)
+    filtered_scope = {**scope, 'group': ['resources'], 'q': ['校內工讀']}
+    back = breadcrumb.get_by_role('link', name='返回生活目錄', exact=True)
     await expect(back).to_have_count(1)
     await expect(back).to_be_visible()
     await expect(page.get_by_role('navigation', name='麵包屑', exact=True)).to_have_count(0)
     await expect(page.locator('main a[href="/life"]')).to_have_count(0)
     back_destination = urlparse(await back.get_attribute('href'))
     assert back_destination.path == '/life'
-    assert parse_qs(back_destination.query) == scope
+    assert parse_qs(back_destination.query) == filtered_scope
     await no_overflow(page)
     await page.screenshot(
         path=str(OUT / 'career-from-life-mobile.png'), full_page=True, animations='disabled',
     )
 
-    await page.go_back(wait_until='load')
-    await expect(search).to_have_value('校內工讀')
-    await expect(resources).to_have_attribute('aria-pressed', 'true')
-    restored = urlparse(page.url)
-    assert restored.path == '/life'
-    assert parse_qs(restored.query) == {
-        **scope, 'group': ['resources'], 'q': ['校內工讀'],
-    }
-    await expect(results.get_by_role('link')).to_have_count(1)
-    await expect(career).to_be_visible()
-    await check_primary_navigation(page, '生活')
-    await no_overflow(page)
+    for action in ('breadcrumb', 'browser'):
+        if action == 'breadcrumb':
+            await back.focus()
+            await back.press('Enter')
+        else:
+            await career.press('Enter')
+            await expect(back).to_be_visible()
+            await page.go_back(wait_until='load')
+        await expect(search).to_have_value('校內工讀')
+        await expect(resources).to_have_attribute('aria-pressed', 'true')
+        restored = urlparse(page.url)
+        assert restored.path == '/life'
+        assert parse_qs(restored.query) == filtered_scope
+        await expect(results.get_by_role('link')).to_have_count(1)
+        await expect(career).to_be_focused()
+        await check_primary_navigation(page, '生活')
+        await no_overflow(page)
+
+    # A shared career link belongs to the campus, without a previous visitor's filters.
+    await goto_path(page, destination.geturl() + '&q=old-search&source=shared')
+    direct = breadcrumb.get_by_role('link', name='生活', exact=True)
+    await expect(direct).to_be_visible()
+    direct_destination = urlparse(await direct.get_attribute('href'))
+    assert direct_destination.path == '/life'
+    assert parse_qs(direct_destination.query) == scope
 
 
 async def check_home_personalization(page):
@@ -1680,7 +1694,7 @@ async def main():
             await check_directory_child_return(page)
             results.append('returning to a directory child restores its disclosure and focus only in the original history entry')
             await check_career_directory_return(page)
-            results.append('career opens from campus resources with scoped life navigation and browser Back restores work-study search')
+            results.append('career breadcrumb and browser Back restore the scoped work-study result and keyboard focus; a shared career link returns to its campus')
             for preference in ['nthu', 'all']:
                 await check_deep_link_login_scope(page, preference)
                 results.append(f'PU deep-link Header login overrides saved {preference} browsing preference without copying auth query to the outer URL')
