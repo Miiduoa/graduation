@@ -25,7 +25,8 @@ function nameOf(error: unknown): string {
 
 const NON_RETRYABLE_STATUSES = new Set([400, 401, 403, 404, 409, 413, 422, 429]);
 const RETRYABLE_STATUSES = new Set([0, 500, 502, 503, 504]);
-const NON_RETRYABLE_CODE = /^(INVALID_|SIGN_IN_|ORIGIN_|SESSION_|FORBIDDEN|AUTH_|RATE_|METHOD_|CONFIGURATION_)/;
+const NON_RETRYABLE_CODE =
+  /^(INVALID_|SIGN_IN_|ORIGIN_|SESSION_|FORBIDDEN|AUTH_|RATE_|METHOD_|CONFIGURATION_)/;
 
 export function isWakeRetryableFailure(error: unknown, callerAborted = false): boolean {
   if (callerAborted || error == null) return false;
@@ -118,7 +119,11 @@ export async function withWakeRetry<T>(
   try {
     return await attempt();
   } catch (error) {
-    if (options.retry === false || options.externalSignal?.aborted || !isWakeRetryableFailure(error))
+    if (
+      options.retry === false ||
+      options.externalSignal?.aborted ||
+      !isWakeRetryableFailure(error)
+    )
       throw error;
     return await attempt();
   }

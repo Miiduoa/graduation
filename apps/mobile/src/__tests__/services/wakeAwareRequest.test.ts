@@ -1,7 +1,4 @@
-import {
-  WAKE_REQUEST_TIMEOUT_MS,
-  withWakeRetry,
-} from '@campus/shared/src/wakeAwareRequest';
+import { WAKE_REQUEST_TIMEOUT_MS, withWakeRetry } from '@campus/shared/src/wakeAwareRequest';
 
 describe('shared wake request lifecycle in the mobile test runtime', () => {
   const methods = ['any', 'timeout'] as const;

@@ -42,7 +42,11 @@ it('does not retry a caller abort or a 4xx failure', async () => {
 
 async function withoutNativeSignalAny(run: () => Promise<void>): Promise<void> {
   const descriptor = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
-  Object.defineProperty(AbortSignal, 'any', { configurable: true, writable: true, value: undefined });
+  Object.defineProperty(AbortSignal, 'any', {
+    configurable: true,
+    writable: true,
+    value: undefined,
+  });
   try {
     await run();
   } finally {
@@ -61,9 +65,13 @@ it('releases legacy abort listeners after every attempt, including a retry', asy
       .mockRejectedValueOnce(new NuniError(503, 'SERVICE_UNAVAILABLE'))
       .mockResolvedValueOnce('ready');
     try {
-      await expect(withWakeRetry(run, { externalSignal: controller.signal })).resolves.toBe('ready');
+      await expect(withWakeRetry(run, { externalSignal: controller.signal })).resolves.toBe(
+        'ready',
+      );
       expect(run).toHaveBeenCalledTimes(2);
-      const listeners = add.mock.calls.filter(([type]) => type === 'abort').map(([, listener]) => listener);
+      const listeners = add.mock.calls
+        .filter(([type]) => type === 'abort')
+        .map(([, listener]) => listener);
       expect(listeners).toHaveLength(2);
       for (const listener of listeners) {
         expect(remove).toHaveBeenCalledWith('abort', listener);
@@ -81,10 +89,13 @@ it('preserves the caller abort reason and removes the legacy listener without re
     const controller = new AbortController();
     const remove = vi.spyOn(controller.signal, 'removeEventListener');
     const reason = new Error('navigation cancelled');
-    const run = vi.fn((signal: AbortSignal) => new Promise<never>((_, reject) => {
-      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-      controller.abort(reason);
-    }));
+    const run = vi.fn(
+      (signal: AbortSignal) =>
+        new Promise<never>((_, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+          controller.abort(reason);
+        }),
+    );
     try {
       await expect(withWakeRetry(run, { externalSignal: controller.signal })).rejects.toBe(reason);
       expect(run).toHaveBeenCalledTimes(1);
@@ -99,9 +110,13 @@ it('releases legacy listeners after a non-retryable failure', async () => {
   await withoutNativeSignalAny(async () => {
     const controller = new AbortController();
     const remove = vi.spyOn(controller.signal, 'removeEventListener');
-    const run = vi.fn(async () => { throw new NuniError(403, 'FORBIDDEN'); });
+    const run = vi.fn(async () => {
+      throw new NuniError(403, 'FORBIDDEN');
+    });
     try {
-      await expect(withWakeRetry(run, { externalSignal: controller.signal })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(withWakeRetry(run, { externalSignal: controller.signal })).rejects.toMatchObject(
+        { code: 'FORBIDDEN' },
+      );
       expect(run).toHaveBeenCalledTimes(1);
       expect(remove).toHaveBeenCalledTimes(1);
     } finally {
