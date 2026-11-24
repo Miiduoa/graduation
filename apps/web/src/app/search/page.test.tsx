@@ -1773,6 +1773,20 @@ describe('continuing a search after opening a service', () => {
     expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
   });
 
+  it('does not pass cached Next fields from a native Map to an application push', () => {
+    renderAfterFrame();
+    const payload = new Map([['view', 'compact']]);
+    act(() => window.history.replaceState(payload, ''));
+    expect(window.history.state).toBe(payload);
+
+    act(() => window.history.pushState({}, '', '?q=公車'));
+    expect(new URLSearchParams(window.location.search).get('q')).toBe('公車');
+    // The real Next wrapper uses __NA to bypass URL synchronization.
+    expect(window.history.state).toEqual({
+      __campusSearchHistoryEntry: expect.any(String),
+    });
+  });
+
   it.each(['map', 'array'] as const)(
     'preserves the same entry’s return through mounted campus replacements with a fresh %s',
     async (shape) => {

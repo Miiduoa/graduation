@@ -175,9 +175,12 @@ function installHistoryTracking() {
         const current = state as Record<string, unknown> | null | undefined;
         if (push || replacesPage || previousKey || hasSearchHistoryFields(current) || writesReturn) {
           const fields = cloned && current ? current : { ...current };
-          // Next cannot copy its router tree from a serialized Map. Restore it
-          // before the snapshot is written so Back can traverse within this document.
-          if (nativeState?.value === previousState) Object.assign(fields, nextFields);
+          // Restore the router tree when adding a snapshot to the same native
+          // entry so Back stays in this document. Application pushes must reach
+          // Next without an injected __NA so it can synchronize the new URL.
+          if (!push && writesReturn && nativeState?.value === previousState) {
+            Object.assign(fields, nextFields);
+          }
           const saved = replacesPage || (push && !carriesReturn)
             ? null
             : writesReturn && !push

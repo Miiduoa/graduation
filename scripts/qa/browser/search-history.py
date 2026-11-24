@@ -78,6 +78,27 @@ async def check_search_history(origin):
             assert await page.evaluate("""() =>
               history.state.__campusSearchHistoryPayload?.get('view')
             """) == {'mode': 'compact'}
+
+            # Keep the same campus scope when the push removes the campus query.
+            await page.goto(f'{origin}/library?campus=all')
+            await page.wait_for_function("() => history.state?.__NA === true")
+            await page.evaluate("() => { window.__pushBeforeSearch = history.pushState; }")
+            await page.get_by_role('link', name='搜尋服務與語音輸入').click()
+            await page.wait_for_url('**/search?campus=all')
+            await expect(field).to_be_visible()
+            await page.wait_for_function("""() =>
+              window.__pushBeforeSearch && history.pushState !== window.__pushBeforeSearch
+            """)
+            await page.evaluate("""() => {
+              history.replaceState(new Map([['view', 'compact']]), '');
+              if (!(history.state instanceof Map)) throw new Error('Expected a native Map entry');
+              history.pushState({}, '', '?q=公車');
+            }""")
+            await expect(page).to_have_url(f'{origin}/search?q=%E5%85%AC%E8%BB%8A')
+            await expect(field).to_have_value('公車')
+            await expect(results.get_by_role('link').filter(
+                has=page.get_by_role('heading', name='公車', exact=True),
+            )).to_be_visible()
         finally:
             await browser.close()
 
