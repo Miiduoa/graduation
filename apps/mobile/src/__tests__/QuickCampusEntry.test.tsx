@@ -208,3 +208,69 @@ test.each([['alice', 'pu', true], ['bob', 'pu', false], ['alice', 'other', false
     expect(view.queryByLabelText('詢問手機助理，在哪間教室？')).toBeNull();
   },
 );
+
+test.each([null, 'alice'])('searches locally when the account has no selected school (%s)', (uid) => {
+  const open = jest.fn();
+  const view = render(<QuickCampusEntry uid={uid} schoolId={null} onOpen={open} />);
+  const input = view.getByLabelText('說出或輸入想做的事');
+  expect(input.props.returnKeyType).toBe('search');
+  fireEvent.changeText(input, 'library catalog');
+  fireEvent(input, 'submitEditing');
+  expect(view.getByText('找到 1 個服務，請選擇要開啟的項目。')).toBeTruthy();
+  expect(open).not.toHaveBeenCalled();
+  expect(askCampusAssistant).not.toHaveBeenCalled();
+  expect(interpret).not.toHaveBeenCalled();
+  fireEvent.press(view.getByLabelText('前往圖書館'));
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ route: 'Library' }));
+  fireEvent.changeText(input, 'business plan');
+  expect(view.queryByText('找到 1 個服務，請選擇要開啟的項目。')).toBeNull();
+  fireEvent.press(view.getByLabelText('查看搜尋結果'));
+  expect(view.getByText('沒有相符的服務，試試課表、公車或圖書館。')).toBeTruthy();
+});
+
+test.each([
+  ['bob', 'pu'],
+  ['alice', 'other'],
+  [null, null],
+] as const)('discards previous-scope conversation and aborts a pending answer (%s/%s)', async (uid, schoolId) => {
+  const ask = jest.mocked(askCampusAssistant);
+  ask.mockResolvedValueOnce({ source: 'device', content: '上一個身分的回答', hasActions: false });
+  let finish!: (value: Awaited<ReturnType<typeof askCampusAssistant>>) => void;
+  ask.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const open = jest.fn();
+  const view = render(<QuickCampusEntry uid="alice" schoolId="pu" onOpen={open} />);
+  let input = view.getByLabelText('說出或輸入想做的事');
+  fireEvent.changeText(input, '第一個問題');
+  await act(async () => fireEvent(input, 'submitEditing'));
+  expect(view.getByText('上一個身分的回答')).toBeTruthy();
+  fireEvent.changeText(input, '私人草稿');
+  fireEvent(input, 'submitEditing');
+  const signal = ask.mock.lastCall![0].signal;
+  view.rerender(<QuickCampusEntry uid={uid} schoolId={schoolId} onOpen={open} />);
+  expect(signal?.aborted).toBe(true);
+  input = view.getByLabelText('說出或輸入想做的事');
+  expect(input.props.value).toBe('');
+  expect(view.queryByText('上一個身分的回答')).toBeNull();
+  await act(async () => finish({ source: 'device', content: '遲到的私人回答', hasActions: false }));
+  expect(view.queryByText('遲到的私人回答')).toBeNull();
+  expect(open).not.toHaveBeenCalled();
+});
+
+test('discards a late cloud preview when switching campus with the same account', async () => {
+  let finish!: (value: Awaited<ReturnType<typeof interpretMobileCampusRequest>>) => void;
+  interpret.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const open = jest.fn();
+  const view = render(<QuickCampusEntry uid="alice" schoolId="pu" onOpen={open} />);
+  fireEvent.changeText(view.getByLabelText('說出或輸入想做的事'), 'library catalog');
+  fireEvent.press(view.getByLabelText('用雲端 AI 找相關服務'));
+  const request = interpret.mock.lastCall![0];
+  view.rerender(<QuickCampusEntry uid="alice" schoolId="other" onOpen={open} />);
+  expect(request.isCurrent()).toBe(false);
+  fireEvent.changeText(view.getByLabelText('說出或輸入想做的事'), 'library catalog');
+  await act(async () => finish({
+    status: 'understood', source: 'model', summary: '舊校園資料',
+    destinations: ['/library'], clarifyingQuestion: null,
+  }));
+  expect(view.queryByText('舊校園資料')).toBeNull();
+  expect(view.getByLabelText('前往圖書館')).toBeTruthy();
+});
