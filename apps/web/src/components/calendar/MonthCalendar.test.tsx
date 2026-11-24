@@ -195,6 +195,18 @@ it('外部月份或日期更新不搶走目前控制的焦點', () => {
   expect(document.activeElement).toBe(outside);
 });
 
+it('窄螢幕換月後從第一個星期欄開始顯示', () => {
+  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(216);
+  vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(616);
+  const { rerender } = render(<MonthCalendar {...baseProps} selectedDate="" />);
+  const calendar = screen.getByRole('region', { name: '2028-01 月格，週日起始' });
+  calendar.scrollLeft = 200;
+
+  rerender(<MonthCalendar {...baseProps} month="2028-02" selectedDate="" />);
+
+  expect(screen.getByRole('region', { name: '2028-02 月格，週日起始' }).scrollLeft).toBe(0);
+});
+
 it('缺少跨月回呼時留在邊界，不攔截瀏覽器快捷鍵', () => {
   render(<MonthCalendar {...baseProps} />);
   const last = focusDate('2028-01-31');

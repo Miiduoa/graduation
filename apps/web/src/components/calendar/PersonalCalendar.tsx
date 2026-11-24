@@ -511,9 +511,11 @@ function PersonalCalendarWorkspace({
     ) {
       trigger.focus({ preventScroll: true });
       trigger.scrollIntoView?.({ block: 'nearest' });
-    } else {
-      createButtonRef.current?.focus({ preventScroll: true });
+      return;
     }
+    const fallback = createButtonRef.current;
+    fallback?.focus({ preventScroll: true });
+    fallback?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
   }, [paused, mode, editorRevision, month, selectedDate]);
 
   const revealDayAgenda = useCallback(() => {

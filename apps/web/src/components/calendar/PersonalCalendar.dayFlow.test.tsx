@@ -374,20 +374,40 @@ it('returns a cancelled edit to the original event control without changing its 
   expect(readPersonalImports(scope())).toEqual([stored]);
 });
 
-it('uses the create control when the original edit trigger is no longer visible after a view change', async () => {
-  const stored = event('existing', '合成月格行程', '2026-11-14');
-  seed([stored]);
-  render(<PersonalCalendar />);
-  await ready();
-  activate(screen.getByRole('button', { name: stored.title }));
-  await waitFor(() => expect(document.activeElement).toBe(titleField()));
-  activate(screen.getByRole('button', { name: '列表' }));
-  activate(screen.getByRole('button', { name: '取消' }));
-  await waitFor(() =>
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: '新增行程' })),
-  );
-  expect(readPersonalImports(scope())).toEqual([stored]);
-});
+it.each(['列表', '下一月'])(
+  '切換到「%s」後取消編輯，將焦點移到可見的新增行程按鈕',
+  async (navigation) => {
+    const stored = event('existing', '合成月格行程', '2026-11-14');
+    seed([stored]);
+    render(<PersonalCalendar />);
+    await ready();
+    const trigger = screen.getByRole('button', { name: stored.title });
+    activate(trigger);
+    await waitFor(() => expect(document.activeElement).toBe(titleField()));
+    activate(screen.getByRole('button', { name: navigation }));
+    expect(trigger.isConnected).toBe(false);
+
+    const createButton = screen.getByRole('button', { name: '新增行程' });
+    // JSDOM has no layout. Simulate the page position after reaching the cancel button.
+    let pageOffset = window.innerHeight;
+    vi.spyOn(createButton, 'getBoundingClientRect').mockImplementation(
+      () => new DOMRect(20, 60 - pageOffset, 100, 40),
+    );
+    createButton.scrollIntoView = () => {
+      pageOffset = 0;
+    };
+    expect(createButton.getBoundingClientRect().bottom).toBeLessThan(0);
+
+    activate(screen.getByRole('button', { name: '取消' }));
+    expect(document.activeElement).toBe(createButton);
+    const { top, bottom, left, right } = createButton.getBoundingClientRect();
+    expect(top).toBeGreaterThanOrEqual(0);
+    expect(bottom).toBeLessThanOrEqual(window.innerHeight);
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(right).toBeLessThanOrEqual(window.innerWidth);
+    expect(readPersonalImports(scope())).toEqual([stored]);
+  },
+);
 
 it('does not steal focus from another control when a pending save completes', async () => {
   let release: (() => void) | undefined;

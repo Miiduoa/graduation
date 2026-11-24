@@ -106,6 +106,7 @@ export function MonthCalendar({
         </h3>
       </header>
       <div
+        key={month}
         ref={viewportRef}
         className={styles.viewport}
         role="region"
@@ -113,7 +114,7 @@ export function MonthCalendar({
         aria-describedby={`${descriptionId}-keyboard`}
         tabIndex={0}
       >
-        <div className={styles.grid} key={month}>
+        <div className={styles.grid}>
           {MONTH_WEEKDAYS.map((day) => (
             <div className={styles.weekday} key={day}>
               <span className={styles.srOnly}>週</span>
