@@ -133,6 +133,45 @@ it('keeps freshness tied to its accepted search, rechecks later searches, and pr
   }
 });
 
+it.each(['focus', 'visibilitychange'])('rechecks displayed freshness on %s without requerying or altering the source', async (event) => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  const fetcher = vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-22T04:01:00.000Z' }));
+  try {
+    vi.stubGlobal('fetch', fetcher);
+    render(<PublicCourseSearch {...props} />);
+    submit('005076');
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
+    now.mockReturnValue(Date.parse('2026-11-23T04:02:00.000Z'));
+    await act(async () => {
+      (event === 'focus' ? window : document).dispatchEvent(new Event(event));
+    });
+    expect(screen.getByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeTruthy();
+    expect(screen.getByText('校方資料擷取：2026-11-22 12:01（台灣時間；非校方更新時間）')).toBeTruthy();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it('refreshes freshness while the result stays open and releases its clock when unmounted', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-23T04:00:00.000Z'));
+  const fetcher = vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-22T04:00:30.000Z' }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<PublicCourseSearch {...props} />);
+  await act(async () => { submit('005076'); });
+  expect(screen.getByRole('heading', { name: course.title })).toBeTruthy();
+  expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
+  expect(vi.getTimerCount()).toBe(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  expect(screen.getByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  view.unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it('carries linked weekday and credits into a verified search and imports every meeting of a matching course', async () => {
   const multiDay = { ...course, time: '3cd4i' };
   const fetcher = vi.fn().mockResolvedValue(filteredResponse([multiDay], { weekday: 3, credits: 3 }, { unresolvedCount: 2 }));
@@ -787,7 +826,8 @@ it.each(['fetch', 'body'])('times out a stalled %s, retries the same query and i
   await act(async () => { finish(); });
   expect(screen.queryByText(course.title)).toBeNull();
   expect(screen.getByRole('status').textContent).toContain('沒有找到「005076」課程');
-  expect(vi.getTimerCount()).toBe(0);
+  // The request deadline is released; only the accepted result's clock remains.
+  expect(vi.getTimerCount()).toBe(1);
 });
 
 it('clears the request deadline when a pending search is unmounted', async () => {
