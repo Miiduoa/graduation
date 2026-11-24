@@ -2501,6 +2501,45 @@ it('stays paused after a hidden observer when the canvas misses the visual viewp
   }
 });
 
+it('resumes after the keyboard closes even if the observer last reported hidden and the viewport stays shrunken', async () => {
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0, scale: 1,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 400, 320, 150));
+  try {
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    const field = showKeyboard();
+    viewport.height = 200;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    // Keyboard closed, WebView keeps the shrunken height, and the observer
+    // stays silent on its last hidden report. Layout still includes the canvas.
+    hideKeyboard(field);
+    expect(viewport.height).toBe(200);
+    await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+
 it('pauses a layout-visible 3D canvas behind the mobile keyboard until the visual viewport returns', async () => {
   const viewport = Object.assign(new EventTarget(), {
     width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
@@ -3076,6 +3115,47 @@ it('pauses when a focused field shrinks the visual viewport over only the dialog
   }
 });
 
+it('pauses a focused search field after a canvas touch scrolls it out of the shrunken visual viewport', async () => {
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: undefined } }));
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: 250, offsetLeft: 0, offsetTop: 0, scale: 1,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 80, 320, 150));
+  try {
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+    const search = within(dialog).getByRole('searchbox', { name: '搜尋導覽地點' });
+    act(() => search.focus());
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(document.activeElement).toBe(search);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    // Ordinary canvas touch or scroll must not cache the current viewport.
+    fireEvent.pointerDown(graphics);
+    fireEvent.touchStart(graphics);
+    bounds.mockReturnValue(new DOMRect(0, 400, 320, 150));
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(document.activeElement).toBe(search);
+    expect(viewport.height).toBe(250);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+
 it('resumes 3D when the visitor touches the paused scene overlay while a stale viewport and a focused field remain', async () => {
   const { viewport, dialog, graphics, bounds } = await openKeyboardCoveredScene();
   try {
@@ -3612,6 +3692,32 @@ it('revokes a deliberate 3D choice if its ID is reused at a changed coordinate, 
   expect(directions.searchParams.get('destination')).toBe(`${places[1].lat},${places[1].lng}`);
   expect(within(dialog).getByRole('heading', { name: movedDorm.name })).toBeTruthy();
 });
+
+it('keeps a still-valid destination after a temporary area-too-large model recovers', async () => {
+  const far = { id: 'far-campus', name: '遠距校區', category: '其他', description: '', lat: 25, lng: 121 };
+  const props = { school: 'other-school', selected: places[0], onSelect: vi.fn() };
+  const view = render(<CampusSpatialExplorer {...props} locations={places} />);
+  const dialog = await open();
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'dorm' } });
+  expect(within(dialog).getByRole('heading', { name: '本校宿舍' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+  await act(async () => {
+    view.rerender(<CampusSpatialExplorer {...props} locations={[...places, far]} />);
+  });
+  expect(within(dialog).getByText(/這組地點的範圍超出單一校區/)).toBeTruthy();
+  expect(within(dialog).queryByText(/先前選擇的地點已變更或不在目前地圖範圍/)).toBeNull();
+
+  await act(async () => {
+    view.rerender(<CampusSpatialExplorer {...props} locations={places} />);
+  });
+  expect(within(dialog).getByRole('heading', { name: '本校宿舍' })).toBeTruthy();
+  const directions = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  expect(directions.searchParams.get('destination')).toBe(`${places[1].lat},${places[1].lng}`);
+  expect(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' })).toBeTruthy();
+  expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('dorm');
+});
+
 
 it('opens a scoped building preview with one dialog and releases the campus graphics', async () => {
   const onSelect = vi.fn();
