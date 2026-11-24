@@ -224,12 +224,143 @@ const LEXICON: { value: string; kind: TokenKind }[] = [
   ...CONJ_CUES.map(value => ({ value, kind: 'conj' as const })),
 ].sort((a, b) => b.value.length - a.value.length);
 
+type LexiconTerm = { value: string; kind: TokenKind };
+type LexiconTrieNode = {
+  children: Map<string, LexiconTrieNode>;
+  space: LexiconTrieNode | null;
+  term: LexiconTerm | null;
+};
+
+function newLexiconTrieNode(): LexiconTrieNode {
+  return { children: new Map(), space: null, term: null };
+}
+
+const LEXICON_EXACT_TRIE = newLexiconTrieNode();
+const LEXICON_LATIN_TRIE = newLexiconTrieNode();
+const QUERY_PREFIX_TRIE = newLexiconTrieNode();
+const WRITE_PREFIX_TRIE = newLexiconTrieNode();
+
+function insertExactTrie(root: LexiconTrieNode, value: string, term: LexiconTerm | null): void {
+  let node = root;
+  for (let index = 0; index < value.length; index += 1) {
+    const ch = value[index]!;
+    let child = node.children.get(ch);
+    if (!child) {
+      child = newLexiconTrieNode();
+      node.children.set(ch, child);
+    }
+    node = child;
+  }
+  if (term && (!node.term || node.term.value.length < term.value.length)) node.term = term;
+  if (!term && !node.term) node.term = { value, kind: 'other' };
+}
+
+function insertLatinTrie(root: LexiconTrieNode, value: string, term: LexiconTerm): void {
+  let node = root;
+  const lower = value.toLowerCase();
+  for (let index = 0; index < lower.length; ) {
+    if (lower[index] === ' ') {
+      while (index < lower.length && lower[index] === ' ') index += 1;
+      node = node.space ?? (node.space = newLexiconTrieNode());
+      continue;
+    }
+    const ch = lower[index]!;
+    let child = node.children.get(ch);
+    if (!child) {
+      child = newLexiconTrieNode();
+      node.children.set(ch, child);
+    }
+    node = child;
+    index += 1;
+  }
+  if (!node.term || node.term.value.length < term.value.length) node.term = term;
+}
+
+function isLatinStartValue(value: string): boolean {
+  const code = value.charCodeAt(0);
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || value.startsWith("'");
+}
+
+function isAsciiLetterCode(code: number): boolean {
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+for (const item of LEXICON) {
+  if (isLatinStartValue(item.value)) insertLatinTrie(LEXICON_LATIN_TRIE, item.value, item);
+  else insertExactTrie(LEXICON_EXACT_TRIE, item.value, item);
+}
+for (const value of QUERY_VERBS) {
+  if (isLatinStartValue(value)) insertLatinTrie(QUERY_PREFIX_TRIE, value, { value, kind: 'query' });
+  else insertExactTrie(QUERY_PREFIX_TRIE, value, { value, kind: 'query' });
+}
+for (const value of WRITE_COMPOUNDS) {
+  insertExactTrie(WRITE_PREFIX_TRIE, value, { value, kind: 'write' });
+}
+
+function walkExactTrie(
+  root: LexiconTrieNode,
+  text: string,
+  index: number,
+  firstTerminal: boolean,
+): { term: LexiconTerm; length: number } | null {
+  let node = root;
+  let best: { term: LexiconTerm; length: number } | null = null;
+  for (let cursor = index; cursor < text.length; cursor += 1) {
+    const child = node.children.get(text[cursor]!);
+    if (!child) break;
+    node = child;
+    if (node.term) {
+      const hit = { term: node.term, length: cursor + 1 - index };
+      if (firstTerminal) return hit;
+      best = hit;
+    }
+  }
+  return best;
+}
+
+function walkLatinTrie(root: LexiconTrieNode, text: string, index: number): { term: LexiconTerm; length: number } | null {
+  let node = root;
+  let best: { term: LexiconTerm; length: number } | null = null;
+  let cursor = index;
+  while (cursor < text.length) {
+    if (node.space && /\s/.test(text[cursor]!)) {
+      do { cursor += 1; } while (cursor < text.length && /\s/.test(text[cursor]!));
+      node = node.space;
+      if (node.term && (cursor >= text.length || !isAsciiLetterCode(text.charCodeAt(cursor)))) {
+        best = { term: node.term, length: cursor - index };
+      }
+      continue;
+    }
+    const lower = text[cursor]!.toLowerCase();
+    const child = node.children.get(lower);
+    if (!child) break;
+    node = child;
+    cursor += 1;
+    if (node.term && (cursor >= text.length || !isAsciiLetterCode(text.charCodeAt(cursor)))) {
+      best = { term: node.term, length: cursor - index };
+    }
+  }
+  return best;
+}
+
+function matchLexicon(text: string, index: number): { term: LexiconTerm; length: number } | null {
+  const exact = walkExactTrie(LEXICON_EXACT_TRIE, text, index, false);
+  const latin = isAsciiLetterCode(text.charCodeAt(index) || 0) || text[index] === "'"
+    ? walkLatinTrie(LEXICON_LATIN_TRIE, text, index)
+    : null;
+  if (exact && latin) return exact.length >= latin.length ? exact : latin;
+  return exact ?? latin;
+}
+
 function startsKnownQuery(text: string, index: number): boolean {
-  return QUERY_VERBS.some(value => text.startsWith(value, index));
+  if (isAsciiLetterCode(text.charCodeAt(index) || 0) || text[index] === "'") {
+    return walkLatinTrie(QUERY_PREFIX_TRIE, text, index) !== null;
+  }
+  return walkExactTrie(QUERY_PREFIX_TRIE, text, index, true) !== null;
 }
 
 function startsKnownWrite(text: string, index: number): boolean {
-  return WRITE_COMPOUNDS.some(value => text.startsWith(value, index));
+  return walkExactTrie(WRITE_PREFIX_TRIE, text, index, true) !== null;
 }
 
 const CLAUSE_BOUNDARY_WORDS = new Set<string>([...CLAUSE_CUES, '以及', '和', '與', '及', '後', '、']);
@@ -269,11 +400,6 @@ function noteToken(tokens: Token[], token: Token, state: { clauseHasQuery: boole
 }
 
 
-function lexiconMatchLength(text: string, index: number, value: string): number {
-  if (!/^[A-Za-z']/.test(value)) return text.startsWith(value, index) ? value.length : 0;
-  const matched = new RegExp(`^${escapeRegex(value).replace(/ /g, '\\s+')}(?![A-Za-z])`, 'i').exec(text.slice(index));
-  return matched ? matched[0].length : 0;
-}
 
 function isWhitespaceToken(token: Token): boolean {
   return /^\s+$/u.test(token.value);
@@ -299,7 +425,6 @@ function isWriteNegatedAt(tokens: Token[], writeAt: number): boolean {
 
 const PUNCT_CHAR = /[，,；;。！!？?\r\n：:()（）\[\]【】《》〈〉「」『』“”‘’"'·…]/u;
 const FILE_EXTENSION = /\.[A-Za-z][A-Za-z0-9]{0,7}$/u;
-const BARE_FILENAME_AT = /^(?:[\p{L}\p{N}_-]+)\.[A-Za-z][A-Za-z0-9]{0,7}(?![A-Za-z0-9])/u;
 const BARE_FILENAME_ANYWHERE = /[\p{L}\p{N}_-]+\.[A-Za-z][A-Za-z0-9]{0,7}(?![A-Za-z0-9])/u;
 const BARE_FILENAME_BODY = /^[\p{L}\p{N}_-]+$/u;
 const NESTED_BRACKET_PAIRS: Array<readonly [string, string]> = [
@@ -372,22 +497,7 @@ function typographicQuoteSpan(text: string, index: number): { open: number; inne
   return null;
 }
 
-function quotedFilenameSpan(text: string, index: number): { open: number; inner: number; close: number; end: number } | null {
-  const quoted = typographicQuoteSpan(text, index);
-  if (quoted && isValidFilenameValue(text.slice(quoted.inner, quoted.close), true)) return quoted;
-  const scan = scanNestedBrackets(text);
-  if (!scan.balanced) return null;
-  const span = scan.spans.find(item => item.start === index);
-  if (!span) return null;
-  if (!isValidFilenameValue(text.slice(span.innerStart, span.innerEnd), true)) return null;
-  return { open: span.start, inner: span.innerStart, close: span.innerEnd, end: span.end };
-}
 
-function filenameMatchLength(text: string, index: number): number {
-  const matched = BARE_FILENAME_AT.exec(text.slice(index));
-  if (!matched || !isValidFilenameValue(matched[0], false)) return 0;
-  return matched[0].length;
-}
 
 function hasFilenameCandidate(text: string): boolean {
   if (BARE_FILENAME_ANYWHERE.test(text)) return true;
@@ -402,7 +512,7 @@ function hasFilenameCandidate(text: string): boolean {
     }
     index += 1;
   }
-  const scan = scanNestedBrackets(text);
+  const scan = bracketsFor(text);
   if (scan.balanced && scan.spans.some(span => FILE_EXTENSION.test(text.slice(span.innerStart, span.innerEnd)))) {
     return true;
   }
@@ -410,7 +520,7 @@ function hasFilenameCandidate(text: string): boolean {
 }
 
 function hasBracketContent(text: string): boolean {
-  const scan = scanNestedBrackets(text);
+  const scan = bracketsFor(text);
   if (!scan.balanced) return true;
   if (scan.spans.length > 0) return true;
   return NESTED_BRACKET_PAIRS.some(([open, close]) => text.includes(open) || text.includes(close));
@@ -421,13 +531,66 @@ function hasReadBlockingDecoration(text: string): boolean {
   return hasFilenameCandidate(text) || hasBracketContent(text);
 }
 
+const BRACKET_SCAN_LIMIT = 8;
+const bracketScanCache = new Map<string, BracketScan>();
+
+function bracketsFor(text: string): BracketScan {
+  const hit = bracketScanCache.get(text);
+  if (hit) {
+    bracketScanCache.delete(text);
+    bracketScanCache.set(text, hit);
+    return hit;
+  }
+  const scan = scanNestedBrackets(text);
+  bracketScanCache.set(text, scan);
+  if (bracketScanCache.size > BRACKET_SCAN_LIMIT) {
+    const oldest = bracketScanCache.keys().next().value;
+    if (oldest !== undefined) bracketScanCache.delete(oldest);
+  }
+  return scan;
+}
+
+function precomputedQuotedFilenames(text: string): Map<number, { open: number; inner: number; close: number; end: number }> {
+  const found = new Map<number, { open: number; inner: number; close: number; end: number }>();
+  let index = 0;
+  while (index < text.length) {
+    const quoted = typographicQuoteSpan(text, index);
+    if (quoted) {
+      if (isValidFilenameValue(text.slice(quoted.inner, quoted.close), true)) found.set(quoted.open, quoted);
+      index = quoted.end;
+      continue;
+    }
+    index += 1;
+  }
+  const scan = bracketsFor(text);
+  if (scan.balanced) {
+    for (const span of scan.spans) {
+      if (!isValidFilenameValue(text.slice(span.innerStart, span.innerEnd), true)) continue;
+      found.set(span.start, { open: span.start, inner: span.innerStart, close: span.innerEnd, end: span.end });
+    }
+  }
+  return found;
+}
+
+function precomputedBareFilenames(text: string): Map<number, number> {
+  const found = new Map<number, number>();
+  const pattern = new RegExp(BARE_FILENAME_ANYWHERE.source, 'gu');
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    if (isValidFilenameValue(match[0], false)) found.set(match.index, match[0].length);
+  }
+  return found;
+}
+
 function tokenize(text: string): Token[] {
   const tokens: Token[] = [];
   const state = { clauseHasQuery: false };
+  const quotedFiles = precomputedQuotedFilenames(text);
+  const bareFiles = precomputedBareFilenames(text);
   let index = 0;
   while (index < text.length) {
     const from = index;
-    const quoted = quotedFilenameSpan(text, index);
+    const quoted = quotedFiles.get(index);
     if (quoted) {
       noteToken(tokens, { value: text.slice(quoted.open, quoted.inner), start: quoted.open, end: quoted.inner, kind: 'punct' }, state);
       noteToken(tokens, { value: text.slice(quoted.inner, quoted.close), start: quoted.inner, end: quoted.close, kind: 'filename' }, state);
@@ -435,26 +598,23 @@ function tokenize(text: string): Token[] {
       index = quoted.end;
       continue;
     }
-    const fileLength = filenameMatchLength(text, index);
+    const fileLength = bareFiles.get(index) ?? 0;
     if (fileLength > 0) {
       noteToken(tokens, { value: text.slice(from, from + fileLength), start: from, end: from + fileLength, kind: 'filename' }, state);
       index += fileLength;
       continue;
     }
-    let matchedLength = 0;
-    const entry = LEXICON.find(item => {
-      matchedLength = lexiconMatchLength(text, index, item.value);
-      return matchedLength > 0;
-    });
-    if (entry) {
-      noteToken(tokens, { value: entry.value, start: from, end: from + matchedLength, kind: entry.kind }, state);
-      index += matchedLength;
+    const lexicon = matchLexicon(text, index);
+    if (lexicon) {
+      noteToken(tokens, { value: lexicon.term.value, start: from, end: from + lexicon.length, kind: lexicon.term.kind }, state);
+      index += lexicon.length;
       continue;
     }
-    const latin = /^[A-Za-z]+/.exec(text.slice(index));
-    if (latin) {
-      noteToken(tokens, { value: latin[0], start: from, end: from + latin[0].length, kind: 'unknown' }, state);
-      index += latin[0].length;
+    if (isAsciiLetterCode(text.charCodeAt(index))) {
+      let end = index + 1;
+      while (end < text.length && isAsciiLetterCode(text.charCodeAt(end))) end += 1;
+      noteToken(tokens, { value: text.slice(from, end), start: from, end, kind: 'unknown' }, state);
+      index = end;
       continue;
     }
     const ch = text[index]!;
@@ -468,7 +628,7 @@ function tokenize(text: string): Token[] {
       !/[查看交繳]/.test(ch) &&
       !startsKnownQuery(text, from) && !startsKnownWrite(text, from) &&
       !startsKnownQuery(text, from + 1) && !startsKnownWrite(text, from + 1) &&
-      !LEXICON.some(item => text.startsWith(item.value, from + 1))) {
+      !matchLexicon(text, from + 1)) {
       noteToken(tokens, { value: ch + next, start: from, end: from + 2, kind: 'noun' }, state);
       index += 2;
       continue;
@@ -505,22 +665,55 @@ function isModifierBoundaryToken(token: Token): boolean {
   return token.kind === 'punct';
 }
 
-function nextSignificantToken(tokens: Token[], cursor: number): Token | undefined {
+function nextSignificantToken(tokens: Token[], cursor: number, nextIndex?: number[]): Token | undefined {
+  if (nextIndex) {
+    const index = nextIndex[cursor] ?? -1;
+    return index >= 0 ? tokens[index] : undefined;
+  }
   for (let index = cursor + 1; index < tokens.length; index += 1) {
-    if (!/^\s+$/u.test(tokens[index]!.value)) return tokens[index];
+    if (!isWhitespaceToken(tokens[index]!)) return tokens[index];
   }
   return undefined;
 }
 
-function isProgressiveCloser(tokens: Token[], cursor: number, clauseEnd: number): boolean {
+function previousSignificantToken(tokens: Token[], cursor: number): Token | undefined {
+  for (let index = cursor - 1; index >= 0; index -= 1) {
+    if (!isWhitespaceToken(tokens[index]!)) return tokens[index];
+  }
+  return undefined;
+}
+
+function significantNeighborIndex(tokens: Token[]): { prev: number[]; next: number[] } {
+  const prev = new Array<number>(tokens.length).fill(-1);
+  const next = new Array<number>(tokens.length).fill(-1);
+  let last = -1;
+  for (let index = 0; index < tokens.length; index += 1) {
+    prev[index] = last;
+    if (!isWhitespaceToken(tokens[index]!)) last = index;
+  }
+  last = -1;
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    next[index] = last;
+    if (!isWhitespaceToken(tokens[index]!)) last = index;
+  }
+  return { prev, next };
+}
+
+function isProgressiveCloser(tokens: Token[], cursor: number, clauseEnd: number, nextIndex?: number[]): boolean {
   if (cursor === clauseEnd) return true;
-  const next = nextSignificantToken(tokens, cursor);
+  const next = nextSignificantToken(tokens, cursor, nextIndex);
   if (!next) return true;
   return next.value === '的' || isModifierBoundaryToken(next) || ACTION_CUES.includes(next.value);
 }
 
+function isSupplyCloser(tokens: Token[], cursor: number, nextIndex?: number[]): boolean {
+  const value = tokens[cursor]!.value;
+  return value === '用的' || (value === '用' && nextSignificantToken(tokens, cursor, nextIndex)?.value === '的');
+}
+
 function collectModifierSpans(tokens: Token[]): Array<{ start: number; end: number }> {
   const spans: Array<{ start: number; end: number }> = [];
+  const neighbors = significantNeighborIndex(tokens);
   let index = 0;
   while (index < tokens.length) {
     if (isModifierBoundaryToken(tokens[index]!)) {
@@ -531,26 +724,23 @@ function collectModifierSpans(tokens: Token[]): Array<{ start: number; end: numb
     while (end + 1 < tokens.length && !isModifierBoundaryToken(tokens[end + 1]!)) end += 1;
     const supply: number[] = [];
     const progressive: number[] = [];
+    let lastSupplyClose: number | undefined;
+    let lastProgressiveClose: number | undefined;
     for (let cursor = index; cursor <= end; cursor += 1) {
       const value = tokens[cursor]!.value;
       if (value === '供') supply.push(cursor);
-      if (value === '用的' || (value === '用' && nextSignificantToken(tokens, cursor)?.value === '的')) {
+      if (isSupplyCloser(tokens, cursor, neighbors.next)) {
+        lastSupplyClose = cursor;
         const start = supply.pop();
         if (start !== undefined && cursor > start) spans.push({ start, end: cursor });
       }
       if (value === '正在' || value === '正') progressive.push(cursor);
-      if (value === '中' && isProgressiveCloser(tokens, cursor, end)) {
+      if (value === '中' && isProgressiveCloser(tokens, cursor, end, neighbors.next)) {
+        lastProgressiveClose = cursor;
         const start = progressive.pop();
         if (start !== undefined && cursor > start) spans.push({ start, end: cursor });
       }
     }
-    const lastSupplyClose = [...Array(end - index + 1).keys()].map(offset => index + offset)
-      .reverse().find(cursor => {
-        const value = tokens[cursor]!.value;
-        return value === '用的' || (value === '用' && nextSignificantToken(tokens, cursor)?.value === '的');
-      });
-    const lastProgressiveClose = [...Array(end - index + 1).keys()].map(offset => index + offset)
-      .reverse().find(cursor => tokens[cursor]!.value === '中' && isProgressiveCloser(tokens, cursor, end));
     while (supply.length > 0) {
       const start = supply.pop()!;
       if (lastSupplyClose !== undefined && lastSupplyClose > start) {
@@ -601,7 +791,7 @@ function firstTokenAtOrAfter(tokens: Token[], from: number): number {
   return low;
 }
 
-function isRelativeQuery(tokens: Token[], token: Token, at = tokens.indexOf(token), interior = modifierInteriorIndex(tokens)): boolean {
+function isRelativeQuery(tokens: Token[], token: Token, at: number, interior: boolean[]): boolean {
   if (at < 0) return false;
   if (interior[at]) return true;
   const next = tokens[at + 1]?.value;
@@ -633,7 +823,8 @@ function nextNegatedWriteStop(text: string, from: number): number {
       const following = tokens[next];
       if (following && isWriteVerbToken(following)) return offset;
     }
-    if (/^(?:and|then|also)\b/i.test(text.slice(token.start))) return offset;
+    const word = token.value.toLowerCase();
+    if (word === 'and' || word === 'then' || word === 'also') return offset;
   }
   return -1;
 }
@@ -969,7 +1160,7 @@ function dataTypeMask(text: string): boolean[] {
   for (const token of tokensFor(text)) {
     if (token.kind === 'filename') mark(token.start, token.end);
   }
-  const scan = scanNestedBrackets(text);
+  const scan = bracketsFor(text);
   if (!scan.balanced) {
     mark(scan.firstOpen, text.length);
     return mask;
@@ -1176,9 +1367,32 @@ function visibleCommandTokens(text: string): Token[] {
   return tokensFor(text).filter(token => token.kind !== 'filename' && !tokenIsProtected(token, mask));
 }
 
+function prepareWordRole(tokens: Token[], index: number): 'command' | 'modifier' | 'doubt' | 'none' {
+  const token = tokens[index]!;
+  if (!isPrepareActionValue(token.value)) return 'none';
+  if (token.kind === 'noun') return 'modifier';
+  const next = nextSignificantToken(tokens, index);
+  const prev = previousSignificantToken(tokens, index);
+  if (next && (next.value === '的' || next.value === '之')) return 'modifier';
+  // 玩課雲準備作業: a prepare word between nouns is a modifier or at least not a proven command.
+  if (next && next.kind === 'noun' && prev && prev.kind === 'noun') return 'doubt';
+  return 'command';
+}
+
+function visiblePrepareRole(text: string, role: 'command' | 'modifier' | 'doubt'): boolean {
+  const mask = dataTypeMask(text);
+  const tokens = tokensFor(text);
+  return tokens.some((token, index) =>
+    token.kind !== 'filename' && !tokenIsProtected(token, mask) && prepareWordRole(tokens, index) === role);
+}
+
 /** Prepare/draft words are honored only as commands, never as a noun such as 作業草稿. */
 function hasHonoredPrepareCommand(text: string): boolean {
-  return visibleCommandTokens(text).some(token => isPrepareActionValue(token.value) && token.kind !== 'noun');
+  return visiblePrepareRole(text, 'command');
+}
+
+function hasDoubtfulPrepare(text: string): boolean {
+  return visiblePrepareRole(text, 'doubt');
 }
 
 function hasNonPrepareQueryCommand(text: string): boolean {
@@ -1249,6 +1463,7 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   }
   // A query verb plus a prepare command in the same sentence is not a proven
   // read or a proven prepare; confirmation must run before either action.
+  if (hasDoubtfulPrepare(original)) return { outcome: 'ambiguous' };
   if (hasHonoredPrepareCommand(original) && hasNonPrepareQueryCommand(original)) {
     return { outcome: 'ambiguous' };
   }
