@@ -153,33 +153,34 @@ export function parseCampusWalkingOsmCandidates(
     if (!Array.isArray(item.nodes) || item.nodes.length < 2) return null;
     const ids: unknown[] = item.nodes;
     let hasCampusNode = false;
-    let previousInside = false;
-    let inside = false;
+    let hasOutsideNode = false;
+    let hasMissingNode = false;
     for (const id of ids) {
-      const scope = positiveId(id) ? nodeScopes.get(id) : undefined;
-      if (scope === undefined && !invalidOutsideNodeIds.has(id)) return null;
-      // A way contributes only segments with two consecutive in-bounds nodes.
-      if (scope && previousInside) inside = true;
-      if (scope) hasCampusNode = true;
-      previousInside = scope === true;
+      const scope = positiveId(id) ? nodeScopes.get(id) :
+        invalidOutsideNodeIds.has(id) ? false : undefined;
+      if (scope === true) hasCampusNode = true;
+      if (scope === false) hasOutsideNode = true;
+      if (scope === undefined) hasMissingNode = true;
     }
 
+    // Use all known members to determine scope before handling broken references.
+    if (hasMissingNode && (hasCampusNode || !hasOutsideNode)) return null;
     const validReferences = ids.every(positiveId);
     if (!validReferences && hasCampusNode) return null;
     if (!positiveId(item.id)) {
-      if (inside) return null;
+      if (hasCampusNode) return null;
       continue;
     }
     const repeated = wayScopes.has(item.id);
-    if (hasInScopeDuplicate(wayScopes, item.id, inside)) return null;
+    if (hasInScopeDuplicate(wayScopes, item.id, hasCampusNode)) return null;
     if (repeated) {
       ways.delete(item.id);
       continue;
     }
-    if (!validReferences) continue;
+    if (hasMissingNode || !validReferences) continue;
     const rev = revision(item, baseMs);
     if (!rev || !HIGHWAYS.includes(rev.tags.highway)) {
-      if (inside) return null;
+      if (hasCampusNode) return null;
       continue;
     }
     ways.set(item.id, { id: item.id, nodes: ids, ...rev });

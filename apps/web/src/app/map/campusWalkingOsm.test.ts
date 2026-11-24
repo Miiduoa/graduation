@@ -97,11 +97,15 @@ describe('OSM campus walking discovery (not routing approval)', () => {
     expect(parse(input)).toEqual(parse());
   });
 
-  it('rejects a repeated way identity when either occurrence has a campus segment', () => {
+  it('rejects a repeated way identity when either occurrence references a campus node', () => {
     const outside = [node(6, 10.015, 20.002), node(7, 10.016, 20.002)];
     const campusWay = way(103, [1, 5]);
     const outsideWay = way(103, [6, 7]);
-    for (const duplicates of [[campusWay, campusWay], [outsideWay, campusWay], [campusWay, outsideWay]]) {
+    const boundaryWay = way(103, [1, 6]);
+    for (const duplicates of [
+      [campusWay, campusWay], [outsideWay, campusWay], [campusWay, outsideWay],
+      [outsideWay, boundaryWay], [boundaryWay, outsideWay],
+    ]) {
       expect(parse({ ...payload(), elements: [...payload().elements, ...outside, ...duplicates] })).toBeNull();
     }
     expect(parse({
@@ -117,20 +121,21 @@ describe('OSM campus walking discovery (not routing approval)', () => {
       ...input,
       elements: [...input.elements, ...outside, node(0, 10.017, 20.002), way(0, [6, 7])],
     })).toEqual(parse(input));
-    for (const invalid of [node(0, 10.001, 20.004), way(0, [1, 5])]) {
-      expect(parse({ ...input, elements: [...input.elements, invalid] })).toBeNull();
+    for (const invalid of [node(0, 10.001, 20.004), way(0, [1, 5]), way(0, [1, 6])]) {
+      expect(parse({ ...input, elements: [...input.elements, ...outside, invalid] })).toBeNull();
     }
   });
 
-  it('drops ways referencing invalid outside node IDs unless they also reference campus nodes', () => {
+  it('drops incomplete outside ways and rejects incomplete campus ways', () => {
     const input = payload();
     const elements = [
       ...input.elements,
-      node(6, 10.015, 20.002), node(0, 10.017, 20.002), node(7, 10.016, 20.002),
+      node(6, 10.015, 20.002), node(7, 10.016, 20.002),
     ];
-    expect(parse({ ...input, elements: [...elements, way(103, [6, 0, 7])] }))
-      .toEqual(parse(input));
-    for (const references of [[1, 2, 0], [1, 0, 7]]) {
+    for (const references of [[6, 0, 7], [6, 999, 7]]) {
+      expect(parse({ ...input, elements: [...elements, way(103, references)] })).toEqual(parse(input));
+    }
+    for (const references of [[1, 2, 0], [7, 0, 1], [1, 999, 7], [0, 999]]) {
       expect(parse({ ...input, elements: [...elements, way(103, references)] })).toBeNull();
     }
   });
