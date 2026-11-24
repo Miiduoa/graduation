@@ -1368,12 +1368,52 @@ describe('three-way sentence classification', () => {
     expect(tronClassCompoundClauses(question)).toEqual([]);
   });
 
+  it.each([
+    '玩課雲已經幫我準備作業',
+    '玩課雲剛才請人幫我準備作業',
+    '玩課雲已經也幫我準備作業',
+    '玩課雲曾經替我準備作業',
+    '玩課雲尚未幫我準備作業',
+    '玩課雲已下載教材',
+    '玩課雲剛才幫我下載教材',
+    '我已經查過玩課雲作業',
+    '我查過玩課雲作業',
+    '查玩課雲作業，剛下載教材',
+    '查玩課雲作業「公告',
+    '查玩課雲作業「「公告」',
+    '查玩課雲作業『通知',
+    '查玩課雲作業“教材',
+  ])('asks for confirmation for a descriptive action or incomplete quote: %s', question => {
+    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each(['請幫我準備 TronClass 作業', '幫我準備 TronClass 作業'])(
+    'honors a current preparation request: %s', question => {
+      expect(classifyTronClassSentence(question)).toEqual({
+        outcome: 'clearly-write',
+        intent: { intent: 'prepare', pendingOnly: false },
+      });
+    },
+  );
+
+  it('scans nested brackets within the 200 ms budget', () => {
+    const question = '查玩課雲作業' + '('.repeat(350) + '教材'.repeat(100) + '.pdf' + ')'.repeat(350);
+    const started = performance.now();
+    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
   it('scans a long run of unmatched opening quotes within the 200 ms budget', () => {
     const question = '查玩課雲作業' + '「'.repeat(980);
     const started = performance.now();
-    classifyTronClassSentence(question);
-    canAnswerTronClassQuestion(question);
-    tronClassCompoundClauses(question);
+    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
     expect(performance.now() - started).toBeLessThan(200);
   });
 });
