@@ -47,7 +47,7 @@ export const personalImportStorageKey = (scope: PersonalImportScope) =>
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
 const locks = new Map<string, Promise<unknown>>();
 const pendingWrites = new Map<string, Promise<void>>();
-type Recovery = { raw: string | null };
+type Recovery = { raw: string | null; fromCheckpoint?: true };
 const pendingRestorations = new Map<string, Recovery>();
 let writeSequence = 0;
 
@@ -106,9 +106,9 @@ async function readLegacyCheckpoint(
     try {
       // Older builds wrapped the original ledger in a second layer of JSON.
       const raw: unknown = unwrapPersonalImportCheckpoint(encoded);
-      if (raw === null) return { raw: null, ledger: empty() };
+      if (raw === null) return { raw: null, ledger: empty(), fromCheckpoint: true };
       if (typeof raw === 'string' && raw.trimStart().startsWith('{')) {
-        return { raw, ledger: parseLedger(raw, scope) };
+        return { raw, ledger: parseLedger(raw, scope), fromCheckpoint: true };
       }
     } catch {
       // An invalid legacy checkpoint cannot supply the ledger.
@@ -334,6 +334,10 @@ export function mutatePersonalImportLedger<T>(
           if (browserRecovery) {
             writtenRaw = commitWebPersonalImports(
               key, primaryRaw, raw, assertWritable, browserRecovery,
+              {
+                verify: !hasPersisted && (webPrimary === null || recovery?.fromCheckpoint === true),
+                adopted: recovery?.fromCheckpoint === true,
+              },
               needsJournal ? { raw: persistedRaw } : undefined,
               lease,
             );

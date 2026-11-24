@@ -41,7 +41,7 @@ export function capturePersonalImportBrowserRecovery(storage: Storage, key: stri
   return {
     hasCopies: copies.length > 0,
     checkpoint: copies.find(({ entry }) => entry === personalImportCheckpointKey(key))?.raw ?? null,
-    retire(published: string, canRetire = (_entry: string, _raw: string) => true) {
+    retire(published: string, canRetire: (entry: string, raw: string) => boolean) {
       for (const { entry, raw } of copies) {
         if (raw !== null && canRetire(entry, raw) &&
             storage.getItem(key) === published && storage.getItem(entry) === raw) {

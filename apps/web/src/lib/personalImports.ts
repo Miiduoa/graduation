@@ -39,9 +39,9 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
   const checkpoint = primary === null ? recovery.checkpoint : null;
   const establishedCommit = recovery.hasCopies && hasWebPersonalImportCommit(primary);
   const canRetire = (entry: string, raw: string) =>
-    establishedCommit || (entry === checkpointKey && raw === checkpoint);
-  const supersedesCheckpoint = recovery.checkpoint === null ||
-    canRetire(checkpointKey, recovery.checkpoint);
+    entry === checkpointKey ? raw === checkpoint : establishedCommit;
+  const shouldMarkCommit = recovery.hasCopies &&
+    (establishedCommit || recovery.checkpoint === null || checkpoint !== null);
   const raw = checkpoint === null ? primary : unwrapPersonalImportCheckpoint(checkpoint);
   if (raw !== null && typeof raw !== 'string') {
     throw new Error('這份匯入紀錄暫時讀不到，原始資料仍保留。');
@@ -51,7 +51,7 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
     write(state: PersonalImportLocalState) {
       // Keep a v1 commit marker while legacy recovery data may still exist.
       const ledger = { version: 1 as const, ...state };
-      const published = recovery.hasCopies && supersedesCheckpoint
+      const published = shouldMarkCommit
         ? serializePersonalImportBrowserCommit(ledger)
         : JSON.stringify(ledger);
       if (localStorage.getItem(key) !== primary ||
@@ -62,8 +62,7 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
       if (localStorage.getItem(key) !== published) {
         throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
       }
-      // A prior commit supersedes leftover recovery data. Otherwise retire
-      // only the checkpoint this mutation actually used as its input.
+      // Retire standalone checkpoints only when this write used them.
       recovery.retire(published, canRetire);
       primary = published;
     },

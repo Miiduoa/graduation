@@ -15,6 +15,7 @@ import {
   planPersonalImport,
   serializePersonalImportBackup,
   parsePersonalImportBackup,
+  type PersonalImportRecord,
   type PersonalImportRow,
 } from '@campus/shared';
 import {
@@ -504,7 +505,7 @@ test.each([
       expect(readWebCalendarImports(scope)).toEqual(edited.records);
       await expect(loadPersonalImports(scope)).resolves.toEqual(edited);
       expect(storage.getItem(journal)).toBeNull();
-      expect(storage.getItem(checkpoint)).toBeNull();
+      expect(storage.getItem(checkpoint)).toBe(recovery === 'both' ? original : null);
       expect(quota.mock.calls.some(([entry]) =>
         entry.startsWith('campus.personal-imports.stage.v2:'))).toBe(false);
       expect(Object.keys(window.sessionStorage)).toEqual([]);
@@ -573,6 +574,42 @@ test('Expo Web cleanup leaves a checkpoint that appeared after reading a valid p
   }
 });
 
+test('Expo and Web calendar saves preserve a standalone checkpoint with an extra event', async () => {
+  const cleanup = useWebStorage();
+  const restoreLocks = withoutWebWriteLocks();
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('a', '活動 A')]);
+    const withExtraEvent = await appendPersonalImports(scope, [
+      { ...row('b', '活動 B'), dayOfWeek: 2 },
+    ]);
+    const backup = JSON.stringify(withExtraEvent.ledger);
+    storage.setItem(key, JSON.stringify(ledger));
+    storage.setItem(checkpoint, backup);
+
+    await appendPersonalImports(scope, [{ ...row('c', '活動 C'), dayOfWeek: 3 }], {
+      canContinue: () => true,
+    });
+    expect(JSON.parse(storage.getItem(key)!).records.map(({ title }: PersonalImportRecord) => title))
+      .toEqual(['活動 A', '活動 C']);
+    expect(storage.getItem(checkpoint)).toBe(backup);
+
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: { request: async (_key: string, write: () => unknown) => write() },
+    });
+    await saveWebCalendarBatch(scope, [{ ...row('d', '活動 D'), dayOfWeek: 4 }]);
+    expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
+      .toEqual(['活動 A', '活動 C', '活動 D']);
+    expect(storage.getItem(checkpoint)).toBe(backup);
+  } finally {
+    restoreLocks();
+    cleanup();
+  }
+});
+
 test('a Web calendar save after an Expo commit cannot revive stale recovery data', async () => {
   const cleanup = useWebStorage();
   const restoreLocks = withoutWebWriteLocks();
@@ -605,7 +642,7 @@ test('a Web calendar save after an Expo commit cannot revive stale recovery data
     expect(webRecords).toEqual(expect.arrayContaining(edited.records));
     expect(webRecords.map(({ title }) => title)).toEqual(['Expo 更新', 'Web 新增']);
     expect((await loadPersonalImports(scope)).records).toEqual(webRecords);
-    expect(storage.getItem(checkpoint)).toBeNull();
+    expect(storage.getItem(checkpoint)).toBe(original);
     expect(storage.getItem(journal)).toBeNull();
   } finally {
     restoreLocks();
@@ -655,10 +692,11 @@ test.each([
     const reads = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
       this: Storage, entry,
     ) {
-      // The first read confirms Expo's write. The second is its cleanup check.
+      const value = getItem.call(this, entry);
+      // An older Web tab can publish immediately after Expo verifies its write.
       if (interleaved && this === storage && entry === key && primaryReadsAfterSet &&
-          ++primaryReadsAfterSet === 3) writeWithOldWebCalendar();
-      return getItem.call(this, entry);
+          ++primaryReadsAfterSet === 2) writeWithOldWebCalendar();
+      return value;
     });
     const writes = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
       this: Storage, entry, value,
@@ -701,7 +739,7 @@ test.each([
     expect(edited.records.map(({ title }) => title)).toEqual(['Expo 更新', '重新開啟後更新']);
     expect(readWebCalendarImports(scope)).toEqual(edited.records);
     expect(storage.getItem(journal)).toBeNull();
-    expect(storage.getItem(checkpoint)).toBeNull();
+    expect(storage.getItem(checkpoint)).toBe(stale);
   } finally {
     cleanup();
   }
@@ -1328,6 +1366,45 @@ test.each(['before', 'attempted'] as const)(
       expect(saved.ledger.records).toContainEqual(ledger.records[0]);
       await expect(loadPersonalImports(scope)).resolves.toEqual(saved.ledger);
       expect(storage.getItem(journal)).toBeNull();
+    } finally {
+      cleanup();
+    }
+  },
+);
+
+test.each([null, '{"version":1,'])(
+  'Expo Web rejects contradictory journal contents with primary %s',
+  async (primary) => {
+    const cleanup = useWebStorage();
+    const storage = window.localStorage;
+    const key = personalImportStorageKey(scope);
+    const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+    try {
+      const { ledger } = await appendPersonalImports(scope, [row('original', '錯誤日誌的行程')]);
+      if (primary === null) storage.removeItem(key);
+      else storage.setItem(key, primary);
+      const contradictory = JSON.stringify({
+        id: 'legacy',
+        original: JSON.stringify(ledger),
+        before: sha256('another ledger'),
+        attempted: sha256(primary ?? 'null'),
+      });
+      storage.setItem(journal, contradictory);
+
+      const append = () => appendPersonalImports(scope, [row('new', '新行程')], {
+        canContinue: () => true,
+      });
+      if (primary === null) {
+        await expect(loadPersonalImports(scope)).resolves.toMatchObject({ records: [] });
+        const saved = await append();
+        expect(JSON.parse(storage.getItem(key)!)).toMatchObject({ records: saved.ledger.records });
+        expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['新行程']);
+      } else {
+        await expect(loadPersonalImports(scope)).rejects.toThrow();
+        await expect(append()).rejects.toThrow();
+        expect(storage.getItem(key)).toBe(primary);
+        expect(storage.getItem(journal)).toBe(contradictory);
+      }
     } finally {
       cleanup();
     }

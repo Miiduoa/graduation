@@ -318,8 +318,7 @@ async function readWebRollback(key: string, verifiedPrimary?: string): Promise<s
     if (storage.getItem(backupKey) !== encoded) continue;
     if (current !== journal.before && current !== journal.attempted) return undefined;
     const original = typeof journal.original === 'string' ? journal.original : 'null';
-    // Replacing a verified ledger also requires a fingerprint for the rollback bytes.
-    if (verifiedPrimary !== undefined && fingerprint(original) !== journal.before) return undefined;
+    if (fingerprint(original) !== journal.before) return undefined;
     return original;
   }
 }
@@ -351,6 +350,7 @@ export function commitWebPersonalImports(
   attempted: string,
   assertWritable: () => void,
   recoveryCopies: ReturnType<typeof capturePersonalImportBrowserRecovery>,
+  checkpoint: { verify: boolean; adopted: boolean },
   recovery?: { raw: string | null },
   lease?: BrowserLease,
 ): string {
@@ -362,7 +362,7 @@ export function commitWebPersonalImports(
   const replace = (raw: string, ownsStage: () => boolean) => {
     assertWritable();
     if (!ownsStage() || storage.getItem(key) !== before ||
-        (before === null && storage.getItem(checkpointKey) !== recoveryCopies.checkpoint)) {
+        (checkpoint.verify && storage.getItem(checkpointKey) !== recoveryCopies.checkpoint)) {
       throw conflict();
     }
     storage.setItem(key, raw);
@@ -431,7 +431,7 @@ export function commitWebPersonalImports(
   };
 
   const published = commit();
-  recoveryCopies.retire(published);
+  recoveryCopies.retire(published, (entry) => entry !== checkpointKey || checkpoint.adopted);
   return published;
 }
 
