@@ -143,9 +143,18 @@ if [[ "$1" == bash ]]; then
     fi
   fi
   exec bash -c '
-    kill() { printf "sudo:kill:%s\n" "$*" >> "$MOCK_LOG"; builtin kill "$@"; }
     code="$1"
     shift
+    kill() {
+      printf "%s\n" "$*" >> "$MOCK_LOG.raw-signal"
+      builtin kill "$@"
+    }
+    python3() {
+      command python3 "$@" || return
+      if [[ "${3:-}" == *pidfd_send_signal* ]]; then
+        printf "sudo:pidfd:-%s -- %s\n" "$8" "$4" >> "$MOCK_LOG"
+      fi
+    }
     eval "$code"
   ' signal-test "$code" "${@:5}"
 fi
@@ -295,7 +304,7 @@ assert_recovery_deadlines 2
 [[ "$(grep -c "^sudo:timeout --kill-after=5s 180s bash -c .* record-process-group [^ ]*/process-group [^ ]* $mock_dir/bin/python -m playwright install-deps chromium\$" "$MOCK_LOG")" -eq 2 ]]
 [[ "$(grep -c '^sudo:timeout --kill-after=5s 180s bash -c .* record-process-group [^ ]*/process-group [^ ]* apt-get ' "$MOCK_LOG")" -eq 2 ]]
 # Ordinary failures never signal any process group.
-[[ "$(grep -c '^sudo:kill' "$MOCK_LOG" || true)" -eq 0 ]]
+[[ "$(grep -c '^sudo:pidfd' "$MOCK_LOG" || true)" -eq 0 ]]
 
 # Both first and second attempts may time out; the third success is still valid.
 export MOCK_PYTHON_FAILS=0 MOCK_APT_FAILS=0 MOCK_DEPS_FAILS=0 MOCK_TIMEOUT_FAILS=2
@@ -391,20 +400,20 @@ for mode in replaced symlink marker starttime valid leader-exits unreadable; do
   leader="$(cat "$MOCK_LOCK.leader.child-pid")"
   member="$(cat "$MOCK_LOCK.member.child-pid")"
   if [[ "$mode" == valid ]]; then
-    grep -qx "sudo:kill:-KILL -- $leader" "$MOCK_LOG"
-    grep -qx "sudo:kill:-KILL -- $member" "$MOCK_LOG"
+    grep -qx "sudo:pidfd:-KILL -- $leader" "$MOCK_LOG"
+    grep -qx "sudo:pidfd:-KILL -- $member" "$MOCK_LOG"
   elif [[ "$mode" == leader-exits || "$mode" == unreadable ]]; then
-    grep -qx "sudo:kill:-KILL -- $member" "$MOCK_LOG"
-    ! grep -qx "sudo:kill:-KILL -- $leader" "$MOCK_LOG"
+    grep -qx "sudo:pidfd:-KILL -- $member" "$MOCK_LOG"
+    ! grep -qx "sudo:pidfd:-KILL -- $leader" "$MOCK_LOG"
     "$REAL_TIMEOUT" 3s flock "$MOCK_LOCK.record-lock" true
     if [[ "$mode" == unreadable ]]; then kill -0 "$leader"; fi
   else
-    [[ "$(grep -c '^sudo:kill:' "$MOCK_LOG" || true)" == 0 ]]
+    [[ "$(grep -c '^sudo:pidfd:' "$MOCK_LOG" || true)" == 0 ]]
     kill -0 "$leader" "$member"
   fi
   unmarked="$(cat "$MOCK_LOCK.unmarked.child-pid")"
   kill -0 "$unmarked"
-  [[ "$(grep -cx "sudo:kill:-KILL -- $unmarked" "$MOCK_LOG" || true)" == 0 ]]
+  [[ "$(grep -cx "sudo:pidfd:-KILL -- $unmarked" "$MOCK_LOG" || true)" == 0 ]]
   kill -KILL "$leader" "$member" "$unmarked" 2>/dev/null || true
   rm -f "$MOCK_LOCK.leader.child-pid" "$MOCK_LOCK.member.child-pid" "$MOCK_LOCK.unmarked.child-pid"
 done
@@ -431,15 +440,15 @@ assert_recovery_deadlines "$recovery_attempts"
 [[ ! -e "$MOCK_LOCK.interrupted" ]]
 flock -n "$MOCK_LOCK" true
 if [[ "$child_only" == 1 ]]; then
-  grep -qx "sudo:kill:-KILL -- $(cat "$MOCK_LOCK.child-pid")" "$MOCK_LOG"
-  ! grep -q '^sudo:kill:-KILL -- -' "$MOCK_LOG"
+  grep -qx "sudo:pidfd:-KILL -- $(cat "$MOCK_LOCK.child-pid")" "$MOCK_LOG"
+  ! grep -q '^sudo:pidfd:-KILL -- -' "$MOCK_LOG"
   unrelated_pid="$(cat "$MOCK_LOCK.unrelated.child-pid")"
   kill -0 "$unrelated_pid"
-  ! grep -qx "sudo:kill:-KILL -- $unrelated_pid" "$MOCK_LOG"
+  ! grep -qx "sudo:pidfd:-KILL -- $unrelated_pid" "$MOCK_LOG"
   kill "$unrelated_pid"
   rm -f "$MOCK_LOCK.unrelated.child-pid"
 else
-  ! grep -q '^sudo:kill:' "$MOCK_LOG"
+  ! grep -q '^sudo:pidfd:' "$MOCK_LOG"
 fi
 done
 export MOCK_CHILD_ONLY_TIMEOUT=0 MOCK_MODEL_REUSE=0
@@ -457,7 +466,7 @@ grep -q '^dpkg-hung$' "$MOCK_LOG"
 [[ "$(grep -c '^dpkg:--configure -a$' "$MOCK_LOG")" -eq 2 ]]
 assert_recovery_deadlines 2
 # One cleanup for the timed-out install attempt and one for the timed-out recovery.
-(( $(grep -c '^sudo:kill:-KILL -- [1-9][0-9]*$' "$MOCK_LOG") >= 2 ))
+(( $(grep -c '^sudo:pidfd:-KILL -- [1-9][0-9]*$' "$MOCK_LOG") >= 2 ))
 flock -n "$MOCK_LOCK" true
 
 # Without the recovery cleanup, the surviving dpkg helper keeps the lock and
@@ -533,4 +542,5 @@ assert_recovery_deadlines 1
 [[ "$(grep -c '^python:-m playwright install chromium$' "$MOCK_LOG" || true)" -eq 0 ]]
 grep -q 'could not recover interrupted package configuration' "$mock_dir/repair-output.log"
 
+[[ ! -s "$MOCK_LOG.raw-signal" ]]
 echo 'Browser installation bounded retry tests: 20/20 passed'

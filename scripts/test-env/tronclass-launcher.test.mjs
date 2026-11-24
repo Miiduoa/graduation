@@ -1970,11 +1970,12 @@ if (arg.endsWith('/firebase.js')) {
   try {
     const deadline = Date.now() + 8000;
     const health = signal === 'health cleanup';
-    const ready = marker(health ? 'health-started' : 'web-port');
-    while (!existsSync(ready) && Date.now() < deadline) await delay(20);
-    assert.ok(existsSync(ready), output);
-    const pids = ['web.pid', 'emulator.pid', ...(health ? ['health.pid'] : [])]
-      .map(name => Number(readFileSync(marker(name), 'utf8')));
+    // Health can start before the background web fixture has bound its port.
+    const pidFiles = ['web.pid', 'emulator.pid', ...(health ? ['health.pid'] : [])].map(marker);
+    const ready = [marker('web-port'), ...(health ? [marker('health-started')] : []), ...pidFiles];
+    while (!ready.every(existsSync) && Date.now() < deadline) await delay(20);
+    assert.ok(ready.every(existsSync), output);
+    const pids = pidFiles.map(file => Number(readFileSync(file, 'utf8')));
     for (const pid of pids) process.kill(pid, 0);
     const started = Date.now();
     if (health) {
@@ -2086,10 +2087,13 @@ if (arg && arg.endsWith('/firebase.js')) {
     done
     printf '%s\\n' "$BASHPID" >> "$TRONCLASS_RUNTIME_DIR/helpers-finished"
   fi
-  if [[ "$1" == -KILL && "$BASHPID" == "$$" ]]; then
-    printf '%s\\n' "\${*:2}" >> "$TRONCLASS_RUNTIME_DIR/launcher-kills"
-  fi
   builtin kill "$@"
+}
+python3() {
+  command python3 "$@" || return
+  if [[ "\${3:-}" == *pidfd_send_signal* && "$8" == KILL && "$BASHPID" == "$$" ]]; then
+    printf '%s\\n' "-- $4" >> "$TRONCLASS_RUNTIME_DIR/launcher-kills"
+  fi
 }
 `);
   const proc = spawn('bash', [script], {
@@ -2308,6 +2312,173 @@ if (process.argv[2]?.includes('/selftest.log.')) {
         try { process.kill(memberPid, 'SIGKILL'); } catch { /* already exited */ }
       }
     }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('default TMPDIR rejects a symbolic link before a parent component', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-default-parent-'));
+  try {
+    mkdirSync(path.join(dir, 'real'));
+    symlinkSync(path.join(dir, 'real'), path.join(dir, 'link'));
+    const result = spawnSync('bash', [fileURLToPath(import.meta.resolve('./tronclass.sh'))], {
+      encoding: 'utf8', timeout: 3000,
+      env: { ...process.env, TMPDIR: `${dir}/link/..`, TRONCLASS_RUNTIME_DIR: '', TRONCLASS_SIGNAL_SELFTEST: '1' },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /symbolic link/i);
+    assert.deepEqual(readdirSync(dir).sort(), ['link', 'real']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+for (const replacement of ['symlink', 'regular file']) {
+  test(`group journal stays on its original inode after replacement by a ${replacement}`, () => {
+    const dir = mkdtempSync('/tmp/tronclass-journal-test-');
+    const script = fileURLToPath(import.meta.resolve('./tronclass.sh'));
+    const original = path.join(dir, 'original');
+    const target = path.join(dir, 'target');
+    const nameFile = path.join(dir, 'journal-name');
+    let replacedName;
+    try {
+      writeFileSync(target, 'preserve me\n');
+      const fixture = readFileSync(script, 'utf8').replace('import tempfile\n', `import tempfile
+create_journal = tempfile.mkstemp
+def replace_journal(*args, **kwargs):
+    fd, name = create_journal(*args, **kwargs)
+    os.rename(name, ${JSON.stringify(original)})
+    with open(${JSON.stringify(nameFile)}, "w") as saved:
+        saved.write(name)
+    if ${JSON.stringify(replacement)} == "symlink":
+        os.symlink(${JSON.stringify(target)}, name)
+    else:
+        with open(name, "x") as other:
+            other.write("preserve replacement")
+    return fd, name
+tempfile.mkstemp = replace_journal
+`).replace('tronclass_read_session_key() {', `printf '%s\\n' 'original journal record' >&"$group_journal_fd"
+tronclass_read_group_journal
+exit 0
+tronclass_read_session_key() {`);
+      const result = spawnSync('bash', ['-c', fixture, script], {
+        encoding: 'utf8', timeout: 3000,
+        env: { ...process.env, TRONCLASS_RUNTIME_DIR: dir, TRONCLASS_SIGNAL_SELFTEST: '1' },
+      });
+      replacedName = readFileSync(nameFile, 'utf8');
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /\noriginal journal record\n$/);
+      assert.equal(readFileSync(original, 'utf8'), 'original journal record\n');
+      assert.equal(readFileSync(target, 'utf8'), 'preserve me\n');
+      assert.equal(readFileSync(replacedName, 'utf8'), replacement === 'symlink' ? 'preserve me\n' : 'preserve replacement');
+    } finally {
+      if (replacedName) rmSync(replacedName, { force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const mode of ['pidfd', 'fallback']) {
+  test(`process signalling refuses a reused PID at delivery with ${mode}`, () => {
+    const result = spawnSync('bash', ['-c', String.raw`
+source scripts/process-identity.sh
+python3() {
+  local code="$3"; shift 3
+  command python3 -I - "$case_mode" "$code" "$@" <<'PYTHON'
+import builtins
+import errno
+import io
+import os
+import signal
+import sys
+
+mode, code = sys.argv[1:3]
+sys.argv = [sys.argv[0], *sys.argv[3:]]
+replacement = False
+
+def pidfd_open(pid):
+    if mode == "fallback":
+        raise OSError(errno.ENOSYS, "pidfd unavailable")
+    if replacement:
+        raise AssertionError("opened a pidfd for the replacement")
+    return 99
+
+def stat(*args, **kwargs):
+    global replacement
+    start = b"200" if replacement else b"100"
+    replacement = True  # The numeric PID now refers to another process.
+    return io.BytesIO(b"42 (old) " + b" ".join([b"S", b"1", b"42"] + [b"0"] * 16 + [start]))
+
+def send(fd, sig):
+    assert fd == 99 and replacement
+    print("original descriptor only")
+    raise ProcessLookupError(errno.ESRCH, "old task exited")
+
+def forbidden(*args):
+    raise AssertionError("signalled the replacement by its numeric PID")
+
+os.pidfd_open = pidfd_open
+os.open = lambda *args, **kwargs: 88
+builtins.open = stat
+signal.pidfd_send_signal = send
+os.kill = forbidden
+exec(code)
+PYTHON
+}
+case_mode="$1"
+proc_send_signal 42 100 42 "" KILL
+`, 'pid-reuse-test', mode], { encoding: 'utf8', timeout: 3000 });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stderr, '');
+    assert.equal(result.stdout.trim(), mode === 'pidfd' ? 'original descriptor only' : '');
+  });
+}
+
+test('forced group cleanup rescans for a member forked after the first scan', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-group-rescan-'));
+  try {
+    const result = spawnSync('bash', ['-c', String.raw`
+set -euo pipefail
+source scripts/process-identity.sh
+dir="$1"
+env TRONCLASS_TEST_GROUP=marked setsid python3 -I - "$dir" <<'PYTHON' &
+import os
+import signal
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+def fork_member(*args):
+    if os.fork() == 0:
+        (root / "member").write_text(str(os.getpid()))
+        while True:
+            signal.pause()
+
+signal.signal(signal.SIGUSR1, fork_member)
+(root / "leader").write_text(str(os.getpid()))
+while True:
+    signal.pause()
+PYTHON
+leader_job=$!
+trap 'for file in "$dir"/leader "$dir"/member; do if [[ -s "$file" ]]; then kill -KILL "$(cat "$file")" 2>/dev/null || true; fi; done; wait "$leader_job" 2>/dev/null || true' EXIT
+for ((i=0; i<100; i++)); do [[ -s "$dir/leader" ]] && break; sleep 0.01; done
+leader="$(cat "$dir/leader")"
+proc_identity "$leader"
+eval "$(declare -f proc_send_signal | sed '1s/proc_send_signal/real_proc_send_signal/')"
+proc_send_signal() {
+  if [[ "$1" == "$leader" && ! -s "$dir/member" ]]; then
+    real_proc_send_signal "$1" "$2" "$3" "$4" USR1 || return
+    for ((i=0; i<100; i++)); do [[ -s "$dir/member" ]] && break; sleep 0.01; done
+  fi
+  real_proc_send_signal "$@"
+}
+proc_signal_marked_group "$leader" "$proc_start" "$leader" TRONCLASS_TEST_GROUP=marked KILL
+member="$(cat "$dir/member")"
+if proc_identity "$member"; then [[ "$proc_state" == Z || "$proc_state" == X ]]; fi
+`, 'group-rescan-test', dir], { encoding: 'utf8', timeout: 6000 });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });

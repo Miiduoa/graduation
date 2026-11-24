@@ -62,7 +62,7 @@ read_attempt_record() {
 }
 
 kill_timed_out_group() {
-  "$@" bash -c "$(declare -f proc_identity proc_group_leader_matches proc_group_members proc_signal_marked_group private_attempt_dir read_attempt_record)
+  "$@" bash -c "$(declare -f proc_identity proc_group_leader_matches proc_send_signal proc_group_members proc_signal_marked_group private_attempt_dir read_attempt_record)
     read_attempt_record \"\$@\"" signal-process-group "$attempt_dir/process-group" "$attempt_id" "$installer_group" || true
 }
 

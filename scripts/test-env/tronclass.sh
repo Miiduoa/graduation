@@ -78,10 +78,10 @@ import os
 import secrets
 import stat
 import sys
+import tempfile
 
 specified = bool(sys.argv[1])
 requested = sys.argv[1] or sys.argv[2]
-target = os.path.abspath(requested)
 flags = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW
 fds = []
 bindings = []
@@ -111,7 +111,11 @@ try:
     absolute = requested if requested.startswith("/") else os.getcwd() + "/" + requested
     opened = os.fstat(fds[-1])
     unresolved = 0
-    for name in (absolute if specified else target).split("/"):
+    for name in absolute.split("/"):
+        if not specified:
+            if name not in ("", "."):
+                opened = open_directory(name)
+            continue
         if name in ("", "."):
             continue
         if name == "..":
@@ -144,6 +148,8 @@ try:
         raise OSError("invalid runtime directory")
     verify_bindings()
 
+    target = os.path.abspath(absolute)
+
     # Share existing private directories. For other modes and the default
     # location, create a private child without changing any directory's mode.
     if not specified or stat.S_IMODE(opened.st_mode) not in (0o700, 0o2700):
@@ -169,7 +175,22 @@ try:
 
     verify_bindings()
     descriptor = f"/proc/{os.getpid()}/fd/{fds[-1]}".encode()
-    sys.stdout.buffer.write(os.fsencode(target) + b"\0" + descriptor + b"\0")
+    # mkstemp creates and opens the same inode. The pathname is used only
+    # to unlink our entry; a replacement, including a symlink, is ignored.
+    journal_fd, journal_name = tempfile.mkstemp(prefix="tronclass-groups.", dir="/tmp")
+    fds.append(journal_fd)
+    journal = os.fstat(journal_fd)
+    if not stat.S_ISREG(journal.st_mode) or journal.st_uid != os.getuid():
+        raise OSError("invalid group journal")
+    try:
+        named = os.lstat(journal_name)
+    except FileNotFoundError:
+        pass
+    else:
+        if stat.S_ISREG(named.st_mode) and identity(named) == identity(journal):
+            os.unlink(journal_name)
+    journal_descriptor = f"/proc/{os.getpid()}/fd/{journal_fd}".encode()
+    sys.stdout.buffer.write(os.fsencode(target) + b"\0" + descriptor + b"\0" + journal_descriptor + b"\0")
     sys.stdout.buffer.flush()
     if os.read(3, 1) != b"1":
         raise OSError("runtime directory descriptor was not transferred")
@@ -184,12 +205,14 @@ PYTHON
 runtime_setup_pid="${TRONCLASS_RUNTIME_SETUP_PID:-}"
 if ! { IFS= read -r -d '' TRONCLASS_RUNTIME_DIR &&
        IFS= read -r -d '' runtime_descriptor &&
-       exec {runtime_fd}<"$runtime_descriptor"; } <&"${TRONCLASS_RUNTIME_SETUP[0]:-}" ||
+       IFS= read -r -d '' journal_descriptor &&
+       exec {runtime_fd}<"$runtime_descriptor" &&
+       exec {group_journal_fd}<>"$journal_descriptor"; } <&"${TRONCLASS_RUNTIME_SETUP[0]:-}" ||
    ! printf 1 >&"${TRONCLASS_RUNTIME_SETUP[1]:-}"; then
   exit 1
 fi
 wait "$runtime_setup_pid"
-unset runtime_descriptor TRONCLASS_REPORT_DIR_FD TRONCLASS_WRITE_RUNTIME_REPORT
+unset runtime_descriptor journal_descriptor TRONCLASS_REPORT_DIR_FD TRONCLASS_WRITE_RUNTIME_REPORT
 export TRONCLASS_RUNTIME_DIR
 # Bash reopens the private inode through procfs. Keep this reference for
 # shell utilities and Node (which has no openat API); the original path is
@@ -223,12 +246,23 @@ tronclass_early_cleanup() {
 trap 'tronclass_early_cleanup' EXIT
 trap 'tronclass_early_cleanup INT' INT
 trap 'tronclass_early_cleanup TERM' TERM
-# Keep the wrapper's spawn records available even if sidecar publication fails.
-# The launcher holds the unlinked journal open until all wrappers are reaped.
-group_journal="$(mktemp /tmp/tronclass-groups.XXXXXXXX)"
-exec {group_journal_fd}>>"$group_journal"
-rm -- "$group_journal"
-unset group_journal
+# All journal writers share this append descriptor. Readers use positional I/O
+# so concurrent cleanup passes do not move its offset.
+python3 -I -c 'import fcntl, os
+fcntl.fcntl(3, fcntl.F_SETFL, fcntl.fcntl(3, fcntl.F_GETFL) | os.O_APPEND)' 3<&"$group_journal_fd"
+
+tronclass_read_group_journal() {
+  python3 -I -c 'import os, sys
+offset = 0
+remaining = os.fstat(3).st_size
+while remaining:
+    data = os.pread(3, min(remaining, 65536), offset)
+    if not data:
+        break
+    sys.stdout.buffer.write(data)
+    offset += len(data)
+    remaining -= len(data)' 3<&"$group_journal_fd"
+}
 tronclass_read_session_key() {
   node - /proc/self/fd/4 "$1.key" 4<&"$runtime_fd" <<'NODE'
 const fs = require('node:fs');
@@ -340,7 +374,7 @@ tronclass_record_matches() {
 tronclass_signal_wrapper() {
   local pid="$1" start="$2" sig="$3"
   tronclass_record_matches "$pid" "$start" || return 0
-  kill "-$sig" "$pid" 2>/dev/null || true
+  proc_send_signal "$pid" "$start" "" "" "$sig" || true
 }
 
 tronclass_read_record_file() {
@@ -391,7 +425,7 @@ tronclass_stop_logged() {
         [ "$existing" = "$child_record" ] && continue 2
       done
       records+=("$child_record")
-    done < "/proc/self/fd/$group_journal_fd"
+    done < <(tronclass_read_group_journal)
     tronclass_record_matches "$wrapper" "$wrapper_start" || return 0
     parents+=("$wrapper")
     while [ "${#parents[@]}" -gt 0 ]; do
@@ -487,7 +521,7 @@ cleanup() {
       [[ -n "$record" && -z "${signalled[$record]:-}" ]] || continue
       signalled["$record"]=1
       tronclass_signal_record "$record" KILL
-    done < "/proc/self/fd/$group_journal_fd"
+    done < <(tronclass_read_group_journal)
   }
   TRONCLASS_CLEANUP_DEADLINE=$((EPOCHSECONDS + 6))
   local pid start entry
