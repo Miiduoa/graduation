@@ -51,7 +51,7 @@ export function createMerchantConfirmations() {
   function merge(
     next: NuniMerchantWorkspace | NuniMerchantWorkspaceDetail,
     source: Source,
-    revision = ++request,
+    revision: number,
   ): Confirmation {
     const key = workspaceKey(next);
     const current = entries.get(key);
@@ -73,8 +73,8 @@ export function createMerchantConfirmations() {
       return current;
     }
 
-    // Reads started before a confirmation can finish after it. A later
-    // read can supersede a receipt even when availability shares its version.
+    // Reads and writes share the order assigned when their requests start.
+    // A later read can supersede a receipt even when availability shares its version.
     // A confirmed detail remains authoritative over a same-version list row.
     if (
       current &&
@@ -205,7 +205,7 @@ export function createMerchantConfirmations() {
     },
     merge,
     confirmMenu,
-    beginRead: () => ++request,
+    beginRequest: () => ++request,
     verify,
     denied: (key: string) => access.get(key)?.denied === true,
     needsAccessRefresh: (key: string) => access.has(key) || !!entries.get(key)?.detail,

@@ -85,7 +85,7 @@ export function MerchantOperations({
   navigation,
   onBack,
   onExpired,
-  beginRead,
+  beginRequest,
   onChanged,
   onDenied,
   onMenuConfirmed,
@@ -105,8 +105,8 @@ export function MerchantOperations({
   };
   onBack?(): void;
   onExpired(): void;
-  beginRead?(): number;
-  onChanged(detail: Detail, verifiedAccess: boolean, revision?: number): Detail | null | void;
+  beginRequest?(): number;
+  onChanged(detail: Detail, verifiedAccess: boolean, revision: number): Detail | null | void;
   onMenuConfirmed?(detail: Detail): void;
   onDenied?(tenantId: string, locationId: string, revision?: number): void;
 }) {
@@ -132,7 +132,8 @@ export function MerchantOperations({
   const [menu, setMenu] = useState<MenuDraft[]>(saved?.menu ?? [newItem()]);
   const [menuConfirmed, setMenuConfirmed] = useState(false);
   const [menuReceipt, setMenuReceipt] = useState<number | null>(saved?.menuReceipt ?? null);
-  const [localConfirmations] = useState(() => (beginRead ? null : createMerchantConfirmations()));
+  const [localConfirmations] = useState(createMerchantConfirmations);
+  const nextRevision = beginRequest ?? localConfirmations.beginRequest;
   const [menuBlocked, setMenuBlocked] = useState(saved?.menuBlocked ?? false);
   const [activationConfirmed, setActivationConfirmed] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
@@ -178,28 +179,30 @@ export function MerchantOperations({
   }, [suspended, invalidate]);
 
   const accept = useCallback(
-    (next: Detail, verifiedAccess = false, revision?: number) => {
+    (next: Detail, verifiedAccess: boolean, revision: number) => {
       if (drafts.get(draftKey)?.menuReceipt != null) {
         if (onMenuConfirmed) onMenuConfirmed(next);
-        else localConfirmations?.confirmMenu(workspaceKey(next));
+        else if (!beginRequest) localConfirmations.confirmMenu(workspaceKey(next));
       }
       const merged =
         changed.current(next, verifiedAccess, revision) ??
-        (localConfirmations
-          ? workspaceDetail(localConfirmations.merge(next, verifiedAccess ? 'read' : 'write'))
-          : null);
+        (beginRequest
+          ? null
+          : workspaceDetail(
+              localConfirmations.merge(next, verifiedAccess ? 'read' : 'write', revision),
+            ));
       setDetail(merged);
       setFresh(!!merged);
       setMenuConfirmed(false);
       setActivationConfirmed(false);
       return merged;
     },
-    [draftKey, drafts, localConfirmations, onMenuConfirmed],
+    [beginRequest, draftKey, drafts, localConfirmations, onMenuConfirmed],
   );
 
   const checkAccess = useCallback(
     async (current: () => boolean) => {
-      const revision = beginRead?.();
+      const revision = nextRevision();
       try {
         const next = await operations.get(tenantId, locationId);
         if (current()) changed.current(next, true, revision);
@@ -214,14 +217,14 @@ export function MerchantOperations({
         }
       }
     },
-    [beginRead, locationId, onDenied, operations, tenantId],
+    [nextRevision, locationId, onDenied, operations, tenantId],
   );
 
   const read = useCallback(
     async (reconcile = true) => {
       readAfterWrite.current = false;
       const version = ++run.current;
-      const revision = beginRead?.();
+      const revision = nextRevision();
       setLoading(true);
       setFresh(false);
       try {
@@ -255,7 +258,7 @@ export function MerchantOperations({
         if (active.current && version === run.current) setLoading(false);
       }
     },
-    [operations, tenantId, locationId, accept, drafts, draftKey, onDenied, beginRead],
+    [operations, tenantId, locationId, accept, drafts, draftKey, onDenied, nextRevision],
   );
   useLayoutEffect(() => {
     if (!suspended) {
@@ -286,7 +289,10 @@ export function MerchantOperations({
     };
   }, [checkAccess, read, suspended, visible]);
 
-  async function mutate(action: Action, task: (current: () => boolean) => Promise<void>) {
+  async function mutate(
+    action: Action,
+    task: (current: () => boolean, revision: number) => Promise<void>,
+  ) {
     if (!active.current || lock.current || loading || uncertain || !fresh || !entryVerified) return;
     lock.current = true;
     const mutation = ++mutationRun.current;
@@ -306,7 +312,7 @@ export function MerchantOperations({
     setError('');
     setNotice('');
     try {
-      await task(current);
+      await task(current, nextRevision());
       if (current() && !visibleRef.current) await checkAccess(current);
     } catch (failure) {
       if (!current()) return;
@@ -525,7 +531,7 @@ export function MerchantOperations({
                 onSubmit={(event) => {
                   event.preventDefault();
                   if (!draft.agreed || !draft.serviceModes.length || settingsChanged) return;
-                  void mutate('settings', async (current) => {
+                  void mutate('settings', async (current, revision) => {
                     const next = await operations.updateSettings(tenantId, locationId, {
                       serviceModes: draft.serviceModes,
                       paymentMode: draft.paymentMode,
@@ -533,7 +539,7 @@ export function MerchantOperations({
                       expectedVersion: draft.baseVersion,
                     });
                     if (!current()) return;
-                    accept(next);
+                    accept(next, false, revision);
                     setSettings(null);
                     setNotice('營運設定已儲存。');
                   });
@@ -631,7 +637,7 @@ export function MerchantOperations({
               <Button
                 disabled={locked}
                 onClick={() =>
-                  void mutate('settings', async (current) => {
+                  void mutate('settings', async (current, revision) => {
                     const next = await operations.updateSettings(tenantId, locationId, {
                       serviceModes: detail.serviceModes,
                       paymentMode: 'counter-only',
@@ -639,7 +645,7 @@ export function MerchantOperations({
                       expectedVersion: detail.readinessVersion,
                     });
                     if (!current()) return;
-                    accept(next);
+                    accept(next, false, revision);
                     setNotice('已改為現場櫃檯付款。');
                   })
                 }
@@ -684,7 +690,7 @@ export function MerchantOperations({
                         });
                         if (!current()) return;
                         if (onMenuConfirmed) onMenuConfirmed(detail);
-                        else localConfirmations?.confirmMenu(workspaceKey(detail));
+                        else if (!beginRequest) localConfirmations.confirmMenu(workspaceKey(detail));
                         setMenuReceipt(receipt.createdItems);
                         setMenuConfirmed(false);
                         setNotice(
@@ -836,10 +842,10 @@ export function MerchantOperations({
                     disabled={locked || !canActivate || !!settings || !activationConfirmed}
                     variant="primary"
                     onClick={() =>
-                      void mutate('activate', async (current) => {
+                      void mutate('activate', async (current, revision) => {
                         const next = await operations.activate(tenantId, locationId);
                         if (!current()) return;
-                        const confirmed = accept(next);
+                        const confirmed = accept(next, false, revision);
                         if (confirmed)
                           setNotice(`門市狀態已更新：${merchantWorkspaceStateLabel(confirmed)}。`);
                       })
@@ -858,14 +864,14 @@ export function MerchantOperations({
                   <Button
                     disabled={locked}
                     onClick={() =>
-                      void mutate('availability', async (current) => {
+                      void mutate('availability', async (current, revision) => {
                         const next = await operations.setAvailability(
                           tenantId,
                           locationId,
                           detail.locationStatus === 'closed',
                         );
                         if (!current()) return;
-                        const confirmed = accept(next);
+                        const confirmed = accept(next, false, revision);
                         if (confirmed)
                           setNotice(`門市狀態已更新：${merchantWorkspaceStateLabel(confirmed)}。`);
                       })

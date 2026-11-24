@@ -615,6 +615,44 @@ it.each([2, 3])(
   },
 );
 
+it('keeps the same-version reopening confirmed on the list when an older pause receipt arrives', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const open = detail('store-a', true);
+  const paused = { ...open, locationStatus: 'closed', publicAccess: false };
+  let finishWrite!: (receipt: typeof paused) => void;
+  const write = new Promise<typeof paused>((resolve) => {
+    finishWrite = resolve;
+  });
+  const readDetail = vi.fn(() => Promise.resolve(open));
+  mocks.request.mockImplementation((requestPath) => {
+    if (requestPath === `${path}/availability`) return write;
+    if (requestPath === path) return readDetail();
+    if (requestPath === 'merchant-workspaces') return Promise.resolve({ workspaces: [paused] });
+    return respond(requestPath);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+  expect(mocks.request).toHaveBeenCalledWith(
+    `${path}/availability`,
+    'context-a',
+    { acceptingOrders: false },
+    undefined,
+  );
+
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
+  expect(screen.getByText('營業中')).toBeTruthy();
+
+  readDetail.mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
+  await act(async () => finishWrite(paused));
+  expect(readDetail).toHaveBeenCalledTimes(3);
+  expect(screen.getByText('營業中')).toBeTruthy();
+  expect(screen.queryByText('暫停接單')).toBeNull();
+});
+
 it.each(['receipt', 'unknown', 'unknown while on the list'] as const)(
   'keeps an availability write locked across browser history and handles its %s',
   async (result) => {

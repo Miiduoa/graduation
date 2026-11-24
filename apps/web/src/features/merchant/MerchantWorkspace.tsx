@@ -312,7 +312,7 @@ function AccountWorkspace({
   }, [clearOverview, invalidate, onExpired]);
   const load = useCallback(async () => {
     const run = ++generation.current;
-    const listRevision = confirmed.beginRead();
+    const listRevision = confirmed.beginRequest();
     const isCurrent = () => mounted.current && enabled.current && run === generation.current;
     setLoading(true);
     setLoadError('');
@@ -371,7 +371,7 @@ function AccountWorkspace({
             !operationDrafts.get(JSON.stringify([item.tenantId, item.locationId]))?.uncertain
           )
             return;
-          const revision = confirmed.beginRead();
+          const revision = confirmed.beginRequest();
           try {
             const detail = await operations.get(item.tenantId, item.locationId);
             return { key, revision, detail };
@@ -508,10 +508,10 @@ function AccountWorkspace({
   }
 
   const onWorkspaceChanged = useCallback(
-    (detail: NuniMerchantWorkspaceDetail, verifiedAccess: boolean, revision?: number) => {
+    (detail: NuniMerchantWorkspaceDetail, verifiedAccess: boolean, revision: number) => {
       if (!mounted.current || !enabled.current) return null;
       const key = workspaceKey(detail);
-      if (verifiedAccess && revision !== undefined) confirmed.verify(key, revision, false);
+      if (verifiedAccess) confirmed.verify(key, revision, false);
       const merged = confirmed.merge(detail, verifiedAccess ? 'read' : 'write', revision);
       const allowed = !confirmed.denied(key);
       if (allowed) setHasVerifiedLocation(true);
@@ -522,7 +522,7 @@ function AccountWorkspace({
   );
 
   const onWorkspaceDenied = useCallback(
-    (tenantId: string, locationId: string, revision = confirmed.beginRead()) => {
+    (tenantId: string, locationId: string, revision = confirmed.beginRequest()) => {
       if (!mounted.current || !enabled.current) return;
       confirmed.verify(workspaceKey({ tenantId, locationId }), revision, true);
       publishOverview();
@@ -562,7 +562,7 @@ function AccountWorkspace({
               : undefined
           }
           onExpired={expire}
-          beginRead={confirmed.beginRead}
+          beginRequest={confirmed.beginRequest}
           onChanged={onWorkspaceChanged}
           onMenuConfirmed={onMenuConfirmed}
           onDenied={onWorkspaceDenied}
