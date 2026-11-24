@@ -179,13 +179,6 @@ function splitClauses(text: string): string[] {
   return clauses;
 }
 
-function isInWordWriteMorpheme(_text: string, _from: number, clauseHasQuery: boolean): boolean {
-  // Verb vs noun is decided by the lexicon (外交, 交通, …), not by the next
-  // character. A leftover 交／繳 syllable is in-word only while a query still
-  // governs the clause, so「務必速交學習單／課堂報告」stay writes.
-  return clauseHasQuery;
-}
-
 const QUERY_CONTEXT_HOLD_CUES = new Set(['供', '正在', '正']);
 
 function noteToken(tokens: Token[], token: Token, state: { clauseHasQuery: boolean }): void {
@@ -215,12 +208,13 @@ function tokenize(text: string): Token[] {
     // 查／看 in the second syllable of leftover content is in-word (審查、檢查).
     // 交／繳 only bind when a query already governs the clause and what follows
     // is not a submission object, so ambiguous writes stay blocked and pure reads do not.
-    if (HAN_CHAR.test(ch) && HAN_CHAR.test(next) && /[查看交繳]/.test(next) &&
+    // 交／繳 are verbs unless the lexicon already consumed a noun such as「外交」.
+    // Only 查／看 still bind as a second syllable of leftover content (審查、檢查).
+    if (HAN_CHAR.test(ch) && HAN_CHAR.test(next) && /[查看]/.test(next) &&
       !/[查看交繳]/.test(ch) &&
       !startsKnownQuery(text, from) && !startsKnownWrite(text, from) &&
       !startsKnownQuery(text, from + 1) && !startsKnownWrite(text, from + 1) &&
-      !LEXICON.some(item => text.startsWith(item.value, from + 1)) &&
-      ( /[查看]/.test(next) || isInWordWriteMorpheme(text, from, state.clauseHasQuery) )) {
+      !LEXICON.some(item => text.startsWith(item.value, from + 1))) {
       noteToken(tokens, { value: ch + next, start: from, end: from + 2, kind: 'noun' }, state);
       index += 2;
       continue;
@@ -268,12 +262,19 @@ function tokenCovering(text: string, index: number): Token | undefined {
 }
 
 function isModifierBoundaryToken(token: Token): boolean {
-  return token.kind === 'punct' || CLAUSE_CUES.includes(token.value);
+  return token.kind === 'punct';
+}
+
+function nextSignificantToken(tokens: Token[], cursor: number): Token | undefined {
+  for (let index = cursor + 1; index < tokens.length; index += 1) {
+    if (!/^\s+$/u.test(tokens[index]!.value)) return tokens[index];
+  }
+  return undefined;
 }
 
 function isProgressiveCloser(tokens: Token[], cursor: number, clauseEnd: number): boolean {
   if (cursor === clauseEnd) return true;
-  const next = tokens[cursor + 1];
+  const next = nextSignificantToken(tokens, cursor);
   if (!next) return true;
   return next.value === '的' || isModifierBoundaryToken(next) || ACTION_CUES.includes(next.value);
 }
@@ -293,7 +294,7 @@ function collectModifierSpans(tokens: Token[]): Array<{ start: number; end: numb
     for (let cursor = index; cursor <= end; cursor += 1) {
       const value = tokens[cursor]!.value;
       if (value === '供') supply.push(cursor);
-      if (value === '用的' || (value === '用' && tokens[cursor + 1]?.value === '的')) {
+      if (value === '用的' || (value === '用' && nextSignificantToken(tokens, cursor)?.value === '的')) {
         const start = supply.pop();
         if (start !== undefined && cursor > start) spans.push({ start, end: cursor });
       }
@@ -306,7 +307,7 @@ function collectModifierSpans(tokens: Token[]): Array<{ start: number; end: numb
     const lastSupplyClose = [...Array(end - index + 1).keys()].map(offset => index + offset)
       .reverse().find(cursor => {
         const value = tokens[cursor]!.value;
-        return value === '用的' || (value === '用' && tokens[cursor + 1]?.value === '的');
+        return value === '用的' || (value === '用' && nextSignificantToken(tokens, cursor)?.value === '的');
       });
     const lastProgressiveClose = [...Array(end - index + 1).keys()].map(offset => index + offset)
       .reverse().find(cursor => tokens[cursor]!.value === '中' && isProgressiveCloser(tokens, cursor, end));
@@ -377,6 +378,7 @@ function nextNegatedWriteStop(text: string, from: number): number {
     const token = tokens[i]!;
     if (token.start < from) continue;
     const offset = token.start - from;
+    if (interior[i]) continue;
     if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) return offset;
     if (token.kind === 'cue' && ACTION_CUES.includes(token.value)) return offset;
     if (token.kind === 'query' && QUERY_START.has(token.value) && !isRelativeQuery(tokens, token, i, interior)) {
@@ -460,7 +462,12 @@ function readGovernsStatus(segment: string): boolean {
 /** Classify each occurrence using its own context in the original request. */
 function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
   const tokens = tokensFor(text);
+  let lastPunctEnd = 0;
   for (const token of tokens) {
+    if (token.kind === 'punct') {
+      lastPunctEnd = token.end;
+      continue;
+    }
     if (token.kind === 'noun') continue;
     const matched = WRITE_COMPOUND_SET.has(token.value)
       ? { 0: token.value, 1: token.value, length: 2 } as Pick<RegExpExecArray, 0 | 1 | 'length'>
@@ -474,7 +481,7 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
     if (!matched[1]) return 'unsupported';
 
     const after = text.slice(token.start + matched[0].length).trimStart();
-    const segment = before.split(/[,;。?!、:\r\n]/u).at(-1)!.trimStart();
+    const segment = text.slice(lastPunctEnd, token.start).trimStart();
     if (ADDITIVE_CUE.test(beforeTail)) return STATUS_NOUN.test(after) ? 'planner' : 'unsupported';
     if (WRITE_CUE.test(beforeTail)) return 'unsupported';
     if (segment.includes('把')) return 'unsupported';
@@ -505,11 +512,19 @@ const BA_OBJECT_RE = new RegExp(BA_OBJECT, 'u');
 const BA_TRANSFER_RE = new RegExp(BA_TRANSFER, 'u');
 
 function hasBaObjectWrite(text: string): boolean {
-  for (const match of text.matchAll(/[把將]/gu)) {
-    const before = text.slice(0, match.index);
-    if (BA_NEGATION.test(before)) continue;
+  for (const token of tokensFor(text)) {
+    if (token.value !== '把' && token.value !== '將') continue;
+    const before = text.slice(0, token.start);
+    if (BA_NEGATION.test(suffixForEndAnchor(before))) continue;
     // Keep colons inside the same 把／將 command, as in「把附件：放到作業區」.
-    const segmentRest = text.slice(match.index + match[0].length).split(/[,;。！!？?、\r\n]/u)[0] ?? '';
+    let restEnd = text.length;
+    for (const later of tokensFor(text)) {
+      if (later.start > token.start && later.kind === 'punct' && /[,;。！!？?、]/u.test(later.value)) {
+        restEnd = later.start;
+        break;
+      }
+    }
+    const segmentRest = text.slice(token.end, restEnd);
     const object = BA_OBJECT_RE.exec(segmentRest);
     if (!object) continue;
     if (BA_TRANSFER_RE.test(segmentRest)) return true;
