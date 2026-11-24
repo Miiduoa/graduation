@@ -440,6 +440,27 @@ function PublicCourseSearchForm({
     void searchCourses(submitted);
   }
 
+  // Match native's source-freshness guidance: a successful search does not
+  // establish that the university has published an up-to-date offering.
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    const update = () => setNow(Date.now());
+    update();
+    const timer = window.setInterval(update, 60_000);
+    window.addEventListener('focus', update);
+    document.addEventListener('visibilitychange', update);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', update);
+      document.removeEventListener('visibilitychange', update);
+    };
+  }, []);
+  const fetchedAt = result?.status === 'ready' ? result.fetchedAt : undefined;
+  const fetchAgeMs = fetchedAt && now !== null ? now - Date.parse(fetchedAt) : null;
+  const fetchIsOld = fetchAgeMs !== null && fetchAgeMs > 24 * 60 * 60 * 1000;
+  // Allow a small client/server clock skew without presenting false warnings.
+  const fetchIsFuture = fetchAgeMs !== null && fetchAgeMs < -5 * 60 * 1000;
+
   const visibleCourses = result?.status === 'ready' ? result.courses : [];
   const selectedCourses = visibleCourses
     .map((course, index) => ({ course, cardId: courseCardId(course, index) }))
@@ -533,6 +554,18 @@ function PublicCourseSearchForm({
             另有 {result.unresolvedCount} 筆資料無法確認是否符合上述篩選條件，未列入結果。
           </p>}
           {result.fetchedAt && <p>校方資料擷取：{formatPublicCatalogFetchedAt(result.fetchedAt)}（台灣時間；非校方更新時間）</p>}
+          {!result.fetchedAt && <p aria-live="polite">
+            目前沒有校方資料的擷取時間。加入個人課表前，請先至
+            {catalog ? <a href={catalog.url} target="_blank" rel="noopener noreferrer">官方課程目錄</a> : '官方課程目錄'}核對。
+          </p>}
+          {fetchIsOld && <p aria-live="polite">
+            距離伺服器上次取得校方資料已超過 24 小時，課程與教室可能變動。加入前請先查看
+            {catalog ? <a href={catalog.url} target="_blank" rel="noopener noreferrer">官方課程目錄</a> : '官方課程目錄'}。
+          </p>}
+          {fetchIsFuture && <p aria-live="polite">
+            伺服器提供的擷取時間比此裝置時間晚超過 5 分鐘，無法確認課程資料時效。加入前請先查看
+            {catalog ? <a href={catalog.url} target="_blank" rel="noopener noreferrer">官方課程目錄</a> : '官方課程目錄'}。
+          </p>}
           {result.courses.length > 0 && (
             <div className={courseStyles.searchActions}>
               <p role="status" aria-label="選取課程">已選 {selectedCourses.length} 門課（最多 {MAX_PUBLIC_COURSE_BULK_SELECTION} 門），可一次帶入同學期課表核對。</p>
