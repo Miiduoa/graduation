@@ -77,6 +77,7 @@ export function MerchantOperations({
   tenantId,
   locationId,
   suspended,
+  visible = true,
   drafts,
   foodDrafts,
   navigation,
@@ -88,11 +89,13 @@ export function MerchantOperations({
   tenantId: string;
   locationId: string;
   suspended: boolean;
+  visible?: boolean;
   drafts: MerchantOperationDrafts;
   foodDrafts?: FoodDraftCache;
   navigation?: {
     section: MerchantWorkspaceSection;
     queue: MerchantWorkspaceQueue;
+    backHref: string;
     onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   };
   onBack?(): void;
@@ -132,6 +135,7 @@ export function MerchantOperations({
   const active = useRef(false);
   const lock = useRef(false);
   const run = useRef(0);
+  const opened = useRef(false);
   const mutationRun = useRef(0);
   const changed = useRef(onChanged);
   const expire = useRef(onExpired);
@@ -167,44 +171,61 @@ export function MerchantOperations({
     changed.current(next);
   }, []);
 
-  const read = useCallback(async () => {
-    const version = ++run.current;
-    setLoading(true);
-    setFresh(false);
-    try {
-      const next = await operations.get(tenantId, locationId);
-      if (!active.current || version !== run.current) return;
-      accept(next);
-      // A count of zero cannot prove a non-idempotent menu request failed:
-      // an existing menu may have no remaining sellable stock.
-      setUncertain((current) =>
-        current === 'menu' && next.publishedMenuItems === 0 ? current : null,
-      );
-      setError('');
-    } catch (failure) {
-      if (!active.current || version !== run.current) return;
-      if (
-        failure instanceof NuniError &&
-        (failure.status === 401 || failure.code === 'SESSION_CHANGED')
-      ) {
-        setDetail(null);
-        expire.current();
-      } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-        setDetail(null);
-        setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
-      } else setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
-    } finally {
-      if (active.current && version === run.current) setLoading(false);
-    }
-  }, [operations, tenantId, locationId, accept]);
-  useEffect(() => {
+  const read = useCallback(
+    async (reconcile = true) => {
+      const version = ++run.current;
+      setLoading(true);
+      setFresh(false);
+      try {
+        const next = await operations.get(tenantId, locationId);
+        if (!active.current || version !== run.current) return;
+        accept(next);
+        // A count of zero cannot prove a non-idempotent menu request failed:
+        // an existing menu may have no remaining sellable stock.
+        if (reconcile) {
+          setUncertain((current) =>
+            current === 'menu' && next.publishedMenuItems === 0 ? current : null,
+          );
+        }
+        if (reconcile || !drafts.get(draftKey)?.uncertain) setError('');
+      } catch (failure) {
+        if (!active.current || version !== run.current) return;
+        if (
+          failure instanceof NuniError &&
+          (failure.status === 401 || failure.code === 'SESSION_CHANGED')
+        ) {
+          setDetail(null);
+          expire.current();
+        } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
+          setDetail(null);
+          setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
+        } else setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+      } finally {
+        if (active.current && version === run.current) setLoading(false);
+      }
+    },
+    [operations, tenantId, locationId, accept, drafts, draftKey],
+  );
+  useLayoutEffect(() => {
     if (!suspended) {
       setUncertain(drafts.get(draftKey)?.uncertain ?? null);
       setBusy(null);
       lock.current = false;
-      void read();
+      opened.current = false;
     }
-  }, [read, suspended, drafts, draftKey]);
+  }, [suspended, drafts, draftKey]);
+  useLayoutEffect(() => {
+    // A read started before the write settles cannot reconcile that write.
+    if (!visible || suspended) return;
+    if (!lock.current) {
+      // Returning through history does not acknowledge an unknown write.
+      void read(!opened.current);
+      opened.current = true;
+    }
+    return () => {
+      if (!lock.current) ++run.current;
+    };
+  }, [read, suspended, visible]);
 
   async function mutate(action: Action, task: (current: () => boolean) => Promise<void>) {
     if (!active.current || lock.current || loading || uncertain || !fresh) return;
@@ -261,6 +282,7 @@ export function MerchantOperations({
     }
   }
 
+  if (!visible) return null;
   if (suspended) return <p role="status">正在重新確認帳號，門市資料暫時隱藏。</p>;
   const draft = settings ?? (detail ? settingsOf(detail) : null);
   const settingsChanged =
@@ -296,7 +318,7 @@ export function MerchantOperations({
         {navigation ? (
           <Link
             className="btn"
-            href="/merchant/workspace"
+            href={navigation.backHref}
             aria-disabled={!!busy || undefined}
             onClick={(event) => {
               if (busy) event.preventDefault();

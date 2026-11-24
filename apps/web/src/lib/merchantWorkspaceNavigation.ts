@@ -21,6 +21,7 @@ type MerchantWorkspaceDestination = {
 };
 
 const workspacePath = '/merchant/workspace';
+export const merchantApplicationsHref = `${workspacePath}?view=applications#merchant-applications-title`;
 
 function readSection(value: unknown): MerchantWorkspaceSection {
   return value === 'orders' ? 'orders' : 'overview';

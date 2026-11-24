@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import type { NuniMerchantWorkspaceDetail } from '@campus/shared/src/nuniMerchantOperations';
 import { queueFixture, shiftFixture } from '@/features/food/foodTestFixtures';
-import { merchantWorkspaceHref } from '@/lib/merchantWorkspaceNavigation';
+import { merchantApplicationsHref, merchantWorkspaceHref } from '@/lib/merchantWorkspaceNavigation';
 import { MerchantWorkspace } from './MerchantWorkspace';
 
 const mocks = vi.hoisted(() => ({
@@ -268,3 +268,120 @@ it('ignores a delayed old-store response after moving to a different store', asy
   await act(async () => complete(detail()));
   expect(screen.queryByRole('heading', { name: '餐坊／一樓', level: 2 })).toBeNull();
 });
+
+it.each(['receipt', 'unknown', 'unknown while on the list'] as const)(
+  'keeps an availability write locked across browser history and handles its %s',
+  async (result) => {
+    active = true;
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const paused = { ...detail('store-a', true), locationStatus: 'closed', publicAccess: false };
+    let finish!: (receipt: typeof paused) => void;
+    let fail!: (failure: Error) => void;
+    const write = new Promise<typeof paused>((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    });
+    mocks.request.mockImplementation((requestPath) =>
+      requestPath === `${path}/availability` ? write : respond(requestPath),
+    );
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+    expect(mocks.request).toHaveBeenCalledWith(
+      `${path}/availability`,
+      'context-a',
+      { acceptingOrders: false },
+      undefined,
+    );
+
+    await act(async () => window.history.back());
+    await screen.findByRole('link', { name: '管理門市：一樓' });
+    const failsOnList = result === 'unknown while on the list';
+    if (failsOnList) await act(async () => fail(new NuniError(0, 'NETWORK_ERROR')));
+    await act(async () => window.history.forward());
+    const pause = await screen.findByRole('button', { name: '暫停接單' });
+    expect(pause.hasAttribute('disabled')).toBe(true);
+    if (failsOnList) {
+      // The return read still reports "open", but cannot clear the unknown write.
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: '重新讀取門市狀態' }).hasAttribute('disabled'),
+        ).toBe(false),
+      );
+    } else {
+      expect(
+        screen.getByRole('button', { name: '重新讀取門市狀態' }).hasAttribute('disabled'),
+      ).toBe(true);
+      // Every GET would still report "open". Defer the return read until the pending write settles.
+      expect(mocks.request.mock.calls.filter(([requestPath]) => requestPath === path)).toHaveLength(
+        1,
+      );
+    }
+    fireEvent.click(pause);
+    expect(
+      mocks.request.mock.calls.filter(([requestPath]) => requestPath.endsWith('/availability')),
+    ).toHaveLength(1);
+
+    if (result === 'receipt') {
+      await act(async () => finish(paused));
+      expect(
+        (await screen.findByRole('button', { name: '恢復接單' })).hasAttribute('disabled'),
+      ).toBe(false);
+      await screen.findByText('門市狀態已更新：暫停接單。');
+    } else {
+      if (!failsOnList) await act(async () => fail(new NuniError(0, 'NETWORK_ERROR')));
+      await screen.findByText(/尚未確認這次操作的結果/);
+      expect(screen.getByRole('button', { name: '暫停接單' }).hasAttribute('disabled')).toBe(true);
+      mocks.request.mockImplementation((requestPath) =>
+        requestPath === path ? Promise.resolve(paused) : respond(requestPath),
+      );
+      fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+      expect(
+        (await screen.findByRole('button', { name: '恢復接單' })).hasAttribute('disabled'),
+      ).toBe(false);
+    }
+  },
+);
+
+it.each(['browser Back', 'return link from application progress'])(
+  'retains loaded locations and applications after %s when refreshing the list fails',
+  async (returnVia) => {
+    if (returnVia === 'return link from application progress') {
+      mocks.demo = true;
+      window.history.replaceState(null, '', merchantApplicationsHref);
+    }
+    const application = {
+      tenantId: 'campus-one',
+      applicationId: 'application-1',
+      brandName: '測試餐坊',
+      locationName: '餐廳櫃位',
+      state: 'under-review',
+      reviewerNote: '',
+      submittedAt: '2026-10-09T02:00:00.000Z',
+    };
+    let unavailable = false;
+    mocks.request.mockImplementation((path) => {
+      if (unavailable && ['merchant-workspaces', 'merchant-applications'].includes(path))
+        return Promise.reject(new Error('offline'));
+      if (path === 'merchant-applications') return Promise.resolve({ applications: [application] });
+      return respond(path);
+    });
+    render(<MerchantWorkspace view="workspace" />);
+    await screen.findByRole('heading', { name: '測試餐坊／餐廳櫃位' });
+    fireEvent.click(screen.getByRole('link', { name: '管理門市：一樓' }));
+    await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+
+    unavailable = true;
+    if (returnVia === 'browser Back') {
+      await act(async () => window.history.back());
+    } else {
+      fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+      expect(window.location.search).toBe('?view=applications');
+    }
+    await screen.findByText('目前無法確認店家資料，請重新載入。');
+    expect(screen.getByRole('link', { name: '管理門市：一樓' })).toBeTruthy();
+    const applications = screen.getByRole('region', { name: '申請進度' });
+    expect(within(applications).getByRole('heading', { name: '測試餐坊／餐廳櫃位' })).toBeTruthy();
+    expect(within(applications).getByText(/審核中/)).toBeTruthy();
+  },
+);

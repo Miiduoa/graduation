@@ -4,6 +4,7 @@ import { useCallback, useEffect, useSyncExternalStore, type MouseEvent } from 'r
 import { usePathname, useSearchParams } from 'next/navigation';
 import { isCurrentTabNavigationClick } from './currentTabNavigation';
 import {
+  merchantApplicationsHref,
   merchantWorkspaceHref,
   readMerchantWorkspaceLocation,
   type MerchantWorkspaceLocation,
@@ -20,6 +21,8 @@ const subscribe = (onChange: () => void) => {
 };
 const snapshot = () => `${window.location.pathname}${window.location.search}`;
 const serverSnapshot = () => null;
+const isApplicationsView = (params: URLSearchParams | null) =>
+  params?.get('view') === 'applications';
 
 /** The URL selects a workspace; the authenticated API still decides access. */
 export function useMerchantWorkspaceRoute(enabled: boolean) {
@@ -30,10 +33,11 @@ export function useMerchantWorkspaceRoute(enabled: boolean) {
     window.dispatchEvent(new Event(CHANGE_EVENT));
   }, [routerPathname, routerSearch]);
   const url = useSyncExternalStore(subscribe, snapshot, serverSnapshot);
-  const location: MerchantWorkspaceLocation =
-    enabled && url
-      ? readMerchantWorkspaceLocation(new URL(url, 'https://nuni.local').searchParams)
-      : { status: 'list' };
+  const params = enabled && url ? new URL(url, 'https://nuni.local').searchParams : null;
+  const location: MerchantWorkspaceLocation = params
+    ? readMerchantWorkspaceLocation(params)
+    : { status: 'list' };
+  const showApplications = location.status === 'list' && isApplicationsView(params);
   const navigate = useCallback((event: MouseEvent<HTMLAnchorElement>) => {
     if (!isCurrentTabNavigationClick(event, event.currentTarget)) return;
     const destination = new URL(event.currentTarget.href);
@@ -47,9 +51,13 @@ export function useMerchantWorkspaceRoute(enabled: boolean) {
       return;
     const target = readMerchantWorkspaceLocation(destination.searchParams);
     const href =
-      target.status === 'selected' ? merchantWorkspaceHref(target) : '/merchant/workspace';
+      target.status === 'selected'
+        ? merchantWorkspaceHref(target)
+        : isApplicationsView(destination.searchParams)
+          ? merchantApplicationsHref
+          : '/merchant/workspace';
     try {
-      if (`${window.location.pathname}${window.location.search}` !== href) {
+      if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== href) {
         const state = { ...window.history.state };
         // Next skips synchronization for router-owned writes. Its patched
         // History API copies current internals; retain unrelated state only.
@@ -64,5 +72,5 @@ export function useMerchantWorkspaceRoute(enabled: boolean) {
       // A real link remains usable when the browser denies History access.
     }
   }, []);
-  return { location, hydrated: url !== null, navigate };
+  return { location, showApplications, hydrated: url !== null, navigate };
 }

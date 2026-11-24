@@ -548,7 +548,7 @@ it('keeps an in-progress application editable when refreshing reveals another ap
   expect(mocks.request.mock.calls.filter((call) => call[2])).toHaveLength(0);
 });
 
-it('prioritizes the actual authorized store for a returning operator and hides it after a failed refresh', async () => {
+it('prioritizes the actual authorized store for a returning operator and retains it after a failed refresh', async () => {
   const workspace = {
     tenantId: 'campus-one',
     tenantName: '第一校園',
@@ -577,8 +577,8 @@ it('prioritizes the actual authorized store for a returning operator and hides i
   mocks.request.mockRejectedValue(new Error('offline'));
   fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
   await screen.findByRole('alert');
-  expect(screen.queryByRole('heading', { name: '開始今天的門市工作' })).toBeNull();
-  expect(screen.queryByRole('link', { name: '管理門市：第一門市' })).toBeNull();
+  expect(screen.getByRole('heading', { name: '開始今天的門市工作' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '管理門市：第一門市' })).toBeTruthy();
   expect(screen.queryByRole('heading', { name: '開始申請第一間門市' })).toBeNull();
 });
 
