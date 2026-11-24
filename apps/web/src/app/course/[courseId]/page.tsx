@@ -14,6 +14,8 @@ import {
   type CourseAssignment,
   type CourseWork,
 } from '@/lib/courseWork';
+import { useSearchParams } from 'next/navigation';
+import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigationLinks';
 import { LoginLink } from '@/components/LoginLink';
 import {
   COURSE_WORK_MISSING_ASSIGNMENT,
@@ -260,7 +262,8 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
   const school = useOptionalSelectedSchool();
   const hash = useLocationHash();
   const scopeLoading = !hydrated || authLoading || school?.loading;
-  const returnPath = coursePageReturnPath(courseId, hash);
+  const campusSearch = buildCampusNavigationSearch(useSearchParams());
+  const returnPath = campusServiceHref(coursePageReturnPath(courseId, hash), campusSearch);
 
   if (scopeLoading || !user) {
     return (
@@ -274,7 +277,10 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
             <LoginLink
               className={styles.primary}
               returnPath={returnPath}
-              liveReturnPath={() => coursePageReturnPath(courseId, window.location.hash)}
+              liveReturnPath={() => campusServiceHref(
+                coursePageReturnPath(courseId, window.location.hash),
+                buildCampusNavigationSearch(new URLSearchParams(window.location.search)),
+              )}
             >
               登入帳號
             </LoginLink>

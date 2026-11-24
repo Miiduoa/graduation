@@ -522,22 +522,41 @@ it.each([false, true])('failed config hides all official forms (submitOnly=%s)',
   expect(screen.queryByLabelText('外宿原因')).toBeNull();
 });
 
-it.each([0, 1])('reports announcement push delivery honestly (%i delivered)', async (delivered) => {
+it.each([undefined, 0, 1])('reports only confirmed provider acceptance (%s accepted)', async (acceptedRecipients) => {
+    let pending = acceptedRecipients === 1;
   api.config.packages = true;
   api.call.mockImplementation(async (data) =>
     data.action === 'config'
       ? api.config
       : ['mine', 'workspace'].includes(data.action)
         ? api.rows
-        : { success: true, delivered, recipients: 1 },
+        : pending ? { acceptedRecipients: 0, recipients: 1, pendingRecipients: 1 }
+          : { success: true, delivered: 1, acceptedRecipients, recipients: 1 },
   );
   render(<DormWorkflow schoolId="pu" uid="staff" />);
   fireEvent.click(await screen.findByText('開啟輔導員工作台'));
   fireEvent.click(await screen.findByText('住宿生'));
   fireEvent.click(await screen.findByText('預覽公告'));
+  expect(screen.getByRole('alert').textContent).toBe('請填寫要發布公告的棟別。');
+  expect(screen.queryByText('確認發布本棟公告')).toBeNull();
+  fireEvent.change(screen.getByLabelText('公告棟別'), { target: { value: 'A' } });
+  fireEvent.change(screen.getByLabelText('公告標題'), { target: { value: '停水' } });
+  fireEvent.change(screen.getByLabelText('公告內容'), { target: { value: '週三上午施工' } });
+  fireEvent.click(screen.getByText('預覽公告'));
   fireEvent.click(screen.getByText('確認發布本棟公告'));
+  if (pending) {
+    await screen.findByText('公告已發布。名冊共 1 人，推播服務已受理 0 人。還有 1 人待處理。');
+    await waitFor(() => expect((screen.getByText('繼續傳送待處理的推播') as HTMLButtonElement).disabled).toBe(false));
+    pending = false;
+    fireEvent.click(screen.getByText('繼續傳送待處理的推播'));
+    await waitFor(() => expect(api.call.mock.calls.filter(([row]) => row.action === 'announce')).toHaveLength(3));
+    const [first, continued, retry] = api.call.mock.calls.filter(([row]) => row.action === 'announce');
+    expect(continued[0].key).toBe(first[0].key);
+      expect(retry[0].key).toBe(first[0].key);
+  }
   expect(
-    await screen.findByText(delivered ? '公告已發布，推播 1/1 人。' : '公告已發布，推播尚未送出。'),
+    await screen.findByText(acceptedRecipients === undefined ? '公告已發布，可在宿舍頁查看。推播結果尚未確認。'
+        : acceptedRecipients ? '公告已發布。名冊共 1 人，推播服務已受理其中 1 人的通知。' : '公告已發布，目前沒有推播受理紀錄。'),
   ).toBeTruthy();
 });
 
