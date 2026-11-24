@@ -852,6 +852,51 @@ it.each([
   expect(document.activeElement).toBe(shouldHandoff ? row : focusDuringPause);
 });
 
+it.each(['切月後回今天', '切換檢視'])('指標操作%s時，結束仍在等待的深連結聚焦', async (navigation) => {
+  const date = emptyPersonalEventDraft().date;
+  const target = focusEvent('today-target', { date });
+  const previous = focusEvent('today-origin', { date, title: '同日的另一筆行程' });
+  seedFocusedEvents([previous, target]);
+  const viewport = Object.assign(new EventTarget(), {
+    offsetLeft: 260, offsetTop: 80, width: 180, height: 240,
+  });
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+  const scroll = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  context.search = `eventId=${previous.id}`;
+  const view = render(<PersonalCalendar />);
+  await screen.findByText(`已定位到「${previous.title}」。`);
+  const list = screen.getByRole('list', { name: '個人行程列表' });
+  const origin = within(list.querySelector('li[aria-current="true"]')!).getByRole('button', { name: '編輯' });
+  origin.focus();
+  scroll.mockClear();
+  context.search = `eventId=${target.id}`;
+  view.rerender(<PersonalCalendar />);
+  await screen.findByText(`已定位到「${target.title}」。`);
+  expect(scroll).toHaveBeenCalled();
+  expect(document.activeElement).toBe(origin);
+  scroll.mockClear();
+
+  // A pointer click can activate navigation without moving focus to its button.
+  if (navigation === '切月後回今天') {
+    fireEvent.click(screen.getByRole('button', { name: '下一月' }));
+    expect(origin.isConnected).toBe(false);
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.click(screen.getByRole('button', { name: '回今天' }));
+    expect(document.activeElement).toBe(document.body);
+  } else {
+    fireEvent.click(screen.getByRole('button', { name: '月格' }));
+    expect(document.activeElement).toBe(origin);
+    fireEvent.click(screen.getByRole('button', { name: '回今天' }));
+  }
+  expect(screen.getByRole('heading', { name: target.title })).toBeTruthy();
+  const focusAfterNavigation = document.activeElement;
+  viewport.offsetLeft = 0;
+  viewport.dispatchEvent(new Event('scroll'));
+  viewport.dispatchEvent(new Event('resize'));
+  expect(scroll).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(focusAfterNavigation);
+});
+
 it.each([
   ['another owner', 'platform:two', 'pu'],
   ['another school', 'platform:one', 'ntu'],

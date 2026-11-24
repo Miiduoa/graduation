@@ -11,7 +11,6 @@ import {
   onVisibleViewportChange,
   revealForFocus,
   scrollVerticallyIntoView,
-  stillOwnsFocus,
 } from './calendarScroll';
 
 import Link from 'next/link';
@@ -326,6 +325,18 @@ export function PersonalCalendar() {
   );
 }
 
+type LinkedFocusOrigin = {
+  element: Element | null;
+  state: 'focused' | 'detaching' | 'unavailable';
+};
+
+function ownsLinkedFocus(origin: LinkedFocusOrigin) {
+  return (
+    document.activeElement === origin.element ||
+    (origin.state === 'unavailable' && document.activeElement === document.body)
+  );
+}
+
 function PersonalCalendarWorkspace({
   context,
   paused,
@@ -365,11 +376,6 @@ function PersonalCalendarWorkspace({
   const dueUid = user?.uid ?? null;
   const dueStatus = dues.uid === dueUid ? dues.status : 'idle';
   const [dueRetry, setDueRetry] = useState(0);
-  const changeMonth = useCallback((value: string) => {
-    setMonth(value);
-    setSelectedDate('');
-  }, []);
-
   useEffect(() => {
     if (authLoading || nuniLoading || (!user?.uid && !nuniAccountId)) return;
     let active = true;
@@ -419,12 +425,6 @@ function PersonalCalendarWorkspace({
       active = false;
     };
   }, [authLoading, nuniLoading, user?.uid, nuniAccountId, nuniContext, dueRetry]);
-  const goToday = () => {
-    const today = emptyPersonalEventDraft().date;
-    setMonth(today.slice(0, 7));
-    setSelectedDate(today);
-    if (today === selectedDate) setDateRevealRevision((revision) => revision + 1);
-  };
   const [mode, setMode] = useState<'idle' | 'create' | 'edit'>('idle');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<PersonalEventDraft>(() => emptyPersonalEventDraft());
@@ -452,15 +452,12 @@ function PersonalCalendarWorkspace({
   const requestId = useRef(0);
   const viewRevision = useRef(0);
   const locatedRequest = useRef<string | null>(null);
-  const linkedFocusOrigin = useRef<{
-    element: Element | null;
-    state: 'focused' | 'unavailable';
-  } | null>(null);
+  const linkedFocusOrigin = useRef<LinkedFocusOrigin | null>(null);
   const attachMonthList = useCallback((list: HTMLUListElement | null) => {
     const origin = linkedFocusOrigin.current;
-    // React detaches the ref before the browser can emit focusout during removal.
-    if (!list && origin?.element && monthListRef.current?.contains(origin.element)) {
-      origin.state = 'unavailable';
+    if (!list && origin?.state === 'focused' && monthListRef.current?.contains(origin.element)) {
+      // Removal can emit focusout before the commit finishes.
+      origin.state = 'detaching';
     }
     monthListRef.current = list;
   }, []);
@@ -484,6 +481,23 @@ function PersonalCalendarWorkspace({
     stopLinkedFocusRetry.current = null;
   }, [requestedEventId]);
 
+  const changeMonth = useCallback(
+    (value: string) => {
+      cancelLinkedFocus();
+      setMonth(value);
+      setSelectedDate('');
+    },
+    [cancelLinkedFocus],
+  );
+
+  const goToday = () => {
+    cancelLinkedFocus();
+    const today = emptyPersonalEventDraft().date;
+    setMonth(today.slice(0, 7));
+    setSelectedDate(today);
+    if (today === selectedDate) setDateRevealRevision((revision) => revision + 1);
+  };
+
   useEffect(() => {
     locatedRequest.current = null;
     settledFocusRequest.current = null;
@@ -495,14 +509,14 @@ function PersonalCalendarWorkspace({
       const origin = linkedFocusOrigin.current;
       if (!origin) return;
       if (document.activeElement === origin.element) origin.state = 'focused';
-      else if (!stillOwnsFocus(origin.element, origin.state === 'unavailable')) cancelLinkedFocus();
+      else if (!ownsLinkedFocus(origin)) cancelLinkedFocus();
     };
     const recordBlur = (event: FocusEvent) => {
       const origin = linkedFocusOrigin.current;
       if (
         origin?.state === 'focused' &&
         event.target === origin.element &&
-        !workspaceBoundary.current?.hidden
+        !(workspaceBoundary.current?.hidden && workspaceBoundary.current.contains(origin.element))
       ) {
         // End the request before a later unmount can make body a fallback.
         cancelLinkedFocus();
@@ -547,7 +561,7 @@ function PersonalCalendarWorkspace({
     });
     const revealLinkedEvent = (mode: 'reveal' | 'visible') => {
       if (suspended.current) return;
-      if (!stillOwnsFocus(origin.element, origin.state === 'unavailable')) {
+      if (!ownsLinkedFocus(origin)) {
         cancelLinkedFocus();
         return;
       }
@@ -581,18 +595,21 @@ function PersonalCalendarWorkspace({
   }, []);
   useLayoutEffect(() => {
     suspended.current = paused;
-    if (!paused) return;
-    pendingFocus.current = null;
+    if (paused) pendingFocus.current = null;
     const origin = linkedFocusOrigin.current;
-    // Hiding the workspace can drop focus before layout effects, even without a blur event.
+    if (!origin) return;
+    // Revalidation can hide the workspace or remove the focused list control.
     if (
-      origin?.state === 'focused' &&
-      workspaceBoundary.current?.contains(origin.element) &&
-      stillOwnsFocus(origin.element, true)
+      paused &&
+      (origin.state === 'detaching' || workspaceBoundary.current?.contains(origin.element)) &&
+      (document.activeElement === origin.element || document.activeElement === document.body)
     ) {
       origin.state = 'unavailable';
+    } else if (origin.state === 'detaching') {
+      if (document.activeElement === origin.element) origin.state = 'focused';
+      else cancelLinkedFocus();
     }
-  }, [paused, workspaceBoundary]);
+  });
 
   useLayoutEffect(() => {
     viewRevision.current += 1;
@@ -682,6 +699,7 @@ function PersonalCalendarWorkspace({
   }, [paused, revealDayAgenda, selectedDate, dateRevealRevision]);
 
   const selectMonthDay = (date: string) => {
+    cancelLinkedFocus();
     pendingDayReveal.current = date;
     if (date === selectedDate) {
       setDateRevealRevision((revision) => revision + 1);
@@ -691,6 +709,7 @@ function PersonalCalendarWorkspace({
   };
 
   const showMonthList = () => {
+    cancelLinkedFocus();
     setSelectedDate('');
     setCalendarView('list');
   };
@@ -1024,7 +1043,10 @@ function PersonalCalendarWorkspace({
               type="button"
               className="btn"
               aria-pressed={calendarView === 'month'}
-              onClick={() => setCalendarView('month')}
+              onClick={() => {
+                cancelLinkedFocus();
+                setCalendarView('month');
+              }}
             >
               月格
             </button>
