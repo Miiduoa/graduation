@@ -219,7 +219,7 @@ it('requires a new campus selection when the application program changes', async
   expect((screen.getByLabelText('校區／營運區域') as HTMLSelectElement).value).toBe('');
   expect(screen.queryByRole('option', { name: '主校區' })).toBeNull();
 });
-it('does not describe a partial load failure as no applications or no permissions', async () => {
+it('shows the confirmed empty applications when the initial workspace list fails', async () => {
   mocks.request.mockImplementation((path, context, input) =>
     path === 'merchant-workspaces'
       ? Promise.reject(new Error('offline'))
@@ -227,13 +227,37 @@ it('does not describe a partial load failure as no applications or no permission
   );
   render(<MerchantWorkspace />);
   await screen.findByRole('alert');
-  expect(screen.queryByText('你還沒有送出進駐申請。')).toBeNull();
+  expect(screen.getByText('你還沒有送出進駐申請。')).toBeTruthy();
+  expect(screen.queryByText(/這個帳號目前沒有已核准的門市/)).toBeNull();
   expect(screen.queryByRole('button', { name: '送出進駐申請' })).toBeNull();
   expect(screen.queryByRole('region', { name: '開始申請第一間門市' })).toBeNull();
   mocks.request.mockImplementation(respond);
   fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
   await screen.findByText('你還沒有送出進駐申請。');
 });
+it.each(['merchant-workspaces', 'merchant-applications'])(
+  'keeps both confirmed empty lists visible when %s returns 503 on reload',
+  async (endpoint) => {
+    render(<MerchantWorkspace view="workspace" />);
+    const noWorkspaces = /這個帳號目前沒有已核准的門市/;
+    const noApplications = '你還沒有送出進駐申請。';
+    await screen.findByText(noWorkspaces);
+    await screen.findByText(noApplications);
+    const reload = screen.getByRole<HTMLButtonElement>('button', { name: '重新載入' });
+    await waitFor(() => expect(reload.disabled).toBe(false));
+
+    mocks.request.mockImplementation((path, context, input) =>
+      path === endpoint
+        ? Promise.reject(new NuniError(503, 'UNAVAILABLE'))
+        : respond(path, context, input),
+    );
+    fireEvent.click(reload);
+    await screen.findByRole('alert');
+    expect(screen.getByText(noWorkspaces)).toBeTruthy();
+    expect(screen.getByText(noApplications)).toBeTruthy();
+  },
+);
+
 it('clears account drafts and ignores a prior account response after switching', async () => {
   let resolveOld!: (value: unknown) => void;
   mocks.request.mockImplementation((path, context, input) =>

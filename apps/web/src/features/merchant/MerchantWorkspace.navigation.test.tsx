@@ -279,6 +279,7 @@ it.each([
   async ({ readMode, returnStatus }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     let published = false;
+    let currentList = false;
     let detailStatus: number | null = readMode === 'automatic' ? null : 503;
     mocks.request.mockImplementation((requestPath) => {
       if (requestPath === `${path}/initial-menu`) {
@@ -300,6 +301,14 @@ it.each([
               publishedMenuItems: 1,
               missingRequirements: ['settings'],
             });
+      }
+      if (requestPath === 'merchant-workspaces' && currentList) {
+        return Promise.resolve({
+          workspaces: [
+            { ...detail(), readinessVersion: 2, missingRequirements: ['settings'] },
+            detail('store-b'),
+          ],
+        });
       }
       return respond(requestPath);
     });
@@ -342,6 +351,10 @@ it.each([
       detailStatus = 503;
       await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
       await screen.findByText(/目前無法更新部分門市資料/);
+      expect(storeLink()).toBeNull();
+
+      currentList = true;
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
       fireEvent.click(await within(locations).findByRole('link', { name: '管理門市：一樓' }));
       await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
       expect(screen.queryByRole('heading', { name: '餐坊／一樓' })).toBeNull();
@@ -1147,7 +1160,7 @@ it.each([
 );
 
 it.each([403, 404])(
-  'reopens with only the newly verified lower-version detail after list denial %s',
+  'reopens with only the newly verified current detail after list denial %s',
   async (status) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const previous = {
@@ -1158,7 +1171,7 @@ it.each([403, 404])(
     };
     const current: NuniMerchantWorkspaceDetail = {
       ...detail('store-a', true),
-      readinessVersion: 6,
+      readinessVersion: 7,
       merchantName: '重新授權的餐坊',
       locationStatus: 'closed',
       publicAccess: false,
@@ -1187,10 +1200,20 @@ it.each([403, 404])(
     expect(readDetail).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
 
-    readDetail.mockImplementation(() => Promise.resolve(current));
+    readDetail.mockResolvedValueOnce({ ...current, readinessVersion: 6 });
     await act(async () => window.history.forward());
-    await screen.findByRole('heading', { name: '重新授權的餐坊／一樓' });
+    const reload = await screen.findByRole<HTMLButtonElement>('button', {
+      name: '重新讀取門市狀態',
+    });
+    await waitFor(() => expect(reload.disabled).toBe(false));
     expect(readDetail).toHaveBeenCalledTimes(3);
+    expect(screen.queryByRole('heading', { name: '重新授權的餐坊／一樓' })).toBeNull();
+    expect(screen.queryByText('暫停接單')).toBeNull();
+
+    readDetail.mockResolvedValue(current);
+    fireEvent.click(reload);
+    await screen.findByRole('heading', { name: '重新授權的餐坊／一樓' });
+    expect(readDetail).toHaveBeenCalledTimes(4);
     expect(screen.getByText('暫停接單')).toBeTruthy();
     expect(screen.queryByText('營業中')).toBeNull();
     expect(screen.queryByText('先前的餐坊／一樓')).toBeNull();
@@ -1335,7 +1358,7 @@ it.each([403, 404])(
   async (status) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const previous = { ...detail('store-a', true), readinessVersion: 7 };
-    const current = { ...previous, readinessVersion: 6, merchantName: '重新授權的餐坊' };
+    const current = { ...previous, readinessVersion: 7, merchantName: '重新授權的餐坊' };
     let denyList!: (error: NuniError) => void;
     let failForward!: (error: NuniError) => void;
     const list = new Promise<never>((_, reject) => { denyList = reject; });
@@ -1370,7 +1393,7 @@ it.each([403, 404])(
   },
 );
 
-it.each([403, 404])('recovers with a lower-version detail after a manual read returns %s', async (status) => {
+it.each([403, 404])('recovers with a current detail after a stale retry following a %s denial', async (status) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const previous = {
     ...detail('store-a', true),
@@ -1380,7 +1403,7 @@ it.each([403, 404])('recovers with a lower-version detail after a manual read re
   };
   const recovered = {
     ...detail('store-a', true),
-    readinessVersion: 6,
+    readinessVersion: 7,
     merchantName: '重新授權的餐坊',
     locationStatus: 'closed',
     publicAccess: false,
@@ -1389,6 +1412,12 @@ it.each([403, 404])('recovers with a lower-version detail after a manual read re
   const readDetail = vi.fn()
     .mockResolvedValueOnce(previous)
     .mockRejectedValueOnce(new NuniError(status, 'DENIED'))
+    .mockResolvedValueOnce({
+      ...recovered,
+      readinessVersion: 6,
+      merchantName: '過期的門市',
+      missingRequirements: ['menu'],
+    })
     .mockResolvedValueOnce(recovered);
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [previous] });
@@ -1406,8 +1435,16 @@ it.each([403, 404])('recovers with a lower-version detail after a manual read re
   expect(screen.queryByText('撤銷前的餐坊／一樓')).toBeNull();
 
   fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
-  await screen.findByRole('heading', { name: '重新授權的餐坊／一樓' });
+  const reload = screen.getByRole<HTMLButtonElement>('button', { name: '重新讀取門市狀態' });
+  await waitFor(() => expect(reload.disabled).toBe(false));
   expect(readDetail).toHaveBeenCalledTimes(3);
+  expect(screen.queryByRole('heading', { name: '過期的門市／一樓' })).toBeNull();
+  expect(screen.queryByText(/建立有庫存的首次菜單/)).toBeNull();
+  expect(screen.queryByText('服務方式')).toBeNull();
+
+  fireEvent.click(reload);
+  await screen.findByRole('heading', { name: '重新授權的餐坊／一樓' });
+  expect(readDetail).toHaveBeenCalledTimes(4);
   expect(screen.getByText('暫停接單')).toBeTruthy();
   expect(screen.queryByText('營業中')).toBeNull();
   expect(screen.getByText('自取、內用')).toBeTruthy();
@@ -1425,7 +1462,7 @@ it.each([
   const previous = { ...detail('store-a', true), readinessVersion: 7, merchantName: '撤銷前的餐坊' };
   const recovered = {
     ...detail('store-a', true),
-    readinessVersion: 6,
+    readinessVersion: 7,
     merchantName: '重新授權的餐坊',
     locationStatus: 'closed',
     publicAccess: false,
@@ -1498,7 +1535,7 @@ it.each([
 ])('discards the initial menu receipt after $source denial $status', async ({ source, status }) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const previous = { ...detail(), readinessVersion: 7 };
-  const recovered = { ...detail(), readinessVersion: 6, missingRequirements: ['menu'] };
+  const recovered = { ...detail(), readinessVersion: 7, missingRequirements: ['menu'] };
   let listDenied = false;
   const readDetail = vi.fn()
     .mockResolvedValueOnce(previous)
@@ -1533,16 +1570,25 @@ it.each([
     readDetail.mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
     await act(async () => window.history.back());
     await screen.findByText('目前無法確認店家資料，請重新載入。');
-    readDetail.mockResolvedValue(recovered);
+    readDetail.mockResolvedValue({ ...recovered, readinessVersion: 6 });
     await act(async () => window.history.forward());
   } else {
     readDetail.mockRejectedValueOnce(new NuniError(status, 'DENIED'));
     reload();
     await screen.findByText(/目前無法取得這間門市的管理權限/);
-    readDetail.mockResolvedValue(recovered);
+    readDetail.mockResolvedValue({ ...recovered, readinessVersion: 6 });
     reload();
   }
 
+  await waitFor(() =>
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '重新讀取門市狀態' }).disabled)
+      .toBe(false),
+  );
+  expect(screen.queryByText('待完成：建立有庫存的首次菜單')).toBeNull();
+  expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
+
+  readDetail.mockResolvedValue(recovered);
+  reload();
   await screen.findByText('待完成：建立有庫存的首次菜單');
   expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
   expect(screen.queryByText(/目前有 0 項有庫存的上架品項/)).toBeNull();

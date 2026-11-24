@@ -102,12 +102,23 @@ it('preserves a newer application receipt through older list responses until a s
     submittedAt: '2026-10-09T02:00:00.000Z',
   };
 
-  confirmed.mergeApplications([], confirmed.beginRequest());
+  const listed = {
+    ...receipt,
+    applicationId: 'older-application',
+    state: 'under-review' as const,
+    reviewerNote: '請補營業登記資料',
+  };
+  confirmed.mergeApplications([listed], confirmed.beginRequest());
   const earlierList = confirmed.beginRequest();
+  const deniedList = confirmed.beginRequest();
   const write = confirmed.beginRequest();
   expect(confirmed.confirmApplication(receipt, write)).toBe(true);
-  expect(confirmed.rejectApplications(earlierList)).toBe(false);
-  confirmed.mergeApplications([], earlierList);
+  expect(confirmed.overview()?.applications).toEqual([receipt, listed]);
+  expect(confirmed.rejectApplications(deniedList)).toBe(true);
+  expect(confirmed.hasApplicationList()).toBe(false);
+  expect(confirmed.overview()?.applications).toEqual([receipt]);
+  confirmed.mergeApplications([listed], earlierList);
+  expect(confirmed.hasApplicationList()).toBe(false);
   expect(confirmed.overview()?.applications).toEqual([receipt]);
 
   expect(confirmed.rejectApplications(confirmed.beginRequest())).toBe(true);

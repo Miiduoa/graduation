@@ -756,11 +756,9 @@ function AccountWorkspace({
               {overview.workspaces.length === 0 ? (
                 workspaceListEmpty && (
                   <>
-                    {!loadError && (
-                      <p>
-                        這個帳號目前沒有已核准的門市。如果你是店員，請向門市負責人確認工作帳號與接單方式。
-                      </p>
-                    )}
+                    <p>
+                      這個帳號目前沒有已核准的門市。如果你是店員，請向門市負責人確認工作帳號與接單方式。
+                    </p>
                     {view === 'workspace' && (
                       <Button onClick={() => void onSwitchAccount()}>登出並切換店家帳號</Button>
                     )}
@@ -815,7 +813,7 @@ function AccountWorkspace({
                 申請進度
               </h3>
               {overview.applications.length === 0 ? (
-                applicationsKnown && !loading && !loadError && <p>你還沒有送出進駐申請。</p>
+                applicationsKnown && <p>你還沒有送出進駐申請。</p>
               ) : (
                 <ul className={styles.list}>
                   {overview.applications.map((item) => (

@@ -48,6 +48,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const retainedWorkspaceKeys = new Set<string>();
   const receipts = new Map<string, Observation<NuniMerchantApplication>>();
   const entries = new Map<string, WorkspaceObservations>();
+  const revokedVersionFloors = new Map<string, number>();
   let listRevocation = 0;
   let listedRevision = 0;
   const receiptFloors = new Map<string, number>();
@@ -56,7 +57,6 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const verified = new Map<string, number>();
   let applicationRevocation = 0;
   let applicationListRevision = 0;
-  let applicationReceiptRevision = 0;
   let request = 0;
   const beginRequest = () => ++request;
 
@@ -65,6 +65,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   }
 
   function discardWorkspace(key: string) {
+    const version = entries.get(key)?.row?.version;
+    if (version !== undefined) revokedVersionFloors.set(key, version);
     entries.delete(key);
     const draft = drafts.get(key);
     if (draft) draft.menuReceipt = null;
@@ -83,7 +85,14 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const entry = entries.get(key) ?? { confirmedRevision: 0 };
     // Access ordering tracks successful requests independently of the winning readiness version.
     entry.confirmedRevision = Math.max(entry.confirmedRevision, revision);
-    const row = latestObservation(entry.row, next, revision);
+    const floor = revokedVersionFloors.get(key);
+    // Revocation removes the data, but a retry still needs a current readiness version.
+    if (floor !== undefined && next.readinessVersion !== undefined && next.readinessVersion < floor) {
+      entries.set(key, entry);
+      return;
+    }
+    const observation = latestObservation(entry.row, next, revision);
+    const row = { ...observation, version: observation.version ?? floor };
     // The receipt remains usable until a winning observation reports that menu is missing.
     if (row.value !== entry.row?.value && row.value.missingRequirements.includes('menu')) {
       const draft = drafts.get(key);
@@ -136,6 +145,12 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     return true;
   }
 
+  function discardReceiptsThrough(revision: number) {
+    for (const [id, receipt] of receipts) {
+      if (receipt.revision <= revision) receipts.delete(id);
+    }
+  }
+
   function mergeApplications(rows: NuniMerchantApplication[], revision: number) {
     if (revision <= Math.max(applicationRevocation, applicationListRevision)) return;
     applicationListRevision = revision;
@@ -154,9 +169,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       return merged;
     });
     // The successful list owns membership through its request revision.
-    for (const [id, receipt] of receipts) {
-      if (receipt.revision <= revision) receipts.delete(id);
-    }
+    discardReceiptsThrough(revision);
   }
 
   return {
@@ -225,13 +238,10 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     workspaceRevocations: () => ({ list: listRevocation, details: new Map(revocations) }),
     mergeApplications,
     rejectApplications(revision: number) {
-      if (
-        revision <= Math.max(applicationRevocation, applicationListRevision, applicationReceiptRevision)
-      )
-        return false;
+      if (revision <= Math.max(applicationRevocation, applicationListRevision)) return false;
       applicationRevocation = revision;
       delete lists.applications;
-      receipts.clear();
+      discardReceiptsThrough(revision);
       return true;
     },
     confirmApplication(receipt: NuniMerchantApplication, revision: number) {
@@ -251,7 +261,6 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         value: useCurrent ? current : receipt,
         revision: Math.max(revision, previous?.revision ?? 0),
       });
-      applicationReceiptRevision = Math.max(applicationReceiptRevision, revision);
       return true;
     },
     knownWorkspaces(): Array<Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'> & Partial<NuniMerchantWorkspace>> {
@@ -275,7 +284,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
           if (entry.row && hasVerifiedAccess(key)) keys.add(key);
         }
       }
-      if (!Object.keys(lists).length && !listedWorkspaces && !keys.size) return null;
+      if (!Object.keys(lists).length && !listedWorkspaces && !keys.size && !receipts.size) return null;
       return {
         programs: lists.programs ?? [],
         workspaces: [...keys].flatMap((key) => {
@@ -316,10 +325,10 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       listedRevision = 0;
       applicationRevocation = 0;
       applicationListRevision = 0;
-      applicationReceiptRevision = 0;
       receipts.clear();
       retainedWorkspaceKeys.clear();
       entries.clear();
+      revokedVersionFloors.clear();
       revocations.clear();
       verified.clear();
     },
