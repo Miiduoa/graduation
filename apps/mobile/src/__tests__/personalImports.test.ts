@@ -57,11 +57,16 @@ function useWebStorage() {
   // Expo Web's AsyncStorage uses the same localStorage entries as direct reads.
   const getItem = jest.mocked(AsyncStorage.getItem);
   const setItem = jest.mocked(AsyncStorage.setItem);
+  const multiGet = jest.mocked(AsyncStorage.multiGet);
+  const nativeMultiGet = multiGet.getMockImplementation()!;
   const nativeGet = getItem.getMockImplementation()!;
   const nativeSet = setItem.getMockImplementation()!;
   getItem.mockImplementation(async (key) => window.localStorage.getItem(key));
   setItem.mockImplementation(async (key, value) => window.localStorage.setItem(key, value));
+  multiGet.mockImplementation(async (keys) =>
+    keys.map((key) => [key, window.localStorage.getItem(key)]));
   return () => {
+    multiGet.mockImplementation(nativeMultiGet);
     getItem.mockImplementation(nativeGet);
     setItem.mockImplementation(nativeSet);
     window.localStorage.clear();
@@ -105,14 +110,18 @@ test('Web leaves the primary ledger intact when the recovery copy cannot be stor
   const { ledger } = await appendPersonalImports(scope, [row('original')]);
   const key = personalImportStorageKey(scope);
   const before = window.localStorage.getItem(key);
-  const storeBackup = jest.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
-    throw new DOMException('Quota exceeded', 'QuotaExceededError');
+  const setItem = Storage.prototype.setItem;
+  const storeBackup = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+    this: Storage, entry, value,
+  ) {
+    if (this === window.sessionStorage) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    setItem.call(this, entry, value);
   });
   try {
     await expect(appendPersonalImports(scope, [row('new', '統計')], {
       canContinue: () => true,
     })).rejects.toThrow('Quota exceeded');
-    expect(storeBackup).toHaveBeenCalledTimes(1);
+    expect(storeBackup.mock.calls.filter(([entry]) => entry === key)).toEqual([]);
     expect(window.localStorage.getItem(key)).toBe(before);
     await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
   } finally {
@@ -388,20 +397,19 @@ test.each([
     const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
     const checkpoint = key + ':checkpoint';
     const setItem = Storage.prototype.setItem;
-    const multiGet = jest.mocked(AsyncStorage.multiGet);
-    const nativeMultiGet = multiGet.getMockImplementation()!;
     let quota: jest.SpyInstance | undefined;
     try {
       const { ledger } = await appendPersonalImports(scope, [row('original', '原本標題')]);
       const original = JSON.stringify(ledger);
-      const primary = original.replace('原本標題', primaryTitle);
+      const primaryWithTitle = original.replace('原本標題', primaryTitle);
+      const primary = recovery === 'checkpoint'
+        ? primaryWithTitle.replace('"version":1', '"version":0')
+        : primaryWithTitle;
       const hasJournal = recovery === 'journal' || recovery === 'both';
       const hasCheckpoint = recovery === 'checkpoint' || recovery === 'both';
       storage.setItem(key, primary);
       if (hasJournal) storage.setItem(journal, original);
       if (hasCheckpoint) storage.setItem(checkpoint, original);
-      multiGet.mockImplementation(async (keys) =>
-        keys.map((entry) => [entry, storage.getItem(entry)]));
       await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
 
       let primaryCapacity = primary.length - 2;
@@ -446,7 +454,6 @@ test.each([
       expect(Object.keys(window.sessionStorage)).toEqual([]);
     } finally {
       quota?.mockRestore();
-      multiGet.mockImplementation(nativeMultiGet);
       restoreLocks();
       cleanup();
     }
@@ -460,10 +467,6 @@ test('a Web calendar save after an Expo commit cannot revive stale recovery data
   const key = personalImportStorageKey(scope);
   const checkpoint = key + ':checkpoint';
   const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
-  const multiGet = jest.mocked(AsyncStorage.multiGet);
-  const nativeMultiGet = multiGet.getMockImplementation()!;
-  multiGet.mockImplementation(async (keys) =>
-    keys.map((entry) => [entry, storage.getItem(entry)]));
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
     value: { request: async (_key: string, write: () => unknown) => write() },
@@ -479,8 +482,12 @@ test('a Web calendar save after an Expo commit cannot revive stale recovery data
     });
     expect(JSON.parse(storage.getItem(key)!).webCommit).toEqual(expect.any(String));
 
+    // Copies may remain if the previous page stopped before cleanup.
+    storage.setItem(checkpoint, original);
+    storage.setItem(journal, original);
     await saveWebCalendarBatch(scope, [{ ...row('web', 'Web 新增'), dayOfWeek: 2 }]);
     expect(JSON.parse(storage.getItem(key)!)).not.toHaveProperty('webCommit');
+    expect(hasWebPersonalImportCommit(storage.getItem(key))).toBe(true);
     const webRecords = readWebCalendarImports(scope);
     expect(webRecords).toEqual(expect.arrayContaining(edited.records));
     expect(webRecords.map(({ title }) => title)).toEqual(['Expo 更新', 'Web 新增']);
@@ -488,7 +495,144 @@ test('a Web calendar save after an Expo commit cannot revive stale recovery data
     expect(storage.getItem(checkpoint)).toBeNull();
     expect(storage.getItem(journal)).toBeNull();
   } finally {
-    multiGet.mockImplementation(nativeMultiGet);
+    restoreLocks();
+    cleanup();
+  }
+});
+
+test.each([
+  ['interleaved old Web save', true],
+  ['closed Expo page followed by an old Web save', false],
+] as const)('Expo ignores a stale checkpoint after %s', async (_scenario, interleaved) => {
+  const cleanup = useWebStorage();
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+  const getItem = Storage.prototype.getItem;
+  const setItem = Storage.prototype.setItem;
+  const removeItem = Storage.prototype.removeItem;
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    storage.setItem(checkpoint, interleaved ? JSON.stringify(JSON.stringify(ledger)) : JSON.stringify(ledger));
+    const stale = storage.getItem(checkpoint);
+    const writeWithOldWebCalendar = () => {
+      const { records } = JSON.parse(getItem.call(storage, key)!);
+      setItem.call(storage, key, JSON.stringify({
+        version: 1,
+        records: [
+          ...records,
+          { ...records[0], id: 'web', dayOfWeek: 2, title: 'Web 新增' },
+        ],
+        sync: { enabled: false, base: null },
+      }));
+    };
+
+    let primaryReadsAfterSet = 0;
+    const reads = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
+      this: Storage, entry,
+    ) {
+      // The first read confirms Expo's write. The second is its cleanup check.
+      if (interleaved && this === storage && entry === key && primaryReadsAfterSet &&
+          ++primaryReadsAfterSet === 3) writeWithOldWebCalendar();
+      return getItem.call(this, entry);
+    });
+    const writes = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage, entry, value,
+    ) {
+      setItem.call(this, entry, value);
+      if (this === storage && entry === key) primaryReadsAfterSet = 1;
+    });
+    const removals = jest.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+      this: Storage, entry,
+    ) {
+      // Simulate an Expo page ending after publication and before checkpoint removal.
+      if (!interleaved && this === storage && entry === checkpoint) {
+        window.dispatchEvent(new Event('pagehide'));
+        return;
+      }
+      removeItem.call(this, entry);
+    });
+    try {
+      await editPersonalImport(scope, ledger.records[0], row('original', 'Expo 更新'), {
+        canContinue: () => true,
+      });
+    } finally {
+      removals.mockRestore();
+      writes.mockRestore();
+      reads.mockRestore();
+    }
+    expect(storage.getItem(checkpoint)).toBe(stale);
+    expect(storage.getItem(journal)).toBeNull();
+    if (!interleaved) writeWithOldWebCalendar();
+    expect(hasWebPersonalImportCommit(storage.getItem(key))).toBe(false);
+
+    const records = readWebCalendarImports(scope);
+    expect(records.map(({ title }) => title)).toEqual(['Expo 更新', 'Web 新增']);
+    let reopened!: typeof import('../services/personalImports');
+    jest.isolateModules(() => { reopened = require('../services/personalImports'); });
+    await expect(reopened.loadPersonalImports(scope)).resolves.toMatchObject({ records });
+    const edited = await reopened.editPersonalImport(scope, records[1], {
+      ...records[1], title: '重新開啟後更新',
+    }, { canContinue: () => true });
+    expect(edited.records.map(({ title }) => title)).toEqual(['Expo 更新', '重新開啟後更新']);
+    expect(storage.getItem(checkpoint)).toBeNull();
+  } finally {
+    cleanup();
+  }
+});
+
+test.each([false, true])('a growing Expo edit can use the entire primary budget (lease initially fits: %s)', async (leaseFits) => {
+  const cleanup = useWebStorage();
+  const restoreLocks = withoutWebWriteLocks();
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const setItem = Storage.prototype.setItem;
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    const original = JSON.stringify(ledger);
+    storage.setItem(key, original);
+    // The lease consumes more than two characters. In the second case the
+    // primary can grow by exactly the size of that lease, before reservation.
+    let growth = 2;
+    let capacity = key.length + original.length + growth;
+    let leasesWritten = 0;
+    const quota = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage, entry, value,
+    ) {
+      const isLease = this === storage && entry.startsWith(webLeasePrefix(key));
+      if (isLease && leaseFits) {
+        growth = entry.length + value.length;
+        capacity = key.length + original.length + growth;
+      }
+      const used = Object.keys(this).filter((stored) => stored !== entry)
+        .reduce((size, stored) => size + stored.length + this.getItem(stored)!.length, 0);
+      if (this === storage && used + entry.length + value.length > capacity) {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      setItem.call(this, entry, value);
+      if (isLease) leasesWritten++;
+    });
+    try {
+      const edit = (extra: number) => mutatePersonalImportLedger(scope, { canContinue: () => true }, (current) => {
+        const records = [{ ...current.records[0], title: current.records[0].title + '字'.repeat(growth + extra) }];
+        const edited = { ...current, records };
+        return { ledger: edited, result: edited };
+      });
+      await expect(edit(1)).rejects.toMatchObject({ name: 'QuotaExceededError' });
+      expect(storage.getItem(key)).toBe(original);
+      expect(Object.keys(storage)).toEqual([key]);
+      const edited = await edit(0);
+      expect(leasesWritten).toBe(leaseFits ? 2 : 0);
+      expect(storage.getItem(key)).toHaveLength(original.length + growth);
+      expect(JSON.parse(storage.getItem(key)!)).toEqual(edited);
+      await expect(loadPersonalImports(scope)).resolves.toEqual(edited);
+      expect(Object.keys(storage)).toEqual([key]);
+      expect(Object.keys(window.sessionStorage)).toEqual([]);
+    } finally {
+      quota.mockRestore();
+    }
+  } finally {
     restoreLocks();
     cleanup();
   }

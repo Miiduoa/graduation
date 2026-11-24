@@ -1,25 +1,21 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createPersonalImportId } from '@campus/shared';
+import {
+  capturePersonalImportBrowserRecovery,
+  personalImportBrowserCommitSuffix as compactWebCommitSuffix,
+  personalImportWebJournalKey,
+  personalImportWebJournalPrefix as journalPrefix,
+  serializePersonalImportBrowserCommit,
+} from '@campus/shared/src/imports/browserRecovery';
 import { File, Paths } from 'expo-file-system';
 import { sha256 } from 'js-sha256';
 import { Platform } from 'react-native';
 
 const markerSuffix = '.rollback.pending';
-const journalPrefix = 'campus.personal-imports.rollback.v1:';
 const legacyStagePattern = /^campus\.personal-imports\.rollback\.v1:([a-f0-9]{64}):stage:\d+:[^:]+$/;
 // Continue reading the two compact encodings written by earlier builds.
 const legacyCompactWebCommit = '\t';
 const compactVersionKey = '$commit';
-// All legacy writers serialized version first. Moving it to the end leaves
-// the JSON schema and byte count intact for older readers and in-place writes.
-const compactWebCommitSuffix = ',"version":1}';
-
-export const personalImportCheckpointKey = (key: string) => `${key}:checkpoint`;
-
-// One atomic browser storage entry contains both the recovery marker and the payload.
-function webJournalKey(key: string) {
-  return journalPrefix + sha256(key);
-}
 
 type WebRollback = {
   id: string;
@@ -59,7 +55,11 @@ function sweepExpiredLeases(storage: Storage): void {
   }
 }
 
-type BrowserWrite<T> = (assertLockHeld: () => void, leaseQuotaError?: DOMException) => Promise<T>;
+type BrowserLease = {
+  canStage: () => boolean;
+  releaseForAtomicWrite: () => void;
+};
+type BrowserWrite<T> = (assertLockHeld: () => void, lease?: BrowserLease) => Promise<T>;
 
 function isQuotaExceeded(error: unknown): error is DOMException {
   return error instanceof DOMException && error.name === 'QuotaExceededError';
@@ -78,11 +78,11 @@ async function writeWithLease<T>(
   const lostLease = new Error('匯入資料的寫入標記已失效，請稍後再試。');
   let value = String(Date.now() + leaseDuration);
   let stopped = false;
-  let leaseQuotaError: DOMException | undefined;
+  let reserved = false;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   const assertLease = () => {
     if (stopped || !isLiveLease(value) ||
-        (!leaseQuotaError && storage.getItem(leaseKey) !== value)) throw lostLease;
+        (reserved && storage.getItem(leaseKey) !== value)) throw lostLease;
   };
   const stop = () => {
     stopped = true;
@@ -98,26 +98,35 @@ async function writeWithLease<T>(
     window.addEventListener('pagehide', stop);
     try {
       storage.setItem(leaseKey, value);
+      reserved = true;
     } catch (error) {
       if (!isQuotaExceeded(error)) throw error;
       // Without a persisted lease this attempt may only publish an in-place
       // replacement atomically. It cannot create or reuse a recovery stage.
-      leaseQuotaError = error;
     }
     assertLease();
-    if (leaseQuotaError) return await write(assertLease, leaseQuotaError);
-    heartbeat = setInterval(() => {
-      try {
+    if (reserved) {
+      heartbeat = setInterval(() => {
+        try {
+          assertLease();
+          const next = String(Date.now() + leaseDuration);
+          storage.setItem(leaseKey, next);
+          value = next;
+          assertLease();
+        } catch {
+          stop();
+        }
+      }, leaseDuration / 3);
+    }
+    return await write(assertLease, {
+      canStage: () => reserved,
+      releaseForAtomicWrite: () => {
         assertLease();
-        const next = String(Date.now() + leaseDuration);
-        storage.setItem(leaseKey, next);
-        value = next;
-        assertLease();
-      } catch {
-        stop();
-      }
-    }, leaseDuration / 3);
-    return await write(assertLease);
+        storage.removeItem(leaseKey);
+        reserved = false;
+        clearInterval(heartbeat);
+      },
+    });
   } finally {
     window.removeEventListener('pagehide', stop);
     stop();
@@ -243,7 +252,10 @@ export async function withPersonalImportWriteLock<T>(
     return write(assertLockHeld);
   };
   if (navigator.locks) {
-    return navigator.locks.request(journalPrefix + ledgerHash, () => writeWithCleanup(noLockCheck));
+    // Share the calendar lock and retain the legacy Expo lock while older tabs
+    // can still be writing or sweeping this ledger.
+    return navigator.locks.request(key, () =>
+      navigator.locks.request(journalPrefix + ledgerHash, () => writeWithCleanup(noLockCheck)));
   }
 
   // IndexedDB serializes readwrite transactions by object store. Use a
@@ -290,7 +302,7 @@ export async function withPersonalImportWriteLock<T>(
 
 async function readWebRollback(key: string): Promise<string | undefined> {
   const storage = window.localStorage;
-  const backupKey = webJournalKey(key);
+  const backupKey = personalImportWebJournalKey(key);
   for (;;) {
     const encoded = storage.getItem(backupKey);
     if (encoded === null) return undefined;
@@ -358,80 +370,83 @@ export function commitWebPersonalImports(
   attempted: string,
   assertWritable: () => void,
   recovery?: { raw: string | null },
-  leaseQuotaError?: DOMException,
+  lease?: BrowserLease,
 ): string {
   const storage = window.localStorage;
   const id = createPersonalImportId();
   const committed = JSON.stringify({ ...JSON.parse(attempted), webCommit: id });
   const conflict = () => new Error('匯入資料已在另一個分頁更新，請重新載入。');
   const fitsInPlace = before !== null && attempted.length <= before.length;
+  const recoveryCopies = capturePersonalImportBrowserRecovery(storage, key);
+  const replace = (raw: string, ownsStage: () => boolean) => {
+    assertWritable();
+    if (!ownsStage() || storage.getItem(key) !== before) throw conflict();
+    storage.setItem(key, raw);
+    if (storage.getItem(key) !== raw) throw conflict();
+    return raw;
+  };
   const publish = (ownsStage = () => true) => {
-    const recoveryEntries = [webJournalKey(key), personalImportCheckpointKey(key)]
-      .map((entry) => ({ entry, raw: storage.getItem(entry) }))
-      .filter(({ raw }) => raw !== null);
-    const replace = (raw: string) => {
-      assertWritable();
-      if (!ownsStage() || storage.getItem(key) !== before) throw conflict();
-      storage.setItem(key, raw);
-      if (storage.getItem(key) !== raw) throw conflict();
-      return raw;
-    };
-    let published: string;
     try {
-      published = replace(committed);
+      return replace(committed, ownsStage);
     } catch (error) {
       if (!isQuotaExceeded(error)) throw error;
-      // Publish the marker with the ledger in one write so both legacy recovery
-      // formats are superseded even when there is no room for a new field.
-      const { version, ...ledger } = JSON.parse(attempted);
-      published = replace(recoveryEntries.length ? JSON.stringify({ ...ledger, version }) : attempted);
+      // Keep the marker and version in the same entry at the original byte count.
+      return replace(
+        recoveryCopies.hasCopies ? serializePersonalImportBrowserCommit(JSON.parse(attempted)) : attempted,
+        ownsStage,
+      );
     }
-    // Other writers may rebuild the JSON without the generation marker. Retire
-    // the superseded copies while their bytes and our published ledger still match.
-    for (const { entry, raw } of recoveryEntries) {
-      if (storage.getItem(key) === published && storage.getItem(entry) === raw) {
-        storage.removeItem(entry);
-      }
-    }
-    return published;
   };
-  if (!recovery && !leaseQuotaError) return publish();
-
-  if (leaseQuotaError) {
-    if (!fitsInPlace) throw leaseQuotaError;
-    return publish();
-  }
-
-  const stages = window.sessionStorage;
-  sweepSessionStages(stages);
-
-  // This attempt owns a private, verbatim copy. Encoding it as a JSON string
-  // would expand every quote and backslash and consume extra session quota.
-  const stageKey = stagePrefix + id;
-  const encoded = recovery?.raw ?? 'null';
-  const ownsStage = () => stages.getItem(stageKey) === encoded;
-  assertWritable();
-  activeStages.add(stageKey);
-  try {
+  const publishWithQuotaRetry = (ownsStage?: () => boolean, discardStage?: () => void) => {
     try {
-      stages.setItem(stageKey, encoded);
+      return publish(ownsStage);
     } catch (error) {
-      if (!isQuotaExceeded(error) || !fitsInPlace) throw error;
-      // A single atomic replacement leaves the original intact on failure.
+      if (!isQuotaExceeded(error) || !lease?.canStage()) throw error;
+      // Give the primary back the lease's quota. The retry uses only the
+      // primary snapshot and must never rely on a stage after releasing ownership.
+      discardStage?.();
+      assertWritable();
+      lease.releaseForAtomicWrite();
       return publish();
     }
-    return publish(ownsStage);
-  } finally {
-    // Stages are private to an attempt and are never read for recovery.
-    // Reclaim this stage even if another tab has already published.
-    try {
+  };
+  const commit = () => {
+    if (!recovery || lease?.canStage() === false) return publishWithQuotaRetry();
+
+    const stages = window.sessionStorage;
+    sweepSessionStages(stages);
+
+    // The private copy uses the verbatim ledger without JSON string escaping.
+    const stageKey = stagePrefix + id;
+    const encoded = recovery.raw ?? 'null';
+    const ownsStage = () => stages.getItem(stageKey) === encoded;
+    const discardStage = () => {
       if (ownsStage()) stages.removeItem(stageKey);
-    } catch {
-      // An abandoned stage is inert and can be reclaimed by a later write.
+    };
+    assertWritable();
+    activeStages.add(stageKey);
+    try {
+      try {
+        stages.setItem(stageKey, encoded);
+      } catch (error) {
+        if (!isQuotaExceeded(error) || !fitsInPlace) throw error;
+        return publishWithQuotaRetry();
+      }
+      return publishWithQuotaRetry(ownsStage, discardStage);
     } finally {
-      activeStages.delete(stageKey);
+      try {
+        discardStage();
+      } catch {
+        // An abandoned stage is inert and can be reclaimed by a later write.
+      } finally {
+        activeStages.delete(stageKey);
+      }
     }
-  }
+  };
+
+  const published = commit();
+  recoveryCopies.retire(published);
+  return published;
 }
 
 function journalFiles(key: string) {

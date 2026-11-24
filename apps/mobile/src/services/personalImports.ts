@@ -1,12 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { personalImportCheckpointKey } from '@campus/shared/src/imports/browserRecovery';
 import { findCatalogSameSlotChange } from './publicCourseTimetableImport';
 import {
   clearPersonalImportRollback,
   commitWebPersonalImports,
   hasWebPersonalImportCommit,
   parsePersonalImportStorageJson,
-  personalImportCheckpointKey,
   preparePersonalImportRollback,
   readPersonalImportRollback,
   withPersonalImportWriteLock,
@@ -60,6 +60,25 @@ async function readRecovery(
   scope: PersonalImportScope,
   webPrimary: string | null,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
+  if (Platform.OS === 'web' && webPrimary !== null) {
+    try {
+      parseLedger(webPrimary, scope);
+    } catch {
+      return readLegacyCheckpoint(key, scope);
+    }
+    if (hasWebPersonalImportCommit(webPrimary)) return null;
+    // A standalone browser checkpoint cannot prove that it belongs to a
+    // valid primary. Journals can still identify interrupted legacy writes.
+    return readRollbackJournal(key, scope, webPrimary);
+  }
+
+  return readLegacyCheckpoint(key, scope);
+}
+
+async function readLegacyCheckpoint(
+  key: string,
+  scope: PersonalImportScope,
+): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
   const checkpoint = personalImportCheckpointKey(key);
   let encoded: string | null;
   try {
@@ -91,6 +110,14 @@ async function readRecovery(
 
   const pending = pendingRestorations.get(key);
   if (pending) return { ...pending, ledger: parseLedger(pending.raw, scope) };
+  return readRollbackJournal(key, scope, null);
+}
+
+async function readRollbackJournal(
+  key: string,
+  scope: PersonalImportScope,
+  webPrimary: string | null,
+): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
   const journal = await readPersonalImportRollback(key);
   if (journal === undefined) return null;
   if (journal === 'null') return { raw: null, ledger: empty() };
@@ -173,7 +200,8 @@ export async function loadPersonalImports(
     const sequence = writeSequence;
     const web = Platform.OS === 'web';
     const webPrimary = web ? await AsyncStorage.getItem(key) : null;
-    const recovery = hasWebPersonalImportCommit(webPrimary) ? null : await readRecovery(key, scope, webPrimary);
+    const recovery = await readRecovery(key, scope, webPrimary);
+    if (web && webPrimary !== await AsyncStorage.getItem(key)) continue;
     if (sequence !== writeSequence) continue;
     if (recovery) return recovery.ledger;
     if (web) return parseLedger(webPrimary, scope);
@@ -265,7 +293,7 @@ export function mutatePersonalImportLedger<T>(
   const previous = locks.get(key) || Promise.resolve();
   const task = previous
     .catch(() => undefined)
-    .then(() => withPersonalImportWriteLock(key, async (assertLockHeld, leaseQuotaError) => {
+    .then(() => withPersonalImportWriteLock(key, async (assertLockHeld, lease) => {
       let hasPersisted = false;
       const assertWritable = () => {
         assertLockHeld();
@@ -278,7 +306,7 @@ export function mutatePersonalImportLedger<T>(
       assertWritable();
       const web = Platform.OS === 'web';
       const webPrimary = web ? await AsyncStorage.getItem(key) : null;
-      const recovery = hasWebPersonalImportCommit(webPrimary) ? null : await readRecovery(key, scope, webPrimary);
+      const recovery = await readRecovery(key, scope, webPrimary);
       let primaryRaw = web || recovery ? webPrimary : await AsyncStorage.getItem(key);
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
@@ -296,7 +324,7 @@ export function mutatePersonalImportLedger<T>(
           if (web) {
             writtenRaw = commitWebPersonalImports(
               key, primaryRaw, raw, assertWritable, needsJournal ? { raw: persistedRaw } : undefined,
-              leaseQuotaError,
+              lease,
             );
           } else if (!needsJournal) {
             await AsyncStorage.setItem(key, raw);

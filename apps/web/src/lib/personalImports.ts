@@ -14,6 +14,10 @@ import {
   parsePersonalImportSyncState,
   type PersonalImportSyncState,
 } from '@campus/shared/src/imports/sync';
+import {
+  capturePersonalImportBrowserRecovery,
+  serializePersonalImportBrowserCommit,
+} from '@campus/shared/src/imports/browserRecovery';
 import type { PersonalImportLocalState } from '@campus/shared/src/imports/syncEngine';
 
 export type PersonalImportScope = { owner: string; schoolId: string };
@@ -22,6 +26,19 @@ export const PERSONAL_IMPORT_LIMIT = 2000;
 
 export function personalImportsStorageKey(scope: PersonalImportScope) {
   return `campus.personal-imports.v1:${encodeURIComponent(scope.owner)}:${encodeURIComponent(scope.schoolId)}`;
+}
+
+function writePersonalImportLedger(scope: PersonalImportScope, state: PersonalImportLocalState) {
+  const key = personalImportsStorageKey(scope);
+  const recovery = capturePersonalImportBrowserRecovery(localStorage, key);
+  // A page may close before retiring the old copies. Keep a version-compatible
+  // commit marker in the primary when those copies could still be present.
+  const ledger = { version: 1 as const, ...state };
+  const published = recovery.hasCopies
+    ? serializePersonalImportBrowserCommit(ledger)
+    : JSON.stringify(ledger);
+  localStorage.setItem(key, published);
+  recovery.retire(published);
 }
 
 export function readPersonalImports(scope: PersonalImportScope): PersonalImportRecord[] {
@@ -89,10 +106,7 @@ export async function withPersonalImportSyncLock<T>(
       if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
       if (JSON.stringify(persisted) === JSON.stringify(state)) return;
       try {
-        localStorage.setItem(
-          personalImportsStorageKey(scope),
-          JSON.stringify({ version: 1, ...state }),
-        );
+        writePersonalImportLedger(scope, state);
       } catch {
         throw new Error('裝置空間不足，這次同步未能保存；原資料仍保留，請先下載備份。');
       }
@@ -119,10 +133,7 @@ async function mutate<T>(
     if (rows.length > PERSONAL_IMPORT_LIMIT)
       throw new Error('這台裝置已存滿 2,000 筆，請先匯出備份並移除不再需要的紀錄。');
     try {
-      localStorage.setItem(
-        personalImportsStorageKey(scope),
-        JSON.stringify({ version: 1, records: rows, sync: readPersonalImportSyncState(scope) }),
-      );
+      writePersonalImportLedger(scope, { records: rows, sync: readPersonalImportSyncState(scope) });
     } catch {
       throw new Error('這次沒有存成，可能是裝置空間不足或瀏覽器禁止儲存。草稿還在，請稍後再試。');
     }
