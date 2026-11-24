@@ -176,3 +176,101 @@ process.exit(0);
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('launcher rejects a symbolic-link component written as link/.', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-dot-'));
+  const target = path.join(dir, 'real');
+  const link = path.join(dir, 'link');
+  mkdirSync(target);
+  symlinkSync(target, link);
+  try {
+    writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
+if (process.argv.includes('-e')) process.exit(0);
+process.exit(0);
+`, { mode: 0o700 });
+    writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
+process.exit(0);
+`, { mode: 0o700 });
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        TMPDIR: dir,
+        HOME: dir,
+        TRONCLASS_RUNTIME_DIR: `${link}/.`,
+      },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /symbolic link/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launcher rejects a runtime path whose intermediate component is a symbolic link', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-mid-'));
+  const real = path.join(dir, 'real');
+  const link = path.join(dir, 'link');
+  mkdirSync(path.join(real, 'runtime'), { recursive: true, mode: 0o700 });
+  symlinkSync(real, link);
+  try {
+    writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
+if (process.argv.includes('-e')) process.exit(0);
+process.exit(0);
+`, { mode: 0o700 });
+    writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
+process.exit(0);
+`, { mode: 0o700 });
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        TMPDIR: dir,
+        HOME: dir,
+        TRONCLASS_RUNTIME_DIR: path.join(link, 'runtime'),
+      },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /symbolic link/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launcher resolves a relative runtime directory against the repository root', () => {
+  const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
+  const relative = `.r35-tronclass-runtime-${process.pid}`;
+  const expected = path.resolve(repoRoot, relative);
+  mkdirSync(expected, { mode: 0o700 });
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-rel-'));
+  const capture = path.join(dir, 'captured.json');
+  try {
+    writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
+const fs = require('node:fs');
+if (process.argv.includes('-e')) process.exit(0);
+fs.writeFileSync(process.env.TRONCLASS_LAUNCHER_CAPTURE,
+  JSON.stringify({ dir: process.env.TRONCLASS_RUNTIME_DIR ?? null }));
+process.exit(73);
+`, { mode: 0o700 });
+    writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
+process.exit(0);
+`, { mode: 0o700 });
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        TRONCLASS_LAUNCHER_CAPTURE: capture,
+        TMPDIR: dir,
+        HOME: dir,
+        TRONCLASS_RUNTIME_DIR: relative,
+      },
+    });
+    assert.equal(result.status, 73, result.stderr);
+    const observed = JSON.parse(readFileSync(capture, 'utf8'));
+    assert.equal(observed.dir, expected);
+    assert.equal(path.isAbsolute(observed.dir), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(expected, { recursive: true, force: true });
+  }
+});

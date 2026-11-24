@@ -70,11 +70,39 @@ tronclass_runtime_dir="${TRONCLASS_RUNTIME_DIR:-}"
 while [ -n "$tronclass_runtime_dir" ] && [ "$tronclass_runtime_dir" != "/" ] && [ "${tronclass_runtime_dir%/}" != "$tronclass_runtime_dir" ]; do
   tronclass_runtime_dir="${tronclass_runtime_dir%/}"
 done
-if [ -n "$tronclass_runtime_dir" ]; then
-  if [ -L "$tronclass_runtime_dir" ] || [ ! -d "$tronclass_runtime_dir" ]; then
+tronclass_physical_dir() {
+  local target="$1"
+  case "$target" in
+    /*) ;;
+    *) target="$TRONCLASS_PROJECT_ROOT/$target" ;;
+  esac
+  local acc="/" part next
+  local rest="${target#/}"
+  local IFS='/'
+  for part in $rest; do
+    [ -z "$part" ] && continue
+    if [ "$part" = "." ]; then continue; fi
+    if [ "$part" = ".." ]; then
+      [ "$acc" = "/" ] && continue
+      acc="${acc%/*}"
+      [ -n "$acc" ] || acc="/"
+      continue
+    fi
+    if [ "$acc" = "/" ]; then next="/$part"; else next="$acc/$part"; fi
+    if [ -L "$next" ] || { [ -e "$next" ] && [ -L "$next" ]; }; then
+      echo 'TRONCLASS_RUNTIME_DIR must be a directory owned by this user, not a symbolic link.' >&2
+      return 1
+    fi
+    acc="$next"
+  done
+  if [ -L "$acc" ] || [ ! -d "$acc" ]; then
     echo 'TRONCLASS_RUNTIME_DIR must be a directory owned by this user, not a symbolic link.' >&2
-    exit 1
+    return 1
   fi
+  printf '%s' "$acc"
+}
+if [ -n "$tronclass_runtime_dir" ]; then
+  tronclass_runtime_dir="$(tronclass_physical_dir "$tronclass_runtime_dir")" || exit 1
   if [ "$(stat -c '%u' "$tronclass_runtime_dir")" != "$(id -u)" ]; then
     echo 'TRONCLASS_RUNTIME_DIR must be owned by the current user.' >&2
     exit 1
@@ -91,17 +119,42 @@ if [ -L "$TRONCLASS_RUNTIME_DIR" ]; then
 fi
 export TRONCLASS_RUNTIME_DIR
 for TRONCLASS_KEY_NAME in bff-session tronclass-session; do
-  node - "$TRONCLASS_RUNTIME_DIR/$TRONCLASS_KEY_NAME.key" <<'NODE'
+  node - "$TRONCLASS_RUNTIME_DIR" "$TRONCLASS_KEY_NAME.key" <<'NODE'
 const fs = require('node:fs');
+const path = require('node:path');
 const { randomBytes } = require('node:crypto');
-const target = process.argv[2];
-if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) {
-  throw new Error('Refusing a symbolic link key file.');
+const runtimeDir = process.argv[2];
+const target = path.resolve(runtimeDir, process.argv[3]);
+
+function assertNoSymlinkComponent(targetPath, missingOk) {
+  const resolved = path.resolve(targetPath);
+  let current = path.parse(resolved).root;
+  for (const part of resolved.slice(current.length).split(path.sep)) {
+    if (!part) continue;
+    current = path.join(current, part);
+    let stat;
+    try { stat = fs.lstatSync(current); }
+    catch (error) {
+      if (missingOk && error && error.code === 'ENOENT') continue;
+      throw error;
+    }
+    if (stat.isSymbolicLink()) throw new Error('Refusing a symbolic link key file.');
+  }
+  return resolved;
 }
+
+assertNoSymlinkComponent(path.dirname(target), false);
+if (fs.existsSync(target)) assertNoSymlinkComponent(target, false);
 if (!fs.existsSync(target)) fs.writeFileSync(target, randomBytes(48).toString('base64url'), { mode: 0o600, flag: 'wx' });
-if (fs.lstatSync(target).isSymbolicLink()) throw new Error('Refusing a symbolic link key file.');
-if (!/^[A-Za-z0-9_-]{64}$/.test(fs.readFileSync(target, 'utf8'))) throw new Error('Invalid local session key file.');
-fs.chmodSync(target, 0o600);
+assertNoSymlinkComponent(target, false);
+const resolvedKey = fs.realpathSync(target);
+const resolvedDir = fs.realpathSync(runtimeDir);
+const prefix = resolvedDir.endsWith(path.sep) ? resolvedDir : resolvedDir + path.sep;
+if (!resolvedKey.startsWith(prefix)) {
+  throw new Error('Refusing a session key path outside the runtime directory.');
+}
+if (!/^[A-Za-z0-9_-]{64}$/.test(fs.readFileSync(resolvedKey, 'utf8'))) throw new Error('Invalid local session key file.');
+fs.chmodSync(resolvedKey, 0o600);
 NODE
 done
 export BFF_SESSION_SECRET="$(<"$TRONCLASS_RUNTIME_DIR/bff-session.key")"
