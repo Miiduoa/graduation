@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import {
   defaultNotificationPreferences,
+  isValidNotificationTime as isNotificationTime,
   type NotificationPreferences,
 } from '@campus/shared/src/notifications';
 import { getDb, getAuthInstance, isFirebaseMockMode } from '../firebase';
@@ -306,18 +307,13 @@ export async function refreshPushTokenIfNeeded(uid: string): Promise<void> {
   }
 }
 
-export { defaultNotificationPreferences, type NotificationPreferences };
+export { defaultNotificationPreferences, isNotificationTime, type NotificationPreferences };
 
 export type NotificationPreferenceScope = { schoolId: string; isCurrent?: () => boolean };
 export type NotificationPreferenceState = {
   preferences: NotificationPreferences;
   source: 'server' | 'local' | 'cache' | 'unavailable';
 };
-
-const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
-export function isNotificationTime(value: string): boolean {
-  return timePattern.test(value);
-}
 
 function normalizePreferences(value: unknown): NotificationPreferences {
   const input = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
