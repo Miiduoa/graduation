@@ -10,7 +10,21 @@ export async function withCampusEventShortlistLock<T>(
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open('nuni-campus-event-shortlist-locks', 1);
     request.onupgradeneeded = () => request.result.createObjectStore('write-lock');
-    request.onsuccess = () => resolve(request.result);
+    let blocked = false;
+    request.onblocked = () => {
+      blocked = true;
+      reject(new Error('Event shortlist database upgrade blocked'));
+    };
+    request.onsuccess = () => {
+      const connection = request.result;
+      if (blocked) {
+        // A rejected open can still succeed later; never leave that connection open.
+        connection.close();
+        return;
+      }
+      connection.onversionchange = () => connection.close();
+      resolve(connection);
+    };
     request.onerror = () => reject(request.error);
   });
   try {

@@ -30,3 +30,50 @@ it('uses the browser Web Lock for the scope and never starts the operation after
   );
   expect(operation).toHaveBeenCalledTimes(1);
 });
+
+it('rejects a blocked IndexedDB open and closes a late connection without writing', async () => {
+  const close = vi.fn();
+  const transaction = vi.fn();
+  const operation = vi.fn(async () => 'saved');
+  const request: {
+    onblocked?: () => void;
+    onsuccess?: () => void;
+    result: { close: typeof close; transaction: typeof transaction };
+  } = { result: { close, transaction } };
+  vi.stubGlobal('navigator', {});
+  vi.stubGlobal('indexedDB', { open: () => request });
+
+  const pending = withCampusEventShortlistLock('events', operation);
+  const rejected = expect(pending).rejects.toThrow('database upgrade blocked');
+  expect(request.onblocked).toBeTypeOf('function');
+  request.onblocked?.();
+  await rejected;
+  request.onsuccess?.();
+
+  expect(close).toHaveBeenCalledOnce();
+  expect(transaction).not.toHaveBeenCalled();
+  expect(operation).not.toHaveBeenCalled();
+});
+
+it('closes an open connection on a version change and preserves transaction errors', async () => {
+  const close = vi.fn();
+  const transaction = vi.fn(() => { throw new Error('transaction failed'); });
+  const operation = vi.fn(async () => 'saved');
+  const connection: {
+    close: typeof close;
+    transaction: typeof transaction;
+    onversionchange?: () => void;
+  } = { close, transaction };
+  const request: { onsuccess?: () => void; result: typeof connection } = { result: connection };
+  vi.stubGlobal('navigator', {});
+  vi.stubGlobal('indexedDB', { open: () => request });
+
+  const pending = withCampusEventShortlistLock('events', operation);
+  const rejected = expect(pending).rejects.toThrow('transaction failed');
+  request.onsuccess?.();
+  expect(connection.onversionchange).toBeTypeOf('function');
+  connection.onversionchange?.();
+  expect(close).toHaveBeenCalledOnce();
+  await rejected;
+  expect(operation).not.toHaveBeenCalled();
+});
