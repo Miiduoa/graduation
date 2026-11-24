@@ -16,9 +16,9 @@ diff --git a/dist/client/components/app-router.js b/dist/client/components/app-r
              // TODO: Warn when Navigation API is available (navigation.navigate() should be used)
              // Avoid a loop when Next.js internals trigger pushState/replaceState
              if (data?.__NA || data?._N) {
-+                // Application replacements can reuse history.state, including __NA.
-+                // Keep the current route tree in sync when only its URL query changes.
-+                if (data.__NA && !data[Symbol.for('nuni.app-router.history-replace')] && url != null) {
++                // Only callers that own URL-derived filters opt in to restoring the router URL.
++                // Ordinary __NA writes must leave pending navigations in the action queue.
++                if (data.__NA && data[Symbol.for('nuni.app-router.sync-history-query')] === true && url != null) {
 +                    const current = new URL(window.location.href);
 +                    const target = new URL(url, current);
 +                    if (current.origin === target.origin && current.pathname === target.pathname && current.search !== target.search) {
@@ -47,9 +47,9 @@ diff --git a/dist/esm/client/components/app-router.js b/dist/esm/client/componen
              // TODO: Warn when Navigation API is available (navigation.navigate() should be used)
              // Avoid a loop when Next.js internals trigger pushState/replaceState
              if (data?.__NA || data?._N) {
-+                // Application replacements can reuse history.state, including __NA.
-+                // Keep the current route tree in sync when only its URL query changes.
-+                if (data.__NA && !data[Symbol.for('nuni.app-router.history-replace')] && url != null) {
++                // Only callers that own URL-derived filters opt in to restoring the router URL.
++                // Ordinary __NA writes must leave pending navigations in the action queue.
++                if (data.__NA && data[Symbol.for('nuni.app-router.sync-history-query')] === true && url != null) {
 +                    const current = new URL(window.location.href);
 +                    const target = new URL(url, current);
 +                    if (current.origin === target.origin && current.pathname === target.pathname && current.search !== target.search) {

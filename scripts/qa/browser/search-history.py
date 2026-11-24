@@ -99,6 +99,36 @@ async def check_search_history(origin):
             await expect(results.get_by_role('link').filter(
                 has=page.get_by_role('heading', name='公車', exact=True),
             )).to_be_visible()
+
+            # Keep the search observer installed while exercising an off-search query write.
+            await page.evaluate("() => window.next.router.push('/library?campus=all')")
+            await page.wait_for_url(f'{origin}/library?campus=all')
+            requested = asyncio.Event()
+            release = asyncio.Event()
+
+            async def delay_search_navigation(route):
+                if route.request.headers.get('rsc') == '1':
+                    requested.set()
+                    await release.wait()
+                await route.continue_()
+
+            destination = f'{origin}/search?campus=all&q=pending-navigation'
+            pattern = '**/search?campus=all&q=pending-navigation*'
+            await page.route(pattern, delay_search_navigation)
+            try:
+                await page.evaluate("(url) => window.next.router.push(url)", destination)
+                await asyncio.wait_for(requested.wait(), timeout=15)
+                await expect(page).to_have_url(f'{origin}/library?campus=all')
+                # Match replaceStudyQuery: reuse Next's active state while changing the query.
+                await page.evaluate("""() => {
+                  if (!history.state?.__NA) throw new Error('Expected the real Next history marker');
+                  history.replaceState(history.state, '', '?campus=all&q=edited');
+                }""")
+                await expect(page).to_have_url(f'{origin}/library?campus=all&q=edited')
+            finally:
+                release.set()
+                await page.unroute(pattern, delay_search_navigation)
+            await expect(page).to_have_url(destination)
         finally:
             await browser.close()
 

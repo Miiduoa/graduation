@@ -7,6 +7,7 @@ import { SERVICE_CATEGORIES, type ServiceCategory } from '@/lib/campusServices';
 import {
   APP_ROUTER_HISTORY_PUSH,
   APP_ROUTER_HISTORY_REPLACE,
+  APP_ROUTER_SYNC_HISTORY_QUERY,
   consumeSearchResultNavigation,
   isSearchResultNavigationPending,
   markSearchResultNavigation,
@@ -150,7 +151,14 @@ function installHistoryTracking() {
       const push = method === 'pushState';
       const routerCommit = push && isRouterHistoryWrite(data, APP_ROUTER_HISTORY_PUSH);
       const routerReplace = !push && isRouterHistoryWrite(data, APP_ROUTER_HISTORY_REPLACE);
-      const changesPage = url != null && new URL(url, window.location.href).pathname !== previousPath;
+      const targetUrl = url == null ? null : new URL(url, previousHref);
+      const changesPage = targetUrl !== null && targetUrl.pathname !== previousPath;
+      const syncSearchQuery =
+        !push && !routerReplace && previousPath === '/search' &&
+        targetUrl !== null && !changesPage &&
+        targetUrl.origin === window.location.origin &&
+        targetUrl.search !== window.location.search &&
+        Boolean(readNextHistoryFields(data).__NA);
       const replacesPage = !push && changesPage;
       const nextFields = changesPage ? {} : {
         ...(nativeState?.value === previousState ? nativeState?.nextFields : {}),
@@ -197,6 +205,11 @@ function installHistoryTracking() {
           }
           state = fields;
         }
+      }
+      if (syncSearchQuery) {
+        // The marker belongs to this write and is omitted by History serialization.
+        if (state === data) state = record ? { ...data } : cloneHistoryState(data);
+        Object.defineProperty(state, APP_ROUTER_SYNC_HISTORY_QUERY, { value: true });
       }
       original.call(this, state, unused, url);
       nativeState = !cloned && state != null && !isHistoryRecord(state)
