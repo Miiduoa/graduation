@@ -68,6 +68,10 @@
   gap: 10px;
 }
 
+.conversation[hidden] {
+  display: none;
+}
+
 .tools {
   display: flex;
   flex-wrap: wrap;

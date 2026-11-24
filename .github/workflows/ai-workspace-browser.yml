@@ -1,0 +1,84 @@
+name: AI Workspace Browser
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'apps/web/src/components/AssistantWorkspace*'
+      - 'apps/web/src/components/TodayCampusEntry*'
+      - 'apps/web/src/components/QuickCampusEntry*'
+      - 'apps/web/src/components/AppHeader*'
+      - 'apps/web/src/components/CampusProviders*'
+      - 'apps/web/src/components/today/**'
+      - 'apps/web/src/features/nuni/Assistant*'
+      - 'apps/web/src/features/nuni/assistant/**'
+      - 'apps/web/src/features/nuni/Session*'
+      - 'apps/web/src/app/ai-assistant/**'
+      - 'apps/web/src/app/globals.css'
+      - 'apps/web/src/app/home.module.css'
+      - 'scripts/qa/ai-workspace/**'
+      - 'scripts/qa/browser/**'
+      - 'package.json'
+      - 'apps/web/package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/ai-workspace-browser.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-workspace-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: Conversation continuity and identity isolation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Taipei
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '10.28.2'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.5'
+          cache: pnpm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify real conversations and ownership boundaries
+        run: |
+          mkdir -p artifacts/ai-workspace
+          pnpm --filter web test \
+            src/components/AssistantWorkspaceProvider.test.tsx \
+            src/components/AssistantWorkspace.integration.test.tsx \
+            src/components/TodayCampusEntry.test.tsx \
+            src/features/nuni/assistant/AssistantThread.inlineWorkspace.test.tsx \
+            src/app/ai-assistant/LegacyAssistant.workspaceDraft.test.tsx \
+            --reporter=default --reporter=json \
+            --outputFile=../../artifacts/ai-workspace/unit-tests.json
+      - name: Install Chromium and Chinese fonts
+        run: |
+          python -m pip install playwright==1.57.0
+          bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk
+      - name: Bundle product UI with isolated fixture sources
+        run: node scripts/qa/ai-workspace/build.mjs
+      - name: Verify desktop, phone and accessible workspace journeys
+        run: python scripts/qa/ai-workspace/check.py
+      - name: Upload browser evidence and source hashes
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ai-workspace-browser
+          path: artifacts/ai-workspace
+          retention-days: 7

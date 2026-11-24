@@ -23,6 +23,68 @@ beforeEach(() => {
   applyTheme('light');
 });
 
+test('the home workspace prepares an editable task and sends only the final question on request', async () => {
+  const ask = jest.mocked(askCampusAssistant);
+  ask.mockResolvedValueOnce({ source: 'device', hasActions: false, content: '下一堂課在主顧樓 301。' });
+  const open = jest.fn();
+  const view = render(<QuickCampusEntry uid="alice" schoolId="pu" presentation="workspace" onOpen={open} />);
+  const input = view.getByLabelText('說出或輸入想做的事');
+  const send = view.getByRole('button', { name: '詢問手機助理' });
+  expect(send).toBeDisabled();
+  fireEvent.press(view.getByRole('button', { name: '填入需求：下一堂課在哪裡？' }));
+  expect(input.props.value).toBe('下一堂課在哪裡？');
+  expect(ask).not.toHaveBeenCalled();
+  expect(interpret).not.toHaveBeenCalled();
+  expect(open).not.toHaveBeenCalled();
+  expect(view.queryByRole('button', { name: /^填入需求/ })).toBeNull();
+  fireEvent.changeText(input, '下一堂課的教室在哪裡？');
+  await act(async () => fireEvent.press(send));
+  expect(ask).toHaveBeenCalledWith(expect.objectContaining({
+    mode: 'device', scope: { uid: 'alice', schoolId: 'pu' },
+    messages: [{ role: 'user', content: '下一堂課的教室在哪裡？' }],
+  }));
+  expect(view.getByText('下一堂課在主顧樓 301。')).toBeTruthy();
+  expect(view.getByRole('header', { name: '接著想了解什麼？' })).toBeTruthy();
+  expect(input.props.placeholder).toBe('接著問…');
+  expect(send).toBeDisabled();
+  expect(interpret).not.toHaveBeenCalled();
+});
+
+test.each([null, 'alice'])('the home workspace offers local service discovery without a selected campus (%s)', (uid) => {
+  const open = jest.fn();
+  const view = render(<QuickCampusEntry uid={uid} schoolId={null} presentation="workspace" onOpen={open} />);
+  expect(view.queryByRole('button', { name: '填入需求：下一堂課在哪裡？' })).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '填入需求：圖書館開放時間' }));
+  fireEvent.press(view.getByRole('button', { name: '查看搜尋結果' }));
+  expect(view.getByText('找到 1 個服務，請選擇要開啟的項目。')).toBeTruthy();
+  expect(open).not.toHaveBeenCalled();
+  expect(askCampusAssistant).not.toHaveBeenCalled();
+  expect(interpret).not.toHaveBeenCalled();
+  fireEvent.press(view.getByRole('button', { name: '前往圖書館' }));
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ route: 'Library' }));
+});
+
+test('the home workspace retains a stopped question and a same-scope appearance change does not reset it', async () => {
+  const ask = jest.mocked(askCampusAssistant);
+  let finish!: (value: Awaited<ReturnType<typeof askCampusAssistant>>) => void;
+  ask.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  const view = render(<QuickCampusEntry uid="alice" schoolId="pu" presentation="workspace" onOpen={jest.fn()} />);
+  fireEvent.press(view.getByRole('button', { name: '填入需求：下一堂課在哪裡？' }));
+  fireEvent.press(view.getByRole('button', { name: '詢問手機助理' }));
+  const request = ask.mock.lastCall![0];
+  expect(view.getByText('手機助理正在回答，可隨時停止並保留問題。')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '停止回答' }));
+  expect(request.signal?.aborted).toBe(true);
+  act(() => applyTheme('dark'));
+  expect(view.getByDisplayValue('下一堂課在哪裡？')).toBeTruthy();
+  expect(view.queryByText('手機助理正在回答，可隨時停止並保留問題。')).toBeNull();
+  await act(async () => finish({ source: 'device', hasActions: false, content: '停止後的舊答案' }));
+  expect(view.queryByText('停止後的舊答案')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '清除快速需求' }));
+  expect(view.getByRole('button', { name: '詢問手機助理' })).toBeDisabled();
+  expect(view.getByRole('button', { name: '填入需求：下一堂課在哪裡？' })).toBeTruthy();
+});
+
 test('asks the model to understand several goals only when the student submits', async () => {
   interpret.mockResolvedValue({
     status: 'understood', source: 'model',

@@ -48,6 +48,8 @@ function classQuestions(reply?: CampusAssistantMessage, uid?: string | null, sch
 type QuickCampusEntryProps = {
   uid?: string | null;
   schoolId?: string | null;
+  /** The home workspace keeps the same scoped conversation and service actions. */
+  presentation?: 'compact' | 'workspace';
   onOpen: (action: MobileQuickAction) => void;
   onOpenAssistantRoute?: (route: string) => void;
 };
@@ -65,6 +67,7 @@ export function QuickCampusEntry(props: QuickCampusEntryProps) {
 function ScopedQuickCampusEntry({
   uid,
   schoolId,
+  presentation = 'compact',
   onOpen,
   onOpenAssistantRoute,
 }: QuickCampusEntryProps) {
@@ -74,6 +77,8 @@ function ScopedQuickCampusEntry({
   const textColor = dark ? '#F2F3F1' : '#252729';
   const mutedColor = dark ? '#A5AAA7' : '#686C70';
   const borderColor = dark ? '#292B2D' : '#E6E7E8';
+  const workspace = presentation === 'workspace';
+  const input = useRef<TextInput>(null);
   const [query, setQuery] = useState('');
   const [submittedSearch, setSubmittedSearch] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -109,6 +114,9 @@ function ScopedQuickCampusEntry({
   const signedIn = Boolean(uid);
   const canAsk = Boolean(uid && schoolId);
   const modelBusy = shown?.status === 'loading';
+  const starters = canAsk
+    ? ['下一堂課在哪裡？', '圖書館開放時間']
+    : ['圖書館開放時間', '公車到站時間'];
 
   function update(value: string) {
     sequence.current += 1;
@@ -205,13 +213,28 @@ function ScopedQuickCampusEntry({
   return (
     <View
       style={{
-        gap: 8,
-        borderTopWidth: 1,
+        gap: workspace ? 12 : 8,
+        borderTopWidth: workspace ? 0 : 1,
         borderTopColor: borderColor,
-        paddingTop: 20,
+        paddingTop: workspace ? 0 : 20,
       }}
       accessibilityLabel="校園助理與常用服務"
+      testID={workspace ? 'today-task-workspace' : undefined}
     >
+      {workspace && (
+        <View style={{ gap: 6 }}>
+          <Text accessibilityRole="header" style={{ fontSize: 23, lineHeight: 31, fontWeight: '600', color: textColor }}>
+            {lastReply ? '接著想了解什麼？' : '今天想完成什麼？'}
+          </Text>
+          <Text style={{ ...typography.bodySmall, color: mutedColor }}>
+            {lastReply
+              ? '接著追問，沿用這次對話的內容。'
+              : canAsk
+                ? '問課表、找校園服務，接著在這裡追問。'
+                : '輸入想找的服務，或直接開啟課表與校園資訊。'}
+          </Text>
+        </View>
+      )}
       {earlierTurns > 0 && (
         <View style={{ gap: 8 }}>
           <Pressable
@@ -255,7 +278,9 @@ function ScopedQuickCampusEntry({
           flexDirection: 'row',
           alignItems: 'center',
           backgroundColor: dark ? '#151617' : '#F5F6F7',
-          borderRadius: radius.md,
+          borderRadius: workspace ? radius.lg : radius.md,
+          borderWidth: workspace ? 1 : 0,
+          borderColor,
           paddingLeft: 12,
           paddingRight: 6,
           gap: 8,
@@ -263,9 +288,10 @@ function ScopedQuickCampusEntry({
       >
         <Ionicons name={canAsk ? 'chatbubble-outline' : 'search-outline'} size={18} color={mutedColor} />
         <TextInput
+          ref={input}
           accessibilityLabel="說出或輸入想做的事"
           accessibilityHint={canAsk ? '可使用鍵盤聽寫，送出後在這裡查看回答。' : '輸入需求，尋找校園服務。'}
-          placeholder={lastReply ? '接著問…' : canAsk ? '問校園助理…' : '找校園服務'}
+          placeholder={lastReply ? '接著問…' : workspace ? '輸入想做的事…' : canAsk ? '問校園助理…' : '找校園服務'}
           placeholderTextColor={mutedColor}
           autoCorrect={false}
           autoCapitalize="none"
@@ -287,8 +313,49 @@ function ScopedQuickCampusEntry({
             <Ionicons name="close-circle-outline" size={21} color={mutedColor} />
           </Pressable>
         ) : null}
+        {workspace && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={asking ? '停止回答' : canAsk ? '詢問手機助理' : '查看搜尋結果'}
+            accessibilityState={{ disabled: !phrase && !asking }}
+            disabled={!phrase && !asking}
+            onPress={asking ? stop : submitInput}
+            style={({ pressed }) => ({
+              width: 44, height: 44, borderRadius: radius.md,
+              alignItems: 'center', justifyContent: 'center',
+              backgroundColor: phrase || asking ? textColor : colors.surface2,
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <Ionicons name={asking ? 'stop' : canAsk ? 'arrow-up' : 'search-outline'} size={20}
+              color={phrase || asking ? (dark ? '#151617' : '#FFFFFF') : mutedColor} />
+          </Pressable>
+        )}
       </View>
-      {!!phrase && !canAsk && (
+      {workspace && !phrase && !lastReply && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {starters.map(starter => (
+            <Pressable
+              key={starter}
+              accessibilityRole="button"
+              accessibilityLabel={'填入需求：' + starter}
+              accessibilityHint="先填入輸入框，可編輯後再送出。"
+              onPress={() => {
+                update(starter);
+                input.current?.focus();
+              }}
+              style={({ pressed }) => ({
+                minHeight: 44, paddingHorizontal: 12, justifyContent: 'center',
+                borderWidth: 1, borderColor, borderRadius: radius.full,
+                backgroundColor: pressed ? colors.surface2 : 'transparent',
+              })}
+            >
+              <Text style={{ ...typography.bodySmall, color: textColor }}>{starter}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+      {!!phrase && !canAsk && !workspace && (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="查看搜尋結果"
@@ -304,7 +371,7 @@ function ScopedQuickCampusEntry({
           {suggestions.length ? `找到 ${suggestions.length} 個服務，請選擇要開啟的項目。` : '沒有相符的服務，試試課表、公車或圖書館。'}
         </Text>
       )}
-      {!!phrase && canAsk && (
+      {!!phrase && canAsk && !workspace && (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={asking ? '停止回答' : '詢問手機助理'}
@@ -316,6 +383,11 @@ function ScopedQuickCampusEntry({
             {asking ? '回答中 · 停止' : '詢問手機助理'}
           </Text>
         </Pressable>
+      )}
+      {workspace && asking && (
+        <Text accessibilityLiveRegion="polite" style={{ ...typography.bodySmall, color: mutedColor }}>
+          手機助理正在回答，可隨時停止並保留問題。
+        </Text>
       )}
       {askError && (
         <View>

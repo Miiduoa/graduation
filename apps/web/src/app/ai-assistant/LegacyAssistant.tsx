@@ -188,7 +188,7 @@ export function AssistantConversation({
             publicCourse: { read: result.read },
           },
         ]);
-        setDraft('');
+        setDraft((current) => current.trim() === content ? '' : current);
         return;
       }
       sessionId.current ??= crypto.randomUUID();
@@ -432,7 +432,7 @@ export function AssistantConversation({
                 : '回覆可能有誤；申請、繳費請以服務頁面的紀錄為準。'}
           </p>
           {inline && pending ? (
-            <button key="stop" type="button" className={home.primary} onClick={stopAsking}>
+            <button key="stop" type="button" className={home.primary} onClick={stopAsking} data-assistant-stop-read="true">
               停止回答
             </button>
           ) : (

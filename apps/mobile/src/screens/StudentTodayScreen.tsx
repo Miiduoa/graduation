@@ -340,6 +340,14 @@ export default function StudentTodayScreen() {
             </Pressable>
           )}
         </View>
+        <QuickCampusEntry
+          key={scope}
+          uid={uid}
+          schoolId={schoolId}
+          presentation="workspace"
+          onOpen={openQuickAction}
+          onOpenAssistantRoute={(route) => safeNavigate(navigation, route)}
+        />
         {firstLoad ? (
           <TodaySkeleton styles={s} />
         ) : (
@@ -362,13 +370,6 @@ export default function StudentTodayScreen() {
             {!urgentWorkFirst && todoSection}
           </>
         )}
-        <QuickCampusEntry
-          key={scope}
-          uid={uid}
-          schoolId={schoolId}
-          onOpen={openQuickAction}
-          onOpenAssistantRoute={(route) => safeNavigate(navigation, route)}
-        />
         <CampusPersonalization now={now} />
       </ScrollView>
     </SafeAreaView>

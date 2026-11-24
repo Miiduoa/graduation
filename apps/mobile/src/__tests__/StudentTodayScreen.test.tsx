@@ -139,12 +139,20 @@ test('keeps the assistant usable during the first course load without dropping t
   jest.mocked(loadStudentHome).mockReturnValueOnce(first.promise);
   const view = render(<StudentTodayScreen />);
   expect(view.getByTestId('today-skeleton')).toBeTruthy();
+  // The task entry is first in both the visual and assistive reading order,
+  // even while coursework is still loading.
+  const loadingOrder = view.root.findAll(() => true);
+  expect(loadingOrder.indexOf(view.getByTestId('today-task-workspace')))
+    .toBeLessThan(loadingOrder.indexOf(view.getByTestId('today-skeleton')));
   const input = view.getByLabelText('說出或輸入想做的事');
   fireEvent.changeText(input, '想找等一下的教室');
   await act(async () => first.resolve(result()));
   expect(view.queryByTestId('today-skeleton')).toBeNull();
   expect(view.getByLabelText('說出或輸入想做的事')).toBe(input);
   expect(view.getByDisplayValue('想找等一下的教室')).toBeTruthy();
+  const readyOrder = view.root.findAll(() => true);
+  expect(readyOrder.indexOf(view.getByTestId('today-task-workspace')))
+    .toBeLessThan(readyOrder.indexOf(view.getByText('今天課表')));
   expect(askCampusAssistant).not.toHaveBeenCalled();
 });
 
