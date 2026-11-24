@@ -111,20 +111,34 @@ tronclass_physical_dir() {
 }
 if [ -n "$tronclass_runtime_dir" ]; then
   tronclass_runtime_dir="$(tronclass_physical_dir "$tronclass_runtime_dir")" || exit 1
-  if [ "$(stat -c '%u' "$tronclass_runtime_dir")" != "$(id -u)" ]; then
-    echo 'TRONCLASS_RUNTIME_DIR must be owned by the current user.' >&2
-    exit 1
-  fi
-  chmod 700 "$tronclass_runtime_dir"
   TRONCLASS_RUNTIME_DIR="$tronclass_runtime_dir"
 else
   TRONCLASS_RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/campus-tronclass-emulator.XXXXXX")"
-  chmod 700 "$TRONCLASS_RUNTIME_DIR"
 fi
-if [ -L "$TRONCLASS_RUNTIME_DIR" ]; then
-  echo 'Refusing a symbolic link runtime directory.' >&2
-  exit 1
-fi
+node - "$TRONCLASS_RUNTIME_DIR" <<'NODE'
+const fs = require('node:fs');
+const target = require('node:path').resolve(process.argv[2]);
+const flags = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW;
+let fd;
+try {
+  fd = fs.openSync('/', flags);
+  for (const part of target.split('/').filter(Boolean)) {
+    const next = fs.openSync(`/proc/self/fd/${fd}/${part}`, flags);
+    fs.closeSync(fd);
+    fd = next;
+  }
+  const info = fs.fstatSync(fd);
+  if (info.uid !== process.getuid()) throw new Error('owner');
+  fs.fchmodSync(fd, 0o700);
+  const current = fs.lstatSync(target);
+  if (!current.isDirectory() || current.dev !== info.dev || current.ino !== info.ino) throw new Error('replaced');
+} catch {
+  process.stderr.write('TRONCLASS_RUNTIME_DIR must be a directory owned by the current user, not a symbolic link or replaced directory.\n');
+  process.exitCode = 1;
+} finally {
+  if (fd !== undefined) fs.closeSync(fd);
+}
+NODE
 export TRONCLASS_RUNTIME_DIR
 TRONCLASS_RUN_ID="$(openssl rand -hex 16 2>/dev/null || true)"
 if ! printf '%s' "$TRONCLASS_RUN_ID" | grep -Eq '^[0-9a-fA-F]{32}$'; then
@@ -710,10 +724,23 @@ try {
     // Publish without replacing an existing record, including symlinks.
     const namedTmp = fs.lstatSync(tmpPath);
     if (namedTmp.dev !== tmpStat.dev || namedTmp.ino !== tmpStat.ino) throw new Error('replaced tmp');
-    fs.linkSync(tmpPath, pgidPath);
+    // Linux renameat2 makes the completed record visible with one link.
+    const publication = spawnSync('python3', ['-I', '-c', `
+import ctypes
+import os
+import sys
+
+rename = ctypes.CDLL(None, use_errno=True).renameat2
+rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+AT_FDCWD = -100
+RENAME_NOREPLACE = 1
+if rename(AT_FDCWD, os.fsencode(sys.argv[1]), AT_FDCWD, os.fsencode(sys.argv[2]), RENAME_NOREPLACE):
+    sys.exit(1)
+`, tmpPath, pgidPath], { stdio: 'ignore' });
+    if (publication.status !== 0) throw new Error('record publication');
   } finally {
     fs.closeSync(tmpFd);
-    fs.unlinkSync(tmpPath);
+    fs.rmSync(tmpPath, { force: true });
   }
 } catch (error) {
   process.stderr.write('Unable to record the logged child process group.\n');

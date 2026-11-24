@@ -83,6 +83,11 @@ test('launcher stores session keys in a private temporary directory', () => {
     writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
 const fs = require('node:fs');
 if (process.argv.includes('-e')) process.exit(0);
+if (process.argv.length === 4 && process.argv[2] === '-' &&
+  process.argv[3].startsWith(process.env.TMPDIR + '/campus-tronclass-emulator.')) {
+  const { status } = require('node:child_process').spawnSync(process.execPath, process.argv.slice(2), { stdio: 'inherit' });
+  process.exit(status ?? 1);
+}
 fs.writeFileSync(process.env.TRONCLASS_LAUNCHER_CAPTURE,
   JSON.stringify({ dir: process.env.TRONCLASS_RUNTIME_DIR ?? null }));
 process.exit(73);
@@ -344,6 +349,44 @@ test('launcher reuses an existing session key only when it is a private regular 
     assert.equal(readFileSync(path.join(runtime, 'bff-session.key'), 'utf8'), 'x'.repeat(64));
     assert.equal(statSync(path.join(runtime, 'bff-session.key')).mode & 0o777, 0o600);
     assert.equal(lstatSync(path.join(runtime, 'bff-session.key')).nlink, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launcher only changes permissions on the runtime directory it validated', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-runtime-replacement-'));
+  const runtime = path.join(dir, 'runtime');
+  const original = path.join(dir, 'original');
+  const replacement = path.join(dir, 'replacement');
+  mkdirSync(runtime, { mode: 0o755 });
+  mkdirSync(replacement, { mode: 0o755 });
+  try {
+    const preload = path.join(dir, 'replace-directory.cjs');
+    writeFileSync(preload, `
+const fs = require('node:fs');
+const fstat = fs.fstatSync;
+fs.fstatSync = (fd, ...args) => {
+  const info = fstat(fd, ...args);
+  if (process.argv[2] === ${JSON.stringify(runtime)} &&
+    fs.readlinkSync('/proc/self/fd/' + fd) === ${JSON.stringify(runtime)}) {
+    fs.renameSync(${JSON.stringify(runtime)}, ${JSON.stringify(original)});
+    fs.renameSync(${JSON.stringify(replacement)}, ${JSON.stringify(runtime)});
+  }
+  return info;
+};
+`);
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      timeout: 5000,
+      env: { ...process.env, TRONCLASS_SIGNAL_SELFTEST: '1', TRONCLASS_RUNTIME_DIR: runtime,
+        NODE_OPTIONS: `--require=${preload}` },
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /replaced directory/);
+    assert.equal(statSync(original).mode & 0o777, 0o700);
+    assert.equal(statSync(runtime).mode & 0o777, 0o755);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1327,6 +1370,9 @@ test('concurrent launchers preserve a live PGID write and remove dead-writer tem
   const preload = path.join(dir, 'pause.cjs');
   const opened = path.join(dir, 'opened');
   const resume = path.join(dir, 'resume');
+  const published = path.join(dir, 'published');
+  const finishPublication = path.join(dir, 'finish-publication');
+  const collision = path.join(dir, 'collision');
   const launchers = [];
   const waitFor = async (condition, description) => {
     const deadline = Date.now() + 5000;
@@ -1354,13 +1400,42 @@ test('concurrent launchers preserve a live PGID write and remove dead-writer tem
   try {
     writeFileSync(preload, `
 const fs = require('node:fs');
+const childProcess = require('node:child_process');
+const wait = new Int32Array(new SharedArrayBuffer(4));
+const pauseAfterPublish = target => {
+  fs.writeFileSync(${JSON.stringify(published)}, target);
+  while (!fs.existsSync(${JSON.stringify(finishPublication)})) Atomics.wait(wait, 0, 0, 15);
+};
+const spawnSync = childProcess.spawnSync;
+childProcess.spawnSync = (command, args, options) => {
+  const result = spawnSync(command, args, options);
+  const record = args.at(-1);
+  if (command === 'python3' && record?.includes('.pgid.')) {
+    if (process.env.TEST_PGID_COLLISION) {
+      fs.writeFileSync(${JSON.stringify(collision)}, JSON.stringify({ record, status: result.status }));
+    } else if (result.status === 0) {
+      pauseAfterPublish(record);
+    }
+  }
+  return result;
+};
+const linkSync = fs.linkSync;
+fs.linkSync = (source, target) => {
+  linkSync(source, target);
+  if (target.includes('.pgid.')) pauseAfterPublish(target);
+};
 const fsync = fs.fsyncSync;
 fs.fsyncSync = fd => {
   fsync(fd);
   const target = fs.readlinkSync('/proc/self/fd/' + fd);
   if (!target.includes('/.pgid-')) return;
+  if (process.env.TEST_PGID_COLLISION) {
+    const run = process.env.TRONCLASS_RUN_ID;
+    const record = ${JSON.stringify(dir)} + '/selftest.log.' + run + '.pgid.' + run;
+    fs.symlinkSync(${JSON.stringify(resume)}, record);
+    return;
+  }
   fs.writeFileSync(${JSON.stringify(opened)}, target);
-  const wait = new Int32Array(new SharedArrayBuffer(4));
   while (!fs.existsSync(${JSON.stringify(resume)})) Atomics.wait(wait, 0, 0, 15);
 };
 `);
@@ -1388,9 +1463,22 @@ fs.fsyncSync = fd => {
     writeFileSync(resume, '');
     await waitFor(() => existsSync(firstRecord) && existsSync(first.childFile), 'first wrapper published its own record');
     assert.equal(readFileSync(firstRecord, 'utf8').trim().split(' ')[1], readFileSync(first.childFile, 'utf8'));
-    assert.equal(records().length, 2);
+    await waitFor(() => existsSync(published), 'first wrapper paused immediately after publication');
+    assert.equal(lstatSync(firstRecord).nlink, 1);
+    assert.equal(existsSync(active), false);
+    const third = launch('third');
+    await waitFor(() => existsSync(third.childFile) && records().length === 3, 'third launcher retained the first live record');
+    assert.equal(lstatSync(firstRecord).nlink, 1);
+    const fourth = launch('fourth', { TEST_PGID_COLLISION: '1', NODE_OPTIONS: `--require=${preload}` });
+    await waitFor(() => existsSync(fourth.childFile) && existsSync(collision) && readFileSync(collision, 'utf8'),
+      'fourth wrapper attempted publication over an existing symlink');
+    const refused = JSON.parse(readFileSync(collision, 'utf8'));
+    assert.equal(refused.status, 1);
+    assert.ok(lstatSync(refused.record).isSymbolicLink());
+    assert.equal(readFileSync(resume, 'utf8'), '');
   } finally {
     writeFileSync(resume, '');
+    writeFileSync(finishPublication, '');
     for (const { proc } of launchers) proc.kill('SIGTERM');
     exits = await Promise.all(launchers.map(({ exited }) => exited));
     rmSync(dir, { recursive: true, force: true });
