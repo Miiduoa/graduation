@@ -133,10 +133,7 @@
 }
 
 .eventTitle {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  display: block;
 }
 
 .grid .more {
@@ -231,9 +228,6 @@
   }
   .grid .event {
     padding-inline: 0.25rem;
-  }
-  .eventTitle {
-    display: block;
   }
 }
 

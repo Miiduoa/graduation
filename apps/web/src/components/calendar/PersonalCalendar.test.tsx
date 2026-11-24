@@ -6,6 +6,8 @@ import {
   type PersonalImportRecord,
 } from '@campus/shared';
 import { PersonalCalendar } from './PersonalCalendar';
+import * as personalImports from '@/lib/personalImports';
+import * as personalImportHooks from '@/lib/usePersonalImports';
 import {
   changePersonalImport,
   personalImportsStorageKey,
@@ -175,6 +177,53 @@ it('creates, edits and deletes personal events through the storage contract', as
   await screen.findByText('已刪除這筆個人行程。');
   expect(readPersonalImports(scope)).toEqual([]);
   view.unmount();
+});
+
+it('開啟時間無效的既有行程時立即顯示原因，修正後才可儲存', async () => {
+  const record: PersonalImportRecord = {
+    id: 'legacy-event',
+    kind: 'events',
+    title: '舊行程',
+    schoolId: 'pu',
+    academicYear: '',
+    semester: '',
+    date: '2026-10-20',
+    startTime: '18:00',
+    endTime: '17:00',
+    batchId: 'legacy-batch',
+    importedAt: '2026-10-01T00:00:00Z',
+    source: { type: 'paste', line: 1, rawText: '舊行程' },
+  };
+  // Current storage validation rejects this record, so supply it at the editor's data boundary.
+  vi.spyOn(personalImportHooks, 'usePersonalImports').mockReturnValue({
+    records: [record],
+    ready: true,
+    loading: false,
+    error: '',
+    syncEnabled: false,
+  });
+  const change = vi.spyOn(personalImports, 'changePersonalImport').mockResolvedValue(undefined);
+  renderCalendar();
+  fireEvent.click(await screen.findByRole('button', { name: '編輯' }));
+
+  const reason = /結束時間必須晚於開始時間/;
+  expect(screen.getByText(reason)).toBeTruthy();
+  const save = screen.getByRole<HTMLButtonElement>('button', { name: '儲存修改' });
+  expect(save.disabled).toBe(true);
+  fireEvent.click(save);
+  expect(change).not.toHaveBeenCalled();
+
+  fireEvent.change(screen.getByLabelText('結束時間'), { target: { value: '19:00' } });
+  expect(screen.queryByText(reason)).toBeNull();
+  expect(save.disabled).toBe(false);
+  fireEvent.click(save);
+  await screen.findByText('個人行程已更新。');
+  expect(change).toHaveBeenCalledExactlyOnceWith(
+    { owner: context.owner, schoolId: context.schoolId },
+    record,
+    expect.objectContaining({ id: record.id, endTime: '19:00' }),
+    expect.any(Function),
+  );
 });
 
 it('keeps the draft when validation or persistence fails and does not overwrite on load errors', async () => {

@@ -891,13 +891,14 @@ function PersonalCalendarWorkspace({
                 if (!suspended.current && !writing.current) setDraft(next);
               }}
             />
-            {draftIssues.length > 0 && JSON.stringify(draft) !== JSON.stringify(initialDraft) && (
-              <ul className={styles.issues}>
-                {draftIssues.map((issue) => (
-                  <li key={`${issue.code}-${issue.field}`}>{issue.message}</li>
-                ))}
-              </ul>
-            )}
+            {draftIssues.length > 0 &&
+              (mode === 'edit' || JSON.stringify(draft) !== JSON.stringify(initialDraft)) && (
+                <ul className={styles.issues}>
+                  {draftIssues.map((issue) => (
+                    <li key={`${issue.code}-${issue.field}`}>{issue.message}</li>
+                  ))}
+                </ul>
+              )}
             {formError && (
               <p id={formErrorId} role="alert">
                 {formError}

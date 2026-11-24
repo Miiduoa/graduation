@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { PersonalImportRecord } from '@campus/shared';
@@ -32,7 +32,7 @@ function dateTabStops() {
     .filter((button) => button.tabIndex === 0);
 }
 
-it('窄月格顯示行程名稱，可展開並直接開啟指定行程', () => {
+it.each([375, 541])('%ipx 月格完整顯示行程名稱，可展開並直接開啟指定行程', (viewportWidth) => {
   // JSDOM parses media rules but does not apply them based on viewport width.
   const stylesheet = document.createElement('style');
   stylesheet.textContent = readFileSync(
@@ -40,7 +40,6 @@ it('窄月格顯示行程名稱，可展開並直接開啟指定行程', () => {
     'utf8',
   ).replace(/\.([a-zA-Z]\w*)/g, (selector, name) => (styles[name] ? `.${styles[name]}` : selector));
   document.head.append(stylesheet);
-  const viewportWidth = 375;
   const rules = Array.from(stylesheet.sheet!.cssRules).flatMap((rule) => {
     if (!(rule instanceof CSSMediaRule)) return [rule.cssText];
     const maxWidth = rule.conditionText.match(/^\(max-width:\s*(\d+)px\)$/);
@@ -53,7 +52,7 @@ it('窄月格顯示行程名稱，可展開並直接開啟指定行程', () => {
     const records: PersonalImportRecord[] = Array.from({ length: 3 }, (_, i) => ({
       id: String(i),
       kind: 'events',
-      title: i === 0 ? '跨月活動的完整長名稱應可透過輔助科技閱讀' : `合成${i}`,
+      title: i < 2 ? `跨月活動的完整長名稱用於確認月格換行後可辨識第 ${i + 1} 場` : '合成2',
       schoolId: 'pu',
       academicYear: '',
       semester: '',
@@ -78,10 +77,16 @@ it('窄月格顯示行程名稱，可展開並直接開啟指定行程', () => {
     );
     expect(screen.getByRole('heading', { name: '2024 / 03' })).toBeTruthy();
     expect(screen.getByRole('region', { name: '2024-03 月格，週日起始' }).tabIndex).toBe(0);
-    const title = screen.getByText(records[0].title);
-    const firstEvent = screen.getByRole('button', { name: records[0].title });
-    expect(firstEvent.contains(title)).toBe(true);
-    expect(getComputedStyle(title).display).toBe('block');
+    for (const record of records.slice(0, 2)) {
+      const event = screen.getByRole('button', { name: record.title });
+      const title = within(event).getByText(record.title);
+      const titleStyle = getComputedStyle(title);
+      expect(titleStyle.display).toBe('block');
+      expect(titleStyle.getPropertyValue('-webkit-line-clamp')).toBe('');
+      expect(getComputedStyle(event).overflowWrap).toBe('anywhere');
+      fireEvent.click(event);
+      expect(onEdit).toHaveBeenLastCalledWith(record, event);
+    }
     expect(screen.queryByText('合成2')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '還有 1 筆' }));
     const edit = screen.getByRole('button', { name: '合成2' });
