@@ -164,10 +164,11 @@ function installHistoryTracking() {
       const targetUrl = url == null ? null : new URL(url, previousHref);
       const changesPage = targetUrl !== null && targetUrl.pathname !== previousPath;
       const replacesPage = !push && changesPage;
+      const incomingNextFields = changesPage ? {} : readNextHistoryFields(data);
       const nextFields = changesPage ? {} : {
         ...(nativeState?.value === previousState ? nativeState?.nextFields : {}),
         ...readNextHistoryFields(previousState),
-        ...readNextHistoryFields(data),
+        ...incomingNextFields,
       };
       const record = isHistoryRecord(data);
       const copiedState = !record && hasSearchHistoryFields(data);
@@ -240,14 +241,15 @@ function installHistoryTracking() {
           (typeof url === 'string' && url.trimStart().startsWith('#')) ||
           (previousHref !== nextHref &&
             previousHref.split('#', 1)[0] === nextHref.split('#', 1)[0]);
+        const rewritesNativeState = previousHref === nextHref && incomingNextFields.__NA;
         if (
           url != null &&
           previousKey &&
           !changesOnlyFragment &&
+          !rewritesNativeState &&
           !routerReplace
         ) {
-          // A fragment-only write leaves the current filters alone. Replacing the full URL
-          // can explicitly reapply its filters even when the URL is identical.
+          // Fragment writes and native rewrites of the current URL leave the input draft intact.
           publishReturn(null, {
             entryKey: previousKey,
             queryString: currentQueryString(),
@@ -326,10 +328,15 @@ function captureReturn(event: PopStateEvent) {
   const departedKey = trackedEntryKey;
   trackedEntryKey = entryKey;
   consumeSearchResultNavigation();
-  const saved = entry?.saved ?? null;
+  // Only the paired destination can restore the result snapshot and its filters.
+  // Other traversals into this entry restore the filters from the arriving URL.
+  const saved =
+    entry && departedKey !== null && departedKey === entry.entries.destinationKey
+      ? entry.saved
+      : null;
   publishReturn(
-    departedKey !== null && departedKey === entry?.entries.destinationKey ? saved : null,
-    saved && entryKey ? { saved, entryKey, queryString: currentQueryString() } : null,
+    saved,
+    entry && entryKey ? { saved, entryKey, queryString: currentQueryString() } : null,
   );
 }
 

@@ -1349,6 +1349,26 @@ describe('continuing a search after opening a service', () => {
     expect(scroll).toHaveBeenCalledTimes(1);
   });
 
+  it('uses the edited URL filters when returning from bottom navigation', async () => {
+    leaveLibrary();
+    await go(-1);
+    const view = renderAfterFrame();
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '公車' } });
+    view.unmount();
+    commitNavigation('/life');
+    await go(-1);
+    renderAfterFrame();
+
+    expect(new URLSearchParams(window.location.search).get('q')).toBe('公車');
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('公車');
+    const bus = screen.getByRole('link', { name: /^公車/ });
+    expect(document.activeElement).not.toBe(bus);
+    expect(screen.queryByRole('link', { name: /^圖書館/ })).toBeNull();
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
   it('does not restore after a later departure that shares the remembered result path', () => {
     const entry = leaveLibrary();
     traverse(librarySearch, entry);
@@ -1556,7 +1576,7 @@ describe('continuing a search after opening a service', () => {
     expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
   });
 
-  it('keeps an IME draft when rewriting the same fragment but reapplies a full URL', async () => {
+  it('keeps an IME draft through native Next replacements of the current URL and fragment', async () => {
     const entry = leaveLibrary();
     await go(-1);
     renderAfterFrame();
@@ -1567,17 +1587,20 @@ describe('continuing a search after opening a service', () => {
 
     fireEvent.compositionStart(search);
     fireEvent.change(search, { target: { value: '公' } });
+    expect(window.history.state.__NA).toBe(true);
     act(() => window.history.replaceState(window.history.state, '', '#results'));
     expect(window.location.href).toBe(href);
     expect(search.value).toBe('公');
 
     act(() => window.history.replaceState(window.history.state, '', href));
     expect(window.location.href).toBe(href);
-    expect(search.value).toBe('公車');
+    expect(search.value).toBe('公');
     expect(window.history.state).toMatchObject({
       __campusSearchHistoryEntry: entry.__campusSearchHistoryEntry,
       __campusSearchResultReturn: entry.__campusSearchResultReturn,
     });
+    fireEvent.compositionEnd(search);
+    expect(new URLSearchParams(window.location.search).get('q')).toBe('公');
   });
 
   it('assigns a history key when replacing a keyless initial search with another page', () => {
