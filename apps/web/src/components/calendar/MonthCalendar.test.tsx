@@ -234,6 +234,54 @@ it.each([false, true])('跨月進場動畫結束後只揭露仍有焦點的日�
   }
 });
 
+it.each(['月格', 'body', '其他控制項'])('跨月首次揭露失敗後由進場動畫結束重試焦點（焦點在 %s）', (focusLocation) => {
+  const visualViewport = Object.assign(new EventTarget(), {
+    offsetTop: 0, offsetLeft: 0, width: 320, height: 400,
+  });
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: visualViewport });
+  let animationOffset = 3;
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this.getAttribute('aria-label') === '2028-02-01') {
+      return new DOMRect(40, 356 + animationOffset, 44, 44);
+    }
+    if (this.getAttribute('aria-label') === '2028-02 月格，週日起始') {
+      return new DOMRect(0, focusLocation === 'body' ? 41 : 40, 320, 360);
+    }
+    return originalBounds.call(this);
+  });
+  const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+
+  function ControlledCalendar() {
+    const [month, setMonth] = useState('2028-01');
+    return (
+      <>
+        <button type="button">其他控制項</button>
+        <MonthCalendar {...baseProps} month={month} onMonthChange={setMonth} />
+      </>
+    );
+  }
+
+  render(<ControlledCalendar />);
+  fireEvent.keyDown(focusDate('2028-01-31'), { key: 'ArrowRight' });
+  const viewport = screen.getByRole('region', { name: '2028-02 月格，週日起始' });
+  const target = screen.getByRole('button', { name: '2028-02-01' });
+  expect(scrollBy).toHaveBeenCalledWith({ left: 0, top: 3, behavior: 'instant' });
+  const fallback = focusLocation === 'body' ? document.body : viewport;
+  expect(document.activeElement).toBe(fallback);
+  scrollBy.mockClear();
+
+  const focusMoved = focusLocation === '其他控制項';
+  const active = focusMoved ? screen.getByRole('button', { name: '其他控制項' }) : fallback;
+  if (focusMoved) act(() => active.focus());
+  animationOffset = 0;
+  fireEvent.animationEnd(target);
+  expect(document.activeElement).toBe(active);
+  fireEvent.animationEnd(viewport.querySelector(`.${styles.grid}`)!);
+
+  expect(document.activeElement).toBe(focusMoved ? active : target);
+  expect(scrollBy).not.toHaveBeenCalled();
+});
+
 it.each([
   { origin: '2028-10-27', key: 'End', expected: '2028-10-28', width: 609, next: null },
   { origin: '2028-10-23', key: 'Home', expected: '2028-10-22', width: 609, next: null },

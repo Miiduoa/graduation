@@ -9,7 +9,7 @@ import { monthCalendarKeyboardDate } from './monthCalendarNavigation';
 import {
   focusWhenRevealed,
   focusWhenVisible,
-  retryFocusOnViewportChange,
+  retryFocusWhileOwned,
   revealForFocus,
 } from './calendarScroll';
 import styles from './MonthCalendar.module.css';
@@ -151,9 +151,9 @@ export function MonthCalendar({
       if (pendingFocus.current === requested) pendingFocus.current = null;
       stopWatching();
     };
-    const stopRetry = retryFocusOnViewportChange(origin, (mode) => {
+    const stopRetry = retryFocusWhileOwned(origin, (mode) => {
       if (pendingFocus.current === requested && focusDate(requested.date, mode)) cancel();
-    }, cancel);
+    }, cancel, gridRef.current);
     const stopWatching = () => {
       stopRetry();
       document.removeEventListener('keydown', continueNavigation);

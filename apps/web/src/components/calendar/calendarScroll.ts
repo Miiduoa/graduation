@@ -192,21 +192,28 @@ export function focusWhenVisible(element: HTMLElement) {
   return true;
 }
 
-export function retryFocusOnViewportChange(
+export function retryFocusWhileOwned(
   origin: Element | null,
   attempt: (mode: 'reveal' | 'visible') => void,
   cancel: () => void,
+  animationTarget?: Element | null,
 ) {
   const checkFocus = () => {
     if (!stillOwnsFocus(origin)) cancel();
   };
-  const unsubscribe = onFocusRetryOpportunity((mode) => {
+  const retry = (mode: 'reveal' | 'visible') => {
     if (stillOwnsFocus(origin)) attempt(mode);
     else cancel();
-  });
+  };
+  const unsubscribe = onFocusRetryOpportunity(retry);
+  const onAnimationEnd = (event: Event) => {
+    if (event.target === animationTarget) retry('reveal');
+  };
+  animationTarget?.addEventListener('animationend', onAnimationEnd);
   document.addEventListener('focusin', checkFocus);
   return () => {
     unsubscribe();
+    animationTarget?.removeEventListener('animationend', onAnimationEnd);
     document.removeEventListener('focusin', checkFocus);
   };
 }
