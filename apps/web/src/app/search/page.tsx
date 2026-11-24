@@ -24,6 +24,7 @@ import { CampusIcon } from '@/components/CampusIcon';
 import { resolveCampusActions, getQuickCampusActions } from '@/lib/quickCampusActions';
 import {
   clearSearchResultReturn,
+  finishSearchFilterArrival,
   getSearchHistoryEntryKey,
   rememberSearchResultReturn,
   useSearchResultReturn,
@@ -110,7 +111,7 @@ function ServiceDirectory() {
       ? filters
       : { query: '', category: 'all' as const };
   const returnScope = JSON.stringify([account.ownerScope, schoolSearch, campusId]);
-  const entryFilters = useSearchResultReturn({
+  const filterArrival = useSearchResultReturn({
     directory,
     resultsHeading,
     scope: returnScope,
@@ -168,14 +169,15 @@ function ServiceDirectory() {
     // A real Back/Forward traversal wins over queued acknowledgements of earlier typing.
     if (isHistoryArrival && queryString !== restoring.queryString) return;
     historyRestoration.current = null;
-    if (entryFilters) {
+    if (filterArrival) {
       // A history traversal can restore this entry’s filters independently of result focus.
       restoredFilters.current = { scope: draftScope, queryString };
       editedFilters.current = null;
-      setFilters({ scope: draftScope, ...entryFilters });
+      setFilters({ scope: draftScope, ...filterArrival.saved.filters });
       setRestoredExpanded(
         restoreDirectorySearch('search', '/search', storageScope)?.expanded ?? [],
       );
+      finishSearchFilterArrival(filterArrival);
       return;
     }
     if (
@@ -211,7 +213,7 @@ function ServiceDirectory() {
     confirmedScope,
     draftScope,
     queryString,
-    entryFilters,
+    filterArrival,
     storageScope,
   ]);
   const term = query.trim();

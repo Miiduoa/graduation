@@ -22,9 +22,10 @@ type SearchReturn = {
   href: string;
   kind: ResultKind;
 };
+type FilterArrival = { saved: SearchReturn; queryString: string };
 
 let observedWindow: Window | undefined;
-const emptyReturnState: { pending: SearchReturn | null; arrival: SearchReturn | null } = {
+const emptyReturnState: { pending: SearchReturn | null; arrival: FilterArrival | null } = {
   pending: null,
   arrival: null,
 };
@@ -159,6 +160,9 @@ function installHistoryTracking() {
       } else if (!replacesPage && searchEntry && !writesReturn) {
         // Bind the new URL only after the browser accepts the same-page replacement.
         searchEntry.entries.searchUrl = currentUrl();
+        const { arrival, pending } = returnState;
+        // A query edit can supersede the traversal before its filters are applied.
+        if (arrival && !matchesRouterUrl(arrival.queryString)) publishReturn(pending, null);
       } else if (replacesPage && previousKey) {
         for (const [token, armed] of entriesByReturnToken) {
           if (armed.searchKey === previousKey) entriesByReturnToken.delete(token);
@@ -213,16 +217,21 @@ function publishReturn(pending: SearchReturn | null, arrival = returnState.arriv
   listeners.forEach((listener) => listener());
 }
 
+export function finishSearchFilterArrival(arrival: FilterArrival) {
+  // Acknowledging this traversal leaves the entry snapshot available for another Back.
+  if (returnState.arrival === arrival) publishReturn(returnState.pending, null);
+}
+
 function captureReturn(event: PopStateEvent) {
   const entry = readSearchEntry(event.state);
   const entryKey = readEntryKey(event.state);
   const departedKey = trackedEntryKey;
   trackedEntryKey = entryKey;
   consumeSearchResultNavigation();
-  const arrival = entry?.saved ?? null;
+  const saved = entry?.saved ?? null;
   publishReturn(
-    departedKey !== null && departedKey === entry?.entries.destinationKey ? arrival : null,
-    arrival,
+    departedKey !== null && departedKey === entry?.entries.destinationKey ? saved : null,
+    saved ? { saved, queryString: new URLSearchParams(window.location.search).toString() } : null,
   );
 }
 
@@ -330,14 +339,15 @@ export function useSearchResultReturn({
     liveState.current = { scope, ready, blocked, queryString, query, category };
   }, [blocked, category, query, queryString, ready, scope]);
 
-  const matchingFilters =
+  const filterArrival =
     arrival &&
     ready &&
     !blocked &&
-    arrival.scope === scope &&
-    readCurrentReturn(arrival) &&
+    arrival.saved.scope === scope &&
+    arrival.queryString === queryString &&
+    readCurrentReturn(arrival.saved) &&
     matchesRouterUrl(queryString)
-      ? arrival.filters
+      ? arrival
       : null;
 
   useEffect(() => {
@@ -434,5 +444,5 @@ export function useSearchResultReturn({
     scope,
   ]);
 
-  return matchingFilters;
+  return filterArrival;
 }

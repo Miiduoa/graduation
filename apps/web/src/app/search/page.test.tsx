@@ -1230,6 +1230,39 @@ describe('continuing a search after opening a service', () => {
     expect(scroll).toHaveBeenCalledTimes(2);
   });
 
+  it('uses a same-page URL edit after restoring focus and saves the snapshot for the next Back', async () => {
+    const entry = leaveLibrary();
+    await go(-1);
+    const view = renderAfterFrame();
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+
+    router.search = window.location.search;
+    const url = new URL(window.location.href);
+    url.searchParams.set('q', '公車');
+    window.history.replaceState(null, '', url);
+    expect(window.history.state).toMatchObject({
+      __campusSearchHistoryEntry: entry.__campusSearchHistoryEntry,
+      __campusSearchResultReturn: entry.__campusSearchResultReturn,
+    });
+    view.rerender(<SearchPage />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+
+    router.search = null;
+    view.rerender(<SearchPage />);
+    expect(new URL(window.location.href).searchParams.get('q')).toBe('公車');
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('公車');
+    expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /^圖書館/ })).toBeNull();
+    view.unmount();
+
+    await go(1);
+    await go(-1);
+    renderAfterFrame();
+    expect(window.location.href).toBe(url.href);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+  });
+
   it('does not restore a previous result after an unrelated later visit from the same search entry', () => {
     const entry = leaveLibrary();
     traverse(librarySearch, entry);
