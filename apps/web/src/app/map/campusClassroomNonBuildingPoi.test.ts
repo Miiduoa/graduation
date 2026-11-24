@@ -1038,18 +1038,48 @@ describe('bilingual timetable lookup uses the existing sourced building identity
     }).status).toBe('unmatched');
   });
 
-  it('keeps a second explicit name match ambiguous rather than choosing a pin', () => {
+  it('prefers public fields over a catalog-only English name and preserves public-field ambiguity', () => {
     const location = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-renyuan')!;
-    const collision = { ...location, id: 'synthetic-other-hall', name: 'Anthony Kuo Hall' };
-    const result = resolveCampusClassroom({
-      schoolId: 'pu', query: 'Anthony Kuo Hall 303', locations: [location, collision],
-    });
-    expect(result.status).toBe('ambiguous');
-    expect(result.matches).toEqual([location, collision]);
+    const imported = { ...location, name: 'Anthony Kuo Hall' };
+    const collision = { ...location, id: 'synthetic-other-hall', name: '教學館', building: imported.name };
+    const query = 'Anthony Kuo Hall 303';
+    expect(location.name).toBe('任垣樓');
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query, locations: [location, collision],
+    })).toMatchObject({ status: 'matched', matchKind: 'primary', matches: [collision] });
+    for (const direct of [imported, { ...location, building: imported.name }]) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [direct, collision],
+      })).toMatchObject({ status: 'ambiguous', matchKind: 'primary', matches: [direct, collision] });
+    }
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query, locations: [location],
+    })).toMatchObject({ status: 'matched', matchKind: 'catalog', matches: [location] });
   });
 });
 
 describe('official Providence English building-name variants', () => {
+  it.each([
+    ['pu-wenxing', 'Bishop Kupfer Hall'],
+    ['pu-library', 'Luking Library'],
+  ])('keeps official alias fields on %s behind another public name', (id, official) => {
+    const location = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === id)!;
+    const collision = { ...location, id: 'synthetic-other-building', name: official };
+    const query = official + ' 303';
+    for (const aliased of [
+      location,
+      { ...location, name: official },
+      { ...location, building: official },
+    ]) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [aliased, collision],
+      })).toMatchObject({ status: 'matched', matchKind: 'primary', matches: [collision] });
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [aliased],
+      })).toMatchObject({ status: 'matched', matchKind: 'alias', matches: [aliased] });
+    }
+  });
+
   it.each([
     ['pu-wenxing', 'Bishop Kupfer Hall', 'Wen Xing Hall'],
     ['pu-library', 'Luking Library', 'Gaesia Library'],
@@ -1131,6 +1161,16 @@ describe('official Providence classroom codes with cross-checked POI identities'
     }).status).toBe('unmatched');
   });
 
+  it('prefers a stored building label over a newly mapped official code', () => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find((item) => item.id === 'pu-renyuan')!;
+    const imported = { ...place, id: 'synthetic-other-hall', building: 'AK' };
+    const result = resolveCampusClassroom({
+      schoolId: 'pu', query: 'AK303', locations: [imported, place],
+    });
+    expect(result.status).toBe('matched');
+    expect(result.matches).toEqual([imported]);
+  });
+
   it('does not guess a location for official codes lacking a verified separate pin', () => {
     for (const query of ['C303', '1R303', '2R303']) {
       expect(resolveCampusClassroom({
@@ -1205,7 +1245,7 @@ describe('floor ranges do not establish a classroom destination', () => {
       ['主顧樓', hall, 'another-school'],
     ] as const) {
       for (const suffix of ['3F4F', '3F 4F', '3F-4F', '3F/4F',
-        '3樓4F', 'B1F B2F', '３Ｆ４Ｆ', '3F 4F教室']) {
+        '3樓4F', '3樓4樓', '3樓-4樓', 'B1F B2F', '３Ｆ４Ｆ', '3F 4F教室']) {
         const query = prefix + suffix;
         const result = resolveCampusClassroom({ schoolId, query, locations: [place] });
         expect(result.status, schoolId + ': ' + query).toBe('unmatched');
@@ -1217,6 +1257,33 @@ describe('floor ranges do not establish a classroom destination', () => {
         expect(result.status, query).toBe('matched');
         expect(result.matches[0], query).toBe(place);
       }
+    }
+  });
+});
+
+describe('catalog names and codes yield to an exact public name on another place', () => {
+  it.each(['AK303', 'Anthony Kuo Hall 303'])('does not unique-match %s when a bus stop uses that public name', (query) => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find((item) => item.id === 'pu-renyuan')!;
+    const stop = { ...place, id: 'synthetic-ak-bus-stop', name: query, category: '公車站' };
+    const result = resolveCampusClassroom({
+      schoolId: 'pu', query, locations: [place, stop],
+    });
+    expect(result.status).toBe('unmatched');
+    expect(result.matches).toEqual([]);
+    const alone = resolveCampusClassroom({
+      schoolId: 'pu', query, locations: [place],
+    });
+    expect(alone.status).toBe('matched');
+    expect(alone.matches).toEqual([place]);
+  });
+
+  it('keeps legacy PH303 and direct public name matches in the presence of a bus stop', () => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find((item) => item.id === 'pu-zhugu')!;
+    for (const query of ['PH303', '主顧樓303']) {
+      const stop = { ...place, id: 'synthetic-zhugu-bus-stop', name: query, category: '公車站' };
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [place, stop],
+      })).toMatchObject({ status: 'matched', matches: [place] });
     }
   });
 });
