@@ -1418,6 +1418,38 @@ describe('three-way sentence classification', () => {
   });
 
   it.each([
+    '查玩課雲作業的下載紀錄',
+    '看玩課雲下載紀錄',
+    '查玩課雲教材下載記錄',
+    '看玩課雲附件下載歷史',
+    '查玩課雲講義下載進度',
+    '查玩課雲教材下載的情況',
+    '下載玩課雲教材，查作業下載狀態',
+    '查 TronClass download history',
+    '查玩課雲可以下載的教材',
+    '查玩課雲教材下載教材',
+    '查玩課雲作業是我的課堂作業。',
+    '查玩課雲作業是我的作業',
+    '看玩課雲作業就是我的作業',
+    '查玩課雲作業才是我的作業',
+    '查玩課雲作業是我的作業，查校園公告',
+  ])('requires confirmation for a download record or declarative complement: %s', question => {
+    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each(['幫我下載 TronClass 講義', '下載 TronClass 教材', 'Please download TronClass materials', '請把玩課雲講義下載', '幫我下載玩課雲', '玩課雲幫我下載', 'Please download TronClass'])(
+    'honors a current download command: %s', question => {
+      expect(classifyTronClassSentence(question)).toEqual({
+        outcome: 'clearly-read',
+        intent: { intent: 'download', pendingOnly: false },
+      });
+    },
+  );
+
+  it.each([
     '玩課雲作業是我的',
     '玩課雲有作業。',
     '玩課雲作業',
@@ -1465,6 +1497,9 @@ describe('three-way sentence classification', () => {
   it.each([
     ['查玩課雲作業', false],
     ['查玩課雲作業草稿', false],
+    ['查玩課雲作業是什麼', false],
+    ['查玩課雲作業是不是我的作業', false],
+    ['查玩課雲作業是我的作業嗎？', false],
     ['我現在就要查玩課雲作業', false],
     ['玩課雲有作業嗎', false],
     ['玩課雲有作業嗎？', false],
