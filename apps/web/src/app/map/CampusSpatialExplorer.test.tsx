@@ -252,6 +252,36 @@ it('requires an explicit selection even when destination search finds a single r
   expect(dialog.getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+it('offers an explicit direct choice only for a unique search result and never launches navigation', async () => {
+  const classrooms: MapLocation[] = [
+    { ...places[0], id: 'a', name: '討論室', building: '甲棟', floor: '2F' },
+    { ...places[1], id: 'b', name: '討論室', building: '乙棟', floor: '3F' },
+  ];
+  const onSelect = vi.fn();
+  render(<CampusSpatialExplorer school="other-school" locations={classrooms} selected={null} onSelect={onSelect} />);
+  const dialog = within(await open());
+  const search = dialog.getByRole('searchbox', { name: '搜尋導覽地點' });
+  const picker = dialog.getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement;
+  const directChoice = () => dialog.queryByRole('button', { name: /^選擇：/ });
+  expect(directChoice()).toBeNull();
+  fireEvent.change(search, { target: { value: '討論室' } });
+  expect(directChoice()).toBeNull();
+  fireEvent.change(search, { target: { value: '乙棟　３ｆ' } });
+  const button = dialog.getByRole('button', { name: /^選擇：討論室.*乙棟.*3F/ });
+  expect(picker.value).toBe('');
+  expect(dialog.queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  button.focus();
+  fireEvent.click(button);
+  expect(picker.value).toBe('b');
+  expect(document.activeElement).toBe(button);
+  expect(new URL(dialog.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!)
+    .searchParams.get('destination')).toBe('24.228,120.582');
+  expect(onSelect).not.toHaveBeenCalled();
+  fireEvent.change(search, { target: { value: '未知地點' } });
+  expect(directChoice()).toBeNull();
+  expect(picker.value).toBe('b');
+});
+
 it('includes existing building and floor context in duplicate destination controls without claiming an entrance', async () => {
   // Synthetic records only: neither building nor room names are campus evidence.
   const classrooms: MapLocation[] = [
