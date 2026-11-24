@@ -76,7 +76,7 @@ function linkRequest(action: 'start' | 'complete' | 'cancel', session: PlatformS
 }
 
 export async function startGoogleLink(request: NextRequest): Promise<NextResponse> {
-  if (!googleAccountLinkEnabled()) return jsonResponse({ error: 'GOOGLE_LINK_UNAVAILABLE' }, 404);
+  if (!googleAccountManagementEnabled()) return jsonResponse({ error: 'GOOGLE_LINK_UNAVAILABLE' }, 404);
   try {
     requireSameOrigin(request);
     if (request.nextUrl.search || request.headers.get('content-type')?.split(';')[0]?.trim() !== 'application/x-www-form-urlencoded')
@@ -87,6 +87,7 @@ export async function startGoogleLink(request: NextRequest): Promise<NextRespons
       throw new NuniError(400, 'INVALID_INPUT');
     const context = sessionContext(session);
     if (!equalSecret(form.get('context'), context)) throw new NuniError(409, 'SESSION_CHANGED');
+    if (!googleAccountLinkEnabled()) return result('unavailable');
 
     const startedAt = Date.now();
     const tx = nuniRecord(await linkRequest('start', session, {}));
@@ -134,13 +135,15 @@ function readTransaction(request: NextRequest, session: PlatformSession): LinkTr
 }
 
 export async function finishGoogleLink(request: NextRequest): Promise<NextResponse> {
-  if (!googleAccountLinkEnabled()) return jsonResponse({ error: 'GOOGLE_LINK_UNAVAILABLE' }, 404);
+  if (!googleAccountManagementEnabled()) return jsonResponse({ error: 'GOOGLE_LINK_UNAVAILABLE' }, 404);
   try {
     const session = currentSession(request);
     const tx = readTransaction(request, session);
     const query = request.nextUrl.searchParams;
     if (!tx || query.getAll('state').length !== 1 || !equalSecret(query.get('state'), tx.state))
       return result('invalid');
+    // The account-management read stays available if new linking was paused during OAuth.
+    if (!googleAccountLinkEnabled()) return result('unavailable');
     // A stale or mismatched callback cannot delete a newer cookie or cancel a different transaction.
     const linkInput = { transactionId: tx.transactionId, nonce: tx.nonce };
     if (query.has('error')) {

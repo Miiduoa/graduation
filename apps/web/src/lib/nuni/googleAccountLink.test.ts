@@ -78,6 +78,17 @@ describe('dedicated Google account linking', () => {
     expect(fetcher).not.toHaveBeenCalled();
     unchanged(start); unchanged(finish);
   });
+  it.each(['PLATFORM_GOOGLE_LOGIN_ENABLED', 'PLATFORM_GOOGLE_CLIENT_SECRET'])(
+    'returns to readable account management when %s is paused during authorization', async (key) => {
+      vi.stubEnv(key, '');
+      outcome(await startGoogleLink(startRequest()), 'unavailable');
+      outcome(await finishGoogleLink(callback(validQuery())), 'unavailable');
+      // A paused provider cannot bypass the existing actor/context/state checks.
+      outcome(await startGoogleLink(startRequest({ context: 'z'.repeat(43) })), 'reauth');
+      outcome(await finishGoogleLink(callback(validQuery(), pending(), { switched: true })), 'invalid');
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
   it.each([
     [{ origin: 'https://other.example' }, 403, null],
     [{ context: 'z'.repeat(43) }, 303, 'reauth'],
