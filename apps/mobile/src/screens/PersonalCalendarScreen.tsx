@@ -278,22 +278,26 @@ function PersonalCalendarWorkspace({
   useLayoutEffect(() => {
     // A return to the same account and school still starts a new verification.
     currentScope.current = { resolvedKey, verifiedKey, loggingOut };
+    setReminderBusyId(null);
   }, [resolvedKey, verifiedKey, loggingOut]);
 
   useLayoutEffect(() => {
     ledgerReady.current = ready;
   }, [ready]);
 
-  const beginRead = useCallback((resource: keyof typeof latestRead.current, expected: string) => {
+  const beginVerifiedOperation = useCallback((expected: string) => {
     const verification = currentScope.current;
     if (!active.current || verification.verifiedKey !== expected) return;
+    return () => active.current && currentScope.current === verification;
+  }, []);
+
+  const beginRead = useCallback((resource: keyof typeof latestRead.current, expected: string) => {
+    const isCurrent = beginVerifiedOperation(expected);
+    if (!isCurrent) return;
     const sequence = ++readSequence.current;
     latestRead.current[resource] = sequence;
-    return () =>
-      active.current &&
-      currentScope.current === verification &&
-      latestRead.current[resource] === sequence;
-  }, []);
+    return () => isCurrent() && latestRead.current[resource] === sequence;
+  }, [beginVerifiedOperation]);
 
   const refreshReminders = useCallback(async () => {
     if (!scope) return;
@@ -586,17 +590,19 @@ function PersonalCalendarWorkspace({
 
   const applyReminder = async (
     record: PersonalImportRecord,
-    action: () => Promise<{
+    action: (isCurrent: () => boolean) => Promise<{
       entry: PersonalEventReminderEntry;
       permission: { granted: boolean; canAskAgain: boolean; unsupported: boolean };
     }>,
   ) => {
     if (!scope || reminderBusyId) return;
+    const isCurrent = beginVerifiedOperation(personalImportStorageKey(scope));
+    if (!isCurrent) return;
     setReminderBusyId(record.id);
     setFormError('');
     try {
-      const result = await action();
-      if (!isActiveScope()) return;
+      const result = await action(isCurrent);
+      if (!isCurrent()) return;
       setReminders((prev) => ({ ...prev, [record.id]: result.entry }));
       const statusNote = reminderStatusCopy(result.entry.status, result.entry.lastError);
       // Never claim scheduled/off success after a failed required transition.
@@ -628,10 +634,10 @@ function PersonalCalendarWorkspace({
       }
       await refreshReminders();
     } catch (error) {
-      if (!isActiveScope()) return;
+      if (!isCurrent()) return;
       setFormError(error instanceof Error ? error.message : '提醒設定沒有完成，行程本身不受影響。');
     } finally {
-      if (active.current) setReminderBusyId(null);
+      if (isCurrent()) setReminderBusyId(null);
     }
   };
 
@@ -688,14 +694,18 @@ function PersonalCalendarWorkspace({
               disabled={!canMutate || busy}
               onPress={() => {
                 if (!scope) return;
+                const isCurrent = beginVerifiedOperation(personalImportStorageKey(scope));
+                if (!isCurrent) return;
                 clearPersonalEventReminderRuntimeFailure(scope);
                 setReminderBlocked(null);
                 void reconcilePersonalEventReminders(scopedCopy(scope), {
-                  active: () => isActiveScope(),
+                  active: isCurrent,
                 })
-                  .then(() => refreshReminders())
+                  .then(() => {
+                    if (isCurrent()) return refreshReminders();
+                  })
                   .catch((error) => {
-                    if (!isActiveScope()) return;
+                    if (!isCurrent()) return;
                     const message = userFacingReminderFailureMessage(error);
                     publishPersonalEventReminderRuntimeFailure(scope, message);
                     setReminderBlocked(message);
@@ -720,14 +730,12 @@ function PersonalCalendarWorkspace({
               onPress={() => {
                 if (!scope) return;
                 if (enabled) {
-                  void applyReminder(record, () =>
-                    disablePersonalEventReminder(scopedCopy(scope), record, () => isActiveScope()),
+                  void applyReminder(record, (isCurrent) =>
+                    disablePersonalEventReminder(scopedCopy(scope), record, isCurrent),
                   );
                 } else {
-                  void applyReminder(record, () =>
-                    enableAllDayPersonalEventReminder(scopedCopy(scope), record, () =>
-                      isActiveScope(),
-                    ),
+                  void applyReminder(record, (isCurrent) =>
+                    enableAllDayPersonalEventReminder(scopedCopy(scope), record, isCurrent),
                   );
                 }
               }}
@@ -749,12 +757,12 @@ function PersonalCalendarWorkspace({
                   disabled={!canMutate || busy}
                   onPress={() => {
                     if (!scope) return;
-                    void applyReminder(record, () =>
+                    void applyReminder(record, (isCurrent) =>
                       enableTimedPersonalEventReminder(
                         scopedCopy(scope),
                         record,
                         lead as TimedLeadMinutes,
-                        () => isActiveScope(),
+                        isCurrent,
                       ),
                     );
                   }}
@@ -767,8 +775,8 @@ function PersonalCalendarWorkspace({
                 disabled={!canMutate || busy}
                 onPress={() => {
                   if (!scope) return;
-                  void applyReminder(record, () =>
-                    disablePersonalEventReminder(scopedCopy(scope), record, () => isActiveScope()),
+                  void applyReminder(record, (isCurrent) =>
+                    disablePersonalEventReminder(scopedCopy(scope), record, isCurrent),
                   );
                 }}
               />
@@ -782,8 +790,8 @@ function PersonalCalendarWorkspace({
               disabled={!canMutate || busy}
               onPress={() => {
                 if (!scope) return;
-                void applyReminder(record, () =>
-                  retryPersonalEventReminder(scopedCopy(scope), record, () => isActiveScope()),
+                void applyReminder(record, (isCurrent) =>
+                  retryPersonalEventReminder(scopedCopy(scope), record, isCurrent),
                 );
               }}
             />

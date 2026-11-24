@@ -32,10 +32,14 @@ export const personalImportStorageKey = (scope: PersonalImportScope) =>
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
 const locks = new Map<string, Promise<unknown>>();
 const pendingCheckpoints = new Map<string, Promise<void>>();
+// Keep verified bytes available if storage cannot recreate a cleared checkpoint.
+const rollbackCheckpoints = new Map<string, { raw: string | null }>();
 let checkpointSequence = 0;
 const recoveryKey = (key: string) => `${key}:checkpoint`;
 
 async function readCheckpoint(key: string): Promise<{ raw: string | null } | null> {
+  const rollback = rollbackCheckpoints.get(key);
+  if (rollback) return rollback;
   const [[, encoded]] = await AsyncStorage.multiGet([recoveryKey(key)]);
   if (encoded === null) return null;
   const raw: unknown = JSON.parse(encoded);
@@ -49,6 +53,7 @@ async function restoreCheckpoint(key: string, raw: string | null) {
   else await AsyncStorage.setItem(key, raw);
   checkpointSequence += 1;
   await AsyncStorage.multiRemove([recoveryKey(key)]);
+  rollbackCheckpoints.delete(key);
 }
 type ImportChange = { scope: PersonalImportScope; source: 'local' | 'sync' };
 const listeners = new Set<(change: ImportChange) => void>();
@@ -222,7 +227,13 @@ export function mutatePersonalImportLedger<T>(
               if (dispatched) {
                 // Cleanup may have removed the backup. Put it back before attempting restoration
                 // so readers still see the last verified ledger if restoration fails.
-                if (clearingCheckpoint) await AsyncStorage.multiSet([recoveryEntry]);
+                if (clearingCheckpoint) {
+                  try {
+                    await AsyncStorage.multiSet([recoveryEntry]);
+                  } catch {
+                    rollbackCheckpoints.set(key, { raw: persistedRaw });
+                  }
+                }
                 await restoreCheckpoint(key, persistedRaw);
               } else {
                 await AsyncStorage.multiRemove([recoveryKey(key)]);
@@ -244,7 +255,7 @@ export function mutatePersonalImportLedger<T>(
         if (typeof guard === 'function') return write();
         checkpointSequence += 1;
         const checkpointWrite = write().finally(() => pendingCheckpoints.delete(key));
-        // Readers resume through the durable checkpoint even when this write rejects.
+        // Readers wait until the write commits or rollback has established the verified ledger.
         pendingCheckpoints.set(key, checkpointWrite.then(() => undefined, () => undefined));
         await checkpointWrite;
       };

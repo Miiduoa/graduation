@@ -644,11 +644,13 @@ it.each(['during revalidation', 'after recovery'])(
 );
 
 it.each([
-  ['setItem', false],
-  ['setItem', true],
-  ['multiRemove', false],
-  ['multiRemove', true],
-] as const)('preserves the event when deletion loses verification during %s (restoration fails: %s)', async (phase, restoreFails) => {
+  ['setItem', false, false],
+  ['setItem', true, false],
+  ['multiRemove', false, false],
+  ['multiRemove', true, false],
+  ['multiRemove', false, true],
+  ['multiRemove', true, true],
+] as const)('preserves the event when deletion loses verification during %s (restoration fails: %s, backup rebuild fails: %s)', async (phase, restoreFails, rebuildFails) => {
   const view = await fillAndSave('寫入途中重驗');
   const scope = mockScope!;
   const key = personalImportStorageKey(scope);
@@ -659,6 +661,9 @@ it.each([
   const started = jest.fn();
   const multiRemove = jest.mocked(AsyncStorage.multiRemove);
   const nativeMultiRemove = multiRemove.getMockImplementation()!;
+  const rejectRebuild = jest.fn(async () => {
+    throw new Error('重建備份失敗');
+  });
   setItem.mockClear();
   if (phase === 'setItem') {
     setItem.mockImplementationOnce(async (storageKey, value) => {
@@ -672,6 +677,7 @@ it.each([
       started();
       await pending.promise;
       await nativeMultiRemove(keys);
+      if (rebuildFails) jest.mocked(AsyncStorage.multiSet).mockImplementationOnce(rejectRebuild);
     });
   }
   if (restoreFails) setItem.mockRejectedValueOnce(new Error('還原寫入失敗'));
@@ -698,6 +704,9 @@ it.each([
 
     expect((await read).records.map((row) => row.title)).toEqual(['寫入途中重驗']);
     expect(setItem.mock.calls).toEqual([[key, expect.any(String)], [key, stored]]);
+    if (rebuildFails) {
+      expect(rejectRebuild).toHaveBeenCalledWith([[key + ':checkpoint', JSON.stringify(stored)]]);
+    }
     if (restoreFails) {
       expect(JSON.parse((await AsyncStorage.getItem(key))!).records).toEqual([]);
       expect((await loadPersonalImports(scope)).records.map((row) => row.title)).toEqual(['寫入途中重驗']);
@@ -713,6 +722,57 @@ it.each([
     pending.resolve();
     unsubscribe();
   }
+});
+
+it('revokes a pending reminder across same-account revalidation and ignores its late result', async () => {
+  const view = await fillAndSave('提醒權限等待');
+  const scope = mockScope!;
+  const { records: [record] } = await loadPersonalImports(scope);
+  const permission = deferred<void>();
+  const nextPermission = deferred<void>();
+  const writeJournal = jest.fn();
+  const result = {
+    entry: {
+      eventId: record.id,
+      revision: 'rev',
+      preference: { enabled: true, mode: 'timed', leadMinutes: 10 },
+      lookupToken: 'tok',
+      osIdentifier: 'per-evtrem.tok',
+      intentGeneration: 1,
+      status: 'permission_needed',
+      updatedAt: new Date().toISOString(),
+    },
+    permission: { granted: false, canAskAgain: false, unsupported: false },
+  };
+  mockEnableTimed.mockImplementationOnce(async (_scope, _record, _lead, isCurrent: () => boolean) => {
+    await permission.promise;
+    if (isCurrent()) writeJournal();
+    return result;
+  });
+  mockEnableTimed.mockImplementationOnce(async () => {
+    await nextPermission.promise;
+    return result;
+  });
+
+  fireEvent.press(view.getByText(record.title));
+  fireEvent.press(view.getByRole('button', { name: '提前 10 分' }));
+  const oldOperation = mockEnableTimed.mock.calls[0][3];
+  expect(oldOperation()).toBe(true);
+  mockScope = null;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(oldOperation()).toBe(false);
+  mockScope = scope;
+  view.rerender(<PersonalCalendarScreen />);
+  await waitFor(() => expect(view.getByRole('button', { name: '提前 30 分' })).toBeEnabled());
+  fireEvent.press(view.getByRole('button', { name: '提前 30 分' }));
+  expect(mockEnableTimed.mock.calls[1][3]()).toBe(true);
+  expect(oldOperation()).toBe(false);
+
+  await act(async () => { permission.resolve(); });
+  expect(writeJournal).not.toHaveBeenCalled();
+  expect(view.queryByRole('button', { name: '✓ 提前 10 分' })).toBeNull();
+  expect(view.getByRole('button', { name: '提前 30 分' })).toBeDisabled();
+  await act(async () => { nextPermission.resolve(); });
 });
 
 it.each(['recovered success', 'recovered error', 'success without revalidation'])(
