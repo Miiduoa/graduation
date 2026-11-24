@@ -86,6 +86,29 @@ export function isHorizontallyVisible(element: HTMLElement) {
   return rect.left >= left && rect.right <= right;
 }
 
+export function verticalVisibleBounds(insets: ReturnType<typeof measureStickyInsets>) {
+  const visible = visibleViewport();
+  return { top: visible.top + insets.top, bottom: visible.bottom - insets.bottom };
+}
+
+export function scrollHorizontallyIntoView(element: HTMLElement, viewport: HTMLElement) {
+  const maxScroll = viewport.scrollWidth - viewport.clientWidth;
+  if (maxScroll <= 0) return;
+  const visible = visibleViewport();
+  const viewportLeft = viewport.getBoundingClientRect().left + viewport.clientLeft;
+  const left = Math.max(visible.left, viewportLeft);
+  const right = Math.min(visible.right, viewportLeft + viewport.clientWidth);
+  const rect = element.getBoundingClientRect();
+  if (right <= left || rect.width <= 0) return;
+
+  const distance =
+    rect.left < left || rect.width > right - left
+      ? Math.floor(rect.left - left)
+      : Math.max(0, Math.ceil(rect.right - right));
+  const target = Math.max(0, Math.min(maxScroll, viewport.scrollLeft + distance));
+  if (target !== viewport.scrollLeft) viewport.scrollLeft = target;
+}
+
 export function scrollVerticallyIntoView(
   element: HTMLElement,
   {
@@ -104,9 +127,7 @@ export function scrollVerticallyIntoView(
 
   const rect = element.getBoundingClientRect();
   if (rect.height <= 0) return;
-  const visible = visibleViewport();
-  const visibleTop = visible.top + top;
-  const visibleBottom = visible.bottom - bottom;
+  const { top: visibleTop, bottom: visibleBottom } = verticalVisibleBounds(insets);
   // Round toward visibility when the browser scrolls in whole CSS pixels.
   const distance =
     align === 'start' || rect.top < visibleTop

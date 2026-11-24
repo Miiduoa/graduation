@@ -6,6 +6,7 @@ import {
   measureStickyInsets,
   onVisibleViewportChange,
   scrollVerticallyIntoView,
+  verticalVisibleBounds,
 } from './calendarScroll';
 
 import Link from 'next/link';
@@ -553,11 +554,8 @@ function PersonalCalendarWorkspace({
     const focused = document.activeElement;
     if (focused instanceof HTMLElement && focused !== document.body) {
       const { top, bottom } = focused.getBoundingClientRect();
-      if (
-        top >= insets.top &&
-        bottom <= window.innerHeight - insets.bottom &&
-        isHorizontallyVisible(focused)
-      ) {
+      const visible = verticalVisibleBounds(insets);
+      if (top >= visible.top && bottom <= visible.bottom && isHorizontallyVisible(focused)) {
         return;
       }
     }
@@ -685,7 +683,7 @@ function PersonalCalendarWorkspace({
     const followSavedDate =
       !baseline ||
       (monthList
-        ? savedMonth !== month && savedMonth !== baseline.date.slice(0, 7)
+        ? savedMonth !== month && savedMonth !== baseline.date?.slice(0, 7)
         : savedDate !== baseline.date);
     writing.current = true;
     setSaving(true);

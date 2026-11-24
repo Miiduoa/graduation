@@ -750,6 +750,43 @@ it.each([
   expect(document.activeElement).toBe(covered ? heading : date);
 });
 
+it.each([
+  ['上界之外', 40, true],
+  ['下界之外', 440, true],
+  ['可視範圍內', 320, false],
+])('縮小可視視窗後選日，依捲動後的實際位置處理焦點（%s）', async (_edge, dateTop, outside) => {
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(640);
+  Object.defineProperty(window, 'visualViewport', {
+    configurable: true,
+    value: Object.assign(new EventTarget(), {
+      offsetTop: 80,
+      offsetLeft: 0,
+      width: 320,
+      height: 320,
+    }),
+  });
+  render(<PersonalCalendar />);
+  await ready();
+  const date = screen.getByRole('button', { name: '2026-11-24' });
+  let pageOffset = 0;
+  vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+    if (this === date) return new DOMRect(20, dateTop + 220 - pageOffset, 80, 32);
+    if (this.classList.contains(workspaceStyles.daySummary)) {
+      return new DOMRect(20, 300 - pageOffset, 280, 60);
+    }
+    return new DOMRect(20, 60, 100, 40);
+  });
+  vi.mocked<(options: ScrollToOptions) => void>(window.scrollBy).mockImplementation((options) => {
+    pageOffset += options.top ?? 0;
+  });
+
+  activate(date);
+
+  const heading = dayHeading('2026-11-24');
+  expect(window.scrollBy).toHaveBeenCalledExactlyOnceWith({ left: 0, top: 220, behavior: 'instant' });
+  expect(document.activeElement).toBe(outside ? heading : date);
+});
+
 it.each(['列表', '下一月'])(
   '切換到「%s」後取消編輯，將焦點移到可見的新增行程按鈕',
   async (navigation) => {

@@ -6,7 +6,11 @@ import {
   type PersonalImportRecord,
 } from '@campus/shared';
 import { monthCalendarKeyboardDate } from './monthCalendarNavigation';
-import { isHorizontallyVisible, scrollVerticallyIntoView } from './calendarScroll';
+import {
+  isHorizontallyVisible,
+  scrollHorizontallyIntoView,
+  scrollVerticallyIntoView,
+} from './calendarScroll';
 import styles from './MonthCalendar.module.css';
 
 export function MonthCalendar({
@@ -39,7 +43,11 @@ export function MonthCalendar({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const dateButtons = useRef(new Map<string, HTMLButtonElement>());
-  const pendingFocus = useRef<{ date: string; origin: HTMLButtonElement } | null>(null);
+  const pendingFocus = useRef<{
+    date: string;
+    origin: HTMLButtonElement;
+    revealDate: boolean;
+  } | null>(null);
   const days = useMemo(() => buildMonthCalendar(records, month), [records, month]);
   const selectedCellIndex = days.findIndex((day) => day?.date === selectedDate);
   const revealWeek = useCallback((columnIndex: number) => {
@@ -50,10 +58,14 @@ export function MonthCalendar({
     if (!viewport || !sunday || !selectedColumn || viewport.clientWidth <= 0) return;
     scrollWeekIntoView(viewport, sunday, selectedColumn);
   }, []);
-  const focusVisibleDate = useCallback((date: string) => {
+  const focusVisibleDate = useCallback((date: string, revealDate: boolean) => {
     const requested = dateButtons.current.get(date);
-    let target: HTMLElement | null = viewportRef.current;
-    if (requested && isHorizontallyVisible(requested)) {
+    const viewport = viewportRef.current;
+    let target: HTMLElement | null = viewport;
+    if (requested && revealDate) {
+      if (viewport) scrollHorizontallyIntoView(requested, viewport);
+      target = requested;
+    } else if (requested && isHorizontallyVisible(requested)) {
       target = requested;
     } else {
       const requestedDay = Number(date.slice(-2));
@@ -87,7 +99,7 @@ export function MonthCalendar({
     pendingFocus.current = null;
     if (document.activeElement !== requested.origin && document.activeElement !== document.body)
       return;
-    focusVisibleDate(requested.date);
+    focusVisibleDate(requested.date, requested.revealDate);
   }, [month, focusVisibleDate]);
 
   const moveDate = (event: KeyboardEvent<HTMLButtonElement>, date: string) => {
@@ -106,21 +118,14 @@ export function MonthCalendar({
     )
       return;
     event.preventDefault();
-    let target = monthCalendarKeyboardDate(date, event.key);
+    const target = monthCalendarKeyboardDate(date, event.key);
     if (!target || target === date) return;
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-      // Skip clipped columns in date order so arrows keep their direction over week boundaries.
-      while (target?.startsWith(`${month}-`)) {
-        const button = dateButtons.current.get(target);
-        if (button && isHorizontallyVisible(button)) break;
-        target = monthCalendarKeyboardDate(target, event.key);
-      }
-      if (!target) return;
-    }
+    // Horizontal arrows visit every date, including dates in clipped columns.
+    const revealDate = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
     if (target.startsWith(`${month}-`)) {
-      focusVisibleDate(target);
+      focusVisibleDate(target, revealDate);
     } else if (onMonthChange) {
-      pendingFocus.current = { date: target, origin: event.currentTarget };
+      pendingFocus.current = { date: target, origin: event.currentTarget, revealDate };
       onMonthChange(target.slice(0, 7));
     }
   };
