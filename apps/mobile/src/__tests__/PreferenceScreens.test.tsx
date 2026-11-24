@@ -139,6 +139,29 @@ test('a late storage read cannot revert a selection made in the open settings sc
   expect(getCurrentTheme().mode).toBe('dark');
 });
 
+test('serializes rapid selections so remounting cannot restore the slower write', async () => {
+  deviceMode('light');
+  const view = render(wrap(<ThemePreviewScreen navigation={navigation} />));
+  await act(async () => {});
+  const first = deferred<void>();
+  jest.mocked(AsyncStorage.setItem).mockImplementationOnce(() => first.promise);
+  fireEvent.press(view.getByRole('radio', { name: '深色' }));
+  fireEvent.press(view.getByRole('radio', { name: '跟隨系統' }));
+  view.unmount();
+
+  const restored = render(wrap(<ThemePreviewScreen navigation={navigation} />));
+  await act(async () => {});
+  expect(AsyncStorage.setItem).toHaveBeenCalledWith('campus.themeMode.v2', 'dark');
+  expect(AsyncStorage.setItem).not.toHaveBeenCalledWith('campus.themeMode.v2', 'system');
+  await act(async () => {
+    first.resolve();
+  });
+  expect(await AsyncStorage.getItem('campus.themeMode.v2')).toBe('system');
+  expect(restored.getByRole('radio', { name: '跟隨系統' })).toHaveAccessibilityState({
+    checked: true,
+  });
+});
+
 test('help uses actual version and feedback route, with searchable answers and no invented support details', async () => {
   const view = render(wrap(<HelpScreen navigation={navigation} />));
   await act(async () => {});
