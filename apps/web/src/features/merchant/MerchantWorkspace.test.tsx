@@ -582,6 +582,70 @@ it('prioritizes the actual authorized store for a returning operator and retains
   expect(screen.queryByRole('heading', { name: '開始申請第一間門市' })).toBeNull();
 });
 
+const continuityStore = {
+  tenantId: 'campus-one',
+  tenantName: '第一校園',
+  merchantName: '餐坊',
+  locationId: 'location-1',
+  locationName: '第一門市',
+  campusName: '主校區',
+  merchantStatus: 'active',
+  locationStatus: 'open',
+  activated: true,
+  publicAccess: true,
+  missingRequirements: [],
+  applicationId: 'application-1',
+  merchantId: 'merchant-1',
+  campusId: 'main-campus',
+  serviceModes: ['pickup'],
+  paymentMode: 'counter-only',
+  onlinePaymentAvailable: false,
+  paymentCapabilityState: 'not-requested',
+  managerConfirmed: true,
+  termsVersion: 'merchant-terms-v1',
+  readinessVersion: 1,
+  publishedMenuItems: 1,
+  merchantMode: 'full',
+  merchantModeLabel: '接單服務',
+  sourceLabel: '',
+  sourceUpdatedAt: null,
+  sourceLine: null,
+};
+
+it('keeps an application receipt received inside a store across stale list reloads', async () => {
+  window.history.replaceState(null, '', '/merchant');
+  let showStore = false;
+  let finishApplication!: (receipt: typeof application) => void;
+  const receipt = new Promise<typeof application>((resolve) => {
+    finishApplication = resolve;
+  });
+  mocks.request.mockImplementation((path, context, input) => {
+    if (path === 'merchant-applications' && input) return receipt;
+    if (path === 'merchant-workspaces' && showStore)
+      return Promise.resolve({ workspaces: [continuityStore] });
+    if (path === 'merchant-workspaces/campus-one/location-1')
+      return Promise.resolve(continuityStore);
+    return respond(path, context, input);
+  });
+
+  render(<MerchantWorkspace />);
+  await fillApplication();
+  showStore = true;
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  const storeLink = await screen.findByRole('link', { name: '管理門市：第一門市' });
+  fireEvent.click(screen.getByRole('button', { name: '送出進駐申請' }));
+  await screen.findByRole('button', { name: '正在確認收件…' });
+  fireEvent.click(storeLink);
+  await screen.findByRole('heading', { name: '餐坊／第一門市', level: 2 });
+  await act(async () => finishApplication(application));
+
+  fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+  await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
+  expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+  expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
+});
+
 it.each([
   { scenario: 'no programs remain open', refreshedPrograms: [] },
   { scenario: 'only another program remains open', refreshedPrograms: programs.slice(1) },
@@ -590,35 +654,6 @@ it.each([
   { scenario: 'the programs endpoint returns 403', refreshedPrograms: null, programStatus: 403 },
 ])('retries after a store visit when $scenario', async ({ refreshedPrograms, programStatus }) => {
   window.history.replaceState(null, '', '/merchant');
-  const store = {
-    tenantId: 'campus-one',
-    tenantName: '第一校園',
-    merchantName: '餐坊',
-    locationId: 'location-1',
-    locationName: '第一門市',
-    campusName: '主校區',
-    merchantStatus: 'active',
-    locationStatus: 'open',
-    activated: true,
-    publicAccess: true,
-    missingRequirements: [],
-    applicationId: 'application-1',
-    merchantId: 'merchant-1',
-    campusId: 'main-campus',
-    serviceModes: ['pickup'],
-    paymentMode: 'counter-only',
-    onlinePaymentAvailable: false,
-    paymentCapabilityState: 'not-requested',
-    managerConfirmed: true,
-    termsVersion: 'merchant-terms-v1',
-    readinessVersion: 1,
-    publishedMenuItems: 1,
-    merchantMode: 'full',
-    merchantModeLabel: '接單服務',
-    sourceLabel: '',
-    sourceUpdatedAt: null,
-    sourceLine: null,
-  };
   let showStore = false;
   let openPrograms: typeof programs | null = programs;
   let submissionAttempts = 0;
@@ -633,8 +668,9 @@ it.each([
     if (path === 'merchant-applications' && !input && showStore)
       return Promise.resolve({ applications: [application] });
     if (path === 'merchant-workspaces' && showStore)
-      return Promise.resolve({ workspaces: [store] });
-    if (path === 'merchant-workspaces/campus-one/location-1') return Promise.resolve(store);
+      return Promise.resolve({ workspaces: [continuityStore] });
+    if (path === 'merchant-workspaces/campus-one/location-1')
+      return Promise.resolve(continuityStore);
     return respond(path, context, input);
   });
   render(<MerchantWorkspace />);

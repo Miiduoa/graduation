@@ -215,52 +215,65 @@ it('requires confirmation again after returning to a store with a first-menu dra
   expect(mocks.request.mock.calls.filter((call) => call[2])).toHaveLength(0);
 });
 
-it('keeps the first menu complete after returning to a stale workspace list', async () => {
-  const path = 'merchant-workspaces/campus-one/store-a';
-  let published = false;
-  let returning = false;
-  mocks.request.mockImplementation((requestPath) => {
-    if (requestPath === `${path}/initial-menu`) {
-      published = true;
-      return Promise.resolve({
-        menuVersionId: 'food-menu_12345678-1234-1234-1234-123456789abc',
-        createdItems: 1,
-      });
+it.each(['automatic', 'manual'] as const)(
+  'keeps the first menu complete on a stale workspace list after a successful %s detail read',
+  async (readMode) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    let published = false;
+    let detailUnavailable = readMode === 'manual';
+    mocks.request.mockImplementation((requestPath) => {
+      if (requestPath === `${path}/initial-menu`) {
+        published = true;
+        return Promise.resolve({
+          menuVersionId: 'food-menu_12345678-1234-1234-1234-123456789abc',
+          createdItems: 1,
+        });
+      }
+      if (requestPath === path && published) {
+        // The return refresh only has the stale list and the last verified detail.
+        return detailUnavailable
+          ? Promise.reject(new NuniError(503, 'UPSTREAM_ERROR'))
+          : Promise.resolve({
+              ...detail(),
+              publishedMenuItems: 1,
+              missingRequirements: ['settings'],
+            });
+      }
+      return respond(requestPath);
+    });
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    fireEvent.change(await screen.findByLabelText('品項 1 名稱'), {
+      target: { value: '蔬菜便當' },
+    });
+    fireEvent.change(screen.getByLabelText('品項 1 售價（元）'), { target: { value: '85' } });
+    fireEvent.change(screen.getByLabelText('品項 1 初始庫存'), { target: { value: '20' } });
+    fireEvent.click(screen.getByLabelText(/我已確認品項、元售價/));
+    fireEvent.click(screen.getByRole('button', { name: '確認建立並上架菜單' }));
+    if (readMode === 'manual') {
+      await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+      await waitFor(() =>
+        expect(
+          screen.getByRole<HTMLButtonElement>('button', { name: '重新讀取門市狀態' }).disabled,
+        ).toBe(false),
+      );
+      detailUnavailable = false;
+      fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
     }
-    if (requestPath === path && published) {
-      // The return refresh only has the stale list and the last verified detail.
-      return returning
-        ? Promise.reject(new NuniError(503, 'UPSTREAM_ERROR'))
-        : Promise.resolve({
-            ...detail(),
-            publishedMenuItems: 1,
-            missingRequirements: ['settings'],
-          });
-    }
-    return respond(requestPath);
-  });
-  render(<MerchantWorkspace view="workspace" />);
-  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
-  fireEvent.change(await screen.findByLabelText('品項 1 名稱'), {
-    target: { value: '蔬菜便當' },
-  });
-  fireEvent.change(screen.getByLabelText('品項 1 售價（元）'), { target: { value: '85' } });
-  fireEvent.change(screen.getByLabelText('品項 1 初始庫存'), { target: { value: '20' } });
-  fireEvent.click(screen.getByLabelText(/我已確認品項、元售價/));
-  fireEvent.click(screen.getByRole('button', { name: '確認建立並上架菜單' }));
-  await screen.findByText(/已建立 1 項首次菜單/);
-  expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
+    await screen.findByText(/已建立 1 項首次菜單/);
+    expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
 
-  returning = true;
-  fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
-  await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
-  expect(
-    mocks.request.mock.calls.filter(([route]) => route === 'merchant-workspaces'),
-  ).toHaveLength(2);
-  const store = screen.getByRole('link', { name: '管理門市：一樓' }).closest('li')!;
-  expect(within(store).getByText('待完成：確認營運設定與條款')).toBeTruthy();
-  expect(within(store).queryByText(/建立菜單/)).toBeNull();
-});
+    detailUnavailable = true;
+    fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+    await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
+    expect(
+      mocks.request.mock.calls.filter(([route]) => route === 'merchant-workspaces'),
+    ).toHaveLength(2);
+    const store = screen.getByRole('link', { name: '管理門市：一樓' }).closest('li')!;
+    expect(within(store).getByText('待完成：確認營運設定與條款')).toBeTruthy();
+    expect(within(store).queryByText(/建立菜單/)).toBeNull();
+  },
+);
 
 it.each(['success', 403, 404, 503, 'timeout'] as const)(
   'hides previous management details on browser Forward until the return read succeeds (%s)',

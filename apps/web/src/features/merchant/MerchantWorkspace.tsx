@@ -45,10 +45,12 @@ import {
 import { useMerchantWorkspaceRoute } from '@/lib/useMerchantWorkspaceRoute';
 
 type Overview = Awaited<ReturnType<typeof loadMerchantOverview>>;
-type OverviewUpdates = {
+type ConfirmedMerchantData = {
   workspaces: Map<string, Overview['workspaces'][number]>;
-  application?: Overview['applications'][number];
+  applications: Map<string, Overview['applications'][number]>;
 };
+const workspaceKey = ({ tenantId, locationId }: Overview['workspaces'][number]) =>
+  `${tenantId}:${locationId}`;
 type Draft = Omit<NuniMerchantApplicationInput, 'idempotencyKey'>;
 const emptyDraft = (): Draft => ({
   tenantId: '',
@@ -273,9 +275,11 @@ function AccountWorkspace({
     if (href !== listHref) setListHref(href);
   }
   const generation = useRef(0);
-  const listUpdates = useRef<OverviewUpdates | null>(null);
-  // A confirmed write must survive the list loader unmounting during navigation.
-  const confirmedWorkspaces = useRef<OverviewUpdates['workspaces']>(new Map());
+  const listed = useRef<Overview | null>(null);
+  const confirmed = useRef<ConfirmedMerchantData>({
+    workspaces: new Map(),
+    applications: new Map(),
+  });
   const mounted = useRef(true);
   const busyRef = useRef(false);
   const enabled = useRef(false);
@@ -287,23 +291,42 @@ function AccountWorkspace({
   }, [suspended, invalidSession]);
   const invalidate = useCallback(() => {
     ++generation.current;
-    listUpdates.current = null;
+  }, []);
+  const publishOverview = useCallback(() => {
+    const data = listed.current;
+    const { applications, workspaces } = confirmed.current;
+    setOverview(
+      data && {
+        ...data,
+        workspaces: data.workspaces.map((item) => workspaces.get(workspaceKey(item)) ?? item),
+        applications: [
+          ...[...applications.values()].reverse(),
+          ...data.applications.filter((item) => !applications.has(item.applicationId)),
+        ],
+      },
+    );
+  }, []);
+  const clearOverview = useCallback(() => {
+    listed.current = null;
+    confirmed.current.workspaces.clear();
+    confirmed.current.applications.clear();
+    setOverview(null);
   }, []);
   const expire = useCallback(() => {
-    confirmedWorkspaces.current.clear();
+    enabled.current = false;
+    invalidate();
+    clearOverview();
     setInvalidSession(true);
-    setOverview(null);
     setDraft(emptyDraft());
     setPending(null);
     void onExpired();
-  }, [onExpired]);
+  }, [clearOverview, invalidate, onExpired]);
   const load = useCallback(async () => {
     const run = ++generation.current;
-    const confirmed = confirmedWorkspaces.current;
-    const initialSnapshots = new Map(confirmed);
+    const { workspaces, applications } = confirmed.current;
+    const initialWorkspaces = new Map(workspaces);
+    const initialApplications = new Map(applications);
     const isCurrent = () => mounted.current && enabled.current && run === generation.current;
-    const updates: OverviewUpdates = { workspaces: new Map() };
-    listUpdates.current = updates;
     setLoading(true);
     setLoadError('');
     try {
@@ -328,67 +351,57 @@ function AccountWorkspace({
       const operations = createMerchantOperations((path, input, method) =>
         browserRequest(path, context, input, method),
       );
-      const refreshed = new Map<string, Overview['workspaces'][number]>();
+      const refreshed = new Map<string, Overview['workspaces'][number] | null>();
       await Promise.all(
-        data.workspaces.map(async ({ tenantId, locationId }) => {
-          const key = `${tenantId}:${locationId}`;
-          const snapshot = initialSnapshots.get(key);
-          if (!snapshot || confirmed.get(key) !== snapshot) return;
+        data.workspaces.map(async (item) => {
+          const key = workspaceKey(item);
+          const snapshot = initialWorkspaces.get(key);
+          if (!snapshot || workspaces.get(key) !== snapshot) return;
+          // The operation owns reconciliation while a write is pending or uncertain.
+          if (operationDrafts.get(JSON.stringify([item.tenantId, item.locationId]))?.uncertain)
+            return;
           try {
-            refreshed.set(key, await operations.get(tenantId, locationId));
+            refreshed.set(key, await operations.get(item.tenantId, item.locationId));
           } catch (error) {
             if (expired(error)) throw error;
+            if (error instanceof NuniError && [403, 404].includes(error.status))
+              refreshed.set(key, null);
           }
         }),
       );
       if (isCurrent()) {
-        const { application } = updates;
-        const workspaces = data.workspaces.map((item) => {
-          const key = `${item.tenantId}:${item.locationId}`;
-          const snapshot = confirmed.get(key);
-          const detail = refreshed.get(key);
-          // A receipt or detail accepted during this reload takes precedence.
-          if (detail && snapshot === initialSnapshots.get(key)) {
-            confirmed.set(key, detail);
-            return detail;
-          }
-          return snapshot ?? updates.workspaces.get(key) ?? item;
-        });
-        const authorizedKeys = new Set(
-          data.workspaces.map((item) => `${item.tenantId}:${item.locationId}`),
-        );
-        for (const key of confirmed.keys()) {
-          if (!authorizedKeys.has(key)) confirmed.delete(key);
+        const authorizedKeys = new Set(data.workspaces.map(workspaceKey));
+        for (const key of workspaces.keys()) {
+          if (!authorizedKeys.has(key)) workspaces.delete(key);
         }
-        setOverview({
-          ...data,
-          applications:
-            application &&
-            !data.applications.some((item) => item.applicationId === application.applicationId)
-              ? [application, ...data.applications]
-              : data.applications,
-          workspaces,
-        });
+        for (const [key, detail] of refreshed) {
+          // Keep any detail or write receipt accepted while the list was loading.
+          if (workspaces.get(key) !== initialWorkspaces.get(key)) continue;
+          if (detail) workspaces.set(key, detail);
+          else workspaces.delete(key);
+        }
+        for (const { applicationId } of data.applications) {
+          const receipt = initialApplications.get(applicationId);
+          // Only a list requested after the receipt can take over tracking this application.
+          if (receipt && applications.get(applicationId) === receipt)
+            applications.delete(applicationId);
+        }
+        listed.current = data;
+        publishOverview();
         if (programsUnavailable) setLoadError('目前無法確認店家資料，請重新載入。');
       }
     } catch (error) {
       if (isCurrent()) {
         if (expired(error)) expire();
         else {
-          if (error instanceof NuniError && [403, 404].includes(error.status)) {
-            confirmedWorkspaces.current.clear();
-            setOverview(null);
-          }
+          if (error instanceof NuniError && [403, 404].includes(error.status)) clearOverview();
           setLoadError('目前無法確認店家資料，請重新載入。');
         }
       }
     } finally {
-      if (run === generation.current) {
-        listUpdates.current = null;
-        if (mounted.current) setLoading(false);
-      }
+      if (run === generation.current && mounted.current) setLoading(false);
     }
-  }, [context, expire, view]);
+  }, [clearOverview, context, expire, operationDrafts, publishOverview, view]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -458,20 +471,8 @@ function AccountWorkspace({
         await browserRequest('merchant-applications', context, payload),
       );
       if (!mounted.current || !enabled.current) return;
-      if (listUpdates.current) listUpdates.current.application = application;
-      setOverview((current) =>
-        current
-          ? {
-              ...current,
-              applications: [
-                application,
-                ...current.applications.filter(
-                  (item) => item.applicationId !== application.applicationId,
-                ),
-              ],
-            }
-          : current,
-      );
+      confirmed.current.applications.set(application.applicationId, application);
+      publishOverview();
       setPending(null);
       setDraft(emptyDraft());
       setNotice('申請已收件。審核通過後仍需完成營運設定，才會開放店家服務。');
@@ -499,27 +500,13 @@ function AccountWorkspace({
   }
 
   const onWorkspaceChanged = useCallback(
-    (detail: Overview['workspaces'][number], confirmedWrite: boolean) => {
+    (detail: Overview['workspaces'][number]) => {
       if (!mounted.current || !enabled.current) return;
       setHasVerifiedLocation(true);
-      const key = `${detail.tenantId}:${detail.locationId}`;
-      if (confirmedWrite || confirmedWorkspaces.current.has(key))
-        confirmedWorkspaces.current.set(key, detail);
-      listUpdates.current?.workspaces.set(key, detail);
-      setOverview((current) =>
-        current
-          ? {
-              ...current,
-              workspaces: current.workspaces.map((workspace) =>
-                workspace.tenantId === detail.tenantId && workspace.locationId === detail.locationId
-                  ? detail
-                  : workspace,
-              ),
-            }
-          : current,
-      );
+      confirmed.current.workspaces.set(workspaceKey(detail), detail);
+      publishOverview();
     },
-    [],
+    [publishOverview],
   );
 
   const withOperations = (content?: ReactNode) => (
