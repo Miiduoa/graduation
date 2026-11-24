@@ -8,12 +8,20 @@ import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useNuniSession } from '../state/nuniSession';
 import { useSchool } from '../state/school';
 import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
+import { TODAY_SERVICE_SHORTCUTS } from '@campus/shared/src/todayServiceShortcuts';
 import { TodayTimetablePanel } from '../components/TodayTimetablePanel';
 import { SchoolPortalImportEntry } from '../components/SchoolPortalImport';
 import {
   isSchoolLoginEntryAvailable,
   loadSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
+
+// Keep the existing guest-stack routes and accessibility names.
+const landingPublicRoutes = {
+  '/map': { route: 'Map', title: '校園地圖' },
+  '/bus': { route: 'BusSchedule', title: '公車查詢' },
+  '/library': { route: 'Library', title: '圖書館' },
+} as const;
 
 const workEntries = [
   { title: '店家進駐與門市管理', detail: '用 Google 帳號申請、查進度，或進入已授權的門市。', tab: 'merchant' },
@@ -214,6 +222,34 @@ export default function LoginLandingScreen() {
           </View>
         ) : null}
         <SchoolBrowsingControl />
+        {hasSchool && (
+          <View style={s.publicPanel} testID="landing-public-shortcuts">
+            <View style={s.sectionHeading}>
+              <Text accessibilityRole="header" style={s.title}>先使用校園服務</Text>
+              <Text style={s.sectionCaption}>不必登入</Text>
+            </View>
+            <View style={s.publicQuickGrid}>
+              {TODAY_SERVICE_SHORTCUTS.flatMap(item => {
+                if (item.destination === '/cafeteria') return [];
+                const entry = landingPublicRoutes[item.destination];
+                return [
+                  <Pressable
+                    key={entry.route}
+                    testID={`public-${entry.route}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={entry.title}
+                    accessibilityHint={item.detail}
+                    style={({ pressed }) => [s.publicQuickButton, pressed && s.rowPressed]}
+                    onPress={() => safeNavigate(navigation, entry.route)}
+                  >
+                    <Text style={s.publicTitle}>{entry.title}</Text>
+                    <Text style={s.publicDetail}>{item.detail}</Text>
+                  </Pressable>,
+                ];
+              })}
+            </View>
+          </View>
+        )}
         <View style={s.panel}>
           <Text accessibilityRole="header" style={s.title}>失物招領</Text>
           <Text style={s.body}>用 Google 帳號刊登遺失或拾獲資訊，查看聯絡方式，並管理自己的刊登。</Text>
@@ -273,11 +309,8 @@ export default function LoginLandingScreen() {
               </View>
               {(
                 [
-                  ['Map', '校園地圖', '搜尋地點、查看位置與步行路線'],
-                  ['Library', '圖書館', `搜尋${school.name}的館藏與官方服務`],
                   ['SchoolInfo', '學校資訊', '查看官方總機、網站與名錄地址'],
                    ['StudentCard', '數位學生證', '出示學生證，或核對對方的校園身分'],
-                  ['BusSchedule', '公車查詢', '查看站點與官方到站資訊'],
                   ['公告總覽', '公開公告', `查看${school.name}發布的消息`],
                   ['CourseCatalog', '課綱查詢', `查看${school.name}課綱或校方課程查詢入口`],
                   ['Health', '校園健康', `查看${school.name}諮商、就醫與健康檢查資訊`],
@@ -415,6 +448,13 @@ const createStyles = () =>
     workspaceShortcutText: { color: theme.colors.accent, fontSize: 12, fontWeight: '600' },
     intro: { paddingTop: 24, paddingBottom: 24 },
     publicPanel: { marginTop: 24, marginBottom: 8 },
+    publicQuickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 10 },
+    publicQuickButton: {
+      flexGrow: 1, flexBasis: '46%', minHeight: 72, minWidth: 0,
+      justifyContent: 'center', padding: 12, borderRadius: 12,
+      borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+    },
     sectionHeading: {
       flexDirection: 'row',
       flexWrap: 'wrap',
