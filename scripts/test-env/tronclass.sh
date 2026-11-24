@@ -340,11 +340,25 @@ tronclass_stop_logged() {
           [ "$existing" = "$child_record" ] && continue 2
         done
         records+=("$child_record")
-        tronclass_signal_record "$child_record" "$sig"
       fi
     done
   }
-  tronclass_discover_wrapper_children
+  # If this run has not recorded a child group yet, wait for the wrapper to
+  # spawn it before signalling the wrapper itself, so a late detached group
+  # is still captured for the later wait and KILL rounds.
+  if [ -z "$memory_record" ] && [ -n "$wrapper" ]; then
+    local wait_i
+    for wait_i in $(seq 1 20); do
+      tronclass_discover_wrapper_children
+      if [ "${#records[@]}" -gt 0 ]; then
+        break
+      fi
+      kill -0 "$wrapper" 2>/dev/null || break
+      sleep 0.1
+    done
+  else
+    tronclass_discover_wrapper_children
+  fi
   local record
   for record in "${records[@]+"${records[@]}"}"; do
     tronclass_signal_record "$record" "$sig"
