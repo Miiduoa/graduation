@@ -204,9 +204,14 @@ function BoardsContent() {
           awaitingServerConfirm.current.has(id) &&
           nextConfirmed.has(id) &&
           !subscribedIds.has(id);
+        // A list that includes a subscription kept locally as unsubscribed
+        // (for example after a failed write) may be newer than the rollback.
+        // A list that omits a still-confirmed subscription is a cache gap and
+        // must not by itself trigger another re-read after the first confirm.
+        const listClaimsUnkeptSubscription = subscribedIds.has(id) && !nextConfirmed.has(id);
         if (
           !pendingSubscriptionCounts.current.has(id) &&
-          (lastSettledWriteSucceeded.current.has(id) || keptRollback) &&
+          (lastSettledWriteSucceeded.current.has(id) || keptRollback || listClaimsUnkeptSubscription) &&
           auth.user?.uid &&
           school?.id
         ) {

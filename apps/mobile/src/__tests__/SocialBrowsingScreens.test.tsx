@@ -361,6 +361,38 @@ test('a failed write re-reads the server so another device\'s subscription is sh
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
+test('an overlapping list after a failed write still confirms another device\'s later subscription', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  const refresh = deferred<string[]>();
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => refresh.promise);
+  const write = deferred();
+  jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
+
+  let refreshPromise!: Promise<void>;
+  act(() => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+
+  // The write fails and the first server confirm still reports unsubscribed.
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(false);
+  await act(async () => { write.reject(new Error('offline')); });
+  expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  // Another device then subscribed; the overlapping list includes that membership.
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
+  await act(async () => { refresh.resolve(['board']); await refreshPromise; });
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  const calls = jest.mocked(isSubscribedToBoard).mock.calls;
+  expect(calls).toEqual([
+    ['alice', 'pu', 'board', { fromServer: true }],
+    ['alice', 'pu', 'board', { fromServer: true }],
+  ]);
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
 test('a failed write never discards an in-flight pull-to-refresh, even if its re-read fails', async () => {
   const otherBoard = { id: 'board-b', name: '攝影社', type: 'topic' };
   jest.mocked(listBoards).mockResolvedValue([board, otherBoard]);
