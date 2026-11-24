@@ -41,13 +41,21 @@ describe('trusted OSM walking segment audit bridge', () => {
     expect(findCampusWalkingRoute(apply([]), 'fixture', bounds, 1, 2, now)).toBeNull();
   });
 
-  it('retains review expiry and OSM snapshot freshness so later routing cannot use an expired graph', () => {
+  it('preserves segment expiry and closes the route at expiry while the OSM snapshot is fresh', () => {
+    const validUntil = '2026-11-25T08:00:00Z';
+    const expiresAt = Date.parse(validUntil);
+    const graph = apply([audit(1, 2, { validUntil }), audit(2, 3, { direction: 'forward' })]);
+    expect(graph.edges.filter(e => e.access === 'reviewed-open').map(e => e.validUntil))
+      .toEqual([validUntil, '2026-12-01T00:00:00Z']);
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 3, expiresAt - 1)?.nodes.map(n => n.id)).toEqual([1, 2, 3]);
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 3, expiresAt)).toBeNull();
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 3, expiresAt)?.nodes.map(n => n.id)).toEqual([2, 3]);
+  });
+
+  it('preserves the OSM snapshot timestamp and rejects stale snapshots while audits are current', () => {
     const graph = apply([audit(), audit(2, 3, { direction: 'forward' })]);
     expect(graph.osmBaseAt).toBe('2026-11-24T08:00:00Z');
-    expect(graph.edges.filter(e => e.access === 'reviewed-open').map(e => e.validUntil))
-      .toEqual(['2026-12-01T00:00:00Z', '2026-12-01T00:00:00Z']);
     expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 3, now)?.nodes.map(n => n.id)).toEqual([1, 2, 3]);
-    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 3, Date.parse('2026-12-01T00:00:00Z'))).toBeNull();
     expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 3, Date.parse('2026-11-27T08:00:01Z'))).toBeNull();
   });
 

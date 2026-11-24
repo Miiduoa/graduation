@@ -38,7 +38,7 @@ function validBounds(b: CampusWalkingBounds): boolean {
     b.south < b.north && b.west < b.east &&
     b.north - b.south <= 0.05 && b.east - b.west <= 0.05;
 }
-function inBounds(n: WalkingNode, b: CampusWalkingBounds): boolean {
+function inBounds(n: Pick<WalkingNode, 'lat' | 'lng'>, b: CampusWalkingBounds): boolean {
   return n.lat >= b.south && n.lat <= b.north && n.lng >= b.west && n.lng <= b.east;
 }
 
@@ -130,9 +130,13 @@ export function parseCampusWalkingOsmCandidates(
     if (item.type !== 'node' || typeof item.lat !== 'number' || typeof item.lon !== 'number' ||
         !Number.isFinite(item.lat) || !Number.isFinite(item.lon) ||
         Math.abs(item.lat) > 90 || Math.abs(item.lon) > 180) return null;
-    if (!positiveId(item.id)) return null;
-    const node = { id: item.id, lat: item.lat, lng: item.lon };
-    const inside = inBounds(node, bounds);
+    const coordinates = { lat: item.lat, lng: item.lon };
+    const inside = inBounds(coordinates, bounds);
+    if (!positiveId(item.id)) {
+      if (inside) return null;
+      continue;
+    }
+    const node = { id: item.id, ...coordinates };
     if (hasInScopeDuplicate(nodeScopes, node.id, inside)) return null;
     if (nodeScopes.size > MAX_NODES) return null;
     if (!inside) continue;
@@ -147,19 +151,24 @@ export function parseCampusWalkingOsmCandidates(
   for (const item of rawWays) {
     if (!Array.isArray(item.nodes) || item.nodes.length < 2 ||
         item.nodes.length > MAX_EDGES + 1 || !item.nodes.every(positiveId)) return null;
-    references += item.nodes.length - 1;
-    if (references > MAX_EDGES || item.nodes.some(id => !nodeScopes.has(id))) return null;
+    if (item.nodes.some(id => !nodeScopes.has(id))) return null;
 
     // A way contributes only segments with two consecutive in-bounds nodes.
     const inside = item.nodes.some((id, i, ids) =>
       i > 0 && nodeScopes.get(ids[i - 1]) && nodeScopes.get(id));
-    if (!positiveId(item.id)) return null;
+    if (!positiveId(item.id)) {
+      if (inside) return null;
+      continue;
+    }
     const repeated = wayScopes.has(item.id);
     if (hasInScopeDuplicate(wayScopes, item.id, inside)) return null;
     if (repeated) {
       ways.delete(item.id);
       continue;
     }
+    // Charge each identified way once, after ruling out a duplicate occurrence.
+    references += item.nodes.length - 1;
+    if (references > MAX_EDGES) return null;
     const rev = revision(item, baseMs);
     if (!rev || !HIGHWAYS.includes(rev.tags.highway)) {
       if (inside) return null;

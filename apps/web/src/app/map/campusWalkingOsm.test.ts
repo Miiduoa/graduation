@@ -110,6 +110,32 @@ describe('OSM campus walking discovery (not routing approval)', () => {
     })).toBeNull();
   });
 
+  it('ignores invalid element IDs outside campus and rejects them inside campus', () => {
+    const input = payload();
+    const outside = [node(6, 10.015, 20.002), node(7, 10.016, 20.002)];
+    expect(parse({
+      ...input,
+      elements: [...input.elements, ...outside, node(0, 10.017, 20.002), way(0, [6, 7])],
+    })).toEqual(parse(input));
+    for (const invalid of [node(0, 10.001, 20.004), way(0, [1, 5])]) {
+      expect(parse({ ...input, elements: [...input.elements, invalid] })).toBeNull();
+    }
+  });
+
+  it('counts a repeated out-of-bounds way only once against the segment budget', () => {
+    const input = payload();
+    const outside = [node(6, 10.015, 20.002), node(7, 10.016, 20.002)];
+    const longWay = way(103, Array.from({ length: 3997 }, (_, i) => 6 + i % 2));
+    const shortWay = way(104, [6, 7]);
+    const atLimit = [...input.elements, ...outside, longWay, shortWay];
+    const baseline = parse({ ...input, elements: atLimit });
+    expect(baseline?.graph.edges).toEqual(parse(input)?.graph.edges);
+    const repeated = parse({ ...input, elements: [...atLimit, { ...shortWay }] });
+    expect(repeated?.graph).toEqual(baseline?.graph);
+    expect(repeated?.ways.map(({ id }) => id)).toEqual([101, 102, 103]);
+    expect(parse({ ...input, elements: [...atLimit, way(105, [6, 7])] })).toBeNull();
+  });
+
   it('excludes highway areas and indoor ways and flags tagged restrictions', () => {
     const input = { ...payload(), elements: [...payload().elements,
       way(103, [1, 2, 1], { area: 'yes' }),
