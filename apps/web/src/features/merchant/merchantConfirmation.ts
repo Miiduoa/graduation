@@ -194,6 +194,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     if (requirementsObservation?.revision === revision && next.missingRequirements?.includes('menu')) {
       discardMenuReceipt(key);
     }
+    // A newer list version can supersede the detail without supplying a replacement.
+    if (entry.detail && entry.detail.version !== row.version) delete entry.detail;
     entry.row = row;
     entries.set(key, entry);
     return entry;
@@ -227,7 +229,6 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const entry = entries.get(key);
     if (!entry?.row || !entry.detail || !hasVerifiedAccess(key)) return null;
     const detail = entry.detail.value;
-    if (detail.readinessVersion !== entry.row.version) return null;
     // Legacy list metadata is rendered separately. Project the matching
     // versioned row's operating state and requirements together onto the detail.
     const row = entry.versionedRow?.value;
@@ -297,6 +298,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       return membership && new Set([...membership.values()].map(({ tenantId }) => tenantId));
     },
     hasApplicationList: () => lists.applications !== undefined,
+    detailFor,
     verifiedDetails() {
       const details = new Map<string, NuniMerchantWorkspaceDetail>();
       for (const key of entries.keys()) {

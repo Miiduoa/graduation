@@ -92,6 +92,7 @@ export function MerchantOperations({
   onBack,
   onExpired,
   confirmedDetail,
+  getConfirmedDetail,
   confirmedListRow,
   receiptFloorFor,
   accessRevocation = 0,
@@ -116,6 +117,7 @@ export function MerchantOperations({
   onBack?(): void;
   onExpired(): void;
   confirmedDetail?: Detail | null;
+  getConfirmedDetail?(key: string): Detail | null;
   confirmedListRow?: NuniMerchantWorkspace;
   receiptFloorFor?(readinessVersion?: number): number;
   accessRevocation?: number;
@@ -352,17 +354,20 @@ export function MerchantOperations({
         const merged = confirmDetail(next, true, revision)?.detail ?? null;
         if (!current()) return;
         if (!merged) {
-          // A rejected refresh cannot replace a successful GET for this entry.
+          // A concurrent list merge can invalidate the detail from a successful entry GET.
+          // Check the shared confirmation before React publishes its next snapshot.
           const confirmedRevision = entryAccessRevision.current;
           if (
             afterWrite &&
             confirmedRevision >= accessRevision.current &&
-            confirmedRevision > Math.max(failedReadRevision.current, observedRevocation.current)
+            confirmedRevision > Math.max(failedReadRevision.current, observedRevocation.current) &&
+            (beginRequest ? getConfirmedDetail?.(draftKey) : localConfirmations.detailFor(draftKey))
           ) {
             setEntryVerified(true);
             setFresh(true);
             return;
           }
+          if (afterWrite) setEntryVerified(false);
           setReadUnavailable(true);
           setError(detailReadError);
           return;
@@ -399,7 +404,7 @@ export function MerchantOperations({
     },
     [
       operations, tenantId, locationId, confirmDetail, confirmEntry, drafts, draftKey,
-      expireSession, revokeDetail, nextRevision,
+      expireSession, revokeDetail, nextRevision, beginRequest, getConfirmedDetail, localConfirmations,
     ],
   );
   useLayoutEffect(() => {
@@ -489,9 +494,11 @@ export function MerchantOperations({
         revokeDetail(revision, true);
       } else if (failure instanceof NuniError && failure.status === 409) {
         if (action === 'menu') setMenuBlocked(true);
-        await read();
-        if (active.current)
-          setError('門市資料已變更。請確認重新讀取的狀態，再決定下一步；草稿仍保留。');
+        await read(true, readAfterWrite.current);
+        if (active.current && session === sessionRun.current)
+          setError((current) =>
+            current || '門市資料已變更。請確認重新讀取的狀態，再決定下一步；草稿仍保留。',
+          );
       } else if (isUnknown(failure)) {
         setUncertain(action);
         if (action === 'menu') setMenuBlocked(true);
@@ -521,7 +528,8 @@ export function MerchantOperations({
   const draft = settings ?? (detail ? settingsOf(detail) : null);
   const settingsChanged =
     !!settings && !!detail && settings.baseVersion !== detail.readinessVersion;
-  const locked = !!busy || loading || !!uncertain || !fresh;
+  const locked = !!busy || loading || !!uncertain || !fresh || !detail;
+  const displayedError = error || (!loading && entryVerified && !detail ? detailReadError : '');
   const menuExists = menuReceipt !== null || (!!detail && !detail.missingRequirements.includes('menu'));
   const operational = !!detail && isMerchantWorkspaceOperational(detail);
   const canActivate =
@@ -571,7 +579,7 @@ export function MerchantOperations({
         </Button>
       </div>
       {(loading || (!entryVerified && busy)) && <p role="status">正在確認門市資料…</p>}
-      {error && <p role="alert">{error}</p>}
+      {displayedError && <p role="alert">{displayedError}</p>}
       {!detail && summary && (
         <div role="status">
           <p>{merchantWorkspaceStateLabel(summary)}</p>
