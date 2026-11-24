@@ -103,6 +103,27 @@ describe('trusted OSM walking segment audit bridge', () => {
     expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)).toBeNull();
   });
 
+  it('rejects cached ways with repeated in-scope segments or self loops', () => {
+    for (const members of [[1, 2, 1, 3], [1, 2, 3, 1, 2], [1, 1, 2, 3]]) {
+      const data = candidates();
+      data.ways[0].nodes = members;
+      expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)).toBeNull();
+    }
+    // A closed ring with distinct segments is not an ambiguous repeated edge.
+    const ring = candidates();
+    ring.ways[0].nodes = [1, 2, 3, 1];
+    const graph = applyCampusWalkingSegmentAudits(ring, 'fixture', [audit()], now)!;
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).not.toBeNull();
+  });
+
+  it('rejects coincident cached source nodes even when graph geometry agrees', () => {
+    const data = candidates();
+    data.nodes[1].lat = data.nodes[0].lat;
+    data.nodes[1].lng = data.nodes[0].lng;
+    data.graph.nodes[1] = { id: 2, lat: data.nodes[1].lat, lng: data.nodes[1].lng };
+    expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)).toBeNull();
+  });
+
   it('does not promote a cached edge whose ordered adjacency is missing', () => {
     const data = candidates();
     data.ways[0].nodes = [2, 1, 3];
