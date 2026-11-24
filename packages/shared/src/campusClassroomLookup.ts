@@ -446,6 +446,10 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     return (
       nameMatchesRoom(comparable, location.name) ||
       nameMatchesRoom(comparable, building) ||
+      // Use existing catalog aliases only after the published identity, scope,
+      // coordinates and non-building checks above passed. A bilingual timetable
+      // can refer to the same POI without changing its stored name or position.
+      (published !== undefined && officialSourcedNames(published).some((name) => nameMatchesRoom(comparable, name))) ||
       nameMatchesVerifiedCode(school, comparable, location.name) ||
       nameMatchesVerifiedCode(school, comparable, building)
     );
