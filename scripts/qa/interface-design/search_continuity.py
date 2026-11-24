@@ -148,6 +148,33 @@ async def check_search_return(page, config, report, capture):
     await page.go_back()
     await assert_results_visible(page, library, report)
 
+    for shape in ('map', 'array'):
+        replacement_url = await page.evaluate("""shape => {
+          const previous = history.state;
+          const url = new URL(location.href);
+          if (shape === 'map') {
+            url.searchParams.delete('q');
+            url.hash = 'results';
+          } else {
+            url.searchParams.set('view', 'compact');
+          }
+          const payload = shape === 'map' ? new Map([['view', 'compact']]) : ['compact'];
+          history.replaceState(payload, '', url);
+          if (history.state.__campusSearchHistoryEntry !== previous.__campusSearchHistoryEntry ||
+              history.state.__campusSearchResultReturn?.token !== previous.__campusSearchResultReturn.token) {
+            throw new Error('Same-page replacement lost the search entry metadata');
+          }
+          return location.href;
+        }""", shape)
+        await page.go_forward()
+        await page.wait_for_url(target_url)
+        await expect(form).to_have_count(0)
+        await page.go_back()
+        assert page.url == replacement_url
+        await expect(field).to_have_value('借書')
+        await assert_results_visible(page, library, report)
+    await page.evaluate("url => history.replaceState(history.state, '', url)", source_url)
+
     # New-tab activation must preserve the current source, not replay a return.
     async with page.context.expect_page() as opened:
         await library.click(modifiers=['Control'])

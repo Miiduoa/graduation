@@ -1359,6 +1359,59 @@ describe('continuing a search after opening a service', () => {
     },
   );
 
+  it.each([
+    ['map', '?campus=pu&view=compact#results'],
+    ['array', '?campus=pu&view=compact'],
+    ['map', '#results'],
+    ['array', '#results'],
+  ] as const)(
+    'restores focus and saved filters after replacing the search entry with a fresh %s (%s)',
+    async (shape, url) => {
+      move('/search?campus=pu');
+      const draft = renderAfterFrame();
+      fireEvent.change(screen.getByRole('searchbox'), { target: { value: '公車' } });
+      expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toContain('公車');
+      draft.unmount();
+
+      const entry = leaveLibrary();
+      await go(-1);
+      const firstReturn = renderAfterFrame();
+      expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+      firstReturn.unmount();
+
+      const state = shape === 'map' ? new Map([['view', 'compact']]) : ['compact'];
+      move(url, state);
+      expect(window.history.state.__campusSearchHistoryEntry).toBe(
+        entry.__campusSearchHistoryEntry,
+      );
+      expect(window.history.state.__campusSearchResultReturn).toEqual(
+        entry.__campusSearchResultReturn,
+      );
+
+      await go(1);
+      expect(window.location.pathname).toBe('/library');
+      await go(-1);
+      expect(window.location.href).toBe(
+        new URL(url, new URL(librarySearch, window.location.origin)).href,
+      );
+      const returned = renderAfterFrame();
+      expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+      expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe(
+        'true',
+      );
+      expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+      expect(scroll).toHaveBeenCalledTimes(2);
+      returned.unmount();
+
+      await go(1);
+      await go(-1);
+      fireEvent.wheel(window);
+      renderAfterFrame();
+      expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+      expect(scroll).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it('does not restore from a destination entry replaced with an unrelated page', async () => {
     leaveLibrary();
     const destinationKey = window.history.state.__campusSearchHistoryEntry;
@@ -1926,8 +1979,9 @@ describe('continuing a search after opening a service', () => {
         };
         view.rerender(<SearchPage />);
       }
-      if (change === 'entry') move(librarySearch, nextState);
-      if (change === 'url') move(librarySearch + '#changed', entry);
+      // Bypass tracking to model an entry or URL change that never went through the wrapper.
+      if (change === 'entry') replaceHistoryForTraversal(nextState, '', librarySearch);
+      if (change === 'url') replaceHistoryForTraversal(entry, '', librarySearch + '#changed');
       if (change === 'unmount') view.unmount();
       nextFrame();
       expect(scroll).not.toHaveBeenCalled();

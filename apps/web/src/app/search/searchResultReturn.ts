@@ -13,10 +13,10 @@ import {
 const HISTORY_ENTRY_KEY = '__campusSearchHistoryEntry';
 const SEARCH_RETURN_STATE = '__campusSearchResultReturn';
 const HISTORY_STATE_PAYLOAD = '__campusSearchHistoryPayload';
+const WRITE_SEARCH_RETURN = Symbol();
 type ResultKind = 'service' | 'suggested' | 'assistant';
 type SearchReturn = {
   token: string;
-  url: string;
   scope: string;
   filters: { query: string; category: ServiceCategory | 'all' };
   href: string;
@@ -35,7 +35,10 @@ const listeners = new Set<() => void>();
 let trackedEntryKey: string | null = null;
 let historyEntrySequence = 0;
 // The source key binds the saved filters to the entry even after its destination is unpaired.
-const entriesByReturnToken = new Map<string, { searchKey: string; destinationKey: string | null }>();
+const entriesByReturnToken = new Map<
+  string,
+  { searchKey: string; searchUrl: string; destinationKey: string | null }
+>();
 
 function currentUrl() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -63,21 +66,19 @@ function hasSearchHistoryFields(state: unknown): state is Record<string, unknown
 }
 
 function onHistoryPush(
-  previousState: unknown,
-  previousPath: string,
+  searchEntry: ReturnType<typeof readSearchEntry>,
   entryKey: string | null,
   routerCommit: boolean,
 ) {
   const navigationToken = consumeSearchResultNavigation();
   // Only a traversal between the linked entries can start another restore.
   publishReturn(null, null);
-  const leaving = readReturn(previousState);
-  const armed = leaving && entriesByReturnToken.get(leaving.token);
-  if (leaving && armed?.searchKey === readEntryKey(previousState) && previousPath === '/search') {
-    if (routerCommit && leaving.token === navigationToken && appUrl(leaving.href) === currentUrl()) {
-      armed.destinationKey = entryKey;
+  if (searchEntry) {
+    const { saved, entries } = searchEntry;
+    if (routerCommit && saved.token === navigationToken && appUrl(saved.href) === currentUrl()) {
+      entries.destinationKey = entryKey;
     } else if (window.location.pathname !== '/search') {
-      armed.destinationKey = null;
+      entries.destinationKey = null;
     }
   }
 }
@@ -120,6 +121,7 @@ function installHistoryTracking() {
     ) {
       const previousState = this.state;
       const previousKey = readEntryKey(previousState);
+      const searchEntry = readSearchEntry(previousState);
       const previousPath = window.location.pathname;
       const push = method === 'pushState';
       const routerCommit = push && isRouterPush(data);
@@ -128,13 +130,21 @@ function installHistoryTracking() {
       // Normalize copies and replacements of keyed entries before serialization.
       const cloned = data != null && !isHistoryRecord(data) &&
         ((!push && previousKey !== null) || hasSearchHistoryFields(data));
+      const writesReturn =
+        data != null && Object.getOwnPropertyDescriptor(data, WRITE_SEARCH_RETURN)?.value === true;
       let state = cloned ? cloneHistoryState(data) : data;
       if (cloned || state == null || isHistoryRecord(state)) {
         const current = state as Record<string, unknown> | null | undefined;
-        if (push || previousKey || current?.[SEARCH_RETURN_STATE] || current?.[HISTORY_ENTRY_KEY]) {
+        if (push || previousKey || hasSearchHistoryFields(current) || writesReturn) {
           const fields = cloned && current ? current : { ...current };
-          if (push || replacesPage) delete fields[SEARCH_RETURN_STATE];
-          // Query and fragment replacements keep the page's entry identity.
+          const saved = push || replacesPage
+            ? null
+            : writesReturn
+              ? readReturn(current)
+              : searchEntry?.saved;
+          if (saved) fields[SEARCH_RETURN_STATE] = saved;
+          else delete fields[SEARCH_RETURN_STATE];
+          // Query and fragment replacements keep both pieces of entry metadata.
           fields[HISTORY_ENTRY_KEY] =
             (push || replacesPage ? null : previousKey) ?? `${Date.now()}-${++historyEntrySequence}`;
           state = fields;
@@ -145,7 +155,10 @@ function installHistoryTracking() {
       // Keep the departing key until that observer has compared the two entries.
       if (push || previousKey === trackedEntryKey) trackedEntryKey = readEntryKey(this.state);
       if (push) {
-        onHistoryPush(previousState, previousPath, trackedEntryKey, routerCommit);
+        onHistoryPush(searchEntry, trackedEntryKey, routerCommit);
+      } else if (!replacesPage && searchEntry && !writesReturn) {
+        // Bind the new URL only after the browser accepts the same-page replacement.
+        searchEntry.entries.searchUrl = currentUrl();
       } else if (replacesPage && previousKey) {
         for (const [token, armed] of entriesByReturnToken) {
           if (armed.searchKey === previousKey) entriesByReturnToken.delete(token);
@@ -163,7 +176,6 @@ function readReturn(state: unknown): SearchReturn | null {
   if (!saved || typeof saved !== 'object') return null;
   const value = saved as Partial<SearchReturn>;
   return typeof value.token === 'string' &&
-    typeof value.url === 'string' &&
     typeof value.scope === 'string' &&
     typeof value.filters?.query === 'string' &&
     (value.filters.category === 'all' ||
@@ -174,21 +186,25 @@ function readReturn(state: unknown): SearchReturn | null {
     : null;
 }
 
-function readCurrentReturn(expected: SearchReturn) {
-  const state = window.history.state;
-  const current = readReturn(state);
-  const entries = entriesByReturnToken.get(expected.token);
-  return entries &&
+function readSearchEntry(state: unknown) {
+  const saved = readReturn(state);
+  const entries = saved && entriesByReturnToken.get(saved.token);
+  return saved &&
+    entries &&
+    window.location.pathname === '/search' &&
     readEntryKey(state) === entries.searchKey &&
-    current?.token === expected.token &&
-    current.url === expected.url &&
-    current.url === currentUrl()
-    ? current
+    currentUrl() === entries.searchUrl
+    ? { saved, entries }
     : null;
 }
 
-function matchesRouterUrl(saved: SearchReturn, queryString: string) {
-  return new URL(saved.url, window.location.origin).searchParams.toString() === queryString;
+function readCurrentReturn(expected: SearchReturn) {
+  const current = readSearchEntry(window.history.state)?.saved;
+  return current?.token === expected.token ? current : null;
+}
+
+function matchesRouterUrl(queryString: string) {
+  return new URLSearchParams(window.location.search).toString() === queryString;
 }
 
 function publishReturn(pending: SearchReturn | null, arrival = returnState.arrival) {
@@ -198,22 +214,14 @@ function publishReturn(pending: SearchReturn | null, arrival = returnState.arriv
 }
 
 function captureReturn(event: PopStateEvent) {
-  const saved = readReturn(event.state);
+  const entry = readSearchEntry(event.state);
   const entryKey = readEntryKey(event.state);
   const departedKey = trackedEntryKey;
   trackedEntryKey = entryKey;
   consumeSearchResultNavigation();
-  const entries = saved && entriesByReturnToken.get(saved.token);
-  const arrival =
-    saved &&
-    entries &&
-    entryKey === entries.searchKey &&
-    window.location.pathname === '/search' &&
-    saved.url === currentUrl()
-      ? saved
-      : null;
+  const arrival = entry?.saved ?? null;
   publishReturn(
-    departedKey !== null && departedKey === entries?.destinationKey ? arrival : null,
+    departedKey !== null && departedKey === entry?.entries.destinationKey ? arrival : null,
     arrival,
   );
 }
@@ -248,30 +256,30 @@ function subscribeReturn(listener: () => void) {
 const getReturnState = () => returnState;
 const getServerReturnState = () => emptyReturnState;
 
-export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token' | 'url'>) {
+// Only these explicit writes can change the return data on an existing entry.
+function replaceEntryReturn(saved: SearchReturn | null) {
+  const previous = window.history.state;
+  const state = Array.isArray(previous) ? structuredClone(previous) : { ...previous };
+  if (saved) state[SEARCH_RETURN_STATE] = saved;
+  else delete state[SEARCH_RETURN_STATE];
+  Object.defineProperty(state, WRITE_SEARCH_RETURN, { value: true });
+  window.history.replaceState(state, '');
+}
+
+export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token'>) {
   publishReturn(null, null);
   if (window.location.pathname !== '/search') return;
   const token = `${Date.now()}-${++returnSequence}`;
   const previousState = window.history.state;
   try {
-    window.history.replaceState(
-      {
-        ...previousState,
-        [SEARCH_RETURN_STATE]: {
-          ...value,
-          token,
-          url: currentUrl(),
-        } satisfies SearchReturn,
-      },
-      '',
-    );
+    replaceEntryReturn({ ...value, token });
     const searchKey = readEntryKey(window.history.state);
     if (searchKey) {
       const previous = readReturn(previousState);
       if (previous && entriesByReturnToken.get(previous.token)?.searchKey === searchKey) {
         entriesByReturnToken.delete(previous.token);
       }
-      entriesByReturnToken.set(token, { searchKey, destinationKey: null });
+      entriesByReturnToken.set(token, { searchKey, searchUrl: currentUrl(), destinationKey: null });
       markSearchResultNavigation(token);
     }
   } catch {
@@ -287,9 +295,7 @@ export function clearSearchResultReturn() {
     entriesByReturnToken.delete(saved.token);
   }
   try {
-    const state = { ...window.history.state };
-    delete state[SEARCH_RETURN_STATE];
-    window.history.replaceState(state, '');
+    replaceEntryReturn(null);
   } catch {
     // The pending focus is cancelled even if this entry cannot be updated.
   }
@@ -330,7 +336,7 @@ export function useSearchResultReturn({
     !blocked &&
     arrival.scope === scope &&
     readCurrentReturn(arrival) &&
-    matchesRouterUrl(arrival, queryString)
+    matchesRouterUrl(queryString)
       ? arrival.filters
       : null;
 
@@ -348,7 +354,7 @@ export function useSearchResultReturn({
     }
     // Back may arrive before Next renders its URL or the saved search draft.
     if (
-      !matchesRouterUrl(current, queryString) ||
+      !matchesRouterUrl(queryString) ||
       current.filters.query !== query ||
       current.filters.category !== category
     )
@@ -394,7 +400,7 @@ export function useSearchResultReturn({
         latest.scope !== live.scope ||
         latest.filters.query !== live.query ||
         latest.filters.category !== live.category ||
-        !matchesRouterUrl(latest, live.queryString) ||
+        !matchesRouterUrl(live.queryString) ||
         !live.ready ||
         live.blocked ||
         (focus !== active && focus !== target && focus !== document.body)
