@@ -19,6 +19,7 @@ import {
   snapshotPersonalImports,
   editPersonalImport,
   loadPersonalImports,
+  mutatePersonalImportLedger,
   personalImportCourses,
   personalImportStorageKey,
   selectPersonalTimetableCourses,
@@ -113,7 +114,103 @@ test('Web leaves the primary ledger intact when the recovery copy cannot be stor
   }
 });
 
-test.each(['before rollback', 'before rollback using the legacy primary', 'after rollback checks'])(
+test('Web IndexedDB locks isolate account and school ledgers while a mutation waits', async () => {
+  const cleanup = useWebStorage();
+  const queues = new Map<string, Promise<void>>();
+  // Model IndexedDB's readwrite scheduling at database/object-store scope.
+  const open = jest.fn((name: string) => {
+    const request = {
+      onsuccess: () => {},
+      result: {
+        close: jest.fn(),
+        transaction: (storeName: string) => {
+          const queueKey = JSON.stringify([name, storeName]);
+          const previous = queues.get(queueKey) ?? Promise.resolve();
+          let release!: () => void;
+          queues.set(queueKey, new Promise<void>((resolve) => { release = resolve; }));
+          let pending = 0;
+          const transaction = {
+            oncomplete: () => {},
+            objectStore: () => ({
+              get: () => {
+                const read = { onsuccess: () => {} };
+                pending += 1;
+                void previous.then(() => setTimeout(() => {
+                  pending -= 1;
+                  read.onsuccess();
+                  if (pending === 0) {
+                    release();
+                    transaction.oncomplete();
+                  }
+                }, 0));
+                return read;
+              },
+            }),
+          };
+          return transaction;
+        },
+      },
+    };
+    void Promise.resolve().then(() => request.onsuccess());
+    return request;
+  });
+  const indexedDB = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB');
+  Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: { open } });
+  let resume!: () => void;
+  const paused = new Promise<void>((resolve) => { resume = resolve; });
+  let signalStarted!: () => void;
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  const slow = mutatePersonalImportLedger(scope, () => true, async (ledger) => {
+    signalStarted();
+    await paused;
+    return { ledger, result: undefined };
+  });
+  let writes: Promise<unknown>[] = [];
+  let sameLedgerWrite: Promise<unknown> | undefined;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await started;
+    const guard = { canContinue: () => true };
+    let otherTab!: typeof import('../services/personalImports');
+    jest.isolateModules(() => {
+      otherTab = require('../services/personalImports');
+    });
+    const enterSameLedger = jest.fn(() => true);
+    sameLedgerWrite = otherTab.appendPersonalImports(scope, [row('same-ledger')], {
+      canContinue: enterSameLedger,
+    });
+    writes = [
+      { ...scope, owner: 'nuni:account-b' },
+      { ...scope, schoolId: 'ntu' },
+    ].map(async (otherScope) => {
+      const { ledger } = await appendPersonalImports(otherScope, [
+        { ...row('new'), schoolId: otherScope.schoolId },
+      ], guard);
+      const [original] = ledger.records;
+      const edited = await editPersonalImport(otherScope, original, { ...original, title: '統計' }, guard);
+      expect(edited.records[0].title).toBe('統計');
+    });
+    await Promise.race([
+      Promise.all(writes),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('其他帳本的儲存被阻塞')), 1000);
+      }),
+    ]);
+    expect(new Set(open.mock.calls.map(([name]) => name)).size).toBe(3);
+    expect(enterSameLedger).not.toHaveBeenCalled();
+    resume();
+    await expect(sameLedgerWrite).resolves.toMatchObject({ added: 1 });
+  } finally {
+    clearTimeout(timeout);
+    resume();
+    await Promise.allSettled([slow, sameLedgerWrite, ...writes]);
+    if (indexedDB) Object.defineProperty(globalThis, 'indexedDB', indexedDB);
+    else Reflect.deleteProperty(globalThis, 'indexedDB');
+    cleanup();
+  }
+});
+
+test.each(['before rollback', 'before rollback using the legacy primary', 'after rollback checks', 'before publication'])(
   'Web keeps a newer commit completed %s without Web Locks or IndexedDB',
   async (timing) => {
     const cleanup = useWebStorage();
@@ -142,14 +239,14 @@ test.each(['before rollback', 'before rollback using the legacy primary', 'after
 
     const rejected = expect(editPersonalImport(scope, ledger.records[0], row('original', '分頁 A'), {
       canContinue: () => verified,
-    })).rejects.toThrow('帳號或學校已切換');
+    })).rejects.toThrow(timing === 'before publication' ? '已在另一個分頁更新' : '帳號或學校已切換');
     let cleanupSpy: jest.SpyInstance | undefined;
     try {
       const stageKey = await staged;
       let newer = { ...ledger, records: [{ ...ledger.records[0], title: '分頁 B' }] };
       const newerRaw = JSON.stringify({ ...newer, webCommit: 'tab-b' });
       const otherStageKey = stageKey + '-tab-b';
-      if (timing === 'before rollback') {
+      if (timing === 'before rollback' || timing === 'before publication') {
         newer = await otherTab.editPersonalImport(scope, ledger.records[0], row('original', '分頁 B'), {
           canContinue: () => true,
         });
@@ -169,7 +266,7 @@ test.each(['before rollback', 'before rollback using the legacy primary', 'after
         });
       }
 
-      verified = false;
+      verified = timing === 'before publication';
       resume();
       await rejected;
       if (timing === 'after rollback checks') {
@@ -178,6 +275,36 @@ test.each(['before rollback', 'before rollback using the legacy primary', 'after
         expect(storage.getItem(otherStageKey)).toBe('分頁 B 的新副本');
       }
       await expect(otherTab.loadPersonalImports(scope)).resolves.toEqual(newer);
+      if (timing === 'before publication') {
+        let reloadedTab!: typeof import('../services/personalImports');
+        jest.isolateModules(() => {
+          reloadedTab = require('../services/personalImports');
+        });
+        const setStorageItem = Storage.prototype.setItem;
+        const stagePrefix = stageKey.slice(0, stageKey.indexOf(':stage:') + ':stage:'.length);
+        const quota = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+          this: Storage,
+          entry,
+          value,
+        ) {
+          // There is enough space for only one full-size recovery copy.
+          if (entry.startsWith(stagePrefix) && Object.keys(this).some((key) => key.startsWith(stagePrefix))) {
+            throw new DOMException('Quota exceeded', 'QuotaExceededError');
+          }
+          setStorageItem.call(this, entry, value);
+        });
+        try {
+          const reloaded = await reloadedTab.loadPersonalImports(scope);
+          const retried = await reloadedTab.editPersonalImport(scope, reloaded.records[0], row('original', '重試成功'), {
+            canContinue: () => true,
+          });
+          expect(retried.records[0].title).toBe('重試成功');
+          await expect(reloadedTab.loadPersonalImports(scope)).resolves.toEqual(retried);
+        } finally {
+          quota.mockRestore();
+        }
+      }
+      expect(storage.getItem(stageKey)).toBeNull();
     } finally {
       resume();
       await rejected;

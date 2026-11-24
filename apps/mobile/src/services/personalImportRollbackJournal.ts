@@ -22,11 +22,11 @@ const fingerprint = (raw: string | null) => sha256(raw ?? 'null');
 
 const lockStore = 'writes';
 
-async function openWriteLockDatabase(): Promise<IDBDatabase | undefined> {
+async function openWriteLockDatabase(key: string): Promise<IDBDatabase | undefined> {
   if (typeof indexedDB === 'undefined') return undefined;
   try {
     return await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('campus.personal-imports.locks', 1);
+      const request = indexedDB.open(`campus.personal-imports.locks:${sha256(key)}`, 1);
       request.onupgradeneeded = () => request.result.createObjectStore(lockStore);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
@@ -42,9 +42,9 @@ export async function withPersonalImportWriteLock<T>(key: string, write: () => P
   const name = webJournalKey(key);
   if (navigator.locks) return navigator.locks.request(name, write);
 
-  // An IndexedDB readwrite transaction serializes cooperating tabs on Web
-  // previews served over HTTP, where Web Locks may be unavailable.
-  const database = await openWriteLockDatabase();
+  // IndexedDB serializes readwrite transactions by object store. Use a
+  // database per ledger so opening a new ledger also needs no shared upgrade.
+  const database = await openWriteLockDatabase(key);
   if (!database) return write();
   try {
     return await new Promise<T>((resolve, reject) => {
@@ -54,7 +54,7 @@ export async function withPersonalImportWriteLock<T>(key: string, write: () => P
       let finished = false;
       const keepLock = () => {
         if (finished) return;
-        store.get(name).onsuccess = () => {
+        store.get('lock').onsuccess = () => {
           if (!operation) {
             operation = write().finally(() => { finished = true; });
             // Observe rejection immediately. Deliver the result after releasing the lock.
@@ -159,13 +159,10 @@ export async function commitWebPersonalImports(
 
     return publish();
   } finally {
-    // Even if another tab publishes here, this key belongs only to this attempt.
-    // No failure path writes the primary or clears a shared recovery key.
+    // Stages are private to an attempt and are never read for recovery.
+    // Reclaim this stage even if another tab has already published.
     try {
-      if (ownsStage()) {
-        const current = storage.getItem(key);
-        if (current === before || current === committed) storage.removeItem(stageKey);
-      }
+      if (ownsStage()) storage.removeItem(stageKey);
     } catch {
       // An abandoned stage is inert and can be reclaimed by a later write.
     }
