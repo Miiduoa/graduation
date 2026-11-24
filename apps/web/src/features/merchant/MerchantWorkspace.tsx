@@ -58,6 +58,12 @@ type ConfirmedMerchantData = {
 };
 const workspaceKey = ({ tenantId, locationId }: Pick<Overview['workspaces'][number], 'tenantId' | 'locationId'>) =>
   `${tenantId}:${locationId}`;
+function preferConfirmedMenu<T extends { missingRequirements: string[] }>(previous: T | undefined, next: T): T {
+  if (previous && !previous.missingRequirements.includes('menu') && next.missingRequirements.includes('menu')) {
+    return { ...next, missingRequirements: next.missingRequirements.filter((item) => item !== 'menu') };
+  }
+  return next;
+}
 type Draft = Omit<NuniMerchantApplicationInput, 'idempotencyKey'>;
 const emptyDraft = (): Draft => ({
   tenantId: '',
@@ -341,20 +347,31 @@ function AccountWorkspace({
     setLoadError('');
     try {
       let programsUnavailable = false;
+      let applicationsUnavailable = false;
       const data = await loadMerchantOverview(async (path, input) => {
         try {
           return await browserRequest(path, context, input);
         } catch (error) {
           if (
-            path !== 'merchant-onboarding-programs' ||
-            !(error instanceof NuniError) ||
-            expired(error) ||
-            ![403, 404].includes(error.status)
-          )
-            throw error;
-          // The store and application requests still determine access to their records.
-          programsUnavailable = true;
-          return { programs: [] };
+            path === 'merchant-onboarding-programs' &&
+            error instanceof NuniError &&
+            !expired(error) &&
+            [403, 404].includes(error.status)
+          ) {
+            // The store and application requests still determine access to their records.
+            programsUnavailable = true;
+            return { programs: [] };
+          }
+          if (
+            path === 'merchant-applications' &&
+            !expired(error) &&
+            !(error instanceof NuniError && [401, 403, 404].includes(error.status))
+          ) {
+            // Still re-check store access; do not treat a failed list as a blank applications page.
+            applicationsUnavailable = true;
+            return { applications: [] };
+          }
+          throw error;
         }
       }, view);
       if (!isCurrent()) return;
@@ -407,7 +424,7 @@ function AccountWorkspace({
         }
         listed.current = data;
         publishOverview();
-        if (programsUnavailable) setLoadError('目前無法確認店家資料，請重新載入。');
+        if (programsUnavailable || applicationsUnavailable) setLoadError('目前無法確認店家資料，請重新載入。');
         else if (accessDenied)
           setLoadError('目前無法取得部分門市的管理權限，請重新載入。');
       }
@@ -529,7 +546,11 @@ function AccountWorkspace({
       setHasVerifiedLocation(true);
       const key = workspaceKey(detail);
       const { workspaces } = confirmed.current;
-      workspaces.set(key, { detail, denied: !verifiedAccess && workspaces.get(key)?.denied });
+      const current = workspaces.get(key);
+      workspaces.set(key, {
+        detail: preferConfirmedMenu(current?.detail, detail),
+        denied: !verifiedAccess && current?.denied,
+      });
       publishOverview();
     },
     [publishOverview],

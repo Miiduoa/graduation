@@ -126,6 +126,9 @@ export function MerchantOperations({
   const [menu, setMenu] = useState<MenuDraft[]>(saved?.menu ?? [newItem()]);
   const [menuConfirmed, setMenuConfirmed] = useState(false);
   const [menuReceipt, setMenuReceipt] = useState<number | null>(saved?.menuReceipt ?? null);
+  const menuWriteRef = useRef(saved?.menuReceipt != null);
+  const menuReceiptRef = useRef<number | null>(saved?.menuReceipt ?? null);
+  const detailRef = useRef<Detail | null>(null);
   const [menuBlocked, setMenuBlocked] = useState(saved?.menuBlocked ?? false);
   const [activationConfirmed, setActivationConfirmed] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
@@ -170,11 +173,24 @@ export function MerchantOperations({
   }, [suspended, invalidate]);
 
   const accept = useCallback((next: Detail, verifiedAccess = false) => {
-    setDetail(next);
+    const current = detailRef.current;
+    const menuAlreadyConfirmed =
+      menuWriteRef.current ||
+      menuReceiptRef.current != null ||
+      (current != null && !current.missingRequirements.includes('menu'));
+    const merged =
+      menuAlreadyConfirmed && next.missingRequirements.includes('menu')
+        ? {
+            ...next,
+            missingRequirements: next.missingRequirements.filter((item) => item !== 'menu'),
+          }
+        : next;
+    detailRef.current = merged;
+    setDetail(merged);
     setFresh(true);
     setMenuConfirmed(false);
     setActivationConfirmed(false);
-    changed.current(next, verifiedAccess);
+    changed.current(merged, verifiedAccess);
   }, []);
 
   const read = useCallback(
@@ -198,6 +214,7 @@ export function MerchantOperations({
         if (reconcile || !drafts.get(draftKey)?.uncertain) setError('');
       } catch (failure) {
         if (!active.current || version !== run.current) return;
+        detailRef.current = null;
         setDetail(null);
         if (
           failure instanceof NuniError &&
@@ -266,10 +283,12 @@ export function MerchantOperations({
         failure instanceof NuniError &&
         (failure.status === 401 || failure.code === 'SESSION_CHANGED')
       ) {
+        detailRef.current = null;
         setDetail(null);
         setFresh(false);
         expire.current();
       } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
+        detailRef.current = null;
         setDetail(null);
         setFresh(false);
         setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
@@ -642,6 +661,8 @@ export function MerchantOperations({
                           },
                           false,
                         );
+                        menuWriteRef.current = true;
+                        menuReceiptRef.current = receipt.createdItems;
                         setMenuReceipt(receipt.createdItems);
                         setMenuConfirmed(false);
                         setNotice(
