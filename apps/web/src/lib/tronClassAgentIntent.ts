@@ -298,9 +298,11 @@ function isWriteNegatedAt(tokens: Token[], writeAt: number): boolean {
 }
 
 const PUNCT_CHAR = /[，,；;。！!？?\r\n：:()（）\[\]【】《》〈〉「」『』“”‘’"'·…]/u;
-const FILENAME_BREAK = /[\s：:，,、；;。！!？?\r\n()（）\[\]【】《》〈〉「」『』“”‘’"'`·…]/u;
 const FILE_EXTENSION = /\.[A-Za-z][A-Za-z0-9]{0,7}$/u;
-const BARE_FILENAME_AT = /^(?:[^\s：:，,、；;。！!？?\r\n()（）\[\]【】《》〈〉「」『』“”‘’"'`·…]+)\.[A-Za-z][A-Za-z0-9]{0,7}(?![A-Za-z0-9])/u;
+// Bare filenames are a single run of letters/digits plus -/_ , then an extension.
+// Any other punctuation or symbol, including / and ／ after NFKC, is not a filename.
+const BARE_FILENAME_AT = /^(?:[\p{L}\p{N}_-]+)\.[A-Za-z][A-Za-z0-9]{0,7}(?![A-Za-z0-9])/u;
+const BARE_FILENAME_BODY = /^[\p{L}\p{N}_-]+$/u;
 const QUOTE_OR_BRACKET_PAIRS: Array<readonly [string, string]> = [
   ['「', '」'], ['『', '』'], ['“', '”'], ['‘', '’'], ['"', '"'], ["'", "'"], ['`', '`'],
   ['（', '）'], ['(', ')'], ['【', '】'], ['[', ']'], ['《', '》'], ['〈', '〉'],
@@ -310,9 +312,12 @@ function containsLexiconVerb(value: string): boolean {
   return [...WRITE_VERB_SET, ...QUERY_VERBS, ...PREPARE_ACTIONS].some(verb => verb.length > 0 && value.includes(verb));
 }
 
-function isValidFilenameValue(value: string, allowVerbs: boolean): boolean {
-  if (!value || FILENAME_BREAK.test(value) || !FILE_EXTENSION.test(value)) return false;
-  return allowVerbs || !containsLexiconVerb(value);
+function isValidFilenameValue(value: string, allowQuoted: boolean): boolean {
+  if (!value || !FILE_EXTENSION.test(value)) return false;
+  // Quoted or bracketed inner text may contain spaces, punctuation, or lexicon verbs.
+  if (allowQuoted) return true;
+  const body = value.replace(FILE_EXTENSION, '');
+  return BARE_FILENAME_BODY.test(body) && !containsLexiconVerb(value);
 }
 
 function quotedFilenameSpan(text: string, index: number): { open: number; inner: number; close: number; end: number } | null {
