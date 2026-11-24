@@ -20,6 +20,9 @@ jest.mock('../state/school', () => ({
 jest.mock('../state/personalImportScope', () => ({
   usePersonalImportScope: () => require('react').useContext(mockScopeContext),
 }));
+jest.mock('../state/nuniSession', () => ({
+  useNuniSession: () => ({ pendingLogout: false }),
+}));
 jest.mock('../services/publicCampusContent', () => ({
   loadCampusEvent: jest.fn(),
   loadCampusEventPage: jest.fn(),
@@ -108,7 +111,7 @@ test('選取活動後，nuni 直接打開可修改的跨日草稿，確認後才
   await view.findByText(/已在這台裝置新增 1 筆/);
   mockVerifying = true;
   view.rerender(<Journey />);
-  expect(view.queryByText(/已在這台裝置新增 1 筆/)).toBeNull();
+  expect(view.getByText(/已在這台裝置新增 1 筆/)).toBeTruthy();
   mockVerifying = false;
   view.rerender(<Journey />);
   await view.findByText(/已在這台裝置新增 1 筆/);

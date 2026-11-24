@@ -31,6 +31,7 @@ import { PersonalMonthCalendar } from './PersonalMonthCalendar';
 import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { usePersonalImportScope } from '../state/personalImportScope';
+import { useNuniSession } from '../state/nuniSession';
 import { useSchool } from '../state/school';
 import {
   appendPersonalImports,
@@ -92,6 +93,7 @@ export function CampusEventCalendarDraftScreen() {
       >
     >();
   const scope = usePersonalImportScope();
+  const loggingOut = !!useNuniSession().pendingLogout;
   const { school } = useSchool();
   const campusEvent = params?.campusEvent;
   const matches =
@@ -100,11 +102,13 @@ export function CampusEventCalendarDraftScreen() {
   useLayoutEffect(() => {
     if (scope && !matches) expired.current = true;
   }, [scope, matches]);
-  if (!campusEvent?.draft || (scope && !matches) || expired.current) {
+  if (!campusEvent?.draft || (scope && !matches) || expired.current || loggingOut) {
     return (
       <Screen>
         <Text style={{ color: theme.colors.text }}>
-          {scope ? '請回到目前校園的活動頁重新開啟草稿。' : '正在確認帳號與校園…'}
+          {loggingOut || (scope && !matches) || expired.current
+            ? '請回到目前校園的活動頁重新開啟草稿。'
+            : '正在確認帳號與校園…'}
         </Text>
       </Screen>
     );
@@ -126,14 +130,18 @@ export function CampusEventCalendarDraftScreen() {
 
 export default function PersonalCalendarScreen() {
   const scope = usePersonalImportScope();
+  const loggingOut = !!useNuniSession().pendingLogout;
   const { school } = useSchool();
   const route = useRoute();
   const key = scope ? personalImportStorageKey(scope) : '';
   const lastReadyKey = useRef(key);
-  if (key) lastReadyKey.current = key;
+  if (loggingOut) lastReadyKey.current = '';
+  else if (key) lastReadyKey.current = key;
   // Keep the same workspace through a brief revalidation so an in-flight save
   // can finish or surface an error instead of silently dropping the draft.
-  const workspaceKey = key || lastReadyKey.current || 'pending';
+  // Logout is not revalidation: drop the sticky key so the previous owner's
+  // calendar cannot reappear, and unmount in-flight reads/deletes.
+  const workspaceKey = loggingOut ? 'pending' : key || lastReadyKey.current || 'pending';
   const focusEventId = (route.params as FocusParams)?.eventId;
   return (
     <PersonalCalendarWorkspace
@@ -158,6 +166,7 @@ function PersonalCalendarWorkspace({
 }) {
   const navigation = useNavigation();
   const scope = usePersonalImportScope();
+  const loggingOut = !!useNuniSession().pendingLogout;
   const active = useRef(true);
   const requestId = useRef(0);
   const scopeSnapshot = useRef(scopeKey);
@@ -307,6 +316,7 @@ function PersonalCalendarWorkspace({
     !!scope && active.current && scopeSnapshot.current === personalImportStorageKey(scope);
   const stillThisScope = (scoped?: { owner: string; schoolId: string }) => {
     if (!active.current) return false;
+    if (loggingOut) return false;
     if (!scope) return true;
     if (!scoped) return isActiveScope();
     return scope.owner === scoped.owner && scope.schoolId === scoped.schoolId;
@@ -714,9 +724,9 @@ function PersonalCalendarWorkspace({
     );
   };
 
-  // Revalidation may hide an idle workspace, but never hide an open draft, an
-  // in-flight save, or the error/receipt that tells the user what happened.
-  if (initialDraft && !scope && !saving && !formError) {
+  // Revalidation may hide an idle unsaved campus draft, but never hide an
+  // in-flight save or the error/receipt that tells the user what happened.
+  if (initialDraft && !scope && !saving && !formError && !notice) {
     return (
       <Screen>
         <Text style={{ color: theme.colors.muted }}>正在確認帳號與校園…</Text>

@@ -39,8 +39,13 @@ let mockScope: { owner: string; schoolId: string } | null = {
 
 const mockNavigate = jest.fn();
 
+let mockPendingLogout = false;
+
 jest.mock('../state/personalImportScope', () => ({
   usePersonalImportScope: () => mockScope,
+}));
+jest.mock('../state/nuniSession', () => ({
+  useNuniSession: () => ({ pendingLogout: mockPendingLogout }),
 }));
 jest.mock('../state/school', () => ({
   useSchool: () => ({ school: { id: 'pu', name: '靜宜大學' } }),
@@ -114,6 +119,7 @@ beforeEach(async () => {
     owner: 'nuni:pa_11111111-1111-4111-8111-111111111111',
     schoolId: 'pu',
   };
+  mockPendingLogout = false;
   mockNavigate.mockReset();
   mockEnableTimed.mockReset();
   mockEnableAllDay.mockReset();
@@ -503,4 +509,13 @@ it('shows a save error if the write fails while the account is briefly revalidat
   await waitFor(() => expect(view.getByText('網路中斷')).toBeTruthy());
   expect(view.getByLabelText('標題').props.value).toBe('重驗失敗要看見錯誤');
   expect(view.queryByText(personalImportSavedNotice(1))).toBeNull();
+});
+
+it("hides the previous owner's calendar while logout is pending", async () => {
+  const view = await fillAndSave('即將登出的行程');
+  expect(view.getByText('即將登出的行程')).toBeTruthy();
+  mockPendingLogout = true;
+  mockScope = null;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(view.queryByText('即將登出的行程')).toBeNull();
 });
