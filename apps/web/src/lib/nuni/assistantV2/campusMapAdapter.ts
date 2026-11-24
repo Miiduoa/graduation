@@ -4,6 +4,7 @@ import { parseCampusMapRecord } from '@campus/shared/src/campusMapRecords';
 import {
   hasBundledCampusPlaces,
   isProvidencePendingVerification,
+  locationMatchesSearch,
   providencePlaceSourceUrl,
   withProvidenceCampusPlaces,
   type CampusMapPlaceLike,
@@ -130,9 +131,10 @@ export async function readCampusMap(input: {
     matches.push({ item, alias });
   }
   const hasPrimary = matches.some(({ item, alias }) => !alias && item.match !== 'search');
-  const candidates = matches
-    .filter(({ item, alias }) => !hasPrimary || !alias || item.match !== 'building')
-    .map(({ item }) => item);
+  const candidates = matches.flatMap(({ item, alias }): CampusMapItem[] => {
+    if (!hasPrimary || !alias || item.match !== 'building') return [item];
+    return locationMatchesSearch(item, args.query) ? [{ ...item, match: 'search' }] : [];
+  });
   const rank = { place: 0, building: 1, search: 2 };
   candidates.sort((a, b) => rank[a.match] - rank[b.match] || a.name.localeCompare(b.name, 'zh-Hant') || a.id.localeCompare(b.id));
   const items = candidates.slice(0, args.limit);

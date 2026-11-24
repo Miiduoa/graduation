@@ -168,8 +168,11 @@ export function parseCampusMapResult(raw: unknown, schoolId: string, requested: 
         ...(item.building !== undefined ? { building: clean(item.building, 120) } : {}),
         ...(item.floor !== undefined ? { floor: clean(item.floor, 80) } : {}),
         ...boundedTransitStopMarker(item) } as CampusMapItem;
-      if (new Set(parsed.facilities).size !== parsed.facilities.length ||
-          parsed.match !== campusMapMatch(schoolId, args.query, parsed)) throw new Error('Invalid map match');
+      const details = campusMapMatchDetails(schoolId, args.query, parsed);
+      const validMatch = details && (parsed.match === details.match ||
+        (parsed.match === 'search' && details.alias && locationMatchesSearch(parsed, args.query)));
+      if (new Set(parsed.facilities).size !== parsed.facilities.length || !validMatch)
+        throw new Error('Invalid map match');
       const sourceUrl = providencePlaceSourceUrl(schoolId, parsed);
       const verification = sourceUrl ? isProvidencePendingVerification(schoolId, parsed) ? 'single-source' : 'cross-checked' : 'published';
       if (parsed.verification !== verification || item.sourceUrl !== (sourceUrl ?? undefined) ||

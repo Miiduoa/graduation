@@ -137,6 +137,20 @@ describe('map reader uses the current page sources', () => {
     });
   });
 
+  it('preserves a published building text match alongside a place with the same name', async () => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find(item => item.id === 'pu-wenxing')!;
+    const name = 'Bishop Kupfer Hall';
+    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([
+      doc(place.id, { ...place, building: name }),
+      doc('imported-building', published({ name })),
+    ]) as never);
+    expect(await read(name)).toMatchObject({
+      resolution: 'ambiguous', partial: false, items: [
+        { id: 'imported-building', match: 'place' }, { id: place.id, match: 'search' },
+      ],
+    });
+  });
+
   it.each([
     ['pu-renyuan', 'AK', 'AK303', false, 'building'],
     ['pu-renyuan', 'AK303', 'AK303', false, 'place'],
