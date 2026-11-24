@@ -114,6 +114,7 @@ const DOMAIN_NOUNS = [
   '作業準備區', '作業準備', '準備區', '下載區', '下載說明',
   '後面', '後來', '後續', '後方', '後段', '後期', '後天', '後台', '後端', '後排', '後座',
   '及時', '及格', '及第', '及至', '及早', '及其',
+  '中文', '中文版', '中間', '中午', '中心', '中央', '中等', '中級', '中學', '中部',
 ];
 const CONJ_CUES = ['以及', '和', '與', '及', '、'];
 const WRITE_COMPOUNDS = [
@@ -179,10 +180,16 @@ function isInWordWriteMorpheme(text: string, from: number, clauseHasQuery: boole
   return true;
 }
 
+const QUERY_CONTEXT_HOLD_CUES = new Set(['供', '正在', '正']);
+
 function noteToken(tokens: Token[], token: Token, state: { clauseHasQuery: boolean }): void {
   tokens.push(token);
-  if (isClauseBoundaryToken(token) || WRITE_CUE_WORD_SET.has(token.value)) state.clauseHasQuery = false;
-  else if (token.kind === 'query' || QUERY_START.has(token.value)) state.clauseHasQuery = true;
+  if (isClauseBoundaryToken(token) || WRITE_CUE_WORD_SET.has(token.value) ||
+    (token.kind === 'cue' && !QUERY_CONTEXT_HOLD_CUES.has(token.value))) {
+    state.clauseHasQuery = false;
+  } else if (token.kind === 'query' || QUERY_START.has(token.value)) {
+    state.clauseHasQuery = true;
+  }
 }
 
 function tokenize(text: string): Token[] {
@@ -256,6 +263,13 @@ function isModifierBoundaryToken(token: Token): boolean {
   return token.kind === 'punct' || CLAUSE_CUES.includes(token.value);
 }
 
+function isProgressiveCloser(tokens: Token[], cursor: number, clauseEnd: number): boolean {
+  if (cursor === clauseEnd) return true;
+  const next = tokens[cursor + 1];
+  if (!next) return true;
+  return next.value === '的' || isModifierBoundaryToken(next) || ACTION_CUES.includes(next.value);
+}
+
 function collectModifierSpans(tokens: Token[]): Array<{ start: number; end: number }> {
   const spans: Array<{ start: number; end: number }> = [];
   let index = 0;
@@ -272,16 +286,15 @@ function collectModifierSpans(tokens: Token[]): Array<{ start: number; end: numb
       const value = tokens[cursor]!.value;
       if (value === '供') supply.push(cursor);
       if (value === '用的' || (value === '用' && tokens[cursor + 1]?.value === '的')) {
-        for (const open of supply) {
-          if (cursor > open) spans.push({ start: open, end: cursor });
+        if (supply.length > 0 && cursor > supply[0]!) {
+          spans.push({ start: supply[0]!, end: cursor });
         }
         supply.length = 0;
       }
       if (value === '正在' || value === '正') progressive.push(cursor);
-      if (value === '中') {
-        for (const open of progressive) {
-          if (cursor > open) spans.push({ start: open, end: cursor });
-        }
+      if (value === '中' && isProgressiveCloser(tokens, cursor, end) && progressive.length > 0 &&
+        cursor > progressive[0]!) {
+        spans.push({ start: progressive[0]!, end: cursor });
         progressive.length = 0;
       }
     }
@@ -295,12 +308,32 @@ const modifierInteriorByTokens = new WeakMap<Token[], boolean[]>();
 function modifierInteriorIndex(tokens: Token[]): boolean[] {
   const cached = modifierInteriorByTokens.get(tokens);
   if (cached) return cached;
-  const interior = Array.from({ length: tokens.length }, () => false);
+  const delta = new Array(tokens.length + 1).fill(0);
   for (const span of collectModifierSpans(tokens)) {
-    for (let index = span.start + 1; index <= span.end; index += 1) interior[index] = true;
+    if (span.end > span.start) {
+      delta[span.start + 1] += 1;
+      delta[span.end + 1] -= 1;
+    }
+  }
+  const interior: boolean[] = [];
+  let depth = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    depth += delta[index]!;
+    interior.push(depth > 0);
   }
   modifierInteriorByTokens.set(tokens, interior);
   return interior;
+}
+
+function firstTokenAtOrAfter(tokens: Token[], from: number): number {
+  let low = 0;
+  let high = tokens.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (tokens[mid]!.end <= from) low = mid + 1;
+    else high = mid;
+  }
+  return low;
 }
 
 function isRelativeQuery(tokens: Token[], token: Token, at = tokens.indexOf(token), interior = modifierInteriorIndex(tokens)): boolean {
@@ -316,9 +349,8 @@ function isRelativeQuery(tokens: Token[], token: Token, at = tokens.indexOf(toke
 function nextNegatedWriteStop(text: string, from: number): number {
   const tokens = tokensFor(text);
   const interior = modifierInteriorIndex(tokens);
-  for (let i = 0; i < tokens.length; i++) {
+  for (let i = firstTokenAtOrAfter(tokens, from); i < tokens.length; i++) {
     const token = tokens[i]!;
-    if (token.end <= from) continue;
     if (token.start < from) continue;
     const offset = token.start - from;
     if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) return offset;
