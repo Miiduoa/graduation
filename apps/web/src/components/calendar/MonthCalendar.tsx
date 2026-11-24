@@ -65,14 +65,17 @@ export function MonthCalendar({
     revealWeek(selectedCellIndex);
   }, [month, selectedDate, selectedCellIndex, dateRevealRevision, revealWeek]);
 
-  const moveDate = useCallback((event: KeyboardEvent | globalThis.KeyboardEvent, date: string) => {
+  const moveDate = useCallback((event: KeyboardEvent | globalThis.KeyboardEvent, focusedDate?: string) => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const origin = document.activeElement;
+    const requested = pendingFocus.current;
+    const date = requested && requested.origin === origin ? requested.date : focusedDate;
+    if (!date || !(origin instanceof HTMLElement)) return;
     const target = monthCalendarKeyboardDate(date, event.key);
     if (!target) return;
     event.preventDefault();
     const targetMonth = target.slice(0, 7);
-    const origin = document.activeElement;
-    if (target === date || !(origin instanceof HTMLElement)) return;
+    if (target === date) return;
     if (targetMonth !== month && !onMonthChange) return;
     pendingFocus.current = { date: target, origin };
     if (targetMonth === month) setFocusRequestRevision((revision) => revision + 1);
@@ -113,7 +116,7 @@ export function MonthCalendar({
         document.activeElement === origin &&
         (event.target === viewport || event.target === document.body || event.target === document)
       ) {
-        moveDate(event, requested.date);
+        moveDate(event);
       }
     };
     const cancel = () => {

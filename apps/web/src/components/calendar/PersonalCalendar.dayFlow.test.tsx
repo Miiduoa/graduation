@@ -182,6 +182,25 @@ it.each([
   expect(readPersonalImports(scope())).toEqual([]);
 });
 
+it.each([true, false])('按 Enter 開啟整月列表後交接焦點（有行程：%s）', async (hasEvents) => {
+  if (hasEvents) seed([event('next-day', '合成隔日行程', '2026-11-15')]);
+  render(<PersonalCalendar />);
+  await ready();
+  activate(screen.getByRole('button', { name: '2026-11-14' }));
+  const trigger = screen.getByRole('button', { name: '查看整月列表' });
+  trigger.focus();
+  expect(document.activeElement).toBe(trigger);
+
+  // JSDOM does not synthesize the native click when Enter activates a button.
+  if (fireEvent.keyDown(trigger, { key: 'Enter' })) fireEvent.click(trigger, { detail: 0 });
+
+  expect(trigger.isConnected).toBe(false);
+  const destination = hasEvents
+    ? screen.getByRole('list', { name: '個人行程列表' })
+    : screen.getByRole('region', { name: '行程明細' });
+  expect(document.activeElement).toBe(destination);
+});
+
 it.each(['列表', '查看整月列表'])(
   'clears the day filter for personal events and deadlines when opening the month list via %s',
   async (entry) => {

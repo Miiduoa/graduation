@@ -505,7 +505,40 @@ it('外部選日移到左側時只捲回必要距離，不搶焦點或重設已�
   expect(document.activeElement).toBe(outside);
 });
 
-it.each(['重試原日期', '繼續按方向鍵', '移走焦點', '月格只露出一像素時等待交接'])(
+it.each([
+  ['月內', '2028-01-27', '2028-01-29'],
+  ['跨月', '2028-01-30', '2028-02-01'],
+])('待聚焦時連按兩次右鍵可沿待聚焦日期繼續%s移動', (_case, start, expected) => {
+  const viewport = Object.assign(new EventTarget(), {
+    offsetLeft: 450, offsetTop: 0, width: 240, height: 400,
+  });
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+  vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this.classList.contains(styles.viewport)) return new DOMRect(20, 50, 300, 250);
+    if (this.classList.contains(styles.date)) return new DOMRect(40, 90, 44, 40);
+    return originalBounds.call(this);
+  });
+
+  function Calendar() {
+    const [month, setMonth] = useState(baseProps.month);
+    return <MonthCalendar {...baseProps} month={month} onMonthChange={setMonth} />;
+  }
+
+  render(<Calendar />);
+  const origin = focusDate(start);
+  fireEvent.keyDown(origin, { key: 'ArrowRight' });
+  expect(document.activeElement).toBe(origin);
+  fireEvent.keyDown(origin, { key: 'ArrowRight' });
+
+  const target = screen.getByRole('button', { name: expected });
+  expect(document.activeElement).not.toBe(target);
+  viewport.offsetLeft = 20;
+  viewport.dispatchEvent(new Event('scroll'));
+  expect(document.activeElement).toBe(target);
+});
+
+it.each(['重試原日期', '繼續按方向鍵', '從月格繼續按方向鍵', '移走焦點', '月格只露出一像素時等待交接'])(
   '跨月目標在水平畫面外時可%s',
   (action) => {
     const viewport = Object.assign(new EventTarget(), {
@@ -530,22 +563,26 @@ it.each(['重試原日期', '繼續按方向鍵', '移走焦點', '月格只露�
       );
     }
     render(<Calendar />);
+    const fromGrid = action === '從月格繼續按方向鍵';
+    if (fromGrid) viewport.offsetLeft = 80;
     const origin = focusDate('2028-01-31');
     fireEvent.keyDown(origin, { key: 'ArrowRight' });
     expect(origin.isConnected).toBe(false);
-    expect(screen.getByRole('region', { name: '2028-02 月格，週日起始' })).toBeTruthy();
-    expect(document.activeElement).toBe(document.body);
+    const grid = screen.getByRole('region', { name: '2028-02 月格，週日起始' });
+    const focusOrigin = fromGrid ? grid : document.body;
+    expect(document.activeElement).toBe(focusOrigin);
     if (action === '月格只露出一像素時等待交接') {
       expect(scrollBy).toHaveBeenCalledWith({ left: 239, top: 0, behavior: 'instant' });
     }
 
     const outside = screen.getByRole('button', { name: '其他控制' });
     if (action === '移走焦點') outside.focus();
-    if (action === '繼續按方向鍵') {
+    const continues = action === '繼續按方向鍵' || fromGrid;
+    if (continues) {
       const key = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
-      fireEvent(document.body, key);
+      fireEvent(focusOrigin, key);
       expect(key.defaultPrevented).toBe(true);
-      expect(document.activeElement).toBe(document.body);
+      expect(document.activeElement).toBe(focusOrigin);
     }
 
     viewport.offsetLeft = 20;
@@ -553,7 +590,7 @@ it.each(['重試原日期', '繼續按方向鍵', '移走焦點', '月格只露�
     expect(document.activeElement).toBe(
       action === '移走焦點'
         ? outside
-        : screen.getByRole('button', { name: action === '繼續按方向鍵' ? '2028-02-02' : '2028-02-01' }),
+        : screen.getByRole('button', { name: continues ? '2028-02-02' : '2028-02-01' }),
     );
   },
 );

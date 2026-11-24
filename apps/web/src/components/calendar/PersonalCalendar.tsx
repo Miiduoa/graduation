@@ -428,9 +428,11 @@ function PersonalCalendarWorkspace({
   const createButtonRef = useRef<HTMLButtonElement | null>(null);
   const dayHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const daySummaryRef = useRef<HTMLDivElement | null>(null);
+  const monthAgendaRef = useRef<HTMLDivElement | null>(null);
+  const monthListRef = useRef<HTMLUListElement | null>(null);
   const pendingDayReveal = useRef<string | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
-  const pendingFocus = useRef<'editor' | 'return' | 'saved' | null>(null);
+  const pendingFocus = useRef<'editor' | 'return' | 'saved' | 'monthList' | null>(null);
   const [editorRevision, setEditorRevision] = useState(0);
   const [baseline, setBaseline] = useState<PersonalImportRecord | null>(null);
   const [saving, setSaving] = useState(false);
@@ -557,6 +559,10 @@ function PersonalCalendarWorkspace({
     pendingFocus.current = null;
     if (target === 'editor' && mode !== 'idle') {
       focusEditorTitle();
+      return;
+    }
+    if (target === 'monthList') {
+      (monthListRef.current ?? monthAgendaRef.current)?.focus();
       return;
     }
     if (mode !== 'idle') return;
@@ -1059,7 +1065,7 @@ function PersonalCalendarWorkspace({
           </section>
         )}
 
-        <div>
+        <div ref={monthAgendaRef} role="region" aria-label="行程明細" tabIndex={-1}>
           {selectedDate && (
             <div className={workspaceStyles.daySummary} ref={daySummaryRef}>
               <div>
@@ -1070,7 +1076,14 @@ function PersonalCalendarWorkspace({
                   <p>{events.length ? `${events.length} 筆個人行程` : '尚無個人行程'}</p>
                 )}
               </div>
-              <button type="button" className="btn" onClick={showMonthList}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  pendingFocus.current = 'monthList';
+                  showMonthList();
+                }}
+              >
                 查看整月列表
               </button>
             </div>
@@ -1091,7 +1104,12 @@ function PersonalCalendarWorkspace({
               )}
             </p>
           ) : calendarView === 'list' || selectedDate ? (
-            <ul className={`${styles.saved} ${workspaceStyles.agenda}`} aria-label="個人行程列表">
+            <ul
+              ref={monthListRef}
+              tabIndex={-1}
+              className={`${styles.saved} ${workspaceStyles.agenda}`}
+              aria-label="個人行程列表"
+            >
               {events.map((event) => (
                 <li
                   key={event.id}
