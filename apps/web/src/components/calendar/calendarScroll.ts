@@ -107,9 +107,10 @@ export function scrollVerticallyIntoView(
   const visible = visibleViewport();
   const visibleTop = visible.top + top;
   const visibleBottom = visible.bottom - bottom;
+  // Round toward visibility when the browser scrolls in whole CSS pixels.
   const distance =
     align === 'start' || rect.top < visibleTop
-      ? rect.top - visibleTop
-      : Math.max(0, rect.bottom - visibleBottom);
+      ? Math.floor(rect.top - visibleTop)
+      : Math.max(0, Math.ceil(rect.bottom - visibleBottom));
   if (distance !== 0) window.scrollBy({ left: 0, top: distance, behavior: 'instant' });
 }
