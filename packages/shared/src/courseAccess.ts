@@ -54,18 +54,14 @@ export function courseScope(value: unknown): CourseScope {
   const schoolId = courseText(row.schoolId, 64, 1).toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/u.test(schoolId))
     throw new CourseAccessError('COURSE_SCOPE_REQUIRED');
-  return { schoolId, ...courseTerm(row.academicYear, row.semester) };
-}
-
-export function courseTerm(yearValue: unknown, semesterValue: unknown): Pick<CourseScope, 'academicYear' | 'semester'> {
-  const year = courseText(yearValue, 12, 1).replace(/學年度$/u, '').trim();
+  const year = courseText(row.academicYear, 12, 1).replace(/學年度$/u, '').trim();
   if (!/^(?:[1-9]\d{1,2}|20\d{2})$/u.test(year)) throw new CourseAccessError('COURSE_SCOPE_REQUIRED');
   const academicYear = String(Number(year) >= 2000 ? Number(year) - 1911 : Number(year));
   const terms: Record<string, string> = { '1': '1', '一': '1', '上': '1', '上學期': '1', '第一學期': '1',
     '2': '2', '二': '2', '下': '2', '下學期': '2', '第二學期': '2', 'summer': 'summer', '暑期': 'summer' };
-  const semester = terms[courseText(semesterValue, 20, 1).toLowerCase()];
+  const semester = terms[courseText(row.semester, 20, 1).toLowerCase()];
   if (!semester) throw new CourseAccessError('COURSE_SCOPE_REQUIRED');
-  return { academicYear, semester };
+  return { schoolId, academicYear, semester };
 }
 export function courseMetadata(value: unknown): CourseMetadata {
   const row = courseRecord(value);

@@ -1,9 +1,5 @@
 # 281 與撤回過濾的 API 發布來源
 
-## 2026-11-24 課務學期正規化
-
-首頁提醒與課程權限共用 `courseTerm`，因此封裝來源 `packages/shared/src/courseAccess.ts` 的 SHA-256 隨之變更。兩份乾淨 checkout 均從固定上游 `9de47b4b` 起步，核對既有四份補丁與 base tree 後，分別執行 manifest 更新與一般重建，得到相同的 candidate tree `67855adc6365cc320de71ebfe147df205ac609e5`。本次 manifest 更新限於該來源 SHA-256、overlay tree 及 candidate tree。
-
 ## 2026-11-07：Agent 單筆行程核對的來源增量
 
 Agent 的單筆行程核對新增可選的 `acknowledged` 裝置同步元資料，對應來源為 `packages/shared/src/imports/sync.ts`。本輪以既有固定上游 commit、四份 checksum 相符的補丁與 base tree，重新執行 `prepare.py --refresh-manifest`；再於另一份獨立乾淨 checkout 執行一般 prepare，兩次產出相同的 candidate tree。

@@ -1,5 +1,5 @@
 import { currentSemesterStartUtc, rocSchoolYear } from './campusAnnouncementQuality';
-import { courseTerm } from './courseAccess';
+import { courseScope } from './courseAccess';
 import { personalTimetableTerms } from './imports/today';
 import type { PersonalImportRecord } from './imports/types';
 import {
@@ -23,7 +23,9 @@ export function isCurrentPriorityTerm(termKey: string | undefined, now: Date): b
   const parts = termKey.split('|');
   if (parts.length !== 2) return false;
   try {
-    const term = courseTerm(parts[0], parts[1]);
+    // Term keys contain only year and semester. Use the personal timetable scope
+    // for normalization; the caller already filtered records by their actual school.
+    const term = courseScope({ schoolId: 'personal', academicYear: parts[0], semester: parts[1] });
     const semester = currentSemesterStartUtc(now).getUTCMonth() === 7 ? '1' : '2';
     return term.academicYear === String(rocSchoolYear(now)) && term.semester === semester;
   } catch {
