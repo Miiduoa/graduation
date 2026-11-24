@@ -1539,6 +1539,46 @@ async def check_assistant_return_journey(page):
     assert urlparse(page.url).path == '/'
 
 
+async def check_offline_recovery(browser):
+    # This context uses the real service worker and only contacts the local server.
+    context = await browser.new_context(
+        viewport={'width': 320, 'height': 740}, color_scheme='dark', reduced_motion='reduce',
+    )
+    try:
+        page = await context.new_page()
+        await page.goto(BASE + '/offline.html')
+        await expect(page.get_by_role('link', name='返回首頁')).to_have_attribute('href', '/')
+        await page.evaluate("""async () => {
+            localStorage.setItem('campus-web-preferences', JSON.stringify({
+              appearance: {fontSize: 'large', animations: false}
+            }));
+            await navigator.serviceWorker.register('/sw.js');
+            await navigator.serviceWorker.ready;
+        }""")
+        await page.wait_for_function('Boolean(navigator.serviceWorker.controller)')
+        target = BASE + '/course/offline-check?campus=pu#assignment-book'
+        await context.set_offline(True)
+        await page.goto(target)
+        status = page.get_by_role('status')
+        retry = page.get_by_role('link', name='重新載入此頁')
+        await expect(status).to_contain_text('目前沒有網路連線')
+        await expect(retry).to_have_attribute('href', target)
+        await expect(page.locator('#submission-note')).to_be_visible()
+        await expect(page.locator('html')).to_have_attribute('data-font', 'large')
+        await page.evaluate("document.documentElement.style.fontSize = '200%'")
+        await no_overflow(page)
+        await retry.focus()
+        await context.set_offline(False)
+        await expect(status).to_contain_text('已重新連上網路')
+        await expect(retry).to_be_focused()
+        async with page.expect_navigation(wait_until='domcontentloaded'):
+            await retry.press('Enter')
+        await expect(page.get_by_role('heading', name='暫時無法開啟頁面')).to_have_count(0)
+        await expect(page).to_have_url(target)
+    finally:
+        await context.close()
+
+
 async def main():
     results = []
     errors = []
@@ -1559,6 +1599,8 @@ async def main():
         page.set_default_timeout(10000)
         page.on('pageerror', lambda error: errors.append(str(error)))
         try:
+            await check_offline_recovery(browser)
+            results.append('Offline course navigation preserves the exact link through reconnection and manual retry')
             for width, label in [(1440, 'desktop'), (768, 'tablet'), (390, 'mobile'), (320, 'small')]:
                 await page.set_viewport_size({'width': width, 'height': 1000 if width > 768 else 844})
                 await goto_path(page, '/?campus=pu')
