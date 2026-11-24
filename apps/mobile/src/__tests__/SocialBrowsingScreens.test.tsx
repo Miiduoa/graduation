@@ -451,13 +451,15 @@ test.each([true, false])('a list started after a failed subscribe verifies its c
   }
 });
 
-test('a list omission delivered before confirmation does not trigger another read when rows arrive later', async () => {
+test('a list omission delivered before confirmation rechecks when rows arrive later without discarding a confirmed subscription', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const view = render(<BoardsScreen />);
   await view.findByText('讀書會');
 
   const firstConfirm = deferred<boolean>();
-  jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => firstConfirm.promise);
+  jest.mocked(isSubscribedToBoard)
+    .mockImplementationOnce(() => firstConfirm.promise)
+    .mockRejectedValueOnce(new Error('offline'));
   jest.mocked(subscribeToBoard).mockRejectedValueOnce(new Error('offline'));
   await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
   expect(view.getByLabelText('訂閱讀書會').props.accessibilityState.busy).toBe(false);
@@ -473,7 +475,7 @@ test('a list omission delivered before confirmation does not trigger another rea
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 
   await act(async () => { rows.resolve([board]); await refreshPromise; });
-  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
@@ -571,13 +573,15 @@ test.each(['during confirmation', 'during write, IDs last', 'during write, rows 
 );
 
 test.each([
-  ['IDs last', false],
-  ['IDs last', 'offline'],
-  ['rows last', false],
-  ['rows last', 'offline'],
+  ['during write', 'IDs last', false],
+  ['during write', 'IDs last', 'offline'],
+  ['during write', 'rows last', false],
+  ['during confirmation', 'rows last', false],
+  ['during write', 'rows last', 'offline'],
+  ['during confirmation', 'rows last', 'offline'],
 ] as const)(
-  'a list crossing a successful unsubscribe rechecks an omission with %s (second confirmation: %s)',
-  async (lastResponse, result) => {
+  'a list started %s rechecks an omission after successful unsubscribe with %s (second confirmation: %s)',
+  async (dispatchTiming, lastResponse, result) => {
     jest.mocked(listBoards).mockResolvedValue([board]);
     const view = render(<BoardsScreen />);
     await view.findByText('讀書會');
@@ -600,7 +604,10 @@ test.each([
     jest.mocked(listBoards).mockImplementationOnce(() => rows.promise);
     jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => secondList.promise);
     let secondRefresh!: Promise<void>;
-    act(() => { secondRefresh = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+    const startSecondRefresh = () => {
+      act(() => { secondRefresh = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+    };
+    if (dispatchTiming === 'during write') startSecondRefresh();
 
     const firstConfirm = deferred<boolean>();
     const secondConfirm = deferred<boolean>();
@@ -610,6 +617,8 @@ test.each([
     await act(async () => { unsubscribe.resolve(); });
     expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
     expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
+
+    if (dispatchTiming === 'during confirmation') startSecondRefresh();
 
     // The first read saw a subscription before another device cancelled it.
     await act(async () => {

@@ -68,7 +68,6 @@ type SubscriptionListRead = {
   subscribedIds: ReadonlySet<string>;
   writeRevisionAtDelivery: number;
   serverRevisionAtDispatch: number;
-  serverRevisionAtDelivery: number;
 };
 
 function BoardsContent() {
@@ -189,7 +188,6 @@ function BoardsContent() {
             subscribedIds: new Set(subs),
             writeRevisionAtDelivery: subscriptionRevision.current,
             serverRevisionAtDispatch,
-            serverRevisionAtDelivery: ++serverReadRevision.current,
           }),
         ),
       ]);
@@ -256,21 +254,15 @@ function BoardsContent() {
           awaitingServerConfirm.current.has(id) &&
           nextConfirmed.has(id) &&
           !subscribedIds.has(id);
-        // A listed subscription during an overlap can be stale even when it
-        // agrees with the first confirmation. For an omitted subscription,
-        // a refresh spanning a write can see a server change while the first
-        // confirmation's response is still in flight. Recheck after the
-        // write settles regardless of which response arrived first.
+        // An overlapping list can reflect a server change even when its IDs
+        // arrive before the single-board response. Verify an omission without
+        // treating the capped list as proof of cancellation.
         const listed = subscribedIds.has(id);
         const listedDuringOverlap = listed && overlappingReconciliations.has(id);
         const listClaimsUnkeptSubscription = listed && !nextConfirmed.has(id);
         const listOmitsConfirmed = !listed && nextConfirmed.has(id) && confirmedByBoardRead.current.has(id);
-        const refreshSpansWrite = (boardWriteRevision.current.get(id) ?? 0) > subscriptionRevisionAtStart;
-        const omissionArrivedAfterConfirmation =
-          overlappingReconciliations.has(id) &&
-          membership.serverRevisionAtDelivery > (boardConfirmationAppliedAt.current.get(id) ?? 0);
         const needsConfirmation = listOmitsConfirmed
-          ? refreshSpansWrite || omissionArrivedAfterConfirmation
+          ? overlappingReconciliations.has(id)
           : keptRollback ||
             listedDuringOverlap ||
             listClaimsUnkeptSubscription ||
