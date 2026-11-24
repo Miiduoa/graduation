@@ -170,8 +170,9 @@ it('PageDown 跨到閏年短月保留焦點，只有選取後才改當日內容'
   expect(onDate).toHaveBeenCalledTimes(1);
 });
 
-it('鍵盤換月聚焦週六時仍完整露出週日欄', () => {
+it('鍵盤換月聚焦週六時只捲動頁面垂直位置，月格仍從週日起始', () => {
   const originalBounds = Element.prototype.getBoundingClientRect;
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(640);
   vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(216);
   vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(616);
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
@@ -181,21 +182,13 @@ it('鍵盤換月聚焦週六時仍完整露出週日欄', () => {
       const viewport = this.closest('[role="region"]')!;
       return new DOMRect(40 + index * 88 - viewport.scrollLeft, 500, 88, 24);
     }
+    if (this.getAttribute('aria-label') === '2028-10-28') {
+      return new DOMRect(568, 700, 88, 40);
+    }
     return originalBounds.call(this);
   });
-  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
-    configurable: true,
-    writable: true,
-    value() {},
-  });
-  vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
-    const viewport = this.closest('[role="region"]') as HTMLElement | null;
-    if (!viewport) return;
-    const bounds = this.getBoundingClientRect();
-    const visible = viewport.getBoundingClientRect();
-    if (bounds.right > visible.right) viewport.scrollLeft += bounds.right - visible.right;
-    if (bounds.left < visible.left) viewport.scrollLeft += bounds.left - visible.left;
-  });
+  const horizontalScroll = vi.spyOn(Element.prototype, 'scrollLeft', 'set');
+  const pageScroll = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
 
   function ControlledCalendar() {
     const [month, setMonth] = useState('2028-09');
@@ -213,7 +206,11 @@ it('鍵盤換月聚焦週六時仍完整露出週日欄', () => {
     );
   }
   render(<ControlledCalendar />);
+  screen.getByRole('region', { name: '2028-09 月格，週日起始' }).scrollLeft = 200;
+  horizontalScroll.mockClear();
   fireEvent.keyDown(focusDate('2028-09-28'), { key: 'PageDown' });
+  expect(horizontalScroll).not.toHaveBeenCalled();
+  expect(pageScroll).toHaveBeenCalledExactlyOnceWith({ left: 0, top: 100, behavior: 'instant' });
   expect(screen.getByRole('heading', { name: '2028 / 10' })).toBeTruthy();
   const saturday = screen.getByRole('button', { name: '2028-10-28' });
   expect(document.activeElement).toBe(saturday);

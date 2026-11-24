@@ -22,25 +22,54 @@ export function stickyHeaderOffset() {
 
 export function stickyFooterOffset() {
   let top = window.innerHeight;
-  let found = false;
   for (const element of document.querySelectorAll(FOOTER_SELECTORS)) {
     if (!isOccluding(element, 'bottom')) continue;
-    found = true;
     top = Math.min(top, element.getBoundingClientRect().top);
   }
-  return found ? Math.max(0, window.innerHeight - top) : 8;
+  return Math.max(0, window.innerHeight - top);
 }
 
-export function scrollVerticallyIntoView(element: HTMLElement) {
+export function measureStickyInsets() {
+  return { top: stickyHeaderOffset(), bottom: stickyFooterOffset() };
+}
+
+export function isHorizontallyVisible(element: HTMLElement) {
   const rect = element.getBoundingClientRect();
-  if (rect.height <= 0) return;
-  const top = stickyHeaderOffset();
-  const bottom = stickyFooterOffset();
+  if (rect.width <= 0) return false;
+  let left = 0;
+  let right = window.innerWidth;
+  for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    const { overflowX } = getComputedStyle(ancestor);
+    if (!['auto', 'scroll', 'hidden', 'clip'].includes(overflowX)) continue;
+    const clipLeft = ancestor.getBoundingClientRect().left + ancestor.clientLeft;
+    left = Math.max(left, clipLeft);
+    right = Math.min(right, clipLeft + ancestor.clientWidth);
+  }
+  return rect.left >= left && rect.right <= right;
+}
+
+export function scrollVerticallyIntoView(
+  element: HTMLElement,
+  {
+    align = 'nearest',
+    insets = measureStickyInsets(),
+  }: {
+    align?: 'start' | 'nearest';
+    insets?: ReturnType<typeof measureStickyInsets>;
+  } = {},
+) {
+  const { top, bottom } = insets;
   document.documentElement.style.setProperty('--calendar-sticky-header-height', `${top}px`);
   document.documentElement.style.setProperty('--calendar-sticky-footer-height', `${bottom}px`);
   element.style.scrollMarginTop = `${top}px`;
   element.style.scrollMarginBottom = `${bottom}px`;
-  if (rect.top < top) window.scrollBy(0, rect.top - top);
-  else if (rect.bottom > window.innerHeight - bottom)
-    window.scrollBy(0, rect.bottom - (window.innerHeight - bottom));
+
+  const rect = element.getBoundingClientRect();
+  if (rect.height <= 0) return;
+  const visibleBottom = window.innerHeight - bottom;
+  const distance =
+    align === 'start' || rect.top < top
+      ? rect.top - top
+      : Math.max(0, rect.bottom - visibleBottom);
+  if (distance !== 0) window.scrollBy({ left: 0, top: distance, behavior: 'instant' });
 }

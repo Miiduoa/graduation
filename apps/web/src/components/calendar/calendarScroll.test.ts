@@ -33,7 +33,7 @@ it('sets scroll-margin-top to the sticky header height before scrolling', () => 
   expect(document.documentElement.style.getPropertyValue('--calendar-sticky-header-height')).toBe(
     '80px',
   );
-  expect(scrollBy).toHaveBeenCalledWith(0, 8 - 80);
+  expect(scrollBy).toHaveBeenCalledWith({ left: 0, top: 8 - 80, behavior: 'instant' });
 });
 
 it('keeps focus above a fixed bottom navigation bar', () => {
@@ -53,5 +53,18 @@ it('keeps focus above a fixed bottom navigation bar', () => {
   expect(document.documentElement.style.getPropertyValue('--calendar-sticky-footer-height')).toBe(
     '72px',
   );
-  expect(scrollBy).toHaveBeenCalledWith(0, 580 + 40 - (640 - 72));
+  expect(scrollBy).toHaveBeenCalledWith({ left: 0, top: 580 + 40 - (640 - 72), behavior: 'instant' });
+});
+
+it('uses the full viewport height when there is no sticky footer', () => {
+  const target = document.createElement('button');
+  vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(
+    new DOMRect(0, window.innerHeight - 40, 100, 40),
+  );
+  const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+
+  expect(stickyFooterOffset()).toBe(0);
+  scrollVerticallyIntoView(target);
+  expect(target.style.scrollMarginBottom).toBe('0px');
+  expect(scrollBy).not.toHaveBeenCalled();
 });

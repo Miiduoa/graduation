@@ -1,7 +1,11 @@
 'use client';
 
 import { MonthCalendar } from './MonthCalendar';
-import { scrollVerticallyIntoView } from './calendarScroll';
+import {
+  isHorizontallyVisible,
+  measureStickyInsets,
+  scrollVerticallyIntoView,
+} from './calendarScroll';
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -417,7 +421,7 @@ function PersonalCalendarWorkspace({
   const titleRef = useRef<HTMLInputElement | null>(null);
   const createButtonRef = useRef<HTMLButtonElement | null>(null);
   const dayHeadingRef = useRef<HTMLHeadingElement | null>(null);
-  const dayAgendaRef = useRef<HTMLDivElement | null>(null);
+  const daySummaryRef = useRef<HTMLDivElement | null>(null);
   const pendingDayReveal = useRef<string | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const pendingFocus = useRef<'editor' | 'return' | 'saved' | null>(null);
@@ -511,7 +515,8 @@ function PersonalCalendarWorkspace({
       trigger?.isConnected &&
       !trigger.closest('[hidden]') &&
       !trigger.matches(':disabled') &&
-      window.getComputedStyle(trigger).display !== 'none'
+      window.getComputedStyle(trigger).visibility === 'visible' &&
+      isHorizontallyVisible(trigger)
     ) {
       trigger.focus({ preventScroll: true });
       scrollVerticallyIntoView(trigger);
@@ -523,20 +528,19 @@ function PersonalCalendarWorkspace({
   }, [paused, mode, editorRevision, month, selectedDate]);
 
   const revealDayAgenda = useCallback(() => {
-    const agenda = dayAgendaRef.current;
-    if (!agenda?.scrollIntoView) return;
+    const summary = daySummaryRef.current;
+    if (!summary) return;
 
-    agenda.scrollIntoView({ block: 'start', behavior: 'instant' });
+    const insets = measureStickyInsets();
+    scrollVerticallyIntoView(summary, { align: 'start', insets });
     const focused = document.activeElement;
-    if (focused && focused !== document.body) {
-      const { top, right, bottom, left } = focused.getBoundingClientRect();
-      const region = focused.closest<HTMLElement>('[role="region"]');
-      const regionLeft = region ? region.getBoundingClientRect().left + region.clientLeft : 0;
-      const visibleLeft = Math.max(0, regionLeft);
-      const visibleRight = region?.clientWidth
-        ? Math.min(window.innerWidth, regionLeft + region.clientWidth)
-        : window.innerWidth;
-      if (bottom > 0 && top < window.innerHeight && right > visibleLeft && left < visibleRight) {
+    if (focused instanceof HTMLElement && focused !== document.body) {
+      const { top, bottom } = focused.getBoundingClientRect();
+      if (
+        top >= insets.top &&
+        bottom <= window.innerHeight - insets.bottom &&
+        isHorizontallyVisible(focused)
+      ) {
         return;
       }
     }
@@ -991,9 +995,9 @@ function PersonalCalendarWorkspace({
           </section>
         )}
 
-        <div ref={dayAgendaRef}>
+        <div>
           {selectedDate && (
-            <div className={workspaceStyles.daySummary}>
+            <div className={workspaceStyles.daySummary} ref={daySummaryRef}>
               <div>
                 <h3 ref={dayHeadingRef} tabIndex={-1}>
                   {selectedDate} 的行程

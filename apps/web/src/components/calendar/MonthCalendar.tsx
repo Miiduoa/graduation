@@ -52,12 +52,11 @@ export function MonthCalendar({
   }, []);
   const focusDateButton = useCallback((button: HTMLButtonElement) => {
     button.focus({ preventScroll: true });
-    const date = button.getAttribute('aria-label') ?? '';
-    revealWeek(days.findIndex((day) => day?.date === date));
     scrollVerticallyIntoView(button);
-  }, [days, revealWeek]);
+  }, []);
 
   useLayoutEffect(() => {
+    if (pendingFocus.current?.date.startsWith(`${month}-`)) return;
     revealWeek(selectedCellIndex);
   }, [month, selectedDate, selectedCellIndex, dateRevealRevision, revealWeek]);
 
@@ -92,7 +91,10 @@ export function MonthCalendar({
     if (!target || target === date) return;
     if (target.startsWith(`${month}-`)) {
       const button = dateButtons.current.get(target);
-      if (button) focusDateButton(button);
+      if (button) {
+        revealWeek(days.findIndex((day) => day?.date === target));
+        focusDateButton(button);
+      }
     } else if (onMonthChange) {
       pendingFocus.current = { date: target, origin: event.currentTarget };
       onMonthChange(target.slice(0, 7));

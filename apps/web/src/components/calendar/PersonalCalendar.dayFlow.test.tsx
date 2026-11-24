@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { personalImportSavedNotice, type PersonalImportRecord } from '@campus/shared';
 import { PersonalCalendar } from './PersonalCalendar';
+import workspaceStyles from './PersonalCalendar.module.css';
 import {
   changePersonalImport,
   personalImportsStorageKey,
@@ -76,6 +77,10 @@ beforeEach(() => {
   state.schoolId = 'pu';
   state.loading = false;
   localStorage.clear();
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
+    () => new DOMRect(20, 60, 100, 40),
+  );
+  vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
   vi.spyOn(window, 'confirm').mockReturnValue(true);
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
@@ -374,6 +379,76 @@ it('returns a cancelled edit to the original event control without changing its 
   expect(readPersonalImports(scope())).toEqual([stored]);
 });
 
+it.each([0, 80])(
+  '取消編輯時，月格裡被水平裁切的原控制改由新增行程接收焦點（scrollLeft=%i）',
+  async (scrollLeft) => {
+    const stored = event('existing', '合成月格行程', '2026-11-14');
+    seed([stored]);
+    render(<PersonalCalendar />);
+    await ready();
+
+    const trigger = screen.getByRole('button', { name: stored.title });
+    const viewport = screen.getByRole('region', { name: '2026-11 月格，週日起始' });
+    viewport.style.overflowX = 'auto';
+    vi.spyOn(viewport, 'clientWidth', 'get').mockReturnValue(216);
+    vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+      if (this === viewport) return new DOMRect(40, 100, 216, 400);
+      if (this === trigger) return new DOMRect(300 - viewport.scrollLeft, 200, 88, 40);
+      return new DOMRect(20, 60, 100, 40);
+    });
+
+    viewport.scrollLeft = 160;
+    activate(trigger);
+    expect(document.activeElement).toBe(titleField());
+    viewport.scrollLeft = scrollLeft;
+    activate(screen.getByRole('button', { name: '取消' }));
+
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '新增行程' }));
+    expect(viewport.scrollLeft).toBe(scrollLeft);
+  },
+);
+
+it.each([
+  ['黏性頁首', 40, true],
+  ['黏性頁尾', 580, true],
+  ['可見區域', 120, false],
+])('選日後依量測的可見範圍處理焦點（%s）', async (_edge, dateTop, covered) => {
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(640);
+  render(
+    <>
+      <header data-testid="sticky-header" style={{ position: 'sticky', opacity: 1 }} />
+      <PersonalCalendar />
+      <footer data-testid="sticky-footer" style={{ position: 'fixed', opacity: 1 }} />
+    </>,
+  );
+  await ready();
+  const header = screen.getByTestId('sticky-header');
+  const footer = screen.getByTestId('sticky-footer');
+  const date = screen.getByRole('button', { name: '2026-11-24' });
+  let pageOffset = 0;
+  vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+    if (this === header) return new DOMRect(0, 0, 320, 80);
+    if (this === footer) return new DOMRect(0, 568, 320, 72);
+    if (this === date) return new DOMRect(20, dateTop + 220 - pageOffset, 80, 32);
+    if (this.classList.contains(workspaceStyles.daySummary)) {
+      return new DOMRect(20, 300 - pageOffset, 280, 60);
+    }
+    return new DOMRect(20, 60, 100, 40);
+  });
+  vi.mocked<(options: ScrollToOptions) => void>(window.scrollBy).mockImplementation((options) => {
+    pageOffset += options.top ?? 0;
+  });
+
+  activate(date);
+
+  const heading = dayHeading('2026-11-24');
+  const summary = heading.closest<HTMLElement>(`.${workspaceStyles.daySummary}`)!;
+  expect(window.scrollBy).toHaveBeenCalledExactlyOnceWith({ left: 0, top: 220, behavior: 'instant' });
+  expect(summary.getBoundingClientRect().top).toBe(80);
+  expect(summary.style.scrollMarginBottom).toBe('72px');
+  expect(document.activeElement).toBe(covered ? heading : date);
+});
+
 it.each(['列表', '下一月'])(
   '切換到「%s」後取消編輯，將焦點移到可見的新增行程按鈕',
   async (navigation) => {
@@ -393,9 +468,9 @@ it.each(['列表', '下一月'])(
     vi.spyOn(createButton, 'getBoundingClientRect').mockImplementation(
       () => new DOMRect(20, 60 - pageOffset, 100, 40),
     );
-    createButton.scrollIntoView = () => {
-      pageOffset = 0;
-    };
+    vi.mocked<(options: ScrollToOptions) => void>(window.scrollBy).mockImplementation((options) => {
+      pageOffset += options.top ?? 0;
+    });
     expect(createButton.getBoundingClientRect().bottom).toBeLessThan(0);
 
     activate(screen.getByRole('button', { name: '取消' }));
