@@ -125,6 +125,24 @@ if [ -L "$TRONCLASS_RUNTIME_DIR" ]; then
   exit 1
 fi
 export TRONCLASS_RUNTIME_DIR
+TRONCLASS_RUN_ID="$(openssl rand -hex 16 2>/dev/null || date +%s%N)"
+export TRONCLASS_RUN_ID
+echo "RUN_ID=$TRONCLASS_RUN_ID"
+# Leftover sidecars from a previous run are never used to send signals.
+for TRONCLASS_STALE_PGID in "$TRONCLASS_RUNTIME_DIR"/web.log.pgid "$TRONCLASS_RUNTIME_DIR"/emulators.log.pgid "$TRONCLASS_RUNTIME_DIR"/selftest.log.pgid "$TRONCLASS_RUNTIME_DIR"/seed.log.pgid "$TRONCLASS_RUNTIME_DIR"/health.log.pgid "$TRONCLASS_RUNTIME_DIR"/acceptance.log.pgid "$TRONCLASS_RUNTIME_DIR"/.pgid-*.tmp; do
+  if [ ! -e "$TRONCLASS_STALE_PGID" ] || [ -L "$TRONCLASS_STALE_PGID" ]; then
+    rm -f "$TRONCLASS_STALE_PGID" 2>/dev/null || true
+    continue
+  fi
+  TRONCLASS_STALE_RAW="$(tr -cd '0-9a-fA-F \t' < "$TRONCLASS_STALE_PGID" 2>/dev/null || true)"
+  TRONCLASS_STALE_RUN="$(printf '%s' "$TRONCLASS_STALE_RAW" | awk '{print $1}')"
+  TRONCLASS_STALE_PID="$(printf '%s' "$TRONCLASS_STALE_RAW" | awk '{print $2}')"
+  TRONCLASS_STALE_START="$(printf '%s' "$TRONCLASS_STALE_RAW" | awk '{print $3}')"
+  if [ "$TRONCLASS_STALE_RUN" = "$TRONCLASS_RUN_ID" ] && [ -n "$TRONCLASS_STALE_PID" ] && [ -n "$TRONCLASS_STALE_START" ]; then
+    continue
+  fi
+  rm -f "$TRONCLASS_STALE_PGID" 2>/dev/null || true
+done
 for TRONCLASS_KEY_NAME in bff-session tronclass-session; do
   node - "$TRONCLASS_RUNTIME_DIR" "$TRONCLASS_KEY_NAME.key" <<'NODE'
 const fs = require('node:fs');
@@ -210,12 +228,14 @@ tronclass_proc_starttime() {
 
 tronclass_parse_record() {
   local raw="$1"
-  raw="$(printf '%s' "$raw" | tr -cd '0-9 \t')"
-  local pid start=""
-  pid="$(printf '%s' "$raw" | awk '{print $1}')"
-  start="$(printf '%s' "$raw" | awk '{print $2}')"
-  [ -n "$pid" ] || return 1
-  printf '%s %s' "$pid" "$start"
+  raw="$(printf '%s' "$raw" | tr -cd '0-9a-fA-F \t')"
+  local run pid start
+  run="$(printf '%s' "$raw" | awk '{print $1}')"
+  pid="$(printf '%s' "$raw" | awk '{print $2}')"
+  start="$(printf '%s' "$raw" | awk '{print $3}')"
+  [ -n "$run" ] && [ -n "$pid" ] && [ -n "$start" ] || return 1
+  [ "$run" = "${TRONCLASS_RUN_ID:-}" ] || return 1
+  printf '%s %s %s' "$run" "$pid" "$start"
 }
 
 tronclass_record_matches() {
@@ -252,7 +272,8 @@ tronclass_capture_child_record() {
     if [ -n "$child" ]; then
       start="$(tronclass_proc_starttime "$child" 2>/dev/null || true)"
       if [ -n "$start" ]; then
-        printf '%s %s' "$child" "$start"
+        if [ -z "${TRONCLASS_RUN_ID:-}" ]; then continue; fi
+        printf '%s %s %s' "$TRONCLASS_RUN_ID" "$child" "$start"
         return 0
       fi
     fi
@@ -264,9 +285,13 @@ tronclass_capture_child_record() {
 tronclass_signal_record() {
   local record="$1"
   local sig="$2"
-  local pid start
-  pid="$(printf '%s' "$record" | awk '{print $1}')"
-  start="$(printf '%s' "$record" | awk '{print $2}')"
+  local parsed run pid start
+  parsed="$(tronclass_parse_record "$record" 2>/dev/null || true)"
+  [ -n "$parsed" ] || return 0
+  run="$(printf '%s' "$parsed" | awk '{print $1}')"
+  pid="$(printf '%s' "$parsed" | awk '{print $2}')"
+  start="$(printf '%s' "$parsed" | awk '{print $3}')"
+  [ "$run" = "${TRONCLASS_RUN_ID:-}" ] || return 0
   tronclass_record_matches "$pid" "$start" || return 0
   kill "-$sig" -- "-$pid" 2>/dev/null || true
   kill "-$sig" "$pid" 2>/dev/null || true
@@ -274,9 +299,11 @@ tronclass_signal_record() {
 
 tronclass_group_alive_record() {
   local record="$1"
-  local pid start
-  pid="$(printf '%s' "$record" | awk '{print $1}')"
-  start="$(printf '%s' "$record" | awk '{print $2}')"
+  local parsed pid start
+  parsed="$(tronclass_parse_record "$record" 2>/dev/null || true)"
+  [ -n "$parsed" ] || return 1
+  pid="$(printf '%s' "$parsed" | awk '{print $2}')"
+  start="$(printf '%s' "$parsed" | awk '{print $3}')"
   tronclass_record_matches "$pid" "$start" || return 1
   if [ -e "/proc/$pid" ]; then
     return 0
@@ -289,21 +316,21 @@ tronclass_stop_logged() {
   local log="$2"
   local sig="${3:-TERM}"
   local memory="$4"
-  # Only stop processes this invocation started. A leftover sidecar from a
-  # previous run in a reused runtime directory must not be used alone.
+  # Signal only the group recorded in memory by this run. Never consult a
+  # sidecar from a previous run. If the child group is not known yet, only
+  # signal this wrapper and its current children.
   [ -n "$wrapper" ] || [ -n "$memory" ] || return 0
-  local file_record="" memory_record=""
-  [ -n "$log" ] && file_record="$(tronclass_read_record_file "${log}.pgid" 2>/dev/null || true)"
+  local memory_record=""
   [ -n "$memory" ] && memory_record="$(tronclass_parse_record "$memory" 2>/dev/null || true)"
-  local record="${memory_record:-$file_record}"
+  local record="$memory_record"
   tronclass_signal_record "$record" "$sig"
   if [ -n "$wrapper" ]; then
     local child
     for child in $(ps -o pid= --ppid "$wrapper" 2>/dev/null); do
       local child_start
       child_start="$(tronclass_proc_starttime "$child" 2>/dev/null || true)"
-      if [ -n "$child_start" ]; then
-        tronclass_signal_record "$child $child_start" "$sig"
+      if [ -n "$child_start" ] && [ -n "${TRONCLASS_RUN_ID:-}" ]; then
+        tronclass_signal_record "$TRONCLASS_RUN_ID $child $child_start" "$sig"
       fi
     done
     kill "-$sig" "$wrapper" 2>/dev/null || true
@@ -383,6 +410,8 @@ const pgidPath = `${logPath}.pgid`;
 try {
   const startTime = readStartTime(child.pid);
   if (!startTime) throw new Error('starttime');
+  const runId = process.env.TRONCLASS_RUN_ID || '';
+  if (!/^[0-9a-fA-F]+$/.test(runId)) throw new Error('run-id');
   try {
     if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('symlink target');
   } catch (error) {
@@ -393,7 +422,7 @@ try {
   try {
     const tmpStat = fs.fstatSync(tmpFd);
     if (!tmpStat.isFile() || tmpStat.nlink !== 1 || tmpStat.uid !== process.getuid()) throw new Error('tmp');
-    fs.writeSync(tmpFd, `${child.pid} ${startTime}\n`);
+    fs.writeSync(tmpFd, `${runId} ${child.pid} ${startTime}\n`);
     fs.fsyncSync(tmpFd);
   } finally {
     fs.closeSync(tmpFd);
@@ -470,6 +499,8 @@ const pgidPath = `${logPath}.pgid`;
 try {
   const startTime = readStartTime(child.pid);
   if (!startTime) throw new Error('starttime');
+  const runId = process.env.TRONCLASS_RUN_ID || '';
+  if (!/^[0-9a-fA-F]+$/.test(runId)) throw new Error('run-id');
   try {
     if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('symlink target');
   } catch (error) {
@@ -480,7 +511,7 @@ try {
   try {
     const tmpStat = fs.fstatSync(tmpFd);
     if (!tmpStat.isFile() || tmpStat.nlink !== 1 || tmpStat.uid !== process.getuid()) throw new Error('tmp');
-    fs.writeSync(tmpFd, `${child.pid} ${startTime}\n`);
+    fs.writeSync(tmpFd, `${runId} ${child.pid} ${startTime}\n`);
     fs.fsyncSync(tmpFd);
   } finally {
     fs.closeSync(tmpFd);
