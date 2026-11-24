@@ -102,6 +102,7 @@ function BoardsContent() {
   // After a failed write, keep the rollback until a from-server re-check lands.
   // A later list may still be served from cache and omit the board.
   const awaitingServerConfirm = useRef(new Set<string>());
+  const pendingServerConfirmCounts = useRef(new Map<string, number>());
   // List membership skipped by keepLocal after a successful write. If the
   // follow-up from-server re-check fails, a list that already included a newer
   // subscription must still be applied.
@@ -137,6 +138,10 @@ function BoardsContent() {
   const load = useCallback(async () => {
     const version = ++loadVersion.current;
     const subscriptionRevisionAtStart = subscriptionRevision.current;
+    const overlappingConfirmations = new Set([
+      ...awaitingServerConfirm.current,
+      ...pendingServerConfirmCounts.current.keys(),
+    ]);
     setLoadError('');
     try {
       if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
@@ -161,11 +166,13 @@ function BoardsContent() {
         if (revision > subscriptionRevisionAtStart) keepLocal.add(id);
       }
       const { subscribedIds } = membership;
-      for (const id of awaitingServerConfirm.current) {
-        // A cache gap that omits a still-confirmed subscription must not
-        // overwrite the rollback. Confirm again from the server because this
-        // refresh may have observed a change after the previous confirmation started.
-        if (confirmedSubscribedRef.current.has(id) && !subscribedIds.has(id)) keepLocal.add(id);
+      for (const id of awaitingServerConfirm.current) overlappingConfirmations.add(id);
+      for (const id of pendingServerConfirmCounts.current.keys()) overlappingConfirmations.add(id);
+      for (const id of overlappingConfirmations) {
+        // Cache-backed membership cannot replace a rollback or a single-board
+        // result that landed during this refresh. A matching omission with no
+        // known subscription can still take the normal list path.
+        if (confirmedSubscribedRef.current.has(id) || subscribedIds.has(id)) keepLocal.add(id);
       }
       const tracked = new Set([
         ...subscribedIds,
@@ -257,6 +264,8 @@ function BoardsContent() {
       (boardWriteRevision.current.get(boardId) ?? -1) <= revisionAtRead &&
       (boardServerAppliedRevision.current.get(boardId) ?? 0) < readRevision &&
       latestIntent.current.get(boardId) === intentAtStart;
+    const pending = pendingServerConfirmCounts.current;
+    pending.set(boardId, (pending.get(boardId) ?? 0) + 1);
     try {
       // Read this board only. listSubscribedBoardIds is capped at 100 and
       // must not treat a missing id as "unsubscribed".
@@ -299,6 +308,10 @@ function BoardsContent() {
         return;
       }
       // Keep the pre-tap rollback or confirmed write; the next refresh will reconcile.
+    } finally {
+      const remaining = (pending.get(boardId) ?? 1) - 1;
+      if (remaining > 0) pending.set(boardId, remaining);
+      else pending.delete(boardId);
     }
   }, [applySubscribed]);
   reconcileBoardSubscriptionRef.current = reconcileBoardSubscription;

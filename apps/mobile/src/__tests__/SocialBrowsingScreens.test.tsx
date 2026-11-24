@@ -393,6 +393,64 @@ test('an overlapping list after a failed write still confirms another device\'s 
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
+test.each([true, false])('a list started after a failed subscribe verifies its cached membership (second confirm succeeds: %s)', async (secondSucceeds) => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  const firstConfirm = deferred<boolean>();
+  const secondConfirm = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard)
+    .mockImplementationOnce(() => firstConfirm.promise)
+    .mockImplementationOnce(() => secondConfirm.promise);
+  jest.mocked(subscribeToBoard).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+  expect(view.getByLabelText('訂閱讀書會').props.accessibilityState.busy).toBe(false);
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+  expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  if (secondSucceeds) {
+    await act(async () => { firstConfirm.resolve(false); });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    await act(async () => { secondConfirm.resolve(true); });
+    expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+  } else {
+    await act(async () => { secondConfirm.reject(new Error('offline')); });
+    await act(async () => { firstConfirm.resolve(true); });
+    expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+  }
+});
+
+test('a list started after a failed subscribe cannot omit a subscription confirmed while it was loading', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  const firstConfirm = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => firstConfirm.promise);
+  jest.mocked(subscribeToBoard).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+  expect(view.getByLabelText('訂閱讀書會').props.accessibilityState.busy).toBe(false);
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+
+  const subs = deferred<string[]>();
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
+  let refreshPromise!: Promise<void>;
+  act(() => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+
+  await act(async () => { firstConfirm.resolve(true); });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  await act(async () => { subs.resolve([]); await refreshPromise; });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
 test('a later overlapping list that omits a board does not overwrite the first successful confirm', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const view = render(<BoardsScreen />);
@@ -496,7 +554,7 @@ test('a refresh older than a confirmed write cannot hide it after the next write
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
-test('a late failed-write re-read never overwrites a newer pull-to-refresh', async () => {
+test('a late failed-write re-read never overwrites the newer pull-to-refresh confirmation', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const view = render(<BoardsScreen />);
   await view.findByText('讀書會');
@@ -511,9 +569,11 @@ test('a late failed-write re-read never overwrites a newer pull-to-refresh', asy
   expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
   expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
 
-  // Another device subscribed; the list refresh applies first.
+  // Another device subscribed; the refresh verifies that membership first.
   jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
   await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 
   await act(async () => { reRead.resolve(false); });
