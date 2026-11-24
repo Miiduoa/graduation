@@ -128,3 +128,29 @@ it('preserves a newer application receipt through older list responses until a s
   expect(confirmed.confirmApplication(receipt, delayedWrite)).toBe(false);
   expect(confirmed.overview()?.applications).toEqual([]);
 });
+
+it('keeps newer application receipt status and notes until a later list confirms them', () => {
+  const confirmed = createMerchantConfirmations(new Map());
+  const receipt = {
+    tenantId: 'campus-one',
+    applicationId: 'application-1',
+    brandName: '餐坊',
+    locationName: '一樓',
+    state: 'under-review' as const,
+    reviewerNote: '',
+    submittedAt: '2026-10-09T02:00:00.000Z',
+  };
+  const staleRow = {
+    ...receipt,
+    state: 'needs-information' as const,
+    reviewerNote: '請補營業登記資料',
+  };
+  const earlyList = confirmed.beginRequest();
+  expect(confirmed.confirmApplication(receipt, confirmed.beginRequest())).toBe(true);
+  confirmed.mergeApplications([staleRow], earlyList);
+  expect(confirmed.overview()?.applications).toEqual([receipt]);
+
+  const updatedRow = { ...staleRow, reviewerNote: '請補最新的食品業者登錄資料' };
+  confirmed.mergeApplications([updatedRow], confirmed.beginRequest());
+  expect(confirmed.overview()?.applications).toEqual([updatedRow]);
+});

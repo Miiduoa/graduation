@@ -52,6 +52,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   let listRevocation = 0;
   let listedRevision = 0;
   const receiptFloors = new Map<string, number>();
+  const menuReceiptRevisions = new Map<string, number>();
   const statusReceiptFloors = new Map<string, Map<number, number>>();
   // Store-specific revocations override the list default for stores with newer confirmations.
   const revocations = new Map<string, number>();
@@ -69,9 +70,14 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     receiptFloors.set(key, Math.max(receiptFloors.get(key) ?? 0, revision));
   }
 
-  function discardWorkspaceReceipts(key: string, revision: number) {
+  function discardMenuReceipt(key: string) {
     const draft = drafts.get(key);
     if (draft) draft.menuReceipt = null;
+    menuReceiptRevisions.delete(key);
+  }
+
+  function discardWorkspaceReceipts(key: string, revision: number) {
+    if ((menuReceiptRevisions.get(key) ?? 0) <= revision) discardMenuReceipt(key);
     advanceReceiptFloor(key, revision);
   }
 
@@ -110,8 +116,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       // Only accepted workspace data can supersede an outstanding denial.
       entry.confirmedRevision = Math.max(entry.confirmedRevision, revision);
       if (next.missingRequirements.includes('menu')) {
-        const draft = drafts.get(key);
-        if (draft) draft.menuReceipt = null;
+        discardMenuReceipt(key);
       }
       // A legacy list can update the displayed row before a versioned detail confirms the change.
       const previous = entry.row?.value.readinessVersion === undefined ? entry.detail : entry.row;
@@ -178,6 +183,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     };
     if (merge(next, revision)?.row?.value !== next) return false;
     draft.menuReceipt = createdItems;
+    menuReceiptRevisions.set(key, revision);
     return true;
   }
 
@@ -193,6 +199,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const previous = new Map(lists.applications?.map((row) => [row.applicationId, row]));
     lists.applications = rows.map((row) => {
       const receipt = receipts.get(row.applicationId);
+      if (receipt && receipt.revision > revision) return row;
       const current = receipt?.value ?? previous.get(row.applicationId);
       if (!current || current.tenantId !== row.tenantId) return row;
       const older = Date.parse(row.submittedAt) < Date.parse(current.submittedAt);
@@ -200,9 +207,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         Date.parse(row.submittedAt) === Date.parse(current.submittedAt) &&
         current.state !== 'submitted' &&
         row.state === 'submitted';
-      const merged = older || regressedToSubmitted ? current : row;
-      if (receipt) receipts.set(row.applicationId, { ...receipt, value: merged });
-      return merged;
+      return older || regressedToSubmitted ? current : row;
     });
     // The successful list owns membership through its request revision.
     discardReceiptsThrough(revision);
@@ -238,7 +243,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
             return [workspaceKey(identity), identity];
           }),
         );
-        // An omitted store keeps its draft and readiness history, but loses its receipts.
+        // List omission invalidates receipts only through the list's request revision.
         for (const key of drafts.keys()) {
           if (listedWorkspaces.has(key)) continue;
           discardWorkspaceReceipts(key, revision);
@@ -365,6 +370,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       includeVerifiedWorkspaces = false;
       listRevocation = 0;
       receiptFloors.clear();
+      menuReceiptRevisions.clear();
       statusReceiptFloors.clear();
       listedRevision = 0;
       applicationRevocation = 0;
