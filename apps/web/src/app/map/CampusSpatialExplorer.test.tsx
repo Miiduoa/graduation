@@ -3180,6 +3180,51 @@ it('resumes 3D when the visitor touches the paused scene overlay while a stale v
   }
 });
 
+it('resumes from the pause overlay even if the observer last reported hidden after the keyboard closed', async () => {
+  const keyboard = Object.assign(new EventTarget(), { boundingRect: new DOMRect() });
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: keyboard } }));
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0, scale: 1,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 400, 320, 150));
+  try {
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+    const search = within(dialog).getByRole('searchbox', { name: '搜尋導覽地點' });
+    act(() => search.focus());
+    viewport.height = 200;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
+    keyboard.boundingRect = new DOMRect();
+    act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+    expect(document.activeElement).toBe(search);
+    expect(viewport.height).toBe(200);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    const overlay = within(dialog).getByText(/立體畫面已暫停/);
+    fireEvent.pointerDown(overlay);
+    expect(document.activeElement).toBe(search);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+
 it('always resumes with the manual restart button while the visual viewport is stale', async () => {
   const { viewport, dialog, bounds } = await openKeyboardCoveredScene();
   try {
