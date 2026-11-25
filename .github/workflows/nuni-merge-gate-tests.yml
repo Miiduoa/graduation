@@ -6,12 +6,18 @@ on:
       - 'scripts/merge-gate/**'
       - '.github/workflows/nuni-merge-gate*.yml'
       - 'docs/security/nuni-merge-gate.md'
+      - '.github/workflows/maestro-e2e.yml'
+      - '.github/workflows/mobile-agent-regression.yml'
+      - '.github/workflows/campus-spatial-browser.yml'
   push:
     branches: [main]
     paths:
       - 'scripts/merge-gate/**'
       - '.github/workflows/nuni-merge-gate*.yml'
       - 'docs/security/nuni-merge-gate.md'
+      - '.github/workflows/maestro-e2e.yml'
+      - '.github/workflows/mobile-agent-regression.yml'
+      - '.github/workflows/campus-spatial-browser.yml'
 permissions:
   contents: read
 jobs:
@@ -22,4 +28,5 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - run: node --test scripts/merge-gate/gate.test.mjs
+      - run: node --test scripts/merge-gate/*.test.mjs
+      - run: python3 scripts/merge-gate/maestro-reports.test.py

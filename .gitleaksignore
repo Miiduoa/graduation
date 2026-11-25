@@ -63,3 +63,5 @@ c6b0c412503fb27e13ee31ec72b25291d6fa6d9d:apps/mobile/src/screens/TodayScreen.tsx
 593330cf36c5e7ab4d87e91eed6e563d230bff4d:apps/mobile/src/screens/ProfileScreen.tsx:generic-api-key:21
 593330cf36c5e7ab4d87e91eed6e563d230bff4d:apps/mobile/src/screens/TodayScreen.tsx:generic-api-key:320
 d8628868502fe68b12e47bd26207042701ad29d0:docs/API.md:generic-api-key:115
+# Public Git object ID of the reviewed course-access workflow in the original pilot commit.
+5313e3dca4d731c7451181390bdbecb8842e33fa:scripts/merge-gate/policy.json:generic-api-key:18

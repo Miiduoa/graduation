@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createSign } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { assertNoBypass, validateApproval } from './ruleset-proof.mjs';
 
 const REPO = 'Miiduoa/graduation';
 const REPO_ID = 1190179363;
@@ -20,19 +21,42 @@ function verifiedJob(job,checks,head){const check=checks.find(c=>c.id===job.id);
 
 function validateReview(review,cmd,owner,comment){const first="nuni-gate-review v1 head="+cmd.head+" base="+cmd.base+" outcome=pass";const body=typeof review.body==="string"?review.body:"";must(review.id===cmd.reviewId&&review.user?.id===owner&&review.author_association==="OWNER"&&["COMMENTED","APPROVED"].includes(review.state)&&review.commit_id===cmd.head&&body.startsWith(first+"\n")&&body.slice(first.length).trim().length>=120&&Number.isFinite(Date.parse(review.submitted_at))&&Date.parse(review.submitted_at)<=Date.parse(comment.created_at),"Missing exact owner-delegated review attestation");}
 
-function validateRule(rule){must(rule.id===26004626&&rule.enforcement==="active"&&rule.target==="branch"&&rule.conditions?.ref_name?.include?.includes("~DEFAULT_BRANCH")&&!rule.conditions?.ref_name?.exclude?.length,"Expected active default-branch ruleset missing");must(Array.isArray(rule.bypass_actors)&&rule.bypass_actors.length===0,"Missing or nonempty ruleset bypass actors");const checks=rule.rules?.filter(r=>r.type==="required_status_checks")??[];must(rule.rules?.some(r=>r.type==="pull_request")&&checks.some(r=>r.parameters?.required_status_checks?.some(c=>c.context==="審查通過"&&c.integration_id===5504170)),"Required App gate changed");return checks.some(r=>r.parameters?.strict_required_status_checks_policy===true&&r.parameters?.required_status_checks?.some(c=>c.context==="審查通過"&&c.integration_id===5504170));}
+const CONDITIONAL_VERDICTS = {
+  '.github/workflows/maestro-e2e.yml': 'Maestro PR result',
+  '.github/workflows/mobile-agent-regression.yml': 'Mobile agent PR result',
+  '.github/workflows/campus-spatial-browser.yml': 'Spatial browser PR result',
+};
+const PREVIEW = '.github/workflows/preview-deploy.yml';
+const NATIVE_CHECKS = [
+  ...['CI Summary', 'Analyze (javascript-typescript)', 'policy-and-postgres', 'EAS Update (Preview)',
+    ...Object.values(CONDITIONAL_VERDICTS)].map(context => ({ context, integration_id: 15368 })),
+  { context: 'CodeQL', integration_id: 57789 },
+  { context: '審查通過', integration_id: APP_ID },
+];
+
+// These conditions must remain enforceable by GitHub after an App success is posted.
+function validateNativeRules(rule) {
+  const targets = rule.conditions?.ref_name;
+  must(rule.id === 26004626 && rule.enforcement === 'active' && rule.target === 'branch' &&
+    targets?.include?.includes('~DEFAULT_BRANCH') && Array.isArray(targets.exclude) && targets.exclude.length === 0,
+    'Active main ruleset missing');
+  must(rule.rules?.some(r => r.type === 'pull_request' && r.parameters?.required_review_thread_resolution === true),
+    'GitHub must require resolved review threads');
+  const statusRules = rule.rules.filter(r => r.type === 'required_status_checks');
+  for (const expected of NATIVE_CHECKS) {
+    must(statusRules.some(({ parameters }) => parameters?.strict_required_status_checks_policy === true &&
+      parameters.required_status_checks?.some(c => c.context === expected.context && c.integration_id === expected.integration_id)),
+      'Missing strict GitHub merge protection: ' + expected.context);
+  }
+}
+
+function validateRule(rule) {
+  assertNoBypass(rule);
+  validateNativeRules(rule);
+}
 
 function validatePr(pr,main,cmd,number){must(pr.number===number&&pr.state==="open"&&pr.draft===false&&pr.mergeable===true&&pr.head?.repo?.id===1190179363&&pr.base?.repo?.id===1190179363&&pr.base?.ref==="main"&&pr.head?.sha===cmd.head&&pr.base?.sha===cmd.base&&main.commit?.sha===cmd.base,"PR/head/base moved, draft, conflict or foreign repo");}
-// A previously successful check is not interchangeable with a different review, PR or base.
-function matchesPublishedCheck(check,head,externalId){
-  return check.name==='審查通過'&&check.app?.id===APP_ID&&check.head_sha===head&&
-    check.status==='completed'&&check.conclusion==='success'&&check.external_id===externalId;
-}
-function requirePublicationEnabled(){
-  must(policy.publicationEnabled===true,
-    'Publication disabled: independent merge-time CI and review enforcement not yet validated');
-}
-export { parseCommand, expectedWorkflows, verifiedRuns, verifiedJob, validateReview, validateRule, validatePr, matchesPublishedCheck, requirePublicationEnabled, policy };
+export { parseCommand, expectedWorkflows, verifiedRuns, verifiedJob, validateReview, validateRule, validatePr, validateNativeRules, NATIVE_CHECKS, policy };
 
 
 async function api(token, path, method = 'GET', body) {
@@ -73,11 +97,11 @@ function liveComment(comment, event, number) {
 }
 async function verify(token, event, cmd, number) {
   const get = p => api(token, PREFIX + p);
-  const [pr, main, comment, reviews, rule, files, compare, workflows] = await Promise.all([
+  const [pr, main, comment, reviews, rule, files, compare, workflows, scripts] = await Promise.all([
     get('/pulls/' + number), get('/branches/main'), get('/issues/comments/' + event.comment.id),
     get('/pulls/' + number + '/reviews?per_page=100'), get('/rulesets/26004626'),
     get('/pulls/' + number + '/files?per_page=100'), get('/compare/' + cmd.base + '...' + cmd.head),
-    get('/contents/.github/workflows?ref=' + cmd.base)
+    get('/contents/.github/workflows?ref=' + cmd.base), get('/contents/scripts/merge-gate?ref=' + cmd.base)
   ]);
   validatePr(pr, main, cmd, number);
   must(compare.merge_base_commit?.sha === cmd.base && compare.behind_by === 0 &&
@@ -98,7 +122,10 @@ async function verify(token, event, cmd, number) {
   const threads = gql.data?.repository?.pullRequest?.reviewThreads;
   must(!gql.errors?.length && threads && !threads.pageInfo.hasNextPage &&
     threads.nodes.every(t=>t.isResolved===true), 'Unresolved or unknown review threads');
-  const strict = validateRule(rule);
+  validateNativeRules(rule);
+  // Metadata-only reads can omit the list. Such reads may prepare a request for
+  // environment review; only an explicit list or fresh administrator evidence can establish zero bypass.
+  if (Object.hasOwn(rule, 'bypass_actors')) assertNoBypass(rule);
   must(Array.isArray(files) && files.length===pr.changed_files, 'Incomplete changed-file listing');
   const expected = expectedWorkflows(files, policy);
   must(Array.isArray(workflows), 'Workflow directory unavailable');
@@ -106,36 +133,101 @@ async function verify(token, event, cmd, number) {
   must(Object.keys(actual).length===Object.keys(policy.workflowBlobs).length &&
     Object.entries(policy.workflowBlobs).every(([p,sha])=>actual[p]===sha) &&
     SELF.every(p=>workflows.some(f=>f.path===p)), 'Trusted CI workflow set changed: manual gate and policy review required');
+  must(Array.isArray(scripts) && Object.entries(policy.evidenceScriptBlobs).every(([path, sha]) =>
+    scripts.some(f => f.path === path && f.sha === sha && f.type === 'file')),
+    'Trusted scope or evidence script changed');
   const [runsResult, checksResult] = await Promise.all([
     get('/actions/runs?event=pull_request&head_sha='+cmd.head+'&per_page=100'),
     get('/commits/'+cmd.head+'/check-runs?filter=latest&per_page=100')
   ]);
-  const runs = verifiedRuns(complete(runsResult,'workflow_runs'),expected,cmd,number);
+  const workflowsRequiredOnEveryPR = [...new Set([...expected, ...Object.keys(CONDITIONAL_VERDICTS), PREVIEW])];
+  const runs = verifiedRuns(complete(runsResult,'workflow_runs'),workflowsRequiredOnEveryPR,cmd,number);
   const checks = complete(checksResult,'check_runs');
   must(checks.some(c=>c.name==='CodeQL'&&c.app?.id===57789&&c.head_sha===cmd.head&&
     c.status==='completed'&&c.conclusion==='success'), 'Missing successful CodeQL App check');
   for (const run of runs) {
     const jobs = complete(await get('/actions/runs/'+run.id+'/attempts/'+run.run_attempt+'/jobs?per_page=100'),'jobs');
-    const required = REQUIRED_JOBS[run.path] || [];
+    // A new workflow must identify a native merge check before its results can authorize publication.
+    must(Object.hasOwn(REQUIRED_JOBS, run.path) || run.path === PREVIEW, 'Unmapped PR workflow: ' + run.path);
+    const required = expected.includes(run.path) ? [...REQUIRED_JOBS[run.path]] : [];
+    if (CONDITIONAL_VERDICTS[run.path]) required.push(CONDITIONAL_VERDICTS[run.path]);
+    if (run.path === PREVIEW) required.push('EAS Update (Preview)');
     must(jobs.length>0&&jobs.some(j=>verifiedJob(j,checks,cmd.head)), 'No verified job: '+run.path);
     for (const name of required) {
       const matches=jobs.filter(j=>j.name===name);
       must(matches.length===1&&verifiedJob(matches[0],checks,cmd.head), 'Required job failed or missing: '+name);
-      if (run.path.endsWith('/maestro-e2e.yml')) {
-        for (const step of ['Build iOS Test App','Run Smoke Tests','Upload Test Results','Publish Test Results'])
+      if (run.path.endsWith('/maestro-e2e.yml') && name === REQUIRED_JOBS[run.path][0]) {
+        for (const step of ['Build iOS Test App','Run Smoke Tests','Run Full Test Suite','Verify full Maestro reports','Upload Test Results','Publish Test Results'])
           must(matches[0].steps?.some(s=>s.name===step&&s.conclusion==='success'), 'Maestro step failed or skipped: '+step);
       }
     }
     must(jobs.every(j=>j.status==='completed'&&
       (verifiedJob(j,checks,cmd.head)||j.conclusion==='skipped')), 'Unverified or unsuccessful workflow job: '+run.path);
   }
-  return {strict,runs,review,checks,files};
+  return {rule,runs,review,files};
 }
 function appJwt(key) {
   const now = Math.floor(Date.now()/1000);
   const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
   const unsigned = encode({alg:'RS256',typ:'JWT'})+'.'+encode({iat:now-60,exp:now+540,iss:String(APP_ID)});
   return unsigned+'.'+createSign('RSA-SHA256').update(unsigned).end().sign(key).toString('base64url');
+}
+const GATE_CHECK_NAME = '審查通過';
+const RUN_URL = new RegExp('^https://github\\.com/' + REPO + '/actions/runs/([1-9][0-9]*)$');
+
+function matchesPublishedCheck(check, head, externalId) {
+  return check?.name === GATE_CHECK_NAME && check.app?.id === APP_ID && check.head_sha === head &&
+    check.status === 'completed' && check.conclusion === 'success' && check.external_id === externalId;
+}
+function requirePublicationEnabled() {
+  must(policy.publicationEnabled === true, 'Publication disabled: merge-time enforcement requires separate verified activation');
+}
+
+function gateExternalId(number, cmd, commentId) {
+  return ['nuni-gate','v2',number,cmd.head,cmd.base,cmd.reviewId,commentId].join(':');
+}
+function canonicalRunUrl(url) {
+  const match = typeof url === 'string' ? RUN_URL.exec(url) : null;
+  return Boolean(match) && Number.isSafeInteger(Number(match[1]));
+}
+// GitHub stores checks on commits. Only this exact command on this workflow run is idempotent.
+function existingGateDecision(checks, cmd, number, commentId, detailsUrl) {
+  must(Array.isArray(checks) && canonicalRunUrl(detailsUrl), 'Missing check history or invalid run URL');
+  const ours = checks.filter(c => c.name === GATE_CHECK_NAME && c.app?.id === APP_ID);
+  if (ours.length === 0) return 'publish';
+  must(ours.length === 1, 'Multiple genuine App checks; use the existing operator procedure');
+  verifyPublishedCheck(ours[0], cmd, gateExternalId(number, cmd, commentId), detailsUrl);
+  return 'reuse';
+}
+// Confirm the check returned by the POST is the exact one we asked GitHub to create.
+function verifyPublishedCheck(result, cmd, externalId, detailsUrl) {
+  must(canonicalRunUrl(detailsUrl) && result && Number.isSafeInteger(result.id) && result.id > 0 &&
+    matchesPublishedCheck(result, cmd.head, externalId) && result.details_url === detailsUrl,
+    'GitHub did not confirm the required App check');
+}
+export { gateExternalId, existingGateDecision, verifyPublishedCheck, requirePublicationEnabled, matchesPublishedCheck };
+
+function runBinding(event, cmd, number) {
+  const runId = Number(process.env.GITHUB_RUN_ID);
+  const runAttempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+  must([runId, runAttempt].every(id => Number.isSafeInteger(id) && id > 0), 'Missing trusted run identity');
+  return { runId, runAttempt, number, head: cmd.head, base: cmd.base, reviewId: cmd.reviewId, commentId: event.comment.id };
+}
+
+async function verifiedPublication(readToken, event, cmd, number) {
+  const binding = runBinding(event, cmd, number);
+  const details = 'https://github.com/' + REPO + '/actions/runs/' + binding.runId;
+  const proof = await verify(readToken, event, cmd, number);
+  const [reviews, history, latestRule] = await Promise.all([
+    api(readToken, PREFIX + '/actions/runs/' + binding.runId + '/approvals'),
+    api(readToken, PREFIX + '/commits/' + cmd.head + '/check-runs?filter=all&per_page=100&check_name=' + encodeURIComponent(GATE_CHECK_NAME)),
+    api(readToken, PREFIX + '/rulesets/26004626'),
+  ]);
+  validateNativeRules(latestRule);
+  if (Object.hasOwn(latestRule, 'bypass_actors')) assertNoBypass(latestRule);
+  validateApproval(reviews, latestRule, binding);
+  const decision = existingGateDecision(complete(history, 'check_runs'), cmd, number, event.comment.id, details);
+  return { ...proof, decision, details };
 }
 async function publish(readToken, event, cmd, number) {
   requirePublicationEnabled();
@@ -159,20 +251,13 @@ async function publish(readToken, event, cmd, number) {
       (!grant.repositories||grant.repositories.length===1&&grant.repositories[0].id===REPO_ID),
       'App token has unexpected scope');
     // Fresh complete verification after acquiring the token, immediately before publication.
-    const proof=await verify(readToken,event,cmd,number);
-    must(proof.strict,'Enable strict up-to-date status checks; do not disable App gate');
-    const externalId=['nuni-gate','v1',number,cmd.head,cmd.base,cmd.reviewId,event.comment.id].join(':');
-    const existing=proof.checks.filter(c=>c.name==='審查通過'&&c.app?.id===APP_ID&&
-      c.head_sha===cmd.head&&c.status==='completed'&&c.conclusion==='success');
-    if (existing.length) {
-      must(existing.length===1&&matchesPublishedCheck(existing[0],cmd.head,externalId),
-        'Existing successful App check belongs to different or ambiguous evidence; use manual gate');
-      console.log('Existing genuine successful App check for this exact attestation; no duplicate published.');
+    const proof = await verifiedPublication(readToken, event, cmd, number);
+    const externalId = gateExternalId(number, cmd, event.comment.id);
+    if (proof.decision === 'reuse') {
+      console.log('This exact command already published its verified App check.');
       return;
     }
-    const runId = Number(process.env.GITHUB_RUN_ID);
-    must(Number.isSafeInteger(runId)&&runId>0,'Missing workflow run ID');
-    const details='https://github.com/'+REPO+'/actions/runs/'+runId;
+    const details = proof.details;
     const summary=[
       'Owner-delegated review attestation (not independent human approval): https://github.com/'+REPO+'/pull/'+number+'#pullrequestreview-'+cmd.reviewId,
       'Command: https://github.com/'+REPO+'/pull/'+number+'#issuecomment-'+event.comment.id,
@@ -187,8 +272,7 @@ async function publish(readToken, event, cmd, number) {
       external_id:externalId,details_url:details,
       output:{title:'審查通過：精確版本與委託審查驗證',summary}
     });
-    must(result.app?.id===APP_ID&&result.head_sha===cmd.head&&result.conclusion==='success',
-      'GitHub did not confirm the required App check');
+    verifyPublishedCheck(result,cmd,externalId,details);
     console.log('Genuine App check published: '+result.id);
   } finally {
     try { await api(token,'/installation/token','DELETE'); }
@@ -210,22 +294,21 @@ async function main() {
   must(Number.isSafeInteger(number)&&number>0,'Invalid PR number');
   const cmd=parseCommand(event.comment.body);
   must(process.env.GITHUB_SHA===cmd.base,'Command base must be the trusted workflow revision');
+  if (cmd.mode === 'approve' || stage === 'publish') requirePublicationEnabled();
   const token=process.env.GH_READ_TOKEN;
   if(stage==='publish') {
     must(cmd.mode==='approve','Read-only command cannot publish');
-    requirePublicationEnabled();
-    // Do not even mint a token until the read-only preflight has passed again.
-    const proof=await verify(token,event,cmd,number);
-    must(proof.strict,'Strict up-to-date ruleset required before publication');
+    const proof = await verifiedPublication(token, event, cmd, number);
+    if (proof.decision === 'reuse') {
+      console.log('Verified existing App check for this command.');
+      return;
+    }
     await publish(token,event,cmd,number);
   } else {
-    const proof=await verify(token,event,cmd,number);
+    const proof = await verify(token,event,cmd,number);
+    if (cmd.mode === 'check') validateRule(proof.rule);
     console.log(JSON.stringify({pr:number,head:cmd.head,base:cmd.base,verifiedRuns:proof.runs.map(r=>r.id),
-      strict:proof.strict,mode:cmd.mode,publicationAllowed:policy.publicationEnabled===true&&proof.strict&&cmd.mode==='approve'}));
-    if(cmd.mode==='approve'){
-      requirePublicationEnabled();
-      must(proof.strict,'Strict up-to-date ruleset required before publication');
-    }
+      mode:cmd.mode, publicationAllowed:false, requiresProtectedEnvironmentApproval:cmd.mode==='approve'}));
   }
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {

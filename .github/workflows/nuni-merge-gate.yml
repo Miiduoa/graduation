@@ -1,4 +1,5 @@
 name: nuni delegated merge gate (pilot)
+run-name: nuni gate PR ${{ github.event.issue.number }} comment ${{ github.event.comment.id }}
 on:
   issue_comment:
     types: [created]
@@ -8,9 +9,6 @@ permissions:
   pull-requests: read
   actions: read
   checks: read
-concurrency:
-  group: nuni-merge-gate-publisher
-  cancel-in-progress: false
 jobs:
   preflight:
     if: >-
@@ -38,6 +36,9 @@ jobs:
           NUNI_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         run: node scripts/merge-gate/gate.mjs preflight
   publish:
+    concurrency:
+      group: nuni-merge-gate-publisher
+      cancel-in-progress: false
     needs: preflight
     if: >-
       github.ref == 'refs/heads/main' &&

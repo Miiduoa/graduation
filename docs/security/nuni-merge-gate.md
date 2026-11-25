@@ -1,40 +1,45 @@
 # nuni merge gate pilot
 
-This preserves ruleset [26004626](https://github.com/Miiduoa/graduation/rules/26004626) and the required check `審查通過` from App 5504170. It does not merge, deploy, change rules, or substitute a GitHub Actions check for the App. The owner delegates review judgment to a human or an agent acting on their behalf; a machine-verifiable attestation is not proof that a substantive review actually happened. Never attest without reading the exact diff, evaluating tests and risks, and addressing findings. The owner-account COMMENT is explicitly not independent human approval.
+The pilot records the owner's delegated review of an exact pull request, head and base. The genuine GitHub App `5504170` issues `審查通過`. Its signing job runs only on GitHub-hosted runners, checks out the triggering `main` commit and uses a repository-scoped installation token with `checks:write`. A review submitted through the owner's account is recorded as an owner-delegated decision.
 
-## Safety hold: read-only pilot
+## Publication hold
 
-Publication is deliberately disabled in policy.json while the merge-time enforcement finding remains unresolved. Even a successful preflight cannot mint an App token or publish a check. Missing or redacted `bypass_actors` is a denial, not an empty list. An earlier App success is not reused unless the exact PR, head, base, review and command identity matches. Do not change the publication flag merely to unblock PRs. A separate reviewed change must establish independent native enforcement of required current checks, applicable path-conditional tests, and unresolved discussions at merge time, and prove negative cases including failed reruns and newly opened threads. Until then continue using the existing genuine gate. No secret is needed for the read-only pilot.
+`policy.json` sets `publicationEnabled` to `false`. An `approve` request stops before requesting an environment, signing a JWT or writing a check. Keep the hold through bootstrap and independent live verification of GitHub blocking failed reruns and newly opened discussions. Activation requires a separately reviewed change on the existing genuine App path. The local test fixture exercises the future enabled path in a credential-free child process.
 
-## Bootstrap (owner, once; publication remains on hold)
+## Bootstrap
 
-1. Review and merge this security-sensitive PR using the existing genuine App/manual mechanism. Until the workflow is on main, issue comments cannot trigger it. Do not bypass the ruleset.
-2. In the existing ruleset keep App 5504170 required and enable **Require branches to be up to date before merging**. Current ruleset is loose; the pilot refuses to publish unless strict. Keep the no-bypass policy.
-3. Create environment `nuni-merge-gate` under repository Settings → Environments. Select deployment branches/tags → selected branches, allow only the branch named `main` (not all protected branches or tags). Enable required reviewers for the initial pilot if an independent reviewer is available; do not allow administrator bypass. The owner must ensure that no other trusted workflow grants unreviewed access to this environment. Use GitHub-hosted runners only.
-4. In the [existing App settings](https://github.com/settings/apps/nuni-merge-gate), confirm this App is installed only on the intended repository, with checks:write and metadata:read. Generate a new App private key if needed and store its PEM directly as the **environment** secret `NUNI_GATE_PRIVATE_KEY`. Do not use a repository-wide secret, paste the key into chat, commit it, or share it with any agent. The runtime restricts the short-lived installation token to this repository and checks:write, verifies App identity and revokes the token after use. No contents-write permission is needed.
-5. Test with `check` first; it does not read the App key or publish a check. `approve` is denied in the current pilot. After the separate merge-time enforcement change is reviewed, validated, and enabled, use `approve` only after a genuine review and successful exact-head tests. Verify the resulting check's App ID and audit URL before merging with expected head SHA. Revalidate current main and the absence of failures immediately before merge; GitHub strict mode prevents stale-base merges.
+1. Review the security change, its exact head, CI, CodeQL and the applicable Maestro full run. Use the existing genuine App procedure to approve this PR for `main`. The proposed `issue_comment` workflow becomes available after it reaches the default branch.
+2. Keep [ruleset 26004626](https://github.com/Miiduoa/graduation/rules/26004626) active on `main` with an empty bypass list. Enable strict up-to-date and required conversation resolution. In that same ruleset, pin the contexts below to their listed sources. Activate the three conditional test results once their workflows are available on `main`. Older branches then need to incorporate the new base.
+3. Configure `nuni-merge-gate` (environment ID `28496869500`) with exactly one branch rule for `main`, admin bypass disabled, and owner `Miiduoa` as the sole required environment reviewer. Permit the owner to review an environment run they initiated. This review grants the signing job access to its environment after a separate administrator readback.
+4. Confirm the App installation selects only `Miiduoa/graduation`. After bootstrap, the owner can enter `NUNI_GATE_PRIVATE_KEY` directly in GitHub's **environment secrets** form. Keep the private key out of repository-wide secrets, local review commands, PR jobs and chat. The installed App also has commit status permission. The pilot requests only checks permission for the one repository and revokes the token after use.
 
-## Pilot scope
+| GitHub source | Required check contexts |
+| --- | --- |
+| nuni-merge-gate `5504170` | `審查通過` |
+| CodeQL `57789` | `CodeQL` |
+| GitHub Actions `15368` | `CI Summary`, `Analyze (javascript-typescript)`, `policy-and-postgres`, `EAS Update (Preview)`, `Maestro PR result`, `Mobile agent PR result`, `Spatial browser PR result` |
 
-Only the 14 known reliability/map file paths enumerated in policy.json, with added or modified status, are eligible. PRs with auth, databases, CI changes, dependencies, migrations, renames, new files outside the list, or other unfamiliar scope remain on the existing genuine manual gate. A shared wake-aware request change also requires Mobile/Maestro checks even when the workflow would not run automatically: in that case the pilot denies instead of skipping a test.
+`CI Summary` requires all nine validation jobs. The three conditional results run on every `main` PR. Each checks the changed paths using the event's exact Git merge parents. A suite deemed applicable must pass. Failed classification, missing evidence, a cancelled test or an applicable skipped test fails its result. A skipped optional preview remains eligible under GitHub's native status-check semantics. GitHub continues to enforce the required checks and unresolved conversations after the App posts its result.
 
-The trusted workflow set is frozen to 43 workflow blob SHAs at the reviewed baseline; the two new gate files are excluded from this fingerprint because they are loaded only from trusted main. Any unrelated workflow addition/change/deletion on main stops approval until policy is reviewed and updated through the manual path. The pilot is deliberately limited; do not extend it merely to get all open PRs through. Do not use stale PR descriptions as evidence.
+## Operator procedure
 
-## Operator commands
+The allowlist contains 14 reliability and campus map paths. The policy pins the trusted workflows and the scripts that classify changes and validate Maestro reports. Changes outside this scope use the existing App procedure. Mobile and shared wake-aware changes require iOS smoke and full tests including successful JUnit evidence for each committed flow. Use **Re-run all jobs** if a partial retry lacks the complete successful job set for the current attempt. A manual workflow run provides additional evidence; the gate verifies `pull_request` runs for the exact PR, head and base.
 
-For an eligible ready PR, after a substantive exact-head review, submit a review (COMMENT if the owner is the author) with first line:
-```
-nuni-gate-review v1 head=<40-char head SHA> base=<40-char main SHA> outcome=pass
-```
-Then provide scope, findings, test evidence, residual risks and what remains untested (at least 120 characters). Do not claim independent approval. Record the numeric review ID. On the same PR, the owner may submit a **new** conversation comment:
-```
-/nuni-gate check <40-char head SHA> <40-char main SHA> <review ID>
-/nuni-gate approve <40-char head SHA> <40-char main SHA> <review ID>
-```
-Use only one command per comment. Edited, expired, foreign, stale, conflict, draft, unresolved-review, missing-check, failed-check and non-pilot requests fail closed. A skipped preview is not a test pass. The script requires the latest successful pull_request runs associated with the exact PR/head/base; verifies required jobs against GitHub Actions check IDs and genuine CodeQL App; requires the iOS build, smoke test, upload and report steps; validates all visible associated runs; rechecks everything after minting the short-lived App token. The privileged job checks out only the default branch SHA, not the PR. No untrusted PR script or dependency executes with the App secret.
+1. Read the exact diff, address findings and review the tests. Submit an owner review on that head with `nuni-gate-review v1 head=<head> base=<base> outcome=pass` as its first line. Record specific findings, test evidence and remaining limitations in at least 120 additional characters. Use a `COMMENT` review on the owner's own PR.
+2. After activation, add a new PR comment containing `/nuni-gate check <head> <base> <review-id>` for a read-only check, or `/nuni-gate approve <head> <base> <review-id>` to request publication. Use full commit SHAs. A dry run with no visibility into the bypass list reports missing evidence. A valid approve request can enter the protected environment queue. Queue admission grants no App check.
+3. From a trusted checkout of the reviewed `main` commit, run the following with GitHub CLI authenticated as the repository owner. Use the numbers in the run URL, run attempt, and initiating PR/comment URLs.
 
-## Test and rollback
+   ```sh
+   node scripts/merge-gate/attest-environment.mjs <run-id> <attempt> <pr-number> <comment-id>
+   node scripts/merge-gate/attest-environment.mjs <run-id> <attempt> <pr-number> <comment-id> --approve-environment
+   ```
 
-`node --test scripts/merge-gate/gate.test.mjs` exercises the pure policy, stale/fork/skipped/failed inputs, review proof, ruleset and PR state. Live environment, read token GraphQL/API permission, App authentication, token revocation and check creation require a pilot run after bootstrap. If anything fails, the existing merge gate remains in force. To disable the pilot, remove the environment secret (or disable its workflow) and revoke the new App key; continue the existing manual process. Do not disable branch protection.
+   The first command reads only. The second independently rechecks the pending deployment, current `main`, PR, comment, exact review, environment restrictions and the latest version of the ruleset. It requires explicit empty bypass lists in both the administrative current ruleset and its immutable GitHub history entry. It records those observations through GitHub's environment approval API. The Actions job has no administration credential. A generic approval from the web UI lacks the required evidence. An expired or ambiguous approval requires a fresh command.
+4. The publisher reads the GitHub-recorded environment approval for its own run. It checks the owner, environment ID, PR, head, base, review, triggering comment, run attempt, five-minute freshness, and current ruleset timestamp and content digest. It repeats these checks before minting a token and immediately before writing. It accepts an existing App success only for the identical command and workflow run. A historical App check without that evidence requires separate review by the existing App operator.
+5. Immediately before merging, use the management account to recheck the ruleset and empty bypass list, latest `main`, exact PR head, current checks, review and resolved conversations. Confirm that the App check's `external_id` is `nuni-gate:v2:<PR>:<head>:<base>:<review-id>:<comment-id>` and its details link is the issuing workflow run. GitHub associates native checks with commits. A PR sharing another PR's head still needs its own matching audit record. Merge through the normal PR interface with an expected head SHA, one batch at a time. Recheck the next batch against the new `main`.
 
-Official references: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#issue_comment ; https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments ; https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app .
+## Verification and rollback
+
+Run `node --test scripts/merge-gate/*.test.mjs` and `python3 scripts/merge-gate/maestro-reports.test.py`. Local negative tests exercise the actual publish entry point without credentials or network access. Live acceptance requires a protected environment approval, real App identity and check readback, plus verifying that GitHub blocks a failed required rerun and an unresolved discussion after an earlier success. To stop publication, disable the publisher, remove the environment secret and revoke its dedicated App key. Keep `main` protections active.
+
+[GitHub ruleset visibility](https://docs.github.com/en/rest/repos/rules#get-a-repository-ruleset) · [Workflow environment approval history](https://docs.github.com/en/rest/actions/workflow-runs#get-the-review-history-for-a-workflow-run) · [GitHub required status checks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)

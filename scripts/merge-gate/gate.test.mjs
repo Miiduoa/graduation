@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseCommand,expectedWorkflows,verifiedRuns,verifiedJob,validateReview,validateRule,validatePr,matchesPublishedCheck,requirePublicationEnabled,policy} from './gate.mjs';
+import {parseCommand,expectedWorkflows,verifiedRuns,verifiedJob,validateReview,validateRule,validateNativeRules,NATIVE_CHECKS,validatePr,policy,requirePublicationEnabled,gateExternalId,existingGateDecision,verifyPublishedCheck} from './gate.mjs';
 
 const head='a'.repeat(40), base='b'.repeat(40);
 const cmd=parseCommand('/nuni-gate approve '+head+' '+base+' 123');
@@ -55,18 +55,35 @@ test('review attestation must be exact owner, SHA, base, fresh command and detai
     {...review,body:'pass'},{...review,submitted_at:'2026-11-25T09:00:00Z'}])
     assert.throws(()=>validateReview(bad,cmd,107848266,comment));
 });
-test('ruleset must retain exact App; strict false cannot publish',()=>{
-  const rule={id:26004626,enforcement:'active',target:'branch',conditions:{ref_name:{include:['~DEFAULT_BRANCH'],exclude:[]}},
-    bypass_actors:[],rules:[{type:'pull_request'},{type:'required_status_checks',parameters:{strict_required_status_checks_policy:true,required_status_checks:[{context:'審查通過',integration_id:5504170}]}}]};
-  assert.equal(validateRule(rule),true);
-  const loose=structuredClone(rule);loose.rules[1].parameters.strict_required_status_checks_policy=false;
-  assert.equal(validateRule(loose),false);
-  const wrong=structuredClone(rule);wrong.rules[1].parameters.required_status_checks[0].integration_id=15368;
-  assert.throws(()=>validateRule(wrong));assert.throws(()=>validateRule({...rule,enforcement:'disabled'}));
-  assert.throws(()=>validateRule({...rule,bypass_actors:[{actor_id:1}]}));
-  const {bypass_actors: omitted,...missing}=rule;
-  assert.throws(()=>validateRule(missing), /bypass actors/);
-  assert.throws(()=>validateRule({...rule,bypass_actors:null}), /bypass actors/);
+function protectedRule() {
+  return {id:26004626,enforcement:'active',target:'branch',conditions:{ref_name:{include:['~DEFAULT_BRANCH'],exclude:[]}},
+    bypass_actors:[],rules:[
+      {type:'pull_request',parameters:{required_review_thread_resolution:true}},
+      {type:'required_status_checks', parameters:{strict_required_status_checks_policy:true,required_status_checks:structuredClone(NATIVE_CHECKS)}},
+    ]};
+}
+test('only explicit no-bypass, thread resolution and strict source-bound native checks authorize the pilot',()=>{
+  assert.doesNotThrow(()=>validateRule(protectedRule()));
+  for (const bypass_actors of [undefined,null,{},false,[{actor_id:1}]]) {
+    assert.throws(()=>validateRule({...protectedRule(),bypass_actors}));
+  }
+  const incomplete=protectedRule();delete incomplete.bypass_actors;
+  assert.throws(()=>validateRule(incomplete));
+  assert.doesNotThrow(()=>validateNativeRules(incomplete)); // preparation only
+  for (const change of [r=>r.enforcement='disabled',r=>r.conditions.ref_name.exclude=['refs/heads/main'],
+    r=>r.rules[0].parameters.required_review_thread_resolution=false,
+    r=>r.rules[1].parameters.strict_required_status_checks_policy=false]) {
+    const rule=protectedRule();change(rule);assert.throws(()=>validateRule(rule));
+  }
+  for (const {context} of NATIVE_CHECKS) {
+    const missing=protectedRule();
+    const checks=missing.rules[1].parameters.required_status_checks;
+    checks.splice(checks.findIndex(c=>c.context===context),1);
+    assert.throws(()=>validateRule(missing));
+    const wrong=protectedRule();
+    wrong.rules[1].parameters.required_status_checks.find(c=>c.context===context).integration_id=42;
+    assert.throws(()=>validateRule(wrong));
+  }
 });
 test('PR must remain open, ready, conflict-free, same repository and exact base/head',()=>{
   const pr={number:1,state:'open',draft:false,mergeable:true,head:{sha:head,repo:{id:1190179363}},base:{sha:base,ref:'main',repo:{id:1190179363}}};
@@ -78,15 +95,58 @@ test('PR must remain open, ready, conflict-free, same repository and exact base/
   assert.throws(()=>validatePr(pr,{commit:{sha:head}},cmd,1));
 });
 
-test('published success is reusable only for the exact attestation',()=>{
-  const externalId='nuni-gate:v1:796:'+head+':'+base+':123:456';
-  const check={name:'審查通過',app:{id:5504170},head_sha:head,status:'completed',conclusion:'success',external_id:externalId};
-  assert(matchesPublishedCheck(check,head,externalId));
-  for(const bad of [{...check,external_id:undefined},{...check,external_id:externalId+':old'},
-    {...check,app:{id:15368}},{...check,head_sha:base},{...check,conclusion:'failure'}])
-    assert(!matchesPublishedCheck(bad,head,externalId));
+const commentId=777, prNumber=1, runUrl=id=>'https://github.com/Miiduoa/graduation/actions/runs/'+id;
+const extId=gateExternalId(prNumber,cmd,commentId);
+const gateCheck=(overrides={})=>({id:9,name:'審查通過',app:{id:5504170},head_sha:head,status:'completed',
+  conclusion:'success',external_id:extId,details_url:runUrl(100),...overrides});
+const decide=checks=>existingGateDecision(checks,cmd,prNumber,commentId,runUrl(100));
+test('retry of the same workflow run and command reuses the exact App check',()=>{
+  assert.equal(decide([gateCheck()]),'reuse');
+  assert.throws(()=>decide([gateCheck({details_url:runUrl(1)})]));
 });
-test('pilot publication stays disabled until independent merge-time enforcement is verified',()=>{
-  assert.equal(policy.publicationEnabled,false);
-  assert.throws(()=>requirePublicationEnabled(), /Publication disabled/);
+test('only absence of a genuine App check permits creation',()=>{
+  assert.equal(decide([]),'publish');
+  assert.equal(decide([gateCheck({app:{id:15368}})]),'publish');
+  assert.equal(decide([gateCheck({app:undefined})]),'publish');
+  assert.throws(()=>decide([gateCheck({conclusion:'failure'})]));
+  assert.equal(decide([gateCheck({name:'other'})]),'publish');
+});
+test('existing App success with wrong PR, base, review, command or run URL is rejected',()=>{
+  const other=(n,h,b,r,c)=>['nuni-gate','v2',n,h,b,r,c].join(':');
+  for(const bad of [other(2,head,base,123,commentId),other(1,head,head,123,commentId),
+    other(1,head,base,124,commentId),other(1,head,base,123,778),other(1,base,base,123,commentId),
+    extId.replace('v2','v1'),extId+':x',undefined,''])
+    assert.throws(()=>decide([gateCheck({external_id:bad})]));
+  for(const url of [undefined,'',runUrl('0'),runUrl('01'),runUrl('-1'),runUrl('1.5'),runUrl('1')+'/',runUrl('1')+'?x=1',
+    runUrl('1')+'/attempts/1',runUrl('9'.repeat(20)),'http://github.com/Miiduoa/graduation/actions/runs/1',
+    'https://github.com/Other/graduation/actions/runs/1','https://github.com/miiduoa/graduation/actions/runs/1',
+    'https://api.github.com/repos/Miiduoa/graduation/actions/runs/1'])
+    assert.throws(()=>decide([gateCheck({details_url:url})]));
+});
+test('existing App success with missing or wrong status, head or id is rejected',()=>{
+  for(const bad of [{head_sha:base},{head_sha:undefined},{status:'in_progress'},{status:undefined},{id:0},{id:undefined}])
+    assert.throws(()=>decide([gateCheck(bad)]));
+});
+test('ambiguous or mixed existing App checks are rejected',()=>{
+  assert.throws(()=>decide([gateCheck(),gateCheck({id:10})]));
+  assert.throws(()=>decide([gateCheck(),gateCheck({id:10,external_id:'other'})]));
+  assert.throws(()=>decide([gateCheck(),gateCheck({id:10,conclusion:'failure'})]));
+  assert.throws(()=>decide([gateCheck(),gateCheck({id:10,status:'in_progress',conclusion:null})]));
+  assert.throws(()=>decide(undefined));
+  assert.equal(decide([gateCheck(),gateCheck({id:10,app:{id:15368},external_id:'x'})]),'reuse');
+});
+test('POST response must be the exact completed success App check',()=>{
+  const details=runUrl(200), result={id:11,name:'審查通過',app:{id:5504170},head_sha:head,status:'completed',
+    conclusion:'success',external_id:extId,details_url:details};
+  assert.doesNotThrow(()=>verifyPublishedCheck(result,cmd,extId,details));
+  for(const bad of [{app:{id:15368}},{app:undefined},{head_sha:base},{status:'queued'},{conclusion:'failure'},
+    {name:'x'},{external_id:'x'},{details_url:runUrl(201)},{details_url:undefined},{id:undefined},{id:0}])
+    assert.throws(()=>verifyPublishedCheck({...result,...bad},cmd,extId,details));
+  assert.throws(()=>verifyPublishedCheck(null,cmd,extId,details));
+  assert.throws(()=>verifyPublishedCheck(result,cmd,extId,runUrl('0')));
+});
+
+test('the committed pilot remains on hold pending independent live acceptance', () => {
+  assert.equal(policy.publicationEnabled, false);
+  assert.throws(requirePublicationEnabled, /Publication disabled/);
 });
