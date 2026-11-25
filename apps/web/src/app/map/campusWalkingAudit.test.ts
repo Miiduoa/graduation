@@ -244,6 +244,44 @@ describe('trusted OSM walking segment audit bridge', () => {
     }
   });
 
+  it('keeps locked and conditionally locked routes closed even without a barrier tag', () => {
+    const restrictions: Record<string, string>[] = [
+      { locked: 'yes' }, { locked: 'unknown' }, { locked: '' },
+      { locked: 'no', 'locked:conditional': 'yes @ (sunset-sunrise)' },
+      { 'locked:conditional': '' }, { opening_hours: '' },
+      { 'access:conditional': '' }, { 'foot:conditional': '' },
+    ];
+    for (const tags of restrictions) {
+      for (const location of ['way', 'from', 'to']) {
+        const data = parseCampusWalkingOsmCandidates({
+          osm3s: { timestamp_osm_base: '2026-11-24T08:00:00Z' },
+          elements: [
+            { ...points[0], tags: location === 'from' ? tags : {} },
+            { ...points[1], tags: location === 'to' ? tags : {} },
+            { type: 'way', id: 101, nodes: [1, 2],
+              tags: { highway: 'footway', ...(location === 'way' ? tags : {}) }, ...revision },
+          ],
+        }, 'fixture', bounds, now)!;
+        expect(data.graph.edges[0].access).toBe('restricted');
+        // An old cached candidate must not erase the source restriction.
+        data.graph.edges[0].access = 'unknown';
+        const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+        expect(graph.edges[0].access).toBe('restricted');
+        expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+        expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1, now)).toBeNull();
+      }
+    }
+  });
+
+  it('does not treat an unlocked tag alone as an access audit', () => {
+    const data = candidates();
+    data.nodes[0].tags.locked = 'no';
+    data.ways[0].tags.locked = 'no';
+    expect(findCampusWalkingRoute(data.graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+    const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).not.toBeNull();
+  });
+
   it('allows explicitly open access only after a matching audit', () => {
     for (const value of ['yes', 'designated', 'permissive']) {
       const data = candidates();
