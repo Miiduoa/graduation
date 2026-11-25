@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import {
   capturePersonalImportBrowserRecovery,
   parsePersonalImportLedger,
+  parsePersonalImportLedgerBody,
   type PersonalImportLedger,
   selectPersonalImportBrowserRecovery,
   personalImportCheckpointKey,
@@ -78,7 +79,7 @@ async function readLedgerSnapshot(key: string, scope: PersonalImportScope) {
 function isReadableLedger(raw: string | null, scope: PersonalImportScope): boolean {
   if (raw === null) return false;
   try {
-    parseLedger(raw, scope);
+    parsePersonalImportLedgerBody(raw, scope.schoolId, Platform.OS === 'web');
     return true;
   } catch {
     return false;
@@ -147,7 +148,11 @@ async function readLegacyCheckpoint(
 async function retireNativeCheckpoint(key: string, adopted: string | undefined) {
   if (adopted === undefined) return;
   const checkpoint = personalImportCheckpointKey(key);
-  if (await AsyncStorage.getItem(checkpoint) === adopted) await AsyncStorage.multiRemove([checkpoint]);
+  try {
+    if (await AsyncStorage.getItem(checkpoint) === adopted) await AsyncStorage.multiRemove([checkpoint]);
+  } catch {
+    // The primary is already durable. Cleanup can leave the redundant copy in place.
+  }
 }
 
 async function verifyNativeLedgerWrite(key: string, raw: string | null) {
@@ -161,9 +166,9 @@ async function restoreLedger(key: string, { raw, checkpoint }: Recovery) {
   if (raw === null) await AsyncStorage.removeItem(key);
   else await AsyncStorage.setItem(key, raw);
   await verifyNativeLedgerWrite(key, raw);
-  await retireNativeCheckpoint(key, checkpoint);
   clearPersonalImportRollback(key);
   pendingRestorations.delete(key);
+  await retireNativeCheckpoint(key, checkpoint);
 }
 
 async function rollbackLedger(key: string, raw: string | null) {
@@ -324,14 +329,14 @@ export function mutatePersonalImportLedger<T>(
               assertWritable();
               await verifyNativeLedgerWrite(key, raw);
               assertWritable();
-              await retireNativeCheckpoint(key, adoptedCheckpoint);
-              assertWritable();
               commit();
               pendingRestorations.delete(key);
             } catch (error) {
               await rollbackLedger(key, persistedRaw);
               throw error;
             }
+            // Keep the adopted copy available throughout the rollback window.
+            await retireNativeCheckpoint(key, adoptedCheckpoint);
           }
           hasPersisted = true;
           primaryRaw = writtenRaw;

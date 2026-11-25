@@ -105,6 +105,43 @@ test.each(['older ledger', 'null'] as const)('native primary wins over an unboun
     .toEqual(['行程 A', '行程 B', '行程 C']);
 });
 
+test.each(['native', 'web', 'web compact commit'] as const)(
+  '%s preserves readable primary records and recovery copies when sync is damaged',
+  async (format) => {
+    const restoreStorage = format === 'native' ? undefined : useWebStorage();
+    try {
+      const key = personalImportStorageKey(scope);
+      const checkpoint = key + ':checkpoint';
+      const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+      await appendPersonalImports(scope, [row('a', '行程 A')]);
+      const older = (await AsyncStorage.getItem(key))!;
+      const { ledger: { version, ...body } } = await appendPersonalImports(scope, [row('b', '行程 B')]);
+      const primary = JSON.stringify({
+        ...(format === 'web compact commit' ? { $commit: version } : { version }),
+        ...body,
+        sync: { enabled: 'invalid', base: null },
+      });
+      await AsyncStorage.setItem(key, primary);
+      await AsyncStorage.setItem(checkpoint, older);
+      const interrupted = JSON.stringify({
+        id: 'interrupted',
+        before: sha256(older),
+        attempted: sha256(primary),
+        original: older,
+      });
+      if (format === 'web compact commit') window.localStorage.setItem(journal, interrupted);
+
+      await expect(loadPersonalImports(scope)).rejects.toThrow('同步紀錄無法讀取');
+      await expect(appendPersonalImports(scope, [row('c', '行程 C')])).rejects.toThrow('同步紀錄無法讀取');
+      expect(await AsyncStorage.getItem(key)).toBe(primary);
+      expect(await AsyncStorage.getItem(checkpoint)).toBe(older);
+      if (format === 'web compact commit') expect(window.localStorage.getItem(journal)).toBe(interrupted);
+    } finally {
+      restoreStorage?.();
+    }
+  },
+);
+
 test.each([false, true])('protected native save preserves an unadopted checkpoint (revoked: %s)', async (revoked) => {
   const key = personalImportStorageKey(scope);
   const checkpoint = key + ':checkpoint';
@@ -173,6 +210,53 @@ test.each([false, true])('native keeps an adopted checkpoint after an unreadable
   await appendPersonalImports(scope, [row('c', '行程 C')]);
   expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
     .toEqual(['行程 A', '行程 C']);
+});
+
+test('native cleanup starts after commit and cannot trigger rollback on revocation', async () => {
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  await appendPersonalImports(scope, [row('a', '行程 A')]);
+  const original = (await AsyncStorage.getItem(key))!;
+  await AsyncStorage.setItem(checkpoint, original);
+  await AsyncStorage.removeItem(key);
+
+  const remove = jest.mocked(AsyncStorage.multiRemove);
+  const nativeRemove = remove.getMockImplementation()!;
+  const get = jest.mocked(AsyncStorage.getItem);
+  const nativeGet = get.getMockImplementation()!;
+  const rollbackReadError = new Error('Row too big to fit into CursorWindow');
+  const rebuildCheckpoint = jest.fn().mockRejectedValue(new Error('無法重建檢查點'));
+  const multiSet = jest.mocked(AsyncStorage.multiSet);
+  const nativeMultiSet = multiSet.getMockImplementation()!;
+  let active = true;
+  let journalAtCleanup: string | undefined;
+  get.mockImplementation(async (entry) => {
+    const raw = await nativeGet(entry);
+    if (entry === key && !active && raw === original) throw rollbackReadError;
+    return raw;
+  });
+  multiSet.mockImplementation((entries, callback) => {
+    if (entries.some(([entry]) => entry === checkpoint)) return rebuildCheckpoint(entries);
+    return nativeMultiSet(entries, callback);
+  });
+  remove.mockImplementationOnce(async (entries) => {
+    journalAtCleanup = readPersonalImportRollback(key);
+    active = false;
+    await nativeRemove(entries);
+  });
+  try {
+    const result = await appendPersonalImports(scope, [row('c', '行程 C')], { canContinue: () => active });
+    expect(result.added).toBe(1);
+    expect(remove).toHaveBeenCalledWith([checkpoint]);
+    expect(journalAtCleanup).toBeUndefined();
+    expect(rebuildCheckpoint).not.toHaveBeenCalled();
+    expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
+    expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
+      .toEqual(['行程 A', '行程 C']);
+  } finally {
+    get.mockImplementation(nativeGet);
+    multiSet.mockImplementation(nativeMultiSet);
+  }
 });
 
 test.each([true, false])('Expo Web only replays pending sync from a current recovery snapshot (replaced: %s)', async (replaced) => {

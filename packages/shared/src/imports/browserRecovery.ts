@@ -171,15 +171,26 @@ export function parsePersonalImportLedger(
   schoolId: string,
   web: boolean,
 ): PersonalImportLedger {
+  const ledger = parsePersonalImportLedgerBody(raw, schoolId, web);
+  if (ledger.sync !== undefined) ledger.sync = parsePersonalImportSyncState(ledger.sync, schoolId);
+  return ledger as PersonalImportLedger;
+}
+
+/** Validate the records and undo history independently of sync metadata. */
+export function parsePersonalImportLedgerBody(
+  raw: string | null,
+  schoolId: string,
+  web: boolean,
+): Omit<PersonalImportLedger, 'sync'> & { sync?: unknown } {
   if (!raw) return { version: 1, records: [], batches: [] };
-  let value: PersonalImportLedger;
+  let value: Omit<PersonalImportLedger, 'sync'> & { sync?: unknown };
   try {
     const { webCommit: _webCommit, ...ledger } = parsePersonalImportStorageJson(raw, web);
     // The Web calendar stores records and sync state without an Expo undo stack.
     if (web && 'sync' in ledger && !('batches' in ledger)) {
       ledger.batches = [];
     }
-    value = ledger as PersonalImportLedger;
+    value = ledger as typeof value;
   } catch {
     throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
   }
@@ -211,7 +222,5 @@ export function parsePersonalImportLedger(
   ) {
     throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
   }
-  if (value.sync !== undefined)
-    value.sync = parsePersonalImportSyncState(value.sync, schoolId);
   return value;
 }

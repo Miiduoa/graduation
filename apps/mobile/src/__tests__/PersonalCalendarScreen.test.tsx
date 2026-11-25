@@ -918,10 +918,10 @@ it.each(['during revalidation', 'after recovery'])(
 it.each([
   ['setItem', false, false],
   ['setItem', true, false],
-  ['multiRemove', false, false],
-  ['multiRemove', true, false],
-  ['multiRemove', false, true],
-  ['multiRemove', true, true],
+  ['setItem', false, true],
+  ['setItem', true, true],
+  ['readback', false, false],
+  ['readback', true, false],
 ] as const)('preserves the event when deletion loses verification during %s (restoration fails: %s, backup rebuild fails: %s)', async (phase, restoreFails, rebuildFails) => {
   const view = await fillAndSave('寫入途中重驗');
   const scope = mockScope!;
@@ -931,8 +931,8 @@ it.each([
   const nativeSetItem = setItem.getMockImplementation()!;
   const pending = deferred<void>();
   const started = jest.fn();
-  const multiRemove = jest.mocked(AsyncStorage.multiRemove);
-  const nativeMultiRemove = multiRemove.getMockImplementation()!;
+  const getItem = jest.mocked(AsyncStorage.getItem);
+  const nativeGetItem = getItem.getMockImplementation()!;
   const rejectRebuild = jest.fn(async () => {
     throw new Error('重建備份失敗');
   });
@@ -942,17 +942,20 @@ it.each([
       started();
       await pending.promise;
       await nativeSetItem(storageKey, value);
+      if (rebuildFails) jest.mocked(AsyncStorage.multiSet).mockImplementationOnce(rejectRebuild);
     });
   } else {
     await AsyncStorage.setItem(key + ':checkpoint', stored!);
     await AsyncStorage.removeItem(key);
     setItem.mockClear();
     setItem.mockImplementationOnce(nativeSetItem);
-    multiRemove.mockImplementationOnce(async (keys) => {
-      started();
-      await pending.promise;
-      await nativeMultiRemove(keys);
-      if (rebuildFails) jest.mocked(AsyncStorage.multiSet).mockImplementationOnce(rejectRebuild);
+    getItem.mockImplementation(async (storageKey) => {
+      const raw = await nativeGetItem(storageKey);
+      if (storageKey === key && raw !== null && raw !== stored) {
+        started();
+        await pending.promise;
+      }
+      return raw;
     });
   }
   if (restoreFails) setItem.mockRejectedValueOnce(new Error('還原寫入失敗'));
@@ -1001,9 +1004,11 @@ it.each([
       expect(await AsyncStorage.getItem(key + ':checkpoint')).toBeNull();
     } else {
       expect(await AsyncStorage.getItem(key)).toBe(stored);
+      expect(await AsyncStorage.getItem(key + ':checkpoint')).toBe(phase === 'readback' ? stored : null);
     }
   } finally {
     pending.resolve();
+    getItem.mockImplementation(nativeGetItem);
     unsubscribe();
   }
 });
