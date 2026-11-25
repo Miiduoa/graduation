@@ -33,10 +33,9 @@ cleanup_attempt_dir() {
 trap cleanup_attempt_dir EXIT
 
 record_attempt() {
-  if [[ -z "$attempt_dir" ]]; then
-    attempt_dir="$(sudo mktemp -d /tmp/playwright-install.XXXXXXXXXX)" || return 1
-    [[ "$attempt_dir" =~ ^/tmp/playwright-install\.[a-zA-Z0-9]{10}$ ]] || { attempt_dir=''; return 1; }
-  fi
+  cleanup_attempt_dir || return 1
+  attempt_dir="$(sudo mktemp -d /tmp/playwright-install.XXXXXXXXXX)" || return 1
+  [[ "$attempt_dir" =~ ^/tmp/playwright-install\.[a-zA-Z0-9]{10}$ ]] || { attempt_dir=''; return 1; }
   IFS= read -r attempt_id < /proc/sys/kernel/random/uuid || return 1
   record_group=(bash -c "$(declare -f proc_identity private_attempt_dir)
     private_attempt_dir \"\${1%/*}\" || exit 1
@@ -44,7 +43,6 @@ record_attempt() {
     group=\$proc_group
     proc_identity \$group && [[ \$group == \$proc_group ]] || exit 1
     umask 077
-    rm -f -- \"\$1\" || exit 1
     (set -o noclobber; printf '%s %s %s %s\\n' \"\$group\" \"\$proc_start\" \"\$2\" \"\$proc_group\" > \"\$1\") || exit 1
     shift 2
     exec \"\$@\"" record-process-group "$attempt_dir/process-group" "$attempt_id")
@@ -53,6 +51,8 @@ record_attempt() {
 read_attempt_record() {
   local file="$1" nonce="$2" installer_group="$3" pid start recorded_nonce group extra
   private_attempt_dir "${file%/*}" || return 1
+  # The recorder must create this file before executing the package command.
+  [[ -e "$file" || -L "$file" ]] || return 0
   # In a private directory the unprivileged caller cannot swap the checked file.
   [[ ! -L "$file" && -f "$file" && "$(stat -c '%u:%a:%h' -- "$file")" == "$EUID:600:1" ]] || return 1
   read -r pid start recorded_nonce group extra < "$file" || return 1
@@ -63,7 +63,10 @@ read_attempt_record() {
 
 kill_timed_out_group() {
   "$@" bash -c "$(declare -f proc_identity proc_group_leader_matches proc_send_signal proc_group_members proc_signal_marked_group private_attempt_dir read_attempt_record)
-    read_attempt_record \"\$@\"" signal-process-group "$attempt_dir/process-group" "$attempt_id" "$installer_group" || true
+    read_attempt_record \"\$@\"" signal-process-group "$attempt_dir/process-group" "$attempt_id" "$installer_group" || {
+    echo 'Playwright package process group cleanup failed.' >&2
+    return 1
+  }
 }
 
 retry_install() {
@@ -92,7 +95,7 @@ retry_install() {
       install_status=$?
     fi
     if (( ${#elevation[@]} )) && [[ "$install_status" == 124 || "$install_status" == 137 ]]; then
-      kill_timed_out_group "${elevation[@]}"
+      kill_timed_out_group "${elevation[@]}" || return 2
     fi
     if (( attempt == 3 )); then
       echo "${label} failed after 3 attempts." >&2
@@ -118,7 +121,7 @@ retry_install() {
           recovery_status=$?
         fi
         if [[ "$recovery_status" == 124 || "$recovery_status" == 137 ]]; then
-          kill_timed_out_group "${elevation[@]}"
+          kill_timed_out_group "${elevation[@]}" || return 2
         fi
         if [[ "$install_status" != 124 && "$install_status" != 137 ]] ||
           (( recovery_attempt == 3 || SECONDS + recovery_attempt >= recovery_deadline )); then break; fi
@@ -146,7 +149,10 @@ if [[ "${1:-}" == '--fonts-noto-cjk' ]]; then
     -o Acquire::Retries=3 install -y fonts-noto-cjk
 else
   retry_install 'Playwright Chromium' 180s python -m playwright install chromium
-  if ! retry_install 'Playwright system dependencies' 90s sudo "$(command -v python)" -m playwright install-deps chromium; then
+  status=0
+  retry_install 'Playwright system dependencies' 90s sudo "$(command -v python)" -m playwright install-deps chromium || status=$?
+  if (( status == 2 )); then exit "$status"; fi
+  if (( status != 0 )); then
     echo 'Skipping extra system packages after bounded retries; continuing with actual browser checks (Ubuntu mirror may be unreachable).' >&2
   fi
 fi

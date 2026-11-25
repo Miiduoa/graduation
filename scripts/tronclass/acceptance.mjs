@@ -1,12 +1,12 @@
 import { constants } from 'node:fs';
 import { Buffer } from 'node:buffer';
-import { chmod, lstat, mkdtemp, open, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, open, realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, TextDecoder } from 'node:util';
+import { compileFunction } from 'node:vm';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const MAX_FILE_BYTES = 128 * 1024;
@@ -164,7 +164,6 @@ export async function loadAcceptanceRuntime() {
   if (version[0] !== 22 || version[1] < 23 || (version[1] === 23 && version[2] < 5)) {
     fail('TRONCLASS_ACCEPTANCE_RUNTIME_UNAVAILABLE');
   }
-  let directory;
   try {
     const { build } = await import('esbuild');
     const require = createRequire(path.join(ROOT, 'package.json'));
@@ -191,14 +190,14 @@ export async function loadAcceptanceRuntime() {
         },
       ],
     });
-    directory = await mkdtemp(path.join(tmpdir(), 'nuni-tronclass-acceptance-'));
-    await chmod(directory, 0o700);
-    const filename = path.join(directory, 'runtime.cjs');
-    await writeFile(filename, result.outputFiles[0].contents, { mode: 0o600, flag: 'wx' });
-    const module = require(filename);
-    return { module, dispose: () => rm(directory, { recursive: true, force: true }) };
+    // The name only labels diagnostics. Evaluate esbuild's output directly.
+    const filename = path.join(ROOT, 'scripts/tronclass/acceptance-runtime.cjs');
+    const module = { exports: {} };
+    const evaluate = compileFunction(result.outputFiles[0].text,
+      ['exports', 'require', 'module', '__filename', '__dirname'], { filename });
+    evaluate.call(module.exports, module.exports, require, module, filename, path.dirname(filename));
+    return { module: module.exports, dispose: async () => {} };
   } catch {
-    if (directory) await rm(directory, { recursive: true, force: true });
     fail('TRONCLASS_ACCEPTANCE_RUNTIME_UNAVAILABLE');
   }
 }

@@ -35,8 +35,8 @@ proc_group_leader_matches() {
   [[ "$marked" == 1 ]] || return 3
 }
 
-# Open the pidfd before the final checks. A numeric PID can be recycled
-# after either check, but the descriptor can only signal the original task.
+# Pin the proc directory before opening the pidfd. A successful stat check
+# after pidfd_open proves that both descriptors still refer to the same task.
 proc_send_signal() {
   python3 -I -c '
 import errno
@@ -55,15 +55,13 @@ def matches(proc):
 
 try:
     sig = getattr(signal, "SIG" + name)
-    with_pidfd = hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal")
-    pidfd = None
-    if with_pidfd:
-        try:
-            pidfd = os.pidfd_open(pid)
-        except OSError as error:
-            if error.errno not in (errno.ENOSYS, errno.EINVAL):
-                raise
     proc = os.open(f"/proc/{pid}", os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        pidfd = os.pidfd_open(pid) if hasattr(os, "pidfd_open") else None
+    except OSError as error:
+        if error.errno not in (errno.ENOSYS, errno.EINVAL):
+            raise
+        pidfd = None
     if not matches(proc):
         sys.exit(1)
     if marker:
@@ -71,18 +69,15 @@ try:
         with os.fdopen(fd, "rb") as environ:
             if os.fsencode(marker) not in environ.read().split(b"\0"):
                 sys.exit(1)
-    if pidfd is not None:
-        try:
-            signal.pidfd_send_signal(pidfd, sig)
-            sys.exit(0)
-        except OSError as error:
-            if error.errno != errno.ENOSYS:
-                raise
-    # A pinned proc directory stops resolving stat if the task exits.
-    # On older kernels, recheck it immediately before the numeric syscall.
-    if not matches(proc):
+    if pidfd is None or not hasattr(signal, "pidfd_send_signal"):
+        print("Cannot safely signal a process: pidfd support is unavailable.", file=sys.stderr)
         sys.exit(1)
-    os.kill(pid, sig)
+    try:
+        signal.pidfd_send_signal(pidfd, sig)
+    except OSError as error:
+        if error.errno == errno.ENOSYS:
+            print("Cannot safely signal a process: pidfd support is unavailable.", file=sys.stderr)
+        raise
 except (OSError, IndexError, ValueError, AttributeError):
     sys.exit(1)
 ' "$@"
@@ -96,21 +91,26 @@ proc_group_members() {
     pid="${entry##*/}"
     proc_identity "$pid" && [[ "$proc_group" == "$group" && "$proc_state" != Z && "$proc_state" != X ]] &&
       (( 10#$proc_start >= 10#$start )) || continue
+    # A live member observed during this pass requires another scan, even if
+    # it exits before verification or cannot be signalled.
+    [[ "$signal" != KILL ]] || found=1
     member_start="$proc_start"
     # The marker is placed in the initial environment of the launched command.
     # Inheritance preserves provenance when the kernel reparents a survivor.
     grep -zFxq -- "$marker" "$entry/environ" 2>/dev/null || continue
     proc_identity "$pid" && [[ "$proc_group" == "$group" && "$proc_start" == "$member_start" && "$proc_state" != Z && "$proc_state" != X ]] || continue
     [[ -n "$signal" ]] || return 0
-    found=1
     if ! proc_send_signal "$pid" "$member_start" "$group" "$marker" "$signal" &&
       proc_identity "$pid" && [[ "$proc_group" == "$group" && "$proc_start" == "$member_start" &&
         "$proc_state" != Z && "$proc_state" != X ]]; then
       failed=1
     fi
   done
-  # Rescan even if delivery raced with exit or was temporarily denied.
-  [[ "$signal" != KILL || "$found" == 0 ]] || return 2
+  # Distinguish an occupied group from a failed signal to a live member.
+  if [[ "$signal" == KILL && "$found" == 1 ]]; then
+    if (( failed )); then return 3; fi
+    return 2
+  fi
   [[ -n "$signal" && "$failed" -eq 0 ]]
 }
 
@@ -123,7 +123,9 @@ proc_signal_marked_group() {
   case "$status" in
     0) [[ -n "$signal" ]] || return 0 ;;
     2|3) ;; # Check surviving members below.
-    *) return 1 ;;
+    *)
+      [[ "$signal" != KILL ]] || echo "Cannot verify process group $group for cleanup." >&2
+      return 1 ;;
   esac
   if [[ "$signal" == KILL ]]; then
     local scan_status empty=0 deadline=$((EPOCHSECONDS + 3))
@@ -133,13 +135,19 @@ proc_signal_marked_group() {
       case "$scan_status" in
         0) (( empty )) && return 0; empty=1 ;;
         2) empty=0 ;; # A member could have forked after the glob expanded.
-        *) return 1 ;;
+        *) echo "Could not signal all live members of process group $group." >&2; return 1 ;;
       esac
-      (( EPOCHSECONDS < deadline )) || return 1
+      if (( scan_status == 2 && EPOCHSECONDS >= deadline )); then
+        echo "Process group $group still has live members after forced cleanup." >&2
+        return 1
+      fi
       sleep 0.01
       status=0
       proc_group_leader_matches "$pid" "$start" "$group" "$marker" || status=$?
-      [[ "$status" != 1 ]] || return 1
+      if [[ "$status" == 1 ]]; then
+        echo "Process group $group changed identity during cleanup." >&2
+        return 1
+      fi
     done
   fi
   proc_group_members "$group" "$start" "$marker" "$signal" && return 0

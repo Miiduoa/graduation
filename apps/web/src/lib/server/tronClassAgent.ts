@@ -216,7 +216,6 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         await assertScopes(ownerKey, grant, scope);
         return result;
       };
-      const requiresCourseConfirmation = readsHomework && homeworkScope.requiresConfirmation;
       let courseId = input.courseId;
       let snapshot = await guardedRead(courseId);
       steps.push({ id: 'courses', tool: 'read_courses', status: snapshot.errors.some((error) => error.area === 'courses') ? 'partial' : 'completed', message: `已核對目前帳號的 ${snapshot.courses.length} 門課程。` });
@@ -225,13 +224,12 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         answer: `${snapshot.partial ? '部分課程資料尚未讀完。' : ''}已讀取 ${snapshot.courses.length} 門 TronClass 課程，可在這裡選擇課程查看作業、公告與教材。` });
 
       if (!courseId) {
-        const matches = snapshot.courses.filter(course => readsHomework
-          ? homeworkScope.matches(course.name, course.code)
-          : containsName(input.question, course.name) || (course.code.length > 1 && containsName(input.question, course.code)));
-        const canResolveCourse = !readsHomework || (!requiresCourseConfirmation &&
+        const canResolveCourse = !readsHomework || (!homeworkScope.requiresConfirmation &&
           !snapshot.errors.some(error => error.area === 'courses'));
-        if (matches.length === 1 && canResolveCourse) courseId = matches[0].id;
-        else if (['materials', 'announcements', 'download'].includes(query.intent) && snapshot.courses.length === 1 &&
+        const matches = canResolveCourse ? snapshot.courses.filter(course => readsHomework
+          ? homeworkScope.matches(course.name, course.code)
+          : containsName(input.question, course.name) || (course.code.length > 1 && containsName(input.question, course.code))) : [];
+        if (matches.length === 1) courseId = matches[0].id; else if (['materials', 'announcements', 'download'].includes(query.intent) && snapshot.courses.length === 1 &&
           !snapshot.partial && isUnqualifiedRequest(input.question, ['公告', '通知', ...snapshot.courses.map((course) => course.name)])) {
           courseId = snapshot.courses[0].id;
         }
@@ -239,7 +237,7 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         else if (readsHomework) {
           steps.push({ id: 'choose-course', tool: 'select_target', status: 'blocked', message: '尚未選定唯一課程。' });
           return finish({ ...base, fetchedAt: snapshot.fetchedAt, snapshot: selectedSnapshot(snapshot), selection: 'course',
-            answer: requiresCourseConfirmation
+            answer: homeworkScope.requiresConfirmation
               ? '這個請求包含全部作業的範圍，請先確認要查詢哪一門課的作業。'
               : '請確認要查詢哪一門課的作業。' });
         }

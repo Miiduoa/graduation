@@ -396,7 +396,12 @@ fi
 for mode in replaced symlink marker starttime valid leader-exits unreadable; do
   export MOCK_RECORD_ATTACK="$mode" MOCK_TIMEOUT_FAILS=1 MOCK_LOCK="$mock_dir/record-$mode"
   : > "$MOCK_LOG"
-  bash "$script_dir/install-playwright.sh" --fonts-noto-cjk > "$mock_dir/record-output.log" 2>&1
+  if bash "$script_dir/install-playwright.sh" --fonts-noto-cjk > "$mock_dir/record-output.log" 2>&1; then
+    echo "Forced cleanup accepted a persistent or unverifiable group ($mode)" >&2
+    exit 1
+  fi
+  grep -q 'package process group cleanup failed' "$mock_dir/record-output.log"
+  [[ "$(grep -c '^dpkg:' "$MOCK_LOG" || true)" == 0 ]]
   leader="$(cat "$MOCK_LOCK.leader.child-pid")"
   member="$(cat "$MOCK_LOCK.member.child-pid")"
   if [[ "$mode" == valid ]]; then
@@ -425,7 +430,7 @@ export MOCK_TIMEOUT_FAILS=0
 # Run with the host's timeout and with a modelled child-only timeout, so the
 # result does not depend on which timeout implementation the runner ships.
 for child_only in 0 1; do
-export MOCK_APT_FAILS=0 MOCK_PROCESS_TEST=1 MOCK_CHILD_ONLY_TIMEOUT="$child_only" MOCK_MODEL_REUSE="$child_only" MOCK_LOCK="$mock_dir/apt-$child_only.lock"
+export MOCK_APT_FAILS=0 MOCK_PROCESS_TEST=1 MOCK_CHILD_ONLY_TIMEOUT="$child_only" MOCK_MODEL_REUSE=0 MOCK_LOCK="$mock_dir/apt-$child_only.lock"
 : > "$MOCK_LOG"
 if ! bash "$script_dir/install-playwright.sh" --fonts-noto-cjk > "$mock_dir/process-output.log" 2>&1; then
   cat "$mock_dir/process-output.log" "$MOCK_LOG" >&2
@@ -442,15 +447,28 @@ flock -n "$MOCK_LOCK" true
 if [[ "$child_only" == 1 ]]; then
   grep -qx "sudo:pidfd:-KILL -- $(cat "$MOCK_LOCK.child-pid")" "$MOCK_LOG"
   ! grep -q '^sudo:pidfd:-KILL -- -' "$MOCK_LOG"
-  unrelated_pid="$(cat "$MOCK_LOCK.unrelated.child-pid")"
-  kill -0 "$unrelated_pid"
-  ! grep -qx "sudo:pidfd:-KILL -- $unrelated_pid" "$MOCK_LOG"
-  kill "$unrelated_pid"
-  rm -f "$MOCK_LOCK.unrelated.child-pid"
 else
   ! grep -q '^sudo:pidfd:' "$MOCK_LOG"
 fi
 done
+export MOCK_CHILD_ONLY_TIMEOUT=0 MOCK_MODEL_REUSE=0
+
+# A live, unverified member blocks recovery even if the marked lock holder
+# was killed. The simulated reuse must never cause a signal to the new task.
+export MOCK_PROCESS_TEST=1 MOCK_CHILD_ONLY_TIMEOUT=1 MOCK_MODEL_REUSE=1 MOCK_LOCK="$mock_dir/reused-group.lock"
+: > "$MOCK_LOG"
+if bash "$script_dir/install-playwright.sh" > "$mock_dir/reused-group-output.log" 2>&1; then
+  echo 'Campus installer ignored a failed process group cleanup' >&2
+  exit 1
+fi
+grep -q 'package process group cleanup failed' "$mock_dir/reused-group-output.log"
+[[ "$(grep -c '^dpkg:' "$MOCK_LOG" || true)" == 0 ]]
+grep -qx "sudo:pidfd:-KILL -- $(cat "$MOCK_LOCK.child-pid")" "$MOCK_LOG"
+unrelated_pid="$(cat "$MOCK_LOCK.unrelated.child-pid")"
+kill -0 "$unrelated_pid"
+[[ "$(grep -cx "sudo:pidfd:-KILL -- $unrelated_pid" "$MOCK_LOG" || true)" == 0 ]]
+kill "$unrelated_pid"
+rm -f "$MOCK_LOCK.unrelated.child-pid"
 export MOCK_CHILD_ONLY_TIMEOUT=0 MOCK_MODEL_REUSE=0
 
 # The dpkg recovery command is bounded like an install attempt: when its own
@@ -472,8 +490,8 @@ flock -n "$MOCK_LOCK" true
 # Without the recovery cleanup, the surviving dpkg helper keeps the lock and
 # recovery stays failed after every bounded retry.
 export MOCK_LOCK="$mock_dir/dpkg-hang-no-cleanup.lock"
-grep -q '^          kill_timed_out_group "${elevation\[@\]}"$' "$script_dir/install-playwright.sh"
-sed 's/^          kill_timed_out_group "${elevation\[@\]}"$/          :/' \
+grep -q '^          kill_timed_out_group "${elevation\[@\]}" || return 2$' "$script_dir/install-playwright.sh"
+sed 's/^          kill_timed_out_group "${elevation\[@\]}" || return 2$/          :/' \
   "$script_dir/install-playwright.sh" > "$mock_dir/scripts/qa/browser/no-recovery-cleanup.sh"
 : > "$MOCK_LOG"
 if bash "$mock_dir/scripts/qa/browser/no-recovery-cleanup.sh" --fonts-noto-cjk > "$mock_dir/no-recovery-cleanup-output.log" 2>&1; then
@@ -506,8 +524,8 @@ export MOCK_DELAY_LOCK_RELEASE=0 MOCK_TIMEOUT_FAILS=0
 # TERM-ignoring lock holder alive. Recovery must then stay failed after all
 # short retries, never proceeding to apt/browser.
 export MOCK_PROCESS_TEST=1 MOCK_CHILD_ONLY_TIMEOUT=1 MOCK_LOCK="$mock_dir/no-cleanup.lock"
-grep -q '^      kill_timed_out_group "${elevation\[@\]}"$' "$script_dir/install-playwright.sh"
-sed 's/^      kill_timed_out_group "${elevation\[@\]}"$/      :/' \
+grep -q '^      kill_timed_out_group "${elevation\[@\]}" || return 2$' "$script_dir/install-playwright.sh"
+sed 's/^      kill_timed_out_group "${elevation\[@\]}" || return 2$/      :/' \
   "$script_dir/install-playwright.sh" > "$mock_dir/scripts/qa/browser/no-cleanup.sh"
 : > "$MOCK_LOG"
 if bash "$mock_dir/scripts/qa/browser/no-cleanup.sh" --fonts-noto-cjk > "$mock_dir/no-cleanup-output.log" 2>&1; then

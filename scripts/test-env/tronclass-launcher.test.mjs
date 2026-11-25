@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -2405,7 +2405,7 @@ def pidfd_open(pid):
 
 def stat(*args, **kwargs):
     global replacement
-    start = b"200" if replacement else b"100"
+    start = b"100"  # The pinned stat check can succeed even as the numeric PID changes.
     replacement = True  # The numeric PID now refers to another process.
     return io.BytesIO(b"42 (old) " + b" ".join([b"S", b"1", b"42"] + [b"0"] * 16 + [start]))
 
@@ -2429,12 +2429,13 @@ case_mode="$1"
 proc_send_signal 42 100 42 "" KILL
 `, 'pid-reuse-test', mode], { encoding: 'utf8', timeout: 3000 });
     assert.equal(result.status, 1, result.stderr);
-    assert.equal(result.stderr, '');
+    if (mode === 'fallback') assert.match(result.stderr, /pidfd support is unavailable/);
+    else assert.equal(result.stderr, '');
     assert.equal(result.stdout.trim(), mode === 'pidfd' ? 'original descriptor only' : '');
   });
 }
 
-test('forced group cleanup rescans for a member forked after the first scan', () => {
+test('forced group cleanup rescans for members forked during successive scans', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-group-rescan-'));
   try {
     const result = spawnSync('bash', ['-c', String.raw`
@@ -2448,9 +2449,13 @@ import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
+generation = 0
+
 def fork_member(*args):
+    global generation
+    generation += 1
     if os.fork() == 0:
-        (root / "member").write_text(str(os.getpid()))
+        (root / f"member-{generation}").write_text(str(os.getpid()))
         while True:
             signal.pause()
 
@@ -2460,25 +2465,74 @@ while True:
     signal.pause()
 PYTHON
 leader_job=$!
-trap 'for file in "$dir"/leader "$dir"/member; do if [[ -s "$file" ]]; then kill -KILL "$(cat "$file")" 2>/dev/null || true; fi; done; wait "$leader_job" 2>/dev/null || true' EXIT
+trap 'for file in "$dir"/leader "$dir"/member-*; do if [[ -s "$file" ]]; then kill -KILL "$(cat "$file")" 2>/dev/null || true; fi; done; wait "$leader_job" 2>/dev/null || true' EXIT
 for ((i=0; i<100; i++)); do [[ -s "$dir/leader" ]] && break; sleep 0.01; done
 leader="$(cat "$dir/leader")"
 proc_identity "$leader"
 eval "$(declare -f proc_send_signal | sed '1s/proc_send_signal/real_proc_send_signal/')"
 proc_send_signal() {
-  if [[ "$1" == "$leader" && ! -s "$dir/member" ]]; then
+  local next=""
+  if [[ "$1" == "$leader" && ! -s "$dir/member-1" ]]; then
+    next="$dir/member-1"
+  elif [[ -s "$dir/member-1" && ! -s "$dir/member-2" && "$1" == "$(cat "$dir/member-1")" ]]; then
+    next="$dir/member-2"
+  fi
+  if [[ -n "$next" ]]; then
     real_proc_send_signal "$1" "$2" "$3" "$4" USR1 || return
-    for ((i=0; i<100; i++)); do [[ -s "$dir/member" ]] && break; sleep 0.01; done
+    for ((i=0; i<100; i++)); do [[ -s "$next" ]] && break; sleep 0.01; done
   fi
   real_proc_send_signal "$@"
 }
 proc_signal_marked_group "$leader" "$proc_start" "$leader" TRONCLASS_TEST_GROUP=marked KILL
-member="$(cat "$dir/member")"
-if proc_identity "$member"; then [[ "$proc_state" == Z || "$proc_state" == X ]]; fi
+for file in "$dir/member-1" "$dir/member-2"; do
+  member="$(cat "$file")"
+  if proc_identity "$member"; then [[ "$proc_state" == Z || "$proc_state" == X ]]; fi
+done
 `, 'group-rescan-test', dir], { encoding: 'utf8', timeout: 6000 });
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stderr);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launcher reports a failure when forced cleanup cannot signal a live group', () => {
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-cleanup-failure-'));
+  const pidFile = path.join(dir, 'grandchild.pid');
+  try {
+    const fixture = readFileSync(script, 'utf8')
+      .replace('source scripts/process-identity.sh', `$&
+eval "$(declare -f proc_send_signal | sed '1s/proc_send_signal/real_proc_send_signal/')"
+proc_send_signal() {
+  [[ -z "$3" || "$5" != KILL ]] || return 1
+  real_proc_send_signal "$@"
+}`)
+      .replace('  wait "$TRONCLASS_SELFTEST_WRAPPER"', `  for ((i=0; i<200; i++)); do
+    [[ -s "$TRONCLASS_SELFTEST_GRANDCHILD" ]] && exit 0
+    sleep 0.01
+  done
+  exit 2`);
+    const result = spawnSync('bash', ['-c', fixture, script], {
+      encoding: 'utf8', timeout: 12000,
+      env: {
+        ...process.env,
+        TRONCLASS_RUNTIME_DIR: dir,
+        TRONCLASS_SIGNAL_SELFTEST: '1',
+        TRONCLASS_SELFTEST_CHILD: path.join(dir, 'child.pid'),
+        TRONCLASS_SELFTEST_GRANDCHILD: pidFile,
+      },
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /TronClass launcher cleanup failed/);
+    const pid = Number(readFileSync(pidFile, 'utf8').trim());
+    process.kill(pid, 0);
+  } finally {
+    if (existsSync(pidFile)) {
+      const pid = Number(readFileSync(pidFile, 'utf8').trim());
+      try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 });

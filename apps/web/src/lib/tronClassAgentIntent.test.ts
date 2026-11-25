@@ -62,6 +62,9 @@ describe('TronClass homework overview scope', () => {
 
   it.each([
     '查玩課雲全部作業和查玩課雲『外交』作業',
+    '查玩課雲全部課程『外交』作業和查公車',
+    '查玩課雲所有課程「外交」未交作業，查校園公告',
+    '查玩課雲 all 『外交』作業和查公車',
     '查玩課雲「外交」作業，查所有作業',
     '查所有作業，查玩課雲外交作業',
   ])('preserves an explicit all-course clause in %s', question => {
@@ -72,6 +75,19 @@ describe('TronClass homework overview scope', () => {
       expect(scope?.requiresConfirmation).toBe(true);
       expect(scope?.matches('外交', 'PS101')).toBe(false);
     }
+  });
+
+  it.each(['全部', '所有', 'all'])('requires confirmation for a single clause with %s and a quoted course', all => {
+    const scope = tronClassAgentHomeworkScope(`查玩課雲 ${all} 『外交』作業`);
+    expect(scope?.overview).toBe(false);
+    expect(scope?.requiresConfirmation).toBe(true);
+    expect(scope?.matches('外交', 'PS101')).toBe(false);
+  });
+
+  it('treats a scope word inside a quoted course name as part of that name', () => {
+    const scope = tronClassAgentHomeworkScope('查玩課雲『所有人的外交』作業');
+    expect(scope?.requiresConfirmation).toBe(false);
+    expect(scope?.matches('所有人的外交', 'PS101')).toBe(true);
   });
 
   it('supplements an inherited homework read when its course name is also a service word', () => {

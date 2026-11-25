@@ -374,7 +374,19 @@ tronclass_record_matches() {
 tronclass_signal_wrapper() {
   local pid="$1" start="$2" sig="$3"
   tronclass_record_matches "$pid" "$start" || return 0
-  proc_send_signal "$pid" "$start" "" "" "$sig" || true
+  local proc_group proc_start proc_state deadline=$((EPOCHSECONDS + 3))
+  local delivered=0
+  if proc_send_signal "$pid" "$start" "" "" "$sig"; then
+    [[ "$sig" == KILL ]] || return 0
+    delivered=1
+  fi
+  while proc_identity "$pid" && [[ "$proc_start" == "$start" && "$proc_state" != Z && "$proc_state" != X ]]; do
+    if (( !delivered || EPOCHSECONDS >= deadline )); then
+      echo "Could not stop launcher wrapper $pid." >&2
+      return 1
+    fi
+    sleep 0.01
+  done
 }
 
 tronclass_read_record_file() {
@@ -393,7 +405,7 @@ tronclass_signal_record() {
   [ -n "$parsed" ] || return 0
   read -r run pid start group <<< "$parsed"
   [ "$run" = "${TRONCLASS_RUN_ID:-}" ] || return 0
-  proc_signal_marked_group "$pid" "$start" "$group" "TRONCLASS_LAUNCHED_RUN=$run" "$sig" || true
+  proc_signal_marked_group "$pid" "$start" "$group" "TRONCLASS_LAUNCHED_RUN=$run" "$sig"
 }
 
 tronclass_group_alive_record() {
@@ -472,11 +484,11 @@ tronclass_stop_logged() {
     tronclass_discover_groups
   done
   tronclass_discover_groups
-  local record
+  local record failed=0
   for record in "${records[@]+"${records[@]}"}"; do
-    tronclass_signal_record "$record" "$sig"
+    tronclass_signal_record "$record" "$sig" || { [[ "$sig" != KILL ]] || failed=1; }
   done
-  tronclass_signal_wrapper "$wrapper" "$wrapper_start" "$sig"
+  tronclass_signal_wrapper "$wrapper" "$wrapper_start" "$sig" || { [[ "$sig" != KILL ]] || failed=1; }
   local orphan_deadline=0 current_time
   while :; do
     tronclass_discover_groups
@@ -491,7 +503,7 @@ tronclass_stop_logged() {
       fi
     done
     if [ "$wrapper_alive" -eq 0 ] && [ "$group_alive" -eq 0 ]; then
-      return 0
+      break
     fi
     [ "$EPOCHSECONDS" -lt "$spawn_deadline" ] || break
     # Preserve the short grace period for orphaned group descendants.
@@ -504,14 +516,18 @@ tronclass_stop_logged() {
   done
   tronclass_discover_groups
   for record in "${records[@]+"${records[@]}"}"; do
-    tronclass_signal_record "$record" KILL
+    tronclass_signal_record "$record" KILL || failed=1
   done
-  tronclass_signal_wrapper "$wrapper" "$wrapper_start" KILL
-  [ -n "$wrapper" ] && wait "$wrapper" 2>/dev/null || true
+  if tronclass_signal_wrapper "$wrapper" "$wrapper_start" KILL; then
+    [ -n "$wrapper" ] && wait "$wrapper" 2>/dev/null || true
+  else
+    failed=1
+  fi
+  return "$failed"
 }
 
 cleanup() {
-  local sig="${1:-}"
+  local exit_status=$? sig="${1:-}" failed=0
   trap - EXIT INT TERM
   local child launch_signal=TERM pending_cleaned='' jobs=() job child_start
   tronclass_kill_discovered_groups() {
@@ -520,7 +536,7 @@ cleanup() {
     while read -r journal_log record; do
       [[ -n "$record" && -z "${signalled[$record]:-}" ]] || continue
       signalled["$record"]=1
-      tronclass_signal_record "$record" KILL
+      tronclass_signal_record "$record" KILL || failed=1
     done < <(tronclass_read_group_journal)
   }
   TRONCLASS_CLEANUP_DEADLINE=$((EPOCHSECONDS + 6))
@@ -563,20 +579,20 @@ cleanup() {
       fi
       sleep 0.05
     done
-    wait "$job" 2>/dev/null || true
+    wait "$job" || failed=1
   done
   if [ "$deadline_reached" -eq 1 ] || [ "$EPOCHSECONDS" -ge "$TRONCLASS_CLEANUP_DEADLINE" ]; then
     tronclass_kill_discovered_groups
     # Let helpers finish discovery, including groups found during escalation.
     for job in "${jobs[@]}"; do
-      wait "$job" 2>/dev/null || true
+      wait "$job" || failed=1
     done
   fi
   unset TRONCLASS_CLEANUP_DEADLINE
   for entry in "${wrappers[@]}"; do
     read -r pid start <<< "$entry"
     [ -n "$pid" ] || continue
-    tronclass_signal_wrapper "$pid" "$start" KILL
+    tronclass_signal_wrapper "$pid" "$start" KILL || { failed=1; continue; }
     # Reap here: stop_logged now runs in a subshell and cannot wait(2) these
     # children, so a just-killed wrapper would otherwise remain a zombie
     # visible to kill -0 after the launcher exits.
@@ -584,8 +600,13 @@ cleanup() {
   done
   # Catch a record written after the last discovery, including during escalation.
   tronclass_kill_discovered_groups
+  if (( failed )); then
+    echo 'TronClass launcher cleanup failed.' >&2
+    exit 1
+  fi
   if [ "$sig" = INT ]; then exit 130; fi
   if [ "$sig" = TERM ]; then exit 143; fi
+  exit "$exit_status"
 }
 trap 'cleanup' EXIT
 trap 'cleanup INT' INT

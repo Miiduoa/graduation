@@ -143,7 +143,7 @@ const READ_PARTICLES = [
   '全部', '是', '給', '出', '用', '用的', '掉', '完', '到', '至', '上去', '出去', '最', '最新', '前',
   '開', '期末', '期中', '第', '週', '周',
   '一', '二', '三', '四', '五', '六', '七', '八', '九', '十',
-  'the', 'a', 'an', 'of', 'for', 'to', 'from', 'with', 'my', 'your',
+  'the', 'a', 'an', 'all', 'of', 'for', 'to', 'from', 'with', 'my', 'your',
   'this', 'that', 'please', 'me', 'it', 'is', 'are', 'be', 'and', 'or',
   'on', 'at', 'by', 'as', 'into', 'onto', 'agent',
   ...OTHER_SERVICE_WORDS,
@@ -1924,7 +1924,7 @@ export function tronClassAgentHomeworkScope(question: string, compoundQuestion?:
   const qualifiers = scopes.filter(scope => !scope.overview);
   // An unqualified clause can inherit a course, but an explicit all-course
   // clause retains its own scope even when its supplemental answer is deduplicated.
-  const requiresConfirmation = !!compound && scopes.some(scope => scope.explicitAll);
+  const requiresConfirmation = scopes.some(scope => scope.explicitAll && (compound !== null || !scope.overview));
   return {
     overview: !compound && qualifiers.length === 0 && !isMultiClauseRequest(question),
     requiresConfirmation,
@@ -2008,17 +2008,19 @@ function parseReadRequest(question: string) {
   const intent = namedType?.intent;
   return {
     intent, complementAt, conflict,
-    courseScope: () => readCourseScope(text, quotes, intent, conflict),
-    hasOutsideQuotes(pattern: RegExp, end = text.length): boolean {
-      let start = 0;
-      for (const quote of quotes) {
-        if (quote.open >= end) break;
-        if (pattern.test(text.slice(start, quote.open))) return true;
-        start = quote.end;
-      }
-      return start < end && pattern.test(text.slice(start, end));
-    },
+    courseScope: () => readCourseScope(text, quotes, intent, conflict,
+      intent === 'homework' && hasOutsideQuotes(/全部|所有|\ball\b/iu)),
+    hasOutsideQuotes,
   };
+  function hasOutsideQuotes(pattern: RegExp, end = text.length): boolean {
+    let start = 0;
+    for (const quote of quotes) {
+      if (quote.open >= end) break;
+      if (pattern.test(text.slice(start, quote.open))) return true;
+      start = quote.end;
+    }
+    return start < end && pattern.test(text.slice(start, end));
+  }
 }
 
 export function hasTronClassReadTargetConflict(question: string): boolean {
@@ -2050,7 +2052,7 @@ function isCourseReadFrame(text: string, intent?: TronClassAgentIntent, targetSp
   });
 }
 
-function readCourseScope(text: string, spans: readonly QuoteSpan[], intent: TronClassAgentIntent | undefined, conflict: boolean) {
+function readCourseScope(text: string, spans: readonly QuoteSpan[], intent: TronClassAgentIntent | undefined, conflict: boolean, explicitAll: boolean) {
   const quoted = spans.map(span => text.slice(span.inner, span.close));
   const normalizeTarget = (name: string) => name.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, '');
   const targets = quoted.map(normalizeTarget);
@@ -2060,9 +2062,9 @@ function readCourseScope(text: string, spans: readonly QuoteSpan[], intent: Tron
   return {
     quoted,
     overview,
-    explicitAll: intent === 'homework' && overview && /全部|所有|\ball\b/iu.test(text),
+    explicitAll,
     matches(...names: string[]): boolean {
-      if (!complete) return false;
+      if (!complete || explicitAll) return false;
       const aliases = names.map(normalizeTarget).filter(Boolean);
       if (targets.length) return onlyQuotedTargets && targets.every(value => aliases.includes(value));
       return aliases.some(target => {

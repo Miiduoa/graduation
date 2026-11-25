@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import fs, { chmod, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import https from 'node:https';
@@ -278,6 +279,34 @@ function syntheticProvider(module) {
       readHistory: async () => ({ list: finalRow ? [globalThis.structuredClone(finalRow)] : [] }),
     });
   return { input, create, writes: () => writes, posts: () => posts };
+}
+
+for (const substitute of ['file', 'symlink']) {
+  test(`runtime loading bypasses a ${substitute} substituted after a bundle write`, async (t) => {
+    const dir = await directory(t);
+    const replacement = path.join(dir, 'replacement.cjs');
+    const executionMarker = path.join(dir, 'replacement-ran');
+    const replacementCode = `require('node:fs').writeFileSync(${JSON.stringify(executionMarker)}, 'ran');`;
+    await writeFile(replacement, replacementCode);
+    const write = fs.writeFile;
+    const hook = t.mock.method(fs, 'writeFile', async (filename, ...args) => {
+      await write(filename, ...args);
+      await rename(filename, `${filename}.original`);
+      if (substitute === 'symlink') await symlink(replacement, filename);
+      else await write(filename, replacementCode);
+    });
+    syncBuiltinESMExports();
+    try {
+      const runtime = await loadAcceptanceRuntime();
+      await runtime.dispose();
+      assert.equal(typeof runtime.module.createDefaultTronClassAcceptanceService, 'function');
+      await assert.rejects(stat(executionMarker), { code: 'ENOENT' });
+      assert.equal(hook.mock.callCount(), 0);
+    } finally {
+      hook.mock.restore();
+      syncBuiltinESMExports();
+    }
+  });
 }
 
 test('builds and loads the real server runtime, then runs private-file preflight/dispatch/reconcile without school networking', async (t) => {
