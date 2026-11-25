@@ -532,17 +532,21 @@ export function capturePersonalImportRollback(key: string) {
   const receiptHash = receipt && stored !== undefined && receipt[1] === sha256(stored)
     ? receipt[2]
     : undefined;
+  const rollbackRaw = binding ? encoded?.slice(binding[0].length) : encoded;
+  const settledHash = readOptionalFile(settlementFile(key));
   return {
     // An unreadable marker cannot establish retirement. Keep the payload
     // available so the caller can check it against the primary and publication evidence.
-    raw: markerCommitted ? undefined : binding ? encoded?.slice(binding[0].length) : encoded,
+    raw: markerCommitted ? undefined : rollbackRaw,
+    // Retirement precedes the replacement write, so an unpublished
+    // replacement can still need the old bytes.
+    committedRaw: markerCommitted ? rollbackRaw : undefined,
     rejected,
-    markerCommitted,
     markerError: rejected && encoded !== undefined ? undefined : markerError,
     payloadError,
-    matchesVerifiedPrimary: verifiedHash || binding || receiptHash ? (raw: string) => {
+    matchesVerifiedPrimary: verifiedHash || binding || receiptHash || settledHash ? (raw: string) => {
       const hash = sha256(raw);
-      return hash === verifiedHash || hash === binding?.[1] || hash === receiptHash;
+      return hash === verifiedHash || hash === binding?.[1] || hash === receiptHash || hash === settledHash;
     } : undefined,
   };
 }
@@ -583,6 +587,10 @@ function publicationBackupFile(key: string): File {
   return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.published.bak`);
 }
 
+function settlementFile(key: string): File {
+  return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.settled`);
+}
+
 export function preparePersonalImportRollback(key: string, raw: string | null, primaryCommitted = false) {
   const encoded = raw ?? 'null';
   const { payload, marker, marked } = journalFiles(key);
@@ -608,6 +616,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   const verification = verificationFile(key);
   const publication = publicationFile(key);
   const publicationBackup = publicationBackupFile(key);
+  const settlement = settlementFile(key);
   const hadRetirement = fileExists(retirement);
   const previous = marked
     ? (primaryCommitted || hadRetirement ? readOptionalFile(payload) : payload.textSync())
@@ -642,6 +651,12 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
       if (!primaryCommitted) throw error;
     }
     if (reset !== undefined && reset !== '') throw new Error('無法建立匯入資料的還原標記。');
+  }
+  // The previous primary now has a rollback copy. Invalidate its settlement
+  // before a new attempt can write the same primary bytes.
+  if (fileExists(settlement) && !deleteMarker(settlement)) {
+    settlement.write('');
+    if (settlement.textSync() !== '') throw new Error('無法更新匯入資料的還原標記。');
   }
   // A retry carries the rejection in its verified payload until publication.
   if (hadRejection && !deleteMarker(rejection)) {
@@ -696,7 +711,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   };
   return {
     retire,
-    publishVerifiedPrimary(primary: string) {
+    publishVerifiedPrimary(primary: string, assertWritable: () => void) {
       const hash = sha256(primary);
       try {
         // Record verification independently of the rollback payload.
@@ -712,7 +727,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
       }
       const current = capturePersonalImportRollback(key);
       if (!fileExists(marker) || (current && !current.rejected &&
-          (current.markerCommitted || current.matchesVerifiedPrimary?.(primary)))) return;
+          current.matchesVerifiedPrimary?.(primary))) return;
       if (current?.rejected) throw new Error('無法確認匯入資料已儲存，請稍後再試。');
       // Bind proof of publication to the rollback copy and the verified primary.
       const receipt = sha256(readOptionalFile(payload) ?? replacement) + '\n' + hash;
@@ -728,9 +743,12 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
           throw new Error('無法確認匯入資料已儲存，請稍後再試。');
         }
       } catch (error) {
-        // The completed marker write retires the rollback even if its contents
-        // remain unreadable and the redundant publication receipt fails.
-        if (!retirementWriteCompleted || !current?.markerError || rejected) throw error;
+        if (!retirementWriteCompleted || rejected) throw error;
+        // The earlier marker can be unreadable on restart and predates any
+        // replacement write. Persist proof of the exact bytes verified after it.
+        assertWritable();
+        settlement.write(hash);
+        if (settlement.textSync() !== hash) throw error;
       }
     },
     preparePrimaryCommit() {
@@ -750,6 +768,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
         discardPayload(verification);
         discardPayload(publication);
         discardPayload(publicationBackup);
+        discardPayload(settlement);
       }
     },
   };
@@ -778,6 +797,7 @@ export function clearPersonalImportRollback(key: string): void {
     discardPayload(rejectionFile(key));
     discardPayload(publicationFile(key));
     discardPayload(publicationBackupFile(key));
+    discardPayload(settlementFile(key));
     discardPayload(payload);
   }
 }

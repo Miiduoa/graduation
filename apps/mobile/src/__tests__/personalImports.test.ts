@@ -393,6 +393,8 @@ test.each([
   ['readback without retirement file with verified first write and unreadable payload', false],
   ['readback without retirement file with verified first write and no hash and unreadable payload', false],
   ['readback without retirement file with verified first write and no hash or receipt and unreadable payload', false],
+  ['readback without retirement file with verified first write and no hash or receipt and readable payload', false],
+  ['readback without retirement file with verified replacement and no hash or receipt and readable payload', false],
   ['all publication paths fail with temporarily unreadable payload', false],
   ['all publication paths fail with temporarily unreadable payload and successful restoration', false],
 ] as const)('native marker retirement %s I/O keeps the correct primary and notification (revoked: %s)', async (phase, revoked) => {
@@ -419,6 +421,7 @@ test.each([
   const markerReadFails = phase === 'readback' || persistentMarkerReadFault;
   const unreadableMetadata = phase === 'readback without retirement file and unreadable payload';
   const verifiedFirstWrite = phase.includes('verified first write');
+  const verifiedReplacement = phase.includes('verified replacement');
   const publicationFails = phase.startsWith('all publication paths fail');
   const restorationFails = phase === 'all publication paths fail with temporarily unreadable payload';
   const lostReceiptAfterRetirement = phase.includes('no hash or receipt');
@@ -443,12 +446,13 @@ test.each([
   const restoreError = new Error('主鍵無法還原');
   const persistentPrimaryReadFault = phase === 'all with primary readback error';
   let primaryReadBlocked = false;
-  if (phase === 'publish' || phase.startsWith('all with primary') || verifiedFirstWrite || publicationFails) {
+  if (phase === 'publish' || phase.startsWith('all with primary') || verifiedFirstWrite || verifiedReplacement || publicationFails) {
     set.mockImplementation(async (entry, value) => {
       if (entry !== key) return nativeSet(entry, value);
       if (!active || (restorationFails && value === JSON.stringify(previous))) throw restoreError;
       encodedWrite = value.startsWith('{"batches":');
-      if (encodedWrite && (phase === 'all with primary write error' || failPayloadBinding || verifiedFirstWrite)) primaryFault();
+      if (encodedWrite && !verifiedReplacement &&
+          (phase === 'all with primary write error' || failPayloadBinding || verifiedFirstWrite)) primaryFault();
       await nativeSet(entry, value);
       if (encodedWrite && persistentPrimaryReadFault) primaryReadBlocked = true;
       if (encodedWrite && phase === 'publish') active = false;
@@ -566,11 +570,19 @@ test.each([
       }
       if (lostReceiptAfterRetirement) {
         expect(publicationFault).toHaveBeenCalledTimes(1);
-        expect(payloadReadFault).toHaveBeenCalled();
+        if (unreadablePayload) {
+          expect(payloadReadFault).toHaveBeenCalled();
+        } else {
+          expect(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.json`).textSync())
+            .toBe(JSON.stringify(previous));
+        }
         expect(textSync.call(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.pending`)))
           .toBe('committed');
         expect(set.mock.calls.slice(firstWriteCall).filter(([entry]) => entry === key).map(([, value]) => value))
-          .toEqual([primary, expect.stringMatching(/^\{"batches":/)]);
+          .toEqual(verifiedReplacement
+            ? [expect.stringMatching(/^\{"records":/), primary]
+            : [primary, expect.stringMatching(/^\{"batches":/)]);
+        if (verifiedReplacement) expect(primary).toMatch(/^\{"batches":/);
       }
       if (failVerification && !markerReadFails) {
         const publication = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.published`);
@@ -672,13 +684,14 @@ test.each([
 });
 
 test.each([
-  ['rejection file', 'records', false], ['pending marker', 'records', false],
-  ['neither', 'records', false], ['neither', 'batches', false], ['neither', 'batches', true],
+  ['rejection file', 'records', false, false], ['pending marker', 'records', false, false],
+  ['neither', 'records', false, false], ['neither', 'batches', false, false], ['neither', 'batches', true, false],
+  ['neither', 'batches', false, true],
 ] as const)(
-  'native restart restores a revoked deletion (rejection: %s, primary: %s, pending read fails: %s)',
-  async (rejection, revokedWrite, pendingReadFails) => {
+  'native restart restores a revoked deletion (rejection: %s, primary: %s, pending read fails: %s, retirement reached disk: %s)',
+  async (rejection, revokedWrite, pendingReadFails, retirementReachedDisk) => {
     const scope = {
-      owner: `nuni:rejected-delete-with-pending-payload-${rejection}-${revokedWrite}-${pendingReadFails}`,
+      owner: `nuni:rejected-delete-with-pending-payload-${rejection}-${revokedWrite}-${pendingReadFails}-${retirementReachedDisk}`,
       schoolId: 'pu',
     };
     const { ledger } = await appendPersonalImports(scope, [row('original')]);
@@ -691,6 +704,7 @@ test.each([
     const deleteFile = File.prototype.delete;
     const retireByDelete = jest.fn(() => { throw new Error('無法刪除待處理標記'); });
     const retireByWrite = jest.fn(() => { throw new Error('無法寫入退役狀態'); });
+    const retireReadFault = jest.fn(() => { throw new Error('退役狀態無法讀回'); });
     const retireByFile = jest.fn(() => { throw new Error('無法建立退役檔'); });
     const restoreError = new Error('主鍵無法還原');
     const rejectPayload = jest.fn(() => { throw new Error('無法標記還原副本'); });
@@ -716,9 +730,18 @@ test.each([
       if (revokedWrite === 'batches' && this.uri.endsWith(prefix + 'pending')) retireByDelete();
       deleteFile.call(this);
     });
+    let blockRetirementRead = false;
+    const textSync = File.prototype.textSync;
+    const retireRead = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+      if (blockRetirementRead && this.uri.endsWith(prefix + 'pending')) retireReadFault();
+      return textSync.call(this);
+    });
     const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
       if (revokedWrite === 'batches' && this.uri.endsWith(prefix + 'pending') && value === 'committed') {
-        retireByWrite();
+        if (!retirementReachedDisk) retireByWrite();
+        writeFile.call(this, value, options);
+        blockRetirementRead = true;
+        return;
       }
       if (this.uri.endsWith(prefix + 'json') && typeof value === 'string' && value.startsWith('rejected:')) {
         rejectPayload();
@@ -740,6 +763,7 @@ test.each([
         canContinue: () => active,
         canCommitFirstWrite: () => active,
       })).rejects.toBe(restoreError);
+      retireRead.mockRestore();
       expect(rejectPayload).toHaveBeenCalledTimes(1);
       expect(rejectFile).toHaveBeenCalledTimes(rejection === 'rejection file' ? 0 : 1);
       expect(rejectMarker).toHaveBeenCalledTimes(rejection === 'neither' ? 1 : 0);
@@ -753,10 +777,12 @@ test.each([
       expect(JSON.parse(primary).records).toEqual([]);
       if (revokedWrite === 'batches') {
         expect(retireByDelete).toHaveBeenCalledTimes(1);
-        expect(retireByWrite).toHaveBeenCalledTimes(1);
+        expect(retireByWrite).toHaveBeenCalledTimes(retirementReachedDisk ? 0 : 1);
+        expect(retireReadFault).toHaveBeenCalledTimes(retirementReachedDisk ? 1 : 0);
         expect(retireByFile).toHaveBeenCalledTimes(1);
       }
-      expect(new File(Paths.document, prefix + 'pending').textSync()).toBe(rejection === 'pending marker' ? 'rejected' : '');
+      const markerState = retirementReachedDisk ? 'committed' : rejection === 'pending marker' ? 'rejected' : '';
+      expect(new File(Paths.document, prefix + 'pending').textSync()).toBe(markerState);
       expect(new File(Paths.document, prefix + 'rejected').info().exists).toBe(rejection === 'rejection file');
       expect(new File(Paths.document, prefix + 'json').textSync()).toBe(JSON.stringify(ledger));
       await jest.isolateModulesAsync(async () => {
@@ -786,6 +812,7 @@ test.each([
       });
     } finally {
       unsubscribe();
+      retireRead.mockRestore();
       write.mockRestore();
       remove.mockRestore();
       create.mockRestore();

@@ -59,7 +59,7 @@ async function readLedgerSnapshot(
 ) {
   const web = Platform.OS === 'web';
   const journal = web ? undefined : capturePersonalImportRollback(key);
-  const checkpoint = journal?.raw !== undefined
+  const checkpoint = journal?.raw !== undefined || journal?.committedRaw !== undefined
     ? await readLegacyCheckpoint(key, scope).catch(() => null)
     : undefined;
   let primary: string | null = null;
@@ -88,7 +88,10 @@ async function readLedgerSnapshot(
   }
   // Only an interrupted native commit can be superseded by a pending copy
   // when the primary is readable. Older clients write ordinary v1 ledgers.
-  const nativeJournal = useNativeJournal ? journal?.raw : undefined;
+  const unverifiedReplacement = nativeEncoding && primary.startsWith('{"batches":') && !verifiedByJournal;
+  const nativeJournal = useNativeJournal
+    ? journal?.raw ?? (unverifiedReplacement ? journal?.committedRaw : undefined)
+    : undefined;
   if (primaryError && nativeJournal === undefined && !isStorageRowTooLarge(primaryError)) {
     throw primaryError;
   }
@@ -459,7 +462,7 @@ export function mutatePersonalImportLedger<T>(
                 assertWritable();
                 await verifyNativeLedgerWrite(key, writtenRaw);
                 assertWritable();
-                journal.publishVerifiedPrimary(writtenRaw);
+                journal.publishVerifiedPrimary(writtenRaw, assertWritable);
                 assertWritable();
               }
               pendingRestorations.delete(key);
