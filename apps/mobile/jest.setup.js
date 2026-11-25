@@ -78,10 +78,11 @@ jest.mock('expo-constants', () => ({
 }));
 
 // Mock expo-file-system
+const mockDocumentPath = 'file:///mock/documents';
 const mockDocumentFiles = new Map();
 beforeEach(() => mockDocumentFiles.clear());
 jest.mock('expo-file-system', () => ({
-  documentDirectory: 'file:///mock/documents/',
+  documentDirectory: mockDocumentPath + '/',
   cacheDirectory: 'file:///mock/cache/',
   EncodingType: { Base64: 'base64' },
   writeAsStringAsync: jest.fn(() => Promise.resolve()),
@@ -89,14 +90,14 @@ jest.mock('expo-file-system', () => ({
   deleteAsync: jest.fn(() => Promise.resolve()),
   getInfoAsync: jest.fn(() => Promise.resolve({ exists: false })),
   makeDirectoryAsync: jest.fn(() => Promise.resolve()),
-  Paths: { document: 'file:///mock/documents' },
+  Paths: { document: mockDocumentPath },
   File: class {
     constructor(...segments) {
       this.uri = segments.join('/');
       this.size = 12;
     }
     get exists() {
-      return mockDocumentFiles.has(this.uri);
+      return !this.uri.startsWith(mockDocumentPath + '/') || mockDocumentFiles.has(this.uri);
     }
     async base64() {
       return '';
@@ -105,7 +106,7 @@ jest.mock('expo-file-system', () => ({
       return new Uint8Array([1, 2, 3]).buffer;
     }
     info() {
-      return { exists: mockDocumentFiles.has(this.uri) };
+      return { exists: this.exists };
     }
     create() {
       if (mockDocumentFiles.has(this.uri)) throw new Error('file already exists');
