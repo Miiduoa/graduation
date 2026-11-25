@@ -3349,7 +3349,9 @@ it.each(['availability', 'orders', 'orders-retry', 'orders-in-flight', 'orders-i
     expect(screen.queryByRole('button', { name: '重試同一份操作' })).toBeNull();
     expect(acceptOrder).toHaveBeenCalledTimes(1);
   } else if (retry) {
-    fireEvent.click(await screen.findByRole('button', { name: '重試同一份操作' }));
+    const restored = await screen.findByRole<HTMLButtonElement>('button', { name: '重試同一份操作' });
+    await waitFor(() => expect(restored.disabled).toBe(false));
+    fireEvent.click(restored);
     expect(acceptOrder).toHaveBeenCalledTimes(2);
   } else if (orders) {
     fireEvent.click(await screen.findByRole('button', { name: '接單：A101' }));
@@ -3881,17 +3883,21 @@ it.each(['orders', 'shift'])('locks both workspaces on a %s GET failure and reco
 });
 
 it.each([
-  { first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', navigation: 'poll' },
-  { first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', navigation: 'poll' },
-  { first: 'shift', second: 'orders', status: 401, code: 'UNAUTHORIZED', navigation: 'poll' },
-  { first: 'shift', second: 'orders', status: 409, code: 'SESSION_CHANGED', navigation: 'poll' },
-  { first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', navigation: 'next page' },
-  { first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', navigation: 'next page' },
-  { first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', navigation: 'remount' },
-  { first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', navigation: 'remount' },
-  { first: 'orders', second: 'shift', status: 200, code: 'OK', navigation: 'remount' },
-] as const)('settles the order round when $second reports $code after $first fails ($navigation)', async ({
-  first, second, status, code, navigation,
+  { firstResult: 'failure', first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', navigation: 'poll' },
+  { firstResult: 'failure', first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', navigation: 'poll' },
+  { firstResult: 'failure', first: 'shift', second: 'orders', status: 401, code: 'UNAUTHORIZED', navigation: 'poll' },
+  { firstResult: 'failure', first: 'shift', second: 'orders', status: 409, code: 'SESSION_CHANGED', navigation: 'poll' },
+  { firstResult: 'failure', first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', navigation: 'next page' },
+  { firstResult: 'failure', first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', navigation: 'next page' },
+  { firstResult: 'failure', first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', navigation: 'remount' },
+  { firstResult: 'failure', first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', navigation: 'remount' },
+  { firstResult: 'failure', first: 'orders', second: 'shift', status: 200, code: 'OK', navigation: 'remount' },
+  { firstResult: 'success', first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', navigation: 'remount' },
+  { firstResult: 'success', first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', navigation: 'remount' },
+  { firstResult: 'success', first: 'orders', second: 'shift', status: 200, code: 'OK', navigation: 'remount' },
+  { firstResult: 'success', first: 'shift', second: 'orders', status: 200, code: 'OK', navigation: 'remount' },
+] as const)('settles the order round when $second reports $code after $first returns $firstResult ($navigation)', async ({
+  firstResult, first, second, status, code, navigation,
 }) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const store = { ...detail('store-a', true), readinessVersion: 8 };
@@ -3899,7 +3905,7 @@ it.each([
     orders: [{ ...queueFixture(), locationId: 'store-a', state: 'paid', allowedActions: ['accept'] }],
     nextCursor: 'page-2',
   };
-  const outage = Promise.withResolvers<never>();
+  const firstRead = Promise.withResolvers<unknown>();
   const sibling = Promise.withResolvers<unknown>();
   const readDetail = vi.fn().mockResolvedValue(store);
   const recovery = Promise.withResolvers<void>();
@@ -3908,6 +3914,7 @@ it.each([
     orders: vi.fn().mockResolvedValue(queue),
     shift: vi.fn().mockResolvedValue(shift),
   };
+  const responses = { orders: queue, shift };
   const accept = vi.fn().mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [store] });
@@ -3927,16 +3934,20 @@ it.each([
   let retry = await screen.findByRole<HTMLButtonElement>('button', { name: '重試同一份操作' });
   expect(retry.disabled).toBe(false);
 
-  reads[first].mockReturnValueOnce(outage.promise);
+  reads[first].mockReturnValueOnce(firstRead.promise);
   reads[second].mockReturnValueOnce(sibling.promise);
   await act(async () => document.dispatchEvent(new Event('visibilitychange')));
   expect(reads.orders).toHaveBeenCalledTimes(2);
   expect(reads.shift).toHaveBeenCalledTimes(2);
-  await act(async () => outage.reject(new NuniError(503, 'UNAVAILABLE')));
-  expect(retry.disabled).toBe(true);
+  if (firstResult === 'failure') {
+    await act(async () => firstRead.reject(new NuniError(503, 'UNAVAILABLE')));
+  } else {
+    await act(async () => firstRead.resolve(responses[first]));
+  }
+  expect(retry.disabled).toBe(firstResult === 'failure');
   expect(mocks.auth.refresh).not.toHaveBeenCalled();
 
-  reads.orders.mockReturnValueOnce(recovery.promise.then(() => queue));
+  reads.orders.mockResolvedValueOnce(queue);
   reads.shift.mockReturnValueOnce(recovery.promise.then(() => shift));
   if (navigation === 'remount') {
     await act(async () => window.history.go(-2));
@@ -3952,9 +3963,9 @@ it.each([
   } else {
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
   }
-  // Even with both recovery responses already available, the pending sibling
-  // must keep this round open and the persisted retry locked.
-  await act(async () => recovery.resolve());
+  // The pending sibling must keep the old round open and the persisted retry
+  // locked, even if both responses for the next round are already available.
+  if (status !== 200) await act(async () => recovery.resolve());
   expect(retry.disabled).toBe(true);
   fireEvent.click(retry);
   expect(accept).toHaveBeenCalledOnce();
@@ -3962,10 +3973,19 @@ it.each([
   expect(reads.shift).toHaveBeenCalledTimes(2);
 
   if (status === 200) {
-    await act(async () => sibling.resolve(shift));
-    await waitFor(() => expect(retry.disabled).toBe(false));
+    await act(async () => sibling.resolve(responses[second]));
+    // The new queue has resolved, but its shift is still pending.
+    expect(retry.disabled).toBe(true);
+    fireEvent.click(retry);
+    expect(accept).toHaveBeenCalledOnce();
     expect(reads.orders).toHaveBeenCalledTimes(3);
     expect(reads.shift).toHaveBeenCalledTimes(3);
+    await act(async () => recovery.resolve());
+    await waitFor(() => expect(retry.disabled).toBe(false));
+    fireEvent.click(retry);
+    expect(accept).toHaveBeenCalledTimes(2);
+    const writes = mocks.request.mock.calls.filter(([resource]) => resource.endsWith('/accept'));
+    expect(writes[1]?.[2]).toEqual(writes[0]?.[2]);
     expect(mocks.auth.refresh).not.toHaveBeenCalled();
     return;
   }

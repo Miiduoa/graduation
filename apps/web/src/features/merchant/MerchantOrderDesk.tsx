@@ -178,12 +178,16 @@ export function MerchantOrderDesk({
         throw new Error('Unsupported action');
     }
   };
+  // A remounted desk must load its own queue and shift before sending, even
+  // when the workspace detail is already confirmed and an old round is draining.
+  const canSubmit = !suspended && accessConfirmed && !!data.data;
+  const hasSubmitAccess = () => canSubmit && (canSend?.() ?? true);
   const task = useFoodMutation({
     cache,
     scope,
     accountId,
     settleAfterUnmount: true,
-    enabled: !suspended && !!data.data,
+    enabled: canSubmit,
     execute,
     reload: data.reload,
     onSuccess(result, intent) {
@@ -209,9 +213,9 @@ export function MerchantOrderDesk({
     },
   });
   function sendOrderIntent(intent: FoodIntent) {
-    if (!canSend || canSend()) void task.send(intent);
+    if (hasSubmitAccess()) void task.send(intent);
   }
-  const locked = !accessConfirmed || !data.data || task.busy || !!task.pending || task.storageBlocked;
+  const locked = !canSubmit || task.busy || !!task.pending || task.storageBlocked;
   const incomingOrders = useMemo(
     () =>
       (data.data?.queue.orders ?? []).filter((order) => merchantOrderBucket(order) === 'incoming'),
@@ -361,7 +365,7 @@ export function MerchantOrderDesk({
           )}
         </div>
       )}
-      <FoodMutationStatus task={task} canRetry={canSend} retryDisabled={!accessConfirmed} />
+      <FoodMutationStatus task={task} canRetry={hasSubmitAccess} retryDisabled={!canSubmit} />
       {receipt && <p role="status">{receipt}</p>}
       {data.data && (
         <div className={styles.stack}>
