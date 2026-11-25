@@ -219,7 +219,7 @@ it('requires a new campus selection when the application program changes', async
   expect((screen.getByLabelText('校區／營運區域') as HTMLSelectElement).value).toBe('');
   expect(screen.queryByRole('option', { name: '主校區' })).toBeNull();
 });
-it('shows the confirmed empty applications when the initial workspace list fails', async () => {
+it('does not describe a partial load failure as no applications or no permissions', async () => {
   mocks.request.mockImplementation((path, context, input) =>
     path === 'merchant-workspaces'
       ? Promise.reject(new Error('offline'))
@@ -227,7 +227,7 @@ it('shows the confirmed empty applications when the initial workspace list fails
   );
   render(<MerchantWorkspace />);
   await screen.findByRole('alert');
-  expect(screen.getByText('你還沒有送出進駐申請。')).toBeTruthy();
+  expect(screen.queryByText('你還沒有送出進駐申請。')).toBeNull();
   expect(screen.queryByText(/這個帳號目前沒有已核准的門市/)).toBeNull();
   expect(screen.queryByRole('button', { name: '送出進駐申請' })).toBeNull();
   expect(screen.queryByRole('region', { name: '開始申請第一間門市' })).toBeNull();
@@ -605,7 +605,7 @@ it('keeps an in-progress application editable when refreshing reveals another ap
   expect(mocks.request.mock.calls.filter((call) => call[2])).toHaveLength(0);
 });
 
-it('prioritizes the actual authorized store for a returning operator and retains it after a failed refresh', async () => {
+it('prioritizes the actual authorized store for a returning operator and hides its entry after a failed refresh', async () => {
   const workspace = {
     tenantId: 'campus-one',
     tenantName: '第一校園',
@@ -634,8 +634,8 @@ it('prioritizes the actual authorized store for a returning operator and retains
   mocks.request.mockRejectedValue(new Error('offline'));
   fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
   await screen.findByRole('alert');
-  expect(screen.getByRole('heading', { name: '開始今天的門市工作' })).toBeTruthy();
-  expect(screen.getByRole('link', { name: '管理門市：第一門市' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '開始今天的門市工作' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '管理門市：第一門市' })).toBeNull();
   expect(screen.queryByRole('heading', { name: '開始申請第一間門市' })).toBeNull();
 });
 

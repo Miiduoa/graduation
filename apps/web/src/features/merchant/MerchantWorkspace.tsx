@@ -242,7 +242,15 @@ function AccountWorkspace({
   onSwitchAccount: () => Promise<void>;
 }) {
   const [
-    { overview, details, verifiedListedRows, listedWorkspaceTenants, applicationsKnown, revocations },
+    {
+      overview,
+      details,
+      verifiedListedRows,
+      listedWorkspaceTenants,
+      applicationsKnown,
+      manageableWorkspaces,
+      revocations,
+    },
     setWorkspaceSnapshot,
   ] = useState({
     overview: null as MerchantOverview | null,
@@ -251,6 +259,7 @@ function AccountWorkspace({
     revocations: { list: 0, details: new Map<string, number>() },
     listedWorkspaceTenants: undefined as ReadonlySet<string> | undefined,
     applicationsKnown: false,
+    manageableWorkspaces: new Set<string>(),
   });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -319,8 +328,15 @@ function AccountWorkspace({
       revocations: confirmed.workspaceRevocations(),
       listedWorkspaceTenants: confirmed.listedWorkspaceTenants(),
       applicationsKnown: confirmed.hasApplicationList(),
+      manageableWorkspaces: new Set(
+        nextOverview?.workspaces.map(workspaceKey).filter(confirmed.canEnterWorkspace),
+      ),
     });
   }, [confirmed]);
+  useLayoutEffect(
+    () => confirmed.subscribeReadFailures(publishOverview),
+    [confirmed, publishOverview],
+  );
   const clearOverview = useCallback(() => {
     confirmed.clear();
     publishOverview();
@@ -404,7 +420,7 @@ function AccountWorkspace({
           (error) => {
             addTargets(confirmed.knownWorkspaces());
             addTargets(visitedLocations.values());
-            if (error instanceof NuniError && error.status === 503) {
+            if (!denied(error)) {
               // The list loader can be retired before it starts detail rechecks.
               confirmed.recordReadFailure(listRevision, targets.keys());
             }
@@ -744,7 +760,8 @@ function AccountWorkspace({
       {notice && <p role="status">{notice}</p>}
       {overview && (
         <div className={styles.stack} hidden={view === 'apply' && submissionBlocked}>
-          {view !== 'apply' && nextStep && (view === 'workspace' || hasMerchantRecords) && (
+          {view !== 'apply' && nextStep && (view === 'workspace' || hasMerchantRecords) &&
+            (nextStep.section !== 'locations' || manageableWorkspaces.size > 0) && (
             <section className={styles.nextTask} aria-labelledby="merchant-next-step-title">
               <p className={styles.eyebrow}>下一步</p>
               <h3 id="merchant-next-step-title">{nextStep.title}</h3>
@@ -796,21 +813,23 @@ function AccountWorkspace({
                             .join('、')}
                         </p>
                       )}
-                      <Link
-                        className="btn"
-                        ref={(node) => {
-                          const key = `${item.tenantId}:${item.locationId}`;
-                          if (node) locationLinks.current.set(key, node);
-                          else locationLinks.current.delete(key);
-                        }}
-                        href={merchantWorkspaceHref({
-                          tenantId: item.tenantId,
-                          locationId: item.locationId,
-                        })}
-                        onClick={onNavigate}
-                      >
-                        管理門市：{item.locationName}
-                      </Link>
+                      {manageableWorkspaces.has(workspaceKey(item)) && (
+                        <Link
+                          className="btn"
+                          ref={(node) => {
+                            const key = `${item.tenantId}:${item.locationId}`;
+                            if (node) locationLinks.current.set(key, node);
+                            else locationLinks.current.delete(key);
+                          }}
+                          href={merchantWorkspaceHref({
+                            tenantId: item.tenantId,
+                            locationId: item.locationId,
+                          })}
+                          onClick={onNavigate}
+                        >
+                          管理門市：{item.locationName}
+                        </Link>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -823,7 +842,9 @@ function AccountWorkspace({
                 申請進度
               </h3>
               {overview.applications.length === 0 ? (
-                applicationsKnown && <p>你還沒有送出進駐申請。</p>
+                applicationsKnown && (listedWorkspaceTenants !== undefined || !loadError) && (
+                  <p>你還沒有送出進駐申請。</p>
+                )
               ) : (
                 <ul className={styles.list}>
                   {overview.applications.map((item) => (
@@ -848,7 +869,11 @@ function AccountWorkspace({
                             (workspace) => workspace.tenantId === item.tenantId,
                           ) ? (
                             overview.workspaces
-                              .filter((workspace) => workspace.tenantId === item.tenantId)
+                              .filter(
+                                (workspace) =>
+                                  workspace.tenantId === item.tenantId &&
+                                  manageableWorkspaces.has(workspaceKey(workspace)),
+                              )
                               .map((workspace) => (
                                 <Link
                                   className="btn"

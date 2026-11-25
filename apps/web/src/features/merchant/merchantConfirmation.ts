@@ -101,7 +101,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   let listRevocation = 0;
   let listedRevision = 0;
   const receiptFloors = new Map<string, number>();
-  const menuReceipts = new Map<string, { revision: number; version?: number; confirmed?: boolean }>();
+  const menuReceipts = new Map<string, { revision: number; version?: number }>();
+  const writeRevisions = new Map<string, number>();
   const statusReceiptFloors = new Map<string, Map<number, number>>();
   // Store-specific revocations override the list default for stores with newer confirmations.
   const revocations = new Map<string, number>();
@@ -138,6 +139,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     if (version !== undefined) revokedVersionFloors.set(key, version);
     entries.delete(key);
     statusReceiptFloors.delete(key);
+    writeRevisions.delete(key);
     discardWorkspaceReceipts(key, revision);
   }
 
@@ -248,7 +250,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     // A receipt can win on readiness version even when its request predates
     // the GET that verified access. Keep that GET's revision independently.
     if (verifiesAccess) {
-      if (revision > Math.max(accessConfirmationRevision(key), readFailureRevision(key))) {
+      if (revision > Math.max(accessConfirmationRevision(key), accessFloor(key))) {
         verified.set(key, revision);
         workspaceKeysAwaitingConfirmation.delete(key);
       }
@@ -280,7 +282,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       return;
     }
     if (detail.missingRequirements === undefined && detail.publishedMenuItems === 0) return;
-    menuReceipts.set(key, { ...receipt, version, confirmed: true });
+    menuReceipts.set(key, { ...receipt, version });
     // A later-started list can win other fields at this version while the
     // detail establishes menu readiness for both views.
     for (const row of [entry.row, entry.versionedRow]) {
@@ -292,8 +294,12 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     return readFailures.get(key) ?? 0;
   }
 
+  function accessFloor(key: string) {
+    return Math.max(readFailureRevision(key), revokedThrough(key));
+  }
+
   function canUseAccess(key: string, revision: number) {
-    return revision > Math.max(readFailureRevision(key), revokedThrough(key)) &&
+    return revision > accessFloor(key) &&
       hasVerifiedAccess(key) && entries.get(key)?.detail !== undefined;
   }
 
@@ -307,6 +313,27 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     if (read && canUseAccess(key, read.revision) && read.version === entry?.detail?.version) {
       return read;
     }
+  }
+
+  function recordWrite(key: string, revision: number) {
+    if (revision > Math.max(writeRevisions.get(key) ?? 0, revokedThrough(key))) {
+      writeRevisions.set(key, revision);
+    }
+  }
+
+  function postWriteReadConfirmation(key: string, entryReadRevision = 0) {
+    const write = writeRevisions.get(key);
+    const read = detailReadConfirmation(key);
+    if (write !== undefined && read && (read.revision > write || read.revision === entryReadRevision)) {
+      return read;
+    }
+  }
+
+  function canEnterWorkspace(key: string) {
+    if (detailReadConfirmation(key)) return true;
+    // A list can offer initial entry, but only a detail read can recover failed access.
+    return readFailureRevision(key) === 0 && !workspaceKeysAwaitingConfirmation.has(key) &&
+      listedMembership()?.has(key) === true && listedRevision > accessFloor(key);
   }
 
   function detailFor(key: string) {
@@ -351,6 +378,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       missingRequirements: summary.missingRequirements.filter((item) => item !== 'menu'),
     };
     if (merge(next, revision)?.entry.row?.value !== next) return false;
+    recordWrite(key, revision);
     draft.menuReceipt = createdItems;
     menuReceipts.set(key, { revision, version: versioned?.readinessVersion });
     return true;
@@ -402,15 +430,11 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       if (menuReceipts.get(key)?.version !== version) return null;
       return drafts.get(key)?.menuReceipt ?? null;
     },
-    menuReadConfirmation(key: string) {
-      const receipt = menuReceipts.get(key);
-      const read = detailReadConfirmation(key);
-      if (receipt?.confirmed && read && read.version === receipt.version && read.revision > receipt.revision) {
-        return read;
-      }
-    },
+    recordWrite,
+    postWriteReadConfirmation,
+    canEnterWorkspace,
     canUseAccess,
-    readFailureRevision,
+    accessFloor,
     subscribeReadFailures(listener: () => void) {
       readFailureListeners.add(listener);
       return () => { readFailureListeners.delete(listener); };
@@ -576,7 +600,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     revoke,
     needsAccessRefresh(key: string) {
       const entry = entries.get(key);
-      return verified.has(key) || revocations.has(key) || !!entry?.detail;
+      return readFailures.has(key) || verified.has(key) || revocations.has(key) || !!entry?.detail;
     },
     clear() {
       for (const draft of drafts.values()) draft.menuReceipt = null;
@@ -586,6 +610,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       listRevocation = 0;
       receiptFloors.clear();
       menuReceipts.clear();
+      writeRevisions.clear();
       statusReceiptFloors.clear();
       listedRevision = 0;
       applicationRevocation = 0;

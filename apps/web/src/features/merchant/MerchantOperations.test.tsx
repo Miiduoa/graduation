@@ -551,7 +551,7 @@ it('offers a read retry after a detail failure without showing a made-up empty w
   await screen.findByLabelText('付款方式');
 });
 
-it('retains details and the draft with operations disabled after a failed refresh', async () => {
+it('locks retained details after a failed refresh and cannot send from the stale form', async () => {
   await open();
   fireEvent.click(screen.getByLabelText(/我確認營運資訊正確/));
   request.mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'));
@@ -560,7 +560,7 @@ it('retains details and the draft with operations disabled after a failed refres
   expect(screen.getByText('米飯店／一樓門市')).toBeTruthy();
   expect(screen.getByLabelText('付款方式')).toBeTruthy();
   expect(button('儲存營運設定').disabled).toBe(true);
-  fireEvent.click(button('儲存營運設定'));
+  fireEvent.submit(screen.getByLabelText('付款方式').closest('form')!);
   expect(request.mock.calls.some(([path]) => path.endsWith('/settings'))).toBe(false);
   fireEvent.click(button('重新讀取門市狀態'));
   await waitFor(() => expect(button('儲存營運設定').disabled).toBe(false));
@@ -940,7 +940,7 @@ it.each(['list', 'detail'])('reconciles a menu receipt when the %s response arri
   if (first === 'list') {
     list();
     expect(draft.menuReceipt).toBe(1);
-    expect(confirmed.menuReadConfirmation(key)).toBeUndefined();
+    expect(confirmed.postWriteReadConfirmation(key)).toBeUndefined();
     detail();
   } else {
     detail();
@@ -950,14 +950,14 @@ it.each(['list', 'detail'])('reconciles a menu receipt when the %s response arri
   expect(draft.menuReceipt).toBe(1);
   expect(confirmed.overview()?.workspaces[0].missingRequirements).not.toContain('menu');
   expect(confirmed.detailFor(key)?.publishedMenuItems).toBe(1);
-  expect(confirmed.menuReadConfirmation(key)).toEqual({ revision: readRevision, version: 8 });
+  expect(confirmed.postWriteReadConfirmation(key)).toEqual({ revision: readRevision, version: 8 });
 
   const failure = confirmed.beginRequest();
   confirmed.recordReadFailure(failure, [key]);
-  expect(confirmed.menuReadConfirmation(key)).toBeUndefined();
+  expect(confirmed.postWriteReadConfirmation(key)).toBeUndefined();
   const recovery = confirmed.beginRequest();
   confirmed.confirmDetail(published, recovery, true);
-  expect(confirmed.menuReadConfirmation(key)).toEqual({ revision: recovery, version: 8 });
+  expect(confirmed.postWriteReadConfirmation(key)).toEqual({ revision: recovery, version: 8 });
   confirmed.mergeWorkspaceList([{ ...published, readinessVersion: 9 }], confirmed.beginRequest());
-  expect(confirmed.menuReadConfirmation(key)).toBeUndefined();
+  expect(confirmed.postWriteReadConfirmation(key)).toBeUndefined();
 });

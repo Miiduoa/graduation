@@ -229,7 +229,7 @@ export function MerchantOperations({
   const run = useRef(0);
   const accessRevision = useRef(0);
   const currentFailureRevision = useCallback(
-    () => observations.readFailureRevision(draftKey),
+    () => observations.accessFloor(draftKey),
     [draftKey, observations],
   );
   const latestFailure = useSyncExternalStore(
@@ -237,7 +237,7 @@ export function MerchantOperations({
     currentFailureRevision,
     () => 0,
   );
-  const entryDetailRead = useRef<DetailReadConfirmation | undefined>(undefined);
+  const entryReadRevision = useRef(0);
   const pendingAccessRead = useRef(0);
   const observedRevocation = useRef(accessRevocation);
   useLayoutEffect(() => {
@@ -262,7 +262,7 @@ export function MerchantOperations({
     ++mutationRun.current;
     deferredWrite.current = null;
     pendingAccessRead.current = 0;
-    entryDetailRead.current = undefined;
+    entryReadRevision.current = 0;
   }, []);
   useLayoutEffect(() => {
     drafts.set(draftKey, {
@@ -317,7 +317,6 @@ export function MerchantOperations({
       }
       if (updateView) {
         accessRevision.current = Math.max(accessRevision.current, revoked);
-        entryDetailRead.current = undefined;
         updateAccess({ type: 'locked' });
         setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
       }
@@ -337,7 +336,6 @@ export function MerchantOperations({
       )
         return false;
       // Session invalidation applies even after navigation retires the request's view.
-      entryDetailRead.current = undefined;
       localConfirmations.clear();
       setNotice(null);
       setDetail(null);
@@ -356,9 +354,9 @@ export function MerchantOperations({
         !observations.canUseAccess(draftKey, revision)
       ) return;
       accessRevision.current = revision;
-      entryDetailRead.current = read;
       showDetail(detail);
       if (reveal) {
+        entryReadRevision.current = revision;
         updateAccess({ type: 'verified', revision });
         setError((current) => current === detailReadError ? '' : current);
       }
@@ -407,10 +405,11 @@ export function MerchantOperations({
 
   const rememberWrite = useCallback((revision: number) => {
     if (revision > (deferredWrite.current?.revision ?? 0)) {
+      observations.recordWrite(draftKey, revision);
       deferredWrite.current = { revision, entry: entryRun.current };
     }
     return deferredWrite.current;
-  }, []);
+  }, [draftKey, observations]);
 
   const read = useCallback(
     async (reconcile = true, mode: DetailReadMode = 'regular', writeRevision = 0) => {
@@ -421,7 +420,6 @@ export function MerchantOperations({
       const visible = visibleRef.current;
       const entry = entryRun.current;
       const reconciliation = rememberWrite(writeRevision);
-      const reconciliationRevision = reconciliation?.revision ?? 0;
       // The receipt's entry can refresh immediately, but only a later visible
       // entry can consume the deferred reconciliation.
       const deferred = visible && reconciliation !== null && entry > reconciliation.entry;
@@ -442,33 +440,15 @@ export function MerchantOperations({
         const merged = confirmDetail(next, true, revision)?.detail ?? null;
         if (!current()) return;
         if (!merged || !observations.canUseAccess(draftKey, revision)) {
-          // A concurrent list merge can invalidate the detail from a successful entry GET.
-          // Check the shared confirmation before React publishes its next snapshot.
-          // Shared access must come from a GET newer than the write being reconciled.
-          const detail = observations.detailFor(draftKey);
+          // The deferred marker controls presentation. The shared confirmation
+          // remains usable across entries until a newer write, version, or failure supersedes it.
+          const retainedRevision = mode !== 'regular' && !deferred ? entryReadRevision.current : 0;
           const sharedRead = visible
-            ? reconciliationRevision
-              ? observations.detailReadConfirmation(draftKey)
-              : observations.menuReadConfirmation(draftKey)
+            ? observations.postWriteReadConfirmation(draftKey, retainedRevision)
             : undefined;
-          // Immediate refreshes can retain access verified in the same entry.
-          // Across entries, the verification must follow the deferred write.
-          const entryRevisionFloor = deferred ? reconciliationRevision : 0;
-          const entryRead = entryDetailRead.current;
-          const confirmedRevision = Math.max(
-            entryRead && entryRead.version === detail?.readinessVersion && entryRead.revision > entryRevisionFloor
-              ? entryRead.revision : 0,
-            sharedRead && sharedRead.version === detail?.readinessVersion && sharedRead.revision > reconciliationRevision
-              ? sharedRead.revision : 0,
-          );
-          if (
-            (readMode !== 'regular' || sharedRead !== undefined) &&
-            confirmedRevision > 0 &&
-            confirmedRevision >= accessRevision.current &&
-            observations.canUseAccess(draftKey, confirmedRevision) &&
-            detail
-          ) {
-            confirmEntry(detail, { revision: confirmedRevision, version: detail.readinessVersion }, true);
+          const detail = sharedRead && observations.detailFor(draftKey);
+          if (sharedRead && detail && sharedRead.revision >= accessRevision.current) {
+            confirmEntry(detail, sharedRead, true);
             return;
           }
           updateAccess({ type: 'read-failed', hideDetail });
@@ -489,7 +469,6 @@ export function MerchantOperations({
         if (!active.current || session !== sessionRun.current) return;
         if (rejectDetailRead(failure, revision, current())) return;
         if (current()) {
-          entryDetailRead.current = undefined;
           updateAccess({ type: 'read-failed', hideDetail });
           setError(detailReadError);
         }
@@ -522,7 +501,7 @@ export function MerchantOperations({
     }
   }, [suspended, drafts, draftKey]);
   const verifyEntry = useCallback(() => {
-    entryDetailRead.current = undefined;
+    entryReadRevision.current = 0;
     updateAccess({ type: 'entry-reset' });
     let checkingAccess = true;
     if (lock.current) {
@@ -646,7 +625,7 @@ export function MerchantOperations({
     !!settings && !!detail && settings.baseVersion !== detail.readinessVersion;
   const accessFailed = latestFailure > 0 && latestFailure >= verifiedRevision;
   const locked = !!busy || loading || !!uncertain || !detail ||
-    verifiedRevision <= Math.max(latestFailure, accessRevocation);
+    verifiedRevision <= latestFailure;
   const displayedError = error || (!loading && entryVerified && (!detail || accessFailed) ? detailReadError : '');
   const menuExists =
     menuReceipt !== null ||

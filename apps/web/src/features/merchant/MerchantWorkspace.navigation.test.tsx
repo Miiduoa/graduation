@@ -376,8 +376,9 @@ it.each([
       fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
     }
 
-    const link = await screen.findByRole('link', { name: '管理門市：一樓' });
-    const store = link.closest('li')!;
+    const storeHeading = await screen.findByRole('heading', { name: '餐坊／一樓', level: 4 });
+    const store = storeHeading.closest('li')!;
+    expect(!!within(store).queryByRole('link', { name: '管理門市：一樓' })).toBe(returnStatus !== 503);
     expect(await within(store).findByText('待完成：確認營運設定與條款')).toBeTruthy();
     expect(within(store).queryByText(/建立菜單/)).toBeNull();
   },
@@ -715,7 +716,8 @@ it.each([
   };
   readDetail.mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
   await act(async () => window.history.back());
-  await screen.findByRole('link', { name: '管理門市：一樓櫃台' });
+  await screen.findByRole('heading', { name: '餐坊／一樓櫃台' });
+  expect(screen.queryByRole('link', { name: '管理門市：一樓櫃台' })).toBeNull();
   await screen.findByText('目前無法更新部分門市資料，請重新載入。');
   expect(readDetail).toHaveBeenCalledTimes(2);
   expect(screen.getByText(label)).toBeTruthy();
@@ -1417,16 +1419,19 @@ it.each([
   expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
 });
 
-it('uses a post-write background confirmation when re-entry returns an older detail', async () => {
+it('uses a post-write background confirmation across repeated stale re-entries', async () => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const open = { ...detail('store-a', true), readinessVersion: 7 };
   const paused = { ...open, readinessVersion: 8, locationStatus: 'closed', publicAccess: false };
   const readDetail = vi.fn()
     .mockResolvedValueOnce(open)
     .mockResolvedValueOnce(paused)
-    .mockResolvedValueOnce(open);
+    .mockResolvedValue(open);
+  const readList = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [open] })
+    .mockResolvedValue({ workspaces: [paused] });
   mocks.request.mockImplementation((resource) => {
-    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
+    if (resource === 'merchant-workspaces') return readList();
     if (resource === path) return readDetail();
     if (resource === `${path}/availability`) return Promise.resolve(paused);
     return respond(resource);
@@ -1437,14 +1442,16 @@ it('uses a post-write background confirmation when re-entry returns an older det
   fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
   await screen.findByText('門市狀態已更新：暫停接單。');
 
-  await act(async () => window.history.back());
-  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
-  await screen.findByRole('link', { name: '管理門市：一樓' });
-  await act(async () => window.history.forward());
-  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+  for (const backgroundReadCount of [2, 4]) {
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(backgroundReadCount));
+    await screen.findByRole('link', { name: '管理門市：一樓' });
+    await act(async () => window.history.forward());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(backgroundReadCount + 1));
+    expect((await screen.findByRole<HTMLButtonElement>('button', { name: '恢復接單' })).disabled).toBe(false);
+    expect(screen.queryByRole('alert')).toBeNull();
+  }
 
-  expect((await screen.findByRole<HTMLButtonElement>('button', { name: '恢復接單' })).disabled).toBe(false);
-  expect(screen.queryByRole('alert')).toBeNull();
   fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
   await screen.findByRole('region', { name: '門市訂單工作台' });
 });
@@ -1875,7 +1882,7 @@ it.each([403, 404])(
     await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
 
     await act(async () => denyOld(new NuniError(status, 'DENIED')));
-    expect(screen.getByRole('link', { name: '管理門市：一樓' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
     expect(screen.getByRole('heading', { name: '新確認的餐坊／一樓' })).toBeTruthy();
     expect(readDetail).toHaveBeenCalledTimes(3);
   },
@@ -1916,7 +1923,8 @@ it.each([403, 404])(
 
     await act(async () => window.history.back());
     await screen.findByText('目前無法確認店家資料，請重新載入。');
-    expect(screen.getByRole('link', { name: '管理門市：一樓' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '新確認的餐坊／一樓' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
     expect(screen.queryByRole('link', { name: '管理門市：二樓' })).toBeNull();
   },
 );
@@ -1965,7 +1973,7 @@ it.each([
 
   await act(async () => window.history.back());
   await screen.findByText('目前無法更新部分門市資料，請重新載入。');
-  expect(screen.getByRole('link', { name: '管理門市：一樓' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
   expect(screen.getByRole('heading', { name: '新確認的餐坊／一樓' })).toBeTruthy();
 });
 
@@ -2283,8 +2291,9 @@ it.each([
 
     await act(async () => window.history.back());
     await waitFor(() => expect(readApplications).toHaveBeenCalledTimes(2));
-    const link = await screen.findByRole('link', { name: '管理門市：一樓' });
-    const row = within(link.closest('li')!);
+    const storeHeading = await screen.findByRole('heading', { name: '餐坊／一樓' });
+    expect(!!screen.queryByRole('link', { name: '管理門市：一樓' })).toBe(!receiptFirst);
+    const row = within(storeHeading.closest('li')!);
     if (listVersion === undefined || (receiptFirst && listVersion === detailVersion)) {
       if (listVersion === undefined) expect(row.getByText('待完成：確認營運設定與條款')).toBeTruthy();
       expect(row.queryByText(/建立菜單/)).toBeNull();
@@ -2695,8 +2704,9 @@ it.each([undefined, 7, 8])('keeps a v7 menu receipt confirmed at v8 through list
 
   await act(async () => window.history.back());
   await screen.findByText('目前無法更新部分門市資料，請重新載入。');
-  const link = screen.getByRole('link', { name: '管理門市：一樓' });
-  const row = within(link.closest('li')!);
+  const storeHeading = screen.getByRole('heading', { name: '餐坊／一樓' });
+  expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+  const row = within(storeHeading.closest('li')!);
   if (version !== 8) expect(row.getByText('待完成：確認營運設定與條款')).toBeTruthy();
   expect(row.queryByText(/建立菜單/)).toBeNull();
   expect(readDetail).toHaveBeenCalledTimes(3);
@@ -2751,6 +2761,58 @@ it('keeps the first menu receipt when the v8 list arrives first and two entries 
       await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(5));
     }
   }
+});
+
+it('closes both management entries after list and detail failures until a detail confirms access', async () => {
+  const store = detail('store-a', true);
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const unavailable = new NuniError(503, 'UNAVAILABLE');
+  const recovery = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+  const readList = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [store] })
+    .mockRejectedValueOnce(unavailable)
+    .mockResolvedValue({ workspaces: [store] });
+  const readDetail = vi.fn()
+    .mockRejectedValueOnce(unavailable)
+    .mockReturnValueOnce(recovery.promise);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === path) return readDetail();
+    if (resource === 'merchant-applications') {
+      return Promise.resolve({ applications: [{
+        tenantId: store.tenantId,
+        applicationId: store.applicationId,
+        brandName: '核准申請',
+        locationName: store.locationName,
+        state: 'approved',
+        reviewerNote: '',
+        submittedAt: '2026-10-09T02:00:00.000Z',
+      }] });
+    }
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  const storeLink = () => screen.queryByRole('link', { name: '管理門市：一樓' });
+  const applicationLink = () => screen.queryByRole('link', { name: '前往管理門市：一樓' });
+  await waitFor(() => expect(applicationLink()).toBeTruthy());
+  expect(storeLink()).toBeTruthy();
+  const reload = screen.getByRole<HTMLButtonElement>('button', { name: '重新載入' });
+  await waitFor(() => expect(reload.disabled).toBe(false));
+  fireEvent.click(reload);
+  await screen.findByText('目前無法確認店家資料，請重新載入。');
+  expect(readDetail).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('heading', { name: '餐坊／一樓' })).toBeTruthy();
+  expect(storeLink()).toBeNull();
+  expect(applicationLink()).toBeNull();
+
+  fireEvent.click(reload);
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+  expect(storeLink()).toBeNull();
+  expect(applicationLink()).toBeNull();
+  await act(async () => recovery.resolve(store));
+  expect(storeLink()).toBeTruthy();
+  expect(applicationLink()).toBeTruthy();
 });
 
 it('keeps a confirmed empty store list when both the list and detail refresh fail', async () => {
@@ -2853,7 +2915,8 @@ it('adopts a pending empty list after a newer list and detail refresh return 503
   await screen.findByText('目前無法確認店家資料，請重新載入。');
   expect(readDetail).toHaveBeenCalledTimes(readsBeforeBack + 1);
   expect(readList).toHaveBeenCalledTimes(3);
-  expect(screen.getByRole('link', { name: '管理門市：一樓' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '餐坊／一樓' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
 
   await act(async () => finishList({ workspaces: [] }));
   await screen.findByRole('button', { name: '登出並切換店家帳號' });
@@ -3092,7 +3155,15 @@ it.each(['before', 'after'])(
     }
 
     await act(async () => olderRefresh.resolve(paused));
-    fireEvent.click(screen.getByRole('link', { name: '管理門市：一樓' }));
+    if (failureArrival === 'before') {
+      expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+      await act(async () => {
+        window.history.pushState(null, '', href());
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+    } else {
+      fireEvent.click(screen.getByRole('link', { name: '管理門市：一樓' }));
+    }
     if (failureArrival === 'after') {
       expect((await screen.findByRole<HTMLButtonElement>('button', { name: '恢復接單' })).disabled).toBe(false);
       expect(screen.getByRole('link', { name: '處理訂單與收銀' })).toBeTruthy();
