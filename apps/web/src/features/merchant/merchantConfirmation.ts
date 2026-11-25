@@ -211,6 +211,21 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     return entry;
   }
 
+  function preserveMenuReceipt<T extends NuniMerchantWorkspaceListRow>(next: T): T {
+    const receiptVersion = menuReceipts.get(workspaceKey(next))?.version;
+    // Both GETs can observe the pre-write menu at the version the receipt confirmed.
+    if (
+      receiptVersion === undefined || next.readinessVersion === undefined ||
+      next.readinessVersion > receiptVersion || !next.missingRequirements?.includes('menu')
+    ) return next;
+    return {
+      ...next,
+      missingRequirements: next.missingRequirements.filter((item) => item !== 'menu'),
+      // A receipt confirms creation. A pre-write detail cannot confirm available stock.
+      ...('publishedMenuItems' in next ? { publishedMenuItems: 0 } : {}),
+    };
+  }
+
   function confirmDetail(
     next: NuniMerchantWorkspaceDetail,
     revision: number,
@@ -220,19 +235,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const version = entries.get(key)?.row?.version;
     // A stale detail must not confirm access or supersede an outstanding denial.
     if (version !== undefined && next.readinessVersion < version) return null;
-    const menuReceipt = menuReceipts.get(key);
-    // A detail refresh can observe the pre-write menu at the version the receipt confirmed.
-    if (
-      verifiesAccess && menuReceipt?.version !== undefined && next.readinessVersion <= menuReceipt.version &&
-      next.missingRequirements?.includes('menu')
-    ) {
-      next = {
-        ...next,
-        missingRequirements: next.missingRequirements.filter((item) => item !== 'menu'),
-        // The receipt confirms creation. A pre-write read cannot confirm available stock.
-        publishedMenuItems: 0,
-      };
-    }
+    if (verifiesAccess) next = preserveMenuReceipt(next);
     const entry = merge(next, revision);
     if (!entry || next.readinessVersion !== entry.row?.version) return null;
     entry.detail = latestObservation(entry.detail, next, revision);
@@ -263,8 +266,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     // versioned row's operating state and requirements together onto the detail.
     const row = entry.versionedRow?.value;
     if (row?.readinessVersion !== detail.readinessVersion) return detail;
-    // An empty summary cannot establish menu readiness for a legacy detail.
-    const missingRequirements = detail.missingRequirements === undefined && row.missingRequirements?.length === 0
+    // A list cannot supply menu readiness for a legacy detail that omitted it.
+    const missingRequirements = detail.missingRequirements === undefined
       ? undefined
       : row.missingRequirements ?? detail.missingRequirements;
     return {
@@ -388,7 +391,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
           discardWorkspaceReceipts(key, revision);
         }
       }
-      for (const row of rows) merge(row, revision);
+      for (const row of rows) merge(preserveMenuReceipt(row), revision);
     },
     rejectWorkspaceList(denied: boolean, revision: number) {
       if (denied) {

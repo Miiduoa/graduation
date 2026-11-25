@@ -195,11 +195,13 @@ export function useFoodMutation({
   onRejected,
   reload,
   enabled,
+  canSend,
 }: {
   cache: FoodDraftCache;
   scope: string;
   accountId: string;
   enabled: boolean;
+  canSend?(): boolean;
   execute(intent: FoodIntent): Promise<unknown>;
   onSuccess(result: unknown, intent: FoodIntent): void;
   onRejected?(): void;
@@ -254,7 +256,10 @@ export function useFoodMutation({
   }, [recoverStorage]);
 
   async function send(intent: FoodIntent, retry = false) {
-    if (!active.current || lock.current || storageBlocked || (!retry && (!enabled || pending)))
+    if (
+      !active.current || lock.current || storageBlocked || (!retry && (!enabled || pending)) ||
+      (canSend && !canSend())
+    )
       return;
     if (!accountId) {
       setError('目前無法確認帳號，請重新確認後再操作。');

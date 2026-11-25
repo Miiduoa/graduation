@@ -55,6 +55,7 @@ export function MerchantOrderDesk({
   tenantId,
   locationId,
   cache,
+  canSend,
   queue: controlledQueue,
   onQueueChange,
   queueHref,
@@ -63,6 +64,7 @@ export function MerchantOrderDesk({
   tenantId: string;
   locationId: string;
   cache: FoodDraftCache;
+  canSend?: () => boolean;
   queue?: MerchantWorkspaceQueue;
   onQueueChange?: (event: MouseEvent<HTMLAnchorElement>, queue: MerchantWorkspaceQueue) => void;
   queueHref?: (queue: MerchantWorkspaceQueue) => string;
@@ -148,6 +150,7 @@ export function MerchantOrderDesk({
     scope,
     accountId,
     enabled: !!data.data,
+    canSend,
     execute,
     reload: data.reload,
     onSuccess(result, intent) {

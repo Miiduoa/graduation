@@ -186,6 +186,8 @@ it('keeps a confirmed missing menu after a legacy list and an unavailable detail
   await screen.findByText(/目前有 1 項有庫存的上架品項/);
   expect(confirmed.confirmMenu(key, confirmed.beginRequest(), 1)).toBe(true);
 
+  current = { ...current, readinessVersion: 8 };
+  confirmed.confirmDetail(current, confirmed.beginRequest(), true);
   const missingMenu = { ...current, missingRequirements: ['menu'] };
   confirmed.mergeWorkspaceList([missingMenu], confirmed.beginRequest());
   expect(drafts.get(key)?.menuReceipt).toBeNull();
@@ -248,6 +250,8 @@ it('clears the initial menu success when a delayed versioned list confirms a mis
   await screen.findByRole('alert');
   expect(screen.getByText(/上架品項。首次菜單只能建立一次。/)).toBeTruthy();
 
+  current = { ...current, readinessVersion: 8 };
+  confirmed.confirmDetail(current, confirmed.beginRequest(), true);
   const versionedList = confirmed.beginRequest();
   const legacyList = confirmed.beginRequest();
   confirmed.mergeWorkspaceList([{ ...current, readinessVersion: undefined }], legacyList);

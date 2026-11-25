@@ -567,6 +567,10 @@ export function MerchantOperations({
     }
   }, [accessRevocation, loading, readUnavailable, suspended, visible, verifyEntry]);
 
+  function hasCurrentAccess() {
+    return verifiedRevision > Math.max(currentFailureRevision(), observedRevocation.current);
+  }
+
   async function mutate(
     action: Action,
     task: (current: () => boolean, revision: number) => Promise<void>,
@@ -574,7 +578,7 @@ export function MerchantOperations({
     // A background GET can fail before React commits the updated controls.
     if (
       !active.current || lock.current || loading || uncertain || !detail ||
-      verifiedRevision <= Math.max(currentFailureRevision(), observedRevocation.current)
+      !hasCurrentAccess()
     ) return;
     lock.current = true;
     const session = sessionRun.current;
@@ -652,12 +656,18 @@ export function MerchantOperations({
       ? !detail.missingRequirements.includes('menu')
       : (detail?.publishedMenuItems ?? 0) > 0);
   const operational = !!detail && isMerchantWorkspaceOperational(detail);
+  // A same-version list can report an activation blocker while a legacy detail
+  // still needs its own stock count to determine whether to show the menu form.
+  const activationRequirements = detail?.missingRequirements ??
+    (detail && confirmedListRow?.readinessVersion === detail.readinessVersion
+      ? confirmedListRow.missingRequirements
+      : undefined);
   const canActivate =
     detail &&
     !detail.activated &&
     detail.managerConfirmed &&
     detail.publishedMenuItems > 0 &&
-    (detail.missingRequirements?.length ?? 0) === 0 &&
+    (activationRequirements?.length ?? 0) === 0 &&
     detail.merchantStatus === 'suspended' &&
     detail.locationStatus === 'suspended' &&
     !detail.publicAccess;
@@ -780,6 +790,7 @@ export function MerchantOperations({
                     tenantId={tenantId}
                     locationId={locationId}
                     cache={foodDrafts ?? localFoodDrafts}
+                    canSend={hasCurrentAccess}
                   />
                 )}
               </div>
@@ -802,6 +813,7 @@ export function MerchantOperations({
                   tenantId={tenantId}
                   locationId={locationId}
                   cache={foodDrafts ?? localFoodDrafts}
+                  canSend={hasCurrentAccess}
                   queue={navigation.queue}
                   queueHref={(queue) =>
                     merchantWorkspaceHref({ tenantId, locationId, section: 'orders', queue })
