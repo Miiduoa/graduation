@@ -1405,6 +1405,38 @@ it.each([
   expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
 });
 
+it('uses a post-write background confirmation when re-entry returns an older detail', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const open = { ...detail('store-a', true), readinessVersion: 7 };
+  const paused = { ...open, readinessVersion: 8, locationStatus: 'closed', publicAccess: false };
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(open)
+    .mockResolvedValueOnce(paused)
+    .mockResolvedValueOnce(open);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
+    if (resource === path) return readDetail();
+    if (resource === `${path}/availability`) return Promise.resolve(paused);
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+  await screen.findByText('門市狀態已更新：暫停接單。');
+
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+  await screen.findByRole('link', { name: '管理門市：一樓' });
+  await act(async () => window.history.forward());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+
+  expect((await screen.findByRole<HTMLButtonElement>('button', { name: '恢復接單' })).disabled).toBe(false);
+  expect(screen.queryByRole('alert')).toBeNull();
+  fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
+  await screen.findByRole('region', { name: '門市訂單工作台' });
+});
+
 it.each([403, 404])('revokes access and the pause notice after stale detail precedes list denial %s', async (status) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const open = { ...detail('store-a', true), readinessVersion: 6 };

@@ -228,7 +228,7 @@ export function MerchantOperations({
   const visibleRef = useRef(visible);
   const entryRun = useRef(0);
   const readAfterWrite = useRef(false);
-  const deferredWriteRevision = useRef(0);
+  const deferredWrite = useRef<{ revision: number; entry: number } | null>(null);
   const mutationRun = useRef(0);
   const changed = useRef(onChanged);
   const expire = useRef(onExpired);
@@ -240,7 +240,7 @@ export function MerchantOperations({
     ++sessionRun.current;
     ++run.current;
     ++mutationRun.current;
-    deferredWriteRevision.current = 0;
+    deferredWrite.current = null;
     pendingAccessRead.current = 0;
     entryAccessRevision.current = 0;
     failedReadRevision.current = 0;
@@ -374,6 +374,13 @@ export function MerchantOperations({
     [confirmDetail, confirmEntry, expireSession, nextRevision, locationId, operations, revokeDetail, tenantId],
   );
 
+  const rememberWrite = useCallback((revision: number) => {
+    if (revision > (deferredWrite.current?.revision ?? 0)) {
+      deferredWrite.current = { revision, entry: entryRun.current };
+    }
+    return deferredWrite.current;
+  }, []);
+
   const read = useCallback(
     async (reconcile = true, mode: DetailReadMode = 'regular', writeRevision = 0) => {
       // A confirmed receipt may remain visible with the previously verified detail
@@ -381,13 +388,13 @@ export function MerchantOperations({
       // Hidden refreshes can confirm shared detail for the next visible entry
       // without consuming that entry's post-write reconciliation.
       const visible = visibleRef.current;
-      const deferredRevision = visible ? deferredWriteRevision.current : 0;
-      // A post-write read can outlast the visible entry that started it.
-      // Only a read from the current visible entry can consume reconciliation.
       const entry = entryRun.current;
-      const reconciliationRevision = Math.max(deferredWriteRevision.current, writeRevision);
-      deferredWriteRevision.current = reconciliationRevision;
-      const readMode = mode === 'regular' && deferredRevision ? 'after-write' : mode;
+      const reconciliation = rememberWrite(writeRevision);
+      const reconciliationRevision = reconciliation?.revision ?? 0;
+      // The receipt's entry can refresh immediately, but only a later visible
+      // entry can consume the deferred reconciliation.
+      const deferred = visible && reconciliation !== null && entry > reconciliation.entry;
+      const readMode = mode === 'regular' && deferred ? 'after-write' : mode;
       const hideDetail = readMode === 'after-write';
       readAfterWrite.current = false;
       const session = sessionRun.current;
@@ -411,8 +418,11 @@ export function MerchantOperations({
           const sharedRevision = visible && reconciliationRevision
             ? (getAccessConfirmationRevision ?? localConfirmations.accessConfirmationRevision)(draftKey)
             : 0;
+          // Immediate refreshes can retain access verified in the same entry.
+          // Across entries, the verification must follow the deferred write.
+          const entryRevisionFloor = deferred ? reconciliationRevision : 0;
           const confirmedRevision = Math.max(
-            entryAccessRevision.current > deferredRevision ? entryAccessRevision.current : 0,
+            entryAccessRevision.current > entryRevisionFloor ? entryAccessRevision.current : 0,
             sharedRevision > reconciliationRevision ? sharedRevision : 0,
           );
           if (
@@ -460,11 +470,11 @@ export function MerchantOperations({
         if (pendingAccessRead.current === revision) pendingAccessRead.current = 0;
         if (current()) {
           if (
-            visibleRef.current &&
+            deferred && visibleRef.current &&
             entry === entryRun.current &&
-            deferredWriteRevision.current === reconciliationRevision
+            deferredWrite.current === reconciliation
           ) {
-            deferredWriteRevision.current = 0;
+            deferredWrite.current = null;
           }
           updateAccess({ type: 'read-finished' });
         }
@@ -473,7 +483,7 @@ export function MerchantOperations({
     [
       operations, tenantId, locationId, confirmDetail, confirmEntry, drafts, draftKey,
       expireSession, revokeDetail, nextRevision, beginRequest, getConfirmedDetail, localConfirmations,
-      getAccessConfirmationRevision, setError, setUncertain, updateAccess,
+      getAccessConfirmationRevision, rememberWrite, setError, setUncertain, updateAccess,
     ],
   );
   useLayoutEffect(() => {
@@ -554,10 +564,9 @@ export function MerchantOperations({
     const revision = nextRevision();
     try {
       await task(current, revision);
-      if (current() && !visibleRef.current) {
-        // A hidden access check cannot consume the next visible entry's reconciliation.
-        deferredWriteRevision.current = Math.max(deferredWriteRevision.current, revision);
-        await checkAccess(current);
+      if (current()) {
+        rememberWrite(revision);
+        if (!visibleRef.current) await checkAccess(current);
       }
     } catch (failure) {
       if (!active.current || session !== sessionRun.current) return;
