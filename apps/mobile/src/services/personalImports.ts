@@ -46,6 +46,7 @@ const locks = new Map<string, Promise<unknown>>();
 const pendingWrites = new Map<string, Promise<void>>();
 type Recovery = { raw: string | null; source?: 'checkpoint' | 'journal'; checkpoint?: string };
 const pendingRestorations = new Map<string, Recovery>();
+const inMemoryVerificationReceipts = new Map<string, string>();
 let writeSequence = 0;
 
 function isStorageRowTooLarge(error: unknown): boolean {
@@ -99,6 +100,7 @@ async function readLedgerSnapshot(
   const receipt = primaryVerified && (attemptedPrimary || rejectionMatches)
     ? await readNativeReceipt(key)
     : null;
+  const inMemoryReceipt = inMemoryVerificationReceipts.get(key);
   const rejectionReceipt = rejectionMatches && receipt?.match(/^([a-f0-9]{64})\n([a-f0-9]{64})$/);
   const rejectionHash = journal?.rejectionHash;
   const publishedAfterRejection = primaryVerified && primary !== null && rejectionReceipt &&
@@ -109,6 +111,7 @@ async function readLedgerSnapshot(
   const checkpointRejection = restoredRejectionHash ? undefined : rejectionMatches;
   const verifiedByJournal = primary !== null && (
     journal?.matchesVerifiedPrimary?.(primary) === true ||
+    (inMemoryReceipt !== undefined && journal?.matchesVerifiedReceipt?.(primary, inMemoryReceipt) === true) ||
     (receipt !== null && journal?.matchesVerifiedReceipt?.(primary, receipt) === true)
   );
   const rejectedPrimary = journal?.rejected && (
@@ -503,6 +506,7 @@ export function mutatePersonalImportLedger<T>(
             }
             assertWritable();
             let newReceipt: string | undefined;
+            let inMemoryReceipt: string | undefined;
             try {
               writtenRaw = journal ? firstRaw : raw;
               await AsyncStorage.setItem(key, writtenRaw);
@@ -566,9 +570,16 @@ export function mutatePersonalImportLedger<T>(
               }
               if (newReceipt !== undefined) {
                 assertWritable();
-                await AsyncStorage.setItem(nativeReceiptKey(key), newReceipt);
+                try {
+                  await AsyncStorage.setItem(nativeReceiptKey(key), newReceipt);
+                } catch (error) {
+                  if (!journal || !options.allowNativePrimaryOnly) throw error;
+                  // The ordinary save already verified these bytes. Keep its
+                  // attempt-bound receipt for reads in this process.
+                  inMemoryReceipt = newReceipt;
+                }
                 assertWritable();
-                currentReceipt = newReceipt;
+                if (inMemoryReceipt === undefined) currentReceipt = newReceipt;
               }
               pendingRestorations.delete(key);
             } catch (error) {
@@ -588,6 +599,8 @@ export function mutatePersonalImportLedger<T>(
               await rollbackLedger(key, persistedRaw, assertWritable, cleaningRecovery);
               throw error;
             }
+            if (inMemoryReceipt === undefined) inMemoryVerificationReceipts.delete(key);
+            else inMemoryVerificationReceipts.set(key, inMemoryReceipt);
           }
           hasPersisted = true;
           primaryRaw = writtenRaw;

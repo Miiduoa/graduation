@@ -572,6 +572,7 @@ test.each([
   ['all retirement writes fail with verified first write and no hash or receipt and readable payload', false],
   ['all retirement writes fail with verified first write and no hash or receipt and readable payload without settlement', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with verification receipt write error', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient verification receipt read', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient readback', false],
   ['all publication paths fail with temporarily unreadable payload', false],
@@ -613,6 +614,8 @@ test.each([
   const stalePublication = phase.endsWith('stale publication receipt');
   const receiptReadFailsAfterSave = phase.endsWith('publication receipt read fault after success');
   const transientVerificationReceiptRead = phase.endsWith('with transient verification receipt read');
+  const verificationReceiptWriteFails = phase.endsWith('with verification receipt write error');
+  const verificationReceiptWriteFault = jest.fn(() => { throw new Error('已驗證寫入憑據無法儲存'); });
   const verificationReceiptReadFault = jest.fn(() => { throw new Error('已驗證寫入憑據暫時無法讀取'); });
   const receiptReadFault = jest.fn(() => { throw new Error('發佈憑據暫時無法讀取'); });
   let receiptReadBlocked = false;
@@ -635,10 +638,11 @@ test.each([
   let primaryReadBlocked = false;
   if (phase === 'publish' || phase.startsWith('all with primary') || verifiedFirstWrite || verifiedReplacement || publicationFails) {
     set.mockImplementation(async (entry, value) => {
+      if (verificationReceiptWriteFails && entry === key + ':verified-write') verificationReceiptWriteFault();
       if (entry !== key) return nativeSet(entry, value);
       if (!active || (restorationFails && value === JSON.stringify(previous))) throw restoreError;
       encodedWrite = value.startsWith('{"batches":');
-      if (fallbackWriteFails && value.startsWith('{"version":')) {
+      if (fallbackWriteFails && value.startsWith('{"version":') && value !== JSON.stringify(previous)) {
         failNextPrimaryRead = phase.endsWith('with transient readback');
         primaryFault();
       }
@@ -851,6 +855,14 @@ test.each([
       receiptReadFailsAfterSave;
     const retrySave = !revoked && (phase === 'all' || phase === 'all with primary write error' || retryGuardedSave);
     expect(fallbackReadFault).toHaveBeenCalledTimes(phase.endsWith('with transient readback') ? 1 : 0);
+    if (verificationReceiptWriteFails) {
+      expect(verificationReceiptWriteFault).toHaveBeenCalledTimes(1);
+      expect(verificationReceiptWriteFault.mock.invocationCallOrder[0])
+        .toBeGreaterThan(primaryFault.mock.invocationCallOrder[1]);
+      expect(active).toBe(true);
+      expect(await nativeGet(key + ':verified-write')).toBeNull();
+      return;
+    }
     if (transientVerificationReceiptRead) {
       const receiptKey = key + ':verified-write';
       expect(await nativeGet(receiptKey)).toEqual(expect.any(String));
