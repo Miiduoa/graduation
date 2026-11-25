@@ -697,7 +697,12 @@ export function preparePersonalImportRollback(
       throw error;
     }
   } else if (resetMarker) {
-    marker.write('');
+    try {
+      marker.write('');
+    } catch (error) {
+      if (primaryCommitted && !rejected && !hadRejection) throw new NativeRollbackUnavailableError(error);
+      throw error;
+    }
     let reset: string | undefined;
     try {
       reset = marker.textSync();

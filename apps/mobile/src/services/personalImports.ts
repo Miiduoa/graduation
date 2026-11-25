@@ -59,13 +59,14 @@ async function readLedgerSnapshot(
   scope: PersonalImportScope,
 ) {
   const web = Platform.OS === 'web';
+  const restorationPending = !web && pendingRestorations.has(key);
   const journal = web ? undefined : capturePersonalImportRollback(key);
   const checkpoint = journal?.raw !== undefined || journal?.committedRaw !== undefined
     ? await readLegacyCheckpoint(key, scope).catch(() => null)
     : undefined;
   let primary: string | null = null;
   let primaryError: unknown;
-  if (web || !pendingRestorations.has(key)) {
+  if (!restorationPending) {
     try {
       primary = await AsyncStorage.getItem(key);
     } catch (error) {
@@ -99,8 +100,10 @@ async function readLedgerSnapshot(
     ? selectPersonalImportBrowserRecovery(browserRecovery, primary, primaryVerified, (raw) => parseLedger(raw, scope))
     : await readNativeRecovery(key, scope, primaryVerified, nativeJournal, checkpoint, journal?.rejected);
   if (!recovery && primaryError) throw primaryError;
-  const preserveAttemptRejection = attemptedPrimary && !verifiedByJournal &&
-    recovery !== null && recovery.raw !== primary;
+  // A pending restoration bypasses the primary read, so its on-disk bytes
+  // cannot be checked against the previous attempt before replacing the hashes.
+  const preserveAttemptRejection = restorationPending ||
+    (attemptedPrimary && !verifiedByJournal && recovery !== null && recovery.raw !== primary);
   return { primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection };
 }
 
