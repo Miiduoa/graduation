@@ -103,7 +103,13 @@ const restrictsWalking = (tags: Tags) =>
   hasNonPublicAccess(tags.foot) ||
   hasNonPublicAccess(tags.access) ||
   !!(tags.barrier && tags.barrier !== 'no') ||
-  !!tags['access:conditional'] || !!tags['foot:conditional'] || !!tags['opening_hours'];
+  // Locked gates/doors may lack a separate barrier tag. A conditional lock
+  // or malformed access schedule is not a verified all-hours passage.
+  // https://wiki.openstreetmap.org/wiki/Key:locked
+  (tags.locked !== undefined && tags.locked !== 'no') ||
+  tags['locked:conditional'] !== undefined ||
+  tags['access:conditional'] !== undefined || tags['foot:conditional'] !== undefined ||
+  tags.opening_hours !== undefined;
 
 export function hasWalkingRestriction(way: Tags, from: Tags, to: Tags): boolean {
   return restrictsWalking(way) || restrictsWalking(from) || restrictsWalking(to);
