@@ -6,12 +6,16 @@ describe('fetchWithPerformance', () => {
 
   beforeEach(() => {
     mockFetch.mockReset();
+    performance.setPerformanceCollectionEnabled(true);
+    performance.setDataCollectionEnabled(true);
     globalThis.fetch = mockFetch;
     performance.getDataStore().clear();
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
+    performance.setPerformanceCollectionEnabled(true);
+    performance.setDataCollectionEnabled(true);
     globalThis.fetch = originalFetch;
     performance.getDataStore().clear();
   });
@@ -44,6 +48,36 @@ describe('fetchWithPerformance', () => {
     mockFetch.mockResolvedValue(response);
     return response;
   }
+
+  it.each(['performance', 'data'] as const)(
+    'bypasses HTTP instrumentation when %s collection is disabled',
+    async (setting) => {
+      const createMetric = jest.spyOn(performance, 'newHttpMetric');
+      if (setting === 'performance') performance.setPerformanceCollectionEnabled(false);
+      else performance.setDataCollectionEnabled(false);
+
+      const response = responseWithLength('1024');
+      const url = 'https://example.test/private';
+      const options = { method: 'POST', body: 'payload' };
+      await expect(fetchWithPerformance(url, options)).resolves.toBe(response);
+      expect(mockFetch).toHaveBeenCalledWith(url, options);
+      expect(response.headers.get).not.toHaveBeenCalled();
+      expect(createMetric).not.toHaveBeenCalled();
+
+      const networkError = new TypeError('network unavailable');
+      mockFetch.mockRejectedValueOnce(networkError);
+      await expect(fetchWithPerformance(url, options)).rejects.toBe(networkError);
+      expect(createMetric).not.toHaveBeenCalled();
+      expect(performance.getDataStore().getHttpMetrics()).toHaveLength(0);
+
+      performance.setPerformanceCollectionEnabled(true);
+      performance.setDataCollectionEnabled(true);
+      responseWithLength('20');
+      await fetchWithPerformance(url);
+      expect(createMetric).toHaveBeenCalledTimes(1);
+      expect(performance.getDataStore().getHttpMetrics()).toHaveLength(1);
+    },
+  );
 
   it('returns the original response without cloning or consuming its body', async () => {
     const response = responseWithLength('1024');
