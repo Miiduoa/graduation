@@ -176,3 +176,25 @@ test.each(['where are my keys', 'where can i find my wallet', 'lostandfoundry'])
     expect(getMobileQuickActions(phrase)).toEqual([]);
   },
 );
+
+test.each([
+  ['Where can I find the library catalog?', '/library', 'Library'],
+  ['Where is the library catalogue?', '/library', 'Library'],
+  ['Where’s the library catalog?', '/library', 'Library'],
+  ['Where can I find the library   catalog?', '/library', 'Library'],
+  ['Where can I find the library?', '/map', 'MapV2'],
+  ['Where can I find the library cataloging department?', '/map', 'MapV2'],
+])('distinguishes online library resources from physical navigation: %s', (phrase, destination, route) => {
+  const actions = getMobileQuickActions(phrase);
+  expect(actions).toHaveLength(1);
+  expect(actions[0]).toMatchObject({ destination, route });
+  expect(ROUTE_TO_TAB[route]).toBeTruthy();
+});
+
+test.each([
+  ['Directions to the library to use the library catalog', '/map'],
+  ['Where can I find the library catalog and classrooms?', '/map'],
+  ['Where can I find the library catalogue and bus stop?', '/bus'],
+])('keeps both the physical route and catalog for an explicit mixed request: %s', (phrase, first) => {
+  expect(getMobileQuickActions(phrase).map(action => action.destination)).toEqual([first, '/library']);
+});

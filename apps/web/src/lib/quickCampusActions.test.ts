@@ -189,3 +189,22 @@ it.each(['where are my keys', 'where can i find my wallet', 'lostandfoundry'])(
     expect(getQuickCampusActions(phrase)).toEqual([]);
   },
 );
+
+it.each([
+  ['Where can I find the library catalog?', '/library'],
+  ['Where is the library catalogue?', '/library'],
+  ['Where’s the library catalog?', '/library'],
+  ['Where can I find the library   catalog?', '/library'],
+  ['Where can I find the library?', '/map'],
+  ['Where can I find the library cataloging department?', '/map'],
+])('distinguishes online library resources from physical navigation: %s', (phrase, href) => {
+  expect(getQuickCampusActions(phrase).map(action => action.href)).toEqual([href]);
+});
+
+it.each([
+  ['Directions to the library to use the library catalog', '/map'],
+  ['Where can I find the library catalog and classrooms?', '/map'],
+  ['Where can I find the library catalogue and bus stop?', '/bus'],
+])('keeps both the physical route and catalog for an explicit mixed request: %s', (phrase, first) => {
+  expect(getQuickCampusActions(phrase).map(action => action.href)).toEqual([first, '/library']);
+});
