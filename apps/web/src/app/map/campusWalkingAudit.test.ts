@@ -149,6 +149,30 @@ describe('trusted OSM walking segment audit bridge', () => {
     expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)).toBeNull();
   });
 
+  it('rejects malformed cached way member IDs even outside the retained graph', () => {
+    const sparse = new Array<number>(3);
+    sparse[0] = 1;
+    sparse[2] = 2;
+    const invalid: unknown[] = [
+      null, undefined, '12', {}, { length: 2, 0: 1, 1: 2 }, [1],
+      [1, 2, 0], [1, 2, -1], [1, 2, 2.5], [1, 2, '3'],
+      [1, 2, null], [1, 2, NaN], [1, 2, Infinity],
+      [1, 2, Number.MAX_SAFE_INTEGER + 1], sparse,
+    ];
+    for (const members of invalid) {
+      const data = candidates();
+      data.ways[0].nodes = members as typeof data.ways[0]['nodes'];
+      expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)).toBeNull();
+    }
+    // Positive IDs outside the retained campus graph remain valid members,
+    // but must not create an inferred connection to an outside node.
+    const data = candidates();
+    data.ways[0].nodes.push(Number.MAX_SAFE_INTEGER);
+    const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).not.toBeNull();
+    expect(graph.edges.some(edge => edge.to === Number.MAX_SAFE_INTEGER)).toBe(false);
+  });
+
   it('rejects cached ways with repeated in-scope segments or self loops', () => {
     for (const members of [[1, 2, 1, 3], [1, 2, 3, 1, 2], [1, 1, 2, 3]]) {
       const data = candidates();
