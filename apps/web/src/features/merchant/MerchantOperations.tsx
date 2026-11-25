@@ -1,6 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import Link from 'next/link';
 import { NuniError } from '@campus/shared/src/nuni';
 import { merchantWorkspaceStateLabel, type NuniMerchantWorkspace } from '@campus/shared/src/nuniMerchant';
@@ -84,11 +93,12 @@ const initialAccess = {
   entryVerified: false,
   loading: true,
   readUnavailable: false,
-  fresh: false,
+  verifiedRevision: 0,
 };
 
 type AccessAction =
-  | { type: 'entry-reset' | 'read-started' | 'read-finished' | 'verified' | 'locked' }
+  | { type: 'entry-reset' | 'read-started' | 'read-finished' | 'locked' }
+  | { type: 'verified'; revision: number }
   | { type: 'read-failed'; hideDetail: boolean };
 
 type DetailReadMode = 'regular' | 'after-write' | 'after-confirmed-write';
@@ -96,20 +106,20 @@ type DetailReadMode = 'regular' | 'after-write' | 'after-confirmed-write';
 function accessReducer(state: typeof initialAccess, action: AccessAction): typeof initialAccess {
   switch (action.type) {
     case 'entry-reset':
-      return { ...state, entryVerified: false, readUnavailable: false };
+      return { ...state, entryVerified: false, readUnavailable: false, verifiedRevision: 0 };
     case 'read-started':
-      return { ...state, readUnavailable: false, loading: true, fresh: false };
+      return { ...state, readUnavailable: false, loading: true, verifiedRevision: 0 };
     case 'read-finished':
       return { ...state, loading: false };
     case 'verified':
-      return { ...state, entryVerified: true, fresh: true, readUnavailable: false };
+      return { ...state, entryVerified: true, verifiedRevision: action.revision, readUnavailable: false };
     case 'locked':
-      return { ...state, fresh: false };
+      return { ...state, verifiedRevision: 0 };
     case 'read-failed':
       return {
         ...state,
         entryVerified: !action.hideDetail && state.entryVerified,
-        fresh: false,
+        verifiedRevision: 0,
         readUnavailable: true,
       };
   }
@@ -130,6 +140,7 @@ export function MerchantOperations({
   getConfirmedDetail,
   getDetailReadConfirmation,
   getDetailFailureRevision,
+  subscribeDetailFailures,
   recordDetailFailure,
   confirmedListRow,
   receiptFloorFor,
@@ -158,6 +169,7 @@ export function MerchantOperations({
   getConfirmedDetail?(key: string): Detail | null;
   getDetailReadConfirmation?(key: string): DetailReadConfirmation | undefined;
   getDetailFailureRevision?(key: string): number;
+  subscribeDetailFailures?(listener: () => void): () => void;
   recordDetailFailure?(key: string, revision: number): void;
   confirmedListRow?: NuniMerchantWorkspace;
   receiptFloorFor?(readinessVersion?: number): number;
@@ -177,7 +189,7 @@ export function MerchantOperations({
     [context],
   );
   const [loadedDetail, setDetail] = useState<Detail | null>(null);
-  const [{ entryVerified, loading, readUnavailable, fresh }, updateAccess] =
+  const [{ entryVerified, loading, readUnavailable, verifiedRevision }, updateAccess] =
     useReducer(accessReducer, initialAccess);
   const detail = entryVerified ? (confirmedDetail === undefined ? loadedDetail : confirmedDetail) : null;
   const [busy, setBusy] = useState<Action | null>(null);
@@ -221,6 +233,15 @@ export function MerchantOperations({
   const run = useRef(0);
   const accessRevision = useRef(0);
   const failureRevision = getDetailFailureRevision ?? localConfirmations.detailFailureRevision;
+  const currentFailureRevision = useCallback(
+    () => failureRevision(draftKey),
+    [draftKey, failureRevision],
+  );
+  const latestFailure = useSyncExternalStore(
+    subscribeDetailFailures ?? localConfirmations.subscribeDetailFailures,
+    currentFailureRevision,
+    () => 0,
+  );
   const recordFailure = recordDetailFailure ?? localConfirmations.recordDetailFailure;
   const entryDetailRead = useRef<DetailReadConfirmation | undefined>(undefined);
   const pendingAccessRead = useRef(0);
@@ -337,18 +358,18 @@ export function MerchantOperations({
     (detail: Detail, revision: number, reveal: boolean) => {
       if (
         revision < accessRevision.current ||
-        revision <= failureRevision(draftKey) ||
+        revision <= currentFailureRevision() ||
         revision <= observedRevocation.current
       ) return;
       accessRevision.current = revision;
       entryDetailRead.current = { revision, version: detail.readinessVersion };
       showDetail(detail);
       if (reveal) {
-        updateAccess({ type: 'verified' });
+        updateAccess({ type: 'verified', revision });
         setError((current) => current === detailReadError ? '' : current);
       }
     },
-    [draftKey, failureRevision, showDetail, setError, updateAccess],
+    [currentFailureRevision, showDetail, setError, updateAccess],
   );
 
   const checkAccess = useCallback(
@@ -415,7 +436,7 @@ export function MerchantOperations({
         if (!active.current || session !== sessionRun.current) return;
         const merged = confirmDetail(next, true, revision)?.detail ?? null;
         if (!current()) return;
-        if (!merged || revision <= failureRevision(draftKey)) {
+        if (!merged || revision <= currentFailureRevision()) {
           // A concurrent list merge can invalidate the detail from a successful entry GET.
           // Check the shared confirmation before React publishes its next snapshot.
           // Shared access must come from a GET newer than the write being reconciled.
@@ -437,12 +458,12 @@ export function MerchantOperations({
             readMode !== 'regular' &&
             confirmedRevision > 0 &&
             confirmedRevision >= accessRevision.current &&
-            confirmedRevision > Math.max(failureRevision(draftKey), observedRevocation.current) &&
+            confirmedRevision > Math.max(currentFailureRevision(), observedRevocation.current) &&
             detail
           ) {
             accessRevision.current = confirmedRevision;
             entryDetailRead.current = { revision: confirmedRevision, version: detail.readinessVersion };
-            updateAccess({ type: 'verified' });
+            updateAccess({ type: 'verified', revision: confirmedRevision });
             setError((current) => current === detailReadError ? '' : current);
             return;
           }
@@ -491,7 +512,7 @@ export function MerchantOperations({
     [
       operations, tenantId, locationId, confirmDetail, confirmEntry, drafts, draftKey,
       expireSession, revokeDetail, nextRevision, beginRequest, getConfirmedDetail, localConfirmations,
-      getDetailReadConfirmation, failureRevision, recordFailure, rememberWrite, setError, setUncertain, updateAccess,
+      getDetailReadConfirmation, currentFailureRevision, recordFailure, rememberWrite, setError, setUncertain, updateAccess,
     ],
   );
   useLayoutEffect(() => {
@@ -550,7 +571,11 @@ export function MerchantOperations({
     action: Action,
     task: (current: () => boolean, revision: number) => Promise<void>,
   ) {
-    if (!active.current || lock.current || loading || uncertain || !fresh || !detail) return;
+    // A background GET can fail before React commits the updated controls.
+    if (
+      !active.current || lock.current || loading || uncertain || !detail ||
+      verifiedRevision <= Math.max(currentFailureRevision(), observedRevocation.current)
+    ) return;
     lock.current = true;
     const session = sessionRun.current;
     const mutation = ++mutationRun.current;
@@ -617,8 +642,10 @@ export function MerchantOperations({
   const draft = settings ?? (detail ? settingsOf(detail) : null);
   const settingsChanged =
     !!settings && !!detail && settings.baseVersion !== detail.readinessVersion;
-  const locked = !!busy || loading || !!uncertain || !fresh || !detail;
-  const displayedError = error || (!loading && entryVerified && !detail ? detailReadError : '');
+  const accessFailed = latestFailure > 0 && latestFailure >= verifiedRevision;
+  const locked = !!busy || loading || !!uncertain || !detail ||
+    verifiedRevision <= Math.max(latestFailure, accessRevocation);
+  const displayedError = error || (!loading && entryVerified && (!detail || accessFailed) ? detailReadError : '');
   const menuExists =
     menuReceipt !== null ||
     (detail?.missingRequirements

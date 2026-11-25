@@ -631,6 +631,7 @@ function AccountWorkspace({
           getConfirmedDetail={confirmed.detailFor}
           getDetailReadConfirmation={confirmed.detailReadConfirmation}
           getDetailFailureRevision={confirmed.detailFailureRevision}
+          subscribeDetailFailures={confirmed.subscribeDetailFailures}
           recordDetailFailure={confirmed.recordDetailFailure}
           confirmedListRow={verifiedListedRows.get(key)}
           receiptFloorFor={(version) => confirmed.workspaceReceiptFloor(key, version)}

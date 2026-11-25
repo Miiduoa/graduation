@@ -105,6 +105,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const revocations = new Map<string, number>();
   // A failed GET limits access recovery without discarding the last confirmed overview.
   const detailFailures = new Map<string, number>();
+  const detailFailureListeners = new Set<() => void>();
   const verified = new Map<string, number>();
   let applicationRevocation = 0;
   let applicationListRevision = 0;
@@ -143,12 +144,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   }
 
   function revoke(key: string, revision: number) {
-    const entry = entries.get(key);
-    // An unversioned list can update metadata without superseding a detail denial.
-    const confirmation = entry?.versionedRow;
-    if (revision <= Math.max(
-      revokedThrough(key), confirmation?.revision ?? 0, accessConfirmationRevision(key),
-    )) return;
+    // Only a detail GET can supersede a denial of management access.
+    if (revision <= Math.max(revokedThrough(key), accessConfirmationRevision(key))) return;
     revocations.set(key, revision);
     workspaceKeysAwaitingConfirmation.add(key);
     discardWorkspace(key, revision);
@@ -336,8 +333,14 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     detailFailureRevision(key: string) {
       return detailFailures.get(key) ?? 0;
     },
+    subscribeDetailFailures(listener: () => void) {
+      detailFailureListeners.add(listener);
+      return () => { detailFailureListeners.delete(listener); };
+    },
     recordDetailFailure(key: string, revision: number) {
-      detailFailures.set(key, Math.max(detailFailures.get(key) ?? 0, revision));
+      if (revision <= (detailFailures.get(key) ?? 0)) return;
+      detailFailures.set(key, revision);
+      for (const listener of detailFailureListeners) listener();
     },
     verifiedDetails() {
       const details = new Map<string, NuniMerchantWorkspaceDetail>();
@@ -510,6 +513,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       revocations.clear();
       verified.clear();
       detailFailures.clear();
+      for (const listener of detailFailureListeners) listener();
     },
   };
 }

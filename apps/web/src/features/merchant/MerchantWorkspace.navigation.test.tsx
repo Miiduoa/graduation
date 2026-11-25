@@ -2961,50 +2961,119 @@ it.each([
   expect(screen.queryByRole('link', { name: /管理門市：一樓/ })).toBeNull();
 });
 
-it('requires a new detail after a newer list refresh fails before an older v8 GET succeeds', async () => {
+it.each(['before', 'after'])(
+  'requires a new detail when a newer background read fails %s stale re-entry',
+  async (failureArrival) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const open = { ...detail('store-a', true), readinessVersion: 7 };
+    const paused = { ...open, readinessVersion: 8, locationStatus: 'closed', publicAccess: false };
+    const olderRefresh = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+    const newerRefresh = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+    const readDetail = vi.fn()
+      .mockResolvedValueOnce(open)
+      .mockReturnValueOnce(olderRefresh.promise)
+      .mockReturnValueOnce(newerRefresh.promise)
+      .mockResolvedValueOnce(open)
+      .mockResolvedValueOnce(paused);
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') {
+        return Promise.resolve({ workspaces: [open, detail('store-b')] });
+      }
+      if (resource === path) return readDetail();
+      if (resource === `${path}/availability`) return Promise.resolve(paused);
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+    await screen.findByText('門市狀態已更新：暫停接單。');
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+
+    // Reenter the list through another store while the first background read is pending.
+    fireEvent.click(screen.getByRole('link', { name: '管理門市：二樓' }));
+    await screen.findByRole('heading', { name: '餐坊／二樓', level: 2 });
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+    const failNewerRefresh = () => act(async () => newerRefresh.reject(new NuniError(503, 'UNAVAILABLE')));
+    if (failureArrival === 'before') {
+      await failNewerRefresh();
+      await screen.findByText('目前無法更新部分門市資料，請重新載入。');
+    }
+
+    await act(async () => olderRefresh.resolve(paused));
+    fireEvent.click(screen.getByRole('link', { name: '管理門市：一樓' }));
+    if (failureArrival === 'after') {
+      expect((await screen.findByRole<HTMLButtonElement>('button', { name: '恢復接單' })).disabled).toBe(false);
+      expect(screen.getByRole('link', { name: '處理訂單與收銀' })).toBeTruthy();
+      await failNewerRefresh();
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: '恢復接單' }).disabled).toBe(true);
+    } else {
+      await waitFor(() => expect(screen.queryByRole('button', { name: '恢復接單' })).toBeNull());
+    }
+    await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+    const retry = screen.getByRole('button', { name: '重新讀取門市狀態' });
+    expect(readDetail).toHaveBeenCalledTimes(4);
+    expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
+
+    fireEvent.click(retry);
+    expect((await screen.findByRole<HTMLButtonElement>('button', { name: '恢復接單' })).disabled).toBe(false);
+  },
+);
+
+it.each([403, 404])('revokes a background detail denial %s despite a newer same-version list', async (status) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const open = { ...detail('store-a', true), readinessVersion: 7 };
   const paused = { ...open, readinessVersion: 8, locationStatus: 'closed', publicAccess: false };
-  const olderRefresh = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+  const listed = { ...paused, merchantName: '清單更新的餐坊' };
+  const deniedRefresh = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+  const newerRefresh = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+  const readList = vi.fn()
+    .mockResolvedValue({ workspaces: [listed, detail('store-b')] })
+    .mockResolvedValueOnce({ workspaces: [open, detail('store-b')] })
+    .mockResolvedValueOnce({ workspaces: [paused, detail('store-b')] });
   const readDetail = vi.fn()
     .mockResolvedValueOnce(open)
-    .mockReturnValueOnce(olderRefresh.promise)
-    .mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'))
-    .mockResolvedValueOnce(open)
-    .mockResolvedValueOnce(paused);
+    .mockResolvedValueOnce(paused)
+    .mockReturnValueOnce(deniedRefresh.promise)
+    .mockReturnValueOnce(newerRefresh.promise)
+    .mockResolvedValue(open);
   mocks.request.mockImplementation((resource) => {
-    if (resource === 'merchant-workspaces') {
-      return Promise.resolve({ workspaces: [open, detail('store-b')] });
-    }
+    if (resource === 'merchant-workspaces') return readList();
     if (resource === path) return readDetail();
     if (resource === `${path}/availability`) return Promise.resolve(paused);
     return respond(resource);
   });
 
   render(<MerchantWorkspace view="workspace" />);
-  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  const storeLink = await screen.findByRole<HTMLAnchorElement>('link', { name: '管理門市：一樓' });
+  const storeHref = storeLink.href;
+  fireEvent.click(storeLink);
   fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
   await screen.findByText('門市狀態已更新：暫停接單。');
+
   await act(async () => window.history.back());
   await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
-
-  // Reenter the list through another store while the first background read is pending.
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
   fireEvent.click(screen.getByRole('link', { name: '管理門市：二樓' }));
   await screen.findByRole('heading', { name: '餐坊／二樓', level: 2 });
   await act(async () => window.history.back());
-  await screen.findByText('目前無法更新部分門市資料，請重新載入。');
-  expect(readDetail).toHaveBeenCalledTimes(3);
+  await screen.findByRole('heading', { name: '清單更新的餐坊／一樓' });
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
 
-  await act(async () => olderRefresh.resolve(paused));
-  fireEvent.click(screen.getByRole('link', { name: '管理門市：一樓' }));
+  await act(async () => deniedRefresh.reject(new NuniError(status, 'DENIED')));
+  expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+
+  await act(async () => {
+    window.history.pushState(null, '', storeHref);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
   await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
-  const retry = screen.getByRole('button', { name: '重新讀取門市狀態' });
-  expect(readDetail).toHaveBeenCalledTimes(4);
   expect(screen.queryByRole('button', { name: '恢復接單' })).toBeNull();
   expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
-
-  fireEvent.click(retry);
-  expect((await screen.findByRole<HTMLButtonElement>('button', { name: '恢復接單' })).disabled).toBe(false);
+  await act(async () => newerRefresh.resolve(paused));
 });
 
 it.each([
