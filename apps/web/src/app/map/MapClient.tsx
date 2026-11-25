@@ -683,6 +683,7 @@ function MapContent({
           school={school}
           locations={mapLocations}
           selected={selected}
+          mapRoute={routeLocations}
           onSelect={selectLocation}
         />
         {officialMapUrl && (
