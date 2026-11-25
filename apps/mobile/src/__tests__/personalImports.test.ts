@@ -572,6 +572,7 @@ test.each([
   ['all retirement writes fail with verified first write and no hash or receipt and readable payload', false],
   ['all retirement writes fail with verified first write and no hash or receipt and readable payload without settlement', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient readback', false],
   ['all publication paths fail with temporarily unreadable payload', false],
   ['all publication paths fail with temporarily unreadable payload and successful restoration', false],
 ] as const)('native marker retirement %s I/O keeps the correct primary and notification (revoked: %s)', async (phase, revoked) => {
@@ -600,7 +601,9 @@ test.each([
   const verifiedFirstWrite = phase.includes('verified first write');
   const retirementWritesFail = phase.startsWith('all retirement writes fail');
   const settlementFails = phase.includes('without settlement');
-  const fallbackWriteFails = phase.endsWith('or fallback');
+  const fallbackWriteFails = phase.includes('or fallback');
+  const fallbackReadFault = jest.fn(() => { throw new Error('第三次主鍵寫入後無法立即讀回'); });
+  let failNextPrimaryRead = false;
   const settlementFault = jest.fn(() => { throw new Error('已完成標記無法寫入'); });
   const verifiedReplacement = phase.includes('verified replacement');
   const publicationFails = phase.startsWith('all publication paths fail');
@@ -632,9 +635,12 @@ test.each([
       if (entry !== key) return nativeSet(entry, value);
       if (!active || (restorationFails && value === JSON.stringify(previous))) throw restoreError;
       encodedWrite = value.startsWith('{"batches":');
-      if ((fallbackWriteFails && value.startsWith('{"version":')) ||
-          (encodedWrite && !verifiedReplacement &&
-            (phase === 'all with primary write error' || failPayloadBinding || verifiedFirstWrite))) primaryFault();
+      if (fallbackWriteFails && value.startsWith('{"version":')) {
+        failNextPrimaryRead = phase.endsWith('with transient readback');
+        primaryFault();
+      }
+      if (encodedWrite && !verifiedReplacement &&
+          (phase === 'all with primary write error' || failPayloadBinding || verifiedFirstWrite)) primaryFault();
       await nativeSet(entry, value);
       if (encodedWrite && persistentPrimaryReadFault) primaryReadBlocked = true;
       if (encodedWrite && phase === 'publish') active = false;
@@ -644,6 +650,10 @@ test.each([
   if (persistentPrimaryReadFault || retirementWritesFail) {
     get.mockImplementation(async (entry) => {
       if (entry === key && primaryReadBlocked) primaryFault();
+      if (entry === key && failNextPrimaryRead) {
+        failNextPrimaryRead = false;
+        fallbackReadFault();
+      }
       const value = await nativeGet(entry);
       if (entry === key && value?.startsWith('{"records":')) primaryReadBack(value);
       return value;
@@ -837,9 +847,7 @@ test.each([
     const retryGuardedSave = persistentMarkerReadFault || unreadablePayload || stalePublication ||
       receiptReadFailsAfterSave;
     const retrySave = !revoked && (phase === 'all' || phase === 'all with primary write error' || retryGuardedSave);
-    // This case has no durable publication proof. The notification read above
-    // must still observe the verified primary in the running process.
-    if (fallbackWriteFails) return;
+    expect(fallbackReadFault).toHaveBeenCalledTimes(phase.endsWith('with transient readback') ? 1 : 0);
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
@@ -1652,7 +1660,7 @@ test('a rejected primary-only edit with no pending marker recovers its checkpoin
   }
 });
 
-test.each(['payload write', 'rejection delete'] as const)('a restored primary remains editable after restart with an older checkpoint and a persistent %s fault', async (fault) => {
+test.each(['payload write', 'rejection delete', 'restored write', 'restored readback'] as const)('a restored primary remains editable after restart with an older checkpoint and a persistent %s fault', async (fault) => {
   const scope = { owner: `nuni:restored-primary-with-older-checkpoint-${fault}`, schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
   const prefix = `personal-imports-${sha256(key)}.rollback.`;
@@ -1669,8 +1677,15 @@ test.each(['payload write', 'rejection delete'] as const)('a restored primary re
   const { write: writeFile, delete: deleteFile } = File.prototype;
   const deleteFault = jest.fn(() => { throw new Error('無法刪除拒絕檔'); });
   const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
-    if (fault === 'rejection delete' && this.uri === rejection.uri) deleteFault();
+    if (fault !== 'payload write' && this.uri === rejection.uri) deleteFault();
     deleteFile.call(this);
+  });
+  const resolvedFault = jest.fn(() => { throw new Error('無法確認拒絕檔已改為 restored'); });
+  const textSync = File.prototype.textSync;
+  const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+    const value = textSync.call(this);
+    if (fault === 'restored readback' && this.uri === rejection.uri && value === 'restored') resolvedFault();
+    return value;
   });
   let payloadBlocked = true;
   const payloadWritten = jest.fn();
@@ -1680,6 +1695,7 @@ test.each(['payload write', 'rejection delete'] as const)('a restored primary re
       if (payloadBlocked) payloadFault();
       payloadWritten();
     }
+    if (fault === 'restored write' && this.uri === rejection.uri && value === 'restored') resolvedFault();
     writeFile.call(this, value, options);
   });
   const set = jest.mocked(AsyncStorage.setItem);
@@ -1723,6 +1739,7 @@ test.each(['payload write', 'rejection delete'] as const)('a restored primary re
     set.mockImplementation(nativeSet);
     payloadBlocked = fault === 'payload write';
     get.mockClear();
+    let saved: typeof original | undefined;
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(original);
@@ -1730,6 +1747,7 @@ test.each(['payload write', 'rejection delete'] as const)('a restored primary re
       const unsubscribeRestart = restarted.subscribePersonalImports(reread);
       try {
         const edited = await restarted.editPersonalImport(scope, original.records[0], row('first', '化學'), guard);
+        saved = edited;
         expect(edited.records.map(({ title }) => title)).toEqual(['化學', '統計']);
         const writeIndex = set.mock.calls.findLastIndex(([entry]) => entry === key);
         const writtenRaw = set.mock.calls[writeIndex][1];
@@ -1744,7 +1762,14 @@ test.each(['payload write', 'rejection delete'] as const)('a restored primary re
           expect(pending.info().exists).toBe(false);
         } else {
           expect(deleteFault).toHaveBeenCalledTimes(1);
-          expect(payloadWritten).toHaveBeenCalledTimes(1);
+          expect(payloadWritten).toHaveBeenCalledTimes(fault === 'rejection delete' ? 1 : 0);
+          if (fault === 'rejection delete') {
+            expect(resolvedFault).not.toHaveBeenCalled();
+          } else {
+            expect(resolvedFault).toHaveBeenCalled();
+            expect(resolvedFault.mock.invocationCallOrder[0]).toBeLessThan(set.mock.invocationCallOrder[writeIndex]);
+          }
+          if (fault.startsWith('restored')) expect(pending.info().exists).toBe(false);
           expect(rejection.info().exists).toBe(true);
         }
         expect(reread).toHaveBeenCalledTimes(1);
@@ -1753,7 +1778,12 @@ test.each(['payload write', 'rejection delete'] as const)('a restored primary re
         unsubscribeRestart();
       }
     });
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(saved);
+    });
   } finally {
+    read.mockRestore();
     unsubscribe();
     get.mockImplementation(nativeGet);
     set.mockImplementation(nativeSet);

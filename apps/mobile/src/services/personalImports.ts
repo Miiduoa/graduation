@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { sha256 } from 'js-sha256';
 import { Platform } from 'react-native';
 import {
   capturePersonalImportBrowserRecovery,
@@ -39,6 +40,7 @@ export type PersonalImportScope = { owner: string; schoolId: string };
 export type { PersonalImportLedger } from '@campus/shared/src/imports/browserRecovery';
 export const personalImportStorageKey = (scope: PersonalImportScope) =>
   `campus.personal-imports.v1:${encodeURIComponent(scope.owner)}:${encodeURIComponent(scope.schoolId)}`;
+const nativeReceiptKey = (key: string) => key + ':verified-write';
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
 const locks = new Map<string, Promise<unknown>>();
 const pendingWrites = new Map<string, Promise<void>>();
@@ -83,10 +85,22 @@ async function readLedgerSnapshot(
   // A rejected primary-only write may already have restored the original bytes.
   const restoredEmpty = primary === null && !primaryError && !restorationPending &&
     rejectionMatches?.(null) === true;
-  const checkpointRejection = (primaryVerified || restoredEmpty) && rejectionMatches?.(primary)
-    ? undefined : rejectionMatches;
-  const verifiedByJournal = primary !== null && journal?.matchesVerifiedPrimary?.(primary) === true;
   const attemptedPrimary = primary !== null && journal?.matchesAttemptedPrimary?.(primary) === true;
+  const receipt = primaryVerified && (attemptedPrimary || rejectionMatches)
+    ? await AsyncStorage.getItem(nativeReceiptKey(key)).catch(() => null)
+    : null;
+  const rejectionReceipt = rejectionMatches && receipt?.match(/^([a-f0-9]{64})\n([a-f0-9]{64})$/);
+  const rejectionHash = journal?.rejectionHash;
+  const publishedAfterRejection = primaryVerified && primary !== null && rejectionReceipt &&
+    (rejectionHash === undefined || rejectionHash === rejectionReceipt[1]) &&
+    rejectionReceipt[2] === sha256(primary);
+  const restoredRejectionHash = publishedAfterRejection ? rejectionReceipt[1] :
+    (primaryVerified || restoredEmpty) && rejectionMatches?.(primary) ? rejectionHash : undefined;
+  const checkpointRejection = restoredRejectionHash ? undefined : rejectionMatches;
+  const verifiedByJournal = primary !== null && (
+    journal?.matchesVerifiedPrimary?.(primary) === true ||
+    (receipt !== null && journal?.matchesVerifiedReceipt?.(primary, receipt) === true)
+  );
   const rejectedPrimary = journal?.rejected && (
     journal.hasRejectedPayload || attemptedPrimary || journal.raw === primary ||
     (primary !== null && journal.matchesFallbackPrimary?.(primary)) ||
@@ -114,7 +128,7 @@ async function readLedgerSnapshot(
   // cannot be checked against the previous attempt before replacing the hashes.
   const preserveAttemptRejection = restorationPending || checkpointRejection !== undefined ||
     (attemptedPrimary && !verifiedByJournal && recovery !== null && recovery.raw !== primary);
-  return { primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection };
+  return { primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection, restoredRejectionHash, receipt };
 }
 
 function isReadableLedger(raw: string | null, scope: PersonalImportScope): boolean {
@@ -405,8 +419,9 @@ export function mutatePersonalImportLedger<T>(
         assertLockHeld();
       };
       assertWritable();
-      const { primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection } =
+      const { primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection, restoredRejectionHash, receipt } =
         await readLedgerSnapshot(key, scope, options.allowNativePrimaryOnly);
+      let currentReceipt = receipt;
       let primaryRaw = primary;
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
@@ -433,7 +448,7 @@ export function mutatePersonalImportLedger<T>(
           : serialized;
         // Keep the recovery copy authoritative until the replacement commits,
         // even if the recovered version no longer fits in AsyncStorage.
-        const needsJournal = typeof guard !== 'function' ||
+        const needsJournal = typeof guard !== 'function' || restoredRejectionHash !== undefined ||
           (recovery !== null && !hasPersisted) || hasNativeCommitEncoding(primaryRaw);
         const write = async () => {
           let writtenRaw = raw;
@@ -464,6 +479,7 @@ export function mutatePersonalImportLedger<T>(
                 first: firstRaw,
                 replacement,
                 fallback: raw,
+                restoredRejectionHash,
                 preserveRejection: !hasPersisted && preserveAttemptRejection,
               });
             } catch (error) {
@@ -476,6 +492,7 @@ export function mutatePersonalImportLedger<T>(
               }
             }
             assertWritable();
+            let newReceipt: string | undefined;
             try {
               writtenRaw = journal ? firstRaw : raw;
               await AsyncStorage.setItem(key, writtenRaw);
@@ -516,20 +533,43 @@ export function mutatePersonalImportLedger<T>(
                     // The optional rewrite may fail before or after reaching disk.
                   }
                   assertWritable();
-                  const readback = await AsyncStorage.getItem(key);
+                  const readback = await AsyncStorage.getItem(key).catch((error: unknown) => {
+                    // A failed optional rewrite can leave either encoding on disk.
+                    // Retry a transient read before deciding which bytes to publish.
+                    if (fallbackWritten) throw error;
+                    return AsyncStorage.getItem(key);
+                  });
                   if (readback === raw) {
                     writtenRaw = raw;
                   } else if (!fallbackWritten && readback === writtenRaw) {
-                    assertWritable();
-                    journal.rememberVerifiedPrimary(writtenRaw);
+                    newReceipt = journal.verificationReceipt(writtenRaw);
                   } else {
                     throw new Error('無法確認匯入資料已儲存，請稍後再試。');
                   }
                 }
                 assertWritable();
               }
+              // Keep a small proof in AsyncStorage when the document directory
+              // cannot publish the verified attempt or retire an old rejection.
+              if (!journal && restoredRejectionHash && capturePersonalImportRollback(key)?.checkpointRejection) {
+                newReceipt = restoredRejectionHash + '\n' + sha256(writtenRaw);
+              }
+              if (newReceipt !== undefined) {
+                assertWritable();
+                await AsyncStorage.setItem(nativeReceiptKey(key), newReceipt);
+                assertWritable();
+                currentReceipt = newReceipt;
+              }
               pendingRestorations.delete(key);
             } catch (error) {
+              if (newReceipt !== undefined) {
+                try {
+                  if (currentReceipt === null) await AsyncStorage.removeItem(nativeReceiptKey(key));
+                  else await AsyncStorage.setItem(nativeReceiptKey(key), currentReceipt);
+                } catch {
+                  // Preserve rejection through the rollback journal and checkpoint.
+                }
+              }
               try {
                 journal?.retainRejection();
               } catch {
