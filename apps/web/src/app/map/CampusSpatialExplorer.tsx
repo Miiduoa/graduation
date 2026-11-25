@@ -1259,7 +1259,7 @@ function SpatialDialog({ school, locations, selected, mapRoute, onSelect, onClos
     selected ? { id: selected.id, identity: spatialDestinationIdentity(selected), inherited: true } : null);
   const [overview, setOverview] = useState(!selected);
   const [overhead, setOverhead] = useState(false);
-  const [buildingPlanId, setBuildingPlanId] = useState<string | null>(null);
+  const [buildingPlanChoice, setBuildingPlanChoice] = useState<{ id: string; identity: string } | 'revoked' | null>(null);
   const [footprints, setFootprints] = useState<ProvidenceFootprint[]>([]);
   const [footprintAttempt, setFootprintAttempt] = useState(0);
   const [footprintStatus, setFootprintStatus] = useState<'loading' | 'ready' | 'unavailable' | 'deferred'>(
@@ -1296,10 +1296,18 @@ function SpatialDialog({ school, locations, selected, mapRoute, onSelect, onClos
   const chosen = typeof selection === 'object' ? selection : null;
   const selectedPoint = model.points.find((point) =>
     point.id === chosen?.id && spatialDestinationIdentity(point.location) === chosen.identity);
-  // The preview owns an editing session scoped to the building ID.
-  const buildingPlanPlace = model.points.find((point) => point.id === buildingPlanId)?.location ??
-    locations.find((location) => location.id === buildingPlanId);
-  if (buildingPlanId !== null && !buildingPlanPlace) setBuildingPlanId(null);
+  // A plan editor must never carry its local draft to a replacement POI
+  // that merely reuses the same ID. Preserve the session during projection
+  // failure only when the full marker identity is still uniquely present.
+  const buildingPlanMatches = typeof buildingPlanChoice === 'object' && buildingPlanChoice !== null
+    ? locations.filter((location) => location.id === buildingPlanChoice.id)
+    : [];
+  const buildingPlanPlace = typeof buildingPlanChoice === 'object' && buildingPlanChoice !== null &&
+    buildingPlanMatches.length === 1 &&
+    spatialDestinationIdentity(buildingPlanMatches[0]) === buildingPlanChoice.identity
+    ? buildingPlanMatches[0] : undefined;
+  if (typeof buildingPlanChoice === 'object' && buildingPlanChoice !== null && !buildingPlanPlace)
+    setBuildingPlanChoice('revoked');
   // A temporarily unloadable model (empty points from an oversized area)
   // is not a destination change. Keep the choice pending and restore
   // details plus walking navigation when the same place is projectable again.
@@ -1836,7 +1844,7 @@ function SpatialDialog({ school, locations, selected, mapRoute, onSelect, onClos
       schoolId={school}
       buildingId={buildingPlanPlace.id}
       buildingName={buildingPlanPlace.name}
-      onClose={() => setBuildingPlanId(null)}
+      onClose={() => setBuildingPlanChoice(null)}
     />;
   }
 
@@ -1848,6 +1856,9 @@ function SpatialDialog({ school, locations, selected, mapRoute, onSelect, onClos
       description="用地點的相對位置認識校園。圖釘是位置標記，不代表建築外觀或室內動線。"
       size="full"
     >
+      {buildingPlanChoice === 'revoked' && <p className={styles.note} role="status">
+        原圖面地點已變更或無法唯一確認，已關閉圖面編輯；未下載的編輯內容不會轉移到其他地點。請重新選擇建築。
+      </p>}
       {model.unavailableReason ? (
         <div className={styles.unavailable} role="status">
           <p>{model.unavailableReason === 'area-too-large'
@@ -2077,7 +2088,7 @@ function SpatialDialog({ school, locations, selected, mapRoute, onSelect, onClos
                   {routeOrigin && <>沿用平面地圖設定的起點「{routeOrigin.name}」；起點也是地點標記，並非已核實的入口。{' '}</>}
                   導航僅以目前地點標記為目的地，並非已核實的校舍入口、可通行道路或無障礙動線；請依現場指標確認。
                 </p>
-                <button className="btn" type="button" onClick={() => setBuildingPlanId(place.id)}>平面圖建模預覽</button>
+                <button className="btn" type="button" onClick={() => setBuildingPlanChoice({ id: place.id, identity: spatialDestinationIdentity(place) })}>平面圖建模預覽</button>
                 {source && <a className={styles.source} href={source} target="_blank" rel="noopener noreferrer">查看地點資料來源 ↗</a>}
               </div>
               </> : <p className={styles.note} role="status" aria-live="polite" aria-atomic="true">
