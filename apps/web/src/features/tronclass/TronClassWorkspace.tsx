@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { createTronClassBindingConsent, type TronClassBindingConsent } from '@campus/shared/src/tronClassBindingConsent';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
@@ -63,6 +64,7 @@ function verifiedStudentKey(connection: TronClassConnection | null): string | nu
 }
 
 export function TronClassWorkspace() {
+  const [bindingConsent] = useState(createTronClassBindingConsent);
   const platform = useOptionalNuniSession();
   const firebase = useAuth();
   const platformSession = platform?.session;
@@ -142,34 +144,30 @@ export function TronClassWorkspace() {
           </section>
         )}
         {(ready || retainDuringPlatformRefresh) && (
-          <AccountDraftRetention key={workspaceKey} identity={identity!} owner={owner!} active={!!ready} />
+          <AccountDraftRetention key={workspaceKey} identity={identity!} owner={owner!} active={!!ready} bindingConsent={bindingConsent} />
         )}
       </div>
     </SiteShell>
   );
 }
 
-type BindingRefresh = { sourceRevision: string | null; bindingChanged: boolean };
-
-function AccountDraftRetention({ identity, owner, active }: {
-  identity: TronClassIdentity; owner: string; active: boolean;
+function AccountDraftRetention({ identity, owner, active, bindingConsent }: {
+  identity: TronClassIdentity; owner: string; active: boolean; bindingConsent: TronClassBindingConsent;
 }) {
   const [recoveryDrafts, setRecoveryDrafts] = useState<SchoolDraft[]>([]);
-  // A same-account session refresh can remount the workspace while the replacement is pending.
-  const bindingRefresh = useRef<BindingRefresh | null>(null);
   // No hidden editor/DOM remains during verification. Remounting the account
   // requires a fresh school status; recovery still requires the same studentKey
   // and a fresh prepare before the retained text or File handles become visible.
   return active ? <AccountWorkspace identity={identity} owner={owner}
-    recoveryDrafts={recoveryDrafts} setRecoveryDrafts={setRecoveryDrafts} bindingRefresh={bindingRefresh} /> : null;
+    recoveryDrafts={recoveryDrafts} setRecoveryDrafts={setRecoveryDrafts} bindingConsent={bindingConsent} /> : null;
 }
 
-function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts, bindingRefresh }: {
+function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts, bindingConsent }: {
   identity: TronClassIdentity;
   owner: string;
   recoveryDrafts: SchoolDraft[];
   setRecoveryDrafts: Dispatch<SetStateAction<SchoolDraft[]>>;
-  bindingRefresh: RefObject<BindingRefresh | null>;
+  bindingConsent: TronClassBindingConsent;
 }) {
   const client = useMemo(() => createTronClassClient(identity), [identity]);
   const agentClient = useMemo(() => createTronClassAgentClient(identity), [identity]);
@@ -195,9 +193,10 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts, 
     if (value.connected || !value.account) {
       setRecoveryDrafts((drafts) => studentKey ? drafts.filter((draft) => draft.studentKey === studentKey) : []);
     }
+    if (value.connected) bindingConsent.accept(owner, value.revision);
     setAwaitingBindingConsent(false);
     setConnection(value);
-  }, [setRecoveryDrafts]);
+  }, [bindingConsent, owner, setRecoveryDrafts]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -215,16 +214,11 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts, 
       (value) => {
         if (!current || request !== connectionRequest.current) return;
         setBusy(false);
-        const refresh = bindingRefresh.current;
-        const pause = value.connected && !!refresh &&
-          (refresh.bindingChanged || refresh.sourceRevision !== value.revision);
+        const pause = value.connected && !bindingConsent.permits(owner, value.revision);
         if (pause) {
           setAwaitingBindingConsent(true);
           setConnection(value);
-        } else {
-          if (value.connected) bindingRefresh.current = null;
-          acceptConnection(value);
-        }
+        } else acceptConnection(value);
         setEditing(!value.connected);
         setAccount(value.account ?? '');
         setError(pause ? 'TronClass 連接已變更。請確認目前的學校帳號，再繼續讀取課程。' :
@@ -241,7 +235,7 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts, 
     return () => {
       current = false;
     };
-  }, [client, epoch, acceptConnection, bindingRefresh]);
+  }, [client, epoch, acceptConnection, bindingConsent, owner]);
 
   function suspendDraft() {
     // Keep page-memory drafts sealed until the same school identity is verified.
@@ -268,11 +262,8 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts, 
     suspendDraft();
     setPassword('');
     setDisconnecting(false);
-    bindingRefresh.current = sourceRevision === undefined ? null : {
-      sourceRevision,
-      bindingChanged: bindingRefresh.current?.bindingChanged === true ||
-        (reason instanceof TronClassRequestError && reason.code === 'TRONCLASS_BINDING_CHANGED'),
-    };
+    if (reason instanceof TronClassRequestError && reason.code === 'TRONCLASS_BINDING_CHANGED')
+      bindingConsent.changed(owner, sourceRevision ?? null);
     if (reason instanceof TronClassRequestError && reason.code === 'TRONCLASS_RECONNECT_REQUIRED') {
       // The local binding TTL may still be valid after the school has rejected
       // its session. Keep the CAS revision, but retire every dependent view.
@@ -312,7 +303,6 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts, 
     try {
       const value = await client.connect(account.trim(), suppliedPassword, expectedRevision, controller.signal);
       if (!alive.current || controller.signal.aborted || request !== connectionRequest.current) return;
-      bindingRefresh.current = null;
       acceptConnection(value);
       setAccount(value.account ?? '');
       setEditing(!value.connected);
@@ -357,7 +347,7 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts, 
     try {
       const value = await client.disconnect(connection.revision);
       if (!alive.current) return;
-      bindingRefresh.current = null;
+      bindingConsent.accept(owner, value.revision);
       acceptConnection(value);
       setAccount('');
       setPassword('');
@@ -411,7 +401,6 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts, 
         )}
         {awaitingBindingConsent && connection?.connected && !editing && !disconnecting && (
           <button className="btn" onClick={() => {
-            bindingRefresh.current = null;
             acceptConnection(connection);
             setError('');
           }}>

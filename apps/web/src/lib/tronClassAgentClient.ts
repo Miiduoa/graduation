@@ -114,6 +114,7 @@ export function createTronClassAgentClient(identity: TronClassIdentity) {
         record(value) && text(value.error) ? value.error : 'REQUEST_FAILED',
         record(value) && text(value.message) ? value.message : '暫時無法完成 TronClass 操作，請稍後再試。',
         response.status,
+        record(value) && revision(value.revision) ? value.revision : undefined,
       );
     }
     return value;
@@ -134,8 +135,8 @@ export function createTronClassAgentClient(identity: TronClassIdentity) {
   }
 
   return {
-    async grant(signal?: AbortSignal): Promise<TronClassAgentGrant> {
-      return parseGrant(await responseValue(await request('/api/tronclass/agent-permissions', { action: 'status' }, signal)));
+    async grant(signal?: AbortSignal, sourceRevision?: string): Promise<TronClassAgentGrant> {
+      return parseGrant(await responseValue(await request('/api/tronclass/agent-permissions', { action: 'status', revision: sourceRevision }, signal)));
     },
     async setGrant(input: {
       revision: string; expectedVersion: string | null; permissions: TronClassAgentPermissions;

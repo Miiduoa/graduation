@@ -67,7 +67,7 @@ export type TronClassSubmissionFirestore = {
   runTransaction<T>(run: (tx: TronClassSubmissionTransaction) => Promise<T>): Promise<T>;
 };
 export type TronClassSubmissionBindings = {
-  requireBinding(ownerKey: string): Promise<TronClassSubmissionBinding>;
+  requireBinding(ownerKey: string, sourceRevision?: string): Promise<TronClassSubmissionBinding>;
   assertCurrent(ownerKey: string, revision: string, studentId?: number): Promise<void>;
 };
 
@@ -224,7 +224,7 @@ export function createTronClassSubmissionService({ db, bindings, source, readAva
   }
   async function bindingFor(ownerKey: string, revision?: string, snapshot?: TronClassSubmissionBinding) {
     if (!shortString(ownerKey, 300)) invalid();
-    const binding = snapshot ?? await bindings.requireBinding(ownerKey);
+    const binding = snapshot ?? await bindings.requireBinding(ownerKey, revision);
     if (!binding || binding.schoolId !== 'pu' || !positiveId(binding.userId) || !REVISION.test(binding.revision) ||
       canonicalInstant(binding.expiresAt) === null || canonicalInstant(binding.expiresAt)! <= now()) {
       fail(401, 'TRONCLASS_RECONNECT_REQUIRED');

@@ -199,7 +199,7 @@ export function createTronClassSubmissionAvailabilityReader({
     };
     let snapshot: TronClassSubmissionBinding | undefined;
     const current = async (): Promise<TronClassSubmissionBinding> => {
-      const binding = snapshot ?? suppliedBinding ?? await guarded(() => bindings.requireBinding(ownerKey));
+      const binding = snapshot ?? suppliedBinding ?? await guarded(() => bindings.requireBinding(ownerKey, expectedRevision));
       if (!binding || binding.revision !== expectedRevision) fail(409, 'TRONCLASS_BINDING_CHANGED');
       if (binding.schoolId !== 'pu' || !positiveId(binding.userId) ||
         typeof binding.expiresAt !== 'string' || !Number.isFinite(Date.parse(binding.expiresAt)) ||

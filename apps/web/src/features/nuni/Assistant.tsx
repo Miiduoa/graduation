@@ -321,7 +321,7 @@ function V2Conversation({
   const askRequest = useRef<AbortController | null>(null);
   const tronClassAskRequest = useRef<AbortController | null>(null);
   const tronClassAuthorityEpoch = useRef(0);
-  const tronClassObservedGrant = useRef<{ revision: string; version: string } | null>(null);
+  const tronClassObservedGrant = useRef<{ revision: string; version: string | null } | null>(null);
   const askStops = useRef(0);
   const [error, setError] = useState('');
   const [recoverableQuestion, setRecoverableQuestion] = useState('');
@@ -484,7 +484,6 @@ function V2Conversation({
   }
   function invalidateTronClassAuthority(currentRequest?: AbortController) {
     tronClassAuthorityEpoch.current += 1;
-    tronClassObservedGrant.current = null;
     if (tronClassAskRequest.current !== currentRequest) tronClassAskRequest.current?.abort();
     setTurns(previous => previous.map(item => item.tronClass
       ? { ...item, tronClass: { ...item.tronClass, inactive: true } } : item));
@@ -711,7 +710,9 @@ function V2Conversation({
     const scope = controller.current;
     const stops = askStops.current;
     const epoch = tronClassAuthorityEpoch.current;
-    let revision = await ask();
+    let revision = tronClassObservedGrant.current?.revision;
+    const firstRevision = await ask();
+    revision ??= firstRevision ?? tronClassObservedGrant.current?.revision;
     for (const clause of clauses) {
       // Stop after a user stop, a scope change or any change in TronClass authority
       // (disabled, disconnected or permission required is reported at most once).
@@ -881,7 +882,10 @@ function V2Conversation({
     try {
       if (tronClass) {
         try {
-          const result = await tronClassAgent.ask(tronClassSelection ?? { question: current }, pendingAsk.signal);
+          const sourceRevision = tronClassObservedGrant.current?.revision;
+          const result = await tronClassAgent.ask(tronClassSelection ?? {
+            question: current, ...(sourceRevision === undefined ? {} : { revision: sourceRevision }),
+          }, pendingAsk.signal);
           if (pendingAsk.signal.aborted || scopeSignal.aborted || tronClassEpoch !== tronClassAuthorityEpoch.current) return;
           const observed = tronClassObservedGrant.current;
           if (observed && (observed.revision !== result.revision || observed.version !== result.grantVersion))
@@ -896,6 +900,8 @@ function V2Conversation({
           if (tronClassEpoch !== tronClassAuthorityEpoch.current) return;
           if (pendingAsk.signal.aborted || scopeSignal.aborted || !(reason instanceof TronClassRequestError)) throw reason;
           if (isTronClassAuthorityError(reason)) invalidateTronClassAuthority(pendingAsk);
+          if (reason.sourceRevision && tronClassObservedGrant.current?.revision !== reason.sourceRevision)
+            tronClassObservedGrant.current = { revision: reason.sourceRevision, version: null };
           // The planner already answered the whole request, including any LMS handoff.
           if (compoundQuestion && reason.status === 503 && reason.code === 'TRONCLASS_DISABLED') return;
           if (!tronClassSelection && reason.status === 503 && reason.code === 'TRONCLASS_DISABLED') {
@@ -916,6 +922,7 @@ function V2Conversation({
           setTurns(previous => [...previous, { question: current,
             reply: { answer: reason.message, steps: [], cards: [], dataRead: true },
             tronClass: {
+              sourceRevision: tronClassSelection?.revision ?? reason.sourceRevision ?? tronClassObservedGrant.current?.revision,
               accessRequired: reason.code.includes('AGENT_PERMISSION'),
               unconnected: reason.status === 401 || /RECONNECT_REQUIRED|NOT_CONNECTED|BINDING_CHANGED/.test(reason.code),
               ...(compoundQuestion ? { compoundQuestion } : {}),
@@ -1489,6 +1496,10 @@ function V2Conversation({
         key={turn.tronClass.result?.requestId ?? turn.question} data={turn.tronClass} question={turn.question}
         client={tronClassAgent} owner={localScope.owner} pending={pending}
         onAuthorityChanged={() => invalidateTronClassAuthority()}
+        onGrantRead={(grant, acceptedCurrent) => {
+          if (acceptedCurrent || !tronClassObservedGrant.current)
+            tronClassObservedGrant.current = { revision: grant.revision, version: grant.version };
+        }}
         onAsk={input => void ask(undefined, input.question === turn.question && turn.tronClass?.compoundQuestion
           ? { ...input, compoundQuestion: turn.tronClass.compoundQuestion } : input)} /> : null}
       demoScope={{ context, accountId, schoolId }}

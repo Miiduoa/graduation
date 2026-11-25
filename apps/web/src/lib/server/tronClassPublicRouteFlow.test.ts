@@ -46,17 +46,21 @@ function environment(contractVerified = true) {
   const binding: TronClassSubmissionBinding = { schoolId: 'pu', userId: 303, account: 'synthetic-account', userName: null,
     revision: REVISION, expiresAt: new Date(NOW + 3_600_000).toISOString(),
     cookies: { session: 'synthetic-cookie', 'XSRF-TOKEN': 'synthetic-csrf' } };
-  rows.set(`_tronClassBindings/${createHash('sha256').update(OWNER).digest('hex')}`, {
+  const bindingPath = `_tronClassBindings/${createHash('sha256').update(OWNER).digest('hex')}`;
+  rows.set(bindingPath, {
     ownerKey: OWNER, schoolId: 'pu', userId: 303, revision: REVISION, state: 'connected',
     expiresAt: NOW + 3_600_000, updatedAt: NOW,
   });
   const bindings = {
-    requireBinding: async (owner: string) => {
+    requireBinding: vi.fn(async (owner: string, sourceRevision?: string) => {
       if (owner !== OWNER) throw new NuniError(401, 'TRONCLASS_NOT_CONNECTED');
+      if (sourceRevision !== undefined && sourceRevision !== binding.revision)
+        throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
       return structuredClone(binding);
-    },
+    }),
+    getStatus: async () => ({ schoolId: 'pu', connected: true, revision: binding.revision }),
     assertCurrent: async (owner: string, revision: string) => {
-      if (owner !== OWNER || revision !== REVISION) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+      if (owner !== OWNER || revision !== binding.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
     },
   };
   const assignment: TronClassAssignment = { ...SCOPE, studentId: 303, title: '合成作業', description: '合成說明',
@@ -102,19 +106,23 @@ function environment(contractVerified = true) {
     binaryComplete = true;
     return new Response(null, { status: 204 });
   });
+  const readonlyPrepare = vi.fn(async () => structuredClone(prepared));
+  const readHistory = vi.fn(async (owner: string) => {
+    expect(owner).toBe(OWNER);
+    return { list: !missingReadback && finalRow ? [structuredClone(finalRow)] : [] };
+  });
   const service = createTronClassPublicSubmissionService({
-    db, bindings, now: () => NOW, readonlyPrepare: async () => structuredClone(prepared),
+    db, bindings, now: () => NOW, readonlyPrepare,
     legacyReconcile: async () => { throw new Error('v2 must not use v1'); },
     enabled: () => enabled, contractVerified,
-    authorization: async owner => ({ binding: await bindings.requireBinding(owner), assignment: structuredClone(assignment),
+    authorization: async (owner, _scope, _signal, expected) => ({
+      binding: await bindings.requireBinding(owner, typeof expected === 'string' ? expected : expected?.revision),
+      assignment: structuredClone(assignment),
       mode: 'normal', historyComplete: true, priorSubmissionIds: finalRow ? [501] : [], userSubmitCount: finalRow ? 1 : 0,
       ordinaryWindowConfirmed: true, prerequisitesConfirmed: true }),
     resolveStorageTarget: async evidence => evidence.uploadId === TARGET.uploadId && evidence.url === TARGET.url && evidence.mode === TARGET.mode
       ? { ...TARGET } : null,
-    readHistory: async owner => {
-      expect(owner).toBe(OWNER);
-      return { list: !missingReadback && finalRow ? [structuredClone(finalRow)] : [] };
-    },
+    readHistory,
     fetchSchool, fetchStorage,
   });
   const authenticate = vi.fn(async () => ({ ownerKey: OWNER, provider: 'platform' }));
@@ -132,7 +140,14 @@ function environment(contractVerified = true) {
   const submit = () => post({ action: 'submit', ...SCOPE, revision: REVISION, operationId: OPERATION,
     content: '我的 <報告>\n合成附件', attachments: [FILE], confirmed: true });
   const upload = (request = uploadRequest()) => handleTronClassIntegration(request, dependencies);
-  return { post, upload, uploadRequest, submit, rows, fetchSchool, fetchStorage, finalPosts: () => finalPosts,
+  return { post, upload, uploadRequest, submit, rows, fetchSchool, fetchStorage, bindings, readonlyPrepare, readHistory,
+    replaceBinding: () => {
+      binding.revision = 'b'.repeat(32);
+      binding.userId = 404;
+      rows.set(bindingPath, { ...rows.get(bindingPath), revision: binding.revision, userId: binding.userId });
+      return binding.revision;
+    },
+    finalPosts: () => finalPosts,
     setMissingReadback: (value: boolean) => { missingReadback = value; }, disable: () => { enabled = false; } };
 }
 
@@ -141,6 +156,27 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe('public HTTP to durable v2 school workflow', () => {
   const cancelInput = { action: 'cancel-preparation', ...SCOPE, revision: REVISION, operationId: OPERATION };
+
+  it.each([
+    { action: 'prepare', ...SCOPE, revision: REVISION },
+    { action: 'reconcile', revision: REVISION, operationId: OPERATION },
+    { action: 'submit', ...SCOPE, revision: REVISION, operationId: OPERATION,
+      content: '合成答案', attachments: [], confirmed: true },
+    cancelInput,
+    null,
+  ])('blocks stale coursework operations before accessing the replacement session %#', async input => {
+    const s = environment();
+    const replacement = s.replaceBinding();
+    expect(await (await s.post({ action: 'status' })).json()).toMatchObject({ connected: true, revision: replacement });
+    const response = input ? await s.post(input) : await s.upload();
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: 'TRONCLASS_BINDING_CHANGED' });
+    if (input) expect(s.bindings.requireBinding).toHaveBeenCalledWith(OWNER, REVISION);
+    expect(s.readonlyPrepare).not.toHaveBeenCalled();
+    expect(s.readHistory).not.toHaveBeenCalled();
+    expect(s.fetchSchool).not.toHaveBeenCalled();
+    expect(s.fetchStorage).not.toHaveBeenCalled();
+  });
 
   it.each([
     { enabled: false, contractVerified: true, error: 'TRONCLASS_WRITES_DISABLED' },

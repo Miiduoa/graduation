@@ -30,11 +30,14 @@ export function handleTronClassAgentDownload(request: NextRequest, dependencies:
         await checkGrant(actor.ownerKey);
       } else {
         original = actor;
-        grant = await grants.require(actor.ownerKey, 'readCourseData');
-        const download = await grants.require(actor.ownerKey, 'downloadMaterials');
-        if (grant.version !== download.version || grant.revision !== download.revision) throw new NuniError(409, 'TRONCLASS_AGENT_PERMISSION_CHANGED');
       }
       return actor;
+    },
+    authorize: async (ownerKey, input) => {
+      grant = await grants.require(ownerKey, 'readCourseData', input.revision);
+      if (grant.revision !== input.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+      const download = await grants.require(ownerKey, 'downloadMaterials', input.revision);
+      if (grant.version !== download.version || grant.revision !== download.revision) throw new NuniError(409, 'TRONCLASS_AGENT_PERMISSION_CHANGED');
     },
     bindings: {
       requireBinding: bindings.requireBinding,

@@ -24,6 +24,7 @@ export class TronClassRequestError extends Error {
     readonly code: string,
     message: string,
     readonly status = 0,
+    readonly sourceRevision?: string,
   ) {
     super(message);
     this.name = 'TronClassRequestError';

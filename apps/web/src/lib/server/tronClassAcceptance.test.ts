@@ -244,7 +244,7 @@ describe('controlled first-text acceptance entry', () => {
     expect(plan.signature).toMatch(/^[a-f0-9]{64}$/);
     expect(f.authorize).toHaveBeenCalledExactlyOnceWith(OWNER, { courseId: 101, homeworkId: 202 },
       undefined, expect.objectContaining({ revision: REVISION, userId: 303 }));
-    expect(f.bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(OWNER);
+    expect(f.bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(OWNER, REVISION);
     expect(f.fetchSchool).not.toHaveBeenCalled();
     expect(f.readHistory).not.toHaveBeenCalled();
     expect(f.writes()).toBe(0);

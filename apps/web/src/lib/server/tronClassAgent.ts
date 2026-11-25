@@ -145,9 +145,12 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
   const now = dependencies.now ?? Date.now;
   const requestId = dependencies.requestId ?? randomUUID;
 
-  async function requireScopes(ownerKey: string, scope: TronClassAgentScope = 'readCourseData'): Promise<TronClassRequiredAgentGrant> {
-    const grant = await grants.require(ownerKey, 'readCourseData');
-    if (scope !== 'readCourseData') sameGrant(grant, await grants.require(ownerKey, scope));
+  async function requireScopes(ownerKey: string, scope: TronClassAgentScope, sourceRevision?: string): Promise<TronClassRequiredAgentGrant> {
+    const grant = sourceRevision === undefined
+      ? await grants.require(ownerKey, 'readCourseData')
+      : await grants.require(ownerKey, 'readCourseData', sourceRevision);
+    if (sourceRevision !== undefined && grant.revision !== sourceRevision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+    if (scope !== 'readCourseData') sameGrant(grant, await grants.require(ownerKey, scope, grant.revision));
     return grant;
   }
   async function assertScopes(ownerKey: string, grant: TronClassRequiredAgentGrant, scope: TronClassAgentScope): Promise<void> {
@@ -155,7 +158,7 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
     if (scope !== 'readCourseData') await grants.assertCurrent(ownerKey, grant, scope);
   }
   async function bindingForGrant(ownerKey: string, grant: TronClassRequiredAgentGrant) {
-    const binding = await bindings.requireBinding(ownerKey);
+    const binding = await bindings.requireBinding(ownerKey, grant.revision);
     if (binding.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
     return binding;
   }
@@ -179,11 +182,11 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
     async capability(ownerKey: string): Promise<TronClassAgentCapabilityResult> {
       const grant = await grants.get(ownerKey);
       await dependencies.beforeResult?.();
-      sameGrant(grant, await grants.get(ownerKey));
+      sameGrant(grant, await grants.get(ownerKey, grant.revision));
       return { source: 'tronclass', revision: grant.revision, grantVersion: grant.version, capabilities: tronClassAgentCapabilities(grant) };
     },
     async prepare(ownerKey: string, input: { courseId: number; homeworkId: number; revision: string }): Promise<TronClassPreparation> {
-      const grant = await requireScopes(ownerKey, 'prepareHomework');
+      const grant = await requireScopes(ownerKey, 'prepareHomework', input.revision);
       if (input.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
       const result = await prepareWithGrant(ownerKey, { courseId: input.courseId, homeworkId: input.homeworkId }, grant);
       await dependencies.beforeResult?.();
@@ -201,7 +204,7 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
       }
       const scope = query.intent === 'download' ? 'downloadMaterials' : query.intent === 'prepare' ? 'prepareHomework' : 'readCourseData';
-      const grant = await requireScopes(ownerKey, scope);
+      const grant = await requireScopes(ownerKey, scope, input.revision);
       if (input.revision !== undefined && input.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
       const capabilities = tronClassAgentCapabilities(grant);
       const steps: TronClassAgentStep[] = [];

@@ -123,7 +123,7 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
   };
   async function current(ownerKey: string, revision: string, studentId?: number, read?: TronClassPreparationRead, snapshot?: TronClassSubmissionBinding): Promise<TronClassSubmissionBinding> {
     read?.check();
-    const binding = snapshot ?? await bindings.requireBinding(ownerKey);
+    const binding = snapshot ?? await bindings.requireBinding(ownerKey, revision);
     read?.check();
     const at = now();
     if (!binding || binding.schoolId !== 'pu' || !positiveId(binding.userId) || binding.revision !== revision ||
@@ -176,7 +176,7 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
         ownerAndScope(ownerKey, input);
         if (Object.keys(input).some(key => !['courseId', 'homeworkId', 'revision'].includes(key))) invalid();
         const scope = Object.freeze({ courseId: input.courseId, homeworkId: input.homeworkId });
-        const session = await read.wait(async () => snapshot ?? bindings.requireBinding(ownerKey));
+        const session = await read.wait(async () => snapshot ?? bindings.requireBinding(ownerKey, input.revision));
         const binding = await read.wait(() => current(ownerKey, input.revision ?? session.revision, undefined, read, session));
         const pinned = { ...binding, cookies: { ...binding.cookies } };
         const base = structuredClone(await read.wait(() => readonlyPrepare(ownerKey, scope, read, pinned)));

@@ -57,6 +57,7 @@ export type V2Turn = {
   tronClass?: {
     result?: import('@/lib/tronClassAgentTypes').TronClassAgentReply;
     accessRequired?: boolean;
+    sourceRevision?: string;
     unconnected?: boolean;
     inactive?: boolean;
     /** A TronClass supplement appended after the planner answered a multi-clause

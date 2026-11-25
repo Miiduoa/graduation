@@ -47,10 +47,16 @@ export async function handleTronClassAgentPermissions(request: NextRequest, depe
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
     const input = value as Record<string, unknown>;
     const grants = dependencies.grants ?? createTronClassAgentGrantService();
-    const keys = input.action === 'status' ? ['action'] : ['action', 'revision', 'expectedVersion', 'permissions'];
+    const keys = input.action === 'status' ? ['action', 'revision'] : ['action', 'revision', 'expectedVersion', 'permissions'];
     if (Object.keys(input).some((key) => !keys.includes(key))) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
     let result;
-    if (input.action === 'status') result = await grants.get(actor.ownerKey);
+    if (input.action === 'status') {
+      const revision = input.revision;
+      if (revision !== undefined && (typeof revision !== 'string' || !/^[a-f0-9]{32}$/.test(revision))) {
+        throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+      }
+      result = revision === undefined ? await grants.get(actor.ownerKey) : await grants.get(actor.ownerKey, revision);
+    }
     else if (input.action === 'set') result = await grants.set(actor.ownerKey, {
       revision: input.revision as string, expectedVersion: input.expectedVersion as string | null,
       permissions: input.permissions as TronClassAgentPermissions,

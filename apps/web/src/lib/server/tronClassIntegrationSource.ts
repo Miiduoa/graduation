@@ -326,7 +326,7 @@ function createTronClassCourseOperation(dependencies: TronClassReaderDependencie
     const operation = async (): Promise<T> => {
       try {
         active();
-        const binding = authorization?.binding ?? await bindings.requireBinding(ownerKey);
+        const binding = authorization?.binding ?? await bindings.requireBinding(ownerKey, revision);
         if (revision !== undefined && binding.revision !== revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
         const check = () => checkBinding(binding.revision);
         await check();

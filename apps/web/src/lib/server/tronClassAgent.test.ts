@@ -93,7 +93,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
   it('reads this actor’s pending homework and preserves unknown states', async () => {
     const f = fixture();
     const result = await f.service.ask(owner, { question: '查 TronClass 未繳作業有哪些', courseId: 101, revision });
-    expect(f.grants.require).toHaveBeenCalledWith(owner, 'readCourseData');
+    expect(f.grants.require).toHaveBeenCalledWith(owner, 'readCourseData', revision);
     expect(f.read.mock.calls).toEqual([
       [owner, { courseId: 101, include: { homework: true, announcements: false, materials: false } }],
     ]);

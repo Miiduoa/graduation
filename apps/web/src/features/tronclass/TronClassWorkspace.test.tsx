@@ -1517,7 +1517,7 @@ it('refreshes added and removed course options from a newer sync and rejects a l
 });
 
 it.each([
-  'initial courses', 'retry courses', 'initial sync', 'retry sync', 'course sync', 'agent permissions', 'session refresh',
+  'initial courses', 'retry courses', 'initial sync', 'retry sync', 'course sync', 'prepare', 'final prepare', 'agent permissions', 'session refresh', 'context change', 'refresh before detection',
 ])('waits for the student before reading a replacement binding after %s', async (stage) => {
   const nextRevision = 'b'.repeat(32);
   const replacement = { ...connection, revision: nextRevision, account: 'student-b', userName: '新帳號' };
@@ -1525,6 +1525,7 @@ it.each([
     homework: [{ ...homework, title: '新帳號的私人作業' }] };
   const schoolReads = vi.fn();
   const agentReads = vi.fn();
+  const preparationReads = vi.fn();
   let rebound = false;
   let replacementStatuses = 0;
   fetchMock.mockImplementation((url, init) => {
@@ -1539,15 +1540,20 @@ it.each([
         rebound = true;
         return bindingChanged();
       }
+      if (input.revision !== (rebound ? nextRevision : revision)) return bindingChanged();
       if (rebound) {
         agentReads(nextRevision);
         return Promise.resolve(json({ revision: nextRevision, version: 'c'.repeat(32),
           permissions: { readCourseData: true, downloadMaterials: true, prepareHomework: true }, updatedAt: null }));
       }
     }
+    if (input.action === 'prepare') {
+      if (input.revision !== (rebound ? nextRevision : revision)) return bindingChanged();
+      preparationReads(input.revision);
+    }
     if (input.action === 'courses' || input.action === 'sync') {
       if ((stage === 'initial courses' && input.action === 'courses') ||
-          ((stage === 'initial sync' || stage === 'session refresh') && input.action === 'sync')) rebound = true;
+          (stage === 'initial sync' && input.action === 'sync')) rebound = true;
       if (input.revision !== (rebound ? nextRevision : revision)) return bindingChanged();
       schoolReads(input.revision);
       if (rebound) return Promise.resolve(json(input.action === 'courses' ? courseIndex(replacementSnapshot) : replacementSnapshot));
@@ -1567,17 +1573,40 @@ it.each([
     else fireEvent.change(screen.getByLabelText('課程'), { target: { value: '12' } });
   }
 
-  await screen.findByRole('button', { name: '繼續讀取目前帳號的課程' });
-  if (stage === 'session refresh') {
+  if (stage === 'prepare' || stage === 'final prepare') {
+    await screen.findByRole('heading', { name: homework.title });
+    if (stage === 'prepare') rebound = true;
+    fireEvent.click(screen.getByRole('button', { name: '準備作業' }));
+    if (stage === 'final prepare') {
+      const preview = await screen.findByRole('button', { name: '預覽繳交內容' });
+      await waitFor(() => expect((preview as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.change(screen.getByLabelText('作業內容'), { target: { value: '合成答案' } });
+      fireEvent.click(preview);
+      fireEvent.click(screen.getByLabelText('我已確認課程、作業內容與附件正確'));
+      rebound = true;
+      fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
+    }
+  }
+  if (stage === 'context change' || stage === 'session refresh' || stage === 'refresh before detection') {
+    await screen.findByRole('heading', { name: homework.title });
+    if (stage !== 'refresh before detection') {
+      // Detect the replacement before the platform issues a new context.
+      rebound = true;
+      fireEvent.click(screen.getByRole('button', { name: '同步最新資料' }));
+      await screen.findByRole('button', { name: '繼續讀取目前帳號的課程' });
+    }
+    rebound = true;
     state.platform.loading = true;
     view.rerender(<TronClassWorkspace />);
     expect(screen.queryByRole('button', { name: '繼續讀取目前帳號的課程' })).toBeNull();
     const beforeRefresh = replacementStatuses;
     state.platform.loading = false;
+    if (stage === 'context change') state.platform.session!.context = 'c'.repeat(43);
     view.rerender(<TronClassWorkspace />);
     await screen.findByRole('button', { name: '繼續讀取目前帳號的課程' });
     expect(replacementStatuses).toBeGreaterThan(beforeRefresh);
   }
+  await screen.findByRole('button', { name: '繼續讀取目前帳號的課程' });
   expect(screen.getByText(/student-b/)).toBeTruthy();
   expect(screen.queryByRole('heading', { name: homework.title })).toBeNull();
   expect(screen.queryByRole('heading', { name: 'TronClass 助理權限' })).toBeNull();
@@ -1589,6 +1618,8 @@ it.each([
   if (stage === 'course sync') expect(body(calls('sync').at(-1)?.[1]).courseId).toBe(12);
   expect(schoolReads).not.toHaveBeenCalledWith(nextRevision);
   expect(agentReads).not.toHaveBeenCalled();
+  expect(preparationReads).not.toHaveBeenCalledWith(nextRevision);
+  expect(calls('submit')).toHaveLength(0);
 
   fireEvent.click(screen.getByRole('button', { name: '繼續讀取目前帳號的課程' }));
   await screen.findByRole('heading', { name: '新帳號的私人作業' });

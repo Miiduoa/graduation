@@ -44,7 +44,7 @@ export function createTronClassOperationReconciler({
       typeof input.revision !== 'string' || !revisionPattern.test(input.revision)) fail(400, 'TRONCLASS_INVALID_INPUT');
     const expected = Object.freeze({ operationId: input.operationId, revision: input.revision });
     const unknown = (): TronClassSubmissionResult => ({ status: 'unknown', operationId: expected.operationId, receipt: null });
-    const session = await bindings.requireBinding(ownerKey);
+    const session = await bindings.requireBinding(ownerKey, expected.revision);
     const binding = { ...session, cookies: { ...session.cookies } };
     const current = async () => {
       const at = now();

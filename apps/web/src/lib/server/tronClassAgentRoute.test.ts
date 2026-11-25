@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import type { TronClassRequiredAgentGrant } from '@campus/shared/src/tronClassAgentPermissions';
 import type { TronClassSnapshotReadOptions } from './tronClassIntegrationSource';
+import { TronClassAgentPermissionRequired } from './tronClassAgentGrants';
 import { handleTronClassAgent, type TronClassAgentRouteDependencies } from './tronClassAgentRoute';
 
 const revision = 'a'.repeat(32);
@@ -111,6 +112,20 @@ it('shows grant denial as a permission error instead of fetching school data', a
   const response = await f.request({ action: 'ask', question: '查 TronClass 作業' });
   expect(response.status).toBe(403);
   expect(await response.json()).toMatchObject({ error: 'TRONCLASS_AGENT_PERMISSION_REQUIRED', message: expect.stringContaining('權限') });
+  expect(f.read).not.toHaveBeenCalled();
+});
+
+it.each([true, false])('pins a permission denial only while the same actor is verified (%s)', async sameActor => {
+  const f = fixture();
+  f.grants.require.mockRejectedValue(new TronClassAgentPermissionRequired(revision));
+  if (!sameActor) f.authenticate.mockResolvedValueOnce(actor).mockResolvedValueOnce({ ...actor, ownerKey: 'firebase:other' });
+  const response = await f.request({ action: 'ask', question: '查 TronClass 作業' });
+  const body = await response.json();
+  if (sameActor) expect(body).toMatchObject({ error: 'TRONCLASS_AGENT_PERMISSION_REQUIRED', revision });
+  else {
+    expect(body).toMatchObject({ error: 'SESSION_CHANGED' });
+    expect(body).not.toHaveProperty('revision');
+  }
   expect(f.read).not.toHaveBeenCalled();
 });
 

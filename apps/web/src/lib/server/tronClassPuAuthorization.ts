@@ -150,7 +150,7 @@ export function createTronClassPuAuthorizationReader({
     const suppliedBinding = typeof expected === 'object' ? expected : undefined;
     let snapshot: TronClassSubmissionBinding | undefined;
     const current = async (): Promise<TronClassSubmissionBinding> => {
-      const binding = snapshot ?? suppliedBinding ?? await guarded(() => bindings.requireBinding(ownerKey));
+      const binding = snapshot ?? suppliedBinding ?? await guarded(() => bindings.requireBinding(ownerKey, typeof expected === 'string' ? expected : undefined));
       if (typeof expected === 'string' && binding?.revision !== expected) fail(409, 'TRONCLASS_BINDING_CHANGED');
       if (!binding || binding.schoolId !== 'pu' || !positiveId(binding.userId) ||
         typeof binding.revision !== 'string' || !/^[a-f0-9]{32}$/.test(binding.revision) ||

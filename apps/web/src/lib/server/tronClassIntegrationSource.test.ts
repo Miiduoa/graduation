@@ -78,7 +78,7 @@ describe('independent TronClass source', () => {
       });
       await expect(service.ask(owner, { question: '查玩課雲『資料庫管理』公告', ...selection }))
         .rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
-      expect(bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(owner);
+      expect(bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(owner, binding.revision);
       expect(source.fetchCourses).toHaveBeenCalledTimes(expectedCalls);
       for (const [cookies] of vi.mocked(source.fetchCourses).mock.calls) expect(cookies).toBe(binding.cookies);
       expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
@@ -92,7 +92,7 @@ describe('independent TronClass source', () => {
       await expect(service.ask(owner, { question: '查玩課雲公告', courseId: course.id, revision: binding.revision })).resolves.toMatchObject({
         intent: 'announcements', selection: null, revision: binding.revision,
       });
-      expect(bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(owner);
+      expect(bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(owner, binding.revision);
       expect(source.fetchCourseAnnouncements).toHaveBeenCalledExactlyOnceWith(binding.cookies, course.id, expect.anything());
     });
   });
@@ -186,7 +186,7 @@ describe('independent TronClass source', () => {
   it('uses the verified binding without a school portal and never exposes its cookies', async () => {
     const { reader, bindings, source } = setup();
     const result = await reader('platform:pa_fixture');
-    expect(bindings.requireBinding).toHaveBeenCalledWith('platform:pa_fixture');
+    expect(bindings.requireBinding).toHaveBeenCalledWith('platform:pa_fixture', undefined);
     expect(source.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 12, status: 'ongoing' },
       { signal: expect.any(AbortSignal), timeoutMs: expect.any(Number) });
     expect(result).toMatchObject({ revision: binding.revision, partial: false, homework: [{ id: 201, submitted: false, description: '請上傳報告' }] });

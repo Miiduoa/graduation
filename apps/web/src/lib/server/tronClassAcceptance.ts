@@ -284,7 +284,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
   };
   const current = async (scope: Identity, allowReconnect = false, signal?: AbortSignal, snapshot?: TronClassSubmissionBinding) => {
     checkSignal(signal);
-    const binding = snapshot ?? await bindings.requireBinding(scope.ownerKey);
+    const binding = snapshot ?? await bindings.requireBinding(scope.ownerKey, allowReconnect ? undefined : scope.revision);
     checkSignal(signal);
     if (
       !binding ||

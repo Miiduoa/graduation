@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { NuniError } from '@campus/shared/src/nuni';
 import { boundedJson } from '../nuni/server';
 import { createTronClassAgentService, type TronClassAgentDependencies } from './tronClassAgent';
+import { TronClassAgentPermissionRequired } from './tronClassAgentGrants';
 import { authenticateTronClassActor } from './tronClassIntegrationAuth';
 import { createUidRateLimiter } from './uidRateLimit';
 
@@ -49,6 +50,7 @@ function revision(value: unknown): string {
 }
 
 export async function handleTronClassAgent(request: NextRequest, dependencies: TronClassAgentRouteDependencies = {}): Promise<Response> {
+  let verifyActor: (() => Promise<void>) | undefined;
   try {
     if (process.env.TRONCLASS_INTEGRATION_ENABLED !== 'true') throw new NuniError(503, 'TRONCLASS_DISABLED');
     if (request.method !== 'POST') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
@@ -61,11 +63,12 @@ export async function handleTronClassAgent(request: NextRequest, dependencies: T
     const body = await boundedJson(request, 8 * 1024);
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
     const input = body as Record<string, unknown>;
-    const service = createTronClassAgentService({ ...dependencies, beforeResult: async () => {
+    verifyActor = async () => {
       const current = await authenticate(request);
       if (current.ownerKey !== actor.ownerKey || current.provider !== actor.provider) throw new NuniError(409, 'SESSION_CHANGED');
       if (request.signal.aborted) throw new NuniError(503, 'TRONCLASS_READ_TIMEOUT');
-    } });
+    };
+    const service = createTronClassAgentService({ ...dependencies, beforeResult: verifyActor });
     let result: unknown;
     switch (input.action) {
       case 'capability':
@@ -95,11 +98,20 @@ export async function handleTronClassAgent(request: NextRequest, dependencies: T
     }
     return response(200, result);
   } catch (error) {
+    let sourceRevision: string | undefined;
+    if (error instanceof TronClassAgentPermissionRequired && verifyActor) {
+      try {
+        await verifyActor();
+        sourceRevision = error.revision;
+      } catch (reason) {
+        error = reason;
+      }
+    }
     const limited = error && typeof error === 'object' && 'code' in error && error.code === 'resource-exhausted';
     const status = error instanceof NuniError ? error.status : limited ? 429 : 503;
     const candidate = error instanceof NuniError ? error.code : limited ? 'TRONCLASS_RATE_LIMITED' : 'TRONCLASS_AGENT_UNAVAILABLE';
     const code = /^[A-Z][A-Z0-9_]{0,99}$/.test(candidate) ? candidate : 'TRONCLASS_AGENT_UNAVAILABLE';
-    return response(status, { error: code, message: MESSAGES[code] ?? (status === 429 ? 'Agent 查詢過於頻繁，請稍後再試。'
+    return response(status, { error: code, ...(sourceRevision === undefined ? {} : { revision: sourceRevision }), message: MESSAGES[code] ?? (status === 429 ? 'Agent 查詢過於頻繁，請稍後再試。'
       : status === 401 ? '登入已到期，請重新登入或連接 TronClass。' : '目前無法完成這項 TronClass 請求，請稍後再試。') });
   }
 }

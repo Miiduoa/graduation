@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import type { TronClassAgentGrant } from '@campus/shared/src/tronClassAgentPermissions';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isTronClassAuthorityError, type TronClassAgentClient, type TronClassAgentQuestion } from '@/lib/tronClassAgentClient';
 import type { TronClassAgentAction } from '@/lib/tronClassAgentTypes';
@@ -15,7 +16,7 @@ const noAgentWrite = async (): Promise<never> => {
   throw new TronClassRequestError('TRONCLASS_AGENT_WRITE_UNAVAILABLE', '助理目前可準備與預覽作業，正式繳交尚未開放。');
 };
 
-export function AssistantTronClassResult({ data, question, client, owner, pending, onAsk, onAuthorityChanged }: {
+export function AssistantTronClassResult({ data, question, client, owner, pending, onAsk, onGrantRead, onAuthorityChanged }: {
   data: NonNullable<V2Turn['tronClass']>;
   question: string;
   client: TronClassAgentClient;
@@ -23,14 +24,18 @@ export function AssistantTronClassResult({ data, question, client, owner, pendin
   pending: boolean;
   onAsk: (input: TronClassAgentQuestion) => void;
   onAuthorityChanged: () => void;
+  onGrantRead: (grant: TronClassAgentGrant, acceptedCurrent: boolean) => void;
 }) {
   const result = data.result;
-  const [showAccess, setShowAccess] = useState(!!data.accessRequired);
+  const [access, setAccess] = useState<'source' | 'current' | null>(data.accessRequired ? 'source' : null);
   const [selected, setSelected] = useState(() => result?.preparation
     ? result.snapshot?.homework.find(item => item.courseId === result.preparation!.courseId && item.id === result.preparation!.homeworkId) ?? null
     : null);
   const [changed, setChanged] = useState(false);
   const inactive = changed || !!data.inactive;
+  const showAccess = access !== null;
+  const sourceRevision = result?.revision ?? data.sourceRevision;
+  const retryRevision = inactive || data.unconnected ? undefined : sourceRevision;
   const authorityChanged = useRef(onAuthorityChanged);
   useEffect(() => { authorityChanged.current = onAuthorityChanged; }, [onAuthorityChanged]);
   const invalidate = useCallback(() => {
@@ -129,13 +134,13 @@ export function AssistantTronClassResult({ data, question, client, owner, pendin
     </>}
     {inactive && <p role="status" className={styles.notice}>連接或權限已更新，請重新查詢以使用目前的設定。</p>}
     <div className={styles.actions}>
-      <button className="btn" disabled={pending} onClick={() => onAsk({ question })}>重新查詢 TronClass</button>
-      <button className={styles.textButton} onClick={() => setShowAccess(value => !value)}>{showAccess ? '收起助理權限' : '管理 TronClass 助理權限'}</button>
+      <button className="btn" disabled={pending} onClick={() => onAsk({ question, ...(retryRevision ? { revision: retryRevision } : {}) })}>重新查詢 TronClass</button>
+      <button className={styles.textButton} onClick={() => setAccess(showAccess ? null : inactive ? 'current' : 'source')}>{showAccess ? '收起助理權限' : '管理 TronClass 助理權限'}</button>
       <Link href="/tronclass" className={styles.textButton}>TronClass 課程空間</Link>
     </div>
-    {showAccess && <TronClassAgentAccess client={client} compact revision={inactive ? undefined : result?.revision}
-      expectedVersion={inactive ? undefined : result?.grantVersion}
-      onSaved={invalidate} onConnectionChanged={invalidate} />}
+    {showAccess && <TronClassAgentAccess client={client} compact revision={access === 'source' ? sourceRevision : undefined}
+      expectedVersion={access === 'source' ? result?.grantVersion : undefined}
+      onRead={grant => onGrantRead(grant, access === 'current')} onSaved={invalidate} onConnectionChanged={invalidate} />}
   </div>;
 }
 

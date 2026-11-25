@@ -201,7 +201,7 @@ export function createTronClassControlledJournal({ db, bindings, now = Date.now 
     run: (tx: TronClassSubmissionTransaction, binding: BindingIdentity, at: number) => Promise<T>): Promise<T> {
     owner(ownerKey);
     try {
-      const raw = await bindings.requireBinding(ownerKey);
+      const raw = await bindings.requireBinding(ownerKey, expectedRevision);
       const binding: BindingIdentity = { schoolId: raw?.schoolId, revision: raw?.revision,
         userId: raw?.userId, expiresAt: Date.parse(raw?.expiresAt) };
       const at = timestamp(now);

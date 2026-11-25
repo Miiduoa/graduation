@@ -394,9 +394,11 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
     return publicStatus(tombstone, now());
   };
 
-  const requireBinding = async (ownerKey: string): Promise<TronClassBoundSession> => {
+  const requireBinding = async (ownerKey: string, sourceRevision?: string): Promise<TronClassBoundSession> => {
+    if (sourceRevision !== undefined) checkedRevision(sourceRevision);
     const row = await read(ownerKey);
     if (row?.state !== 'connected' || !(row.expiresAt! > now())) reconnect();
+    if (sourceRevision !== undefined && row.revision !== sourceRevision) changed();
     return { schoolId: 'pu', revision: row.revision, account: row.account!, userId: row.userId!,
       userName: row.userName ?? null, cookies: unseal(row), expiresAt: new Date(row.expiresAt!).toISOString() };
   };

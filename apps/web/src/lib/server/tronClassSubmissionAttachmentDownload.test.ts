@@ -65,7 +65,7 @@ describe('own historical submission attachment download', () => {
       expect(calls[0]).toBeLessThan(binaryOrder);
       expect(calls.at(-1)).toBeGreaterThan(binaryOrder);
     }
-    expect(f.bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(owner);
+    expect(f.bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(owner, input.revision);
     expect(f.bindings.assertCurrent).toHaveBeenLastCalledWith(owner, input.revision);
   });
 
