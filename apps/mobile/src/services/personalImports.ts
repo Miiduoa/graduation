@@ -55,7 +55,6 @@ function isStorageRowTooLarge(error: unknown): boolean {
 async function readLedgerSnapshot(
   key: string,
   scope: PersonalImportScope,
-  mode: 'read' | 'write',
 ) {
   const web = Platform.OS === 'web';
   const nativeJournal = web ? undefined : readPersonalImportRollback(key);
@@ -70,7 +69,7 @@ async function readLedgerSnapshot(
     }
   }
   const browserRecovery = web
-    ? capturePersonalImportBrowserRecovery(window.localStorage, key, mode)
+    ? capturePersonalImportBrowserRecovery(window.localStorage, key)
     : undefined;
   const primaryVerified = isReadableLedger(primary, scope);
   const recovery: (Recovery & { ledger: PersonalImportLedger }) | null = browserRecovery
@@ -160,15 +159,22 @@ async function retireNativeCheckpoint(
   adopted: string | undefined,
   assertWritable: () => void,
 ) {
-  if (adopted === undefined) return;
+  if (adopted === undefined) return true;
   const checkpoint = personalImportCheckpointKey(key);
-  const current = await AsyncStorage.getItem(checkpoint);
-  if (current === null) return;
+  let current: string | null;
+  try {
+    current = await AsyncStorage.getItem(checkpoint);
+  } catch {
+    return false;
+  }
+  if (current === null) return true;
   if (current !== adopted) throw new Error('匯入資料已更新，請重新載入。');
   assertWritable();
-  await AsyncStorage.multiRemove([checkpoint]);
-  if (await AsyncStorage.getItem(checkpoint) !== null) {
-    throw new Error('無法確認匯入資料的檢查點已清除，請稍後再試。');
+  try {
+    await AsyncStorage.multiRemove([checkpoint]);
+    return await AsyncStorage.getItem(checkpoint) === null;
+  } catch {
+    return false;
   }
 }
 
@@ -191,7 +197,7 @@ async function restoreLedger(
   pendingRestorations.delete(key);
   if (keepJournal) return;
   try {
-    await retireNativeCheckpoint(key, checkpoint, assertWritable);
+    if (!await retireNativeCheckpoint(key, checkpoint, assertWritable)) return;
     assertWritable();
   } catch {
     // The original bytes are restored. Keep restart recovery until a verified write.
@@ -267,7 +273,7 @@ export async function loadPersonalImports(
       continue;
     }
     const sequence = writeSequence;
-    const { primary, recovery } = await readLedgerSnapshot(key, scope, 'read');
+    const { primary, recovery } = await readLedgerSnapshot(key, scope);
     if (Platform.OS === 'web' && primary !== await AsyncStorage.getItem(key)) continue;
     if (sequence !== writeSequence) continue;
     return recovery?.ledger ?? parseLedger(primary, scope);
@@ -314,7 +320,7 @@ export function mutatePersonalImportLedger<T>(
         assertLockHeld();
       };
       assertWritable();
-      const { primary, primaryVerified, browserRecovery, recovery } = await readLedgerSnapshot(key, scope, 'write');
+      const { primary, primaryVerified, browserRecovery, recovery } = await readLedgerSnapshot(key, scope);
       let primaryRaw = primary;
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
@@ -368,6 +374,8 @@ export function mutatePersonalImportLedger<T>(
               // checkpoint cleanup and final permission check have finished.
               if (adoptedCheckpoint !== undefined) {
                 cleaningAdoptedCheckpoint = true;
+                // Cleanup I/O is best effort after readback. Permission checks
+                // still run before removing the copy and after awaiting cleanup.
                 await retireNativeCheckpoint(key, adoptedCheckpoint, assertWritable);
                 assertWritable();
               }

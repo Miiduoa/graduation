@@ -322,7 +322,7 @@ export function commitWebPersonalImports(
       if (!isQuotaExceeded(error)) throw error;
       // Keep the marker and version in the same entry at the original byte count.
       return replace(
-        recoveryCopies.hasCopies ? serializePersonalImportBrowserCommit(JSON.parse(attempted)) : attempted,
+        recoveryCopies.mayHaveCopies ? serializePersonalImportBrowserCommit(JSON.parse(attempted)) : attempted,
         ownsStage,
       );
     }

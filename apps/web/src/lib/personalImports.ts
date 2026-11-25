@@ -32,10 +32,10 @@ export function personalImportsStorageKey(scope: PersonalImportScope) {
   return `campus.personal-imports.v1:${encodeURIComponent(scope.owner)}:${encodeURIComponent(scope.schoolId)}`;
 }
 
-function readPersonalImportLedger(scope: PersonalImportScope, mode: 'read' | 'write') {
+function readPersonalImportLedger(scope: PersonalImportScope) {
   const key = personalImportsStorageKey(scope);
   let primary = localStorage.getItem(key);
-  const recovery = capturePersonalImportBrowserRecovery(localStorage, key, mode);
+  const recovery = capturePersonalImportBrowserRecovery(localStorage, key);
   let primaryRecordsReadable = false;
   if (primary !== null) {
     try {
@@ -52,7 +52,7 @@ function readPersonalImportLedger(scope: PersonalImportScope, mode: 'read' | 'wr
   });
   const raw = adopted ? adopted.raw : primary;
   let firstWrite = true;
-  const shouldMarkCommit = recovery.hasCopies &&
+  const shouldMarkCommit = recovery.mayHaveCopies &&
     (hasWebPersonalImportCommit(primary) || recovery.checkpoint === null || adopted !== null);
   const assertSnapshot = () => recovery.assertSnapshot(
     primary,
@@ -129,11 +129,11 @@ function parseLedgerSyncState(scope: PersonalImportScope, raw: string | null): P
 }
 
 export function readPersonalImports(scope: PersonalImportScope): PersonalImportRecord[] {
-  return readPersonalImportLedger(scope, 'read').records();
+  return readPersonalImportLedger(scope).records();
 }
 
 export function readPersonalImportSyncState(scope: PersonalImportScope): PersonalImportSyncState {
-  return readPersonalImportLedger(scope, 'read').sync();
+  return readPersonalImportLedger(scope).sync();
 }
 
 export async function withPersonalImportSyncLock<T>(
@@ -148,7 +148,7 @@ export async function withPersonalImportSyncLock<T>(
   if (!navigator.locks) throw new Error('目前瀏覽器無法安全同步，請使用最新版瀏覽器。');
   return navigator.locks.request(personalImportsStorageKey(scope), async () => {
     if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
-    const ledger = readPersonalImportLedger(scope, 'write');
+    const ledger = readPersonalImportLedger(scope);
     let persisted: PersonalImportLocalState = {
       records: ledger.records(),
       sync: ledger.sync(),
@@ -180,7 +180,7 @@ async function mutate<T>(
     throw new Error('目前瀏覽器無法安全儲存。請用最新版瀏覽器開啟 HTTPS 網站後重試；草稿還在。');
   return navigator.locks.request(personalImportsStorageKey(scope), () => {
     if (!active()) throw new Error('帳號或校園已切換，請重新開啟匯入。');
-    const ledger = readPersonalImportLedger(scope, 'write');
+    const ledger = readPersonalImportLedger(scope);
     const { rows, result } = action(ledger.records());
     if (rows.length > PERSONAL_IMPORT_LIMIT)
       throw new Error('這台裝置已存滿 2,000 筆，請先匯出備份並移除不再需要的紀錄。');

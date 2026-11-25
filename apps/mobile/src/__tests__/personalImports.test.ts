@@ -279,11 +279,11 @@ test.each([false, true])('native checkpoint cleanup keeps restart recovery until
   }
 });
 
-test.each(['read', 'remove'] as const)('native retains restart recovery when adopted checkpoint cleanup fails during %s', async (failure) => {
+test.each(['read', 'remove'] as const)('native preserves and publishes a verified commit when checkpoint cleanup fails during %s', async (failure) => {
   const scope = { owner: `nuni:checkpoint-cleanup-${failure}`, schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
   const checkpoint = key + ':checkpoint';
-  const { ledger } = await appendPersonalImports(scope, [row('a', '原有行程')]);
+  await appendPersonalImports(scope, [row('a', '原有行程')]);
   const original = (await AsyncStorage.getItem(key))!;
   await AsyncStorage.setItem(checkpoint, original);
   await AsyncStorage.removeItem(key);
@@ -304,23 +304,16 @@ test.each(['read', 'remove'] as const)('native retains restart recovery when ado
   const unsubscribe = subscribePersonalImports(listener);
   const append = () => appendPersonalImports(scope, [row('b', '新增行程')], { canContinue: () => true });
   try {
-    await expect(append()).rejects.toBe(ioError);
-    expect(listener).not.toHaveBeenCalled();
-    expect(await AsyncStorage.getItem(key)).toBe(original);
+    const { ledger } = await append();
+    expect(ledger.records.map(({ title }) => title)).toEqual(['原有行程', '新增行程']);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(await AsyncStorage.getItem(key)).toBe(JSON.stringify(ledger));
     expect(await AsyncStorage.getItem(checkpoint)).toBe(original);
-    expect(readPersonalImportRollback(key)).toBe(original);
-    await AsyncStorage.removeItem(key);
-    await AsyncStorage.removeItem(checkpoint);
+    expect(readPersonalImportRollback(key)).toBeUndefined();
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
     });
-
-    await AsyncStorage.setItem(checkpoint, original);
-    await expect(append()).resolves.toMatchObject({ added: 1 });
-    expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
-    expect(readPersonalImportRollback(key)).toBeUndefined();
-    expect(listener).toHaveBeenCalledTimes(1);
   } finally {
     get.mockImplementation(nativeGet);
     unsubscribe();
@@ -416,7 +409,7 @@ test.each([
   ['Web', 'journal'],
   ['Expo Web', 'checkpoint'],
   ['Expo Web', 'journal'],
-] as const)('%s rereads the published ledger while the %s is still unreadable', async (client, source) => {
+] as const)('%s rereads and saves again while the %s is still unreadable', async (client, source) => {
   const cleanup = useWebStorage();
   const restoreLocks = withoutWebWriteLocks();
   Object.defineProperty(navigator, 'locks', {
@@ -463,6 +456,10 @@ test.each([
       expect(reread).toHaveBeenCalledTimes(1);
       const records = await reread.mock.results[0].value;
       expect(records.map(({ title }) => title)).toEqual(['微積分', '統計']);
+      await expect(append(scope, [row('later', '物理')])).resolves.toMatchObject({ added: 1 });
+      expect(reread).toHaveBeenCalledTimes(2);
+      const updated = await reread.mock.results[1].value;
+      expect(updated.map(({ title }) => title)).toEqual(['微積分', '統計', '物理']);
       expect(getItem.call(storage, recoveryKey)).toBe(recoveryCopy);
     } finally {
       read.mockRestore();

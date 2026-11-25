@@ -40,7 +40,6 @@ export function unwrapPersonalImportCheckpoint(encoded: string): unknown {
 export function capturePersonalImportBrowserRecovery(
   storage: Storage,
   key: string,
-  mode: 'read' | 'write',
 ) {
   const entries = {
     journal: personalImportWebJournalKey(key),
@@ -51,7 +50,6 @@ export function capturePersonalImportBrowserRecovery(
     try {
       return storage.getItem(entry);
     } catch (error) {
-      if (mode === 'write') throw error;
       readErrors.push(error);
       return null;
     }
@@ -64,7 +62,7 @@ export function capturePersonalImportBrowserRecovery(
   return {
     ...copies,
     readErrors,
-    hasCopies: copies.journal !== null || copies.checkpoint !== null,
+    mayHaveCopies: readErrors.length > 0 || copies.journal !== null || copies.checkpoint !== null,
     assertSnapshot(primary: string | null, checkCheckpoint: boolean, checkJournal = false) {
       if (storage.getItem(key) !== primary ||
           (checkCheckpoint && storage.getItem(entries.checkpoint) !== copies.checkpoint) ||
