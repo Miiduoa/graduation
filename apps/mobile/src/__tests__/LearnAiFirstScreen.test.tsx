@@ -83,6 +83,17 @@ test('a course card opens the materials cabinet instead of the class feed', asyn
   });
 });
 
+test('課務分區改版後仍可開啟獨立的 TronClass 課程與作業', async () => {
+  const view = render(<LearnAiFirstScreen />);
+  await view.findByText('迴歸分析作業');
+  fireEvent.press(view.getByText('TronClass 課程與作業'));
+  expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
+    initial: false,
+    screen: 'TronClassWorkspace',
+    params: undefined,
+  });
+});
+
 test('filters real tasks by course and search term without changing the course membership list', async () => {
   const data = result();
   data.courses.push({ ...data.courses[0], id: 'course-b', groupId: 'course-b', name: '資料庫' });

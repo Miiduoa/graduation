@@ -4,6 +4,13 @@ import {
   type NuniSessionDependencies,
 } from '../services/nuniSessionController';
 import { NuniDraftScopeStore } from '../state/nuniDrafts';
+import { requestNativeTronClassSubmissionDownload } from '../services/tronClassNativeDownload';
+import * as nuniClient from '../services/nuniClient';
+
+jest.mock('../services/tronClassNativeDownload', () => ({
+  ...jest.requireActual('../services/tronClassNativeDownload'),
+  requestNativeTronClassSubmissionDownload: jest.fn(),
+}));
 
 const account = 'pa_11111111-1111-4111-8111-111111111111';
 const handle = `ps_${'a'.repeat(43)}`;
@@ -842,6 +849,106 @@ it('cannot read or refill expired input before the next refresh or after control
   controller.dispose();
   expect(controller.canRetainLocalDrafts(account)).toBe(false);
   expect(invalidateLocalDrafts).toHaveBeenCalled();
+});
+
+describe('cancelable platform BFF requests', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('rejects a canceled connection before dispatching the private platform handle', async () => {
+    const { controller } = setup(stored());
+    await controller.refresh();
+    const bff = jest.spyOn(nuniClient, 'nuniBffRequest').mockResolvedValue({ connected: true });
+    const cancellation = new AbortController();
+    cancellation.abort();
+    await expect(controller.bffRequest('tronclass', controller.state.session!.context,
+      { action: 'connect' }, undefined, undefined, cancellation.signal))
+      .rejects.toMatchObject({ code: 'REQUEST_CANCELLED' });
+    expect(bff).not.toHaveBeenCalled();
+  });
+
+  it.each(['cancel', 'logout', 'dispose'] as const)('propagates %s to transport and rejects a late connection result', async cause => {
+    const { controller } = setup(stored());
+    await controller.refresh();
+    const context = controller.state.session!.context;
+    const pending = deferred<unknown>();
+    const bff = jest.spyOn(nuniClient, 'nuniBffRequest').mockReturnValue(pending.promise);
+    const cancellation = new AbortController();
+    const work = controller.bffRequest('tronclass', context, { action: 'connect' },
+      undefined, undefined, cancellation.signal);
+    const rejected = expect(work).rejects.toMatchObject({ code: cause === 'cancel' ? 'REQUEST_CANCELLED' : 'SESSION_CHANGED' });
+    const signal = bff.mock.calls[0][3]!;
+    expect(signal.aborted).toBe(false);
+    if (cause === 'cancel') cancellation.abort();
+    else if (cause === 'logout') await controller.logout();
+    else controller.dispose();
+    expect(signal.aborted).toBe(true);
+    pending.resolve({ connected: true });
+    await rejected;
+    expect(bff).toHaveBeenCalledTimes(1);
+  });
+
+  it('detaches caller cancellation after a completed read without canceling a later request', async () => {
+    const { controller } = setup(stored());
+    await controller.refresh();
+    const context = controller.state.session!.context;
+    const bff = jest.spyOn(nuniClient, 'nuniBffRequest').mockResolvedValue({ connected: true });
+    const cancellation = new AbortController();
+    const remove = jest.spyOn(cancellation.signal, 'removeEventListener');
+    await controller.bffRequest('tronclass', context, { action: 'status' },
+      undefined, undefined, cancellation.signal);
+    const completedSignal = bff.mock.calls[0][3]!;
+    cancellation.abort();
+    expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+    expect(completedSignal.aborted).toBe(false);
+    await expect(controller.bffRequest('tronclass', context, { action: 'status' }))
+      .resolves.toEqual({ connected: true });
+    expect(bff.mock.calls[1][3]!.aborted).toBe(false);
+  });
+});
+
+describe('private TronClass submission attachment capability', () => {
+  const input = { courseId: 10, homeworkId: 20, submissionId: '30', uploadId: 40, revision: 'a'.repeat(32) };
+  const file = { bytes: new Uint8Array([1, 2, 3]), filename: 'answer.pdf', contentType: 'application/pdf' };
+  const download = jest.mocked(requestNativeTronClassSubmissionDownload);
+  beforeEach(() => { download.mockReset().mockResolvedValue(file); });
+
+  it('uses the captured verified platform session and rejects extra authority before dispatch', async () => {
+    const { controller } = setup(stored());
+    await controller.refresh();
+    const context = controller.state.session!.context;
+    expect(await controller.tronClassSubmissionDownload(input, context)).toEqual(file);
+    expect(download).toHaveBeenCalledWith(`Platform ${handle}`, input, expect.any(Function), expect.any(AbortSignal));
+    expect(download.mock.calls[0][2]()).toBe(true);
+    await expect(controller.tronClassSubmissionDownload({ ...input, url: 'https://foreign.test' } as typeof input, context))
+      .rejects.toMatchObject({ code: 'TRONCLASS_INVALID_INPUT' });
+    await expect(controller.tronClassSubmissionDownload(input, 'stale-context'))
+      .rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await expect(controller.tronClassSubmissionDownload(input, context, cancelled.signal))
+      .rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+    expect(download).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['logout', 'dispose', 'leave'] as const)('aborts on %s and discards bytes from a late downloader', async (reason) => {
+    const { controller } = setup(stored());
+    await controller.refresh();
+    const context = controller.state.session!.context;
+    const pending = deferred<typeof file>();
+    download.mockReturnValueOnce(pending.promise);
+    const exit = new AbortController();
+    const work = controller.tronClassSubmissionDownload(input, context, exit.signal);
+    const rejected = expect(work).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+    const activeSignal = download.mock.calls[0][3]!;
+    expect(activeSignal.aborted).toBe(false);
+    if (reason === 'logout') await controller.logout();
+    else if (reason === 'dispose') controller.dispose();
+    else exit.abort();
+    expect(activeSignal.aborted).toBe(true);
+    pending.resolve(file);
+    await rejected;
+    expect(download).toHaveBeenCalledTimes(1);
+  });
 });
 
 const cloudImageInput = {
