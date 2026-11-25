@@ -44,6 +44,7 @@ export type { PersonalImportLedger } from '@campus/shared/src/imports/browserRec
 export const personalImportStorageKey = (scope: PersonalImportScope) =>
   `campus.personal-imports.v1:${encodeURIComponent(scope.owner)}:${encodeURIComponent(scope.schoolId)}`;
 const nativeReceiptKey = (key: string) => key + ':verified-write';
+const nativeBackupReceiptKey = (key: string) => key + ':verified-write-backup';
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
 const locks = new Map<string, Promise<unknown>>();
 const pendingWrites = new Map<string, Promise<void>>();
@@ -59,8 +60,7 @@ function isStorageRowTooLarge(error: unknown): boolean {
   );
 }
 
-async function readNativeReceipt(key: string): Promise<string | null> {
-  const receiptKey = nativeReceiptKey(key);
+async function readNativeReceipt(receiptKey: string): Promise<string | null> {
   try {
     return await AsyncStorage.getItem(receiptKey);
   } catch {
@@ -69,8 +69,7 @@ async function readNativeReceipt(key: string): Promise<string | null> {
   }
 }
 
-async function writeNativeReceipt(key: string, receipt: string) {
-  const receiptKey = nativeReceiptKey(key);
+async function writeNativeReceipt(receiptKey: string, receipt: string) {
   try {
     await AsyncStorage.setItem(receiptKey, receipt);
   } catch {
@@ -108,15 +107,14 @@ async function readLedgerSnapshot(
   const restoredEmpty = primary === null && !primaryError && !restorationPending &&
     rejectionMatches?.(null) === true;
   const attemptedPrimary = primary !== null && journal?.matchesAttemptedPrimary?.(primary) === true;
-  const receipt = primaryVerified && (attemptedPrimary || rejectionMatches)
-    ? await readNativeReceipt(key)
-    : null;
-  const fileReceipt = primaryVerified && (attemptedPrimary || rejectionMatches)
-    ? readNativeVerificationReceipt(key)
-    : undefined;
+  const needsReceipt = primaryVerified && (attemptedPrimary || rejectionMatches !== undefined);
+  const receipt = needsReceipt ? await readNativeReceipt(nativeReceiptKey(key)) : null;
+  const fileReceipt = needsReceipt ? readNativeVerificationReceipt(key) : undefined;
+  const backupReceipt = needsReceipt ? await readNativeReceipt(nativeBackupReceiptKey(key)) : null;
+  const receipts = [receipt, fileReceipt, backupReceipt];
   const rejectionHash = journal?.rejectionHash;
   const primaryHash = primaryVerified && primary !== null && rejectionMatches ? sha256(primary) : undefined;
-  const publishedRejectionHash = primaryHash === undefined ? undefined : [receipt, fileReceipt]
+  const publishedRejectionHash = primaryHash === undefined ? undefined : receipts
     .map((proof) => proof?.match(/^([a-f0-9]{64})\n([a-f0-9]{64})$/))
     .find((proof) => proof && (rejectionHash === undefined || proof[1] === rejectionHash) &&
       proof[2] === primaryHash)?.[1];
@@ -125,8 +123,7 @@ async function readLedgerSnapshot(
   const checkpointRejection = restoredRejectionHash ? undefined : rejectionMatches;
   const verifiedByJournal = primary !== null && (
     journal?.matchesVerifiedPrimary?.(primary) === true ||
-    (fileReceipt !== undefined && journal?.matchesVerifiedReceipt?.(primary, fileReceipt) === true) ||
-    (receipt !== null && journal?.matchesVerifiedReceipt?.(primary, receipt) === true)
+    receipts.some((proof) => typeof proof === 'string' && journal?.matchesVerifiedReceipt?.(primary, proof))
   );
   const rejectedPrimary = journal?.rejected && (
     journal.hasRejectedPayload || attemptedPrimary || journal.raw === primary ||
@@ -155,7 +152,10 @@ async function readLedgerSnapshot(
   // cannot be checked against the previous attempt before replacing the hashes.
   const preserveAttemptRejection = restorationPending || checkpointRejection !== undefined ||
     (attemptedPrimary && !verifiedByJournal && recovery !== null && recovery.raw !== primary);
-  return { primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection, restoredRejectionHash, receipt };
+  return {
+    primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection,
+    restoredRejectionHash, receipt, backupReceipt,
+  };
 }
 
 function isReadableLedger(raw: string | null, scope: PersonalImportScope): boolean {
@@ -446,9 +446,12 @@ export function mutatePersonalImportLedger<T>(
         assertLockHeld();
       };
       assertWritable();
-      const { primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection, restoredRejectionHash, receipt } =
-        await readLedgerSnapshot(key, scope, options.allowNativePrimaryOnly);
+      const {
+        primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection,
+        restoredRejectionHash, receipt, backupReceipt,
+      } = await readLedgerSnapshot(key, scope, options.allowNativePrimaryOnly);
       let currentReceipt = receipt;
+      let currentBackupReceipt = backupReceipt;
       let primaryRaw = primary;
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
@@ -522,6 +525,7 @@ export function mutatePersonalImportLedger<T>(
             let newReceipt: string | undefined;
             let writingFileReceipt = false;
             let previousFileReceipt: string | undefined;
+            let writingBackupReceipt = false;
             try {
               writtenRaw = journal ? firstRaw : raw;
               await AsyncStorage.setItem(key, writtenRaw);
@@ -586,7 +590,7 @@ export function mutatePersonalImportLedger<T>(
               if (newReceipt !== undefined) {
                 assertWritable();
                 try {
-                  await writeNativeReceipt(key, newReceipt);
+                  await writeNativeReceipt(nativeReceiptKey(key), newReceipt);
                 } catch (error) {
                   if (!options.allowNativePrimaryOnly) throw error;
                   // Both AsyncStorage APIs can fail on the same native key.
@@ -594,13 +598,35 @@ export function mutatePersonalImportLedger<T>(
                   assertWritable();
                   previousFileReceipt = readNativeVerificationReceipt(key);
                   writingFileReceipt = true;
-                  writeNativeVerificationReceipt(key, newReceipt);
+                  try {
+                    writeNativeVerificationReceipt(key, newReceipt);
+                  } catch {
+                    // Retain the attempt binding when both the usual receipt
+                    // key and the document directory are unavailable.
+                    assertWritable();
+                    const backupKey = nativeBackupReceiptKey(key);
+                    writingBackupReceipt = true;
+                    await writeNativeReceipt(backupKey, newReceipt);
+                    if (await readNativeReceipt(backupKey) !== newReceipt) {
+                      throw new Error('無法確認匯入資料的儲存憑據。');
+                    }
+                  }
                 }
                 assertWritable();
                 if (!writingFileReceipt) currentReceipt = newReceipt;
+                if (writingBackupReceipt) currentBackupReceipt = newReceipt;
               }
               pendingRestorations.delete(key);
             } catch (error) {
+              if (writingBackupReceipt) {
+                const backupKey = nativeBackupReceiptKey(key);
+                try {
+                  if (currentBackupReceipt === null) await AsyncStorage.removeItem(backupKey);
+                  else await writeNativeReceipt(backupKey, currentBackupReceipt);
+                } catch {
+                  // Continue with the rollback journal and checkpoint.
+                }
+              }
               if (writingFileReceipt) {
                 try {
                   if (previousFileReceipt === undefined) clearNativeVerificationReceipt(key);
@@ -612,7 +638,7 @@ export function mutatePersonalImportLedger<T>(
               if (newReceipt !== undefined) {
                 try {
                   if (currentReceipt === null) await AsyncStorage.removeItem(nativeReceiptKey(key));
-                  else await writeNativeReceipt(key, currentReceipt);
+                  else await writeNativeReceipt(nativeReceiptKey(key), currentReceipt);
                 } catch {
                   // Preserve rejection through the rollback journal and checkpoint.
                 }

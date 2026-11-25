@@ -650,7 +650,8 @@ function verificationReceiptFile(key: string): File {
 }
 
 export function readNativeVerificationReceipt(key: string): string | undefined {
-  return readOptionalFile(verificationReceiptFile(key));
+  const file = verificationReceiptFile(key);
+  return readOptionalFile(file) ?? readOptionalFile(file);
 }
 
 export function writeNativeVerificationReceipt(key: string, receipt: string): void {

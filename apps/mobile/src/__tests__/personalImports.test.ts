@@ -574,6 +574,9 @@ test.each([
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with verification receipt write error', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and file write fault', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and file readback fault', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and transient file read', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient verification receipt read', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient readback', false],
   ['all publication paths fail with temporarily unreadable payload', false],
@@ -615,9 +618,12 @@ test.each([
   const stalePublication = phase.endsWith('stale publication receipt');
   const receiptReadFailsAfterSave = phase.endsWith('publication receipt read fault after success');
   const transientVerificationReceiptRead = phase.endsWith('with transient verification receipt read');
-  const persistentVerificationReceiptWriteFault = phase.endsWith('with persistent verification receipt write error');
+  const persistentVerificationReceiptWriteFault = phase.includes('with persistent verification receipt write error');
   const verificationReceiptWriteFails = phase.endsWith('with verification receipt write error') ||
     persistentVerificationReceiptWriteFault;
+  const fileReceiptWriteFault = jest.fn(() => { throw new Error('檔案憑據無法寫入'); });
+  const fileReceiptReadFault = jest.fn(() => { throw new Error('檔案憑據無法讀取'); });
+  let restarting = false;
   const multiSet = jest.mocked(AsyncStorage.multiSet);
   const nativeMultiSet = multiSet.getMockImplementation()!;
   const multiSetReceiptFault = jest.fn(() => { throw new Error('原生批次寫入無法儲存憑據'); });
@@ -692,6 +698,7 @@ test.each([
     deleteFile.call(this);
   });
   const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+    if (this.uri.endsWith('.rollback.receipt') && phase.endsWith('file write fault')) fileReceiptWriteFault();
     if (publicationFails && this.uri === markerUri && value === 'rejected') {
       throw new Error('待處理標記無法改成拒絕');
     }
@@ -716,6 +723,10 @@ test.each([
     writeFile.call(this, value, options);
   });
   const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+    if (this.uri.endsWith('.rollback.receipt') && (
+      phase.endsWith('file readback fault') ||
+      (restarting && phase.endsWith('transient file read') && fileReceiptReadFault.mock.calls.length === 0)
+    )) fileReceiptReadFault();
     if (receiptReadBlocked && this.uri.endsWith('.rollback.published')) receiptReadFault();
     if ((unreadablePayload || publicationFails) && retirementAttempts > 0 &&
         this.uri.endsWith('.rollback.json')) payloadReadFault();
@@ -891,9 +902,18 @@ test.each([
         return nativeGet(entry);
       });
     }
+    if (phase.endsWith('file write fault')) expect(fileReceiptWriteFault).toHaveBeenCalledTimes(1);
+    if (phase.endsWith('file readback fault')) expect(fileReceiptReadFault).toHaveBeenCalled();
+    if (phase.endsWith('transient file read')) {
+      expect(fileReceiptReadFault).not.toHaveBeenCalled();
+      expect(textSync.call(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.receipt`))).toEqual(expect.any(String));
+      expect(await nativeGet(key + ':verified-write-backup')).toBeNull();
+    }
+    restarting = true;
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
+      if (phase.endsWith('transient file read')) expect(fileReceiptReadFault).toHaveBeenCalledTimes(1);
       if (transientVerificationReceiptRead) expect(verificationReceiptReadFault).toHaveBeenCalledTimes(1);
       if (receiptReadFailsAfterSave) expect(receiptReadFault).toHaveBeenCalled();
       if (retrySave) {
@@ -1707,6 +1727,9 @@ test('a rejected primary-only edit with no pending marker recovers its checkpoin
 
 test.each([
   'payload write', 'payload write with receipt write fault', 'payload write with persistent receipt write fault',
+  'payload write with persistent receipt write fault and file write fault',
+  'payload write with persistent receipt write fault and file readback fault',
+  'payload write with persistent receipt write fault and transient file read',
   'rejection delete',
   'restored write', 'restored readback', 'restored write with transient receipt read',
 ] as const)('a restored primary remains editable after restart with an older checkpoint and a persistent %s fault', async (fault) => {
@@ -1715,6 +1738,11 @@ test.each([
   const prefix = `personal-imports-${sha256(key)}.rollback.`;
   const pending = new File(Paths.document, prefix + 'pending');
   const rejection = new File(Paths.document, prefix + 'rejected');
+  const receiptFile = new File(Paths.document, prefix + 'receipt');
+  const fileReceiptWriteFault = jest.fn(() => { throw new Error('檔案憑據無法寫入'); });
+  const fileReceiptReadFault = jest.fn(() => { throw new Error('檔案憑據無法讀取'); });
+  let restarting = false;
+
   const { ledger: older } = await appendPersonalImports(scope, [row('first')]);
   const { ledger: original } = await appendPersonalImports(scope, [row('second', '統計')]);
   const originalRaw = (await AsyncStorage.getItem(key))!;
@@ -1732,6 +1760,10 @@ test.each([
   const resolvedFault = jest.fn(() => { throw new Error('無法確認拒絕檔已改為 restored'); });
   const textSync = File.prototype.textSync;
   const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+    if (this.uri === receiptFile.uri && (
+      fault.endsWith('file readback fault') ||
+      (restarting && fault.endsWith('transient file read') && fileReceiptReadFault.mock.calls.length === 0)
+    )) fileReceiptReadFault();
     const value = textSync.call(this);
     if (fault === 'restored readback' && this.uri === rejection.uri && value === 'restored') resolvedFault();
     return value;
@@ -1740,6 +1772,7 @@ test.each([
   const payloadWritten = jest.fn();
   const payloadFault = jest.fn(() => { throw new Error('無法寫入還原副本'); });
   const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+    if (this.uri === receiptFile.uri && fault.endsWith('file write fault')) fileReceiptWriteFault();
     if (this.uri.endsWith(prefix + 'json')) {
       if (payloadBlocked) payloadFault();
       payloadWritten();
@@ -1751,7 +1784,7 @@ test.each([
   const get = jest.mocked(AsyncStorage.getItem);
   const nativeSet = set.getMockImplementation()!;
   const nativeGet = get.getMockImplementation()!;
-  const persistentReceiptWriteFault = fault === 'payload write with persistent receipt write fault';
+  const persistentReceiptWriteFault = fault.startsWith('payload write with persistent receipt write fault');
   const receiptWriteFails = fault === 'payload write with receipt write fault' || persistentReceiptWriteFault;
   const multiSet = jest.mocked(AsyncStorage.multiSet);
   const nativeMultiSet = multiSet.getMockImplementation()!;
@@ -1863,9 +1896,18 @@ test.each([
         return nativeGet(entry);
       });
     }
+    if (fault.endsWith('file write fault')) expect(fileReceiptWriteFault).toHaveBeenCalledTimes(1);
+    if (fault.endsWith('file readback fault')) expect(fileReceiptReadFault).toHaveBeenCalled();
+    if (fault.endsWith('transient file read')) {
+      expect(fileReceiptReadFault).not.toHaveBeenCalled();
+      expect(textSync.call(receiptFile)).toEqual(expect.any(String));
+      expect(await nativeGet(key + ':verified-write-backup')).toBeNull();
+    }
+    restarting = true;
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(saved);
+      if (fault.endsWith('transient file read')) expect(fileReceiptReadFault).toHaveBeenCalledTimes(1);
       if (transientReceiptRead) expect(receiptReadFault).toHaveBeenCalledTimes(1);
     });
   } finally {
