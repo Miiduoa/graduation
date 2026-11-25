@@ -61,7 +61,7 @@ async def check_search_history(origin):
                 },
               });
             })()""")
-            await page.goto(f'{origin}/search?campus=pu&q=借書&category=campus')
+            await page.goto(f'{origin}/search?campus=pu')
             campus = page.locator('summary[aria-label="切換校園：靜宜大學"]')
             await expect(campus).to_be_visible(timeout=15_000)
             field = page.get_by_role('searchbox', name='想找什麼？', exact=True)
@@ -69,10 +69,38 @@ async def check_search_history(origin):
             library = results.get_by_role('link').filter(
                 has=page.get_by_role('heading', name='圖書館', exact=True),
             )
-            await expect(field).to_have_value('借書')
+            await expect(field).to_have_value('')
             bus = results.get_by_role('link').filter(
                 has=page.get_by_role('heading', name='公車', exact=True),
             )
+
+            async def check_clear_without_snapshot():
+                await field.fill('借書')
+                await expect(library).to_be_visible()
+                await page.evaluate("""() => {
+                  const state = history.state;
+                  if (!state?.__NA || state.__campusSearchResultReturn) {
+                    throw new Error('Expected a Next entry without a result snapshot');
+                  }
+                  const draft = JSON.parse(sessionStorage.getItem('campus.directory.search.v1'));
+                  if (draft?.search?.query !== '借書') throw new Error('Expected a session draft');
+                  const url = new URL(location.href);
+                  url.searchParams.delete('q');
+                  history.replaceState(state, '', url);
+                }""")
+                await expect(field).to_have_value('借書')
+                await page.evaluate("""() => {
+                  const state = Object.defineProperty({ ...history.state },
+                    Symbol.for('nuni.app-router.sync-history-query'), { value: true });
+                  history.replaceState(state, '', location.href);
+                }""")
+                await expect(field).to_have_value('')
+                await expect(page.get_by_role('button', name='全部', exact=True)).to_have_attribute(
+                    'aria-pressed', 'true',
+                )
+                assert await page.evaluate("""() =>
+                  !JSON.parse(sessionStorage.getItem('campus.directory.search.v1'))?.search?.query
+                """)
 
             async def check_sync_after_native_replace():
                 await expect(field).to_have_value('借書')
@@ -94,6 +122,10 @@ async def check_search_history(origin):
                 await expect(bus).to_be_visible()
 
             await page.wait_for_function("() => window.__searchHistoryOuterNext === true")
+            await check_clear_without_snapshot()
+            await page.evaluate("""() =>
+              history.replaceState(null, '', '?campus=pu&q=借書&category=campus')
+            """)
             await library.click()
             await page.wait_for_url('**/library?*')
             await page.go_back()
@@ -163,6 +195,7 @@ async def check_search_history(origin):
             await page.wait_for_function("""() =>
               window.__pushBeforeSearch && history.pushState !== window.__pushBeforeSearch
             """)
+            await check_clear_without_snapshot()
             await page.evaluate("""() => {
               history.replaceState(new Map([['view', 'compact']]), '');
               if (!(history.state instanceof Map)) throw new Error('Expected a native Map entry');

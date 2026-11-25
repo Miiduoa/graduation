@@ -8,7 +8,11 @@ import { onRouterTransitionStart } from '@/instrumentation-client';
 import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SearchPage from './page';
-import { APP_ROUTER_HISTORY_PUSH, APP_ROUTER_HISTORY_REPLACE } from './searchResultNavigation';
+import {
+  APP_ROUTER_HISTORY_PUSH,
+  APP_ROUTER_HISTORY_REPLACE,
+  APP_ROUTER_SYNC_HISTORY_QUERY,
+} from './searchResultNavigation';
 import { visibleCampusServices } from '@/lib/campusServices';
 import { DIRECTORY_SEARCH_STORAGE_KEY } from '@/lib/campusDirectorySearch';
 
@@ -978,6 +982,40 @@ it('lets a real Back traversal to an empty directory override queued drafts and 
   render(<SearchPage />);
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
 });
+
+it.each([true, false])(
+  'applies an explicit empty query without a result snapshot (router already caught up: %s)',
+  (caughtUp) => {
+    window.history.pushState({}, '', '/search');
+    router.search = '';
+    const view = render(<SearchPage />);
+    const field = screen.getByRole<HTMLInputElement>('searchbox');
+    fireEvent.change(field, { target: { value: '借書' } });
+    expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toContain('借書');
+    if (!caughtUp) {
+      router.search = window.location.search;
+      view.rerender(<SearchPage />);
+    }
+
+    const state = { __NA: true };
+    act(() => window.history.replaceState(state, '', '/search'));
+    expect(field.value).toBe('借書');
+    expect(window.history.state).not.toHaveProperty('__campusSearchResultReturn');
+    Object.defineProperty(state, APP_ROUTER_SYNC_HISTORY_QUERY, { value: true });
+    act(() => window.history.replaceState(state, '', '/search'));
+    if (!caughtUp) {
+      expect(field.value).toBe('借書');
+      router.search = '';
+      view.rerender(<SearchPage />);
+    }
+
+    expect(field.value).toBe('');
+    expect(screen.getByRole('heading', { name: '服務目錄' })).toBeTruthy();
+    view.unmount();
+    render(<SearchPage />);
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
+  },
+);
 
 it('lets a history traversal to an earlier pending query win over newer typing', () => {
   router.search = '';

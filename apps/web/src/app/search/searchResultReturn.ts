@@ -26,7 +26,12 @@ type SearchReturn = {
   href: string;
   kind: ResultKind;
 };
-type FilterArrival = { entryKey: string; queryString: string; saved: SearchReturn | null };
+type FilterArrival = {
+  entryKey: string | null;
+  queryString: string;
+  saved: SearchReturn | null;
+  explicitSync?: true;
+};
 
 let observedWindow: Window | undefined;
 const emptyReturnState: { pending: SearchReturn | null; arrival: FilterArrival | null } = {
@@ -166,6 +171,8 @@ function installHistoryTracking() {
       const changesPage = targetUrl !== null && targetUrl.pathname !== previousPath;
       const replacesPage = !push && changesPage;
       const incomingNextFields = changesPage ? {} : readNextHistoryFields(data);
+      const syncQuery = data != null &&
+        Object.getOwnPropertyDescriptor(data, APP_ROUTER_SYNC_HISTORY_QUERY)?.value === true;
       const nextFields = changesPage ? {} : {
         ...(nativeState?.value === previousState ? nativeState?.nextFields : {}),
         ...readNextHistoryFields(previousState),
@@ -213,8 +220,7 @@ function installHistoryTracking() {
         }
       }
       // Forward the caller's opt-in if Next is inside this observer.
-      if (state !== data && data != null &&
-        Object.getOwnPropertyDescriptor(data, APP_ROUTER_SYNC_HISTORY_QUERY)?.value === true) {
+      if (state !== data && syncQuery) {
         Object.defineProperty(state, APP_ROUTER_SYNC_HISTORY_QUERY, { value: true });
       }
       original.call(this, state, unused, url);
@@ -233,9 +239,9 @@ function installHistoryTracking() {
           });
         }
         onHistoryPush(searchEntry, trackedEntryKey, routerCommit);
-      } else if (!replacesPage && searchEntry && !writesReturn) {
+      } else if (previousPath === '/search' && !replacesPage && !writesReturn) {
         // Bind the new URL only after the browser accepts the same-page replacement.
-        searchEntry.entries.searchUrl = currentUrl();
+        if (searchEntry) searchEntry.entries.searchUrl = currentUrl();
         const { arrival, pending } = returnState;
         const nextHref = window.location.href;
         const changesOnlyFragment =
@@ -246,23 +252,29 @@ function installHistoryTracking() {
         // Match the Router's query representation so a native encoding-only rewrite
         // cannot publish a filter arrival that would replace an in-progress draft.
         const keepsNativeQuery = incomingNextFields.__NA && previousQueryString === queryString;
-        const replacesFilters =
-          url != null && previousKey && !changesOnlyFragment && !keepsNativeQuery && !routerReplace;
-        // An opted-in write to the same URL can catch Next up to an earlier native
-        // write. Keep that entry's queued arrival until the Router renders its query.
+        const updatesQuery = targetUrl?.origin === window.location.origin &&
+          !changesOnlyFragment && !routerReplace;
+        // The explicit write can acknowledge an earlier native write, even on an
+        // entry that has never saved a result. Wait for Next to render the URL.
+        const explicitSync = updatesQuery && incomingNextFields.__NA && syncQuery;
+        const entryKey = readEntryKey(this.state);
         const arrivalMatchesEntry =
-          arrival?.entryKey === previousKey && arrival.queryString === queryString;
-        if (replacesFilters) {
+          arrival?.entryKey === entryKey && arrival.queryString === queryString;
+        if (explicitSync) {
+          publishReturn(null, { entryKey, queryString, saved: null, explicitSync: true });
+        } else if (updatesQuery && searchEntry && !keepsNativeQuery) {
           if (!arrivalMatchesEntry || arrival.saved || pending) {
-            publishReturn(null, { entryKey: previousKey, queryString, saved: null });
+            publishReturn(null, { entryKey, queryString, saved: null });
           }
         } else if (arrival && !arrivalMatchesEntry) {
           publishReturn(pending, null);
         }
-      } else if (replacesPage && previousKey) {
-        searchEntriesByKey.delete(previousKey);
-        for (const armed of searchEntriesByKey.values()) {
-          if (armed.destinationKey === previousKey) armed.destinationKey = null;
+      } else if (replacesPage) {
+        if (previousKey) {
+          searchEntriesByKey.delete(previousKey);
+          for (const armed of searchEntriesByKey.values()) {
+            if (armed.destinationKey === previousKey) armed.destinationKey = null;
+          }
         }
         publishReturn(null, null);
       }

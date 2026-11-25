@@ -126,6 +126,20 @@ function ServiceDirectory() {
     query,
     category,
   });
+  const term = query.trim();
+  const semanticScope = JSON.stringify([
+    account.responseScope,
+    schoolSearch,
+    Boolean(selection?.loading),
+    selection?.catalogStatus,
+  ]);
+  const currentScope = useRef(semanticScope);
+  const [analysis, setAnalysis] = useState<{
+    scope: string;
+    term: string;
+    status: 'pending' | 'ready' | 'error';
+    result?: CampusSemanticResult;
+  } | null>(null);
   useLayoutEffect(() => {
     if (!account.canRemember) return;
     const changedScope = confirmedScope !== null && confirmedScope.draftScope !== draftScope;
@@ -178,10 +192,23 @@ function ServiceDirectory() {
       editedFilters.current = null;
       const next =
         filterArrival.saved?.filters ?? readCampusServiceFilters(new URLSearchParams(queryString));
+      const expanded = restoreDirectorySearch('search', '/search', storageScope)?.expanded ?? [];
+      if (filterArrival.explicitSync) {
+        requestSequence.current += 1;
+        compositionScope.current = null;
+        setAnalysis(null);
+        // Persist the URL's filters, including an intentional empty query.
+        rememberDirectorySearch('search', {
+          path: '/search',
+          destination: '/search',
+          ...next,
+          open: false,
+          scope: storageScope,
+          expanded,
+        });
+      }
       setFilters({ scope: draftScope, ...next });
-      setRestoredExpanded(
-        restoreDirectorySearch('search', '/search', storageScope)?.expanded ?? [],
-      );
+      setRestoredExpanded(expanded);
       finishSearchFilterArrival(filterArrival);
       return;
     }
@@ -221,20 +248,6 @@ function ServiceDirectory() {
     filterArrival,
     storageScope,
   ]);
-  const term = query.trim();
-  const semanticScope = JSON.stringify([
-    account.responseScope,
-    schoolSearch,
-    Boolean(selection?.loading),
-    selection?.catalogStatus,
-  ]);
-  const currentScope = useRef(semanticScope);
-  const [analysis, setAnalysis] = useState<{
-    scope: string;
-    term: string;
-    status: 'pending' | 'ready' | 'error';
-    result?: CampusSemanticResult;
-  } | null>(null);
   useLayoutEffect(() => {
     currentScope.current = semanticScope;
     // eslint-disable-next-line react-hooks/set-state-in-effect
