@@ -572,6 +572,7 @@ test.each([
   ['all retirement writes fail with verified first write and no hash or receipt and readable payload', false],
   ['all retirement writes fail with verified first write and no hash or receipt and readable payload without settlement', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient verification receipt read', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient readback', false],
   ['all publication paths fail with temporarily unreadable payload', false],
   ['all publication paths fail with temporarily unreadable payload and successful restoration', false],
@@ -611,6 +612,8 @@ test.each([
   const lostReceiptAfterRetirement = phase.includes('no hash or receipt');
   const stalePublication = phase.endsWith('stale publication receipt');
   const receiptReadFailsAfterSave = phase.endsWith('publication receipt read fault after success');
+  const transientVerificationReceiptRead = phase.endsWith('with transient verification receipt read');
+  const verificationReceiptReadFault = jest.fn(() => { throw new Error('已驗證寫入憑據暫時無法讀取'); });
   const receiptReadFault = jest.fn(() => { throw new Error('發佈憑據暫時無法讀取'); });
   let receiptReadBlocked = false;
   const noRetirementFile = phase !== 'write' && phase !== 'readback';
@@ -848,9 +851,22 @@ test.each([
       receiptReadFailsAfterSave;
     const retrySave = !revoked && (phase === 'all' || phase === 'all with primary write error' || retryGuardedSave);
     expect(fallbackReadFault).toHaveBeenCalledTimes(phase.endsWith('with transient readback') ? 1 : 0);
+    if (transientVerificationReceiptRead) {
+      const receiptKey = key + ':verified-write';
+      expect(await nativeGet(receiptKey)).toEqual(expect.any(String));
+      expect(await nativeGet(key)).toMatch(/^\{"records":.*統計/);
+      expect(readPersonalImportRollback(key)).toBe(JSON.stringify(previous));
+      get.mockImplementation(async (entry) => {
+        if (entry === receiptKey && verificationReceiptReadFault.mock.calls.length === 0) {
+          verificationReceiptReadFault();
+        }
+        return nativeGet(entry);
+      });
+    }
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
+      if (transientVerificationReceiptRead) expect(verificationReceiptReadFault).toHaveBeenCalledTimes(1);
       if (receiptReadFailsAfterSave) expect(receiptReadFault).toHaveBeenCalled();
       if (retrySave) {
         set.mockImplementation(nativeSet);
@@ -1660,7 +1676,7 @@ test('a rejected primary-only edit with no pending marker recovers its checkpoin
   }
 });
 
-test.each(['payload write', 'rejection delete', 'restored write', 'restored readback'] as const)('a restored primary remains editable after restart with an older checkpoint and a persistent %s fault', async (fault) => {
+test.each(['payload write', 'rejection delete', 'restored write', 'restored readback', 'restored write with transient receipt read'] as const)('a restored primary remains editable after restart with an older checkpoint and a persistent %s fault', async (fault) => {
   const scope = { owner: `nuni:restored-primary-with-older-checkpoint-${fault}`, schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
   const prefix = `personal-imports-${sha256(key)}.rollback.`;
@@ -1695,7 +1711,7 @@ test.each(['payload write', 'rejection delete', 'restored write', 'restored read
       if (payloadBlocked) payloadFault();
       payloadWritten();
     }
-    if (fault === 'restored write' && this.uri === rejection.uri && value === 'restored') resolvedFault();
+    if (fault.startsWith('restored write') && this.uri === rejection.uri && value === 'restored') resolvedFault();
     writeFile.call(this, value, options);
   });
   const set = jest.mocked(AsyncStorage.setItem);
@@ -1778,9 +1794,23 @@ test.each(['payload write', 'rejection delete', 'restored write', 'restored read
         unsubscribeRestart();
       }
     });
+    const transientReceiptRead = fault === 'restored write with transient receipt read';
+    const receiptReadFault = jest.fn(() => { throw new Error('已驗證寫入憑據暫時無法讀取'); });
+    if (transientReceiptRead) {
+      const receiptKey = key + ':verified-write';
+      const savedRaw = (await nativeGet(key))!;
+      expect(rejection.textSync()).toBe(sha256(originalRaw));
+      expect(await nativeGet(key + ':checkpoint')).toBe(checkpoint);
+      expect(await nativeGet(receiptKey)).toBe(sha256(originalRaw) + '\n' + sha256(savedRaw));
+      get.mockImplementation(async (entry) => {
+        if (entry === receiptKey && receiptReadFault.mock.calls.length === 0) receiptReadFault();
+        return nativeGet(entry);
+      });
+    }
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(saved);
+      if (transientReceiptRead) expect(receiptReadFault).toHaveBeenCalledTimes(1);
     });
   } finally {
     read.mockRestore();

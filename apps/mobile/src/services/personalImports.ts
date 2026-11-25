@@ -56,6 +56,16 @@ function isStorageRowTooLarge(error: unknown): boolean {
   );
 }
 
+async function readNativeReceipt(key: string): Promise<string | null> {
+  const receiptKey = nativeReceiptKey(key);
+  try {
+    return await AsyncStorage.getItem(receiptKey);
+  } catch {
+    // A transient read failure must not hide a durable verification receipt.
+    return AsyncStorage.getItem(receiptKey).catch(() => null);
+  }
+}
+
 async function readLedgerSnapshot(
   key: string,
   scope: PersonalImportScope,
@@ -87,7 +97,7 @@ async function readLedgerSnapshot(
     rejectionMatches?.(null) === true;
   const attemptedPrimary = primary !== null && journal?.matchesAttemptedPrimary?.(primary) === true;
   const receipt = primaryVerified && (attemptedPrimary || rejectionMatches)
-    ? await AsyncStorage.getItem(nativeReceiptKey(key)).catch(() => null)
+    ? await readNativeReceipt(key)
     : null;
   const rejectionReceipt = rejectionMatches && receipt?.match(/^([a-f0-9]{64})\n([a-f0-9]{64})$/);
   const rejectionHash = journal?.rejectionHash;
