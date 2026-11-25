@@ -536,11 +536,21 @@ function PersonalCalendarWorkspace({
         cancelLinkedFocus();
       }
     };
+    const cancelOnOutsidePointerDown = (event: PointerEvent) => {
+      if (!suspended.current || !linkedFocusOrigin.current) return;
+      const boundary = workspaceBoundary.current;
+      if (boundary && !event.composedPath().includes(boundary)) {
+        // An outside press can move focus to body without a new focusin.
+        cancelLinkedFocus();
+      }
+    };
     document.addEventListener('focusin', checkFocus, true);
     document.addEventListener('focusout', recordBlur, true);
+    document.addEventListener('pointerdown', cancelOnOutsidePointerDown, true);
     return () => {
       document.removeEventListener('focusin', checkFocus, true);
       document.removeEventListener('focusout', recordBlur, true);
+      document.removeEventListener('pointerdown', cancelOnOutsidePointerDown, true);
     };
   }, [requestedEventId, cancelLinkedFocus, workspaceBoundary]);
 
