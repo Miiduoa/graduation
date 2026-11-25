@@ -764,7 +764,7 @@ it('lets visitors choose a campus starting point and destination without locatio
   expect(screen.queryByRole('link', { name: '使用 Apple 地圖規劃路線' })).toBeNull();
 });
 
-it.each(['origin', 'destination', 'unchanged'] as const)('revalidates manually chosen endpoints after the campus source syncs (%s)', async (changed) => {
+it.each(['origin', 'destination', 'origin-building', 'destination-floor', 'unchanged'] as const)('revalidates manually chosen endpoints after the campus source syncs (%s)', async (changed) => {
   state.user = null;
   const origin = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
   const destination = PROVIDENCE_CAMPUS_PLACES.find((place) => place.name === '蓋夏圖書館')!;
@@ -780,8 +780,10 @@ it.each(['origin', 'destination', 'unchanged'] as const)('revalidates manually c
   expect(screen.getByRole('region', { name: '步行導航' })).toBeTruthy();
 
   await act(async () => source.resolve([
-    { ...origin, lat: origin.lat + (changed === 'origin' ? 0.002 : 0) },
-    { ...destination, lat: destination.lat + (changed === 'destination' ? 0.002 : 0) },
+    { ...origin, lat: origin.lat + (changed === 'origin' ? 0.002 : 0),
+      ...(changed === 'origin-building' ? { building: '測試用變更建築' } : {}) },
+    { ...destination, lat: destination.lat + (changed === 'destination' ? 0.002 : 0),
+      ...(changed === 'destination-floor' ? { floor: '測試用變更樓層' } : {}) },
   ]));
   const login = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
   const returned = new URL(login.searchParams.get('returnUrl')!, window.location.origin);
@@ -796,6 +798,16 @@ it.each(['origin', 'destination', 'unchanged'] as const)('revalidates manually c
     fireEvent.click(screen.getByRole('button', { name: '清除待確認路線' }));
     expect(screen.queryByText(/原先選擇的地點已變更或無法確認/)).toBeNull();
   }
+});
+
+it('does not resolve a shared route with duplicate endpoint IDs', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([
+    library, gate, { ...gate, name: '測試用重複識別碼', lat: gate.lat + 0.002 },
+  ]);
+  render(<MapClient school="other-school" route="gate,library" />);
+  const markers = await screen.findByLabelText('地圖狀態');
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  expect(JSON.parse(markers.textContent!).route).toBeNull();
 });
 
 it('keeps both login returns in sync with manually changed and cleared routes', async () => {
