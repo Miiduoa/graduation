@@ -31,8 +31,9 @@ function evidenceLink(s: string): boolean {
   } catch { return false; }
 }
 const key = (way: number, from: number, to: number) => [way, from, to].join(':');
+const validRevision = (version: number) => Number.isSafeInteger(version) && version > 0;
 function matchesNode(review: ReviewedNode, node: ReviewedNode | undefined): boolean {
-  return !!node && review.id === node.id && review.version === node.version &&
+  return !!node && validRevision(node.version) && review.id === node.id && review.version === node.version &&
     review.lat === node.lat && review.lng === node.lng;
 }
 
@@ -149,7 +150,7 @@ export function applyCampusWalkingSegmentAudits(
     const audit = reviews.get(segment);
     if (!audit || duplicates.has(segment)) return blocked;
     if (!matchesNode(audit.from, from) || !matchesNode(audit.to, to) ||
-        audit.wayVersion !== way.version ||
+        !validRevision(way.version) || audit.wayVersion !== way.version ||
         !adjacentSegments.has(segment) ||
         !['both', 'forward', 'reverse'].includes(audit.direction) ||
         !evidenceLink(audit.evidenceUrl) ||
