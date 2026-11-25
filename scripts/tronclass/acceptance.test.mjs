@@ -220,6 +220,84 @@ test('refuses a file replaced with a FIFO or symlink at open without blocking', 
   }
 });
 
+test('dispatch rechecks the pinned plan name before reading and reserving', { timeout: 5000 }, async (t) => {
+  for (const phase of ['read', 'reserve']) {
+    for (const replacement of ['fifo', 'symlink', 'regular file']) {
+      await t.test(`${phase}: ${replacement}`, async (t) => {
+        const root = await directory(t);
+        const plan = path.join(root, 'plan.json');
+        const moved = path.join(root, 'moved.json');
+        const input = path.join(root, 'input.json');
+        const confirmation = path.join(root, 'confirmation.json');
+        await Promise.all([plan, input, confirmation].map((filename) => privateJson(filename, {})));
+
+        let replaced = false;
+        async function replacePlan() {
+          await rename(plan, moved);
+          if (replacement === 'fifo') {
+            assert.equal(spawnSync('mkfifo', ['-m', '600', plan]).status, 0);
+          } else if (replacement === 'symlink') {
+            await symlink(moved, plan);
+          } else {
+            await privateJson(plan, {});
+          }
+          replaced = true;
+        }
+
+        const originalOpen = open;
+        const hook = t.mock.method(fs, 'open', async (filename, flags, ...args) => {
+          const handle = await originalOpen(filename, flags, ...args);
+          if (phase === 'read' && !replaced && path.basename(filename) === 'plan.json') {
+            await replacePlan();
+          }
+          return handle;
+        });
+        syncBuiltinESMExports();
+        let loadCount = 0;
+        let reservationAttempted = false;
+        let output = '';
+        let error = '';
+        try {
+          const code = await runAcceptanceCli(
+            ['dispatch', '--input', input, '--plan', plan, '--confirm', confirmation],
+            {
+              stdout: (text) => { output += text; },
+              stderr: (text) => { error += text; },
+              loadRuntime: async () => {
+                loadCount++;
+                return {
+                  module: {
+                    parseTronClassAcceptanceInput() {},
+                    createDefaultTronClassAcceptanceService: ({ reserveDispatch }) => ({
+                      async dispatch(_input, reviewedPlan) {
+                        await replacePlan();
+                        reservationAttempted = true;
+                        return reserveDispatch(reviewedPlan);
+                      },
+                    }),
+                  },
+                  dispose: async () => {},
+                };
+              },
+            },
+          );
+          assert.equal(replaced, true);
+          assert.equal(loadCount, phase === 'read' ? 0 : 1);
+          assert.equal(reservationAttempted, phase === 'reserve');
+          assert.equal(code, 1);
+          assert.equal(output, '');
+          assert.equal(error, 'TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED\n');
+          await assert.rejects(stat(`${plan}.dispatch`), { code: 'ENOENT' });
+          await assert.rejects(stat(`${moved}.dispatch`), { code: 'ENOENT' });
+        } finally {
+          hook.mock.restore();
+          syncBuiltinESMExports();
+        }
+      });
+    }
+  }
+});
+
 test('refuses credential arguments and malformed private JSON without loading the runtime', async (t) => {
   const root = await directory(t);
   let output = '',

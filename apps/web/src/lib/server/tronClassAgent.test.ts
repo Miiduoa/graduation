@@ -292,6 +292,45 @@ describe('scoped deterministic TronClass Agent tools', () => {
     expect(f.read).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ['查玩課雲%s公告', 'announcements'],
+    ['查玩課雲%s教材', 'materials'],
+    ['下載玩課雲%s教材', 'download'],
+    ['下載玩課雲%s', 'download'],
+  ] as const)('resolves the complete course range in %s', async (template, intent) => {
+    const listOnly = { include: { homework: false, announcements: false, materials: false } };
+    for (const target of ['『資料庫系統』', '『資料庫』『計算機概論』']) {
+      const f = fixture();
+      const result = await f.service.ask(owner, { question: template.replace('%s', target) });
+      expect(result).toMatchObject({ intent, selection: 'course', actions: [],
+        snapshot: { announcements: [], materials: [] } });
+      expect(result.answer).toContain('請選擇要查詢的課程');
+      expect(f.read.mock.calls).toEqual([[owner, listOnly]]);
+    }
+    for (const target of ['『資料庫』', '『CS101』']) {
+      const f = fixture();
+      const result = await f.service.ask(owner, { question: template.replace('%s', target) });
+      expect(result).toMatchObject({ intent, selection: null });
+      expect(f.read.mock.calls).toEqual([
+        [owner, listOnly],
+        [owner, { courseId: 101, include: { homework: false, announcements: intent === 'announcements', materials: intent !== 'announcements' } }],
+      ]);
+    }
+  });
+
+  it('only falls back to the sole course for an unqualified request', async () => {
+    const f = fixture();
+    f.read.mockResolvedValue({ ...snapshot, courses: [course] });
+    for (const question of ['下載玩課雲『教材』', '下載玩課雲『資料庫教材』']) {
+      f.read.mockClear();
+      expect(await f.service.ask(owner, { question })).toMatchObject({ selection: 'course', actions: [] });
+      expect(f.read).toHaveBeenCalledOnce();
+    }
+    f.read.mockClear();
+    expect(await f.service.ask(owner, { question: '下載玩課雲教材' })).toMatchObject({ selection: null });
+    expect(f.read).toHaveBeenLastCalledWith(owner, { courseId: 101, include: { homework: false, announcements: false, materials: true } });
+  });
+
   it('resolves one exact course title and renders notice text as data only', async () => {
     const f = fixture();
     const result = await f.service.ask(owner, { question: '查 TronClass「資料庫」公告' });

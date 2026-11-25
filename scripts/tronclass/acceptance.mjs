@@ -73,11 +73,12 @@ function localPath(value) {
   return resolved;
 }
 function privateStat(stat, directory = false) {
+  const mode = Number(stat.mode);
   if (
     typeof process.getuid !== 'function' ||
-    stat.uid !== process.getuid() ||
-    (stat.mode & 0o077) !== 0 ||
-    (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1)
+    Number(stat.uid) !== process.getuid() ||
+    (mode & 0o077) !== 0 ||
+    (directory ? !stat.isDirectory() : !stat.isFile() || Number(stat.nlink) !== 1)
   ) {
     fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
   }
@@ -133,18 +134,52 @@ async function withPrivateFileLocation(value, privateParent, action) {
 }
 
 export function readPrivateJson(value) {
-  return withPrivateFileLocation(value, false, readPrivateJsonAt);
+  return withPrivateFileLocation(value, false, (directory, name, verifyParent) =>
+    withPinnedPrivateFileAt(directory, name, verifyParent, readPinnedPrivateJson),
+  );
 }
 
-async function readPrivateJsonAt(directory, name, verifyParent) {
-  let entry;
+async function openPrivateEntry(directory, name) {
+  try {
+    // O_PATH does not open FIFOs for I/O. With O_NOFOLLOW, stat sees the
+    // symlink itself and the regular-file check rejects it.
+    return await open(childPath(directory, name), O_PATH | constants.O_NOFOLLOW);
+  } catch {
+    fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
+  }
+}
+
+async function withPinnedPrivateFileAt(directory, name, verifyParent, action) {
+  const entry = await openPrivateEntry(directory, name);
+  try {
+    return await action(entry, verifyEntry, verifyParent);
+  } finally {
+    await entry.close();
+  }
+
+  async function verifyEntry() {
+    let current;
+    try {
+      const pinned = await entry.stat({ bigint: true });
+      privateStat(pinned);
+      current = await openPrivateEntry(directory, name);
+      const named = await current.stat({ bigint: true });
+      privateStat(named);
+      if (named.dev !== pinned.dev || named.ino !== pinned.ino)
+        fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
+    } catch {
+      fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
+    } finally {
+      await current?.close();
+    }
+  }
+}
+
+async function readPinnedPrivateJson(entry, verifyEntry, verifyParent) {
   let handle;
   try {
-    // O_PATH binds even a FIFO without opening it for I/O. A symlink opened
-    // with O_PATH | O_NOFOLLOW is itself the entry and fails the regular-file check.
-    entry = await open(childPath(directory, name), O_PATH | constants.O_NOFOLLOW);
-    privateStat(await entry.stat());
     await verifyParent();
+    await verifyEntry();
     handle = await open(fdPath(entry), constants.O_RDONLY | constants.O_NONBLOCK);
     const before = await handle.stat();
     privateStat(before);
@@ -179,7 +214,7 @@ async function readPrivateJsonAt(directory, name, verifyParent) {
     if (SAFE_CODES.has(error?.code)) throw error;
     fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
   } finally {
-    await Promise.all([handle?.close(), entry?.close()]);
+    await handle?.close();
   }
 }
 
@@ -189,12 +224,13 @@ export function writePrivateJson(value, body, existingIsRefusal = false) {
   );
 }
 
-async function writePrivateJsonAt(directory, name, verifyParent, body, existingIsRefusal = false) {
+async function writePrivateJsonAt(directory, name, verifyParent, body, existingIsRefusal = false, verifyPlan) {
   const data = Buffer.from(`${JSON.stringify(body, null, 2)}\n`, 'utf8');
   if (data.byteLength > MAX_FILE_BYTES) fail('TRONCLASS_ACCEPTANCE_FILE_TOO_LARGE');
   let handle;
   try {
     await verifyParent();
+    await verifyPlan?.();
     try {
       handle = await open(
         childPath(directory, name),
@@ -363,53 +399,63 @@ export async function runAcceptanceCli(
     }
     const input = values.input ? await readPrivateJson(values.input) : undefined;
     await withPrivateFileLocation(values.plan, true, async (directory, name, verifyParent) => {
-      const plan =
-        command === 'preflight' ? undefined : await readPrivateJsonAt(directory, name, verifyParent);
-      const confirmation = values.confirm ? await readPrivateJson(values.confirm) : undefined;
       if (command === 'preflight') {
-        try {
-          await lstat(childPath(directory, name));
-          fail('TRONCLASS_ACCEPTANCE_OUTPUT_EXISTS');
-        } catch (error) {
-          if (error?.code !== 'ENOENT') throw error;
-        }
-      }
-      runtime = await loadRuntime();
-      if (input !== undefined) runtime.module.parseTronClassAcceptanceInput(input);
-      service = await runtime.module.createDefaultTronClassAcceptanceService({
-        reserveDispatch: (accepted) =>
-          writePrivateJsonAt(
-            directory,
-            `${name}.dispatch`,
-            verifyParent,
-            {
-              version: 1,
-              state: 'dispatch-started',
-              operationId: accepted.operationId,
-              contentSha256: accepted.contentSha256,
-              planSignature: accepted.signature,
-            },
-            true,
-          ),
-      });
-      if (command === 'preflight') {
-        const prepared = await service.preflight(input);
-        await writePrivateJsonAt(directory, name, verifyParent, prepared);
-        stdout(
-          `${JSON.stringify({
-            status: 'prepared',
-            operationId: prepared.operationId,
-            contentSha256: prepared.contentSha256,
-            expiresAt: prepared.expiresAt,
-            contractVerified: false,
-          })}\n`,
-        );
+        await runWithPlan();
       } else {
-        const result =
-          command === 'dispatch'
-            ? await service.dispatch(input, plan, confirmation)
-            : await service.reconcile(plan);
-        stdout(`${JSON.stringify(publicResult(result, plan.operationId))}\n`);
+        await withPinnedPrivateFileAt(directory, name, verifyParent, async (entry, verifyPlan) => {
+          const plan = await readPinnedPrivateJson(entry, verifyPlan, verifyParent);
+          await runWithPlan(plan, verifyPlan);
+        });
+      }
+
+      async function runWithPlan(plan, verifyPlan) {
+        const confirmation = values.confirm ? await readPrivateJson(values.confirm) : undefined;
+        if (command === 'preflight') {
+          try {
+            await lstat(childPath(directory, name));
+            fail('TRONCLASS_ACCEPTANCE_OUTPUT_EXISTS');
+          } catch (error) {
+            if (error?.code !== 'ENOENT') throw error;
+          }
+        }
+        runtime = await loadRuntime();
+        if (input !== undefined) runtime.module.parseTronClassAcceptanceInput(input);
+        service = await runtime.module.createDefaultTronClassAcceptanceService({
+          reserveDispatch: (accepted) =>
+            writePrivateJsonAt(
+              directory,
+              `${name}.dispatch`,
+              verifyParent,
+              {
+                version: 1,
+                state: 'dispatch-started',
+                operationId: accepted.operationId,
+                contentSha256: accepted.contentSha256,
+                planSignature: accepted.signature,
+              },
+              true,
+              verifyPlan,
+            ),
+        });
+        if (command === 'preflight') {
+          const prepared = await service.preflight(input);
+          await writePrivateJsonAt(directory, name, verifyParent, prepared);
+          stdout(
+            `${JSON.stringify({
+              status: 'prepared',
+              operationId: prepared.operationId,
+              contentSha256: prepared.contentSha256,
+              expiresAt: prepared.expiresAt,
+              contractVerified: false,
+            })}\n`,
+          );
+        } else {
+          const result =
+            command === 'dispatch'
+              ? await service.dispatch(input, plan, confirmation)
+              : await service.reconcile(plan);
+          stdout(`${JSON.stringify(publicResult(result, plan.operationId))}\n`);
+        }
       }
     });
     await service.dispose?.();

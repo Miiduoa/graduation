@@ -7,7 +7,8 @@ import type {
 } from '../tronClassAgentTypes';
 import { TRONCLASS_AGENT_MAX_ACTIONS } from '../tronClassAgentTypes';
 import {
-  hasTronClassReadTargetConflict, isTronClassCompoundDownloadAndPrepare, parseTronClassAgentIntent, tronClassAgentHomeworkScope,
+  hasTronClassReadTargetConflict, isTronClassCompoundDownloadAndPrepare, parseTronClassAgentIntent,
+  tronClassAgentHomeworkScope, tronClassReadCourseScope,
 } from '../tronClassAgentIntent';
 import type { TronClassHomeworkItem, TronClassPreparation, TronClassSnapshot } from '../tronClassIntegrationTypes';
 import { tronClassUploadKey } from '../tronClassIntegrationClient';
@@ -224,13 +225,16 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         answer: `${snapshot.partial ? '部分課程資料尚未讀完。' : ''}已讀取 ${snapshot.courses.length} 門 TronClass 課程，可在這裡選擇課程查看作業、公告與教材。` });
 
       if (!courseId) {
+        const courseScope = query.intent === 'announcements' || query.intent === 'materials' || query.intent === 'download'
+          ? tronClassReadCourseScope(input.question, query.intent)
+          : homeworkScope;
         const canResolveCourse = !readsHomework || (!homeworkScope.requiresConfirmation &&
           !snapshot.errors.some(error => error.area === 'courses'));
-        const matches = canResolveCourse ? snapshot.courses.filter(course => readsHomework
-          ? homeworkScope.matches(course.name, course.code)
-          : containsName(input.question, course.name) || (course.code.length > 1 && containsName(input.question, course.code))) : [];
-        if (matches.length === 1) courseId = matches[0].id; else if (['materials', 'announcements', 'download'].includes(query.intent) && snapshot.courses.length === 1 &&
-          !snapshot.partial && isUnqualifiedRequest(input.question, ['公告', '通知', ...snapshot.courses.map((course) => course.name)])) {
+        const matches = canResolveCourse ? snapshot.courses.filter(course => courseScope.matches(course.name, course.code)) : [];
+        if (matches.length === 1) {
+          courseId = matches[0].id;
+        } else if ('quoted' in courseScope && courseScope.quoted.length === 0 && snapshot.courses.length === 1 && !snapshot.partial &&
+          isUnqualifiedRequest(input.question, ['公告', '通知'])) {
           courseId = snapshot.courses[0].id;
         }
         if (courseId) snapshot = await guardedRead(courseId);

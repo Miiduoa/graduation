@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { tronClassAgentHomeworkScope, tronClassQuotedTargets, matchesTronClassHomeworkCourse, isTronClassHomeworkOverview, isTronClassCompoundDownloadAndPrepare, canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs, tronClassReadRequestVerbs } from './tronClassAgentIntent';
+import { tronClassAgentHomeworkScope, tronClassReadCourseScope, tronClassQuotedTargets, matchesTronClassHomeworkCourse, isTronClassHomeworkOverview, isTronClassCompoundDownloadAndPrepare, canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs, tronClassReadRequestVerbs } from './tronClassAgentIntent';
 
 /** Unknown leftover tokens now make a sentence ambiguous (confirmation), which is acceptable. */
 function expectAuthorizedOrAmbiguous(
@@ -115,6 +115,14 @@ describe('TronClass homework overview scope', () => {
     expect(matchesTronClassHomeworkCourse(question, '資料庫')).toBe(false);
     expect(matchesTronClassHomeworkCourse(question, '資料庫實習')).toBe(true);
   });
+
+  it.each(['查玩課雲%s公告', '查玩課雲%s教材', '下載玩課雲%s教材'])(
+    'matches the full unquoted course range in %s', template => {
+      const scope = tronClassReadCourseScope(template.replace('%s', '資料庫系統'));
+      expect(scope.matches('資料庫')).toBe(false);
+      expect(scope.matches('資料庫系統')).toBe(true);
+    },
+  );
 });
 
 describe('explicit TronClass navigation', () => {

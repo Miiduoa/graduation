@@ -2019,8 +2019,8 @@ function analyzeReadRequest(text: string, tokens: Token[]) {
   const intent = namedType?.intent;
   return {
     intent, complementAt, conflict,
-    courseScope: () => readCourseScope(text, quotes, intent, conflict,
-      intent === 'homework' && hasOutsideQuotes(/全部|所有|\ball\b/iu)),
+    courseScope: (scopeIntent = intent) => readCourseScope(text, quotes, scopeIntent, conflict,
+      scopeIntent === 'homework' && hasOutsideQuotes(/全部|所有|\ball\b/iu)),
     hasOutsideQuotes,
   };
   function hasOutsideQuotes(pattern: RegExp, end = text.length): boolean {
@@ -2057,6 +2057,7 @@ function isCourseReadFrame(text: string, intent?: TronClassAgentIntent, targetSp
     if (target && token.start >= target.open && token.end <= target.end) return true;
     const predicate = predicateKindOf(token);
     return !token.value.trim() || token.kind === 'punct' || predicate === 'read' || predicate === 'prepare' ||
+      (intent === 'materials' && predicate === 'download') ||
       HOMEWORK_OVERVIEW_WORDS.has(token.value.toLowerCase()) ||
       (intent !== 'homework' && DATA_TYPES.some(type => type.intent === intent && type.pattern.test(token.value))) ||
       (predicate === 'write' && matchesStatusSuffix(text, token.end) !== undefined);
@@ -2101,7 +2102,11 @@ export function matchesTronClassHomeworkCourse(question: string, name: string): 
 }
 
 export function tronClassQuotedTargets(question: string): string[] {
-  return parseReadRequest(question).courseScope().quoted;
+  return tronClassReadCourseScope(question).quoted;
+}
+
+export function tronClassReadCourseScope(question: string, intent?: 'announcements' | 'materials' | 'download') {
+  return parseReadRequest(question).courseScope(intent === 'download' ? 'materials' : intent);
 }
 
 export type TronClassAgentQueryIntent = {
