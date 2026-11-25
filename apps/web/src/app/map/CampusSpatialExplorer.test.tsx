@@ -867,9 +867,12 @@ it('offers an accessible way to recover a suspended scene when mobile visibility
     act(() => intersection?.(entries, {} as IntersectionObserver));
   };
 
+  // Wait for the committed ready state, not just the scene factory call.
+  // A slow worker may observe create() before React commits the ready UI.
+  await waitFor(() => expect(host.tabIndex).toBe(0));
   // Keyboard focus was on the active 3D host when it suspended.
   // Only then should the recovery control receive focus.
-  host.focus();
+  act(() => host.focus());
   expect(document.activeElement).toBe(host);
   notify(false, 200);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
@@ -991,6 +994,41 @@ it('keeps keyboard focus on directions instead of stealing it during offscreen 3
   expect(document.activeElement).toBe(directions);
   expect(scene.create).toHaveBeenCalledTimes(1);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('recovers focus blurred by scene deactivation without overriding a deliberate focus move', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const directions = within(dialog).getByRole('link', { name: '開啟步行導航' });
+  await waitFor(() => expect(host.tabIndex).toBe(0));
+  const notify = (visible: boolean) => act(() => intersection?.([
+    observerEntry(host, visible),
+  ], {} as IntersectionObserver));
+
+  act(() => host.focus());
+  expect(document.activeElement).toBe(host);
+  // Some browsers synchronously blur a marker when WebGL deactivates it.
+  scene.setActive.mockImplementationOnce(() => host.blur());
+  notify(false);
+  expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '重新啟動立體畫面' }));
+  notify(true);
+  expect(document.activeElement).toBe(host);
+
+  // A focus move during deactivation must take precedence over stale intent.
+  scene.setActive.mockImplementationOnce(() => directions.focus());
+  notify(false);
+  expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+  expect(document.activeElement).toBe(directions);
+  notify(true);
+  expect(document.activeElement).toBe(directions);
+  expect(scene.create).toHaveBeenCalledTimes(1);
 });
 
 it('moves focus from the restart button into the scene when auto-resume removes it', async () => {
