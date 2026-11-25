@@ -268,12 +268,14 @@ function MapContent({
   const selectedId = selection ?? (focus ? focusedPlace?.id : automaticClassroomId);
   const selected = locations.find((location) => location.id === selectedId) ?? null;
   const deepLinkRoute = useMemo<[MapLocation, MapLocation] | null>(() => {
+    // A shared route is not an explicit confirmation of provisional bundled markers.
+    if (sourcePending) return null;
     const ids = route?.split(',').map((id) => id.trim());
     if (!ids || ids.length !== 2 || ids[0] === ids[1]) return null;
     const from = locations.find((location) => location.id === ids[0]);
     const to = locations.find((location) => location.id === ids[1]);
     return from && to ? [from, to] : null;
-  }, [route, locations]);
+  }, [route, locations, sourcePending]);
   const routeStart = confirmedRoutePlace(locations, routeDraft?.from ?? null);
   const routeEnd = confirmedRoutePlace(locations, routeDraft?.to ?? null);
   const routeNeedsConfirmation = Boolean(
@@ -487,6 +489,14 @@ function MapContent({
           <p role="status">已設定「{routeStart.name}」為起點。請選擇其他地點，再按「設為終點」。</p>
           <button className="btn" onClick={() => setRouteDraft({ from: null, to: null })}>
             取消起點
+          </button>
+        </div>
+      )}
+      {sourcePending && route && routeDraft === null && (
+        <div className={styles.notice}>
+          <p role="status">正在確認連結的起點與終點，確認後才會提供步行導航。</p>
+          <button className="btn" type="button" onClick={() => setRouteDraft({ from: null, to: null })}>
+            清除路線
           </button>
         </div>
       )}
