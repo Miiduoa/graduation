@@ -3,6 +3,12 @@
   "reviewBase": "b94f1ea4ec0962bb655deef95ea356afc85a7a35",
   "reviewedIgnoreBlob": "848dc8304adb2ec8db2b534ae36f9b042ede2b30",
   "sourceRun": 41307842834,
+  "publicWorkflowReference": {
+    "fingerprint": "5313e3dca4d731c7451181390bdbecb8842e33fa:scripts/merge-gate/policy.json:generic-api-key:18",
+    "policyBlob": "7fc7c50d7add53919c401d2729464e5b93fb347a",
+    "workflowPath": ".github/workflows/course-access-review.yml",
+    "workflowBlob": "11d270b1acd222b158b2a182e46d7ccb3c3aa099"
+  },
   "aliases": [
     {
       "reviewed": "2c4a285abdb24aa2346e9783d24bf1fb3c420356:scripts/verify-nuni-materials-api.mjs:generic-api-key:164",
