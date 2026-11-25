@@ -77,6 +77,21 @@ describe('independent TronClass source', () => {
     expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
   });
 
+  it('does not contact private data feeds when the current complete index fails the selection check', async () => {
+    const { reader, source } = setup();
+    const acceptCourseIndex = vi.fn(() => false);
+    const result = await reader('platform:pa_fixture', { courseId: 101, requireCompleteCourses: true, acceptCourseIndex,
+      include: { homework: true, announcements: true, materials: true } });
+    expect(acceptCourseIndex).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      courses: expect.arrayContaining([expect.objectContaining({ id: 101 })]), partial: false, errors: [],
+    }));
+    expect(result).toMatchObject({ partial: false, homework: [], announcements: [], materials: [] });
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+    expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
+  });
+
   it('rejects a course index if the school binding changes during its course reads', async () => {
     const { source, bindings } = setup();
     bindings.assertCurrent.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined)

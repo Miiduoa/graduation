@@ -87,6 +87,27 @@ test('rejects symlinks, oversized files, broad permissions and URLs without expo
   }
 });
 
+test('walks directory components before applying dot-dot to private paths', async (t) => {
+  const root = await directory(t);
+  const child = path.join(root, 'child');
+  const source = path.join(root, 'input.json');
+  const output = path.join(root, 'plan.json');
+  await mkdir(child, { mode: 0o700 });
+  await symlink(child, path.join(root, 'alias'));
+  await privateJson(source, { value: 'synthetic' });
+
+  await assert.rejects(readPrivateJson(`${root}/alias/../input.json`), {
+    code: 'TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED',
+  });
+  await assert.rejects(writePrivateJson(`${root}/alias/../plan.json`, {}), {
+    code: 'TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED',
+  });
+  await assert.rejects(stat(output), { code: 'ENOENT' });
+  assert.deepEqual(await readPrivateJson(`${root}//child/./../input.json`), { value: 'synthetic' });
+  assert.equal(await writePrivateJson(`${root}/child/../plan.json`, { version: 1 }), true);
+  assert.deepEqual(await readPrivateJson(output), { version: 1 });
+});
+
 test('rejects nonprivate output directories and keeps a once marker across competing writers', async (t) => {
   const root = await directory(t);
   const marker = path.join(root, 'plan.json.dispatch');

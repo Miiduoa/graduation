@@ -1851,6 +1851,16 @@ function wholeRequestAllowsCompoundRead(question: string): boolean {
   return clauses.every(clauseAllowsCompoundCompanion);
 }
 
+function isCourseQualifiedCompanion(clause: string, candidate: string, target: ReturnType<typeof parseReadRequest>,
+  scope: ReturnType<typeof readCourseScope>): boolean {
+  if (!target.intent || scope.overview || !isPositivelyProvenRead(candidate)) return false;
+  // Keep complete service names (such as 校園公告) in the cross-service planner.
+  const subjectStart = tokensFor(clause).find(token => !isAllowedRequestPrefix(token) &&
+    predicateKindOf(token) !== 'read' && predicateKindOf(token) !== 'download')?.start;
+  return subjectStart !== undefined &&
+    resolveAssistantServiceIntent(`打開${clause.slice(subjectStart, target.complementAt)}`)?.kind !== 'open';
+}
+
 /**
  * For a multi-clause request, list the clauses the TronClass Agent should also
  * answer. The whole request still goes to the original cross-service planning
@@ -1892,7 +1902,7 @@ function parseTronClassCompound(question: string) {
     const courseScope = target.courseScope();
     // A course qualifier can contain a service word, even when the source is inherited.
     if (target.hasOutsideQuotes(OTHER_SERVICE_OR_SCHEDULE) &&
-      !explicitSource && !(target.intent === 'homework' && isPositivelyProvenRead(candidate))) continue;
+      !explicitSource && !isCourseQualifiedCompanion(clause, candidate, target, courseScope)) continue;
     // Earlier companions can constrain the course. Supplemental answers still require established context.
     if (!context && !explicitSource) {
       courseScopes.push(courseScope);

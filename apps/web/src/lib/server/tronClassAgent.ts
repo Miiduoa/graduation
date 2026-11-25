@@ -13,7 +13,7 @@ import {
 import type { TronClassHomeworkItem, TronClassPreparation, TronClassSnapshot } from '../tronClassIntegrationTypes';
 import { tronClassUploadKey } from '../tronClassIntegrationClient';
 import { createTronClassAgentGrantService } from './tronClassAgentGrants';
-import { createTronClassIntegrationReader } from './tronClassIntegrationSource';
+import { createTronClassIntegrationReader, type TronClassSnapshotReadOptions } from './tronClassIntegrationSource';
 import { getDefaultTronClassSubmissionService } from './tronClassSubmission';
 
 export type TronClassAgentGrants = Pick<ReturnType<typeof createTronClassAgentGrantService>, 'get' | 'require' | 'assertCurrent'>;
@@ -62,7 +62,7 @@ function isUnqualifiedRequest(question: string, names: string[]): boolean {
 }
 
 function resolveCourse(
-  snapshot: TronClassSnapshot,
+  snapshot: Pick<TronClassSnapshot, 'courses' | 'errors' | 'partial'>,
   scope: NonNullable<ReturnType<typeof tronClassAgentCourseScope>>,
   question: string,
   allowSoleCourseFallback: boolean,
@@ -214,8 +214,8 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         steps: [{ id: 'capability', tool: 'select_target', status: query.intent === 'unsupported' ? 'blocked' : 'completed', message: '已核對 Agent 可用功能與授權範圍。' }] });
       }
       const readsHomework = query.intent === 'homework' || query.intent === 'prepare';
-      const snapshotRead = (courseId?: number, requireCompleteCourses = false) => ({
-        ...(requireCompleteCourses ? { requireCompleteCourses } : {}),
+      const snapshotRead = (courseId?: number, acceptCourseIndex?: TronClassSnapshotReadOptions['acceptCourseIndex']) => ({
+        ...(acceptCourseIndex ? { requireCompleteCourses: true, acceptCourseIndex } : {}),
         ...(courseId !== undefined ? { courseId } : {}),
         include: {
           homework: readsHomework && courseId !== undefined,
@@ -223,11 +223,11 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
           materials: (query.intent === 'materials' || query.intent === 'download') && courseId !== undefined,
         },
       });
-      const guardedRead = async (courseId?: number, requireCompleteCourses = false) => {
+      const guardedRead = async (courseId?: number, acceptCourseIndex?: TronClassSnapshotReadOptions['acceptCourseIndex']) => {
         await assertScopes(ownerKey, grant, scope);
-        const result = await read(ownerKey, snapshotRead(courseId, requireCompleteCourses));
+        const result = await read(ownerKey, snapshotRead(courseId, acceptCourseIndex));
         if (result.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
-        if (courseId && !(requireCompleteCourses && result.errors.some((error) => error.area === 'courses')) &&
+        if (courseId && !acceptCourseIndex &&
           !result.courses.some((course) => course.id === courseId)) throw new NuniError(403, 'TRONCLASS_COURSE_NOT_FOUND');
         await assertScopes(ownerKey, grant, scope);
         return result;
@@ -240,11 +240,17 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         answer: `${snapshot.partial ? '部分課程資料尚未讀完。' : ''}已讀取 ${snapshot.courses.length} 門 TronClass 課程，可在這裡選擇課程查看作業、公告與教材。` });
 
       if (!courseId) {
-        courseId = resolveCourse(snapshot, courseScope, input.question, !readsHomework);
-        if (courseId) {
-          snapshot = await guardedRead(courseId, true);
+        const resolveScope = (index: Parameters<typeof resolveCourse>[0]) =>
+          resolveCourse(index, courseScope, input.question, !readsHomework);
+        const selected = resolveScope(snapshot);
+        if (selected) {
+          snapshot = await guardedRead();
+          if (resolveScope(snapshot) === selected) {
+            snapshot = await guardedRead(selected, index => resolveScope(index) === selected);
+            // A private feed failure does not invalidate the course index.
+            if (resolveScope({ ...snapshot, partial: false }) === selected) courseId = selected;
+          }
           if (snapshot.errors.some((error) => error.area === 'courses')) {
-            courseId = undefined;
             steps.push({ id: 'courses-refresh', tool: 'read_courses', status: 'partial', message: '重新核對時未取得完整課程清單。' });
           }
         }

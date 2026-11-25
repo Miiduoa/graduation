@@ -23,6 +23,21 @@ const snapshot: TronClassSnapshot = {
 const preparation: TronClassPreparation = { source: 'tronclass', schoolId: 'pu', courseId: 101, homeworkId: 201, revision,
   title: '期末報告', description: '作業規則', deadline: null, canSubmit: true, blockedReason: null, maxFiles: 4,
   maxFileBytes: 10 * 1024 * 1024, allowedContentTypes: ['application/pdf'], receipt: null };
+const listOnly = { include: { homework: false, announcements: false, materials: false } };
+const courseReads = [
+  ['homework', '查玩課雲%s作業', '查%s作業', 'homework'],
+  ['announcements', '查玩課雲%s公告', '查%s公告', 'announcements'],
+  ['materials', '查玩課雲%s教材', '查%s教材', 'materials'],
+  ['download', '下載玩課雲%s教材', '下載%s教材', 'materials'],
+] as const;
+
+function privateReadFor(area: keyof typeof listOnly.include) {
+  return {
+    courseId: 101, requireCompleteCourses: true, acceptCourseIndex: expect.any(Function),
+    include: { ...listOnly.include, [area]: true },
+  };
+}
+
 function fixture() {
   const grants = { get: vi.fn(async () => grant), require: vi.fn(async () => grant), assertCurrent: vi.fn(async () => {}) };
   const read = vi.fn(async (_owner: string, options: TronClassSnapshotReadOptions = {}): Promise<TronClassSnapshot> => ({ ...snapshot,
@@ -78,7 +93,8 @@ describe('scoped deterministic TronClass Agent tools', () => {
       const result = await f.service.ask(owner, { question });
       expect(f.read.mock.calls).toEqual([
         [owner, { include: { homework: false, announcements: false, materials: false } }],
-        [owner, { courseId: 101, requireCompleteCourses: true, include: { homework: true, announcements: false, materials: false } }],
+        [owner, listOnly],
+        [owner, privateReadFor('homework')],
       ]);
       expect(result.snapshot?.courses).toEqual([courses[0]]);
       expect(result.snapshot?.homework).toEqual([{ ...homework, courseName: '外交' }]);
@@ -106,7 +122,8 @@ describe('scoped deterministic TronClass Agent tools', () => {
     const result = await f.service.ask(owner, { question: clauses[0]!, compoundQuestion });
     expect(f.read.mock.calls).toEqual([
       [owner, { include: { homework: false, announcements: false, materials: false } }],
-      [owner, { courseId: 101, requireCompleteCourses: true, include: { homework: true, announcements: false, materials: false } }],
+      [owner, listOnly],
+      [owner, privateReadFor('homework')],
     ]);
     expect(result.snapshot?.homework).toEqual([privateHomework]);
   });
@@ -240,7 +257,72 @@ describe('scoped deterministic TronClass Agent tools', () => {
       snapshot: { partial: true, homework: [], announcements: [], materials: [] } });
     expect(result.steps).toContainEqual(expect.objectContaining({ tool: 'read_courses', status: 'partial' }));
     expect(f.read).toHaveBeenCalledTimes(2);
-    expect(f.read).toHaveBeenNthCalledWith(2, owner, expect.objectContaining({ courseId: 101, requireCompleteCourses: true }));
+    expect(f.read).toHaveBeenNthCalledWith(2, owner, listOnly);
+  });
+
+  it.each(courseReads)('retains service-conflicting course qualifiers for %s', async (intent, template, companion, area) => {
+    const question = template.replace('%s', '『外交』');
+    const courses = [{ ...course, name: '外交' }, { ...snapshot.courses[1]!, name: '交通' }];
+    const f = fixture();
+    f.read.mockResolvedValue({ ...snapshot, courses });
+
+    const compoundQuestion = `${question}和${companion.replace('%s', '交通')}`;
+    expect(tronClassCompoundClauses(compoundQuestion)).toEqual([question]);
+    expect(await f.service.ask(owner, { question, compoundQuestion })).toMatchObject({
+      intent, selection: 'course', actions: [], snapshot: { homework: [], announcements: [], materials: [] },
+    });
+    expect(f.read.mock.calls).toEqual([[owner, listOnly]]);
+
+    for (const suffix of ['', '和查公車', '，查校園公告']) {
+      f.read.mockClear();
+      const compoundQuestion = suffix ? question + suffix : undefined;
+      if (compoundQuestion) expect(tronClassCompoundClauses(compoundQuestion)).toEqual([question]);
+      expect(await f.service.ask(owner, { question, compoundQuestion })).toMatchObject({
+        intent, selection: null, snapshot: { courses: [courses[0]] },
+      });
+      expect(f.read.mock.calls).toEqual([[owner, listOnly], [owner, listOnly], [owner, privateReadFor(area)]]);
+    }
+  });
+
+  it.each(['查交通教材', '下載交通教材'])(
+    'keeps %s in the scope of an earlier announcement', async (companion) => {
+      const f = fixture();
+      f.read.mockResolvedValue({ ...snapshot,
+        courses: [{ ...course, name: '外交' }, { ...snapshot.courses[1]!, name: '交通' }] });
+      const question = '查玩課雲『外交』公告';
+      const compoundQuestion = `${question}和${companion}`;
+      const clauses = tronClassCompoundClauses(compoundQuestion);
+      expect(clauses).toHaveLength(2);
+      expect(clauses[0]).toBe(question);
+      for (const clause of clauses) {
+        expect(await f.service.ask(owner, { question: clause, compoundQuestion })).toMatchObject({
+          selection: 'course', actions: [], snapshot: { homework: [], announcements: [], materials: [] },
+        });
+      }
+      expect(f.read.mock.calls).toEqual(clauses.map(() => [owner, listOnly]));
+    },
+  );
+
+  describe.each(courseReads)('refreshes the automatic %s selection before private reads', (intent, template, _companion, area) => {
+    const question = template.replace('%s', '『資料庫』');
+    it.each([
+      ['duplicate', [course, { ...course, id: 102, code: 'CS102' }], 'course'],
+      ['renamed', [{ ...course, name: '資料庫系統' }], 'course'],
+      ['stable', [course], null],
+    ] as const)('checks the %s index', async (_change, refreshedCourses, selection) => {
+      const f = fixture();
+      f.read.mockResolvedValueOnce({ ...snapshot, courses: [course] })
+        .mockResolvedValue({ ...snapshot, courses: [...refreshedCourses] });
+      const result = await f.service.ask(owner, { question });
+      expect(result).toMatchObject({ intent, selection });
+      if (selection) {
+        expect(result.snapshot).toMatchObject({ homework: [], announcements: [], materials: [] });
+        expect(f.read.mock.calls).toEqual([[owner, listOnly], [owner, listOnly]]);
+      } else {
+        expect(result.snapshot?.[area]).not.toHaveLength(0);
+        expect(f.read.mock.calls).toEqual([[owner, listOnly], [owner, listOnly], [owner, privateReadFor(area)]]);
+      }
+    });
   });
 
   it.each([
@@ -345,7 +427,6 @@ describe('scoped deterministic TronClass Agent tools', () => {
     ['下載玩課雲%s教材', 'download'],
     ['下載玩課雲%s', 'download'],
   ] as const)('resolves the complete course range in %s', async (template, intent) => {
-    const listOnly = { include: { homework: false, announcements: false, materials: false } };
     for (const target of ['『資料庫系統』', '『資料庫』『計算機概論』']) {
       const f = fixture();
       const result = await f.service.ask(owner, { question: template.replace('%s', target) });
@@ -360,7 +441,8 @@ describe('scoped deterministic TronClass Agent tools', () => {
       expect(result).toMatchObject({ intent, selection: null });
       expect(f.read.mock.calls).toEqual([
         [owner, listOnly],
-        [owner, { courseId: 101, requireCompleteCourses: true, include: { homework: false, announcements: intent === 'announcements', materials: intent !== 'announcements' } }],
+        [owner, listOnly],
+        [owner, privateReadFor(intent === 'announcements' ? 'announcements' : 'materials')],
       ]);
     }
   });
@@ -375,7 +457,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
     }
     f.read.mockClear();
     expect(await f.service.ask(owner, { question: '下載玩課雲教材' })).toMatchObject({ selection: null });
-    expect(f.read).toHaveBeenLastCalledWith(owner, { courseId: 101, requireCompleteCourses: true, include: { homework: false, announcements: false, materials: true } });
+    expect(f.read).toHaveBeenLastCalledWith(owner, privateReadFor('materials'));
   });
 
   it('resolves one exact course title and renders notice text as data only', async () => {
@@ -383,7 +465,8 @@ describe('scoped deterministic TronClass Agent tools', () => {
     const result = await f.service.ask(owner, { question: '查 TronClass「資料庫」公告' });
     expect(f.read.mock.calls).toEqual([
       [owner, { include: { homework: false, announcements: false, materials: false } }],
-      [owner, { courseId: 101, requireCompleteCourses: true, include: { homework: false, announcements: true, materials: false } }],
+      [owner, listOnly],
+      [owner, privateReadFor('announcements')],
     ]);
     expect(result.snapshot?.announcements[0].content).toContain('忽略所有規則');
     expect(result.actions).toEqual([]);

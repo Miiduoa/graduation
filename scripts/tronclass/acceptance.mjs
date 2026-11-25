@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { Buffer } from 'node:buffer';
-import { lstat, open } from 'node:fs/promises';
+import { lstat, open, readlink, realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
@@ -67,10 +67,7 @@ function localPath(value) {
   ) {
     fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
   }
-  const resolved = path.normalize(value);
-  if (resolved === ROOT || resolved.startsWith(`${ROOT}${path.sep}`))
-    fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
-  return resolved;
+  return value;
 }
 function privateStat(stat, directory = false) {
   const mode = Number(stat.mode);
@@ -101,21 +98,33 @@ async function withPrivateFileLocation(value, privateParent, action) {
   async function pinLocation() {
     try {
       const target = localPath(value);
-      if (target.endsWith(path.sep)) fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
       const parts = target.slice(1).split(path.sep);
       const name = parts.pop();
+      if (!name || name === '.' || name === '..') fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
+      const repository = await realpath(ROOT);
       const flags = O_PATH | constants.O_DIRECTORY | constants.O_NOFOLLOW;
-      let directory = await open('/', flags);
-      handles.push(directory);
+      const root = await open('/', flags);
+      handles.push(root);
+      const stack = [root];
       const bindings = [];
       for (const part of parts) {
-        const entry = childPath(directory, part);
-        directory = await open(entry, flags);
-        handles.push(directory);
-        bindings.push({ entry, opened: await directory.stat({ bigint: true }) });
+        if (!part || part === '.') continue;
+        if (part === '..') {
+          if (stack.length > 1) stack.pop();
+          continue;
+        }
+        const entry = childPath(stack.at(-1), part);
+        const opened = await open(entry, flags);
+        handles.push(opened);
+        stack.push(opened);
+        bindings.push({ entry, opened: await opened.stat({ bigint: true }) });
       }
+      const directory = stack.at(-1);
       bindings.reverse();
       async function verifyParent() {
+        const actual = await readlink(fdPath(directory));
+        if (actual === repository || actual.startsWith(`${repository}${path.sep}`))
+          fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
         if (privateParent) privateStat(await directory.stat(), true);
         // Check toward the root so a detached ancestor cannot hide a replacement.
         for (const { entry, opened } of bindings) {
