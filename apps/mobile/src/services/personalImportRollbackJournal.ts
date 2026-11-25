@@ -521,12 +521,12 @@ export function capturePersonalImportRollback(key: string) {
   if (retired && !rejectionRecorded && !rearmedPattern.test(retiredPayload ?? '')) return undefined;
   let markerCommitted = false;
   let rejected = rejectionRecorded;
-  let rejectionUnreadable = false;
+  let rejectionUnreadable = rejectionValue === undefined;
   let markerError: unknown;
   try {
     const state = marker.textSync();
     rejected ||= state === rejectedMarker;
-    rejectionUnreadable = rejectionValue === undefined && state !== rejectedMarker;
+    rejectionUnreadable &&= state !== rejectedMarker;
     markerCommitted = !rejected && state === committedMarker;
   } catch (error) {
     markerError = error;
@@ -664,6 +664,14 @@ export function publishNativeRollbackResolution(key: string, receipt: string): v
   if (readRejectionState(file) !== resolution) {
     throw new Error('無法確認匯入資料的還原狀態。');
   }
+}
+
+export function discardNativeRollbackAfterVerifiedWrite(key: string): void {
+  const { payload, marked } = journalFiles(key);
+  // Once the primary is verified, removing stale rollback evidence can
+  // publish those same bytes without writing another receipt or ledger.
+  discardPayload(rejectionFile(key));
+  if (marked) discardPayload(payload);
 }
 
 function publicationFile(key: string): File {
@@ -946,7 +954,7 @@ export function preparePersonalImportRollback(
         } catch (settlementError) {
           if (!allowPrimaryOnly) throw settlementError;
         }
-        if (allowPrimaryOnly && readOptionalFile(payload) === writtenPayload) return false;
+        if (allowPrimaryOnly) return false;
         throw error;
       }
       return true;

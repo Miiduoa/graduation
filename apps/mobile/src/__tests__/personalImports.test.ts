@@ -580,6 +580,10 @@ test.each([
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and backup read fault and file readback fault', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and backup write fault and rejection write fault and file write fault', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and backup read fault and rejection read fault and file readback fault', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and backup write fault and rejection write fault and resolution write fault and file write fault', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and backup read fault and rejection read fault and resolution read fault and file readback fault', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and backup read fault and rejection read fault and pending restart read fault and file readback fault', false],
+  ['readback without retirement file with verified first write and no hash or receipt without settlement or fallback and unreadable payload', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and transient file read', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient verification receipt read', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient readback', false],
@@ -612,6 +616,7 @@ test.each([
   const retirementWritesFail = phase.startsWith('all retirement writes fail');
   const settlementFails = phase.includes('without settlement');
   const fallbackWriteFails = phase.includes('or fallback');
+  const unreadablePayloadAfterRetirement = persistentMarkerReadFault && settlementFails;
   const fallbackReadFault = jest.fn(() => { throw new Error('第三次主鍵寫入後無法立即讀回'); });
   let failNextPrimaryRead = false;
   const settlementFault = jest.fn(() => { throw new Error('已完成標記無法寫入'); });
@@ -633,6 +638,13 @@ test.each([
   const resolutionReadFault = jest.fn(() => { throw new Error('拒絕檔無法讀回'); });
   let resolutionWritten = false;
   let restarting = false;
+  const resolutionKey = key + ':rollback-resolution';
+  const resolutionWriteBlocked = phase.includes('resolution write fault');
+  const resolutionReadBlocked = phase.includes('resolution read fault');
+  const resolutionSetFault = jest.fn(() => { throw new Error('還原狀態無法寫入'); });
+  const resolutionMultiSetFault = jest.fn(() => { throw new Error('還原狀態無法批次寫入'); });
+  const resolutionGetFault = jest.fn(() => { throw new Error('還原狀態無法讀回'); });
+  let resolutionStored = false;
   const backupKey = key + ':verified-write-backup';
   const backupWriteFails = phase.includes('backup write fault');
   const backupReadFails = phase.includes('backup read fault');
@@ -643,6 +655,7 @@ test.each([
   const multiSetReceiptFault = jest.fn(() => { throw new Error('原生批次寫入無法儲存憑據'); });
   if (persistentVerificationReceiptWriteFault) {
     multiSet.mockImplementation(async (entries) => {
+      if (resolutionWriteBlocked && entries.some(([entry]) => entry === resolutionKey)) resolutionMultiSetFault();
       if (entries.some(([entry]) => entry === key + ':verified-write')) multiSetReceiptFault();
       if (backupWriteFails && entries.some(([entry]) => entry === backupKey)) backupWriteFault();
       return nativeMultiSet(entries);
@@ -666,12 +679,19 @@ test.each([
   const publicationFault = jest.fn(() => { throw new Error('發佈憑據無法寫入'); });
   let encodedWrite = false;
   let markerReadBlocked = false;
+  const restartMarkerFault = jest.fn(() => { throw new Error('重啟時待處理標記無法讀取'); });
   const restoreError = new Error('主鍵無法還原');
   const persistentPrimaryReadFault = phase === 'all with primary readback error';
   let primaryReadBlocked = false;
   if (phase === 'publish' || phase.startsWith('all with primary') || verifiedFirstWrite || verifiedReplacement || publicationFails) {
     set.mockImplementation(async (entry, value) => {
       if (verificationReceiptWriteFails && entry === key + ':verified-write') verificationReceiptWriteFault();
+      if (entry === resolutionKey) {
+        if (resolutionWriteBlocked) resolutionSetFault();
+        await nativeSet(entry, value);
+        resolutionStored = true;
+        return;
+      }
       if (backupWriteFails && entry === backupKey) backupWriteFault();
       if (entry !== key) return nativeSet(entry, value);
       if (!active || (restorationFails && value === JSON.stringify(previous))) throw restoreError;
@@ -688,8 +708,9 @@ test.each([
     });
   }
   const primaryReadBack = jest.fn();
-  if (persistentPrimaryReadFault || retirementWritesFail) {
+  if (persistentPrimaryReadFault || retirementWritesFail || fallbackWriteFails) {
     get.mockImplementation(async (entry) => {
+      if (entry === resolutionKey && resolutionReadBlocked && resolutionStored) resolutionGetFault();
       if (backupReadFails && entry === backupKey) backupReadFault();
       if (entry === key && primaryReadBlocked) primaryFault();
       if (entry === key && failNextPrimaryRead) {
@@ -749,11 +770,14 @@ test.each([
       (restarting && phase.endsWith('transient file read') && fileReceiptReadFault.mock.calls.length === 0)
     )) fileReceiptReadFault();
     if (receiptReadBlocked && this.uri.endsWith('.rollback.published')) receiptReadFault();
-    if ((unreadablePayload || publicationFails) && retirementAttempts > 0 &&
+    const retirementReadsRecovered = restarting && unreadablePayloadAfterRetirement;
+    if (!retirementReadsRecovered && (unreadablePayload || publicationFails) && retirementAttempts > 0 &&
         this.uri.endsWith('.rollback.json')) payloadReadFault();
     if (rejectionReadFails && resolutionWritten && this.uri.endsWith('.rollback.rejected')) resolutionReadFault();
+    if (restarting && phase.includes('pending restart read fault') && this.uri === markerUri) restartMarkerFault();
     const value = textSync.call(this);
-    if (this.uri === markerUri && (markerReadBlocked || (markerReadFails && value === 'committed'))) {
+    if (!retirementReadsRecovered && this.uri === markerUri &&
+        (markerReadBlocked || (markerReadFails && value === 'committed'))) {
       markerReadBlocked ||= persistentMarkerReadFault;
       retirementAttempts++;
       if (revoked) active = false;
@@ -828,8 +852,13 @@ test.each([
         if (unreadablePayload) {
           expect(payloadReadFault).toHaveBeenCalled();
         } else {
-          const rawPayload = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.json`).textSync();
-          expect(rawPayload.slice(rawPayload.indexOf('\n') + 1)).toBe(JSON.stringify(previous));
+          const payload = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.json`);
+          if (resolutionWriteBlocked || resolutionReadBlocked) {
+            expect(payload.info().exists).toBe(false);
+          } else {
+            const rawPayload = payload.textSync();
+            expect(rawPayload.slice(rawPayload.indexOf('\n') + 1)).toBe(JSON.stringify(previous));
+          }
         }
         expect(textSync.call(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.pending`)))
           .toBe(retirementWritesFail ? '' : 'committed');
@@ -861,7 +890,7 @@ test.each([
         expect(create.mock.contexts.map((file: File) => file.uri)).toContain(
           new File(Paths.document, `personal-imports-${sha256(key)}.rollback.committed`).uri,
         );
-        if (!markerReadFails && !unreadablePayload) {
+        if (!markerReadFails && !unreadablePayload && !resolutionWriteBlocked && !resolutionReadBlocked) {
           expect(readPersonalImportRollback(key)).toBe(JSON.stringify(previous));
         }
       } else {
@@ -871,7 +900,7 @@ test.each([
       await expect(reread.mock.results[0].value).resolves.toEqual(expected);
     }
     if (persistentMarkerReadFault) {
-      expect(retirementAttempts).toBeGreaterThan(1);
+      expect(retirementAttempts).toBeGreaterThan(unreadablePayloadAfterRetirement ? 0 : 1);
     } else {
       expect(retirementAttempts).toBe(1);
     }
@@ -896,8 +925,8 @@ test.each([
       expect(await AsyncStorage.getItem(key)).toMatch(/^\{"records":.*統計/);
       expect(readPersonalImportRollback(key)).toBe(JSON.stringify(previous));
     }
-    const retryGuardedSave = persistentMarkerReadFault || unreadablePayload || stalePublication ||
-      receiptReadFailsAfterSave;
+    const retryGuardedSave = (persistentMarkerReadFault || unreadablePayload || stalePublication ||
+      receiptReadFailsAfterSave) && !unreadablePayloadAfterRetirement;
     const retrySave = !revoked && (phase === 'all' || phase === 'all with primary write error' || retryGuardedSave);
     expect(fallbackReadFault).toHaveBeenCalledTimes(phase.endsWith('with transient readback') ? 1 : 0);
     if (verificationReceiptWriteFails) {
@@ -939,12 +968,29 @@ test.each([
     expect(resolutionWriteFault).toHaveBeenCalledTimes(rejectionWriteFails ? 1 : 0);
     if (rejectionReadFails) expect(resolutionReadFault).toHaveBeenCalled();
     if (rejectionWriteFails || rejectionReadFails) {
-      expect(await nativeGet(key + ':rollback-resolution')).toEqual(expect.any(String));
+      expect(await nativeGet(resolutionKey)).toEqual(resolutionWriteBlocked ? null : expect.any(String));
     }
+    expect(resolutionSetFault).toHaveBeenCalledTimes(resolutionWriteBlocked ? 1 : 0);
+    expect(resolutionMultiSetFault).toHaveBeenCalledTimes(resolutionWriteBlocked ? 1 : 0);
+    expect(resolutionGetFault).toHaveBeenCalledTimes(resolutionReadBlocked ? 2 : 0);
     restarting = true;
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      const rejectionReadsBeforeRestart = resolutionReadFault.mock.calls.length;
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
+      if (unreadablePayloadAfterRetirement) {
+        const payload = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.json`);
+        expect(payload.textSync()).toContain(JSON.stringify(previous));
+        const proof = await nativeGet(key + ':verified-write');
+        expect(proof?.endsWith(sha256((await nativeGet(key))!))).toBe(true);
+      }
+      if (phase.includes('pending restart read fault')) {
+        expect(restartMarkerFault).toHaveBeenCalledTimes(1);
+        expect(resolutionReadFault.mock.calls.length - rejectionReadsBeforeRestart).toBe(2);
+        const payload = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.json`);
+        expect(textSync.call(payload)).toContain(JSON.stringify(previous));
+        expect(await nativeGet(resolutionKey)).toMatch(new RegExp(sha256((await nativeGet(key))!) + '$'));
+      }
       if (phase.endsWith('transient file read')) expect(fileReceiptReadFault).toHaveBeenCalledTimes(1);
       if (transientVerificationReceiptRead) expect(verificationReceiptReadFault).toHaveBeenCalledTimes(1);
       if (receiptReadFailsAfterSave) expect(receiptReadFault).toHaveBeenCalled();
@@ -1765,6 +1811,8 @@ test.each([
   'payload write with persistent receipt write fault and backup read fault and file readback fault',
   'payload write with persistent receipt write fault and backup write fault and rejection write fault and file write fault',
   'payload write with persistent receipt write fault and backup read fault and rejection read fault and file readback fault',
+  'payload write with persistent receipt write fault and backup write fault and rejection write fault and resolution write fault and file write fault',
+  'payload write with persistent receipt write fault and backup read fault and rejection read fault and resolution read fault and file readback fault',
   'payload write with transient rejection read',
   'payload write with persistent receipt write fault and transient file read',
   'rejection delete',
@@ -1786,6 +1834,13 @@ test.each([
   let restarting = false;
   let reopeningRestoredPrimary = false;
   const rejectionReadFault = jest.fn(() => { throw new Error('拒絕檔暫時無法讀取'); });
+  const resolutionKey = key + ':rollback-resolution';
+  const resolutionWriteBlocked = fault.includes('resolution write fault');
+  const resolutionReadBlocked = fault.includes('resolution read fault');
+  const resolutionSetFault = jest.fn(() => { throw new Error('還原狀態無法寫入'); });
+  const resolutionMultiSetFault = jest.fn(() => { throw new Error('還原狀態無法批次寫入'); });
+  const resolutionGetFault = jest.fn(() => { throw new Error('還原狀態無法讀回'); });
+  let resolutionStored = false;
   const backupKey = key + ':verified-write-backup';
   const backupWriteFails = fault.includes('backup write fault');
   const backupReadFails = fault.includes('backup read fault');
@@ -1847,6 +1902,7 @@ test.each([
   const multiSetReceiptFault = jest.fn(() => { throw new Error('原生批次寫入無法儲存憑據'); });
   if (persistentReceiptWriteFault) {
     multiSet.mockImplementation(async (entries) => {
+      if (resolutionWriteBlocked && entries.some(([entry]) => entry === resolutionKey)) resolutionMultiSetFault();
       if (entries.some(([entry]) => entry === key + ':verified-write')) multiSetReceiptFault();
       if (backupWriteFails && entries.some(([entry]) => entry === backupKey)) backupWriteFault();
       return nativeMultiSet(entries);
@@ -1867,6 +1923,7 @@ test.each([
     }
   });
   get.mockImplementation(async (entry) => {
+    if (entry === resolutionKey && resolutionReadBlocked && resolutionStored) resolutionGetFault();
     if (backupReadFails && entry === backupKey) backupReadFault();
     if (entry === key && restored && restoreReadFault.mock.calls.length === 0) restoreReadFault();
     return nativeGet(entry);
@@ -1889,6 +1946,12 @@ test.each([
     active = true;
     const receiptWriteFault = jest.fn(() => { throw new Error('已驗證寫入憑據無法儲存'); });
     set.mockImplementation(async (entry, value) => {
+      if (entry === resolutionKey) {
+        if (resolutionWriteBlocked) resolutionSetFault();
+        await nativeSet(entry, value);
+        resolutionStored = true;
+        return;
+      }
       if (backupWriteFails && entry === backupKey) backupWriteFault();
       if (receiptWriteFails && entry === key + ':verified-write') {
         receiptWriteFault();
@@ -1927,7 +1990,9 @@ test.each([
         if (payloadBlocked) {
           expect(payloadFault).toHaveBeenCalledTimes(2);
           expect(pending.info().exists).toBe(false);
-          if (rejectionWriteFails) {
+          if (resolutionWriteBlocked || resolutionReadBlocked) {
+            expect(rejection.info().exists).toBe(false);
+          } else if (rejectionWriteFails) {
             expect(rejection.textSync()).toBe(sha256(originalRaw));
           } else if (rejectionReadFails) {
             expect(textSync.call(rejection)).toBe('verified:\n' + sha256(originalRaw) + '\n' + sha256(writtenRaw));
@@ -1987,8 +2052,11 @@ test.each([
     expect(resolutionWriteFault).toHaveBeenCalledTimes(rejectionWriteFails ? 1 : 0);
     if (rejectionReadFails) expect(resolutionReadFault).toHaveBeenCalled();
     if (rejectionWriteFails || rejectionReadFails) {
-      expect(await nativeGet(key + ':rollback-resolution')).toEqual(expect.any(String));
+      expect(await nativeGet(resolutionKey)).toEqual(resolutionWriteBlocked ? null : expect.any(String));
     }
+    expect(resolutionSetFault).toHaveBeenCalledTimes(resolutionWriteBlocked ? 1 : 0);
+    expect(resolutionMultiSetFault).toHaveBeenCalledTimes(resolutionWriteBlocked ? 1 : 0);
+    expect(resolutionGetFault).toHaveBeenCalledTimes(resolutionReadBlocked ? 2 : 0);
     restarting = true;
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');

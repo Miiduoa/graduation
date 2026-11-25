@@ -16,6 +16,7 @@ import {
   clearNativeVerificationReceipt,
   clearPersonalImportRollback,
   commitWebPersonalImports,
+  discardNativeRollbackAfterVerifiedWrite,
   NativeRollbackUnavailableError,
   preparePersonalImportRollback,
   publishNativeRollbackResolution,
@@ -638,9 +639,14 @@ export function mutatePersonalImportLedger<T>(
                         previousRollbackResolution = await readNativeReceipt(resolutionKey);
                         assertWritable();
                         writingRollbackResolution = true;
-                        await writeNativeReceipt(resolutionKey, newReceipt);
-                        if (await readNativeReceipt(resolutionKey) !== newReceipt) {
-                          throw new Error('無法確認匯入資料的還原狀態。');
+                        try {
+                          await writeNativeReceipt(resolutionKey, newReceipt);
+                          if (await readNativeReceipt(resolutionKey) !== newReceipt) {
+                            throw new Error('無法確認匯入資料的還原狀態。');
+                          }
+                        } catch {
+                          assertWritable();
+                          discardNativeRollbackAfterVerifiedWrite(key);
                         }
                       }
                     }
