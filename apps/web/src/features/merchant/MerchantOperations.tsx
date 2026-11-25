@@ -377,7 +377,9 @@ export function MerchantOperations({
     async (reconcile = true, mode: DetailReadMode = 'regular') => {
       // A confirmed receipt may remain visible with the previously verified detail
       // during an outage. Only a successful read can restore the controls.
-      const deferredRevision = deferredWriteRevision.current;
+      // Hidden refreshes can confirm shared detail for the next visible entry
+      // without consuming that entry's post-write reconciliation.
+      const deferredRevision = visibleRef.current ? deferredWriteRevision.current : 0;
       const readMode = mode === 'regular' && deferredRevision ? 'after-write' : mode;
       const hideDetail = readMode === 'after-write';
       readAfterWrite.current = false;
@@ -935,16 +937,14 @@ export function MerchantOperations({
                           ? onMenuConfirmed(detail, revision, receipt.createdItems)
                           : localConfirmations.confirmMenu(draftKey, revision, receipt.createdItems);
                         setMenuConfirmed(false);
-                        if (!accepted) {
-                          // A newer observation won. If the list is open, reconcile
-                          // on the next entry after the background access check.
-                          if (!visibleRef.current) deferredWriteRevision.current = revision;
-                          else if (!readAfterWrite.current) await read(true, 'after-write');
-                          return;
-                        }
-                        setNotice({ value: receipt.createdItems, revision });
+                        // Reconcile on the next entry whenever the receipt arrives on the list.
+                        const visible = visibleRef.current;
+                        if (!visible) deferredWriteRevision.current = revision;
+                        if (accepted) setNotice({ value: receipt.createdItems, revision });
                         // Re-entered views refresh when the mutation settles.
-                        if (!readAfterWrite.current) await read(true, 'after-confirmed-write');
+                        if (!readAfterWrite.current && (visible || accepted)) {
+                          await read(true, accepted ? 'after-confirmed-write' : 'after-write');
+                        }
                       });
                     }}
                   >
