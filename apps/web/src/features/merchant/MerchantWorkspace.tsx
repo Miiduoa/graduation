@@ -403,6 +403,11 @@ function AccountWorkspace({
           }),
           (error) => {
             addTargets(confirmed.knownWorkspaces());
+            addTargets(visitedLocations.values());
+            if (error instanceof NuniError && error.status === 503) {
+              // The list loader can be retired before it starts detail rechecks.
+              for (const key of targets.keys()) confirmed.recordDetailFailure(key, listRevision);
+            }
             confirmed.rejectWorkspaceList(denied(error), listRevision);
             publishOverview();
           },

@@ -99,7 +99,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   let listRevocation = 0;
   let listedRevision = 0;
   const receiptFloors = new Map<string, number>();
-  const menuReceiptRevisions = new Map<string, number>();
+  const menuReceipts = new Map<string, { revision: number; version?: number }>();
   const statusReceiptFloors = new Map<string, Map<number, number>>();
   // Store-specific revocations override the list default for stores with newer confirmations.
   const revocations = new Map<string, number>();
@@ -123,11 +123,11 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   function discardMenuReceipt(key: string) {
     const draft = drafts.get(key);
     if (draft) draft.menuReceipt = null;
-    menuReceiptRevisions.delete(key);
+    menuReceipts.delete(key);
   }
 
   function discardWorkspaceReceipts(key: string, revision: number) {
-    if ((menuReceiptRevisions.get(key) ?? 0) <= revision) discardMenuReceipt(key);
+    if ((menuReceipts.get(key)?.revision ?? 0) <= revision) discardMenuReceipt(key);
     advanceReceiptFloor(key, revision);
   }
 
@@ -220,6 +220,19 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const version = entries.get(key)?.row?.version;
     // A stale detail must not confirm access or supersede an outstanding denial.
     if (version !== undefined && next.readinessVersion < version) return null;
+    const menuReceipt = menuReceipts.get(key);
+    // A detail refresh can observe the pre-write menu at the version the receipt confirmed.
+    if (
+      verifiesAccess && menuReceipt?.version !== undefined && next.readinessVersion <= menuReceipt.version &&
+      next.missingRequirements?.includes('menu')
+    ) {
+      next = {
+        ...next,
+        missingRequirements: next.missingRequirements.filter((item) => item !== 'menu'),
+        // The receipt confirms creation. A pre-write read cannot confirm available stock.
+        publishedMenuItems: 0,
+      };
+    }
     const entry = merge(next, revision);
     if (!entry || next.readinessVersion !== entry.row?.version) return null;
     entry.detail = latestObservation(entry.detail, next, revision);
@@ -250,7 +263,10 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     // versioned row's operating state and requirements together onto the detail.
     const row = entry.versionedRow?.value;
     if (row?.readinessVersion !== detail.readinessVersion) return detail;
-    const missingRequirements = row.missingRequirements ?? detail.missingRequirements;
+    // An empty summary cannot establish menu readiness for a legacy detail.
+    const missingRequirements = detail.missingRequirements === undefined && row.missingRequirements?.length === 0
+      ? undefined
+      : row.missingRequirements ?? detail.missingRequirements;
     return {
       ...detail,
       ...row,
@@ -282,7 +298,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     };
     if (merge(next, revision)?.row?.value !== next) return false;
     draft.menuReceipt = createdItems;
-    menuReceiptRevisions.set(key, revision);
+    menuReceipts.set(key, { revision, version: versioned?.readinessVersion });
     return true;
   }
 
@@ -500,7 +516,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       includeVerifiedWorkspaces = false;
       listRevocation = 0;
       receiptFloors.clear();
-      menuReceiptRevisions.clear();
+      menuReceipts.clear();
       statusReceiptFloors.clear();
       listedRevision = 0;
       applicationRevocation = 0;

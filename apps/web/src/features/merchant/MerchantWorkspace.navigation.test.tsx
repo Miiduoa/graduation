@@ -2328,6 +2328,41 @@ function submitFirstMenu() {
   fireEvent.click(screen.getByRole('button', { name: '確認建立並上架菜單' }));
 }
 
+it.each([6, 7])('keeps a winning initial menu receipt through write and re-entry GETs at v%s', async (version) => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const beforeMenu = { ...detail(), readinessVersion: 7 };
+  const stale = { ...beforeMenu, readinessVersion: version };
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(beforeMenu)
+    .mockResolvedValueOnce(stale)
+    .mockResolvedValueOnce({ ...beforeMenu, missingRequirements: ['settings'], publishedMenuItems: 1 })
+    .mockResolvedValue(stale);
+  const readList = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [beforeMenu] })
+    .mockResolvedValue({ workspaces: [{ ...beforeMenu, missingRequirements: ['settings'] }] });
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === path) return readDetail();
+    if (resource === `${path}/initial-menu`) return Promise.resolve(firstMenuReceipt);
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByLabelText('品項 1 名稱');
+  submitFirstMenu();
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+  await screen.findByText(/已建立 1 項首次菜單/);
+  expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
+
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+  await act(async () => window.history.forward());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
+  await screen.findByText(/已建立 1 項首次菜單/);
+  expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
+});
+
 const firstMenuReceipt = {
   menuVersionId: 'food-menu_12345678-1234-1234-1234-123456789abc',
   createdItems: 1,
@@ -3022,6 +3057,62 @@ it.each(['before', 'after'])(
   },
 );
 
+it('locks operations immediately when a retired list GET returns 503 without a detail GET', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const open = { ...detail('store-a', true), readinessVersion: 7 };
+  const paused = { ...open, readinessVersion: 8, locationStatus: 'closed', publicAccess: false };
+  const olderDetail = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+  const failedList = Promise.withResolvers<{ workspaces: NuniMerchantWorkspaceDetail[] }>();
+  const list = { workspaces: [open, detail('store-b')] };
+  const readList = vi.fn().mockResolvedValueOnce(list).mockResolvedValueOnce(list).mockReturnValue(failedList.promise);
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(open)
+    .mockReturnValueOnce(olderDetail.promise)
+    .mockResolvedValueOnce(open)
+    .mockResolvedValue(paused);
+  const changeAvailability = vi.fn().mockResolvedValue(paused);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === path) return readDetail();
+    if (resource === `${path}/availability`) return changeAvailability();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+  await screen.findByText('門市狀態已更新：暫停接單。');
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+
+  fireEvent.click(screen.getByRole('link', { name: '管理門市：二樓' }));
+  await screen.findByRole('heading', { name: '餐坊／二樓', level: 2 });
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readList).toHaveBeenCalledTimes(3));
+  await act(async () => olderDetail.resolve(paused));
+  fireEvent.click(screen.getByRole('link', { name: '管理門市：一樓' }));
+  const resume = await screen.findByRole<HTMLButtonElement>('button', { name: '恢復接單' });
+  expect(resume.disabled).toBe(false);
+  expect(screen.getByRole('link', { name: '處理訂單與收銀' })).toBeTruthy();
+
+  await act(async () => {
+    failedList.reject(new NuniError(503, 'UNAVAILABLE'));
+    await failedList.promise.catch(() => undefined);
+    await Promise.resolve();
+    // Exercise the submit guard while React still shows the previously enabled button.
+    expect(resume.disabled).toBe(false);
+    resume.click();
+    expect(changeAvailability).toHaveBeenCalledTimes(1);
+  });
+  expect(resume.disabled).toBe(true);
+  expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
+  expect(readDetail).toHaveBeenCalledTimes(3);
+
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+  await waitFor(() => expect(resume.disabled).toBe(false));
+  expect(screen.getByRole('link', { name: '處理訂單與收銀' })).toBeTruthy();
+});
+
 it.each([403, 404])('revokes a background detail denial %s despite a newer same-version list', async (status) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const open = { ...detail('store-a', true), readinessVersion: 7 };
@@ -3077,17 +3168,21 @@ it.each([403, 404])('revokes a background detail denial %s despite a newer same-
 });
 
 it.each([
-  { requirements: undefined, showsForm: true },
-  { requirements: [], showsForm: false },
-])('distinguishes legacy menu readiness from an explicit empty requirements list ($showsForm)', async ({
+  { requirements: undefined, listedRequirements: undefined, showsForm: true },
+  { requirements: undefined, listedRequirements: [], showsForm: true },
+  { requirements: [], listedRequirements: [], showsForm: false },
+])('distinguishes legacy detail requirements $requirements from list requirements $listedRequirements', async ({
   requirements,
+  listedRequirements,
   showsForm,
 }) => {
   const legacy: NuniMerchantWorkspaceDetail = detail();
   if (requirements === undefined) delete legacy.missingRequirements;
   else legacy.missingRequirements = requirements;
   mocks.request.mockImplementation((resource) => {
-    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [legacy] });
+    if (resource === 'merchant-workspaces') {
+      return Promise.resolve({ workspaces: [{ ...legacy, missingRequirements: listedRequirements }] });
+    }
     if (resource === 'merchant-workspaces/campus-one/store-a') return Promise.resolve(legacy);
     return respond(resource);
   });
