@@ -97,7 +97,9 @@ async function readNativeRecovery(
   const pending = pendingRestorations.get(key);
   if (!primaryVerified) {
     const checkpoint = await readLegacyCheckpoint(key, scope);
-    if (checkpoint && (nativeJournal === undefined || (checkpoint.raw ?? 'null') === nativeJournal)) {
+    if (checkpoint &&
+        (pending === undefined || checkpoint.raw === pending.raw) &&
+        (nativeJournal === undefined || (checkpoint.raw ?? 'null') === nativeJournal)) {
       return checkpoint;
     }
     if (pending) return { ...pending, ledger: parseLedger(pending.raw, scope) };
@@ -145,11 +147,23 @@ async function readLegacyCheckpoint(
   return null;
 }
 
-async function retireNativeCheckpoint(key: string, adopted: string | undefined) {
+async function retireNativeCheckpoint(
+  key: string,
+  adopted: string | undefined,
+  assertWritable?: () => void,
+) {
   if (adopted === undefined) return;
   const checkpoint = personalImportCheckpointKey(key);
+  let unchanged = false;
   try {
-    if (await AsyncStorage.getItem(checkpoint) === adopted) await AsyncStorage.multiRemove([checkpoint]);
+    unchanged = await AsyncStorage.getItem(checkpoint) === adopted;
+  } catch {
+    // Leave the copy in place if it cannot be verified.
+  }
+  if (!unchanged) return;
+  assertWritable?.();
+  try {
+    await AsyncStorage.multiRemove([checkpoint]);
   } catch {
     // The primary is already durable. Cleanup can leave the redundant copy in place.
   }
@@ -249,7 +263,8 @@ export type PersonalImportWriteGuard =
   | (() => boolean)
   | {
       canContinue: () => boolean;
-      canCommitFirstWrite?: () => boolean;
+      canCommitFirstWrite?: (queued: boolean) => boolean;
+      confirmAfterCleanup?: boolean;
     };
 
 export function mutatePersonalImportLedger<T>(
@@ -266,15 +281,17 @@ export function mutatePersonalImportLedger<T>(
 ): Promise<T> {
   const canContinue = typeof guard === 'function' ? guard : guard.canContinue;
   const key = personalImportStorageKey(scope);
-  const previous = locks.get(key) || Promise.resolve();
-  const task = previous
+  const previous = locks.get(key);
+  // Browser locks can also queue behind a different tab.
+  const queued = previous !== undefined || Platform.OS === 'web';
+  const task = (previous ?? Promise.resolve())
     .catch(() => undefined)
     .then(() => withPersonalImportWriteLock(key, async (assertLockHeld, lease) => {
       let hasPersisted = false;
       const assertWritable = () => {
         assertLockHeld();
         if (!canContinue()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
-        if (!hasPersisted && typeof guard !== 'function' && guard.canCommitFirstWrite?.() === false) {
+        if (!hasPersisted && typeof guard !== 'function' && guard.canCommitFirstWrite?.(queued) === false) {
           throw new Error('目前無法確認行事曆可寫入，請稍後再試。');
         }
         assertLockHeld();
@@ -335,8 +352,25 @@ export function mutatePersonalImportLedger<T>(
               await rollbackLedger(key, persistedRaw);
               throw error;
             }
-            // Keep the adopted copy available throughout the rollback window.
-            await retireNativeCheckpoint(key, adoptedCheckpoint);
+            if (adoptedCheckpoint !== undefined) {
+              // Cleanup follows byte verification and durable commit. Scoped
+              // operations can still require authority before publishing success.
+              const confirm = typeof guard !== 'function' && guard.confirmAfterCleanup
+                ? assertWritable
+                : undefined;
+              try {
+                await retireNativeCheckpoint(key, adoptedCheckpoint, confirm);
+                confirm?.();
+              } catch (error) {
+                try {
+                  preparePersonalImportRollback(key, persistedRaw);
+                } catch {
+                  // Attempt restoration even if the durable journal cannot be recreated.
+                }
+                await rollbackLedger(key, persistedRaw);
+                throw error;
+              }
+            }
           }
           hasPersisted = true;
           primaryRaw = writtenRaw;

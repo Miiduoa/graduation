@@ -20,6 +20,7 @@ import {
   deletePersonalImport,
   editPersonalImport,
   loadPersonalImports,
+  mutatePersonalImportLedger,
   personalImportStorageKey,
   subscribePersonalImports,
 } from '../services/personalImports';
@@ -621,6 +622,56 @@ it('finishes a started save while the account is briefly revalidated', async () 
   const ledger = await loadPersonalImports(mockScope);
   expect(ledger.records).toHaveLength(1);
   expect(ledger.records[0]?.title).toBe('重驗後仍要存下');
+});
+
+it.each(['create', 'edit'] as const)('keeps a queued %s draft when the lock opens during revalidation', async (mode) => {
+  const scope = mockScope!;
+  const originalTitle = '原本的行程';
+  const draftTitle = '等重新驗證的行程';
+  const view = mode === 'edit' ? await fillAndSave(originalTitle) : renderCalendar();
+  if (mode === 'edit') {
+    fireEvent.press(view.getByText(originalTitle));
+    fireEvent.changeText(view.getByLabelText('標題'), draftTitle);
+  } else {
+    await fillDraft(view, draftTitle);
+  }
+  const key = personalImportStorageKey(scope);
+  const stored = await AsyncStorage.getItem(key);
+  const entered = deferred<void>();
+  const release = deferred<void>();
+  const preceding = mutatePersonalImportLedger(scope, () => true, async (ledger) => {
+    entered.resolve();
+    await release.promise;
+    return { ledger, result: undefined };
+  });
+  await entered.promise;
+  const saveName = mode === 'edit' ? '儲存修改' : '儲存行程';
+  const save = mode === 'edit' ? jest.mocked(editPersonalImport) : jest.mocked(appendPersonalImports);
+  try {
+    fireEvent.press(view.getByRole('button', { name: saveName }));
+    const queued = save.mock.results.at(-1)!.value;
+    mockNuniLoading = true;
+    mockScope = null;
+    view.rerender(<PersonalCalendarScreen />);
+    await act(async () => {
+      release.resolve();
+      await preceding;
+      await expect(queued).rejects.toThrow('目前無法確認行事曆可寫入');
+    });
+    expect(await AsyncStorage.getItem(key)).toBe(stored);
+
+    mockNuniLoading = false;
+    mockScope = scope;
+    view.rerender(<PersonalCalendarScreen />);
+    expect(view.getByLabelText('標題').props.value).toBe(draftTitle);
+    fireEvent.press(await view.findByRole('button', { name: saveName, disabled: false }));
+    await waitFor(async () => {
+      expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual([draftTitle]);
+    });
+  } finally {
+    release.resolve();
+    await preceding;
+  }
 });
 
 it('shows a save error if the write fails while the account is briefly revalidated', async () => {

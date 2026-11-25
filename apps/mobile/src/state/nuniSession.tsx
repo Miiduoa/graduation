@@ -108,9 +108,11 @@ export function NuniSessionProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useNuniSession(): Auth {
-  const value = useContext(Context);
-  if (!value) throw new Error('NuniSessionProvider is required');
+export function useNuniSession(): Auth;
+export function useNuniSession(optional: true): Auth | null;
+export function useNuniSession(optional = false): Auth | null {
+  const value = useOptionalNuniSession();
+  if (!value && !optional) throw new Error('NuniSessionProvider is required');
   return value;
 }
 

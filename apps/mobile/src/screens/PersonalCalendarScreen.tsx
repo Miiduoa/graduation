@@ -88,7 +88,7 @@ type LoadState =
 type FocusParams = { eventId?: string } | undefined;
 
 function useCalendarAccount(scope: PersonalImportScope | null) {
-  const platform = useNuniSession();
+  const platform = useNuniSession(true);
   const legacy = useAuth();
   const firebaseUid = legacy.user?.uid;
   const firebaseSignedOut = !legacy.loading && !firebaseUid;
@@ -106,20 +106,20 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
     if (firebaseSignedOut) lastFirebaseUid.current = undefined;
     else if (firebaseUid && (scope || !lastFirebaseUid.current)) lastFirebaseUid.current = firebaseUid;
   }, [firebaseLogoutGeneration, firebaseSignedOut, firebaseUid, scope]);
-  const loggingOut = !!platform.pendingLogout;
-  const sessionRejected = !platform.session && !!platform.error;
-  const observedOwner = platform.session
+  const loggingOut = !!platform?.pendingLogout;
+  const sessionRejected = !platform?.session && !!platform?.error;
+  const observedOwner = platform?.session
     ? `nuni:${platform.session.platformAccountId}`
     : !sessionRejected && firebaseUid
       ? `firebase:${firebaseUid}`
       : null;
-  const nuniRevalidating = platform.loading && !platform.session && !sessionRejected;
-  const nuniSignedOut = !platform.session && !platform.loading && !loggingOut && !sessionRejected;
+  const nuniRevalidating = platform?.loading && !platform.session && !sessionRejected;
+  const nuniSignedOut = !platform?.session && !platform?.loading && !loggingOut && !sessionRejected;
   const knownOwner = scope?.owner ?? (firebaseChanged ? null : observedOwner);
   const ownerSignedOut = (owner: string | undefined) =>
     firebaseSignedOut && !!owner?.startsWith('firebase:');
   // An explicit Nuni login starts a new workspace even for the same account.
-  const nuniGeneration = platform.signInGeneration;
+  const nuniGeneration = platform?.signInGeneration;
   return {
     knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseJustSignedOut, ownerSignedOut, workspaceUid,
     nuniRevalidating, nuniSignedOut, nuniGeneration, firebaseLogoutGeneration,
@@ -516,12 +516,14 @@ function PersonalCalendarWorkspace({
         !latest.writesRevoked &&
         (!latest.resolvedKey || latest.verifiedKey === expected);
     };
-    // A destructive confirmation belongs to a single uninterrupted verification.
+    // A queued operation must still have a verified workspace when it reaches
+    // its first write. A destructive confirmation also requires continuity.
     const guard: PersonalImportWriteGuard = {
       canContinue,
-      canCommitFirstWrite: confirmationScope
-        ? () => currentScope.current === confirmationScope
-        : undefined,
+      canCommitFirstWrite: (queued) => confirmationScope
+        ? currentScope.current === confirmationScope
+        : !queued || currentScope.current.verifiedKey === expected,
+      confirmAfterCleanup: true,
     };
     mutationLock.current = true;
     setSaving(true);

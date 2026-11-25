@@ -1853,6 +1853,47 @@ test('Expo Web refuses to publish from a journal replaced after recovery', async
   }
 });
 
+test.each(['Web', 'Expo Web'] as const)('%s recovers a bound journal before an older checkpoint when the primary is missing', async (client) => {
+  const cleanup = useWebStorage();
+  const restoreLocks = withoutWebWriteLocks();
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: async (_key: string, write: () => unknown) => write() },
+  });
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+  try {
+    await appendPersonalImports(scope, [row('a', '行程 A')]);
+    const older = storage.getItem(key)!;
+    await appendPersonalImports(scope, [row('b', '行程 B')]);
+    const original = storage.getItem(key)!;
+    storage.removeItem(key);
+    storage.setItem(checkpoint, older);
+    storage.setItem(journal, JSON.stringify({
+      id: 'interrupted',
+      original,
+      before: sha256(original),
+      attempted: sha256('null'),
+    }));
+
+    if (client === 'Web') {
+      await saveWebCalendarBatch(scope, [row('c', '行程 C')]);
+    } else {
+      await appendPersonalImports(scope, [row('c', '行程 C')]);
+    }
+    expect(readWebCalendarImports(scope).map(({ title }) => title)).toEqual(['行程 A', '行程 B', '行程 C']);
+    expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
+      .toEqual(['行程 A', '行程 B', '行程 C']);
+    expect(storage.getItem(checkpoint)).toBe(older);
+    expect(storage.getItem(journal)).toBeNull();
+  } finally {
+    restoreLocks();
+    cleanup();
+  }
+});
+
 test('Web retries from a legacy marked copy and retires it when the new ledger commits', async () => {
   const cleanup = useWebStorage();
   try {

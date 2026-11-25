@@ -74,7 +74,7 @@ function readWebPersonalImportRollback(
   encoded: string | null,
   primary: string | null,
   primaryVerified: boolean,
-): string | undefined {
+): { raw: string | null; bound: boolean } | undefined {
   if (encoded === null) return undefined;
   let journal: unknown;
   try {
@@ -89,13 +89,14 @@ function readWebPersonalImportRollback(
       !('attempted' in journal) || typeof journal.attempted !== 'string' ||
       !('original' in journal) || (journal.original !== null && typeof journal.original !== 'string')) {
     if (primaryVerified) return undefined;
-    return typeof journal === 'string' ? journal : encoded;
+    const raw = typeof journal === 'string' ? journal : encoded;
+    return { raw: raw === 'null' ? null : raw, bound: false };
   }
   const current = fingerprint(primary);
   if (current !== journal.before && current !== journal.attempted) return undefined;
   const original = typeof journal.original === 'string' ? journal.original : 'null';
   if (fingerprint(original) !== journal.before) return undefined;
-  return original;
+  return { raw: original === 'null' ? null : original, bound: true };
 }
 
 export function parsePersonalImportStorageJson(raw: string, web: boolean) {
@@ -121,6 +122,19 @@ export function selectPersonalImportBrowserRecovery<T>(
 ): { raw: string | null; ledger: T; source: PersonalImportRecoverySource } | null {
   if (primaryVerified && hasWebPersonalImportCommit(primary)) return null;
 
+  const journal = readWebPersonalImportRollback(copies.journal, primary, primaryVerified);
+  const recoverJournal = () => {
+    if (!journal || journal.raw === '') return null;
+    try {
+      return { raw: journal.raw, ledger: parse(journal.raw), source: 'journal' as const };
+    } catch {
+      return null;
+    }
+  };
+  // A journal tied to this primary describes an interrupted write.
+  const interrupted = journal?.bound ? recoverJournal() : null;
+  if (interrupted) return interrupted;
+
   if (!primaryVerified && copies.checkpoint !== null) {
     try {
       const raw = unwrapPersonalImportCheckpoint(copies.checkpoint);
@@ -133,14 +147,7 @@ export function selectPersonalImportBrowserRecovery<T>(
     }
   }
 
-  const journal = readWebPersonalImportRollback(copies.journal, primary, primaryVerified);
-  if (!journal) return null;
-  try {
-    const raw = journal === 'null' ? null : journal;
-    return { raw, ledger: parse(raw), source: 'journal' };
-  } catch {
-    return null;
-  }
+  return journal?.bound ? null : recoverJournal();
 }
 
 function isPersonalImportBatchHistory(value: unknown): value is Array<{
