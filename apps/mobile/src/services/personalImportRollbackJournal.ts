@@ -522,7 +522,14 @@ export function capturePersonalImportRollback(key: string) {
   // A revoked publication can leave its verified encoding in AsyncStorage
   // if restoring the original bytes there also fails.
   if (encoded?.startsWith(rejectedPrefix)) {
-    return { raw: encoded.slice(rejectedPrefix.length), rejected: true, matchesAttemptedPrimary };
+    return {
+      raw: encoded.slice(rejectedPrefix.length),
+      rejected: true,
+      // Preparing a retry can replace the attempt hashes before the primary
+      // changes. The explicit rejection still protects the original bytes.
+      hasRejectedPayload: true,
+      matchesAttemptedPrimary,
+    };
   }
   const binding = encoded?.match(committedPayloadPattern);
   const verification = readOptionalFile(verificationFile(key));
@@ -554,6 +561,7 @@ export function capturePersonalImportRollback(key: string) {
     // need the old bytes until the exact primary is verified for publication.
     committedRaw: markerCommitted ? rollbackRaw : undefined,
     rejected,
+    hasRejectedPayload: false,
     matchesAttemptedPrimary,
     markerError: rejected && encoded !== undefined ? undefined : markerError,
     payloadError,
@@ -602,6 +610,12 @@ function publicationBackupFile(key: string): File {
 
 function settlementFile(key: string): File {
   return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.settled`);
+}
+
+export class NativeRollbackUnavailableError extends Error {
+  constructor(readonly failure: unknown) {
+    super('無法準備匯入資料的還原副本。');
+  }
 }
 
 export function preparePersonalImportRollback(
@@ -653,7 +667,12 @@ export function preparePersonalImportRollback(
     previousBody === rejectedPrefix + encoded;
   let writtenPayload = wrap(rejected ? rejectedPrefix + encoded : encoded);
   if (previous !== writtenPayload) {
-    payload.write(writtenPayload);
+    try {
+      payload.write(writtenPayload);
+    } catch (error) {
+      if (!rejected && !hadRejection) throw new NativeRollbackUnavailableError(error);
+      throw error;
+    }
     const written = marked && primaryCommitted ? readOptionalFile(payload) : payload.textSync();
     // On a read fault, the verified primary still holds the original bytes.
     if (written !== undefined && written !== writtenPayload) {
@@ -661,9 +680,14 @@ export function preparePersonalImportRollback(
     }
   }
   if (!marked) {
-    marker.create();
-    // On iOS, create() can return normally even if FileManager did not create the file.
-    if (!fileExists(marker)) throw new Error('無法建立匯入資料的還原標記。');
+    try {
+      marker.create();
+      // On iOS, create() can return normally even if FileManager did not create the file.
+      if (!fileExists(marker)) throw new Error('無法建立匯入資料的還原標記。');
+    } catch (error) {
+      if (!rejected && !hadRejection) throw new NativeRollbackUnavailableError(error);
+      throw error;
+    }
   } else if (resetMarker) {
     marker.write('');
     let reset: string | undefined;

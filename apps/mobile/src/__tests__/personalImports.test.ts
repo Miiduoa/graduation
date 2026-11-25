@@ -397,6 +397,73 @@ test.each([[false, null], [true, null], [false, 'pending'], [false, 'settled']] 
   }
 });
 
+test('native restart keeps a rejected deletion after retry rewrites the payload but cannot remove the rejection file', async () => {
+  const scope = { owner: 'nuni:retry-rejection-cleanup', schoolId: 'pu' };
+  const key = personalImportStorageKey(scope);
+  const prefix = `personal-imports-${sha256(key)}.rollback.`;
+  const payload = new File(Paths.document, prefix + 'json');
+  const rejection = new File(Paths.document, prefix + 'rejected');
+  const { ledger } = await appendPersonalImports(scope, [row('first'), row('second', '統計')]);
+  const set = jest.mocked(AsyncStorage.setItem);
+  const nativeSet = set.getMockImplementation()!;
+  let verified = true;
+  const guard = { canContinue: () => verified, canCommitFirstWrite: () => verified };
+  set.mockImplementation(async (entry, value) => {
+    if (entry === key && !verified) throw new Error('無法還原主帳本');
+    await nativeSet(entry, value);
+    if (entry === key) verified = false;
+  });
+  const notify = jest.fn();
+  const unsubscribe = subscribePersonalImports(notify);
+  try {
+    await expect(deletePersonalImport(scope, ledger.records[0], guard)).rejects.toThrow('無法還原主帳本');
+    const deletedRaw = (await AsyncStorage.getItem(key))!;
+    expect(JSON.parse(deletedRaw).records).toEqual([ledger.records[1]]);
+    expect(payload.textSync().split('\n')[0]).toContain(sha256(deletedRaw));
+    expect(rejection.info().exists).toBe(true);
+    expect(notify).not.toHaveBeenCalled();
+    await AsyncStorage.removeItem(key + ':checkpoint');
+    set.mockImplementation(nativeSet);
+
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+      verified = true;
+      set.mockClear();
+      const deleteFile = File.prototype.delete;
+      const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
+        if (this.uri === rejection.uri) throw new Error('拒絕檔無法刪除');
+        deleteFile.call(this);
+      });
+      const unsubscribeRetry = restarted.subscribePersonalImports(notify);
+      try {
+        await expect(restarted.deletePersonalImport(scope, ledger.records[1], guard))
+          .rejects.toThrow('無法更新匯入資料的還原標記');
+        expect(remove.mock.contexts.some((file) => file.uri === rejection.uri)).toBe(true);
+        expect(set).not.toHaveBeenCalled();
+        expect(notify).not.toHaveBeenCalled();
+        expect(await AsyncStorage.getItem(key)).toBe(deletedRaw);
+        const [attempt, ...body] = payload.textSync().split('\n');
+        expect(attempt).toMatch(/^attempt:/);
+        expect(attempt).not.toContain(sha256(deletedRaw));
+        expect(body.join('\n')).toBe('rejected:\n' + JSON.stringify(ledger));
+        expect(rejection.info().exists).toBe(true);
+        expect(rejection.textSync()).toBe('');
+      } finally {
+        unsubscribeRetry();
+        remove.mockRestore();
+      }
+    });
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+    });
+  } finally {
+    unsubscribe();
+    set.mockImplementation(nativeSet);
+  }
+});
+
 test('native retry publishes the verified replacement when the cleared rejection payload is temporarily unreadable', async () => {
   const scope = { owner: 'nuni:retry-rejected-publication', schoolId: 'pu' };
   const { ledger: previous } = await appendPersonalImports(scope, [row('original')]);
@@ -1194,6 +1261,55 @@ test.each([
   }
 });
 
+
+test.each(['payload write', 'pending creation', 'pending missing after creation'] as const)(
+  'native append and edit use the readable primary when journal preparation fails at %s',
+  async (phase) => {
+    const scope = { owner: `nuni:optional-rollback-${phase}`, schoolId: 'pu' };
+    const key = personalImportStorageKey(scope);
+    const prefix = `personal-imports-${sha256(key)}.rollback.`;
+    const { ledger } = await appendPersonalImports(scope, [row('first')]);
+    const { write: writeFile, create: createFile } = File.prototype;
+    const fault = jest.fn();
+    const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+      if (phase === 'payload write' && this.uri.endsWith(prefix + 'json')) {
+        fault();
+        throw new Error('文件目錄無法寫入');
+      }
+      writeFile.call(this, value, options);
+    });
+    const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
+      if (phase !== 'payload write' && this.uri.endsWith(prefix + 'pending')) {
+        fault();
+        if (phase === 'pending creation') throw new Error('待處理標記無法建立');
+        return;
+      }
+      createFile.call(this, options);
+    });
+    const guard = { canContinue: () => true, canCommitFirstWrite: () => true };
+    const reread = jest.fn(() => loadPersonalImports(scope));
+    const unsubscribe = subscribePersonalImports(reread);
+    try {
+      const appended = await appendPersonalImports(scope, [row('second', '統計')], guard);
+      expect(appended.ledger.records.map(({ title }) => title)).toEqual(['微積分', '統計']);
+      await expect(reread.mock.results[0].value).resolves.toEqual(appended.ledger);
+      const edited = await editPersonalImport(scope, ledger.records[0], row('first', '化學'), guard);
+      expect(edited.records.map(({ title }) => title)).toEqual(['化學', '統計']);
+      expect(reread).toHaveBeenCalledTimes(2);
+      await expect(reread.mock.results[1].value).resolves.toEqual(edited);
+      expect(fault).toHaveBeenCalledTimes(2);
+      expect(JSON.parse((await AsyncStorage.getItem(key))!)).toEqual(edited);
+      await jest.isolateModulesAsync(async () => {
+        const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+        await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(edited);
+      });
+    } finally {
+      unsubscribe();
+      create.mockRestore();
+      write.mockRestore();
+    }
+  },
+);
 
 test('native append and edit survive a settled file that cannot be deleted, cleared or read', async () => {
   const scope = { owner: 'nuni:retained-settlement', schoolId: 'pu' };

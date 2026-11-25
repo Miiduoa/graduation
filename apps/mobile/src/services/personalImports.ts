@@ -14,6 +14,7 @@ import {
   capturePersonalImportRollback,
   clearPersonalImportRollback,
   commitWebPersonalImports,
+  NativeRollbackUnavailableError,
   preparePersonalImportRollback,
   recordFailedPersonalImportRestoration,
   withPersonalImportWriteLock,
@@ -79,7 +80,7 @@ async function readLedgerSnapshot(
   const verifiedByJournal = primary !== null && journal?.matchesVerifiedPrimary?.(primary) === true;
   const attemptedPrimary = primary !== null && journal?.matchesAttemptedPrimary?.(primary) === true;
   const rejectedPrimary = journal?.rejected && (
-    attemptedPrimary || journal.raw === primary ||
+    journal.hasRejectedPayload || attemptedPrimary || journal.raw === primary ||
     (journal.payloadError && hasNativeCommitEncoding(primary))
   );
   if (!primaryVerified || rejectedPrimary) {
@@ -365,6 +366,7 @@ export function mutatePersonalImportLedger<T>(
     | { ledger: PersonalImportLedger; result: T }
     | Promise<{ ledger: PersonalImportLedger; result: T }>,
   source: ImportChange['source'] = 'local',
+  options: { allowNativePrimaryOnly?: boolean } = {},
 ): Promise<T> {
   const canContinue = typeof guard === 'function' ? guard : guard.canContinue;
   const key = personalImportStorageKey(scope);
@@ -434,22 +436,31 @@ export function mutatePersonalImportLedger<T>(
             // Prepare rollback for either write before replacing the primary.
             const firstRaw = encodeNativeFirstWrite(ledger);
             const replacement = encodeNativeReplacement(ledger);
-            const journal = preparePersonalImportRollback(key, persistedRaw, primaryCommitted, {
-              first: firstRaw,
-              replacement,
-            });
+            let journal: ReturnType<typeof preparePersonalImportRollback> | undefined;
             try {
-              await AsyncStorage.setItem(key, firstRaw);
-              writtenRaw = firstRaw;
+              journal = preparePersonalImportRollback(key, persistedRaw, primaryCommitted, {
+                first: firstRaw,
+                replacement,
+              });
+            } catch (error) {
+              if (!(error instanceof NativeRollbackUnavailableError)) throw error;
+              // A readable primary can support ordinary saves when the
+              // document directory cannot prepare an auxiliary copy.
+              if (!options.allowNativePrimaryOnly || !primaryCommitted) throw error.failure;
+            }
+            assertWritable();
+            try {
+              writtenRaw = journal ? firstRaw : raw;
+              await AsyncStorage.setItem(key, writtenRaw);
               assertWritable();
-              await verifyNativeLedgerWrite(key, firstRaw);
+              await verifyNativeLedgerWrite(key, writtenRaw);
               assertWritable();
               // Keep the rollback copy through cleanup and the final authority check.
               cleaningRecovery = true;
               const checkpointRetired = adoptedCheckpoint === undefined ||
                 await retireNativeCheckpoint(key, adoptedCheckpoint, assertWritable);
               assertWritable();
-              if (!journal.retire(assertWritable, checkpointRetired, firstRaw)) {
+              if (journal && !journal.retire(assertWritable, checkpointRetired, firstRaw)) {
                 assertWritable();
                 try {
                   journal.preparePrimaryCommit();
@@ -469,7 +480,7 @@ export function mutatePersonalImportLedger<T>(
               pendingRestorations.delete(key);
             } catch (error) {
               try {
-                journal.retainRejection();
+                journal?.retainRejection();
               } catch {
                 // Still try to restore the original primary and checkpoint.
               }
@@ -561,7 +572,7 @@ export function appendPersonalImports(
       ledger,
       result: { ledger, added: planned.added.length, duplicates: planned.duplicates.length },
     };
-  });
+  }, 'local', { allowNativePrimaryOnly: !options.restoreBackup });
 }
 
 /** A later edit gets a new revision owner, so undoing its original batch cannot remove it. */
@@ -603,7 +614,7 @@ export function editPersonalImport(
       batches: retainActiveBatches(current.batches, records),
     };
     return { ledger, result: ledger };
-  });
+  }, 'local', { allowNativePrimaryOnly: true });
 }
 
 /** Remove one exact revision, never another tab's newer edit or a different school's row. */
