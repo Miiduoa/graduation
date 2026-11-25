@@ -1184,6 +1184,7 @@ function PersonalCalendarWorkspace({
             month={month}
             selectedDate={selectedDate}
             dateSelectionRevision={dateSelectionRevision}
+            workspaceBoundary={workspaceBoundary}
             onDate={selectMonthDay}
             onMonthChange={changeMonth}
             onEdit={openEdit}

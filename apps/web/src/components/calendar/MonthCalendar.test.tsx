@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { PersonalImportRecord } from '@campus/shared';
 import { MonthCalendar } from './MonthCalendar';
@@ -637,7 +637,15 @@ it.each([
   expect(document.activeElement).toBe(target);
 });
 
-it.each(['重試原日期', '繼續按方向鍵', '從月格繼續按方向鍵', '移走焦點', '月格只露出一像素時等待交接'])(
+it.each([
+  '重試原日期',
+  '繼續按方向鍵',
+  '從月格繼續按方向鍵',
+  '移走焦點',
+  '點擊工作區外空白後取消交接',
+  '點擊工作區內空白後繼續交接',
+  '月格只露出一像素時等待交接',
+])(
   '跨月目標在水平畫面外時可%s',
   (action) => {
     const viewport = Object.assign(new EventTarget(), {
@@ -654,10 +662,20 @@ it.each(['重試原日期', '繼續按方向鍵', '從月格繼續按方向鍵',
 
     function Calendar() {
       const [month, setMonth] = useState(baseProps.month);
+      const workspaceBoundary = useRef<HTMLDivElement>(null);
       return (
         <>
           <button type="button">其他控制</button>
-          <MonthCalendar {...baseProps} month={month} onMonthChange={setMonth} />
+          <div>工作區外空白</div>
+          <div ref={workspaceBoundary}>
+            <div>工作區內空白</div>
+            <MonthCalendar
+              {...baseProps}
+              month={month}
+              onMonthChange={setMonth}
+              workspaceBoundary={workspaceBoundary}
+            />
+          </div>
         </>
       );
     }
@@ -676,6 +694,14 @@ it.each(['重試原日期', '繼續按方向鍵', '從月格繼續按方向鍵',
 
     const outside = screen.getByRole('button', { name: '其他控制' });
     if (action === '移走焦點') outside.focus();
+    const pressedOutside = action === '點擊工作區外空白後取消交接';
+    if (pressedOutside || action === '點擊工作區內空白後繼續交接') {
+      const blank = screen.getByText(pressedOutside ? '工作區外空白' : '工作區內空白');
+      fireEvent.pointerDown(blank);
+      fireEvent.pointerUp(blank);
+      fireEvent.click(blank);
+      expect(document.activeElement).toBe(document.body);
+    }
     const continues = action === '繼續按方向鍵' || fromGrid;
     if (continues) {
       const key = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
@@ -686,6 +712,10 @@ it.each(['重試原日期', '繼續按方向鍵', '從月格繼續按方向鍵',
 
     viewport.offsetLeft = 20;
     viewport.dispatchEvent(new Event('scroll'));
+    if (pressedOutside) {
+      expect(document.activeElement).toBe(document.body);
+      return;
+    }
     expect(document.activeElement).toBe(
       action === '移走焦點'
         ? outside

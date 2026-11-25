@@ -1,4 +1,4 @@
-import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import {
   buildMonthCalendar,
   emptyPersonalEventDraft,
@@ -19,6 +19,7 @@ export function MonthCalendar({
   month,
   selectedDate,
   dateSelectionRevision = 0,
+  workspaceBoundary,
   onDate,
   onEdit,
   onMonthChange,
@@ -28,6 +29,7 @@ export function MonthCalendar({
   month: string;
   selectedDate: string;
   dateSelectionRevision?: number;
+  workspaceBoundary?: RefObject<HTMLElement | null>;
   onDate: (date: string) => void;
   onEdit: (event: PersonalImportRecord, trigger?: HTMLButtonElement) => void;
   onMonthChange?: (month: string) => void;
@@ -41,6 +43,7 @@ export function MonthCalendar({
   }
   const today = emptyPersonalEventDraft().date;
   const descriptionId = useId();
+  const calendarRef = useRef<HTMLElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const dateButtons = useRef(new Map<string, HTMLButtonElement>());
@@ -116,7 +119,8 @@ export function MonthCalendar({
 
   useLayoutEffect(() => {
     const requested = pendingFocus.current;
-    if (!requested) return;
+    const boundary = workspaceBoundary?.current ?? calendarRef.current;
+    if (!requested || !boundary) return;
     if (
       !requested.date.startsWith(`${month}-`) ||
       (document.activeElement !== requested.origin &&
@@ -155,7 +159,7 @@ export function MonthCalendar({
       if (pendingFocus.current === requested) pendingFocus.current = null;
       stopWatching();
     };
-    const stopRetry = retryFocusWhileOwned(origin, (mode) => {
+    const stopRetry = retryFocusWhileOwned(origin, boundary, (mode) => {
       if (pendingFocus.current === requested && focusDate(requested.date, mode)) cancel();
     }, cancel, gridRef.current);
     const stopWatching = () => {
@@ -164,10 +168,10 @@ export function MonthCalendar({
     };
     document.addEventListener('keydown', continueNavigation);
     return stopWatching;
-  }, [month, focusDate, moveDate, focusRequestRevision, dateSelectionRevision]);
+  }, [month, focusDate, moveDate, focusRequestRevision, dateSelectionRevision, workspaceBoundary]);
 
   return (
-    <section className={styles.calendar} aria-label="每月行程">
+    <section ref={calendarRef} className={styles.calendar} aria-label="每月行程">
       <header className={styles.header}>
         <p>個人行事曆</p>
         <h3>

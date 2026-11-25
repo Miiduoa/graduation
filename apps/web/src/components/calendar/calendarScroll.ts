@@ -202,12 +202,17 @@ export function focusWhenVisible(element: HTMLElement) {
 
 export function retryFocusWhileOwned(
   origin: Element | null,
+  boundary: Element,
   attempt: (mode: 'reveal' | 'visible') => void,
   cancel: () => void,
   animationTarget?: Element | null,
 ) {
   const checkFocus = () => {
     if (!stillOwnsFocus(origin)) cancel();
+  };
+  const onPointerDown = (event: PointerEvent) => {
+    // An outside press can leave focus on body without emitting focusin.
+    if (!event.composedPath().includes(boundary)) cancel();
   };
   const retry = (mode: 'reveal' | 'visible') => {
     if (stillOwnsFocus(origin)) attempt(mode);
@@ -219,10 +224,12 @@ export function retryFocusWhileOwned(
   };
   animationTarget?.addEventListener('animationend', onAnimationEnd);
   document.addEventListener('focusin', checkFocus);
+  document.addEventListener('pointerdown', onPointerDown, true);
   return () => {
     unsubscribe();
     animationTarget?.removeEventListener('animationend', onAnimationEnd);
     document.removeEventListener('focusin', checkFocus);
+    document.removeEventListener('pointerdown', onPointerDown, true);
   };
 }
 
