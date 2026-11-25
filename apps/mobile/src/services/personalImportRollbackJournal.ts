@@ -611,12 +611,11 @@ export function capturePersonalImportRollback(key: string) {
   // if restoring the original bytes there also fails.
   const orphanRejectionHash = orphan !== undefined ? rejectionHash : undefined;
   const rejectedRaw = encoded?.startsWith(rejectedPrefix) ? encoded.slice(rejectedPrefix.length) : undefined;
-  if (rejectedRaw !== undefined || deniedAttempt) {
+  if (deniedAttempt) {
     return {
       raw: rejectedRaw ?? rollbackRaw,
       rejected: true,
-      // Preparing a retry can replace the attempt hashes before the primary
-      // changes. The explicit rejection still protects the original bytes.
+      // This denial matches the current attempt.
       hasRejectedPayload: true,
       matchesAttemptedPrimary,
       matchesFallbackPrimary,
@@ -625,7 +624,8 @@ export function capturePersonalImportRollback(key: string) {
   const verification = readOptionalFile(verificationFile(key));
   const legacyBinding = rearmed && stored !== undefined ? sha256(stored) + '\n' : '';
   const verificationBinding = attempt && verification?.startsWith(attempt[0]) ? attempt[0] : legacyBinding;
-  const recordedHash = verification?.startsWith(verificationBinding)
+  const recordedHash = (rejectedRaw === undefined || verificationBinding === attempt?.[0]) &&
+    verification?.startsWith(verificationBinding)
     ? verification.slice(verificationBinding.length)
     : undefined;
   const verifiedHash = recordedHash && primaryHashPattern.test(recordedHash)
@@ -648,32 +648,34 @@ export function capturePersonalImportRollback(key: string) {
   const retiredHash = attempt && retirementProof?.startsWith(attempt[0])
     ? retirementProof.slice(attempt[0].length)
     : undefined;
+  const canUseCommitProof = (!rejected || rejectionUnreadable) &&
+    (rejectedRaw === undefined || attempt !== undefined);
   const matchesAttemptReceipt = attempt
     ? (raw: string, proof: string) => proof === attempt[0] + sha256(raw)
     : undefined;
   return {
     // An unreadable marker cannot establish retirement. Keep the payload
     // available so the caller can check it against the primary and publication evidence.
-    raw: markerCommitted ? undefined : rollbackRaw,
+    raw: rejectedRaw ?? (markerCommitted ? undefined : rollbackRaw),
     // Retirement precedes publication, so either native encoding can still
     // need the old bytes until the exact primary is verified for publication.
     committedRaw: markerCommitted ? rollbackRaw : undefined,
-    rejected,
-    hasRejectedPayload: false,
+    rejected: rejected || rejectedRaw !== undefined,
+    hasRejectedPayload: rejectedRaw !== undefined,
     matchesAttemptedPrimary,
     matchesFallbackPrimary,
     verificationReceipt: attempt && ((raw: string) => attempt[0] + sha256(raw)),
     matchesRejectionAttempt: attempt && ((proof: string) => proof === attempt[0]),
-    markerError: rejected && encoded !== undefined ? undefined : markerError,
-    payloadError,
-    // A separately verified resolution can disambiguate an unreadable
-    // rejection file. An explicit rejection marker or payload takes precedence.
-    matchesVerifiedReceipt: !rejected || rejectionUnreadable ? matchesAttemptReceipt : undefined,
+    markerError: (rejected || rejectedRaw !== undefined) && encoded !== undefined ? undefined : markerError,
+    payloadError: rejectedRaw === undefined ? payloadError : undefined,
+    // The payload can carry an earlier rejection into a retry. Check proofs
+    // for this attempt before falling back to those rejected bytes.
+    matchesVerifiedReceipt: canUseCommitProof ? matchesAttemptReceipt : undefined,
     verifiedReceipt,
     rejectionHash: orphanRejectionHash,
     checkpointRejection: orphanRejectionHash === undefined ? undefined
       : (raw: string | null) => orphanRejectionHash === sha256(raw ?? 'null'),
-    matchesVerifiedPrimary: (!rejected || rejectionUnreadable) &&
+    matchesVerifiedPrimary: canUseCommitProof &&
       (verifiedHash || binding || receiptHashes.length || settledHash || retiredHash) ? (raw: string) => {
       const hash = sha256(raw);
       return hash === verifiedHash || hash === binding?.[1] || receiptHashes.includes(hash) ||
@@ -816,8 +818,10 @@ export function preparePersonalImportRollback(
   const rejection = rejectionFile(key);
   let hadRejection = fileExists(rejection);
   let retireRestoredRejection = false;
+  let rejectionUnreadable = false;
   if (hadRejection) {
     const state = readOptionalFile(rejection);
+    rejectionUnreadable = state === undefined;
     const verifiedReceipt = readRollbackResolution(state);
     const activeRejection = verifiedReceipt?.match(committedReceiptPattern)?.[1] ??
       state?.match(targetedRejectionPattern)?.[1] ?? state;
@@ -870,7 +874,11 @@ export function preparePersonalImportRollback(
     try {
       payload.write(writtenPayload);
     } catch (error) {
-      if (!rejected && !hadRejection) throw new NativeRollbackUnavailableError(error);
+      // With no pending marker or readable denial, the verified primary
+      // can use the receipt path if the document directory is unavailable.
+      if (!rejected && (!hadRejection || (!marked && primaryCommitted && rejectionUnreadable))) {
+        throw new NativeRollbackUnavailableError(error);
+      }
       throw error;
     }
     let written: string | undefined;

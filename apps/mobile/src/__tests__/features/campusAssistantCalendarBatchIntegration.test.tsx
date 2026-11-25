@@ -198,28 +198,32 @@ test.each(['continue', 'cancel'] as const)('restarting a partially completed pla
 test('an unknown second write stops the third until same-ID readback and a fresh continuation confirmation', async () => {
   const targetKey = personalImportStorageKey(scope);
   let writes = 0;
-  let lateLedger = '';
+  let secondWriteLanded = false;
+  let readsAfterSecondWrite = 0;
   jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
-    if (key === targetKey && ++writes === 2) {
-      lateLedger = value;
-      throw new Error('lost native response');
+    await originalSet(key, value);
+    if (key === targetKey && ++writes === 2) secondWriteLanded = true;
+  });
+  jest.mocked(AsyncStorage.getItem).mockImplementation(async (key) => {
+    if (key === targetKey && secondWriteLanded && ++readsAfterSecondWrite > 1) {
+      throw new Error('temporarily unavailable after commit');
     }
-    return originalSet(key, value);
+    return originalGet(key);
   });
   const view = render(<CampusAssistantScreen />);
   await send(view, batchQuestion());
   await act(async () => fireEvent.press(view.getByRole('button', { name: '確認加入 3 筆行程' })));
-  await waitFor(() => expect(view.getAllByText(/目前沒有讀到這筆行程/).length).toBeGreaterThan(0));
+  await waitFor(() => expect(view.getAllByText(/尚未確認這筆行程是否已保存/).length).toBeGreaterThan(0));
   expect(view.getByText('已核對 1／3 筆行程')).toBeTruthy();
   expect(view.getByText('尚未開始')).toBeTruthy();
   expect(view.queryByRole('button', { name: '確認接續剩餘 1 筆行程' })).toBeNull();
   expect(ledgerWrites()).toHaveLength(2);
   const journal = await readAssistantCalendarJournal(scope, () => true);
   expect(journal.map((entry) => entry.proposal.event.title)).toEqual(['英文讀書', '程式練習']);
-  expect((await loadPersonalImports(scope)).records).toHaveLength(1);
-  expect(lateLedger).not.toBe('');
+  await expect(loadPersonalImports(scope)).rejects.toThrow('temporarily unavailable after commit');
+  expect(secondWriteLanded).toBe(true);
 
-  await originalSet(targetKey, lateLedger);
+  jest.mocked(AsyncStorage.getItem).mockImplementation(originalGet);
   await act(async () => fireEvent.press(view.getByRole('button', { name: '重新核對整份行程' })));
   await view.findByRole('button', { name: '確認接續剩餘 1 筆行程' });
   expect(view.getByText('已核對 2／3 筆行程')).toBeTruthy();
@@ -250,7 +254,8 @@ test.each(['account', 'school'] as const)('a %s change during the first native w
   view.rerender(<CampusAssistantScreen />);
   await ready(view);
   await act(async () => gate.resolve());
-  await waitFor(async () => expect(JSON.parse((await originalGet(targetKey))!).records).toHaveLength(1));
+  await waitFor(async () => expect(await originalGet(targetKey)).toBeNull());
+  expect((await loadPersonalImports(scope)).records).toEqual([]);
   expect(view.queryByText('1. 英文讀書')).toBeNull();
   expect(view.queryByText(/已逐筆保存並核對/)).toBeNull();
   expect(view.queryByRole('button', { name: '確認接續剩餘 2 筆行程' })).toBeNull();

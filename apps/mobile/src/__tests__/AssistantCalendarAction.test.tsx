@@ -61,19 +61,24 @@ test('cancelling an unconfirmed draft never writes or offers a misleading succes
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
 });
 
-test('an unknown result offers only same-ID checking and can verify a late native commit', async () => {
+test('an unknown result offers only same-ID checking and can verify a committed save after a read fault', async () => {
   const task = createAssistantCalendarTask(event, context);
-  let lateKey = ''; let lateValue = '';
+  let saved = false;
+  let readsAfterWrite = 0;
   jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
-    if (key !== ledgerKey) return originalSet(key, value);
-    lateKey = key; lateValue = value; throw new Error('lost native response');
+    await originalSet(key, value);
+    if (key === ledgerKey) saved = true;
+  });
+  jest.mocked(AsyncStorage.getItem).mockImplementation(async (key) => {
+    if (key === ledgerKey && saved && ++readsAfterWrite > 1) throw new Error('temporarily unavailable after commit');
+    return originalGet(key);
   });
   const view = render(<Harness initial={task} nav={navigation()} />);
   await act(async () => fireEvent.press(view.getByRole('button', { name: '確認加入個人行事曆' })));
   expect(view.queryByRole('button', { name: '確認加入個人行事曆' })).toBeNull();
   expect(view.queryByRole('button', { name: '先不要' })).toBeNull();
   expect(view.queryByText('已在這台手機保存並核對行程。')).toBeNull();
-  await originalSet(lateKey, lateValue);
+  jest.mocked(AsyncStorage.getItem).mockImplementation(originalGet);
   await act(async () => fireEvent.press(view.getByRole('button', { name: '重新核對行程' })));
   expect(view.getByText('已在這台手機保存並核對行程。')).toBeTruthy();
   expect(ledgerWrites()).toHaveLength(1);

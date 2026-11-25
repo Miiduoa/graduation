@@ -485,12 +485,19 @@ test('a stopped batch resumes the unstarted source step after restart without re
   const view = render(<CampusAssistantScreen route={route} navigation={navigation()} />);
   const confirm = await selectStudyBatch(view);
   const held = deferred<void>();
+  const target = personalImportStorageKey(scope);
+  let saved = false;
+  let readsAfterWrite = 0;
   jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
     await originalSet(key, value);
-    if (key === personalImportStorageKey(scope) && ledgerWrites().length === 1) await held.promise;
+    if (key === target) saved = true;
+  });
+  jest.mocked(AsyncStorage.getItem).mockImplementation(async (key) => {
+    if (key === target && saved && ++readsAfterWrite > 1) await held.promise;
+    return originalGet(key);
   });
   act(() => fireEvent.press(confirm));
-  await waitFor(() => expect(ledgerWrites()).toHaveLength(1));
+  await waitFor(() => expect(readsAfterWrite).toBeGreaterThan(1));
   await act(async () => fireEvent.press(view.getByRole('button', { name: '停止後續行程' })));
   await act(async () => held.resolve());
   await waitFor(() => expect(view.queryByRole('button', { name: '停止後續行程' })).toBeNull());

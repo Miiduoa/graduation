@@ -73,16 +73,27 @@ test('cancelling an unstarted batch persists the decision without claiming to de
     plan: { id: initial.plan.id, cancelledAt: expect.any(String) } });
 });
 
-test('stop remains enabled during an in-flight native write and prevents the next operation', async () => {
-  const initial = await prepareAssistantCalendarBatch(events, context);
+function holdCommittedLedgerRead() {
   const held = deferred();
+  let saved = false;
+  let readsAfterWrite = 0;
   jest.mocked(AsyncStorage.setItem).mockImplementation(async (storageKey, value) => {
     await originalSet(storageKey, value);
-    if (storageKey === key) await held.promise;
+    if (storageKey === key) saved = true;
   });
+  jest.mocked(AsyncStorage.getItem).mockImplementation(async (storageKey) => {
+    if (storageKey === key && saved && ++readsAfterWrite > 1) await held.promise;
+    return originalGet(storageKey);
+  });
+  return { ...held, didStart: () => readsAfterWrite > 1 };
+}
+
+test('stop remains enabled during post-commit readback and prevents the next operation', async () => {
+  const initial = await prepareAssistantCalendarBatch(events, context);
+  const held = holdCommittedLedgerRead();
   const view = render(<Harness initial={initial} />);
   act(() => fireEvent.press(view.getByRole('button', { name: '確認加入 2 筆行程' })));
-  await waitFor(() => expect(writes()).toHaveLength(1));
+  await waitFor(() => expect(held.didStart()).toBe(true));
   const stop = view.getByRole('button', { name: '停止後續行程' });
   expect(stop).toBeEnabled();
   fireEvent.press(stop);
@@ -98,15 +109,11 @@ test('stop remains enabled during an in-flight native write and prevents the nex
 
 test('unmount aborts subsequent steps and drops late callbacks without deleting the first result', async () => {
   const initial = await prepareAssistantCalendarBatch(events, context);
-  const held = deferred();
-  jest.mocked(AsyncStorage.setItem).mockImplementation(async (storageKey, value) => {
-    await originalSet(storageKey, value);
-    if (storageKey === key) await held.promise;
-  });
+  const held = holdCommittedLedgerRead();
   const changed = jest.fn();
   const view = render(<Harness initial={initial} changed={changed} />);
   act(() => fireEvent.press(view.getByRole('button', { name: '確認加入 2 筆行程' })));
-  await waitFor(() => expect(writes()).toHaveLength(1));
+  await waitFor(() => expect(held.didStart()).toBe(true));
   view.unmount();
   const callbacks = changed.mock.calls.length;
   await act(async () => held.resolve());

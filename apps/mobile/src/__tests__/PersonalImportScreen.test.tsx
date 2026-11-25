@@ -3,6 +3,7 @@ import type { useNuniSession } from '../state/nuniSession';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
+import { File } from 'expo-file-system';
 import {
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
   personalImportPreviewNotice,
@@ -52,25 +53,6 @@ jest.mock('../screens/AIModelManagerScreen', () => {
 });
 jest.mock('../services/personalImportBackupSharing', () => ({
   sharePersonalImportBackup: jest.fn(),
-}));
-jest.mock('expo-file-system', () => ({
-  Paths: { document: 'file:///mock/documents' },
-  File: class {
-    size = 1000;
-    uri: string;
-    constructor(value: string) {
-      this.uri = value;
-    }
-    info() {
-      return { exists: false };
-    }
-    async text() {
-      return mockFileText();
-    }
-    async base64() {
-      return '';
-    }
-  },
 }));
 jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => mockScope }));
 jest.mock('../state/school', () => ({
@@ -139,6 +121,7 @@ beforeEach(async () => {
   jest.clearAllMocks();
   mockRecognizeImportImage.mockReset();
   mockFileText.mockReset();
+  jest.spyOn(File.prototype, 'text').mockImplementation(() => mockFileText());
   mockDocumentRead.mockReset();
   mockDocumentCancel.mockReset();
   jest.mocked(DocumentPicker.getDocumentAsync).mockReset();

@@ -125,6 +125,9 @@ jest.mock('expo-file-system', () => ({
     write(content) {
       mockDocumentFiles.set(this.uri, content);
     }
+    async text() {
+      return this.textSync();
+    }
     textSync() {
       if (!mockDocumentFiles.has(this.uri)) throw new Error('file does not exist');
       return mockDocumentFiles.get(this.uri);

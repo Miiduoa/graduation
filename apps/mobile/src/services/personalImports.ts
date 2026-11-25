@@ -76,9 +76,8 @@ async function readNativeStorage(key: string): Promise<string | null> {
   }
 }
 
-async function readNativeReceipt(receiptKey: string, useBatchFallback = false): Promise<string | null> {
-  const read = useBatchFallback ? readNativeStorageWithBatchFallback : readNativeStorage;
-  return read(receiptKey).catch(() => null);
+async function readNativeReceipt(receiptKey: string): Promise<string | null> {
+  return readNativeStorageWithBatchFallback(receiptKey).catch(() => null);
 }
 
 async function readNativeStorageWithBatchFallback(key: string): Promise<string | null> {
@@ -135,19 +134,19 @@ async function readLedgerSnapshot(
   // Only a denial carrying that exact attempt binding can override it.
   const denial = journal?.matchesRejectionAttempt &&
     ((primaryVerified && (attemptedPrimary || fallbackPrimary)) || journal.rejected)
-    ? await readNativeReceipt(nativeRejectionAttemptKey(key), true)
+    ? await readNativeReceipt(nativeRejectionAttemptKey(key))
     : null;
   const deniedAttempt = (attemptedPrimary || fallbackPrimary) &&
     denial !== null && journal?.matchesRejectionAttempt?.(denial) === true;
   const candidatePrimary = attemptedPrimary || fallbackPrimary;
   const nativeRejectionBinding = primary?.match(nativeRestoredRejectionPattern)?.[1];
   const needsReceipt = !deniedAttempt && primaryVerified && (candidatePrimary || rejectionMatches !== undefined || nativeRejectionBinding !== undefined);
-  const receipt = needsReceipt ? await readNativeReceipt(nativeReceiptKey(key), true) : null;
+  const receipt = needsReceipt ? await readNativeReceipt(nativeReceiptKey(key)) : null;
   const fileReceipt = needsReceipt ? readNativeVerificationReceipt(key) : undefined;
-  const backupReceipt = needsReceipt ? await readNativeReceipt(nativeBackupReceiptKey(key), true) : null;
-  const rollbackResolution = needsReceipt ? await readNativeReceipt(nativeRollbackResolutionKey(key), true) : null;
+  const backupReceipt = needsReceipt ? await readNativeReceipt(nativeBackupReceiptKey(key)) : null;
+  const rollbackResolution = needsReceipt ? await readNativeReceipt(nativeRollbackResolutionKey(key)) : null;
   const checkpointPublication = needsReceipt
-    ? await readNativeReceipt(personalImportCheckpointKey(key), true)
+    ? await readNativeReceipt(personalImportCheckpointKey(key))
     : null;
   const checkpointReceipt = checkpointPublication?.match(checkpointPublicationPattern)?.[1].replace(/ /g, '\n');
   const receipts = [receipt, fileReceipt, backupReceipt, journal?.verifiedReceipt, rollbackResolution, checkpointReceipt];
@@ -555,9 +554,7 @@ export function mutatePersonalImportLedger<T>(
         const raw = !browserRecovery && hasNativeCommitEncoding(serialized)
           ? JSON.stringify(nativeLedgerInDefaultOrder(ledger))
           : serialized;
-        // Keep the recovery copy authoritative until the replacement commits,
-        // even if the recovered version no longer fits in AsyncStorage.
-        const needsJournal = typeof guard !== 'function' || restoredRejectionHash !== undefined ||
+        const needsGuardedEncoding = typeof guard !== 'function' || restoredRejectionHash !== undefined ||
           (recovery !== null && !hasPersisted) || hasNativeCommitEncoding(primaryRaw);
         const write = async () => {
           let writtenRaw = raw;
@@ -565,11 +562,9 @@ export function mutatePersonalImportLedger<T>(
             writtenRaw = commitWebPersonalImports(
               key, primaryRaw, raw, assertWritable, browserRecovery,
               recoveryCheck(),
-              needsJournal ? { raw: persistedRaw } : undefined,
+              needsGuardedEncoding ? { raw: persistedRaw } : undefined,
               lease,
             );
-          } else if (!needsJournal) {
-            await AsyncStorage.setItem(key, writtenRaw);
           } else {
             const adoptedCheckpoint = hasPersisted ? undefined : recovery?.checkpoint;
             if (adoptedCheckpoint !== undefined &&
@@ -579,8 +574,9 @@ export function mutatePersonalImportLedger<T>(
             assertWritable();
             const primaryCommitted = hasPersisted || (primaryVerified && recovery === null);
             let cleaningRecovery = false;
-            // Prepare rollback for either write before replacing the primary.
-            const firstRaw = encodeNativeFirstWrite(ledger);
+            // Prepare rollback before replacing the primary, including for
+            // ordinary writes that keep their existing ledger encoding.
+            const firstRaw = needsGuardedEncoding ? encodeNativeFirstWrite(ledger) : raw;
             const replacement = encodeNativeReplacement(ledger);
             let journal: ReturnType<typeof preparePersonalImportRollback> | undefined;
             try {
@@ -621,6 +617,7 @@ export function mutatePersonalImportLedger<T>(
               await writeNativeReceipt(checkpointKey, publication);
               return await readNativeStorageWithBatchFallback(checkpointKey) === publication;
             };
+            let initialWriteFailure: { error: unknown } | undefined;
             try {
               const continuedRejection = !journal ? restoredRejectionHash : undefined;
               writtenRaw = journal ? firstRaw : raw;
@@ -628,9 +625,18 @@ export function mutatePersonalImportLedger<T>(
                 // Carry the original rejection binding in the ledger write itself.
                 writtenRaw = raw.slice(0, -1) + ',"nativeRestoredRejection":"' + continuedRejection + '"}';
               }
-              await AsyncStorage.setItem(key, writtenRaw);
+              try {
+                await AsyncStorage.setItem(key, writtenRaw);
+              } catch (error) {
+                // A native bridge can reject after persisting the bytes.
+                initialWriteFailure = { error };
+              }
               assertWritable();
-              await verifyNativeLedgerWrite(key, writtenRaw);
+              try {
+                await verifyNativeLedgerWrite(key, writtenRaw);
+              } catch (error) {
+                throw initialWriteFailure ? initialWriteFailure.error : error;
+              }
               assertWritable();
               // Keep the rollback copy through cleanup and the final authority check.
               cleaningRecovery = true;
@@ -826,7 +832,10 @@ export function mutatePersonalImportLedger<T>(
                 // Still try to restore the original primary and checkpoint.
               }
               await rollbackLedger(
-                key, persistedRaw, assertWritable, cleaningRecovery,
+                key, persistedRaw, assertWritable,
+                // A failed bridge response can race a late write. Keep the
+                // attempt binding even after restoring and verifying the old bytes.
+                cleaningRecovery || (journal !== undefined && initialWriteFailure !== undefined),
                 nativeRestoredRejectionPattern.test(writtenRaw) ? writtenRaw : undefined,
                 retryPrimaryRestoration,
               );
@@ -854,7 +863,6 @@ export function mutatePersonalImportLedger<T>(
             }
           }
         };
-        if (!browserRecovery && !needsJournal) return write();
         // Readers wait until the write commits or rollback establishes the verified ledger.
         await trackWrite(key, write);
       };
