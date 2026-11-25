@@ -263,7 +263,7 @@ export type PersonalImportWriteGuard =
   | (() => boolean)
   | {
       canContinue: () => boolean;
-      canCommitFirstWrite?: (queued: boolean) => boolean;
+      canCommitFirstWrite?: () => boolean;
       confirmAfterCleanup?: boolean;
     };
 
@@ -282,18 +282,16 @@ export function mutatePersonalImportLedger<T>(
   const canContinue = typeof guard === 'function' ? guard : guard.canContinue;
   const key = personalImportStorageKey(scope);
   const previous = locks.get(key);
-  // Browser locks can also queue behind a different tab.
-  const queued = previous !== undefined || Platform.OS === 'web';
   const task = (previous ?? Promise.resolve())
     .catch(() => undefined)
     .then(() => withPersonalImportWriteLock(key, async (assertLockHeld, lease) => {
       let hasPersisted = false;
       const assertWritable = () => {
         assertLockHeld();
-        if (!canContinue()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
-        if (!hasPersisted && typeof guard !== 'function' && guard.canCommitFirstWrite?.(queued) === false) {
+        if (!hasPersisted && typeof guard !== 'function' && guard.canCommitFirstWrite?.() === false) {
           throw new Error('目前無法確認行事曆可寫入，請稍後再試。');
         }
+        if (!canContinue()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
         assertLockHeld();
       };
       assertWritable();

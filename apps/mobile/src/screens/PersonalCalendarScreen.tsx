@@ -233,8 +233,7 @@ export default function PersonalCalendarScreen() {
   })();
   if (key) lastReadyKey.current = key;
   else if (staleSticky) lastReadyKey.current = '';
-  // Keep the same workspace through a brief revalidation so an in-flight save
-  // can finish or surface an error instead of silently dropping the draft.
+  // Keep the workspace and draft mounted through brief revalidation.
   // Logout or a known owner/school switch is not revalidation: drop the sticky
   // key so the previous workspace cannot reappear or accept late reads.
   const workspaceKey = key || (!staleSticky && lastReadyKey.current) || 'pending';
@@ -509,20 +508,20 @@ function PersonalCalendarWorkspace({
       return;
     }
 
-    // Only an operation admitted while verified may continue through revalidation.
-    const canContinue = () => {
+    // A retained workspace can display a save error while revalidation is pending.
+    const canReportResult = () => {
       const latest = currentScope.current;
       return active.current && requestedScope.writeGeneration === latest.writeGeneration &&
         !latest.writesRevoked &&
         (!latest.resolvedKey || latest.verifiedKey === expected);
     };
-    // A queued operation must still have a verified workspace when it reaches
-    // its first write. A destructive confirmation also requires continuity.
+    const canContinue = () => canReportResult() && currentScope.current.verifiedKey === expected;
+    // Leave account changes to canContinue so they keep their specific error.
     const guard: PersonalImportWriteGuard = {
       canContinue,
-      canCommitFirstWrite: (queued) => confirmationScope
+      canCommitFirstWrite: () => !canReportResult() || (confirmationScope
         ? currentScope.current === confirmationScope
-        : !queued || currentScope.current.verifiedKey === expected,
+        : currentScope.current.verifiedKey === expected),
       confirmAfterCleanup: true,
     };
     mutationLock.current = true;
@@ -537,7 +536,7 @@ function PersonalCalendarWorkspace({
       setDraft(emptyPersonalEventDraft());
       await refresh();
     } catch (error) {
-      if (canContinue()) setFormError(personalEventSaveError(error));
+      if (canReportResult()) setFormError(personalEventSaveError(error));
     } finally {
       mutationLock.current = false;
       if (active.current) setSaving(false);

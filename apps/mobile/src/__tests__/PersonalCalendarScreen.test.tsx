@@ -624,6 +624,98 @@ it('finishes a started save while the account is briefly revalidated', async () 
   expect(ledger.records[0]?.title).toBe('重驗後仍要存下');
 });
 
+it.each([
+  ['create', 'entry'],
+  ['edit', 'entry'],
+  ['create', 'read'],
+  ['edit', 'read'],
+  ['create', 'readback'],
+  ['edit', 'readback'],
+] as const)('keeps an unqueued native %s draft when scope is lost at %s', async (mode, phase) => {
+  expect(Platform.OS).not.toBe('web');
+  const scope = mockScope!;
+  const originalTitle = '原本的行程';
+  const draftTitle = '等重新驗證的行程';
+  const view = mode === 'edit' ? await fillAndSave(originalTitle) : renderCalendar();
+  if (mode === 'edit') {
+    fireEvent.press(view.getByText(originalTitle));
+    fireEvent.changeText(view.getByLabelText('標題'), draftTitle);
+  } else {
+    await fillDraft(view, draftTitle);
+  }
+
+  const key = personalImportStorageKey(scope);
+  const stored = await AsyncStorage.getItem(key);
+  const entered = deferred<void>();
+  const release = deferred<void>();
+  const getItem = jest.mocked(AsyncStorage.getItem);
+  const read = getItem.getMockImplementation()!;
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  setItem.mockClear();
+  const actual = jest.requireActual<typeof import('../services/personalImports')>('../services/personalImports');
+  if (phase === 'entry') {
+    if (mode === 'edit') {
+      jest.mocked(editPersonalImport).mockImplementationOnce(async (...args) => {
+        entered.resolve();
+        await release.promise;
+        return actual.editPersonalImport(...args);
+      });
+    } else {
+      jest.mocked(appendPersonalImports).mockImplementationOnce(async (...args) => {
+        entered.resolve();
+        await release.promise;
+        return actual.appendPersonalImports(...args);
+      });
+    }
+  } else {
+    getItem.mockImplementation(async (storageKey, callback) => {
+      const value = await read(storageKey, callback);
+      if (storageKey === key && (phase === 'read' || setItem.mock.calls.some(([target]) => target === key))) {
+        getItem.mockImplementation(read);
+        entered.resolve();
+        await release.promise;
+      }
+      return value;
+    });
+  }
+
+  const notify = jest.fn();
+  const unsubscribe = subscribePersonalImports(notify);
+  const saveName = mode === 'edit' ? '儲存修改' : '儲存行程';
+  try {
+    fireEvent.press(view.getByRole('button', { name: saveName }));
+    const save = mode === 'edit'
+      ? jest.mocked(editPersonalImport).mock.results.at(-1)!.value
+      : jest.mocked(appendPersonalImports).mock.results.at(-1)!.value;
+    await entered.promise;
+    mockNuniLoading = true;
+    mockScope = null;
+    view.rerender(<PersonalCalendarScreen />);
+    await act(async () => {
+      release.resolve();
+      await expect(save).rejects.toThrow('目前無法確認行事曆可寫入');
+    });
+    expect(await AsyncStorage.getItem(key)).toBe(stored);
+    expect(notify).not.toHaveBeenCalled();
+    if (phase !== 'readback') {
+      expect(setItem).not.toHaveBeenCalledWith(key, expect.any(String));
+    }
+    expect(view.getByLabelText('標題').props.value).toBe(draftTitle);
+
+    mockNuniLoading = false;
+    mockScope = scope;
+    view.rerender(<PersonalCalendarScreen />);
+    fireEvent.press(await view.findByRole('button', { name: saveName, disabled: false }));
+    await waitFor(async () => {
+      expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual([draftTitle]);
+    });
+  } finally {
+    release.resolve();
+    getItem.mockImplementation(read);
+    unsubscribe();
+  }
+});
+
 it.each(['create', 'edit'] as const)('keeps a queued %s draft when the lock opens during revalidation', async (mode) => {
   const scope = mockScope!;
   const originalTitle = '原本的行程';
