@@ -527,8 +527,7 @@ export function capturePersonalImportRollback(key: string) {
   if (retired && !rejectionRecorded && !rearmedPattern.test(retiredPayload ?? '')) return undefined;
   let markerCommitted = false;
   let rejected = rejectionRecorded;
-  // A blank result can be an old rejection or a failed readback. Only an
-  // independent resolution for this exact attempt can disambiguate it.
+  // Distinguish an explicit rejection from an unreadable or malformed sidecar.
   let rejectionUnreadable = rejectionRecorded && rejectionValue !== rejectedMarker && rejectionHash === undefined;
   let markerError: unknown;
   try {
@@ -593,9 +592,10 @@ export function capturePersonalImportRollback(key: string) {
   const rollbackRaw = binding ? encoded?.slice(binding[0].length) : encoded;
   // Ordinary edits to a readable ledger can use the hash in the prepared
   // copy when publication fails. A rejected payload or marker wins. If the
-  // rejection file alone is unreadable, require a readable, non-rejected marker.
+  // rejection file cannot be read, the exact ordinary attempt binding can
+  // still verify the primary. A readable blank rejection is evidence of failure.
   const matchesOrdinaryPrimary = attempt?.[1].startsWith(ordinaryAttemptPrefix) &&
-    (!rejected || (rejectionUnreadable && !markerError && rejectionValue !== ''))
+    (!rejected || (rejectionUnreadable && rejectionValue !== ''))
     ? matchesAttemptedPrimary
     : undefined;
   const settlement = readOptionalFile(settlementFile(key));
@@ -963,7 +963,12 @@ export function preparePersonalImportRollback(
       const current = capturePersonalImportRollback(key);
       if (!fileExists(marker) || (current && !current.rejected &&
           current.matchesVerifiedPrimary?.(primary))) return true;
-      if (current?.rejected) throw new Error('無法確認匯入資料已儲存，請稍後再試。');
+      if (current?.rejected) {
+        // An auxiliary read can report rejection after the caller verified
+        // the primary. Let ordinary saves try the independent proof stores.
+        if (allowPrimaryOnly) return false;
+        throw new Error('無法確認匯入資料已儲存，請稍後再試。');
+      }
       // Bind proof of publication to the rollback copy and the verified primary.
       const receipt = sha256(readOptionalFile(payload) ?? writtenPayload) + '\n' + hash;
       try {
