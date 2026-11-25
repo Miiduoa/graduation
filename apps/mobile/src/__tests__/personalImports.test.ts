@@ -1017,7 +1017,7 @@ test.each([
       }
     });
     if (persistentPrimaryReadFault) {
-      expect(primaryFault).toHaveBeenCalledTimes(4);
+      expect(primaryFault).toHaveBeenCalledTimes(5);
       primaryReadBlocked = false;
       await expect(loadPersonalImports(scope)).resolves.toEqual(previous);
     }
@@ -1051,20 +1051,30 @@ const rollbackFiles = [
   '.rollback.pending', '.rollback.json', '.rollback.verified',
   '.rollback.published', '.rollback.published.bak', '.rollback.settled',
 ] as const;
-type RecoveryFault = 'write' | 'setItem' | 'readback' | 'read once' | 'read' | 'remove' | 'remove no-op';
-type RecoveryFaultCase = [string, Array<[string, RecoveryFault]>];
+type RecoveryFault =
+  | 'write' | 'setItem' | 'readback' | 'read once' | 'read' | 'remove' | 'remove no-op'
+  | 'restart read once' | 'restart read' | 'publication read';
+type RecoveryFaultCase = [
+  string,
+  Array<[string, RecoveryFault]>,
+  { dormant?: boolean; staleCopy?: boolean; primaryOnly?: boolean; revokeFallback?: boolean }?,
+];
+const blockPublicationLayers = (layers: readonly string[]): Array<[string, RecoveryFault]> =>
+  layers.map((location) => [location, 'write']);
 const blockedPublication: Array<[string, RecoveryFault]> = [
-  ...publicationLayers.map((location): [string, RecoveryFault] => [location, 'write']),
+  ...blockPublicationLayers(publicationLayers),
   ['.rollback.pending', 'remove'], ['.rollback.json', 'remove'], ['.rollback.rejected', 'remove'],
 ];
 const nativeRecoveryCases: RecoveryFaultCase[] = [
   ...[...rollbackFiles, ...publicationLayers].flatMap((location) =>
     (['write', 'readback', 'read once', 'read'] as const).map(
-      (fault): RecoveryFaultCase => [location + ' ' + fault, [[location, fault]]],
+      (fault): RecoveryFaultCase => [location + ' ' + fault, [[location, fault]],
+        { dormant: publicationLayers.findIndex((layer) => layer === location) > 0 }],
     ),
   ),
   ...publicationLayers.filter((location) => location.startsWith(':')).map(
-    (location): RecoveryFaultCase => [location + ' setItem', [[location, 'setItem']]],
+    (location): RecoveryFaultCase => [location + ' setItem', [[location, 'setItem']],
+      { dormant: location !== ':verified-write' }],
   ),
   ['primary transient readback', [['', 'read once']]],
   ['primary write fails', [['', 'write']]],
@@ -1091,14 +1101,61 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
     (['write', 'readback', 'read'] as const).map((fault): RecoveryFaultCase => [
       publicationLayers[index] + ' + ' + location + ' ' + fault,
       [[publicationLayers[index], fault], [location, fault]],
+      { dormant: index > 0 },
     ]),
   ),
-  ['every publication write and rollback removal', blockedPublication],
+  ...publicationLayers.slice(2).map((location, index): RecoveryFaultCase => [
+    'publication cascade with adjacent readback failures at ' + publicationLayers[index + 1] + ' and ' + location,
+    [
+      ...blockPublicationLayers(publicationLayers.slice(0, index + 1)),
+      [publicationLayers[index + 1], 'readback'], [location, 'readback'],
+    ],
+  ]),
+  ...publicationLayers.slice(1).flatMap((location, index) =>
+    (['write', 'readback', 'read'] as const).map((fault): RecoveryFaultCase => [
+      'publication cascade to ' + location + ' ' + fault,
+      [...blockPublicationLayers(publicationLayers.slice(0, index + 1)), [location, fault]],
+    ]),
+  ),
+  ['every publication write and rollback removal', blockedPublication, { staleCopy: true }],
+  ...(['write', 'readback', 'publication read', 'restart read'] as const).map(
+    (fault): RecoveryFaultCase => [
+      'every publication write and rollback removal with checkpoint ' + fault,
+      [...blockedPublication, [':checkpoint', fault]],
+      { staleCopy: true },
+    ],
+  ),
+  ['every publication readback and rollback removal with unreadable checkpoint', [
+    ...publicationLayers.map((layer): [string, RecoveryFault] => [layer, 'readback']),
+    ...blockedPublication.filter(([, fault]) => fault === 'remove'),
+    [':checkpoint', 'restart read'],
+  ], { staleCopy: true }],
+  ['primary transient restart read with verified-write receipt', [
+    ['', 'restart read once'],
+  ], { staleCopy: true }],
+  ['verified-write transient restart read', [
+    [':verified-write', 'restart read once'],
+  ], { staleCopy: true }],
+  ['file receipt transient restart read', [
+    [':verified-write', 'write'], ['.rollback.receipt', 'restart read once'],
+  ], { staleCopy: true }],
+  ['resolution with unreadable rejection and transient restart marker read', [
+    ...blockPublicationLayers(publicationLayers.slice(0, -1)),
+    ['.rollback.rejected', 'restart read'], ['.rollback.pending', 'restart read once'],
+  ], { staleCopy: true }],
+  ['primary-only save with stale rejection and unavailable checkpoint', [
+    ...blockedPublication, ['.rollback.json', 'write'], [':checkpoint', 'write'],
+  ], { primaryOnly: true }],
+  ['revoked primary-only save with stale rejection', [
+    ['.rollback.json', 'write'],
+  ], { primaryOnly: true, revokeFallback: true }],
   ['same faults with legacy journal names', blockedPublication],
   ['revoked during checkpoint publication', blockedPublication],
 ];
 
-test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (name, failures) => {
+test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
+  name, failures, { dormant = false, staleCopy = false, primaryOnly = false, revokeFallback = false } = {},
+) => {
   const scope = { owner: 'nuni:recovery-matrix-' + name, schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
   const { ledger: previous } = await appendPersonalImports(scope, [row('original')]);
@@ -1106,7 +1163,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (name, f
   const revokeOnPrimary = name === 'revoked primary and checkpoint rebuild write';
   const revokeOnCheckpoint = name === 'revoked during checkpoint publication';
   if (!revokeOnPrimary) {
-    const checkpoint = adopted ? previous : { ...previous, records: [] };
+    const checkpoint = adopted || revokeFallback ? previous : { ...previous, records: [] };
     await AsyncStorage.setItem(key + ':checkpoint', JSON.stringify(checkpoint));
   }
   if (adopted) await AsyncStorage.removeItem(key);
@@ -1134,22 +1191,19 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (name, f
     get: get.getMockImplementation()!, getMany: getMany.getMockImplementation()!,
     removeMany: removeMany.getMockImplementation()!,
   };
-  if (faults.get('.rollback.rejected') === 'remove') {
-    new File(Paths.document, documentPrefix + '.rollback.rejected').write('restored');
+  if (primaryOnly || failures.some(([location]) => location === '.rollback.rejected' &&
+      (staleCopy || faults.get(location) === 'remove'))) {
+    new File(Paths.document, documentPrefix + '.rollback.rejected')
+      .write(primaryOnly ? sha256((await native.get(key))!) : 'restored');
   }
   const primaryFault = faults.get('');
-  const rejects = revokeOnPrimary || revokeOnCheckpoint ||
+  const rejects = revokeOnPrimary || revokeOnCheckpoint || revokeFallback ||
     primaryFault === 'write' || primaryFault === 'readback' || primaryFault === 'read';
   let authorized = true;
   let restarting = false;
   const storageWritten = new Set<string>();
   const fileWritten = new Set<string>();
-  const late = failures.some(([location]) => publicationLayers.some((layer) => layer === location));
-  const lateTargets = failures.flatMap(([location]) => {
-    const index = publicationLayers.findIndex((layer) => layer === location);
-    return index < 0 ? [] : [index];
-  });
-  const preceding = publicationLayers.slice(0, Math.min(...lateTargets));
+  const late = staleCopy || failures.some(([location]) => publicationLayers.some((layer) => layer === location));
   const publicationFileFault = faults.has('.rollback.published') || faults.has('.rollback.published.bak');
   const backupRetirementFault = faults.has('.rollback.committed');
   const forceBackupRetirement = backupRetirementFault && !faults.has('.rollback.pending');
@@ -1161,28 +1215,25 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (name, f
     injected.add(location + ' ' + fault);
     return true;
   };
-  const isBlocked = (location: string) =>
-    inject(location, 'write') || (late && preceding.some((layer) => layer === location));
+  const isBlocked = (location: string) => inject(location, 'write');
   const simulateRead = <T,>(location: string, written: boolean, value: T, invalid: T): T => {
-    const fault = faults.get(location);
-    if ((fault === 'read' && written) || (fault === 'read once' && written && !consumed.has(location))) {
+    if (written && (inject(location, 'read') ||
+      (!consumed.has(location) && inject(location, 'read once')))) {
       consumed.add(location);
-      injected.add(location + ' ' + fault);
       throw failure;
     }
-    if (fault === 'readback' && written) {
-      injected.add(location + ' ' + fault);
-      return invalid;
-    }
-    return value;
+    return written && inject(location, 'readback') ? invalid : value;
   };
+  let primaryWrites = 0;
   set.mockImplementation(async (entry, value) => {
     const location = entry.slice(key.length);
+    if (entry === key) primaryWrites++;
     if (isBlocked(location) || inject(location, 'setItem') ||
-        (late && entry === key && !value.startsWith('{"records":'))) throw failure;
+        (entry === key && ((late && !primaryOnly && !value.startsWith('{"records":')) ||
+          (revokeFallback && !authorized)))) throw failure;
     await native.set(entry, value);
     storageWritten.add(location);
-    if ((revokeOnPrimary && entry === key) ||
+    if (((revokeOnPrimary || revokeFallback) && entry === key) ||
         (revokeOnCheckpoint && location === ':checkpoint' && value.startsWith('verified:'))) authorized = false;
   });
   setMany.mockImplementation(async (entries) => {
@@ -1193,14 +1244,26 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (name, f
   get.mockImplementation(async (entry) => {
     const location = entry.slice(key.length);
     const value = await native.get(entry);
+    if (restarting && (
+      inject(location, 'restart read') ||
+      (!consumed.has(location) && inject(location, 'restart read once'))
+    )) {
+      consumed.add(location);
+      throw failure;
+    }
+    if (location === ':checkpoint' && primaryWrites > 1 && inject(location, 'publication read')) throw failure;
     if (location === '' && restarting) return value;
     return simulateRead(location, storageWritten.has(location), value, null);
   });
   getMany.mockImplementation(async (entries) => {
     const values = await native.getMany(entries);
-    return values.map(([entry, value]) => [
-      entry, entry === key + ':checkpoint' ? simulateRead(':checkpoint', true, value, null) : value,
-    ]);
+    return values.map(([entry, value]) => {
+      if (entry !== key + ':checkpoint') return [entry, value];
+      if ((restarting && inject(':checkpoint', 'restart read')) ||
+          (primaryWrites > 1 && inject(':checkpoint', 'publication read'))) throw failure;
+      return [entry, simulateRead(':checkpoint', faults.get(':checkpoint') !== 'readback' ||
+        storageWritten.has(':checkpoint'), value, 'checkpoint readback mismatch')];
+    });
   });
   removeMany.mockImplementation(async (entries) => {
     if (entries.some((entry) => inject(entry.slice(key.length), 'remove'))) throw failure;
@@ -1227,6 +1290,11 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (name, f
   });
   const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
     const location = fileLocation(this);
+    if (restarting && (inject(location, 'restart read') ||
+        (!consumed.has(location) && inject(location, 'restart read once')))) {
+      consumed.add(location);
+      throw failure;
+    }
     return simulateRead(location, fileWritten.has(location), originalFile.text.call(this), 'readback mismatch');
   });
   const deleteFile = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
@@ -1249,12 +1317,38 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (name, f
       expect(notified).toHaveBeenCalledTimes(1);
       await expect(notified.mock.results[0].value).resolves.toEqual(expected);
     }
+    if (staleCopy) {
+      expect(primaryWrites).toBe(3);
+      expect(await native.get(key)).toMatch(/^\{"records":/);
+      expect(originalFile.text.call(new File(Paths.document, documentPrefix + '.rollback.json')))
+        .toContain(JSON.stringify(previous));
+      expect(originalFile.text.call(new File(Paths.document, documentPrefix + '.rollback.pending'))).toBe('');
+      if (faults.get('') === 'restart read once') {
+        expect(await native.get(key + ':verified-write')).toEqual(expect.any(String));
+      }
+    }
+    if (primaryOnly) {
+      expect(new File(Paths.document, documentPrefix + '.rollback.pending').info().exists).toBe(false);
+      expect(new File(Paths.document, documentPrefix + '.rollback.rejected').info().exists).toBe(true);
+    }
     restarting = true;
+    const readsBeforeRestart = get.mock.calls.length;
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
     });
-    expect([...injected]).toEqual(expect.arrayContaining(failures.map(([location, fault]) => location + ' ' + fault)));
+    if (faults.get('') === 'restart read once') {
+      const restartKeys = get.mock.calls.slice(readsBeforeRestart).map(([entry]) => entry);
+      expect(restartKeys.filter((entry) => entry === key)).toHaveLength(2);
+      expect(restartKeys).toContain(key + ':verified-write');
+    }
+    const reachable = dormant
+      ? failures.filter(([location]) => location === publicationLayers[0])
+      : failures.filter(([location, fault]) =>
+          (!primaryOnly || location !== '.rollback.pending') &&
+          !(location === '.rollback.json' && fault === 'remove' &&
+            failures.some(([field, mode]) => field === '.rollback.rejected' && mode === 'remove')));
+    expect([...injected]).toEqual(expect.arrayContaining(reachable.map(([location, fault]) => location + ' ' + fault)));
   } finally {
     unsubscribe();
     deleteFile.mockRestore();

@@ -16,9 +16,11 @@ const resolvedRejection = 'restored';
 const verifiedRejectionPrefix = 'verified:\n';
 const rejectedPrefix = 'rejected:\n';
 const rearmedPattern = /^rearmed(?::[^\n:]+)?:\n/;
+const ordinaryAttemptPrefix = 'ordinary-';
 const attemptPattern = /^attempt:([^:\n]+):([a-f0-9]{64}):([a-f0-9]{64})(?::([a-f0-9]{64}))?\n/;
 const committedPayloadPattern = /^committed:([a-f0-9]{64})\n/;
 const committedReceiptPattern = /^([a-f0-9]{64})\n([a-f0-9]{64})$/;
+const targetedRejectionPattern = /^rejected:([a-f0-9]{64}):([a-f0-9]{64})$/;
 const primaryHashPattern = /^[a-f0-9]{64}$/;
 const legacyStagePattern = /^campus\.personal-imports\.rollback\.v1:([a-f0-9]{64}):stage:\d+:[^:]+$/;
 const lockStore = 'writes';
@@ -503,9 +505,9 @@ export function capturePersonalImportRollback(key: string) {
   const rejectionValue = fileExists(rejection) ? readOptionalFile(rejection) : resolvedRejection;
   const verifiedReceipt = readRollbackResolution(rejectionValue);
   const rejectionRecorded = rejectionValue !== resolvedRejection && verifiedReceipt === undefined;
-  const rejectionHash = rejectionValue && primaryHashPattern.test(rejectionValue)
-    ? rejectionValue
-    : undefined;
+  const targetedRejection = rejectionValue?.match(targetedRejectionPattern);
+  const rejectionHash = targetedRejection?.[1] ??
+    (rejectionValue && primaryHashPattern.test(rejectionValue) ? rejectionValue : undefined);
   if (!marked) {
     const verifiedBinding = verifiedReceipt?.match(committedReceiptPattern);
     if (!rejectionRecorded && !verifiedBinding) return undefined;
@@ -515,6 +517,7 @@ export function capturePersonalImportRollback(key: string) {
     return {
       rejected: true,
       rejectionHash: checkpointHash,
+      rejectedPrimaryHash: targetedRejection?.[2],
       verifiedReceipt,
       checkpointRejection: (raw: string | null) => checkpointHash === sha256(raw ?? 'null'),
     };
@@ -588,6 +591,13 @@ export function capturePersonalImportRollback(key: string) {
     }
   }
   const rollbackRaw = binding ? encoded?.slice(binding[0].length) : encoded;
+  // Ordinary edits to a readable ledger can use the hash in the prepared
+  // copy when publication fails. A rejected payload or marker wins. If the
+  // rejection file alone is unreadable, require a readable, non-rejected marker.
+  const matchesOrdinaryPrimary = attempt?.[1].startsWith(ordinaryAttemptPrefix) &&
+    (!rejected || (rejectionUnreadable && !markerError && rejectionValue !== ''))
+    ? matchesAttemptedPrimary
+    : undefined;
   const settlement = readOptionalFile(settlementFile(key));
   const settlementPrefix = attempt?.[0] ?? '';
   const settled = settlement?.startsWith(settlementPrefix)
@@ -608,6 +618,7 @@ export function capturePersonalImportRollback(key: string) {
     hasRejectedPayload: false,
     matchesAttemptedPrimary,
     matchesFallbackPrimary,
+    matchesOrdinaryPrimary,
     markerError: rejected && encoded !== undefined ? undefined : markerError,
     payloadError,
     // A separately verified resolution can disambiguate an unreadable
@@ -680,9 +691,8 @@ export function publishNativeRollbackResolution(key: string, receipt: string): v
 export function clearVerifiedNativeRollback(key: string): boolean {
   const { payload, marked } = journalFiles(key);
   const rejection = rejectionFile(key);
-  const rejectionCleared = !fileExists(rejection) || deleteMarker(rejection);
-  const payloadCleared = !marked || !fileExists(payload) || deleteMarker(payload);
-  return rejectionCleared && payloadCleared;
+  if (fileExists(rejection) && !deleteMarker(rejection)) return false;
+  return !marked || !fileExists(payload) || deleteMarker(payload);
 }
 
 function publicationFile(key: string): File {
@@ -728,7 +738,14 @@ export function preparePersonalImportRollback(
   key: string,
   raw: string | null,
   primaryCommitted = false,
-  attemptedPrimary?: { first: string; replacement: string; fallback: string; preserveRejection?: boolean; restoredRejectionHash?: string },
+  attemptedPrimary?: {
+    first: string;
+    replacement: string;
+    fallback: string;
+    preserveRejection?: boolean;
+    restoredRejectionHash?: string;
+    preferBoundPrimary?: boolean;
+  },
 ) {
   const encoded = raw ?? 'null';
   const { payload, marker, marked } = journalFiles(key);
@@ -739,7 +756,8 @@ export function preparePersonalImportRollback(
   if (hadRejection) {
     const state = readOptionalFile(rejection);
     const verifiedReceipt = readRollbackResolution(state);
-    const activeRejection = verifiedReceipt?.match(committedReceiptPattern)?.[1] ?? state;
+    const activeRejection = verifiedReceipt?.match(committedReceiptPattern)?.[1] ??
+      state?.match(targetedRejectionPattern)?.[1] ?? state;
     retireRestoredRejection = !marked && attemptedPrimary?.restoredRejectionHash !== undefined &&
       !attemptedPrimary.preserveRejection &&
       (activeRejection === undefined || activeRejection === attemptedPrimary.restoredRejectionHash);
@@ -774,8 +792,9 @@ export function preparePersonalImportRollback(
   const rearmed = hadRetirement || hadVerification || fileExists(publication) || fileExists(publicationBackup);
   const prefix = rearmed ? `rearmed:${createPersonalImportId()}:\n` : '';
   // Bind each possible write to this rollback copy without changing its row size.
+  const ordinary = attemptedPrimary?.preferBoundPrimary && !attemptedPrimary.preserveRejection && !markerRejected;
   const attempt = attemptedPrimary
-    ? `attempt:${createPersonalImportId()}:${sha256(attemptedPrimary.first)}:${sha256(attemptedPrimary.replacement)}:${sha256(attemptedPrimary.fallback)}\n`
+    ? `attempt:${ordinary ? ordinaryAttemptPrefix : ''}${createPersonalImportId()}:${sha256(attemptedPrimary.first)}:${sha256(attemptedPrimary.replacement)}:${sha256(attemptedPrimary.fallback)}\n`
     : '';
   const wrap = (value: string) => prefix + attempt + value;
   const previousBody = previous?.replace(rearmedPattern, '').replace(attemptPattern, '');
@@ -993,6 +1012,11 @@ export function preparePersonalImportRollback(
       // Preserve the attempt binding even when the rollback copy is unreadable.
       try {
         payload.write(wrap(rejectedPrefix + encoded));
+      } catch (error) {
+        // The ordinary attempt can be recovered from its primary binding.
+        // If its payload cannot record rejection, try the pending marker too.
+        if (ordinary) marker.write(rejectedMarker);
+        throw error;
       } finally {
         discardPayload(verification);
         discardPayload(publication);
@@ -1003,14 +1027,22 @@ export function preparePersonalImportRollback(
   };
 }
 
-export function recordFailedPersonalImportRestoration(key: string, original: string | null): void {
+export function recordFailedPersonalImportRestoration(
+  key: string,
+  original: string | null,
+  rejectedPrimary?: string,
+): void {
   // Record rejection independently so a restart can distinguish an unreadable
   // rejected journal from auxiliary read failures after a verified commit.
   const rejection = rejectionFile(key);
   const { marker, marked } = journalFiles(key);
   try {
     if (!marked) {
-      rejection.write(sha256(original ?? 'null'));
+      const originalHash = sha256(original ?? 'null');
+      const evidence = rejectedPrimary === undefined
+        ? originalHash
+        : `rejected:${originalHash}:${sha256(rejectedPrimary)}`;
+      rejection.write(evidence);
     } else if (!fileExists(rejection)) {
       rejection.create();
     } else {

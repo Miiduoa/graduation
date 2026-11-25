@@ -48,6 +48,8 @@ export const personalImportStorageKey = (scope: PersonalImportScope) =>
 const nativeReceiptKey = (key: string) => key + ':verified-write';
 const nativeBackupReceiptKey = (key: string) => key + ':verified-write-backup';
 const nativeRollbackResolutionKey = (key: string) => key + ':rollback-resolution';
+// Native primary-only writes can outlive an earlier rejection file.
+const nativeRestoredRejectionPattern = /,"nativeRestoredRejection":"([a-f0-9]{64})"}$/;
 const checkpointPublicationPattern = /^verified:([a-z0-9:-]+(?: [a-z0-9:-]+)+)\n/;
 
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
@@ -109,7 +111,9 @@ async function readLedgerSnapshot(
   let primaryError: unknown;
   if (!restorationPending) {
     try {
-      primary = await AsyncStorage.getItem(key);
+      // With rollback evidence, retry before a transient primary read can
+      // send recovery down the path for a missing ledger.
+      primary = await (journal ? readNativeStorage(key) : AsyncStorage.getItem(key));
     } catch (error) {
       if (web) throw error;
       primaryError = error;
@@ -136,23 +140,33 @@ async function readLedgerSnapshot(
   const receipts = [receipt, fileReceipt, backupReceipt, journal?.verifiedReceipt, rollbackResolution, checkpointReceipt];
   const rejectionHash = journal?.rejectionHash;
   const primaryHash = primaryVerified && primary !== null && rejectionMatches ? sha256(primary) : undefined;
-  const publishedRejectionHash = primaryHash === undefined ? undefined : receipts
+  const explicitlyRejected = primaryHash !== undefined && journal?.rejectedPrimaryHash === primaryHash;
+  const publishedRejectionHash = primaryHash === undefined || explicitlyRejected ? undefined : receipts
     .map((proof) => proof?.match(/^([a-f0-9]{64})\n([a-f0-9]{64})$/))
     .find((proof) => proof && (rejectionHash === undefined || proof[1] === rejectionHash) &&
       proof[2] === primaryHash)?.[1];
-  const restoredRejectionHash = publishedRejectionHash ??
+  const nativeRejectionBinding = primary?.match(nativeRestoredRejectionPattern)?.[1];
+  const boundRestoredRejection = primaryHash !== undefined && rejectionHash !== undefined &&
+    !explicitlyRejected && nativeRejectionBinding === rejectionHash
+    ? rejectionHash
+    : undefined;
+  const restoredRejectionHash = publishedRejectionHash ?? boundRestoredRejection ??
     ((primaryVerified || restoredEmpty) && rejectionMatches?.(primary) ? rejectionHash : undefined);
   const checkpointRejection = restoredRejectionHash ? undefined : rejectionMatches;
   const resolvedUnreadableRejection = primary !== null && [rollbackResolution, checkpointReceipt].some((proof) =>
     typeof proof === 'string' && journal?.matchesUnreadableRejectionResolution?.(primary, proof));
+  const ordinaryPrimary = primaryVerified && primary !== null &&
+    journal?.matchesOrdinaryPrimary?.(primary) === true;
   const verifiedByJournal = primary !== null && (
     resolvedUnreadableRejection ||
     journal?.matchesVerifiedPrimary?.(primary) === true ||
-    receipts.some((proof) => typeof proof === 'string' && journal?.matchesVerifiedReceipt?.(primary, proof))
+    receipts.some((proof) => typeof proof === 'string' && journal?.matchesVerifiedReceipt?.(primary, proof)) ||
+    ordinaryPrimary
   );
-  const rejectedPrimary = journal?.rejected && !resolvedUnreadableRejection && (
+  const rejectedPrimary = journal?.rejected && !ordinaryPrimary && !resolvedUnreadableRejection && (
     journal.hasRejectedPayload || attemptedPrimary || journal.raw === primary ||
     (primary !== null && journal.matchesFallbackPrimary?.(primary)) ||
+    (nativeRejectionBinding !== undefined && rejectionMatches === undefined) ||
     (journal.payloadError && hasNativeCommitEncoding(primary))
   );
   if (!primaryVerified || rejectedPrimary) {
@@ -164,7 +178,8 @@ async function readLedgerSnapshot(
   const nativeJournal = !primaryVerified || rejectedPrimary || (attemptedPrimary && !verifiedByJournal)
     ? journal?.raw ?? (attemptedPrimary ? journal?.committedRaw : undefined)
     : undefined;
-  if (primaryError && nativeJournal === undefined && !isStorageRowTooLarge(primaryError)) {
+  if (primaryError && !isStorageRowTooLarge(primaryError) &&
+      (!journal?.rejected || nativeJournal === undefined)) {
     throw primaryError;
   }
   const recovery: (Recovery & { ledger: PersonalImportLedger }) | null = browserRecovery
@@ -334,6 +349,7 @@ async function rollbackLedger(
   raw: string | null,
   assertWritable: () => void,
   keepJournal: boolean,
+  rejectedPrimary?: string,
 ) {
   const recovery: Recovery = { raw };
   pendingRestorations.set(key, recovery);
@@ -351,7 +367,7 @@ async function rollbackLedger(
     await restoreLedger(key, recovery, assertWritable, keepJournal);
   } catch (error) {
     try {
-      recordFailedPersonalImportRestoration(key, raw);
+      recordFailedPersonalImportRestoration(key, raw, rejectedPrimary);
     } catch {
       // The rollback payload and checkpoint may still preserve the original.
     }
@@ -429,8 +445,9 @@ function encodeNativeFirstWrite({ version, records, ...ledger }: PersonalImportL
 
 function parseLedger(raw: string | null, scope: PersonalImportScope): PersonalImportLedger {
   const web = Platform.OS === 'web';
-  const ledger = parsePersonalImportLedger(raw, scope.schoolId, web);
-  if (web || !hasNativeCommitEncoding(raw)) return ledger;
+  const stored = !web ? raw?.replace(nativeRestoredRejectionPattern, '}') ?? null : raw;
+  const ledger = parsePersonalImportLedger(stored, scope.schoolId, web);
+  if (web || !hasNativeCommitEncoding(stored)) return ledger;
   return nativeLedgerInDefaultOrder(ledger);
 }
 
@@ -535,6 +552,7 @@ export function mutatePersonalImportLedger<T>(
             let journal: ReturnType<typeof preparePersonalImportRollback> | undefined;
             try {
               journal = preparePersonalImportRollback(key, persistedRaw, primaryCommitted, {
+                preferBoundPrimary: options.allowNativePrimaryOnly && primaryCommitted,
                 first: firstRaw,
                 replacement,
                 fallback: raw,
@@ -561,7 +579,13 @@ export function mutatePersonalImportLedger<T>(
             let previousCheckpoint: string | null = null;
             let writingCheckpointPublication = false;
             try {
+              const continuedRejection = !journal && restoredRejectionHash &&
+                capturePersonalImportRollback(key)?.checkpointRejection ? restoredRejectionHash : undefined;
               writtenRaw = journal ? firstRaw : raw;
+              if (continuedRejection) {
+                // Carry the original rejection binding in the ledger write itself.
+                writtenRaw = raw.slice(0, -1) + ',"nativeRestoredRejection":"' + continuedRejection + '"}';
+              }
               await AsyncStorage.setItem(key, writtenRaw);
               assertWritable();
               await verifyNativeLedgerWrite(key, writtenRaw);
@@ -613,8 +637,8 @@ export function mutatePersonalImportLedger<T>(
               }
               // Keep a small proof in AsyncStorage when the document directory
               // cannot publish the verified attempt or retire an old rejection.
-              if (!journal && restoredRejectionHash && capturePersonalImportRollback(key)?.checkpointRejection) {
-                newReceipt = restoredRejectionHash + '\n' + sha256(writtenRaw);
+              if (continuedRejection) {
+                newReceipt = continuedRejection + '\n' + sha256(writtenRaw);
               }
               if (newReceipt !== undefined) {
                 assertWritable();
@@ -667,16 +691,21 @@ export function mutatePersonalImportLedger<T>(
                           assertWritable();
                           if (!clearVerifiedNativeRollback(key)) {
                             const checkpointKey = personalImportCheckpointKey(key);
-                            previousCheckpoint = await readNativeCheckpointPublication(checkpointKey);
+                            const checkpoint = await readNativeCheckpointPublication(checkpointKey)
+                              .catch(() => undefined);
                             assertWritable();
-                            // Preserve any legacy recovery payload while binding publication
-                            // to the exact attempt. File deletion is only a best effort.
-                            const priorRecovery = previousCheckpoint?.replace(checkpointPublicationPattern, '') ?? '';
-                            const publication = 'verified:' + newReceipt.replace(/\n/g, ' ') + '\n' + priorRecovery;
-                            writingCheckpointPublication = true;
-                            await writeNativeReceipt(checkpointKey, publication);
-                            if (await readNativeCheckpointPublication(checkpointKey) !== publication) {
-                              throw new Error('無法確認匯入資料的儲存憑據。');
+                            if (checkpoint !== undefined) {
+                              previousCheckpoint = checkpoint;
+                              // Keep the legacy payload available to older readers.
+                              const priorRecovery = checkpoint?.replace(checkpointPublicationPattern, '') ?? '';
+                              const publication = 'verified:' + newReceipt.replace(/\n/g, ' ') + '\n' + priorRecovery;
+                              writingCheckpointPublication = true;
+                              try {
+                                await writeNativeReceipt(checkpointKey, publication);
+                                await readNativeCheckpointPublication(checkpointKey);
+                              } catch {
+                                // A checkpoint is optional once the primary is verified.
+                              }
                             }
                           }
                         }
@@ -746,7 +775,10 @@ export function mutatePersonalImportLedger<T>(
               } catch {
                 // Still try to restore the original primary and checkpoint.
               }
-              await rollbackLedger(key, persistedRaw, assertWritable, cleaningRecovery);
+              await rollbackLedger(
+                key, persistedRaw, assertWritable, cleaningRecovery,
+                nativeRestoredRejectionPattern.test(writtenRaw) ? writtenRaw : undefined,
+              );
               throw error;
             }
           }
