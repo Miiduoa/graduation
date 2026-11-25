@@ -64,7 +64,10 @@ function ServiceDirectory() {
   const canRemember = account.canRemember && campusReady;
   const searchInput = useRef<HTMLInputElement>(null);
   const resultsHeading = useRef<HTMLHeadingElement>(null);
-  const compositionScope = useRef<string | null>(null);
+  const composition = useRef<{
+    scope: string;
+    filters: ReturnType<typeof readCampusServiceFilters>;
+  } | null>(null);
   const directory = useRef<HTMLDivElement>(null);
   const [restoredExpanded, setRestoredExpanded] = useState<string[]>([]);
   const requestSequence = useRef(0);
@@ -125,6 +128,7 @@ function ServiceDirectory() {
     queryString,
     query,
     category,
+    composition,
   });
   const term = query.trim();
   const semanticScope = JSON.stringify([
@@ -152,7 +156,7 @@ function ServiceDirectory() {
     if (confirmedScope === null) {
       // Bind edits made during initial account resolution without treating them as an account switch.
       if (editedFilters.current) editedFilters.current.scope = draftScope;
-      if (compositionScope.current !== null) compositionScope.current = draftScope;
+      if (composition.current) composition.current.scope = draftScope;
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFilters((current) =>
         current.scope === draftScope ? current : { ...current, scope: draftScope },
@@ -168,7 +172,7 @@ function ServiceDirectory() {
       else supersedeSearchResultReturn();
       editedFilters.current = null;
       historyRestoration.current = null;
-      compositionScope.current = null;
+      composition.current = null;
       forgetDirectorySearch('search');
       const url = new URL(window.location.href);
       writeCampusServiceFilters(url.searchParams, '', 'all');
@@ -191,7 +195,7 @@ function ServiceDirectory() {
       // composition whose end event may still arrive after this render.
       restoredFilters.current = { scope: draftScope, queryString };
       editedFilters.current = null;
-      compositionScope.current = null;
+      composition.current = null;
       const next =
         filterArrival.saved?.filters ?? readCampusServiceFilters(new URLSearchParams(queryString));
       const expanded = restoreDirectorySearch('search', '/search', storageScope)?.expanded ?? [];
@@ -267,7 +271,7 @@ function ServiceDirectory() {
         ? (restoreDirectorySearch('search', '/search', storageScope)?.expanded ?? [])
         : [];
       requestSequence.current += 1;
-      compositionScope.current = null;
+      composition.current = null;
       setAnalysis(null);
       // An empty history entry is intentionally empty, even if a session draft exists.
       historyRestoration.current = {
@@ -448,7 +452,7 @@ function ServiceDirectory() {
           aria-label="尋找服務"
           onSubmit={(event) => {
             event.preventDefault();
-            if (compositionScope.current !== null) return;
+            if (composition.current !== null) return;
             resultsHeading.current?.focus();
           }}
         >
@@ -471,21 +475,21 @@ function ServiceDirectory() {
                 onChange={(event) =>
                   updateFilters(
                     { query: event.target.value, category },
-                    compositionScope.current === null,
+                    composition.current === null,
                   )
                 }
                 onCompositionStart={() => {
-                  compositionScope.current = draftScope;
+                  composition.current ??= { scope: draftScope, filters: { query, category } };
                 }}
                 onCompositionEnd={(event) => {
-                  const scope = compositionScope.current;
-                  compositionScope.current = null;
+                  const scope = composition.current?.scope;
+                  composition.current = null;
                   if (scope === draftScope)
                     updateFilters({ query: event.currentTarget.value, category });
                 }}
                 onKeyDown={(event) => {
                   const composing =
-                    event.nativeEvent.isComposing || compositionScope.current !== null;
+                    event.nativeEvent.isComposing || composition.current !== null;
                   if (event.key === 'Enter' && (composing || event.keyCode === 229)) {
                     event.preventDefault();
                   }

@@ -1548,21 +1548,26 @@ describe('continuing a search after opening a service', () => {
         const routerEntry = structuredClone(nextState);
         Object.defineProperty(routerEntry, APP_ROUTER_HISTORY_REPLACE, { value: true });
         act(() => move(pushedUrl, routerEntry));
-        expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+        const search = screen.getByRole<HTMLInputElement>('searchbox');
+        expect(search.value).toBe('借書');
+        if (shape === 'copied array') {
+          // The restored filters already differ from the URL before composition.
+          fireEvent.compositionStart(search);
+          fireEvent.change(search, { target: { value: '圖' } });
+          expect(search.value).toBe('圖');
+        }
         act(() => window.history.replaceState(null, '', pushedUrl));
         expect(window.location.href).toBe(pushedUrl);
-        expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
-        const syncEntry = Object.defineProperty(
-          { ...window.history.state, ...nextState },
-          APP_ROUTER_SYNC_HISTORY_QUERY,
-          { value: true },
-        );
-        act(() => window.history.replaceState(syncEntry, '', pushedUrl));
         expect(window.history.state).toMatchObject({
           __campusSearchHistoryEntry: intervening.__campusSearchHistoryEntry,
           __campusSearchResultReturn: intervening.__campusSearchResultReturn,
         });
-        expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('公車');
+        expect(search.value).toBe('公車');
+        if (shape === 'copied array') {
+          fireEvent.compositionEnd(search, { data: '圖' });
+          expect(search.value).toBe('公車');
+          expect(window.location.href).toBe(pushedUrl);
+        }
         expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
         expect(screen.queryByRole('link', { name: /^圖書館/ })).toBeNull();
         router.search = null;

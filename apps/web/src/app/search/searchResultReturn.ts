@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
 
-import { SERVICE_CATEGORIES, type ServiceCategory } from '@/lib/campusServices';
+import { readCampusServiceFilters, SERVICE_CATEGORIES, type ServiceCategory } from '@/lib/campusServices';
 
 import {
   APP_ROUTER_HISTORY_PUSH,
@@ -34,6 +34,7 @@ type FilterArrival = {
 };
 
 let observedWindow: Window | undefined;
+let filtersDifferFromUrl: ((queryString: string) => boolean) | undefined;
 const emptyReturnState: { pending: SearchReturn | null; arrival: FilterArrival | null } = {
   pending: null,
   arrival: null,
@@ -252,17 +253,21 @@ function installHistoryTracking() {
         // Compare the committed URL with the previous URL independently of the
         // caller's state. Next may add its fields inside this observer.
         const queryChanged = previousQueryString !== queryString;
-        const updatesQuery = targetUrl?.origin === window.location.origin &&
-          !changesOnlyFragment && !routerReplace;
+        const replacesSearchUrl = targetUrl?.origin === window.location.origin && !routerReplace;
+        // A paired Back can show the saved filters on an entry whose URL was
+        // changed by an intervening push. A same-query write can reconcile it.
+        const replacesFilters = replacesSearchUrl &&
+          (queryChanged || filtersDifferFromUrl?.(queryString));
         // The explicit write can acknowledge an earlier native write, even on an
         // entry that has never saved a result. Wait for Next to render the URL.
-        const explicitSync = updatesQuery && incomingNextFields.__NA && syncQuery;
+        const explicitSync =
+          replacesSearchUrl && !changesOnlyFragment && incomingNextFields.__NA && syncQuery;
         const entryKey = readEntryKey(this.state);
         const arrivalMatchesEntry =
           arrival?.entryKey === entryKey && arrival.queryString === queryString;
         if (explicitSync) {
           publishReturn(null, { entryKey, queryString, saved: null, explicitSync: true });
-        } else if (updatesQuery && searchEntry && queryChanged) {
+        } else if (searchEntry && replacesFilters) {
           if (!arrivalMatchesEntry || arrival.saved || pending) {
             publishReturn(null, { entryKey, queryString, saved: null });
           }
@@ -443,6 +448,7 @@ export function useSearchResultReturn({
   queryString,
   query,
   category,
+  composition,
 }: {
   directory: RefObject<HTMLDivElement | null>;
   resultsHeading: RefObject<HTMLHeadingElement | null>;
@@ -452,6 +458,7 @@ export function useSearchResultReturn({
   queryString: string;
   query: string;
   category: ServiceCategory | 'all';
+  composition: RefObject<{ filters: SearchReturn['filters'] } | null>;
 }) {
   const { pending: historyReturn, arrival } = useSyncExternalStore(
     subscribeReturn,
@@ -462,6 +469,19 @@ export function useSearchResultReturn({
   useLayoutEffect(() => {
     liveState.current = { scope, ready, blocked, queryString, query, category };
   }, [blocked, category, query, queryString, ready, scope]);
+
+  useLayoutEffect(() => {
+    const compareFilters = (urlQuery: string) => {
+      const fromUrl = readCampusServiceFilters(new URLSearchParams(urlQuery));
+      // While composing, compare against the filters from composition start.
+      const current = composition.current?.filters ?? liveState.current;
+      return fromUrl.query !== current.query || fromUrl.category !== current.category;
+    };
+    filtersDifferFromUrl = compareFilters;
+    return () => {
+      if (filtersDifferFromUrl === compareFilters) filtersDifferFromUrl = undefined;
+    };
+  }, [composition]);
 
   const filterArrival =
     arrival &&
