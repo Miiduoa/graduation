@@ -2801,7 +2801,7 @@ it.each([
   { menuState: 'legacy zero stock', intermediateRequirements: [], retryVersion: 9, status: 200 },
   { menuState: 'legacy zero stock', intermediateRequirements: [], retryVersion: 9, status: 503 },
 ])(
-  'shows a v7 first-menu receipt before and after automatic GET $status with earlier v8 menu $menuState',
+  'keeps a v7 first-menu receipt through automatic GET $status and session renewal with earlier v8 menu $menuState',
   async ({ menuState, intermediateRequirements, retryVersion, status }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const initial = { ...detail(), readinessVersion: 7 };
@@ -2817,6 +2817,7 @@ it.each([
       ...intermediate, readinessVersion: retryVersion, missingRequirements: ['menu'],
     };
     const retry = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+    const renewedEntry = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
     const receipt = Promise.withResolvers<typeof firstMenuReceipt>();
     const snapshot = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
     const readDetail = vi.fn()
@@ -2825,14 +2826,24 @@ it.each([
       .mockResolvedValueOnce(intermediate)
       .mockReturnValueOnce(retry.promise)
       .mockResolvedValue({ ...published, readinessVersion: retryVersion });
-    mocks.request.mockImplementation((resource) => {
+    const renewedDetail = {
+      ...initial, readinessVersion: 10, missingRequirements: ['menu'],
+    };
+    const readRenewedDetail = vi.fn()
+      .mockReturnValueOnce(renewedEntry.promise)
+      .mockResolvedValue({ ...published, readinessVersion: 11 });
+    mocks.request.mockImplementation((resource, context) => {
+      if (context === 'context-renewed') {
+        if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [renewedDetail] });
+        if (resource === path) return readRenewedDetail();
+      }
       if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [initial] });
       if (resource === path) return readDetail();
       if (resource === `${path}/initial-menu`) return receipt.promise;
       return respond(resource);
     });
 
-    render(<MerchantWorkspace view="workspace" />);
+    const view = render(<MerchantWorkspace view="workspace" />);
     fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
     await screen.findByLabelText('品項 1 名稱');
     submitFirstMenu();
@@ -2858,6 +2869,14 @@ it.each([
       await act(async () => retry.resolve(retried));
     }
     expect(screen.getByText(success)).toBeTruthy();
+    expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
+
+    mocks.auth.session = { platformAccountId: 'account-a', context: 'context-renewed' };
+    view.rerender(<MerchantWorkspace view="workspace" />);
+    await waitFor(() => expect(readRenewedDetail).toHaveBeenCalledTimes(1));
+    await act(async () => renewedEntry.resolve(renewedDetail));
+    expect(screen.getByText(success)).toBeTruthy();
+    expect(screen.getByText(/目前有 0 項有庫存的上架品項/)).toBeTruthy();
     expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));

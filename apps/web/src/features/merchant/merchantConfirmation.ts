@@ -100,6 +100,11 @@ type WorkspaceReadTarget = { key: string; source: 'detail' | 'orders' };
 
 export type MerchantConfirmations = ReturnType<typeof createMerchantConfirmations>;
 
+type MenuReceiptObservation = { revision: number; confirmedThrough: number } & (
+  | { menuVerified: false; version?: number }
+  | { menuVerified: true; version: number }
+);
+
 export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuReceipt: number | null }>) {
   let lists: Partial<Omit<MerchantOverview, 'workspaces'>> = {};
   // Keep list membership separate from the revocable observations used to render rows.
@@ -115,7 +120,13 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const receiptFloors = new Map<string, number>();
   // Explicit removal invalidates menu receipts independently of readiness label changes.
   const menuReceiptFloors = new Map<string, number>();
-  const menuReceipts = new Map<string, { revision: number; version: number; confirmedThrough: number; menuVerified: boolean }>();
+  const menuReceipts = new Map<string, MenuReceiptObservation>();
+  // Account drafts can outlive the session. Reconcile settled receipts with this session's reads.
+  for (const [key, draft] of drafts) {
+    if (draft.menuReceipt !== null) {
+      menuReceipts.set(key, { revision: 0, confirmedThrough: 0, menuVerified: false });
+    }
+  }
   const menuReceiptListeners = new Set<() => void>();
   const writeRevisions = new Map<string, number>();
   const statusReceiptFloors = new Map<string, Map<number, number>>();
@@ -266,7 +277,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const receipt = menuReceipts.get(key);
     // Both GETs can observe the pre-write menu at the version the receipt confirmed.
     if (
-      !receipt || !next.missingRequirements?.includes('menu') ||
+      receipt?.version === undefined || !next.missingRequirements?.includes('menu') ||
       (next.readinessVersion !== undefined && next.readinessVersion > receipt.version)
     ) return next;
     const isDetail = 'publishedMenuItems' in next;
