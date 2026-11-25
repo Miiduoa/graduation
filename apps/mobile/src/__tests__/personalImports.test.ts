@@ -1390,6 +1390,37 @@ test.each([
   },
 );
 
+test('a first native append verifies and notifies despite an unreadable legacy checkpoint', async () => {
+  const scope = { owner: 'nuni:new-ledger-checkpoint-io', schoolId: 'pu' };
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  const multiGet = jest.mocked(AsyncStorage.multiGet);
+  const readMany = multiGet.getMockImplementation()!;
+  const get = jest.mocked(AsyncStorage.getItem);
+  const set = jest.mocked(AsyncStorage.setItem);
+  const fault = jest.fn(() => { throw new Error('舊檢查點持續無法讀取'); });
+  multiGet.mockImplementation(async (keys) => keys.includes(checkpoint) ? fault() : readMany(keys));
+  const listener = jest.fn();
+  const unsubscribe = subscribePersonalImports(listener);
+  try {
+    const guard = { canContinue: () => true, canCommitFirstWrite: () => true };
+    const { ledger, added } = await appendPersonalImports(scope, [row('first')], guard);
+    expect(added).toBe(1);
+    expect(fault).toHaveBeenCalledTimes(1);
+    const write = set.mock.calls.findIndex(([entry]) => entry === key);
+    expect(write).toBeGreaterThanOrEqual(0);
+    expect(get.mock.calls.some(([entry], index) =>
+      entry === key && get.mock.invocationCallOrder[index] > set.mock.invocationCallOrder[write] &&
+      get.mock.invocationCallOrder[index] < listener.mock.invocationCallOrder[0],
+    )).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(1);
+    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+  } finally {
+    unsubscribe();
+    multiGet.mockImplementation(readMany);
+  }
+});
+
 test('native append and edit survive a pending reset failure after verified retirement', async () => {
   const scope = { owner: 'nuni:committed-pending-reset-failure', schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
@@ -1463,6 +1494,76 @@ test('native append and edit survive a pending reset failure after verified reti
     unsubscribe();
     read.mockRestore();
     write.mockRestore();
+    remove.mockRestore();
+  }
+});
+
+test('a revoked native edit using the primary fallback is rejected after restart', async () => {
+  const scope = { owner: 'nuni:revoked-fallback-edit', schoolId: 'pu' };
+  const key = personalImportStorageKey(scope);
+  const prefix = `personal-imports-${sha256(key)}.rollback.`;
+  const marker = new File(Paths.document, prefix + 'pending');
+  const payload = new File(Paths.document, prefix + 'json');
+  const rejection = new File(Paths.document, prefix + 'rejected');
+  const { delete: deleteFile, write: writeFile, textSync } = File.prototype;
+  const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
+    if (this.uri === marker.uri) throw new Error('無法刪除待處理標記');
+    deleteFile.call(this);
+  });
+  const set = jest.mocked(AsyncStorage.setItem);
+  const writeStorage = set.getMockImplementation()!;
+  let active = true;
+  const guard = { canContinue: () => active, canCommitFirstWrite: () => active };
+  const listener = jest.fn();
+  const unsubscribe = subscribePersonalImports(listener);
+  let read: jest.SpyInstance | undefined;
+  let write: jest.SpyInstance | undefined;
+  try {
+    const { ledger: original } = await appendPersonalImports(scope, [row('first')], guard);
+    expect(listener).toHaveBeenCalledTimes(1);
+    listener.mockClear();
+    expect(marker.textSync()).toBe('committed');
+    const originalRaw = (await AsyncStorage.getItem(key))!;
+    let backupRead = false;
+    read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+      const value = textSync.call(this);
+      if (this.uri === payload.uri && value.endsWith('\n' + originalRaw)) backupRead = true;
+      return value;
+    });
+    const resetFault = jest.fn(() => { throw new Error('待處理標記重設未落盤'); });
+    write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+      if (this.uri === marker.uri && value === '') {
+        expect(backupRead).toBe(true);
+        resetFault();
+      }
+      writeFile.call(this, value, options);
+    });
+    const restoreFault = jest.fn(() => { throw new Error('無法還原舊主鍵'); });
+    set.mockImplementation(async (entry, value) => {
+      if (entry === key && !active) restoreFault();
+      await writeStorage(entry, value);
+      if (entry === key) active = false;
+    });
+    await expect(editPersonalImport(scope, original.records[0], row('first', '未提交的編輯'), guard))
+      .rejects.toThrow('無法還原舊主鍵');
+    expect(resetFault).toHaveBeenCalledTimes(1);
+    expect(restoreFault).toHaveBeenCalledTimes(1);
+    expect(listener).not.toHaveBeenCalled();
+    expect(marker.textSync()).toBe('committed');
+    expect(rejection.info().exists).toBe(true);
+    expect(payload.textSync()).toContain(originalRaw);
+    const primary = (await AsyncStorage.getItem(key))!;
+    expect(primary.startsWith('{"version":1,')).toBe(true);
+    expect(JSON.parse(primary).records[0].title).toBe('未提交的編輯');
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(original);
+    });
+  } finally {
+    set.mockImplementation(writeStorage);
+    unsubscribe();
+    write?.mockRestore();
+    read?.mockRestore();
     remove.mockRestore();
   }
 });
@@ -3079,6 +3180,48 @@ test('Expo Web reports success and notifies when the primary readback throws aft
     unsubscribe();
     write.mockRestore();
     read.mockRestore();
+    cleanup();
+  }
+});
+
+test('Expo Web verifies and notifies using the lease when the current IndexedDB transaction cannot start', async () => {
+  const cleanup = useWebStorage();
+  const key = personalImportStorageKey(scope);
+  const database = `campus.personal-imports.locks:${sha256(key)}`;
+  const failTransaction = jest.fn(() => { throw new DOMException('無法建立交易', 'InvalidStateError'); });
+  const { open, restore } = useIndexedDBLocks((name) => {
+    if (name === database) failTransaction();
+  });
+  const guard = { canContinue: () => true, canCommitFirstWrite: () => true };
+  const storage = window.localStorage;
+  const get = jest.spyOn(Storage.prototype, 'getItem');
+  const set = jest.spyOn(Storage.prototype, 'setItem');
+  const reread = jest.fn(() => {
+    const write = set.mock.calls.findLastIndex(([entry]) => entry === key);
+    const verifiedBeforeNotification = get.mock.calls.some(([entry], index) =>
+      entry === key && get.mock.contexts[index] === storage &&
+      get.mock.invocationCallOrder[index] > set.mock.invocationCallOrder[write] &&
+      get.mock.results[index].value === set.mock.calls[write]?.[1],
+    );
+    expect(verifiedBeforeNotification).toBe(true);
+    return loadPersonalImports(scope);
+  });
+  const unsubscribe = subscribePersonalImports(reread);
+  try {
+    expect(navigator.locks).toBeUndefined();
+    const { ledger } = await appendPersonalImports(scope, [row('original')], guard);
+    await expect(reread.mock.results[0].value).resolves.toEqual(ledger);
+    const edited = await editPersonalImport(scope, ledger.records[0], row('original', '化學'), guard);
+    expect(open).toHaveBeenCalledWith(database, 1);
+    expect(failTransaction).toHaveBeenCalledTimes(2);
+    expect(reread).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(window.localStorage.getItem(key)!)).toMatchObject(edited);
+    await expect(reread.mock.results[1].value).resolves.toEqual(edited);
+  } finally {
+    unsubscribe();
+    set.mockRestore();
+    get.mockRestore();
+    restore();
     cleanup();
   }
 });

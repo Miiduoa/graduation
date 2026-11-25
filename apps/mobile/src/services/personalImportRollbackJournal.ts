@@ -14,7 +14,7 @@ const committedMarker = 'committed';
 const rejectedMarker = 'rejected';
 const rejectedPrefix = 'rejected:\n';
 const rearmedPattern = /^rearmed(?::[^\n:]+)?:\n/;
-const attemptPattern = /^attempt:([^:\n]+):([a-f0-9]{64}):([a-f0-9]{64})\n/;
+const attemptPattern = /^attempt:([^:\n]+):([a-f0-9]{64}):([a-f0-9]{64})(?::([a-f0-9]{64}))?\n/;
 const committedPayloadPattern = /^committed:([a-f0-9]{64})\n/;
 const committedReceiptPattern = /^([a-f0-9]{64})\n([a-f0-9]{64})$/;
 const primaryHashPattern = /^[a-f0-9]{64}$/;
@@ -302,9 +302,15 @@ export async function withPersonalImportWriteLock<T>(
   // database per ledger so opening a new ledger also needs no shared upgrade.
   const database = await openWriteLockDatabase(ledgerHash);
   if (!database) return writeWithLease(ledgerHash, write);
+  let transaction: IDBTransaction;
+  try {
+    transaction = database.transaction(lockStore, 'readwrite');
+  } catch {
+    database.close();
+    return writeWithLease(ledgerHash, write);
+  }
   try {
     return await new Promise<T>((resolve, reject) => {
-      const transaction = database.transaction(lockStore, 'readwrite');
       const store = transaction.objectStore(lockStore);
       let operation: Promise<T> | undefined;
       let finished = false;
@@ -519,6 +525,10 @@ export function capturePersonalImportRollback(key: string) {
     const hash = sha256(raw);
     return hash === attempt[2] || hash === attempt[3];
   });
+  // Ordinary fallback writes can commit without rearming the marker. Only
+  // explicit rejection makes their hash evidence for rolling back.
+  const fallbackHash = attempt?.[4];
+  const matchesFallbackPrimary = fallbackHash ? (raw: string) => sha256(raw) === fallbackHash : undefined;
   // A revoked publication can leave its verified encoding in AsyncStorage
   // if restoring the original bytes there also fails.
   if (encoded?.startsWith(rejectedPrefix)) {
@@ -529,6 +539,7 @@ export function capturePersonalImportRollback(key: string) {
       // changes. The explicit rejection still protects the original bytes.
       hasRejectedPayload: true,
       matchesAttemptedPrimary,
+      matchesFallbackPrimary,
     };
   }
   const binding = encoded?.match(committedPayloadPattern);
@@ -563,6 +574,7 @@ export function capturePersonalImportRollback(key: string) {
     rejected,
     hasRejectedPayload: false,
     matchesAttemptedPrimary,
+    matchesFallbackPrimary,
     markerError: rejected && encoded !== undefined ? undefined : markerError,
     payloadError,
     matchesVerifiedPrimary: verifiedHash || binding || receiptHash || settledHash ? (raw: string) => {
@@ -622,7 +634,7 @@ export function preparePersonalImportRollback(
   key: string,
   raw: string | null,
   primaryCommitted = false,
-  attemptedPrimary?: { first: string; replacement: string; preserveRejection?: boolean },
+  attemptedPrimary?: { first: string; replacement: string; fallback: string; preserveRejection?: boolean },
 ) {
   const encoded = raw ?? 'null';
   const { payload, marker, marked } = journalFiles(key);
@@ -657,9 +669,9 @@ export function preparePersonalImportRollback(
   // Give each new attempt its own payload binding when old proofs may survive.
   const rearmed = hadRetirement || hadVerification || fileExists(publication) || fileExists(publicationBackup);
   const prefix = rearmed ? `rearmed:${createPersonalImportId()}:\n` : '';
-  // Bind both possible writes to this rollback copy without changing their row size.
+  // Bind each possible write to this rollback copy without changing its row size.
   const attempt = attemptedPrimary
-    ? `attempt:${createPersonalImportId()}:${sha256(attemptedPrimary.first)}:${sha256(attemptedPrimary.replacement)}\n`
+    ? `attempt:${createPersonalImportId()}:${sha256(attemptedPrimary.first)}:${sha256(attemptedPrimary.replacement)}:${sha256(attemptedPrimary.fallback)}\n`
     : '';
   const wrap = (value: string) => prefix + attempt + value;
   const previousBody = previous?.replace(rearmedPattern, '').replace(attemptPattern, '');

@@ -57,6 +57,7 @@ function isStorageRowTooLarge(error: unknown): boolean {
 async function readLedgerSnapshot(
   key: string,
   scope: PersonalImportScope,
+  allowEmptyPrimary = false,
 ) {
   const web = Platform.OS === 'web';
   const restorationPending = !web && pendingRestorations.has(key);
@@ -82,6 +83,7 @@ async function readLedgerSnapshot(
   const attemptedPrimary = primary !== null && journal?.matchesAttemptedPrimary?.(primary) === true;
   const rejectedPrimary = journal?.rejected && (
     journal.hasRejectedPayload || attemptedPrimary || journal.raw === primary ||
+    (primary !== null && journal.matchesFallbackPrimary?.(primary)) ||
     (journal.payloadError && hasNativeCommitEncoding(primary))
   );
   if (!primaryVerified || rejectedPrimary) {
@@ -98,7 +100,8 @@ async function readLedgerSnapshot(
   }
   const recovery: (Recovery & { ledger: PersonalImportLedger }) | null = browserRecovery
     ? selectPersonalImportBrowserRecovery(browserRecovery, primary, primaryVerified, (raw) => parseLedger(raw, scope))
-    : await readNativeRecovery(key, scope, primaryVerified, nativeJournal, checkpoint, journal?.rejected);
+    : await readNativeRecovery(key, scope, primaryVerified, nativeJournal, checkpoint, journal?.rejected,
+        allowEmptyPrimary && primary === null && !primaryError && !journal && !restorationPending);
   if (!recovery && primaryError) throw primaryError;
   // A pending restoration bypasses the primary read, so its on-disk bytes
   // cannot be checked against the previous attempt before replacing the hashes.
@@ -124,6 +127,7 @@ async function readNativeRecovery(
   nativeJournal: string | undefined,
   capturedCheckpoint?: Awaited<ReturnType<typeof readLegacyCheckpoint>>,
   rejected = false,
+  allowEmptyPrimary = false,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
   // A marked native journal or an in-process rollback can supersede an
   // interrupted primary write. A standalone legacy checkpoint cannot.
@@ -133,7 +137,7 @@ async function readNativeRecovery(
       ? capturedCheckpoint
       : await readLegacyCheckpoint(key, scope).catch((error: unknown) => {
           // The legacy copy is optional when another rollback has authoritative bytes.
-          if (pending === undefined && nativeJournal === undefined) throw error;
+          if (!allowEmptyPrimary && pending === undefined && nativeJournal === undefined) throw error;
           return null;
         });
     if (checkpoint &&
@@ -390,7 +394,7 @@ export function mutatePersonalImportLedger<T>(
       };
       assertWritable();
       const { primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection } =
-        await readLedgerSnapshot(key, scope);
+        await readLedgerSnapshot(key, scope, options.allowNativePrimaryOnly);
       let primaryRaw = primary;
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
@@ -447,6 +451,7 @@ export function mutatePersonalImportLedger<T>(
               journal = preparePersonalImportRollback(key, persistedRaw, primaryCommitted, {
                 first: firstRaw,
                 replacement,
+                fallback: raw,
                 preserveRejection: !hasPersisted && preserveAttemptRejection,
               });
             } catch (error) {
