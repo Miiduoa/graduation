@@ -97,7 +97,8 @@ export function MerchantOrderDesk({
       observation?.reject(failure);
       throw failure;
     };
-    const [queue, shift] = await Promise.all([
+    // Keep the poll in flight until both observations have settled.
+    const [queue, shift] = await Promise.allSettled([
       client.listMerchantOrders(tenantId, locationId, { limit: 50, cursor }).catch(reject),
       client.getShift(tenantId, locationId).catch((error: unknown) => {
         if (
@@ -109,10 +110,12 @@ export function MerchantOrderDesk({
         return reject(error);
       }),
     ]);
+    if (queue.status === 'rejected') throw queue.reason;
+    if (shift.status === 'rejected') throw shift.reason;
     observation?.confirm();
-    return { queue, shift };
+    return { queue: queue.value, shift: shift.value };
   }, [beginRead, client, tenantId, locationId, cursor]);
-  const data = useFoodRead(load, { pollMs: FOOD_POLL_MS, paused: suspended });
+  const data = useFoodRead(load, { pollMs: FOOD_POLL_MS, paused: suspended, serializeReads: true });
   const [opening, setOpening] = useFoodDraft(cache, `${scope}:opening`, '0');
   const [counted, setCounted] = useFoodDraft(cache, `${scope}:counted`, '');
   const [openNext, setOpenNext] = useFoodDraft(cache, `${scope}:open-next`, false);

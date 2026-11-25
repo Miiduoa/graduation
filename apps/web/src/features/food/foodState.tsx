@@ -61,6 +61,8 @@ export function useFoodRead<T>(
   options?: {
     pollMs?: number;
     paused?: boolean;
+    /** Drain a retired loader before starting a replacement read. */
+    serializeReads?: boolean;
     /** Return false to stop periodic polling (e.g. terminal order detail). */
     shouldPoll?: (data: T | null) => boolean;
   },
@@ -72,6 +74,7 @@ export function useFoodRead<T>(
   const shouldPollRef = useRef(options?.shouldPoll);
   const pollMs = options?.pollMs;
   const paused = options?.paused;
+  const serializeReads = options?.serializeReads;
   shouldPollRef.current = options?.shouldPoll;
   const scopeRef = useRef<{
     active: boolean;
@@ -138,13 +141,21 @@ export function useFoodRead<T>(
 
   useLayoutEffect(() => {
     if (paused) return;
-    const scope = { active: true, loader: load, revision: 0, inFlight: null, queued: null };
+    const previous = serializeReads ? scopeRef.current?.inFlight : null;
+    const scope: NonNullable<typeof scopeRef.current> = {
+      active: true, loader: load, revision: 0, inFlight: null, queued: null,
+    };
+    if (previous) {
+      scope.inFlight = previous.then(() => {
+        scope.inFlight = null;
+      });
+    }
     scopeRef.current = scope;
     void reload();
     return () => {
       scope.active = false;
     };
-  }, [reload, load, paused]);
+  }, [reload, load, paused, serializeReads]);
 
   useEffect(() => {
     if (paused || !pollMs || pollMs <= 0) return;

@@ -3539,6 +3539,61 @@ it('keeps both management entries closed for a store revealed by a retired list 
   expect(applicationLink()).toBeTruthy();
 });
 
+it.each([
+  { status: 401, code: 'UNAUTHORIZED' },
+  { status: 409, code: 'SESSION_CHANGED' },
+])('ignores an old list outage after reloading the workspace following $code', async ({ status, code }) => {
+  const oldStore = detail('store-a', true);
+  const newStore = detail('store-b', true);
+  const oldList = Promise.withResolvers<never>();
+  const newList = Promise.withResolvers<{ workspaces: NuniMerchantWorkspaceDetail[] }>();
+  const readList = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [oldStore] })
+    .mockReturnValueOnce(oldList.promise)
+    .mockReturnValue(newList.promise);
+  const readOldStore = vi.fn()
+    .mockResolvedValueOnce(oldStore)
+    .mockRejectedValueOnce(new NuniError(status, code))
+    .mockResolvedValue(oldStore);
+  const readNewStore = vi.fn(() => Promise.resolve(newStore));
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === 'merchant-workspaces/campus-one/store-a') return readOldStore();
+    if (resource === 'merchant-workspaces/campus-one/store-b') return readNewStore();
+    if (resource === 'merchant-applications') {
+      return Promise.resolve({ applications: [{
+        tenantId: newStore.tenantId,
+        applicationId: newStore.applicationId,
+        brandName: '核准申請',
+        locationName: newStore.locationName,
+        state: 'approved',
+        reviewerNote: '',
+        submittedAt: '2026-10-09T02:00:00.000Z',
+      }] });
+    }
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readList).toHaveBeenCalledTimes(2));
+  await act(async () => window.history.forward());
+  await screen.findByText('登入或帳號已變更，這次店家資料與草稿已清除。');
+  expect(mocks.auth.refresh).toHaveBeenCalledOnce();
+  await act(async () => window.history.back());
+  await waitFor(() => expect(window.location.search).toBe(''));
+  fireEvent.click(screen.getByRole('button', { name: '重新載入店家資料' }));
+  await waitFor(() => expect(readList).toHaveBeenCalledTimes(3));
+
+  await act(async () => oldList.reject(new NuniError(503, 'UNAVAILABLE')));
+  await act(async () => newList.resolve({ workspaces: [newStore] }));
+  expect(screen.getByRole('link', { name: '管理門市：二樓' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '前往管理門市：二樓' })).toBeTruthy();
+  expect(readNewStore).not.toHaveBeenCalled();
+});
+
 it.each(['list', 'background detail'] as const)(
   'keeps a first-menu receipt arriving after a same-version %s observed the pre-write state',
   async (source) => {
@@ -3723,17 +3778,20 @@ it.each(['orders', 'shift'])('locks both workspaces on a %s GET failure and reco
 });
 
 it.each([
-  { first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED' },
-  { first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED' },
-  { first: 'shift', second: 'orders', status: 401, code: 'UNAUTHORIZED' },
-  { first: 'shift', second: 'orders', status: 409, code: 'SESSION_CHANGED' },
-] as const)('expires the workspace when $second reports $code after $first fails in the same poll', async ({
-  first, second, status, code,
+  { first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', changePage: false },
+  { first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', changePage: false },
+  { first: 'shift', second: 'orders', status: 401, code: 'UNAUTHORIZED', changePage: false },
+  { first: 'shift', second: 'orders', status: 409, code: 'SESSION_CHANGED', changePage: false },
+  { first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', changePage: true },
+  { first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', changePage: true },
+] as const)('expires the workspace when $second reports $code after $first fails (change page: $changePage)', async ({
+  first, second, status, code, changePage,
 }) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const store = { ...detail('store-a', true), readinessVersion: 8 };
   const queue = {
     orders: [{ ...queueFixture(), locationId: 'store-a', state: 'paid', allowedActions: ['accept'] }],
+    nextCursor: 'page-2',
   };
   const outage = Promise.withResolvers<never>();
   const sessionFailure = Promise.withResolvers<never>();
@@ -3773,18 +3831,26 @@ it.each([
 
   reads.orders.mockReturnValueOnce(recovery.promise.then(() => queue));
   reads.shift.mockReturnValueOnce(recovery.promise.then(() => shift));
-  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
-  expect(reads.orders).toHaveBeenCalledTimes(3);
-  expect(reads.shift).toHaveBeenCalledTimes(3);
+  if (changePage) {
+    fireEvent.click(screen.getByRole('button', { name: '下一頁待處理訂單' }));
+  } else {
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  }
+  // Even with both recovery responses already available, the pending sibling
+  // must keep this round open and the persisted retry locked.
+  await act(async () => recovery.resolve());
   expect(retry.disabled).toBe(true);
+  fireEvent.click(retry);
+  expect(accept).toHaveBeenCalledOnce();
+  expect(reads.orders).toHaveBeenCalledTimes(2);
+  expect(reads.shift).toHaveBeenCalledTimes(2);
 
   await act(async () => sessionFailure.reject(new NuniError(status, code)));
   await screen.findByText('登入或帳號已變更，這次店家資料與草稿已清除。');
   expect(mocks.auth.refresh).toHaveBeenCalledOnce();
-  await act(async () => recovery.resolve());
   await act(async () => document.dispatchEvent(new Event('visibilitychange')));
-  expect(reads.orders).toHaveBeenCalledTimes(3);
-  expect(reads.shift).toHaveBeenCalledTimes(3);
+  expect(reads.orders).toHaveBeenCalledTimes(2);
+  expect(reads.shift).toHaveBeenCalledTimes(2);
   expect(screen.queryByRole('button', { name: '重試同一份操作' })).toBeNull();
   expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
   expect(accept).toHaveBeenCalledOnce();
