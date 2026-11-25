@@ -5,7 +5,9 @@ import type {
 } from './nuniMerchant';
 
 /** Navigation guidance only; authorization remains with the workspace APIs. */
-export function isMerchantWorkspaceOperational(workspace: NuniMerchantWorkspace): boolean {
+export function isMerchantWorkspaceOperational(
+  workspace: Pick<NuniMerchantWorkspace, 'activated' | 'merchantStatus' | 'locationStatus' | 'publicAccess'>,
+): boolean {
   return (
     workspace.activated &&
     workspace.merchantStatus === 'active' &&
