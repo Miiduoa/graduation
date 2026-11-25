@@ -106,7 +106,7 @@ export function CampusAssignmentReminderAction({
         if (active && isCurrent()) setStatusLoading(false);
       });
     return () => { active = false; };
-  }, [userId, schoolId, step.title, step.groupName, step.dueAt, snapshot?.checkedAt, statusRefresh]);
+  }, [userId, schoolId, step.title, step.titleFormat, step.groupName, step.dueAt, snapshot?.checkedAt, statusRefresh]);
 
   const schedule = async () => {
     if (lock.current || statusLoading || statusError || disabled || !canUse ||

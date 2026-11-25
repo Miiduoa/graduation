@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Text, TextInput, View } from 'react-native';
+import React, { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Alert, Text, TextInput, View } from 'react-native';
+import { useNavigation, usePreventRemove } from '@react-navigation/native';
 import { randomUUID } from 'expo-crypto';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
@@ -81,15 +82,67 @@ function FeedbackEditor({
   const requestId = useRef<{ id: string; fingerprint: string } | null>(null);
   const lock = useRef(false);
   const mounted = useRef(true);
-  useEffect(() => {
+  const stackNavigation = useNavigation();
+  const draft = useMemo(
+    () => ({ feedbackType, title, description, contactEmail, rating }),
+    [feedbackType, title, description, contactEmail, rating],
+  );
+  const [initialDraft, setInitialDraft] = useState(draft);
+  const currentDraft = useRef(draft);
+  const pendingRemoval = useRef<symbol | null>(null);
+  const dirty =
+    feedbackType !== initialDraft.feedbackType ||
+    title !== initialDraft.title ||
+    description !== initialDraft.description ||
+    contactEmail !== initialDraft.contactEmail ||
+    rating !== initialDraft.rating;
+  useLayoutEffect(() => {
+    currentDraft.current = draft;
+  }, [draft]);
+  useLayoutEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      pendingRemoval.current = null;
     };
   }, []);
   const current = () => mounted.current && isScopeCurrent();
+  usePreventRemove(!receipt && (dirty || busy), ({ data }) => {
+    if (!current() || lock.current || pendingRemoval.current) return;
+    const id = Symbol('feedback-leave-confirmation');
+    const expectedDraft = currentDraft.current;
+    pendingRemoval.current = id;
+    const release = () => {
+      if (pendingRemoval.current === id) pendingRemoval.current = null;
+    };
+    Alert.alert(
+      '尚有未送出的回饋',
+      '離開後，這次填寫的回饋將不會保留。',
+      [
+        { text: '繼續編輯', style: 'cancel', onPress: release },
+        {
+          text: '捨棄並離開',
+          style: 'destructive',
+          onPress: () => {
+            if (pendingRemoval.current !== id) return;
+            release();
+            if (
+              !current() ||
+              lock.current ||
+              currentDraft.current !== expectedDraft ||
+              !stackNavigation.isFocused()
+            )
+              return;
+            stackNavigation.dispatch(data.action);
+          },
+        },
+      ],
+      { cancelable: true, onDismiss: release },
+    );
+  });
   const change = (update: () => void) => {
     if (lock.current || !current()) return;
+    pendingRemoval.current = null;
     setError('');
     update();
   };
@@ -99,6 +152,7 @@ function FeedbackEditor({
       setError('請填寫有效的聯絡電子郵件，或留空。');
       return;
     }
+    pendingRemoval.current = null;
     lock.current = true;
     setBusy(true);
     setError('');
@@ -154,12 +208,20 @@ function FeedbackEditor({
               label="提交另一則回饋"
               variant="ghost"
               onPress={() => {
+                pendingRemoval.current = null;
                 requestId.current = null;
                 setReceipt(null);
                 setTitle('');
                 setDescription('');
                 setRating(0);
                 setFeedbackType('feature');
+                setInitialDraft({
+                  feedbackType: 'feature',
+                  title: '',
+                  description: '',
+                  contactEmail,
+                  rating: 0,
+                });
               }}
             />
           </View>
@@ -167,7 +229,12 @@ function FeedbackEditor({
       </AIDetailScreen>
     );
   return (
-    <AIDetailScreen title="意見回饋" onBack={() => navigation?.goBack?.()}>
+    <AIDetailScreen
+      title="意見回饋"
+      onBack={() => {
+        if (current() && !lock.current) navigation?.goBack?.();
+      }}
+    >
       <AICard title="意見回饋">
         <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
           描述遇到的問題或想改善的地方。若希望收到回覆，可以留下聯絡電子郵件。
