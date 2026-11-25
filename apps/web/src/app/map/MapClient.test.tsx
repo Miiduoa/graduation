@@ -848,6 +848,46 @@ it('recovers when geolocation throws synchronously and ignores callbacks from th
   }
 });
 
+it('restores every campus place when clearing the overview filters while keeping GPS and saved favorites', async () => {
+  const distant = { ...gate, id: 'distant-fixture', name: '遠方校舍測試資料', lat: gate.lat + 0.1 };
+  vi.mocked(loadMapLocations).mockResolvedValue([library, gate, distant]);
+  vi.mocked(loadMapFavorites).mockResolvedValue(['library']);
+  const original = Object.getOwnPropertyDescriptor(navigator, 'geolocation');
+  Object.defineProperty(navigator, 'geolocation', {
+    configurable: true,
+    value: { getCurrentPosition: (callback: PositionCallback) => {
+      callback({ coords: { latitude: gate.lat, longitude: gate.lng } } as GeolocationPosition);
+    } },
+  });
+  try {
+    render(<MapClient school="pu" />);
+    await sourceSettled();
+    const favorites = screen.getByRole('button', { name: '只看收藏' });
+    await waitFor(() => expect(favorites.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+    const nearby = screen.getByRole('button', { name: '附近 1 公里' });
+    fireEvent.click(nearby);
+    fireEvent.click(favorites);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '圖書館' } });
+    expect(screen.queryByRole('button', { name: '查看遠方校舍測試資料' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '查看正門' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '看整個校園' }));
+    expect(nearby.getAttribute('aria-pressed')).toBe('false');
+    expect(favorites.getAttribute('aria-pressed')).toBe('false');
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    expect(screen.getByRole('button', { name: '查看遠方校舍測試資料' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '查看正門' })).toBeTruthy();
+    const map = JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+    expect(map.locations.map((place: MapLocation) => place.id)).toContain(distant.id);
+    expect(map.myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
+    expect(screen.getByRole('button', { name: '取消收藏蓋夏圖書館' })).toBeTruthy();
+    expect(setMapFavorite).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(navigator, 'geolocation', original);
+    else Reflect.deleteProperty(navigator, 'geolocation');
+  }
+});
+
 it('filters favorites without exposing unsaved locations or requiring a map redraw on login', async () => {
   vi.mocked(loadMapFavorites).mockResolvedValueOnce(['library']);
   render(<MapClient school="pu" />);
