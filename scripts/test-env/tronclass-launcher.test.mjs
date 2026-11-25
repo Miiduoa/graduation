@@ -2496,43 +2496,49 @@ done
   }
 });
 
-test('launcher reports a failure when forced cleanup cannot signal a live group', () => {
-  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-cleanup-failure-'));
-  const pidFile = path.join(dir, 'grandchild.pid');
-  try {
-    const fixture = readFileSync(script, 'utf8')
-      .replace('source scripts/process-identity.sh', `$&
+test('launcher reports forced cleanup failure and preserves signal exit codes', async (t) => {
+  for (const [signal, expected] of [['EXIT', 1], ['INT', 130], ['TERM', 143]]) {
+    await t.test(signal, () => {
+      const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+      const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-cleanup-failure-'));
+      const pidFile = path.join(dir, 'grandchild.pid');
+      try {
+        const fixture = readFileSync(script, 'utf8')
+          .replace('source scripts/process-identity.sh', `$&
 eval "$(declare -f proc_send_signal | sed '1s/proc_send_signal/real_proc_send_signal/')"
 proc_send_signal() {
   [[ -z "$3" || "$5" != KILL ]] || return 1
   real_proc_send_signal "$@"
 }`)
-      .replace('  wait "$TRONCLASS_SELFTEST_WRAPPER"', `  for ((i=0; i<200; i++)); do
-    [[ -s "$TRONCLASS_SELFTEST_GRANDCHILD" ]] && exit 0
+          .replace('  wait "$TRONCLASS_SELFTEST_WRAPPER"', () => `  for ((i=0; i<200; i++)); do
+    if [[ -s "$TRONCLASS_SELFTEST_GRANDCHILD" ]]; then
+      ${signal === 'EXIT' ? 'exit 0' : `kill -${signal} "$$"; exit 2`}
+    fi
     sleep 0.01
   done
   exit 2`);
-    const result = spawnSync('bash', ['-c', fixture, script], {
-      encoding: 'utf8', timeout: 12000,
-      env: {
-        ...process.env,
-        TRONCLASS_RUNTIME_DIR: dir,
-        TRONCLASS_SIGNAL_SELFTEST: '1',
-        TRONCLASS_SELFTEST_CHILD: path.join(dir, 'child.pid'),
-        TRONCLASS_SELFTEST_GRANDCHILD: pidFile,
-      },
+        const result = spawnSync('bash', ['-c', fixture, script], {
+          encoding: 'utf8', timeout: 12000,
+          env: {
+            ...process.env,
+            TRONCLASS_RUNTIME_DIR: dir,
+            TRONCLASS_SIGNAL_SELFTEST: '1',
+            TRONCLASS_SELFTEST_CHILD: path.join(dir, 'child.pid'),
+            TRONCLASS_SELFTEST_GRANDCHILD: pidFile,
+          },
+        });
+        assert.equal(result.error, undefined);
+        assert.equal(result.status, expected, result.stderr);
+        assert.match(result.stderr, /TronClass launcher cleanup failed/);
+        const pid = Number(readFileSync(pidFile, 'utf8').trim());
+        process.kill(pid, 0);
+      } finally {
+        if (existsSync(pidFile)) {
+          const pid = Number(readFileSync(pidFile, 'utf8').trim());
+          try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+        }
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
-    assert.equal(result.error, undefined);
-    assert.equal(result.status, 1, result.stderr);
-    assert.match(result.stderr, /TronClass launcher cleanup failed/);
-    const pid = Number(readFileSync(pidFile, 'utf8').trim());
-    process.kill(pid, 0);
-  } finally {
-    if (existsSync(pidFile)) {
-      const pid = Number(readFileSync(pidFile, 'utf8').trim());
-      try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
-    }
-    rmSync(dir, { recursive: true, force: true });
   }
 });

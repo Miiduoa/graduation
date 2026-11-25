@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
-import fs, { chmod, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import fs, { chmod, mkdir, mkdtemp, open, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -98,6 +100,124 @@ test('rejects nonprivate output directories and keeps a once marker across compe
   await assert.rejects(writePrivateJson(path.join(root, 'unsafe.json'), {}), {
     code: 'TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED',
   });
+});
+
+test('rejects a parent replaced at the final open for plans and dispatch markers', async (t) => {
+  const root = await directory(t);
+  for (const [name, marker, replacement] of [
+    ['plan.json', false, 'directory'],
+    ['plan.json.dispatch', true, 'symlink'],
+  ]) {
+    await t.test(replacement, async (t) => {
+      const parent = path.join(root, replacement);
+      const moved = `${parent}-moved`;
+      const substitute = replacement === 'directory' ? parent : `${parent}-substitute`;
+      await mkdir(parent, { mode: 0o700 });
+      const originalOpen = open;
+      const hook = t.mock.method(fs, 'open', async (filename, flags, ...args) => {
+        if (path.basename(filename) === name && (flags & constants.O_CREAT) !== 0) {
+          await rename(parent, moved);
+          await mkdir(substitute, { mode: 0o700 });
+          if (replacement === 'symlink') await symlink(substitute, parent);
+        }
+        return originalOpen(filename, flags, ...args);
+      });
+      syncBuiltinESMExports();
+      try {
+        await assert.rejects(writePrivateJson(path.join(parent, name), {}, marker), {
+          code: 'TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED',
+        });
+        await assert.rejects(stat(path.join(substitute, name)), { code: 'ENOENT' });
+      } finally {
+        hook.mock.restore();
+        syncBuiltinESMExports();
+      }
+    });
+  }
+});
+
+test('dispatch rejects a plan ancestor replaced before reservation', async (t) => {
+  const root = await directory(t);
+  const ancestor = path.join(root, 'workspace');
+  const parent = path.join(ancestor, 'reviewed');
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  const plan = path.join(parent, 'plan.json');
+  const input = path.join(root, 'input.json');
+  const confirmation = path.join(root, 'confirmation.json');
+  await Promise.all([plan, input, confirmation].map((filename) => privateJson(filename, {})));
+
+  let error = '';
+  let reservationAttempted = false;
+  const code = await runAcceptanceCli(
+    ['dispatch', '--input', input, '--plan', plan, '--confirm', confirmation],
+    {
+      stdout: () => assert.fail('A replaced directory must not yield a dispatch result'),
+      stderr: (text) => {
+        error += text;
+      },
+      loadRuntime: async () => {
+        await rename(ancestor, `${ancestor}-moved`);
+        await mkdir(parent, { recursive: true, mode: 0o700 });
+        return {
+          module: {
+            parseTronClassAcceptanceInput() {},
+            createDefaultTronClassAcceptanceService: ({ reserveDispatch }) => ({
+              async dispatch(_input, reviewedPlan) {
+                reservationAttempted = true;
+                return reserveDispatch(reviewedPlan);
+              },
+            }),
+          },
+          dispose: async () => {},
+        };
+      },
+    },
+  );
+  assert.equal(reservationAttempted, true);
+  assert.equal(code, 1);
+  assert.equal(error, 'TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED\n');
+  await assert.rejects(stat(`${plan}.dispatch`), { code: 'ENOENT' });
+  await assert.rejects(stat(path.join(`${ancestor}-moved`, 'reviewed', 'plan.json.dispatch')), {
+    code: 'ENOENT',
+  });
+});
+
+test('refuses a file replaced with a FIFO or symlink at open without blocking', async (t) => {
+  const root = await directory(t);
+  const alternate = path.join(root, 'alternate.json');
+  await privateJson(alternate, { value: 'alternate' });
+  for (const mode of ['fifo', 'symlink']) {
+    const target = path.join(root, `${mode}.json`);
+    await privateJson(target, { value: 'original' });
+    // Isolate the read so a regression that blocks a libuv thread can be killed.
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import assert from 'node:assert/strict';
+      import { execFileSync } from 'node:child_process';
+      import fs from 'node:fs/promises';
+      import { syncBuiltinESMExports } from 'node:module';
+      import path from 'node:path';
+      import { readPrivateJson } from ${JSON.stringify(new URL('./acceptance.mjs', import.meta.url).href)};
+      const [target, alternate, mode] = process.argv.slice(1);
+      const open = fs.open;
+      let replaced = false;
+      fs.open = async (filename, ...args) => {
+        if (!replaced && path.basename(filename) === path.basename(target)) {
+          replaced = true;
+          await fs.unlink(target);
+          if (mode === 'fifo') execFileSync('mkfifo', ['-m', '600', target]);
+          else await fs.symlink(alternate, target);
+        }
+        return open(filename, ...args);
+      };
+      syncBuiltinESMExports();
+      await assert.rejects(readPrivateJson(target), {
+        code: 'TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED',
+      });
+      assert.equal(replaced, true);
+    `, target, alternate, mode], { encoding: 'utf8', timeout: 3000, killSignal: 'SIGKILL' });
+    assert.equal(result.error, undefined, mode);
+    assert.equal(result.status, 0, result.stderr);
+  }
 });
 
 test('refuses credential arguments and malformed private JSON without loading the runtime', async (t) => {

@@ -602,7 +602,7 @@ cleanup() {
   tronclass_kill_discovered_groups
   if (( failed )); then
     echo 'TronClass launcher cleanup failed.' >&2
-    exit 1
+    exit_status=1
   fi
   if [ "$sig" = INT ]; then exit 130; fi
   if [ "$sig" = TERM ]; then exit 143; fi
