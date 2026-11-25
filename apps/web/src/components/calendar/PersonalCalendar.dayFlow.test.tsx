@@ -1370,6 +1370,46 @@ it('儲存改期的新增行程期間重選同一天，完成後保留最後選�
   expect(readPersonalImports(scope())).toMatchObject([{ date: '2026-11-15' }]);
 });
 
+it('跨月儲存完成後在 React 提交前重選日期，保留原月份與當日行程', async () => {
+  const date = '2026-11-14';
+  const savedDate = '2026-12-15';
+  const existing = event('existing-november', '十一月當日的既有行程', date);
+  seed([existing]);
+  const pendingWrite = deferNextCalendarWrite();
+  render(<PersonalCalendar />);
+  await ready();
+  const dateControl = screen.getByRole('button', { name: date });
+  const monthField = screen.getByLabelText<HTMLInputElement>('查看月份');
+  activate(dateControl);
+  activate(screen.getByRole('button', { name: '新增行程' }));
+  const title = '跨月儲存的合成行程';
+  const editorField = titleField();
+  fireEvent.change(editorField, { target: { value: title } });
+  fireEvent.change(formDate(), { target: { value: savedDate } });
+  activate(screen.getByRole('button', { name: '儲存行程' }));
+  await waitFor(() => expect(pendingWrite()).toBeTypeOf('function'));
+
+  await act(async () => {
+    pendingWrite()?.();
+    // Let runSave queue navigation while act keeps the November grid mounted.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(readPersonalImports(scope())).toEqual(
+      expect.arrayContaining([expect.objectContaining({ title, date: savedDate })]),
+    );
+    expect(editorField.isConnected).toBe(true);
+    expect(monthField.value).toBe('2026-11');
+    activate(dateControl);
+  });
+
+  await screen.findByText(personalImportSavedNotice(1));
+  expect(monthField.value).toBe('2026-11');
+  expect(dateControl.getAttribute('aria-pressed')).toBe('true');
+  expect(dayHeading(date)).toBeTruthy();
+  expect(screen.getByRole('button', { name: existing.title })).toBeTruthy();
+  expect(screen.queryByRole('textbox', { name: '標題' })).toBeNull();
+  expect(document.activeElement).toBe(dateControl);
+});
+
 it.each(['selected date', 'document.body'])(
   'preserves the newly selected month and date when an earlier day finishes saving with focus on %s',
   async (focusTarget) => {

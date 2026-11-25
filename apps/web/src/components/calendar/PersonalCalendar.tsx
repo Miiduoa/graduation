@@ -364,9 +364,13 @@ function PersonalCalendarWorkspace({
   const importHref = campusServiceHref('/import?kind=events', schoolSearch);
   const todayHref = campusServiceHref('/', schoolSearch);
   const ledger = usePersonalImports(scope, !paused);
-  const [month, setMonth] = useState(() => emptyPersonalEventDraft().date.slice(0, 7));
-  const [calendarView, setCalendarView] = useState<'month' | 'list'>('month');
-  const [selectedDate, setSelectedDate] = useState('');
+  const [navigation, setNavigation] = useState(() => ({
+    month: emptyPersonalEventDraft().date.slice(0, 7),
+    calendarView: 'month' as 'month' | 'list',
+    selectedDate: '',
+    revision: 0,
+  }));
+  const { month, calendarView, selectedDate } = navigation;
   const [dateSelectionRevision, setDateSelectionRevision] = useState(0);
   const [dues, setDues] = useState<{
     uid: string | null;
@@ -486,26 +490,25 @@ function PersonalCalendarWorkspace({
     stopLinkedFocusRetry.current = null;
   }, [requestedEventId]);
 
-  const changeMonth = useCallback(
-    (value: string) => {
-      cancelLinkedFocus();
-      setMonth(value);
-      setSelectedDate('');
-    },
-    [cancelLinkedFocus],
-  );
+  const navigate = useCallback((next: Omit<typeof navigation, 'revision'>) => {
+    const revision = ++viewRevision.current;
+    setNavigation({ ...next, revision });
+  }, []);
+
+  const changeMonth = (value: string) => {
+    cancelLinkedFocus();
+    navigate({ month: value, selectedDate: '', calendarView });
+  };
 
   const selectDate = (date: string) => {
     cancelLinkedFocus();
     // Reselecting the current day also supersedes navigation after a pending save.
-    viewRevision.current += 1;
-    setSelectedDate(date);
+    navigate({ month: date.slice(0, 7), selectedDate: date, calendarView });
     setDateSelectionRevision((revision) => revision + 1);
   };
 
   const goToday = () => {
     const today = emptyPersonalEventDraft().date;
-    setMonth(today.slice(0, 7));
     selectDate(today);
   };
 
@@ -545,10 +548,12 @@ function PersonalCalendarWorkspace({
     if (paused || !ledger.ready || !requestedEventId || !linkedEventDate) return;
     if (locatedRequest.current === requestedEventId) return;
     locatedRequest.current = requestedEventId;
-    setMonth(linkedEventDate.slice(0, 7));
-    setSelectedDate(linkedEventDate);
-    setCalendarView('list');
-  }, [paused, ledger.ready, requestedEventId, linkedEventDate]);
+    navigate({
+      month: linkedEventDate.slice(0, 7),
+      selectedDate: linkedEventDate,
+      calendarView: 'list',
+    });
+  }, [paused, ledger.ready, requestedEventId, linkedEventDate, navigate]);
 
   useEffect(() => {
     if (
@@ -662,10 +667,6 @@ function PersonalCalendarWorkspace({
     };
   }, [paused, cancelLinkedFocus, workspaceBoundary]);
 
-  useLayoutEffect(() => {
-    viewRevision.current += 1;
-  }, [month, selectedDate, calendarView]);
-
   const focusEditorTitle = () => {
     const title = titleRef.current;
     if (!title) return;
@@ -765,8 +766,7 @@ function PersonalCalendarWorkspace({
 
   const showMonthList = () => {
     cancelLinkedFocus();
-    setSelectedDate('');
-    setCalendarView('list');
+    navigate({ month, selectedDate: '', calendarView: 'list' });
   };
 
   const monthEvents = useMemo(
@@ -919,16 +919,19 @@ function PersonalCalendarWorkspace({
           : savedDate !== baseline.date);
       await action(row);
       if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
-      // Preserve navigation during the write even if focus has since returned
-      // to the body or revalidation has hidden the editor.
       if (savedFromView === viewRevision.current) {
         if (followSavedDate) {
-          setMonth(savedMonth);
-          setSelectedDate(savedDate);
+          // A newer navigation can run before this update or replace it in the same batch.
+          setNavigation((current) =>
+            current.revision === savedFromView
+              ? { ...current, month: savedMonth, selectedDate: savedDate }
+              : current,
+          );
         }
         pendingWriteFocus.current?.stop();
         pendingWriteFocus.current = {
           ...writeFocus,
+          canHandoff: () => savedFromView === viewRevision.current && writeFocus.canHandoff(),
           target: followSavedDate || selectedDate ? 'saved' : 'return',
         };
         focusQueued = true;
@@ -1140,7 +1143,7 @@ function PersonalCalendarWorkspace({
               aria-pressed={calendarView === 'month'}
               onClick={() => {
                 cancelLinkedFocus();
-                setCalendarView('month');
+                navigate({ month, selectedDate, calendarView: 'month' });
               }}
             >
               月格
