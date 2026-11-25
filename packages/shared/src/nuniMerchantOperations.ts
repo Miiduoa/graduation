@@ -5,7 +5,8 @@ export const NUNI_MERCHANT_TERMS_VERSION = 'merchant-terms-v1' as const;
 export type NuniMerchantServiceMode = 'pickup' | 'dine-in' | 'delivery';
 export type NuniMerchantPaymentMode = 'counter-only' | 'online-and-counter';
 export type NuniMerchantWorkspaceIdentity = { tenantId: string; locationId: string };
-export type NuniMerchantWorkspaceDetail = NuniMerchantWorkspace & {
+export type NuniMerchantWorkspaceDetail = Omit<NuniMerchantWorkspace, 'missingRequirements'> & {
+  missingRequirements?: string[];
   applicationId: string;
   merchantId: string;
   campusId: string | null;
@@ -179,13 +180,13 @@ export function parseMerchantWorkspaceDetail(
     ],
     invalidResponse,
   );
-  const base = parseMerchantWorkspaces({ workspaces: [row] })[0];
+  const base = parseMerchantWorkspaces({ workspaces: [row] }, { preserveMissingReadiness: true })[0];
   if (identity && (base.tenantId !== identity.tenantId || base.locationId !== identity.locationId))
     return invalidResponse();
   choice(base.merchantStatus, ['active', 'suspended'], invalidResponse);
   choice(base.locationStatus, ['open', 'closed', 'suspended'], invalidResponse);
   if (
-    base.missingRequirements.some((item) => !['settings', 'menu', 'online-payment'].includes(item))
+    base.missingRequirements?.some((item) => !['settings', 'menu', 'online-payment'].includes(item))
   )
     return invalidResponse();
   const sourceUpdatedAt =
@@ -199,6 +200,7 @@ export function parseMerchantWorkspaceDetail(
     return invalidResponse();
   return {
     ...base,
+    activated: base.activated ?? false,
     applicationId: text(row.applicationId, 1, 100, invalidResponse),
     merchantId: text(row.merchantId, 1, 120, invalidResponse),
     campusId: row.campusId === null ? null : text(row.campusId, 1, 64, invalidResponse),

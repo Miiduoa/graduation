@@ -446,6 +446,7 @@ function AccountWorkspace({
                 publishOverview();
               }
             } else {
+              confirmed.recordDetailFailure(key, revision);
               detailUnavailable = true;
             }
           }
@@ -629,6 +630,8 @@ function AccountWorkspace({
           confirmedDetail={details.get(key) ?? null}
           getConfirmedDetail={confirmed.detailFor}
           getDetailReadConfirmation={confirmed.detailReadConfirmation}
+          getDetailFailureRevision={confirmed.detailFailureRevision}
+          recordDetailFailure={confirmed.recordDetailFailure}
           confirmedListRow={verifiedListedRows.get(key)}
           receiptFloorFor={(version) => confirmed.workspaceReceiptFloor(key, version)}
           accessRevocation={revocations.details.get(key) ?? revocations.list}

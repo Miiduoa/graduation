@@ -176,7 +176,9 @@ export function merchantApplicationStateLabel(state: MerchantApplicationState): 
     withdrawn: '已撤回',
   }[state];
 }
-export function merchantWorkspaceStateLabel(workspace: NuniMerchantWorkspace): string {
+export function merchantWorkspaceStateLabel(
+  workspace: Pick<NuniMerchantWorkspace, 'activated' | 'merchantStatus' | 'locationStatus' | 'publicAccess'>,
+): string {
   if (!workspace.activated) return '已核准，待完成營運設定';
   if (workspace.merchantStatus !== 'active' || workspace.locationStatus === 'suspended')
     return '已停權，請聯絡場域管理者';

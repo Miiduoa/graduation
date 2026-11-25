@@ -103,6 +103,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const statusReceiptFloors = new Map<string, Map<number, number>>();
   // Store-specific revocations override the list default for stores with newer confirmations.
   const revocations = new Map<string, number>();
+  // A failed GET limits access recovery without discarding the last confirmed overview.
+  const detailFailures = new Map<string, number>();
   const verified = new Map<string, number>();
   let applicationRevocation = 0;
   let applicationListRevision = 0;
@@ -258,7 +260,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       activated: row.activated ?? detail.activated,
       missingRequirements,
       readinessVersion: detail.readinessVersion,
-      publishedMenuItems: missingRequirements.includes('menu') ? 0 : detail.publishedMenuItems,
+      publishedMenuItems: missingRequirements?.includes('menu') ? 0 : detail.publishedMenuItems,
     };
   }
 
@@ -330,6 +332,12 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     detailFor,
     detailReadConfirmation(key: string) {
       return entries.get(key)?.detailRead;
+    },
+    detailFailureRevision(key: string) {
+      return detailFailures.get(key) ?? 0;
+    },
+    recordDetailFailure(key: string, revision: number) {
+      detailFailures.set(key, Math.max(detailFailures.get(key) ?? 0, revision));
     },
     verifiedDetails() {
       const details = new Map<string, NuniMerchantWorkspaceDetail>();
@@ -501,6 +509,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       workspaceKeysAwaitingConfirmation.clear();
       revocations.clear();
       verified.clear();
+      detailFailures.clear();
     },
   };
 }

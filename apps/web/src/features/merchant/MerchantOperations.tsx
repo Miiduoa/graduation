@@ -129,6 +129,8 @@ export function MerchantOperations({
   confirmedDetail,
   getConfirmedDetail,
   getDetailReadConfirmation,
+  getDetailFailureRevision,
+  recordDetailFailure,
   confirmedListRow,
   receiptFloorFor,
   accessRevocation = 0,
@@ -155,6 +157,8 @@ export function MerchantOperations({
   confirmedDetail?: Detail | null;
   getConfirmedDetail?(key: string): Detail | null;
   getDetailReadConfirmation?(key: string): DetailReadConfirmation | undefined;
+  getDetailFailureRevision?(key: string): number;
+  recordDetailFailure?(key: string, revision: number): void;
   confirmedListRow?: NuniMerchantWorkspace;
   receiptFloorFor?(readinessVersion?: number): number;
   accessRevocation?: number;
@@ -216,7 +220,8 @@ export function MerchantOperations({
   const lock = useRef(false);
   const run = useRef(0);
   const accessRevision = useRef(0);
-  const failedReadRevision = useRef(0);
+  const failureRevision = getDetailFailureRevision ?? localConfirmations.detailFailureRevision;
+  const recordFailure = recordDetailFailure ?? localConfirmations.recordDetailFailure;
   const entryDetailRead = useRef<DetailReadConfirmation | undefined>(undefined);
   const pendingAccessRead = useRef(0);
   const observedRevocation = useRef(accessRevocation);
@@ -243,7 +248,6 @@ export function MerchantOperations({
     deferredWrite.current = null;
     pendingAccessRead.current = 0;
     entryDetailRead.current = undefined;
-    failedReadRevision.current = 0;
   }, []);
   useLayoutEffect(() => {
     drafts.set(draftKey, {
@@ -333,7 +337,7 @@ export function MerchantOperations({
     (detail: Detail, revision: number, reveal: boolean) => {
       if (
         revision < accessRevision.current ||
-        revision <= failedReadRevision.current ||
+        revision <= failureRevision(draftKey) ||
         revision <= observedRevocation.current
       ) return;
       accessRevision.current = revision;
@@ -344,7 +348,7 @@ export function MerchantOperations({
         setError((current) => current === detailReadError ? '' : current);
       }
     },
-    [showDetail, setError, updateAccess],
+    [draftKey, failureRevision, showDetail, setError, updateAccess],
   );
 
   const checkAccess = useCallback(
@@ -354,8 +358,7 @@ export function MerchantOperations({
       if (verifiesEntry) {
         accessRevision.current = Math.max(accessRevision.current, observedRevocation.current);
       }
-      try {
-        const next = await operations.get(tenantId, locationId);
+      await operations.get(tenantId, locationId).then((next) => {
         if (!active.current || session !== sessionRun.current) return;
         const merged = confirmDetail(next, true, revision)?.detail ?? null;
         if (merged && verifiesEntry && current()) {
@@ -363,17 +366,17 @@ export function MerchantOperations({
           // the write or its pending refresh still controls entry access.
           confirmEntry(merged, revision, !readAfterWrite.current && !pendingAccessRead.current);
         }
-      } catch (failure) {
+      }).catch((failure: unknown) => {
         if (!active.current || session !== sessionRun.current) return;
         if (expireSession(failure)) return;
         if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
           revokeDetail(revision, current() && revision >= accessRevision.current);
         } else {
-          failedReadRevision.current = Math.max(failedReadRevision.current, revision);
+          recordFailure(draftKey, revision);
         }
-      }
+      });
     },
-    [confirmDetail, confirmEntry, expireSession, nextRevision, locationId, operations, revokeDetail, tenantId],
+    [confirmDetail, confirmEntry, draftKey, expireSession, nextRevision, locationId, operations, recordFailure, revokeDetail, tenantId],
   );
 
   const rememberWrite = useCallback((revision: number) => {
@@ -408,12 +411,11 @@ export function MerchantOperations({
       pendingAccessRead.current = revision;
       accessRevision.current = Math.max(accessRevision.current, observedRevocation.current);
       updateAccess({ type: 'read-started' });
-      try {
-        const next = await operations.get(tenantId, locationId);
+      await operations.get(tenantId, locationId).then((next) => {
         if (!active.current || session !== sessionRun.current) return;
         const merged = confirmDetail(next, true, revision)?.detail ?? null;
         if (!current()) return;
-        if (!merged) {
+        if (!merged || revision <= failureRevision(draftKey)) {
           // A concurrent list merge can invalidate the detail from a successful entry GET.
           // Check the shared confirmation before React publishes its next snapshot.
           // Shared access must come from a GET newer than the write being reconciled.
@@ -435,7 +437,7 @@ export function MerchantOperations({
             readMode !== 'regular' &&
             confirmedRevision > 0 &&
             confirmedRevision >= accessRevision.current &&
-            confirmedRevision > Math.max(failedReadRevision.current, observedRevocation.current) &&
+            confirmedRevision > Math.max(failureRevision(draftKey), observedRevocation.current) &&
             detail
           ) {
             accessRevision.current = confirmedRevision;
@@ -457,22 +459,22 @@ export function MerchantOperations({
           );
         }
         if (reconcile || !drafts.get(draftKey)?.uncertain) setError('');
-      } catch (failure) {
+      }).catch((failure: unknown) => {
         // Navigation retires view updates while the request still belongs to this session.
         if (!active.current || session !== sessionRun.current) return;
         if (expireSession(failure)) return;
         if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
           if (revokeDetail(revision, current())) return;
+          if (current()) recordFailure(draftKey, revision);
+        } else {
+          recordFailure(draftKey, revision);
         }
         if (current()) {
-          // Earlier reads may still update shared detail, but cannot verify
-          // entry access after this read failed.
-          failedReadRevision.current = Math.max(failedReadRevision.current, revision);
           entryDetailRead.current = undefined;
           updateAccess({ type: 'read-failed', hideDetail });
           setError(detailReadError);
         }
-      } finally {
+      }).finally(() => {
         if (pendingAccessRead.current === revision) pendingAccessRead.current = 0;
         if (current()) {
           if (
@@ -484,12 +486,12 @@ export function MerchantOperations({
           }
           updateAccess({ type: 'read-finished' });
         }
-      }
+      });
     },
     [
       operations, tenantId, locationId, confirmDetail, confirmEntry, drafts, draftKey,
       expireSession, revokeDetail, nextRevision, beginRequest, getConfirmedDetail, localConfirmations,
-      getDetailReadConfirmation, rememberWrite, setError, setUncertain, updateAccess,
+      getDetailReadConfirmation, failureRevision, recordFailure, rememberWrite, setError, setUncertain, updateAccess,
     ],
   );
   useLayoutEffect(() => {
@@ -568,13 +570,12 @@ export function MerchantOperations({
     setError('');
     setNotice(null);
     const revision = nextRevision();
-    try {
-      await task(current, revision);
+    await task(current, revision).then(async () => {
       if (current()) {
         rememberWrite(revision);
         if (!visibleRef.current) await checkAccess(current);
       }
-    } catch (failure) {
+    }).catch(async (failure: unknown) => {
       if (!active.current || session !== sessionRun.current) return;
       if (expireSession(failure) || !current()) return;
       if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
@@ -596,7 +597,7 @@ export function MerchantOperations({
         if (action === 'menu') setMenuBlocked(false);
         setError('這次操作未被接受。請確認資料與門市的營運條件後再試。');
       }
-    } finally {
+    }).finally(() => {
       if (mutation === mutationRun.current) {
         lock.current = false;
         if (active.current) {
@@ -604,28 +605,32 @@ export function MerchantOperations({
           if (readAfterWrite.current) void read(false, 'after-write', revision);
         }
       }
-    }
+    });
   }
 
   if (!visible) return null;
   if (suspended) return <p role="status">正在重新確認帳號，門市資料暫時隱藏。</p>;
   const summary = detail ?? (!loading && (entryVerified || readUnavailable) ? confirmedListRow : null);
   const missingRequirements = summary?.missingRequirements
-    .map((item) => requirements[item] ?? '請向場域管理者確認')
+    ?.map((item) => requirements[item] ?? '請向場域管理者確認')
     .join('、');
   const draft = settings ?? (detail ? settingsOf(detail) : null);
   const settingsChanged =
     !!settings && !!detail && settings.baseVersion !== detail.readinessVersion;
   const locked = !!busy || loading || !!uncertain || !fresh || !detail;
   const displayedError = error || (!loading && entryVerified && !detail ? detailReadError : '');
-  const menuExists = menuReceipt !== null || (!!detail && !detail.missingRequirements.includes('menu'));
+  const menuExists =
+    menuReceipt !== null ||
+    (detail?.missingRequirements
+      ? !detail.missingRequirements.includes('menu')
+      : (detail?.publishedMenuItems ?? 0) > 0);
   const operational = !!detail && isMerchantWorkspaceOperational(detail);
   const canActivate =
     detail &&
     !detail.activated &&
     detail.managerConfirmed &&
     detail.publishedMenuItems > 0 &&
-    detail.missingRequirements.length === 0 &&
+    (detail.missingRequirements?.length ?? 0) === 0 &&
     detail.merchantStatus === 'suspended' &&
     detail.locationStatus === 'suspended' &&
     !detail.publicAccess;

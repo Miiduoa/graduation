@@ -40,7 +40,10 @@ vi.mock('@/features/food/AccountDemoDiningPanel', () => ({
     mocks.demo ? <p>本人示範門市</p> : fallback,
 }));
 
-function detail(locationId = 'store-a', activated = false): NuniMerchantWorkspaceDetail {
+function detail(
+  locationId = 'store-a',
+  activated = false,
+): NuniMerchantWorkspaceDetail & NuniMerchantWorkspace {
   return {
     tenantId: 'campus-one',
     tenantName: '第一校園',
@@ -2956,4 +2959,77 @@ it.each([
   expect(screen.queryByRole('heading', { name: `${legacy.merchantName}／一樓` })).toBeNull();
   expect(screen.queryByRole('heading', { name: '更新店名／一樓' })).toBeNull();
   expect(screen.queryByRole('link', { name: /管理門市：一樓/ })).toBeNull();
+});
+
+it('requires a new detail after a newer list refresh fails before an older v8 GET succeeds', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const open = { ...detail('store-a', true), readinessVersion: 7 };
+  const paused = { ...open, readinessVersion: 8, locationStatus: 'closed', publicAccess: false };
+  const olderRefresh = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(open)
+    .mockReturnValueOnce(olderRefresh.promise)
+    .mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'))
+    .mockResolvedValueOnce(open)
+    .mockResolvedValueOnce(paused);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') {
+      return Promise.resolve({ workspaces: [open, detail('store-b')] });
+    }
+    if (resource === path) return readDetail();
+    if (resource === `${path}/availability`) return Promise.resolve(paused);
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+  await screen.findByText('門市狀態已更新：暫停接單。');
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+
+  // Reenter the list through another store while the first background read is pending.
+  fireEvent.click(screen.getByRole('link', { name: '管理門市：二樓' }));
+  await screen.findByRole('heading', { name: '餐坊／二樓', level: 2 });
+  await act(async () => window.history.back());
+  await screen.findByText('目前無法更新部分門市資料，請重新載入。');
+  expect(readDetail).toHaveBeenCalledTimes(3);
+
+  await act(async () => olderRefresh.resolve(paused));
+  fireEvent.click(screen.getByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+  const retry = screen.getByRole('button', { name: '重新讀取門市狀態' });
+  expect(readDetail).toHaveBeenCalledTimes(4);
+  expect(screen.queryByRole('button', { name: '恢復接單' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
+
+  fireEvent.click(retry);
+  expect((await screen.findByRole<HTMLButtonElement>('button', { name: '恢復接單' })).disabled).toBe(false);
+});
+
+it.each([
+  { requirements: undefined, showsForm: true },
+  { requirements: [], showsForm: false },
+])('distinguishes legacy menu readiness from an explicit empty requirements list ($showsForm)', async ({
+  requirements,
+  showsForm,
+}) => {
+  const legacy: NuniMerchantWorkspaceDetail = detail();
+  if (requirements === undefined) delete legacy.missingRequirements;
+  else legacy.missingRequirements = requirements;
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [legacy] });
+    if (resource === 'merchant-workspaces/campus-one/store-a') return Promise.resolve(legacy);
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+  if (showsForm) {
+    expect(screen.getByLabelText('品項 1 名稱')).toBeTruthy();
+  } else {
+    expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
+    expect(screen.getByText('目前有 0 項有庫存的上架品項。首次菜單只能建立一次。')).toBeTruthy();
+  }
 });
