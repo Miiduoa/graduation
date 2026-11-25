@@ -10,12 +10,14 @@ import type { NuniMerchantWorkspaceDetail } from '@campus/shared/src/nuniMerchan
 export type MerchantOverview = Awaited<ReturnType<typeof loadMerchantOverview>>;
 
 type Observation<T = NuniMerchantWorkspaceListRow> = { value: T; revision: number; version?: number };
+export type DetailReadConfirmation = { revision: number; version: number };
 export type DetailConfirmation = { detail: NuniMerchantWorkspaceDetail; won: boolean };
 
 type WorkspaceObservations = {
   row?: Observation;
   versionedRow?: Observation;
   detail?: Observation<NuniMerchantWorkspaceDetail>;
+  detailRead?: DetailReadConfirmation;
 };
 
 function workspaceSummary(entry: WorkspaceObservations | undefined): NuniMerchantWorkspace | undefined {
@@ -201,7 +203,10 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       discardMenuReceipt(key);
     }
     // A newer list version can supersede the detail without supplying a replacement.
-    if (entry.detail && entry.detail.version !== row.version) delete entry.detail;
+    if (entry.detail && entry.detail.version !== row.version) {
+      delete entry.detail;
+      delete entry.detailRead;
+    }
     entry.row = row;
     entries.set(key, entry);
     return entry;
@@ -221,7 +226,12 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     entry.detail = latestObservation(entry.detail, next, revision);
     // A receipt can win on readiness version even when its request predates
     // the GET that verified access. Keep that GET's revision independently.
-    if (verifiesAccess && revision > accessConfirmationRevision(key)) verified.set(key, revision);
+    if (verifiesAccess) {
+      if (revision > accessConfirmationRevision(key)) verified.set(key, revision);
+      if (revision > (entry.detailRead?.revision ?? 0)) {
+        entry.detailRead = { revision, version: next.readinessVersion };
+      }
+    }
     const detail = detailFor(key);
     return detail && {
       detail,
@@ -318,7 +328,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     },
     hasApplicationList: () => lists.applications !== undefined,
     detailFor,
-    accessConfirmationRevision,
+    detailReadConfirmation(key: string) {
+      return entries.get(key)?.detailRead;
+    },
     verifiedDetails() {
       const details = new Map<string, NuniMerchantWorkspaceDetail>();
       for (const key of entries.keys()) {

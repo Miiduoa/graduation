@@ -1301,7 +1301,9 @@ it.each([
       await act(async () => denyBackground(new NuniError(backgroundDenial, 'DETAIL_FAILED')));
     }
     if (listArrival === 'before') await act(async () => finishList(latestList));
-    await act(async () => finishRefresh(paused));
+    // The denial is older than the entry GET. The refresh still needs to confirm
+    // the receipt's v9 before that version can be used to manage the store.
+    await act(async () => finishRefresh(backgroundDenial ? latestPause : paused));
     if (listArrival === 'after') {
       expect(screen.getByRole('link', { name: '處理訂單與收銀' })).toBeTruthy();
       await act(async () => finishList(latestList));
@@ -1436,6 +1438,60 @@ it('uses a post-write background confirmation when re-entry returns an older det
   fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
   await screen.findByRole('region', { name: '門市訂單工作台' });
 });
+
+it.each(['entry GET', 'hidden refresh failure'] as const)(
+  'keeps entry locked after a stale post-write GET with an earlier %s',
+  async (scenario) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const open = { ...detail('store-a', true), readinessVersion: 7 };
+    const paused = { ...open, readinessVersion: 8, locationStatus: 'closed', publicAccess: false };
+    const hiddenFailure = scenario === 'hidden refresh failure';
+    let finishPause!: (value: typeof paused) => void;
+    const pause = new Promise<typeof paused>((resolve) => { finishPause = resolve; });
+    let finishBackground!: (value: typeof paused) => void;
+    const background = new Promise<typeof paused>((resolve) => { finishBackground = resolve; });
+    const readDetail = vi.fn()
+      .mockResolvedValueOnce(open)
+      .mockImplementationOnce(() => hiddenFailure ? background : Promise.resolve(open))
+      .mockImplementationOnce(() => hiddenFailure
+        ? Promise.reject(new NuniError(503, 'UNAVAILABLE'))
+        : Promise.resolve(open))
+      .mockResolvedValueOnce(open);
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
+      if (resource === path) return readDetail();
+      if (resource === `${path}/availability`) return pause;
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+
+    if (hiddenFailure) {
+      await act(async () => finishPause(paused));
+      await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+      await act(async () => finishBackground(paused));
+      await act(async () => window.history.forward());
+    } else {
+      await act(async () => window.history.forward());
+      await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+      await act(async () => finishPause(paused));
+    }
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
+
+    expect(screen.getByRole('alert').textContent).toContain('請重新讀取');
+    expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '恢復接單' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
+
+    readDetail.mockResolvedValueOnce(paused);
+    fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+    expect((await screen.findByRole<HTMLButtonElement>('button', { name: '恢復接單' })).disabled).toBe(false);
+  },
+);
 
 it.each([403, 404])('revokes access and the pause notice after stale detail precedes list denial %s', async (status) => {
   const path = 'merchant-workspaces/campus-one/store-a';
