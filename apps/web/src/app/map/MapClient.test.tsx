@@ -223,12 +223,30 @@ it('waits for the source before automatically selecting a classroom that may be 
   vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
   render(<MapClient school="pu" query="主顧303" />);
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
+  const result = within(screen.getByRole('region', { name: '教室定位結果' }));
+  expect(result.queryByRole('button', { name: '定位主顧樓' })).toBeNull();
   await act(async () => source.resolve([
     { ...library, id: 'east-zhugu', name: '主顧樓', lat: 24.22, lng: 120.59 },
     { ...library, id: 'west-zhugu', name: '主顧樓', lat: 24.22, lng: 120.58 },
   ]));
   expect(screen.getByText(/有多個相符地點/)).toBeTruthy();
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
+});
+
+it('does not offer a provisional classroom destination while the campus source is syncing', async () => {
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" query="PH303" />);
+  const result = within(screen.getByRole('region', { name: '教室定位結果' }));
+  expect(result.getByRole('status').textContent).toContain('尚未確認這間教室的位置');
+  expect(result.queryByRole('button', { name: '定位主顧樓' })).toBeNull();
+  expect(result.queryByText(/可對應「主顧樓」的位置/)).toBeNull();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
+
+  await act(async () => source.resolve([]));
+  expect(result.queryByRole('status')).toBeNull();
+  expect(result.getByText(/可對應「主顧樓」的位置/)).toBeTruthy();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-zhugu');
 });
 
 it.each(['Bishop Kupfer Hall 303', 'Ｂｉｓｈｏｐ  Ｋｕｐｆｅｒ Ｈａｌｌ ３０３'])(
