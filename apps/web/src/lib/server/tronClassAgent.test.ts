@@ -207,13 +207,18 @@ describe('scoped deterministic TronClass Agent tools', () => {
     });
   });
 
-  it('does not resolve a seemingly unique name from an incomplete course index', async () => {
+  it.each([
+    ['homework', '查玩課雲『資料庫』作業'],
+    ['announcements', '查玩課雲『資料庫』公告'],
+    ['materials', '查玩課雲『資料庫』教材'],
+    ['download', '下載玩課雲『資料庫』教材'],
+  ])('requires course confirmation for %s when the course index is incomplete', async (intent, question) => {
     const f = fixture();
-    f.read.mockResolvedValue({ ...snapshot, partial: true,
+    f.read.mockResolvedValue({ ...snapshot, courses: [course], partial: true,
       errors: [{ courseId: null, area: 'courses', message: '課程索引尚未讀完' }] });
-    const result = await f.service.ask(owner, { question: '查玩課雲「資料庫」作業' });
-    expect(result.selection).toBe('course');
-    expect(result.snapshot?.homework).toEqual([]);
+    const result = await f.service.ask(owner, { question });
+    expect(result).toMatchObject({ intent, selection: 'course', actions: [], preparation: null,
+      snapshot: { homework: [], announcements: [], materials: [] } });
     expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
       include: { homework: false, announcements: false, materials: false },
     });

@@ -61,6 +61,19 @@ function isUnqualifiedRequest(question: string, names: string[]): boolean {
     .replace(/[\p{P}\p{S}]/gu, '').length === 0;
 }
 
+function resolveCourse(
+  snapshot: TronClassSnapshot,
+  scope: { matches: (name: string, code: string) => boolean; quoted?: readonly string[] },
+  requiresConfirmation: boolean,
+  question: string,
+): number | undefined {
+  if (requiresConfirmation || snapshot.errors.some((error) => error.area === 'courses')) return;
+  const matches = snapshot.courses.filter((course) => scope.matches(course.name, course.code));
+  if (matches.length === 1) return matches[0].id;
+  if (scope.quoted?.length === 0 && snapshot.courses.length === 1 && !snapshot.partial &&
+    isUnqualifiedRequest(question, ['公告', '通知'])) return snapshot.courses[0].id;
+}
+
 function selectedSnapshot(snapshot: TronClassSnapshot, options: {
   courseId?: number; homework?: TronClassHomeworkItem[]; announcements?: boolean; materials?: boolean;
 } = {}): TronClassSnapshot {
@@ -228,15 +241,7 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         const courseScope = query.intent === 'announcements' || query.intent === 'materials' || query.intent === 'download'
           ? tronClassReadCourseScope(input.question, query.intent)
           : homeworkScope;
-        const canResolveCourse = !readsHomework || (!homeworkScope.requiresConfirmation &&
-          !snapshot.errors.some(error => error.area === 'courses'));
-        const matches = canResolveCourse ? snapshot.courses.filter(course => courseScope.matches(course.name, course.code)) : [];
-        if (matches.length === 1) {
-          courseId = matches[0].id;
-        } else if ('quoted' in courseScope && courseScope.quoted.length === 0 && snapshot.courses.length === 1 && !snapshot.partial &&
-          isUnqualifiedRequest(input.question, ['公告', '通知'])) {
-          courseId = snapshot.courses[0].id;
-        }
+        courseId = resolveCourse(snapshot, courseScope, readsHomework && homeworkScope.requiresConfirmation, input.question);
         if (courseId) snapshot = await guardedRead(courseId);
         else if (readsHomework) {
           steps.push({ id: 'choose-course', tool: 'select_target', status: 'blocked', message: '尚未選定唯一課程。' });

@@ -102,6 +102,24 @@ test('rejects nonprivate output directories and keeps a once marker across compe
   });
 });
 
+test('exclusive dispatch marker creation leaves existing FIFOs and symlink targets intact', async (t) => {
+  const root = await directory(t);
+  const target = path.join(root, 'target.json');
+  const fifoMarker = path.join(root, 'fifo-plan.json.dispatch');
+  const symlinkMarker = path.join(root, 'symlink-plan.json.dispatch');
+  await privateJson(target, { value: 'original' });
+  const original = await readFile(target);
+  assert.equal(spawnSync('mkfifo', ['-m', '600', fifoMarker]).status, 0);
+  await symlink(target, symlinkMarker);
+
+  for (const marker of [fifoMarker, symlinkMarker]) {
+    assert.equal(await writePrivateJson(marker, { value: 'dispatch' }, true), false);
+  }
+  assert.ok((await stat(fifoMarker)).isFIFO());
+  assert.ok((await fs.lstat(symlinkMarker)).isSymbolicLink());
+  assert.deepEqual(await readFile(target), original);
+});
+
 test('rejects a parent replaced at the final open for plans and dispatch markers', async (t) => {
   const root = await directory(t);
   for (const [name, marker, replacement] of [
@@ -220,8 +238,8 @@ test('refuses a file replaced with a FIFO or symlink at open without blocking', 
   }
 });
 
-test('dispatch rechecks the pinned plan name before reading and reserving', { timeout: 5000 }, async (t) => {
-  for (const phase of ['read', 'reserve']) {
+test('dispatch reads only the verified plan descriptor and refuses replaced plan names', { timeout: 5000 }, async (t) => {
+  for (const phase of ['open', 'read', 'reserve']) {
     for (const replacement of ['fifo', 'symlink', 'regular file']) {
       await t.test(`${phase}: ${replacement}`, async (t) => {
         const root = await directory(t);
@@ -229,7 +247,9 @@ test('dispatch rechecks the pinned plan name before reading and reserving', { ti
         const moved = path.join(root, 'moved.json');
         const input = path.join(root, 'input.json');
         const confirmation = path.join(root, 'confirmation.json');
-        await Promise.all([plan, input, confirmation].map((filename) => privateJson(filename, {})));
+        const originalPlan = { value: 'reviewed' };
+        await privateJson(plan, originalPlan);
+        await Promise.all([input, confirmation].map((filename) => privateJson(filename, {})));
 
         let replaced = false;
         async function replacePlan() {
@@ -237,18 +257,32 @@ test('dispatch rechecks the pinned plan name before reading and reserving', { ti
           if (replacement === 'fifo') {
             assert.equal(spawnSync('mkfifo', ['-m', '600', plan]).status, 0);
           } else if (replacement === 'symlink') {
-            await symlink(moved, plan);
+            await symlink(input, plan);
           } else {
-            await privateJson(plan, {});
+            await privateJson(plan, { value: 'replacement' });
           }
           replaced = true;
         }
 
+        let planOpens = 0;
+        let planFlags;
+        let bytesRead;
         const originalOpen = open;
         const hook = t.mock.method(fs, 'open', async (filename, flags, ...args) => {
           const handle = await originalOpen(filename, flags, ...args);
-          if (phase === 'read' && !replaced && path.basename(filename) === 'plan.json') {
-            await replacePlan();
+          if (path.basename(filename) === 'plan.json') {
+            planOpens++;
+            planFlags = flags;
+            if (phase === 'open' && !replaced) await replacePlan();
+            if (phase === 'read') {
+              const read = handle.read.bind(handle);
+              handle.read = async (buffer, offset, ...args) => {
+                if (!replaced) await replacePlan();
+                const result = await read(buffer, offset, ...args);
+                if (result.bytesRead) bytesRead = buffer.subarray(offset, offset + result.bytesRead).toString();
+                return result;
+              };
+            }
           }
           return handle;
         });
@@ -270,6 +304,7 @@ test('dispatch rechecks the pinned plan name before reading and reserving', { ti
                     parseTronClassAcceptanceInput() {},
                     createDefaultTronClassAcceptanceService: ({ reserveDispatch }) => ({
                       async dispatch(_input, reviewedPlan) {
+                        assert.deepEqual(reviewedPlan, originalPlan);
                         await replacePlan();
                         reservationAttempted = true;
                         return reserveDispatch(reviewedPlan);
@@ -282,7 +317,10 @@ test('dispatch rechecks the pinned plan name before reading and reserving', { ti
             },
           );
           assert.equal(replaced, true);
-          assert.equal(loadCount, phase === 'read' ? 0 : 1);
+          assert.equal(planOpens, 1);
+          assert.ok(planFlags & constants.O_NOFOLLOW);
+          if (phase === 'read') assert.deepEqual(JSON.parse(bytesRead), originalPlan);
+          assert.equal(loadCount, phase === 'reserve' ? 1 : 0);
           assert.equal(reservationAttempted, phase === 'reserve');
           assert.equal(code, 1);
           assert.equal(output, '');

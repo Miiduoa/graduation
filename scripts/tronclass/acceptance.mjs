@@ -135,53 +135,52 @@ async function withPrivateFileLocation(value, privateParent, action) {
 
 export function readPrivateJson(value) {
   return withPrivateFileLocation(value, false, (directory, name, verifyParent) =>
-    withPinnedPrivateFileAt(directory, name, verifyParent, readPinnedPrivateJson),
+    withPinnedPrivateJsonAt(directory, name, verifyParent, (body) => body),
   );
 }
 
-async function openPrivateEntry(directory, name) {
-  try {
-    // O_PATH does not open FIFOs for I/O. With O_NOFOLLOW, stat sees the
-    // symlink itself and the regular-file check rejects it.
-    return await open(childPath(directory, name), O_PATH | constants.O_NOFOLLOW);
-  } catch {
+function verifyPrivateIdentity(current, expected) {
+  privateStat(current);
+  if (current.dev !== expected.dev || current.ino !== expected.ino)
     fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
-  }
 }
 
-async function withPinnedPrivateFileAt(directory, name, verifyParent, action) {
-  const entry = await openPrivateEntry(directory, name);
-  try {
-    return await action(entry, verifyEntry, verifyParent);
-  } finally {
-    await entry.close();
-  }
-
-  async function verifyEntry() {
-    let current;
-    try {
-      const pinned = await entry.stat({ bigint: true });
-      privateStat(pinned);
-      current = await openPrivateEntry(directory, name);
-      const named = await current.stat({ bigint: true });
-      privateStat(named);
-      if (named.dev !== pinned.dev || named.ino !== pinned.ino)
-        fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
-    } catch {
-      fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
-    } finally {
-      await current?.close();
-    }
-  }
-}
-
-async function readPinnedPrivateJson(entry, verifyEntry, verifyParent) {
+async function withPinnedPrivateJsonAt(directory, name, verifyParent, action) {
+  const filename = childPath(directory, name);
   let handle;
   try {
-    await verifyParent();
+    let expected;
+    try {
+      expected = await lstat(filename, { bigint: true });
+      privateStat(expected);
+      // NONBLOCK keeps a substituted FIFO from blocking before fstat can reject it.
+      handle = await open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      verifyPrivateIdentity(await handle.stat({ bigint: true }), expected);
+      await verifyParent();
+    } catch {
+      fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
+    }
+
+    // A changed name can veto the operation. It never supplies bytes to the
+    // parser or redirects the exclusive marker creation in the pinned directory.
+    async function verifyEntry() {
+      try {
+        verifyPrivateIdentity(await lstat(filename, { bigint: true }), expected);
+      } catch {
+        fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
+      }
+    }
+    const body = await readPinnedPrivateJson(handle, verifyParent);
     await verifyEntry();
-    handle = await open(fdPath(entry), constants.O_RDONLY | constants.O_NONBLOCK);
-    const before = await handle.stat();
+    return await action(body, verifyEntry);
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function readPinnedPrivateJson(handle, verifyParent) {
+  try {
+    const before = await handle.stat({ bigint: true });
     privateStat(before);
     if (before.size < 1 || before.size > MAX_FILE_BYTES)
       fail('TRONCLASS_ACCEPTANCE_FILE_TOO_LARGE');
@@ -192,14 +191,15 @@ async function readPinnedPrivateJson(entry, verifyEntry, verifyParent) {
       if (!next.bytesRead) break;
       length += next.bytesRead;
     }
-    const after = await handle.stat();
+    const after = await handle.stat({ bigint: true });
+    privateStat(after);
     await verifyParent();
     if (length > MAX_FILE_BYTES) fail('TRONCLASS_ACCEPTANCE_FILE_TOO_LARGE');
     if (
-      length !== before.size ||
+      BigInt(length) !== before.size ||
       after.size !== before.size ||
-      after.mtimeMs !== before.mtimeMs ||
-      after.ctimeMs !== before.ctimeMs
+      after.mtimeNs !== before.mtimeNs ||
+      after.ctimeNs !== before.ctimeNs
     ) {
       fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
     }
@@ -213,8 +213,6 @@ async function readPinnedPrivateJson(entry, verifyEntry, verifyParent) {
   } catch (error) {
     if (SAFE_CODES.has(error?.code)) throw error;
     fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
-  } finally {
-    await handle?.close();
   }
 }
 
@@ -402,10 +400,7 @@ export async function runAcceptanceCli(
       if (command === 'preflight') {
         await runWithPlan();
       } else {
-        await withPinnedPrivateFileAt(directory, name, verifyParent, async (entry, verifyPlan) => {
-          const plan = await readPinnedPrivateJson(entry, verifyPlan, verifyParent);
-          await runWithPlan(plan, verifyPlan);
-        });
+        await withPinnedPrivateJsonAt(directory, name, verifyParent, runWithPlan);
       }
 
       async function runWithPlan(plan, verifyPlan) {
