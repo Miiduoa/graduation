@@ -33,6 +33,7 @@ import {
 
 import {
   createMerchantConfirmations,
+  readFailureKind,
   workspaceKey,
   type DetailConfirmation,
   type DetailReadConfirmation,
@@ -145,7 +146,7 @@ export function MerchantOperations({
   receiptFloorFor,
   accessRevocation = 0,
   onChanged,
-  onDenied,
+  onRevoked,
   onMenuConfirmed,
 }: {
   context: string;
@@ -171,7 +172,7 @@ export function MerchantOperations({
   accessRevocation?: number;
   onChanged(detail: Detail, verifiedAccess: boolean, revision: number): DetailConfirmation | null | void;
   onMenuConfirmed?(detail: Detail, revision: number, createdItems: number): boolean;
-  onDenied?(tenantId: string, locationId: string, revision: number): number | undefined;
+  onRevoked?(): void;
 }) {
   const draftKey = workspaceKey({ tenantId, locationId });
   const saved = drafts.get(draftKey);
@@ -316,12 +317,9 @@ export function MerchantOperations({
     return confirmation.detail;
   };
 
-  const revokeDetail = useCallback(
-    (revision: number, updateView: boolean) => {
-      const revoked = confirmations
-        ? onDenied?.(tenantId, locationId, revision)
-        : localConfirmations.revoke(draftKey, revision);
-      if (revoked === undefined) return false;
+  const showRevocation = useCallback(
+    (revoked: number, updateView: boolean) => {
+      onRevoked?.();
       if (!confirmations) {
         setDetail(null);
         setNotice((current) => current && current.revision > revoked ? current : null);
@@ -331,28 +329,25 @@ export function MerchantOperations({
         updateAccess({ type: 'locked' });
         setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
       }
-      return true;
     },
-    [
-      confirmations, draftKey, localConfirmations, locationId, onDenied, tenantId,
-      setDetail, setNotice, setError, updateAccess,
-    ],
+    [confirmations, onRevoked, setDetail, setNotice, setError, updateAccess],
   );
 
-  const expireSession = useCallback(
-    (failure: unknown) => {
-      if (
-        !(failure instanceof NuniError) ||
-        (failure.status !== 401 && failure.code !== 'SESSION_CHANGED')
-      )
-        return false;
-      // Session invalidation applies even after navigation retires the request's view.
+  const revokeDetail = useCallback(
+    (revision: number, updateView: boolean) => {
+      const revoked = observations.revoke(draftKey, revision);
+      if (revoked !== undefined) showRevocation(revoked, updateView);
+    },
+    [draftKey, observations, showRevocation],
+  );
+
+  const clearExpiredSession = useCallback(
+    () => {
       localConfirmations.clear();
       setNotice(null);
       setDetail(null);
       updateAccess({ type: 'locked' });
       expire.current();
-      return true;
     },
     [localConfirmations, setNotice, setDetail, updateAccess],
   );
@@ -377,19 +372,22 @@ export function MerchantOperations({
 
   const rejectWorkspaceRead = useCallback(
     (
+      isSameSession: () => boolean,
       failure: unknown,
       revision: number,
       updateView: boolean,
       source: 'detail' | 'orders' = 'detail',
     ) => {
-      if (expireSession(failure)) return true;
-      if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-        return revokeDetail(revision, updateView);
+      const result = observations.rejectRead(
+        isSameSession, failure, revision, clearExpiredSession, { key: draftKey, source },
+      );
+      if ('revoked' in result && result.revoked !== undefined) {
+        showRevocation(result.revoked, updateView);
+        return true;
       }
-      observations.recordReadFailure(revision, draftKey, source);
-      return false;
+      return result.kind === 'expired' || result.kind === 'retired';
     },
-    [draftKey, expireSession, observations, revokeDetail],
+    [clearExpiredSession, draftKey, observations, showRevocation],
   );
 
   const checkAccess = useCallback(
@@ -412,8 +410,7 @@ export function MerchantOperations({
           );
         }
       }).catch((failure: unknown) => {
-        if (!isSameSession()) return;
-        rejectWorkspaceRead(failure, revision, current() && revision >= accessRevision.current);
+        rejectWorkspaceRead(isSameSession, failure, revision, current() && revision >= accessRevision.current);
       });
     },
     [captureReadSession, confirmDetail, confirmEntry, nextRevision, locationId, operations, rejectWorkspaceRead, tenantId],
@@ -483,8 +480,7 @@ export function MerchantOperations({
         if (reconcile || !drafts.get(draftKey)?.uncertain) setError('');
       }).catch((failure: unknown) => {
         // Navigation retires view updates while the request still belongs to this session.
-        if (!isSameSession()) return;
-        if (rejectWorkspaceRead(failure, revision, current())) return;
+        if (rejectWorkspaceRead(isSameSession, failure, revision, current())) return;
         if (current()) {
           updateAccess({ type: 'read-failed', hideDetail });
           setError(detailReadError);
@@ -572,9 +568,7 @@ export function MerchantOperations({
         if (isSameSession()) read.confirm();
       },
       reject(failure: unknown) {
-        if (isSameSession()) {
-          rejectWorkspaceRead(failure, read.revision, visibleRef.current, 'orders');
-        }
+        rejectWorkspaceRead(isSameSession, failure, read.revision, visibleRef.current, 'orders');
       },
     };
   }, [captureReadSession, draftKey, observations, rejectWorkspaceRead]);
@@ -592,11 +586,12 @@ export function MerchantOperations({
       !active.current || lock.current || loading || uncertain || !detail ||
       !hasCurrentAccess()
     ) return;
+    const isSameSession = captureReadSession();
+    if (!isSameSession()) return;
     lock.current = true;
-    const session = sessionRun.current;
     const mutation = ++mutationRun.current;
     const version = ++run.current;
-    const current = () => active.current && version === run.current;
+    const current = () => isSameSession() && version === run.current;
     // Record the intent before issuing the request. Returning to the list or
     // renewing this account's session must not turn an unknown write into a retry.
     drafts.set(draftKey, {
@@ -624,15 +619,19 @@ export function MerchantOperations({
         }
       }
     }).catch(async (failure: unknown) => {
-      if (!active.current || session !== sessionRun.current) return;
-      if (expireSession(failure) || !current()) return;
-      if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
+      if (!isSameSession()) return;
+      if (readFailureKind(failure) === 'expired') {
+        clearExpiredSession();
+        return;
+      }
+      if (!current()) return;
+      if (readFailureKind(failure) === 'denied') {
         revokeDetail(revision, true);
       } else if (failure instanceof NuniError && failure.status === 409) {
         if (action === 'menu') setMenuBlocked(true);
         // A conflict always requires post-write reconciliation, even on the same entry.
         await read(true, 'after-write', revision);
-        if (active.current && session === sessionRun.current)
+        if (isSameSession())
           setError((current) =>
             current || '門市資料已變更。請確認重新讀取的狀態，再決定下一步；草稿仍保留。',
           );
@@ -648,7 +647,7 @@ export function MerchantOperations({
     }).finally(() => {
       if (mutation === mutationRun.current) {
         lock.current = false;
-        if (active.current) {
+        if (isSameSession()) {
           setBusy(null);
           if (readAfterWrite.current) void read(false, 'after-write', revision);
         }

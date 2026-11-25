@@ -3542,6 +3542,40 @@ it('keeps both management entries closed for a store revealed by a retired list 
 it.each([
   { status: 401, code: 'UNAUTHORIZED' },
   { status: 409, code: 'SESSION_CHANGED' },
+])('allows both management entries after the list itself expires with $code', async ({ status, code }) => {
+  const store = detail('store-b', true);
+  const readList = vi.fn()
+    .mockRejectedValueOnce(new NuniError(status, code))
+    .mockResolvedValue({ workspaces: [store] });
+  const storeRead = vi.fn().mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === 'merchant-workspaces/campus-one/store-b') return storeRead();
+    if (resource === 'merchant-applications') {
+      return Promise.resolve({ applications: [{
+        tenantId: store.tenantId,
+        applicationId: store.applicationId,
+        brandName: '核准申請',
+        locationName: store.locationName,
+        state: 'approved',
+        reviewerNote: '',
+        submittedAt: '2026-10-09T02:00:00.000Z',
+      }] });
+    }
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  await screen.findByText('登入或帳號已變更，這次店家資料與草稿已清除。');
+  fireEvent.click(screen.getByRole('button', { name: '重新載入店家資料' }));
+  expect(await screen.findByRole('link', { name: '管理門市：二樓' })).toBeTruthy();
+  expect(await screen.findByRole('link', { name: '前往管理門市：二樓' })).toBeTruthy();
+  expect(storeRead).not.toHaveBeenCalled();
+});
+
+it.each([
+  { status: 401, code: 'UNAUTHORIZED' },
+  { status: 409, code: 'SESSION_CHANGED' },
 ])('ignores an old list outage after reloading the workspace following $code', async ({ status, code }) => {
   const oldStore = detail('store-a', true);
   const newStore = detail('store-b', true);

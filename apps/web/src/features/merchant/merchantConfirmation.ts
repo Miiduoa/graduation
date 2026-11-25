@@ -1,3 +1,4 @@
+import { NuniError } from '@campus/shared/src/nuni';
 import {
   merchantWorkspaceStateLabel,
   type loadMerchantOverview,
@@ -86,6 +87,16 @@ export const workspaceKey = ({
   tenantId,
   locationId,
 }: Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'>) => `${tenantId}:${locationId}`;
+
+export function readFailureKind(error: unknown) {
+  if (error instanceof NuniError) {
+    if (error.status === 401 || error.code === 'SESSION_CHANGED') return 'expired';
+    if (error.status === 403 || error.status === 404) return 'denied';
+  }
+  return 'unavailable';
+}
+
+type WorkspaceReadTarget = { key: string; source: 'detail' | 'orders' };
 
 export type MerchantConfirmations = ReturnType<typeof createMerchantConfirmations>;
 
@@ -457,6 +468,42 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     }
   }
 
+  function recordReadFailure(revision: number, key?: string, source: 'detail' | 'orders' = 'detail') {
+    if (key === undefined) {
+      if (revision <= listReadFailure) return;
+      listReadFailure = revision;
+    } else {
+      const failures = source === 'orders' ? orderReadFailures : readFailures;
+      if (revision <= (failures.get(key) ?? 0)) return;
+      failures.set(key, revision);
+    }
+    publishReadChange();
+  }
+
+  function rejectWorkspaceList(denied: boolean, revision: number) {
+    if (denied) {
+      if (revision <= Math.max(listedRevision, listRevocation)) return;
+      for (const key of new Set([...entries.keys(), ...revocations.keys(), ...drafts.keys()])) {
+        // Preserve a newer confirmation and its existing access state.
+        if (Math.max(entries.get(key)?.row?.revision ?? 0, accessConfirmationRevision(key)) > revision) {
+          revocations.set(key, revokedThrough(key));
+          if (listedMembership()?.has(key) || (includeVerifiedWorkspaces && hasVerifiedAccess(key))) {
+            retainedWorkspaceKeys.add(key);
+          }
+        } else {
+          if (revocations.has(key)) revocations.set(key, Math.max(revokedThrough(key), revision));
+          discardWorkspace(key, revision);
+          retainedWorkspaceKeys.delete(key);
+        }
+      }
+      listRevocation = revision;
+      includeVerifiedWorkspaces = false;
+    } else if (revision > listRevocation) {
+      // Direct-entry fallback is available until the first successful list.
+      includeVerifiedWorkspaces = listedWorkspaces === undefined;
+    }
+  }
+
   return {
     listedWorkspaceTenants() {
       const membership = listedMembership();
@@ -512,17 +559,29 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       readChangeListeners.add(listener);
       return () => { readChangeListeners.delete(listener); };
     },
-    recordReadFailure(revision: number, key?: string, source: 'detail' | 'orders' = 'detail') {
-      if (key === undefined) {
-        if (revision <= listReadFailure) return;
-        listReadFailure = revision;
-      } else {
-        const failures = source === 'orders' ? orderReadFailures : readFailures;
-        if (revision <= (failures.get(key) ?? 0)) return;
-        failures.set(key, revision);
+    rejectRead(
+      isSameSession: () => boolean,
+      error: unknown,
+      revision: number,
+      onExpired: () => void,
+      target?: WorkspaceReadTarget,
+    ) {
+      if (!isSameSession()) return { kind: 'retired' } as const;
+      const kind = readFailureKind(error);
+      if (kind === 'expired') {
+        onExpired();
+        return { kind } as const;
       }
-      publishReadChange();
+      if (!target) {
+        if (kind === 'unavailable') recordReadFailure(revision);
+        rejectWorkspaceList(kind === 'denied', revision);
+        return { kind } as const;
+      }
+      if (kind === 'denied') return { kind, revoked: revoke(target.key, revision) } as const;
+      recordReadFailure(revision, target.key, target.source);
+      return { kind } as const;
     },
+    recordReadFailure,
     verifiedDetails() {
       const details = new Map<string, NuniMerchantWorkspaceDetail>();
       for (const key of entries.keys()) {
@@ -555,29 +614,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       }
       for (const row of rows) merge(row, revision);
     },
-    rejectWorkspaceList(denied: boolean, revision: number) {
-      if (denied) {
-        if (revision <= Math.max(listedRevision, listRevocation)) return;
-        for (const key of new Set([...entries.keys(), ...revocations.keys(), ...drafts.keys()])) {
-          // Preserve a newer confirmation and its existing access state.
-          if (Math.max(entries.get(key)?.row?.revision ?? 0, accessConfirmationRevision(key)) > revision) {
-            revocations.set(key, revokedThrough(key));
-            if (listedMembership()?.has(key) || (includeVerifiedWorkspaces && hasVerifiedAccess(key))) {
-              retainedWorkspaceKeys.add(key);
-            }
-          } else {
-            if (revocations.has(key)) revocations.set(key, Math.max(revokedThrough(key), revision));
-            discardWorkspace(key, revision);
-            retainedWorkspaceKeys.delete(key);
-          }
-        }
-        listRevocation = revision;
-        includeVerifiedWorkspaces = false;
-      } else if (revision > listRevocation) {
-        // Direct-entry fallback is available until the first successful list.
-        includeVerifiedWorkspaces = listedWorkspaces === undefined;
-      }
-    },
+    rejectWorkspaceList,
     workspaceReceiptFloor(key: string, readinessVersion?: number) {
       let floor = receiptFloors.get(key) ?? 0;
       if (readinessVersion !== undefined) {

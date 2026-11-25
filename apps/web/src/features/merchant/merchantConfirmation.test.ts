@@ -1,3 +1,4 @@
+import { NuniError } from '@campus/shared/src/nuni';
 import { expect, it } from 'vitest';
 import type { NuniMerchantWorkspace } from '@campus/shared/src/nuniMerchant';
 import type { NuniMerchantWorkspaceDetail } from '@campus/shared/src/nuniMerchantOperations';
@@ -27,8 +28,7 @@ it('renders the newer menu requirement after a list previously confirmed the men
   expect(confirmed.overview()?.workspaces).toEqual([missingMenu]);
 });
 
-it.each(['merge', 'denial', 'omitted requirements'] as const)('reconciles legacy lists and versioned detail ($0)', (scenario) => {
-  const confirmed = createMerchantConfirmations(new Map());
+function workspaceFixture() {
   const legacyRow: NuniMerchantWorkspace = {
     tenantId: 'campus-one',
     tenantName: '第一校園',
@@ -65,6 +65,12 @@ it.each(['merge', 'denial', 'omitted requirements'] as const)('reconciles legacy
     sourceUpdatedAt: null,
     sourceLine: null,
   };
+  return { legacyRow, detail };
+}
+
+it.each(['merge', 'denial', 'omitted requirements'] as const)('reconciles legacy lists and versioned detail ($0)', (scenario) => {
+  const confirmed = createMerchantConfirmations(new Map());
+  const { legacyRow, detail } = workspaceFixture();
   if (scenario === 'omitted requirements') {
     delete detail.missingRequirements;
     confirmed.confirmDetail(detail, confirmed.beginRequest(), true);
@@ -189,4 +195,88 @@ it('keeps newer application receipt status and notes until a later list confirms
   const updatedRow = { ...staleRow, reviewerNote: '請補最新的食品業者登錄資料' };
   confirmed.mergeApplications([updatedRow], confirmed.beginRequest());
   expect(confirmed.overview()?.applications).toEqual([updatedRow]);
+});
+
+const readSources = [
+  { name: 'list', source: undefined },
+  { name: 'foreground detail', source: 'detail' },
+  { name: 'background detail', source: 'detail' },
+  { name: 'order queue', source: 'orders' },
+  { name: 'shift', source: 'orders' },
+] as const;
+const readOutcomes = [
+  { status: 401, code: 'UNAUTHORIZED', kind: 'expired' },
+  { status: 409, code: 'SESSION_CHANGED', kind: 'expired' },
+  { status: 403, code: 'FORBIDDEN', kind: 'denied' },
+  { status: 404, code: 'NOT_FOUND', kind: 'denied' },
+  { status: 503, code: 'UNAVAILABLE', kind: 'unavailable' },
+] as const;
+const readMatrix = readSources.flatMap(({ name, source }) =>
+  readOutcomes.flatMap((outcome) =>
+    ['visible', 'navigated', 'cleared'].map((lifetime) => ({ name, source, ...outcome, lifetime })),
+  ),
+);
+
+it.each(readMatrix)('$name $status $code while $lifetime', ({ source, status, code, kind, lifetime }) => {
+  const { detail } = workspaceFixture();
+  const key = 'campus-one:store-a';
+  const confirmed = createMerchantConfirmations(new Map());
+  const list = (row = detail) => confirmed.mergeWorkspaceList([row], confirmed.beginRequest());
+  const read = (row = detail) => confirmed.confirmDetail(row, confirmed.beginRequest(), true);
+  list();
+  read();
+  const round = source === 'orders' ? confirmed.beginOrderRead(key) : undefined;
+  const revision = round?.revision ?? confirmed.beginRequest();
+  let session = 0;
+  const capturedSession = session;
+  const clear = () => {
+    session++;
+    confirmed.clear();
+  };
+  if (lifetime === 'cleared') {
+    clear();
+    list();
+  }
+
+  const result = confirmed.rejectRead(
+    () => session === capturedSession,
+    new NuniError(status, code),
+    revision,
+    clear,
+    source && { key, source },
+  );
+
+  if (lifetime === 'cleared' || kind === 'expired') {
+    expect(result.kind).toBe(lifetime === 'cleared' ? 'retired' : 'expired');
+    round?.settle();
+    list();
+    expect(confirmed.accessFloor(key)).toBe(0);
+    expect(confirmed.canEnterWorkspace(key)).toBe(true);
+    expect(confirmed.detailReadConfirmation(key)).toBeUndefined();
+    return;
+  }
+
+  expect(result.kind).toBe(kind);
+  expect(confirmed.accessFloor(key)).toBe(revision);
+  expect(confirmed.canEnterWorkspace(key)).toBe(false);
+  if (source || kind === 'unavailable') {
+    list();
+    expect(confirmed.canEnterWorkspace(key)).toBe(false);
+  }
+
+  // A version-changing receipt cannot establish the GET confirmation.
+  const newer = { ...detail, readinessVersion: detail.readinessVersion + 1 };
+  if (kind === 'unavailable') {
+    const write = confirmed.beginRequest();
+    confirmed.recordWrite(key, write);
+    confirmed.confirmDetail(newer, write, false);
+    expect(confirmed.canEnterWorkspace(key)).toBe(false);
+  }
+  read(newer);
+  if (round && kind === 'unavailable') expect(confirmed.canEnterWorkspace(key)).toBe(false);
+  round?.settle();
+  expect(confirmed.detailReadConfirmation(key)?.version).toBe(newer.readinessVersion);
+  expect(confirmed.canEnterWorkspace(key)).toBe(true);
+  expect(confirmed.confirmDetail(detail, confirmed.beginRequest(), true)).toBeNull();
+  expect(confirmed.canEnterWorkspace(key)).toBe(true);
 });

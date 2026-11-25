@@ -51,6 +51,7 @@ import { useMerchantWorkspaceRoute } from '@/lib/useMerchantWorkspaceRoute';
 
 import {
   createMerchantConfirmations,
+  readFailureKind,
   workspaceKey,
   type MerchantOverview,
 } from './merchantConfirmation';
@@ -76,7 +77,7 @@ const requirementLabel: Record<string, string> = {
   'online-payment': '完成線上付款資格',
 };
 function expired(error: unknown) {
-  return error instanceof NuniError && (error.status === 401 || error.code === 'SESSION_CHANGED');
+  return readFailureKind(error) === 'expired';
 }
 
 const merchantEntry = {
@@ -365,8 +366,7 @@ function AccountWorkspace({
     const isCurrent = () => isSameSession() && run === generation.current;
     setLoading(true);
     setLoadError('');
-    const denied = (error: unknown) =>
-      error instanceof NuniError && [403, 404].includes(error.status);
+    const denied = (error: unknown) => readFailureKind(error) === 'denied';
     const targets = new Map<string, Pick<NuniMerchantWorkspaceDetail, 'tenantId' | 'locationId'>>();
     const addTargets = (items: Iterable<Pick<NuniMerchantWorkspaceDetail, 'tenantId' | 'locationId'>>) => {
       for (const item of items) targets.set(workspaceKey(item), item);
@@ -407,27 +407,21 @@ function AccountWorkspace({
           },
         ),
         // Confirm the list as soon as it settles, independently of application progress.
-        observeFailure(
-          (view === 'apply'
-            ? Promise.resolve([])
-            : browserRequest('merchant-workspaces', context).then((value) =>
-                parseMerchantWorkspaces(value, { preserveMissingReadiness: true }),
-              )
-          ).then((rows) => {
-            if (isSameSession()) {
-              confirmed.mergeWorkspaceList(rows, listRevision);
-              publishOverview();
-            }
-          }),
-          (error) => {
-            if (!denied(error)) {
-              // The list loader can be retired before it starts detail rechecks.
-              confirmed.recordReadFailure(listRevision);
-            }
-            confirmed.rejectWorkspaceList(denied(error), listRevision);
+        (view === 'apply'
+          ? Promise.resolve([])
+          : browserRequest('merchant-workspaces', context).then((value) =>
+              parseMerchantWorkspaces(value, { preserveMissingReadiness: true }),
+            )
+        ).then((rows) => {
+          if (isSameSession()) {
+            confirmed.mergeWorkspaceList(rows, listRevision);
             publishOverview();
-          },
-        ),
+          }
+        }).catch((error: unknown) => {
+          const result = confirmed.rejectRead(isSameSession, error, listRevision, expire);
+          if (result.kind === 'denied' || result.kind === 'unavailable') publishOverview();
+          throw error;
+        }),
       ]);
       if (!isCurrent()) return;
       if (programs.status === 'fulfilled') confirmed.setPrograms(programs.value);
@@ -459,18 +453,12 @@ function AccountWorkspace({
             confirmed.confirmDetail(detail, revision, true);
             publishOverview();
           } catch (error) {
-            if (!isSameSession()) return;
-            if (expired(error)) {
-              expire();
-            } else if (denied(error)) {
-              if (confirmed.revoke(key, revision) !== undefined) {
-                accessDenied = true;
-                publishOverview();
-              }
-            } else {
-              confirmed.recordReadFailure(revision, key);
-              detailUnavailable = true;
+            const result = confirmed.rejectRead(isSameSession, error, revision, expire, { key, source: 'detail' });
+            if ('revoked' in result && result.revoked !== undefined) {
+              accessDenied = true;
+              publishOverview();
             }
+            if (result.kind === 'unavailable') detailUnavailable = true;
           }
         }),
       );
@@ -604,16 +592,6 @@ function AccountWorkspace({
     [publishOverview, confirmed],
   );
 
-  const onWorkspaceDenied = useCallback(
-    (tenantId: string, locationId: string, revision: number) => {
-      if (!mounted.current || !enabled.current) return;
-      const revoked = confirmed.revoke(workspaceKey({ tenantId, locationId }), revision);
-      if (revoked !== undefined) publishOverview();
-      return revoked;
-    },
-    [publishOverview, confirmed],
-  );
-
   const onMenuConfirmed = useCallback(
     (detail: NuniMerchantWorkspaceDetail, revision: number, createdItems: number) => {
       if (!mounted.current || !enabled.current) return false;
@@ -657,7 +635,7 @@ function AccountWorkspace({
           accessRevocation={revocations.details.get(key) ?? revocations.list}
           onChanged={onWorkspaceChanged}
           onMenuConfirmed={onMenuConfirmed}
-          onDenied={onWorkspaceDenied}
+          onRevoked={publishOverview}
         />
       ))}
       {content}
