@@ -680,7 +680,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   };
   return {
     retire,
-    publishVerifiedFirstWrite(primary: string) {
+    publishVerifiedPrimary(primary: string) {
       const hash = sha256(primary);
       try {
         // Record verification independently of the rollback payload.

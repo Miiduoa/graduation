@@ -436,6 +436,8 @@ test.each([
   let encodedWrite = false;
   let markerReadBlocked = false;
   const restoreError = new Error('主鍵無法還原');
+  const persistentPrimaryReadFault = phase === 'all with primary readback error';
+  let primaryReadBlocked = false;
   if (phase === 'publish' || phase.startsWith('all with primary') || verifiedFirstWrite || publicationFails) {
     set.mockImplementation(async (entry, value) => {
       if (entry !== key) return nativeSet(entry, value);
@@ -443,12 +445,13 @@ test.each([
       encodedWrite = value.startsWith('{"batches":');
       if (encodedWrite && (phase === 'all with primary write error' || failPayloadBinding || verifiedFirstWrite)) primaryFault();
       await nativeSet(entry, value);
+      if (encodedWrite && persistentPrimaryReadFault) primaryReadBlocked = true;
       if (encodedWrite && phase === 'publish') active = false;
     });
   }
-  if (phase === 'all with primary readback error') {
+  if (persistentPrimaryReadFault) {
     get.mockImplementation(async (entry) => {
-      if (entry === key && encodedWrite && primaryFault.mock.calls.length === 0) primaryFault();
+      if (entry === key && primaryReadBlocked) primaryFault();
       return nativeGet(entry);
     });
   }
@@ -511,7 +514,12 @@ test.each([
     const firstWriteCall = set.mock.calls.length;
     const append = appendPersonalImports(scope, [row('new', '統計')], { canContinue: () => active });
     let expected = previous;
-    if (publicationFails) {
+    if (persistentPrimaryReadFault) {
+      await expect(append).rejects.toThrow('提交編碼主鍵 I/O 失敗');
+      expect(reread).not.toHaveBeenCalled();
+      expect(await nativeGet(key)).toBe(JSON.stringify(previous));
+      expect(primaryFault).toHaveBeenCalledTimes(2);
+    } else if (publicationFails) {
       if (restorationFails) await expect(append).rejects.toBe(restoreError);
       else await expect(append).rejects.toThrow('發佈憑據無法寫入');
       expect(reread).not.toHaveBeenCalled();
@@ -545,6 +553,11 @@ test.each([
       expect(expected.records.map(({ title }) => title)).toEqual(['微積分', '統計']);
       const primary = (await AsyncStorage.getItem(key))!;
       if (verifiedFirstWrite) expect(primary.startsWith('{"records":')).toBe(true);
+      if (phase === 'all') {
+        expect(primary.startsWith('{"batches":')).toBe(true);
+        expect(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.verified`).textSync())
+          .toBe(sha256(primary));
+      }
       if (lostReceiptAfterRetirement) {
         expect(publicationFault).toHaveBeenCalledTimes(1);
         expect(payloadReadFault).toHaveBeenCalled();
@@ -577,7 +590,9 @@ test.each([
     } else {
       expect(retirementAttempts).toBe(1);
     }
-    if (phase.startsWith('all with primary') || verifiedFirstWrite) expect(primaryFault).toHaveBeenCalledTimes(1);
+    if ((phase.startsWith('all with primary') && !persistentPrimaryReadFault) || verifiedFirstWrite) {
+      expect(primaryFault).toHaveBeenCalledTimes(1);
+    }
     if (failPayloadBinding) expect(payloadFault).toHaveBeenCalledTimes(1);
     if (failVerification) expect(verificationFault).toHaveBeenCalledTimes(1);
     if (adoptedCheckpoint) {
@@ -617,6 +632,11 @@ test.each([
         }
       }
     });
+    if (persistentPrimaryReadFault) {
+      expect(primaryFault).toHaveBeenCalledTimes(3);
+      primaryReadBlocked = false;
+      await expect(loadPersonalImports(scope)).resolves.toEqual(previous);
+    }
     if (unreadablePayload) expect(payloadReadFault.mock.calls.length).toBeGreaterThanOrEqual(3);
     if (unreadableMetadata) expect(metadataFault.mock.calls.length).toBeGreaterThanOrEqual(3);
     if (stalePublication) expect(publicationFault).not.toHaveBeenCalled();
@@ -638,10 +658,13 @@ test.each([
   }
 });
 
-test.each(['rejection file', 'pending marker', 'neither'] as const)(
-  'native restart restores a revoked deletion after rollback write failures (rejection recorded by %s)',
-  async (rejection) => {
-    const scope = { owner: `nuni:rejected-delete-with-pending-payload-${rejection}`, schoolId: 'pu' };
+test.each([
+  ['rejection file', 'records'], ['pending marker', 'records'], ['neither', 'records'],
+  ['neither', 'batches'],
+] as const)(
+  'native restart restores a revoked deletion after rollback write failures (rejection: %s, primary: %s)',
+  async (rejection, revokedWrite) => {
+    const scope = { owner: `nuni:rejected-delete-with-pending-payload-${rejection}-${revokedWrite}`, schoolId: 'pu' };
     const { ledger } = await appendPersonalImports(scope, [row('original')]);
     const key = personalImportStorageKey(scope);
     const prefix = `personal-imports-${sha256(key)}.rollback.`;
@@ -649,6 +672,10 @@ test.each(['rejection file', 'pending marker', 'neither'] as const)(
     const nativeSet = set.getMockImplementation()!;
     const writeFile = File.prototype.write;
     const createFile = File.prototype.create;
+    const deleteFile = File.prototype.delete;
+    const retireByDelete = jest.fn(() => { throw new Error('無法刪除待處理標記'); });
+    const retireByWrite = jest.fn(() => { throw new Error('無法寫入退役狀態'); });
+    const retireByFile = jest.fn(() => { throw new Error('無法建立退役檔'); });
     const restoreError = new Error('主鍵無法還原');
     const rejectPayload = jest.fn(() => { throw new Error('無法標記還原副本'); });
     const rejectMarker = jest.fn(() => { throw new Error('無法改寫待處理標記'); });
@@ -667,9 +694,16 @@ test.each(['rejection file', 'pending marker', 'neither'] as const)(
     set.mockImplementation(async (entry, value) => {
       if (entry === key && !active) throw restoreError;
       await nativeSet(entry, value);
-      if (entry === key) active = false;
+      if (entry === key && value.startsWith(`{"${revokedWrite}":`)) active = false;
+    });
+    const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
+      if (revokedWrite === 'batches' && this.uri.endsWith(prefix + 'pending')) retireByDelete();
+      deleteFile.call(this);
     });
     const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+      if (revokedWrite === 'batches' && this.uri.endsWith(prefix + 'pending') && value === 'committed') {
+        retireByWrite();
+      }
       if (this.uri.endsWith(prefix + 'json') && typeof value === 'string' && value.startsWith('rejected:')) {
         rejectPayload();
       }
@@ -679,6 +713,7 @@ test.each(['rejection file', 'pending marker', 'neither'] as const)(
       writeFile.call(this, value, options);
     });
     const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
+      if (revokedWrite === 'batches' && this.uri.endsWith(prefix + 'committed')) retireByFile();
       if (rejection !== 'rejection file' && this.uri.endsWith(prefix + 'rejected')) rejectFile();
       createFile.call(this, options);
     });
@@ -697,7 +732,14 @@ test.each(['rejection file', 'pending marker', 'neither'] as const)(
         expect(await AsyncStorage.getItem(key + ':checkpoint')).toBeNull();
       }
       expect(notify).not.toHaveBeenCalled();
-      expect(await AsyncStorage.getItem(key)).toMatch(/^\{"records":\[\]/);
+      const primary = (await AsyncStorage.getItem(key))!;
+      expect(primary.startsWith(`{"${revokedWrite}":`)).toBe(true);
+      expect(JSON.parse(primary).records).toEqual([]);
+      if (revokedWrite === 'batches') {
+        expect(retireByDelete).toHaveBeenCalledTimes(1);
+        expect(retireByWrite).toHaveBeenCalledTimes(1);
+        expect(retireByFile).toHaveBeenCalledTimes(1);
+      }
       expect(new File(Paths.document, prefix + 'pending').textSync()).toBe(rejection === 'pending marker' ? 'rejected' : '');
       expect(new File(Paths.document, prefix + 'rejected').info().exists).toBe(rejection === 'rejection file');
       expect(new File(Paths.document, prefix + 'json').textSync()).toBe(JSON.stringify(ledger));
@@ -705,6 +747,8 @@ test.each(['rejection file', 'pending marker', 'neither'] as const)(
         const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
         await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
         write.mockRestore();
+        remove.mockRestore();
+        create.mockRestore();
         set.mockImplementation(nativeSet);
         const { ledger: updated } = await restarted.appendPersonalImports(scope, [row('next', '統計')], {
           canContinue: () => true,
@@ -715,6 +759,7 @@ test.each(['rejection file', 'pending marker', 'neither'] as const)(
     } finally {
       unsubscribe();
       write.mockRestore();
+      remove.mockRestore();
       create.mockRestore();
       set.mockImplementation(nativeSet);
       checkpointWrite.mockImplementation(nativeMultiSet);

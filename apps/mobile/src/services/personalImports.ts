@@ -78,12 +78,10 @@ async function readLedgerSnapshot(
   const primaryVerified = isReadableLedger(primary, scope);
   const verifiedByJournal = primary !== null && journal?.matchesVerifiedPrimary?.(primary) === true;
   const nativeEncoding = !web && primaryVerified && hasNativeCommitEncoding(primary);
-  const nativeCommit = nativeEncoding || (primaryVerified && verifiedByJournal);
-  const tentativeNativeWrite = nativeEncoding && primary?.startsWith('{"records":');
   const rejectedPrimary = journal?.rejected && (nativeEncoding || journal.raw === primary);
   const useNativeJournal = !primaryVerified ||
     rejectedPrimary ||
-    (tentativeNativeWrite && !verifiedByJournal);
+    (nativeEncoding && !verifiedByJournal);
   if (!primaryVerified || rejectedPrimary) {
     if (journal?.markerError) throw journal.markerError;
     if (journal?.payloadError) throw journal.payloadError;
@@ -98,7 +96,7 @@ async function readLedgerSnapshot(
     ? selectPersonalImportBrowserRecovery(browserRecovery, primary, primaryVerified, (raw) => parseLedger(raw, scope))
     : await readNativeRecovery(key, scope, primaryVerified, nativeJournal, checkpoint, journal?.rejected);
   if (!recovery && primaryError) throw primaryError;
-  return { primary, primaryVerified, browserRecovery, recovery, nativeCommit };
+  return { primary, primaryVerified, browserRecovery, recovery };
 }
 
 function isReadableLedger(raw: string | null, scope: PersonalImportScope): boolean {
@@ -325,8 +323,8 @@ function hasNativeCommitEncoding(raw: string | null): boolean {
     (raw.startsWith('{"batches":') || raw.startsWith('{"records":'));
 }
 
-function encodeNativeCommit({ version, records, batches, ...metadata }: PersonalImportLedger) {
-  // Reserve a field order for commits whose journal files could not be retired.
+function encodeNativeReplacement({ version, records, batches, ...metadata }: PersonalImportLedger) {
+  // Use a distinct field order for the replacement when retirement fails.
   // Replacing the same bytes in a different order fits at the same row limit.
   return JSON.stringify({ batches, records, ...metadata, version });
 }
@@ -382,13 +380,12 @@ export function mutatePersonalImportLedger<T>(
         assertLockHeld();
       };
       assertWritable();
-      const { primary, primaryVerified, browserRecovery, recovery, nativeCommit } = await readLedgerSnapshot(key, scope);
+      const { primary, primaryVerified, browserRecovery, recovery } = await readLedgerSnapshot(key, scope);
       let primaryRaw = primary;
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
       assertWritable();
       let persisted = current;
-      let keepNativeCommitEncoding = nativeCommit;
       const recoveryCheck = () => ({
         verifyCheckpoint: !hasPersisted && !primaryVerified,
         verifyJournal: !hasPersisted && (!primaryVerified || recovery?.source === 'journal'),
@@ -410,7 +407,8 @@ export function mutatePersonalImportLedger<T>(
           : serialized;
         // Keep the recovery copy authoritative until the replacement commits,
         // even if the recovered version no longer fits in AsyncStorage.
-        const needsJournal = typeof guard !== 'function' || (recovery !== null && !hasPersisted);
+        const needsJournal = typeof guard !== 'function' ||
+          (recovery !== null && !hasPersisted) || hasNativeCommitEncoding(primaryRaw);
         const write = async () => {
           let writtenRaw = raw;
           if (browserRecovery) {
@@ -421,7 +419,6 @@ export function mutatePersonalImportLedger<T>(
               lease,
             );
           } else if (!needsJournal) {
-            writtenRaw = keepNativeCommitEncoding ? encodeNativeCommit(ledger) : raw;
             await AsyncStorage.setItem(key, writtenRaw);
           } else {
             const adoptedCheckpoint = hasPersisted ? undefined : recovery?.checkpoint;
@@ -447,21 +444,23 @@ export function mutatePersonalImportLedger<T>(
               const checkpointRetired = adoptedCheckpoint === undefined ||
                 await retireNativeCheckpoint(key, adoptedCheckpoint, assertWritable);
               assertWritable();
-              keepNativeCommitEncoding = !journal.retire(assertWritable, checkpointRetired);
-              if (keepNativeCommitEncoding) {
+              if (!journal.retire(assertWritable, checkpointRetired)) {
                 assertWritable();
-                const encoded = encodeNativeCommit(ledger);
+                const replacement = encodeNativeReplacement(ledger);
                 try {
                   journal.preparePrimaryCommit();
-                  await AsyncStorage.setItem(key, encoded);
-                  await verifyNativeLedgerWrite(key, encoded);
-                  assertWritable();
-                  writtenRaw = encoded;
+                  await AsyncStorage.setItem(key, replacement);
+                  writtenRaw = replacement;
                 } catch {
-                  assertWritable();
-                  journal.publishVerifiedFirstWrite(firstRaw);
-                  assertWritable();
+                  // Confirm the first write survived a failed replacement before
+                  // publishing its bytes. A rejected write can still reach disk.
+                  writtenRaw = firstRaw;
                 }
+                assertWritable();
+                await verifyNativeLedgerWrite(key, writtenRaw);
+                assertWritable();
+                journal.publishVerifiedPrimary(writtenRaw);
+                assertWritable();
               }
               pendingRestorations.delete(key);
             } catch (error) {
