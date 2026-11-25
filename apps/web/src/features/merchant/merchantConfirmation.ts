@@ -116,6 +116,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   // Explicit removal invalidates menu receipts independently of readiness label changes.
   const menuReceiptFloors = new Map<string, number>();
   const menuReceipts = new Map<string, { revision: number; version: number; confirmedThrough: number; menuVerified: boolean }>();
+  const menuReceiptListeners = new Set<() => void>();
   const writeRevisions = new Map<string, number>();
   const statusReceiptFloors = new Map<string, Map<number, number>>();
   // Store-specific revocations override the list default for stores with newer confirmations.
@@ -164,10 +165,14 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     receiptFloors.set(key, Math.max(receiptFloors.get(key) ?? 0, revision));
   }
 
+  function publishMenuReceiptChange() {
+    for (const listener of menuReceiptListeners) listener();
+  }
+
   function discardMenuReceipt(key: string) {
     const draft = drafts.get(key);
     if (draft) draft.menuReceipt = null;
-    menuReceipts.delete(key);
+    if (menuReceipts.delete(key)) publishMenuReceiptChange();
   }
 
   function discardWorkspaceReceipts(key: string, revision: number) {
@@ -444,6 +449,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     menuReceipts.set(key, { revision, version, confirmedThrough: request, menuVerified: false });
     reconcileMenuReceipt(key, entry);
     applyMenuReceipt(entry);
+    publishMenuReceiptChange();
     return true;
   }
 
@@ -525,10 +531,12 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     hasApplicationList: () => lists.applications !== undefined,
     detailFor,
     detailReadConfirmation,
-    menuReceiptFor(key: string, version: number) {
-      const receipt = menuReceipts.get(key);
-      if (!receipt || receipt.version > version || entries.get(key)?.row?.version !== version) return null;
-      return drafts.get(key)?.menuReceipt ?? null;
+    menuReceiptFor(key: string) {
+      return menuReceipts.has(key) ? drafts.get(key)?.menuReceipt ?? null : null;
+    },
+    subscribeMenuReceiptChanges(listener: () => void) {
+      menuReceiptListeners.add(listener);
+      return () => { menuReceiptListeners.delete(listener); };
     },
     recordWrite,
     reusableDetailRead,
@@ -773,6 +781,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       orderReadFailures.clear();
       orderReadScopes.clear();
       listReadFailure = 0;
+      publishMenuReceiptChange();
       publishReadChange();
     },
   };

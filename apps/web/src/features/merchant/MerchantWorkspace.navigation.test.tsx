@@ -2398,7 +2398,8 @@ it.each([
     await act(async () => window.history.forward());
     await screen.findByText('待完成：建立有庫存的首次菜單');
     expect(readDetail.mock.calls.length).toBeGreaterThan(detailReadsBeforeForward);
-    expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
+    expect(screen.getByText(/已建立 1 項首次菜單/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '儲存營運設定' })).toBeNull();
     await act(async () => finishApplications({ applications: [] }));
     expect(screen.queryByText(/目前有 \d+ 項有庫存的上架品項/)).toBeNull();
     expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
@@ -2795,12 +2796,13 @@ it.each([undefined, 7, 8])('keeps a v7 menu receipt confirmed at v8 through list
 });
 
 it.each([
-  { menuState: 'missing', intermediateRequirements: ['menu'], retryVersion: 8 },
-  { menuState: 'present', intermediateRequirements: ['settings'], retryVersion: 8 },
-  { menuState: 'legacy zero stock', intermediateRequirements: [], retryVersion: 9 },
+  { menuState: 'missing', intermediateRequirements: ['menu'], retryVersion: 8, status: 200 },
+  { menuState: 'present', intermediateRequirements: ['settings'], retryVersion: 8, status: 200 },
+  { menuState: 'legacy zero stock', intermediateRequirements: [], retryVersion: 9, status: 200 },
+  { menuState: 'legacy zero stock', intermediateRequirements: [], retryVersion: 9, status: 503 },
 ])(
-  'shows a v7 first-menu receipt after a pre-receipt v8 detail with menu $menuState',
-  async ({ menuState, intermediateRequirements, retryVersion }) => {
+  'shows a v7 first-menu receipt before and after automatic GET $status with earlier v8 menu $menuState',
+  async ({ menuState, intermediateRequirements, retryVersion, status }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const initial = { ...detail(), readinessVersion: 7 };
     const published = {
@@ -2840,11 +2842,22 @@ it.each([
     await act(async () => snapshot.resolve(intermediate));
     await act(async () => window.history.forward());
     await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+    const success = /已建立 1 項首次菜單/;
+    expect(screen.queryByText(success)).toBeNull();
     await act(async () => receipt.resolve(firstMenuReceipt));
     expect(readDetail).toHaveBeenCalledTimes(4);
+    expect(screen.getByText(success)).toBeTruthy();
+    expect(screen.getByText('正在確認門市資料…')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '儲存營運設定' })).toBeNull();
 
-    await act(async () => retry.resolve(retried));
-    await screen.findByText(/已建立 1 項首次菜單/);
+    if (status === 503) {
+      await act(async () => retry.reject(new NuniError(status, 'UNAVAILABLE')));
+      expect(screen.getByRole('alert').textContent).toContain('無法確認門市目前的資料');
+      expect(screen.queryByRole('button', { name: '儲存營運設定' })).toBeNull();
+    } else {
+      await act(async () => retry.resolve(retried));
+    }
+    expect(screen.getByText(success)).toBeTruthy();
     expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));

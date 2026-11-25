@@ -210,7 +210,15 @@ export function MerchantOperations({
   const [menuConfirmed, setMenuConfirmed] = useState(false);
   const [localConfirmations] = useState(() => createMerchantConfirmations(drafts));
   const observations = confirmations ?? localConfirmations;
-  const menuReceipt = detail ? observations.menuReceiptFor(draftKey, detail.readinessVersion) : null;
+  const menuReceiptSnapshot = useCallback(
+    () => observations.menuReceiptFor(draftKey),
+    [draftKey, observations],
+  );
+  const menuReceipt = useSyncExternalStore(
+    observations.subscribeMenuReceiptChanges,
+    menuReceiptSnapshot,
+    () => null,
+  );
   const nextRevision = observations.beginRequest;
   const statusReceiptVersion = notice?.statusChange ? notice.readinessVersion : undefined;
   const noticeFloor = receiptFloorFor
