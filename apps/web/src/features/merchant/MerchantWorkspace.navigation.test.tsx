@@ -2,7 +2,10 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import type { NuniMerchantWorkspace } from '@campus/shared/src/nuniMerchant';
-import type { NuniMerchantWorkspaceDetail } from '@campus/shared/src/nuniMerchantOperations';
+import {
+  parseMerchantWorkspaceDetail,
+  type NuniMerchantWorkspaceDetail,
+} from '@campus/shared/src/nuniMerchantOperations';
 import { loadFoodPending } from '@/features/food/foodPersistence';
 import { future, queueFixture, shiftFixture } from '@/features/food/foodTestFixtures';
 import { merchantApplicationsHref, merchantWorkspaceHref } from '@/lib/merchantWorkspaceNavigation';
@@ -3418,7 +3421,7 @@ it.each([
   { requirements: undefined, listedRequirements: [], showsForm: true },
   { requirements: undefined, listedRequirements: ['settings'], showsForm: true },
   { requirements: undefined, listedRequirements: ['settings'], showsForm: false, stock: 1 },
-  { requirements: [], listedRequirements: [], showsForm: false },
+  { requirements: [], listedRequirements: [], showsForm: true },
 ])('distinguishes legacy detail requirements $requirements from list requirements $listedRequirements', async ({
   requirements,
   listedRequirements,
@@ -3429,7 +3432,10 @@ it.each([
     ...detail(), readinessVersion: 8, managerConfirmed: stock > 0, publishedMenuItems: stock,
   };
   if (requirements === undefined) delete legacy.missingRequirements;
-  else legacy.missingRequirements = requirements;
+  else {
+    legacy.missingRequirements = requirements;
+    expect(parseMerchantWorkspaceDetail(legacy).missingRequirements).toEqual(requirements);
+  }
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') {
       return Promise.resolve({ workspaces: [{ ...legacy, missingRequirements: listedRequirements }] });
@@ -3714,6 +3720,74 @@ it.each(['orders', 'shift'])('locks both workspaces on a %s GET failure and reco
   expect(restored.disabled).toBe(false);
   fireEvent.click(restored);
   expect(accept).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  { first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED' },
+  { first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED' },
+  { first: 'shift', second: 'orders', status: 401, code: 'UNAUTHORIZED' },
+  { first: 'shift', second: 'orders', status: 409, code: 'SESSION_CHANGED' },
+] as const)('expires the workspace when $second reports $code after $first fails in the same poll', async ({
+  first, second, status, code,
+}) => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const store = { ...detail('store-a', true), readinessVersion: 8 };
+  const queue = {
+    orders: [{ ...queueFixture(), locationId: 'store-a', state: 'paid', allowedActions: ['accept'] }],
+  };
+  const outage = Promise.withResolvers<never>();
+  const sessionFailure = Promise.withResolvers<never>();
+  const recovery = Promise.withResolvers<void>();
+  const shift = { ...shiftFixture(), locationId: 'store-a' };
+  const reads = {
+    orders: vi.fn().mockResolvedValue(queue),
+    shift: vi.fn().mockResolvedValue(shift),
+  };
+  const accept = vi.fn().mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [store] });
+    if (resource === path) return Promise.resolve(store);
+    if (resource === `${path}/orders`) return reads.orders();
+    if (resource === `${path}/shift`) return reads.shift();
+    if (resource.endsWith('/accept')) return accept();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  fireEvent.click(await screen.findByRole('link', { name: '處理訂單與收銀' }));
+  fireEvent.click(await screen.findByRole('button', { name: '接單：A101' }));
+  fireEvent.click(screen.getByLabelText('我已確認這筆訂單與處理內容'));
+  fireEvent.click(screen.getByRole('button', { name: '確認：接單' }));
+  const retry = await screen.findByRole<HTMLButtonElement>('button', { name: '重試同一份操作' });
+  expect(retry.disabled).toBe(false);
+
+  reads[first].mockReturnValueOnce(outage.promise);
+  reads[second].mockReturnValueOnce(sessionFailure.promise);
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  expect(reads.orders).toHaveBeenCalledTimes(2);
+  expect(reads.shift).toHaveBeenCalledTimes(2);
+  await act(async () => outage.reject(new NuniError(503, 'UNAVAILABLE')));
+  expect(retry.disabled).toBe(true);
+  expect(mocks.auth.refresh).not.toHaveBeenCalled();
+
+  reads.orders.mockReturnValueOnce(recovery.promise.then(() => queue));
+  reads.shift.mockReturnValueOnce(recovery.promise.then(() => shift));
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  expect(reads.orders).toHaveBeenCalledTimes(3);
+  expect(reads.shift).toHaveBeenCalledTimes(3);
+  expect(retry.disabled).toBe(true);
+
+  await act(async () => sessionFailure.reject(new NuniError(status, code)));
+  await screen.findByText('登入或帳號已變更，這次店家資料與草稿已清除。');
+  expect(mocks.auth.refresh).toHaveBeenCalledOnce();
+  await act(async () => recovery.resolve());
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  expect(reads.orders).toHaveBeenCalledTimes(3);
+  expect(reads.shift).toHaveBeenCalledTimes(3);
+  expect(screen.queryByRole('button', { name: '重試同一份操作' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
+  expect(accept).toHaveBeenCalledOnce();
 });
 
 it.each([false, true])('settles an order receipt after browser Back to the list (remount first: %s)', async (reenterFirst) => {

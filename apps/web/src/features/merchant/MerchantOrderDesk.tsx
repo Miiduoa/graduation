@@ -92,25 +92,25 @@ export function MerchantOrderDesk({
   const queueHintId = useId();
   const load = useCallback(async () => {
     const observation = beginRead?.();
-    try {
-      const [queue, shift] = await Promise.all([
-        client.listMerchantOrders(tenantId, locationId, { limit: 50, cursor }),
-        client.getShift(tenantId, locationId).catch((error: unknown) => {
-          if (
-            error instanceof NuniError &&
-            error.status === 404 &&
-            error.code === 'FOOD_SHIFT_NOT_FOUND'
-          )
-            return null;
-          throw error;
-        }),
-      ]);
-      observation?.confirm();
-      return { queue, shift };
-    } catch (failure) {
+    // Each request can invalidate the workspace even after its sibling fails.
+    const reject = (failure: unknown): never => {
       observation?.reject(failure);
       throw failure;
-    }
+    };
+    const [queue, shift] = await Promise.all([
+      client.listMerchantOrders(tenantId, locationId, { limit: 50, cursor }).catch(reject),
+      client.getShift(tenantId, locationId).catch((error: unknown) => {
+        if (
+          error instanceof NuniError &&
+          error.status === 404 &&
+          error.code === 'FOOD_SHIFT_NOT_FOUND'
+        )
+          return null;
+        return reject(error);
+      }),
+    ]);
+    observation?.confirm();
+    return { queue, shift };
   }, [beginRead, client, tenantId, locationId, cursor]);
   const data = useFoodRead(load, { pollMs: FOOD_POLL_MS, paused: suspended });
   const [opening, setOpening] = useFoodDraft(cache, `${scope}:opening`, '0');

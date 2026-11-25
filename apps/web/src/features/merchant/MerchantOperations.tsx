@@ -657,11 +657,7 @@ export function MerchantOperations({
   const blocked = !!busy || loading || !!uncertain || !detail;
   const locked = blocked || access !== 'confirmed';
   const displayedError = error || (!loading && entryVerified && access !== 'confirmed' ? detailReadError : '');
-  const menuExists =
-    menuReceipt !== null ||
-    (detail?.missingRequirements
-      ? !detail.missingRequirements.includes('menu')
-      : (detail?.publishedMenuItems ?? 0) > 0);
+  const menuExists = menuReceipt !== null || !!detail?.publishedMenuItems;
   const operational = !!detail && isMerchantWorkspaceOperational(detail);
   const ordersSuspended = !ordersOpen || !operational || blocked ||
     (access !== 'confirmed' && !(access === 'orders-unavailable' && entryConfirmation));
