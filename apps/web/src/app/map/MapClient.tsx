@@ -269,13 +269,13 @@ function MapContent({
   const selected = locations.find((location) => location.id === selectedId) ?? null;
   const deepLinkRoute = useMemo<[MapLocation, MapLocation] | null>(() => {
     // A shared route is not an explicit confirmation of provisional bundled markers.
-    if (sourcePending) return null;
+    if (placeState.source !== 'ready') return null;
     const ids = route?.split(',').map((id) => id.trim());
     if (!ids || ids.length !== 2 || ids[0] === ids[1]) return null;
     const from = locations.find((location) => location.id === ids[0]);
     const to = locations.find((location) => location.id === ids[1]);
     return from && to ? [from, to] : null;
-  }, [route, locations, sourcePending]);
+  }, [route, locations, placeState.source]);
   const routeStart = confirmedRoutePlace(locations, routeDraft?.from ?? null);
   const routeEnd = confirmedRoutePlace(locations, routeDraft?.to ?? null);
   const routeNeedsConfirmation = Boolean(
@@ -492,9 +492,11 @@ function MapContent({
           </button>
         </div>
       )}
-      {sourcePending && route && routeDraft === null && (
+      {placeState.source !== 'ready' && route && routeDraft === null && (
         <div className={styles.notice}>
-          <p role="status">正在確認連結的起點與終點，確認後才會提供步行導航。</p>
+          <p role="status">{sourcePending
+            ? '正在確認連結的起點與終點，確認後才會提供步行導航。'
+            : '暫時無法確認連結的起點與終點，請重新讀取地點資料，或清除路線後手動選擇。'}</p>
           <button className="btn" type="button" onClick={() => setRouteDraft({ from: null, to: null })}>
             清除路線
           </button>
@@ -639,7 +641,7 @@ function MapContent({
           正在同步校方地點資料，已先顯示靜宜的預載地點。
         </p>
       )}
-      {!sourcePending && route && !deepLinkRoute && routeDraft === null && (
+      {placeState.source === 'ready' && route && !deepLinkRoute && routeDraft === null && (
         <p className={styles.notice} role="status">
           這個連結的起點或終點已不在目前地點資料中，請從下方列表重新選擇。
         </p>
