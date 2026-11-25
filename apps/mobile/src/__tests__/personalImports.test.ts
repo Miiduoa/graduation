@@ -382,6 +382,7 @@ test.each([
   ['all with primary write error', false], ['all with primary readback error', false],
   ['all with primary and payload write errors', false],
   ['all with primary, payload and verification write errors', false],
+  ['all with primary, payload and verification write errors and stale publication receipt', false],
   ['all with primary, payload and verification write errors after adopting a checkpoint', false],
   ['pending payload unreadable with commit encoding', false],
   ['pending payload unreadable with verification file', false],
@@ -389,6 +390,7 @@ test.each([
   ['readback without retirement file and unreadable payload', false],
   ['readback without retirement file with verified first write and unreadable payload', false],
   ['readback without retirement file with verified first write and no hash and unreadable payload', false],
+  ['all publication paths fail with temporarily unreadable payload', false],
 ] as const)('native marker retirement %s I/O keeps the correct primary and notification (revoked: %s)', async (phase, revoked) => {
   const scope = { owner: `nuni:retirement-${phase}-${revoked}`, schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
@@ -413,23 +415,27 @@ test.each([
   const markerReadFails = phase === 'readback' || persistentMarkerReadFault;
   const unreadableMetadata = phase === 'readback without retirement file and unreadable payload';
   const verifiedFirstWrite = phase.includes('verified first write');
+  const publicationFails = phase === 'all publication paths fail with temporarily unreadable payload';
+  const stalePublication = phase.endsWith('stale publication receipt');
   const noRetirementFile = phase !== 'write' && phase !== 'readback';
   const primaryFault = jest.fn(() => { throw new Error('提交編碼主鍵 I/O 失敗'); });
   const payloadFault = jest.fn(() => { throw new Error('還原副本無法寫入主鍵雜湊'); });
   const failVerification = phase.startsWith('all with primary, payload and verification write errors') ||
-    phase.includes('no hash');
-  const unreadablePayload = phase.startsWith('pending payload unreadable') || phase.endsWith('unreadable payload');
+    phase.includes('no hash') || publicationFails;
+  const unreadablePayload = !publicationFails &&
+    (phase.startsWith('pending payload unreadable') || phase.endsWith('unreadable payload'));
   const sidecarOnly = phase === 'pending payload unreadable with verification file';
   const payloadReadFault = jest.fn(() => { throw new Error('還原副本無法讀取'); });
   const failPayloadBinding = phase === 'all with primary and payload write errors' || failVerification;
   const verificationFault = jest.fn(() => { throw new Error('驗證檔無法寫入'); });
+  const publicationFault = jest.fn(() => { throw new Error('發佈憑據無法寫入'); });
   let encodedWrite = false;
   let markerReadBlocked = false;
   const restoreError = new Error('主鍵無法還原');
-  if (phase === 'publish' || phase.startsWith('all with primary') || verifiedFirstWrite) {
+  if (phase === 'publish' || phase.startsWith('all with primary') || verifiedFirstWrite || publicationFails) {
     set.mockImplementation(async (entry, value) => {
       if (entry !== key) return nativeSet(entry, value);
-      if (!active) throw restoreError;
+      if (!active || (publicationFails && value === JSON.stringify(previous))) throw restoreError;
       encodedWrite = value.startsWith('{"batches":');
       if (encodedWrite && (phase === 'all with primary write error' || failPayloadBinding || verifiedFirstWrite)) primaryFault();
       await nativeSet(entry, value);
@@ -443,6 +449,7 @@ test.each([
     });
   }
   const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
+    if (publicationFails && this.uri.endsWith('.rollback.rejected')) throw new Error('拒絕檔無法建立');
     if (noRetirementFile && this.uri.endsWith('.rollback.committed')) {
       if (phase === 'all' && revoked) active = false;
       throw new Error('備用退役檔無法建立');
@@ -451,10 +458,21 @@ test.each([
   });
   const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
     if (this.uri === markerUri) throw new Error('標記無法刪除');
+    if (stalePublication && this.uri.endsWith('.rollback.published')) throw new Error('發佈憑據無法刪除');
     deleteFile.call(this);
   });
   const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+    if (publicationFails && this.uri === markerUri && value === 'rejected') {
+      throw new Error('待處理標記無法改成拒絕');
+    }
+    if (this.uri.endsWith('.rollback.published') && (publicationFails || (stalePublication && value === ''))) {
+      publicationFault();
+    }
     if (failVerification && this.uri.endsWith('.rollback.verified')) verificationFault();
+    if (publicationFails && this.uri.endsWith('.rollback.json') &&
+        typeof value === 'string' && value.startsWith('rejected:')) {
+      throw new Error('還原副本維持待處理');
+    }
     if (failPayloadBinding && this.uri.endsWith('.rollback.json') &&
         typeof value === 'string' && value.startsWith('committed:')) payloadFault();
     if (!markerReadFails && this.uri === markerUri && value === 'committed') {
@@ -465,7 +483,8 @@ test.each([
     writeFile.call(this, value, options);
   });
   const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
-    if (unreadablePayload && retirementAttempts > 0 && this.uri.endsWith('.rollback.json')) payloadReadFault();
+    if ((unreadablePayload || publicationFails) && retirementAttempts > 0 &&
+        this.uri.endsWith('.rollback.json')) payloadReadFault();
     const value = textSync.call(this);
     if (this.uri === markerUri && (markerReadBlocked || (markerReadFails && value === 'committed'))) {
       markerReadBlocked ||= persistentMarkerReadFault;
@@ -486,7 +505,20 @@ test.each([
   try {
     const append = appendPersonalImports(scope, [row('new', '統計')], { canContinue: () => active });
     let expected = previous;
-    if (revoked) {
+    if (publicationFails) {
+      await expect(append).rejects.toBe(restoreError);
+      expect(reread).not.toHaveBeenCalled();
+      expect(primaryFault).toHaveBeenCalledTimes(1);
+      expect(payloadFault).toHaveBeenCalledTimes(1);
+      expect(verificationFault).toHaveBeenCalledTimes(1);
+      expect(publicationFault).toHaveBeenCalledTimes(1);
+      expect(payloadReadFault).toHaveBeenCalled();
+      expect(await AsyncStorage.getItem(key)).toMatch(/^\{"records":.*統計/);
+      await AsyncStorage.removeItem(checkpoint);
+      read.mockRestore();
+      expect(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.pending`).textSync()).toBe('');
+      expect(readPersonalImportRollback(key)).toBe(JSON.stringify(previous));
+    } else if (revoked) {
       await expect(append).rejects.toThrow(phase === 'publish' ? restoreError : '帳號或學校已切換');
       expect(reread).not.toHaveBeenCalled();
       expect(readPersonalImportRollback(key)).toBe(JSON.stringify(previous));
@@ -539,7 +571,7 @@ test.each([
       await nativeSet(key, raw);
       new File(Paths.document, `personal-imports-${sha256(key)}.rollback.verified`).write(sha256(raw));
     }
-    const retryGuardedSave = persistentMarkerReadFault || unreadablePayload;
+    const retryGuardedSave = persistentMarkerReadFault || unreadablePayload || stalePublication;
     const retrySave = !revoked && (phase === 'all' || phase === 'all with primary write error' || retryGuardedSave);
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
@@ -568,6 +600,7 @@ test.each([
     });
     if (unreadablePayload) expect(payloadReadFault.mock.calls.length).toBeGreaterThanOrEqual(3);
     if (unreadableMetadata) expect(metadataFault.mock.calls.length).toBeGreaterThanOrEqual(3);
+    if (stalePublication) expect(publicationFault).not.toHaveBeenCalled();
     if (retrySave) {
       await jest.isolateModulesAsync(async () => {
         const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
@@ -695,6 +728,34 @@ test.each(['', '{"version":1,"records":[', '{"version":1,"records":[],"batches":
     }
   },
 );
+
+test.each([false, true])('native keeps newer #752 writes despite a stale pending copy (old proof: %s)', async (oldProof) => {
+  const scope = { owner: `nuni:legacy-primary-stale-pending-${oldProof}`, schoolId: 'pu' };
+  const key = personalImportStorageKey(scope);
+  const { ledger: older } = await appendPersonalImports(scope, [row('original')]);
+  const journal = preparePersonalImportRollback(key, JSON.stringify(older));
+  const { ledger: newer } = await appendPersonalImports(scope, [row('saved-by-752', '物理')]);
+  const prefix = `personal-imports-${sha256(key)}.rollback.`;
+  if (oldProof) {
+    new File(Paths.document, prefix + 'json').write(`committed:${sha256(JSON.stringify(older))}\n${JSON.stringify(older)}`);
+  }
+  expect(await AsyncStorage.getItem(key)).toBe(JSON.stringify(newer));
+  expect(readPersonalImportRollback(key)).toBe(JSON.stringify(older));
+  try {
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(newer);
+      const guard = { canContinue: () => true, canCommitFirstWrite: () => true };
+      const edited = await restarted.editPersonalImport(scope, newer.records[1], row('saved-by-752', '化學'), guard);
+      const { ledger } = await restarted.appendPersonalImports(scope, [row('next', '統計')], guard);
+      expect(edited.records.map(({ title }) => title)).toEqual(['微積分', '化學']);
+      expect(ledger.records.map(({ title }) => title)).toEqual(['微積分', '化學', '統計']);
+      expect(JSON.parse((await AsyncStorage.getItem(key))!)).toEqual(ledger);
+    });
+  } finally {
+    journal.retire();
+  }
+});
 
 test.each([true, false])('native restart reads a valid journal despite persistent checkpoint I/O (restored primary: %s)', async (restored) => {
   const scope = { owner: 'nuni:checkpoint-io-restart', schoolId: 'pu' };

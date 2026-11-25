@@ -16,7 +16,6 @@ import {
   commitWebPersonalImports,
   preparePersonalImportRollback,
   recordFailedPersonalImportRestoration,
-  retainRejectedPersonalImportRollback,
   withPersonalImportWriteLock,
 } from './personalImportRollbackJournal';
 import {
@@ -78,16 +77,20 @@ async function readLedgerSnapshot(
     : undefined;
   const primaryVerified = isReadableLedger(primary, scope);
   const verifiedByJournal = primary !== null && journal?.matchesVerifiedPrimary?.(primary) === true;
-  const nativeCommit = !web && primaryVerified &&
-    (hasNativeCommitEncoding(primary) || verifiedByJournal);
-  if (!primaryVerified || journal?.rejected) {
+  const nativeEncoding = !web && primaryVerified && hasNativeCommitEncoding(primary);
+  const nativeCommit = nativeEncoding || (primaryVerified && verifiedByJournal);
+  const tentativeNativeWrite = nativeEncoding && primary?.startsWith('{"records":');
+  const rejectedPrimary = journal?.rejected && (nativeEncoding || journal.raw === primary);
+  const useNativeJournal = !primaryVerified ||
+    rejectedPrimary ||
+    (tentativeNativeWrite && !verifiedByJournal);
+  if (!primaryVerified || rejectedPrimary) {
     if (journal?.markerError) throw journal.markerError;
     if (journal?.payloadError) throw journal.payloadError;
   }
-  // A records-first primary can reach disk before the final authority check.
-  // A readable pending copy takes precedence until publication is recorded.
-  const published = nativeCommit && (verifiedByJournal || primary?.startsWith('{"batches":'));
-  const nativeJournal = published && !journal?.rejected ? undefined : journal?.raw;
+  // Only an interrupted native commit can be superseded by a pending copy
+  // when the primary is readable. Older clients write ordinary v1 ledgers.
+  const nativeJournal = useNativeJournal ? journal?.raw : undefined;
   if (primaryError && nativeJournal === undefined && !isStorageRowTooLarge(primaryError)) {
     throw primaryError;
   }
@@ -462,7 +465,7 @@ export function mutatePersonalImportLedger<T>(
               pendingRestorations.delete(key);
             } catch (error) {
               try {
-                retainRejectedPersonalImportRollback(key, persistedRaw);
+                journal.retainRejection();
               } catch {
                 // Still try to restore the original primary and checkpoint.
               }
