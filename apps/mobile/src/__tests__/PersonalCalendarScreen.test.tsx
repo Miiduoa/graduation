@@ -599,29 +599,55 @@ it.each(['availability', 'write'])('blocks an old export after same-account reva
   expect(exportMock.mock.calls[1][2]?.()).toBe(true);
 });
 
-it('finishes a started save while the account is briefly revalidated', async () => {
-  const view = renderCalendar();
-  await fillDraft(view, '重驗後仍要存下');
-  const write = deferred<Awaited<ReturnType<typeof appendPersonalImports>>>();
-  const actual = jest.requireActual('../services/personalImports') as typeof import('../services/personalImports');
-  jest.mocked(appendPersonalImports).mockImplementationOnce(() => write.promise);
-  fireEvent.press(view.getByRole('button', { name: '儲存行程' }));
-  await waitFor(() => expect(appendPersonalImports).toHaveBeenCalled());
-  const [scope, rows, canContinue] = jest.mocked(appendPersonalImports).mock.calls[0];
-  mockScope = null;
-  view.rerender(<PersonalCalendarScreen />);
-  await act(async () => {
-    write.resolve(await actual.appendPersonalImports(scope, rows, canContinue));
+it('blocks a started save until the account scope is revalidated', async () => {
+  const scope = mockScope!;
+  const originalTitle = '工作區原有行程';
+  const draftTitle = '重驗後仍要存下';
+  const view = await fillAndSave(originalTitle);
+  fireEvent.press(view.getByText('月格'));
+  fireEvent.press(view.getByLabelText('2026-10-20'));
+  await fillDraft(view, draftTitle);
+
+  const key = personalImportStorageKey(scope);
+  const stored = await AsyncStorage.getItem(key);
+  const release = deferred<void>();
+  const actual = jest.requireActual<typeof import('../services/personalImports')>('../services/personalImports');
+  const append = jest.mocked(appendPersonalImports);
+  append.mockImplementationOnce(async (...args) => {
+    await release.promise;
+    return actual.appendPersonalImports(...args);
   });
-  mockScope = {
-    owner: 'nuni:pa_11111111-1111-4111-8111-111111111111',
-    schoolId: 'pu',
-  };
-  view.rerender(<PersonalCalendarScreen />);
-  await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
-  const ledger = await loadPersonalImports(mockScope);
-  expect(ledger.records).toHaveLength(1);
-  expect(ledger.records[0]?.title).toBe('重驗後仍要存下');
+
+  const notify = jest.fn();
+  const unsubscribe = subscribePersonalImports(notify);
+  const saveName = '儲存行程';
+  try {
+    fireEvent.press(view.getByRole('button', { name: saveName }));
+    const save = append.mock.results.at(-1)!.value;
+    mockScope = null;
+    view.rerender(<PersonalCalendarScreen />);
+
+    await act(async () => {
+      release.resolve();
+      await expect(save).rejects.toThrow('目前無法確認行事曆可寫入');
+    });
+    expect(await AsyncStorage.getItem(key)).toBe(stored);
+    expect(notify).not.toHaveBeenCalled();
+    expect(view.getByText('2026-10-20 的行程')).toBeTruthy();
+    expect(view.getByLabelText('標題').props.value).toBe(draftTitle);
+    expect(view.getByRole('button', { name: saveName })).toBeDisabled();
+    expect(view.queryByText(personalImportSavedNotice(1))).toBeNull();
+
+    mockScope = scope;
+    view.rerender(<PersonalCalendarScreen />);
+    fireEvent.press(await view.findByRole('button', { name: saveName, disabled: false }));
+    await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
+    const ledger = await loadPersonalImports(scope);
+    expect(ledger.records.map(({ title }) => title)).toEqual([originalTitle, draftTitle]);
+  } finally {
+    release.resolve();
+    unsubscribe();
+  }
 });
 
 it.each([
