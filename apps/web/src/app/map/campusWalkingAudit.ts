@@ -31,6 +31,7 @@ function evidenceLink(s: string): boolean {
   } catch { return false; }
 }
 const key = (way: number, from: number, to: number) => [way, from, to].join(':');
+const unorderedKey = (way: number, from: number, to: number) => key(way, Math.min(from, to), Math.max(from, to));
 const validRevision = (version: number) => Number.isSafeInteger(version) && version > 0;
 function matchesNode(review: ReviewedNode, node: ReviewedNode | undefined): boolean {
   return !!node && validRevision(node.version) && review.id === node.id && review.version === node.version &&
@@ -122,11 +123,16 @@ export function applyCampusWalkingSegmentAudits(
     }
   }
   const reviews = new Map<string, CampusWalkingSegmentAudit>();
+  // Require one audit per physical way segment, even if a conflicting record
+  // reverses its endpoints. The ordered key still governs actual promotion.
+  const seenReviews = new Set<string>();
   const duplicates = new Set<string>();
   for (const audit of audits) {
     if (audit.schoolId !== schoolId) continue;
     const segment = key(audit.osmWayId, audit.from.id, audit.to.id);
-    if (reviews.has(segment)) duplicates.add(segment);
+    const physicalSegment = unorderedKey(audit.osmWayId, audit.from.id, audit.to.id);
+    if (seenReviews.has(physicalSegment)) duplicates.add(physicalSegment);
+    seenReviews.add(physicalSegment);
     reviews.set(segment, audit);
   }
 
@@ -148,7 +154,7 @@ export function applyCampusWalkingSegmentAudits(
     if (!from || !to || !way || edge.access !== 'unknown') return blocked;
     const segment = key(edge.osmWayId, edge.from, edge.to);
     const audit = reviews.get(segment);
-    if (!audit || duplicates.has(segment)) return blocked;
+    if (!audit || duplicates.has(unorderedKey(edge.osmWayId, edge.from, edge.to))) return blocked;
     if (!matchesNode(audit.from, from) || !matchesNode(audit.to, to) ||
         !validRevision(way.version) || audit.wayVersion !== way.version ||
         !adjacentSegments.has(segment) ||
