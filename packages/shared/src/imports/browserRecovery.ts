@@ -17,6 +17,14 @@ export function serializePersonalImportBrowserCommit({ version, ...ledger }: { v
   return JSON.stringify({ ...ledger, version });
 }
 
+// Legacy writers never placed version between the metadata and records.
+function hasDetachedBrowserCommit(value: Record<string, unknown> | null) {
+  if (value?.version !== 1) return false;
+  const fields = Object.keys(value);
+  return fields.length >= 3 &&
+    fields.at(-2) === 'version' && fields.at(-1) === 'records';
+}
+
 export function hasWebPersonalImportCommit(raw: string | null): boolean {
   if (!raw) return false;
   try {
@@ -24,6 +32,7 @@ export function hasWebPersonalImportCommit(raw: string | null): boolean {
     if (value?.['$commit'] === 1 && !('version' in value)) return true;
     return value?.version === 1 && (
       typeof value.webCommit === 'string' ||
+      hasDetachedBrowserCommit(value) ||
       raw.endsWith(personalImportBrowserCommitSuffix) ||
       (raw.endsWith('\t') && raw === JSON.stringify(value) + '\t')
     );
@@ -46,10 +55,12 @@ export function capturePersonalImportBrowserRecovery(
     checkpoint: personalImportCheckpointKey(key),
   };
   const readErrors: unknown[] = [];
+  let journalUnreadable = false;
   const readCopy = (entry: string) => {
     try {
       return storage.getItem(entry);
     } catch (error) {
+      if (entry === entries.journal) journalUnreadable = true;
       readErrors.push(error);
       return null;
     }
@@ -71,6 +82,11 @@ export function capturePersonalImportBrowserRecovery(
       }
     },
     detachJournal(published: string) {
+      if (journalUnreadable) {
+        const { version, records, ...metadata } = JSON.parse(published);
+        // Keep the v1 schema and byte count, including on the quota retry.
+        return JSON.stringify({ ...metadata, version, records });
+      }
       // A verified commit must remain readable even if its old journal survives.
       const matchesJournal = (raw: string) =>
         readWebPersonalImportRollback(copies.journal, raw, true)?.bound === true;
@@ -137,7 +153,7 @@ export function parsePersonalImportStorageJson(raw: string, web: boolean) {
     const { [compactVersionKey]: version, ...ledger } = value;
     return { version, ...ledger };
   }
-  if (web && raw.endsWith(personalImportBrowserCommitSuffix)) {
+  if (web && (raw.endsWith(personalImportBrowserCommitSuffix) || hasDetachedBrowserCommit(value))) {
     const { version, ...ledger } = value;
     return { version, ...ledger };
   }
@@ -161,6 +177,14 @@ export function selectPersonalImportBrowserRecovery<T>(
       return null;
     }
   };
+  if (journal?.bound && primaryVerified && primary !== null && hasDetachedBrowserCommit(JSON.parse(primary))) {
+    try {
+      parse(primary);
+      return null;
+    } catch {
+      // A bound journal can still recover a primary with damaged sync state.
+    }
+  }
   // A journal tied to this primary describes an interrupted write.
   const interrupted = journal?.bound ? recoverJournal() : null;
   if (interrupted) return interrupted;

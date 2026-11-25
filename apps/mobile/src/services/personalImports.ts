@@ -78,7 +78,7 @@ async function readLedgerSnapshot(
   const primaryVerified = isReadableLedger(primary, scope);
   const nativeCommit = !web && primaryVerified &&
     (hasNativeCommitEncoding(primary) || (primary !== null && !!journal?.matchesVerifiedPrimary?.(primary)));
-  if (journal?.markerError && !nativeCommit) throw journal.markerError;
+  if (journal?.markerError && (!nativeCommit || !journal.payloadReadable)) throw journal.markerError;
   const nativeJournal = nativeCommit && !journal?.rejected ? undefined : journal?.raw;
   if (primaryError && nativeJournal === undefined && !isStorageRowTooLarge(primaryError)) {
     throw primaryError;
@@ -295,13 +295,18 @@ export async function loadPersonalImports(
 }
 
 function hasNativeCommitEncoding(raw: string | null): boolean {
-  return raw?.startsWith('{"batches":') === true && raw.endsWith(',"version":1}');
+  return raw?.endsWith(',"version":1}') === true &&
+    (raw.startsWith('{"batches":') || raw.startsWith('{"records":'));
 }
 
 function encodeNativeCommit({ version, records, batches, ...metadata }: PersonalImportLedger) {
   // Reserve a field order for commits whose journal files could not be retired.
   // Replacing the same bytes in a different order fits at the same row limit.
   return JSON.stringify({ batches, records, ...metadata, version });
+}
+
+function encodeNativeFirstWrite({ version, records, ...ledger }: PersonalImportLedger) {
+  return JSON.stringify({ records, ...ledger, version });
 }
 
 function parseLedger(raw: string | null, scope: PersonalImportScope): PersonalImportLedger {
@@ -399,17 +404,22 @@ export function mutatePersonalImportLedger<T>(
               throw new Error('匯入資料已更新，請重新載入。');
             }
             assertWritable();
-            const primaryCommitted = keepNativeCommitEncoding && (hasPersisted || recovery === null);
+            const primaryCommitted = hasPersisted || (primaryVerified && recovery === null);
             const journal = preparePersonalImportRollback(key, persistedRaw, primaryCommitted);
             let cleaningRecovery = false;
-            let publishingCommitEncoding = false;
+            // An adopted checkpoint keeps a tentative primary while cleanup
+            // can still revoke authority. Other writes carry their commit
+            // encoding from the first replacement, at the original byte count.
+            const firstRaw = adoptedCheckpoint === undefined ? encodeNativeFirstWrite(ledger) : raw;
+            let publishingCommitEncoding = firstRaw !== raw;
             try {
-              await AsyncStorage.setItem(key, raw);
+              await AsyncStorage.setItem(key, firstRaw);
+              writtenRaw = firstRaw;
               assertWritable();
-              await verifyNativeLedgerWrite(key, raw);
+              await verifyNativeLedgerWrite(key, firstRaw);
               assertWritable();
-              // Keep the journal authoritative across a restart until the
-              // checkpoint cleanup and final permission check have finished.
+              // An adopted checkpoint is protected by the tentative journal
+              // until cleanup and the final permission check have finished.
               cleaningRecovery = true;
               const checkpointRetired = adoptedCheckpoint === undefined ||
                 await retireNativeCheckpoint(key, adoptedCheckpoint, assertWritable);
@@ -418,7 +428,7 @@ export function mutatePersonalImportLedger<T>(
               if (keepNativeCommitEncoding) {
                 publishingCommitEncoding = true;
                 assertWritable();
-                journal.recordVerifiedPrimary(raw);
+                journal.recordVerifiedPrimary(firstRaw);
                 const encoded = encodeNativeCommit(ledger);
                 try {
                   journal.preparePrimaryCommit();
@@ -427,7 +437,7 @@ export function mutatePersonalImportLedger<T>(
                   writtenRaw = encoded;
                 } catch {
                   assertWritable();
-                  journal.retainVerifiedPrimary(raw);
+                  journal.retainVerifiedPrimary(firstRaw);
                 }
                 assertWritable();
               }

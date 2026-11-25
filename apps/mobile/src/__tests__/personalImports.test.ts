@@ -353,12 +353,13 @@ test.each([false, true])('native marker deletion I/O preserves the correct ledge
       expect(ledger.records.map(({ title }) => title)).toEqual(['微積分', '統計']);
       expect(reread).toHaveBeenCalledTimes(1);
       await expect(reread.mock.results[0].value).resolves.toEqual(ledger);
-      expect(await AsyncStorage.getItem(key)).toBe(JSON.stringify(ledger));
+      expect(JSON.parse((await AsyncStorage.getItem(key))!)).toEqual(ledger);
     }
     expect(remove).toHaveBeenCalledTimes(1);
     const prefix = `personal-imports-${sha256(key)}`;
     expect(new File(Paths.document, prefix + '.rollback.pending').info().exists).toBe(true);
-    expect(new File(Paths.document, prefix + '.rollback.json').textSync()).toBe(original);
+    expect(new File(Paths.document, prefix + '.rollback.json').textSync())
+      .toBe(revoked ? 'rejected:\n' + original : original);
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
@@ -379,6 +380,7 @@ test.each([
   ['all', false], ['all', true], ['publish', true],
   ['all with primary write error', false], ['all with primary readback error', false],
   ['all with primary and payload write errors', false],
+  ['all with primary, payload and verification write errors', false],
   ['readback without retirement file', false],
 ] as const)('native marker retirement %s I/O keeps the correct primary and notification (revoked: %s)', async (phase, revoked) => {
   const scope = { owner: `nuni:retirement-${phase}-${revoked}`, schoolId: 'pu' };
@@ -396,7 +398,9 @@ test.each([
   const noRetirementFile = phase !== 'write' && phase !== 'readback';
   const primaryFault = jest.fn(() => { throw new Error('提交編碼主鍵 I/O 失敗'); });
   const payloadFault = jest.fn(() => { throw new Error('還原副本無法寫入主鍵雜湊'); });
-  const failPayloadBinding = phase === 'all with primary and payload write errors';
+  const failVerification = phase === 'all with primary, payload and verification write errors';
+  const failPayloadBinding = phase === 'all with primary and payload write errors' || failVerification;
+  const verificationFault = jest.fn(() => { throw new Error('驗證檔無法寫入'); });
   let encodedWrite = false;
   let markerReadBlocked = false;
   const restoreError = new Error('主鍵無法還原');
@@ -428,6 +432,7 @@ test.each([
     deleteFile.call(this);
   });
   const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+    if (failVerification && this.uri.endsWith('.rollback.verified')) verificationFault();
     if (failPayloadBinding && this.uri.endsWith('.rollback.json') &&
         typeof value === 'string' && value.startsWith('committed:')) payloadFault();
     if (!markerReadFails && this.uri === markerUri && value === 'committed') {
@@ -475,7 +480,7 @@ test.each([
         );
         if (!markerReadFails) expect(readPersonalImportRollback(key)).toBe(JSON.stringify(previous));
       } else {
-        expect(primary).toBe(JSON.stringify(expected));
+        expect(JSON.parse(primary)).toEqual(expected);
       }
       expect(reread).toHaveBeenCalledTimes(1);
       await expect(reread.mock.results[0].value).resolves.toEqual(expected);
@@ -487,6 +492,7 @@ test.each([
     }
     if (phase.startsWith('all with primary')) expect(primaryFault).toHaveBeenCalledTimes(1);
     if (failPayloadBinding) expect(payloadFault).toHaveBeenCalledTimes(1);
+    if (failVerification) expect(verificationFault).toHaveBeenCalledTimes(1);
     const retryGuardedSave = phase === 'readback without retirement file';
     const retrySave = !revoked && (phase === 'all' || phase === 'all with primary write error' || retryGuardedSave);
     await jest.isolateModulesAsync(async () => {
@@ -676,7 +682,65 @@ test.each([
   }
 });
 
-test.each(['Web', 'Expo Web'] as const)('%s keeps a commit readable when it would match a retained journal fingerprint', async (client) => {
+
+test.each(['committed', 'verified'] as const)('native calendar can append and edit with a retained .rollback.%s file', async (sidecar) => {
+  const scope = { owner: `nuni:retained-${sidecar}`, schoolId: 'pu' };
+  const key = personalImportStorageKey(scope);
+  const prefix = `personal-imports-${sha256(key)}.rollback.`;
+  const sidecarFile = new File(Paths.document, prefix + sidecar);
+  const { create, delete: deleteFile, write } = File.prototype;
+  const blockedRemoval = jest.fn(() => { throw new Error('無法刪除還原檔'); });
+  const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
+    if (this.uri === sidecarFile.uri) blockedRemoval();
+    if (this.uri.endsWith('.rollback.pending')) throw new Error('無法刪除 pending 標記');
+    deleteFile.call(this);
+  });
+  const markerWrite = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+    if (this.uri.endsWith('.rollback.pending') && value === 'committed') throw new Error('無法更新 pending 標記');
+    write.call(this, value, options);
+  });
+  const retire = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
+    if (sidecar === 'verified' && this.uri.endsWith('.rollback.committed')) throw new Error('無法建立退役檔');
+    create.call(this, options);
+  });
+  const set = jest.mocked(AsyncStorage.setItem);
+  const nativeSet = set.getMockImplementation()!;
+  if (sidecar === 'verified') {
+    // Leave the verified first publication and its sidecar on disk.
+    set.mockImplementation(async (entry, value) => {
+      if (entry === key && value.startsWith('{"batches":')) throw new Error('無法重寫主鍵');
+      await nativeSet(entry, value);
+    });
+  }
+  const guard = { canContinue: () => true, canCommitFirstWrite: () => true };
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('first')], guard);
+    expect(sidecarFile.info().exists).toBe(true);
+    let expected = ledger;
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+      const appended = await restarted.appendPersonalImports(scope, [row('second', '統計')], guard);
+      expected = await restarted.editPersonalImport(scope, appended.ledger.records[1], row('second', '化學'), guard);
+      expect(expected.records.map(({ title }) => title)).toEqual(['微積分', '化學']);
+    });
+    expect(sidecarFile.info().exists).toBe(true);
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
+    });
+    expect(blockedRemoval).toHaveBeenCalled();
+  } finally {
+    set.mockImplementation(nativeSet);
+    retire.mockRestore();
+    markerWrite.mockRestore();
+    remove.mockRestore();
+  }
+});
+
+test.each([
+  ['Web', false], ['Expo Web', false], ['Web', true], ['Expo Web', true],
+] as const)('%s keeps a commit readable when it would match a retained journal fingerprint (unreadable during commit: %s)', async (client, unreadable) => {
   const cleanup = useWebStorage();
   const restoreLocks = withoutWebWriteLocks();
   Object.defineProperty(navigator, 'locks', {
@@ -693,8 +757,13 @@ test.each(['Web', 'Expo Web'] as const)('%s keeps a commit readable when it woul
     const batches = client === 'Web' ? ledger.batches : [];
     const attempted = JSON.stringify({ records: [], sync, batches, version: 1 });
     const copy = JSON.stringify({ id: 'legacy', original, before: sha256(original), attempted: sha256(attempted) });
-    storage.setItem(key, attempted);
+    storage.setItem(key, unreadable ? original : attempted);
     storage.setItem(journal, copy);
+    const getItem = Storage.prototype.getItem;
+    const read = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, entry) {
+      if (unreadable && this === storage && entry === journal) throw new DOMException('journal', 'SecurityError');
+      return getItem.call(this, entry);
+    });
     const setItem = Storage.prototype.setItem;
     const write = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, entry, value) {
       if (entry === key && JSON.parse(value).webCommit) throw new DOMException('quota', 'QuotaExceededError');
@@ -718,6 +787,7 @@ test.each(['Web', 'Expo Web'] as const)('%s keeps a commit readable when it woul
         });
       }
     } finally {
+      read.mockRestore();
       write.mockRestore();
       remove.mockRestore();
     }
