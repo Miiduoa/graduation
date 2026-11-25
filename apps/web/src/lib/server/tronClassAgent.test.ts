@@ -38,14 +38,18 @@ function privateReadFor(area: keyof typeof listOnly.include) {
   };
 }
 
+const binding = { schoolId: 'pu' as const, revision, account: 'fixture', userId: 12, userName: null,
+  cookies: { session: 'fixture' }, expiresAt: '2026-11-14T00:00:00Z' };
+
 function fixture() {
+  const bindings = { requireBinding: vi.fn(async () => binding), assertCurrent: vi.fn(async () => {}) };
   const grants = { get: vi.fn(async () => grant), require: vi.fn(async () => grant), assertCurrent: vi.fn(async () => {}) };
   const read = vi.fn(async (_owner: string, options: TronClassSnapshotReadOptions = {}): Promise<TronClassSnapshot> => ({ ...snapshot,
     announcements: options.courseId ? snapshot.announcements : [], materials: options.courseId ? snapshot.materials : [],
   }));
   const prepare = vi.fn(async () => preparation);
   const beforeResult = vi.fn(async () => {});
-  const service = createTronClassAgentService({ grants, read, prepare, beforeResult,
+  const service = createTronClassAgentService({ grants, bindings, read: (owner, options) => read(owner, options), prepare, beforeResult,
     now: () => Date.parse('2026-11-13T00:01:00.000Z'), requestId: () => 'agent-request-12345678' });
   return { service, grants, read, prepare, beforeResult };
 }
@@ -282,6 +286,27 @@ describe('scoped deterministic TronClass Agent tools', () => {
       });
       expect(f.read.mock.calls).toEqual([[owner, listOnly], [owner, listOnly], [owner, privateReadFor(area)]]);
     }
+  });
+
+  it.each([
+    ['查玩課雲『外交』公告', '下載『交通』'],
+    ['查玩課雲『外交』教材', '查『交通』公告'],
+    ['下載玩課雲『外交』', '查『交通』教材'],
+    ['查玩課雲『外交』公告', '查『交通』'],
+    ['查玩課雲『外交』公告', '查『任意課名』'],
+  ])('includes inherited quoted read targets in the whole request: %s，%s', async (question, companion) => {
+    const f = fixture();
+    f.read.mockResolvedValue({ ...snapshot,
+      courses: [{ ...course, name: '外交' }, { ...snapshot.courses[1]!, name: companion.includes('任意課名') ? '任意課名' : '交通' }] });
+    const compoundQuestion = `${question}，${companion}`;
+    const clauses = tronClassCompoundClauses(compoundQuestion);
+    expect(clauses[0]).toBe(question);
+    for (const clause of clauses) {
+      expect(await f.service.ask(owner, { question: clause, compoundQuestion })).toMatchObject({
+        selection: 'course', actions: [], snapshot: { homework: [], announcements: [], materials: [] },
+      });
+    }
+    expect(f.read.mock.calls).toEqual(clauses.map(() => [owner, listOnly]));
   });
 
   it.each(['查交通教材', '下載交通教材'])(

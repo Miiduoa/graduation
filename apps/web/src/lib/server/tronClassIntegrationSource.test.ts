@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
+import { createTronClassAgentService } from './tronClassAgent';
 import { createTronClassCourseIndexReader, createTronClassIntegrationReader } from './tronClassIntegrationSource';
 import type { LmsHomeworkPage, LmsReadOptions, LmsReadResult, LmsReadonlySource } from './tronClassLmsSource';
 
@@ -27,6 +28,75 @@ beforeEach(() => vi.restoreAllMocks());
 afterEach(() => vi.useRealTimers());
 
 describe('independent TronClass source', () => {
+  describe('reads with an authorized Agent binding snapshot', () => {
+    const owner = 'platform:pa_fixture';
+    const replacement = { ...binding, revision: 'revision_9876543210', cookies: { session: 'replacement-fixture' } };
+    const grant = { revision: binding.revision, version: 'a'.repeat(32), updatedAt: null,
+      permissions: { readCourseData: true, downloadMaterials: true, prepareHomework: false } };
+    const grants = { get: vi.fn(async () => grant), require: vi.fn(async () => grant), assertCurrent: vi.fn(async () => {}) };
+    function setupAgent(beforeRead?: (attempt: number) => void) {
+      const { reader, bindings, source } = setup();
+      let attempts = 0;
+      const service = createTronClassAgentService({ grants, bindings, read: (...args) => {
+        beforeRead?.(++attempts);
+        return reader(...args);
+      } });
+      return { service, bindings, source };
+    }
+
+    it.each(['查玩課雲作業', '查玩課雲公告', '查玩課雲教材', '下載玩課雲教材'])(
+      'rejects a replacement loaded after grant verification for explicit course reads of %s', async question => {
+        const { service, bindings, source } = setupAgent();
+        bindings.requireBinding.mockResolvedValue(replacement);
+        await expect(service.ask(owner, { question, courseId: course.id })).rejects.toMatchObject({
+          code: 'TRONCLASS_BINDING_CHANGED',
+        });
+        expect(source.fetchCourses).not.toHaveBeenCalled();
+        expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+        expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+        expect(source.fetchActivities).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['explicit', { courseId: course.id }, 1, 0],
+      ['automatic before the final index', {}, 3, 4],
+      ['automatic before private feeds', {}, null, 6],
+    ] as const)('rejects a stale %s read before the next school request', async (_stage, selection, changeOnRead, expectedCalls) => {
+      let current = binding;
+      const { service, bindings, source } = setupAgent(attempt => {
+        if (attempt === changeOnRead) current = replacement;
+      });
+      bindings.requireBinding.mockImplementation(async () => current);
+      bindings.assertCurrent.mockImplementation(async (_owner, revision) => {
+        if (revision !== current.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+      });
+      let calls = 0;
+      vi.mocked(source.fetchCourses).mockImplementation(async (_cookies, options) => {
+        if (++calls === expectedCalls && changeOnRead === null) current = replacement;
+        return options.status === 'ongoing' ? [course] : [];
+      });
+      await expect(service.ask(owner, { question: '查玩課雲『資料庫管理』公告', ...selection }))
+        .rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+      expect(bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(owner);
+      expect(source.fetchCourses).toHaveBeenCalledTimes(expectedCalls);
+      for (const [cookies] of vi.mocked(source.fetchCourses).mock.calls) expect(cookies).toBe(binding.cookies);
+      expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+      expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+      expect(source.fetchActivities).not.toHaveBeenCalled();
+    });
+
+    it('uses the same authorized session for a valid explicit course read', async () => {
+      const { service, bindings, source } = setupAgent();
+      bindings.requireBinding.mockResolvedValueOnce(binding).mockResolvedValue(replacement);
+      await expect(service.ask(owner, { question: '查玩課雲公告', courseId: course.id })).resolves.toMatchObject({
+        intent: 'announcements', selection: null, revision: binding.revision,
+      });
+      expect(bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(owner);
+      expect(source.fetchCourseAnnouncements).toHaveBeenCalledExactlyOnceWith(binding.cookies, course.id, expect.anything());
+    });
+  });
+
   it('returns a separate course index while an overview homework request is still waiting', async () => {
     const { reader, source, bindings } = setup();
     let finish!: (value: LmsReadResult<LmsHomeworkPage>) => void;

@@ -23,7 +23,7 @@ import type {
 } from '../tronClassIntegrationTypes';
 import type { LmsReadOptions, LmsReadResult, LmsReadonlySource } from './tronClassLmsSource';
 import { tronClassLmsReadonlySource } from './tronClassLmsSource';
-import { createTronClassBindingService } from './tronClassBinding';
+import { createTronClassBindingService, type TronClassBoundSession } from './tronClassBinding';
 import { isTronClassSourceVisible } from './tronClassSourceVisibility';
 import { isTronClassMaterialDownloadAllowed, tronClassMaterialUploadKey } from './tronClassMaterialFile';
 
@@ -259,6 +259,11 @@ export type TronClassReaderDependencies = {
   bindings?: BindingReader; source?: Source; now?: () => number; budgetMs?: number;
 };
 
+export type TronClassSnapshotAuthorization = {
+  binding: TronClassBoundSession;
+  assertGrant: () => Promise<void>;
+};
+
 type CourseReadContext = {
   binding: Awaited<ReturnType<BindingReader['requireBinding']>>;
   courses: TronClassCourseSummary[];
@@ -274,7 +279,8 @@ function createTronClassCourseOperation(dependencies: TronClassReaderDependencie
   const bindings = dependencies.bindings ?? createTronClassBindingService();
   const source = dependencies.source ?? tronClassLmsReadonlySource;
   const now = dependencies.now ?? Date.now;
-  return async <T>(ownerKey: string, readResult: (context: CourseReadContext) => Promise<T>, signal?: AbortSignal): Promise<T> => {
+  return async <T>(ownerKey: string, readResult: (context: CourseReadContext) => Promise<T>,
+    signal?: AbortSignal, authorization?: TronClassSnapshotAuthorization): Promise<T> => {
     const deadline = now() + (dependencies.budgetMs ?? READ_BUDGET_MS);
     const controller = new AbortController();
     let failure: NuniError | undefined;
@@ -294,8 +300,18 @@ function createTronClassCourseOperation(dependencies: TronClassReaderDependencie
       if (controller.signal.aborted) throw failure ?? timeout();
       if (now() >= deadline) throw stop(timeout());
     };
+    const checkBinding = async (revision: string) => {
+      active();
+      await bindings.assertCurrent(ownerKey, revision);
+      active();
+    };
     const read: ReadStep = async request => {
       active();
+      if (authorization) {
+        await authorization.assertGrant();
+        await checkBinding(authorization.binding.revision);
+        active();
+      }
       try {
         const result = await request({ signal: controller.signal, timeoutMs: Math.max(1, Math.ceil(deadline - now())) });
         active();
@@ -310,12 +326,8 @@ function createTronClassCourseOperation(dependencies: TronClassReaderDependencie
     const operation = async (): Promise<T> => {
       try {
         active();
-        const binding = await bindings.requireBinding(ownerKey);
-        const check = async () => {
-          active();
-          await bindings.assertCurrent(ownerKey, binding.revision);
-          active();
-        };
+        const binding = authorization?.binding ?? await bindings.requireBinding(ownerKey);
+        const check = () => checkBinding(binding.revision);
         await check();
         const courses = parseCourses(await read(readOptions => source.fetchCourses(binding.cookies, { userId: binding.userId, status: 'ongoing' }, readOptions)));
         const errors: TronClassCourseIndexError[] = [];
@@ -394,7 +406,8 @@ export function resolveSnapshotInclude(options: TronClassSnapshotReadOptions): {
 
 export function createTronClassIntegrationReader(dependencies: TronClassReaderDependencies = {}) {
   const operation = createTronClassCourseOperation(dependencies);
-  return async (ownerKey: string, options: TronClassSnapshotReadOptions = {}, signal?: AbortSignal): Promise<TronClassSnapshot> => {
+  return async (ownerKey: string, options: TronClassSnapshotReadOptions = {}, signal?: AbortSignal,
+    authorization?: TronClassSnapshotAuthorization): Promise<TronClassSnapshot> => {
     if (options.courseId !== undefined && positiveId(options.courseId) !== options.courseId) {
       throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
     }
@@ -446,6 +459,6 @@ export function createTronClassIntegrationReader(dependencies: TronClassReaderDe
         announcements: contents.announcements, materials: contents.materials,
         errors, partial: errors.length > 0,
       };
-    }, signal);
+    }, signal, authorization);
   };
 }

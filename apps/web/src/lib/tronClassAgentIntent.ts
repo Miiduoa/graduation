@@ -1796,6 +1796,20 @@ function isPositivelyProvenRead(text: string): boolean {
   return hasPositiveReadForm(original);
 }
 
+function inheritedReadCandidate(clause: string, target: ReturnType<typeof parseReadRequest>): string | null {
+  const continuation = target.hasOutsideQuotes(TRONCLASS_CONTINUATION);
+  if (!continuation && !target.hasQuotedTarget) return null;
+  const mask = typographicQuoteMask(clause);
+  if (tokensFor(clause).some(token => isNegatorToken(token) && !tokenIsProtected(token, mask))) return null;
+  const predicates = analyzeClauses(visibleCommandTokens(clause))[0]?.predicates ?? [];
+  if (predicates.some(predicate => predicate.kind === 'read' || predicate.kind === 'download')) {
+    const questionMark = clause.endsWith('?') ? '?' : '';
+    const candidate = `${clause.slice(0, clause.length - questionMark.length)} 玩課雲${questionMark}`;
+    if (continuation || isPositivelyProvenRead(candidate)) return candidate;
+  }
+  return continuation ? `玩課雲${clause}` : null;
+}
+
 function clauseAllowsCompoundCompanion(clause: string): boolean {
   const text = clause.normalize('NFKC').trim();
   if (!text) return true;
@@ -1814,6 +1828,9 @@ function clauseAllowsCompoundCompanion(clause: string): boolean {
     scanNegation(tokensFor(text), modifierInteriorIndex(tokensFor(text))) === 'clear') {
     return true;
   }
+  const target = parseReadRequest(text);
+  if (target.hasQuotedTarget && !target.hasOutsideQuotes(TRONCLASS_KEYWORD) &&
+    !target.hasOutsideQuotes(TRONCLASS_CONTINUATION) && inheritedReadCandidate(text, target)) return true;
   const bare = text.replace(/[?!.。]+$/u, '').trim();
   if (tronClassExplicitNavigationQuestion(text) || isTronClassNavigationTarget(bare) ||
     isTronClassNavigationTarget(bare.replace(/^(?:(?:請|麻煩)?(?:幫我|替我)?(?:開啟|打開|開|前往|進入))\s*/u, ''))) {
@@ -1884,20 +1901,9 @@ function parseTronClassCompound(question: string) {
   const seen = new Set<string>();
   let context = false;
   for (const clause of clauses) {
-    let candidate: string | null = null;
     const target = parseReadRequest(clause);
-    const continuation = target.hasOutsideQuotes(TRONCLASS_CONTINUATION) &&
-      !tokensFor(clause).some(isNegatorToken);
     const explicitSource = target.hasOutsideQuotes(TRONCLASS_KEYWORD);
-    if (explicitSource) {
-      candidate = clause;
-    } else if (continuation) {
-      const predicates = analyzeClauses(visibleCommandTokens(clause))[0]?.predicates ?? [];
-      const questionMark = clause.endsWith('?') ? '?' : '';
-      candidate = predicates.some(predicate => predicate.kind === 'read' || predicate.kind === 'download')
-        ? `${clause.slice(0, clause.length - questionMark.length)} 玩課雲${questionMark}`
-        : `玩課雲${clause}`;
-    }
+    const candidate = explicitSource ? clause : inheritedReadCandidate(clause, target);
     if (!candidate) continue;
     const courseScope = target.courseScope();
     // A course qualifier can contain a service word, even when the source is inherited.
@@ -2032,7 +2038,7 @@ function analyzeReadRequest(text: string, tokens: Token[]) {
   }
   const intent = namedType?.intent;
   return {
-    intent, complementAt, conflict,
+    intent, complementAt, conflict, hasQuotedTarget: quotes.length > 0,
     courseScope: (scopeIntent = sawDownload ? 'materials' : intent) => readCourseScope(text, quotes, scopeIntent, conflict,
       hasOutsideQuotes(/全部|所有|\ball\b/iu)),
     hasOutsideQuotes,

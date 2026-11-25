@@ -9,16 +9,16 @@ Use this profile only for a project whose billing is already enabled and whose o
 Generate a separate configuration from the current complete index specification:
 
 ```sh
-node scripts/tronclass/prepare-ttl-profile.cjs --out /tmp/nuni-tronclass-ttl
+node scripts/tronclass/prepare-ttl-profile.cjs
 ```
 
 The generator copies all existing composite indexes and field overrides, adds the three `purgeAt` policies, and explicitly disables TTL on shared submission locks. It leaves the normal deployment files unchanged. The profile retains an ascending collection index on each expiry field so the bounded worker can still run. It contains no Functions or Storage deployment configuration.
 
-After reviewing the generated files and confirming the intended project, an operator can use the existing deployment and readiness commands with that configuration:
+The generator reports the private temporary directory it created. After reviewing the files and confirming the intended project, set `TRONCLASS_TTL_DIR` to the reported directory and use that configuration with the existing deployment and readiness commands.
 
 ```sh
-pnpm exec firebase deploy --only firestore:indexes --project "$TRONCLASS_FIREBASE_PROJECT" --config /tmp/nuni-tronclass-ttl/firebase.json
-node scripts/wait-for-firestore-indexes.cjs --project "$TRONCLASS_FIREBASE_PROJECT" --config /tmp/nuni-tronclass-ttl/firebase.json
+pnpm exec firebase deploy --only firestore:indexes --project "$TRONCLASS_FIREBASE_PROJECT" --config "$TRONCLASS_TTL_DIR/firebase.json"
+node scripts/wait-for-firestore-indexes.cjs --project "$TRONCLASS_FIREBASE_PROJECT" --config "$TRONCLASS_TTL_DIR/firebase.json"
 ```
 
 The readiness gate requires the exact field's TTL to be `ACTIVE` with no added expiration offset; ready indexes alone cannot satisfy this check. The lock policy must be disabled. TTL is asynchronous, so server authorization continues enforcing expiry independently. An absent/null `purgeAt` preserves closed binding markers and unresolved submission operations. The permanent submission lock is never eligible for automatic deletion.

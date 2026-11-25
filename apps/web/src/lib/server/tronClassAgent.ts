@@ -13,12 +13,14 @@ import {
 import type { TronClassHomeworkItem, TronClassPreparation, TronClassSnapshot } from '../tronClassIntegrationTypes';
 import { tronClassUploadKey } from '../tronClassIntegrationClient';
 import { createTronClassAgentGrantService } from './tronClassAgentGrants';
-import { createTronClassIntegrationReader, type TronClassSnapshotReadOptions } from './tronClassIntegrationSource';
+import { createTronClassIntegrationReader, type TronClassSnapshotReadOptions, type TronClassSnapshotAuthorization } from './tronClassIntegrationSource';
+import { createTronClassBindingService, type TronClassBindingService } from './tronClassBinding';
 import { getDefaultTronClassSubmissionService } from './tronClassSubmission';
 
 export type TronClassAgentGrants = Pick<ReturnType<typeof createTronClassAgentGrantService>, 'get' | 'require' | 'assertCurrent'>;
 export type TronClassAgentDependencies = {
   grants?: TronClassAgentGrants;
+  bindings?: Pick<TronClassBindingService, 'requireBinding' | 'assertCurrent'>;
   read?: ReturnType<typeof createTronClassIntegrationReader>;
   prepare?: (ownerKey: string, input: { courseId: number; homeworkId: number }) => Promise<TronClassPreparation>;
   now?: () => number;
@@ -134,8 +136,10 @@ function downloadActions(snapshot: TronClassSnapshot, question: string, mayAutom
 
 export function createTronClassAgentService(dependencies: TronClassAgentDependencies = {}) {
   const grants = dependencies.grants ?? createTronClassAgentGrantService();
-  // One overview and one selected-course read remain bounded within a request.
-  const read = dependencies.read ?? createTronClassIntegrationReader({ budgetMs: 20_000 });
+  const bindings = dependencies.bindings ?? createTronClassBindingService();
+  // Stable automatic selection reads the course index three times: the overview,
+  // a full-list recheck, and the index guard immediately before private reads.
+  const read = dependencies.read ?? createTronClassIntegrationReader({ bindings, budgetMs: 20_000 });
   const prepareSource = dependencies.prepare ?? (async (ownerKey, input) => (await getDefaultTronClassSubmissionService()).prepare(ownerKey, input));
   const now = dependencies.now ?? Date.now;
   const requestId = dependencies.requestId ?? randomUUID;
@@ -223,9 +227,15 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
           materials: (query.intent === 'materials' || query.intent === 'download') && courseId !== undefined,
         },
       });
+      let authorization: TronClassSnapshotAuthorization | undefined;
       const guardedRead = async (courseId?: number, acceptCourseIndex?: TronClassSnapshotReadOptions['acceptCourseIndex']) => {
         await assertScopes(ownerKey, grant, scope);
-        const result = await read(ownerKey, snapshotRead(courseId, acceptCourseIndex));
+        if (!authorization) {
+          const binding = await bindings.requireBinding(ownerKey);
+          if (binding.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+          authorization = { binding, assertGrant: () => assertScopes(ownerKey, grant, scope) };
+        }
+        const result = await read(ownerKey, snapshotRead(courseId, acceptCourseIndex), undefined, authorization);
         if (result.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
         if (courseId && !acceptCourseIndex &&
           !result.courses.some((course) => course.id === courseId)) throw new NuniError(403, 'TRONCLASS_COURSE_NOT_FOUND');

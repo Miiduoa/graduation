@@ -129,6 +129,38 @@ describe('TronClass homework overview scope', () => {
     expect(tronClassAgentCourseScope(question)?.matches('資料庫', 'CS101')).toBe(true);
   });
 
+  it.each([
+    '，下載『交通』',
+    '，查『交通』',
+    '，查《交通》教材',
+    '，查「交通」公告',
+  ])('combines quoted course scopes for %s', suffix => {
+    const clause = '查玩課雲『外交』公告';
+    const question = clause + suffix;
+    expect(tronClassCompoundClauses(question)).toContain(clause);
+    const scope = tronClassAgentCourseScope(clause, question);
+    expect(scope?.matches('外交', 'PS101')).toBe(false);
+    expect(scope?.matches('交通', 'TR101')).toBe(false);
+  });
+
+  it('keeps one exact course when a quoted download precedes the explicit source', () => {
+    const clause = '查玩課雲『外交』公告';
+    const question = `下載『外交』，${clause}`;
+    expect(tronClassCompoundClauses(question)).toEqual([clause]);
+    const scope = tronClassAgentCourseScope(clause, question);
+    expect(scope?.matches('外交', 'PS101')).toBe(true);
+    expect(scope?.matches('外交史', 'PS102')).toBe(false);
+  });
+
+  it.each(['和查公車', '，查校園公告'])('keeps %s outside the quoted course scope', suffix => {
+    const clause = '查玩課雲『外交』公告';
+    const question = clause + suffix;
+    expect(tronClassCompoundClauses(question)).toEqual([clause]);
+    const scope = tronClassAgentCourseScope(clause, question);
+    expect(scope?.matches('外交', 'PS101')).toBe(true);
+    expect(scope?.matches('外交史', 'PS101')).toBe(false);
+  });
+
   it.each(['查玩課雲公告', '查玩課雲教材', '下載玩課雲教材'])(
     'inherits a single course from the original request for %s', question => {
       const compoundQuestion = `查玩課雲『資料庫』課程，${question}`;

@@ -3,17 +3,22 @@ import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import type { TronClassRequiredAgentGrant } from '@campus/shared/src/tronClassAgentPermissions';
+import type { TronClassSnapshotReadOptions } from './tronClassIntegrationSource';
 import { handleTronClassAgent, type TronClassAgentRouteDependencies } from './tronClassAgentRoute';
 
 const revision = 'a'.repeat(32);
 const actor = { ownerKey: 'firebase:agent-route-fixture', provider: 'firebase' as const };
 const grant: TronClassRequiredAgentGrant = { revision, version: 'b'.repeat(32), permissions: { readCourseData: true, downloadMaterials: true, prepareHomework: true }, updatedAt: '2026-11-13T00:00:00.000Z' };
+const binding = { schoolId: 'pu' as const, revision, account: 'fixture', userId: 12, userName: null,
+  cookies: { session: 'fixture' }, expiresAt: '2026-11-14T00:00:00Z' };
+
 function fixture() {
+  const bindings = { requireBinding: vi.fn(async () => binding), assertCurrent: vi.fn(async () => {}) };
   const authenticate = vi.fn(async () => actor);
   const grants = { get: vi.fn(async () => grant), require: vi.fn(async () => grant), assertCurrent: vi.fn(async () => {}) };
-  const read = vi.fn(async () => ({ revision, fetchedAt: '2026-11-13T00:00:00.000Z', courses: [], homework: [], announcements: [], materials: [], errors: [], partial: false }));
+  const read = vi.fn(async (_owner: string, _options?: TronClassSnapshotReadOptions) => ({ revision, fetchedAt: '2026-11-13T00:00:00.000Z', courses: [], homework: [], announcements: [], materials: [], errors: [], partial: false }));
   const prepare = vi.fn();
-  const dependencies: TronClassAgentRouteDependencies = { authenticate, grants, read, prepare, rateLimit: vi.fn() };
+  const dependencies: TronClassAgentRouteDependencies = { authenticate, grants, bindings, read: (owner, options) => read(owner, options), prepare, rateLimit: vi.fn() };
   const request = (body: unknown, options: { query?: string; headers?: Record<string, string>; method?: string } = {}) =>
     handleTronClassAgent(new NextRequest(`https://nuni.tw/api/tronclass/agent${options.query ?? ''}`, {
       method: options.method ?? 'POST', headers: { 'Content-Type': 'application/json', ...options.headers },
