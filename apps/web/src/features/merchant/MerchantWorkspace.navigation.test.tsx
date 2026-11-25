@@ -2794,25 +2794,35 @@ it.each([undefined, 7, 8])('keeps a v7 menu receipt confirmed at v8 through list
   expect(screen.queryByText(/建立有庫存的首次菜單/)).toBeNull();
 });
 
-it.each(['missing', 'present'])(
-  'shows a v7 first-menu receipt after a pre-receipt v8 detail with menu %s',
-  async (menuState) => {
+it.each([
+  { menuState: 'missing', intermediateRequirements: ['menu'], retryVersion: 8 },
+  { menuState: 'present', intermediateRequirements: ['settings'], retryVersion: 8 },
+  { menuState: 'legacy zero stock', intermediateRequirements: [], retryVersion: 9 },
+])(
+  'shows a v7 first-menu receipt after a pre-receipt v8 detail with menu $menuState',
+  async ({ menuState, intermediateRequirements, retryVersion }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const initial = { ...detail(), readinessVersion: 7 };
     const published = {
       ...initial, readinessVersion: 8, missingRequirements: ['settings'], publishedMenuItems: 1,
     };
-    const intermediate = menuState === 'present'
-      ? published
-      : { ...published, missingRequirements: ['menu'], publishedMenuItems: 0 };
+    const intermediate = {
+      ...published,
+      missingRequirements: intermediateRequirements,
+      publishedMenuItems: menuState === 'present' ? 1 : 0,
+    };
+    const retried = menuState === 'present' ? intermediate : {
+      ...intermediate, readinessVersion: retryVersion, missingRequirements: ['menu'],
+    };
+    const retry = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
     const receipt = Promise.withResolvers<typeof firstMenuReceipt>();
     const snapshot = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
     const readDetail = vi.fn()
       .mockResolvedValueOnce(initial)
       .mockReturnValueOnce(snapshot.promise)
       .mockResolvedValueOnce(intermediate)
-      .mockResolvedValueOnce(intermediate)
-      .mockResolvedValue(published);
+      .mockReturnValueOnce(retry.promise)
+      .mockResolvedValue({ ...published, readinessVersion: retryVersion });
     mocks.request.mockImplementation((resource) => {
       if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [initial] });
       if (resource === path) return readDetail();
@@ -2832,7 +2842,9 @@ it.each(['missing', 'present'])(
     await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
     await act(async () => receipt.resolve(firstMenuReceipt));
     expect(readDetail).toHaveBeenCalledTimes(4);
-    expect(screen.getByText(/已建立 1 項首次菜單/)).toBeTruthy();
+
+    await act(async () => retry.resolve(retried));
+    await screen.findByText(/已建立 1 項首次菜單/);
     expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));

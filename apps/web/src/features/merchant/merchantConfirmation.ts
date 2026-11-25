@@ -301,7 +301,10 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         workspaceKeysAwaitingConfirmation.delete(key);
       }
       if (revision > (entry.detailRead?.revision ?? 0)) {
-        const menu = next.missingRequirements === undefined
+        // An inactive legacy snapshot can report no requirements and no stock before menu creation.
+        const legacyEmpty = !next.activated && next.publishedMenuItems === 0 &&
+          next.missingRequirements?.length === 0;
+        const menu = next.missingRequirements === undefined || legacyEmpty
           ? (next.publishedMenuItems > 0 ? 'present' : 'unknown')
           : (next.missingRequirements.includes('menu') ? 'missing' : 'present');
         entry.detailRead = { revision, version: next.readinessVersion, menu };
