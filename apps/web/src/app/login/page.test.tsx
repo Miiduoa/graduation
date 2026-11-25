@@ -29,6 +29,10 @@ const { replace, signIn, state } = vi.hoisted(() => ({
     schoolDirectoryLoading: false,
     requestedUnavailable: false,
     selectSchool: vi.fn(),
+    platformSession: null as { platformAccountId: string } | null,
+    platformLoading: false,
+    platformError: '',
+    platformPendingLogout: false,
   },
 }));
 vi.mock('@campus/shared/src/puEcampusDataPolicy', async (original) => ({
@@ -62,6 +66,15 @@ vi.mock('@/components/NuniSignIn', () => ({
 vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: state.user, loading: state.loading }),
+}));
+vi.mock('@/features/nuni/Session', async (original) => ({
+  ...(await original<typeof import('@/features/nuni/Session')>()),
+  useNuniSession: () => ({
+    session: state.platformSession,
+    loading: state.platformLoading,
+    error: state.platformError,
+    pendingLogout: state.platformPendingLogout,
+  }),
 }));
 vi.mock('@/features/auth/client', () => ({
   isFirebaseConfigured: () => true,
@@ -108,6 +121,10 @@ beforeEach(() => {
   state.schoolDirectoryLoading = false;
   state.catalogStatus = 'ready';
   state.requestedUnavailable = false;
+  state.platformSession = null;
+  state.platformLoading = false;
+  state.platformError = '';
+  state.platformPendingLogout = false;
   signIn.mockResolvedValue({ uid: 'one' });
   vi.stubGlobal('location', { ...window.location, replace });
 });
@@ -1046,6 +1063,42 @@ it('prioritizes the confirmed selected school at general login without removing 
   expect(screen.getByRole('button', { name: '連線學校帳號' })).toBeTruthy();
   expect(signIn).not.toHaveBeenCalled();
 });
+
+it.each(['session', 'loading', 'error', 'pendingLogout'] as const)(
+  'keeps platform continuation or recovery first when the account has %s',
+  (condition) => {
+    const destination = '/?schoolId=pu#today';
+    state.params = new URLSearchParams({ returnUrl: destination });
+    state.user = null;
+    state.selectedSchoolId = 'pu';
+    state.studentId = true;
+    const view = render(<LoginPage />);
+    const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+    const platform = screen.getByTestId('platform-sign-in');
+    expect(school.open).toBe(true);
+
+    if (condition === 'session') state.platformSession = { platformAccountId: 'existing-account' };
+    if (condition === 'loading') state.platformLoading = true;
+    if (condition === 'error') state.platformError = '無法確認登入狀態';
+    if (condition === 'pendingLogout') state.platformPendingLogout = true;
+    view.rerender(<LoginPage />);
+
+    expect(screen.getByTestId('platform-sign-in')).toBe(platform);
+    expect(platform.getAttribute('data-return-url')).toBe(destination);
+    expect(platform.compareDocumentPosition(school) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(school.open).toBe(false);
+    expect(signIn).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+
+    state.platformSession = null;
+    state.platformLoading = false;
+    state.platformError = '';
+    state.platformPendingLogout = false;
+    view.rerender(<LoginPage />);
+    expect(school.open).toBe(true);
+    expect(school.compareDocumentPosition(platform) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  },
+);
 
 it('retries campus availability into a single school-first entry while keeping the home return context', () => {
   const destination = '/?schoolId=fju#today';

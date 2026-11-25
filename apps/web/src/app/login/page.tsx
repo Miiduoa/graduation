@@ -24,6 +24,7 @@ import {
 import styles from '../servicePages.module.css';
 import loginStyles from './login.module.css';
 import { NuniSignIn } from '@/components/NuniSignIn';
+import { useNuniSession } from '@/features/nuni/Session';
 import { platformDestination } from '@/lib/accountDestination';
 import { isPublicCampusPath, publicCampusServices } from '@/lib/publicCampusServices';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
@@ -71,6 +72,7 @@ function LoginForm({
   issue: boolean;
 }) {
   const { user, loading: schoolLoading } = useAuth();
+  const platformAuth = useNuniSession();
   const selection = useOptionalSelectedSchool();
   const params = useSearchParams();
   const campusSearch = useCampusNavigationSearch(params);
@@ -112,11 +114,15 @@ function LoginForm({
     selection.selectedSchool?.id === selectedSchoolId
       ? selection.selectedSchool
       : null;
-  // Prioritize an available campus only at the general entry. Platform tasks,
-  // explicit school reconnection and paused student access keep their own route.
+  // Prioritize an available campus only for a confirmed signed-out general entry.
+  // Existing accounts and unfinished platform recovery keep their own route first.
   const schoolFirst =
     !schoolTask &&
     taskPath === '/' &&
+    !platformAuth.session &&
+    !platformAuth.loading &&
+    !platformAuth.error &&
+    !platformAuth.pendingLogout &&
     !!confirmedSchool &&
     !options.loading &&
     !options.error &&

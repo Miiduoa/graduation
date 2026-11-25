@@ -30,9 +30,13 @@ it('keeps the requested task through the native OAuth form', async () => {
     '/auth/platform/start?returnUrl=%2Fsocial%3Fcampus%3Dpu',
   );
 });
-it('recognizes an authenticated account and avoids school-login redirect loops', () => {
+it('recognizes an authenticated nuni account without guessing its provider or creating school-login loops', () => {
   mocks.session = { platformAccountId: 'a' };
   render(<NuniSignIn returnUrl="/grades?tab=semester" />);
+  expect(screen.getByRole('heading', { name: '你的 nuni 帳號' })).toBeTruthy();
+  expect(screen.getByText('你已登入 nuni 帳號。')).toBeTruthy();
+  expect(screen.queryByText('你已登入 Google 帳號。')).toBeNull();
+  expect(screen.queryByText(/第一次使用？透過 Google 繼續即可建立帳號/)).toBeNull();
   expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe('/classroom');
   expect(mocks.request).not.toHaveBeenCalled();
 });

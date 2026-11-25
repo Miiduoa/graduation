@@ -24,7 +24,7 @@ function signInPurpose(path: string): string {
     return '登入後回到你的課表、行程或資料匯入，不需要先綁定學校帳號。';
   if (path === '/dormitory') return '登入後整理自己的住宿備忘、設備問題與入住退宿清單。';
   if (path === '/classroom/material-bookmarks') return '登入後回到你收藏的課程教材。';
-  return '使用 Google 帳號，繼續課程、作業與公開看板。';
+  return '繼續課程、作業與公開看板。';
 }
 
 export function NuniSignIn({
@@ -44,6 +44,7 @@ export function NuniSignIn({
   const submitting = useRef(false);
   const [starting, setStarting] = useState(false);
   const destination = platformDestination(returnUrl);
+  const platformReady = !!auth.session && !auth.loading && !auth.pendingLogout && !auth.error;
   const taskUrl = new URL(destination, 'https://campus.local');
   const taskPath = taskUrl.pathname;
   const purpose = signInPurpose(taskPath);
@@ -75,13 +76,13 @@ export function NuniSignIn({
 
   return (
     <section className={styles.loginHelp} aria-labelledby="platform-sign-in-title">
-      <h2 id="platform-sign-in-title">用 Google 帳號登入</h2>
+      <h2 id="platform-sign-in-title">{platformReady ? '你的 nuni 帳號' : '用 Google 帳號登入'}</h2>
       <p>{purpose}</p>
       <p>不需要先登入學校，也不要求學號或學校信箱。</p>
-      <p>
+      {!platformReady && <p>
         第一次使用？透過 Google 繼續即可建立帳號，不必另外設定密碼。之後請使用同一個 Google
         帳號登入。
-      </p>
+      </p>}
       {issue && <p role="alert">這次登入沒有完成，請重新登入。</p>}
       {auth.loading ? (
         <p role="status">正在確認帳號…</p>
@@ -101,7 +102,7 @@ export function NuniSignIn({
         </div>
       ) : auth.session ? (
         <>
-          <p>你已登入 Google 帳號。</p>
+          <p>你已登入 nuni 帳號。</p>
           <Link className="btn primary" href={destination}>
             繼續使用
           </Link>

@@ -18,26 +18,25 @@ const Fastify=require(join(deps,"fastify"));
 const hash=x=>createHash("sha256").update(x).digest("hex");
 const issuer="https://accounts.google.com";
 const idToken="synthetic-verified-token-for-db-contract-only";
-// Minimal fixture mirroring the relevant migration 146 uniqueness/FK contracts.
-// NOT a reconstructed production schema or an authorization grant receipt.
+// Execute complete, byte-pinned source migrations instead of hand-maintained
+// platform table subsets. Only the two campus FK parent keys are synthetic.
+// This remains an isolated selected-schema fixture, not a reconstructed API.
+const fixtureManifest=JSON.parse(await readFile(new URL("./test-fixtures/source.json",import.meta.url),"utf8"));
+assert.equal(fixtureManifest.schema,"campus.google-link-postgres-fixture/v1");
+const platformMigrations=await Promise.all(fixtureManifest.migrations.map(async entry=>{
+  assert.match(entry.file,/^[0-9]{3}_[a-z_]+\.sql$/u);
+  const bytes=await readFile(new URL("./test-fixtures/"+entry.file,import.meta.url));
+  assert.equal(hash(bytes),entry.sha256,entry.file+" SHA-256 drift");
+  const blob=createHash("sha1").update("blob "+bytes.length+"\0").update(bytes).digest("hex");
+  assert.equal(blob,entry.gitBlobSha1,entry.file+" source Git blob drift");
+  return bytes.toString("utf8");
+}));
 const baseSchema=`
-CREATE TABLE platform_accounts(id text PRIMARY KEY,state text NOT NULL DEFAULT 'active');
-CREATE TABLE platform_account_credentials(
- id text PRIMARY KEY,platform_account_id text NOT NULL REFERENCES platform_accounts(id),
- method text NOT NULL,provider_issuer text NOT NULL,provider_subject text NOT NULL,
- email_at_registration text,email_verified boolean NOT NULL DEFAULT false,
- state text NOT NULL DEFAULT 'active',verified_at timestamptz NOT NULL,last_authenticated_at timestamptz NOT NULL,
- UNIQUE(provider_issuer,provider_subject),UNIQUE(id,platform_account_id)
-);
-CREATE TABLE platform_account_sessions(
- token_sha256 text PRIMARY KEY,platform_account_id text NOT NULL REFERENCES platform_accounts(id),
- credential_id text NOT NULL,expires_at timestamptz NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),
- FOREIGN KEY(credential_id,platform_account_id) REFERENCES platform_account_credentials(id,platform_account_id)
-);
-CREATE TABLE platform_operator_assignments(platform_account_id text PRIMARY KEY REFERENCES platform_accounts(id),state text NOT NULL,role_key text NOT NULL);
-CREATE TABLE platform_identity_providers(kind text PRIMARY KEY,issuer text NOT NULL,client_id text NOT NULL,
- jwks_uri text NOT NULL,authorization_endpoint text NOT NULL,token_endpoint text NOT NULL,state text NOT NULL);
-INSERT INTO platform_identity_providers VALUES('google-consumer','https://accounts.google.com',
+CREATE TABLE tenants(id text PRIMARY KEY);
+CREATE TABLE identity_subjects(tenant_id text NOT NULL REFERENCES tenants(id),id text NOT NULL,PRIMARY KEY(tenant_id,id));
+${platformMigrations.join("\n")}
+INSERT INTO platform_identity_providers(kind,issuer,client_id,jwks_uri,authorization_endpoint,token_endpoint,state)
+VALUES('google-consumer','https://accounts.google.com',
  'test.apps.googleusercontent.com','https://www.googleapis.com/oauth2/v3/certs',
  'https://accounts.google.com/o/oauth2/v2/auth','https://oauth2.googleapis.com/token','enabled');
 `;
@@ -65,17 +64,50 @@ test("Google link candidate PostgreSQL and Fastify contract",{timeout:60000},asy
     const platformAccountId="pa_"+randomUUID(),credentialId="pac_"+randomUUID();
     const handle="ps_"+randomBytes(32).toString("base64url"),sessionHash=hash(handle);
     await db.transaction(async tx=>{
-      await tx.query("INSERT INTO platform_accounts(id) VALUES($1)",[platformAccountId]);
+      await tx.query("INSERT INTO platform_accounts(id,display_name) VALUES($1,'Synthetic account')",[platformAccountId]);
       await tx.query("INSERT INTO platform_account_credentials(id,platform_account_id,method,provider_issuer,provider_subject,verified_at,last_authenticated_at) VALUES($1,$2,'apple','https://appleid.apple.com',$3,now(),now())",[credentialId,platformAccountId,randomUUID()]);
       await tx.query("INSERT INTO platform_account_sessions(token_sha256,platform_account_id,credential_id,expires_at) VALUES($1,$2,$3,now()+interval '1 hour')",[sessionHash,platformAccountId,credentialId]);
     });
     return {platformAccountId,credentialId,sessionHash,authorization:"Platform "+handle};
+  }
+  async function closeActor(actor){
+    // Synthetic closure uses the pinned service's account-first lock order and
+    // schema-valid state transitions; this does not invoke the production host.
+    await db.transaction(async tx=>{
+      await tx.query("SELECT id FROM platform_accounts WHERE id=$1 FOR UPDATE",[actor.platformAccountId]);
+      await tx.query("UPDATE platform_accounts SET state='deleted',deleted_at=clock_timestamp(),suspended_at=NULL,updated_at=clock_timestamp() WHERE id=$1",[actor.platformAccountId]);
+      await tx.query("UPDATE platform_account_credentials SET state='revoked',revoked_at=clock_timestamp(),updated_at=clock_timestamp() WHERE platform_account_id=$1 AND state='active'",[actor.platformAccountId]);
+      await tx.query("DELETE FROM platform_account_sessions WHERE platform_account_id=$1",[actor.platformAccountId]);
+    });
   }
   const verified=subject=>({method:"google",providerIssuer:issuer,providerSubject:subject,email:"fixture@example.test",emailVerified:true});
   const verifier=subject=>({verify:async()=>verified(subject)});
   const begin=async(service,actor)=>{const x=await service.start(actor);return {transactionId:x.transactionId,nonce:x.nonce,idToken};};
   const cancelInput=({transactionId,nonce})=>({transactionId,nonce});
   const credentials=subject=>db.transaction(async tx=>(await tx.query("SELECT platform_account_id,state FROM platform_account_credentials WHERE provider_issuer=$1 AND provider_subject=$2",[issuer,subject])).rows);
+  await t.test("platform constraints reject invalid fixture states and proofs",async constraints=>{
+    const actor=await makeActor();
+    await db.transaction(tx=>tx.query("INSERT INTO platform_operator_assignments(platform_account_id,role_key,state) VALUES($1,'platform-operator','active')",[actor.platformAccountId]));
+    const cases=[
+      ["unknown account state","UPDATE platform_accounts SET state='closed' WHERE id=$1",[actor.platformAccountId]],
+      ["deleted account without timestamp","UPDATE platform_accounts SET state='deleted' WHERE id=$1",[actor.platformAccountId]],
+      ["suspended account without timestamp","UPDATE platform_accounts SET state='suspended' WHERE id=$1",[actor.platformAccountId]],
+      ["revoked credential without timestamp","UPDATE platform_account_credentials SET state='revoked' WHERE id=$1",[actor.credentialId]],
+      ["empty provider subject","UPDATE platform_account_credentials SET provider_subject='' WHERE id=$1",[actor.credentialId]],
+      ["unsupported credential method","UPDATE platform_account_credentials SET method='unsupported' WHERE id=$1",[actor.credentialId]],
+      ["nonpositive session lifetime","UPDATE platform_account_sessions SET expires_at=created_at WHERE token_sha256=$1",[actor.sessionHash]],
+      ["untrusted Google provider endpoint","UPDATE platform_identity_providers SET jwks_uri='https://untrusted.example/keys' WHERE kind='google-consumer'",[]],
+      ["unsupported operator role","UPDATE platform_operator_assignments SET role_key='unsupported' WHERE platform_account_id=$1",[actor.platformAccountId]],
+      ["revoked operator without timestamp","UPDATE platform_operator_assignments SET state='revoked' WHERE platform_account_id=$1",[actor.platformAccountId]],
+    ];
+    for(const [name,sql,parameters] of cases)await constraints.test(name,async()=>{
+      await assert.rejects(()=>db.transaction(async tx=>{
+        await tx.query(sql,parameters);
+        // Roll back even if a weakened fixture accidentally accepts this invalid row.
+        assert.fail("Platform fixture accepted "+name);
+      }),{code:"23514"});
+    });
+  });
   await t.test("two accounts racing for one Google subject cannot both claim it",async()=>{
     const a=await makeActor(),b=await makeActor(),subject="race-"+randomUUID();
     const one=createGoogleLinkService({db,verifier:verifier(subject)}),two=createGoogleLinkService({db,verifier:verifier(subject)});
@@ -96,8 +128,8 @@ test("Google link candidate PostgreSQL and Fastify contract",{timeout:60000},asy
     assert.deepEqual(await credentials(subject),[{platform_account_id:actor.platformAccountId,state:"active"}]);
     assert.deepEqual(await service.cancel(actor,cancelInput(input)),{status:"not-pending"});
   });
-  await t.test("cancelling or logging out during provider verification prevents linking",async()=>{
-    for(const mode of ["cancel","logout"]){
+  await t.test("cancelling, logging out or closing the account during verification prevents linking",async()=>{
+    for(const mode of ["cancel","logout","close"]){
       const actor=await makeActor(),subject=mode+"-"+randomUUID();
       let enter,release;
       const entered=new Promise(r=>{enter=r;});
@@ -111,9 +143,10 @@ test("Google link candidate PostgreSQL and Fastify contract",{timeout:60000},asy
         const ready=await Promise.race([entered.then(()=>true),outcome.then(()=>false)]);
         assert.equal(ready,true);
         if(mode==="cancel")assert.deepEqual(await service.cancel(actor,cancelInput(input)),{status:"cancelled"});
+        else if(mode==="close")await closeActor(actor);
         else await db.transaction(tx=>tx.query("DELETE FROM platform_account_sessions WHERE token_sha256=$1",[actor.sessionHash]));
       }finally{release();}
-      assert.equal((await outcome).error?.code,mode==="cancel"?"GOOGLE_LINK_INVALID":"GOOGLE_LINK_REAUTH_REQUIRED");
+      assert.equal((await outcome).error?.code,mode==="logout"?"GOOGLE_LINK_REAUTH_REQUIRED":"GOOGLE_LINK_INVALID");
       assert.deepEqual(await credentials(subject),[]);
     }
   });
@@ -147,13 +180,13 @@ test("Google link candidate PostgreSQL and Fastify contract",{timeout:60000},asy
     await assert.rejects(()=>service.start(actor),{code:"GOOGLE_LINK_REAUTH_REQUIRED"});
     await db.transaction(tx=>tx.query("UPDATE platform_account_sessions SET created_at=clock_timestamp() WHERE token_sha256=$1",[actor.sessionHash]));
     const input=await begin(service,actor);await service.complete(actor,input);
-    await db.transaction(tx=>tx.query("UPDATE platform_account_credentials SET state='revoked' WHERE platform_account_id=$1 AND method='google'",[actor.platformAccountId]));
+    await db.transaction(tx=>tx.query("UPDATE platform_account_credentials SET state='revoked',revoked_at=clock_timestamp() WHERE platform_account_id=$1 AND method='google'",[actor.platformAccountId]));
     assert.deepEqual(await service.status(actor),{platformAccountId:actor.platformAccountId,currentMethod:"apple",methods:["apple"],googleLink:"unavailable"});
-    await db.transaction(tx=>tx.query("UPDATE platform_account_credentials SET state='revoked' WHERE id=$1",[actor.credentialId]));
+    await db.transaction(tx=>tx.query("UPDATE platform_account_credentials SET state='revoked',revoked_at=clock_timestamp() WHERE id=$1",[actor.credentialId]));
     await assert.rejects(()=>service.status(actor),{code:"GOOGLE_LINK_INVALID"});
     const loggedOut=await makeActor();await db.transaction(tx=>tx.query("DELETE FROM platform_account_sessions WHERE token_sha256=$1",[loggedOut.sessionHash]));
     await assert.rejects(()=>service.status(loggedOut),{code:"GOOGLE_LINK_REAUTH_REQUIRED"});
-    const closed=await makeActor();await db.transaction(tx=>tx.query("UPDATE platform_accounts SET state='closed' WHERE id=$1",[closed.platformAccountId]));
+    const closed=await makeActor();await closeActor(closed);
     await assert.rejects(()=>service.status(closed),{code:"GOOGLE_LINK_INVALID"});
   });
   await t.test("writes reject malformed current proof and future sessions without changing pending work",async()=>{
