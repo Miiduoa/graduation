@@ -233,7 +233,7 @@ function SettingsContent({
   const schoolReady = !selection || (
     !selection.loading && selection.catalogStatus === 'ready' && Boolean(selection.selectedSchoolId)
   );
-  const schoolLoginReady = useSignInOptions(selection?.selectedSchoolId ?? null, schoolReady).studentId;
+  const schoolLoginReady = useSignInOptions(selection?.selectedSchoolId ?? null, schoolReady, 'school').studentId;
   const mounted = useRef(true);
   const profileLock = useRef(false);
   const notificationLock = useRef(false);

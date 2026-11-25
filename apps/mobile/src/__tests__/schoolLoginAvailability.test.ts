@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import * as ecampusPolicy from '@campus/shared/src/puEcampusDataPolicy';
 import {
   isSchoolLoginEntryAvailable,
   isStudentIdLoginAvailable,
@@ -6,7 +7,7 @@ import {
   setSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
 import { signInWithStudentId } from '../services/studentIdAuth';
-import { setTCSavedCredentials } from '../services/tronClassClient';
+import { tcLogin } from '../services/tronClassClient';
 
 jest.mock('../services/mockAuth', () => ({ saveMockAuthSession: jest.fn() }));
 jest.mock('../services/puDirectScraper', () => ({
@@ -15,8 +16,7 @@ jest.mock('../services/puDirectScraper', () => ({
 }));
 jest.mock('../services/tronClassClient', () => ({
   setTCBackendSession: jest.fn(),
-  setTCSavedCredentials: jest.fn(),
-  clearTCSavedCredentials: jest.fn(),
+  tcLogin: jest.fn(),
   clearTCSession: jest.fn(),
 }));
 jest.mock('../services/puDataCache', () => ({}));
@@ -29,7 +29,9 @@ jest.mock('../firebase', () => ({
 }));
 jest.mock('../services/testSeedData', () => ({ seedTestData: jest.fn() }));
 jest.mock('../services/postLoginContextFromCaches', () => ({}));
-jest.mock('../services/postLoginDataRouter', () => ({}));
+jest.mock('../services/postLoginDataRouter', () => ({
+  clearPostLoginCache: jest.fn(async () => undefined),
+}));
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -53,7 +55,7 @@ test.each([
     await expect(
       signInWithStudentId({ schoolId: 'pu', studentId: 's123', password: 'secret' }),
     ).rejects.toThrow('帳號連線尚未開放');
-    expect(setTCSavedCredentials).not.toHaveBeenCalled();
+    expect(tcLogin).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
     globalThis.fetch = priorFetch;
   },
@@ -74,10 +76,16 @@ test('accepted SSO still refuses to send a different school credentials to Provi
   setSchoolLoginProviderKinds(['google-consumer']);
   expect(isSchoolLoginEntryAvailable('pu')).toBe(false);
   setSchoolLoginProviderKinds(['school-issued']);
-  expect(isSchoolLoginEntryAvailable('pu')).toBe(true);
+  expect(isSchoolLoginEntryAvailable('pu')).toBe(false);
+  const source = jest.spyOn(ecampusPolicy, 'isPuEcampusDataFetchEnabled').mockReturnValue(true);
+  try {
+    expect(isSchoolLoginEntryAvailable('pu')).toBe(true);
+  } finally {
+    source.mockRestore();
+  }
   expect(isStudentIdLoginAvailable('other-school')).toBe(false);
   await expect(
     signInWithStudentId({ schoolId: 'other-school', studentId: 's123', password: 'secret' }),
   ).rejects.toThrow('帳號連線尚未開放');
-  expect(setTCSavedCredentials).not.toHaveBeenCalled();
+  expect(tcLogin).not.toHaveBeenCalled();
 });

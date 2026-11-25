@@ -28,8 +28,7 @@ import {
 } from './puDirectScraper';
 import {
   setTCBackendSession,
-  setTCSavedCredentials,
-  clearTCSavedCredentials,
+  tcLogin,
   clearTCSession,
 } from './tronClassClient';
 import { isTronClassDataFetchEnabled } from './tronClassDataEnabled';
@@ -76,8 +75,8 @@ export function captureSchoolSessionAssertion(identity: { uid: string; schoolId:
 export function clearPUSession(): void {
   schoolLoginGeneration += 1;
   _currentPUSession = null;
-  clearTCSavedCredentials().catch(() => {});
   clearTCSession().catch(() => {});
+  clearPostLoginCache().catch(() => {});
 }
 
 // ─── Types ───────────────────────────────────────────────
@@ -217,7 +216,7 @@ async function tryBackendUnifiedLogin(
         displayName: (data.displayName as string) || `${studentId} 同學`,
         department: (data.department as string) || '',
         puSessionId: typeof data.puSessionId === 'string' && data.puSessionId.trim() ? data.puSessionId : null,
-        tronClassSessionId: (data.tronClassSessionId as string) || null,
+        tronClassSessionId: typeof data.tronClassSessionId === 'string' ? data.tronClassSessionId.trim() || null : null,
         tronClassUserId: (data.tronClassUserId as number) ?? null,
         studentInfo: data.studentInfo as PUStudentInfo | null,
         courses: data.courses as PUCourseResult | null,
@@ -242,9 +241,10 @@ async function tryBackendUnifiedLogin(
 import { seedTestData } from './testSeedData';
 import { syncPostLoginContextFromCaches } from './postLoginContextFromCaches';
 import { bindVerifiedSchoolAiScope } from './verifiedSchoolAiScope';
-import { routePostLoginData, routePostLoginDataWithContext } from './postLoginDataRouter';
+import { clearPostLoginCache, routePostLoginData, routePostLoginDataWithContext } from './postLoginDataRouter';
 
 async function runPostLoginContextPipeline(p: {
+  assertCurrent: () => void;
   assertVerifiedSession?: () => void;
   uid: string;
   schoolId: string;
@@ -252,10 +252,11 @@ async function runPostLoginContextPipeline(p: {
   email: string;
 }): Promise<void> {
   try {
+    p.assertCurrent();
     const context = await syncPostLoginContextFromCaches(p);
-    p.assertVerifiedSession?.();
+    p.assertCurrent();
     if (context && p.assertVerifiedSession) bindVerifiedSchoolAiScope(context, p.assertVerifiedSession);
-    await routePostLoginDataWithContext(p.schoolId, p.uid);
+    await routePostLoginDataWithContext(p.schoolId, p.uid, p.assertCurrent);
   } catch (e) {
     console.warn('[studentIdAuth] post-login context pipeline failed (continuing):', e);
   }
@@ -364,6 +365,7 @@ async function tryTestAccountLogin(
   password: string,
   schoolId: string,
   progress: OnLoginProgress,
+  assertCurrent: () => void,
 ): Promise<StudentIdLoginResult | null> {
   const test = TEST_ACCOUNTS.find(
     (t) => t.account.toLowerCase() === account.toLowerCase() && t.password === password,
@@ -394,24 +396,29 @@ async function tryTestAccountLogin(
   progress('syncingTronClass', '注入測試資料');
 
   // 注入跨角色互聯的種子資料（課表、成績、訂單等）
+  assertCurrent();
   await seedTestData(test.role);
+  assertCurrent();
 
   // 執行資料路由（測試帳號也要建立關聯圖）
   let routedRole: UserRole = test.role;
   try {
-    const routeResult = await routePostLoginData(test.role);
+    const routeResult = await routePostLoginData(test.role, 'none', { uid, schoolId, assertCurrent });
     routedRole = routeResult.roleInference.inferredRole;
   } catch (_) {
     /* ignore */
   }
 
+  assertCurrent();
   await runPostLoginContextPipeline({
+    assertCurrent,
     uid,
     email,
     schoolId,
     role: routedRole,
   });
 
+  assertCurrent();
   progress('linking', '完成');
 
   if (routedRole !== test.role) {
@@ -424,6 +431,7 @@ async function tryTestAccountLogin(
     loggedIn: true,
     studentName: test.displayName,
   };
+  assertCurrent();
   _currentPUSession = session;
 
   return {
@@ -488,6 +496,7 @@ export async function signInWithStudentId(params: {
     params.password,
     params.schoolId,
     progress,
+    assertBeforeExchange,
   );
   if (testResult) {
     return testResult;
@@ -515,7 +524,7 @@ export async function signInWithStudentId(params: {
   // ── 策略 B: 後端未回應時保留原生直連；明確拒絕不改走另一個登入管道。 ──
   console.log('[studentIdAuth] Backend unavailable, falling back to hybrid login…');
   try {
-    return await handleHybridLogin(studentId, params, progress);
+    return await handleHybridLogin(studentId, params, progress, assertBeforeExchange, assertAttempt);
   } catch (error) {
     if (
       isTeacherLmsUnavailableNotice(backendResult.code) ||
@@ -669,52 +678,38 @@ async function handleBackendLoginSuccess(
   };
 
   const tcAllowed = isTronClassDataFetchEnabled();
-
-  // ── TronClass 登入 + 資料同步（建置開關可跳過）──
-  const userAccount = params.studentId;
-  if (!tcAllowed) {
-    await clearTCSavedCredentials().catch(() => undefined);
+  let lmsConnected = false;
+  if (!tcAllowed || !tronClassSessionId) {
+    // 校務身分已切換，不能用舊帳號的課程連線填補這次登入的缺項。
+    await clearTCSession();
     assertCurrent();
-    await clearTCSession().catch(() => undefined);
-    assertCurrent();
-    progress('syncingTronClass', '已略過 LMS（TronClass）連線');
-  } else {
-    await setTCSavedCredentials(params.studentId, params.password);
-    assertCurrent();
+  }
+  if (tcAllowed) {
     progress('syncingTronClass', '登入 TronClass');
-
     try {
       if (tronClassSessionId) {
         await setTCBackendSession(tronClassSessionId, tronClassUserId);
+        lmsConnected = true;
+      } else if (data.source !== 'hosted') {
         assertCurrent();
-        console.log('[studentIdAuth] TronClass session stored, userId:', tronClassUserId);
-      }
-
-      if (!tronClassSessionId && data.source !== 'hosted') {
-        console.log('[studentIdAuth] TronClass session missing, retrying…');
-        const { tcLogin } = await import('./tronClassClient');
-        assertCurrent();
-        const tcRetry = await tcLogin(userAccount, params.password);
-        assertCurrent();
-        console.log('[studentIdAuth] TronClass retry', tcRetry.success ? 'OK' : 'FAILED');
-      }
-      if (!tronClassSessionId && data.source === 'hosted') {
-        await clearTCSession();
-        assertCurrent();
+        const login = await tcLogin(params.studentId, params.password);
+        lmsConnected = login.success && Boolean(login.session);
       }
     } catch (err) {
       console.warn('[studentIdAuth] TronClass login error (continuing):', err);
     }
     assertCurrent();
-
-    progress('syncingTronClass', '同步 TronClass 課程資料');
+    progress('syncingTronClass', lmsConnected ? '同步 TronClass 課程資料' : 'TronClass 暫時無法連線');
+  } else {
+    progress('syncingTronClass', '已略過 LMS（TronClass）連線');
   }
 
   let synchronized: SyncAllResult | null = null;
   try {
     synchronized = await syncAllData(session, {
       includeEssential: true,
-      fetchTronClass: !(data.source === 'hosted' && !tronClassSessionId),
+      fetchTronClass: lmsConnected,
+      includeTronClassDetails: false,
       includeExtended: data.source !== 'hosted',
     });
     console.log('[studentIdAuth] syncAllData completed');
@@ -727,7 +722,9 @@ async function handleBackendLoginSuccess(
 
   // ── 登入後資料路由：推斷角色 + 建立師生關聯 ──
   try {
-    const routeResult = await routePostLoginData(result.role);
+    const routeResult = await routePostLoginData(result.role, lmsConnected ? 'course-list' : 'none', {
+      uid, schoolId: params.schoolId, assertCurrent,
+    });
     if (routeResult.roleInference.inferredRole !== result.role) {
       result.role = routeResult.roleInference.inferredRole;
       console.log(
@@ -738,8 +735,8 @@ async function handleBackendLoginSuccess(
     console.warn('[studentIdAuth] postLoginDataRouter failed (continuing):', err);
   }
   assertCurrent();
-
   await runPostLoginContextPipeline({
+    assertCurrent,
     uid: result.uid, schoolId: result.schoolId, role: result.role, email: result.email,
     ...(requester && !data.localMock ? { assertVerifiedSession: assertCurrent } : {}),
   });
@@ -764,6 +761,8 @@ async function handleHybridLogin(
   userAccount: string,
   params: { studentId: string; password: string; schoolId: string; schoolName?: string },
   progress: OnLoginProgress,
+  assertBeforeExchange: () => void,
+  assertAttempt: () => void,
 ): Promise<StudentIdLoginResult> {
   const password = params.password;
 
@@ -778,7 +777,6 @@ async function handleHybridLogin(
     ? (async () => {
         try {
           console.log('[studentIdAuth] Hybrid: TronClass login (parallel)…');
-          const { tcLogin } = await import('./tronClassClient');
           const tcResult = await tcLogin(userAccount, password);
           if (tcResult.success && tcResult.session) {
             tcLoginOk = true;
@@ -822,6 +820,7 @@ async function handleHybridLogin(
   // 各請求本身已有逾時；等到登入完成再決定結果，避免舊請求在下一次登入時晚到。
   await Promise.allSettled(tcAllowed ? [tcLoginPromise, puLoginPromise] : [puLoginPromise]);
 
+  assertBeforeExchange();
   // ── 判斷登入結果 ──
   if (!puLoginOk && !tcLoginOk) {
     throw new Error(
@@ -831,11 +830,24 @@ async function handleHybridLogin(
     );
   }
 
+  if (!tcLoginOk) {
+    await clearTCSession();
+    assertBeforeExchange();
+  }
+  const requester = hasUsableFirebaseConfig() ? getAuthInstance().currentUser : null;
+  const assertCurrent = () => {
+    assertAttempt();
+    if (_currentPUSession !== session ||
+        (hasUsableFirebaseConfig() && getAuthInstance().currentUser !== requester)) {
+      throw new Error('帳號已變更，請重新登入。');
+    }
+  };
   // 如果 E校園 成功，使用它的 session
   if (puLoginOk && session) {
     _currentPUSession = session;
     try {
       const adapter = await getAdapter('tw-pu');
+      assertCurrent();
       if (adapter && adapter instanceof PUAdapter) {
         adapter.setDirectSession(session, userAccount);
       }
@@ -849,7 +861,9 @@ async function handleHybridLogin(
     _currentPUSession = session;
   }
 
+  assertCurrent();
   await clearPUCache();
+  assertCurrent();
 
   // ── Step 2: 嘗試同步 E校園 資料（如果 E校園 有連上） ──
   let displayName = session!.studentName ?? tcSession?.userName ?? `${userAccount} 同學`;
@@ -866,6 +880,7 @@ async function handleHybridLogin(
       refreshAnnouncements(session!),
     ]);
 
+    assertCurrent();
     if (studentInfoResult.status === 'fulfilled' && studentInfoResult.value) {
       const info = studentInfoResult.value;
       if (info.name) displayName = info.name;
@@ -874,6 +889,7 @@ async function handleHybridLogin(
     } else {
       try {
         const infoResult = await puFetchStudentInfo(session!);
+        assertCurrent();
         if (infoResult.success && infoResult.data) {
           if (infoResult.data.name) displayName = infoResult.data.name;
           if (infoResult.data.studentId) realStudentId = infoResult.data.studentId;
@@ -887,6 +903,7 @@ async function handleHybridLogin(
     // 重新注入 PUAdapter（用 realStudentId）
     try {
       const adapter = await getAdapter('tw-pu');
+      assertCurrent();
       if (adapter && adapter instanceof PUAdapter) {
         adapter.setDirectSession(session!, realStudentId);
       }
@@ -917,13 +934,9 @@ async function handleHybridLogin(
     studentId: realStudentId,
     loginAccount: userAccount,
   };
+  assertCurrent();
   await saveMockAuthSession(mockSession);
-  if (isTronClassDataFetchEnabled()) {
-    await setTCSavedCredentials(userAccount, password);
-  } else {
-    await clearTCSavedCredentials().catch(() => undefined);
-  }
-
+  assertCurrent();
   const result: StudentIdLoginResult = {
     uid,
     email,
@@ -937,36 +950,26 @@ async function handleHybridLogin(
 
   let synchronized: SyncAllResult | null = null;
 
-  // ── Step 4: TronClass 資料同步（建置關閉或登入失敗時僅同步 E 校園可及資料）──
-  if (tcLoginOk) {
-    progress('syncingTronClass', '同步 TronClass 課程資料');
-    try {
-      synchronized = await syncAllData(session!, { includeEssential: true });
-      console.log('[studentIdAuth] Hybrid: syncAllData completed');
-    } catch (err) {
-      console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
-    }
-  } else if (puLoginOk) {
-    if (tcAllowed) {
-      console.log('[studentIdAuth] Hybrid: TronClass failed, skipping retry to avoid long wait');
-      progress('syncingTronClass', 'TronClass 暫時無法連線');
-    } else {
-      progress('syncingTronClass', '已略過 LMS（TronClass）連線');
-    }
-
-    try {
-      synchronized = await syncAllData(session!, { includeEssential: true });
-      console.log('[studentIdAuth] Hybrid: syncAllData completed (E-campus / 無 TronClass)');
-    } catch (err) {
-      console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
-    }
+  progress('syncingTronClass', tcLoginOk ? '同步 TronClass 課程資料'
+    : tcAllowed ? 'TronClass 暫時無法連線' : '已略過 LMS（TronClass）連線');
+  try {
+    synchronized = await syncAllData(session!, {
+      includeEssential: true,
+      fetchTronClass: tcLoginOk,
+      includeTronClassDetails: false,
+    });
+  } catch (err) {
+    console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
   }
 
+  assertCurrent();
   result.syncSummary = buildSchoolSyncSummary(synchronized, tcAllowed);
 
   // ── 登入後資料路由：推斷角色 + 建立師生關聯 ──
   try {
-    const routeResult = await routePostLoginData(result.role);
+    const routeResult = await routePostLoginData(result.role, tcLoginOk ? 'course-list' : 'none', {
+      uid, schoolId: params.schoolId, assertCurrent,
+    });
     if (routeResult.roleInference.inferredRole !== result.role) {
       result.role = routeResult.roleInference.inferredRole;
       console.log(
@@ -977,12 +980,15 @@ async function handleHybridLogin(
     console.warn('[studentIdAuth] Hybrid: postLoginDataRouter failed (continuing):', err);
   }
 
+  assertCurrent();
   await runPostLoginContextPipeline({
+    assertCurrent,
     uid: result.uid,
     schoolId: result.schoolId,
     role: result.role,
     email: result.email,
   });
+  assertCurrent();
 
   return result;
 }

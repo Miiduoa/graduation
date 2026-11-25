@@ -38,7 +38,7 @@ type CourseReadState = {
 
 function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; returnUrl: string }) {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
-  const options = useSignInOptions();
+  const options = useSignInOptions(undefined, true, 'school');
   const [status, setStatus] = useState<TronClassCourseStatus>('ongoing');
   const [search, setSearch] = useState('');
   const [reload, setReload] = useState(0);

@@ -88,7 +88,7 @@ function compactLayout() {
 const serverLayout = () => false;
 
 function ShareNeedsSchoolAccountNotice({ schoolId }: { schoolId: string }) {
-  const options = useSignInOptions();
+  const options = useSignInOptions(undefined, true, 'school');
   if (options.loading || options.error || !options.studentId) {
     return <p className={styles.notice}>{SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY}</p>;
   }
@@ -111,7 +111,7 @@ function FriendTimetableAccessNotice({
   onViewOwnFree?: () => void;
   busy: boolean;
 }) {
-  const options = useSignInOptions();
+  const options = useSignInOptions(undefined, true, 'school');
   return (
     <>
       <p

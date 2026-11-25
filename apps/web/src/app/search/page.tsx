@@ -66,7 +66,7 @@ function ServiceDirectory() {
     [],
   );
   const schoolSearch = useCampusNavigationSearch(params);
-  const options = useSignInOptions();
+  const options = useSignInOptions(undefined, true, 'school');
   const queryString = params.toString();
   const schoolParams = new URLSearchParams(schoolSearch);
   const requestedCampus = schoolParams.get('campus') || schoolParams.get('schoolId');

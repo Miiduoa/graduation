@@ -4,10 +4,12 @@ import { fireEventAsync, renderAsync } from '@testing-library/react-native';
 import type { useNuniSession } from '../state/nuniSession';
 import LoginLandingScreen from '../screens/LoginLandingScreen';
 import { safeNavigate } from '../utils/safeNavigate';
+import { loadSchoolLoginProviderKinds } from '../services/schoolLoginAvailability';
 
 const mockNavigation = { navigate: jest.fn() };
 let mockAuth: ReturnType<typeof useNuniSession>;
 let mockProviderAvailable = false;
+let mockAvailabilityState: 'unknown' | 'loading' | 'error' | undefined;
 let mockSchool = { id: 'pu', name: '靜宜大學' };
 
 jest.mock('@react-navigation/native', () => ({
@@ -25,7 +27,9 @@ jest.mock('../ui/useThemeStyleSheet', () => ({
   useThemeStyleSheet: <T,>(create: () => T) => create(),
 }));
 jest.mock('../services/schoolLoginAvailability', () => ({
-  isSchoolLoginEntryAvailable: () => mockProviderAvailable,
+  getSchoolLoginAvailabilityState: (schoolId: string) => schoolId !== 'pu'
+    ? 'unavailable' : mockAvailabilityState ?? (mockProviderAvailable ? 'available' : 'unavailable'),
+  isSchoolLoginEntryAvailable: (schoolId: string) => schoolId === 'pu' && mockProviderAvailable,
   loadSchoolLoginProviderKinds: jest.fn(async () => []),
 }));
 jest.mock('../components/SchoolBrowsingControl', () => ({
@@ -40,6 +44,7 @@ jest.mock('../components/TodayTimetablePanel', () => ({
 beforeEach(() => {
   jest.clearAllMocks();
   mockProviderAvailable = false;
+  mockAvailabilityState = undefined;
   mockSchool = { id: 'pu', name: '靜宜大學' };
   mockAuth = {
     session: null,
@@ -59,6 +64,39 @@ beforeEach(() => {
 function landing() {
   return renderAsync(<LoginLandingScreen />);
 }
+
+it('checks the newly selected school without keeping the previous school entry', async () => {
+  mockProviderAvailable = true;
+  const view = await landing();
+  expect(loadSchoolLoginProviderKinds).toHaveBeenLastCalledWith('pu');
+  expect(view.getByTestId('school-login-start')).toBeTruthy();
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  await view.rerenderAsync(<LoginLandingScreen />);
+  expect(loadSchoolLoginProviderKinds).toHaveBeenLastCalledWith('nthu');
+  expect(view.queryByTestId('school-login-start')).toBeNull();
+  expect(view.getByTestId('school-import-start')).toBeTruthy();
+});
+
+it('offers a retry after a failed availability check without claiming the school is closed', async () => {
+  mockAvailabilityState = 'error';
+  const view = await landing();
+  expect(view.queryByText('尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。')).toBeNull();
+  expect(view.queryByTestId('school-login-start')).toBeNull();
+  jest.mocked(loadSchoolLoginProviderKinds).mockImplementationOnce(async () => {
+    mockAvailabilityState = undefined;
+    mockProviderAvailable = true;
+    return ['student-id'];
+  });
+  await fireEventAsync.press(view.getByTestId('school-login-check-retry'));
+  expect(view.queryByTestId('school-login-check-retry')).toBeNull();
+  expect(view.getAllByTestId('school-login-start')).toHaveLength(1);
+  expect(view.getAllByTestId('school-import-start')).toHaveLength(1);
+  const tree = JSON.stringify(view.toJSON());
+  expect(tree.indexOf('"testID":"school-login-start"')).toBeLessThan(tree.indexOf('"testID":"login-start"'));
+  expect(tree.indexOf('"testID":"login-start"')).toBeLessThan(tree.indexOf('"testID":"school-import-start"'));
+  expect(safeNavigate).not.toHaveBeenCalled();
+  expect(mockAuth.signIn).not.toHaveBeenCalled();
+});
 
 it('lets the school picker handle the first result tap while its keyboard is open', async () => {
   const view = await landing();
@@ -89,21 +127,25 @@ it('prioritizes an offered school entry for a signed-out student without moving 
   expect(view.getAllByTestId('school-login-start')).toHaveLength(1);
   expect(tree.indexOf('"testID":"school-login-start"')).toBeLessThan(tree.indexOf('"testID":"login-start"'));
   expect(tree.indexOf('"testID":"login-start"')).toBeLessThan(tree.indexOf('"testID":"school-import-start"'));
-  expect(view.getByText('前往學校帳號登入')).toBeTruthy();
+  expect(view.getByText('使用學校帳號登入')).toBeTruthy();
   expect(view.queryByText('學號登入（尚未開放）')).toBeNull();
   await fireEventAsync.press(view.getByTestId('school-login-start'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'SSOLogin');
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });
 
-it('keeps recovery above school entry and never starts either login automatically', async () => {
+it.each([
+  { label: '確認 Google 帳號', patch: { loading: true } },
+  { label: '處理未完成的登出', patch: { pendingLogout: true } },
+  { label: '查看登入問題', patch: { error: '目前無法連線' } },
+])('keeps $label above school entry and never starts either login automatically', async ({ label, patch }) => {
   mockProviderAvailable = true;
-  mockAuth = { ...mockAuth, pendingLogout: true };
+  mockAuth = { ...mockAuth, ...patch };
   const view = await landing();
   const tree = JSON.stringify(view.toJSON());
   expect(view.getAllByTestId('school-login-start')).toHaveLength(1);
   expect(tree.indexOf('"testID":"login-start"')).toBeLessThan(tree.indexOf('"testID":"school-login-start"'));
-  expect(view.getByText('處理未完成的登出')).toBeTruthy();
+  expect(view.getByText(label)).toBeTruthy();
   expect(safeNavigate).not.toHaveBeenCalled();
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });
@@ -211,6 +253,7 @@ it.each([false, true])('opens the platform without selecting or verifying a scho
 });
 
 it('a verified Google account resumes named tasks before setup without querying or assuming a school role', async () => {
+  mockProviderAvailable = true;
   mockAuth.session = {
     platformAccountId: 'pa_student', context: 'account-a', isPlatformOperator: false,
     expiresAt: Date.now() + 60_000,
@@ -221,6 +264,8 @@ it('a verified Google account resumes named tasks before setup without querying 
   expect(view.getAllByTestId('today-timetable-panel')).toHaveLength(1);
   expect(view.getAllByTestId('public-PersonalCalendar')).toHaveLength(1);
   const tree = JSON.stringify(view.toJSON());
+  expect(view.getAllByTestId('school-login-start')).toHaveLength(1);
+  expect(tree.indexOf('"testID":"login-start"')).toBeLessThan(tree.indexOf('"testID":"school-login-start"'));
   expect(tree.indexOf('today-timetable-panel')).toBeLessThan(tree.indexOf('school-import-start'));
   for (const [label, tab] of [['回到我的課程', 'courses'], ['點餐與訂單', 'food'], ['帳號與資格', 'account']]) {
     await fireEventAsync.press(view.getByText(label));
@@ -257,4 +302,16 @@ it.each([
   } finally {
     open.mockRestore();
   }
+});
+
+it('offers the available school first and accurately labels the school sign-in', async () => {
+  mockProviderAvailable = true;
+  const view = await landing();
+  const tree = JSON.stringify(view.toJSON());
+  expect(tree.indexOf('"testID":"school-login-start"')).toBeLessThan(tree.indexOf('"testID":"login-start"'));
+  expect(view.getByText('使用學校帳號登入')).toBeTruthy();
+  expect(view.queryByText('學號登入（尚未開放）')).toBeNull();
+  await fireEventAsync.press(view.getByTestId('school-login-start'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'SSOLogin');
+  expect(mockAuth.signIn).not.toHaveBeenCalled();
 });

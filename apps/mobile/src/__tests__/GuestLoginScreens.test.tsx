@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import Constants from 'expo-constants';
 import { Alert } from 'react-native';
+import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import { signInWithCredential } from 'firebase/auth';
 import LoginLandingScreen from '../screens/LoginLandingScreen';
 import MeAiFirstScreen from '../screens/MeAiFirstScreen';
@@ -18,6 +19,7 @@ import { applyTheme, createLightTheme, createDarkTheme, clearSchoolTheme } from 
 import { Button } from '../ui/components';
 
 const mockNavigation = { navigate: jest.fn() };
+const originalFetch = globalThis.fetch;
 const mockRefreshProfile = jest.fn();
 let mockAuthUser: { uid: string; displayName?: string; email?: string } | null = null;
 let mockAuthProfile: {
@@ -55,6 +57,10 @@ jest.mock('../state/nuniSession', () => ({ useNuniSession: () => mockPlatformAut
 jest.mock('../state/school', () => ({
   useSchool: () => ({ school: mockSchool }),
 }));
+jest.mock('../services/tronClassWebUiGate', () => ({
+  ...jest.requireActual('../services/tronClassWebUiGate'),
+  webBrowserOpenWithPuTronClassGate: jest.fn(),
+}));
 jest.mock('../services/studentIdAuth', () => ({ signInWithStudentId: jest.fn() }));
 jest.mock('../firebase', () => ({ getAuthInstance: jest.fn() }));
 jest.mock('firebase/auth', () => ({ signInWithCredential: jest.fn() }));
@@ -74,6 +80,8 @@ beforeEach(() => {
   mockAuthProfile = null;
   mockPlatformAuth = { session: null, loading: false, error: '', pendingLogout: false };
   jest.mocked(signInWithStudentId).mockReset();
+  jest.mocked(webBrowserOpenWithPuTronClassGate).mockReset();
+  jest.mocked(webBrowserOpenWithPuTronClassGate).mockResolvedValue(true);
   mockRefreshProfile.mockReset();
   mockRefreshProfile.mockResolvedValue(undefined);
   jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
@@ -83,6 +91,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   jest.useRealTimers();
+  globalThis.fetch = originalFetch;
   jest.restoreAllMocks();
   resetSchoolLoginProviderCache();
   act(() => applyTheme('light'));
@@ -106,6 +115,63 @@ test('the platform account entry uses the same account destination without signi
   expect(signInWithCredential).not.toHaveBeenCalled();
   expect(signInWithStudentId).not.toHaveBeenCalled();
   expect(mockRefreshProfile).not.toHaveBeenCalled();
+});
+
+test('the school source guide reflects the E-campus pause and the current LMS build flag', () => {
+  const view = render(<SSOLoginScreen />);
+  expect(view.getByText('E 校園目前暫停讀取課表、歷年成績與學分紀錄。')).toBeTruthy();
+  expect(view.getByText('此版本尚未開啟玩課雲課程連線。')).toBeTruthy();
+  Object.assign(Constants.expoConfig!, { extra: { appEnv: 'development', tronClassDataEnabled: true } });
+  view.rerender(<SSOLoginScreen />);
+  expect(view.getByText(/玩課雲連線成功後會顯示課程清單的讀取結果/)).toBeTruthy();
+  expect(view.queryByText('此版本尚未開啟玩課雲課程連線。')).toBeNull();
+});
+
+test('school availability failures can be retried without signing in or claiming closure', async () => {
+  resetSchoolLoginProviderCache();
+  const request = jest.fn()
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify({ studentId: true }),
+    } as Response);
+  globalThis.fetch = request as typeof fetch;
+  const view = render(<SSOLoginScreen />);
+  expect(view.getByText('確認學校登入方式')).toBeTruthy();
+  expect(view.queryByTestId('student-password-input')).toBeNull();
+  await view.findByText('無法確認學校登入方式');
+  expect(view.queryByText('學校連線尚未開放')).toBeNull();
+  expect(view.getByRole('button', { name: '用 Google 帳號登入' })).toBeEnabled();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '重新確認學校登入' })));
+  expect(await view.findByTestId('student-id-input')).toBeTruthy();
+  expect(view.queryByText('無法確認學校登入方式')).toBeNull();
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(request.mock.calls.every(([url]) => url === 'https://nuni.tw/api/nuni/sign-in-options?scope=school&schoolId=pu')).toBe(true);
+  expect(signInWithStudentId).not.toHaveBeenCalled();
+  expect(signInWithCredential).not.toHaveBeenCalled();
+});
+
+test('a late Providence capability cannot open credentials after changing schools', async () => {
+  resetSchoolLoginProviderCache();
+  let finish!: (value: Response) => void;
+  const request = jest.fn().mockImplementationOnce(
+    () => new Promise((resolve) => { finish = resolve; }),
+  );
+  globalThis.fetch = request as typeof fetch;
+  const view = render(<SSOLoginScreen />);
+  expect(view.getByText('確認學校登入方式')).toBeTruthy();
+  mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
+  view.rerender(<SSOLoginScreen />);
+  expect(view.getByText('學校連線尚未開放')).toBeTruthy();
+  await act(async () => finish({
+    ok: true,
+    text: async () => JSON.stringify({ studentId: true }),
+  } as Response));
+  expect(view.queryByTestId('student-id-input')).toBeNull();
+  expect(view.queryByTestId('student-password-input')).toBeNull();
+  expect(view.queryByText('重新確認學校登入')).toBeNull();
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(signInWithStudentId).not.toHaveBeenCalled();
 });
 
 test('a pending school request keeps both the form and platform navigation locked', () => {
@@ -190,7 +256,7 @@ test('school success keeps both flows locked and clears the pending dialog after
   }
 });
 
-test('school success reports the actual source counts and an unavailable course platform', async () => {
+test('school success separates E-campus data from the TronClass course list', async () => {
   jest.useFakeTimers();
   try {
     jest.mocked(signInWithStudentId).mockResolvedValueOnce({
@@ -221,10 +287,10 @@ test('school success reports the actual source counts and an unavailable course 
           },
           {
             key: 'learning',
-            title: '課程平台',
+            title: '課程清單',
             source: '玩課雲',
             state: 'unavailable',
-            detail: '尚未取得，請重新連線後再試',
+            detail: '尚未取得課程清單，請重新連線後再試',
           },
         ],
       },
@@ -234,13 +300,14 @@ test('school success reports the actual source counts and an unavailable course 
     await act(async () => fireEvent.press(view.getByText('使用學號登入')));
     expect(view.getByText('已讀取 6 筆上課紀錄')).toBeTruthy();
     expect(view.getByText('已讀取 28 筆成績')).toBeTruthy();
-    expect(view.getByText('尚未取得，請重新連線後再試')).toBeTruthy();
+    expect(view.getByText('課程清單 · 玩課雲')).toBeTruthy();
+    expect(view.getByText('尚未取得課程清單，請重新連線後再試')).toBeTruthy();
     expect(view.getByText('部分資料尚未取得，可先查看已完成的項目。')).toBeTruthy();
     expect(view.getByText(/尚未取得校方完整畢業審核/)).toBeTruthy();
     act(() => jest.advanceTimersByTime(250));
     expect(Alert.alert).toHaveBeenCalledWith(
       '登入成功',
-      expect.stringContaining('課程平台：尚未取得，請重新連線後再試'),
+      expect.stringContaining('課程清單：尚未取得課程清單，請重新連線後再試'),
       expect.any(Array),
     );
     view.unmount();
@@ -479,16 +546,44 @@ test('a release without school SSO keeps public and platform entries, but does n
   expect(signInWithStudentId).not.toHaveBeenCalled();
 });
 
+test.each(['production', 'preview'])('paused PU login never displays credential fields in %s', async (appEnv) => {
+  Object.assign(Constants.expoConfig!, {
+    extra: {
+      appEnv,
+      tronClassDataEnabled: true,
+      release: { releasedSchoolIds: ['pu'], features: { enabled: true, sso: true } },
+    },
+  });
+  setSchoolLoginProviderKinds(['school-issued']);
+  const landing = render(<LoginLandingScreen />);
+  expect(landing.queryByTestId('school-login-start')).toBeNull();
+  expect(landing.getByTestId('school-tronclass-open')).toBeTruthy();
+  expect(landing.getByTestId('login-start')).toBeTruthy();
+  landing.unmount();
+
+  const direct = render(<SSOLoginScreen />);
+  expect(direct.queryByTestId('student-password-input')).toBeNull();
+  await act(async () => {});
+  expect(direct.queryByTestId('student-id-input')).toBeNull();
+  expect(direct.queryByTestId('student-password-input')).toBeNull();
+  expect(direct.getByRole('button', { name: '用 Google 帳號登入' })).toBeTruthy();
+  expect(signInWithStudentId).not.toHaveBeenCalled();
+});
+
 test('the guest school-login entry always follows the selected university', () => {
   const view = render(<LoginLandingScreen />);
   expect(view.getByTestId('school-login-start')).toBeTruthy();
-  expect(view.getByText('學校帳號')).toBeTruthy();
-  expect(view.getByText('前往學校帳號登入')).toBeTruthy();
+  expect(view.getByText('使用學校帳號開始')).toBeTruthy();
+  expect(view.getByText('使用學校帳號登入')).toBeTruthy();
   expect(
     view.getByText(
       '手動匯入仍可獨立使用，不需要登入學校；校方資料的連線狀態與平台帳號分別確認。',
     ),
   ).toBeTruthy();
+  expect(view.queryByTestId('school-login-hint')).toBeNull();
+  expect(view.queryByText(/尚未開放學號直接登入/)).toBeNull();
+  expect(view.queryByText('學校帳號（尚未開放）')).toBeNull();
+  expect(view.queryByText('學號登入（尚未開放）')).toBeNull();
   expect(view.queryByText(/可直接使用 e 校園帳號/)).toBeNull();
   expect(view.queryByText(/提供學號直接連線/)).toBeNull();
   expect(view.queryByText('可連線')).toBeNull();
@@ -497,6 +592,7 @@ test('the guest school-login entry always follows the selected university', () =
   mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
   view.rerender(<LoginLandingScreen />);
   expect(view.queryByTestId('school-login-start')).toBeNull();
+  expect(view.getByTestId('school-login-hint')).toBeTruthy();
   expect(
     view.getByText('尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。'),
   ).toBeTruthy();
@@ -507,6 +603,88 @@ test('the guest school-login entry always follows the selected university', () =
   expect(view.queryByText('可連線')).toBeNull();
   expect(view.queryByText('使用學號連線')).toBeNull();
   expect(view.queryByText(/提供學號直接連線/)).toBeNull();
+});
+
+test('the official TronClass directory opens without a nuni campus or account', async () => {
+  mockSchool = { id: '', name: '', shortName: '' };
+  const view = render(<LoginLandingScreen />);
+  expect(view.queryByTestId('school-tronclass-open')).toBeNull();
+  expect(view.queryByTestId('school-login-start')).toBeNull();
+  expect(view.getByText(/在 TronClass 官網搜尋學校或機構/)).toBeTruthy();
+  const directory = view.getByRole('link', { name: '前往 TronClass 登入' });
+  await act(async () => fireEvent.press(directory));
+  expect(webBrowserOpenWithPuTronClassGate).toHaveBeenCalledTimes(1);
+  expect(webBrowserOpenWithPuTronClassGate).toHaveBeenCalledWith('https://www.tronclass.com/login');
+  expect(signInWithStudentId).not.toHaveBeenCalled();
+  expect(signInWithCredential).not.toHaveBeenCalled();
+  expect(safeNavigate).not.toHaveBeenCalled();
+});
+
+describe('official school TronClass action on the guest landing', () => {
+  function enablePuTronClass() {
+    Object.assign(Constants.expoConfig!, { extra: { appEnv: 'development', tronClassDataEnabled: true } });
+  }
+
+  test('FJU opens the catalog address as an external site without signing in or syncing', async () => {
+    mockSchool = { id: 'fju', name: '輔仁大學', shortName: '輔大' };
+    const view = render(<LoginLandingScreen />);
+    expect(view.getByText(/在校方網站登入即可查看自己的課程/)).toBeTruthy();
+    await act(async () => fireEvent.press(view.getByTestId('school-tronclass-open')));
+    expect(webBrowserOpenWithPuTronClassGate).toHaveBeenCalledTimes(1);
+    expect(webBrowserOpenWithPuTronClassGate).toHaveBeenCalledWith('https://elearn2.fju.edu.tw/');
+    expect(signInWithStudentId).not.toHaveBeenCalled();
+    expect(signInWithCredential).not.toHaveBeenCalled();
+    expect(mockRefreshProfile).not.toHaveBeenCalled();
+    expect(safeNavigate).not.toHaveBeenCalled();
+    expect(view.queryByTestId('school-tronclass-open-failed')).toBeNull();
+  });
+
+  test('PU is hidden when the build gate blocks TronClass and opens through the gate when enabled', async () => {
+    const view = render(<LoginLandingScreen />);
+    expect(view.getByTestId('school-login-start')).toBeTruthy();
+    expect(view.queryByTestId('school-tronclass-open')).toBeNull();
+    expect(view.getByRole('link', { name: '前往 TronClass 登入' })).toBeTruthy();
+    enablePuTronClass();
+    view.rerender(<LoginLandingScreen />);
+    await act(async () => fireEvent.press(view.getByTestId('school-tronclass-open')));
+    expect(webBrowserOpenWithPuTronClassGate).toHaveBeenCalledWith('https://tronclass.pu.edu.tw/');
+    expect(signInWithStudentId).not.toHaveBeenCalled();
+  });
+
+  test('switching schools replaces or removes the action', () => {
+    mockSchool = { id: 'fju', name: '輔仁大學', shortName: '輔大' };
+    const view = render(<LoginLandingScreen />);
+    expect(view.getByText('開啟學校官方 輔大 TronClass →')).toBeTruthy();
+    mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
+    view.rerender(<LoginLandingScreen />);
+    expect(view.queryByTestId('school-tronclass-open')).toBeNull();
+    mockSchool = { id: 'fju', name: '輔仁大學', shortName: '輔大' };
+    view.rerender(<LoginLandingScreen />);
+    expect(view.getByTestId('school-tronclass-open')).toBeTruthy();
+  });
+
+  test('a failed opening is reported, and a late failure cannot affect the next school', async () => {
+    let finish!: (opened: boolean) => void;
+    jest.mocked(webBrowserOpenWithPuTronClassGate).mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    mockSchool = { id: 'fju', name: '輔仁大學', shortName: '輔大' };
+    const view = render(<LoginLandingScreen />);
+    fireEvent.press(view.getByTestId('school-tronclass-open'));
+    mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
+    view.rerender(<LoginLandingScreen />);
+    await act(async () => finish(false));
+    mockSchool = { id: 'fju', name: '輔仁大學', shortName: '輔大' };
+    view.rerender(<LoginLandingScreen />);
+    expect(view.queryByTestId('school-tronclass-open-failed')).toBeNull();
+
+    jest.mocked(webBrowserOpenWithPuTronClassGate).mockResolvedValueOnce(false);
+    await act(async () => fireEvent.press(view.getByTestId('school-tronclass-open')));
+    expect(view.getByTestId('school-tronclass-open-failed')).toHaveTextContent('無法開啟學校網站，請稍後再試。');
+    expect(signInWithStudentId).not.toHaveBeenCalled();
+  });
 });
 
 test('a direct school login route cannot show Providence credentials while browsing NTHU', () => {

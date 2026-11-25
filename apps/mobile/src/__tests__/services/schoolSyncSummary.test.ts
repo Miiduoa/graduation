@@ -25,3 +25,12 @@ test('distinguishes genuine empty responses, grades-based credits and unavailabl
 test('disabled learning fetch is identified without claiming zero courses', () => {
   expect(buildSchoolSyncSummary(null, false).items[3]).toMatchObject({ state: 'disabled' });
 });
+
+test('a course-list receipt never claims all TronClass content was synchronized', () => {
+  const summary = buildSchoolSyncSummary({ tcCourses: [{ id: 1 }] } as Partial<SyncAllResult>, true);
+  expect(summary.items[3]).toMatchObject({
+    title: '課程清單',
+    state: 'received',
+    detail: '已取得 1 門課程；作業、教材與課程成績需另行確認同步結果',
+  });
+});

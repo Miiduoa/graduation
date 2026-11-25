@@ -13,6 +13,7 @@ import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navig
 
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 import {
+  isPuEcampusDataFetchEnabled,
   PU_ECAMPUS_DATA_PAUSED_CODE,
   PU_ECAMPUS_DATA_PAUSED_MESSAGE,
 } from '@campus/shared/src/puEcampusDataPolicy';
@@ -26,9 +27,11 @@ import { useSchool } from '../state/school';
 import { finishLoginReturn } from '../utils/loginReturn';
 import { safeNavigate } from '../utils/safeNavigate';
 import { signInWithStudentId, type LoginProgress } from '../services/studentIdAuth';
+import { isTronClassDataFetchEnabled } from '../services/tronClassDataEnabled';
 import type { SchoolSyncSummary } from '../services/schoolSyncSummary';
 import {
   SCHOOL_LOGIN_BIND_HINT,
+  getSchoolLoginAvailabilityState,
   isSchoolLoginEntryAvailable,
   loadSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
@@ -73,9 +76,12 @@ function SchoolLoginContent(
   const nav = props?.navigation ?? routeNavigation;
   const auth = useAuth();
 
-  const [schoolLoginAvailable, setSchoolLoginAvailable] = useState(
-    isSchoolLoginEntryAvailable(school.id),
+  const [schoolLoginState, setSchoolLoginState] = useState(
+    getSchoolLoginAvailabilityState(school.id),
   );
+  const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
+  const schoolLoginAvailable = schoolLoginState === 'available' && isSchoolLoginEntryAvailable(school.id);
+  const checkingSchoolLogin = schoolLoginState === 'unknown' || schoolLoginState === 'loading';
 
   const [studentIdInput, setStudentIdInput] = useState('');
   const [studentPwInput, setStudentPwInput] = useState('');
@@ -91,9 +97,6 @@ function SchoolLoginContent(
 
   useEffect(() => {
     mounted.current = true;
-    void loadSchoolLoginProviderKinds().then(() => {
-      if (mounted.current) setSchoolLoginAvailable(isSchoolLoginEntryAvailable(school.id));
-    });
     return () => {
       mounted.current = false;
       // Authentication may still finish; only this screen's callbacks are invalidated.
@@ -101,6 +104,16 @@ function SchoolLoginContent(
       if (successTimer.current !== null) clearTimeout(successTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const pending = loadSchoolLoginProviderKinds(school.id);
+    setSchoolLoginState(getSchoolLoginAvailabilityState(school.id));
+    void pending.then(() => {
+      if (active) setSchoolLoginState(getSchoolLoginAvailabilityState(school.id));
+    });
+    return () => { active = false; };
+  }, [school.id, availabilityAttempt]);
 
   function beginAttempt(provider: LoginAttempt['provider']) {
     if (!mounted.current || activeAttempt.current) return null;
@@ -326,15 +339,39 @@ function SchoolLoginContent(
                 disabled={formLocked || !studentIdInput.trim() || !studentPwInput.trim()}
               />
               <View style={styles.sourceGuide}>
-                <Text style={styles.sourceTitle}>一次連線，分別讀取你的資料</Text>
-                <Text style={styles.note}>E 校園：課表、歷年成績與學分紀錄</Text>
-                <Text style={styles.note}>玩課雲：課程、教材與作業；使用相同帳密</Text>
+                <Text style={styles.sourceTitle}>本次可讀取的資料</Text>
+                <Text style={styles.note}>
+                  {isPuEcampusDataFetchEnabled()
+                    ? 'E 校園提供課表、歷年成績與學分紀錄，讀取結果會逐項顯示。'
+                    : 'E 校園目前暫停讀取課表、歷年成績與學分紀錄。'}
+                </Text>
+                <Text style={styles.note}>
+                  {isTronClassDataFetchEnabled()
+                    ? '玩課雲連線成功後會顯示課程清單的讀取結果。作業與教材需要另外讀取。'
+                    : '此版本尚未開啟玩課雲課程連線。'}
+                </Text>
               </View>
             </View>
           </AnimatedCard>
         ) : (
-          <AnimatedCard title="學校連線尚未開放">
-            <Text style={styles.body}>{SCHOOL_LOGIN_BIND_HINT}</Text>
+          <AnimatedCard title={schoolLoginState === 'error'
+            ? '無法確認學校登入方式'
+            : checkingSchoolLogin ? '確認學校登入方式' : '學校連線尚未開放'}>
+            <Text style={styles.body}>
+              {schoolLoginState === 'error'
+                ? '目前無法取得登入設定，請確認網路後重試。'
+                : checkingSchoolLogin
+                  ? '正在確認所選學校的登入方式，請稍候。'
+                  : SCHOOL_LOGIN_BIND_HINT}
+            </Text>
+            {schoolLoginState === 'error' ? (
+              <Button
+                text="重新確認學校登入"
+                kind="secondary"
+                onPress={() => setAvailabilityAttempt((attempt) => attempt + 1)}
+                disabled={formLocked}
+              />
+            ) : null}
           </AnimatedCard>
         )}
 

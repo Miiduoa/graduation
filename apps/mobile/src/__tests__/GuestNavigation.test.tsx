@@ -3,6 +3,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { PreAuthStack } from '../screens/PreAuthStack';
 import { Text } from 'react-native';
+import Constants from 'expo-constants';
 import { SchoolSessionBoundary, hasReadySchoolSession } from '../app/SchoolSessionBoundary';
 import { preAuthLinking } from '../app/preAuthLinking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,6 +13,7 @@ import {
   setSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
 
+const originalExtra = Constants.expoConfig?.extra;
 let mockBrowsingSchoolId = 'pu';
 let mockSelectionReady = true;
 let mockPlatformSession: { platformAccountId: string } | null = null;
@@ -55,6 +57,7 @@ jest.mock('expo-linking', () => ({
   },
 }));
 beforeEach(() => {
+  Object.assign(Constants.expoConfig!, { extra: { ...originalExtra, appEnv: 'development' } });
   mockSelectionReady = true;
   mockBrowsingSchoolId = 'pu';
   mockPlatformSession = null;
@@ -71,6 +74,7 @@ beforeEach(() => {
   setSchoolLoginProviderKinds(['school-issued']);
 });
 afterEach(() => {
+  Object.assign(Constants.expoConfig!, { extra: originalExtra });
   resetSchoolLoginProviderCache();
 });
 
@@ -185,7 +189,7 @@ jest.mock('../screens/CampusContentScreens', () => {
   };
 });
 
-test('the signed-out stack opens school login through the real navigation helper', async () => {
+test('the signed-out development stack opens school login through the real navigation helper', async () => {
   const onUnhandledAction = jest.fn();
   const navigation = createNavigationContainerRef();
   const content = () => (
@@ -203,14 +207,22 @@ test('the signed-out stack opens school login through the real navigation helper
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
-test('the primary signed-out entry opens the independent platform workspace', async () => {
+test('a signed-out production user can reach the platform while PU student login is paused', async () => {
+  Object.assign(Constants.expoConfig!, {
+    extra: {
+      appEnv: 'production',
+      release: { releasedSchoolIds: ['pu'], features: { enabled: true, sso: true } },
+    },
+  });
   const navigation = createNavigationContainerRef();
   const view = render(
     <NavigationContainer ref={navigation}>
       <PreAuthStack />
     </NavigationContainer>,
   );
-  fireEvent.press(await view.findByTestId('login-start'));
+  const platformLogin = await view.findByTestId('login-start');
+  expect(view.queryByTestId('school-login-start')).toBeNull();
+  fireEvent.press(platformLogin);
   await view.findByTestId('platform-workspace');
   expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
 });
