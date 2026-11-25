@@ -184,7 +184,7 @@ it('keeps a confirmed missing menu after a legacy list and an unavailable detail
   await waitFor(() => expect(confirmed.verifiedDetails().has(key)).toBe(true));
   mounted.rerender(workspace());
   await screen.findByText(/目前有 1 項有庫存的上架品項/);
-  expect(confirmed.confirmMenu(key, confirmed.beginRequest(), 1)).toBe(true);
+  expect(confirmed.confirmMenu(key, confirmed.beginRequest(), 1, current.readinessVersion)).toBe(true);
 
   current = { ...current, readinessVersion: 8 };
   confirmed.confirmDetail(current, confirmed.beginRequest(), true);
@@ -230,7 +230,9 @@ it('clears the initial menu success when a delayed versioned list confirms a mis
       onChanged={(detail, verifiedAccess, revision) =>
         confirmed.confirmDetail(detail, revision, verifiedAccess)
       }
-      onMenuConfirmed={(_, revision, createdItems) => confirmed.confirmMenu(key, revision, createdItems)}
+      onMenuConfirmed={(detail, revision, createdItems) =>
+        confirmed.confirmMenu(key, revision, createdItems, detail.readinessVersion)
+      }
       onExpired={onExpired}
     />
   );
@@ -869,7 +871,7 @@ it('ties shared access recovery to the GET version and the latest failure revisi
   expect(confirmed.detailReadConfirmation(key)).toBeUndefined();
   const backgroundRead = confirmed.beginRequest();
   const newerFailure = confirmed.beginRequest();
-  confirmed.recordReadFailure(newerFailure, [key]);
+  confirmed.recordReadFailure(newerFailure, key);
   confirmed.confirmDetail(v8, backgroundRead, true);
 
   expect(confirmed.detailFor(key)?.readinessVersion).toBe(8);
@@ -891,7 +893,7 @@ it.each([7, 8])('keeps a winning first-menu receipt through workspace snapshots 
   confirmed.mergeWorkspaceList([before], confirmed.beginRequest());
   confirmed.confirmDetail(before, confirmed.beginRequest(), true);
   const preWriteRead = confirmed.beginRequest();
-  expect(confirmed.confirmMenu(key, confirmed.beginRequest(), 1)).toBe(true);
+  expect(confirmed.confirmMenu(key, confirmed.beginRequest(), 1, before.readinessVersion)).toBe(true);
 
   const snapshot = { ...before, readinessVersion: version };
   confirmed.confirmDetail(snapshot, preWriteRead, true);
@@ -916,7 +918,7 @@ it('keeps omitted requirements on legacy detail through a same-version pre-write
   const draft = { menuReceipt: null as number | null };
   const confirmed = createMerchantConfirmations(new Map([[key, draft]]));
   confirmed.confirmDetail(legacy, confirmed.beginRequest(), true);
-  expect(confirmed.confirmMenu(key, confirmed.beginRequest(), 1)).toBe(true);
+  expect(confirmed.confirmMenu(key, confirmed.beginRequest(), 1, legacy.readinessVersion)).toBe(true);
 
   confirmed.confirmDetail(initial(), confirmed.beginRequest(), true);
   expect(confirmed.detailFor(key)?.missingRequirements).toBeUndefined();
@@ -931,7 +933,7 @@ it.each(['list', 'detail'])('reconciles a menu receipt when the %s response arri
   const confirmed = createMerchantConfirmations(new Map([[key, draft]]));
   confirmed.mergeWorkspaceList([before], confirmed.beginRequest());
   confirmed.confirmDetail(before, confirmed.beginRequest(), true);
-  expect(confirmed.confirmMenu(key, confirmed.beginRequest(), 1)).toBe(true);
+  expect(confirmed.confirmMenu(key, confirmed.beginRequest(), 1, before.readinessVersion)).toBe(true);
   // The list started later, so it wins same-version row fields in both orders.
   const readRevision = confirmed.beginRequest();
   const listRevision = confirmed.beginRequest();
@@ -940,7 +942,7 @@ it.each(['list', 'detail'])('reconciles a menu receipt when the %s response arri
   if (first === 'list') {
     list();
     expect(draft.menuReceipt).toBe(1);
-    expect(confirmed.postWriteReadConfirmation(key)).toBeUndefined();
+    expect(confirmed.reusableDetailRead(key)).toBeUndefined();
     detail();
   } else {
     detail();
@@ -950,14 +952,14 @@ it.each(['list', 'detail'])('reconciles a menu receipt when the %s response arri
   expect(draft.menuReceipt).toBe(1);
   expect(confirmed.overview()?.workspaces[0].missingRequirements).not.toContain('menu');
   expect(confirmed.detailFor(key)?.publishedMenuItems).toBe(1);
-  expect(confirmed.postWriteReadConfirmation(key)).toEqual({ revision: readRevision, version: 8 });
+  expect(confirmed.reusableDetailRead(key)).toEqual({ revision: readRevision, version: 8 });
 
   const failure = confirmed.beginRequest();
-  confirmed.recordReadFailure(failure, [key]);
-  expect(confirmed.postWriteReadConfirmation(key)).toBeUndefined();
+  confirmed.recordReadFailure(failure, key);
+  expect(confirmed.reusableDetailRead(key)).toBeUndefined();
   const recovery = confirmed.beginRequest();
   confirmed.confirmDetail(published, recovery, true);
-  expect(confirmed.postWriteReadConfirmation(key)).toEqual({ revision: recovery, version: 8 });
+  expect(confirmed.reusableDetailRead(key)).toEqual({ revision: recovery, version: 8 });
   confirmed.mergeWorkspaceList([{ ...published, readinessVersion: 9 }], confirmed.beginRequest());
-  expect(confirmed.postWriteReadConfirmation(key)).toBeUndefined();
+  expect(confirmed.reusableDetailRead(key)).toBeUndefined();
 });

@@ -370,7 +370,7 @@ export function MerchantOperations({
       if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
         return revokeDetail(revision, updateView);
       }
-      observations.recordReadFailure(revision, [draftKey]);
+      observations.recordReadFailure(revision, draftKey);
       return false;
     },
     [draftKey, expireSession, observations, revokeDetail],
@@ -444,7 +444,7 @@ export function MerchantOperations({
           // remains usable across entries until a newer write, version, or failure supersedes it.
           const retainedRevision = mode !== 'regular' && !deferred ? entryReadRevision.current : 0;
           const sharedRead = visible
-            ? observations.postWriteReadConfirmation(draftKey, retainedRevision)
+            ? observations.reusableDetailRead(draftKey, retainedRevision)
             : undefined;
           const detail = sharedRead && observations.detailFor(draftKey);
           if (sharedRead && detail && sharedRead.revision >= accessRevision.current) {
@@ -963,7 +963,9 @@ export function MerchantOperations({
                         if (!current()) return;
                         const accepted = onMenuConfirmed
                           ? onMenuConfirmed(detail, revision, receipt.createdItems)
-                          : localConfirmations.confirmMenu(draftKey, revision, receipt.createdItems);
+                          : localConfirmations.confirmMenu(
+                              draftKey, revision, receipt.createdItems, detail.readinessVersion,
+                            );
                         setMenuConfirmed(false);
                         const visible = visibleRef.current;
                         // Re-entered views refresh when the mutation settles.

@@ -2294,7 +2294,11 @@ it.each([
     const storeHeading = await screen.findByRole('heading', { name: '餐坊／一樓' });
     expect(!!screen.queryByRole('link', { name: '管理門市：一樓' })).toBe(!receiptFirst);
     const row = within(storeHeading.closest('li')!);
-    if (listVersion === undefined || (receiptFirst && listVersion === detailVersion)) {
+    if (!receiptFirst) {
+      expect(row.getByText('待完成：建立菜單')).toBeTruthy();
+      await resolveReceipt();
+    }
+    if (listVersion === undefined || listVersion === detailVersion) {
       if (listVersion === undefined) expect(row.getByText('待完成：確認營運設定與條款')).toBeTruthy();
       expect(row.queryByText(/建立菜單/)).toBeNull();
       const detailReadsBeforeForward = readDetail.mock.calls.length;
@@ -2309,11 +2313,6 @@ it.each([
     }
     expect(row.queryByText(/確認營運設定與條款/)).toBeNull();
     expect(row.getByText('待完成：建立菜單')).toBeTruthy();
-    if (!receiptFirst) {
-      await resolveReceipt();
-      expect(row.getByText('待完成：建立菜單')).toBeTruthy();
-    }
-
     const detailReadsBeforeForward = readDetail.mock.calls.length;
     await act(async () => window.history.forward());
     await screen.findByText('待完成：建立有庫存的首次菜單');
@@ -2385,7 +2384,7 @@ const firstMenuReceipt = {
 };
 
 it.each(['entry GET', 'list background GET'])(
-  'restores operations after a losing menu receipt and a stale post-write read with v8 from the %s',
+  'restores operations after a confirmed menu receipt and a stale post-write read with v8 from the %s',
   async (confirmationSource) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const initial = { ...detail(), readinessVersion: 7 };
@@ -2429,7 +2428,7 @@ it.each(['entry GET', 'list background GET'])(
 
     expect(screen.getByText('營業中')).toBeTruthy();
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
-    expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
+    expect(screen.getByText(/已建立 1 項首次菜單/)).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
     fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
     await screen.findByRole('region', { name: '門市訂單工作台' });
@@ -2438,7 +2437,7 @@ it.each(['entry GET', 'list background GET'])(
 );
 
 it.each([200, 403, 404, 503])(
-  'reconciles a losing menu write that settles on the list before history forward (GET %s)',
+  'reconciles a confirmed menu write that settles on the list before history forward (GET %s)',
   async (status) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const initial = { ...detail(), readinessVersion: 7 };
@@ -2487,7 +2486,7 @@ it.each([200, 403, 404, 503])(
 
     await screen.findByRole('button', { name: '暫停接單' });
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
-    expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
+    expect(screen.getByText(/已建立 1 項首次菜單/)).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
     fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
     await screen.findByRole('region', { name: '門市訂單工作台' });
@@ -3446,3 +3445,134 @@ it.each([
     expect(screen.getByLabelText('品項 1 名稱')).toBeTruthy();
   },
 );
+
+it('keeps both management entries closed for a store revealed by a retired list after a newer 503', async () => {
+  const known = detail('store-a', true);
+  const late = detail('store-b', true);
+  const latePath = 'merchant-workspaces/campus-one/store-b';
+  const pendingList = Promise.withResolvers<{ workspaces: NuniMerchantWorkspaceDetail[] }>();
+  const recovery = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+  const readLate = vi.fn(() => recovery.promise);
+  const readList = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [known] })
+    .mockReturnValueOnce(pendingList.promise)
+    .mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'))
+    .mockResolvedValue({ workspaces: [known, late] });
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === latePath) return readLate();
+    if (resource === 'merchant-applications') {
+      return Promise.resolve({ applications: [{
+        tenantId: late.tenantId,
+        applicationId: late.applicationId,
+        brandName: '核准申請',
+        locationName: late.locationName,
+        state: 'approved',
+        reviewerNote: '',
+        submittedAt: '2026-10-09T02:00:00.000Z',
+      }] });
+    }
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readList).toHaveBeenCalledTimes(2));
+  await act(async () => window.history.forward());
+  await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+  await act(async () => window.history.back());
+  await screen.findByText('目前無法確認店家資料，請重新載入。');
+
+  await act(async () => pendingList.resolve({ workspaces: [known, late] }));
+  await screen.findByRole('heading', { name: '餐坊／二樓' });
+  const storeLink = () => screen.queryByRole('link', { name: '管理門市：二樓' });
+  const applicationLink = () => screen.queryByRole('link', { name: '前往管理門市：二樓' });
+  expect(storeLink()).toBeNull();
+  expect(applicationLink()).toBeNull();
+  expect(readLate).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  await waitFor(() => expect(readLate).toHaveBeenCalledOnce());
+  expect(storeLink()).toBeNull();
+  expect(applicationLink()).toBeNull();
+  await act(async () => recovery.resolve(late));
+  expect(storeLink()).toBeTruthy();
+  expect(applicationLink()).toBeTruthy();
+});
+
+it.each(['list', 'background detail'] as const)(
+  'keeps a first-menu receipt arriving after a same-version %s observed the pre-write state',
+  async (source) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const before = { ...detail(), readinessVersion: 7 };
+    const published = { ...before, readinessVersion: 8, missingRequirements: ['settings'], publishedMenuItems: 1 };
+    const write = Promise.withResolvers<typeof firstMenuReceipt>();
+    const background = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+    const refresh = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+    const readDetail = vi.fn()
+      .mockResolvedValueOnce(before)
+      .mockReturnValueOnce(background.promise)
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValue(before);
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [before] });
+      if (resource === path) return readDetail();
+      if (resource === `${path}/initial-menu`) return write.promise;
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    await screen.findByLabelText('品項 1 名稱');
+    submitFirstMenu();
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+    if (source === 'background detail') await act(async () => background.resolve(before));
+
+    await act(async () => write.resolve(firstMenuReceipt));
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+    await act(async () => refresh.resolve(published));
+    if (source === 'list') await act(async () => background.resolve(before));
+    await act(async () => window.history.forward());
+    await screen.findByText(/已建立 1 項首次菜單/);
+    expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
+  },
+);
+
+it('reuses a current detail without a write through two stale re-entries and rejects it after a newer list version', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const current = { ...detail('store-a', true), readinessVersion: 8 };
+  const stale = { ...current, readinessVersion: 7 };
+  const readDetail = vi.fn().mockResolvedValueOnce(current).mockResolvedValue(stale);
+  const readList = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [current] })
+    .mockResolvedValueOnce({ workspaces: [current] })
+    .mockResolvedValueOnce({ workspaces: [current] })
+    .mockResolvedValueOnce({ workspaces: [{ ...current, readinessVersion: 9 }] });
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === path) return readDetail();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  const pause = () => screen.findByRole<HTMLButtonElement>('button', { name: '暫停接單' });
+  expect((await pause()).disabled).toBe(false);
+
+  for (const expectedReads of [3, 5]) {
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(expectedReads - 1));
+    await act(async () => window.history.forward());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(expectedReads));
+    expect((await pause()).disabled).toBe(false);
+  }
+
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(6));
+  await act(async () => window.history.forward());
+  await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+  expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
+});

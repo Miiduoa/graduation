@@ -418,11 +418,9 @@ function AccountWorkspace({
             }
           }),
           (error) => {
-            addTargets(confirmed.knownWorkspaces());
-            addTargets(visitedLocations.values());
             if (!denied(error)) {
               // The list loader can be retired before it starts detail rechecks.
-              confirmed.recordReadFailure(listRevision, targets.keys());
+              confirmed.recordReadFailure(listRevision);
             }
             confirmed.rejectWorkspaceList(denied(error), listRevision);
             publishOverview();
@@ -468,7 +466,7 @@ function AccountWorkspace({
                 publishOverview();
               }
             } else {
-              confirmed.recordReadFailure(revision, [key]);
+              confirmed.recordReadFailure(revision, key);
               detailUnavailable = true;
             }
           }
@@ -619,7 +617,9 @@ function AccountWorkspace({
   const onMenuConfirmed = useCallback(
     (detail: NuniMerchantWorkspaceDetail, revision: number, createdItems: number) => {
       if (!mounted.current || !enabled.current) return false;
-      const accepted = confirmed.confirmMenu(workspaceKey(detail), revision, createdItems);
+      const accepted = confirmed.confirmMenu(
+        workspaceKey(detail), revision, createdItems, detail.readinessVersion,
+      );
       if (accepted) publishOverview();
       return accepted;
     },
