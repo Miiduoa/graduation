@@ -66,6 +66,10 @@ function deferred<T>() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // A failed test can leave an unconsumed one-shot response; do not leak it into the next case.
+  vi.mocked(loadMapLocations).mockReset();
+  vi.mocked(loadMapFavorites).mockReset();
+  vi.mocked(setMapFavorite).mockReset();
   state.user = { uid: 'alice' };
   state.configured = true;
   vi.mocked(loadMapLocations).mockResolvedValue([library, gate]);
@@ -361,7 +365,7 @@ it.each([
   }
 });
 
-it('clears an automatic classroom when a source retry brings in a conflicting public name', async () => {
+it('keeps a classroom unconfirmed after source failure and a conflicting retry', async () => {
   const source = deferred<MapLocation[]>();
   vi.mocked(loadMapLocations)
     .mockRejectedValueOnce(new Error('offline'))
@@ -369,15 +373,21 @@ it('clears an automatic classroom when a source retry brings in a conflicting pu
   render(<MapClient school="pu" query="AK303" />);
   const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
   const retry = await screen.findByRole('button', { name: '重新讀取地點資料' });
-  expect(mapState().selected.id).toBe('pu-renyuan');
+  const result = within(screen.getByRole('region', { name: '教室定位結果' }));
+  expect(result.getByRole('status').textContent).toContain('暫時無法確認這間教室的位置');
+  expect(mapState().selected).toBeNull();
+  expect(screen.queryByRole('link', { name: '從目前位置導航' })).toBeNull();
 
   fireEvent.click(retry);
+  expect(result.getByRole('status').textContent).toContain('正在確認地點資料');
   expect(mapState().selected).toBeNull();
   await act(async () => source.resolve([
     { ...gate, id: 'synthetic-ak-bus-stop', name: 'AK303', category: '公車站' },
   ]));
   expect(mapState().selected).toBeNull();
   expect(screen.getByRole('button', { name: '查看AK303' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '從目前位置導航' })).toBeNull();
+  expect(loadMapLocations).toHaveBeenCalledTimes(2);
 });
 
 it('never replaces a missing explicit focus with the classroom guess, including after a source update', async () => {
