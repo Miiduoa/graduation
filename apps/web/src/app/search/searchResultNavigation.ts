@@ -2,6 +2,7 @@
 export const APP_ROUTER_HISTORY_PUSH = Symbol.for('nuni.app-router.history-push');
 export const APP_ROUTER_HISTORY_REPLACE = Symbol.for('nuni.app-router.history-replace');
 export const APP_ROUTER_SYNC_HISTORY_QUERY = Symbol.for('nuni.app-router.sync-history-query');
+export const APP_ROUTER_HISTORY_QUERY_DIFFERS = Symbol.for('nuni.app-router.history-query-differs');
 export const APP_ROUTER_HISTORY_QUERY_SYNC_BLOCKED = Symbol.for(
   'nuni.app-router.history-query-sync-blocked',
 );

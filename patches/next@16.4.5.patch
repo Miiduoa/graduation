@@ -38,11 +38,21 @@ diff --git a/dist/client/components/app-router.js b/dist/client/components/app-r
      const { canonicalUrl } = state;
      // Add memoized pathname/query for useSearchParams and usePathname.
      const { searchParams, pathname } = (0, _react.useMemo)(()=>{
-@@ -271,6 +277,14 @@
+@@ -271,6 +277,24 @@
          throw _unresolvedthenable.unresolvedThenable;
      }
      (0, _react.useEffect)(()=>{
++        const historyQueryDiffers = Symbol.for('nuni.app-router.history-query-differs');
 +        const historyQuerySyncBlocked = Symbol.for('nuni.app-router.history-query-sync-blocked');
++        const canonicalQueryDiffers = (target)=>{
++            const routerUrl = new URL(actionQueue.state.canonicalUrl, target);
++            return routerUrl.origin === target.origin && routerUrl.pathname === target.pathname &&
++                routerUrl.searchParams.toString() !== target.searchParams.toString();
++        };
++        Object.defineProperty(window.history, historyQueryDiffers, {
++            configurable: true,
++            value: canonicalQueryDiffers
++        });
 +        // The queue can advance before React commits the matching history entry.
 +        const isHistoryQuerySyncBlocked = ()=>actionQueue.pending?.payload.type === 'navigate' ||
 +            actionQueue.state !== committedRouterState.current;
@@ -53,7 +63,7 @@ diff --git a/dist/client/components/app-router.js b/dist/client/components/app-r
          const originalPushState = window.history.pushState.bind(window.history);
          const originalReplaceState = window.history.replaceState.bind(window.history);
          // Ensure the canonical URL in the Next.js Router is updated when the URL is changed so that `usePathname` and `useSearchParams` hold the pushed values.
-@@ -303,6 +317,22 @@
+@@ -303,6 +327,19 @@
              // TODO: Warn when Navigation API is available (navigation.navigate() should be used)
              // Avoid a loop when Next.js internals trigger pushState/replaceState
              if (data?.__NA || data?._N) {
@@ -64,10 +74,7 @@ diff --git a/dist/client/components/app-router.js b/dist/client/components/app-r
 +                    if (current.pathname === '/search' && current.origin === target.origin && current.pathname === target.pathname) {
 +                        const syncBlocked = isHistoryQuerySyncBlocked();
 +                        const result = originalReplaceState(data, _unused, url);
-+                        const routerUrl = new URL(actionQueue.state.canonicalUrl, current);
-+                        if (!syncBlocked && !isHistoryQuerySyncBlocked() &&
-+                            routerUrl.origin === current.origin && routerUrl.pathname === current.pathname &&
-+                            routerUrl.searchParams.toString() !== target.searchParams.toString()) {
++                        if (!syncBlocked && !isHistoryQuerySyncBlocked() && canonicalQueryDiffers(target)) {
 +                            applyUrlFromHistoryPushReplace(target);
 +                        }
 +                        return result;
@@ -76,15 +83,16 @@ diff --git a/dist/client/components/app-router.js b/dist/client/components/app-r
                  return originalReplaceState(data, _unused, url);
              }
              data = copyNextJsInternalHistoryState(data);
-@@ -320,6 +350,7 @@
+@@ -320,6 +357,8 @@
              }
          }
          return ()=>{
++            delete window.history[historyQueryDiffers];
 +            delete window.history[historyQuerySyncBlocked];
              window.history.pushState = originalPushState;
              window.history.replaceState = originalReplaceState;
              window.removeEventListener('popstate', onPopState);
-@@ -434,7 +465,8 @@
+@@ -434,7 +473,8 @@
      return /*#__PURE__*/ (0, _jsxruntime.jsxs)(_jsxruntime.Fragment, {
          children: [
              /*#__PURE__*/ (0, _jsxruntime.jsx)(HistoryUpdater, {
@@ -141,11 +149,21 @@ diff --git a/dist/esm/client/components/app-router.js b/dist/esm/client/componen
      const { canonicalUrl } = state;
      // Add memoized pathname/query for useSearchParams and usePathname.
      const { searchParams, pathname } = useMemo(()=>{
-@@ -259,6 +265,14 @@
+@@ -259,6 +265,24 @@
          throw unresolvedThenable;
      }
      useEffect(()=>{
++        const historyQueryDiffers = Symbol.for('nuni.app-router.history-query-differs');
 +        const historyQuerySyncBlocked = Symbol.for('nuni.app-router.history-query-sync-blocked');
++        const canonicalQueryDiffers = (target)=>{
++            const routerUrl = new URL(actionQueue.state.canonicalUrl, target);
++            return routerUrl.origin === target.origin && routerUrl.pathname === target.pathname &&
++                routerUrl.searchParams.toString() !== target.searchParams.toString();
++        };
++        Object.defineProperty(window.history, historyQueryDiffers, {
++            configurable: true,
++            value: canonicalQueryDiffers
++        });
 +        // The queue can advance before React commits the matching history entry.
 +        const isHistoryQuerySyncBlocked = ()=>actionQueue.pending?.payload.type === 'navigate' ||
 +            actionQueue.state !== committedRouterState.current;
@@ -156,7 +174,7 @@ diff --git a/dist/esm/client/components/app-router.js b/dist/esm/client/componen
          const originalPushState = window.history.pushState.bind(window.history);
          const originalReplaceState = window.history.replaceState.bind(window.history);
          // Ensure the canonical URL in the Next.js Router is updated when the URL is changed so that `usePathname` and `useSearchParams` hold the pushed values.
-@@ -291,6 +305,22 @@
+@@ -291,6 +315,19 @@
              // TODO: Warn when Navigation API is available (navigation.navigate() should be used)
              // Avoid a loop when Next.js internals trigger pushState/replaceState
              if (data?.__NA || data?._N) {
@@ -167,10 +185,7 @@ diff --git a/dist/esm/client/components/app-router.js b/dist/esm/client/componen
 +                    if (current.pathname === '/search' && current.origin === target.origin && current.pathname === target.pathname) {
 +                        const syncBlocked = isHistoryQuerySyncBlocked();
 +                        const result = originalReplaceState(data, _unused, url);
-+                        const routerUrl = new URL(actionQueue.state.canonicalUrl, current);
-+                        if (!syncBlocked && !isHistoryQuerySyncBlocked() &&
-+                            routerUrl.origin === current.origin && routerUrl.pathname === current.pathname &&
-+                            routerUrl.searchParams.toString() !== target.searchParams.toString()) {
++                        if (!syncBlocked && !isHistoryQuerySyncBlocked() && canonicalQueryDiffers(target)) {
 +                            applyUrlFromHistoryPushReplace(target);
 +                        }
 +                        return result;
@@ -179,15 +194,16 @@ diff --git a/dist/esm/client/components/app-router.js b/dist/esm/client/componen
                  return originalReplaceState(data, _unused, url);
              }
              data = copyNextJsInternalHistoryState(data);
-@@ -308,6 +338,7 @@
+@@ -308,6 +345,8 @@
              }
          }
          return ()=>{
++            delete window.history[historyQueryDiffers];
 +            delete window.history[historyQuerySyncBlocked];
              window.history.pushState = originalPushState;
              window.history.replaceState = originalReplaceState;
              window.removeEventListener('popstate', onPopState);
-@@ -422,7 +453,8 @@
+@@ -422,7 +461,8 @@
      return /*#__PURE__*/ _jsxs(_Fragment, {
          children: [
              /*#__PURE__*/ _jsx(HistoryUpdater, {

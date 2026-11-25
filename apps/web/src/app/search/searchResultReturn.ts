@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type RefObjec
 import { readCampusServiceFilters, SERVICE_CATEGORIES, type ServiceCategory } from '@/lib/campusServices';
 
 import {
+  APP_ROUTER_HISTORY_QUERY_DIFFERS,
   APP_ROUTER_HISTORY_QUERY_SYNC_BLOCKED,
   APP_ROUTER_HISTORY_PUSH,
   APP_ROUTER_HISTORY_REPLACE,
@@ -179,9 +180,15 @@ function installHistoryTracking() {
         targetUrl?.origin === window.location.origin && incomingNextFields.__NA && syncQuery;
       // Both wrapper orders consult Next before the native write. A rejected
       // opt-in must not queue filters or fall through to snapshot reconciliation.
-      const syncBlocked = explicitSync && (this as History & {
+      const routerHistory = this as History & {
+        [APP_ROUTER_HISTORY_QUERY_DIFFERS]?: (target: URL) => boolean;
         [APP_ROUTER_HISTORY_QUERY_SYNC_BLOCKED]?: () => boolean;
-      })[APP_ROUTER_HISTORY_QUERY_SYNC_BLOCKED]?.();
+      };
+      const syncBlocked =
+        explicitSync && routerHistory[APP_ROUTER_HISTORY_QUERY_SYNC_BLOCKED]?.();
+      // Read the canonical query before an inner Next wrapper can restore it.
+      const canonicalQueryChanged = explicitSync && !syncBlocked &&
+        routerHistory[APP_ROUTER_HISTORY_QUERY_DIFFERS]?.(targetUrl);
       const nextFields = changesPage ? {} : {
         ...(nativeState?.value === previousState ? nativeState?.nextFields : {}),
         ...readNextHistoryFields(previousState),
@@ -268,7 +275,7 @@ function installHistoryTracking() {
         const entryKey = readEntryKey(this.state);
         const arrivalMatchesEntry =
           arrival?.entryKey === entryKey && arrival.queryString === queryString;
-        if (explicitSync && !routerReplace) {
+        if (explicitSync && replacesSearchUrl && (replacesFilters || canonicalQueryChanged)) {
           publishReturn(null, { entryKey, queryString, saved: null, explicitSync: true });
         } else if (searchEntry && replacesFilters) {
           if (!arrivalMatchesEntry || arrival.saved || pending) {

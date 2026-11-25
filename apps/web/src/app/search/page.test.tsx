@@ -420,6 +420,38 @@ it('recognizes a complex signed-in campus request using AI instead of only keywo
   expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
 });
 
+it('preserves analysis and an IME draft when an explicit write only reencodes the query', async () => {
+  userState.uid = 'alice';
+  vi.mocked(interpretCampusRequest).mockResolvedValue({
+    status: 'understood',
+    source: 'model',
+    summary: '想確認圖書館的借書時間。',
+    destinations: ['/library'],
+    clarifyingQuestion: null,
+  });
+  const url = '/search?q=借書%20時間';
+  window.history.replaceState({ __NA: true }, '', url);
+  router.search = window.location.search;
+  render(<SearchPage />);
+  const field = screen.getByRole<HTMLInputElement>('searchbox');
+  expect(field.value).toBe('借書 時間');
+  fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+  expect(await screen.findByText('想確認圖書館的借書時間。')).toBeTruthy();
+
+  const state = { __NA: true, [APP_ROUTER_SYNC_HISTORY_QUERY]: true };
+  act(() => window.history.replaceState(state, '', url.replaceAll('%20', '+')));
+  expect(window.location.search).toContain('+');
+  expect(screen.getByText('想確認圖書館的借書時間。')).toBeTruthy();
+
+  fireEvent.compositionStart(field);
+  fireEvent.change(field, { target: { value: '公' } });
+  act(() => window.history.replaceState(state, '', url));
+  expect(window.location.search).toContain('%20');
+  expect(field.value).toBe('公');
+  fireEvent.compositionEnd(field);
+  expect(new URLSearchParams(window.location.search).get('q')).toBe('公');
+});
+
 it('hides readonly homework by default and restores it when enabled', () => {
   const view = render(<SearchPage />);
   expect(screen.queryByRole('link', { name: /^校方作業與教材/ })).toBeNull();
