@@ -1458,9 +1458,16 @@ it.each([
   expect(schoolReads).not.toHaveBeenCalledWith(replacementRevision);
 
   for (const input of actions('prepare')) expect(input.revision).toBe(revision);
-  fireEvent.press(view.getByRole('button', {
-    name: remounts ? '繼續讀取目前帳號的課程' : '重新讀取連接狀態',
-  }));
+  if (!remounts) {
+    fireEvent.press(view.getByRole('button', { name: '重新讀取連接狀態' }));
+    await view.findByRole('button', { name: '繼續讀取目前帳號的課程' });
+    expect(view.getByText(/帳號：student-b/)).toBeTruthy();
+    expect(actions('status')).toHaveLength(stage === 'retry sync' ? 3 : 2);
+    expect(view.queryByRole('button', { name: '新帳號的私人作業' })).toBeNull();
+    for (const input of [...actions('courses'), ...actions('sync')]) expect(input.revision).toBe(revision);
+    expect(schoolReads).not.toHaveBeenCalledWith(replacementRevision);
+  }
+  fireEvent.press(view.getByRole('button', { name: '繼續讀取目前帳號的課程' }));
   await view.findByRole('button', { name: '新帳號的私人作業' });
   expect(actions('courses').at(-1)?.revision).toBe(replacementRevision);
   expect(actions('sync').at(-1)?.revision).toBe(replacementRevision);

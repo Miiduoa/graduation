@@ -90,7 +90,7 @@ node scripts/tronclass/acceptance.mjs reconcile \
   --plan /absolute/private/tronclass-check/plan.json
 ```
 
-查證仍驗證計畫 HMAC 與原 journal scope，但不要求計畫仍在五分鐘內，也不再執行寫入 authorization。同一已驗證學生重新綁定可使用新的 current revision 查證，原 attempt revision 不改寫；換 owner／學生不能沿用。沒有 acknowledgment、讀回失敗或資料不符時，保留 `unknown` 及原鎖。
+查證仍驗證計畫 HMAC 與原 journal scope，但不要求計畫仍在五分鐘內，也不再執行寫入 authorization。查證須沿用計畫的來源綁定版本。即使是同一學生重新綁定，版本不符也會在解封 session 或向校方讀取前回傳 `TRONCLASS_BINDING_CHANGED`，並保留原 attempt 與鎖。沒有 acknowledgment、讀回失敗或資料不符時，保留 `unknown` 及原鎖。
 
 輸出應按 `status` 解讀：
 

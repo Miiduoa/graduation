@@ -391,7 +391,7 @@ function NativeTronClassWorkspace({ client, owner, bindingConsent }: {
     latestConnection.current = null;
     setConnection(null);
   }
-  async function load(confirmReplacement = false) {
+  async function load() {
     if (lock.current || assignmentBusy || !current()) return;
     lock.current = true;
     ++courseRequest.current;
@@ -411,7 +411,7 @@ function NativeTronClassWorkspace({ client, owner, bindingConsent }: {
     try {
       const value = await client.status();
       if (!current()) return;
-      if (value.connected && !confirmReplacement && !bindingConsent.permits(owner, value.revision)) {
+      if (value.connected && !bindingConsent.permits(owner, value.revision)) {
         setConnection(value);
         latestConnection.current = value;
         setAccount(value.account ?? '');
@@ -745,7 +745,7 @@ function NativeTronClassWorkspace({ client, owner, bindingConsent }: {
               acceptConnection(connection);
               setError('');
               synchronize(connection);
-            } else void load(!statusKnown);
+            } else void load();
           }}
         />
       </AICard>
