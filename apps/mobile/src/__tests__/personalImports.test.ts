@@ -378,6 +378,7 @@ test.each([
   ['write', false], ['readback', false], ['write', true], ['readback', true],
   ['all', false], ['all', true], ['publish', true],
   ['all with primary write error', false], ['all with primary readback error', false],
+  ['all with primary and payload write errors', false],
   ['readback without retirement file', false],
 ] as const)('native marker retirement %s I/O keeps the correct primary and notification (revoked: %s)', async (phase, revoked) => {
   const scope = { owner: `nuni:retirement-${phase}-${revoked}`, schoolId: 'pu' };
@@ -394,14 +395,17 @@ test.each([
   const markerReadFails = phase === 'readback' || phase === 'readback without retirement file';
   const noRetirementFile = phase !== 'write' && phase !== 'readback';
   const primaryFault = jest.fn(() => { throw new Error('提交編碼主鍵 I/O 失敗'); });
+  const payloadFault = jest.fn(() => { throw new Error('還原副本無法寫入主鍵雜湊'); });
+  const failPayloadBinding = phase === 'all with primary and payload write errors';
   let encodedWrite = false;
+  let markerReadBlocked = false;
   const restoreError = new Error('主鍵無法還原');
   if (phase === 'publish' || phase.startsWith('all with primary')) {
     set.mockImplementation(async (entry, value) => {
       if (entry !== key) return nativeSet(entry, value);
       if (!active) throw restoreError;
       encodedWrite = value.startsWith('{"batches":');
-      if (encodedWrite && phase === 'all with primary write error') primaryFault();
+      if (encodedWrite && (phase === 'all with primary write error' || failPayloadBinding)) primaryFault();
       await nativeSet(entry, value);
       if (encodedWrite && phase === 'publish') active = false;
     });
@@ -424,6 +428,8 @@ test.each([
     deleteFile.call(this);
   });
   const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+    if (failPayloadBinding && this.uri.endsWith('.rollback.json') &&
+        typeof value === 'string' && value.startsWith('committed:')) payloadFault();
     if (!markerReadFails && this.uri === markerUri && value === 'committed') {
       retirementAttempts++;
       if (phase === 'write' && revoked) active = false;
@@ -433,7 +439,8 @@ test.each([
   });
   const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
     const value = textSync.call(this);
-    if (markerReadFails && this.uri === markerUri && value === 'committed') {
+    if (this.uri === markerUri && (markerReadBlocked || (markerReadFails && value === 'committed'))) {
+      markerReadBlocked ||= phase === 'readback without retirement file';
       retirementAttempts++;
       if (revoked) active = false;
       throw new Error('更新後的標記無法讀回');
@@ -479,17 +486,27 @@ test.each([
       expect(retirementAttempts).toBe(1);
     }
     if (phase.startsWith('all with primary')) expect(primaryFault).toHaveBeenCalledTimes(1);
+    if (failPayloadBinding) expect(payloadFault).toHaveBeenCalledTimes(1);
+    const retryGuardedSave = phase === 'readback without retirement file';
+    const retrySave = !revoked && (phase === 'all' || phase === 'all with primary write error' || retryGuardedSave);
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
-      if ((phase === 'all' || phase === 'all with primary write error') && !revoked) {
+      if (retrySave) {
         set.mockImplementation(nativeSet);
-        const { ledger } = await restarted.appendPersonalImports(scope, [row('later', '物理')]);
+        const guard = { canContinue: () => active, canCommitFirstWrite: () => active };
+        const { ledger } = await restarted.appendPersonalImports(
+          scope, [row('later', '物理')], retryGuardedSave ? guard : undefined,
+        );
+        expect(ledger.records.map(({ title }) => title)).toEqual(['微積分', '統計', '物理']);
         await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
-        expected = ledger;
+        expected = retryGuardedSave
+          ? await restarted.editPersonalImport(scope, ledger.records.at(-1)!, row('later', '化學'), guard)
+          : ledger;
+        if (retryGuardedSave) expect(expected.records.map(({ title }) => title)).toEqual(['微積分', '統計', '化學']);
       }
     });
-    if ((phase === 'all' || phase === 'all with primary write error') && !revoked) {
+    if (retrySave) {
       await jest.isolateModulesAsync(async () => {
         const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
         await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
@@ -1172,7 +1189,27 @@ test.each(['session access', 'session remove', 'session write', 'session read', 
         schoolId: syncScope.schoolId, revision: 1, records: edited.records,
         updatedAt: '2026-11-25T00:00:00.000Z',
       };
-      await syncPersonalImports(syncScope, async () => snapshot, guard.canContinue);
+      if (failure === 'lease read') {
+        let startRead!: () => void;
+        let finishRead!: (value: typeof snapshot) => void;
+        const reading = new Promise<void>((resolve) => { startRead = resolve; });
+        const remote = new Promise<typeof snapshot>((resolve) => { finishRead = resolve; });
+        const clock = jest.spyOn(Date, 'now');
+        try {
+          const syncing = syncPersonalImports(syncScope, async () => {
+            startRead();
+            return remote;
+          }, guard.canContinue);
+          await Promise.race([reading, syncing]);
+          clock.mockReturnValue(Date.now() + 31_000);
+          finishRead(snapshot);
+          await syncing;
+        } finally {
+          clock.mockRestore();
+        }
+      } else {
+        await syncPersonalImports(syncScope, async () => snapshot, guard.canContinue);
+      }
       const { ledger: latest } = await appendPersonalImports(syncScope, [
         { ...row('later', '統計'), dayOfWeek: 2 },
       ], guard);

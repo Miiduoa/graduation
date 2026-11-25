@@ -399,7 +399,8 @@ export function mutatePersonalImportLedger<T>(
               throw new Error('匯入資料已更新，請重新載入。');
             }
             assertWritable();
-            const journal = preparePersonalImportRollback(key, persistedRaw);
+            const primaryCommitted = keepNativeCommitEncoding && (hasPersisted || recovery === null);
+            const journal = preparePersonalImportRollback(key, persistedRaw, primaryCommitted);
             let cleaningRecovery = false;
             let publishingCommitEncoding = false;
             try {
@@ -417,6 +418,7 @@ export function mutatePersonalImportLedger<T>(
               if (keepNativeCommitEncoding) {
                 publishingCommitEncoding = true;
                 assertWritable();
+                journal.recordVerifiedPrimary(raw);
                 const encoded = encodeNativeCommit(ledger);
                 try {
                   journal.preparePrimaryCommit();
