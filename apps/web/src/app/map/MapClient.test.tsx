@@ -530,6 +530,36 @@ it.each([false, true])('waits for bundled shared-route endpoints and honors canc
   }
 });
 
+it.each([false, true])('keeps a bundled shared route unconfirmed after source failure (cancel=%s)', async (cancel) => {
+  const origin = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  const destination = PROVIDENCE_CAMPUS_PLACES.find((place) => place.name === '蓋夏圖書館')!;
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations)
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" route={origin.id + ',' + destination.id} />);
+  expect(await screen.findByText(/暫時無法確認連結的起點與終點/)).toBeTruthy();
+  expect(screen.queryByText(/已不在目前地點資料中/)).toBeNull();
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route).toBeNull();
+  if (cancel) fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取地點資料' }));
+  // Synthetic replacement, not a verified coordinate or entrance.
+  const updated = { ...destination, lat: destination.lat + 0.001 };
+  await act(async () => source.resolve([origin, updated]));
+  expect(screen.queryByText(/暫時無法確認連結的起點與終點/)).toBeNull();
+  if (cancel) {
+    expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+    expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route).toBeNull();
+  } else {
+    const card = screen.getByRole('region', { name: '步行導航' });
+    const google = new URL(within(card).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+    const apple = new URL(within(card).getByRole('link', { name: '使用 Apple 地圖規劃路線' }).getAttribute('href')!);
+    expect(google.searchParams.get('destination')).toBe(updated.lat + ',' + updated.lng);
+    expect(apple.searchParams.get('daddr')).toBe(google.searchParams.get('destination'));
+  }
+});
+
 it('provides keyboard-operable search, categories, selection and reset', async () => {
   state.user = null;
   render(<MapClient school="pu" />);
