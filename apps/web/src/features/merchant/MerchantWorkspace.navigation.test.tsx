@@ -2706,6 +2706,53 @@ it.each([undefined, 7, 8])('keeps a v7 menu receipt confirmed at v8 through list
   expect(screen.queryByText(/建立有庫存的首次菜單/)).toBeNull();
 });
 
+it('keeps the first menu receipt when the v8 list arrives first and two entries return v7', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const initial = { ...detail(), readinessVersion: 7 };
+  const published = { ...detail('store-a', true), readinessVersion: 8 };
+  const staleList = { ...published, missingRequirements: ['menu'] };
+  const confirmation = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+  const readStores = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [initial] })
+    .mockResolvedValue({ workspaces: [staleList] });
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(initial)
+    .mockResolvedValueOnce(initial)
+    .mockReturnValueOnce(confirmation.promise)
+    .mockResolvedValue(initial);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readStores();
+    if (resource === path) return readDetail();
+    if (resource === `${path}/initial-menu`) return Promise.resolve(firstMenuReceipt);
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByLabelText('品項 1 名稱');
+  submitFirstMenu();
+  await screen.findByText(/已建立 1 項首次菜單/);
+
+  await act(async () => window.history.back());
+  await screen.findByText('待完成：建立菜單');
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+  await act(async () => confirmation.resolve(published));
+  expect(screen.queryByText('待完成：建立菜單')).toBeNull();
+
+  for (const expectedReads of [4, 6]) {
+    await act(async () => window.history.forward());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(expectedReads));
+    expect((await screen.findByRole<HTMLButtonElement>('button', { name: '暫停接單' })).disabled).toBe(false);
+    expect(screen.getByText(/已建立 1 項首次菜單/)).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    if (expectedReads === 4) {
+      await act(async () => window.history.back());
+      await screen.findByRole('link', { name: '管理門市：一樓' });
+      await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(5));
+    }
+  }
+});
+
 it('keeps a confirmed empty store list when both the list and detail refresh fail', async () => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const unavailable = new NuniError(503, 'UNAVAILABLE');
@@ -3064,10 +3111,11 @@ it.each(['before', 'after'])(
   },
 );
 
-it.each(['availability', 'orders', 'orders-retry', 'orders-in-flight', 'stale-entry'])('blocks %s immediately when a retired list GET returns 503', async (section) => {
+it.each(['availability', 'orders', 'orders-retry', 'orders-in-flight', 'orders-in-flight-overview', 'stale-entry'])('blocks %s immediately when a retired list GET returns 503', async (section) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const orders = section.startsWith('orders');
-  const inFlight = section === 'orders-in-flight';
+  const inFlight = section.startsWith('orders-in-flight');
+  const switchToOverview = section === 'orders-in-flight-overview';
   const staleEntry = section === 'stale-entry';
   const retry = section === 'orders-retry';
   const unavailable = new NuniError(503, 'UNAVAILABLE');
@@ -3162,6 +3210,11 @@ it.each(['availability', 'orders', 'orders-retry', 'orders-in-flight', 'stale-en
     fireEvent.click(submit);
     expect(acceptOrder).toHaveBeenCalledTimes(1);
     expect(pendingIntent()).toMatchObject({ action: 'accept', orderId: 'order-1' });
+    if (switchToOverview) {
+      fireEvent.click(screen.getByRole('link', { name: '門市概況' }));
+      expect(screen.getByRole('link', { name: '門市概況' }).getAttribute('aria-current')).toBe('page');
+      expect(screen.queryByRole('region', { name: '門市訂單工作台' })).toBeNull();
+    }
   }
   await act(async () => {
     failedList.reject(unavailable);
@@ -3187,6 +3240,7 @@ it.each(['availability', 'orders', 'orders-retry', 'orders-in-flight', 'stale-en
   }
   fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
   if (inFlight) {
+    if (switchToOverview) fireEvent.click(await screen.findByRole('link', { name: '處理訂單與收銀' }));
     await screen.findByRole('button', { name: '接單：A101' });
     expect(screen.queryByRole('button', { name: '重試同一份操作' })).toBeNull();
     expect(acceptOrder).toHaveBeenCalledTimes(1);

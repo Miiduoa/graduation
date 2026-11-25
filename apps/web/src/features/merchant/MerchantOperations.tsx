@@ -188,7 +188,7 @@ export function MerchantOperations({
   const [busy, setBusy] = useState<Action | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState<{
-    value: string | number;
+    value: string;
     revision: number;
     readinessVersion?: number;
     statusChange?: true;
@@ -197,9 +197,9 @@ export function MerchantOperations({
   const [settings, setSettings] = useState<SettingDraft | null>(saved?.settings ?? null);
   const [menu, setMenu] = useState<MenuDraft[]>(saved?.menu ?? [newItem()]);
   const [menuConfirmed, setMenuConfirmed] = useState(false);
-  const menuReceipt = saved?.menuReceipt ?? null;
   const [localConfirmations] = useState(() => createMerchantConfirmations(drafts));
   const observations = confirmations ?? localConfirmations;
+  const menuReceipt = detail ? observations.menuReceiptFor(draftKey, detail.readinessVersion) : null;
   const nextRevision = observations.beginRequest;
   const statusReceiptVersion = notice?.statusChange ? notice.readinessVersion : undefined;
   const noticeFloor = receiptFloorFor
@@ -216,6 +216,8 @@ export function MerchantOperations({
   const [activationConfirmed, setActivationConfirmed] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
   const ordersOpen = navigation ? navigation.section === 'orders' : showOrders;
+  const [ordersVisited, setOrdersVisited] = useState(false);
+  if (ordersOpen && !ordersVisited) setOrdersVisited(true);
   const workspaceHeading = useRef<HTMLHeadingElement>(null);
   const hasDetail = !!detail;
   useEffect(() => {
@@ -444,8 +446,10 @@ export function MerchantOperations({
           // Check the shared confirmation before React publishes its next snapshot.
           // Shared access must come from a GET newer than the write being reconciled.
           const detail = observations.detailFor(draftKey);
-          const sharedRead = visible && reconciliationRevision
-            ? observations.detailReadConfirmation(draftKey)
+          const sharedRead = visible
+            ? reconciliationRevision
+              ? observations.detailReadConfirmation(draftKey)
+              : observations.menuReadConfirmation(draftKey)
             : undefined;
           // Immediate refreshes can retain access verified in the same entry.
           // Across entries, the verification must follow the deferred write.
@@ -458,16 +462,13 @@ export function MerchantOperations({
               ? sharedRead.revision : 0,
           );
           if (
-            readMode !== 'regular' &&
+            (readMode !== 'regular' || sharedRead !== undefined) &&
             confirmedRevision > 0 &&
             confirmedRevision >= accessRevision.current &&
             observations.canUseAccess(draftKey, confirmedRevision) &&
             detail
           ) {
-            accessRevision.current = confirmedRevision;
-            entryDetailRead.current = { revision: confirmedRevision, version: detail.readinessVersion };
-            updateAccess({ type: 'verified', revision: confirmedRevision });
-            setError((current) => current === detailReadError ? '' : current);
+            confirmEntry(detail, { revision: confirmedRevision, version: detail.readinessVersion }, true);
             return;
           }
           updateAccess({ type: 'read-failed', hideDetail });
@@ -713,11 +714,10 @@ export function MerchantOperations({
           {missingRequirements && <p>待完成：{missingRequirements}</p>}
         </div>
       )}
-      {typeof visibleNotice === 'number'
-        ? menuReceipt !== null && (
-            <p role="status">已建立 {visibleNotice} 項首次菜單。啟用前請再確認門市資料。</p>
-          )
-        : visibleNotice && <p role="status">{visibleNotice}</p>}
+      {menuReceipt !== null && (
+        <p role="status">已建立 {menuReceipt} 項首次菜單。啟用前請再確認門市資料。</p>
+      )}
+      {visibleNotice && <p role="status">{visibleNotice}</p>}
       {detail && draft && (
         <>
           <section className={styles.intro} aria-label="門市現況">
@@ -987,7 +987,6 @@ export function MerchantOperations({
                           : localConfirmations.confirmMenu(draftKey, revision, receipt.createdItems);
                         setMenuConfirmed(false);
                         const visible = visibleRef.current;
-                        if (accepted) setNotice({ value: receipt.createdItems, revision });
                         // Re-entered views refresh when the mutation settles.
                         if (!readAfterWrite.current && (visible || accepted)) {
                           await read(true, accepted ? 'after-confirmed-write' : 'after-write', revision);
@@ -1192,9 +1191,9 @@ export function MerchantOperations({
           )}
         </>
       )}
-      {/* Keep the mutation mounted while revalidation hides the desk. */}
+      {/* The workspace owns pending receipts across its sections and access refreshes. */}
       <div id="merchant-order-workspace" hidden={!ordersOpen || locked || !operational}>
-        {ordersOpen && (
+        {ordersVisited && (
           <MerchantOrderDesk
             key={`${context}:${tenantId}:${locationId}`}
             context={context}
@@ -1202,7 +1201,7 @@ export function MerchantOperations({
             locationId={locationId}
             cache={foodDrafts ?? localFoodDrafts}
             canSend={hasCurrentAccess}
-            suspended={locked || !operational}
+            suspended={!ordersOpen || locked || !operational}
             queue={navigation?.queue}
             queueHref={
               navigation && ((queue) =>

@@ -922,3 +922,42 @@ it('keeps omitted requirements on legacy detail through a same-version pre-write
   expect(confirmed.detailFor(key)?.missingRequirements).toBeUndefined();
   expect(draft.menuReceipt).toBe(1);
 });
+
+it.each(['list', 'detail'])('reconciles a menu receipt when the %s response arrives first', (first) => {
+  const before = { ...initial(), readinessVersion: 7 };
+  const published = { ...before, readinessVersion: 8, missingRequirements: ['settings'], publishedMenuItems: 1 };
+  const key = workspaceKey(before);
+  const draft = { menuReceipt: null as number | null };
+  const confirmed = createMerchantConfirmations(new Map([[key, draft]]));
+  confirmed.mergeWorkspaceList([before], confirmed.beginRequest());
+  confirmed.confirmDetail(before, confirmed.beginRequest(), true);
+  expect(confirmed.confirmMenu(key, confirmed.beginRequest(), 1)).toBe(true);
+  // The list started later, so it wins same-version row fields in both orders.
+  const readRevision = confirmed.beginRequest();
+  const listRevision = confirmed.beginRequest();
+  const list = () => confirmed.mergeWorkspaceList([{ ...before, readinessVersion: 8 }], listRevision);
+  const detail = () => confirmed.confirmDetail(published, readRevision, true);
+  if (first === 'list') {
+    list();
+    expect(draft.menuReceipt).toBe(1);
+    expect(confirmed.menuReadConfirmation(key)).toBeUndefined();
+    detail();
+  } else {
+    detail();
+    list();
+  }
+
+  expect(draft.menuReceipt).toBe(1);
+  expect(confirmed.overview()?.workspaces[0].missingRequirements).not.toContain('menu');
+  expect(confirmed.detailFor(key)?.publishedMenuItems).toBe(1);
+  expect(confirmed.menuReadConfirmation(key)).toEqual({ revision: readRevision, version: 8 });
+
+  const failure = confirmed.beginRequest();
+  confirmed.recordReadFailure(failure, [key]);
+  expect(confirmed.menuReadConfirmation(key)).toBeUndefined();
+  const recovery = confirmed.beginRequest();
+  confirmed.confirmDetail(published, recovery, true);
+  expect(confirmed.menuReadConfirmation(key)).toEqual({ revision: recovery, version: 8 });
+  confirmed.mergeWorkspaceList([{ ...published, readinessVersion: 9 }], confirmed.beginRequest());
+  expect(confirmed.menuReadConfirmation(key)).toBeUndefined();
+});
