@@ -2374,6 +2374,81 @@ it.each([200, 403, 404, 503])(
   },
 );
 
+it.each([
+  { conflict: false, status: 200 },
+  { conflict: false, status: 403 },
+  { conflict: false, status: 404 },
+  { conflict: false, status: 503 },
+  { conflict: true, status: 200 },
+  { conflict: true, status: 503 },
+])(
+  'reconciles a post-write read that finishes on the list (conflict: $conflict, return GET: $status)',
+  async ({ conflict, status }) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const operating = { ...detail('store-a', true), readinessVersion: 8 };
+    const initial = { ...(conflict ? operating : detail()), readinessVersion: 7 };
+    const write = Promise.withResolvers<typeof firstMenuReceipt>();
+    const refresh = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+    const list = Promise.withResolvers<{ workspaces: NuniMerchantWorkspaceDetail[] }>();
+    const readStores = vi.fn()
+      .mockResolvedValueOnce({ workspaces: [initial] })
+      .mockReturnValue(list.promise);
+    const readDetail = vi.fn()
+      .mockResolvedValueOnce(initial)
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValueOnce(initial)
+      .mockImplementationOnce(() => status === 200
+        ? Promise.resolve(initial)
+        : Promise.reject(new NuniError(status, 'UNAVAILABLE')));
+    const writePath = conflict ? `${path}/availability` : `${path}/initial-menu`;
+    const writeRequest = vi.fn(() => write.promise);
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') return readStores();
+      if (resource === path) return readDetail();
+      if (resource === writePath) return writeRequest();
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    if (conflict) {
+      fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+    } else {
+      await screen.findByLabelText('品項 1 名稱');
+      submitFirstMenu();
+      await act(async () => write.resolve(firstMenuReceipt));
+      await screen.findByText(/已建立 1 項首次菜單/);
+      expect(readDetail).toHaveBeenCalledTimes(2);
+    }
+    expect(writeRequest).toHaveBeenCalledTimes(1);
+
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readStores).toHaveBeenCalledTimes(2));
+    if (conflict) {
+      await act(async () => write.reject(new NuniError(409, 'FOOD_MERCHANT_WORKSPACE_CHANGED')));
+      expect(readDetail).toHaveBeenCalledTimes(2);
+    }
+    await act(async () => refresh.resolve(operating));
+    await act(async () => list.resolve({ workspaces: [initial] }));
+    await screen.findByText('營業中');
+    expect(readDetail).toHaveBeenCalledTimes(3);
+
+    await act(async () => window.history.forward());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
+    if (status !== 200) {
+      await screen.findByRole('alert');
+      expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
+      expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
+      return;
+    }
+
+    expect((await screen.findByRole<HTMLButtonElement>('button', { name: '暫停接單' })).disabled).toBe(false);
+    expect(screen.queryByText(/無法確認門市目前的資料/)).toBeNull();
+    fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
+    await screen.findByRole('region', { name: '門市訂單工作台' });
+  },
+);
+
 it('keeps confirmed menu requirements and the receipt through a legacy list and a detail 503', async () => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const initial = { ...detail(), readinessVersion: 7 };

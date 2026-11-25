@@ -374,12 +374,16 @@ export function MerchantOperations({
   );
 
   const read = useCallback(
-    async (reconcile = true, mode: DetailReadMode = 'regular') => {
+    async (reconcile = true, mode: DetailReadMode = 'regular', writeRevision = 0) => {
       // A confirmed receipt may remain visible with the previously verified detail
       // during an outage. Only a successful read can restore the controls.
       // Hidden refreshes can confirm shared detail for the next visible entry
       // without consuming that entry's post-write reconciliation.
       const deferredRevision = visibleRef.current ? deferredWriteRevision.current : 0;
+      // A post-write read can outlast the visible entry that started it.
+      // Keep its write revision until a current read finishes on the store view.
+      const reconciliationRevision = Math.max(deferredWriteRevision.current, writeRevision);
+      deferredWriteRevision.current = reconciliationRevision;
       const readMode = mode === 'regular' && deferredRevision ? 'after-write' : mode;
       const hideDetail = readMode === 'after-write';
       readAfterWrite.current = false;
@@ -451,7 +455,9 @@ export function MerchantOperations({
       } finally {
         if (pendingAccessRead.current === revision) pendingAccessRead.current = 0;
         if (current()) {
-          if (deferredWriteRevision.current === deferredRevision) deferredWriteRevision.current = 0;
+          if (visibleRef.current && deferredWriteRevision.current === reconciliationRevision) {
+            deferredWriteRevision.current = 0;
+          }
           updateAccess({ type: 'read-finished' });
         }
       }
@@ -548,7 +554,7 @@ export function MerchantOperations({
       } else if (failure instanceof NuniError && failure.status === 409) {
         if (action === 'menu') setMenuBlocked(true);
         // A conflict always requires post-write reconciliation, even on the same entry.
-        await read(true, 'after-write');
+        await read(true, 'after-write', revision);
         if (active.current && session === sessionRun.current)
           setError((current) =>
             current || '門市資料已變更。請確認重新讀取的狀態，再決定下一步；草稿仍保留。',
@@ -567,7 +573,7 @@ export function MerchantOperations({
         lock.current = false;
         if (active.current) {
           setBusy(null);
-          if (readAfterWrite.current) void read(false, 'after-write');
+          if (readAfterWrite.current) void read(false, 'after-write', revision);
         }
       }
     }
@@ -943,7 +949,7 @@ export function MerchantOperations({
                         if (accepted) setNotice({ value: receipt.createdItems, revision });
                         // Re-entered views refresh when the mutation settles.
                         if (!readAfterWrite.current && (visible || accepted)) {
-                          await read(true, accepted ? 'after-confirmed-write' : 'after-write');
+                          await read(true, accepted ? 'after-confirmed-write' : 'after-write', revision);
                         }
                       });
                     }}
