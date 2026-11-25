@@ -395,6 +395,91 @@ test.each([[false, null], [true, null], [false, 'pending'], [false, 'settled']] 
   }
 });
 
+test('native retry publishes the verified replacement when the cleared rejection payload is temporarily unreadable', async () => {
+  const scope = { owner: 'nuni:retry-rejected-publication', schoolId: 'pu' };
+  const { ledger: previous } = await appendPersonalImports(scope, [row('original')]);
+  const key = personalImportStorageKey(scope);
+  const prefix = `personal-imports-${sha256(key)}.rollback.`;
+  const payload = new File(Paths.document, prefix + 'json');
+  const original = JSON.stringify(previous);
+  preparePersonalImportRollback(key, original).retainRejection();
+  expect(payload.textSync()).toBe('rejected:\n' + original);
+
+  const { create: createFile, delete: deleteFile, write: writeFile, textSync } = File.prototype;
+  const set = jest.mocked(AsyncStorage.setItem);
+  const get = jest.mocked(AsyncStorage.getItem);
+  const nativeSet = set.getMockImplementation()!;
+  const nativeGet = get.getMockImplementation()!;
+  let replacement: string | undefined;
+  let payloadUnreadable = false;
+  const readBackReplacement = jest.fn();
+  set.mockImplementation(async (entry, value) => {
+    await nativeSet(entry, value);
+    if (entry === key && value.startsWith('{"batches":')) {
+      replacement = value;
+      payloadUnreadable = true;
+    }
+  });
+  get.mockImplementation(async (entry) => {
+    const value = await nativeGet(entry);
+    if (entry === key && replacement !== undefined && value === replacement) {
+      readBackReplacement(value);
+    }
+    return value;
+  });
+  const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
+    if (this.uri.endsWith(prefix + 'pending')) throw new Error('待處理標記無法刪除');
+    deleteFile.call(this);
+  });
+  const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
+    if (this.uri.endsWith(prefix + 'committed')) throw new Error('備用退役檔無法建立');
+    createFile.call(this, options);
+  });
+  const payloadBindingFault = jest.fn(() => { throw new Error('副本雜湊無法寫入'); });
+  const verificationFault = jest.fn(() => { throw new Error('驗證檔無法寫入'); });
+  const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+    if (this.uri === payload.uri && typeof value === 'string' && value.startsWith('committed:')) {
+      payloadBindingFault();
+    }
+    if (this.uri.endsWith(prefix + 'verified')) verificationFault();
+    writeFile.call(this, value, options);
+  });
+  const payloadReadFault = jest.fn(() => { throw new Error('還原副本暫時無法讀取'); });
+  const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+    if (this.uri === payload.uri && payloadUnreadable) payloadReadFault();
+    return textSync.call(this);
+  });
+  const notify = jest.fn();
+  const unsubscribe = subscribePersonalImports(notify);
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('new', '統計')], { canContinue: () => true });
+    expect(replacement).toMatch(/^\{"batches":/);
+    expect(readBackReplacement).toHaveBeenCalledWith(replacement);
+    expect(payloadBindingFault).toHaveBeenCalledTimes(1);
+    expect(verificationFault).toHaveBeenCalledTimes(1);
+    expect(payloadReadFault).toHaveBeenCalled();
+    const receipt = new File(Paths.document, prefix + 'published').textSync();
+    expect(new File(Paths.document, prefix + 'published.bak').textSync()).toBe(receipt);
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    payloadUnreadable = false;
+    expect(payload.textSync()).toBe(original);
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+    });
+    expect(receipt).toBe(sha256(original) + '\n' + sha256(replacement!));
+  } finally {
+    unsubscribe();
+    read.mockRestore();
+    write.mockRestore();
+    create.mockRestore();
+    remove.mockRestore();
+    set.mockImplementation(nativeSet);
+    get.mockImplementation(nativeGet);
+  }
+});
+
 test.each([
   ['write', false], ['readback', false], ['write', true], ['readback', true],
   ['all', false], ['all', true], ['publish', true],
@@ -2010,6 +2095,43 @@ test.each(['save', 'sync'] as const)('Web %s preserves Expo undo history recover
     cleanup();
   }
 });
+
+test.each(['save', 'edit'] as const)(
+  'Web %s repairs an invalid primary batch history for Expo Web',
+  async (operation) => {
+    const cleanup = useWebStorage();
+    const restoreLocks = withoutWebWriteLocks();
+    const key = personalImportStorageKey(scope);
+    const storage = window.localStorage;
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: { request: async (_key: string, write: () => unknown) => write() },
+    });
+    try {
+      const { ledger } = await appendPersonalImports(scope, [row('old', 'Expo 匯入')]);
+      const sync = { enabled: true, base: null };
+      storage.setItem(key, JSON.stringify({ ...ledger, sync, batches: {} }));
+      expect(readWebCalendarImports(scope)).toEqual(ledger.records);
+
+      if (operation === 'save') {
+        await saveWebCalendarBatch(scope, [{ ...row('new', 'Web 匯入'), dayOfWeek: 2 }]);
+      } else {
+        await editWebCalendarImport(scope, ledger.records[0], row('old', 'Web 編輯'));
+      }
+      const updated = await loadPersonalImports(scope);
+      expect(updated.records.map(({ title }) => title)).toEqual(
+        operation === 'save' ? ['Expo 匯入', 'Web 匯入'] : ['Web 編輯'],
+      );
+      expect(updated.records).toEqual(readWebCalendarImports(scope));
+      expect(updated.sync).toEqual(sync);
+      expect(updated.batches).toEqual([]);
+      expect(JSON.parse(storage.getItem(key)!)).not.toHaveProperty('batches');
+    } finally {
+      restoreLocks();
+      cleanup();
+    }
+  },
+);
 
 test.each([{}, [{ id: 'incomplete', count: 1 }]])(
   'Web save and sync leave an incomplete Expo checkpoint untouched (%j)',

@@ -235,7 +235,7 @@ export function selectPersonalImportBrowserRecovery<T>(
   return legacy;
 }
 
-function isPersonalImportBatchHistory(value: unknown): value is Array<{
+export function isPersonalImportBatchHistory(value: unknown): value is Array<{
   id: string;
   createdAt: string;
   count: number;

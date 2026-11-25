@@ -629,12 +629,12 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   const previousBody = previous?.replace(rearmedPattern, '');
   const rejected = markerRejected ||
     previousBody === rejectedPrefix + encoded;
-  const replacement = wrap(rejected ? rejectedPrefix + encoded : encoded);
-  if (previous !== replacement) {
-    payload.write(replacement);
+  let writtenPayload = wrap(rejected ? rejectedPrefix + encoded : encoded);
+  if (previous !== writtenPayload) {
+    payload.write(writtenPayload);
     const written = marked && primaryCommitted ? readOptionalFile(payload) : payload.textSync();
     // On a read fault, the verified primary still holds the original bytes.
-    if (written !== undefined && written !== replacement) {
+    if (written !== undefined && written !== writtenPayload) {
       throw new Error('無法確認匯入資料的還原副本已寫入。');
     }
   }
@@ -669,7 +669,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   let retirementWriteCompleted = false;
   const recordVerification = (hash: string) => {
     try {
-      verification.write(rearmed ? sha256(replacement) + '\n' + hash : hash);
+      verification.write(rearmed ? sha256(writtenPayload) + '\n' + hash : hash);
     } catch {
       // The other proofs can still settle this write.
     }
@@ -742,7 +742,9 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
       recordVerification(hash);
       try {
         // Tie retirement to the verified bytes while keeping the rollback copy.
-        payload.write(wrap(`committed:${hash}\n${encoded}`));
+        const committedPayload = wrap(`committed:${hash}\n${encoded}`);
+        payload.write(committedPayload);
+        writtenPayload = committedPayload;
       } catch {
         // The verification file or publication receipt can still settle this write.
       }
@@ -751,7 +753,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
           current.matchesVerifiedPrimary?.(primary))) return;
       if (current?.rejected) throw new Error('無法確認匯入資料已儲存，請稍後再試。');
       // Bind proof of publication to the rollback copy and the verified primary.
-      const receipt = sha256(readOptionalFile(payload) ?? replacement) + '\n' + hash;
+      const receipt = sha256(readOptionalFile(payload) ?? writtenPayload) + '\n' + hash;
       try {
         publication.write(receipt);
         const writtenReceipt = readOptionalFile(publication);
@@ -775,8 +777,10 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
       // The tentative write is verified now, so a rejected primary from a
       // previous attempt can no longer be exposed by clearing this flag.
       if (!rejected) return;
-      payload.write(wrap(encoded));
-      if (payload.textSync() !== wrap(encoded)) {
+      const clearedPayload = wrap(encoded);
+      payload.write(clearedPayload);
+      writtenPayload = clearedPayload;
+      if (payload.textSync() !== clearedPayload) {
         throw new Error('無法確認匯入資料的還原副本已寫入。');
       }
     },

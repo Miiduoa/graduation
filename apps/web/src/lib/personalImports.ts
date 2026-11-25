@@ -17,6 +17,7 @@ import {
 import {
   capturePersonalImportBrowserRecovery,
   hasWebPersonalImportCommit,
+  isPersonalImportBatchHistory,
   parsePersonalImportLedger,
   parsePersonalImportStorageJson,
   selectPersonalImportBrowserRecovery,
@@ -70,7 +71,7 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
       // Expo owns the undo history. Carry it through Web writes from the same
       // ledger snapshot as the records before retiring an adopted checkpoint.
       const batches: unknown = adopted?.ledger.batches ?? (raw ? JSON.parse(raw).batches : []);
-      const ledger = { version: 1 as const, ...state, batches };
+      const ledger = { version: 1 as const, ...state, batches: isPersonalImportBatchHistory(batches) ? batches : undefined };
       const published = recovery.detachJournal(shouldMarkCommit
         ? serializePersonalImportBrowserCommit(ledger)
         : JSON.stringify(ledger));
