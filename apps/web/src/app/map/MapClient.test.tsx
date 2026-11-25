@@ -119,6 +119,36 @@ it('requires a new spatial choice when a live map source reuses the focused ID',
   }
 });
 
+it.each(['coordinates', 'building', 'floor', 'unchanged'] as const)('revalidates a manually selected detail after source sync (%s)', async (change) => {
+  state.user = null;
+  const original = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" />);
+  fireEvent.click(screen.getByRole('button', { name: '查看' + original.name }));
+  const google = () => screen.queryByRole('link', { name: '從目前位置導航' });
+  const apple = () => screen.queryByRole('link', { name: '使用 Apple 地圖從目前位置導航' });
+  expect(google()).toBeTruthy();
+  expect(apple()).toBeTruthy();
+  const replacement = { ...original,
+    ...(change === 'coordinates' ? { lat: original.lat + 0.002 } : {}),
+    ...(change === 'building' ? { building: '測試用變更建築' } : {}),
+    ...(change === 'floor' ? { floor: '測試用變更樓層' } : {}),
+  };
+  await act(async () => source.resolve([replacement]));
+  if (change !== 'unchanged') {
+    expect(google()).toBeNull();
+    expect(apple()).toBeNull();
+    expect(screen.getByText(/已停用地點導航/)).toBeTruthy();
+    const login = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
+    expect(new URL(login.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('focus')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '查看' + replacement.name }));
+  }
+  expect(screen.queryByText(/已停用地點導航/)).toBeNull();
+  expect(new URL(google()!.getAttribute('href')!).searchParams.get('destination')).toBe(replacement.lat + ',' + replacement.lng);
+  expect(new URL(apple()!.getAttribute('href')!).searchParams.get('daddr')).toBe(replacement.lat + ',' + replacement.lng);
+});
+
 it('resolves classroom deep links to a unique real building while retaining the original room wording', async () => {
   vi.mocked(loadMapLocations).mockResolvedValue([]);
   render(<MapClient school="pu" query="主顧303" />);
