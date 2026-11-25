@@ -576,6 +576,8 @@ test.each([
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and file write fault', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and file readback fault', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and backup write fault and file write fault', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and backup read fault and file readback fault', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and transient file read', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient verification receipt read', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient readback', false],
@@ -624,12 +626,18 @@ test.each([
   const fileReceiptWriteFault = jest.fn(() => { throw new Error('檔案憑據無法寫入'); });
   const fileReceiptReadFault = jest.fn(() => { throw new Error('檔案憑據無法讀取'); });
   let restarting = false;
+  const backupKey = key + ':verified-write-backup';
+  const backupWriteFails = phase.includes('backup write fault');
+  const backupReadFails = phase.includes('backup read fault');
+  const backupWriteFault = jest.fn(() => { throw new Error('備用憑據無法寫入'); });
+  const backupReadFault = jest.fn(() => { throw new Error('備用憑據無法讀取'); });
   const multiSet = jest.mocked(AsyncStorage.multiSet);
   const nativeMultiSet = multiSet.getMockImplementation()!;
   const multiSetReceiptFault = jest.fn(() => { throw new Error('原生批次寫入無法儲存憑據'); });
   if (persistentVerificationReceiptWriteFault) {
     multiSet.mockImplementation(async (entries) => {
       if (entries.some(([entry]) => entry === key + ':verified-write')) multiSetReceiptFault();
+      if (backupWriteFails && entries.some(([entry]) => entry === backupKey)) backupWriteFault();
       return nativeMultiSet(entries);
     });
   }
@@ -657,6 +665,7 @@ test.each([
   if (phase === 'publish' || phase.startsWith('all with primary') || verifiedFirstWrite || verifiedReplacement || publicationFails) {
     set.mockImplementation(async (entry, value) => {
       if (verificationReceiptWriteFails && entry === key + ':verified-write') verificationReceiptWriteFault();
+      if (backupWriteFails && entry === backupKey) backupWriteFault();
       if (entry !== key) return nativeSet(entry, value);
       if (!active || (restorationFails && value === JSON.stringify(previous))) throw restoreError;
       encodedWrite = value.startsWith('{"batches":');
@@ -674,6 +683,7 @@ test.each([
   const primaryReadBack = jest.fn();
   if (persistentPrimaryReadFault || retirementWritesFail) {
     get.mockImplementation(async (entry) => {
+      if (backupReadFails && entry === backupKey) backupReadFault();
       if (entry === key && primaryReadBlocked) primaryFault();
       if (entry === key && failNextPrimaryRead) {
         failNextPrimaryRead = false;
@@ -902,6 +912,11 @@ test.each([
         return nativeGet(entry);
       });
     }
+    if (backupWriteFails) {
+      expect(backupWriteFault).toHaveBeenCalledTimes(2);
+      expect(await nativeGet(backupKey)).toBeNull();
+    }
+    if (backupReadFails) expect(backupReadFault).toHaveBeenCalled();
     if (phase.endsWith('file write fault')) expect(fileReceiptWriteFault).toHaveBeenCalledTimes(1);
     if (phase.endsWith('file readback fault')) expect(fileReceiptReadFault).toHaveBeenCalled();
     if (phase.endsWith('transient file read')) {
@@ -1729,6 +1744,9 @@ test.each([
   'payload write', 'payload write with receipt write fault', 'payload write with persistent receipt write fault',
   'payload write with persistent receipt write fault and file write fault',
   'payload write with persistent receipt write fault and file readback fault',
+  'payload write with persistent receipt write fault and backup write fault and file write fault',
+  'payload write with persistent receipt write fault and backup read fault and file readback fault',
+  'payload write with transient rejection read',
   'payload write with persistent receipt write fault and transient file read',
   'rejection delete',
   'restored write', 'restored readback', 'restored write with transient receipt read',
@@ -1742,6 +1760,13 @@ test.each([
   const fileReceiptWriteFault = jest.fn(() => { throw new Error('檔案憑據無法寫入'); });
   const fileReceiptReadFault = jest.fn(() => { throw new Error('檔案憑據無法讀取'); });
   let restarting = false;
+  let reopeningRestoredPrimary = false;
+  const rejectionReadFault = jest.fn(() => { throw new Error('拒絕檔暫時無法讀取'); });
+  const backupKey = key + ':verified-write-backup';
+  const backupWriteFails = fault.includes('backup write fault');
+  const backupReadFails = fault.includes('backup read fault');
+  const backupWriteFault = jest.fn(() => { throw new Error('備用憑據無法寫入'); });
+  const backupReadFault = jest.fn(() => { throw new Error('備用憑據無法讀取'); });
 
   const { ledger: older } = await appendPersonalImports(scope, [row('first')]);
   const { ledger: original } = await appendPersonalImports(scope, [row('second', '統計')]);
@@ -1764,6 +1789,8 @@ test.each([
       fault.endsWith('file readback fault') ||
       (restarting && fault.endsWith('transient file read') && fileReceiptReadFault.mock.calls.length === 0)
     )) fileReceiptReadFault();
+    if (reopeningRestoredPrimary && fault === 'payload write with transient rejection read' &&
+        this.uri === rejection.uri && rejectionReadFault.mock.calls.length === 0) rejectionReadFault();
     const value = textSync.call(this);
     if (fault === 'restored readback' && this.uri === rejection.uri && value === 'restored') resolvedFault();
     return value;
@@ -1792,6 +1819,7 @@ test.each([
   if (persistentReceiptWriteFault) {
     multiSet.mockImplementation(async (entries) => {
       if (entries.some(([entry]) => entry === key + ':verified-write')) multiSetReceiptFault();
+      if (backupWriteFails && entries.some(([entry]) => entry === backupKey)) backupWriteFault();
       return nativeMultiSet(entries);
     });
   }
@@ -1810,6 +1838,7 @@ test.each([
     }
   });
   get.mockImplementation(async (entry) => {
+    if (backupReadFails && entry === backupKey) backupReadFault();
     if (entry === key && restored && restoreReadFault.mock.calls.length === 0) restoreReadFault();
     return nativeGet(entry);
   });
@@ -1831,6 +1860,7 @@ test.each([
     active = true;
     const receiptWriteFault = jest.fn(() => { throw new Error('已驗證寫入憑據無法儲存'); });
     set.mockImplementation(async (entry, value) => {
+      if (backupWriteFails && entry === backupKey) backupWriteFault();
       if (receiptWriteFails && entry === key + ':verified-write') {
         receiptWriteFault();
       }
@@ -1841,7 +1871,12 @@ test.each([
     let saved: typeof original | undefined;
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      reopeningRestoredPrimary = true;
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(original);
+      reopeningRestoredPrimary = false;
+      if (fault === 'payload write with transient rejection read') {
+        expect(rejectionReadFault).toHaveBeenCalledTimes(1);
+      }
       const reread = jest.fn(() => restarted.loadPersonalImports(scope));
       const unsubscribeRestart = restarted.subscribePersonalImports(reread);
       try {
@@ -1859,7 +1894,11 @@ test.each([
         if (payloadBlocked) {
           expect(payloadFault).toHaveBeenCalledTimes(2);
           expect(pending.info().exists).toBe(false);
-          expect(rejection.textSync()).toBe(sha256(originalRaw));
+          if (backupWriteFails || backupReadFails) {
+            expect(rejection.textSync()).toBe('verified:\n' + sha256(originalRaw) + '\n' + sha256(writtenRaw));
+          } else {
+            expect(rejection.textSync()).toBe(sha256(originalRaw));
+          }
           expect(receiptWriteFault).toHaveBeenCalledTimes(receiptWriteFails ? 1 : 0);
           if (persistentReceiptWriteFault) {
             expect(multiSetReceiptFault).toHaveBeenCalledTimes(1);
@@ -1896,6 +1935,11 @@ test.each([
         return nativeGet(entry);
       });
     }
+    if (backupWriteFails) {
+      expect(backupWriteFault).toHaveBeenCalledTimes(2);
+      expect(await nativeGet(backupKey)).toBeNull();
+    }
+    if (backupReadFails) expect(backupReadFault).toHaveBeenCalled();
     if (fault.endsWith('file write fault')) expect(fileReceiptWriteFault).toHaveBeenCalledTimes(1);
     if (fault.endsWith('file readback fault')) expect(fileReceiptReadFault).toHaveBeenCalled();
     if (fault.endsWith('transient file read')) {

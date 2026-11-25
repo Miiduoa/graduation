@@ -13,6 +13,7 @@ const markerSuffix = '.rollback.pending';
 const committedMarker = 'committed';
 const rejectedMarker = 'rejected';
 const resolvedRejection = 'restored';
+const verifiedRejectionPrefix = 'verified:\n';
 const rejectedPrefix = 'rejected:\n';
 const rearmedPattern = /^rearmed(?::[^\n:]+)?:\n/;
 const attemptPattern = /^attempt:([^:\n]+):([a-f0-9]{64}):([a-f0-9]{64})(?::([a-f0-9]{64}))?\n/;
@@ -499,16 +500,19 @@ function journalFiles(key: string) {
 export function capturePersonalImportRollback(key: string) {
   const { payload, marker, marked } = journalFiles(key);
   const rejection = rejectionFile(key);
-  const rejectionValue = fileExists(rejection) ? readOptionalFile(rejection) : resolvedRejection;
-  const rejectionRecorded = rejectionValue !== resolvedRejection;
+  const rejectionValue = fileExists(rejection) ? readRejectionState(rejection) : resolvedRejection;
+  const verifiedReceipt = readRollbackResolution(rejectionValue);
+  const rejectionRecorded = rejectionValue !== resolvedRejection && verifiedReceipt === undefined;
   if (!marked) {
-    if (!rejectionRecorded) return undefined;
+    const verifiedBinding = verifiedReceipt?.match(committedReceiptPattern);
+    if (!rejectionRecorded && !verifiedBinding) return undefined;
     // A primary-only write has no journal payload. Bind recovery to the
     // original bytes so an unrelated legacy checkpoint cannot be adopted.
-    const checkpointHash = rejectionValue;
+    const checkpointHash = verifiedBinding?.[1] ?? rejectionValue;
     return {
       rejected: true,
       rejectionHash: checkpointHash,
+      verifiedReceipt,
       checkpointRejection: (raw: string | null) => checkpointHash === sha256(raw ?? 'null'),
     };
   }
@@ -597,6 +601,7 @@ export function capturePersonalImportRollback(key: string) {
     matchesVerifiedReceipt: !rejected && attempt
       ? (raw: string, proof: string) => proof === attempt[0] + sha256(raw)
       : undefined,
+    verifiedReceipt,
     matchesVerifiedPrimary: verifiedHash || binding || receiptHash || settledHash ? (raw: string) => {
       const hash = sha256(raw);
       return hash === verifiedHash || hash === binding?.[1] || hash === receiptHash ||
@@ -621,6 +626,19 @@ function readOptionalFile(payload: File): string | undefined {
   }
 }
 
+function readRejectionState(file: File): string | undefined {
+  return readOptionalFile(file) ?? readOptionalFile(file);
+}
+
+function readRollbackResolution(state: string | undefined): string | undefined {
+  if (!state?.startsWith(verifiedRejectionPrefix)) return undefined;
+  const receipt = state.slice(verifiedRejectionPrefix.length);
+  if (committedReceiptPattern.test(receipt)) return receipt;
+  const attempt = receipt.match(attemptPattern);
+  if (attempt && primaryHashPattern.test(receipt.slice(attempt[0].length))) return receipt;
+  return undefined;
+}
+
 function retirementFile(key: string): File {
   return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.committed`);
 }
@@ -631,6 +649,15 @@ function verificationFile(key: string): File {
 
 function rejectionFile(key: string): File {
   return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.rejected`);
+}
+
+export function publishNativeRollbackResolution(key: string, receipt: string): void {
+  const file = rejectionFile(key);
+  const resolution = verifiedRejectionPrefix + receipt;
+  file.write(resolution);
+  if (readRejectionState(file) !== resolution) {
+    throw new Error('無法確認匯入資料的還原狀態。');
+  }
 }
 
 function publicationFile(key: string): File {
@@ -685,11 +712,13 @@ export function preparePersonalImportRollback(
   let hadRejection = fileExists(rejection);
   let retireRestoredRejection = false;
   if (hadRejection) {
-    const state = readOptionalFile(rejection);
+    const state = readRejectionState(rejection);
+    const verifiedReceipt = readRollbackResolution(state);
+    const activeRejection = verifiedReceipt?.match(committedReceiptPattern)?.[1] ?? state;
     retireRestoredRejection = !marked && attemptedPrimary?.restoredRejectionHash !== undefined &&
       !attemptedPrimary.preserveRejection &&
-      (state === undefined || state === attemptedPrimary.restoredRejectionHash);
-    if (state === resolvedRejection || retireRestoredRejection) hadRejection = false;
+      (activeRejection === undefined || activeRejection === attemptedPrimary.restoredRejectionHash);
+    if (state === resolvedRejection || verifiedReceipt !== undefined || retireRestoredRejection) hadRejection = false;
   }
   let markerRejected = marked && hadRejection;
   if (marked) {
@@ -952,8 +981,10 @@ export function recordFailedPersonalImportRestoration(key: string, original: str
     } else if (!fileExists(rejection)) {
       rejection.create();
     } else {
-      const state = readOptionalFile(rejection);
-      if (state === undefined || state === resolvedRejection) rejection.write(rejectedMarker);
+      const state = readRejectionState(rejection);
+      if (state === undefined || state === resolvedRejection || state.startsWith(verifiedRejectionPrefix)) {
+        rejection.write(rejectedMarker);
+      }
     }
     if (fileExists(rejection)) return;
   } catch {

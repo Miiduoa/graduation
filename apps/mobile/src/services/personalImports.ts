@@ -18,6 +18,7 @@ import {
   commitWebPersonalImports,
   NativeRollbackUnavailableError,
   preparePersonalImportRollback,
+  publishNativeRollbackResolution,
   readNativeVerificationReceipt,
   recordFailedPersonalImportRestoration,
   withPersonalImportWriteLock,
@@ -111,7 +112,7 @@ async function readLedgerSnapshot(
   const receipt = needsReceipt ? await readNativeReceipt(nativeReceiptKey(key)) : null;
   const fileReceipt = needsReceipt ? readNativeVerificationReceipt(key) : undefined;
   const backupReceipt = needsReceipt ? await readNativeReceipt(nativeBackupReceiptKey(key)) : null;
-  const receipts = [receipt, fileReceipt, backupReceipt];
+  const receipts = [receipt, fileReceipt, backupReceipt, journal?.verifiedReceipt];
   const rejectionHash = journal?.rejectionHash;
   const primaryHash = primaryVerified && primary !== null && rejectionMatches ? sha256(primary) : undefined;
   const publishedRejectionHash = primaryHash === undefined ? undefined : receipts
@@ -526,6 +527,7 @@ export function mutatePersonalImportLedger<T>(
             let writingFileReceipt = false;
             let previousFileReceipt: string | undefined;
             let writingBackupReceipt = false;
+            let publishingRollbackResolution = false;
             try {
               writtenRaw = journal ? firstRaw : raw;
               await AsyncStorage.setItem(key, writtenRaw);
@@ -591,6 +593,9 @@ export function mutatePersonalImportLedger<T>(
                 assertWritable();
                 try {
                   await writeNativeReceipt(nativeReceiptKey(key), newReceipt);
+                  if (await readNativeReceipt(nativeReceiptKey(key)) !== newReceipt) {
+                    throw new Error('無法確認匯入資料的儲存憑據。');
+                  }
                 } catch (error) {
                   if (!options.allowNativePrimaryOnly) throw error;
                   // Both AsyncStorage APIs can fail on the same native key.
@@ -606,18 +611,33 @@ export function mutatePersonalImportLedger<T>(
                     assertWritable();
                     const backupKey = nativeBackupReceiptKey(key);
                     writingBackupReceipt = true;
-                    await writeNativeReceipt(backupKey, newReceipt);
-                    if (await readNativeReceipt(backupKey) !== newReceipt) {
-                      throw new Error('無法確認匯入資料的儲存憑據。');
+                    try {
+                      await writeNativeReceipt(backupKey, newReceipt);
+                      if (await readNativeReceipt(backupKey) !== newReceipt) {
+                        throw new Error('無法確認匯入資料的儲存憑據。');
+                      }
+                    } catch {
+                      // Resolve the rollback itself when neither receipt store
+                      // can confirm publication of the already verified primary.
+                      assertWritable();
+                      publishingRollbackResolution = true;
+                      publishNativeRollbackResolution(key, newReceipt);
                     }
                   }
                 }
                 assertWritable();
                 if (!writingFileReceipt) currentReceipt = newReceipt;
-                if (writingBackupReceipt) currentBackupReceipt = newReceipt;
+                if (writingBackupReceipt && !publishingRollbackResolution) currentBackupReceipt = newReceipt;
               }
               pendingRestorations.delete(key);
             } catch (error) {
+              if (publishingRollbackResolution) {
+                try {
+                  recordFailedPersonalImportRestoration(key, persistedRaw);
+                } catch {
+                  // Continue restoring the journal and primary.
+                }
+              }
               if (writingBackupReceipt) {
                 const backupKey = nativeBackupReceiptKey(key);
                 try {
