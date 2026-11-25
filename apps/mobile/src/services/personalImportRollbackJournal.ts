@@ -74,6 +74,15 @@ async function writeWithLease<T>(
   let stopped = false;
   let reserved = false;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
+  const abandonLease = () => {
+    reserved = false;
+    clearInterval(heartbeat);
+    try {
+      storage.removeItem(leaseKey);
+    } catch {
+      // Each attempt owns its lease key. If removal fails, it expires.
+    }
+  };
   const assertLease = () => {
     if (stopped) throw lostLease;
     if (!reserved) return;
@@ -83,13 +92,7 @@ async function writeWithLease<T>(
       stored = storage.getItem(leaseKey);
     } catch {
       // A blocked lease check leaves only the atomic primary snapshot path.
-      reserved = false;
-      clearInterval(heartbeat);
-      try {
-        storage.removeItem(leaseKey);
-      } catch {
-        // Each attempt owns its lease key. If removal fails, it expires.
-      }
+      abandonLease();
       return;
     }
     if (stored !== value) throw lostLease;
@@ -120,7 +123,12 @@ async function writeWithLease<T>(
           assertLease();
           if (!reserved) return;
           const next = String(Date.now() + leaseDuration);
-          storage.setItem(leaseKey, next);
+          try {
+            storage.setItem(leaseKey, next);
+          } catch {
+            abandonLease();
+            return;
+          }
           value = next;
           assertLease();
         } catch {
@@ -456,7 +464,7 @@ export function capturePersonalImportRollback(key: string) {
   const { payload, marker, marked } = journalFiles(key);
   if (!marked) return undefined;
   const retired = retirementFile(key).info().exists;
-  const retiredPayload = retired ? readRetiredPayload(payload) : undefined;
+  const retiredPayload = retired ? readOptionalFile(payload) : undefined;
   if (retired && !retiredPayload?.startsWith(rearmedPrefix)) return undefined;
   let committed: boolean;
   let markerError: unknown;
@@ -466,7 +474,15 @@ export function capturePersonalImportRollback(key: string) {
     markerError = error;
     committed = true;
   }
-  const stored = retired ? retiredPayload : committed ? readRetiredPayload(payload) : payload.textSync();
+  let stored = retiredPayload;
+  let payloadError: unknown;
+  if (!retired) {
+    try {
+      stored = payload.textSync();
+    } catch (error) {
+      if (!committed) payloadError = error;
+    }
+  }
   const encoded = stored?.startsWith(rearmedPrefix) ? stored.slice(rearmedPrefix.length) : stored;
   // A revoked publication can leave its verified encoding in AsyncStorage
   // if restoring the original bytes there also fails.
@@ -474,7 +490,7 @@ export function capturePersonalImportRollback(key: string) {
     return { raw: encoded.slice(rejectedPrefix.length), rejected: true };
   }
   const binding = encoded?.match(committedPayloadPattern);
-  const verification = readRetiredPayload(verificationFile(key));
+  const verification = readOptionalFile(verificationFile(key));
   // A surviving sidecar can verify a rearmed journal only when it describes
   // the same payload.
   const bindingPrefix = stored?.startsWith(rearmedPrefix) ? sha256(stored) + '\n' : '';
@@ -486,6 +502,7 @@ export function capturePersonalImportRollback(key: string) {
     raw: committed ? undefined : binding ? encoded?.slice(binding[0].length) : encoded,
     rejected: false,
     markerError,
+    payloadError,
     payloadReadable: encoded !== undefined,
     matchesVerifiedPrimary: verifiedHash ? (raw: string) => sha256(raw) === verifiedHash : undefined,
   };
@@ -494,14 +511,15 @@ export function capturePersonalImportRollback(key: string) {
 export function readPersonalImportRollback(key: string): string | undefined {
   const journal = capturePersonalImportRollback(key);
   if (journal?.markerError) throw journal.markerError;
+  if (journal?.payloadError) throw journal.payloadError;
   return journal?.raw;
 }
 
-function readRetiredPayload(payload: File): string | undefined {
+function readOptionalFile(payload: File): string | undefined {
   try {
     return payload.textSync();
   } catch {
-    // A retired journal need not have a readable payload.
+    // Auxiliary files can be unreadable even when AsyncStorage is healthy.
     return undefined;
   }
 }
@@ -535,7 +553,9 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   const retirement = retirementFile(key);
   const verification = verificationFile(key);
   const hadRetirement = retirement.info().exists;
-  const previous = marked ? (hadRetirement ? readRetiredPayload(payload) : payload.textSync()) : undefined;
+  const previous = marked
+    ? (primaryCommitted || hadRetirement ? readOptionalFile(payload) : payload.textSync())
+    : undefined;
   const hadVerification = verification.info().exists;
   // A fresh payload supersedes auxiliary files from the previous attempt.
   const rearmed = hadRetirement || hadVerification;
@@ -544,7 +564,9 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   const replacement = wrap(rejected ? rejectedPrefix + encoded : encoded);
   if (previous !== replacement) {
     payload.write(replacement);
-    if (payload.textSync() !== replacement) {
+    const written = marked && primaryCommitted ? readOptionalFile(payload) : payload.textSync();
+    // On a read fault, the verified primary still holds the original bytes.
+    if (written !== undefined && written !== replacement) {
       throw new Error('無法確認匯入資料的還原副本已寫入。');
     }
   }
@@ -639,7 +661,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
 export function retainRejectedPersonalImportRollback(key: string, raw: string | null): void {
   verifiedPrimaries.delete(key);
   const { payload } = journalFiles(key);
-  const rearmed = readRetiredPayload(payload)?.startsWith(rearmedPrefix) === true;
+  const rearmed = readOptionalFile(payload)?.startsWith(rearmedPrefix) === true;
   // Keep the old ledger authoritative when the in-place commit encoding may
   // have reached disk before the final authority check failed.
   try {

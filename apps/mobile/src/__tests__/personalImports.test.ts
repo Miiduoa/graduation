@@ -218,7 +218,7 @@ test.each([false, true])('native keeps an adopted checkpoint after an unreadable
     .toEqual(['行程 A', '行程 C']);
 });
 
-test.each([false, true])('native checkpoint cleanup keeps restart recovery until authority is confirmed (revoked: %s)', async (revoked) => {
+test.each([false, true])('native checkpoint cleanup preserves the rollback copy through the final authority check (revoked: %s)', async (revoked) => {
   const key = personalImportStorageKey(scope);
   const checkpoint = key + ':checkpoint';
   await appendPersonalImports(scope, [row('a', '行程 A')]);
@@ -269,7 +269,9 @@ test.each([false, true])('native checkpoint cleanup keeps restart recovery until
     }
     expect(remove).toHaveBeenCalledWith([checkpoint]);
     expect(journalDuringCleanup).toBe(original);
-    expect(restartedLedger?.records.map(({ title }) => title)).toEqual(['行程 A']);
+    // The first replacement was verified before cleanup. A fresh process
+    // can read it, while the running writer can still restore on revocation.
+    expect(restartedLedger?.records.map(({ title }) => title)).toEqual(['行程 A', '行程 C']);
     expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
     expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
       .toEqual(revoked ? ['行程 A'] : ['行程 A', '行程 C']);
@@ -307,7 +309,7 @@ test.each(['read', 'remove'] as const)('native preserves and publishes a verifie
     const { ledger } = await append();
     expect(ledger.records.map(({ title }) => title)).toEqual(['原有行程', '新增行程']);
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(await AsyncStorage.getItem(key)).toBe(JSON.stringify(ledger));
+    expect(JSON.parse((await AsyncStorage.getItem(key))!)).toEqual(ledger);
     expect(await AsyncStorage.getItem(checkpoint)).toBe(original);
     expect(readPersonalImportRollback(key)).toBeUndefined();
     expect(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.pending`).info().exists).toBe(true);
@@ -381,11 +383,22 @@ test.each([
   ['all with primary write error', false], ['all with primary readback error', false],
   ['all with primary and payload write errors', false],
   ['all with primary, payload and verification write errors', false],
+  ['all with primary, payload and verification write errors after adopting a checkpoint', false],
+  ['pending payload unreadable with commit encoding', false],
+  ['pending payload unreadable with verification file', false],
   ['readback without retirement file', false],
 ] as const)('native marker retirement %s I/O keeps the correct primary and notification (revoked: %s)', async (phase, revoked) => {
   const scope = { owner: `nuni:retirement-${phase}-${revoked}`, schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
   const { ledger: previous } = await appendPersonalImports(scope, [row('original')]);
+  const checkpoint = key + ':checkpoint';
+  const adoptedCheckpoint = phase.endsWith('after adopting a checkpoint');
+  const checkpointFault = jest.fn(async () => { throw new Error('檢查點無法刪除'); });
+  if (adoptedCheckpoint) {
+    await AsyncStorage.setItem(checkpoint, JSON.stringify(previous));
+    await AsyncStorage.removeItem(key);
+    jest.mocked(AsyncStorage.multiRemove).mockImplementationOnce(checkpointFault);
+  }
   const markerUri = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.pending`).uri;
   const { create: createFile, delete: deleteFile, write: writeFile, textSync } = File.prototype;
   let active = true;
@@ -398,7 +411,10 @@ test.each([
   const noRetirementFile = phase !== 'write' && phase !== 'readback';
   const primaryFault = jest.fn(() => { throw new Error('提交編碼主鍵 I/O 失敗'); });
   const payloadFault = jest.fn(() => { throw new Error('還原副本無法寫入主鍵雜湊'); });
-  const failVerification = phase === 'all with primary, payload and verification write errors';
+  const failVerification = phase.startsWith('all with primary, payload and verification write errors');
+  const unreadablePayload = phase.startsWith('pending payload unreadable');
+  const sidecarOnly = phase === 'pending payload unreadable with verification file';
+  const payloadReadFault = jest.fn(() => { throw new Error('還原副本無法讀取'); });
   const failPayloadBinding = phase === 'all with primary and payload write errors' || failVerification;
   const verificationFault = jest.fn(() => { throw new Error('驗證檔無法寫入'); });
   let encodedWrite = false;
@@ -443,6 +459,7 @@ test.each([
     writeFile.call(this, value, options);
   });
   const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+    if (unreadablePayload && retirementAttempts > 0 && this.uri.endsWith('.rollback.json')) payloadReadFault();
     const value = textSync.call(this);
     if (this.uri === markerUri && (markerReadBlocked || (markerReadFails && value === 'committed'))) {
       markerReadBlocked ||= phase === 'readback without retirement file';
@@ -478,7 +495,9 @@ test.each([
         expect(create.mock.contexts.map((file: File) => file.uri)).toContain(
           new File(Paths.document, `personal-imports-${sha256(key)}.rollback.committed`).uri,
         );
-        if (!markerReadFails) expect(readPersonalImportRollback(key)).toBe(JSON.stringify(previous));
+        if (!markerReadFails && !unreadablePayload) {
+          expect(readPersonalImportRollback(key)).toBe(JSON.stringify(previous));
+        }
       } else {
         expect(JSON.parse(primary)).toEqual(expected);
       }
@@ -493,7 +512,17 @@ test.each([
     if (phase.startsWith('all with primary')) expect(primaryFault).toHaveBeenCalledTimes(1);
     if (failPayloadBinding) expect(payloadFault).toHaveBeenCalledTimes(1);
     if (failVerification) expect(verificationFault).toHaveBeenCalledTimes(1);
-    const retryGuardedSave = phase === 'readback without retirement file';
+    if (adoptedCheckpoint) {
+      expect(checkpointFault).toHaveBeenCalledWith([checkpoint]);
+      expect(await AsyncStorage.getItem(checkpoint)).toBe(JSON.stringify(previous));
+    }
+    if (sidecarOnly) {
+      // A previous version could leave a raw primary verified only by the sidecar.
+      const raw = JSON.stringify(expected);
+      await nativeSet(key, raw);
+      new File(Paths.document, `personal-imports-${sha256(key)}.rollback.verified`).write(sha256(raw));
+    }
+    const retryGuardedSave = phase === 'readback without retirement file' || unreadablePayload;
     const retrySave = !revoked && (phase === 'all' || phase === 'all with primary write error' || retryGuardedSave);
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
@@ -501,17 +530,26 @@ test.each([
       if (retrySave) {
         set.mockImplementation(nativeSet);
         const guard = { canContinue: () => active, canCommitFirstWrite: () => active };
-        const { ledger } = await restarted.appendPersonalImports(
-          scope, [row('later', '物理')], retryGuardedSave ? guard : undefined,
-        );
-        expect(ledger.records.map(({ title }) => title)).toEqual(['微積分', '統計', '物理']);
-        await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
-        expected = retryGuardedSave
-          ? await restarted.editPersonalImport(scope, ledger.records.at(-1)!, row('later', '化學'), guard)
-          : ledger;
-        if (retryGuardedSave) expect(expected.records.map(({ title }) => title)).toEqual(['微積分', '統計', '化學']);
+        const retryRead = jest.fn(() => restarted.loadPersonalImports(scope));
+        const unsubscribeRetry = restarted.subscribePersonalImports(retryRead);
+        try {
+          const { ledger } = await restarted.appendPersonalImports(
+            scope, [row('later', '物理')], retryGuardedSave ? guard : undefined,
+          );
+          expect(ledger.records.map(({ title }) => title)).toEqual(['微積分', '統計', '物理']);
+          await expect(retryRead.mock.results[0].value).resolves.toEqual(ledger);
+          expected = ledger;
+          if (retryGuardedSave) {
+            expected = await restarted.editPersonalImport(scope, ledger.records.at(-1)!, row('later', '化學'), guard);
+            expect(expected.records.map(({ title }) => title)).toEqual(['微積分', '統計', '化學']);
+            await expect(retryRead.mock.results[1].value).resolves.toEqual(expected);
+          }
+        } finally {
+          unsubscribeRetry();
+        }
       }
     });
+    if (unreadablePayload) expect(payloadReadFault.mock.calls.length).toBeGreaterThanOrEqual(3);
     if (retrySave) {
       await jest.isolateModulesAsync(async () => {
         const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
@@ -1194,12 +1232,16 @@ test.each(['Web Locks', 'IndexedDB', 'lease'] as const)(
   },
 );
 
-test.each(['session access', 'session remove', 'session write', 'session read', 'lease write', 'lease read'] as const)(
+test.each([
+  'session access', 'session remove', 'session write', 'session read',
+  'lease write', 'lease read', 'lease renewal security', 'lease renewal I/O',
+] as const)(
   'Expo Web keeps adding, editing and syncing during persistent %s failure',
   async (failure) => {
     const cleanup = useWebStorage();
     const restoreLocks = withoutWebWriteLocks();
-    if (failure === 'lease write' || failure === 'lease read') {
+    const renewalFails = failure.startsWith('lease renewal');
+    if (failure.startsWith('lease ')) {
       Object.defineProperty(globalThis, 'indexedDB', {
         configurable: true,
         value: { open: () => { throw new DOMException('IndexedDB unavailable', 'SecurityError'); } },
@@ -1216,7 +1258,9 @@ test.each(['session access', 'session remove', 'session write', 'session read', 
     const key = personalImportStorageKey(syncScope);
     const guard = { canContinue: () => true };
     const { removeItem, setItem, getItem } = Storage.prototype;
-    const ioError = new DOMException('Auxiliary storage unavailable', 'SecurityError');
+    const ioError = failure === 'lease renewal I/O'
+      ? new Error('Lease renewal unavailable')
+      : new DOMException('Auxiliary storage unavailable', 'SecurityError');
     const unavailable = jest.fn(() => { throw ioError; });
     let fault: jest.SpyInstance | undefined;
     const reread = jest.fn(() => loadPersonalImports(syncScope));
@@ -1235,10 +1279,11 @@ test.each(['session access', 'session remove', 'session write', 'session read', 
           if (this === stages) unavailable();
           setItem.call(this, entry, value);
         });
-      } else if (failure === 'lease write') {
+      } else if (failure === 'lease write' || renewalFails) {
         const storage = window.localStorage;
         fault = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, entry, value) {
-          if (this === storage && entry.startsWith(webLeasePrefix(key))) unavailable();
+          if (this === storage && entry.startsWith(webLeasePrefix(key)) &&
+              (!renewalFails || getItem.call(storage, entry) !== null)) unavailable();
           setItem.call(this, entry, value);
         });
       } else {
@@ -1259,23 +1304,29 @@ test.each(['session access', 'session remove', 'session write', 'session read', 
         schoolId: syncScope.schoolId, revision: 1, records: edited.records,
         updatedAt: '2026-11-25T00:00:00.000Z',
       };
-      if (failure === 'lease read') {
+      if (failure === 'lease read' || renewalFails) {
+        jest.useFakeTimers();
         let startRead!: () => void;
         let finishRead!: (value: typeof snapshot) => void;
         const reading = new Promise<void>((resolve) => { startRead = resolve; });
         const remote = new Promise<typeof snapshot>((resolve) => { finishRead = resolve; });
-        const clock = jest.spyOn(Date, 'now');
         try {
           const syncing = syncPersonalImports(syncScope, async () => {
             startRead();
             return remote;
           }, guard.canContinue);
           await Promise.race([reading, syncing]);
-          clock.mockReturnValue(Date.now() + 31_000);
+          if (renewalFails) {
+            expect(Object.keys(window.localStorage).filter((entry) => entry.startsWith(webLeasePrefix(key))))
+              .toHaveLength(1);
+            jest.advanceTimersByTime(10_000);
+            expect(unavailable).toHaveBeenCalledTimes(1);
+          }
+          jest.advanceTimersByTime(31_000);
           finishRead(snapshot);
           await syncing;
         } finally {
-          clock.mockRestore();
+          jest.useRealTimers();
         }
       } else {
         await syncPersonalImports(syncScope, async () => snapshot, guard.canContinue);
@@ -1287,9 +1338,9 @@ test.each(['session access', 'session remove', 'session write', 'session read', 
       expect(latest.sync?.base).toEqual(snapshot);
       await expect(reread.mock.results.at(-1)!.value).resolves.toEqual(latest);
       expect(JSON.parse(window.localStorage.getItem(key)!)).toMatchObject(latest);
-      expect(unavailable.mock.calls.length).toBeGreaterThanOrEqual(3);
+      expect(unavailable.mock.calls.length).toBeGreaterThanOrEqual(renewalFails ? 1 : 3);
       if (failure === 'session remove') expect(stages.getItem(orphan)).toBe('null');
-      if (failure === 'lease read') {
+      if (failure === 'lease read' || renewalFails) {
         expect(Object.keys(window.localStorage).filter((entry) => entry.startsWith(webLeasePrefix(key))))
           .toEqual([]);
       }

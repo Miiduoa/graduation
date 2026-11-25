@@ -79,6 +79,7 @@ async function readLedgerSnapshot(
   const nativeCommit = !web && primaryVerified &&
     (hasNativeCommitEncoding(primary) || (primary !== null && !!journal?.matchesVerifiedPrimary?.(primary)));
   if (journal?.markerError && (!nativeCommit || !journal.payloadReadable)) throw journal.markerError;
+  if (journal?.payloadError && !nativeCommit) throw journal.payloadError;
   const nativeJournal = nativeCommit && !journal?.rejected ? undefined : journal?.raw;
   if (primaryError && nativeJournal === undefined && !isStorageRowTooLarge(primaryError)) {
     throw primaryError;
@@ -407,26 +408,22 @@ export function mutatePersonalImportLedger<T>(
             const primaryCommitted = hasPersisted || (primaryVerified && recovery === null);
             const journal = preparePersonalImportRollback(key, persistedRaw, primaryCommitted);
             let cleaningRecovery = false;
-            // An adopted checkpoint keeps a tentative primary while cleanup
-            // can still revoke authority. Other writes carry their commit
-            // encoding from the first replacement, at the original byte count.
-            const firstRaw = adoptedCheckpoint === undefined ? encodeNativeFirstWrite(ledger) : raw;
-            let publishingCommitEncoding = firstRaw !== raw;
+            // The first replacement must carry the commit encoding even if
+            // every later attempt to retire the recovery files fails.
+            const firstRaw = encodeNativeFirstWrite(ledger);
             try {
               await AsyncStorage.setItem(key, firstRaw);
               writtenRaw = firstRaw;
               assertWritable();
               await verifyNativeLedgerWrite(key, firstRaw);
               assertWritable();
-              // An adopted checkpoint is protected by the tentative journal
-              // until cleanup and the final permission check have finished.
+              // Keep the rollback copy through cleanup and the final authority check.
               cleaningRecovery = true;
               const checkpointRetired = adoptedCheckpoint === undefined ||
                 await retireNativeCheckpoint(key, adoptedCheckpoint, assertWritable);
               assertWritable();
               keepNativeCommitEncoding = !journal.retire(assertWritable, checkpointRetired);
               if (keepNativeCommitEncoding) {
-                publishingCommitEncoding = true;
                 assertWritable();
                 journal.recordVerifiedPrimary(firstRaw);
                 const encoded = encodeNativeCommit(ledger);
@@ -443,12 +440,10 @@ export function mutatePersonalImportLedger<T>(
               }
               pendingRestorations.delete(key);
             } catch (error) {
-              if (publishingCommitEncoding) {
-                try {
-                  retainRejectedPersonalImportRollback(key, persistedRaw);
-                } catch {
-                  // Still try to restore the original primary and checkpoint.
-                }
+              try {
+                retainRejectedPersonalImportRollback(key, persistedRaw);
+              } catch {
+                // Still try to restore the original primary and checkpoint.
               }
               await rollbackLedger(key, persistedRaw, assertWritable, cleaningRecovery);
               throw error;
