@@ -194,6 +194,28 @@ describe('trusted OSM walking segment audit bridge', () => {
     expect(data.graph.edges[0].access).toBe('unknown');
   });
 
+  it('quarantines reversed duplicate audits of the same physical way segment in either order', () => {
+    const forward = audit(1, 2, { direction: 'forward' });
+    const reversed = audit(2, 1, { direction: 'forward' });
+    const neighbor = audit(2, 3);
+    for (const reviews of [[forward, reversed], [reversed, forward], [forward, forward]]) {
+      const graph = apply([...reviews, neighbor]);
+      expect(graph.edges[0].access).toBe('unknown');
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1, now)).toBeNull();
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 3, now)).not.toBeNull();
+    }
+    expect(apply([reversed]).edges[0].access).toBe('unknown');
+    for (const unrelated of [
+      audit(2, 1, { schoolId: 'other' }),
+      audit(2, 1, { osmWayId: 999 }),
+    ]) {
+      const graph = apply([forward, unrelated, neighbor]);
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 3, now)?.nodes.map(n => n.id)).toEqual([1, 2, 3]);
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1, now)).toBeNull();
+    }
+  });
+
   it('keeps purpose-limited or unrecognised access closed on ways and endpoints', () => {
     const restrictions = ['agricultural', 'forestry', 'delivery', 'emergency',
       'discouraged', 'unknown', 'yes;private', ''];
