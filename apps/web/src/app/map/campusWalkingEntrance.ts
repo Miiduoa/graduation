@@ -1,6 +1,6 @@
 import type { MapLocation } from './mapService';
 import { applyCampusWalkingSegmentAudits, type CampusWalkingSegmentAudit } from './campusWalkingAudit';
-import { findCampusWalkingRoute, type CampusWalkingBounds, type CampusWalkingRoute, type WalkingNode } from './campusWalkingGraph';
+import { findCampusWalkingRoute, isCampusWalkingRouteCurrent, type CampusWalkingBounds, type CampusWalkingRoute, type WalkingNode } from './campusWalkingGraph';
 import type { CampusWalkingOsmCandidates } from './campusWalkingOsm';
 
 type Destination = Pick<MapLocation, 'id' | 'name' | 'category' | 'lat' | 'lng' | 'building' | 'floor'>;
@@ -16,7 +16,31 @@ export type CampusEntranceReview = {
 
 type EntranceRouteResult =
   | { status: 'unverified-entrance' | 'route-unavailable' }
-  | { status: 'ready'; route: CampusWalkingRoute; entranceEvidenceUrl: string };
+  | { status: 'ready'; route: CampusWalkingRoute; entranceEvidenceUrl: string; destination: Readonly<Destination> };
+
+function sameDestination(a: Destination, b: Destination): boolean {
+  return a.id === b.id && a.name === b.name && a.category === b.category &&
+    a.lat === b.lat && a.lng === b.lng && a.building === b.building && a.floor === b.floor;
+}
+
+/** Before displaying a previously planned entrance route, verify that the
+ * current school, exact origin, destination and OSM snapshot still match.
+ * Only for results from the trusted planner; replan on audit/catalogue changes.
+ */
+export function isCampusEntranceRouteCurrent(
+  result: EntranceRouteResult,
+  schoolId: string,
+  originNodeId: number,
+  destination: Destination,
+  osmBaseAt: string,
+  now: number,
+): boolean {
+  return result.status === 'ready' &&
+    result.route.nodes[0]?.id === originNodeId &&
+    result.route.osmBaseAt === osmBaseAt &&
+    sameDestination(result.destination, destination) &&
+    isCampusWalkingRouteCurrent(result.route, schoolId, now);
+}
 
 const MAX_REVIEW_MS = 30 * 86400000;
 function utcMillis(value: string): number {
@@ -58,9 +82,7 @@ export function routeToCampusEntrance(
   if (matches.length !== 1) return { status: 'unverified-entrance' };
   const review = matches[0];
   const place = review.destination;
-  if (place.name !== destination.name || place.category !== destination.category ||
-      place.lat !== destination.lat || place.lng !== destination.lng ||
-      place.building !== destination.building || place.floor !== destination.floor) {
+  if (!sameDestination(place, destination)) {
     return { status: 'unverified-entrance' };
   }
   const reviewed = utcMillis(review.reviewedAt);
@@ -89,5 +111,7 @@ export function routeToCampusEntrance(
     status: 'ready',
     route: { ...route, reviewExpiresAtMs: Math.min(route.reviewExpiresAtMs, expiry) },
     entranceEvidenceUrl: review.evidenceUrl,
+    destination: { id: destination.id, name: destination.name, category: destination.category,
+      lat: destination.lat, lng: destination.lng, building: destination.building, floor: destination.floor },
   };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { routeToCampusEntrance, type CampusEntranceReview } from './campusWalkingEntrance';
+import { isCampusEntranceRouteCurrent, routeToCampusEntrance, type CampusEntranceReview } from './campusWalkingEntrance';
 import type { CampusWalkingSegmentAudit } from './campusWalkingAudit';
 import { isCampusWalkingRouteCurrent } from './campusWalkingGraph';
 import { parseCampusWalkingOsmCandidates } from './campusWalkingOsm';
@@ -43,6 +43,31 @@ describe('reviewed outdoor entrance route handoff', () => {
     expect(result.route.reviewExpiresAtMs).toBe(expiry);
     expect(isCampusWalkingRouteCurrent(result.route, 'fixture', expiry - 1)).toBe(true);
     expect(isCampusWalkingRouteCurrent(result.route, 'fixture', expiry)).toBe(false);
+  });
+
+  it('invalidates a cached entrance route when the current navigation context changes', () => {
+    const selected = { ...destination };
+    const data = candidates();
+    const result = routeToCampusEntrance(data, 'fixture', bounds, 1, selected, [review], [segment], now);
+    expect(result.status).toBe('ready');
+    const current = (place = destination, school = 'fixture', start = 1, snapshot = data.osmBaseAt,
+      time = now) => isCampusEntranceRouteCurrent(result, school, start, place, snapshot, time);
+    expect(current()).toBe(true);
+    for (const changed of [
+      { ...destination, id: 'other' }, { ...destination, name: 'Other' },
+      { ...destination, category: 'Other' }, { ...destination, lat: 10.003 },
+      { ...destination, lng: 20.004 }, { ...destination, building: 'Other' },
+      { ...destination, floor: '3' },
+    ]) expect(current(changed)).toBe(false);
+    expect(current(destination, 'other')).toBe(false);
+    expect(current(destination, 'fixture', 2)).toBe(false);
+    expect(current(destination, 'fixture', 1, '2026-11-24T08:00:30Z')).toBe(false);
+    expect(current(destination, 'fixture', 1, data.osmBaseAt, Date.parse(review.validUntil))).toBe(false);
+    selected.floor = '3';
+    expect(current(selected)).toBe(false);
+    expect(current()).toBe(true);
+    expect(isCampusEntranceRouteCurrent(plan([]), 'fixture', 1, destination, data.osmBaseAt, now)).toBe(false);
+    expect(isCampusEntranceRouteCurrent(plan([review], []), 'fixture', 1, destination, data.osmBaseAt, now)).toBe(false);
   });
 
   it('distinguishes an unverified entrance from an unavailable network', () => {
