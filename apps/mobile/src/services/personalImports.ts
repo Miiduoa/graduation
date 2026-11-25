@@ -264,7 +264,6 @@ export type PersonalImportWriteGuard =
   | {
       canContinue: () => boolean;
       canCommitFirstWrite?: () => boolean;
-      confirmAfterCleanup?: boolean;
     };
 
 export function mutatePersonalImportLedger<T>(
@@ -344,30 +343,17 @@ export function mutatePersonalImportLedger<T>(
               assertWritable();
               await verifyNativeLedgerWrite(key, raw);
               assertWritable();
+              // Keep the journal authoritative across a restart until the
+              // checkpoint cleanup and final permission check have finished.
+              if (adoptedCheckpoint !== undefined) {
+                await retireNativeCheckpoint(key, adoptedCheckpoint, assertWritable);
+                assertWritable();
+              }
               commit();
               pendingRestorations.delete(key);
             } catch (error) {
               await rollbackLedger(key, persistedRaw);
               throw error;
-            }
-            if (adoptedCheckpoint !== undefined) {
-              // Cleanup follows byte verification and durable commit. Scoped
-              // operations can still require authority before publishing success.
-              const confirm = typeof guard !== 'function' && guard.confirmAfterCleanup
-                ? assertWritable
-                : undefined;
-              try {
-                await retireNativeCheckpoint(key, adoptedCheckpoint, confirm);
-                confirm?.();
-              } catch (error) {
-                try {
-                  preparePersonalImportRollback(key, persistedRaw);
-                } catch {
-                  // Attempt restoration even if the durable journal cannot be recreated.
-                }
-                await rollbackLedger(key, persistedRaw);
-                throw error;
-              }
             }
           }
           hasPersisted = true;

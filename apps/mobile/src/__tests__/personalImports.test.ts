@@ -212,7 +212,7 @@ test.each([false, true])('native keeps an adopted checkpoint after an unreadable
     .toEqual(['行程 A', '行程 C']);
 });
 
-test('native cleanup starts after commit and cannot trigger rollback on revocation', async () => {
+test.each([false, true])('native checkpoint cleanup keeps restart recovery until authority is confirmed (revoked: %s)', async (revoked) => {
   const key = personalImportStorageKey(scope);
   const checkpoint = key + ':checkpoint';
   await appendPersonalImports(scope, [row('a', '行程 A')]);
@@ -229,7 +229,8 @@ test('native cleanup starts after commit and cannot trigger rollback on revocati
   const multiSet = jest.mocked(AsyncStorage.multiSet);
   const nativeMultiSet = multiSet.getMockImplementation()!;
   let active = true;
-  let journalAtCleanup: string | undefined;
+  let restartedLedger: Awaited<ReturnType<typeof loadPersonalImports>> | undefined;
+  let journalDuringCleanup: string | undefined;
   get.mockImplementation(async (entry) => {
     const raw = await nativeGet(entry);
     if (entry === key && !active && raw === original) throw rollbackReadError;
@@ -240,19 +241,32 @@ test('native cleanup starts after commit and cannot trigger rollback on revocati
     return nativeMultiSet(entries, callback);
   });
   remove.mockImplementationOnce(async (entries) => {
-    journalAtCleanup = readPersonalImportRollback(key);
-    active = false;
     await nativeRemove(entries);
+    if (revoked) active = false;
+    journalDuringCleanup = readPersonalImportRollback(key);
+    // Reload the service without the original process's locks or pending rollback state.
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      restartedLedger = await restarted.loadPersonalImports(scope);
+    });
   });
   try {
-    const result = await appendPersonalImports(scope, [row('c', '行程 C')], { canContinue: () => active });
-    expect(result.added).toBe(1);
+    const write = appendPersonalImports(scope, [row('c', '行程 C')], { canContinue: () => active });
+    if (revoked) {
+      await expect(write).rejects.toBe(rollbackReadError);
+      expect(rebuildCheckpoint).toHaveBeenCalled();
+      expect(readPersonalImportRollback(key)).toBe(original);
+    } else {
+      await expect(write).resolves.toMatchObject({ added: 1 });
+      expect(rebuildCheckpoint).not.toHaveBeenCalled();
+      expect(readPersonalImportRollback(key)).toBeUndefined();
+    }
     expect(remove).toHaveBeenCalledWith([checkpoint]);
-    expect(journalAtCleanup).toBeUndefined();
-    expect(rebuildCheckpoint).not.toHaveBeenCalled();
+    expect(journalDuringCleanup).toBe(original);
+    expect(restartedLedger?.records.map(({ title }) => title)).toEqual(['行程 A']);
     expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
     expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
-      .toEqual(['行程 A', '行程 C']);
+      .toEqual(revoked ? ['行程 A'] : ['行程 A', '行程 C']);
   } finally {
     get.mockImplementation(nativeGet);
     multiSet.mockImplementation(nativeMultiSet);

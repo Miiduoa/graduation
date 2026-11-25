@@ -515,14 +515,12 @@ function PersonalCalendarWorkspace({
         !latest.writesRevoked &&
         (!latest.resolvedKey || latest.verifiedKey === expected);
     };
-    const canContinue = () => canReportResult() && currentScope.current.verifiedKey === expected;
+    // Revalidating the same account and school cannot revive an earlier save.
+    const canContinue = () => canReportResult() && currentScope.current === requestedScope;
     // Leave account changes to canContinue so they keep their specific error.
     const guard: PersonalImportWriteGuard = {
       canContinue,
-      canCommitFirstWrite: () => !canReportResult() || (confirmationScope
-        ? currentScope.current === confirmationScope
-        : currentScope.current.verifiedKey === expected),
-      confirmAfterCleanup: true,
+      canCommitFirstWrite: () => !canReportResult() || currentScope.current === requestedScope,
     };
     mutationLock.current = true;
     setSaving(true);

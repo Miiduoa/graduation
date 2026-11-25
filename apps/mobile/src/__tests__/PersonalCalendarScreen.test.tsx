@@ -651,13 +651,19 @@ it('blocks a started save until the account scope is revalidated', async () => {
 });
 
 it.each([
-  ['create', 'entry'],
-  ['edit', 'entry'],
-  ['create', 'read'],
-  ['edit', 'read'],
-  ['create', 'readback'],
-  ['edit', 'readback'],
-] as const)('keeps an unqueued native %s draft when scope is lost at %s', async (mode, phase) => {
+  ['create', 'entry', false],
+  ['edit', 'entry', false],
+  ['create', 'read', false],
+  ['edit', 'read', false],
+  ['create', 'readback', false],
+  ['edit', 'readback', false],
+  ['create', 'entry', true],
+  ['edit', 'entry', true],
+  ['create', 'read', true],
+  ['edit', 'read', true],
+  ['create', 'readback', true],
+  ['edit', 'readback', true],
+] as const)('keeps an unqueued native %s draft when scope is lost at %s (same scope restored before resume: %s)', async (mode, phase, restoredBeforeResume) => {
   expect(Platform.OS).not.toBe('web');
   const scope = mockScope!;
   const originalTitle = '原本的行程';
@@ -717,6 +723,11 @@ it.each([
     mockNuniLoading = true;
     mockScope = null;
     view.rerender(<PersonalCalendarScreen />);
+    if (restoredBeforeResume) {
+      mockNuniLoading = false;
+      mockScope = { ...scope };
+      view.rerender(<PersonalCalendarScreen />);
+    }
     await act(async () => {
       release.resolve();
       await expect(save).rejects.toThrow('目前無法確認行事曆可寫入');
@@ -742,7 +753,12 @@ it.each([
   }
 });
 
-it.each(['create', 'edit'] as const)('keeps a queued %s draft when the lock opens during revalidation', async (mode) => {
+it.each([
+  ['create', false],
+  ['edit', false],
+  ['create', true],
+  ['edit', true],
+] as const)('keeps a queued %s draft after scope loss (same scope restored before lock opens: %s)', async (mode, restoredBeforeResume) => {
   const scope = mockScope!;
   const originalTitle = '原本的行程';
   const draftTitle = '等重新驗證的行程';
@@ -765,18 +781,26 @@ it.each(['create', 'edit'] as const)('keeps a queued %s draft when the lock open
   await entered.promise;
   const saveName = mode === 'edit' ? '儲存修改' : '儲存行程';
   const save = mode === 'edit' ? jest.mocked(editPersonalImport) : jest.mocked(appendPersonalImports);
+  const notify = jest.fn();
+  const unsubscribe = subscribePersonalImports(notify);
   try {
     fireEvent.press(view.getByRole('button', { name: saveName }));
     const queued = save.mock.results.at(-1)!.value;
     mockNuniLoading = true;
     mockScope = null;
     view.rerender(<PersonalCalendarScreen />);
+    if (restoredBeforeResume) {
+      mockNuniLoading = false;
+      mockScope = { ...scope };
+      view.rerender(<PersonalCalendarScreen />);
+    }
     await act(async () => {
       release.resolve();
       await preceding;
       await expect(queued).rejects.toThrow('目前無法確認行事曆可寫入');
     });
     expect(await AsyncStorage.getItem(key)).toBe(stored);
+    expect(notify).not.toHaveBeenCalled();
 
     mockNuniLoading = false;
     mockScope = scope;
@@ -788,6 +812,7 @@ it.each(['create', 'edit'] as const)('keeps a queued %s draft when the lock open
     });
   } finally {
     release.resolve();
+    unsubscribe();
     await preceding;
   }
 });
