@@ -402,6 +402,8 @@ export function AdminCourseVerifyScreen() {
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
         >
           {/* Error/Success Messages */}
           {err && (
