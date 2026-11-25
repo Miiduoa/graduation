@@ -101,11 +101,12 @@ async function readLedgerSnapshot(
   const recovery: (Recovery & { ledger: PersonalImportLedger }) | null = browserRecovery
     ? selectPersonalImportBrowserRecovery(browserRecovery, primary, primaryVerified, (raw) => parseLedger(raw, scope))
     : await readNativeRecovery(key, scope, primaryVerified, nativeJournal, checkpoint, journal?.rejected,
-        allowEmptyPrimary && primary === null && !primaryError && !journal && !restorationPending);
+        allowEmptyPrimary && primary === null && !primaryError && !journal && !restorationPending,
+        journal?.checkpointRejection);
   if (!recovery && primaryError) throw primaryError;
   // A pending restoration bypasses the primary read, so its on-disk bytes
   // cannot be checked against the previous attempt before replacing the hashes.
-  const preserveAttemptRejection = restorationPending ||
+  const preserveAttemptRejection = restorationPending || journal?.checkpointRejection !== undefined ||
     (attemptedPrimary && !verifiedByJournal && recovery !== null && recovery.raw !== primary);
   return { primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection };
 }
@@ -128,11 +129,12 @@ async function readNativeRecovery(
   capturedCheckpoint?: Awaited<ReturnType<typeof readLegacyCheckpoint>>,
   rejected = false,
   allowEmptyPrimary = false,
+  checkpointRejection?: (raw: string | null) => boolean,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
-  // A marked native journal or an in-process rollback can supersede an
-  // interrupted primary write. A standalone legacy checkpoint cannot.
+  // A marked journal, bound checkpoint, or in-process rollback can
+  // supersede an interrupted primary write.
   const pending = pendingRestorations.get(key);
-  if (!primaryVerified || nativeJournal !== undefined) {
+  if (!primaryVerified || nativeJournal !== undefined || checkpointRejection) {
     const checkpoint = capturedCheckpoint !== undefined
       ? capturedCheckpoint
       : await readLegacyCheckpoint(key, scope).catch((error: unknown) => {
@@ -141,6 +143,7 @@ async function readNativeRecovery(
           return null;
         });
     if (checkpoint &&
+        (!checkpointRejection || checkpointRejection(checkpoint.raw)) &&
         (pending === undefined || checkpoint.raw === pending.raw) &&
         (nativeJournal === undefined || (checkpoint.raw ?? 'null') === nativeJournal)) {
       return checkpoint;
@@ -148,6 +151,9 @@ async function readNativeRecovery(
     if (pending) return { ...pending, ledger: parseLedger(pending.raw, scope) };
   }
 
+  if (checkpointRejection) {
+    throw new Error('無法確認匯入資料已還原，請保留此裝置上的資料並稍後重試。');
+  }
   if (nativeJournal === undefined) return null;
   const raw = nativeJournal === 'null' ? null : nativeJournal;
   try {
@@ -269,7 +275,7 @@ async function rollbackLedger(
     await restoreLedger(key, recovery, assertWritable, keepJournal);
   } catch (error) {
     try {
-      recordFailedPersonalImportRestoration(key);
+      recordFailedPersonalImportRestoration(key, raw);
     } catch {
       // The rollback payload and checkpoint may still preserve the original.
     }
@@ -323,7 +329,7 @@ export async function loadPersonalImports(
       continue;
     }
     const sequence = writeSequence;
-    const { primary, recovery } = await readLedgerSnapshot(key, scope);
+    const { primary, recovery } = await readLedgerSnapshot(key, scope, true);
     if (Platform.OS === 'web' && primary !== await AsyncStorage.getItem(key)) continue;
     if (sequence !== writeSequence) continue;
     return recovery?.ledger ?? parseLedger(primary, scope);

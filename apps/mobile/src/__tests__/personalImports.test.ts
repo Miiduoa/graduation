@@ -1568,6 +1568,56 @@ test('a revoked native edit using the primary fallback is rejected after restart
   }
 });
 
+test('a rejected primary-only edit with no pending marker recovers its checkpoint after restart', async () => {
+  const scope = { owner: 'nuni:rejected-without-pending', schoolId: 'pu' };
+  const key = personalImportStorageKey(scope);
+  const prefix = `personal-imports-${sha256(key)}.rollback.`;
+  const pending = new File(Paths.document, prefix + 'pending');
+  const rejection = new File(Paths.document, prefix + 'rejected');
+  const { ledger: original } = await appendPersonalImports(scope, [row('first')]);
+  const originalRaw = (await AsyncStorage.getItem(key))!;
+  expect(pending.info().exists).toBe(false);
+  expect(await AsyncStorage.getItem(key + ':checkpoint')).toBeNull();
+
+  const { write: writeFile } = File.prototype;
+  const payloadFault = jest.fn(() => { throw new Error('無法寫入還原副本'); });
+  const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+    if (this.uri.endsWith(prefix + 'json')) payloadFault();
+    writeFile.call(this, value, options);
+  });
+  const set = jest.mocked(AsyncStorage.setItem);
+  const writeStorage = set.getMockImplementation()!;
+  const restoreFault = jest.fn(() => { throw new Error('無法還原舊主鍵'); });
+  let active = true;
+  set.mockImplementation(async (entry, value) => {
+    if (entry === key && !active) restoreFault();
+    await writeStorage(entry, value);
+    if (entry === key) active = false;
+  });
+  const listener = jest.fn();
+  const unsubscribe = subscribePersonalImports(listener);
+  try {
+    const guard = { canContinue: () => active, canCommitFirstWrite: () => active };
+    await expect(editPersonalImport(scope, original.records[0], row('first', '未提交的編輯'), guard))
+      .rejects.toThrow('無法還原舊主鍵');
+    expect(payloadFault).toHaveBeenCalledTimes(1);
+    expect(restoreFault).toHaveBeenCalledTimes(1);
+    expect(listener).not.toHaveBeenCalled();
+    expect(pending.info().exists).toBe(false);
+    expect(rejection.textSync()).toBe(sha256(originalRaw));
+    expect(await AsyncStorage.getItem(key + ':checkpoint')).toBe(originalRaw);
+    expect(JSON.parse((await AsyncStorage.getItem(key))!).records[0].title).toBe('未提交的編輯');
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(original);
+    });
+  } finally {
+    unsubscribe();
+    set.mockImplementation(writeStorage);
+    write.mockRestore();
+  }
+});
+
 test('native append and edit survive a settled file that cannot be deleted, cleared or read', async () => {
   const scope = { owner: 'nuni:retained-settlement', schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
@@ -3184,47 +3234,56 @@ test('Expo Web reports success and notifies when the primary readback throws aft
   }
 });
 
-test('Expo Web verifies and notifies using the lease when the current IndexedDB transaction cannot start', async () => {
-  const cleanup = useWebStorage();
-  const key = personalImportStorageKey(scope);
-  const database = `campus.personal-imports.locks:${sha256(key)}`;
-  const failTransaction = jest.fn(() => { throw new DOMException('無法建立交易', 'InvalidStateError'); });
-  const { open, restore } = useIndexedDBLocks((name) => {
-    if (name === database) failTransaction();
-  });
-  const guard = { canContinue: () => true, canCommitFirstWrite: () => true };
-  const storage = window.localStorage;
-  const get = jest.spyOn(Storage.prototype, 'getItem');
-  const set = jest.spyOn(Storage.prototype, 'setItem');
-  const reread = jest.fn(() => {
-    const write = set.mock.calls.findLastIndex(([entry]) => entry === key);
-    const verifiedBeforeNotification = get.mock.calls.some(([entry], index) =>
-      entry === key && get.mock.contexts[index] === storage &&
-      get.mock.invocationCallOrder[index] > set.mock.invocationCallOrder[write] &&
-      get.mock.results[index].value === set.mock.calls[write]?.[1],
-    );
-    expect(verifiedBeforeNotification).toBe(true);
-    return loadPersonalImports(scope);
-  });
-  const unsubscribe = subscribePersonalImports(reread);
-  try {
-    expect(navigator.locks).toBeUndefined();
-    const { ledger } = await appendPersonalImports(scope, [row('original')], guard);
-    await expect(reread.mock.results[0].value).resolves.toEqual(ledger);
-    const edited = await editPersonalImport(scope, ledger.records[0], row('original', '化學'), guard);
-    expect(open).toHaveBeenCalledWith(database, 1);
-    expect(failTransaction).toHaveBeenCalledTimes(2);
-    expect(reread).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(window.localStorage.getItem(key)!)).toMatchObject(edited);
-    await expect(reread.mock.results[1].value).resolves.toEqual(edited);
-  } finally {
-    unsubscribe();
-    set.mockRestore();
-    get.mockRestore();
-    restore();
-    cleanup();
-  }
-});
+test.each(['synchronous throw', 'abort before the first lock read'] as const)(
+  'Expo Web verifies and notifies using the lease after an IndexedDB %s',
+  async (failure) => {
+    const cleanup = useWebStorage();
+    const key = personalImportStorageKey(scope);
+    const database = `campus.personal-imports.locks:${sha256(key)}`;
+    const failTransaction = jest.fn(() => {
+      if (failure === 'synchronous throw') throw new DOMException('無法建立交易', 'InvalidStateError');
+      abort(key);
+    });
+    const { abort, open, restore } = useIndexedDBLocks((name) => {
+      if (name !== database) return;
+      if (failure === 'synchronous throw') failTransaction();
+      else queueMicrotask(failTransaction);
+    });
+    const guard = { canContinue: () => true, canCommitFirstWrite: () => true };
+    const storage = window.localStorage;
+    const get = jest.spyOn(Storage.prototype, 'getItem');
+    const set = jest.spyOn(Storage.prototype, 'setItem');
+    const reread = jest.fn(() => {
+      const write = set.mock.calls.findLastIndex(([entry]) => entry === key);
+      const verifiedBeforeNotification = get.mock.calls.some(([entry], index) =>
+        entry === key && get.mock.contexts[index] === storage &&
+        get.mock.invocationCallOrder[index] > set.mock.invocationCallOrder[write] &&
+        get.mock.results[index].value === set.mock.calls[write]?.[1],
+      );
+      return { verifiedBeforeNotification, ledger: loadPersonalImports(scope) };
+    });
+    const unsubscribe = subscribePersonalImports(reread);
+    try {
+      expect(navigator.locks).toBeUndefined();
+      const { ledger } = await appendPersonalImports(scope, [row('original')], guard);
+      expect(reread.mock.results[0].value.verifiedBeforeNotification).toBe(true);
+      await expect(reread.mock.results[0].value.ledger).resolves.toEqual(ledger);
+      const edited = await editPersonalImport(scope, ledger.records[0], row('original', '化學'), guard);
+      expect(open).toHaveBeenCalledWith(database, 1);
+      expect(failTransaction).toHaveBeenCalledTimes(2);
+      expect(reread).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(window.localStorage.getItem(key)!)).toMatchObject(edited);
+      expect(reread.mock.results[1].value.verifiedBeforeNotification).toBe(true);
+      await expect(reread.mock.results[1].value.ledger).resolves.toEqual(edited);
+    } finally {
+      unsubscribe();
+      set.mockRestore();
+      get.mockRestore();
+      restore();
+      cleanup();
+    }
+  },
+);
 
 test('an IndexedDB abort after verified publication and notification preserves a successful edit', async () => {
   const cleanup = useWebStorage();

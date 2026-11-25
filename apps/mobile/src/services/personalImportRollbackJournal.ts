@@ -309,8 +309,9 @@ export async function withPersonalImportWriteLock<T>(
     database.close();
     return writeWithLease(ledgerHash, write);
   }
+  const useLease = Symbol();
   try {
-    return await new Promise<T>((resolve, reject) => {
+    const result = await new Promise<T | typeof useLease>((resolve, reject) => {
       const store = transaction.objectStore(lockStore);
       let operation: Promise<T> | undefined;
       let finished = false;
@@ -335,8 +336,9 @@ export async function withPersonalImportWriteLock<T>(
       transaction.onabort = () => {
         aborted = transaction.error ?? new Error('匯入資料的寫入鎖定已中止，請稍後再試。');
         finished = true;
-        // IndexedDB only holds the lock. Its abort cannot undo completed localStorage writes.
-        if (committed && operation) operation.then(resolve, reject);
+        // Fall back only before the operation starts. An abort cannot undo a committed localStorage write.
+        if (!operation) resolve(useLease);
+        else if (committed) operation.then(resolve, reject);
         else reject(aborted);
       };
       transaction.oncomplete = () => {
@@ -345,9 +347,11 @@ export async function withPersonalImportWriteLock<T>(
       };
       keepLock();
     });
+    if (result !== useLease) return result;
   } finally {
     database.close();
   }
+  return writeWithLease(ledgerHash, write);
 }
 
 export { hasWebPersonalImportCommit } from '@campus/shared/src/imports/browserRecovery';
@@ -493,8 +497,18 @@ function journalFiles(key: string) {
 
 export function capturePersonalImportRollback(key: string) {
   const { payload, marker, marked } = journalFiles(key);
-  if (!marked) return undefined;
-  const rejectionRecorded = fileExists(rejectionFile(key));
+  const rejection = rejectionFile(key);
+  const rejectionRecorded = fileExists(rejection);
+  if (!marked) {
+    if (!rejectionRecorded) return undefined;
+    // A primary-only write has no journal payload. Bind recovery to the
+    // original bytes so an unrelated legacy checkpoint cannot be adopted.
+    const checkpointHash = readOptionalFile(rejection);
+    return {
+      rejected: true,
+      checkpointRejection: (raw: string | null) => checkpointHash === sha256(raw ?? 'null'),
+    };
+  }
   const retired = fileExists(retirementFile(key));
   const retiredPayload = retired && !rejectionRecorded ? readOptionalFile(payload) : undefined;
   if (retired && !rejectionRecorded && !rearmedPattern.test(retiredPayload ?? '')) return undefined;
@@ -866,19 +880,22 @@ export function preparePersonalImportRollback(
   };
 }
 
-export function recordFailedPersonalImportRestoration(key: string): void {
+export function recordFailedPersonalImportRestoration(key: string, original: string | null): void {
   // Record rejection independently so a restart can distinguish an unreadable
   // rejected journal from auxiliary read failures after a verified commit.
   const rejection = rejectionFile(key);
+  const { marker, marked } = journalFiles(key);
   try {
-    if (!fileExists(rejection)) {
+    if (!marked) {
+      rejection.write(sha256(original ?? 'null'));
+    } else if (!fileExists(rejection)) {
       rejection.create();
     }
     if (fileExists(rejection)) return;
   } catch {
     // The pending marker can still preserve the rejection.
   }
-  journalFiles(key).marker.write(rejectedMarker);
+  marker.write(rejectedMarker);
 }
 
 export function clearPersonalImportRollback(key: string): void {

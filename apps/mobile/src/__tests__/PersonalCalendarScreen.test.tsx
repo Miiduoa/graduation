@@ -11,6 +11,7 @@ import {
 } from '@campus/shared';
 import { PersonalImportAuthorityProvider } from '../state/personalImportAuthority';
 import PersonalCalendarScreen from '../screens/PersonalCalendarScreen';
+import { capturePersonalImportRollback } from '../services/personalImportRollbackJournal';
 import { PersonalEventReminderJournalCorruptError } from '../services/personalEventReminderJournal';
 import { reminderStatusCopy, type PersonalEventReminderEntry } from '../services/personalEventReminderModel';
 import { shareICalContent } from '../services/ical';
@@ -204,6 +205,47 @@ async function fillAndSave(title: string) {
   await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
   return view;
 }
+
+it('creates the first native event from the screen when the legacy checkpoint remains unreadable', async () => {
+  const scope = mockScope!;
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  const get = jest.mocked(AsyncStorage.getItem);
+  const set = jest.mocked(AsyncStorage.setItem);
+  const multiGet = jest.mocked(AsyncStorage.multiGet);
+  const readMany = multiGet.getMockImplementation()!;
+  const fault = jest.fn(() => { throw new Error('舊檢查點持續無法讀取'); });
+  const listener = jest.fn(() => loadPersonalImports(scope));
+  const unsubscribe = subscribePersonalImports(listener);
+  try {
+    expect(Platform.OS).not.toBe('web');
+    expect(await get(key)).toBeNull();
+    expect(capturePersonalImportRollback(key)).toBeUndefined();
+    multiGet.mockImplementation(async (keys) => keys.includes(checkpoint) ? fault() : readMany(keys));
+    await fillAndSave('第一筆原生行程');
+
+    expect(fault).toHaveBeenCalledTimes(2);
+    expect(fault.mock.invocationCallOrder[0]).toBeLessThan(
+      jest.mocked(appendPersonalImports).mock.invocationCallOrder.at(-1)!,
+    );
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith({ scope, source: 'local' });
+    const write = set.mock.calls.findLastIndex(([entry]) => entry === key);
+    expect(write).toBeGreaterThanOrEqual(0);
+    const verified = get.mock.calls.findIndex(([entry], index) =>
+      entry === key && get.mock.invocationCallOrder[index] > set.mock.invocationCallOrder[write] &&
+      get.mock.invocationCallOrder[index] < listener.mock.invocationCallOrder[0],
+    );
+    expect(verified).toBeGreaterThanOrEqual(0);
+    await expect(get.mock.results[verified].value).resolves.toBe(set.mock.calls[write][1]);
+    await expect(listener.mock.results[0].value).resolves.toMatchObject({
+      records: [expect.objectContaining({ title: '第一筆原生行程' })],
+    });
+  } finally {
+    unsubscribe();
+    multiGet.mockImplementation(readMany);
+  }
+});
 
 it('creates edits and deletes personal events on the public/platform scope', async () => {
   const view = await fillAndSave('口試練習');
