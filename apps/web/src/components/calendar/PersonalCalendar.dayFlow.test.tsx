@@ -1266,6 +1266,46 @@ it.each([
   expect(document.activeElement).toBe(blurMonth ? document.body : monthField);
 });
 
+it.each(['儲存', '刪除'])('%s完成時，編輯器卸載造成的同步離焦仍可交接焦點', async (operation) => {
+  const date = '2026-11-14';
+  const stored = event('detaching-editor', '卸載編輯器的合成行程', date);
+  const deleting = operation === '刪除';
+  if (deleting) seed([stored]);
+  const pendingWrite = deferNextCalendarWrite();
+  render(<PersonalCalendar />);
+  await ready();
+  activate(screen.getByRole('button', { name: date }));
+  const create = screen.getByRole('button', { name: '新增行程' });
+  activate(deleting ? screen.getByRole('button', { name: stored.title }) : create);
+  if (!deleting) fireEvent.change(titleField(), { target: { value: stored.title } });
+  const editor = screen.getByRole('region', { name: deleting ? '編輯行程' : '新增行程' });
+  const submit = screen.getByRole('button', { name: deleting ? '刪除這筆' : '儲存行程' });
+  activate(submit);
+  await waitFor(() => expect(pendingWrite()).toBeTypeOf('function'));
+
+  const parent = editor.parentNode!;
+  const removeChild = parent.removeChild.bind(parent);
+  let blurredDuringRemoval = false;
+  vi.spyOn(parent, 'removeChild').mockImplementation((child) => {
+    // Chromium can blur the focused button before it disconnects the editor.
+    if (child === editor && document.activeElement === submit && submit.isConnected) {
+      submit.blur();
+      blurredDuringRemoval = true;
+    }
+    return removeChild(child);
+  });
+
+  await act(async () => {
+    pendingWrite()?.();
+  });
+  expect(blurredDuringRemoval).toBe(true);
+  expect(editor.isConnected).toBe(false);
+  expect(document.activeElement).toBe(deleting ? create : dayHeading(date));
+  expect(readPersonalImports(scope()).map((row) => row.title)).toEqual(
+    deleting ? [] : [stored.title],
+  );
+});
+
 it('preserves the newly selected day when a completed write is acknowledged during revalidation', async () => {
   let acknowledge: (() => void) | undefined;
   Object.defineProperty(navigator, 'locks', {

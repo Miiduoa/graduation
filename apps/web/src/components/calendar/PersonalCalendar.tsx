@@ -866,6 +866,8 @@ function PersonalCalendarWorkspace({
       const control = event.target;
       if (
         control instanceof HTMLElement &&
+        // React clears the editor ref before removal can emit a native focusout.
+        editorRef.current === editor &&
         editor?.contains(control) &&
         control.isConnected &&
         !control.closest('[hidden]') &&
