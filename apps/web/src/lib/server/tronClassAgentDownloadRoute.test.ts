@@ -33,7 +33,7 @@ it('returns the actual bounded attachment after rechecking actor, binding and bo
   expect(response.headers.get('content-disposition')).toContain(`filename*=UTF-8''${encodeURIComponent('教材.pdf')}`);
   expect(response.headers.get('cache-control')).toBe('no-store, private, no-transform');
   expect(f.authenticate).toHaveBeenCalledTimes(2);
-  expect(f.grants.require.mock.calls).toEqual([[actor.ownerKey, 'readCourseData'], [actor.ownerKey, 'downloadMaterials']]);
+  expect(f.grants.require.mock.calls).toEqual([[actor.ownerKey, 'readCourseData', input.revision], [actor.ownerKey, 'downloadMaterials', input.revision]]);
   expect(f.grants.assertCurrent).toHaveBeenCalledWith(actor.ownerKey, grant, 'readCourseData');
   expect(f.grants.assertCurrent).toHaveBeenCalledWith(actor.ownerKey, grant, 'downloadMaterials');
   expect(f.bindings.assertCurrent).toHaveBeenCalledTimes(2);
@@ -86,7 +86,8 @@ it('binds a download to the grant’s school binding revision', async () => {
   const f = fixture();
   expect((await f.request({ ...input, revision: 'c'.repeat(32) })).status).toBe(409);
   expect(f.download).not.toHaveBeenCalled();
-  expect(f.release).toHaveBeenCalledOnce();
+  expect(f.grants.require).toHaveBeenCalledExactlyOnceWith(actor.ownerKey, 'readCourseData', 'c'.repeat(32));
+  expect(f.acquireSlot).not.toHaveBeenCalled();
 });
 
 it('does not read another actor’s permission after a nuni session switch', async () => {

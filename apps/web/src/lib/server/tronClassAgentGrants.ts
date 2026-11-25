@@ -14,6 +14,12 @@ const VERSION = /^[a-f0-9]{32}$/;
 
 function fail(status: number, code: string): never { throw new NuniError(status, code); }
 
+export class TronClassAgentPermissionRequired extends NuniError {
+  constructor(readonly revision: string) {
+    super(403, 'TRONCLASS_AGENT_PERMISSION_REQUIRED');
+  }
+}
+
 function permissionSet(value: unknown): TronClassAgentPermissions | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Row;
@@ -69,9 +75,10 @@ export function createTronClassAgentGrantService(dependencies: {
     }
     return value;
   };
-  const get = async (ownerKey: string): Promise<TronClassAgentGrant> => {
+  const get = async (ownerKey: string, sourceRevision?: string): Promise<TronClassAgentGrant> => {
     const documentPath = path(ownerKey);
-    const binding = await bindings.requireBinding(ownerKey);
+    const binding = await bindings.requireBinding(ownerKey, sourceRevision);
+    if (sourceRevision !== undefined && binding.revision !== sourceRevision) fail(409, 'TRONCLASS_BINDING_CHANGED');
     const db = await store();
     const row = currentRow((await db.doc(documentPath).get()).data(), ownerKey, binding.revision);
     return publicGrant(row, binding.revision);
@@ -87,7 +94,7 @@ export function createTronClassAgentGrantService(dependencies: {
     }
     const permissions = permissionSet(input.permissions);
     if (!permissions) fail(422, 'TRONCLASS_INVALID_INPUT');
-    const binding = await bindings.requireBinding(ownerKey);
+    const binding = await bindings.requireBinding(ownerKey, input.revision);
     if (binding.revision !== input.revision) fail(409, 'TRONCLASS_BINDING_CHANGED');
     const db = await store();
     const ref = db.doc(documentPath);
@@ -104,22 +111,22 @@ export function createTronClassAgentGrantService(dependencies: {
       if (previous.version !== input.expectedVersion) fail(409, 'TRONCLASS_AGENT_PERMISSION_CHANGED');
       tx.set(ref, { ...row, agentGrant: { version, permissions, updatedAt: timestamp } });
     });
-    const result = await get(ownerKey);
+    const result = await get(ownerKey, input.revision);
     if (result.version !== version) fail(409, 'TRONCLASS_AGENT_PERMISSION_CHANGED');
     return result;
   };
-  const requireGrant = async (ownerKey: string, scope: TronClassAgentScope): Promise<TronClassRequiredAgentGrant> => {
+  const requireGrant = async (ownerKey: string, scope: TronClassAgentScope, sourceRevision?: string): Promise<TronClassRequiredAgentGrant> => {
     if (!TRONCLASS_AGENT_SCOPES.includes(scope)) fail(422, 'TRONCLASS_INVALID_INPUT');
-    const grant = await get(ownerKey);
+    const grant = await get(ownerKey, sourceRevision);
     if (!grant.version || !grant.permissions.readCourseData || !grant.permissions[scope]) {
-      fail(403, 'TRONCLASS_AGENT_PERMISSION_REQUIRED');
+      throw new TronClassAgentPermissionRequired(grant.revision);
     }
     return { ...grant, version: grant.version };
   };
   const assertCurrent = async (ownerKey: string, expected: TronClassAgentGrant, scope: TronClassAgentScope): Promise<void> => {
     if (!expected || typeof expected.revision !== 'string' || !VERSION.test(expected.revision) ||
       typeof expected.version !== 'string' || !VERSION.test(expected.version)) fail(403, 'TRONCLASS_AGENT_PERMISSION_REQUIRED');
-    const grant = await requireGrant(ownerKey, scope);
+    const grant = await requireGrant(ownerKey, scope, expected.revision);
     if (grant.revision !== expected.revision || grant.version !== expected.version) {
       fail(409, 'TRONCLASS_AGENT_PERMISSION_CHANGED');
     }

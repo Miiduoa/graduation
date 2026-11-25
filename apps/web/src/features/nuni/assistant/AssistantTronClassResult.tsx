@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import type { TronClassAgentGrant } from '@campus/shared/src/tronClassAgentPermissions';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isTronClassAuthorityError, type TronClassAgentClient, type TronClassAgentQuestion } from '@/lib/tronClassAgentClient';
 import type { TronClassAgentAction } from '@/lib/tronClassAgentTypes';
@@ -15,7 +16,7 @@ const noAgentWrite = async (): Promise<never> => {
   throw new TronClassRequestError('TRONCLASS_AGENT_WRITE_UNAVAILABLE', '助理目前可準備與預覽作業，正式繳交尚未開放。');
 };
 
-export function AssistantTronClassResult({ data, question, client, owner, pending, onAsk, onAuthorityChanged }: {
+export function AssistantTronClassResult({ data, question, client, owner, pending, onAsk, onGrantRead, onAuthorityChanged }: {
   data: NonNullable<V2Turn['tronClass']>;
   question: string;
   client: TronClassAgentClient;
@@ -23,14 +24,18 @@ export function AssistantTronClassResult({ data, question, client, owner, pendin
   pending: boolean;
   onAsk: (input: TronClassAgentQuestion) => void;
   onAuthorityChanged: () => void;
+  onGrantRead: (grant: TronClassAgentGrant, acceptedCurrent: boolean) => void;
 }) {
   const result = data.result;
-  const [showAccess, setShowAccess] = useState(!!data.accessRequired);
+  const [access, setAccess] = useState<'source' | 'current' | null>(data.accessRequired ? 'source' : null);
   const [selected, setSelected] = useState(() => result?.preparation
     ? result.snapshot?.homework.find(item => item.courseId === result.preparation!.courseId && item.id === result.preparation!.homeworkId) ?? null
     : null);
   const [changed, setChanged] = useState(false);
   const inactive = changed || !!data.inactive;
+  const showAccess = access !== null;
+  const sourceRevision = result?.revision ?? data.sourceRevision;
+  const retryRevision = inactive || data.unconnected ? undefined : sourceRevision;
   const authorityChanged = useRef(onAuthorityChanged);
   useEffect(() => { authorityChanged.current = onAuthorityChanged; }, [onAuthorityChanged]);
   const invalidate = useCallback(() => {
@@ -47,10 +52,10 @@ export function AssistantTronClassResult({ data, question, client, owner, pendin
     };
   }, [client, owner, result?.revision, inactive]);
   const preparationClient = useMemo(() => ({
-    prepare: async (courseId: number, homeworkId: number) => {
+    prepare: async (courseId: number, homeworkId: number, revision: string) => {
       const controller = new AbortController();
       preparations.current.add(controller);
-      try { return await client.prepare(courseId, homeworkId, controller.signal); }
+      try { return await client.prepare(courseId, homeworkId, revision, controller.signal); }
       catch (reason) {
         if (!controller.signal.aborted && isTronClassAuthorityError(reason)) invalidate();
         throw reason;
@@ -68,7 +73,7 @@ export function AssistantTronClassResult({ data, question, client, owner, pendin
       <p className={styles.meta}>來源：靜宜大學 TronClass · 查詢時間：{tronClassTime(result.fetchedAt)}</p>
       {result.selection === 'course' || result.intent === 'courses' ? <div className={styles.choices} role="group" aria-label="選擇 TronClass 課程">
         {snapshot?.courses.map(course => <button key={course.id} className={styles.choice} disabled={pending || inactive}
-          onClick={() => onAsk({ question: result.selection === 'course' ? question : '查詢 TronClass 作業', courseId: course.id })}>
+          onClick={() => onAsk({ question: result.selection === 'course' ? question : '查詢 TronClass 作業', courseId: course.id, revision: result.revision })}>
           <strong>{course.name}</strong>
           <span>{[course.code, course.semester, ...course.teachers].filter(Boolean).join(' · ')}</span>
           <span>{result.selection === 'course' ? '選擇這門課繼續' : '查詢這門課的作業'}</span>
@@ -83,7 +88,7 @@ export function AssistantTronClassResult({ data, question, client, owner, pendin
             <p className={styles.meta}>{homework.submitted === true ? '已繳交' : homework.submitted === false ? '尚未繳交' : '尚未確認繳交狀態'}</p>
             {homework.description && <details><summary>作業要求</summary><p className={styles.literal}>{homework.description}</p></details>}
             {action && <button className="btn" disabled={pending || inactive}
-              onClick={() => onAsk({ question: '幫我準備 TronClass 作業', courseId: homework.courseId, homeworkId: homework.id })}>準備 {homework.title}</button>}
+              onClick={() => onAsk({ question: '幫我準備 TronClass 作業', courseId: homework.courseId, homeworkId: homework.id, revision: result.revision })}>準備 {homework.title}</button>}
           </li>;
         })}
       </ul>}
@@ -129,13 +134,13 @@ export function AssistantTronClassResult({ data, question, client, owner, pendin
     </>}
     {inactive && <p role="status" className={styles.notice}>連接或權限已更新，請重新查詢以使用目前的設定。</p>}
     <div className={styles.actions}>
-      <button className="btn" disabled={pending} onClick={() => onAsk({ question })}>重新查詢 TronClass</button>
-      <button className={styles.textButton} onClick={() => setShowAccess(value => !value)}>{showAccess ? '收起助理權限' : '管理 TronClass 助理權限'}</button>
+      <button className="btn" disabled={pending} onClick={() => onAsk({ question, ...(retryRevision ? { revision: retryRevision } : {}) })}>重新查詢 TronClass</button>
+      <button className={styles.textButton} onClick={() => setAccess(showAccess ? null : inactive ? 'current' : 'source')}>{showAccess ? '收起助理權限' : '管理 TronClass 助理權限'}</button>
       <Link href="/tronclass" className={styles.textButton}>TronClass 課程空間</Link>
     </div>
-    {showAccess && <TronClassAgentAccess client={client} compact revision={inactive ? undefined : result?.revision}
-      expectedVersion={inactive ? undefined : result?.grantVersion}
-      onSaved={invalidate} onConnectionChanged={invalidate} />}
+    {showAccess && <TronClassAgentAccess client={client} compact revision={access === 'source' ? sourceRevision : undefined}
+      expectedVersion={access === 'source' ? result?.grantVersion : undefined}
+      onRead={grant => onGrantRead(grant, access === 'current')} onSaved={invalidate} onConnectionChanged={invalidate} />}
   </div>;
 }
 

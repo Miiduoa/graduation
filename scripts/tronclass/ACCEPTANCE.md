@@ -6,7 +6,7 @@
 
 ## 執行環境
 
-使用本 repository 的 Node **22.23.5 以上、未滿 23** 與 frozen lock 安裝的 dependencies。CLI 使用既有 **esbuild 0.28.2** 將固定 server-only entry 編譯成暫存 Node bundle；`server-only` 使用套件既有的 `react-server` condition。沒有 TypeScript require hook、任意 module path 或新 runtime dependency。結束時移除編譯暫存。
+使用本 repository 的 Node **22.23.5 以上、未滿 23** 與 frozen lock 安裝的 dependencies。CLI 使用既有 **esbuild 0.28.2** 以 `write: false` 將固定 server-only entry 編譯為記憶體中的 Node bundle，並直接載入該輸出；`server-only` 使用套件既有的 `react-server` condition。沒有 TypeScript require hook、任意 module path 或新 runtime dependency。
 
 真正 preflight／dispatch／reconcile 必須在已具備 Web server 私有設定的受信任操作環境執行：既有 `FIREBASE_SERVICE_ACCOUNT_JSON`、`TRONCLASS_SESSION_SECRET`（未設時沿用 `BFF_SESSION_SECRET`），及必要時既有 PU relay 設定。沿用原本 `campus-one-tw` Admin 與 binding；不初始化其他專案或資料庫，不新增服務帳號，不自動讀取 `.env`。
 
@@ -90,7 +90,7 @@ node scripts/tronclass/acceptance.mjs reconcile \
   --plan /absolute/private/tronclass-check/plan.json
 ```
 
-查證仍驗證計畫 HMAC 與原 journal scope，但不要求計畫仍在五分鐘內，也不再執行寫入 authorization。同一已驗證學生重新綁定可使用新的 current revision 查證，原 attempt revision 不改寫；換 owner／學生不能沿用。沒有 acknowledgment、讀回失敗或資料不符時，保留 `unknown` 及原鎖。
+查證仍驗證計畫 HMAC 與原 journal scope，但不要求計畫仍在五分鐘內，也不再執行寫入 authorization。查證須沿用計畫的來源綁定版本。即使是同一學生重新綁定，版本不符也會在解封 session 或向校方讀取前回傳 `TRONCLASS_BINDING_CHANGED`，並保留原 attempt 與鎖。沒有 acknowledgment、讀回失敗或資料不符時，保留 `unknown` 及原鎖。
 
 輸出應按 `status` 解讀：
 

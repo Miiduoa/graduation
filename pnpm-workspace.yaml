@@ -5,3 +5,6 @@ packages:
   - workers/*
 
 nodeLinker: hoisted
+# pnpm 10.28.2 套用 patch 時會暫時切換工作目錄；序列化依賴建置，
+# 避免 hoisted linker 的 worker 在同一時間以相對路徑重新連結套件。
+childConcurrency: 1

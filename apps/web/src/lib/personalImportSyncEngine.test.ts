@@ -28,6 +28,7 @@ async function performPersonalImportSync(
     async (next) => {
       Object.assign(current, JSON.parse(JSON.stringify(next)));
     },
+    () => {},
   );
   Object.assign(current, JSON.parse(JSON.stringify(result.state)));
   return result;

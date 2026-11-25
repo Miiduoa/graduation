@@ -96,6 +96,7 @@ export async function performPersonalImportSync(
   active: () => boolean,
   resolution: PersonalImportSyncResolution | undefined,
   checkpoint: PersonalImportSyncCheckpoint,
+  assertSnapshot: () => void,
 ): Promise<PersonalImportSyncResult> {
   const requireActive = () => {
     if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
@@ -104,6 +105,11 @@ export async function performPersonalImportSync(
     requireActive();
     await checkpoint(state);
     requireActive();
+  };
+  const write = (mutation: NonNullable<PersonalImportSyncState['pending']>) => {
+    requireActive();
+    assertSnapshot();
+    return transport('personal-imports/write', { schoolId, ...mutation });
   };
   const read = async () => {
     const snapshot = parsePersonalImportSnapshot(
@@ -126,7 +132,7 @@ export async function performPersonalImportSync(
       // The server returns its CURRENT snapshot on a successful replay. The exact
       // pending payload, not that current snapshot, is the acknowledged baseline.
       remote = parsePersonalImportSnapshot(
-        await transport('personal-imports/write', { schoolId, ...pending }),
+        await write(pending),
         schoolId,
       );
       requireActive();
@@ -241,7 +247,7 @@ export async function performPersonalImportSync(
     // this request would look like local deletions when recovering after a crash.
     await persist({ records, sync: { ...sync, enabled: true, base, pending: mutation } });
     snapshot = parsePersonalImportSnapshot(
-      await transport('personal-imports/write', { schoolId, ...mutation }),
+      await write(mutation),
       schoolId,
     );
     requireActive();

@@ -9,6 +9,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  StyleSheet,
   Text,
   View,
 } from 'react-native';
@@ -16,8 +17,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
 import { useNavigation } from '@react-navigation/native';
 
-import { Card, ErrorState, LoadingState, Pill, Screen, SectionTitle } from '../ui/components';
+import { Card, ErrorState, LoadingState, Screen, SectionTitle } from '../ui/components';
 import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 import { CourseDemoDataRibbon, courseChipScrollContentStyle } from '../ui/courseChipShell';
 import { useAuth } from '../state/auth';
 import { useAsyncList } from '../hooks/useAsyncList';
@@ -165,21 +167,26 @@ function getFileIcon(name: string): keyof typeof Ionicons.glyphMap {
   return 'attach-outline';
 }
 
-function getFileColor(name: string): string {
+function getFileTone(name: string): { color: string; soft: string } {
   const lower = name.toLowerCase();
-  if (lower.endsWith('.pdf')) return '#D70015';
-  if (lower.endsWith('.pptx') || lower.endsWith('.ppt')) return '#FF9500';
-  if (lower.endsWith('.mp4') || lower.endsWith('.mov')) return '#AF52DE';
-  if (lower.endsWith('.docx') || lower.endsWith('.doc')) return theme.colors.info;
-  if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) return '#34C759';
+  if (lower.endsWith('.pdf')) return { color: theme.colors.danger, soft: theme.colors.dangerSoft };
+  if (lower.endsWith('.pptx') || lower.endsWith('.ppt'))
+    return { color: theme.colors.warning, soft: theme.colors.warningSoft };
+  if (lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.avi'))
+    return { color: theme.colors.social, soft: theme.colors.socialSoft };
+  if (lower.endsWith('.docx') || lower.endsWith('.doc'))
+    return { color: theme.colors.info, soft: theme.colors.infoSoft };
+  if (lower.endsWith('.xlsx') || lower.endsWith('.xls'))
+    return { color: theme.colors.success, soft: theme.colors.successSoft };
   if (
     lower.endsWith('.jpg') ||
     lower.endsWith('.jpeg') ||
     lower.endsWith('.png') ||
-    lower.endsWith('.gif')
+    lower.endsWith('.gif') ||
+    lower.endsWith('.webp')
   )
-    return '#FF2D55';
-  return theme.colors.accent;
+    return { color: theme.colors.accent, soft: theme.colors.accentSoft };
+  return { color: theme.colors.accent, soft: theme.colors.accentSoft };
 }
 
 function isImageFile(name: string): boolean {
@@ -255,12 +262,15 @@ function ImagePreviewModal(props: {
 function MaterialCard(props: {
   activity: TCCourseActivity;
   courseId: number;
+  isFirst?: boolean;
   onPreviewImage: (url: string, title: string) => void;
 }) {
-  const { activity, courseId, onPreviewImage } = props;
+  const { activity, courseId, isFirst, onPreviewImage } = props;
   const upload = activity.uploads[0];
   const icon = upload ? getFileIcon(upload.name) : 'document-outline';
-  const color = upload ? getFileColor(upload.name) : theme.colors.accent;
+  const tone = upload
+    ? getFileTone(upload.name)
+    : { color: theme.colors.accent, soft: theme.colors.accentSoft };
   const [downloading, setDownloading] = useState(false);
   const navigation = useNavigation<any>();
 
@@ -298,43 +308,45 @@ function MaterialCard(props: {
     <Pressable
       onPress={handlePress}
       disabled={downloading}
+      accessibilityRole="button"
       style={({ pressed }) => ({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12,
-        padding: 14,
-        borderRadius: 14,
-        backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        opacity: pressed || downloading ? 0.7 : 1,
+        minHeight: 56,
+        paddingVertical: 12,
+        paddingHorizontal: 14,
+        backgroundColor: pressed ? theme.colors.surfaceInteractive : theme.colors.surface,
+        borderTopWidth: isFirst ? 0 : StyleSheet.hairlineWidth,
+        borderTopColor: theme.colors.separator,
+        opacity: downloading ? 0.7 : 1,
       })}
     >
       <View
         style={{
-          width: 40,
-          height: 40,
-          borderRadius: 12,
-          backgroundColor: `${color}14`,
+          width: 38,
+          height: 38,
+          borderRadius: theme.radius.md,
+          backgroundColor: tone.soft,
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
         {downloading ? (
-          <ActivityIndicator size="small" color={color} />
+          <ActivityIndicator size="small" color={tone.color} />
         ) : (
-          <Ionicons name={icon} size={20} color={color} />
+          <Ionicons name={icon} size={19} color={tone.color} />
         )}
       </View>
       <View style={{ flex: 1 }}>
         <Text
-          style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}
+          style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14, lineHeight: 20 }}
           numberOfLines={2}
         >
           {activity.title}
         </Text>
         {upload ? (
-          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+          <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
             {upload.name} · {formatFileSize(upload.size)}
           </Text>
         ) : null}
@@ -350,7 +362,7 @@ function MaterialCard(props: {
         ) : (
           <Ionicons name="download-outline" size={16} color={theme.colors.accent} />
         )}
-        <Text style={{ color: theme.colors.muted, fontSize: 9 }}>
+        <Text style={{ color: theme.colors.muted, fontSize: 10 }}>
           {isImageFile(upload?.name ?? '') ? '預覽' : '下載'}
         </Text>
       </View>
@@ -360,9 +372,9 @@ function MaterialCard(props: {
 
 // ── 考試成績卡片（可展開看作答紀錄）─────────────────
 
-function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
+function ExamCard(props: { exam: ExamWithDetails; courseId: number; isFirst?: boolean }) {
   const navigation = useNavigation<any>();
-  const { exam, courseId } = props;
+  const { exam, courseId, isFirst } = props;
   const [expanded, setExpanded] = useState(false);
 
   const score = exam.submission?.exam_score;
@@ -371,29 +383,33 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
   const isEnded = exam.is_closed || (exam.end_time ? new Date(exam.end_time) < new Date() : false);
 
   let statusColor = theme.colors.muted;
+  let statusSoft = theme.colors.surface2;
   let statusText = '未作答';
   let statusIcon: keyof typeof Ionicons.glyphMap = 'time-outline';
 
   if (hasScore) {
-    statusColor = score >= 60 ? '#34C759' : '#D70015';
+    statusColor = score >= 60 ? theme.colors.success : theme.colors.danger;
+    statusSoft = score >= 60 ? theme.colors.successSoft : theme.colors.dangerSoft;
     statusText = `${score} 分`;
     statusIcon = 'checkmark-circle';
   } else if (isSubmitted) {
     statusColor = theme.colors.success;
+    statusSoft = theme.colors.successSoft;
     statusText = '已交卷';
     statusIcon = 'checkmark-done-outline';
   } else if (isEnded) {
-    statusColor = '#D70015';
+    statusColor = theme.colors.danger;
+    statusSoft = theme.colors.dangerSoft;
     statusText = '已結束';
     statusIcon = 'close-circle-outline';
   } else if (exam.end_time) {
     const hoursLeft = (new Date(exam.end_time).getTime() - Date.now()) / (1000 * 60 * 60);
+    statusColor = theme.colors.warning;
+    statusSoft = theme.colors.warningSoft;
     if (hoursLeft > 0 && hoursLeft <= 24) {
-      statusColor = '#FF9500';
       statusText = `剩 ${Math.floor(hoursLeft)}h`;
       statusIcon = 'alarm-outline';
     } else {
-      statusColor = '#FF9500';
       statusText = `截止：${formatDate(exam.end_time)}`;
       statusIcon = 'alarm-outline';
     }
@@ -404,44 +420,45 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
   const attempts = exam.attempts ?? [];
 
   return (
-    <View>
+    <View
+      style={{
+        borderTopWidth: isFirst ? 0 : StyleSheet.hairlineWidth,
+        borderTopColor: theme.colors.separator,
+      }}
+    >
       <Pressable
         onPress={() => setExpanded(!expanded)}
+        accessibilityRole="button"
         style={({ pressed }) => ({
           flexDirection: 'row',
           alignItems: 'center',
           gap: 12,
-          padding: 14,
-          borderRadius: expanded ? 14 : 14,
-          borderBottomLeftRadius: expanded ? 0 : 14,
-          borderBottomRightRadius: expanded ? 0 : 14,
-          backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
-          borderWidth: 1,
-          borderColor: hasScore ? (score >= 60 ? '#34C75930' : '#D7001530') : theme.colors.border,
-          borderBottomWidth: expanded ? 0 : 1,
-          opacity: pressed ? 0.8 : 1,
+          minHeight: 56,
+          paddingVertical: 12,
+          paddingHorizontal: 14,
+          backgroundColor: pressed ? theme.colors.surfaceInteractive : theme.colors.surface,
         })}
       >
         <View
           style={{
-            width: 40,
-            height: 40,
-            borderRadius: 12,
-            backgroundColor: `${statusColor}14`,
+            width: 38,
+            height: 38,
+            borderRadius: theme.radius.md,
+            backgroundColor: statusSoft,
             alignItems: 'center',
             justifyContent: 'center',
           }}
         >
-          <Ionicons name={statusIcon} size={20} color={statusColor} />
+          <Ionicons name={statusIcon} size={19} color={statusColor} />
         </View>
         <View style={{ flex: 1 }}>
           <Text
-            style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}
+            style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14, lineHeight: 20 }}
             numberOfLines={2}
           >
             {exam.title}
           </Text>
-          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+          <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
             {exam.start_time ? formatDate(exam.start_time) : ''}
             {exam.start_time && exam.end_time ? ' ~ ' : ''}
             {exam.end_time ? formatDate(exam.end_time) : ''}
@@ -453,7 +470,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
           ) : null}
         </View>
         <View style={{ alignItems: 'flex-end', gap: 2 }}>
-          <Text style={{ color: statusColor, fontWeight: '700', fontSize: hasScore ? 18 : 13 }}>
+          <Text style={{ color: statusColor, fontWeight: '700', fontSize: hasScore ? 17 : 13 }}>
             {statusText}
           </Text>
           <Ionicons
@@ -469,14 +486,10 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
         <View
           style={{
             padding: 14,
-            borderRadius: 14,
-            borderTopLeftRadius: 0,
-            borderTopRightRadius: 0,
-            backgroundColor: theme.colors.surface2,
-            borderWidth: 1,
-            borderColor: hasScore ? (score >= 60 ? '#34C75930' : '#D7001530') : theme.colors.border,
-            borderTopWidth: 0,
-            gap: 10,
+            backgroundColor: theme.colors.surfaceMuted,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: theme.colors.separator,
+            gap: 12,
           }}
         >
           {/* 考試基本資訊 */}
@@ -516,10 +529,12 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                     flexDirection: 'row',
                     alignItems: 'center',
                     gap: 8,
-                    paddingVertical: 6,
+                    paddingVertical: 8,
                     paddingHorizontal: 10,
-                    borderRadius: 8,
+                    borderRadius: theme.radius.md,
                     backgroundColor: theme.colors.surface,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
                   }}
                 >
                   <View
@@ -527,7 +542,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                       width: 22,
                       height: 22,
                       borderRadius: 11,
-                      backgroundColor: `${theme.colors.accent}20`,
+                      backgroundColor: theme.colors.accentSoft,
                       alignItems: 'center',
                       justifyContent: 'center',
                     }}
@@ -548,9 +563,9 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                     style={{
                       color:
                         Number(sub.score) >= 60
-                          ? '#34C759'
+                          ? theme.colors.success
                           : Number(sub.score) > 0
-                            ? '#D70015'
+                            ? theme.colors.danger
                             : theme.colors.muted,
                       fontWeight: '700',
                       fontSize: 15,
@@ -575,8 +590,10 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                   style={{
                     paddingVertical: 8,
                     paddingHorizontal: 10,
-                    borderRadius: 8,
+                    borderRadius: theme.radius.md,
                     backgroundColor: theme.colors.surface,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
                     gap: 4,
                   }}
                 >
@@ -586,7 +603,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                     </Text>
                     <Text
                       style={{
-                        color: (attempt.score ?? 0) >= 60 ? '#34C759' : '#D70015',
+                        color: (attempt.score ?? 0) >= 60 ? theme.colors.success : theme.colors.danger,
                         fontWeight: '700',
                         fontSize: 14,
                       }}
@@ -611,14 +628,14 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                             flexDirection: 'row',
                             alignItems: 'center',
                             gap: 6,
-                            paddingVertical: 3,
+                            paddingVertical: 4,
                             paddingHorizontal: 6,
-                            borderRadius: 6,
+                            borderRadius: theme.radius.sm,
                             backgroundColor:
                               ans.correct === true
-                                ? '#34C75910'
+                                ? theme.colors.successSoft
                                 : ans.correct === false
-                                  ? '#D7001510'
+                                  ? theme.colors.dangerSoft
                                   : 'transparent',
                           }}
                         >
@@ -633,9 +650,9 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                             size={14}
                             color={
                               ans.correct === true
-                                ? '#34C759'
+                                ? theme.colors.success
                                 : ans.correct === false
-                                  ? '#D70015'
+                                  ? theme.colors.danger
                                   : theme.colors.muted
                             }
                           />
@@ -647,8 +664,8 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                               color:
                                 ans.score != null
                                   ? ans.score > 0
-                                    ? '#34C759'
-                                    : '#D70015'
+                                    ? theme.colors.success
+                                    : theme.colors.danger
                                   : theme.colors.muted,
                               fontSize: 11,
                               fontWeight: '600',
@@ -672,9 +689,9 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                 flexDirection: 'row',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                paddingTop: 8,
-                borderTopWidth: 1,
-                borderTopColor: theme.colors.border,
+                paddingTop: 10,
+                borderTopWidth: StyleSheet.hairlineWidth,
+                borderTopColor: theme.colors.separator,
               }}
             >
               <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '600' }}>
@@ -690,7 +707,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
               </Text>
               <Text
                 style={{
-                  color: (exam.submission.exam_score ?? 0) >= 60 ? '#34C759' : '#D70015',
+                  color: (exam.submission.exam_score ?? 0) >= 60 ? theme.colors.success : theme.colors.danger,
                   fontWeight: '700',
                   fontSize: 20,
                 }}
@@ -708,19 +725,21 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                 kind: 'quiz',
               })
             }
+            accessibilityRole="button"
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'center',
               gap: 6,
-              paddingVertical: 8,
-              borderRadius: 8,
-              backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface,
-              opacity: pressed ? 0.8 : 1,
+              minHeight: 44,
+              borderRadius: theme.radius.md,
+              backgroundColor: pressed ? theme.colors.surfaceInteractive : theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
             })}
           >
-            <Ionicons name="open-outline" size={12} color={theme.colors.accent} />
-            <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}>
+            <Ionicons name="open-outline" size={14} color={theme.colors.accent} />
+            <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: '600' }}>
               在 APP 內查看
             </Text>
           </Pressable>
@@ -732,9 +751,9 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
 
 // ── 作業卡片（可展開看繳交紀錄）────────────────────
 
-function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
+function HomeworkCard(props: { hw: HomeworkItem; courseId: number; isFirst?: boolean }) {
   const navigation = useNavigation<any>();
-  const { hw, courseId } = props;
+  const { hw, courseId, isFirst } = props;
   const [expanded, setExpanded] = useState(false);
 
   const hasSubmission = (hw.homework_submissions?.length ?? 0) > 0;
@@ -744,21 +763,25 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
   const isEnded = hw.is_closed || isOverdue;
 
   let statusColor = theme.colors.accent;
+  let statusSoft = theme.colors.accentSoft;
   let statusText = '進行中';
   let statusIcon: keyof typeof Ionicons.glyphMap = 'time-outline';
 
   if (hasSubmission) {
-    statusColor = '#34C759';
+    statusColor = theme.colors.success;
+    statusSoft = theme.colors.successSoft;
     statusText = '已繳交';
     statusIcon = 'checkmark-circle';
   } else if (isEnded) {
-    statusColor = '#D70015';
+    statusColor = theme.colors.danger;
+    statusSoft = theme.colors.dangerSoft;
     statusText = '已截止';
     statusIcon = 'close-circle-outline';
   } else if (endTime) {
     const hoursLeft = (endTime.getTime() - now.getTime()) / (1000 * 60 * 60);
     if (hoursLeft <= 24 && hoursLeft > 0) {
-      statusColor = '#FF9500';
+      statusColor = theme.colors.warning;
+      statusSoft = theme.colors.warningSoft;
       statusText = `剩 ${Math.floor(hoursLeft)}h`;
       statusIcon = 'alarm-outline';
     }
@@ -768,39 +791,40 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
   const subs = hw.submissions ?? [];
 
   return (
-    <View>
+    <View
+      style={{
+        borderTopWidth: isFirst ? 0 : StyleSheet.hairlineWidth,
+        borderTopColor: theme.colors.separator,
+      }}
+    >
       <Pressable
         onPress={() => setExpanded(!expanded)}
+        accessibilityRole="button"
         style={({ pressed }) => ({
           flexDirection: 'row',
           alignItems: 'center',
           gap: 12,
-          padding: 14,
-          borderRadius: 14,
-          borderBottomLeftRadius: expanded ? 0 : 14,
-          borderBottomRightRadius: expanded ? 0 : 14,
-          backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
-          borderWidth: 1,
-          borderColor: hasSubmission ? '#34C75930' : isEnded ? '#D7001520' : theme.colors.border,
-          borderBottomWidth: expanded ? 0 : 1,
-          opacity: pressed ? 0.8 : 1,
+          minHeight: 56,
+          paddingVertical: 12,
+          paddingHorizontal: 14,
+          backgroundColor: pressed ? theme.colors.surfaceInteractive : theme.colors.surface,
         })}
       >
         <View
           style={{
-            width: 40,
-            height: 40,
-            borderRadius: 12,
-            backgroundColor: `${statusColor}14`,
+            width: 38,
+            height: 38,
+            borderRadius: theme.radius.md,
+            backgroundColor: statusSoft,
             alignItems: 'center',
             justifyContent: 'center',
           }}
         >
-          <Ionicons name={statusIcon} size={20} color={statusColor} />
+          <Ionicons name={statusIcon} size={19} color={statusColor} />
         </View>
         <View style={{ flex: 1 }}>
           <Text
-            style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}
+            style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14, lineHeight: 20 }}
             numberOfLines={2}
           >
             {hw.title}
@@ -825,14 +849,10 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
         <View
           style={{
             padding: 14,
-            borderRadius: 14,
-            borderTopLeftRadius: 0,
-            borderTopRightRadius: 0,
-            backgroundColor: theme.colors.surface2,
-            borderWidth: 1,
-            borderColor: hasSubmission ? '#34C75930' : isEnded ? '#D7001520' : theme.colors.border,
-            borderTopWidth: 0,
-            gap: 8,
+            backgroundColor: theme.colors.surfaceMuted,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: theme.colors.separator,
+            gap: 10,
           }}
         >
           {/* 作業詳情 */}
@@ -843,7 +863,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
               </Text>
               {detail.description ? (
                 <Text
-                  style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}
+                  style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18 }}
                   numberOfLines={5}
                 >
                   {detail.description.replace(/<[^>]*>/g, '').trim()}
@@ -864,7 +884,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
               )}
               {/* 附件 */}
               {detail.attachments.length > 0 && (
-                <View style={{ gap: 3, marginTop: 4 }}>
+                <View style={{ gap: 4, marginTop: 4 }}>
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>附件：</Text>
                   {detail.attachments.map((att) => (
                     <Pressable
@@ -877,10 +897,10 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
                           });
                         }
                       }}
-                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4 }}
                     >
-                      <Ionicons name="attach" size={12} color={theme.colors.accent} />
-                      <Text style={{ color: theme.colors.accent, fontSize: 11 }}>{att.name}</Text>
+                      <Ionicons name="attach" size={14} color={theme.colors.accent} />
+                      <Text style={{ color: theme.colors.accent, fontSize: 12 }}>{att.name}</Text>
                     </Pressable>
                   ))}
                 </View>
@@ -890,7 +910,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
 
           {/* 繳交紀錄 */}
           {subs.length > 0 && (
-            <View style={{ gap: 4 }}>
+            <View style={{ gap: 6 }}>
               <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13 }}>
                 繳交紀錄（{subs.length} 次）
               </Text>
@@ -898,10 +918,12 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
                 <View
                   key={sub.id}
                   style={{
-                    paddingVertical: 6,
+                    paddingVertical: 8,
                     paddingHorizontal: 10,
-                    borderRadius: 8,
+                    borderRadius: theme.radius.md,
                     backgroundColor: theme.colors.surface,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
                     gap: 2,
                   }}
                 >
@@ -912,7 +934,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
                     {sub.score != null && (
                       <Text
                         style={{
-                          color: sub.score >= 60 ? '#34C759' : '#D70015',
+                          color: sub.score >= 60 ? theme.colors.success : theme.colors.danger,
                           fontWeight: '700',
                           fontSize: 14,
                         }}
@@ -921,9 +943,13 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
                       </Text>
                     )}
                   </View>
-                  {sub.is_late && <Text style={{ color: '#FF9500', fontSize: 10 }}>遲交</Text>}
+                  {sub.is_late && (
+                    <Text style={{ color: theme.colors.warning, fontSize: 11, fontWeight: '600' }}>
+                      遲交
+                    </Text>
+                  )}
                   {sub.feedback && (
-                    <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
+                    <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
                       老師評語：{sub.feedback}
                     </Text>
                   )}
@@ -949,19 +975,21 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
                 },
               )
             }
+            accessibilityRole="button"
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'center',
               gap: 6,
-              paddingVertical: 8,
-              borderRadius: 8,
-              backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface,
-              opacity: pressed ? 0.8 : 1,
+              minHeight: 44,
+              borderRadius: theme.radius.md,
+              backgroundColor: pressed ? theme.colors.surfaceInteractive : theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
             })}
           >
-            <Ionicons name="open-outline" size={12} color={theme.colors.accent} />
-            <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}>
+            <Ionicons name="open-outline" size={14} color={theme.colors.accent} />
+            <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: '600' }}>
               在 APP 內查看
             </Text>
           </Pressable>
@@ -1010,24 +1038,34 @@ function ScoreOverview(props: { exams: ExamWithDetails[]; courseId: number }) {
   }
 
   return (
-    <Card title="成績概覽" subtitle={`${scoredExams.length} 項已評分`}>
-      <View style={{ gap: 10 }}>
+    <View style={{ gap: 8 }}>
+      <SectionTitle text={`成績概覽 · ${scoredExams.length} 項已評分`} />
+      <View
+        style={{
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.lg,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          padding: 14,
+          gap: 10,
+        }}
+      >
         <View
           style={{
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
             paddingBottom: 10,
-            borderBottomWidth: 1,
-            borderBottomColor: theme.colors.border,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.colors.separator,
           }}
         >
-          <Text style={{ color: theme.colors.text, fontSize: 14 }}>
+          <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '600' }}>
             {hasWeights ? '加權預估成績' : '平均分數'}
           </Text>
           <Text
             style={{
-              color: finalScore >= 60 ? '#34C759' : '#D70015',
+              color: finalScore >= 60 ? theme.colors.success : theme.colors.danger,
               fontWeight: '700',
               fontSize: 24,
             }}
@@ -1036,27 +1074,32 @@ function ScoreOverview(props: { exams: ExamWithDetails[]; courseId: number }) {
           </Text>
         </View>
 
-        {scoredExams.map((exam) => (
+        {scoredExams.map((exam, idx) => (
           <View
             key={exam.id}
             style={{
               flexDirection: 'row',
               justifyContent: 'space-between',
               alignItems: 'center',
-              paddingVertical: 4,
+              paddingTop: idx === 0 ? 0 : 8,
+              borderTopWidth: idx === 0 ? 0 : StyleSheet.hairlineWidth,
+              borderTopColor: theme.colors.separator,
             }}
           >
             <View style={{ flex: 1, marginRight: 8 }}>
               <Text style={{ color: theme.colors.text, fontSize: 13 }}>{exam.title}</Text>
               {Number(exam.score_percentage) > 0 && (
-                <Text style={{ color: theme.colors.muted, fontSize: 10 }}>
+                <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 1 }}>
                   佔 {exam.score_percentage}%
                 </Text>
               )}
             </View>
             <Text
               style={{
-                color: (exam.submission?.exam_score ?? 0) >= 60 ? '#34C759' : '#D70015',
+                color:
+                  (exam.submission?.exam_score ?? 0) >= 60
+                    ? theme.colors.success
+                    : theme.colors.danger,
                 fontWeight: '700',
                 fontSize: 16,
               }}
@@ -1073,18 +1116,18 @@ function ScoreOverview(props: { exams: ExamWithDetails[]; courseId: number }) {
               kind: 'score',
             })
           }
+          accessibilityRole="button"
           style={({ pressed }) => ({
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'center',
             gap: 6,
-            paddingVertical: 10,
-            borderRadius: 10,
-            backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
+            minHeight: 44,
+            borderRadius: theme.radius.md,
+            backgroundColor: pressed ? theme.colors.surfaceInteractive : theme.colors.surface2,
             borderWidth: 1,
             borderColor: theme.colors.border,
             marginTop: 4,
-            opacity: pressed ? 0.8 : 1,
           })}
         >
           <Ionicons name="stats-chart-outline" size={14} color={theme.colors.accent} />
@@ -1093,7 +1136,7 @@ function ScoreOverview(props: { exams: ExamWithDetails[]; courseId: number }) {
           </Text>
         </Pressable>
       </View>
-    </Card>
+    </View>
   );
 }
 
@@ -1109,27 +1152,39 @@ function ModuleSection(props: {
   const { data, courseId, isExpanded, onToggle, onPreviewImage } = props;
   const { module: mod, materials, exams, homeworks } = data;
   const totalItems = materials.length + exams.length + homeworks.length;
+  const summaryParts = [
+    materials.length > 0 ? `${materials.length} 份教材` : null,
+    homeworks.length > 0 ? `${homeworks.length} 份作業` : null,
+    exams.length > 0 ? `${exams.length} 項測驗` : null,
+  ].filter(Boolean);
 
   return (
-    <View style={{ gap: 8 }}>
+    <View
+      style={{
+        backgroundColor: theme.colors.surface,
+        borderRadius: theme.radius.lg,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        overflow: 'hidden',
+      }}
+    >
       <Pressable
         onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: isExpanded }}
         style={({ pressed }) => ({
           padding: 14,
-          borderRadius: 14,
-          backgroundColor: theme.colors.surface,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          opacity: pressed ? 0.8 : 1,
+          minHeight: 56,
+          backgroundColor: pressed ? theme.colors.surfaceInteractive : theme.colors.surface,
         })}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <View
             style={{
-              width: 36,
-              height: 36,
-              borderRadius: 10,
-              backgroundColor: `${theme.colors.accent}14`,
+              width: 34,
+              height: 34,
+              borderRadius: theme.radius.md,
+              backgroundColor: theme.colors.accentSoft,
               alignItems: 'center',
               justifyContent: 'center',
             }}
@@ -1139,15 +1194,12 @@ function ModuleSection(props: {
             </Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15, lineHeight: 21 }}>
               {mod.name}
             </Text>
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-              {materials.length > 0 && <Pill text={`${materials.length} 份教材`} kind="default" />}
-              {exams.length > 0 && <Pill text={`${exams.length} 項測驗`} kind="accent" />}
-              {homeworks.length > 0 && <Pill text={`${homeworks.length} 份作業`} kind="default" />}
-              {totalItems === 0 && <Pill text="暫無內容" kind="default" />}
-            </View>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+              {summaryParts.length > 0 ? summaryParts.join(' · ') : '暫無內容'}
+            </Text>
           </View>
           <Ionicons
             name={isExpanded ? 'chevron-up' : 'chevron-down'}
@@ -1158,25 +1210,39 @@ function ModuleSection(props: {
       </Pressable>
 
       {isExpanded && totalItems > 0 && (
-        <View style={{ gap: 8, paddingLeft: 8 }}>
+        <View
+          style={{
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: theme.colors.separator,
+          }}
+        >
           {/* 教材 */}
           {materials.length > 0 && (
-            <View style={{ gap: 6 }}>
-              <Text
+            <View>
+              <View
                 style={{
-                  color: theme.colors.muted,
-                  fontSize: 11,
-                  fontWeight: '600',
-                  paddingLeft: 4,
+                  paddingHorizontal: 14,
+                  paddingVertical: 6,
+                  backgroundColor: theme.colors.surfaceMuted,
                 }}
               >
-                教材
-              </Text>
-              {materials.map((m) => (
+                <Text
+                  style={{
+                    color: theme.colors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: '600',
+                    letterSpacing: 0.4,
+                  }}
+                >
+                  教材
+                </Text>
+              </View>
+              {materials.map((m, idx) => (
                 <MaterialCard
                   key={`mat-${m.id}`}
                   activity={m}
                   courseId={courseId}
+                  isFirst={idx === 0}
                   onPreviewImage={onPreviewImage}
                 />
               ))}
@@ -1185,38 +1251,65 @@ function ModuleSection(props: {
 
           {/* 作業 */}
           {homeworks.length > 0 && (
-            <View style={{ gap: 6 }}>
-              <Text
+            <View
+              style={{
+                borderTopWidth: materials.length > 0 ? StyleSheet.hairlineWidth : 0,
+                borderTopColor: theme.colors.separator,
+              }}
+            >
+              <View
                 style={{
-                  color: theme.colors.muted,
-                  fontSize: 11,
-                  fontWeight: '600',
-                  paddingLeft: 4,
+                  paddingHorizontal: 14,
+                  paddingVertical: 6,
+                  backgroundColor: theme.colors.surfaceMuted,
                 }}
               >
-                作業
-              </Text>
-              {homeworks.map((hw) => (
-                <HomeworkCard key={`hw-${hw.id}`} hw={hw} courseId={courseId} />
+                <Text
+                  style={{
+                    color: theme.colors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: '600',
+                    letterSpacing: 0.4,
+                  }}
+                >
+                  作業
+                </Text>
+              </View>
+              {homeworks.map((hw, idx) => (
+                <HomeworkCard key={`hw-${hw.id}`} hw={hw} courseId={courseId} isFirst={idx === 0} />
               ))}
             </View>
           )}
 
           {/* 測驗 */}
           {exams.length > 0 && (
-            <View style={{ gap: 6 }}>
-              <Text
+            <View
+              style={{
+                borderTopWidth:
+                  materials.length > 0 || homeworks.length > 0 ? StyleSheet.hairlineWidth : 0,
+                borderTopColor: theme.colors.separator,
+              }}
+            >
+              <View
                 style={{
-                  color: theme.colors.muted,
-                  fontSize: 11,
-                  fontWeight: '600',
-                  paddingLeft: 4,
+                  paddingHorizontal: 14,
+                  paddingVertical: 6,
+                  backgroundColor: theme.colors.surfaceMuted,
                 }}
               >
-                測驗
-              </Text>
-              {exams.map((e) => (
-                <ExamCard key={`exam-${e.id}`} exam={e} courseId={courseId} />
+                <Text
+                  style={{
+                    color: theme.colors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: '600',
+                    letterSpacing: 0.4,
+                  }}
+                >
+                  測驗
+                </Text>
+              </View>
+              {exams.map((e, idx) => (
+                <ExamCard key={`exam-${e.id}`} exam={e} courseId={courseId} isFirst={idx === 0} />
               ))}
             </View>
           )}
@@ -1224,7 +1317,14 @@ function ModuleSection(props: {
       )}
 
       {isExpanded && totalItems === 0 && (
-        <View style={{ paddingLeft: 46, paddingVertical: 8 }}>
+        <View
+          style={{
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: theme.colors.separator,
+          }}
+        >
           <Text style={{ color: theme.colors.muted, fontSize: 13 }}>此章節尚無教材或測驗</Text>
         </View>
       )}
@@ -1235,6 +1335,7 @@ function ModuleSection(props: {
 // ── 主畫面 ────────────────────────────────────────
 
 export function CourseModulesScreen(props: any) {
+  useThemeVersion();
   const nav = props?.navigation;
   const courseId = Number(props?.route?.params?.groupId ?? 0);
   const courseName = String(props?.route?.params?.groupName ?? '課程');
@@ -1495,14 +1596,36 @@ export function CourseModulesScreen(props: any) {
           </View>
         ) : null}
         {/* 課程標題 */}
-        <Card title={courseName} subtitle="課程內容">
-          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-            <Pill text={`${moduleData.length} 個章節`} kind="accent" />
-            <Pill text={`${totalMaterials} 份教材`} kind="default" />
-            {totalExams > 0 && <Pill text={`${totalExams} 項測驗`} kind="default" />}
-            {totalHomeworks > 0 && <Pill text={`${totalHomeworks} 份作業`} kind="default" />}
-          </View>
-        </Card>
+        <View
+          style={{
+            paddingBottom: 14,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.colors.separator,
+            gap: 4,
+          }}
+        >
+          <Text
+            accessibilityRole="header"
+            style={{
+              color: theme.colors.text,
+              fontSize: 22,
+              fontWeight: '700',
+              lineHeight: 28,
+            }}
+          >
+            {courseName}
+          </Text>
+          <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 19 }}>
+            {[
+              `${moduleData.length} 個章節`,
+              `${totalMaterials} 份教材`,
+              totalExams > 0 ? `${totalExams} 項測驗` : null,
+              totalHomeworks > 0 ? `${totalHomeworks} 份作業` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+        </View>
 
         {/* 成績概覽 */}
         <ScoreOverview exams={allExams} courseId={courseId} />

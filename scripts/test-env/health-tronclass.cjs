@@ -4,7 +4,6 @@
 // never authenticates, sends cookies, or calls the TronClass integration API.
 const assert = require('node:assert/strict');
 const { writeRuntimeReport } = require('./write-runtime-report.cjs');
-const path = require('node:path');
 
 const origin = process.env.WEB_PUBLIC_ORIGIN;
 assert.match(origin || '', /^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/);
@@ -39,7 +38,7 @@ async function main() {
       { method: 'GET', path: '/login', status: 200 }],
     authenticated: false, bindingApiCalled: false };
   if (process.env.TRONCLASS_RUNTIME_DIR) {
-    writeRuntimeReport(process.env.TRONCLASS_RUNTIME_DIR, 'health.json', report);
+    writeRuntimeReport(Number(process.env.TRONCLASS_REPORT_DIR_FD), 'health.json', report);
   }
   console.log(JSON.stringify(report));
 }

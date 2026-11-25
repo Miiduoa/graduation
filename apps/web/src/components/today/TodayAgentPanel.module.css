@@ -1,23 +1,16 @@
 .panel {
   min-width: 0;
-  padding: 22px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg, 16px);
-  background: var(--surface);
+  padding-block: 18px;
+  border-top: 1px solid var(--border-strong);
   color: var(--text);
 }
 
 .panel[data-compact] {
-  padding: 18px 20px;
-  border-color: var(--border);
+  padding-block: 12px;
 }
 
 .panel[data-compact] .title {
-  font-size: var(--font-body-size);
-}
-
-.panel[data-compact] .eyebrow {
-  display: none;
+  font-size: var(--font-h3-size);
 }
 
 .taskPicker {
@@ -54,14 +47,6 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-}
-
-.eyebrow {
-  margin: 0 0 5px;
-  color: var(--muted);
-  font-size: var(--font-body-sm-size);
-  font-weight: 550;
-  letter-spacing: 0.025em;
 }
 
 .title {
@@ -200,9 +185,9 @@
   min-height: 44px;
   padding: 10px 14px;
   border: 1px solid var(--brand);
-  border-radius: var(--radius-md, 10px);
+  border-radius: var(--radius-sm);
   background: var(--brand);
-  color: var(--surface);
+  color: var(--on-brand);
   font-size: var(--font-body-sm-size);
   font-weight: 600;
   line-height: 1.5;
@@ -271,7 +256,7 @@
   margin: 12px 0;
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md, 10px);
+  border-radius: var(--radius-sm);
   background: var(--warning-soft);
   font-size: var(--font-body-sm-size);
   line-height: 1.7;
@@ -406,10 +391,6 @@
 }
 
 @media (max-width: 540px) {
-  .panel {
-    padding: 18px 16px;
-  }
-
   .progress {
     gap: 8px;
   }

@@ -242,7 +242,7 @@ export function TronClassAssignment({
 
   useEffect(() => {
     let current = true;
-    void client.prepare(homework.courseId, homework.id).then(
+    void client.prepare(homework.courseId, homework.id, revision).then(
       (value) => {
         if (!current) return;
         if (
@@ -422,7 +422,7 @@ export function TronClassAssignment({
     let prepared = false;
     let journalSaved = false;
     try {
-      const latest = await client.prepare(homework.courseId, homework.id);
+      const latest = await client.prepare(homework.courseId, homework.id, revision);
       if (!operationCurrent(expected)) return;
       if (
         latest.revision !== revision ||

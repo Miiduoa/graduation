@@ -47,8 +47,8 @@ export default function ExportJobsPage() {
 
   return (
     <RequireAdmin>
-      <h1 style={{ marginTop: 0 }}>匯出任務（非同步）</h1>
-      <p style={{ color: '#3C3C43', lineHeight: 1.6 }}>
+      <h2>匯出任務（非同步）</h2>
+      <p style={{ color: 'var(--muted)', lineHeight: 1.6 }}>
         報表匯出任務由各報表頁「入列」後寫入 <code>report_export_jobs</code>；外部 worker（Edge function 或 cron）
         以 <code>report_export_jobs_claim_next</code> 取出處理；完成時 <code>storage_path</code> 會指到簽名儲存物件路徑。
         頁面每 8 秒自動重整。
@@ -63,7 +63,7 @@ export default function ExportJobsPage() {
           borderRadius: 8,
           border: '1px solid var(--brand)',
           background: 'var(--brand)',
-          color: '#fff',
+          color: 'var(--on-brand)',
           fontWeight: 700,
           cursor: 'pointer',
         }}>
@@ -72,10 +72,10 @@ export default function ExportJobsPage() {
 
       {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
 
-      <div style={{ overflowX: 'auto', marginTop: 16, background: '#fff', border: '1px solid #E5E5EA', borderRadius: 12 }}>
+      <div style={{ overflowX: 'auto', marginTop: 16, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ background: '#F2F2F7' }}>
+            <tr style={{ background: 'var(--bg-soft)' }}>
               <th style={cellStyle}>建立</th>
               <th style={cellStyle}>kind</th>
               <th style={cellStyle}>scope</th>
@@ -89,7 +89,7 @@ export default function ExportJobsPage() {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.id} style={{ background: r.status === 'failed' ? '#fef2f2' : undefined }}>
+              <tr key={r.id} style={{ background: r.status === 'failed' ? 'var(--danger-soft)' : undefined }}>
                 <td style={cellStyle}>{new Date(r.created_at).toLocaleString()}</td>
                 <td style={cellStyle}>{r.report_kind}</td>
                 <td style={{ ...cellStyle, fontFamily: 'monospace', fontSize: 11 }}>{r.scope_course_id ?? '—'}</td>
@@ -98,7 +98,7 @@ export default function ExportJobsPage() {
                   <span
                     style={{
                       padding: '2px 8px',
-                      borderRadius: 999,
+                      borderRadius: 4,
                       background: statusBg(r.status),
                       color: statusFg(r.status),
                       fontSize: 11,
@@ -121,29 +121,29 @@ export default function ExportJobsPage() {
         </table>
       </div>
       {!error && rows.length === 0 ? (
-        <p style={{ color: '#8E8E93' }}>目前沒有匯出任務。</p>
+        <p style={{ color: 'var(--muted)' }}>目前沒有匯出任務。</p>
       ) : null}
     </RequireAdmin>
   );
 }
 
 function statusBg(s: string) {
-  if (s === 'queued') return '#fef3c7';
-  if (s === 'running') return '#E5F2FF';
-  if (s === 'ready') return '#dcfce7';
-  if (s === 'failed') return '#fecaca';
-  return '#F2F2F7';
+  if (s === 'queued') return 'var(--warning-soft)';
+  if (s === 'running') return 'var(--info-soft)';
+  if (s === 'ready') return 'var(--success-soft)';
+  if (s === 'failed') return 'var(--danger)';
+  return 'var(--bg-soft)';
 }
 function statusFg(s: string) {
-  if (s === 'queued') return '#92400e';
-  if (s === 'running') return '#1d4ed8';
-  if (s === 'ready') return '#166534';
-  if (s === 'failed') return '#991b1b';
-  return '#1C1C1E';
+  if (s === 'queued') return 'var(--warning)';
+  if (s === 'running') return 'var(--info)';
+  if (s === 'ready') return 'var(--success)';
+  if (s === 'failed') return 'var(--danger)';
+  return 'var(--text)';
 }
 
 const cellStyle: React.CSSProperties = {
   padding: 8,
-  border: '1px solid #E5E5EA',
+  border: '1px solid var(--border)',
   textAlign: 'left',
 };

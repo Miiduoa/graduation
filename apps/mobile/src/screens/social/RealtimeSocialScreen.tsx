@@ -251,7 +251,7 @@ function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onReques
   return (
     <View style={[styles.root, { paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + insets.bottom }]}>
       <ScrollView
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent} colors={[theme.colors.accent]} />}
         contentContainerStyle={{ paddingBottom: 32 }}
       >
         {/* ─── POI chips ─── */}
@@ -266,6 +266,7 @@ function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onReques
                 onPress={() => setSelectedPoi(poi.id)}
                 style={[styles.poiChip, active && styles.poiChipActive]}
                 accessibilityRole="button"
+                accessibilityState={{ selected: active }}
                 accessibilityLabel={`選擇 ${poi.name}`}
               >
                 <Ionicons
@@ -382,7 +383,7 @@ function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onReques
                   ) : isVideo ? (
                     <View style={[styles.storyCardText, styles.videoCover]}>
                       <View style={styles.videoBadge}>
-                        <Ionicons name="play" size={12} color="#f3faf6" />
+                        <Ionicons name="play" size={12} color="#fff" />
                         <Text style={styles.videoLabel}>影片</Text>
                       </View>
                       {!!latest?.text && <Text numberOfLines={3} style={styles.storyCardTxt}>{latest.text}</Text>}
@@ -394,7 +395,7 @@ function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onReques
                         { backgroundColor: latest?.bgColor || theme.colors.surfaceElevated },
                       ]}
                     >
-                      <Text numberOfLines={5} style={styles.storyCardTxt}>
+                      <Text numberOfLines={5} style={[styles.storyCardTxt, !latest?.bgColor && { color: theme.colors.text }]}>
                         {latest?.text || '（媒體）'}
                       </Text>
                     </View>
@@ -438,21 +439,21 @@ const createStyles = () => StyleSheet.create({
     marginBottom: 8,
     fontSize: 14,
   },
-  softMuted: { color: theme.colors.textSecondary, fontSize: 13, marginVertical: 8 },
+  softMuted: { color: theme.colors.textSecondary, fontSize: 14, marginVertical: 8 },
 
   poiChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
+    minHeight: 44,
+    borderRadius: theme.radius.sm,
     backgroundColor: theme.colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
   },
   poiChipActive: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
-  poiChipTxt: { fontSize: 12, color: theme.colors.textSecondary, fontWeight: '700' },
+  poiChipTxt: { fontSize: 13, color: theme.colors.textSecondary, fontWeight: '700' },
   poiDot: {
     width: 6,
     height: 6,
@@ -467,11 +468,9 @@ const createStyles = () => StyleSheet.create({
     gap: 12,
     marginTop: 12,
     marginHorizontal: 14,
-    paddingHorizontal: 14,
     paddingVertical: 12,
-    backgroundColor: theme.colors.surfaceElevated ?? theme.colors.surface,
-    borderRadius: theme.radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
   },
   poiSummaryName: { color: theme.colors.text, fontWeight: '700', fontSize: 15 },
@@ -482,8 +481,8 @@ const createStyles = () => StyleSheet.create({
     gap: 6,
     backgroundColor: theme.colors.accent,
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: theme.radius.md,
+    minHeight: 44,
+    borderRadius: theme.radius.sm,
   },
   pulseBtnActive: { backgroundColor: theme.colors.success },
   pulseBtnTxt: { color: theme.colors.onAccent, fontWeight: '700', fontSize: 13 },
@@ -492,28 +491,24 @@ const createStyles = () => StyleSheet.create({
   peerCard: {
     width: 84,
     alignItems: 'center',
-    padding: 8,
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
+    paddingVertical: 8,
   },
   peerAvatar: { width: 44, height: 44, borderRadius: 22 },
   peerAvatarFb: { alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.accent },
   peerAvatarTxt: { color: theme.colors.onAccent, fontWeight: '700' },
   peerName: { marginTop: 6, fontSize: 12, color: theme.colors.text, fontWeight: '600' },
-  peerDept: { fontSize: 10, color: theme.colors.textSecondary },
+  peerDept: { fontSize: 12, color: theme.colors.textSecondary },
 
   storyComposeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    minHeight: 44,
     backgroundColor: theme.colors.accent,
-    borderRadius: 999,
+    borderRadius: theme.radius.sm,
   },
-  storyComposeTxt: { color: theme.colors.onAccent, fontWeight: '700', fontSize: 12 },
+  storyComposeTxt: { color: theme.colors.onAccent, fontWeight: '700', fontSize: 13 },
 
   storyGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 },
   storyCard: {
@@ -531,9 +526,9 @@ const createStyles = () => StyleSheet.create({
     padding: 14,
     justifyContent: 'center',
   },
-  videoCover: { alignItems: 'flex-start', gap: 12, backgroundColor: '#243b33' },
-  videoBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#90afa1', borderRadius: 20, paddingHorizontal: 9, paddingVertical: 4 },
-  videoLabel: { fontSize: 12, fontWeight: '600', color: '#f3faf6' },
+  videoCover: { alignItems: 'flex-start', gap: 12, backgroundColor: '#000' },
+  videoBadge: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  videoLabel: { fontSize: 13, fontWeight: '600', color: '#fff' },
   storyCardTxt: { color: '#fff', fontSize: 14, lineHeight: 20, fontWeight: '600' },
   storyCardFooter: {
     flexDirection: 'row',
@@ -548,8 +543,8 @@ const createStyles = () => StyleSheet.create({
     justifyContent: 'center',
   },
   storyAuthorAvTxt: { color: theme.colors.onAccent, fontWeight: '700', fontSize: 11 },
-  storyAuthorName: { fontSize: 12, color: theme.colors.text, fontWeight: '700', flex: 1 },
-  storyCount: { fontSize: 11, color: theme.colors.textSecondary },
+  storyAuthorName: { fontSize: 13, color: theme.colors.text, fontWeight: '700', flex: 1 },
+  storyCount: { fontSize: 12, color: theme.colors.textSecondary },
 
 });
 

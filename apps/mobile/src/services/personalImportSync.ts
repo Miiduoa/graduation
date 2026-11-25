@@ -89,7 +89,7 @@ export function syncPersonalImports(
   const task = mutatePersonalImportLedger(
     scope,
     current,
-    async (ledger, checkpoint) => {
+    async (ledger, checkpoint, assertSnapshot) => {
       const result = await performPersonalImportSync(
         scope.schoolId,
         ledger,
@@ -104,6 +104,7 @@ export function syncPersonalImports(
             batches: ledger.batches.filter((batch) => batchIds.has(batch.id)),
           });
         },
+        assertSnapshot,
       );
       const batchIds = new Set(result.state.records.map((record) => record.batchId));
       return {

@@ -409,14 +409,14 @@ export function createNativeTronClassClient(access: TronClassAccess) {
     },
     async courses(expectedRevision: string) {
       if (!revision(expectedRevision)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
-      return sameRevision(decodeTronClassCourseIndex(await request('courses')) ?? invalid(), expectedRevision);
+      return sameRevision(decodeTronClassCourseIndex(await request('courses', { revision: expectedRevision })) ?? invalid(), expectedRevision);
     },
     async sync(expectedRevision: string, courseId?: number) {
-      if (courseId !== undefined && !id(courseId))
+      if (!revision(expectedRevision) || (courseId !== undefined && !id(courseId)))
         throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
       const value = sameRevision(
         parseNativeTronClassSnapshot(
-          await request('sync', courseId === undefined ? {} : { courseId }),
+          await request('sync', { ...(courseId === undefined ? {} : { courseId }), revision: expectedRevision }),
         ),
         expectedRevision,
       );
@@ -439,9 +439,9 @@ export function createNativeTronClassClient(access: TronClassAccess) {
       return value;
     },
     async prepare(courseId: number, homeworkId: number, expectedRevision: string) {
-      if (!id(courseId) || !id(homeworkId)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+      if (!id(courseId) || !id(homeworkId) || !revision(expectedRevision)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
       return sameRevision(
-        parseNativeTronClassPreparation(await request('prepare', { courseId, homeworkId }), {
+        parseNativeTronClassPreparation(await request('prepare', { courseId, homeworkId, revision: expectedRevision }), {
           courseId,
           homeworkId,
         }),

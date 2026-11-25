@@ -164,9 +164,9 @@ export default function Wave5Page() {
 
   return (
     <RequireAdmin>
-      <h1 style={{ marginTop: 0 }}>商用核心模組（Wave 5）</h1>
-      <p style={{ color: '#3C3C43', lineHeight: 1.6 }}>
-        行事曆／問卷／分組／徽章；對應 migration 20260520130000–130200。請先選課程。
+      <h2>課程活動</h2>
+      <p style={{ color: 'var(--muted)', lineHeight: 1.6 }}>
+        選擇課程後可管理行事曆、問卷、小組與徽章。
       </p>
       {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
       {info ? <p style={{ color: 'var(--success)' }}>{info}</p> : null}
@@ -193,8 +193,8 @@ export default function Wave5Page() {
               onClick={() => setTab(t)}
               style={{
                 ...tabBtn,
-                background: tab === t ? 'var(--brand)' : '#fff',
-                color: tab === t ? '#fff' : '#1C1C1E',
+                background: tab === t ? 'var(--brand)' : 'var(--surface)',
+                color: tab === t ? 'var(--on-brand)' : 'var(--text)',
               }}>
               {labelOf(t)}
             </button>
@@ -205,9 +205,9 @@ export default function Wave5Page() {
       {subtitle ? <p style={{ marginTop: 12, fontWeight: 600 }}>{subtitle}</p> : null}
 
       {!courseId ? (
-        <p style={{ color: '#8E8E93' }}>請先選課。</p>
+        <p style={{ color: 'var(--muted)' }}>請先選課。</p>
       ) : (
-        <div style={{ marginTop: 16, background: '#fff', border: '1px solid #E5E5EA', borderRadius: 12, padding: 16 }}>
+        <div style={{ marginTop: 16, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
           {tab === 'calendar' ? (
             <>
               <button type="button" onClick={() => void createCalendarEvent()} disabled={busy} style={primaryBtn}>
@@ -217,7 +217,7 @@ export default function Wave5Page() {
                 {events.map((e) => (
                   <li key={e.id} style={listItem}>
                     <strong>{e.title}</strong>
-                    <div style={{ color: '#8E8E93', fontSize: 12 }}>
+                    <div style={{ color: 'var(--muted)', fontSize: 12 }}>
                       {new Date(e.starts_at).toLocaleString()}
                       {e.source_kind ? `｜來源：${e.source_kind}` : ''}
                     </div>
@@ -234,7 +234,7 @@ export default function Wave5Page() {
                 {surveys.map((s) => (
                   <li key={s.id} style={listItem}>
                     <strong>{s.title}</strong>
-                    <div style={{ color: '#8E8E93', fontSize: 12 }}>
+                    <div style={{ color: 'var(--muted)', fontSize: 12 }}>
                       匿名：{s.is_anonymous ? '是' : '否'}｜開放：{new Date(s.open_at).toLocaleString()}
                       {s.closes_at ? `｜關閉：${new Date(s.closes_at).toLocaleString()}` : ''}
                     </div>
@@ -251,7 +251,7 @@ export default function Wave5Page() {
                 {groups.map((g) => (
                   <li key={g.id} style={listItem}>
                     <strong>{g.name}</strong>
-                    <div style={{ color: '#8E8E93', fontSize: 12 }}>
+                    <div style={{ color: 'var(--muted)', fontSize: 12 }}>
                       上限：{g.max_members ?? '∞'}｜自選：{g.is_self_signup ? '是' : '否'}
                     </div>
                   </li>
@@ -272,8 +272,8 @@ export default function Wave5Page() {
                 {badges.map((b) => (
                   <li key={b.id} style={listItem}>
                     <strong>{b.name}</strong>
-                    <div style={{ color: '#8E8E93', fontSize: 12 }}>{b.description || '—'}</div>
-                    <div style={{ color: '#8E8E93', fontSize: 11, fontFamily: 'monospace' }}>
+                    <div style={{ color: 'var(--muted)', fontSize: 12 }}>{b.description || '—'}</div>
+                    <div style={{ color: 'var(--muted)', fontSize: 11, fontFamily: 'monospace' }}>
                       {JSON.stringify(b.criteria)}
                     </div>
                   </li>
@@ -297,14 +297,14 @@ function labelOf(t: Tab): string {
 const selectStyle: React.CSSProperties = {
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid #d1d5db',
+  border: '1px solid var(--border-strong)',
   fontSize: 14,
   minWidth: 220,
 };
 const tabBtn: React.CSSProperties = {
   padding: '8px 14px',
   borderRadius: 8,
-  border: '1px solid #d1d5db',
+  border: '1px solid var(--border-strong)',
   fontWeight: 700,
   cursor: 'pointer',
 };
@@ -313,13 +313,13 @@ const primaryBtn: React.CSSProperties = {
   borderRadius: 10,
   border: '1px solid var(--brand)',
   background: 'var(--brand)',
-  color: '#fff',
+  color: 'var(--on-brand)',
   fontWeight: 700,
   cursor: 'pointer',
 };
 const listItem: React.CSSProperties = {
   padding: 12,
-  border: '1px solid #E5E5EA',
+  border: '1px solid var(--border)',
   borderRadius: 8,
   marginBottom: 8,
 };

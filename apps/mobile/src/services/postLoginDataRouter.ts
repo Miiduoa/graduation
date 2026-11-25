@@ -23,10 +23,10 @@ import {
   type TCCourseMember,
   type TCUserProfile,
 } from './tronClassClient';
-import { loadMockAuthSession, saveMockAuthSession } from './mockAuth';
+import { loadMockAuthSession, updateMockAuthRole } from './mockAuth';
 import { isTestAccount, getTestClassRoster, TEST_UIDS } from './testSeedData';
 import { campusEventBus } from './campusEventBus';
-import { getAuthInstance } from '../firebase';
+import { getAuthInstance, hasUsableFirebaseConfig } from '../firebase';
 import { setLastPostLoginEngineBootstrap, tryCallFinalizePostLogin } from './finalizePostLoginClient';
 import { getPostLoginContext } from '../data/postLoginDataRouter';
 import type { PrimaryRole } from '../data/postLoginTypes';
@@ -103,6 +103,23 @@ const KEYS = {
   lastRouted: `${STORAGE_PREFIX}last_routed`,
 } as const;
 
+// Keep one owner-tagged snapshot. Older untagged records cannot establish an owner.
+const ROUTED_SNAPSHOT_KEY = STORAGE_PREFIX + 'owner_snapshot';
+let routeGeneration = 0;
+let pendingRouteWrite = Promise.resolve();
+
+function queueRouteWrite(write: () => Promise<void>): Promise<void> {
+  const operation = pendingRouteWrite.then(write);
+  pendingRouteWrite = operation.catch(() => undefined);
+  return operation;
+}
+
+function currentFirebaseUser() {
+  return hasUsableFirebaseConfig() ? getAuthInstance().currentUser : null;
+}
+
+type LoginRouteScope = { uid: string; schoolId: string; assertCurrent: () => void };
+
 // ═══════════════════════════════════════════════════════
 // III. 角色推斷
 // ═══════════════════════════════════════════════════════
@@ -116,7 +133,10 @@ const KEYS = {
  *   3. 有 course.role === 'ta' → 仍為 student（助教通常是研究生）
  *   4. 都是 student → student
  */
-async function inferRole(currentRole: UserRole): Promise<RoleInferenceResult> {
+async function inferRole(
+  currentRole: UserRole,
+  lmsAccess: LoginLmsAccess,
+): Promise<RoleInferenceResult> {
   // 測試帳號不推斷
   const session = await loadMockAuthSession();
   if (session && isTestAccount(session.uid)) {
@@ -138,7 +158,7 @@ async function inferRole(currentRole: UserRole): Promise<RoleInferenceResult> {
 
   // Step 1: 嘗試從 TronClass Profile 取得角色
   try {
-    if (await hasTCSession()) {
+    if (lmsAccess === 'details' && await hasTCSession()) {
       const profile = await tcFetchProfile();
       if (profile) {
         tcProfileRole = profile.role;
@@ -151,7 +171,7 @@ async function inferRole(currentRole: UserRole): Promise<RoleInferenceResult> {
 
   // Step 2: 從 TronClass 課程列表判斷
   try {
-    const tcCourses = await getAnyCachedTCCourses();
+    const tcCourses = lmsAccess === 'none' ? null : await getAnyCachedTCCourses();
     if (tcCourses && tcCourses.length > 0) {
       for (const c of tcCourses) {
         if (c.role === 'teacher') {
@@ -215,6 +235,7 @@ async function inferRole(currentRole: UserRole): Promise<RoleInferenceResult> {
  */
 async function buildCourseRelations(
   inferredRole: UserRole,
+  lmsAccess: LoginLmsAccess,
 ): Promise<{
   relations: CourseRelation[];
   classmates: CourseMemberInfo[];
@@ -228,7 +249,7 @@ async function buildCourseRelations(
 
   // ── 取得快取的課程資料 ──
   const puCourseResult = await getAnyCachedCourses();
-  const tcCourses = await getAnyCachedTCCourses();
+  const tcCourses = lmsAccess === 'none' ? null : await getAnyCachedTCCourses();
   const puCourses: PUCourse[] = puCourseResult?.courses ?? [];
 
   // ── 建立 TC course code → TC course 的對照表 ──
@@ -316,8 +337,7 @@ async function buildCourseRelations(
   }
 
   // ── 預載課程成員名冊（TronClass）──
-  const hasTc = await hasTCSession();
-  if (hasTc) {
+  if (lmsAccess === 'details' && await hasTCSession()) {
     // 最多並行載入 6 門課的成員（避免太多請求）
     const coursesToFetch = relations
       .filter((r) => r.tcCourseId != null)
@@ -397,11 +417,13 @@ async function buildCourseRelations(
 // V. 主入口
 // ═══════════════════════════════════════════════════════
 
+type LoginLmsAccess = 'none' | 'course-list' | 'details';
+
 /**
  * 登入後呼叫此函式，完成：
  *   1. 自動推斷角色（可能更新 MockAuthSession.role）
  *   2. 建立師生關聯圖
- *   3. 預載課程成員名冊
+ *   3. 只在要求詳細資料時讀取課程名冊
  *   4. 儲存結果到 AsyncStorage
  *   5. 透過 EventBus 廣播結果
  *
@@ -410,31 +432,52 @@ async function buildCourseRelations(
  */
 export async function routePostLoginData(
   currentRole: UserRole,
+  lmsAccess: LoginLmsAccess = 'details',
+  scope?: LoginRouteScope,
 ): Promise<PostLoginDataResult> {
+  scope?.assertCurrent();
+  const generation = ++routeGeneration;
+  const requester = currentFirebaseUser();
+  const assertCurrent = () => {
+    scope?.assertCurrent();
+    if (generation !== routeGeneration || currentFirebaseUser() !== requester) {
+      throw new Error('帳號已變更，請重新登入。');
+    }
+  };
+  const mock = !requester && !scope ? await loadMockAuthSession() : null;
+  assertCurrent();
+  const ownerUid = scope?.uid ?? requester?.uid ?? mock?.uid;
+  const schoolId = scope?.schoolId ?? mock?.schoolId;
+
   const start = Date.now();
   console.log('[postLoginDataRouter] Starting post-login data routing…');
 
   // ── Step 0: 後端 finalize（權威角色 + Firestore / claims）──
   let serverFinalize: Awaited<ReturnType<typeof tryCallFinalizePostLogin>> = null;
   try {
-    serverFinalize = await tryCallFinalizePostLogin();
-    if (serverFinalize?.success) {
-      const u = getAuthInstance().currentUser;
-      if (u) {
-        await u.getIdToken(true).catch(() => undefined);
-      }
+    if (!scope || requester?.uid === ownerUid) {
+      serverFinalize = await tryCallFinalizePostLogin(undefined, {
+        useTronClassSession: lmsAccess !== 'none',
+        includeCourseRosters: lmsAccess === 'details',
+        assertCurrent,
+      });
+    }
+    assertCurrent();
+    if (serverFinalize?.success && requester) {
+      await requester.getIdToken(true).catch(() => undefined);
     }
   } catch (e) {
     console.warn('[postLoginDataRouter] finalizePostLogin skipped:', e);
   }
 
+  assertCurrent();
   // ── Step 1: 推斷角色（優先採用伺服器解析）──
   let roleInference: RoleInferenceResult;
   let effectiveRole: UserRole = currentRole;
 
   if (serverFinalize?.success && serverFinalize.resolved?.primaryRole) {
     effectiveRole = serverFinalize.resolved.primaryRole as UserRole;
-    const tcCourses = await getAnyCachedTCCourses();
+    const tcCourses = lmsAccess === 'none' ? null : await getAnyCachedTCCourses();
     const teachingCount =
       tcCourses?.filter((c) => String(c.role || '').toLowerCase() === 'teacher').length ?? 0;
     const enrolledCount =
@@ -452,49 +495,28 @@ export async function routePostLoginData(
       `[postLoginDataRouter] Server role: ${currentRole} → ${effectiveRole} (${roleInference.confidence})`,
     );
   } else {
-    roleInference = await inferRole(currentRole);
+    roleInference = await inferRole(currentRole, lmsAccess);
     effectiveRole = roleInference.inferredRole;
     console.log(
       `[postLoginDataRouter] Role inference: ${currentRole} → ${roleInference.inferredRole} (${roleInference.confidence}: ${roleInference.reason})`,
     );
   }
 
-  // 如果推斷的角色不同 → 更新 MockAuthSession
-  if (roleInference.inferredRole !== currentRole) {
-    try {
-      const session = await loadMockAuthSession();
-      if (session) {
-        session.role = roleInference.inferredRole;
-        await saveMockAuthSession(session);
-        console.log(`[postLoginDataRouter] Updated session role: ${currentRole} → ${roleInference.inferredRole}`);
-      }
-    } catch (e) {
-      console.warn('[postLoginDataRouter] Failed to update session role:', e);
-    }
+  assertCurrent();
+  if ((!requester || requester.uid !== ownerUid) && ownerUid && schoolId && roleInference.inferredRole !== currentRole) {
+    await updateMockAuthRole(ownerUid, schoolId, roleInference.inferredRole, assertCurrent);
   }
+  assertCurrent();
 
   // ── Step 2: 建立課程關聯 ──
   const { relations, classmates, myStudents, myTeachers } = await buildCourseRelations(
-    effectiveRole,
+    effectiveRole, lmsAccess,
   );
   console.log(
     `[postLoginDataRouter] Relations built: ${relations.length} courses, ${classmates.length} classmates, ${myStudents.length} students, ${myTeachers.length} teachers`,
   );
 
-  // ── Step 3: 儲存到 AsyncStorage ──
-  try {
-    await AsyncStorage.multiSet([
-      [KEYS.inferredRole, JSON.stringify(roleInference)],
-      [KEYS.courseRelations, JSON.stringify(relations)],
-      [KEYS.classmates, JSON.stringify(classmates)],
-      [KEYS.myStudents, JSON.stringify(myStudents)],
-      [KEYS.myTeachers, JSON.stringify(myTeachers)],
-      [KEYS.lastRouted, new Date().toISOString()],
-    ]);
-  } catch (e) {
-    console.warn('[postLoginDataRouter] Failed to persist results:', e);
-  }
-
+  assertCurrent();
   const elapsed = Date.now() - start;
 
   const result: PostLoginDataResult = {
@@ -506,6 +528,26 @@ export async function routePostLoginData(
     elapsedMs: elapsed,
   };
 
+  if (ownerUid) {
+    await queueRouteWrite(async () => {
+      assertCurrent();
+      try {
+        await AsyncStorage.setItem(ROUTED_SNAPSHOT_KEY, JSON.stringify({ uid: ownerUid, schoolId, result }));
+        await AsyncStorage.multiRemove(Object.values(KEYS));
+      } catch (error) {
+        console.warn('[postLoginDataRouter] Failed to persist results:', error);
+      }
+      try {
+        assertCurrent();
+      } catch (error) {
+        // Newer publications and logout cleanup run after this operation in the same queue.
+        await AsyncStorage.removeItem(ROUTED_SNAPSHOT_KEY);
+        throw error;
+      }
+    });
+  }
+  assertCurrent();
+
   // ── Step 4: 廣播到 EventBus ──
   try {
     campusEventBus.emit('post_login_data_routed', {
@@ -516,6 +558,7 @@ export async function routePostLoginData(
       teacherCount: myTeachers.length,
     });
 
+    assertCurrent();
     if (roleInference.inferredRole !== currentRole) {
       campusEventBus.emit('role_updated', {
         previousRole: currentRole,
@@ -525,10 +568,10 @@ export async function routePostLoginData(
     }
   } catch (_) { /* EventBus 可能尚未初始化 */ }
 
-  const authUser = getAuthInstance().currentUser;
-  if (authUser) {
+  assertCurrent();
+  if (requester && requester.uid === ownerUid) {
     setLastPostLoginEngineBootstrap({
-      uid: authUser.uid,
+      uid: requester.uid,
       schoolId: serverFinalize?.context?.schoolId ?? null,
       primaryRole: effectiveRole,
       runId: serverFinalize?.runId ?? null,
@@ -570,13 +613,21 @@ function primaryRoleToUserRole(primary: PrimaryRole): UserRole {
  * 在 buildPostLoginContext 已寫入快取後呼叫：依 PostLoginContext 發 `post_login_context_ready`
  *（與舊版 `post_login_data_routed` 分開，避免同一輪登入重複計數）。
  */
-export async function routePostLoginDataWithContext(schoolId: string, uid: string): Promise<void> {
+export async function routePostLoginDataWithContext(
+  schoolId: string, uid: string, assertCurrent?: () => void,
+): Promise<void> {
+  const generation = routeGeneration;
+  const requester = currentFirebaseUser();
+  assertCurrent?.();
   const ctx = await getPostLoginContext(schoolId, uid);
   if (!ctx) {
     console.log('[postLoginDataRouter] routePostLoginDataWithContext: no PostLoginContext, skip');
     return;
   }
 
+  assertCurrent?.();
+  if (ctx.uid !== uid || ctx.schoolId !== schoolId || generation !== routeGeneration ||
+      currentFirebaseUser() !== requester) return;
   const role = primaryRoleToUserRole(ctx.roles.primaryRole);
   const studentCourseCount = ctx.asStudent?.courses.length ?? 0;
   const teachingCount = ctx.asTeacher?.teachingCourses.length ?? 0;
@@ -605,55 +656,34 @@ export async function routePostLoginDataWithContext(schoolId: string, uid: strin
 // VI. 讀取快取的結果（供各引擎使用）
 // ═══════════════════════════════════════════════════════
 
-/** 取得快取的角色推斷結果 */
-export async function getCachedRoleInference(): Promise<RoleInferenceResult | null> {
+async function readRoutedResult<K extends keyof PostLoginDataResult>(key: K): Promise<PostLoginDataResult[K] | null> {
+  const generation = routeGeneration;
+  const requester = currentFirebaseUser();
   try {
-    const raw = await AsyncStorage.getItem(KEYS.inferredRole);
-    return raw ? JSON.parse(raw) : null;
+    const mock = requester ? null : await loadMockAuthSession();
+    const uid = requester?.uid ?? mock?.uid;
+    if (!uid) return null;
+    await pendingRouteWrite;
+    const raw = await AsyncStorage.getItem(ROUTED_SNAPSHOT_KEY);
+    if (!raw) return null;
+    if (mock) {
+      const currentMock = await loadMockAuthSession();
+      if (currentMock?.uid !== mock.uid || currentMock.schoolId !== mock.schoolId) return null;
+    }
+    if (currentFirebaseUser() !== requester || generation !== routeGeneration) return null;
+    const stored = JSON.parse(raw);
+    if (stored.uid !== uid || (mock && stored.schoolId !== mock.schoolId)) return null;
+    return stored.result?.[key] ?? null;
   } catch {
     return null;
   }
 }
 
-/** 取得快取的課程關聯 */
-export async function getCachedCourseRelations(): Promise<CourseRelation[] | null> {
-  try {
-    const raw = await AsyncStorage.getItem(KEYS.courseRelations);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-/** 取得我的同班同學 */
-export async function getCachedClassmates(): Promise<CourseMemberInfo[] | null> {
-  try {
-    const raw = await AsyncStorage.getItem(KEYS.classmates);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-/** 取得我教的學生（教師視角） */
-export async function getCachedMyStudents(): Promise<CourseMemberInfo[] | null> {
-  try {
-    const raw = await AsyncStorage.getItem(KEYS.myStudents);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-/** 取得相關教師列表 */
-export async function getCachedMyTeachers(): Promise<Array<{ name: string; email: string; courses: string[] }> | null> {
-  try {
-    const raw = await AsyncStorage.getItem(KEYS.myTeachers);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
+export function getCachedRoleInference() { return readRoutedResult('roleInference'); }
+export function getCachedCourseRelations() { return readRoutedResult('courseRelations'); }
+export function getCachedClassmates() { return readRoutedResult('classmates'); }
+export function getCachedMyStudents() { return readRoutedResult('myStudents'); }
+export function getCachedMyTeachers() { return readRoutedResult('myTeachers'); }
 
 /** 取得特定課程的學生名冊（從快取的 relations 中） */
 export async function getCachedCourseStudents(courseCode: string): Promise<CourseMemberInfo[]> {
@@ -673,7 +703,6 @@ export async function isTeacherOfCourse(courseCode: string): Promise<boolean> {
 
 /** 清除所有路由快取 */
 export async function clearPostLoginCache(): Promise<void> {
-  try {
-    await AsyncStorage.multiRemove(Object.values(KEYS));
-  } catch (_) { /* ignore */ }
+  routeGeneration += 1;
+  await queueRouteWrite(() => AsyncStorage.multiRemove([ROUTED_SNAPSHOT_KEY, ...Object.values(KEYS)]));
 }

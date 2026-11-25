@@ -6,6 +6,7 @@ import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import type { CampusEvent } from '@/lib/campusEvents';
 
 const loadCampusEvent = vi.hoisted(() => vi.fn());
+vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: null, loading: false }) }));
 vi.mock('@/lib/campusEvents', async (original) => ({
   ...(await original<typeof import('@/lib/campusEvents')>()),
   loadCampusEvent,

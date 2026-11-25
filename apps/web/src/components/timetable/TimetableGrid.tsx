@@ -5,7 +5,6 @@ import {
   cleanCourse,
   courseTimeLabel,
   periodCount,
-  periodDisplayLabel,
   periodLabelAt,
   periodSlots,
   WEEKDAY_LABELS,
@@ -125,7 +124,11 @@ export function TimetableGrid({
               const period = slot.index;
               return (
                 <tr key={period}>
-                  <th scope="row" className={styles.period}><strong>{periodDisplayLabel(period, periodProfile)}</strong><span>{slot.start}</span><span>{slot.end}</span></th>
+                  <th scope="row" className={styles.period}>
+                    <strong>{periodProfile === 'ncku' ? `${slot.label} 節` : `第 ${slot.label} 節`}</strong>
+                    <span>{slot.start}</span>
+                    <span>–{slot.end}</span>
+                  </th>
                   {WEEKDAY_LABELS.map((label, dayIndex) => {
                     const day = dayIndex + 1;
                     const entries = coursesAtSlot(courses, day, period, periodTotal, WEEKDAY_LABELS.length);
@@ -150,6 +153,7 @@ export function TimetableGrid({
                             : <button type="button" key={course.id}
                                 className={`${styles.course} ${period > course.start ? styles.continuation : ''} ${movement.draggable}`}
                                 disabled={disabled} draggable={!disabled && !choosing && !imported}
+                                data-course-focus-id={period === course.start ? course.id : undefined}
                                 aria-label={`${imported ? '檢視匯入紀錄' : '編輯'} ${course.name}，${label}第 ${periodLabelAt(period, periodProfile)} 節${period > course.start ? '，續堂' : ''}`}
                                 onClick={() => onEdit(course)}
                                 onDragStart={(event) => {
@@ -202,7 +206,7 @@ export function UnscheduledCourses({
       <p className={styles.hint}>這些課程仍保留在課表中。補齊時間後，才能可靠計算空堂或安排邀約。</p>
       <div className={styles.pendingList}>
         {pending.map((course) => (
-          <button type="button" key={course.id} className={styles.course} disabled={disabled} onClick={() => onEdit(course)}>
+          <button type="button" key={course.id} className={styles.course} disabled={disabled} data-course-focus-id={course.id} onClick={() => onEdit(course)}>
             <strong>{course.name}</strong><span>{course.teacher || '教師未填'} · {course.room || '教室未填'}</span><span>安排時間</span>
           </button>
         ))}

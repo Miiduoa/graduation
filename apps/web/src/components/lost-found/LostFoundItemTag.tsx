@@ -27,12 +27,11 @@ export function LostFoundItemTag({
   const date = formatLostFoundCalendarDate(item.date);
   return (
     <div
-      className={`${styles.tag} ${href ? styles.listTag : styles.detailTag}`}
+      className={styles.tag}
       data-testid="lost-found-tag"
       data-type={item.type}
       data-status={item.status}
     >
-      <span className={styles.cord} aria-hidden="true" />
       <div className={styles.header}>
         <div className={styles.meta}>
           <span className={styles.type}>{typeLabel(item.type)}</span>

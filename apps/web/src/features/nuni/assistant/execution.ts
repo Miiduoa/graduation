@@ -43,13 +43,18 @@ export function canConfirmAction(state: V2ActionState | undefined): boolean {
   return !state || state.status === 'blocked' || (state.status === 'absent' && state.retryable);
 }
 
+/** A saved event can still need device or follow-up recovery before its next step. */
+export function isAssistantCalendarActionReady(state: V2ActionState | undefined): boolean {
+  return state?.status === 'verified' && state.local === 'ready' && !state.verificationWarning;
+}
+
 export function priorCalendarActionsVerified(
   cards: V2Card[],
   index: number,
   states: V2ActionStates,
 ): boolean {
   return cards.slice(0, index).every((card) =>
-    card.tool !== 'propose_personal_event' || states[card.mutationId]?.status === 'verified',
+    card.tool !== 'propose_personal_event' || isAssistantCalendarActionReady(states[card.mutationId]),
   );
 }
 
@@ -60,7 +65,7 @@ export function firstUnverifiedCalendarAction(
   states: V2ActionStates,
 ): V2Card | undefined {
   return cards.slice(0, index).find((card) =>
-    card.tool === 'propose_personal_event' && states[card.mutationId]?.status !== 'verified');
+    card.tool === 'propose_personal_event' && !isAssistantCalendarActionReady(states[card.mutationId]));
 }
 
 /** Explain the first unresolved calendar dependency without treating it as permission to retry. */
@@ -78,6 +83,8 @@ export function priorCalendarActionHint(
     return '前一筆個人行程與現有紀錄不一致。請先核對個人行事曆，再重新規劃後續步驟，避免重複建立。';
   if (state?.status === 'unknown' || state?.status === 'checking' || state?.status === 'executing')
     return '前一筆個人行程結果尚未核對，請先讀回原結果。這一步不會自動繼續或重新送出。';
+  if (state?.status === 'verified')
+    return '前一筆行程已儲存，裝置資料或安排追蹤仍待核對。請先重新核對原操作，再繼續下一步。';
   return '前一筆個人行程尚未確認建立。請先完成並讀回前一筆，無法建立時須重新規劃後續步驟。';
 }
 
@@ -94,7 +101,7 @@ export function assistantAnswerWithExecution(turn: V2Turn, states: V2ActionState
     if (!state) return [];
     if (state.status === 'verified') {
       const event = state.receipt.record;
-      return [`已讀回核對並儲存個人行程「${event.title}」：${event.date} ${event.allDay ? '全天' : `${event.startTime}–${event.endTime}`}。${state.local === 'unavailable' ? '帳號已儲存，此裝置尚未讀回或更新，不能宣稱本機已可見。' : ''}${state.verificationWarning ? `最近的再次查核未完成，保留的是 ${state.receipt.verifiedAt} 的核對結果。` : ''}這是行程儲存結果，沒有設定推播，也不代表作業已完成或繳交。`];
+      return [`已讀回核對並儲存個人行程「${event.title}」：${event.date} ${event.allDay ? '全天' : `${event.startTime}–${event.endTime}`}。${state.local === 'unavailable' ? '帳號已儲存，此裝置尚未讀回或更新，不能宣稱本機已可見。' : ''}${state.verificationWarning ? `後續核對或安排追蹤尚未完成，保留的是 ${state.receipt.verifiedAt} 的核對結果。` : ''}這是行程儲存結果，沒有設定推播，也不代表作業已完成或繳交。`];
     }
     if (state.status === 'unknown' || state.status === 'checking' || state.status === 'executing')
       return ['這筆操作結果尚未核對，不能宣稱已完成，也不能重新建立同一個安排。'];

@@ -49,41 +49,41 @@ describe('webPreferences', () => {
       deriveSecondaryThemeColor('#FF6B35'),
     );
     expect(document.documentElement.style.getPropertyValue('--font-h1-size')).toBe('1.625rem');
-    expect(document.documentElement.style.getPropertyValue('--font-body-size')).toBe('1.0625rem');
+    expect(document.documentElement.style.getPropertyValue('--font-body-size')).toBe('1.125rem');
   });
 
   it.each([
     {
       fontSize: 'small' as const,
-      body: '0.875rem',
-      bodySm: '0.75rem',
+      body: '0.9375rem',
+      bodySm: '0.8125rem',
       h1: '1.375rem',
       h2: '1.125rem',
       h3: '1rem',
-      label: '0.75rem',
+      label: '0.8125rem',
       labelSm: '0.625rem',
     },
     {
       fontSize: 'medium' as const,
-      body: '0.9375rem',
-      bodySm: '0.8125rem',
+      body: '1rem',
+      bodySm: '0.875rem',
       h1: '1.5rem',
       h2: '1.25rem',
       h3: '1.0625rem',
-      label: '0.8125rem',
+      label: '0.875rem',
       labelSm: '0.6875rem',
     },
     {
       fontSize: 'large' as const,
-      body: '1.0625rem',
-      bodySm: '0.9375rem',
+      body: '1.125rem',
+      bodySm: '1rem',
       h1: '1.625rem',
       h2: '1.375rem',
       h3: '1.1875rem',
-      label: '0.875rem',
+      label: '0.9375rem',
       labelSm: '0.75rem',
     },
-  ])('writes rem font tokens for $fontSize preserving the px-equivalent scale', ({
+  ])('writes rem font tokens for $fontSize preserving the saved size steps', ({
     fontSize,
     body,
     bodySm,

@@ -1,0 +1,149 @@
+.agenda {
+  container-type: inline-size;
+  margin-block: 16px 24px;
+  border-top: 1px solid var(--border-strong);
+}
+.day,
+.emptyDay {
+  min-width: 0;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.dayHeading {
+  margin: 0;
+  font-size: var(--font-h3-size);
+  line-height: 1.5;
+  font-weight: 600;
+  color: var(--text);
+}
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rows li + li {
+  border-top: 1px solid var(--border);
+}
+.row {
+  display: grid;
+  grid-template-columns: 4.25em minmax(0, 1fr) auto;
+  grid-template-areas:
+    'clock title arrow'
+    'clock details arrow';
+  align-items: baseline;
+  column-gap: 0.75em;
+  width: 100%;
+  min-height: 44px;
+  padding: 12px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.time {
+  grid-area: clock;
+  font-size: var(--font-body-size);
+  font-weight: 600;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+.end {
+  display: block;
+  font-size: var(--font-body-sm-size);
+  font-weight: 400;
+  color: var(--muted);
+}
+.title {
+  grid-area: title;
+  font-size: var(--font-h3-size);
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.details,
+.emptyText {
+  margin: 0;
+  font-size: var(--font-body-sm-size);
+  line-height: 1.6;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.details {
+  grid-area: details;
+}
+.chevron {
+  grid-area: arrow;
+  align-self: center;
+  font-size: 1.25em;
+  line-height: 1;
+  color: var(--muted-light);
+}
+.emptyDay {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25em 1.25em;
+  align-items: baseline;
+}
+.emptyDay .dayHeading {
+  font-size: var(--font-body-size);
+  color: var(--muted);
+}
+.row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.row:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+@media (hover: hover) and (pointer: fine) {
+  .row:hover:enabled {
+    background: var(--bg-soft);
+  }
+}
+@container (min-width: 46em) {
+  .day,
+  .emptyDay {
+    display: grid;
+    grid-template-columns: minmax(5em, 14%) minmax(0, 1fr);
+    gap: 1em;
+  }
+  .day {
+    padding-block: 0;
+  }
+  .day .dayHeading {
+    padding-top: 16px;
+  }
+  .row {
+    grid-template-columns: 7.5em minmax(0, 3fr) minmax(0, 2fr) auto;
+    grid-template-areas: 'clock title details arrow';
+    align-items: baseline;
+    padding-block: 16px;
+  }
+  .time {
+    white-space: nowrap;
+  }
+  .end {
+    display: inline;
+  }
+}
+@container (max-width: 18em) {
+  .row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'clock arrow' 'title arrow' 'details arrow';
+  }
+  .end {
+    display: inline;
+  }
+}
+@media print {
+  .row {
+    break-inside: avoid;
+  }
+  .chevron {
+    display: none;
+  }
+}

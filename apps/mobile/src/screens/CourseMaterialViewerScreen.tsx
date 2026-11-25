@@ -5,7 +5,7 @@
  * 使用 `PuWebView`（react-native-webview）載入；內含 LMS／玩課雲請求過濾。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, View, Text, ActivityIndicator, Pressable } from 'react-native';
+import { Alert, View, Text, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +17,8 @@ import {
 } from '../services/tronClassDataEnabled';
 import { materialFailureMessage } from '@campus/shared/src/materialAccess';
 import { PuWebView } from '../ui/PuWebView';
+import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 
 type RouteProps = {
   route?: {
@@ -33,6 +35,7 @@ type RouteProps = {
 };
 
 export default function CourseMaterialViewerScreen(props: RouteProps) {
+  useThemeVersion();
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const url = props.route?.params?.url ?? '';
@@ -94,18 +97,30 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
           flex: 1,
           alignItems: 'center',
           justifyContent: 'center',
+          backgroundColor: theme.colors.bg,
           padding: 24,
           paddingTop: Math.max(insets.top, 24),
         }}
       >
-        <Text style={{ color: '#D70015', fontSize: 16 }}>沒有提供檔案連結。</Text>
+        <Text style={{ color: theme.colors.danger, fontSize: 16, fontWeight: '600' }}>
+          沒有提供檔案連結。
+        </Text>
         <Pressable
           onPress={goLeave}
           accessibilityRole="button"
           accessibilityLabel="返回上一頁"
-          style={{ marginTop: 16, padding: 12, backgroundColor: '#003F8A', borderRadius: 8 }}
+          style={({ pressed }) => ({
+            marginTop: 16,
+            minHeight: 44,
+            paddingHorizontal: 20,
+            justifyContent: 'center',
+            alignItems: 'center',
+            backgroundColor: theme.colors.accent,
+            borderRadius: theme.radius.md,
+            opacity: pressed ? 0.85 : 1,
+          })}
         >
-          <Text style={{ color: '#fff' }}>返回</Text>
+          <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>返回</Text>
         </Pressable>
       </View>
     );
@@ -118,38 +133,58 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
           flex: 1,
           alignItems: 'center',
           justifyContent: 'center',
+          backgroundColor: theme.colors.bg,
           padding: 24,
           paddingTop: Math.max(insets.top, 24),
         }}
       >
         <Text
-          style={{ color: '#003F8A', fontSize: 17, fontWeight: '700', textAlign: 'center' }}
+          style={{ color: theme.colors.text, fontSize: 17, fontWeight: '700', textAlign: 'center' }}
         >
           LMS（TronClass）已關閉
         </Text>
-        <Text style={{ color: '#3C3C43', fontSize: 14, marginTop: 12, textAlign: 'center' }}>
+        <Text
+          style={{
+            color: theme.colors.textSecondary,
+            fontSize: 14,
+            lineHeight: 21,
+            marginTop: 12,
+            textAlign: 'center',
+          }}
+        >
           {TRONCLASS_DATA_DISABLED_MESSAGE}
         </Text>
         <Pressable
           onPress={goLeave}
           accessibilityRole="button"
           accessibilityLabel="返回上一頁"
-          style={{ marginTop: 20, padding: 12, backgroundColor: '#003F8A', borderRadius: 8 }}
+          style={({ pressed }) => ({
+            marginTop: 20,
+            minHeight: 44,
+            paddingHorizontal: 20,
+            justifyContent: 'center',
+            alignItems: 'center',
+            backgroundColor: theme.colors.accent,
+            borderRadius: theme.radius.md,
+            opacity: pressed ? 0.85 : 1,
+          })}
         >
-          <Text style={{ color: '#fff' }}>返回</Text>
+          <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>返回</Text>
         </Pressable>
       </View>
     );
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#fff' }}>
+    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       {/* 頂部資訊條（此畫面 headerShown: false，需自帶返回與 Safe Area） */}
       <View
         style={{
-          backgroundColor: '#003F8A',
+          backgroundColor: theme.colors.surface,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.separator,
           paddingTop: Math.max(insets.top, 8),
-          paddingBottom: 12,
+          paddingBottom: 10,
           paddingHorizontal: 10,
           flexDirection: 'row',
           alignItems: 'center',
@@ -161,17 +196,23 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel="返回上一頁"
-          style={{ marginRight: 2 }}
+          style={({ pressed }) => ({
+            minWidth: 44,
+            minHeight: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed ? 0.6 : 1,
+          })}
         >
-          <Ionicons name="chevron-back" size={26} color="#fff" />
+          <Ionicons name="chevron-back" size={24} color={theme.colors.text} />
         </Pressable>
-        <Ionicons name={kindIcon as never} size={20} color="#fff" />
+        <Ionicons name={kindIcon as never} size={20} color={theme.colors.accent} />
         <View style={{ flex: 1 }}>
-          <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }} numberOfLines={1}>
+          <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }} numberOfLines={1}>
             {title}
           </Text>
           {courseName ? (
-            <Text style={{ color: '#E5F2FF', fontSize: 12 }} numberOfLines={1}>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }} numberOfLines={1}>
               {courseName}
             </Text>
           ) : null}
@@ -181,14 +222,31 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel="分享此教材連結"
+          style={({ pressed }) => ({
+            minWidth: 44,
+            minHeight: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed ? 0.6 : 1,
+          })}
         >
-          <Ionicons name="share-outline" size={20} color="#fff" />
+          <Ionicons name="share-outline" size={20} color={theme.colors.accent} />
         </Pressable>
       </View>
 
-      <Text style={{ padding: 12, color: '#3C3C43' }}>
-        校方教材預覽：這裡可以閱讀；作業繳交與正式紀錄請到校方系統完成。閱讀不算作業完成。
-      </Text>
+      <View
+        style={{
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+          backgroundColor: theme.colors.surfaceMuted,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.separator,
+        }}
+      >
+        <Text style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18 }}>
+          校方教材預覽：這裡可以閱讀；作業繳交與正式紀錄請到校方系統完成。閱讀不算作業完成。
+        </Text>
+      </View>
       {/* 主內容（PuWebView 內建 LMS／玩課雲請求過濾） */}
       <View style={{ flex: 1 }}>
         {loading && (
@@ -199,11 +257,11 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
               left: 0,
               right: 0,
               padding: 8,
-              backgroundColor: '#003F8A20',
+              backgroundColor: theme.colors.accentSoft,
               zIndex: 2,
             }}
           >
-            <ActivityIndicator color="#003F8A" />
+            <ActivityIndicator color={theme.colors.accent} />
           </View>
         )}
         <PuWebView
@@ -250,20 +308,63 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
             style={{
               position: 'absolute',
               bottom: 24,
-              left: 24,
-              right: 24,
-              padding: 12,
-              backgroundColor: '#D70015',
-              borderRadius: 12,
+              left: 20,
+              right: 20,
+              padding: 14,
+              backgroundColor: theme.colors.surface,
+              borderRadius: theme.radius.lg,
+              borderWidth: 1,
+              borderColor: theme.colors.danger,
+              gap: 12,
             }}
           >
-            <Text style={{ color: '#fff', fontSize: 13 }}>{error}</Text>
-            <Pressable accessibilityRole="button" onPress={() => { activeRevision.current += 1; loadFailed.current = false; setError(null); setLoading(true); setRevision(activeRevision.current); }}>
-              <Text style={{ color: '#fff', padding: 12 }}>再試一次</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" onPress={goLeave}>
-              <Text style={{ color: '#fff', padding: 12 }}>返回課程</Text>
-            </Pressable>
+            <Text style={{ color: theme.colors.danger, fontSize: 13, lineHeight: 20, fontWeight: '600' }}>
+              {error}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  activeRevision.current += 1;
+                  loadFailed.current = false;
+                  setError(null);
+                  setLoading(true);
+                  setRevision(activeRevision.current);
+                }}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  minHeight: 44,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.accent,
+                  opacity: pressed ? 0.85 : 1,
+                })}
+              >
+                <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>
+                  再試一次
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={goLeave}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  minHeight: 44,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.surface2,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                  opacity: pressed ? 0.85 : 1,
+                })}
+              >
+                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>
+                  返回課程
+                </Text>
+              </Pressable>
+            </View>
           </View>
         )}
       </View>

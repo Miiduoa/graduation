@@ -13,12 +13,12 @@ afterEach(() => { vi.unstubAllGlobals(); });
 it('sends only the current request and scoped auth to the Agent route', async () => {
   const fetch = vi.fn(async () => json(reply)); vi.stubGlobal('fetch', fetch);
   const client = createTronClassAgentClient({ kind: 'platform', context: 'platform-session' });
-  expect(await client.ask({ question: 'TronClass 未交作業' })).toEqual(reply);
+  expect(await client.ask({ question: '查 TronClass 未交作業' })).toEqual(reply);
   const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
   expect(url).toBe('/api/tronclass/agent');
   expect(init.headers).toEqual({ 'X-Campus-Session': 'platform-session', 'Content-Type': 'application/json' });
   expect(init).toMatchObject({ method: 'POST', cache: 'no-store', credentials: 'same-origin', redirect: 'error' });
-  expect(JSON.parse(String(init.body))).toEqual({ action: 'ask', question: 'TronClass 未交作業' });
+  expect(JSON.parse(String(init.body))).toEqual({ action: 'ask', question: '查 TronClass 未交作業' });
 });
 
 it.each([
@@ -28,7 +28,7 @@ it.each([
 ])('rejects a mismatched revision, invented target, or expanded writing authority', async changes => {
   vi.stubGlobal('fetch', vi.fn(async () => json({ ...reply, ...changes })));
   const client = createTronClassAgentClient({ kind: 'platform', context: 'platform-session' });
-  await expect(client.ask({ question: 'TronClass 作業' })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+  await expect(client.ask({ question: '查 TronClass 作業' })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
 });
 
 it('rejects dependent grants and stale binding responses', async () => {
@@ -62,7 +62,7 @@ it('discards a late response after cancellation even if fetch ignored the signal
   vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { finish = resolve; })));
   const client = createTronClassAgentClient({ kind: 'platform', context: 'platform-session' });
   const controller = new AbortController();
-  const result = client.ask({ question: 'TronClass 作業' }, controller.signal);
+  const result = client.ask({ question: '查 TronClass 作業' }, controller.signal);
   const rejected = expect(result).rejects.toMatchObject({ name: 'AbortError' });
   await Promise.resolve();
   controller.abort();

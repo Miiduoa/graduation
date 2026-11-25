@@ -1009,12 +1009,25 @@ function httpError(status) {
   return error;
 }
 
+function isLegacyPaginationNumberInput(value) {
+  if (Array.isArray(value)) return value.every(isLegacyPaginationNumberInput);
+  return value == null || ['number', 'string', 'boolean', 'bigint'].includes(typeof value);
+}
+
 function homeworkPaginationNumber(value, required = true) {
   if (value === undefined || value === null) return null;
+  if (!required) {
+    try {
+      if (!isLegacyPaginationNumberInput(value)) return null;
+      const parsed = Number(value);
+      return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
   const parsed = typeof value === 'number' ? value
     : typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : NaN;
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    if (!required) return null;
     throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
   }
   return parsed;
@@ -1031,31 +1044,32 @@ async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize =
       : {},
   );
   if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.homework_activities)) {
-    throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
+    // Legacy callers (no readOptions) keep merge-base behaviour: a 200 body
+    // without an activities array is still reported as HTTP 200.
+    throw strict ? homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502) : httpError(200);
   }
   // On the integration path, invalid metadata is not an absent total: treating it
   // as null can make a short or empty response appear complete and hide remaining
   // assignments. Legacy callers keep the older missing-total compatibility.
   const total = homeworkPaginationNumber(data.total, strict);
-  const sourcePage = homeworkPaginationNumber(data.page, strict);
-  const sourcePageSize = homeworkPaginationNumber(data.page_size, strict);
+  const sourcePage = strict ? homeworkPaginationNumber(data.page, true) : null;
+  const sourcePageSize = strict ? homeworkPaginationNumber(data.page_size, true) : null;
   const requestedPage = homeworkPaginationNumber(page, false);
   const requestedPageSize = homeworkPaginationNumber(pageSize, false);
-  // Legacy and integration alike cap the array by the requested page size, matching
-  // merge-base behaviour. School page_size is never used as the length limit.
-  const pageLimit = requestedPageSize ?? pageSize;
+  // Use the requested limit even when the school reports a different page size.
+  const pageLimit = requestedPageSize ?? 50;
   // Compare numerically so a legacy string page still matches a numeric school page.
   if ((strict && sourcePage !== null && requestedPage !== null && sourcePage !== requestedPage) ||
     (strict && sourcePageSize !== null && requestedPageSize !== null && sourcePageSize !== requestedPageSize) ||
-    data.homework_activities.length > pageLimit ||
+    (strict && data.homework_activities.length > pageLimit) ||
     (strict && total !== null && data.homework_activities.length > total)) {
     throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
   }
   return {
-    homework_activities: data.homework_activities,
+    homework_activities: strict ? data.homework_activities : data.homework_activities.slice(0, pageLimit),
     total,
-    page: sourcePage ?? requestedPage ?? page,
-    page_size: sourcePageSize ?? requestedPageSize ?? pageSize,
+    page: strict ? (sourcePage ?? requestedPage ?? page) : (data.page ?? page),
+    page_size: strict ? (sourcePageSize ?? requestedPageSize ?? pageSize) : (data.page_size ?? pageSize),
   };
 }
 

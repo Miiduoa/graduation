@@ -1,0 +1,52 @@
+{
+  "schema": "campus.google-link-postgres-fixture/v1",
+  "repository": "https://github.com/Miiduoa/nuni-prod.git",
+  "baseCommit": "9de47b4b3492325e430562c37bcad552867162db",
+  "productionBind": {
+    "tree": "b0a10ac814cd03fbfb45132566035acce8339f17",
+    "patch": "deploy/nuni-api/security/patches/0000-production-tree-b0a10ac.patch",
+    "sha256": "5d85e8300896b04acf1c7fcad065510ce1f7a28f723da857bed4727d30924812"
+  },
+  "scope": "Selected complete platform account migrations only; campus prerequisites are key-only fixtures. Not a reconstructed API, complete production schema, or runtime grant receipt.",
+  "prerequisiteKeyTables": [
+    "tenants(id)",
+    "identity_subjects(tenant_id,id)"
+  ],
+  "migrations": [
+    {
+      "file": "146_platform_accounts.sql",
+      "sourcePath": "apps/api/src/migrations/146_platform_accounts.sql",
+      "sourceRevision": "9de47b4b3492325e430562c37bcad552867162db",
+      "gitBlobSha1": "886da03d5582bc04599f567fe0ea7c85c7fe3c32",
+      "sha256": "3e334a838a12d2ca270019e5a41a46cc426cd497375cfc33f29f7766b37cb987"
+    },
+    {
+      "file": "206_platform_account_suspension.sql",
+      "sourcePath": "apps/api/src/migrations/206_platform_account_suspension.sql",
+      "sourceRevision": "9de47b4b3492325e430562c37bcad552867162db",
+      "gitBlobSha1": "a3cf6e65340779669b57d0741a1e4140b9688b8b",
+      "sha256": "754a0003832f6153954f7096b566ad94de3375f8836a7bc065773bfc74d8df7d"
+    },
+    {
+      "file": "245_school_onboarding_applications.sql",
+      "sourcePath": "apps/api/src/migrations/245_school_onboarding_applications.sql",
+      "sourceRevision": "9de47b4b3492325e430562c37bcad552867162db",
+      "gitBlobSha1": "0759396b97cea1504df32417663c1d4aca424a6e",
+      "sha256": "fe545551ab25d03890a88f385c233a16f803234adc265d36e280bb16fb3dff41"
+    },
+    {
+      "file": "268_product_qa_platform_credential_method.sql",
+      "sourcePath": "apps/api/src/migrations/268_product_qa_platform_credential_method.sql",
+      "sourceRevision": "9de47b4b3492325e430562c37bcad552867162db",
+      "gitBlobSha1": "c57a8fe0278d37614e135497a6920d9fe788573f",
+      "sha256": "e5920e1d47ae2c5ff8f71f5ceb205abd103f053912ae33afab17bb53216f79db"
+    },
+    {
+      "file": "275_platform_password_administrators.sql",
+      "sourcePath": "apps/api/src/migrations/275_platform_password_administrators.sql",
+      "sourceRevision": "b0a10ac814cd03fbfb45132566035acce8339f17",
+      "gitBlobSha1": "7edadfae5dd3ff1e4b9010e723e1c64c7e22e9ef",
+      "sha256": "ad11b5cbea2f6ef4b6c8867e31635749e9b237f21efedcb2b6bb2568f0710bd2"
+    }
+  ]
+}

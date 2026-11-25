@@ -127,6 +127,9 @@ export function useAsyncList<T>(
 
     setLoading(true);
     setError(null);
+    // Cleanup cancels the previous refresh; this load now owns its visible state.
+    setRefreshing(false);
+    setLastRefreshError(null);
 
     if (!keepPreviousData) {
       setItems([]);

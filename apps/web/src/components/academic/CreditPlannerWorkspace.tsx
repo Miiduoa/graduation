@@ -287,7 +287,6 @@ export function CreditPlannerWorkspace({
     <section className={styles.workspace} aria-label="個人學分試算">
       <div className={styles.heading}>
         <div>
-          <span className={styles.kicker}>YOUR CREDIT PLAN</span>
           <h2>每一學分，都算得清楚。</h2>
           <p>{schoolName ? schoolName + ' · ' : ''}自己的畢業進度，由你安排。先試算、再逐學期排課。</p>
         </div>
@@ -421,7 +420,6 @@ export function CreditPlannerWorkspace({
 
       <div className={styles.sectionHeading}>
         <div>
-          <span className={styles.kicker}>PLAN BY SEMESTER</span>
           <h3>把學分拆成每學期的行動</h3>
         </div>
         <label className={styles.termSelect}>
@@ -458,7 +456,6 @@ export function CreditPlannerWorkspace({
       <div className={styles.courseLayout}>
         <form className={styles.addCard} onSubmit={saveCourse}>
           <div className={styles.cardTitle}>
-            <span className={styles.kicker}>COURSE BUILDER</span>
             <h3>{editingId ? '修改規劃課程' : '加入一門課程'}</h3>
             <p>候選與已選課都屬於未取得學分，不會自動變成「已確認」。</p>
           </div>
@@ -537,7 +534,6 @@ export function CreditPlannerWorkspace({
         </form>
         <div className={styles.courseList}>
           <div className={styles.cardTitle}>
-            <span className={styles.kicker}>MY COURSES</span>
             <h3>已安排課程 <span className={styles.count}>{plan.courses.length}</span></h3>
             <p>已選課 {formatCredits(summary.registered)} 學分 · 候選 {formatCredits(summary.candidate)} 學分</p>
           </div>

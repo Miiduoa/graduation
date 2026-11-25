@@ -725,9 +725,9 @@ async def scenario(browser, origin, config, report):
         await check_section('loading-feedback', lambda: check_loading_feedback(page, config, report, capture))
         await check_section('quick-search', lambda: check_quick_search(page, config, report, capture))
         await check_section('service-navigation', lambda: check_service_navigation(page, config, report, capture))
+        await check_section('search-continuity', lambda: check_search_continuity(page, config, report, capture))
         await check_section('course-editing', lambda: check_course_editing(page, config, report, capture))
         await check_section('record-editing', lambda: check_record_editing(page, config, report, capture))
-        await check_section('search-continuity', lambda: check_search_continuity(page, config, report, capture))
         if config['name'] in ('desktop-light', 'compact-dark-site-motion'):
             await check_section('short-services', lambda: check_short_service_menu(page, report, capture))
             await check_section('short-navigation', lambda: check_short_navigation_panels(page, report, capture))

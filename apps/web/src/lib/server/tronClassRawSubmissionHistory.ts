@@ -27,7 +27,7 @@ type Dependencies = {
 
 /**
  * Private, read-only evidence for the controlled operation reconciler. The
- * student ID and cookies always come from the current server-side binding.
+ * student ID and cookies come from the authorized server-side snapshot.
  * Raw source fields never form an HTTP response, a saved fixture or a receipt.
  */
 export function createTronClassRawSubmissionHistoryReader({
@@ -39,7 +39,7 @@ export function createTronClassRawSubmissionHistoryReader({
 
   return async function readHistory(
     ownerKey: string,
-    expected: Pick<TronClassSubmissionBinding, 'schoolId' | 'revision' | 'userId'>,
+    expected: TronClassSubmissionBinding,
     input: TronClassHomeworkScope,
     signal?: AbortSignal,
   ): Promise<unknown> {
@@ -47,7 +47,7 @@ export function createTronClassRawSubmissionHistoryReader({
       !expected || expected.schoolId !== 'pu' || typeof expected.revision !== 'string' || !revision.test(expected.revision) || !positiveId(expected.userId) ||
       !input || !positiveId(input.courseId) || !positiveId(input.homeworkId)) fail(400, 'TRONCLASS_INVALID_INPUT');
     const scope = Object.freeze({ courseId: input.courseId, homeworkId: input.homeworkId });
-    const identity = Object.freeze({ schoolId: expected.schoolId, revision: expected.revision, userId: expected.userId });
+    const binding = { ...expected, cookies: { ...expected.cookies } };
     const controller = new AbortController();
     const abort = () => controller.abort();
     const timeout = () => new NuniError(504, 'TRONCLASS_READ_TIMEOUT');
@@ -64,18 +64,13 @@ export function createTronClassRawSubmissionHistoryReader({
 
     const current = async () => {
       check();
-      const binding = await bindings.requireBinding(ownerKey);
-      check();
-      if (binding.schoolId !== identity.schoolId || binding.userId !== identity.userId || binding.revision !== identity.revision) {
-        fail(409, 'TRONCLASS_BINDING_CHANGED');
-      }
       const at = now();
       if (!Number.isFinite(at) || !Number.isFinite(Date.parse(binding.expiresAt)) || Date.parse(binding.expiresAt) <= at) {
         fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
       }
-      await bindings.assertCurrent(ownerKey, binding.revision);
+      await bindings.assertCurrent(ownerKey, binding.revision, binding.userId);
       check();
-      return { ...binding, cookies: { ...binding.cookies } };
+      return binding;
     };
     const read = async (run: () => Promise<LmsReadResult<unknown>>, activity: boolean) => {
       check();
@@ -129,7 +124,7 @@ export function createTronClassRawSubmissionHistoryReader({
         if (!isTronClassSourceVisible(activity)) fail(404, 'TRONCLASS_HOMEWORK_NOT_FOUND');
         if (activity.submit_by_group !== false) unavailable();
       };
-      const binding = await current();
+      await current();
       await checkAccess(binding);
       check();
       const raw = structuredClone(await read(() => source.fetchStudentSubmissionList!(binding.cookies, scope.homeworkId, binding.userId, readOptions), false));

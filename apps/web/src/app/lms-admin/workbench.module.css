@@ -1,0 +1,41 @@
+.workspace {
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.workspace h2 {
+  margin-block: 0 12px;
+  font: 600 clamp(1.3rem, 2vw, 1.75rem) / 1.45 var(--font-heading);
+}
+
+.workspace :is(input, select, textarea) {
+  max-width: 100%;
+  color: var(--text);
+  background-color: var(--surface);
+}
+
+.workspace :is(button, select, input:not([type='checkbox'], [type='radio'])) {
+  min-height: 44px;
+}
+
+.workspace table {
+  font-variant-numeric: tabular-nums;
+}
+
+.directory {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+  gap: 0 clamp(16px, 4vw, 56px);
+  padding: 0;
+  list-style: none;
+}
+
+.directory a {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  padding-block: 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--brand);
+}

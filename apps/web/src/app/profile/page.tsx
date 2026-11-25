@@ -146,12 +146,13 @@ export default function ProfilePage() {
   const campusSearch = useCampusNavigationSearch(params);
   const href = (path: string) => campusServiceHref(path, campusSearch);
   const profileReturn = href('/profile');
-  const options = useSignInOptions(selection?.selectedSchoolId, !selection || !selection.loading);
+  const options = useSignInOptions(selection?.selectedSchoolId, !selection || !selection.loading, 'school');
   const hasCourseAccount = !nuni.loading && !nuni.pendingLogout && !nuni.error && !!nuni.session;
   const hasSchoolAccount = !loading && !error && !!user;
   const needsSignIn = !loading && !user && !nuni.loading && !nuni.session && !nuni.error && !nuni.pendingLogout;
   const services: PersonalService[] = [
     { href: '/timetable', label: '我的課表', description: '查看上課時間與教室，整理自己的課表。' },
+    { href: '/events?saved=1', label: '收藏的活動', description: '回到想參加的活動，確認時間與報名方式。' },
     ...(hasSchoolAccount ? [
       { href: '/community/me', label: '我的社群頁', description: '整理公開貼文、媒體與私人收藏。' },
       { href: '/grades?tab=semester', label: '成績紀錄', description: '查詢學期成績與原始紀錄。' },
@@ -231,11 +232,11 @@ export default function ProfilePage() {
             {!loading && user ? (
               <section className={styles.panel}>
                 <h3>學校帳號已登入</h3>
-                <p>個人校務紀錄使用目前的學校帳號，課程與店家服務依各自資格提供。</p>
+                <p>學校帳號用來查看個人校務紀錄。Google 帳號用於平台課程與店家服務，兩個帳號目前分別管理。</p>
                 <div className={styles.connectionActions}>
                   <Link className="btn" href={href('/settings?section=account')}>管理學校帳號</Link>
                   {!nuni.loading && !nuni.error && !nuni.pendingLogout && !nuni.session && (
-                    <Link className="btn" href={href(loginHref(profileReturn))}>連線 Google 帳號</Link>
+                    <Link className="btn" href={href(loginHref(profileReturn))}>用 Google 登入平台服務</Link>
                   )}
                 </div>
               </section>

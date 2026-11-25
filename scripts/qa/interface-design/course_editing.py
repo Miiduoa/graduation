@@ -84,8 +84,9 @@ async def check_course_editing(page, config, report, capture):
     await expect(link).to_be_focused()
     await expect(name).to_have_value('資料結構・尚未儲存的修改')
 
+    # Chromium uses Control on the CI Linux host even for narrow viewports.
     async with page.context.expect_page() as opened:
-        await link.click(modifiers=['ControlOrMeta'])
+        await link.click(modifiers=['Control'])
     other = await opened.value
     try:
         await other.wait_for_url('**/course/interface-course*#assignment-work-a')

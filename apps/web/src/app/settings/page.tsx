@@ -243,7 +243,7 @@ function SettingsContent({
   const schoolReady = !selection || (
     !selection.loading && selection.catalogStatus === 'ready' && Boolean(selection.selectedSchoolId)
   );
-  const schoolLoginReady = useSignInOptions(selection?.selectedSchoolId ?? null, schoolReady).studentId;
+  const schoolLoginReady = useSignInOptions(selection?.selectedSchoolId ?? null, schoolReady, 'school').studentId;
   const mounted = useRef(true);
   const profileLock = useRef(false);
   const notificationLock = useRef(false);
@@ -1319,7 +1319,7 @@ function SettingsContent({
   };
 
   return (
-    <SiteShell title="設定" subtitle="讓校園生活，照你的習慣安排。">
+    <SiteShell title="設定">
       <div className={styles.layout}>
         <aside className={styles.sidebar}>
           <nav

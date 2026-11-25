@@ -522,7 +522,7 @@ test('a guest can retry a temporary provider outage and sign in without losing t
   fireEvent.press(await view.findByText('登入學校帳號'));
   expect(mockPublicNavigate).toHaveBeenCalledWith('SSOLogin');
   expect(mockLoadProviders).toHaveBeenCalledTimes(2);
-  expect(mockLoadProviders).toHaveBeenLastCalledWith({ recheckUnavailable: true });
+  expect(mockLoadProviders).toHaveBeenLastCalledWith('pu', { recheckUnavailable: true });
   expect(mockRead).not.toHaveBeenCalled();
   expect(mockClear).not.toHaveBeenCalled();
 });

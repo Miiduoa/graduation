@@ -32,13 +32,16 @@ class MockTrace implements PerformanceTrace {
   private metrics: Map<string, number> = new Map();
   private stopped: boolean = false;
 
-  constructor(name: string) {
+  constructor(
+    name: string,
+    private readonly canRecord: () => boolean,
+  ) {
     this.name = name;
   }
 
   start(): void {
     this.startTime = Date.now();
-    if (__DEV__) {
+    if (__DEV__ && this.canRecord()) {
       console.log(`[Perf] Trace started: ${this.name}`);
     }
   }
@@ -46,6 +49,7 @@ class MockTrace implements PerformanceTrace {
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
+    if (!this.canRecord()) return;
     const duration = Date.now() - this.startTime;
 
     if (__DEV__) {
@@ -98,7 +102,33 @@ interface HttpMetric {
   setResponseContentType(contentType: string): void;
   putAttribute(name: string, value: string): void;
   start(): Promise<void>;
-  stop(): Promise<void>;
+  stop(measurement?: { durationMs: number }): Promise<void>;
+}
+
+// HTTP telemetry must never retain signed URLs, query parameters, credentials,
+// or path segments that may contain student identifiers and access tokens.
+function httpMetricOrigin(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    if ((url.protocol === 'https:' || url.protocol === 'http:') && url.host) {
+      return `${url.protocol}//${url.host}`;
+    }
+  } catch {
+    // Relative or malformed URLs must not fall back to logging raw input.
+  }
+  return '[unknown-origin]';
+}
+
+function httpErrorKind(error: unknown): string {
+  if (!(error instanceof Error)) return 'UnknownError';
+  switch (error.name) {
+    case 'AbortError':
+    case 'TimeoutError':
+    case 'TypeError':
+      return error.name;
+    default:
+      return 'Error';
+  }
 }
 
 // Mock HTTP metric
@@ -112,7 +142,11 @@ class MockHttpMetric implements HttpMetric {
   private contentType: string = '';
   private attributes: Map<string, string> = new Map();
 
-  constructor(url: string, method: string) {
+  constructor(
+    url: string,
+    method: string,
+    private readonly canRecord: () => boolean,
+  ) {
     this.url = url;
     this.method = method;
   }
@@ -141,8 +175,9 @@ class MockHttpMetric implements HttpMetric {
     this.startTime = Date.now();
   }
 
-  async stop(): Promise<void> {
-    const duration = Date.now() - this.startTime;
+  async stop(measurement?: { durationMs: number }): Promise<void> {
+    if (!this.canRecord()) return;
+    const duration = measurement?.durationMs ?? Date.now() - this.startTime;
 
     if (__DEV__) {
       console.log(`[Perf] HTTP: ${this.method} ${this.url}`);
@@ -183,6 +218,10 @@ interface HttpMetricData {
   contentType: string;
   attributes: Record<string, string>;
   timestamp: number;
+}
+
+function isFailedHttpMetric(metric: HttpMetricData): boolean {
+  return metric.responseCode >= 400 || metric.attributes.transport_error === 'true';
 }
 
 // Performance data store for analytics
@@ -228,7 +267,7 @@ class PerformanceDataStore {
   }
 
   getErrorHttpRequests(): HttpMetricData[] {
-    return this.httpMetrics.filter((m) => m.responseCode >= 400);
+    return this.httpMetrics.filter(isFailedHttpMetric);
   }
 
   clear(): void {
@@ -264,7 +303,7 @@ class PerformanceDataStore {
           : 0,
       errorRate:
         this.httpMetrics.length > 0
-          ? this.httpMetrics.filter((m) => m.responseCode >= 400).length / this.httpMetrics.length
+          ? this.httpMetrics.filter(isFailedHttpMetric).length / this.httpMetrics.length
           : 0,
       slowRequests: this.httpMetrics.filter((m) => m.duration > 1000).length,
     };
@@ -309,13 +348,27 @@ const performanceDataStore = new PerformanceDataStore();
 class PerformanceService {
   private enabled: boolean = true;
   private dataCollectionEnabled: boolean = true;
+  private collectionEpoch = 0;
 
   setPerformanceCollectionEnabled(enabled: boolean): void {
+    if (this.enabled !== enabled) this.collectionEpoch++;
     this.enabled = enabled;
   }
 
   setDataCollectionEnabled(enabled: boolean): void {
+    if (this.dataCollectionEnabled !== enabled) this.collectionEpoch++;
     this.dataCollectionEnabled = enabled;
+  }
+
+  // A pending trace must not become recordable again after collection is disabled
+  // and subsequently re-enabled. Capture only the current permission epoch.
+  private collectionPermission(): () => boolean {
+    const epoch = this.collectionEpoch;
+    return () => this.isCollectionAllowed() && this.collectionEpoch === epoch;
+  }
+
+  isCollectionAllowed(): boolean {
+    return this.enabled && this.dataCollectionEnabled;
   }
 
   isPerformanceCollectionEnabled(): boolean {
@@ -326,14 +379,14 @@ class PerformanceService {
    * Create a new trace
    */
   newTrace(traceName: string): PerformanceTrace {
-    return new MockTrace(traceName);
+    return new MockTrace(traceName, this.collectionPermission());
   }
 
   /**
    * Create a new HTTP metric
    */
   newHttpMetric(url: string, httpMethod: string): HttpMetric {
-    return new MockHttpMetric(url, httpMethod);
+    return new MockHttpMetric(httpMetricOrigin(url), httpMethod, this.collectionPermission());
   }
 
   /**
@@ -367,7 +420,7 @@ class PerformanceService {
       return result;
     } catch (error) {
       trace.putAttribute('success', 'false');
-      trace.putAttribute('error', String(error));
+      trace.putAttribute('error_kind', httpErrorKind(error));
       throw error;
     } finally {
       trace.stop();
@@ -392,7 +445,7 @@ class PerformanceService {
       return result;
     } catch (error) {
       trace.putAttribute('success', 'false');
-      trace.putAttribute('error', String(error));
+      trace.putAttribute('error_kind', httpErrorKind(error));
       throw error;
     } finally {
       trace.stop();
@@ -497,37 +550,107 @@ export function withScreenPerformance<P extends object>(
 }
 
 // Fetch wrapper with performance tracking
+async function startHttpMetric(
+  url: string,
+  method: string,
+  requestSize: number | undefined,
+): Promise<HttpMetric | undefined> {
+  try {
+    const metric = performance.newHttpMetric(url, method);
+    if (requestSize !== undefined) metric.setRequestPayloadSize(requestSize);
+    metric.putAttribute('duration_scope', 'response_headers');
+    await metric.start();
+    return metric;
+  } catch {
+    // Optional telemetry must not prevent the network request from starting.
+    return undefined;
+  }
+}
+
+function finishHttpMetric(
+  started: Promise<HttpMetric | undefined>,
+  durationMs: number,
+  annotate: (metric: HttpMetric) => void,
+): void {
+  void started
+    .then(async (metric) => {
+      if (!metric) return;
+      try {
+        annotate(metric);
+      } finally {
+        await metric.stop({ durationMs });
+      }
+    })
+    .catch(() => {
+      // Recording failures must not replace the response or original fetch error.
+    });
+}
+
+function recordHttpResponse(
+  started: Promise<HttpMetric | undefined>,
+  durationMs: number,
+  status: number,
+  contentType: string,
+  contentLength: string | null,
+): void {
+  // Capture metadata only, so a slow metric cannot retain the response body.
+  const length = contentLength?.trim();
+  const declaredBytes = length && /^\d+$/.test(length) ? Number(length) : NaN;
+  finishHttpMetric(started, durationMs, (metric) => {
+    metric.setHttpResponseCode(status);
+    metric.setResponseContentType(contentType);
+    // Content-Length is the server-declared byte count, not decoded body size.
+    if (Number.isSafeInteger(declaredBytes) && declaredBytes >= 0) {
+      metric.setResponsePayloadSize(declaredBytes);
+      metric.putAttribute('response_size_source', 'content-length');
+    } else {
+      metric.putAttribute('response_size_source', 'unknown');
+    }
+  });
+}
+
 export async function fetchWithPerformance(
   url: string,
   options: RequestInit = {},
 ): Promise<Response> {
-  const httpMetric = performance.newHttpMetric(url, options.method ?? 'GET');
+  // Opted-out requests do not allocate metrics or inspect response metadata.
+  if (!performance.isCollectionAllowed()) return fetch(url, options);
 
-  if (options.body) {
-    httpMetric.setRequestPayloadSize(typeof options.body === 'string' ? options.body.length : 0);
-  }
+  const started = startHttpMetric(
+    url,
+    options.method ?? 'GET',
+    options.body ? (typeof options.body === 'string' ? options.body.length : 0) : undefined,
+  );
 
-  await httpMetric.start();
-
+  // Measure the fetch itself, excluding asynchronous telemetry setup and shutdown.
+  const requestStartedAt = Date.now();
+  let response: Response;
   try {
-    const response = await fetch(url, options);
-
-    httpMetric.setHttpResponseCode(response.status);
-    httpMetric.setResponseContentType(response.headers.get('content-type') ?? 'unknown');
-
-    // Clone response to read size
-    const clone = response.clone();
-    const text = await clone.text();
-    httpMetric.setResponsePayloadSize(text.length);
-
-    await httpMetric.stop();
-    return response;
+    response = await fetch(url, options);
   } catch (error) {
-    httpMetric.setHttpResponseCode(0);
-    httpMetric.putAttribute('error', String(error));
-    await httpMetric.stop();
+    finishHttpMetric(started, Math.max(0, Date.now() - requestStartedAt), (metric) => {
+      metric.setHttpResponseCode(0);
+      metric.putAttribute('duration_scope', 'transport_failure');
+      metric.putAttribute('transport_error', 'true');
+      metric.putAttribute('error_kind', httpErrorKind(error));
+    });
     throw error;
   }
+
+  const durationMs = Math.max(0, Date.now() - requestStartedAt);
+  try {
+    // Never clone or consume a body to collect optional telemetry.
+    recordHttpResponse(
+      started,
+      durationMs,
+      response.status,
+      response.headers.get('content-type') ?? 'unknown',
+      response.headers.get('content-length'),
+    );
+  } catch {
+    finishHttpMetric(started, durationMs, () => {});
+  }
+  return response;
 }
 
 // Export types

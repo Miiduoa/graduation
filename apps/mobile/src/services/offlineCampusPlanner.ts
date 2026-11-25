@@ -2,6 +2,7 @@ import type { OnDeviceSchoolContext } from './onDeviceSchoolContext';
 import type { CampusSenseSnapshot } from './campusSenseSnapshot';
 import { CAMPUS_SENSE_MAX_AGE_MS } from './campusSenseSnapshot';
 import { parseCampusAssignmentSource } from './campusAssignmentSource';
+import { campusAssignmentDisplayTitle } from './campusAssignmentTarget';
 import type { CampusPlanComparisonBasis } from './campusPlanComparison';
 import type { NuniPlanAssignmentSource, NuniPlanQuizSource } from './nuniPlanAssignmentTarget';
 import {
@@ -151,7 +152,7 @@ export function buildOfflineCampusPlan(input: {
         : '來源沒有可核對的截止日期；請先核對作業頁';
       steps.push({
         id: 'assignment-' + index,
-        title: cleaned(assignment.title),
+        title: campusAssignmentDisplayTitle(assignment.title),
         detail: (assignment.groupName ? cleaned(assignment.groupName) + '｜' : '') +
           due + '。請到課程頁確認繳交方式與最新狀態。',
         priority, evidence: 'authorized-assignments', route: '/classroom',

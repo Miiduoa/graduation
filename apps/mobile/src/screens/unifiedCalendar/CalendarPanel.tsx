@@ -1,6 +1,15 @@
 /* eslint-disable */
 import React, { useMemo, useState, useCallback } from 'react';
-import { ScrollView, Text, View, Pressable, Alert, Share, Clipboard } from 'react-native';
+import {
+  ScrollView,
+  Text,
+  View,
+  Pressable,
+  Alert,
+  Share,
+  Clipboard,
+  StyleSheet,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Screen,
@@ -13,7 +22,8 @@ import {
   Divider,
 } from '../../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
-import { theme, softShadowStyle } from '../../ui/theme';
+import { theme } from '../../ui/theme';
+import { useThemeVersion } from '../../ui/useThemeStyleSheet';
 import { useSchool } from '../../state/school';
 import { useAuth } from '../../state/auth';
 import { useDataSource } from '../../hooks/useDataSource';
@@ -162,12 +172,9 @@ function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeBu
   return (
     <View
       style={{
-        padding: 14,
-        borderRadius: theme.radius.md,
-        borderWidth: 1,
+        paddingVertical: 14,
+        borderTopWidth: StyleSheet.hairlineWidth,
         borderColor: theme.colors.border,
-        backgroundColor: theme.colors.surface,
-        ...softShadowStyle(theme.shadows.soft),
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -192,27 +199,37 @@ function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeBu
       </View>
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`訂閱，${label}`}
           onPress={handleSubscribe}
           style={({ pressed }) => ({
             flex: 1,
-            paddingVertical: 10,
+            minHeight: 44,
+            minWidth: 44,
+            justifyContent: 'center',
+            alignItems: 'center',
             paddingHorizontal: 14,
             borderRadius: theme.radius.md,
             backgroundColor: pressed ? theme.colors.accentHover : theme.colors.accent,
             flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
             gap: 6,
             transform: [{ scale: pressed ? 0.985 : 1 }],
           })}
         >
-          <Ionicons name="add-circle" size={16} color="#fff" />
-          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>訂閱</Text>
+          <Ionicons name="add-circle" size={16} color={theme.colors.onAccent} />
+          <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 13 }}>
+            訂閱
+          </Text>
         </Pressable>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`複製訂閱連結，${label}`}
           onPress={handleCopy}
           style={({ pressed }) => ({
-            paddingVertical: 10,
+            minHeight: 44,
+            minWidth: 44,
+            justifyContent: 'center',
+            alignItems: 'center',
             paddingHorizontal: 14,
             borderRadius: theme.radius.md,
             borderWidth: 1,
@@ -224,9 +241,14 @@ function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeBu
           <Ionicons name="copy-outline" size={16} color={theme.colors.text} />
         </Pressable>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`分享訂閱連結，${label}`}
           onPress={handleShare}
           style={({ pressed }) => ({
-            paddingVertical: 10,
+            minHeight: 44,
+            minWidth: 44,
+            justifyContent: 'center',
+            alignItems: 'center',
             paddingHorizontal: 14,
             borderRadius: theme.radius.md,
             borderWidth: 1,
@@ -243,6 +265,7 @@ function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeBu
 }
 
 export function CalendarPanel(props: { navigation?: any; header?: React.ReactNode }) {
+  useThemeVersion();
   const nav = props?.navigation;
   const { school } = useSchool();
   const auth = useAuth();
@@ -262,10 +285,7 @@ export function CalendarPanel(props: { navigation?: any; header?: React.ReactNod
     loading: eventsLoading,
     error: eventsError,
     reload: reloadEvents,
-  } = useAsyncList<any>(
-    () => ds.listEvents(school.id),
-    [ds, school.id],
-  );
+  } = useAsyncList<any>(() => ds.listEvents(school.id), [ds, school.id]);
 
   const {
     items: assignments,
@@ -599,7 +619,7 @@ export function CalendarPanel(props: { navigation?: any; header?: React.ReactNod
                     <Text
                       style={{
                         color: isSelected
-                          ? '#fff'
+                          ? theme.colors.onAccent
                           : isCurrentMonth
                             ? theme.colors.text
                             : theme.colors.muted,
@@ -619,7 +639,9 @@ export function CalendarPanel(props: { navigation?: any; header?: React.ReactNod
                               width: 5,
                               height: 5,
                               borderRadius: theme.radius.full,
-                              backgroundColor: isSelected ? '#fff' : theme.colors.accent,
+                              backgroundColor: isSelected
+                                ? theme.colors.onAccent
+                                : theme.colors.accent,
                             }}
                           />
                         )}
@@ -629,7 +651,9 @@ export function CalendarPanel(props: { navigation?: any; header?: React.ReactNod
                               width: 5,
                               height: 5,
                               borderRadius: theme.radius.full,
-                              backgroundColor: isSelected ? '#fff' : theme.colors.warning,
+                              backgroundColor: isSelected
+                                ? theme.colors.onAccent
+                                : theme.colors.warning,
                             }}
                           />
                         )}
@@ -727,13 +751,10 @@ export function CalendarPanel(props: { navigation?: any; header?: React.ReactNod
                     accessibilityLabel={`${e.type === 'event' ? '查看活動' : '查看作業'}：${e.title}`}
                     onPress={() => openCalendarEvent(e)}
                     style={({ pressed }) => ({
-                      padding: 14,
-                      borderRadius: theme.radius.md,
-                      borderWidth: 1,
+                      paddingVertical: 14,
+                      borderBottomWidth: StyleSheet.hairlineWidth,
                       borderColor: theme.colors.border,
-                      backgroundColor: theme.colors.surface,
-                      ...softShadowStyle(theme.shadows.soft),
-                      transform: [{ scale: pressed ? 0.985 : 1 }],
+                      backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
                     })}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
