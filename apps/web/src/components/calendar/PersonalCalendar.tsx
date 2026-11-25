@@ -439,6 +439,11 @@ function PersonalCalendarWorkspace({
   const pendingDayReveal = useRef<string | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const pendingFocus = useRef<'editor' | 'return' | 'saved' | 'monthList' | null>(null);
+  const pendingWriteFocus = useRef<{
+    target: 'return' | 'saved';
+    canHandoff: () => boolean;
+    stop: () => void;
+  } | null>(null);
   const [editorRevision, setEditorRevision] = useState(0);
   const [baseline, setBaseline] = useState<PersonalImportRecord | null>(null);
   const [saving, setSaving] = useState(false);
@@ -600,11 +605,17 @@ function PersonalCalendarWorkspace({
     active.current = true;
     return () => {
       active.current = false;
+      pendingWriteFocus.current?.stop();
+      pendingWriteFocus.current = null;
     };
   }, []);
   useLayoutEffect(() => {
     suspended.current = paused;
-    if (paused) pendingFocus.current = null;
+    if (paused) {
+      pendingFocus.current = null;
+      pendingWriteFocus.current?.stop();
+      pendingWriteFocus.current = null;
+    }
     const origin = linkedFocusOrigin.current;
     if (!origin) return;
     // Revalidation can hide the workspace or remove the focused list control.
@@ -683,9 +694,18 @@ function PersonalCalendarWorkspace({
   }, [paused, mode, editorRevision]);
 
   useLayoutEffect(() => {
-    if (paused || !pendingFocus.current) return;
-    const target = pendingFocus.current;
+    if (paused) return;
+    let target = pendingFocus.current;
     pendingFocus.current = null;
+    const writeFocus = pendingWriteFocus.current;
+    if (writeFocus && (mode === 'idle' || target)) {
+      pendingWriteFocus.current = null;
+      // The editor may have been detached by this commit. Keep tracking through
+      // the commit so a late focus move also invalidates the body fallback.
+      if (!target && writeFocus.canHandoff()) target = writeFocus.target;
+      writeFocus.stop();
+    }
+    if (!target) return;
     if (target === 'editor' && mode !== 'idle') {
       focusEditorTitle();
       return;
@@ -884,6 +904,7 @@ function PersonalCalendarWorkspace({
     const savedMonth = savedDate.slice(0, 7);
     const monthList = calendarView === 'list' && !selectedDate;
     const writeFocus = trackWriteFocus();
+    let focusQueued = false;
     writing.current = true;
     setSaving(true);
     setFormError('');
@@ -905,9 +926,12 @@ function PersonalCalendarWorkspace({
           setMonth(savedMonth);
           setSelectedDate(savedDate);
         }
-        if (writeFocus.canHandoff()) {
-          pendingFocus.current = followSavedDate || selectedDate ? 'saved' : 'return';
-        }
+        pendingWriteFocus.current?.stop();
+        pendingWriteFocus.current = {
+          ...writeFocus,
+          target: followSavedDate || selectedDate ? 'saved' : 'return',
+        };
+        focusQueued = true;
       }
       setInitialDraft(null);
       setNotice(success);
@@ -919,7 +943,7 @@ function PersonalCalendarWorkspace({
       if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
       setFormError(personalEventSaveError(error));
     } finally {
-      writeFocus.stop();
+      if (!focusQueued) writeFocus.stop();
       if (active.current && ticket === requestId.current) {
         writing.current = false;
         setSaving(false);
@@ -962,6 +986,7 @@ function PersonalCalendarWorkspace({
     const scoped = { ...scope };
     const original = baseline;
     const writeFocus = trackWriteFocus();
+    let focusQueued = false;
     writing.current = true;
     setSaving(true);
     setFormError('');
@@ -974,7 +999,9 @@ function PersonalCalendarWorkspace({
     )
       .then(() => {
         if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
-        if (writeFocus.canHandoff()) pendingFocus.current = 'return';
+        pendingWriteFocus.current?.stop();
+        pendingWriteFocus.current = { ...writeFocus, target: 'return' };
+        focusQueued = true;
         setInitialDraft(null);
         setNotice('已刪除這筆個人行程。');
         setMode('idle');
@@ -987,7 +1014,7 @@ function PersonalCalendarWorkspace({
         setFormError(personalEventSaveError(error));
       })
       .finally(() => {
-        writeFocus.stop();
+        if (!focusQueued) writeFocus.stop();
         if (active.current && ticket === requestId.current) {
           writing.current = false;
           setSaving(false);

@@ -1224,6 +1224,48 @@ it('刪除期間移到查看月份再主動離焦，完成後焦點留在 body',
   expect(readPersonalImports(scope())).toEqual([]);
 });
 
+it.each([
+  { operation: '儲存', blurMonth: false },
+  { operation: '儲存', blurMonth: true },
+  { operation: '刪除', blurMonth: false },
+  { operation: '刪除', blurMonth: true },
+])('$operation 完成至編輯器關閉之間移到查看月份（離焦 $blurMonth）', async ({
+  operation,
+  blurMonth,
+}) => {
+  const date = '2026-11-14';
+  const stored = event('commit-focus', '焦點交接的合成行程', date);
+  const deleting = operation === '刪除';
+  if (deleting) seed([stored]);
+  const pendingWrite = deferNextCalendarWrite();
+  render(<PersonalCalendar />);
+  await ready();
+  activate(screen.getByRole('button', { name: date }));
+  activate(screen.getByRole('button', { name: deleting ? stored.title : '新增行程' }));
+  if (!deleting) fireEvent.change(titleField(), { target: { value: stored.title } });
+  const editorField = titleField();
+  const monthField = screen.getByLabelText('查看月份');
+  const submit = screen.getByRole('button', { name: deleting ? '刪除這筆' : '儲存行程' });
+  activate(submit);
+  await waitFor(() => expect(pendingWrite()).toBeTypeOf('function'));
+
+  await act(async () => {
+    pendingWrite()?.();
+    // Drain the write's Promise continuations while act holds the React commit.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(readPersonalImports(scope())).toHaveLength(deleting ? 0 : 1);
+    expect(editorField.isConnected).toBe(true);
+    expect(document.activeElement).toBe(submit);
+    monthField.focus();
+    expect(document.activeElement).toBe(monthField);
+    if (blurMonth) monthField.blur();
+  });
+
+  await screen.findByText(deleting ? '已刪除這筆個人行程。' : personalImportSavedNotice(1));
+  expect(screen.queryByRole('textbox', { name: '標題' })).toBeNull();
+  expect(document.activeElement).toBe(blurMonth ? document.body : monthField);
+});
+
 it('preserves the newly selected day when a completed write is acknowledged during revalidation', async () => {
   let acknowledge: (() => void) | undefined;
   Object.defineProperty(navigator, 'locks', {
