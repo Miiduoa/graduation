@@ -662,26 +662,13 @@ export function preparePersonalImportRollback(
   let resetMarker = false;
   const rejection = rejectionFile(key);
   let hadRejection = fileExists(rejection);
+  let retireRestoredRejection = false;
   if (hadRejection) {
     const state = readOptionalFile(rejection);
-    if (state === resolvedRejection) {
-      hadRejection = false;
-    } else if (!marked && attemptedPrimary?.restoredRejectionHash && !attemptedPrimary.preserveRejection &&
-        (state === undefined || state === attemptedPrimary.restoredRejectionHash)) {
-      // The snapshot verified the original primary. Retire only its matching
-      // rejection before arming another attempt.
-      if (!deleteMarker(rejection)) {
-        try {
-          rejection.write(resolvedRejection);
-          if (rejection.textSync() !== resolvedRejection) {
-            throw new Error('無法更新匯入資料的還原標記。');
-          }
-        } catch (error) {
-          throw new NativeRollbackUnavailableError(error);
-        }
-      }
-      hadRejection = false;
-    }
+    retireRestoredRejection = !marked && attemptedPrimary?.restoredRejectionHash !== undefined &&
+      !attemptedPrimary.preserveRejection &&
+      (state === undefined || state === attemptedPrimary.restoredRejectionHash);
+    if (state === resolvedRejection || retireRestoredRejection) hadRejection = false;
   }
   let markerRejected = marked && hadRejection;
   if (marked) {
@@ -739,6 +726,17 @@ export function preparePersonalImportRollback(
     // On a read fault, the verified primary still holds the original bytes.
     if (written !== undefined && written !== writtenPayload) {
       throw new Error('無法確認匯入資料的還原副本已寫入。');
+    }
+  }
+  // Keep the restored primary's rejection binding until the new copy is verified.
+  if (retireRestoredRejection && !deleteMarker(rejection)) {
+    try {
+      rejection.write(resolvedRejection);
+      if (rejection.textSync() !== resolvedRejection) {
+        throw new Error('無法更新匯入資料的還原標記。');
+      }
+    } catch (error) {
+      throw new NativeRollbackUnavailableError(error);
     }
   }
   if (!marked) {

@@ -67,6 +67,15 @@ async function readNativeReceipt(key: string): Promise<string | null> {
   }
 }
 
+async function writeNativeReceipt(key: string, receipt: string) {
+  const receiptKey = nativeReceiptKey(key);
+  try {
+    await AsyncStorage.setItem(receiptKey, receipt);
+  } catch {
+    await AsyncStorage.multiSet([[receiptKey, receipt]]);
+  }
+}
+
 async function readLedgerSnapshot(
   key: string,
   scope: PersonalImportScope,
@@ -101,7 +110,7 @@ async function readLedgerSnapshot(
     ? await readNativeReceipt(key)
     : null;
   const inMemoryReceipt = inMemoryVerificationReceipts.get(key);
-  const rejectionReceipt = rejectionMatches && receipt?.match(/^([a-f0-9]{64})\n([a-f0-9]{64})$/);
+  const rejectionReceipt = rejectionMatches && (inMemoryReceipt ?? receipt)?.match(/^([a-f0-9]{64})\n([a-f0-9]{64})$/);
   const rejectionHash = journal?.rejectionHash;
   const publishedAfterRejection = primaryVerified && primary !== null && rejectionReceipt &&
     (rejectionHash === undefined || rejectionHash === rejectionReceipt[1]) &&
@@ -571,9 +580,9 @@ export function mutatePersonalImportLedger<T>(
               if (newReceipt !== undefined) {
                 assertWritable();
                 try {
-                  await AsyncStorage.setItem(nativeReceiptKey(key), newReceipt);
+                  await writeNativeReceipt(key, newReceipt);
                 } catch (error) {
-                  if (!journal || !options.allowNativePrimaryOnly) throw error;
+                  if (!options.allowNativePrimaryOnly) throw error;
                   // The ordinary save already verified these bytes. Keep its
                   // attempt-bound receipt for reads in this process.
                   inMemoryReceipt = newReceipt;
@@ -586,7 +595,7 @@ export function mutatePersonalImportLedger<T>(
               if (newReceipt !== undefined) {
                 try {
                   if (currentReceipt === null) await AsyncStorage.removeItem(nativeReceiptKey(key));
-                  else await AsyncStorage.setItem(nativeReceiptKey(key), currentReceipt);
+                  else await writeNativeReceipt(key, currentReceipt);
                 } catch {
                   // Preserve rejection through the rollback journal and checkpoint.
                 }

@@ -860,8 +860,7 @@ test.each([
       expect(verificationReceiptWriteFault.mock.invocationCallOrder[0])
         .toBeGreaterThan(primaryFault.mock.invocationCallOrder[1]);
       expect(active).toBe(true);
-      expect(await nativeGet(key + ':verified-write')).toBeNull();
-      return;
+      expect(await nativeGet(key + ':verified-write')).toEqual(expect.any(String));
     }
     if (transientVerificationReceiptRead) {
       const receiptKey = key + ':verified-write';
@@ -1688,7 +1687,10 @@ test('a rejected primary-only edit with no pending marker recovers its checkpoin
   }
 });
 
-test.each(['payload write', 'rejection delete', 'restored write', 'restored readback', 'restored write with transient receipt read'] as const)('a restored primary remains editable after restart with an older checkpoint and a persistent %s fault', async (fault) => {
+test.each([
+  'payload write', 'payload write with receipt write fault', 'rejection delete',
+  'restored write', 'restored readback', 'restored write with transient receipt read',
+] as const)('a restored primary remains editable after restart with an older checkpoint and a persistent %s fault', async (fault) => {
   const scope = { owner: `nuni:restored-primary-with-older-checkpoint-${fault}`, schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
   const prefix = `personal-imports-${sha256(key)}.rollback.`;
@@ -1705,7 +1707,7 @@ test.each(['payload write', 'rejection delete', 'restored write', 'restored read
   const { write: writeFile, delete: deleteFile } = File.prototype;
   const deleteFault = jest.fn(() => { throw new Error('無法刪除拒絕檔'); });
   const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
-    if (fault !== 'payload write' && this.uri === rejection.uri) deleteFault();
+    if (!fault.startsWith('payload write') && this.uri === rejection.uri) deleteFault();
     deleteFile.call(this);
   });
   const resolvedFault = jest.fn(() => { throw new Error('無法確認拒絕檔已改為 restored'); });
@@ -1764,8 +1766,14 @@ test.each(['payload write', 'rejection delete', 'restored write', 'restored read
     expect(await AsyncStorage.getItem(key + ':checkpoint')).toBe(checkpoint);
 
     active = true;
-    set.mockImplementation(nativeSet);
-    payloadBlocked = fault === 'payload write';
+    const receiptWriteFault = jest.fn(() => { throw new Error('已驗證寫入憑據無法儲存'); });
+    set.mockImplementation(async (entry, value) => {
+      if (fault === 'payload write with receipt write fault' && entry === key + ':verified-write') {
+        receiptWriteFault();
+      }
+      await nativeSet(entry, value);
+    });
+    payloadBlocked = fault.startsWith('payload write');
     get.mockClear();
     let saved: typeof original | undefined;
     await jest.isolateModulesAsync(async () => {
@@ -1788,9 +1796,11 @@ test.each(['payload write', 'rejection delete', 'restored write', 'restored read
         if (payloadBlocked) {
           expect(payloadFault).toHaveBeenCalledTimes(2);
           expect(pending.info().exists).toBe(false);
+          expect(rejection.textSync()).toBe(sha256(originalRaw));
+          expect(receiptWriteFault).toHaveBeenCalledTimes(fault === 'payload write with receipt write fault' ? 1 : 0);
         } else {
           expect(deleteFault).toHaveBeenCalledTimes(1);
-          expect(payloadWritten).toHaveBeenCalledTimes(fault === 'rejection delete' ? 1 : 0);
+          expect(payloadWritten).toHaveBeenCalledTimes(1);
           if (fault === 'rejection delete') {
             expect(resolvedFault).not.toHaveBeenCalled();
           } else {
