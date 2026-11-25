@@ -1515,3 +1515,34 @@ it('refreshes added and removed course options from a newer sync and rejects a l
   expect(screen.getByRole('option', { name: '新增課程' })).toBeTruthy();
   expect(screen.queryByRole('option', { name: '資料庫' })).toBeNull();
 });
+
+it.each(['startup', 'retry'])('keeps the workspace binding when courses runs after rebinding on %s', async (stage) => {
+  const schoolReads = vi.fn();
+  let currentRevision = revision;
+  let staleRequest = false;
+  fetchMock.mockImplementation((url, init) => {
+    const input = body(init);
+    if (input.action === 'status' && staleRequest) return Promise.resolve(json({ ...connection, connected: false }));
+    if (input.action === 'courses') {
+      if (stage === 'startup') currentRevision = 'b'.repeat(32);
+      if (input.revision !== currentRevision) {
+        staleRequest = true;
+        return Promise.resolve(json({ error: 'TRONCLASS_BINDING_CHANGED' }, 409));
+      }
+      schoolReads(currentRevision);
+      return Promise.resolve(json({ error: 'TRONCLASS_TIMEOUT' }, 504));
+    }
+    if (input.action === 'sync') return Promise.resolve(json({ error: 'TRONCLASS_TIMEOUT' }, 504));
+    return defaultResponse(url, init);
+  });
+  render(<TronClassWorkspace />);
+  if (stage === 'retry') {
+    const retry = await screen.findByRole('button', { name: '重新讀取課程清單' });
+    currentRevision = 'b'.repeat(32);
+    fireEvent.click(retry);
+  }
+  await waitFor(() => expect(calls('status')).toHaveLength(2));
+  const expected = { action: 'courses', revision };
+  expect(calls('courses').map(([, init]) => body(init))).toEqual(stage === 'retry' ? [expected, expected] : [expected]);
+  expect(schoolReads.mock.calls).toEqual(stage === 'retry' ? [[revision]] : []);
+});

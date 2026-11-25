@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import { handleTronClassIntegration, type TronClassRouteDependencies } from './tronClassIntegrationRoute';
+import type { LmsReadonlySource } from './tronClassLmsSource';
 import { TRONCLASS_MAX_FILE_BYTES } from './tronClassSubmission';
 
 vi.mock('./tronClassIntegrationSource', () => ({ createTronClassIntegrationReader: vi.fn(), createTronClassCourseIndexReader: vi.fn() }));
@@ -122,12 +123,46 @@ it('loads only the authenticated course index and forwards cancellation without 
   const response = await handleTronClassIntegration(request, dependencies);
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ kind: 'course-index', courses: [], partial: false });
-  expect(courses).toHaveBeenCalledExactlyOnceWith(ownerKey, request.signal);
+  expect(courses).toHaveBeenCalledExactlyOnceWith(ownerKey, request.signal, undefined);
   expect(authenticate).toHaveBeenCalledTimes(2);
   expect(read).not.toHaveBeenCalled();
   expect(getSubmissions).not.toHaveBeenCalled();
   controller.abort();
   expect(courses.mock.calls[0][1].aborted).toBe(true);
+});
+
+it.each(['before binding load', 'after binding load'])('rejects a course index after rebinding %s without calling the school', async (stage) => {
+  const { request, dependencies, bindings } = setup();
+  const { createTronClassCourseIndexReader } = await vi.importActual<typeof import('./tronClassIntegrationSource')>('./tronClassIntegrationSource');
+  const original = { revision, userId: 12, cookies: { session: 'session-a-fixture' } };
+  const replacement = { revision: 'b'.repeat(32), userId: 34, cookies: { session: 'session-b-fixture' } };
+  let current = original;
+  bindings.requireBinding.mockImplementation(async () => {
+    if (stage === 'before binding load') current = replacement;
+    const loaded = current;
+    current = replacement;
+    return loaded;
+  });
+  bindings.assertCurrent.mockImplementation(async (_owner, expected) => {
+    if (expected !== current.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+  });
+  const source = {
+    fetchCourses: vi.fn().mockResolvedValue([]),
+    fetchHomeworkPage: vi.fn(), fetchActivities: vi.fn(),
+    fetchCourseAnnouncements: vi.fn(), fetchSiteAnnouncements: vi.fn(),
+  } satisfies LmsReadonlySource;
+  dependencies.courses = createTronClassCourseIndexReader({ bindings, source });
+
+  const stale = await request({ action: 'courses', revision });
+  expect(stale.status).toBe(409);
+  expect(await stale.json()).toMatchObject({ error: 'TRONCLASS_BINDING_CHANGED' });
+  expect(source.fetchCourses).not.toHaveBeenCalled();
+
+  const unscoped = await request({ action: 'courses' });
+  expect(unscoped.status).toBe(200);
+  expect(await unscoped.json()).toMatchObject({ revision: replacement.revision });
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+  expect(source.fetchCourses).toHaveBeenCalledWith(replacement.cookies, { userId: 34, status: 'ongoing' }, expect.anything());
 });
 
 it('requires authentication before loading a course index', async () => {
@@ -174,6 +209,8 @@ it.each([
   { action: 'status', ownerKey: 'other-account' },
   { action: 'courses', ownerKey: 'other-account' },
   { action: 'courses', courseId: 101 },
+  { action: 'courses', revision: null },
+  { action: 'courses', revision: 'invalid' },
   { action: 'sync', schoolId: 'attacker' },
   { action: 'sync', courseId: '101' },
   { action: 'sync', courseId: 1.5 },

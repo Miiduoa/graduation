@@ -1389,3 +1389,27 @@ it('rejects a file selection in a second draft without deleting the first draft 
   await view.findByText('確認這次作業內容');
   expect(mockUpload).not.toHaveBeenCalled();
 });
+
+it.each(['startup', 'retry'])('keeps the workspace binding when courses runs after rebinding on %s', async (stage) => {
+  const schoolReads = jest.fn();
+  let currentRevision = revision;
+  mockBffRequest.mockImplementation((path, context, input) => {
+    if (input.action === 'courses') {
+      if (stage === 'startup') currentRevision = 'b'.repeat(32);
+      if (input.revision !== currentRevision) return Promise.reject(new NuniError(409, 'TRONCLASS_BINDING_CHANGED'));
+      schoolReads(currentRevision);
+      return Promise.reject(new NuniError(504, 'TRONCLASS_TIMEOUT'));
+    }
+    if (input.action === 'sync') return Promise.reject(new NuniError(504, 'TRONCLASS_TIMEOUT'));
+    return defaultRequest(path, context, input);
+  });
+  const view = render(<TronClassWorkspaceScreen />);
+  if (stage === 'retry') {
+    const retry = await view.findByRole('button', { name: '重新讀取課程清單' });
+    currentRevision = 'b'.repeat(32);
+    await act(async () => fireEvent.press(retry));
+  }
+  const expected = { action: 'courses', revision };
+  await waitFor(() => expect(actions('courses')).toEqual(stage === 'retry' ? [expected, expected] : [expected]));
+  expect(schoolReads.mock.calls).toEqual(stage === 'retry' ? [[revision]] : []);
+});

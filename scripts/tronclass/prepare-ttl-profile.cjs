@@ -23,9 +23,13 @@ function withPrivateOutput(outDir, root, write) {
   const uid = process.getuid();
   const explicit = outDir !== undefined;
   if (explicit && (typeof outDir !== 'string' || !outDir.trim())) throw new Error('Use a nonempty output path.');
-  const requested = explicit ? path.resolve(outDir) : undefined;
-  if (requested) requireOutsideRepository(requested, root);
-  const parent = requested ? path.dirname(requested) : path.resolve(os.tmpdir());
+  const requested = explicit ? outDir : os.tmpdir();
+  // Keep '..' until the preceding directory or symlink has been verified.
+  const absolute = path.isAbsolute(requested) ? requested : `${process.cwd()}/${requested}`;
+  const components = absolute.split('/').filter(Boolean);
+  const leaf = explicit ? components.pop() : undefined;
+  const existingDirectory = explicit && (!leaf || leaf === '.' || leaf === '..');
+  if (existingDirectory && leaf) components.push(leaf);
   const handles = [];
   const bindings = [];
 
@@ -50,13 +54,19 @@ function withPrivateOutput(outDir, root, write) {
     const rootFd = pin('/', O_PATH | O_DIRECTORY);
     verifyDirectory(fs.fstatSync(rootFd));
     const stack = [rootFd];
-    let parts = parent.split('/');
+    let parts = components;
     let links = 0;
     while (parts.length) {
       const part = parts.shift();
       if (!part || part === '.') continue;
       if (part === '..') {
+        const fd = pin(`${fdPath(stack.at(-1))}/..`, O_PATH | O_DIRECTORY);
         if (stack.length > 1) stack.pop();
+        const actual = fs.fstatSync(fd, { bigint: true });
+        const expected = fs.fstatSync(stack.at(-1), { bigint: true });
+        if (actual.dev !== expected.dev || actual.ino !== expected.ino) {
+          throw new Error('Use an output location controlled by the current user.');
+        }
         continue;
       }
       const entry = `${fdPath(stack.at(-1))}/${part}`;
@@ -85,9 +95,10 @@ function withPrivateOutput(outDir, root, write) {
     }
 
     const actualParent = fs.readlinkSync(fdPath(parentFd));
-    requireOutsideRepository(path.join(actualParent, requested ? path.basename(requested) : 'nuni-tronclass-ttl-'), root);
+    requireOutsideRepository(path.join(actualParent, existingDirectory ? '' : leaf ?? 'nuni-tronclass-ttl-'), root);
+    if (existingDirectory) throw new Error('Output path already exists.');
     for (;;) {
-      const name = requested ? path.basename(requested) : `nuni-tronclass-ttl-${randomBytes(16).toString('hex')}`;
+      const name = leaf ?? `nuni-tronclass-ttl-${randomBytes(16).toString('hex')}`;
       const entry = `${fdPath(parentFd)}/${name}`;
       try {
         fs.mkdirSync(entry, { mode: 0o700 });

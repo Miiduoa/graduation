@@ -70,7 +70,7 @@ it('loads an independently typed course picker using the same verified native id
   const request = jest.fn(async () => index);
   const client = createNativeTronClassClient({ owner: 'platform:a', isCurrent: () => true, request, upload: jest.fn() });
   expect(await client.courses(revision)).toEqual(index);
-  expect(request).toHaveBeenCalledWith({ action: 'courses' });
+  expect(request).toHaveBeenCalledWith({ action: 'courses', revision });
   await expect(client.courses('b'.repeat(32))).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
   request.mockResolvedValueOnce({ ...index, kind: 'snapshot' });
   await expect(client.courses(revision)).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });

@@ -52,6 +52,14 @@ describe('TronClass client response boundary', () => {
     expect(new Headers(init.headers).get('X-Campus-Session')).toBe('context-a');
   });
 
+  it('sends the source binding revision for a scoped course index request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'TRONCLASS_BINDING_CHANGED' }), { status: 409 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(createTronClassClient({ kind: 'platform', context: 'context-a' }).courses(undefined, courseIndex.revision))
+      .rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual({ action: 'courses', revision: courseIndex.revision });
+  });
+
   it.each([
     { ...courseIndex, kind: undefined },
     { ...courseIndex, homework: [] },

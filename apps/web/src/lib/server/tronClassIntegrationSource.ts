@@ -369,11 +369,11 @@ function createTronClassCourseOperation(dependencies: TronClassReaderDependencie
 /** Read only the verified owner's course picker; never starts a homework request. */
 export function createTronClassCourseIndexReader(dependencies: TronClassReaderDependencies = {}) {
   const operation = createTronClassCourseOperation(dependencies);
-  return (ownerKey: string, signal?: AbortSignal): Promise<TronClassCourseIndex> =>
+  return (ownerKey: string, signal?: AbortSignal, revision?: string): Promise<TronClassCourseIndex> =>
     operation(ownerKey, async ({ binding, courses, errors, now }) => ({
       kind: 'course-index' as const, revision: binding.revision,
       fetchedAt: new Date(now()).toISOString(), courses, errors, partial: errors.length > 0,
-    }), signal);
+    }), signal, undefined, revision);
 }
 
 export type TronClassSnapshotReadOptions = {

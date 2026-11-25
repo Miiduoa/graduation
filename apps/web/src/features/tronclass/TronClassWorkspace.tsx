@@ -599,7 +599,7 @@ function ConnectedWorkspace({
     setIndexLoading(true);
     setIndexError('');
     try {
-      const value = await client.courses(controller.signal);
+      const value = await client.courses(controller.signal, courseIndex?.revision ?? snapshot?.revision ?? revision);
       if (!alive.current || request !== indexGeneration.current) return;
       if (value.revision !== revision) { currentConnectionChanged.current(); return; }
       if (directoryOrder >= acceptedDirectorySequence.current) {

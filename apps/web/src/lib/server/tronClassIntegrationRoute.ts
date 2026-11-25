@@ -187,9 +187,10 @@ export async function handleTronClassIntegration(
               ...(input.courseId === undefined && input.revision === undefined ? {} : { revision: revision(input.revision) }) }, request.signal);
           break;
         case 'courses':
-          only(input, ['action']);
+          only(input, ['action', 'revision']);
           if (!dependencies.rateLimit) courseIndexLimiter.check(actor.ownerKey);
-          result = await (dependencies.courses ?? createTronClassCourseIndexReader({ bindings }))(actor.ownerKey, request.signal);
+          result = await (dependencies.courses ?? createTronClassCourseIndexReader({ bindings }))(actor.ownerKey, request.signal,
+            input.revision === undefined ? undefined : revision(input.revision));
           break;
         case 'prepare':
           only(input, ['action', 'courseId', 'homeworkId', 'revision']);

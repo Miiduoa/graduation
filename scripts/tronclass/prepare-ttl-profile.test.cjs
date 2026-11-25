@@ -134,3 +134,36 @@ test('rejects an ancestor where other users can rename entries before creating o
   assert.deepEqual(fs.readdirSync(parent), []);
   assert.equal(fs.statSync(parent).mode, mode);
 });
+
+for (const scenario of ['fresh output', 'existing output', 'unsafe ancestor']) {
+  test(`walks the symlink before '..' with ${scenario}`, t => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'tronclass-ttl-safe-'));
+    t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
+    const parent = path.join(workspace, 'parent');
+    const sub = path.join(parent, 'sub');
+    const actualOutput = path.join(parent, 'profile');
+    const normalizedOutput = path.join(workspace, 'profile');
+    fs.mkdirSync(sub, { recursive: true });
+    fs.symlinkSync('parent/sub', path.join(workspace, 'link'), 'dir');
+    const outDir = `${workspace}/link/../profile`;
+
+    if (scenario === 'fresh output') {
+      const result = prepareTronClassTtlProfile({ outDir });
+      assert.equal(result.outDir, path.join(fs.realpathSync(parent), 'profile'));
+      assertPrivateDirectory(actualOutput);
+    } else if (scenario === 'existing output') {
+      fs.mkdirSync(actualOutput, { mode: 0o755 });
+      const existingFile = path.join(actualOutput, 'firebase.json');
+      fs.writeFileSync(existingFile, 'existing');
+      const mode = fs.statSync(actualOutput).mode;
+      assert.throws(() => prepareTronClassTtlProfile({ outDir }), /already exists/);
+      assert.equal(fs.readFileSync(existingFile, 'utf8'), 'existing');
+      assert.equal(fs.statSync(actualOutput).mode, mode);
+    } else {
+      fs.chmodSync(sub, 0o777);
+      assert.throws(() => prepareTronClassTtlProfile({ outDir }), /controlled by the current user/);
+      assert.equal(fs.existsSync(actualOutput), false);
+    }
+    assert.equal(fs.existsSync(normalizedOutput), false);
+  });
+}
