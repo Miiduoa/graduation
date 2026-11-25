@@ -840,6 +840,22 @@ it('does not resolve a shared route with duplicate endpoint IDs', async () => {
   expect(JSON.parse(markers.textContent!).route).toBeNull();
 });
 
+it.each([false, true])('does not expose conflicting markers even when filtering hides one (%s)', async (reverse) => {
+  const conflicting = { ...gate, name: '測試用重複識別碼', category: '教學', lat: gate.lat + 0.002 };
+  const records = reverse ? [conflicting, gate] : [gate, conflicting];
+  vi.mocked(loadMapLocations).mockResolvedValue([library, ...records]);
+  render(<MapClient school="other-school" />);
+  const markers = await screen.findByLabelText('地圖狀態');
+  const ids = () => JSON.parse(markers.textContent!).locations.map((place: MapLocation) => place.id);
+  expect(ids()).toEqual([library.id]);
+  expect(screen.getByText(/地點識別碼重複/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '查看' + gate.name })).toBeNull();
+  expect(screen.queryByRole('button', { name: '查看' + conflicting.name })).toBeNull();
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋地點' }), { target: { value: gate.name } });
+  expect(ids()).toEqual([]);
+  expect(screen.queryByRole('link', { name: '從目前位置導航' })).toBeNull();
+});
+
 it('keeps both login returns in sync with manually changed and cleared routes', async () => {
   state.user = null;
   render(<MapClient school="pu" route="gate,library" focus="library" />);
