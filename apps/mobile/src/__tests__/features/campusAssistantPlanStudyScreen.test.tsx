@@ -480,40 +480,62 @@ test('a source change after the first readback preserves its result and stops th
   expect((await loadPersonalImports(scope)).records).toHaveLength(1);
 });
 
-test('a stopped batch resumes the unstarted source step after restart without recreating its first event', async () => {
-  addSecondAssignment();
-  const view = render(<CampusAssistantScreen route={route} navigation={navigation()} />);
-  const confirm = await selectStudyBatch(view);
-  const held = deferred<void>();
-  const target = personalImportStorageKey(scope);
-  let saved = false;
-  let readsAfterWrite = 0;
-  jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
-    await originalSet(key, value);
-    if (key === target) saved = true;
-  });
-  jest.mocked(AsyncStorage.getItem).mockImplementation(async (key) => {
-    if (key === target && saved && ++readsAfterWrite > 1) await held.promise;
-    return originalGet(key);
-  });
-  act(() => fireEvent.press(confirm));
-  await waitFor(() => expect(readsAfterWrite).toBeGreaterThan(1));
-  await act(async () => fireEvent.press(view.getByRole('button', { name: '停止後續行程' })));
-  await act(async () => held.resolve());
-  await waitFor(() => expect(view.queryByRole('button', { name: '停止後續行程' })).toBeNull());
-  const firstId = (await loadPersonalImports(scope)).records[0].id;
-  view.unmount();
-  const reopened = render(<CampusAssistantScreen route={route} navigation={navigation()} />);
-  const resume = await reopened.findByRole('button', { name: '確認接續剩餘 1 筆行程' });
-  expect(ledgerWrites()).toHaveLength(1);
-  await act(async () => fireEvent.press(resume));
-  await reopened.findByText('已逐筆保存並核對 2 筆準備行程。');
-  expect(ledgerWrites()).toHaveLength(2);
-  const ledger = await loadPersonalImports(scope);
-  expect(ledger.records).toHaveLength(2);
-  expect(ledger.records.filter((row) => row.id === firstId)).toHaveLength(1);
-  expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(2);
-});
+test.each(['post-commit readback', 'native write response'] as const)(
+  'a batch stopped during %s reconciles its first operation before allowing continuation',
+  async (stage) => {
+    addSecondAssignment();
+    const view = render(<CampusAssistantScreen route={route} navigation={navigation()} />);
+    const confirm = await selectStudyBatch(view);
+    const held = deferred<void>();
+    const target = personalImportStorageKey(scope);
+    const duringWrite = stage === 'native write response';
+    let saved = false;
+    let readsAfterWrite = 0;
+    jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
+      await originalSet(key, value);
+      if (key === target) {
+        saved = true;
+        if (duringWrite) await held.promise;
+      }
+    });
+    jest.mocked(AsyncStorage.getItem).mockImplementation(async (key) => {
+      if (!duringWrite && key === target && saved && ++readsAfterWrite > 1) await held.promise;
+      return originalGet(key);
+    });
+    act(() => fireEvent.press(confirm));
+    await waitFor(() => expect(duringWrite ? saved : readsAfterWrite > 1).toBe(true));
+    await act(async () => fireEvent.press(view.getByRole('button', { name: '停止後續行程' })));
+    await act(async () => held.resolve());
+    await waitFor(() => expect(view.queryByRole('button', { name: '停止後續行程' })).toBeNull());
+    const attempts = await readAssistantCalendarJournal(scope, () => true);
+    expect(attempts).toHaveLength(1);
+    const firstId = attempts[0].proposal.mutationId;
+    view.unmount();
+    const reopened = render(<CampusAssistantScreen route={route} navigation={navigation()} />);
+    if (duringWrite) {
+      await reopened.findByText('已核對 0／2 筆行程');
+      expect(reopened.getAllByText(/目前沒有讀到這筆行程/).length).toBeGreaterThan(0);
+      expect(reopened.getByText('尚未開始')).toBeTruthy();
+      expect(reopened.queryByRole('button', { name: '確認接續剩餘 1 筆行程' })).toBeNull();
+      expect(reopened.queryByText('已逐筆保存並核對 2 筆準備行程。')).toBeNull();
+      expect((await loadPersonalImports(scope)).records).toEqual([]);
+      expect(ledgerWrites()).toHaveLength(1);
+      expect((await readAssistantCalendarJournal(scope, () => true)).map(({ proposal }) => proposal.mutationId))
+        .toEqual([firstId]);
+      return;
+    }
+    expect((await loadPersonalImports(scope)).records.map(({ id }) => id)).toEqual([firstId]);
+    const resume = await reopened.findByRole('button', { name: '確認接續剩餘 1 筆行程' });
+    expect(ledgerWrites()).toHaveLength(1);
+    await act(async () => fireEvent.press(resume));
+    await reopened.findByText('已逐筆保存並核對 2 筆準備行程。');
+    expect(ledgerWrites()).toHaveLength(2);
+    const ledger = await loadPersonalImports(scope);
+    expect(ledger.records).toHaveLength(2);
+    expect(ledger.records.filter((row) => row.id === firstId)).toHaveLength(1);
+    expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(2);
+  },
+);
 
 test('cancelling the complete preview lookup keeps the composer draft and never creates a task', async () => {
   addSecondAssignment();

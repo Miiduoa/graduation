@@ -284,7 +284,7 @@ test('an uncertain native save reaches the original read-only action card and la
   let readsAfterWrite = 0;
   jest.mocked(AsyncStorage.setItem).mockImplementation(async (storageKey, value) => {
     await originalSet(storageKey, value);
-    if (storageKey === key) saved = true;
+    if (storageKey === key) { saved = true; throw new Error('lost reply'); }
   });
   jest.mocked(AsyncStorage.getItem).mockImplementation(async (storageKey) => {
     if (storageKey === key && saved && ++readsAfterWrite > 1) throw new Error('temporarily unavailable');
@@ -306,10 +306,16 @@ test('an uncertain native save reaches the original read-only action card and la
   expect(mockBff).toHaveBeenCalledTimes(2);
 });
 
-test.each(['stop', 'source'] as const)('a %s during post-commit readback retains a path to the original result', async (interruption) => {
+test.each([
+  ['stop', 'post-commit readback'], ['source', 'post-commit readback'],
+  ['stop', 'native write response'], ['source', 'native write response'],
+] as const)('a %s during %s retains a read-only path to the original operation', async (interruption, stage) => {
   const view = render(<CampusAssistantScreen route={route} />);
   await queried(view);
-  const hour = interruption === 'stop' ? '21' : '22';
+  const duringWrite = stage === 'native write response';
+  const hour = duringWrite
+    ? (interruption === 'stop' ? '23' : '18')
+    : (interruption === 'stop' ? '21' : '22');
   await send(view, `幫這份作業 2099-01-02 ${hour}:00 到 ${hour}:30 安排準備`);
   const target = personalImportStorageKey(scope);
   const held = deferred<void>();
@@ -317,14 +323,17 @@ test.each(['stop', 'source'] as const)('a %s during post-commit readback retains
   let readsAfterWrite = 0;
   jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
     await originalSet(key, value);
-    if (key === target) saved = true;
+    if (key === target) {
+      saved = true;
+      if (duringWrite) await held.promise;
+    }
   });
   jest.mocked(AsyncStorage.getItem).mockImplementation(async (key) => {
-    if (key === target && saved && ++readsAfterWrite > 1) await held.promise;
+    if (!duringWrite && key === target && saved && ++readsAfterWrite > 1) await held.promise;
     return originalGet(key);
   });
-  await act(async () => fireEvent.press(view.getByRole('button', { name: '確認建立準備行程' })));
-  await waitFor(() => expect(readsAfterWrite).toBeGreaterThan(1));
+  act(() => fireEvent.press(view.getByRole('button', { name: '確認建立準備行程' })));
+  await waitFor(() => expect(duringWrite ? saved : readsAfterWrite > 1).toBe(true));
   const journal = await readAssistantCalendarJournal(scope, () => true);
   expect(journal).toHaveLength(1);
   if (interruption === 'stop') fireEvent.press(view.getByRole('button', { name: '停止後續處理' }));
@@ -335,8 +344,17 @@ test.each(['stop', 'source'] as const)('a %s during post-commit readback retains
   expect(view.queryByRole('button', { name: '確認建立準備行程' })).toBeNull();
   await act(async () => held.resolve());
   await act(async () => fireEvent.press(view.getByRole('button', { name: label })));
-  await view.findByText('已在這台手機保存並核對行程。');
-  expect((await loadPersonalImports(scope)).records[0]!.id).toBe(journal[0]!.proposal.mutationId);
+  const ledger = await loadPersonalImports(scope);
+  if (duringWrite) {
+    await view.findByText(/目前沒有讀到這筆行程/);
+    expect(view.queryByText('已在這台手機保存並核對行程。')).toBeNull();
+    expect(ledger.records).toEqual([]);
+  } else {
+    await view.findByText('已在這台手機保存並核對行程。');
+    expect(ledger.records[0]!.id).toBe(journal[0]!.proposal.mutationId);
+  }
+  expect((await readAssistantCalendarJournal(scope, () => true)).map(({ proposal }) => proposal.mutationId))
+    .toEqual([journal[0]!.proposal.mutationId]);
   expect(ledgerWrites()).toHaveLength(1);
   expect(mockBff).toHaveBeenCalledTimes(2);
 });

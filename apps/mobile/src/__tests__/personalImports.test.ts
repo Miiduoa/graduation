@@ -1071,7 +1071,7 @@ type RecoveryFault =
   | 'restart read once' | 'restart read' | 'restart readback' | 'publication read' | 'save read' | 'save read once' | 'save readback'
   | 'create no-op' | 'existence check' | 'exists check' | 'created marker probe'
   | 'reject payload' | 'reject payload no-op' | 'restore write' | 'restore read'
-  | 'directory list' | 'bind payload' | 'optional primary write' | 'optional primary read' | 'retire marker';
+  | 'checkpoint proof write' | 'directory list' | 'bind payload' | 'optional primary write' | 'optional primary read' | 'retire marker';
 type RecoveryPhase = 'save' | 'notification' | 'restart';
 type RecoveryApi = 'getItem' | 'multiGet' | 'setItem' | 'multiSet' | 'removeItem' |
   'multiRemove' | 'create' | 'write' | 'textSync' | 'delete' | 'info' | 'exists' | 'list';
@@ -1081,6 +1081,7 @@ type RecoveryFaultCase = [
   {
     staleCopy?: boolean;
     primaryOnly?: boolean;
+    unavailableJournal?: boolean;
     revokeFallback?: boolean;
     landedRetirement?: boolean;
     thirdWriteLands?: boolean;
@@ -1185,6 +1186,7 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
       ...blockPublicationLayers(publicationLayers.slice(publicationLayers.indexOf(layer) + 1))
         .map(([location, fault]): RecoveryFaultCase[1][number] => [location, fault, undefined, 'save']),
       [':checkpoint', 'write'],
+      [layer, 'setItem', 'setItem', 'save'],
       [layer, 'save read', 'getItem', 'save'],
     ], { batchReceipt: layer },
   ]),
@@ -1241,6 +1243,37 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
     [[location, 'existence check', 'info', 'restart'], [location, 'exists check', 'exists', 'restart']],
     { missingProbe: location },
   ]),
+  ...(['import', 'backup'] as const).map((entryPoint): RecoveryFaultCase => [
+    entryPoint + ' can save with dual metadata faults on absent rollback files',
+    ['legacy.rollback.pending', '.rollback.pending', '.rollback.rejected'].flatMap((location): RecoveryFaultCase[1] => [
+      [location, 'existence check', 'info', 'save'],
+      [location, 'exists check', 'exists', 'save'],
+    ]), { entryPoint, functionGuard: true },
+  ]),
+  ['verified-write receipt survives unknown retirement metadata on restart', [
+    ...blockedAuxiliaryPublication,
+    ['.rollback.pending', 'remove', 'delete', 'save'],
+    [':checkpoint', 'write'],
+    ['.rollback.committed', 'existence check', 'info', 'restart'],
+    ['.rollback.committed', 'exists check', 'exists', 'restart'],
+    ['documents', 'directory list', 'list', 'restart'],
+  ], { staleCopy: true }],
+  ...(['bound copy', 'checkpoint'] as const).map((recoverySource): RecoveryFaultCase => [
+    'primary-only save reloads from ' + recoverySource + ' when neither proof nor primary repair survives', [
+      ...blockPublicationLayers(publicationLayers),
+      ['', 'restore write', 'setItem', 'save'],
+      ['.rollback.json', 'write', 'write', 'save'],
+      ['.rollback.rejected.bak', 'write', 'write', 'save'],
+      ['.rollback.pending', 'write', 'write', 'save'],
+      ...(recoverySource === 'checkpoint' ? [
+        [':primary-rollback', 'restart read', 'getItem', 'restart'],
+        [':primary-rollback', 'restart read', 'multiGet', 'restart'],
+      ] satisfies RecoveryFaultCase[1] : []),
+      [':checkpoint', 'checkpoint proof write', 'setItem', 'save'],
+      [':checkpoint', 'checkpoint proof write', 'multiSet', 'save'],
+      [':rollback-rejected-attempt', 'setItem', 'setItem', 'save'],
+      [':rollback-rejected-attempt', 'multiSet', 'multiSet', 'save'],
+    ], { unavailableJournal: true, noCommitProof: true }]),
   ['missing current pending tolerates an unavailable fallback directory listing', [
     ['.rollback.pending', 'existence check', 'info', 'restart'],
     ['.rollback.pending', 'exists check', 'exists', 'restart'],
@@ -1432,7 +1465,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   name, failures, { staleCopy = false, primaryOnly = false, revokeFallback = false, landedRetirement = false,
     thirdWriteLands = false, revokeJournal = false, restoredWithoutPending = false,
     optionalReadAttempt, rejectedPrimary, entryPoint, functionGuard = false, rejectedRetry = false, batchReceipt,
-    missingProbe, noCommitProof = false, preserveCandidate = false, lateInitialWrite = false } = {},
+    missingProbe, unavailableJournal = false, noCommitProof = false, preserveCandidate = false, lateInitialWrite = false } = {},
 ) => {
   const scope = { owner: entryPoint === 'sync' ? 'nuni:pa_11111111-1111-4111-8111-111111111111'
     : 'nuni:recovery-matrix-' + name, schoolId: 'pu' };
@@ -1448,11 +1481,12 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   const adopted = name === 'adopted checkpoint deletion';
   const revokeOnPrimary = name === 'revoked primary and checkpoint rebuild write';
   const revokeOnCheckpoint = name === 'revoked during checkpoint publication';
-  if (!revokeOnPrimary) {
+  if (!revokeOnPrimary && !unavailableJournal) {
     const checkpoint = adopted || revokeFallback ? previous : { ...previous, records: [] };
     await AsyncStorage.setItem(key + ':checkpoint', JSON.stringify(checkpoint));
   }
   if (adopted) await AsyncStorage.removeItem(key);
+  if (unavailableJournal) clearPersonalImportRollback(key);
   const faults = new Map(failures.map(([location, fault]) => [location, fault] as const));
   const consumed = new Set<string>();
   const injected: Array<[string, RecoveryFault, RecoveryPhase, RecoveryApi]> = [];
@@ -1503,7 +1537,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     get: async (entry: string) => (await originalStorage.getMany([entry]))[0][1],
     remove: (entry: string) => originalStorage.removeMany([entry]),
   };
-  if (!revokeJournal && (primaryOnly || failures.some(([location]) => location === '.rollback.rejected' &&
+  if (!unavailableJournal && !revokeJournal && (primaryOnly || failures.some(([location]) => location === '.rollback.rejected' &&
       (staleCopy || failures.some(([entry, fault]) => entry === location && fault === 'remove')) &&
       !failures.some(([entry, fault]) => entry === location && fault === 'readback')))) {
     new File(Paths.document, documentPrefix + '.rollback.rejected')
@@ -1525,7 +1559,9 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     primaryFault === 'write' || primaryFault === 'save readback' || primaryFault === 'save read';
   let authorized = true;
   let phase: RecoveryPhase = 'save';
-  const late = staleCopy || (entryPoint !== undefined && noCommitProof) || landedRetirement || failures.some(([location]) => publicationLayers.some((layer) => layer === location));
+  const saveMissingProbe = functionGuard && failures.some(([, fault]) => fault === 'exists check');
+  const late = staleCopy || (entryPoint !== undefined && noCommitProof) || landedRetirement ||
+    (!saveMissingProbe && failures.some(([location]) => publicationLayers.some((layer) => layer === location)));
   let committedMarkerWritten = false;
   let pendingCreated = false;
   const primaryWrites: string[] = [];
@@ -1534,7 +1570,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   const publicationFileFault = faults.has('.rollback.published') || faults.has('.rollback.published.bak');
   const backupRetirementFault = faults.has('.rollback.committed');
   const forceBackupRetirement = backupRetirementFault && !faults.has('.rollback.pending');
-  const keepPending = !missingProbe && (late || backupRetirementFault || publicationFileFault || faults.has(':checkpoint') ||
+  const keepPending = !missingProbe && !saveMissingProbe && (late || backupRetirementFault || publicationFileFault || faults.has(':checkpoint') ||
     faults.has('.rollback.pending') || faults.has('.rollback.verified') || faults.has('.rollback.settled'));
   const failure = new Error('模擬儲存故障');
   const inject = (location: string, fault: RecoveryFault, api: RecoveryApi) => {
@@ -1574,10 +1610,11 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     if (entry === key) primaryWrites.push(value);
     if (entry === key && primaryWrites.length > 1 && primaryWrites.length <= 3 && !(thirdWriteLands && primaryWrites.length === 3) &&
         inject(location, 'optional primary write', 'setItem')) throw failure;
-    if (inject(location, 'write', 'setItem') ||
+    if ((value.startsWith('verified:') && inject(location, 'checkpoint proof write', 'setItem')) ||
+        inject(location, 'write', 'setItem') ||
         (!(lateInitialWrite && entry === key && primaryWrites.length > 1) && inject(location, 'setItem', 'setItem')) ||
         (entry === key && (((value === previousRaw || !authorized) && inject(location, 'restore write', 'setItem')) ||
-          (late && !primaryOnly && !(functionGuard && primaryWrites.length === 1) &&
+          (late && !primaryOnly && !unavailableJournal && !(functionGuard && primaryWrites.length === 1) &&
             value !== previousRaw && !value.startsWith('{"records":') &&
             !(thirdWriteLands && primaryWrites.length === 3)) ||
           (revokeFallback && !authorized)))) throw failure;
@@ -1588,11 +1625,13 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
         (revokeOnCheckpoint && location === ':checkpoint' && value.startsWith('verified:'))) authorized = false;
   });
   setMany.mockImplementation(async (entries) => {
-    if (entries.some(([entry]) => {
+    if (entries.some(([entry, value]) => {
       const location = entry.slice(key.length);
-      return inject(location, 'write', 'multiSet') || inject(location, 'multiSet', 'multiSet');
+      return (value.startsWith('verified:') && inject(location, 'checkpoint proof write', 'multiSet')) ||
+        inject(location, 'write', 'multiSet') || inject(location, 'multiSet', 'multiSet');
     })) throw failure;
     await originalStorage.setMany(entries);
+    for (const [entry] of entries) landedStorageWrites.add(entry.slice(key.length));
   });
   get.mockImplementation(async (entry) => {
     const location = entry.slice(key.length);
@@ -1655,13 +1694,15 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   });
   const info = jest.spyOn(File.prototype, 'info').mockImplementation(function (this: File) {
     const location = fileLocation(this);
-    if (inject(location, 'existence check', 'info') ||
+    if ((phase !== 'save' || !saveMissingProbe || (primaryWrites.length === 0 && !originalFile.exists.call(this))) &&
+        inject(location, 'existence check', 'info') ||
         (pendingCreated && inject(location, 'created marker probe', 'info'))) throw failure;
     return { exists: originalFile.exists.call(this) };
   });
   const exists = jest.spyOn(File.prototype, 'exists', 'get').mockImplementation(function (this: File) {
     const location = fileLocation(this);
-    if (inject(location, 'exists check', 'exists') ||
+    if ((phase !== 'save' || !saveMissingProbe || (primaryWrites.length === 0 && !originalFile.exists.call(this))) &&
+        inject(location, 'exists check', 'exists') ||
         (pendingCreated && inject(location, 'created marker probe', 'exists'))) throw failure;
     return originalFile.exists.call(this);
   });
@@ -1726,7 +1767,9 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
       const payload = originalFile.text.call(new File(Paths.document, documentPrefix + '.rollback.json'));
       const attempt = payload.split('\n')[0];
       expect(attempt).toMatch(/^attempt:ordinary-/);
-      expect(await native.get(key + batchReceipt)).toBe(attempt + '\n' + sha256(primary));
+      const proof = attempt + '\n' + sha256(primary);
+      expect(await native.get(key + batchReceipt)).toBe(proof);
+      expect(setMany).toHaveBeenCalledWith([[key + batchReceipt, proof]]);
       expect(await native.get(key + ':checkpoint')).not.toMatch(/^verified:/);
     }
     if (staleCopy || landedRetirement) {
@@ -1781,6 +1824,15 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
       expect(payload).toContain(JSON.stringify(previous));
       expect(payload).not.toContain('rejected:\n');
     }
+    if (name.startsWith('verified-write receipt survives unknown retirement')) {
+      const receipt = await native.get(key + ':verified-write');
+      expect(receipt?.endsWith(sha256((await native.get(key))!))).toBe(true);
+      const readbacks = await Promise.allSettled(get.mock.results
+        .filter((_, index) => get.mock.calls[index][0] === key + ':verified-write' &&
+          get.mock.invocationCallOrder[index] < notified.mock.invocationCallOrder[0])
+        .map(({ value }) => value));
+      expect(readbacks).toContainEqual({ status: 'fulfilled', value: receipt });
+    }
     if (staleBackup) {
       expect(originalFile.exists.call(backupFile)).toBe(true);
       expect(await native.get(key + ':verified-write')).toEqual(expect.any(String));
@@ -1797,6 +1849,25 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     if (restoredWithoutPending) {
       expect(await native.get(key)).toBe(JSON.stringify(previous));
       expect(originalFile.exists.call(backupFile)).toBe(faults.get('.rollback.rejected.bak') !== 'write');
+    }
+    if (unavailableJournal) {
+      expect(landedPrimaryWrites).toEqual([primaryWrites[0]]);
+      expect(await native.get(key)).toBe(primaryWrites[0]);
+      const binding = JSON.parse(primaryWrites[0]).nativePrimaryAttempt as string;
+      expect(binding.split(':')[0]).toBe(sha256(previousRaw));
+      const rollbackCopy = binding.split(':')[1] + '\n' + previousRaw;
+      expect(await native.get(key + ':primary-rollback')).toBe(rollbackCopy);
+      const writeIndex = set.mock.calls.findIndex(([entry, value]) => entry === key && value === primaryWrites[0]);
+      expect(set.mock.calls.slice(0, writeIndex)).toContainEqual([key + ':primary-rollback', rollbackCopy]);
+      expect(get.mock.calls.some(([entry], index) => entry === key + ':primary-rollback' &&
+        get.mock.invocationCallOrder[index] < set.mock.invocationCallOrder[writeIndex])).toBe(true);
+      expect(await native.get(key + ':checkpoint')).toBe(previousRaw);
+      for (const location of [...rollbackFiles, '.rollback.receipt', '.rollback.rejected', '.rollback.rejected.bak']) {
+        expect(originalFile.exists.call(new File(Paths.document, documentPrefix + location))).toBe(false);
+      }
+      for (const location of publicationLayers.filter((layer) => layer.startsWith(':'))) {
+        expect(await native.get(key + location)).toBeNull();
+      }
     }
     if (primaryOnly) {
       expect(new File(Paths.document, documentPrefix + '.rollback.pending').info().exists).toBe(noCommitProof);
@@ -1866,6 +1937,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
         const calls = injected.filter((event) =>
           event[0] === location && event[1] === fault && event[2] === expectedPhase && event[3] === api);
         expect(injected).toContainEqual([location, fault, expectedPhase, api]);
+        if (saveMissingProbe && (api === 'info' || api === 'exists')) expect(calls).toHaveLength(2);
         if (fault.endsWith(' once')) expect(calls).toHaveLength(1);
         if (batchReceipt && fault === 'save read') expect(calls).toHaveLength(2);
         if (fault === 'restart read' && api === 'textSync') expect(calls).toHaveLength(2);
@@ -2443,7 +2515,9 @@ test.each([
       await expect(reread.mock.results[1].value).resolves.toEqual(edited);
       if (phase === 'payload readback') expect(fault.mock.calls.length).toBeGreaterThanOrEqual(4);
       else expect(fault).toHaveBeenCalledTimes(2);
-      expect(JSON.parse((await AsyncStorage.getItem(key))!)).toEqual(edited);
+      const { nativePrimaryAttempt, ...storedLedger } = JSON.parse((await AsyncStorage.getItem(key))!);
+      expect(nativePrimaryAttempt).toMatch(/^[a-f0-9]{64}:import-/);
+      expect(storedLedger).toEqual(edited);
       await jest.isolateModulesAsync(async () => {
         const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
         await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(edited);
@@ -2552,7 +2626,9 @@ test('native append and edit survive a pending reset failure after verified reti
     const edited = await expectSave(() =>
       editPersonalImport(scope, appended.records[1], row('second', '化學'), guard), ['微積分', '化學']);
     expect(resetFault).toHaveBeenCalledTimes(2);
-    expect(JSON.parse((await AsyncStorage.getItem(key))!)).toEqual(edited);
+    const { nativePrimaryAttempt, ...storedLedger } = JSON.parse((await AsyncStorage.getItem(key))!);
+    expect(nativePrimaryAttempt).toMatch(/^[a-f0-9]{64}:import-/);
+    expect(storedLedger).toEqual(edited);
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(edited);
@@ -2632,6 +2708,58 @@ test('a revoked native edit using the primary fallback is rejected after restart
     write?.mockRestore();
     read?.mockRestore();
     remove.mockRestore();
+  }
+});
+
+test('a failed follow-up write preserves the restored primary-only ledger and its file proof', async () => {
+  const scope = { owner: 'nuni:primary-only-file-proof', schoolId: 'pu' };
+  const key = personalImportStorageKey(scope);
+  const prefix = `personal-imports-${sha256(key)}.rollback.`;
+  const { write: writeFile } = File.prototype;
+  const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+    if (this.uri.endsWith(prefix + 'json')) throw new Error('無法寫入文件還原副本');
+    writeFile.call(this, value, options);
+  });
+  const set = jest.mocked(AsyncStorage.setItem);
+  const setMany = jest.mocked(AsyncStorage.multiSet);
+  const nativeSet = set.getMockImplementation()!;
+  const nativeSetMany = setMany.getMockImplementation()!;
+  const receiptKey = key + ':verified-write';
+  const rejectPrimary = jest.fn(() => { throw new Error('主鍵寫入失敗'); });
+  let savedRaw: string | null = null;
+  set.mockImplementation(async (entry, value) => {
+    if (entry === receiptKey) throw new Error('憑據鍵無法寫入');
+    if (entry === key && savedRaw !== null && value !== savedRaw) rejectPrimary();
+    await nativeSet(entry, value);
+  });
+  setMany.mockImplementation(async (entries, callback) => {
+    if (entries.some(([entry]) => entry === receiptKey)) throw new Error('憑據鍵無法批次寫入');
+    await nativeSetMany(entries, callback);
+  });
+  const notified = jest.fn();
+  const unsubscribe = subscribePersonalImports(notified);
+  try {
+    const { ledger: saved } = await appendPersonalImports(scope, [row('first')]);
+    savedRaw = await AsyncStorage.getItem(key);
+    const receiptFile = new File(Paths.document, prefix + 'receipt');
+    const proof = receiptFile.textSync();
+    expect(proof.endsWith(sha256(savedRaw!))).toBe(true);
+    expect(notified).toHaveBeenCalledTimes(1);
+
+    await expect(appendPersonalImports(scope, [row('second', '統計')])).rejects.toThrow('主鍵寫入失敗');
+    expect(rejectPrimary).toHaveBeenCalledTimes(1);
+    expect(notified).toHaveBeenCalledTimes(1);
+    expect(await AsyncStorage.getItem(key)).toBe(savedRaw);
+    expect(receiptFile.textSync()).toBe(proof);
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(saved);
+    });
+  } finally {
+    unsubscribe();
+    set.mockImplementation(nativeSet);
+    setMany.mockImplementation(nativeSetMany);
+    write.mockRestore();
   }
 });
 

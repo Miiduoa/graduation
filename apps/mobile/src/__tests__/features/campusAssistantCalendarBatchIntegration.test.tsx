@@ -202,7 +202,10 @@ test('an unknown second write stops the third until same-ID readback and a fresh
   let readsAfterSecondWrite = 0;
   jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
     await originalSet(key, value);
-    if (key === targetKey && ++writes === 2) secondWriteLanded = true;
+    if (key === targetKey && ++writes === 2) {
+      secondWriteLanded = true;
+      throw new Error('lost native response after persistence');
+    }
   });
   jest.mocked(AsyncStorage.getItem).mockImplementation(async (key) => {
     if (key === targetKey && secondWriteLanded && ++readsAfterSecondWrite > 1) {

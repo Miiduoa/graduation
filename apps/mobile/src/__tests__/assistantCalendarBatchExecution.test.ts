@@ -120,6 +120,33 @@ test('an unknown second write stops the third; late commit is rechecked and only
   expect((await readAssistantCalendarJournal(scope, () => true)).slice(0, 2).map((entry) => entry.proposal.mutationId)).toEqual(originalIds);
 });
 
+test('a lost second native response leaves late unproven bytes out of reconciliation and stops the third step', async () => {
+  const prepared = await prepareAssistantCalendarBatch(events, context());
+  let dispatches = 0;
+  let lateLedger: string | undefined;
+  jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
+    if (key === ledgerKey && ++dispatches === 2) {
+      lateLedger = value;
+      throw new Error('native result unknown');
+    }
+    await originalSet(key, value);
+  });
+  const paused = await confirmAssistantCalendarBatch(prepared.plan, context());
+  expect(paused).toMatchObject({ state: 'paused', progress: { verified: 1, notStarted: 1 },
+    steps: [{ state: 'recorded', task: { state: 'verified' } }, { state: 'recorded', task: { state: 'unknown' } }, { state: 'not-started' }] });
+  const ids = (await readAssistantCalendarJournal(scope, () => true)).map((entry) => entry.proposal.mutationId);
+  expect(ids).toHaveLength(2);
+  expect(lateLedger).toEqual(expect.any(String));
+  await originalSet(ledgerKey, lateLedger!);
+  expect(await recheckAssistantCalendarBatch(prepared.plan, context())).toMatchObject({
+    state: 'paused', progress: { verified: 1, notStarted: 1 },
+  });
+  expect((await loadPersonalImports(scope)).records.map(({ id }) => id)).toEqual([ids[0]]);
+  expect((await confirmAssistantCalendarBatch(prepared.plan, context())).state).toBe('paused');
+  expect((await readAssistantCalendarJournal(scope, () => true)).map((entry) => entry.proposal.mutationId)).toEqual(ids);
+  expect(ledgerWrites().filter(([, value]) => value === lateLedger)).toHaveLength(1);
+});
+
 test('a saved-then-rejected native response can continue only after the original single executor verifies it', async () => {
   const prepared = await prepareAssistantCalendarBatch(events, context());
   let writes = 0;

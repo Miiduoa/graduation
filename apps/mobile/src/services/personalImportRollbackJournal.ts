@@ -490,15 +490,18 @@ function listedInDocumentDirectory(file: File): boolean | undefined {
   }
 }
 
-function journalFiles(key: string, recoverExistence = false) {
-  const probe = (file: File) => {
-    try {
-      return fileExists(file);
-    } catch (error) {
-      if (!recoverExistence) throw error;
-      return listedInDocumentDirectory(file);
-    }
-  };
+function probeJournalFile(file: File, strict = false): boolean | undefined {
+  try {
+    return fileExists(file);
+  } catch (error) {
+    const listed = listedInDocumentDirectory(file);
+    if (listed === undefined && strict) throw error;
+    return listed;
+  }
+}
+
+function journalFiles(key: string, mode?: 'capture' | 'prepare') {
+  const probe = (file: File) => mode ? probeJournalFile(file, mode === 'prepare') : fileExists(file);
   const files = (name: string) => {
     const marker = new File(Paths.document, name + markerSuffix);
     const payload = new File(Paths.document, name + '.rollback.json');
@@ -506,7 +509,7 @@ function journalFiles(key: string, recoverExistence = false) {
     return { marker, payload, markerPresent, marked: markerPresent === true };
   };
   const findBoundOrphan = ({ payload, markerPresent }: ReturnType<typeof files>) => {
-    if (!recoverExistence || markerPresent === true || !probe(payload)) return undefined;
+    if (mode !== 'capture' || markerPresent === true || probe(payload) === false) return undefined;
     const raw = readOptionalFile(payload);
     return attemptPattern.test(raw?.replace(rearmedPattern, '') ?? '') ? raw : undefined;
   };
@@ -527,14 +530,9 @@ function journalFiles(key: string, recoverExistence = false) {
 }
 
 export function capturePersonalImportRollback(key: string) {
-  const { payload, marker, markerPresent, marked, orphan } = journalFiles(key, true);
+  const { payload, marker, markerPresent, marked, orphan } = journalFiles(key, 'capture');
   const rejection = rejectionFile(key);
-  let rejectionExists: boolean | undefined;
-  try {
-    rejectionExists = fileExists(rejection);
-  } catch {
-    rejectionExists = listedInDocumentDirectory(rejection);
-  }
+  const rejectionExists = probeJournalFile(rejection);
   const rejectionValue = rejectionExists === false ? resolvedRejection : readOptionalFile(rejection) ??
     (!marked ? readOptionalFile(rejectionBackupFile(key)) : undefined);
   const verifiedReceipt = readRollbackResolution(rejectionValue);
@@ -557,8 +555,9 @@ export function capturePersonalImportRollback(key: string) {
     };
   }
   const retirement = retirementFile(key);
-  const retired = fileExists(retirement);
-  const retirementProof = retired ? readOptionalFile(retirement) : undefined;
+  const retirementPresent = probeJournalFile(retirement);
+  const retirementProof = retirementPresent !== false ? readOptionalFile(retirement) : undefined;
+  const retired = retirementPresent === true || retirementProof !== undefined;
   const retiredPayload = retired && !rejectionRecorded ? readOptionalFile(payload) : undefined;
   if (retired && !rejectionRecorded && !rearmedPattern.test(retiredPayload ?? '') &&
       !attemptPattern.test(retiredPayload ?? '')) return undefined;
@@ -586,9 +585,9 @@ export function capturePersonalImportRollback(key: string) {
   }
   // Pending is created after the payload is verified. Verified cleanup can
   // remove the payload even when deleting an older rejection file fails.
-  if (stored === undefined && !fileExists(payload) &&
+  if (stored === undefined && probeJournalFile(payload) === false &&
       (!rejected || (rejectionUnreadable && rejectionValue !== '')) &&
-      !fileExists(rejectionBackupFile(key))) return undefined;
+      probeJournalFile(rejectionBackupFile(key)) === false) return undefined;
   const rearmed = rearmedPattern.test(stored ?? '');
   const body = stored?.replace(rearmedPattern, '');
   const attempt = body?.match(attemptPattern);
@@ -605,7 +604,7 @@ export function capturePersonalImportRollback(key: string) {
   // A rejection bound to this attempt can survive both marker reads failing.
   const rejectionBackup = rejectionBackupFile(key);
   const backupDenial = attempt && (rejectionUnreadable || markerError !== undefined) &&
-    fileExists(rejectionBackup) ? readOptionalFile(rejectionBackup) : undefined;
+    probeJournalFile(rejectionBackup) !== false ? readOptionalFile(rejectionBackup) : undefined;
   const deniedAttempt = backupDenial !== undefined && backupDenial === attempt?.[0];
   // A revoked publication can leave its verified encoding in AsyncStorage
   // if restoring the original bytes there also fails.
@@ -813,10 +812,10 @@ export function preparePersonalImportRollback(
   },
 ) {
   const encoded = raw ?? 'null';
-  const { payload, marker, marked } = journalFiles(key);
+  const { payload, marker, marked } = journalFiles(key, 'prepare');
   let resetMarker = false;
   const rejection = rejectionFile(key);
-  let hadRejection = fileExists(rejection);
+  let hadRejection = probeJournalFile(rejection, true) === true;
   let retireRestoredRejection = false;
   let rejectionUnreadable = false;
   if (hadRejection) {
