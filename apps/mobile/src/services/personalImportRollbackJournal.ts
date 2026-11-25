@@ -819,7 +819,7 @@ export function preparePersonalImportRollback(
   };
   return {
     retire,
-    publishVerifiedPrimary(primary: string, assertWritable: () => void) {
+    publishVerifiedPrimary(primary: string, assertWritable: () => void, allowPrimaryOnly = false) {
       const hash = sha256(primary);
       recordVerification(hash);
       try {
@@ -832,7 +832,7 @@ export function preparePersonalImportRollback(
       }
       const current = capturePersonalImportRollback(key);
       if (!fileExists(marker) || (current && !current.rejected &&
-          current.matchesVerifiedPrimary?.(primary))) return;
+          current.matchesVerifiedPrimary?.(primary))) return true;
       if (current?.rejected) throw new Error('無法確認匯入資料已儲存，請稍後再試。');
       // Bind proof of publication to the rollback copy and the verified primary.
       const receipt = sha256(readOptionalFile(payload) ?? writtenPayload) + '\n' + hash;
@@ -855,8 +855,15 @@ export function preparePersonalImportRollback(
         }
         // Persist proof of the exact primary bytes verified by the caller.
         assertWritable();
-        if (!settle(hash)) throw error;
+        try {
+          if (settle(hash)) return true;
+        } catch (settlementError) {
+          if (!allowPrimaryOnly) throw settlementError;
+        }
+        if (allowPrimaryOnly && readOptionalFile(payload) === writtenPayload) return false;
+        throw error;
       }
+      return true;
     },
     preparePrimaryCommit() {
       // The tentative write is verified now, so a rejected primary from a

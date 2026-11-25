@@ -570,6 +570,7 @@ test.each([
   ['readback without retirement file with verified first write and no hash or receipt and readable payload', false],
   ['readback without retirement file with verified replacement and no hash or receipt and readable payload', false],
   ['all retirement writes fail with verified first write and no hash or receipt and readable payload', false],
+  ['all retirement writes fail with verified first write and no hash or receipt and readable payload without settlement', false],
   ['all publication paths fail with temporarily unreadable payload', false],
   ['all publication paths fail with temporarily unreadable payload and successful restoration', false],
 ] as const)('native marker retirement %s I/O keeps the correct primary and notification (revoked: %s)', async (phase, revoked) => {
@@ -597,6 +598,8 @@ test.each([
   const unreadableMetadata = phase === 'readback without retirement file and unreadable payload';
   const verifiedFirstWrite = phase.includes('verified first write');
   const retirementWritesFail = phase.startsWith('all retirement writes fail');
+  const settlementFails = phase.endsWith('without settlement');
+  const settlementFault = jest.fn(() => { throw new Error('已完成標記無法寫入'); });
   const verifiedReplacement = phase.includes('verified replacement');
   const publicationFails = phase.startsWith('all publication paths fail');
   const restorationFails = phase === 'all publication paths fail with temporarily unreadable payload';
@@ -665,6 +668,7 @@ test.each([
       publicationFault();
     }
     if (failVerification && this.uri.endsWith('.rollback.verified')) verificationFault();
+    if (settlementFails && this.uri.endsWith('.rollback.settled')) settlementFault();
     if (publicationFails && this.uri.endsWith('.rollback.json') &&
         typeof value === 'string' && /(?:^|\n)rejected:/.test(value)) {
       throw new Error('還原副本維持待處理');
@@ -741,9 +745,10 @@ test.each([
       expected = (await append).ledger;
       expect(expected.records.map(({ title }) => title)).toEqual(['微積分', '統計']);
       const primary = (await AsyncStorage.getItem(key))!;
-      if (verifiedFirstWrite) expect(primary.startsWith('{"records":')).toBe(true);
+      if (verifiedFirstWrite && !settlementFails) expect(primary.startsWith('{"records":')).toBe(true);
       if (retirementWritesFail) {
-        expect(primaryReadBack).toHaveBeenCalledWith(primary);
+        const first = settlementFails ? set.mock.calls[firstWriteCall][1] : primary;
+        expect(primaryReadBack).toHaveBeenCalledWith(first);
         expect(primaryReadBack.mock.invocationCallOrder[0]).toBeLessThan(primaryFault.mock.invocationCallOrder[0]);
         expect(primaryReadBack.mock.invocationCallOrder[1]).toBeGreaterThan(primaryFault.mock.invocationCallOrder[0]);
       }
@@ -762,10 +767,18 @@ test.each([
         }
         expect(textSync.call(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.pending`)))
           .toBe(retirementWritesFail ? '' : 'committed');
-        expect(set.mock.calls.slice(firstWriteCall).filter(([entry]) => entry === key).map(([, value]) => value))
-          .toEqual(verifiedReplacement
+        const attemptedWrites = set.mock.calls.slice(firstWriteCall)
+          .filter(([entry]) => entry === key).map(([, value]) => value);
+        if (settlementFails) {
+          expect(primary).toMatch(/^\{"version":1,/);
+          expect(attemptedWrites).toEqual([
+            expect.stringMatching(/^\{"records":/), expect.stringMatching(/^\{"batches":/), primary,
+          ]);
+        } else {
+          expect(attemptedWrites).toEqual(verifiedReplacement
             ? [expect.stringMatching(/^\{"records":/), primary]
             : [primary, expect.stringMatching(/^\{"batches":/)]);
+        }
         if (verifiedReplacement) expect(primary).toMatch(/^\{"batches":/);
       }
       if (failVerification && !markerReadFails && !lostReceiptAfterRetirement) {
@@ -796,6 +809,7 @@ test.each([
     if ((phase.startsWith('all with primary') && !persistentPrimaryReadFault) || verifiedFirstWrite) {
       expect(primaryFault).toHaveBeenCalledTimes(1);
     }
+    if (settlementFails) expect(settlementFault).toHaveBeenCalledTimes(1);
     if (failPayloadBinding) expect(payloadFault).toHaveBeenCalledTimes(1);
     if (failVerification) expect(verificationFault).toHaveBeenCalledTimes(1);
     if (adoptedCheckpoint) {
@@ -1706,6 +1720,92 @@ test('a rejected primary-only edit can reopen its restored primary despite an ol
     unsubscribe();
     get.mockImplementation(nativeGet);
     set.mockImplementation(nativeSet);
+    write.mockRestore();
+  }
+});
+
+test('a rejected primary-only first write reopens a restored empty ledger without a checkpoint', async () => {
+  const scope = { owner: 'nuni:restored-empty-without-checkpoint', schoolId: 'pu' };
+  const key = personalImportStorageKey(scope);
+  const prefix = `personal-imports-${sha256(key)}.rollback.`;
+  const pending = new File(Paths.document, prefix + 'pending');
+  const rejection = new File(Paths.document, prefix + 'rejected');
+  const emptyLedger = await loadPersonalImports(scope);
+  const { write: writeFile } = File.prototype;
+  const payloadFault = jest.fn(() => { throw new Error('無法寫入還原副本'); });
+  const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+    if (this.uri.endsWith(prefix + 'json')) payloadFault();
+    writeFile.call(this, value, options);
+  });
+  const set = jest.mocked(AsyncStorage.setItem);
+  const get = jest.mocked(AsyncStorage.getItem);
+  const remove = jest.mocked(AsyncStorage.removeItem);
+  const checkpoint = jest.mocked(AsyncStorage.multiSet);
+  const nativeSet = set.getMockImplementation()!;
+  const nativeGet = get.getMockImplementation()!;
+  const nativeRemove = remove.getMockImplementation()!;
+  const checkpointFault = jest.fn(async (_entries: Parameters<typeof AsyncStorage.multiSet>[0]) => {
+    throw new Error('無法建立檢查點');
+  });
+  const restoreReadFault = jest.fn(() => { throw new Error('無法立即讀回已刪除的主鍵'); });
+  let active = true;
+  let removed = false;
+  const nativeMultiSet = checkpoint.getMockImplementation()!;
+  checkpoint.mockImplementation((entries, callback) =>
+    entries.some(([entry]) => entry === key + ':checkpoint')
+      ? checkpointFault(entries)
+      : nativeMultiSet(entries, callback),
+  );
+  set.mockImplementation(async (entry, value) => {
+    await nativeSet(entry, value);
+    if (entry === key) active = false;
+  });
+  remove.mockImplementation(async (entry) => {
+    await nativeRemove(entry);
+    if (entry === key) removed = true;
+  });
+  get.mockImplementation(async (entry) => {
+    if (entry === key && removed && restoreReadFault.mock.calls.length === 0) restoreReadFault();
+    return nativeGet(entry);
+  });
+  const listener = jest.fn();
+  const unsubscribe = subscribePersonalImports(listener);
+  const guard = { canContinue: () => active, canCommitFirstWrite: () => active };
+  try {
+    await expect(appendPersonalImports(scope, [row('revoked')], guard))
+      .rejects.toThrow('無法立即讀回已刪除的主鍵');
+    expect(payloadFault).toHaveBeenCalledTimes(1);
+    expect(checkpointFault).toHaveBeenCalledWith([[key + ':checkpoint', 'null']]);
+    expect(restoreReadFault).toHaveBeenCalledTimes(1);
+    expect(listener).not.toHaveBeenCalled();
+    expect(pending.info().exists).toBe(false);
+    expect(rejection.textSync()).toBe(sha256('null'));
+    expect(await get(key)).toBeNull();
+    expect(await get(key + ':checkpoint')).toBeNull();
+
+    active = true;
+    set.mockImplementation(nativeSet);
+    write.mockRestore();
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(emptyLedger);
+      const reread = jest.fn(() => restarted.loadPersonalImports(scope));
+      const unsubscribeRestart = restarted.subscribePersonalImports(reread);
+      try {
+        const { ledger } = await restarted.appendPersonalImports(scope, [row('first', '化學')], guard);
+        expect(ledger.records.map(({ title }) => title)).toEqual(['化學']);
+        expect(reread).toHaveBeenCalledTimes(1);
+        await expect(reread.mock.results[0].value).resolves.toEqual(ledger);
+      } finally {
+        unsubscribeRestart();
+      }
+    });
+  } finally {
+    unsubscribe();
+    get.mockImplementation(nativeGet);
+    set.mockImplementation(nativeSet);
+    remove.mockImplementation(nativeRemove);
+    checkpoint.mockImplementation(nativeMultiSet);
     write.mockRestore();
   }
 });

@@ -81,7 +81,9 @@ async function readLedgerSnapshot(
   const primaryVerified = isReadableLedger(primary, scope);
   const rejectionMatches = journal?.checkpointRejection;
   // A rejected primary-only write may already have restored the original bytes.
-  const checkpointRejection = primaryVerified && rejectionMatches?.(primary)
+  const restoredEmpty = primary === null && !primaryError && !restorationPending &&
+    rejectionMatches?.(null) === true;
+  const checkpointRejection = (primaryVerified || restoredEmpty) && rejectionMatches?.(primary)
     ? undefined : rejectionMatches;
   const verifiedByJournal = primary !== null && journal?.matchesVerifiedPrimary?.(primary) === true;
   const attemptedPrimary = primary !== null && journal?.matchesAttemptedPrimary?.(primary) === true;
@@ -104,7 +106,7 @@ async function readLedgerSnapshot(
   }
   const recovery: (Recovery & { ledger: PersonalImportLedger }) | null = browserRecovery
     ? selectPersonalImportBrowserRecovery(browserRecovery, primary, primaryVerified, (raw) => parseLedger(raw, scope))
-    : await readNativeRecovery(key, scope, primaryVerified, nativeJournal, checkpoint, journal?.rejected,
+    : await readNativeRecovery(key, scope, primaryVerified, nativeJournal, restoredEmpty ? null : checkpoint, journal?.rejected,
         allowEmptyPrimary && primary === null && !primaryError && !journal && !restorationPending,
         checkpointRejection);
   if (!recovery && primaryError) throw primaryError;
@@ -499,7 +501,18 @@ export function mutatePersonalImportLedger<T>(
                 assertWritable();
                 await verifyNativeLedgerWrite(key, writtenRaw);
                 assertWritable();
-                journal.publishVerifiedPrimary(writtenRaw, assertWritable);
+                const published = journal.publishVerifiedPrimary(
+                  writtenRaw, assertWritable, writtenRaw === firstRaw && options.allowNativePrimaryOnly,
+                );
+                if (!published) {
+                  // Persist the ordinary encoding outside the tentative hashes
+                  // so a restart can use it without a publication file.
+                  assertWritable();
+                  await AsyncStorage.setItem(key, raw);
+                  assertWritable();
+                  await verifyNativeLedgerWrite(key, raw);
+                  writtenRaw = raw;
+                }
                 assertWritable();
               }
               pendingRestorations.delete(key);
