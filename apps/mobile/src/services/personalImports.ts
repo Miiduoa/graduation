@@ -13,6 +13,7 @@ import {
   parsePersonalImportStorageJson,
   preparePersonalImportRollback,
   readPersonalImportRollback,
+  readWebPersonalImportRollback,
   withPersonalImportWriteLock,
 } from './personalImportRollbackJournal';
 import {
@@ -47,7 +48,7 @@ export const personalImportStorageKey = (scope: PersonalImportScope) =>
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
 const locks = new Map<string, Promise<unknown>>();
 const pendingWrites = new Map<string, Promise<void>>();
-type Recovery = { raw: string | null; fromCheckpoint?: true };
+type Recovery = { raw: string | null; source?: 'checkpoint' | 'journal' };
 const pendingRestorations = new Map<string, Recovery>();
 let writeSequence = 0;
 
@@ -63,21 +64,38 @@ async function readRecovery(
   key: string,
   scope: PersonalImportScope,
   webPrimary: string | null,
-  webCheckpoint?: string | null,
+  browserRecovery?: ReturnType<typeof capturePersonalImportBrowserRecovery>,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
-  if (Platform.OS === 'web' && webPrimary !== null) {
+  let primaryVerified = false;
+  if (browserRecovery && webPrimary !== null) {
     try {
       parseLedger(webPrimary, scope);
+      primaryVerified = true;
     } catch {
-      return readLegacyCheckpoint(key, scope, webCheckpoint);
+      // A damaged primary may still be recoverable from a legacy copy.
     }
-    if (hasWebPersonalImportCommit(webPrimary)) return null;
-    // A standalone browser checkpoint cannot prove that it belongs to a
-    // valid primary. Journals can still identify interrupted legacy writes.
-    return readRollbackJournal(key, scope, webPrimary);
+    if (primaryVerified && hasWebPersonalImportCommit(webPrimary)) return null;
   }
 
-  return readLegacyCheckpoint(key, scope, webCheckpoint);
+  if (!primaryVerified) {
+    const checkpoint = await readLegacyCheckpoint(key, scope, browserRecovery?.checkpoint);
+    if (checkpoint) return checkpoint;
+    const pending = pendingRestorations.get(key);
+    if (pending) return { ...pending, ledger: parseLedger(pending.raw, scope) };
+  }
+
+  const journal = browserRecovery
+    ? readWebPersonalImportRollback(browserRecovery.journal, webPrimary, primaryVerified)
+    : await readPersonalImportRollback(key);
+  if (journal === undefined) return null;
+  try {
+    if (!journal) throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
+    const raw = journal === 'null' ? null : journal;
+    return { raw, ledger: parseLedger(raw, scope), source: 'journal' };
+  } catch (error) {
+    if (!primaryVerified) throw error;
+    return null;
+  }
 }
 
 async function readLegacyCheckpoint(
@@ -106,36 +124,16 @@ async function readLegacyCheckpoint(
     try {
       // Older builds wrapped the original ledger in a second layer of JSON.
       const raw: unknown = unwrapPersonalImportCheckpoint(encoded);
-      if (raw === null) return { raw: null, ledger: empty(), fromCheckpoint: true };
+      if (raw === null) return { raw: null, ledger: empty(), source: 'checkpoint' };
       if (typeof raw === 'string' && raw.trimStart().startsWith('{')) {
-        return { raw, ledger: parseLedger(raw, scope), fromCheckpoint: true };
+        return { raw, ledger: parseLedger(raw, scope), source: 'checkpoint' };
       }
     } catch {
       // An invalid legacy checkpoint cannot supply the ledger.
     }
   }
 
-  const pending = pendingRestorations.get(key);
-  if (pending) return { ...pending, ledger: parseLedger(pending.raw, scope) };
-  return readRollbackJournal(key, scope);
-}
-
-async function readRollbackJournal(
-  key: string,
-  scope: PersonalImportScope,
-  verifiedWebPrimary?: string,
-): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
-  const journal = await readPersonalImportRollback(key, verifiedWebPrimary);
-  if (journal === undefined) return null;
-  if (journal === 'null') return { raw: null, ledger: empty() };
-  try {
-    if (!journal) throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
-    return { raw: journal, ledger: parseLedger(journal, scope) };
-  } catch (error) {
-    // A corrupt Web journal can be skipped when the primary is a verified ledger.
-    if (verifiedWebPrimary === undefined) throw error;
-    return null;
-  }
+  return null;
 }
 
 async function restoreLedger(key: string, { raw }: Recovery) {
@@ -206,7 +204,10 @@ export async function loadPersonalImports(
     const sequence = writeSequence;
     const web = Platform.OS === 'web';
     const webPrimary = web ? await AsyncStorage.getItem(key) : null;
-    const recovery = await readRecovery(key, scope, webPrimary);
+    const browserRecovery = web
+      ? capturePersonalImportBrowserRecovery(window.localStorage, key)
+      : undefined;
+    const recovery = await readRecovery(key, scope, webPrimary, browserRecovery);
     if (web && webPrimary !== await AsyncStorage.getItem(key)) continue;
     if (sequence !== writeSequence) continue;
     if (recovery) return recovery.ledger;
@@ -316,7 +317,7 @@ export function mutatePersonalImportLedger<T>(
       const browserRecovery = web
         ? capturePersonalImportBrowserRecovery(window.localStorage, key)
         : undefined;
-      const recovery = await readRecovery(key, scope, webPrimary, browserRecovery?.checkpoint);
+      const recovery = await readRecovery(key, scope, webPrimary, browserRecovery);
       let primaryRaw = web || recovery ? webPrimary : await AsyncStorage.getItem(key);
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
@@ -335,8 +336,8 @@ export function mutatePersonalImportLedger<T>(
             writtenRaw = commitWebPersonalImports(
               key, primaryRaw, raw, assertWritable, browserRecovery,
               {
-                verify: !hasPersisted && (webPrimary === null || recovery?.fromCheckpoint === true),
-                adopted: recovery?.fromCheckpoint === true,
+                verifyCheckpoint: !hasPersisted && (webPrimary === null || recovery?.source === 'checkpoint'),
+                adopted: hasPersisted ? undefined : recovery?.source,
               },
               needsJournal ? { raw: persistedRaw } : undefined,
               lease,

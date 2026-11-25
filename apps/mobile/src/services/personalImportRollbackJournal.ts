@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createPersonalImportId } from '@campus/shared';
 import {
   type capturePersonalImportBrowserRecovery,
@@ -293,34 +292,32 @@ export async function withPersonalImportWriteLock<T>(
   }
 }
 
-async function readWebRollback(key: string, verifiedPrimary?: string): Promise<string | undefined> {
-  const storage = window.localStorage;
-  const backupKey = personalImportWebJournalKey(key);
-  for (;;) {
-    const encoded = storage.getItem(backupKey);
-    if (encoded === null) return undefined;
-    let journal: unknown;
-    try {
-      journal = JSON.parse(encoded);
-    } catch {
-      return verifiedPrimary === undefined ? encoded : undefined;
-    }
-    // Unbound legacy copies cannot establish that a verified primary was interrupted.
-    if (!journal || typeof journal !== 'object' || 'version' in journal ||
-        !('id' in journal) || typeof journal.id !== 'string' ||
-        !('before' in journal) || typeof journal.before !== 'string' ||
-        !('attempted' in journal) || typeof journal.attempted !== 'string' ||
-        !('original' in journal) || (journal.original !== null && typeof journal.original !== 'string')) {
-      if (verifiedPrimary !== undefined) return undefined;
-      return typeof journal === 'string' ? journal : encoded;
-    }
-    const current = fingerprint(verifiedPrimary ?? await AsyncStorage.getItem(key));
-    if (storage.getItem(backupKey) !== encoded) continue;
-    if (current !== journal.before && current !== journal.attempted) return undefined;
-    const original = typeof journal.original === 'string' ? journal.original : 'null';
-    if (fingerprint(original) !== journal.before) return undefined;
-    return original;
+export function readWebPersonalImportRollback(
+  encoded: string | null,
+  primary: string | null,
+  primaryVerified: boolean,
+): string | undefined {
+  if (encoded === null) return undefined;
+  let journal: unknown;
+  try {
+    journal = JSON.parse(encoded);
+  } catch {
+    return primaryVerified ? undefined : encoded;
   }
+  // Unbound legacy copies cannot establish that a verified primary was interrupted.
+  if (!journal || typeof journal !== 'object' || 'version' in journal ||
+      !('id' in journal) || typeof journal.id !== 'string' ||
+      !('before' in journal) || typeof journal.before !== 'string' ||
+      !('attempted' in journal) || typeof journal.attempted !== 'string' ||
+      !('original' in journal) || (journal.original !== null && typeof journal.original !== 'string')) {
+    if (primaryVerified) return undefined;
+    return typeof journal === 'string' ? journal : encoded;
+  }
+  const current = fingerprint(primary);
+  if (current !== journal.before && current !== journal.attempted) return undefined;
+  const original = typeof journal.original === 'string' ? journal.original : 'null';
+  if (fingerprint(original) !== journal.before) return undefined;
+  return original;
 }
 
 export function parsePersonalImportStorageJson(raw: string) {
@@ -350,7 +347,7 @@ export function commitWebPersonalImports(
   attempted: string,
   assertWritable: () => void,
   recoveryCopies: ReturnType<typeof capturePersonalImportBrowserRecovery>,
-  checkpoint: { verify: boolean; adopted: boolean },
+  recoveryCheck: { verifyCheckpoint: boolean; adopted?: 'checkpoint' | 'journal' },
   recovery?: { raw: string | null },
   lease?: BrowserLease,
 ): string {
@@ -359,10 +356,12 @@ export function commitWebPersonalImports(
   const committed = JSON.stringify({ ...JSON.parse(attempted), webCommit: id });
   const conflict = () => new Error('匯入資料已在另一個分頁更新，請重新載入。');
   const checkpointKey = personalImportCheckpointKey(key);
+  const journalKey = personalImportWebJournalKey(key);
   const replace = (raw: string, ownsStage: () => boolean) => {
     assertWritable();
     if (!ownsStage() || storage.getItem(key) !== before ||
-        (checkpoint.verify && storage.getItem(checkpointKey) !== recoveryCopies.checkpoint)) {
+        (recoveryCheck.verifyCheckpoint && storage.getItem(checkpointKey) !== recoveryCopies.checkpoint) ||
+        (recoveryCheck.adopted === 'journal' && storage.getItem(journalKey) !== recoveryCopies.journal)) {
       throw conflict();
     }
     storage.setItem(key, raw);
@@ -431,7 +430,7 @@ export function commitWebPersonalImports(
   };
 
   const published = commit();
-  recoveryCopies.retire(published, (entry) => entry !== checkpointKey || checkpoint.adopted);
+  if (recoveryCheck.adopted) recoveryCopies.retire(published, recoveryCheck.adopted);
   return published;
 }
 
@@ -452,9 +451,7 @@ function journalFiles(key: string) {
   return { marker, payload: new File(directory, `${name}.rollback.json`), marked: marker.info().exists };
 }
 
-export async function readPersonalImportRollback(key: string, verifiedWebPrimary?: string): Promise<string | undefined> {
-  // Expo's Web implementation cannot construct a Directory or File.
-  if (Platform.OS === 'web') return readWebRollback(key, verifiedWebPrimary);
+export async function readPersonalImportRollback(key: string): Promise<string | undefined> {
   const { payload, marked } = journalFiles(key);
   return marked ? payload.textSync() : undefined;
 }

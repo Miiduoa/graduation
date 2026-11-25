@@ -34,19 +34,23 @@ export function unwrapPersonalImportCheckpoint(encoded: string): unknown {
 }
 
 export function capturePersonalImportBrowserRecovery(storage: Storage, key: string) {
-  const copies = [personalImportWebJournalKey(key), personalImportCheckpointKey(key)]
-    .map((entry) => ({ entry, raw: storage.getItem(entry) }))
-    .filter(({ raw }) => raw !== null);
+  const entries = {
+    journal: personalImportWebJournalKey(key),
+    checkpoint: personalImportCheckpointKey(key),
+  };
+  const copies = {
+    journal: storage.getItem(entries.journal),
+    checkpoint: storage.getItem(entries.checkpoint),
+  };
 
   return {
-    hasCopies: copies.length > 0,
-    checkpoint: copies.find(({ entry }) => entry === personalImportCheckpointKey(key))?.raw ?? null,
-    retire(published: string, canRetire: (entry: string, raw: string) => boolean) {
-      for (const { entry, raw } of copies) {
-        if (raw !== null && canRetire(entry, raw) &&
-            storage.getItem(key) === published && storage.getItem(entry) === raw) {
-          storage.removeItem(entry);
-        }
+    ...copies,
+    hasCopies: copies.journal !== null || copies.checkpoint !== null,
+    retire(published: string, source: keyof typeof copies) {
+      const entry = entries[source];
+      const raw = copies[source];
+      if (raw !== null && storage.getItem(key) === published && storage.getItem(entry) === raw) {
+        storage.removeItem(entry);
       }
     },
   };

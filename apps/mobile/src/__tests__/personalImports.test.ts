@@ -610,6 +610,44 @@ test('Expo and Web calendar saves preserve a standalone checkpoint with an extra
   }
 });
 
+test('Expo and Web preserve an unbound journal with an event skipped by the primary ledger', async () => {
+  const cleanup = useWebStorage();
+  const restoreLocks = withoutWebWriteLocks();
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: async (_key: string, write: () => unknown) => write() },
+  });
+  try {
+    await appendPersonalImports(scope, [row('a', '主帳本行程')]);
+    const primary = storage.getItem(key)!;
+    await appendPersonalImports(scope, [row('b', '僅在副本的行程')]);
+    const copy = storage.getItem(key)!;
+    storage.setItem(key, primary);
+    storage.setItem(journal, copy);
+    // Older primary ledgers did not carry a commit marker.
+    const legacyPrimary = JSON.parse(primary);
+    delete legacyPrimary.webCommit;
+    storage.setItem(key, JSON.stringify(legacyPrimary));
+
+    expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['主帳本行程']);
+    await appendPersonalImports(scope, [row('c', 'Expo 新增')], { canContinue: () => true });
+    expect(readWebCalendarImports(scope).map(({ title }) => title)).toEqual(['主帳本行程', 'Expo 新增']);
+    expect(storage.getItem(journal)).toBe(copy);
+
+    await saveWebCalendarBatch(scope, [{ ...row('d', 'Web 新增'), dayOfWeek: 2 }]);
+    expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual([
+      '主帳本行程', 'Expo 新增', 'Web 新增',
+    ]);
+    expect(storage.getItem(journal)).toBe(copy);
+  } finally {
+    restoreLocks();
+    cleanup();
+  }
+});
+
 test('a Web calendar save after an Expo commit cannot revive stale recovery data', async () => {
   const cleanup = useWebStorage();
   const restoreLocks = withoutWebWriteLocks();
@@ -643,7 +681,7 @@ test('a Web calendar save after an Expo commit cannot revive stale recovery data
     expect(webRecords.map(({ title }) => title)).toEqual(['Expo 更新', 'Web 新增']);
     expect((await loadPersonalImports(scope)).records).toEqual(webRecords);
     expect(storage.getItem(checkpoint)).toBe(original);
-    expect(storage.getItem(journal)).toBeNull();
+    expect(storage.getItem(journal)).toBe(original);
   } finally {
     restoreLocks();
     cleanup();
@@ -664,7 +702,6 @@ test.each([
   const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
   const getItem = Storage.prototype.getItem;
   const setItem = Storage.prototype.setItem;
-  const removeItem = Storage.prototype.removeItem;
   try {
     const { ledger } = await appendPersonalImports(scope, [row('original')]);
     const journalRaw = {
@@ -693,9 +730,11 @@ test.each([
       this: Storage, entry,
     ) {
       const value = getItem.call(this, entry);
-      // An older Web tab can publish immediately after Expo verifies its write.
-      if (interleaved && this === storage && entry === key && primaryReadsAfterSet &&
-          ++primaryReadsAfterSet === 2) writeWithOldWebCalendar();
+      // An older Web tab can publish immediately after Expo reads back its write.
+      if (interleaved && this === storage && entry === key && primaryReadsAfterSet === 1) {
+        primaryReadsAfterSet++;
+        writeWithOldWebCalendar();
+      }
       return value;
     });
     const writes = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
@@ -704,22 +743,11 @@ test.each([
       setItem.call(this, entry, value);
       if (this === storage && entry === key) primaryReadsAfterSet = 1;
     });
-    const removals = jest.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
-      this: Storage, entry,
-    ) {
-      // Simulate an Expo page ending after publication and before recovery cleanup.
-      if (!interleaved && this === storage && (entry === journal || entry === checkpoint)) {
-        window.dispatchEvent(new Event('pagehide'));
-        return;
-      }
-      removeItem.call(this, entry);
-    });
     try {
       await editPersonalImport(scope, ledger.records[0], row('original', 'Expo 更新'), {
         canContinue: () => true,
       });
     } finally {
-      removals.mockRestore();
       writes.mockRestore();
       reads.mockRestore();
     }
@@ -738,7 +766,7 @@ test.each([
     }, { canContinue: () => true });
     expect(edited.records.map(({ title }) => title)).toEqual(['Expo 更新', '重新開啟後更新']);
     expect(readWebCalendarImports(scope)).toEqual(edited.records);
-    expect(storage.getItem(journal)).toBeNull();
+    expect(storage.getItem(journal)).toBe(journalRaw);
     expect(storage.getItem(checkpoint)).toBe(stale);
   } finally {
     cleanup();
@@ -1353,19 +1381,20 @@ test.each(['before', 'attempted'] as const)(
       const original = JSON.stringify(ledger);
       const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
       storage.setItem(key, original);
-      storage.setItem(journal, JSON.stringify({
+      const contradictory = JSON.stringify({
         id: 'legacy',
         original: null,
         before: sha256(matched === 'before' ? original : 'another ledger'),
         attempted: sha256(matched === 'attempted' ? original : 'interrupted write'),
-      }));
+      });
+      storage.setItem(journal, contradictory);
 
       await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
       const saved = await appendPersonalImports(scope, [row('new', '新課程')], { canContinue: () => true });
       expect(saved.ledger.records).toHaveLength(2);
       expect(saved.ledger.records).toContainEqual(ledger.records[0]);
       await expect(loadPersonalImports(scope)).resolves.toEqual(saved.ledger);
-      expect(storage.getItem(journal)).toBeNull();
+      expect(storage.getItem(journal)).toBe(contradictory);
     } finally {
       cleanup();
     }
@@ -1410,6 +1439,34 @@ test.each([null, '{"version":1,'])(
     }
   },
 );
+
+test('Expo Web refuses to publish from a journal replaced after recovery', async () => {
+  const cleanup = useWebStorage();
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    const original = JSON.stringify(ledger);
+    const primary = JSON.stringify({ ...ledger, records: [], batches: [] });
+    const bound = {
+      id: 'legacy', original, before: sha256(original), attempted: sha256(primary),
+    };
+    storage.setItem(key, primary);
+    storage.setItem(journal, JSON.stringify(bound));
+    const replacement = JSON.stringify({ ...bound, id: 'another-attempt' });
+    await expect(mutatePersonalImportLedger(scope, { canContinue: () => true }, (current) => {
+      expect(current).toEqual(ledger);
+      storage.setItem(journal, replacement);
+      const records = current.records.map((record) => ({ ...record, title: '更新' }));
+      return { ledger: { ...current, records }, result: undefined };
+    })).rejects.toThrow('已在另一個分頁更新');
+    expect(storage.getItem(key)).toBe(primary);
+    expect(storage.getItem(journal)).toBe(replacement);
+  } finally {
+    cleanup();
+  }
+});
 
 test('Web retries from a legacy marked copy and retires it when the new ledger commits', async () => {
   const cleanup = useWebStorage();

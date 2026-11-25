@@ -36,16 +36,24 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
   let primary = localStorage.getItem(key);
   const recovery = capturePersonalImportBrowserRecovery(localStorage, key);
   const checkpointKey = personalImportCheckpointKey(key);
-  const checkpoint = primary === null ? recovery.checkpoint : null;
-  const establishedCommit = recovery.hasCopies && hasWebPersonalImportCommit(primary);
-  const canRetire = (entry: string, raw: string) =>
-    entry === checkpointKey ? raw === checkpoint : establishedCommit;
-  const shouldMarkCommit = recovery.hasCopies &&
-    (establishedCommit || recovery.checkpoint === null || checkpoint !== null);
-  const raw = checkpoint === null ? primary : unwrapPersonalImportCheckpoint(checkpoint);
-  if (raw !== null && typeof raw !== 'string') {
-    throw new Error('這份匯入紀錄暫時讀不到，原始資料仍保留。');
+  const checkpoint = recovery.checkpoint;
+  let raw = primary;
+  let adoptedCheckpoint = false;
+  if (primary === null && checkpoint !== null) {
+    try {
+      const candidate = unwrapPersonalImportCheckpoint(checkpoint);
+      if (candidate === null || (typeof candidate === 'string' && candidate.trimStart().startsWith('{'))) {
+        parsePersonalImportRecords(scope, candidate);
+        parseLedgerSyncState(scope, candidate);
+        raw = candidate;
+        adoptedCheckpoint = true;
+      }
+    } catch {
+      // Leave damaged copies in storage and proceed with the empty ledger.
+    }
   }
+  const shouldMarkCommit = recovery.hasCopies &&
+    (hasWebPersonalImportCommit(primary) || checkpoint === null || adoptedCheckpoint);
   return {
     raw,
     write(state: PersonalImportLocalState) {
@@ -63,7 +71,10 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
         throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
       }
       // Retire standalone checkpoints only when this write used them.
-      recovery.retire(published, canRetire);
+      if (adoptedCheckpoint) {
+        recovery.retire(published, 'checkpoint');
+        adoptedCheckpoint = false;
+      }
       primary = published;
     },
   };

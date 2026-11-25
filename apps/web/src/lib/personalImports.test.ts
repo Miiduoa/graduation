@@ -197,3 +197,44 @@ it('keeps a checkpoint replaced during sync and refuses to publish from the earl
   expect(localStorage.getItem(key)).toBeNull();
   expect(localStorage.getItem(checkpoint)).toBe(replacement);
 });
+
+it.each(['{"version":1,', '"{\"version\":1,"', '{"version":1,"records":{}}'])(
+  'saves and syncs with only a damaged checkpoint (%s)',
+  async (damaged) => {
+    const { withPersonalImportSyncLock, readPersonalImportSyncState } = await import('./personalImports');
+    const key = personalImportsStorageKey(scope);
+    const checkpoint = key + ':checkpoint';
+    localStorage.setItem(checkpoint, damaged);
+
+    expect(readPersonalImports(scope)).toEqual([]);
+    await expect(savePersonalImportBatch(scope, rows())).resolves.toMatchObject({ added: 1 });
+    expect(readPersonalImports(scope).map(({ title }) => title)).toEqual(['資料庫']);
+    expect(localStorage.getItem(checkpoint)).toBe(damaged);
+
+    localStorage.removeItem(key);
+    await withPersonalImportSyncLock(scope, async (state, persist) => {
+      expect(state).toEqual({ records: [], sync: { enabled: false, base: null } });
+      const next = { ...state, sync: { enabled: true, base: null } };
+      await persist(next);
+      return { state: next, result: undefined };
+    });
+    expect(readPersonalImportSyncState(scope)).toEqual({ enabled: true, base: null });
+    expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ version: 1, records: [] });
+    expect(localStorage.getItem(checkpoint)).toBe(damaged);
+  },
+);
+
+it('checks the damaged checkpoint snapshot before publishing sync', async () => {
+  const { withPersonalImportSyncLock } = await import('./personalImports');
+  const key = personalImportsStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  localStorage.setItem(checkpoint, '{"version":1,');
+  const replacement = '{"version":1,"records":[]}';
+  await expect(withPersonalImportSyncLock(scope, async (state) => {
+    expect(state.records).toEqual([]);
+    localStorage.setItem(checkpoint, replacement);
+    return { state: { ...state, sync: { enabled: true, base: null } }, result: undefined };
+  })).rejects.toThrow();
+  expect(localStorage.getItem(key)).toBeNull();
+  expect(localStorage.getItem(checkpoint)).toBe(replacement);
+});
