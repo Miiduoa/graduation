@@ -568,7 +568,9 @@ function MapContent({
         <section className={`card ${styles.classroom}`} aria-label="教室定位結果">
           <p className={styles.eyebrow}>課表教室</p>
           <h2>{initialQuery}</h2>
-          {classroom.status === 'matched' && classroomPlace ? <>
+          {sourcePending ? (
+            <p role="status">正在確認地點資料，尚未確認這間教室的位置。</p>
+          ) : classroom.status === 'matched' && classroomPlace ? <>
             <p>可對應「{classroomPlace.name}」的位置。抵達後請依課表與現場標示確認教室。</p>
             {selected?.id !== classroomPlace.id && (
               <button className="btn" type="button" onClick={() => selectLocation(classroomPlace)}>
@@ -589,9 +591,7 @@ function MapContent({
               ))}
             </ul>
           </> : (
-            <p>{sourcePending
-              ? '正在確認地點資料，尚未找到能對應這間教室的位置。'
-              : '目前地點資料無法確認這間教室的位置。請改用建築全名搜尋，或核對校方地圖。'}</p>
+            <p>目前地點資料無法確認這間教室的位置。請改用建築全名搜尋，或核對校方地圖。</p>
           )}
           {(classroom.status === 'ambiguous' || classroom.status === 'unmatched') && (
             <div className={styles.actions}>
