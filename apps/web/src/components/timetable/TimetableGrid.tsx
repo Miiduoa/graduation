@@ -50,6 +50,12 @@ export function TimetableGrid({
   const preview = current && target
     ? moveCourseToSlot(current.course, target.day, target.period - current.offset, periodTotal, WEEKDAY_LABELS.length)
     : null;
+  // Native drag startup is cancelled if its source moves during dragstart. Keep
+  // the existing flow content unchanged, including when an invalid target wraps.
+  const visibleMessage = !dragged && preview && !preview.ok ? preview.message : message;
+  const dragMessage = dragged
+    ? preview && !preview.ok ? preview.message : `正在移動「${dragged.course.name}」，放開後會開啟確認視窗。`
+    : '';
 
   function cancelMove() {
     setChoosing(false);
@@ -106,11 +112,15 @@ export function TimetableGrid({
         </label>
         <p>選課程 → 選新時段 → 確認儲存。連續節次會一起移動，按 Escape 可取消。</p>
       </div>}
-      {(preview && !preview.ok ? preview.message : message) && (
-        <p role="status" aria-live="polite" aria-atomic="true" className={movement.status}>
-          {preview && !preview.ok ? preview.message : message}
+      {visibleMessage && (
+        <p role="status" aria-live="polite" aria-atomic="true" aria-hidden={dragged ? true : undefined}
+          className={`${movement.status} ${dragged ? movement.reservedStatus : ''}`}>
+          {visibleMessage}
         </p>
       )}
+      {dragMessage && <p role="status" aria-live="polite" aria-atomic="true" className={`${movement.status} ${movement.dragStatus}`}>
+        {dragMessage}
+      </p>}
       <div className={styles.gridViewport} role="region" aria-label="課表捲動區" aria-describedby={hintId} tabIndex={0}
         onKeyDown={(event) => { if (event.key === 'Escape' && (choosing || dragged)) { event.preventDefault(); cancelMove(); } }}
         onPointerLeave={() => setTarget(null)}>
@@ -161,7 +171,6 @@ export function TimetableGrid({
                                   event.dataTransfer.effectAllowed = 'move';
                                   event.dataTransfer.setData('text/plain', course.id);
                                   setDragged({ course: { ...course }, offset: period - course.start });
-                                  setMessage(`正在移動「${course.name}」，放開後會開啟確認視窗。`);
                                 }}
                                 onDragEnd={() => { setDragged(null); setTarget(null); }}>
                                 {content}

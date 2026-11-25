@@ -2271,24 +2271,25 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
     !TRONCLASS_KEYWORD.test(question)) return null;
   const original = question.normalize('NFKC').trim();
   if (isExistingTronClassNavigation(original)) return null;
+  const unquotedText = textWithoutQuotedSpans(original);
+  const unquoted = textWithoutFilenameTokens(unquotedText);
+  // This existing denial is independent of private-read analysis: an unproven
+  // write always needs confirmation, even if a later read/quote check also
+  // rejects it. Stop before allocating those request and routing views.
+  if (hasUnprovenWrite(unquoted)) return { outcome: 'ambiguous' };
   const originalTarget = parseReadRequest(original);
   if (hasUnclosedQuote(original) || originalTarget.conflict || originalTarget.hasOutsideQuotes(/[《》〈〉]/u)) {
     return { outcome: 'ambiguous' };
   }
   if (typographicQuoteSpans(original).length && analyzeClauses(tokensFor(textWithoutQuotedSpans(original, ' \uFFFC ')))
     .some(clause => clause.predicates.some(predicate => predicate.blockedPrefix))) return { outcome: 'ambiguous' };
-  const unquotedText = textWithoutQuotedSpans(original);
   if (hasDescriptiveAction(unquotedText)) return { outcome: 'ambiguous' };
   const text = readRoutingText(original);
   const commandText = textWithoutQuotedSpans(text);
-  const unquoted = textWithoutFilenameTokens(unquotedText);
   const tokens = tokensFor(original);
   const interior = modifierInteriorIndex(tokens);
   const negation = scanNegation(tokens, interior);
   if (negation === 'unresolved') return { outcome: 'ambiguous' };
-  // An unproven write always requires confirmation. Reuse the clause pass and
-  // stop before building the secondary write-route and regex coverage scans.
-  if (hasUnprovenWrite(unquoted)) return { outcome: 'ambiguous' };
   if (baConstructionState(unquoted) === 'unresolved') return { outcome: 'ambiguous' };
   if (writeLexiconAndRegexDisagree(unquoted)) return { outcome: 'ambiguous' };
   const writeRoute = writeCommandRoute(unquoted);

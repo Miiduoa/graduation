@@ -15,6 +15,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../../process-identity.sh"
 # sudo creates the record directory under the system sticky directory.
 # Keep it private to the elevated attempts and never use the caller's TMPDIR.
 attempt_dir=''
+font_download_dir=''
 proc_identity "$$"
 installer_group="$proc_group"
 
@@ -28,9 +29,18 @@ private_attempt_dir() {
 cleanup_attempt_dir() {
   [[ -n "$attempt_dir" ]] || return 0
   sudo bash -c "$(declare -f private_attempt_dir)
-    private_attempt_dir \"\$1\" && rm -f -- \"\$1/process-group\" && rmdir -- \"\$1\"" clean-attempt-dir "$attempt_dir"
+    private_attempt_dir \"\$1\" && rm -f -- \"\$1/process-group\" \"\$1/fonts-noto-cjk.deb\" && rmdir -- \"\$1\"" clean-attempt-dir "$attempt_dir"
 }
-trap cleanup_attempt_dir EXIT
+
+cleanup() {
+  local status=0
+  cleanup_attempt_dir || status=$?
+  if [[ -n "$font_download_dir" ]]; then
+    rm -f -- "$font_download_dir/fonts-noto-cjk.deb" && rmdir -- "$font_download_dir" || status=$?
+  fi
+  return "$status"
+}
+trap cleanup EXIT
 
 record_attempt() {
   cleanup_attempt_dir || return 1
@@ -44,6 +54,7 @@ record_attempt() {
     proc_identity \$group && [[ \$group == \$proc_group ]] || exit 1
     umask 077
     (set -o noclobber; printf '%s %s %s %s\\n' \"\$group\" \"\$proc_start\" \"\$2\" \"\$proc_group\" > \"\$1\") || exit 1
+    export PLAYWRIGHT_INSTALL_ATTEMPT_DIR=\"\${1%/*}\"
     shift 2
     exec \"\$@\"" record-process-group "$attempt_dir/process-group" "$attempt_id")
 }
@@ -153,6 +164,17 @@ prefetch_noble_fonts() {
   printf '%s  %s\n' "$sha" "$destination" | sha256sum --check --status
 }
 
+install_verified_fonts() {
+  local directory="${PLAYWRIGHT_INSTALL_ATTEMPT_DIR:-}"
+  local sha='7d64b985f6fe128c99eae5610d5c047338e572bdcfb2bb09736be01b824a7f6c'
+  private_attempt_dir "$directory" || return 1
+  # The caller can change its download after prefetch verification. Stage a
+  # private elevated copy and verify those exact bytes before invoking dpkg.
+  cp -- "$1" "$directory/fonts-noto-cjk.deb" || return 1
+  printf '%s  %s\n' "$sha" "$directory/fonts-noto-cjk.deb" | sha256sum --check --status || return 1
+  dpkg --install "$directory/fonts-noto-cjk.deb"
+}
+
 if [[ "${1:-}" == '--fonts-noto-cjk' ]]; then
   # A fresh runner can still be unpacking packages after three minutes.
   retry_install 'Playwright system dependencies' 360s sudo "$(command -v python)" -m playwright install-deps chromium
@@ -160,10 +182,12 @@ if [[ "${1:-}" == '--fonts-noto-cjk' ]]; then
   retry_install 'Playwright Chromium' 180s python -m playwright install chromium
   # Keep ordinary authenticated apt installation for other candidates and as
   # fallback if the archive is unreachable or its bytes fail verification.
-  if prefetch_noble_fonts "$attempt_dir/fonts-noto-cjk.deb"; then
+  font_download_dir="$(mktemp -d /tmp/playwright-font-download.XXXXXXXXXX)"
+  if prefetch_noble_fonts "$font_download_dir/fonts-noto-cjk.deb"; then
     # APT may re-fetch the same version from its preferred mirror even with a
     # local path. This verified Noble package has no package dependencies.
-    retry_install 'Noto CJK fonts' 180s sudo dpkg --install "$attempt_dir/fonts-noto-cjk.deb"
+    retry_install 'Noto CJK fonts' 180s sudo bash -c "$(declare -f private_attempt_dir install_verified_fonts)
+      install_verified_fonts \"\$1\"" install-verified-font "$font_download_dir/fonts-noto-cjk.deb"
   else
     retry_install 'Noto CJK fonts' 180s sudo apt-get \
       -o Acquire::http::Timeout=45 -o Acquire::https::Timeout=45 \

@@ -163,6 +163,9 @@ if [[ "$1" == bash ]]; then
   ' signal-test "$code" "${@:5}"
 fi
 [[ "$1" == env && "$2" == PLAYWRIGHT_INSTALL_ATTEMPT=* && "$3" == timeout ]]
+if [[ "${MOCK_STAGE_TAMPER:-0}" == 1 && "${!#}" == */fonts-noto-cjk.deb ]]; then
+  printf 'changed after download verification' > "${!#}"
+fi
 export "$2"
 shift 2
 args=("$@")
@@ -213,8 +216,8 @@ cat > "$mock_dir/bin/dpkg" <<'MOCK'
 set -euo pipefail
 if [[ "$1" == --install ]]; then
   [[ "${MOCK_ROOT:-0}" == 1 && "$#" == 2 && "$2" == */fonts-noto-cjk.deb ]]
-  [[ "$(cat "$2")" == 'Noble font fixture' ]]
   printf 'dpkg:%s\n' "$*" >> "$MOCK_LOG"
+  [[ "$(cat "$2")" == 'Noble font fixture' ]]
   exit "${MOCK_LOCAL_DPKG_FAIL:-0}"
 fi
 [[ "$*" == '--configure -a' && "${MOCK_ROOT:-0}" == 1 ]]
@@ -423,12 +426,12 @@ MOCK_SLOW_DEPS=1 bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev
 # above simulate a different candidate without using network or APT metadata.
 official_sha=7d64b985f6fe128c99eae5610d5c047338e572bdcfb2bb09736be01b824a7f6c
 fixture_sha="$(printf 'Noble font fixture' | sha256sum | cut -d' ' -f1)"
-sed "s/$official_sha/$fixture_sha/" "$script_dir/install-playwright.sh" > "$mock_dir/fixture-install.sh"
+sed "s/$official_sha/$fixture_sha/" "$script_dir/install-playwright.sh" > "$mock_dir/scripts/qa/browser/fixture-install.sh"
 export MOCK_APT_SHA="$fixture_sha"
 for mode in ok corrupt offline; do
   export MOCK_ARCHIVE="$mode"
   : > "$MOCK_LOG"
-  bash "$mock_dir/fixture-install.sh" --fonts-noto-cjk >/dev/null 2>&1
+  bash "$mock_dir/scripts/qa/browser/fixture-install.sh" --fonts-noto-cjk >/dev/null 2>&1
   [[ "$(grep -c '^prefetch$' "$MOCK_LOG")" -eq 1 ]]
   if [[ "$mode" == ok ]]; then
     grep -q '^dpkg:--install /.*/fonts-noto-cjk.deb$' "$MOCK_LOG"
@@ -439,15 +442,26 @@ for mode in ok corrupt offline; do
   fi
 done
 : > "$MOCK_LOG"
-MOCK_NOBLE_INSTALLED=1 bash "$mock_dir/fixture-install.sh" --fonts-noto-cjk >/dev/null 2>&1
+MOCK_NOBLE_INSTALLED=1 bash "$mock_dir/scripts/qa/browser/fixture-install.sh" --fonts-noto-cjk >/dev/null 2>&1
 [[ "$(grep -c '^prefetch$' "$MOCK_LOG" || true)" -eq 0 ]]
 grep -q '^apt:.*install -y fonts-noto-cjk$' "$MOCK_LOG"
 : > "$MOCK_LOG"
-if MOCK_ARCHIVE=ok MOCK_LOCAL_DPKG_FAIL=1 bash "$mock_dir/fixture-install.sh" --fonts-noto-cjk >/dev/null 2>&1; then
+if MOCK_ARCHIVE=ok MOCK_LOCAL_DPKG_FAIL=1 bash "$mock_dir/scripts/qa/browser/fixture-install.sh" --fonts-noto-cjk >/dev/null 2>&1; then
   echo 'A persistent verified-package installation failure was silently accepted' >&2
   exit 1
 fi
 [[ "$(grep -c '^dpkg:--install' "$MOCK_LOG")" -eq 3 ]]
+[[ "$(grep -c '^apt:' "$MOCK_LOG" || true)" -eq 0 ]]
+
+# A caller-owned download may change before elevation. Never install bytes that
+# fail the checksum of the private copy, even after bounded installation retries.
+: > "$MOCK_LOG"
+if MOCK_ARCHIVE=ok MOCK_STAGE_TAMPER=1 bash "$mock_dir/scripts/qa/browser/fixture-install.sh" --fonts-noto-cjk >/dev/null 2>&1; then
+  echo 'A changed verified-package download was installed after elevation' >&2
+  exit 1
+fi
+[[ "$(grep -c '^prefetch$' "$MOCK_LOG")" -eq 1 ]]
+[[ "$(grep -c '^dpkg:--install' "$MOCK_LOG" || true)" -eq 0 ]]
 [[ "$(grep -c '^apt:' "$MOCK_LOG" || true)" -eq 0 ]]
 unset MOCK_APT_SHA MOCK_ARCHIVE
 
@@ -644,4 +658,4 @@ assert_recovery_deadlines 1
 grep -q 'could not recover interrupted package configuration' "$mock_dir/repair-output.log"
 
 [[ ! -s "$MOCK_LOG.raw-signal" ]]
-echo 'Browser installation bounded retry tests: 23/23 passed'
+echo 'Browser installation bounded retry tests: 24/24 passed'

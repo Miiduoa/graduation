@@ -14,6 +14,7 @@ import { CommunityLoadError, useCommunityLoad } from '../../_components/useCommu
 import { CommunityAccess } from '../../_components/CommunityAccess';
 import { useBoardCreationAccess } from '../../_components/useBoardCreationAccess';
 import { BoardCreationStatus } from '../../_components/BoardCreationStatus';
+import { PostImagePreview } from '../../_components/PostImagePreview';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
@@ -67,7 +68,6 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
   const [anonymous, setAnonymous] = useState(!fromCreatorProfile);
   const [tagsRaw, setTagsRaw] = useState('');
   const [files, setFiles] = useState<File[]>([]);
-  const [previews, setPreviews] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const emptyRetryRef = useRef<HTMLButtonElement | null>(null);
@@ -120,15 +120,6 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
       setAnonymous(selectedBoard.defaultAnonymous);
     }
   }, [fromCreatorProfile, selectedBoard?.defaultAnonymous]);
-
-  // Generate object URLs for previews
-  useEffect(() => {
-    const urls = files.map((f) => URL.createObjectURL(f));
-    setPreviews(urls);
-    return () => {
-      urls.forEach((u) => URL.revokeObjectURL(u));
-    };
-  }, [files]);
 
   const onPickFiles = (list: FileList | null) => {
     if (!list) return;
@@ -361,9 +352,9 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
         onChange={(e) => onPickFiles(e.target.files)}
       />
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {previews.map((src, i) => (
+        {files.map((file, i) => (
           <div
-            key={src}
+            key={`${file.name}:${file.lastModified}:${i}`}
             style={{
               width: 84,
               height: 84,
@@ -373,7 +364,7 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
               background: 'var(--panel2)',
             }}
           >
-            <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <PostImagePreview file={file} />
             <button
               type="button"
               onClick={() => removeFile(i)}

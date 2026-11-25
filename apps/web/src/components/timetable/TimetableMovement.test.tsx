@@ -80,6 +80,33 @@ describe('timetable movement controls', () => {
     fireEvent.dragOver(target, { dataTransfer }); fireEvent.drop(target, { dataTransfer });
     expect(edit).toHaveBeenCalledExactlyOnceWith({ ...course, day: 2, start: 6, end: 8 });
   });
+  it.each([false, true])('keeps the preceding status stable during native dragging (existing status: %s)', (existingStatus) => {
+    const edit = vi.fn();
+    const namedCourse = { ...course, name: '跨校資料庫系統與資訊整合專題研究：長課名仍需完整呈現' };
+    render(<TimetableGrid courses={[namedCourse]} disabled={false} onEdit={edit} />);
+    if (existingStatus) {
+      fireEvent.click(screen.getByRole('button', { name: '移動課程' }));
+      fireEvent.click(screen.getByRole('button', { name: '取消移動' }));
+    }
+    const precedingStatus = screen.queryByRole('status');
+    const source = screen.getByRole('button', { name: /編輯 跨校資料庫.*第 4 節，續堂/ });
+    const dataTransfer = transfer();
+    fireEvent.dragStart(source, { dataTransfer });
+    expect(dataTransfer.setData).toHaveBeenCalledWith('text/plain', course.id);
+    expect(screen.getByRole('status').textContent).toContain(`正在移動「${namedCourse.name}」`);
+    expect(precedingStatus?.textContent ?? null).toBe(existingStatus ? '已取消移動，課表沒有變更。' : null);
+    if (precedingStatus) expect(precedingStatus.getAttribute('aria-hidden')).toBe('true');
+
+    fireEvent.dragOver(document.querySelector(`[data-day="2"][data-period="${PERIOD_TIMES.length}"]`)!, { dataTransfer });
+    expect(screen.getByRole('status').textContent).toContain('放不下');
+    expect(precedingStatus?.textContent ?? null).toBe(existingStatus ? '已取消移動，課表沒有變更。' : null);
+    fireEvent.dragEnd(source);
+    expect(screen.queryByText(/正在移動/)).toBeNull();
+    expect(screen.queryByText(/放不下/)).toBeNull();
+    expect(screen.queryByRole('status')).toBe(precedingStatus);
+    if (precedingStatus) expect(precedingStatus.hasAttribute('aria-hidden')).toBe(false);
+    expect(edit).not.toHaveBeenCalled();
+  });
   it('does not accept externally supplied drag data', () => {
     const edit = vi.fn(); render(<TimetableGrid courses={[course]} disabled={false} onEdit={edit} />);
     fireEvent.drop(document.querySelector('[data-day="2"][data-period="7"]')!, { dataTransfer: transfer() });

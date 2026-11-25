@@ -110,8 +110,8 @@
   color: var(--text);
 }
 
-.section:focus-visible,
-.importAction:focus-visible {
+.navigation .section:focus-visible,
+.navigation .importAction:focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: -3px;
 }
@@ -142,19 +142,19 @@
 
 @media (max-width: 600px) {
   .navigation {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: end;
+    display: flex;
+    align-items: flex-end;
     gap: 0 8px;
     margin-bottom: 20px;
   }
 
   .sections {
+    flex-basis: 12rem;
     padding-inline: 0;
   }
 
   .importAction {
-    margin-inline-start: 0;
+    margin-inline-start: auto;
   }
 
   .importAction::before {

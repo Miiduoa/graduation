@@ -226,6 +226,72 @@ it('clears drafts when the campus changes and shares a guest request with local 
   expect(askRequests()).toHaveLength(0);
 });
 
+it.each([
+  { name: 'home', pathname: '/', search: 'campus=pu', task: {}, initialQuestion: '' },
+  { name: 'service directory', pathname: '/life', search: 'campus=pu&group=resources&q=借書',
+    task: { group: 'resources', q: '借書' }, initialQuestion: '' },
+  { name: 'explicit assistant link', pathname: '/ai-assistant',
+    search: 'campus=pu&taskProfile=teacher&q=查我的授課概況',
+    task: { taskProfile: 'teacher', q: '查我的授課概況' }, initialQuestion: '查我的授課概況' },
+])('keeps a guest draft out of login URLs and storage while returning to the $name', async ({ pathname, search, task, initialQuestion }) => {
+  state.context = null;
+  state.pathname = pathname;
+  state.search = search;
+  window.history.replaceState({}, '', `${pathname}?${search}`);
+  const view = render(<Fixture />);
+  const privateDraft = '明天下課後想去圖書館，這是尚未送出的私人草稿';
+  if (pathname === '/') {
+    fireEvent.change(screen.getByLabelText('想完成的事'), { target: { value: privateDraft } });
+    fireEvent.submit(screen.getByRole('form', { name: '開始校園任務' }));
+  } else if (pathname !== '/ai-assistant') {
+    fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  }
+  const panel = await screen.findByRole('region', { name: '校園助理' });
+  const field = await within(panel).findByRole('searchbox', { name: '想做什麼？' });
+  if (initialQuestion) await waitFor(() => expect(field).toHaveProperty('value', initialQuestion));
+  fireEvent.change(field, { target: { value: privateDraft } });
+  fireEvent.click(within(panel).getByRole('button', { name: '收合' }));
+  fireEvent.click(screen.getByRole('button', {
+    name: pathname === '/ai-assistant' ? '開啟目前任務' : '開啟校園助理',
+  }));
+  expect(field).toHaveProperty('value', privateDraft);
+
+  const link = within(panel).getByRole('link', { name: '登入後，接著詢問校園助理' });
+  const login = new URL(link.getAttribute('href')!, window.location.origin);
+  const returnPath = login.searchParams.get('returnUrl')!;
+  const destination = new URL(returnPath, window.location.origin);
+  expect(destination.pathname).toBe(pathname);
+  expect(Object.fromEntries(destination.searchParams)).toEqual({
+    ...task, schoolId: 'pu', campus: 'pu', school: 'PU',
+  });
+  expect(destination.hash).toBe('#campus-assistant-entry');
+  expect(Object.fromEntries(login.searchParams)).toEqual({
+    returnUrl: returnPath, schoolId: 'pu', campus: 'pu', school: 'PU',
+  });
+  for (const storage of [localStorage, sessionStorage]) {
+    const values = Array.from({ length: storage.length }, (_, index) => storage.getItem(storage.key(index)!));
+    expect(values.join('\n')).not.toContain(privateDraft);
+  }
+  expect(askRequests()).toHaveLength(0);
+
+  // A full-document login return creates a new workspace. Only an existing,
+  // explicit URL question may seed it; the locally edited draft is gone.
+  view.unmount();
+  state.pathname = destination.pathname;
+  state.search = destination.search.slice(1);
+  window.history.replaceState({}, '', returnPath);
+  render(<Fixture />);
+  const returned = await screen.findByRole('region', { name: '校園助理' });
+  const returnedField = await within(returned).findByRole('searchbox', { name: '想做什麼？' });
+  await waitFor(() => expect(returnedField).toHaveProperty('value', initialQuestion));
+  expect(within(returned).queryByText(`你的問題：${privateDraft}`)).toBeNull();
+  expect(askRequests()).toHaveLength(0);
+  expect(window.location.pathname).toBe(pathname);
+  expect(Object.fromEntries(new URLSearchParams(window.location.search))).toEqual({
+    ...task, schoolId: 'pu', campus: 'pu', school: 'PU',
+  });
+});
+
 it('pauses private content during a same-session recheck, then restores history and the unsent draft', async () => {
   const view = render(<Fixture />);
   const panel = await openQuestion('協助我思考報告的開場');

@@ -7,6 +7,13 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const SHA = /^[a-f0-9]{40}$/;
+// #616's main squash repeats the byte-identical, loopback-only emulator helper.
+// This is one reviewed file identity, not another general script allowlist.
+const reviewedTronclassEmulatorFixture = Object.freeze({
+  reviewed: '220cb2e2d74f0847a7d0241878413097dd183d6b:scripts/test-env/verify-tronclass.cjs:generic-api-key:53',
+  observed: '149cfbe2f806ee15da1985854b34dfe72a7e07d9:scripts/test-env/verify-tronclass.cjs:generic-api-key:53',
+  reviewedBlob: 'd85bd50fa1d4f0b86a36247b316822831f0d375a',
+});
 const podfilePath = 'apps/mobile/ios/Podfile.lock';
 const podfileCommits = [
   'a818d9e02eb57cadd7fe0a0041a1fedba452e8a4',
@@ -75,7 +82,13 @@ export function validateAliases(manifest, baseline, candidate, readHistoricalPod
     assert.ok(path.startsWith('scripts/') && /\.test\.[cm]js$/.test(path) && rule === 'generic-api-key', 'Fixture must be an exact finding in a test script');
     assert.match(fixture.reviewedBlob, SHA, 'A reviewed test fixture requires a pinned Git blob');
   }
-  const pairs = [...manifest.aliases, ...fixtures];
+  const emulatorFixture = manifest.reviewedTronclassEmulatorFixture;
+  if (emulatorFixture !== undefined) {
+    assert.ok(emulatorFixture && typeof emulatorFixture === 'object' && !Array.isArray(emulatorFixture), 'Invalid reviewed emulator fixture');
+    const { reviewed, observed, reviewedBlob } = emulatorFixture;
+    assert.deepEqual({ reviewed, observed, reviewedBlob }, reviewedTronclassEmulatorFixture, 'Only the reviewed TronClass squash fingerprint and complete blob are allowed');
+  }
+  const pairs = [...manifest.aliases, ...fixtures, ...(emulatorFixture ? [emulatorFixture] : [])];
   for (const alias of pairs) {
     const before = parseFingerprint(alias.reviewed);
     const after = parseFingerprint(alias.observed);
@@ -129,8 +142,9 @@ function positiveControl() {
     // Generated, nonfunctional test marker. Never print or upload its value.
     const marker = ['AIza', randomBytes(32).toString('base64url').slice(0, 35)].join('');
     writeFileSync(join(root, 'apps/mobile/eas.json'), ['{', ...Array(53).fill(''), `"apiKey": "${marker}"`, '}'].join('\n'));
-    const { reviewedTestFixtures } = JSON.parse(readFileSync('scripts/security/gitleaks-history-aliases.json', 'utf8'));
+    const { reviewedTestFixtures, reviewedTronclassEmulatorFixture: emulatorFixture } = JSON.parse(readFileSync('scripts/security/gitleaks-history-aliases.json', 'utf8'));
     const fixturePositions = reviewedTestFixtures.map(({ observed }) => parseFingerprint(observed));
+    if (emulatorFixture) fixturePositions.push(parseFingerprint(emulatorFixture.observed));
     const podPositions = reviewedPodspecs.map(({ line }) => ({ path: podfilePath, rule: 'generic-api-key', line }));
     const positions = [...fixturePositions, ...podPositions];
     const files = new Map();

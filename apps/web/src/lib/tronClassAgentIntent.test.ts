@@ -1803,6 +1803,37 @@ describe('three-way sentence classification', () => {
     }
   });
 
+  it('keeps early-denied writes isolated from authorized requests after token-cache eviction', () => {
+    const scenarios = [
+      ['幫我上傳玩課雲作業的情況', 'ambiguous', null, []],
+      ['準備 TronClass 作業的老師', 'ambiguous', null, []],
+      ['下載玩課雲教材的紀錄', 'ambiguous', null, []],
+      ['查玩課雲作業', 'clearly-read', 'homework', []],
+      ['幫我準備 TronClass 作業', 'clearly-write', 'prepare', []],
+      ['「幫我準備 TronClass 作業」', 'ambiguous', null, ['幫我準備 TronClass 作業']],
+      ['不要查玩課雲作業', 'ambiguous', null, []],
+      ['查玩課雲「資料庫」作業', 'clearly-read', 'homework', ['資料庫']],
+      ['查玩課雲「資料庫」作業是不是教材？', 'ambiguous', null, ['資料庫']],
+    ] as const;
+    const verify = ([question, outcome, intent, quoted]: (typeof scenarios)[number]) => {
+      expect(classifyTronClassSentence(question)?.outcome, question).toBe(outcome);
+      expect(parseTronClassAgentIntent(question)?.intent ?? null, question).toBe(intent);
+      expect(tronClassQuotedTargets(question), question).toEqual(quoted);
+      tronClassCompoundClauses(question);
+      expect(classifyTronClassSentence(question)?.outcome, question).toBe(outcome);
+    };
+    for (const scenario of scenarios) {
+      verify(scenario);
+      // The production token cache keeps only eight source strings. Denied
+      // writes must not retain or inherit another request's read/quote views.
+      for (let index = 0; index < 16; index++) {
+        expect(classifyTronClassSentence(`幫我刪除玩課雲作業的紀錄${index}`)?.outcome).toBe('ambiguous');
+      }
+      verify(scenario);
+    }
+    [...scenarios].reverse().forEach(verify);
+  });
+
   it('requires confirmation for read verb + object + 的 + noun within the 200 ms budget', () => {
     const objects = ['玩課雲作業', '玩課雲教材', 'TronClass 講義'];
     const nouns = ['老師', '紀錄', '時間', '情況'];

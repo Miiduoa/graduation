@@ -33,7 +33,6 @@ import { useOptionalAssistantWorkspace } from './AssistantWorkspaceContext';
 import { AssistantWorkspaceEntry } from './AssistantWorkspaceEntry';
 import styles from './TodayCampusEntry.module.css';
 import {
-  assistantTaskProfileForWorkContext,
   getAssistantRoleWorkflow,
   type AssistantWorkContext,
 } from '@campus/shared/src/assistantRoleWorkflows';
@@ -299,11 +298,8 @@ function CampusEntryContent({
   if (campus.status === 'loading') return <p role="status">正在確認瀏覽校園…</p>;
   if (!account || campus.status !== 'ready' || !campus.schoolId) {
     const preparedQuestion = inlineDraft?.text.trim();
-    const loginSearch = new URLSearchParams();
-    if (preparedQuestion) loginSearch.set('q', preparedQuestion.slice(0, 1000));
-    if (campus.schoolId) loginSearch.set('schoolId', campus.schoolId);
-    if (preferredWorkContext)
-      loginSearch.set('taskProfile', assistantTaskProfileForWorkContext(preferredWorkContext));
+    // Drafts belong to this document's memory. Login resumes the original route
+    // and filters without serializing an unsent draft into the return URL.
     return (
       <>
         {preparedQuestion && (
@@ -312,7 +308,7 @@ function CampusEntryContent({
         {!uid && !session ? (
           <p className={styles.hint}>
             <LoginLink
-              returnPath={preparedQuestion ? `/ai-assistant?${loginSearch}` : returnPath}
+              returnPath={returnPath}
               onNavigateClick={navigateLink}
             >
               登入後，接著詢問校園助理

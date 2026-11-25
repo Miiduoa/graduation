@@ -21,6 +21,42 @@ NTHU_SEED = {'courses': [{'id': 'browser-nthu', 'name': '清大測試課程', 'd
              'meta': {'title': '清大測試課表'}, 'schoolId': 'nthu', 'shareWithFriends': False,
              'updatedAt': '2026-10-12T00:00:00Z'}
 
+async def native_timetable_drag(page, source, target):
+    # Playwright 1.57 can wait indefinitely for Input.dragIntercepted after a
+    # browser-cancelled dragstart. Send only native mouse input, with deadlines;
+    # Chromium must create the DragEvent/DataTransfer and reach the real drop.
+    async with asyncio.timeout(20):
+        await target.scroll_into_view_if_needed()
+        await source.hover()
+        before = await source.bounding_box()
+        assert before is not None
+        x, y = before['x'] + before['width'] / 2, before['y'] + before['height'] / 2
+        client = await page.context.new_cdp_session(page)
+
+        async def mouse(event_type, mouse_x, mouse_y, buttons):
+            await asyncio.wait_for(client.send('Input.dispatchMouseEvent', {
+                'type': event_type, 'x': mouse_x, 'y': mouse_y,
+                'button': 'left', 'buttons': buttons, 'clickCount': 1,
+            }), timeout=5)
+
+        try:
+            await mouse('mousePressed', x, y, 1)
+            await mouse('mouseMoved', x + 12, y, 1)
+            after = await source.bounding_box()
+            (OUT / 'drag-source-bounds.json').write_text(json.dumps({'before': before, 'after': after}, indent=2))
+            assert after is not None and all(abs(before[key] - after[key]) <= 1 for key in before), \
+                'Starting a native drag moved its course; status messages must not shift the timetable'
+            await expect(page.get_by_role('status').filter(has_text='正在移動「資料庫管理」')).to_be_visible()
+            await target.scroll_into_view_if_needed()
+            bounds = await target.bounding_box()
+            assert bounds is not None
+            target_x, target_y = bounds['x'] + bounds['width'] / 2, bounds['y'] + bounds['height'] / 2
+            await mouse('mouseMoved', target_x, target_y, 1)
+            await mouse('mouseMoved', target_x, target_y, 1)
+            await mouse('mouseReleased', target_x, target_y, 0)
+        finally:
+            await asyncio.wait_for(client.detach(), timeout=5)
+
 async def main():
     results = []
     async with async_playwright() as p:
@@ -125,28 +161,28 @@ async def main():
                     document.addEventListener(type, (event) => {
                         if (window.dragEvents.length < 300) window.dragEvents.push({
                             type, trusted: event.isTrusted, target: event.target.closest('button,td')?.outerHTML.slice(0, 350),
-                            x: event.clientX, y: event.clientY
+                            x: event.clientX, y: event.clientY,
+                            courseId: event.dataTransfer?.getData('text/plain') || '',
+                            day: event.target.closest('td')?.dataset.day,
+                            period: event.target.closest('td')?.dataset.period,
                         });
-                    }, true);
+                    });
                 }
             }''')
             source = page.get_by_role('button', name='編輯 資料庫管理，星期一第 4 節，續堂', exact=True)
             target = page.locator('td[data-day="2"][data-period="7"]')
             await expect(source).to_have_attribute('draggable', 'true')
-            # Keep both ends visible before pressing. A long table must not scroll
-            # under the pointer between mousedown and the first native drag event.
-            await target.scroll_into_view_if_needed()
-            await source.hover()
-            bounds = await source.bounding_box()
-            assert bounds is not None
-            await page.mouse.down()
-            await page.mouse.move(bounds['x'] + bounds['width'] / 2 + 12, bounds['y'] + bounds['height'] / 2, steps=4)
-            await target.hover()
-            await target.hover()
-            await page.mouse.up()
+            await native_timetable_drag(page, source, target)
             drag_events = await page.evaluate('window.dragEvents')
             (OUT / 'drag-events.json').write_text(json.dumps(drag_events, ensure_ascii=False, indent=2))
-            assert any(event['type'] == 'drop' and event['trusted'] for event in drag_events), 'No native drop event reached the timetable'
+            for event_type in ['dragstart', 'dragover', 'drop', 'dragend']:
+                assert any(event['type'] == event_type and event['trusted'] for event in drag_events), \
+                    f'No native {event_type} event reached the timetable'
+            for event_type in ['dragstart', 'drop']:
+                assert any(event['type'] == event_type and event['trusted'] and event['courseId'] == 'browser-database'
+                           for event in drag_events), f'Native {event_type} lost the source course id'
+            assert any(event['type'] == 'drop' and event['trusted'] and event['day'] == '2' and event['period'] == '7'
+                       for event in drag_events), 'Native drop missed the requested continuation destination'
             await expect(dialog.get_by_role('combobox', name='開始節次', exact=True)).to_have_value('6')
             await expect(dialog.get_by_role('combobox', name='結束節次', exact=True)).to_have_value('7')
             await dialog.get_by_role('button', name='儲存', exact=True).click()
@@ -156,6 +192,9 @@ async def main():
             await expect(moved_course).to_be_in_viewport()
             await page.reload(wait_until='networkidle')
             await expect(moved_course).to_be_visible()
+            saved = await page.evaluate('JSON.parse(localStorage.getItem("campus-one-personal-timetable:local:pu"))')
+            moved = next(course for course in saved['courses'] if course['id'] == 'browser-database')
+            assert (moved['day'], moved['start'], moved['end']) == (2, 6, 7), 'Reload lost the saved native movement'
             results.append('real drag with continuation offset, focus on the saved course and reload')
             await page.screenshot(path=str(OUT / 'desktop.png'), full_page=True, animations='disabled')
             await page.set_viewport_size({'width': 390, 'height': 844})
@@ -216,13 +255,26 @@ async def main():
             assert not errors, errors
         except Exception:
             (OUT / 'failure.txt').write_text(traceback.format_exc(), encoding='utf-8')
-            (OUT / 'accessibility.yml').write_text(await page.locator('body').aria_snapshot(), encoding='utf-8')
-            await page.screenshot(path=str(OUT / 'failure.png'), full_page=True, animations='disabled')
+            artifact_errors = []
+            try:
+                events = await asyncio.wait_for(page.evaluate('window.dragEvents || []'), timeout=5)
+                (OUT / 'drag-events.json').write_text(json.dumps(events, ensure_ascii=False, indent=2))
+                (OUT / 'accessibility.yml').write_text(await asyncio.wait_for(page.locator('body').aria_snapshot(), timeout=5), encoding='utf-8')
+            except Exception as error:
+                artifact_errors.append(str(error))
+            try:
+                await asyncio.wait_for(page.screenshot(path=str(OUT / 'failure.png'), full_page=True, animations='disabled'), timeout=5)
+            except Exception as error:
+                artifact_errors.append(str(error))
+            if artifact_errors:
+                (OUT / 'artifact-errors.json').write_text(json.dumps(artifact_errors, ensure_ascii=False, indent=2))
             raise
         finally:
-            await page.context.tracing.stop(path=str(OUT / 'trace.zip'))
             (OUT / 'results.json').write_text(json.dumps({'completed': results, 'pageErrors': errors}, ensure_ascii=False, indent=2))
-            await browser.close()
+            try:
+                await asyncio.wait_for(page.context.tracing.stop(path=str(OUT / 'trace.zip')), timeout=15)
+            finally:
+                await asyncio.wait_for(browser.close(), timeout=5)
     print(json.dumps({'passed': len(results), 'checks': results}, ensure_ascii=False))
 
 asyncio.run(main())

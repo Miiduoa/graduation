@@ -16,6 +16,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
 import { useNavigation } from '@react-navigation/native';
+import { homeworkDescriptionText } from '@campus/shared/src/puLmsReadonly';
 
 import { Card, ErrorState, LoadingState, Screen, SectionTitle } from '../ui/components';
 import { theme } from '../ui/theme';
@@ -866,7 +867,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number; isFirst?: boo
                   style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18 }}
                   numberOfLines={5}
                 >
-                  {detail.description.replace(/<[^>]*>/g, '').trim()}
+                  {homeworkDescriptionText(detail.description)}
                 </Text>
               ) : null}
               {detail.total_score != null && (
