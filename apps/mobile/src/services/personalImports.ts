@@ -15,6 +15,7 @@ import {
   clearPersonalImportRollback,
   commitWebPersonalImports,
   preparePersonalImportRollback,
+  recordFailedPersonalImportRestoration,
   retainRejectedPersonalImportRollback,
   withPersonalImportWriteLock,
 } from './personalImportRollbackJournal';
@@ -76,14 +77,10 @@ async function readLedgerSnapshot(
     ? capturePersonalImportBrowserRecovery(window.localStorage, key)
     : undefined;
   const primaryVerified = isReadableLedger(primary, scope);
-  // The first-write encoding can survive a revoked write. When both recovery
-  // files are unreadable, require the final encoding or an independent hash.
-  const ambiguousFirstWrite = journal?.markerError && !journal.payloadReadable &&
-    primary?.startsWith('{"records":');
   const nativeCommit = !web && primaryVerified &&
-    ((hasNativeCommitEncoding(primary) && !ambiguousFirstWrite) ||
+    (hasNativeCommitEncoding(primary) ||
      (primary !== null && !!journal?.matchesVerifiedPrimary?.(primary)));
-  if (!nativeCommit) {
+  if (!primaryVerified || journal?.rejected) {
     if (journal?.markerError) throw journal.markerError;
     if (journal?.payloadError) throw journal.payloadError;
   }
@@ -246,7 +243,16 @@ async function rollbackLedger(
   } catch {
     // Try restoring the primary anyway. The journal still holds the verified bytes.
   }
-  await restoreLedger(key, recovery, assertWritable, keepJournal);
+  try {
+    await restoreLedger(key, recovery, assertWritable, keepJournal);
+  } catch (error) {
+    try {
+      recordFailedPersonalImportRestoration(key);
+    } catch {
+      // The rollback payload and checkpoint may still preserve the original.
+    }
+    throw error;
+  }
 }
 
 async function trackWrite(key: string, write: () => Promise<void>) {

@@ -10,6 +10,7 @@ import { Platform } from 'react-native';
 
 const markerSuffix = '.rollback.pending';
 const committedMarker = 'committed';
+const rejectedMarker = 'rejected';
 const rejectedPrefix = 'rejected:\n';
 const rearmedPrefix = 'rearmed:\n';
 const committedPayloadPattern = /^committed:([a-f0-9]{64})\n/;
@@ -476,20 +477,24 @@ function journalFiles(key: string) {
 export function capturePersonalImportRollback(key: string) {
   const { payload, marker, marked } = journalFiles(key);
   if (!marked) return undefined;
+  const rejectionRecorded = fileExists(rejectionFile(key));
   const retired = fileExists(retirementFile(key));
-  const retiredPayload = retired ? readOptionalFile(payload) : undefined;
-  if (retired && !retiredPayload?.startsWith(rearmedPrefix)) return undefined;
+  const retiredPayload = retired && !rejectionRecorded ? readOptionalFile(payload) : undefined;
+  if (retired && !rejectionRecorded && !retiredPayload?.startsWith(rearmedPrefix)) return undefined;
   let committed: boolean;
+  let rejected = rejectionRecorded;
   let markerError: unknown;
   try {
-    committed = marker.textSync() === committedMarker;
+    const state = marker.textSync();
+    rejected ||= state === rejectedMarker;
+    committed = !rejected && state === committedMarker;
   } catch (error) {
     markerError = error;
-    committed = true;
+    committed = !rejected;
   }
   let stored = retiredPayload;
   let payloadError: unknown;
-  if (!retired) {
+  if (!retired || rejectionRecorded) {
     try {
       stored = payload.textSync();
     } catch (error) {
@@ -513,10 +518,9 @@ export function capturePersonalImportRollback(key: string) {
     : verifiedPrimaries.get(key) ?? binding?.[1];
   return {
     raw: committed ? undefined : binding ? encoded?.slice(binding[0].length) : encoded,
-    rejected: false,
-    markerError,
+    rejected,
+    markerError: rejected && encoded !== undefined ? undefined : markerError,
     payloadError,
-    payloadReadable: encoded !== undefined,
     matchesVerifiedPrimary: verifiedHash ? (raw: string) => sha256(raw) === verifiedHash : undefined,
   };
 }
@@ -545,13 +549,22 @@ function verificationFile(key: string): File {
   return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.verified`);
 }
 
+function rejectionFile(key: string): File {
+  return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.rejected`);
+}
+
 export function preparePersonalImportRollback(key: string, raw: string | null, primaryCommitted = false) {
   const encoded = raw ?? 'null';
   const { payload, marker, marked } = journalFiles(key);
   let resetMarker = false;
+  const rejection = rejectionFile(key);
+  const hadRejection = fileExists(rejection);
+  let markerRejected = marked && hadRejection;
   if (marked) {
     try {
-      resetMarker = marker.textSync() === committedMarker;
+      const state = marker.textSync();
+      markerRejected ||= state === rejectedMarker;
+      resetMarker = state === committedMarker || markerRejected;
     } catch (error) {
       if (!primaryCommitted) throw error;
       // A verified primary supplies the rollback bytes even when the old
@@ -571,7 +584,8 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   // A fresh payload supersedes auxiliary files from the previous attempt.
   const rearmed = hadRetirement || hadVerification;
   const wrap = (value: string) => rearmed ? rearmedPrefix + value : value;
-  const rejected = previous === rejectedPrefix + encoded || previous === rearmedPrefix + rejectedPrefix + encoded;
+  const rejected = markerRejected ||
+    previous === rejectedPrefix + encoded || previous === rearmedPrefix + rejectedPrefix + encoded;
   const replacement = wrap(rejected ? rejectedPrefix + encoded : encoded);
   if (previous !== replacement) {
     payload.write(replacement);
@@ -594,6 +608,10 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
       if (!primaryCommitted) throw error;
     }
     if (reset !== undefined && reset !== '') throw new Error('無法建立匯入資料的還原標記。');
+  }
+  // A retry carries the rejection in its verified payload until publication.
+  if (hadRejection && !deleteMarker(rejection)) {
+    throw new Error('無法更新匯入資料的還原標記。');
   }
   if (hadRetirement) deleteMarker(retirement);
   if (hadVerification) deleteMarker(verification);
@@ -673,13 +691,27 @@ export function retainRejectedPersonalImportRollback(key: string, raw: string | 
   verifiedPrimaries.delete(key);
   const { payload } = journalFiles(key);
   const rearmed = readOptionalFile(payload)?.startsWith(rearmedPrefix) === true;
-  // Keep the old ledger authoritative when the in-place commit encoding may
-  // have reached disk before the final authority check failed.
+  // Keep the old ledger authoritative when the commit encoding reached disk.
   try {
     payload.write((rearmed ? rearmedPrefix : '') + rejectedPrefix + (raw ?? 'null'));
   } finally {
     discardPayload(verificationFile(key));
   }
+}
+
+export function recordFailedPersonalImportRestoration(key: string): void {
+  // Record rejection independently so a restart can distinguish an unreadable
+  // rejected journal from auxiliary read failures after a verified commit.
+  const rejection = rejectionFile(key);
+  try {
+    if (!fileExists(rejection)) {
+      rejection.create();
+    }
+    if (fileExists(rejection)) return;
+  } catch {
+    // The pending marker can still preserve the rejection.
+  }
+  journalFiles(key).marker.write(rejectedMarker);
 }
 
 export function clearPersonalImportRollback(key: string): void {
@@ -688,6 +720,7 @@ export function clearPersonalImportRollback(key: string): void {
     verifiedPrimaries.delete(key);
     discardPayload(retirementFile(key));
     discardPayload(verificationFile(key));
+    discardPayload(rejectionFile(key));
     discardPayload(payload);
   }
 }
