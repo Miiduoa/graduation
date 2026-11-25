@@ -327,6 +327,33 @@ it('shows the original marker coordinate and updates both navigation destination
   expect(apple.searchParams.get('daddr')).toBe('24.228,120.582');
 });
 
+it('preserves the flat-map route origin only for the matching spatial destination and current endpoints', async () => {
+  const mapRoute: [MapLocation, MapLocation] = [places[0], places[1]];
+  const props = { school: 'other-school', locations: places, selected: places[1], onSelect: vi.fn() };
+  const view = render(<CampusSpatialExplorer {...props} mapRoute={mapRoute} />);
+  const dialog = within(await open());
+  const origin = () => [
+    new URL(dialog.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!).searchParams.get('origin'),
+    new URL(dialog.getByRole('link', { name: '開啟 Apple 地圖步行導航' }).getAttribute('href')!).searchParams.get('saddr'),
+  ];
+  expect(origin()).toEqual(['24.226,120.58', '24.226,120.58']);
+  expect(dialog.getByText(/沿用平面地圖設定的起點/).textContent).toContain(places[0].name);
+
+  const picker = dialog.getByRole('combobox', { name: '想去哪裡' });
+  fireEvent.change(picker, { target: { value: places[0].id } });
+  expect(origin()).toEqual([null, null]);
+  fireEvent.change(picker, { target: { value: places[1].id } });
+  expect(origin()).toEqual(['24.226,120.58', '24.226,120.58']);
+
+  view.rerender(<CampusSpatialExplorer {...props} mapRoute={mapRoute}
+    locations={[{ ...places[0], lat: 24.227 }, places[1]]} />);
+  expect(origin()).toEqual([null, null]);
+  expect(dialog.queryByText(/沿用平面地圖設定的起點/)).toBeNull();
+
+  view.rerender(<CampusSpatialExplorer {...props} mapRoute={null} />);
+  expect(origin()).toEqual([null, null]);
+});
+
 it('uses the observer during startup and restore when host coordinates are non-finite', async () => {
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) { intersection = callback; }
