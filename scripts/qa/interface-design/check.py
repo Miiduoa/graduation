@@ -13,6 +13,7 @@ from feedback import check_action_feedback
 from course_editing import check_course_editing
 from record_editing import check_record_editing
 from navigation import check_navigation_geometry, check_service_navigation, check_today_reading_width
+from search_continuity import check_search_continuity
 
 OUTPUT = Path(__file__).resolve().parents[3] / 'artifacts' / 'interface-design'
 SCENARIOS = [
@@ -709,6 +710,7 @@ async def scenario(browser, origin, config, report):
         await check_section('action-feedback', lambda: check_action_feedback(page, config, report, capture))
         await check_section('quick-search', lambda: check_quick_search(page, config, report, capture))
         await check_section('service-navigation', lambda: check_service_navigation(page, config, report, capture))
+        await check_section('search-continuity', lambda: check_search_continuity(page, config, report, capture))
         await check_section('course-editing', lambda: check_course_editing(page, config, report, capture))
         await check_section('record-editing', lambda: check_record_editing(page, config, report, capture))
         if config['name'] in ('desktop-light', 'compact-dark-site-motion'):

@@ -436,6 +436,8 @@ export function GroupMembersScreen(props: any) {
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
         >
           <AnimatedCard
             title={group?.name ?? '群組成員'}
