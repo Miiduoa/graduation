@@ -106,9 +106,14 @@ export function applyCampusWalkingSegmentAudits(
   // Index ordered adjacency once, rather than scanning the whole way per audit.
   let segmentCount = 0;
   for (const way of ways.values()) {
-    if (way.nodes.length < 2) return null;
+    if (!Array.isArray(way.nodes) || way.nodes.length < 2) return null;
     segmentCount += way.nodes.length - 1;
     if (segmentCount > 4000) return null;
+    // Retained member IDs may be outside the campus, but must still be real
+    // positive integer OSM identities. for-of also rejects sparse cache arrays.
+    for (const id of way.nodes) {
+      if (!Number.isSafeInteger(id) || id <= 0) return null;
+    }
   }
   const adjacentSegments = new Set<string>();
   const undirectedSegments = new Set<string>();
