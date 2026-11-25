@@ -90,6 +90,27 @@ describe('trusted OSM walking segment audit bridge', () => {
     ], now)?.edges[0].access).toBe('reviewed-open');
   });
 
+  it('rejects invalid source revision numbers even when an audit agrees', () => {
+    for (const version of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN]) {
+      for (const location of ['way', 'from', 'to']) {
+        const data = candidates();
+        const source = location === 'way' ? data.ways[0] : data.nodes[location === 'from' ? 0 : 1];
+        source.version = version;
+        const patch = location === 'way' ? { wayVersion: version } :
+          location === 'from' ? { from: { ...reviewedNode(1), version } } :
+            { to: { ...reviewedNode(2), version } };
+        const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit(1, 2, patch)], now)!;
+        expect(graph.edges[0].access).toBe('unknown');
+        expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+      }
+    }
+    const data = candidates();
+    expect(findCampusWalkingRoute(
+      applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!,
+      'fixture', bounds, 1, 2, now,
+    )).not.toBeNull();
+  });
+
   it('rechecks the aggregate retained segment budget before scanning cached ways', () => {
     const data = candidates();
     // Synthetic cache fixture, not actual campus paths.
