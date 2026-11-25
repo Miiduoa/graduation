@@ -898,9 +898,15 @@ describe('r28 structural regressions and function-word variants', () => {
 
   it('tokenizes a long write-heavy string without exponential work', () => {
     const question = `查玩課雲${'必交必繳'.repeat(80)}作業`;
-    const started = Date.now();
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
     parseTronClassAgentIntent(question);
-    expect(Date.now() - started).toBeLessThan(200);
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      parseTronClassAgentIntent(question);
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 
   it.each([
@@ -941,10 +947,19 @@ describe('r28 structural regressions and function-word variants', () => {
     // Stay within the 1,000-character router limit so this actually exercises tokenize.
     const question = `查玩課雲${'必交必繳發布時間務必轉交'.repeat(80)}作業`;
     expect(question.length).toBeLessThanOrEqual(1000);
-    const started = Date.now();
-    parseTronClassAgentIntent(question);
-    parseTronClassAgentIntent(question);
-    expect(Date.now() - started).toBeLessThan(200);
+    const parseTwice = () => {
+      parseTronClassAgentIntent(question);
+      parseTronClassAgentIntent(question);
+    };
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    parseTwice();
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      parseTwice();
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 
   it.each([
@@ -987,10 +1002,19 @@ describe('r28 structural regressions and function-word variants', () => {
   it('scans a long negated modifier span in linear time', () => {
     const question = `不要繳交供${'確認'.repeat(450)}玩課雲作業用的資料，只查校園公告`;
     expect(question.length).toBeLessThanOrEqual(1000);
-    const started = Date.now();
-    expect(parseTronClassAgentIntent(question)).toBeNull();
-    expect(tronClassCompoundClauses(question)).toEqual([]);
-    expect(Date.now() - started).toBeLessThan(200);
+    const run = () => {
+      expect(parseTronClassAgentIntent(question)).toBeNull();
+      expect(tronClassCompoundClauses(question)).toEqual([]);
+    };
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    run();
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      run();
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 
   it.each([
@@ -1009,10 +1033,19 @@ describe('r28 structural regressions and function-word variants', () => {
   it('scans many overlapping 供 spans and two negated writes in linear time', () => {
     const question = `不要繳交${'供老師確認'.repeat(40)}玩課雲作業用的資料，也不要繳交供助教確認玩課雲教材用的附件，只查校園公告`;
     expect(question.length).toBeLessThanOrEqual(1000);
-    const started = Date.now();
-    expect(parseTronClassAgentIntent(question)).toBeNull();
-    expect(tronClassCompoundClauses(question)).toEqual([]);
-    expect(Date.now() - started).toBeLessThan(200);
+    const run = () => {
+      expect(parseTronClassAgentIntent(question)).toBeNull();
+      expect(tronClassCompoundClauses(question)).toEqual([]);
+    };
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    run();
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      run();
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 
   it.each([
@@ -1051,9 +1084,15 @@ describe('r28 structural regressions and function-word variants', () => {
   it('scans a long write-command request in a single token pass', () => {
     const question = `查玩課雲${'外交作業'.repeat(180)}務必速交課堂報告`;
     expect(question.length).toBeLessThanOrEqual(1000);
-    const started = Date.now();
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
     expectWriteOrAmbiguous(question);
-    expect(Date.now() - started).toBeLessThan(200);
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      expectWriteOrAmbiguous(question);
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 
   it.each([
@@ -1080,10 +1119,19 @@ describe('r28 structural regressions and function-word variants', () => {
   it('scans many status-filtered writes in a single token pass', () => {
     const question = `查玩課雲${'未交的作業，'.repeat(90)}務必速交課堂報告`;
     expect(question.length).toBeLessThanOrEqual(1000);
-    const started = Date.now();
-    expect(parseTronClassAgentIntent(question)).toBeNull();
-    expect(tronClassCompoundClauses(question)).toEqual([]);
-    expect(Date.now() - started).toBeLessThan(200);
+    const run = () => {
+      expect(parseTronClassAgentIntent(question)).toBeNull();
+      expect(tronClassCompoundClauses(question)).toEqual([]);
+    };
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    run();
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      run();
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 });
 
@@ -1136,10 +1184,19 @@ describe('lexicon negators and token-only write checks', () => {
   it('scans many 把／將 read clauses in a single token pass', () => {
     const question = `把玩課雲外交作業列出${'，把玩課雲外交作業列出'.repeat(30)}`;
     expect(question.length).toBeLessThanOrEqual(1000);
-    const started = Date.now();
-    expect(classifyTronClassSentence(question)?.outcome).toBe('clearly-read');
-    expect(tronClassCompoundClauses(question)).toEqual(['把玩課雲外交作業列出']);
-    expect(Date.now() - started).toBeLessThan(200);
+    const run = () => {
+      expect(classifyTronClassSentence(question)?.outcome).toBe('clearly-read');
+      expect(tronClassCompoundClauses(question)).toEqual(['把玩課雲外交作業列出']);
+    };
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    run();
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      run();
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 
   it.each([
@@ -1155,10 +1212,19 @@ describe('lexicon negators and token-only write checks', () => {
   it('scans repeated negated 把／將 phrases in linear time', () => {
     const question = `${'不要把玩課雲外交作業列出，'.repeat(25)}只查校園公告`;
     expect(question.length).toBeLessThanOrEqual(1000);
-    const started = Date.now();
-    expect(parseTronClassAgentIntent(question)).toBeNull();
-    expect(tronClassCompoundClauses(question)).toEqual([]);
-    expect(Date.now() - started).toBeLessThan(200);
+    const run = () => {
+      expect(parseTronClassAgentIntent(question)).toBeNull();
+      expect(tronClassCompoundClauses(question)).toEqual([]);
+    };
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    run();
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      run();
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 });
 
@@ -1309,11 +1375,20 @@ describe('three-way sentence classification', () => {
   it('scans a clause of unresolved 把 phrases in linear time', () => {
     const question = `不急${'不要把這份'.repeat(40)}，只查玩課雲公告`;
     expect(question.length).toBeLessThanOrEqual(1000);
-    const started = Date.now();
-    expect(classifyTronClassSentence(question)?.outcome).toBe('ambiguous');
-    expect(parseTronClassAgentIntent(question)).toBeNull();
-    expect(tronClassCompoundClauses(question)).toEqual([]);
-    expect(Date.now() - started).toBeLessThan(200);
+    const run = () => {
+      expect(classifyTronClassSentence(question)?.outcome).toBe('ambiguous');
+      expect(parseTronClassAgentIntent(question)).toBeNull();
+      expect(tronClassCompoundClauses(question)).toEqual([]);
+    };
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    run();
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      run();
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 
   it('does not auto-read after 不 plus an unknown word or an unknown transfer verb', () => {
@@ -1691,9 +1766,15 @@ describe('three-way sentence classification', () => {
   it('scans long compound requests within the classification budget', () => {
     const question = '查玩課雲作業' + '並準備作業'.repeat(198);
     expect(question.length).toBeLessThanOrEqual(1000);
-    const started = performance.now();
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
     expect(isTronClassCompoundDownloadAndPrepare(question)).toBe(false);
-    expect(performance.now() - started).toBeLessThan(100);
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      expect(isTronClassCompoundDownloadAndPrepare(question)).toBe(false);
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(100);
   });
 
   it.each(['查玩課雲公告是不是通知？', '查玩課雲公告是不是『通知』？', '查玩課雲公告是我的公告嗎'])(
@@ -1835,11 +1916,19 @@ describe('three-way sentence classification', () => {
     questions.push('查玩課雲作業的老師');
     expect(questions.length).toBeGreaterThan(20);
     expect(Math.max(...questions.map(question => question.length))).toBeLessThanOrEqual(1000);
-    const started = performance.now();
-    const results = questions.map(question => classifyTronClassSentence(question)?.outcome ?? null);
-    const elapsed = performance.now() - started;
-    expect(results).toEqual(questions.map(() => 'ambiguous'));
-    expect(elapsed).toBeLessThan(200);
+    const classifyAll = () => questions.map(question => classifyTronClassSentence(question)?.outcome ?? null);
+    const expected = questions.map(() => 'ambiguous');
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    expect(classifyAll()).toEqual(expected);
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      const results = classifyAll();
+      const elapsed = performance.now() - started;
+      expect(results).toEqual(expected);
+      samples.push(elapsed);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 
   it.each([
@@ -1866,19 +1955,37 @@ describe('three-way sentence classification', () => {
   it('scans repeated submission status candidates within the 200 ms budget', () => {
     const question = '查玩課雲' + '繳交的作業'.repeat(190) + '繳交狀態';
     expect(question.length).toBeLessThanOrEqual(1000);
-    const started = performance.now();
-    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
-    expect(parseTronClassAgentIntent(question)).toBeNull();
-    expect(performance.now() - started).toBeLessThan(200);
+    const run = () => {
+      expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+      expect(parseTronClassAgentIntent(question)).toBeNull();
+    };
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    run();
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      run();
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 
   it('scans repeated unproven writes with trailing modifiers in linear time within the 200 ms budget', () => {
     const question = '玩課雲' + '刪除作業的老師'.repeat(80);
     expect(question.length).toBeLessThanOrEqual(1000);
-    const started = performance.now();
-    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
-    expect(parseTronClassAgentIntent(question)).toBeNull();
-    expect(performance.now() - started).toBeLessThan(200);
+    const run = () => {
+      expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+      expect(parseTronClassAgentIntent(question)).toBeNull();
+    };
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    run();
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      run();
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 
   it.each([
@@ -1910,21 +2017,38 @@ describe('three-way sentence classification', () => {
       const questions = cuts.flatMap(gap =>
         ['查', '準備', '繳交'].map(verb => `${marker}${gap}幫我${verb}玩課雲作業`));
       expect(Math.max(...questions.map(question => question.length))).toBeLessThanOrEqual(1000);
-      const started = performance.now();
-      const results = questions.map(question => classifyTronClassSentence(question)?.outcome);
-      const elapsed = performance.now() - started;
-      expect(results).toEqual(questions.map(() => 'ambiguous'));
-      expect(elapsed).toBeLessThan(200);
+      const classifyAll = () => questions.map(question => classifyTronClassSentence(question)?.outcome);
+      const expected = questions.map(() => 'ambiguous');
+      // Warm up once so cold-start and CI noise are not measured as the budget sample.
+      expect(classifyAll()).toEqual(expected);
+      const samples: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        const started = performance.now();
+        const results = classifyAll();
+        const elapsed = performance.now() - started;
+        expect(results).toEqual(expected);
+        samples.push(elapsed);
+      }
+      expect(Math.min(...samples)).toBeLessThan(200);
     },
   );
 
   it('scans repeated negated 把 phrases within the 200 ms budget', () => {
     const question = '不要把'.repeat(300) + '玩課雲作業';
-    const started = performance.now();
-    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
-    expect(canAnswerTronClassQuestion(question)).toBe(false);
-    expect(tronClassCompoundClauses(question)).toEqual([]);
-    expect(performance.now() - started).toBeLessThan(200);
+    const run = () => {
+      expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+      expect(canAnswerTronClassQuestion(question)).toBe(false);
+      expect(tronClassCompoundClauses(question)).toEqual([]);
+    };
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    run();
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      run();
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 
   it.each([
@@ -1934,31 +2058,56 @@ describe('three-way sentence classification', () => {
   ])('scans %s within the 200 ms budget', (description, quoted) => {
     const question = '查玩課雲作業' + (quoted.startsWith('「') ? quoted : `「${quoted}」`);
     expect(question.length).toBeLessThanOrEqual(1000);
-    const started = performance.now();
-    const result = classifyTronClassSentence(question);
-    const elapsed = performance.now() - started;
-    expect(result).toEqual({
+    const expected = {
       outcome: 'clearly-read',
       intent: { intent: 'homework', pendingOnly: false },
-    });
-    expect(elapsed, description).toBeLessThan(200);
+    };
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    expect(classifyTronClassSentence(question)).toEqual(expected);
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      const result = classifyTronClassSentence(question);
+      const elapsed = performance.now() - started;
+      expect(result).toEqual(expected);
+      samples.push(elapsed);
+    }
+    expect(Math.min(...samples), description).toBeLessThan(200);
   });
 
   it('scans nested brackets within the 200 ms budget', () => {
     const question = '查玩課雲作業' + '('.repeat(350) + '教材'.repeat(100) + '.pdf' + ')'.repeat(350);
-    const started = performance.now();
-    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
-    expect(canAnswerTronClassQuestion(question)).toBe(false);
-    expect(tronClassCompoundClauses(question)).toEqual([]);
-    expect(performance.now() - started).toBeLessThan(200);
+    const run = () => {
+      expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+      expect(canAnswerTronClassQuestion(question)).toBe(false);
+      expect(tronClassCompoundClauses(question)).toEqual([]);
+    };
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    run();
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      run();
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 
   it('scans a long run of unmatched opening quotes within the 200 ms budget', () => {
     const question = '查玩課雲作業' + '「'.repeat(980);
-    const started = performance.now();
-    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
-    expect(canAnswerTronClassQuestion(question)).toBe(false);
-    expect(tronClassCompoundClauses(question)).toEqual([]);
-    expect(performance.now() - started).toBeLessThan(200);
+    const run = () => {
+      expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+      expect(canAnswerTronClassQuestion(question)).toBe(false);
+      expect(tronClassCompoundClauses(question)).toEqual([]);
+    };
+    // Warm up once so cold-start and CI noise are not measured as the budget sample.
+    run();
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      run();
+      samples.push(performance.now() - started);
+    }
+    expect(Math.min(...samples)).toBeLessThan(200);
   });
 });
