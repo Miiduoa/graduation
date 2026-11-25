@@ -134,6 +134,38 @@ test('opens timetable import from the empty timetable state', async () => {
   expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalImport', { kind: 'timetable' });
 });
 
+test('keeps the four public campus services available while coursework loads and after it resolves', async () => {
+  const first = deferred<ReturnType<typeof result>>();
+  jest.mocked(loadStudentHome).mockReturnValueOnce(first.promise);
+  const view = render(<StudentTodayScreen />);
+  const labels = ['找教室', '查公車', '找餐廳', '查館藏'];
+  for (const label of labels) {
+    expect(view.getByLabelText('校園服務：' + label)).toBeTruthy();
+  }
+  fireEvent.press(view.getByLabelText('校園服務：找教室'));
+  expect(mockNavigate).toHaveBeenCalledWith('校園', {
+    initial: false,
+    screen: 'MapV2',
+    params: undefined,
+  });
+  await act(async () => first.resolve(result()));
+  for (const label of labels) {
+    expect(view.getByLabelText('校園服務：' + label)).toBeTruthy();
+  }
+});
+
+test('offers timetable setup guidance only for a confirmed empty timetable', async () => {
+  mockTimetable.status = 'empty';
+  const view = render(<StudentTodayScreen />);
+  const guidance = '匯入課表截圖或檔案，下次打開就能查看上課時間與教室。';
+  expect(await view.findByText(guidance)).toBeTruthy();
+  fireEvent.press(view.getByText(TODAY_COPY.importTimetable));
+  expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalImport', { kind: 'timetable' });
+  mockTimetable.status = 'error';
+  view.rerender(<StudentTodayScreen />);
+  expect(view.queryByText(guidance)).toBeNull();
+});
+
 test('keeps one inline workspace with supported examples and a separate exploration entry', async () => {
   const view = render(<StudentTodayScreen />);
   await view.findAllByText('繳交期末報告');

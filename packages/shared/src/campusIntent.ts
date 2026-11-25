@@ -57,8 +57,8 @@ export function suggestCampusDestinations(input: string): CampusQuickDestination
   // Match English on the original word boundaries, not the whitespace-stripped
   // Chinese phrase: e.g. "business" must never be interpreted as a bus request.
   const englishLocation = /\b(?:campus map|find (?:my |a |the )?classroom)\b/.test(normalized) ||
-    (/\b(?:directions|where is|where's|how (?:do i |to )?get to)\b/.test(normalized) &&
-      /\b(?:library|classroom|campus building|cafeteria|dormitory|dorm|bus stop)\b/.test(normalized));
+    (/\b(?:directions|where is|where's|where are|where can i find|how (?:do i |to )?get to)\b/.test(normalized) &&
+      /\b(?:library|libraries|classrooms?|campus buildings?|cafeterias?|dormitory|dormitories|dorms?|bus stops?)\b/.test(normalized));
   const locationQuestion = /在哪|位置|怎麼走|如何走|帶我去|走去|導航|找教室|地圖/.test(phrase) || englishLocation;
   const englishBus = /\b(?:bus|buses|bus stop|shuttle)\b/;
   const busQuestion = /公車|巴士|站牌|到站|搭車|幾號車/.test(phrase) || englishBus.test(normalized);
@@ -77,7 +77,7 @@ export function suggestCampusDestinations(input: string): CampusQuickDestination
   match(/講座|校園活動|活動報名|演講/, '/events', /\b(?:campus events?|campus activities|event registration)\b/);
   match(/公告|最新消息/, '/announcements', /\b(?:campus announcements?|school announcements?)\b/);
   match(/通知|未讀訊息|私訊/, '/messages');
-  match(/失物|遺失|拾獲|找不到.*東西/, '/lost-found', /\blost(?: and | & |-)found\b/);
+  match(/失物|遺失|拾獲|找不到.*東西/, '/lost-found', /\blost(?:[ -]+and[ -]+| *& *|[ -]+)found\b/);
   match(/加好友|找朋友|好友課表/, '/friends');
   match(/匯入|掃描課表|上傳課表|上傳成績|讀取截圖|ocr/, '/import');
   match(/課程申訴|缺席申訴|出席異議|成績申訴|申訴單/, '/appeals');
