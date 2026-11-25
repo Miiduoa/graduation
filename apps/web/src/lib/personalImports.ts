@@ -59,6 +59,7 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
     primary,
     firstWrite && !primaryRecordsReadable,
     firstWrite && (!primaryRecordsReadable || adopted?.source === 'journal'),
+    adopted?.source,
   );
   return {
     records: () => adopted?.ledger.records ?? parsePersonalImportRecords(scope, raw),

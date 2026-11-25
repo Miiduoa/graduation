@@ -374,7 +374,9 @@ export function commitWebPersonalImports(
     const published = recoveryCopies.detachJournal(raw);
     assertWritable();
     if (!ownsStage()) throw conflict();
-    recoveryCopies.assertSnapshot(before, recoveryCheck.verifyCheckpoint, recoveryCheck.verifyJournal);
+    recoveryCopies.assertSnapshot(
+      before, recoveryCheck.verifyCheckpoint, recoveryCheck.verifyJournal, recoveryCheck.adopted,
+    );
     writePersonalImportBrowserPrimary(storage, key, published);
     return published;
   };
@@ -489,18 +491,15 @@ export function capturePersonalImportRollback(key: string) {
   const retired = fileExists(retirementFile(key));
   const retiredPayload = retired && !rejectionRecorded ? readOptionalFile(payload) : undefined;
   if (retired && !rejectionRecorded && !rearmedPattern.test(retiredPayload ?? '')) return undefined;
-  let committed: boolean;
   let markerCommitted = false;
   let rejected = rejectionRecorded;
   let markerError: unknown;
   try {
     const state = marker.textSync();
     rejected ||= state === rejectedMarker;
-    committed = !rejected && state === committedMarker;
-    markerCommitted = committed;
+    markerCommitted = !rejected && state === committedMarker;
   } catch (error) {
     markerError = error;
-    committed = !rejected;
   }
   let stored = retiredPayload;
   let payloadError: unknown;
@@ -508,7 +507,7 @@ export function capturePersonalImportRollback(key: string) {
     try {
       stored = payload.textSync();
     } catch (error) {
-      if (!committed) payloadError = error;
+      if (!markerCommitted) payloadError = error;
     }
   }
   const rearmed = rearmedPattern.test(stored ?? '');
@@ -534,7 +533,9 @@ export function capturePersonalImportRollback(key: string) {
     ? receipt[2]
     : undefined;
   return {
-    raw: committed ? undefined : binding ? encoded?.slice(binding[0].length) : encoded,
+    // An unreadable marker cannot establish retirement. Keep the payload
+    // available so the caller can check it against the primary and publication evidence.
+    raw: markerCommitted ? undefined : binding ? encoded?.slice(binding[0].length) : encoded,
     rejected,
     markerCommitted,
     markerError: rejected && encoded !== undefined ? undefined : markerError,

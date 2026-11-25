@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import { sha256 } from 'js-sha256';
 import {
   PERSONAL_IMPORT_CHANGE,
+  changePersonalImport as editWebCalendarImport,
   readPersonalImports as readWebCalendarImports,
   savePersonalImportBatch as saveWebCalendarBatch,
   withPersonalImportSyncLock as withWebCalendarSyncLock,
@@ -671,12 +672,15 @@ test.each([
 });
 
 test.each([
-  ['rejection file', 'records'], ['pending marker', 'records'], ['neither', 'records'],
-  ['neither', 'batches'],
+  ['rejection file', 'records', false], ['pending marker', 'records', false],
+  ['neither', 'records', false], ['neither', 'batches', false], ['neither', 'batches', true],
 ] as const)(
-  'native restart restores a revoked deletion after rollback write failures (rejection: %s, primary: %s)',
-  async (rejection, revokedWrite) => {
-    const scope = { owner: `nuni:rejected-delete-with-pending-payload-${rejection}-${revokedWrite}`, schoolId: 'pu' };
+  'native restart restores a revoked deletion (rejection: %s, primary: %s, pending read fails: %s)',
+  async (rejection, revokedWrite, pendingReadFails) => {
+    const scope = {
+      owner: `nuni:rejected-delete-with-pending-payload-${rejection}-${revokedWrite}-${pendingReadFails}`,
+      schoolId: 'pu',
+    };
     const { ledger } = await appendPersonalImports(scope, [row('original')]);
     const key = personalImportStorageKey(scope);
     const prefix = `personal-imports-${sha256(key)}.rollback.`;
@@ -757,7 +761,19 @@ test.each([
       expect(new File(Paths.document, prefix + 'json').textSync()).toBe(JSON.stringify(ledger));
       await jest.isolateModulesAsync(async () => {
         const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
-        await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+        const textSync = File.prototype.textSync;
+        const pendingReadFault = jest.fn(() => { throw new Error('待處理標記暫時無法讀取'); });
+        const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+          if (pendingReadFails && this.uri.endsWith(prefix + 'pending')) pendingReadFault();
+          return textSync.call(this);
+        });
+        try {
+          await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+          if (pendingReadFails) expect(pendingReadFault).toHaveBeenCalled();
+          expect(notify).not.toHaveBeenCalled();
+        } finally {
+          read.mockRestore();
+        }
         write.mockRestore();
         remove.mockRestore();
         create.mockRestore();
@@ -3134,6 +3150,88 @@ test.each(['Web', 'Expo Web'] as const)('%s recovers a bound journal before an o
     restoreLocks();
     cleanup();
   }
+});
+
+describe.each(['Web', 'Expo Web'] as const)('%s journal recovery with an unreadable checkpoint', (client) => {
+  test.each([
+    ['missing', 'append'], ['damaged', 'append'],
+    ['missing', 'edit'], ['damaged', 'edit'],
+    ['missing', 'sync'], ['damaged', 'sync'],
+  ] as const)('publishes the first %s-primary %s', async (primaryState, operation) => {
+    const cleanup = useWebStorage();
+    const restoreLocks = withoutWebWriteLocks();
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: { request: async (_key: string, write: () => unknown) => write() },
+    });
+    const scope = { owner: 'nuni:pa_00000000-0000-4000-a000-000000000001', schoolId: 'pu' };
+    const storage = window.localStorage;
+    const key = personalImportStorageKey(scope);
+    const checkpoint = key + ':checkpoint';
+    const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+    const active = () => true;
+    const getItem = Storage.prototype.getItem;
+    try {
+      await appendPersonalImports(scope, [row('original')]);
+      const ledger = await setPersonalImportSyncEnabled(scope, true, active);
+      const original = storage.getItem(key)!;
+      const priorCheckpoint = JSON.stringify({ version: 1, records: [], batches: [] });
+      storage.setItem(checkpoint, priorCheckpoint);
+      const attempted = primaryState === 'missing' ? null : '{"version":1,';
+      if (attempted === null) storage.removeItem(key);
+      else storage.setItem(key, attempted);
+      storage.setItem(journal, JSON.stringify({
+        id: 'interrupted', original, before: sha256(original), attempted: sha256(attempted ?? 'null'),
+      }));
+      const checkpointReadFault = jest.fn(() => { throw new Error('檢查點持續無法讀取'); });
+      const read = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, entry) {
+        if (this === storage && entry === checkpoint) checkpointReadFault();
+        return getItem.call(this, entry);
+      });
+      try {
+        const loadRecords = async () => client === 'Web'
+          ? readWebCalendarImports(scope) : (await loadPersonalImports(scope)).records;
+        expect(await loadRecords()).toEqual(ledger.records);
+        const newRow = row('new', '統計');
+        const base = {
+          schoolId: scope.schoolId, revision: 1, records: ledger.records,
+          updatedAt: '2026-11-25T00:00:00.000Z',
+        };
+        if (operation === 'append') {
+          const append = client === 'Web' ? saveWebCalendarBatch : appendPersonalImports;
+          await append(scope, [newRow]);
+        } else if (operation === 'edit') {
+          const edit = client === 'Web' ? editWebCalendarImport : editPersonalImport;
+          await edit(scope, ledger.records[0], { ...newRow, id: ledger.records[0].id });
+        } else if (client === 'Web') {
+          await withWebCalendarSyncLock(scope, async (state, _persist, assertSnapshot) => {
+            expect(state.records).toEqual(ledger.records);
+            assertSnapshot();
+            return { state: { ...state, sync: { enabled: true, base } }, result: undefined };
+          });
+        } else {
+          const transport = jest.fn(async () => base);
+          await syncPersonalImports(scope, transport, active);
+          expect(transport).toHaveBeenCalledWith('personal-imports/read', { schoolId: scope.schoolId });
+        }
+        const titles = {
+          append: ['微積分', '統計'], edit: ['統計'], sync: ['微積分'],
+        }[operation];
+        const published = JSON.parse(storage.getItem(key)!);
+        expect(published.records.map(({ title }: PersonalImportRecord) => title)).toEqual(titles);
+        expect((await loadRecords()).map(({ title }) => title)).toEqual(titles);
+        expect(published.sync).toEqual({ enabled: true, base: operation === 'sync' ? base : null });
+        expect(checkpointReadFault).toHaveBeenCalled();
+        expect(getItem.call(storage, checkpoint)).toBe(priorCheckpoint);
+        expect(storage.getItem(journal)).toBeNull();
+      } finally {
+        read.mockRestore();
+      }
+    } finally {
+      restoreLocks();
+      cleanup();
+    }
+  });
 });
 
 describe.each(['Web', 'Expo Web'] as const)('%s interrupted browser write', (client) => {

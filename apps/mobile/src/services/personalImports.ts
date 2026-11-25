@@ -394,8 +394,8 @@ export function mutatePersonalImportLedger<T>(
       const assertSnapshot = () => {
         assertWritable();
         if (browserRecovery) {
-          const { verifyCheckpoint, verifyJournal } = recoveryCheck();
-          browserRecovery.assertSnapshot(primaryRaw, verifyCheckpoint, verifyJournal);
+          const { verifyCheckpoint, verifyJournal, adopted } = recoveryCheck();
+          browserRecovery.assertSnapshot(primaryRaw, verifyCheckpoint, verifyJournal, adopted);
         }
       };
       const checkpoint = async (ledger: PersonalImportLedger) => {

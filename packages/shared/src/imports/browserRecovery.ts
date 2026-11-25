@@ -70,11 +70,13 @@ export function capturePersonalImportBrowserRecovery(
   };
   const readErrors: unknown[] = [];
   let journalUnreadable = false;
+  let checkpointUnreadable = false;
   const readCopy = (entry: string) => {
     try {
       return storage.getItem(entry);
     } catch (error) {
       if (entry === entries.journal) journalUnreadable = true;
+      else checkpointUnreadable = true;
       readErrors.push(error);
       return null;
     }
@@ -88,9 +90,17 @@ export function capturePersonalImportBrowserRecovery(
     ...copies,
     readErrors,
     mayHaveCopies: readErrors.length > 0 || copies.journal !== null || copies.checkpoint !== null,
-    assertSnapshot(primary: string | null, checkCheckpoint: boolean, checkJournal = false) {
+    assertSnapshot(
+      primary: string | null,
+      checkCheckpoint: boolean,
+      checkJournal: boolean,
+      adopted?: PersonalImportRecoverySource,
+    ) {
+      // Journal recovery can proceed without a checkpoint snapshot when the
+      // checkpoint was already unreadable during recovery.
+      const verifyCheckpoint = checkCheckpoint && !(checkpointUnreadable && adopted === 'journal');
       if (storage.getItem(key) !== primary ||
-          (checkCheckpoint && storage.getItem(entries.checkpoint) !== copies.checkpoint) ||
+          (verifyCheckpoint && storage.getItem(entries.checkpoint) !== copies.checkpoint) ||
           (checkJournal && storage.getItem(entries.journal) !== copies.journal)) {
         throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
       }
