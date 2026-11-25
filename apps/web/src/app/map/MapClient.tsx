@@ -179,7 +179,7 @@ function MapContent({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const routeNoteId = useId();
   const detailNoteId = useId();
-  const [selection, setSelection] = useState<string | null>(null);
+  const [selection, setSelection] = useState<MapLocation | '' | 'revoked' | null>(null);
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [nearbyOnly, setNearbyOnly] = useState(false);
   const [myLocation, setMyLocation] = useState<MapCoordinate | null>(null);
@@ -269,8 +269,13 @@ function MapContent({
   // A later source update can make a room ambiguous; derive this instead of retaining a guess.
   const classroomPlace = classroomLinkActive && classroom.status === 'matched' ? classroom.matches[0] : null;
   const automaticClassroomId = placeState.source === 'ready' ? classroomPlace?.id : undefined;
-  const selectedId = selection ?? (focus ? focusedPlace?.id : automaticClassroomId);
-  const selected = locations.find((location) => location.id === selectedId) ?? null;
+  const automaticPlace = focus ? focusedPlace : locations.find((location) => location.id === automaticClassroomId);
+  const selected = typeof selection === 'object' && selection !== null
+    ? confirmedRoutePlace(locations, selection)
+    : selection === null ? confirmedRoutePlace(locations, automaticPlace ?? null) : null;
+  // Explicitly chosen markers must not silently move or reactivate after a source refresh.
+  if (typeof selection === 'object' && selection !== null && !selected) setSelection('revoked');
+  const selectedId = selected?.id;
   const deepLinkRoute = useMemo<[MapLocation, MapLocation] | null>(() => {
     // A shared route is not an explicit confirmation of provisional bundled markers.
     if (placeState.source !== 'ready') return null;
@@ -301,7 +306,7 @@ function MapContent({
     // in login return URLs so it can be restored if the source later recovers.
     returnParams.set('route', route);
   }
-  const returnFocus = selection ?? focus ?? selectedId;
+  const returnFocus = selection === null ? focus ?? selectedId : selectedId;
   if (returnFocus) returnParams.set('focus', returnFocus);
   const returnQuery = normalizeCampusClassroomQuery(search);
   if (returnQuery) returnParams.set('query', returnQuery);
@@ -309,7 +314,7 @@ function MapContent({
   const platformLoginHref = `/login?returnUrl=${returnUrl}`;
   const schoolLoginHref = `/login?reconnect=school&returnUrl=${returnUrl}`;
   const pendingRoutePlaces = routeLocations?.filter((place) => isProvidencePendingVerification(school, place)) ?? [];
-  const selectLocation = useCallback((location: MapLocation) => setSelection(location.id), []);
+  const selectLocation = useCallback((location: MapLocation) => setSelection({ ...location }), []);
   const walkFrom = myLocation ?? (school === 'pu' ? PROVIDENCE_WALK_ORIGIN : null);
   const walkFromGate = Boolean(walkFrom && !myLocation);
   const mapLocations = useMemo(() => {
@@ -650,6 +655,11 @@ function MapContent({
       {placeState.source === 'ready' && route && !deepLinkRoute && routeDraft === null && (
         <p className={styles.notice} role="status">
           這個連結的起點或終點已不在目前地點資料中，或無法唯一確認有效位置。請從下方列表重新選擇。
+        </p>
+      )}
+      {selection === 'revoked' && (
+        <p className={styles.notice} role="status">
+          先前選擇的地點已變更或無法唯一確認，已停用地點導航。請重新選擇地點。
         </p>
       )}
       {!sourcePending && focus && !locations.some((location) => location.id === focus) && (
