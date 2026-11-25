@@ -119,6 +119,43 @@ describe('audited outdoor campus walking graph', () => {
     expect(isCampusWalkingRouteCurrent(result, 'other', now)).toBe(false);
   });
 
+  it('prefers later route audit expiry for equally short parallel ways regardless of input order', () => {
+    const early = '2026-11-24T09:00:00Z';
+    const late = '2026-11-25T08:00:00Z';
+    const edges = [
+      { ...graph.edges[0], validUntil: early },
+      { ...graph.edges[0], osmWayId: 200, validUntil: late },
+      { ...graph.edges[1], validUntil: late },
+    ];
+    for (const ordered of [edges, [...edges].reverse()]) {
+      const result = route({ ...graph, edges: ordered })!;
+      expect(result.osmWayIds).toEqual([200, 101]);
+      expect(result.reviewExpiresAtMs).toBe(Date.parse(late));
+      expect(isCampusWalkingRouteCurrent(result, 'fixture', Date.parse(early))).toBe(true);
+      expect(route({ ...graph, edges: ordered }, 3, 1)?.osmWayIds).toEqual([101, 200]);
+    }
+    const equal = edges.map(edge => ({ ...edge, validUntil: late }));
+    expect(route({ ...graph, edges: equal })?.osmWayIds).toEqual([101, 101]);
+    expect(route({ ...graph, edges: [...equal].reverse() })?.osmWayIds).toEqual([101, 101]);
+  });
+
+  it('compares the minimum expiry across an entire equal-distance route, not just the last edge', () => {
+    const early = '2026-11-24T09:00:00Z';
+    const late = '2026-11-25T08:00:00Z';
+    // Node 5 shares coordinates with node 2 but remains a distinct explicit path.
+    const edges = [
+      { ...graph.edges[0], validUntil: early },
+      { ...graph.edges[1], validUntil: late },
+      { ...graph.edges[0], to: 5, osmWayId: 200, validUntil: late },
+      { ...graph.edges[1], from: 5, osmWayId: 200, validUntil: late },
+    ];
+    for (const ordered of [edges, [...edges].reverse()]) {
+      const result = route({ ...graph, edges: ordered })!;
+      expect(result.nodes.map(n => n.id)).toEqual([1, 5, 3]);
+      expect(result.reviewExpiresAtMs).toBe(Date.parse(late));
+    }
+  });
+
   it('invalidates cached routes when the snapshot expires or clock is invalid', () => {
     const result = route(graph)!;
     const deadline = Date.parse(graph.osmBaseAt) + 48 * 60 * 60 * 1000;
