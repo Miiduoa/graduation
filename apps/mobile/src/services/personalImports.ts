@@ -59,7 +59,9 @@ async function readLedgerSnapshot(
 ) {
   const web = Platform.OS === 'web';
   const journal = web ? undefined : capturePersonalImportRollback(key);
-  const checkpoint = journal ? await readLegacyCheckpoint(key, scope).catch(() => null) : undefined;
+  const checkpoint = journal?.raw !== undefined
+    ? await readLegacyCheckpoint(key, scope).catch(() => null)
+    : undefined;
   let primary: string | null = null;
   let primaryError: unknown;
   if (web || !pendingRestorations.has(key)) {
@@ -74,7 +76,9 @@ async function readLedgerSnapshot(
     ? capturePersonalImportBrowserRecovery(window.localStorage, key)
     : undefined;
   const primaryVerified = isReadableLedger(primary, scope);
-  const nativeCommit = !web && primaryVerified && hasNativeCommitEncoding(primary);
+  const nativeCommit = !web && primaryVerified &&
+    (hasNativeCommitEncoding(primary) || (primary !== null && !!journal?.matchesVerifiedPrimary?.(primary)));
+  if (journal?.markerError && !nativeCommit) throw journal.markerError;
   const nativeJournal = nativeCommit && !journal?.rejected ? undefined : journal?.raw;
   if (primaryError && nativeJournal === undefined && !isStorageRowTooLarge(primaryError)) {
     throw primaryError;
@@ -411,12 +415,18 @@ export function mutatePersonalImportLedger<T>(
               assertWritable();
               keepNativeCommitEncoding = !journal.retire(assertWritable, checkpointRetired);
               if (keepNativeCommitEncoding) {
-                journal.preparePrimaryCommit();
-                assertWritable();
                 publishingCommitEncoding = true;
-                writtenRaw = encodeNativeCommit(ledger);
-                await AsyncStorage.setItem(key, writtenRaw);
-                await verifyNativeLedgerWrite(key, writtenRaw);
+                assertWritable();
+                const encoded = encodeNativeCommit(ledger);
+                try {
+                  journal.preparePrimaryCommit();
+                  await AsyncStorage.setItem(key, encoded);
+                  await verifyNativeLedgerWrite(key, encoded);
+                  writtenRaw = encoded;
+                } catch {
+                  assertWritable();
+                  journal.retainVerifiedPrimary(raw);
+                }
                 assertWritable();
               }
               pendingRestorations.delete(key);
