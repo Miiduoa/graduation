@@ -629,9 +629,8 @@ export function MerchantOperations({
       if (current()) {
         rememberWrite(revision);
         if (!visibleRef.current) await checkAccess(current);
-        // Setup proceeds to another write in the same view. Verify its new
-        // readiness version before enabling the next setup step.
-        else if ((action === 'settings' || action === 'activate') && !readAfterWrite.current &&
+        // A version-changing receipt invalidates the previous entry confirmation.
+        else if (!readAfterWrite.current &&
           observations.detailFor(draftKey)?.readinessVersion !== entryConfirmation?.version &&
           !observations.detailReadConfirmation(draftKey)) {
           await read(false, 'after-confirmed-write', revision);

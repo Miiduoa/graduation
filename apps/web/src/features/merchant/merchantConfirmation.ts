@@ -517,7 +517,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     detailFor,
     detailReadConfirmation,
     menuReceiptFor(key: string, version: number) {
-      if (menuReceipts.get(key)?.version !== version) return null;
+      const receipt = menuReceipts.get(key);
+      if (!receipt || receipt.version > version || entries.get(key)?.row?.version !== version) return null;
       return drafts.get(key)?.menuReceipt ?? null;
     },
     recordWrite,
@@ -595,7 +596,17 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         rejectWorkspaceList(kind === 'denied', revision);
         return { kind } as const;
       }
-      if (kind === 'denied') return { kind, revoked: revoke(target.key, revision) } as const;
+      if (kind === 'denied') {
+        const { key, source } = target;
+        const isPendingOrderRead = source === 'orders' && orderReadScopes.get(key)?.revision === revision;
+        // A detail GET cannot supersede an order denial that has yet to arrive.
+        const denialRevision = isPendingOrderRead && revision <= accessConfirmationRevision(key)
+          ? beginRequest()
+          : revision;
+        const revoked = revoke(key, denialRevision);
+        if (isPendingOrderRead) recordReadFailure(revision, key, source);
+        return { kind, revoked } as const;
+      }
       recordReadFailure(revision, target.key, target.source);
       return { kind } as const;
     },
