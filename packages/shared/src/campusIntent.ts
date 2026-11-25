@@ -70,7 +70,14 @@ export function suggestCampusDestinations(input: string): CampusQuickDestination
     '',
   );
   const chineseLibraryLookup = physicalPhrase !== phrase;
-  const locationQuestion = /在哪|位置|怎麼走|如何走|帶我去|走去|導航|找教室|地圖/.test(physicalPhrase) || englishLocation;
+  // Digital coursework and personal-service access is not a physical location.
+  // Require an explicit access verb and a clause boundary; keep floor, room,
+  // direction and independent place questions in the remaining phrase.
+  const physicalServicePhrase = physicalPhrase.replace(
+    /(?:作業|教材|課表|成績|行事曆|公告|通知)在哪(?:裡|裏|兒)?(?:可以|能)?(?:查看|查詢|下載|上傳|繳交|看|查|交)(?:呢|啊|嗎)?(?=$|[，。！？、；,.!?;])/g,
+    '',
+  );
+  const locationQuestion = /在哪|位置|怎麼走|如何走|帶我去|走去|導航|找教室|地圖/.test(physicalServicePhrase) || englishLocation;
   const englishBus = /\b(?:bus|buses|bus stop|shuttle)\b/;
   const busQuestion = /公車|巴士|站牌|到站|搭車|幾號車/.test(phrase) || englishBus.test(normalized);
 

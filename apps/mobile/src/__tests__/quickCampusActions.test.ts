@@ -215,3 +215,26 @@ test.each([
   expect(actions.map(action => action.destination)).toEqual(expected);
   expect(actions.every(action => Boolean(ROUTE_TO_TAB[action.route]))).toBe(true);
 });
+
+test.each([
+  ["作業在哪裡交？",["/classroom"]],
+  ["作業在哪裡可以上傳？",["/classroom"]],
+  ["教材在哪裡下載？",["/classroom"]],
+  ["課表在哪裡看？",["/timetable"]],
+  ["成績在哪裡查詢？",["/grades"]],
+  ["行事曆在哪裡查看？",["/calendar"]],
+  ["公告在哪裡看？",["/announcements"]],
+  ["通知在哪裡看？",["/messages"]],
+  ["課表在哪裡看？教室怎麼走？",["/map","/timetable"]],
+  ["作業在哪裡交？圖書館在哪裡？",["/map","/classroom"]],
+  ["作業在哪一間教室交？",["/map","/classroom"]],
+  ["課表在哪裡看？館藏查詢在哪裡？",["/timetable","/library"]],
+  ["課表在哪裡看？公車站在哪裡？",["/bus","/timetable"]],
+  ["課表在哪裡看？作業在哪裡交？成績在哪裡查？",["/classroom","/timetable","/grades"]],
+  ["作業在哪裡交給老師？",["/map","/classroom"]],
+  ["教材在哪一層領取？",["/map","/classroom"]],
+])('routes digital coursework and service access without losing physical destinations: %s', (phrase, expected) => {
+  const actions = getMobileQuickActions(phrase);
+  expect(actions.map(action => action.destination)).toEqual(expected);
+  expect(actions.every(action => Boolean(ROUTE_TO_TAB[action.route]))).toBe(true);
+});
