@@ -669,6 +669,19 @@ it('hides the loaded month grid during Nuni revalidation and retains the unsaved
   expect(view.getByLabelText('標題').props.value).toBe(draftTitle);
 });
 
+it('keeps the ordinary draft after an interactive login to the same Nuni account', async () => {
+  mockUseLiveScope = true;
+  mockSignInGeneration = 1;
+  const view = renderCalendar();
+  await fillDraft(view, '互動登入後保留的草稿');
+
+  mockSignInGeneration = 2;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(view.getByLabelText('標題').props.value).toBe('互動登入後保留的草稿');
+  fireEvent.press(view.getByRole('button', { name: '儲存行程' }));
+  await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
+});
+
 it('blocks a started save until the account scope is revalidated', async () => {
   const scope = mockScope!;
   const originalTitle = '工作區原有行程';
@@ -1057,7 +1070,11 @@ it.each(['new owner', 'same owner'])(
     if (transition === 'same owner') mockSignInGeneration = 2;
     view.rerender(<PersonalCalendarScreen />);
     view.rerender(<PersonalCalendarScreen />);
-    expect(view.queryByLabelText('標題')).toBeNull();
+    if (transition === 'same owner') {
+      expect(view.getByLabelText('標題').props.value).toBe('登出前排隊的草稿');
+    } else {
+      expect(view.queryByLabelText('標題')).toBeNull();
+    }
     await act(async () => {
       read.resolve(stored);
       await expect(save).rejects.toThrow('帳號或學校已切換');
@@ -1067,7 +1084,11 @@ it.each(['new owner', 'same owner'])(
     await waitUntilEditable(view);
     fireEvent.press(view.getByText('列表'));
     expect(view.getByText('新登入帳本的既有行程')).toBeTruthy();
-    await fillDraft(view, '登入後新增的行程');
+    if (transition === 'same owner') {
+      fireEvent.changeText(view.getByLabelText('標題'), '登入後新增的行程');
+    } else {
+      await fillDraft(view, '登入後新增的行程');
+    }
     fireEvent.press(view.getByRole('button', { name: '儲存行程' }));
     await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
     expect((await loadPersonalImports(newScope)).records.map(({ title }) => title)).toEqual(

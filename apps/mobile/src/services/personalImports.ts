@@ -16,7 +16,7 @@ import {
   clearNativeVerificationReceipt,
   clearPersonalImportRollback,
   commitWebPersonalImports,
-  discardNativeRollbackAfterVerifiedWrite,
+  clearVerifiedNativeRollback,
   NativeRollbackUnavailableError,
   preparePersonalImportRollback,
   publishNativeRollbackResolution,
@@ -48,6 +48,8 @@ export const personalImportStorageKey = (scope: PersonalImportScope) =>
 const nativeReceiptKey = (key: string) => key + ':verified-write';
 const nativeBackupReceiptKey = (key: string) => key + ':verified-write-backup';
 const nativeRollbackResolutionKey = (key: string) => key + ':rollback-resolution';
+const checkpointPublicationPattern = /^verified:([a-z0-9:-]+(?: [a-z0-9:-]+)+)\n/;
+
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
 const locks = new Map<string, Promise<unknown>>();
 const pendingWrites = new Map<string, Promise<void>>();
@@ -63,12 +65,24 @@ function isStorageRowTooLarge(error: unknown): boolean {
   );
 }
 
-async function readNativeReceipt(receiptKey: string): Promise<string | null> {
+async function readNativeStorage(key: string): Promise<string | null> {
   try {
-    return await AsyncStorage.getItem(receiptKey);
+    return await AsyncStorage.getItem(key);
   } catch {
-    // A transient read failure must not hide a durable verification receipt.
-    return AsyncStorage.getItem(receiptKey).catch(() => null);
+    return AsyncStorage.getItem(key);
+  }
+}
+
+async function readNativeReceipt(receiptKey: string): Promise<string | null> {
+  return readNativeStorage(receiptKey).catch(() => null);
+}
+
+async function readNativeCheckpointPublication(checkpointKey: string): Promise<string | null> {
+  try {
+    return await readNativeStorage(checkpointKey);
+  } catch {
+    const [[, encoded]] = await AsyncStorage.multiGet([checkpointKey]);
+    return encoded;
   }
 }
 
@@ -115,7 +129,11 @@ async function readLedgerSnapshot(
   const fileReceipt = needsReceipt ? readNativeVerificationReceipt(key) : undefined;
   const backupReceipt = needsReceipt ? await readNativeReceipt(nativeBackupReceiptKey(key)) : null;
   const rollbackResolution = needsReceipt ? await readNativeReceipt(nativeRollbackResolutionKey(key)) : null;
-  const receipts = [receipt, fileReceipt, backupReceipt, journal?.verifiedReceipt, rollbackResolution];
+  const checkpointPublication = needsReceipt
+    ? await readNativeCheckpointPublication(personalImportCheckpointKey(key)).catch(() => null)
+    : null;
+  const checkpointReceipt = checkpointPublication?.match(checkpointPublicationPattern)?.[1].replace(/ /g, '\n');
+  const receipts = [receipt, fileReceipt, backupReceipt, journal?.verifiedReceipt, rollbackResolution, checkpointReceipt];
   const rejectionHash = journal?.rejectionHash;
   const primaryHash = primaryVerified && primary !== null && rejectionMatches ? sha256(primary) : undefined;
   const publishedRejectionHash = primaryHash === undefined ? undefined : receipts
@@ -125,8 +143,8 @@ async function readLedgerSnapshot(
   const restoredRejectionHash = publishedRejectionHash ??
     ((primaryVerified || restoredEmpty) && rejectionMatches?.(primary) ? rejectionHash : undefined);
   const checkpointRejection = restoredRejectionHash ? undefined : rejectionMatches;
-  const resolvedUnreadableRejection = primary !== null && rollbackResolution !== null &&
-    journal?.matchesUnreadableRejectionResolution?.(primary, rollbackResolution) === true;
+  const resolvedUnreadableRejection = primary !== null && [rollbackResolution, checkpointReceipt].some((proof) =>
+    typeof proof === 'string' && journal?.matchesUnreadableRejectionResolution?.(primary, proof));
   const verifiedByJournal = primary !== null && (
     resolvedUnreadableRejection ||
     journal?.matchesVerifiedPrimary?.(primary) === true ||
@@ -242,7 +260,10 @@ async function readLegacyCheckpoint(
   if (encoded !== null) {
     try {
       // Older builds wrapped the original ledger in a second layer of JSON.
-      const raw: unknown = unwrapPersonalImportCheckpoint(encoded);
+      const publication = encoded.match(checkpointPublicationPattern);
+      const stored = publication ? encoded.slice(publication[0].length) : encoded;
+      if (!stored) return null;
+      const raw: unknown = unwrapPersonalImportCheckpoint(stored);
       if (raw === null) return { raw: null, ledger: empty(), source: 'checkpoint', checkpoint: encoded };
       if (typeof raw === 'string' && raw.trimStart().startsWith('{')) {
         return { raw, ledger: parseLedger(raw, scope), source: 'checkpoint', checkpoint: encoded };
@@ -279,9 +300,9 @@ async function retireNativeCheckpoint(
   }
 }
 
-async function verifyNativeLedgerWrite(key: string, raw: string | null) {
+async function verifyNativeLedgerWrite(key: string, raw: string | null, retryRead = true) {
   // Android can store a SQLite row that CursorWindow cannot read back.
-  if (await AsyncStorage.getItem(key) !== raw) {
+  if (await (retryRead ? readNativeStorage(key) : AsyncStorage.getItem(key)) !== raw) {
     throw new Error('無法確認匯入資料已儲存，請稍後再試。');
   }
 }
@@ -294,7 +315,8 @@ async function restoreLedger(
 ) {
   if (raw === null) await AsyncStorage.removeItem(key);
   else await AsyncStorage.setItem(key, raw);
-  await verifyNativeLedgerWrite(key, raw);
+  // Keep durable rejection evidence if restoration cannot be confirmed immediately.
+  await verifyNativeLedgerWrite(key, raw, false);
   pendingRestorations.delete(key);
   if (keepJournal) return;
   try {
@@ -536,6 +558,8 @@ export function mutatePersonalImportLedger<T>(
             let publishingRollbackResolution = false;
             let previousRollbackResolution: string | null = null;
             let writingRollbackResolution = false;
+            let previousCheckpoint: string | null = null;
+            let writingCheckpointPublication = false;
             try {
               writtenRaw = journal ? firstRaw : raw;
               await AsyncStorage.setItem(key, writtenRaw);
@@ -562,7 +586,7 @@ export function mutatePersonalImportLedger<T>(
                 await verifyNativeLedgerWrite(key, writtenRaw);
                 assertWritable();
                 const published = journal.publishVerifiedPrimary(
-                  writtenRaw, assertWritable, writtenRaw === firstRaw && options.allowNativePrimaryOnly,
+                  writtenRaw, assertWritable, options.allowNativePrimaryOnly,
                 );
                 if (!published) {
                   // Persist the ordinary encoding outside the tentative hashes
@@ -576,12 +600,7 @@ export function mutatePersonalImportLedger<T>(
                     // The optional rewrite may fail before or after reaching disk.
                   }
                   assertWritable();
-                  const readback = await AsyncStorage.getItem(key).catch((error: unknown) => {
-                    // A failed optional rewrite can leave either encoding on disk.
-                    // Retry a transient read before deciding which bytes to publish.
-                    if (fallbackWritten) throw error;
-                    return AsyncStorage.getItem(key);
-                  });
+                  const readback = await readNativeStorage(key);
                   if (readback === raw) {
                     writtenRaw = raw;
                   } else if (!fallbackWritten && readback === writtenRaw) {
@@ -646,7 +665,20 @@ export function mutatePersonalImportLedger<T>(
                           }
                         } catch {
                           assertWritable();
-                          discardNativeRollbackAfterVerifiedWrite(key);
+                          if (!clearVerifiedNativeRollback(key)) {
+                            const checkpointKey = personalImportCheckpointKey(key);
+                            previousCheckpoint = await readNativeCheckpointPublication(checkpointKey);
+                            assertWritable();
+                            // Preserve any legacy recovery payload while binding publication
+                            // to the exact attempt. File deletion is only a best effort.
+                            const priorRecovery = previousCheckpoint?.replace(checkpointPublicationPattern, '') ?? '';
+                            const publication = 'verified:' + newReceipt.replace(/\n/g, ' ') + '\n' + priorRecovery;
+                            writingCheckpointPublication = true;
+                            await writeNativeReceipt(checkpointKey, publication);
+                            if (await readNativeCheckpointPublication(checkpointKey) !== publication) {
+                              throw new Error('無法確認匯入資料的儲存憑據。');
+                            }
+                          }
                         }
                       }
                     }
@@ -656,8 +688,18 @@ export function mutatePersonalImportLedger<T>(
                 if (!writingFileReceipt) currentReceipt = newReceipt;
                 if (writingBackupReceipt && !publishingRollbackResolution) currentBackupReceipt = newReceipt;
               }
+              assertWritable();
               pendingRestorations.delete(key);
             } catch (error) {
+              if (writingCheckpointPublication) {
+                const checkpointKey = personalImportCheckpointKey(key);
+                try {
+                  if (previousCheckpoint === null) await AsyncStorage.removeItem(checkpointKey);
+                  else await writeNativeReceipt(checkpointKey, previousCheckpoint);
+                } catch {
+                  // Continue restoring the rejection, journal and primary.
+                }
+              }
               if (writingRollbackResolution) {
                 const resolutionKey = nativeRollbackResolutionKey(key);
                 try {
