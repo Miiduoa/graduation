@@ -12,6 +12,8 @@ import { Platform } from 'react-native';
 const markerSuffix = '.rollback.pending';
 const committedMarker = 'committed';
 const rejectedMarker = 'rejected';
+const resolvedRejection = 'restored';
+const verifiedNativeAttempts = new Map<string, { attempt: string; hash: string }>();
 const rejectedPrefix = 'rejected:\n';
 const rearmedPattern = /^rearmed(?::[^\n:]+)?:\n/;
 const attemptPattern = /^attempt:([^:\n]+):([a-f0-9]{64}):([a-f0-9]{64})(?::([a-f0-9]{64}))?\n/;
@@ -498,12 +500,13 @@ function journalFiles(key: string) {
 export function capturePersonalImportRollback(key: string) {
   const { payload, marker, marked } = journalFiles(key);
   const rejection = rejectionFile(key);
-  const rejectionRecorded = fileExists(rejection);
+  const rejectionValue = fileExists(rejection) ? readOptionalFile(rejection) : resolvedRejection;
+  const rejectionRecorded = rejectionValue !== resolvedRejection;
   if (!marked) {
     if (!rejectionRecorded) return undefined;
     // A primary-only write has no journal payload. Bind recovery to the
     // original bytes so an unrelated legacy checkpoint cannot be adopted.
-    const checkpointHash = readOptionalFile(rejection);
+    const checkpointHash = rejectionValue;
     return {
       rejected: true,
       checkpointRejection: (raw: string | null) => checkpointHash === sha256(raw ?? 'null'),
@@ -578,6 +581,10 @@ export function capturePersonalImportRollback(key: string) {
     ? settlement.slice(settlementPrefix.length)
     : undefined;
   const settledHash = settled && primaryHashPattern.test(settled) ? settled : undefined;
+  const verifiedAttempt = verifiedNativeAttempts.get(key);
+  const inProcessHash = verifiedAttempt && verifiedAttempt.attempt === attempt?.[0]
+    ? verifiedAttempt.hash
+    : undefined;
   return {
     // An unreadable marker cannot establish retirement. Keep the payload
     // available so the caller can check it against the primary and publication evidence.
@@ -591,9 +598,10 @@ export function capturePersonalImportRollback(key: string) {
     matchesFallbackPrimary,
     markerError: rejected && encoded !== undefined ? undefined : markerError,
     payloadError,
-    matchesVerifiedPrimary: verifiedHash || binding || receiptHash || settledHash ? (raw: string) => {
+    matchesVerifiedPrimary: verifiedHash || binding || receiptHash || settledHash || inProcessHash ? (raw: string) => {
       const hash = sha256(raw);
-      return hash === verifiedHash || hash === binding?.[1] || hash === receiptHash || hash === settledHash;
+      return hash === verifiedHash || hash === binding?.[1] || hash === receiptHash ||
+        hash === settledHash || hash === inProcessHash;
     } : undefined,
   };
 }
@@ -654,7 +662,23 @@ export function preparePersonalImportRollback(
   const { payload, marker, marked } = journalFiles(key);
   let resetMarker = false;
   const rejection = rejectionFile(key);
-  const hadRejection = fileExists(rejection);
+  let hadRejection = fileExists(rejection);
+  if (hadRejection) {
+    const state = readOptionalFile(rejection);
+    if (state === resolvedRejection) {
+      hadRejection = false;
+    } else if (!marked && attemptedPrimary && !attemptedPrimary.preserveRejection && state === sha256(encoded)) {
+      // The snapshot verified the original primary. Retire only its matching
+      // rejection before arming another attempt.
+      if (!deleteMarker(rejection)) {
+        rejection.write(resolvedRejection);
+        if (rejection.textSync() !== resolvedRejection) {
+          throw new Error('無法更新匯入資料的還原標記。');
+        }
+      }
+      hadRejection = false;
+    }
+  }
   let markerRejected = marked && hadRejection;
   if (marked) {
     try {
@@ -763,6 +787,7 @@ export function preparePersonalImportRollback(
   const retire = (assertWritable = () => {}, canDeleteMarker = true, primary?: string) => {
     // Commit synchronously so verification and commit cannot be separated by another JS event.
     if (canDeleteMarker && deleteMarker(marker)) {
+      verifiedNativeAttempts.delete(key);
       discardPayload(retirement);
       discardPayload(verification);
       discardPayload(publication);
@@ -819,6 +844,11 @@ export function preparePersonalImportRollback(
   };
   return {
     retire,
+    rememberVerifiedPrimary(primary: string) {
+      // The disk journal still protects failed writes. Bind this process's
+      // readback to the exact attempt whose publication files could not be saved.
+      verifiedNativeAttempts.set(key, { attempt, hash: sha256(primary) });
+    },
     publishVerifiedPrimary(primary: string, assertWritable: () => void, allowPrimaryOnly = false) {
       const hash = sha256(primary);
       recordVerification(hash);
@@ -877,6 +907,7 @@ export function preparePersonalImportRollback(
       }
     },
     retainRejection() {
+      if (verifiedNativeAttempts.get(key)?.attempt === attempt) verifiedNativeAttempts.delete(key);
       // Preserve the attempt binding even when the rollback copy is unreadable.
       try {
         payload.write(wrap(rejectedPrefix + encoded));
@@ -900,6 +931,9 @@ export function recordFailedPersonalImportRestoration(key: string, original: str
       rejection.write(sha256(original ?? 'null'));
     } else if (!fileExists(rejection)) {
       rejection.create();
+    } else {
+      const state = readOptionalFile(rejection);
+      if (state === undefined || state === resolvedRejection) rejection.write(rejectedMarker);
     }
     if (fileExists(rejection)) return;
   } catch {
@@ -911,6 +945,7 @@ export function recordFailedPersonalImportRestoration(key: string, original: str
 export function clearPersonalImportRollback(key: string): void {
   const { payload, marker, marked } = journalFiles(key);
   if (!marked || deleteMarker(marker)) {
+    verifiedNativeAttempts.delete(key);
     discardPayload(retirementFile(key));
     discardPayload(verificationFile(key));
     discardPayload(rejectionFile(key));

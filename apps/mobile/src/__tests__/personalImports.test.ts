@@ -571,6 +571,7 @@ test.each([
   ['readback without retirement file with verified replacement and no hash or receipt and readable payload', false],
   ['all retirement writes fail with verified first write and no hash or receipt and readable payload', false],
   ['all retirement writes fail with verified first write and no hash or receipt and readable payload without settlement', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback', false],
   ['all publication paths fail with temporarily unreadable payload', false],
   ['all publication paths fail with temporarily unreadable payload and successful restoration', false],
 ] as const)('native marker retirement %s I/O keeps the correct primary and notification (revoked: %s)', async (phase, revoked) => {
@@ -598,7 +599,8 @@ test.each([
   const unreadableMetadata = phase === 'readback without retirement file and unreadable payload';
   const verifiedFirstWrite = phase.includes('verified first write');
   const retirementWritesFail = phase.startsWith('all retirement writes fail');
-  const settlementFails = phase.endsWith('without settlement');
+  const settlementFails = phase.includes('without settlement');
+  const fallbackWriteFails = phase.endsWith('or fallback');
   const settlementFault = jest.fn(() => { throw new Error('已完成標記無法寫入'); });
   const verifiedReplacement = phase.includes('verified replacement');
   const publicationFails = phase.startsWith('all publication paths fail');
@@ -630,8 +632,9 @@ test.each([
       if (entry !== key) return nativeSet(entry, value);
       if (!active || (restorationFails && value === JSON.stringify(previous))) throw restoreError;
       encodedWrite = value.startsWith('{"batches":');
-      if (encodedWrite && !verifiedReplacement &&
-          (phase === 'all with primary write error' || failPayloadBinding || verifiedFirstWrite)) primaryFault();
+      if ((fallbackWriteFails && value.startsWith('{"version":')) ||
+          (encodedWrite && !verifiedReplacement &&
+            (phase === 'all with primary write error' || failPayloadBinding || verifiedFirstWrite))) primaryFault();
       await nativeSet(entry, value);
       if (encodedWrite && persistentPrimaryReadFault) primaryReadBlocked = true;
       if (encodedWrite && phase === 'publish') active = false;
@@ -663,8 +666,9 @@ test.each([
     if (publicationFails && this.uri === markerUri && value === 'rejected') {
       throw new Error('待處理標記無法改成拒絕');
     }
-    if (this.uri.endsWith('.rollback.published') &&
-        (publicationFails || lostReceiptAfterRetirement || (stalePublication && value === ''))) {
+    if ((this.uri.endsWith('.rollback.published') &&
+        (publicationFails || lostReceiptAfterRetirement || (stalePublication && value === ''))) ||
+        (fallbackWriteFails && this.uri.endsWith('.rollback.published.bak'))) {
       publicationFault();
     }
     if (failVerification && this.uri.endsWith('.rollback.verified')) verificationFault();
@@ -770,10 +774,13 @@ test.each([
         const attemptedWrites = set.mock.calls.slice(firstWriteCall)
           .filter(([entry]) => entry === key).map(([, value]) => value);
         if (settlementFails) {
-          expect(primary).toMatch(/^\{"version":1,/);
+          expect(primary).toMatch(fallbackWriteFails ? /^\{"records":/ : /^\{"version":1,/);
           expect(attemptedWrites).toEqual([
-            expect.stringMatching(/^\{"records":/), expect.stringMatching(/^\{"batches":/), primary,
+            expect.stringMatching(/^\{"records":/),
+            expect.stringMatching(/^\{"batches":/),
+            expect.stringMatching(/^\{"version":1,/),
           ]);
+          expect(primary).toBe(attemptedWrites[fallbackWriteFails ? 0 : 2]);
         } else {
           expect(attemptedWrites).toEqual(verifiedReplacement
             ? [expect.stringMatching(/^\{"records":/), primary]
@@ -807,7 +814,7 @@ test.each([
       expect(retirementAttempts).toBe(1);
     }
     if ((phase.startsWith('all with primary') && !persistentPrimaryReadFault) || verifiedFirstWrite) {
-      expect(primaryFault).toHaveBeenCalledTimes(1);
+      expect(primaryFault).toHaveBeenCalledTimes(fallbackWriteFails ? 2 : 1);
     }
     if (settlementFails) expect(settlementFault).toHaveBeenCalledTimes(1);
     if (failPayloadBinding) expect(payloadFault).toHaveBeenCalledTimes(1);
@@ -830,6 +837,9 @@ test.each([
     const retryGuardedSave = persistentMarkerReadFault || unreadablePayload || stalePublication ||
       receiptReadFailsAfterSave;
     const retrySave = !revoked && (phase === 'all' || phase === 'all with primary write error' || retryGuardedSave);
+    // This case has no durable publication proof. The notification read above
+    // must still observe the verified primary in the running process.
+    if (fallbackWriteFails) return;
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
@@ -1642,8 +1652,8 @@ test('a rejected primary-only edit with no pending marker recovers its checkpoin
   }
 });
 
-test('a rejected primary-only edit can reopen its restored primary despite an older checkpoint', async () => {
-  const scope = { owner: 'nuni:restored-primary-with-older-checkpoint', schoolId: 'pu' };
+test.each(['payload write', 'rejection delete'] as const)('a restored primary remains editable after restart with an older checkpoint and a persistent %s fault', async (fault) => {
+  const scope = { owner: `nuni:restored-primary-with-older-checkpoint-${fault}`, schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
   const prefix = `personal-imports-${sha256(key)}.rollback.`;
   const pending = new File(Paths.document, prefix + 'pending');
@@ -1656,10 +1666,20 @@ test('a rejected primary-only edit can reopen its restored primary despite an ol
   expect(sha256(checkpoint)).not.toBe(sha256(originalRaw));
   expect(pending.info().exists).toBe(false);
 
-  const { write: writeFile } = File.prototype;
+  const { write: writeFile, delete: deleteFile } = File.prototype;
+  const deleteFault = jest.fn(() => { throw new Error('無法刪除拒絕檔'); });
+  const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
+    if (fault === 'rejection delete' && this.uri === rejection.uri) deleteFault();
+    deleteFile.call(this);
+  });
+  let payloadBlocked = true;
+  const payloadWritten = jest.fn();
   const payloadFault = jest.fn(() => { throw new Error('無法寫入還原副本'); });
   const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
-    if (this.uri.endsWith(prefix + 'json')) payloadFault();
+    if (this.uri.endsWith(prefix + 'json')) {
+      if (payloadBlocked) payloadFault();
+      payloadWritten();
+    }
     writeFile.call(this, value, options);
   });
   const set = jest.mocked(AsyncStorage.setItem);
@@ -1701,7 +1721,8 @@ test('a rejected primary-only edit can reopen its restored primary despite an ol
 
     active = true;
     set.mockImplementation(nativeSet);
-    write.mockRestore();
+    payloadBlocked = fault === 'payload write';
+    get.mockClear();
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(original);
@@ -1710,6 +1731,22 @@ test('a rejected primary-only edit can reopen its restored primary despite an ol
       try {
         const edited = await restarted.editPersonalImport(scope, original.records[0], row('first', '化學'), guard);
         expect(edited.records.map(({ title }) => title)).toEqual(['化學', '統計']);
+        const writeIndex = set.mock.calls.findLastIndex(([entry]) => entry === key);
+        const writtenRaw = set.mock.calls[writeIndex][1];
+        expect(await nativeGet(key)).toBe(writtenRaw);
+        expect(JSON.parse(writtenRaw).records).toEqual(edited.records);
+        expect(get.mock.calls.some(([entry], index) =>
+          entry === key && get.mock.invocationCallOrder[index] > set.mock.invocationCallOrder[writeIndex] &&
+          get.mock.invocationCallOrder[index] < reread.mock.invocationCallOrder[0],
+        )).toBe(true);
+        if (payloadBlocked) {
+          expect(payloadFault).toHaveBeenCalledTimes(2);
+          expect(pending.info().exists).toBe(false);
+        } else {
+          expect(deleteFault).toHaveBeenCalledTimes(1);
+          expect(payloadWritten).toHaveBeenCalledTimes(1);
+          expect(rejection.info().exists).toBe(true);
+        }
         expect(reread).toHaveBeenCalledTimes(1);
         await expect(reread.mock.results[0].value).resolves.toEqual(edited);
       } finally {
@@ -1721,6 +1758,7 @@ test('a rejected primary-only edit can reopen its restored primary despite an ol
     get.mockImplementation(nativeGet);
     set.mockImplementation(nativeSet);
     write.mockRestore();
+    remove.mockRestore();
   }
 });
 

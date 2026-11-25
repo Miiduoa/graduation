@@ -508,10 +508,23 @@ export function mutatePersonalImportLedger<T>(
                   // Persist the ordinary encoding outside the tentative hashes
                   // so a restart can use it without a publication file.
                   assertWritable();
-                  await AsyncStorage.setItem(key, raw);
+                  let fallbackWritten = false;
+                  try {
+                    await AsyncStorage.setItem(key, raw);
+                    fallbackWritten = true;
+                  } catch {
+                    // The optional rewrite may fail before or after reaching disk.
+                  }
                   assertWritable();
-                  await verifyNativeLedgerWrite(key, raw);
-                  writtenRaw = raw;
+                  const readback = await AsyncStorage.getItem(key);
+                  if (readback === raw) {
+                    writtenRaw = raw;
+                  } else if (!fallbackWritten && readback === writtenRaw) {
+                    assertWritable();
+                    journal.rememberVerifiedPrimary(writtenRaw);
+                  } else {
+                    throw new Error('無法確認匯入資料已儲存，請稍後再試。');
+                  }
                 }
                 assertWritable();
               }
