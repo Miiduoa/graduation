@@ -833,6 +833,44 @@ function PersonalCalendarWorkspace({
     setFormError('');
   };
 
+  const trackWriteFocus = () => {
+    const editor = editorRef.current;
+    let canUseBodyFallback =
+      document.activeElement === document.body || Boolean(editor?.contains(document.activeElement));
+    const onFocusIn = (event: FocusEvent) => {
+      if (event.target instanceof Node && !editor?.contains(event.target)) {
+        canUseBodyFallback = false;
+      }
+    };
+    const onFocusOut = (event: FocusEvent) => {
+      const control = event.target;
+      if (
+        control instanceof HTMLElement &&
+        editor?.contains(control) &&
+        control.isConnected &&
+        !control.closest('[hidden]') &&
+        !control.matches(':disabled') &&
+        (event.relatedTarget === null || event.relatedTarget === document.body)
+      ) {
+        canUseBodyFallback = false;
+      }
+    };
+    // Relinquishing a usable control can leave focus on the body without a focusin.
+    // Hiding or disabling a control during the write can also trigger a browser blur.
+    document.addEventListener('focusin', onFocusIn, true);
+    document.addEventListener('focusout', onFocusOut, true);
+    return {
+      canHandoff: () =>
+        !suspended.current &&
+        (editor?.contains(document.activeElement) ||
+          (canUseBodyFallback && document.activeElement === document.body)),
+      stop: () => {
+        document.removeEventListener('focusin', onFocusIn, true);
+        document.removeEventListener('focusout', onFocusOut, true);
+      },
+    };
+  };
+
   const runSave = async (action: (row: PersonalImportRow) => Promise<void>, success: string) => {
     if (!active.current || suspended.current || writing.current) return;
     if (!canMutate || draftIssues.length) {
@@ -845,16 +883,7 @@ function PersonalCalendarWorkspace({
     const savedDate = draft.date;
     const savedMonth = savedDate.slice(0, 7);
     const monthList = calendarView === 'list' && !selectedDate;
-    const editor = editorRef.current;
-    let canUseBodyFallback =
-      document.activeElement === document.body || Boolean(editor?.contains(document.activeElement));
-    const recordFocus = (event: FocusEvent) => {
-      if (event.target instanceof Node && !editor?.contains(event.target)) {
-        canUseBodyFallback = false;
-      }
-    };
-    // A control outside the editor may lose focus again before the write finishes.
-    document.addEventListener('focusin', recordFocus, true);
+    const writeFocus = trackWriteFocus();
     writing.current = true;
     setSaving(true);
     setFormError('');
@@ -876,11 +905,7 @@ function PersonalCalendarWorkspace({
           setMonth(savedMonth);
           setSelectedDate(savedDate);
         }
-        if (
-          !suspended.current &&
-          (editorRef.current?.contains(document.activeElement) ||
-            (canUseBodyFallback && document.activeElement === document.body))
-        ) {
+        if (writeFocus.canHandoff()) {
           pendingFocus.current = followSavedDate || selectedDate ? 'saved' : 'return';
         }
       }
@@ -894,7 +919,7 @@ function PersonalCalendarWorkspace({
       if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
       setFormError(personalEventSaveError(error));
     } finally {
-      document.removeEventListener('focusin', recordFocus, true);
+      writeFocus.stop();
       if (active.current && ticket === requestId.current) {
         writing.current = false;
         setSaving(false);
@@ -936,6 +961,7 @@ function PersonalCalendarWorkspace({
     const ticket = ++requestId.current;
     const scoped = { ...scope };
     const original = baseline;
+    const writeFocus = trackWriteFocus();
     writing.current = true;
     setSaving(true);
     setFormError('');
@@ -948,12 +974,7 @@ function PersonalCalendarWorkspace({
     )
       .then(() => {
         if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
-        if (
-          !suspended.current &&
-          (editorRef.current?.contains(document.activeElement) ||
-            document.activeElement === document.body)
-        )
-          pendingFocus.current = 'return';
+        if (writeFocus.canHandoff()) pendingFocus.current = 'return';
         setInitialDraft(null);
         setNotice('已刪除這筆個人行程。');
         setMode('idle');
@@ -966,6 +987,7 @@ function PersonalCalendarWorkspace({
         setFormError(personalEventSaveError(error));
       })
       .finally(() => {
+        writeFocus.stop();
         if (active.current && ticket === requestId.current) {
           writing.current = false;
           setSaving(false);

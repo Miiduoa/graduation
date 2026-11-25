@@ -1150,7 +1150,7 @@ it('does not steal focus from another control when a pending save completes', as
   expect(readPersonalImports(scope())).toHaveLength(1);
 });
 
-it('單日儲存期間移到查看月份再主動離焦，儲存完成後焦點留在 body', async () => {
+function deferNextCalendarWrite() {
   let release: (() => void) | undefined;
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
@@ -1163,16 +1163,52 @@ it('單日儲存期間移到查看月份再主動離焦，儲存完成後焦點�
         }),
     },
   });
+  return () => release;
+}
+
+it.each(['儲存按鈕', '查看月份'])(
+  '單日儲存期間從%s主動離焦，完成後焦點留在 body',
+  async (target) => {
+    const pendingWrite = deferNextCalendarWrite();
+    render(<PersonalCalendar />);
+    await ready();
+    const date = '2026-11-14';
+    activate(screen.getByRole('button', { name: date }));
+    activate(screen.getByRole('button', { name: '新增行程' }));
+    const title = '單日延遲儲存的合成行程';
+    fireEvent.change(titleField(), { target: { value: title } });
+    const saveButton = screen.getByRole('button', { name: '儲存行程' });
+    activate(saveButton);
+    await waitFor(() => expect(pendingWrite()).toBeTypeOf('function'));
+
+    const control = target === '查看月份' ? screen.getByLabelText('查看月份') : saveButton;
+    if (control !== saveButton) control.focus();
+    expect(document.activeElement).toBe(control);
+    control.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    await act(async () => {
+      pendingWrite()?.();
+    });
+    await screen.findByText(personalImportSavedNotice(1));
+    expect(document.activeElement).toBe(document.body);
+    expect(dayHeading(date)).toBeTruthy();
+    expect(screen.queryByRole('textbox', { name: '標題' })).toBeNull();
+    expect(readPersonalImports(scope())).toMatchObject([{ title, date }]);
+  },
+);
+
+it('刪除期間移到查看月份再主動離焦，完成後焦點留在 body', async () => {
+  const stored = event('pending-delete', '等待刪除的合成行程', '2026-11-14');
+  seed([stored]);
   render(<PersonalCalendar />);
   await ready();
-  const date = '2026-11-14';
-  activate(screen.getByRole('button', { name: date }));
-  activate(screen.getByRole('button', { name: '新增行程' }));
-  const title = '單日延遲儲存的合成行程';
-  fireEvent.change(titleField(), { target: { value: title } });
-  activate(screen.getByRole('button', { name: '儲存行程' }));
-  await waitFor(() => expect(release).toBeTypeOf('function'));
+  activate(screen.getByRole('button', { name: stored.date }));
+  activate(screen.getByRole('button', { name: stored.title }));
 
+  const pendingWrite = deferNextCalendarWrite();
+  activate(screen.getByRole('button', { name: '刪除這筆' }));
+  await waitFor(() => expect(pendingWrite()).toBeTypeOf('function'));
   const monthField = screen.getByLabelText('查看月份');
   monthField.focus();
   expect(document.activeElement).toBe(monthField);
@@ -1180,13 +1216,12 @@ it('單日儲存期間移到查看月份再主動離焦，儲存完成後焦點�
   expect(document.activeElement).toBe(document.body);
 
   await act(async () => {
-    release?.();
+    pendingWrite()?.();
   });
-  await screen.findByText(personalImportSavedNotice(1));
+  await screen.findByText('已刪除這筆個人行程。');
   expect(document.activeElement).toBe(document.body);
-  expect(dayHeading(date)).toBeTruthy();
   expect(screen.queryByRole('textbox', { name: '標題' })).toBeNull();
-  expect(readPersonalImports(scope())).toMatchObject([{ title, date }]);
+  expect(readPersonalImports(scope())).toEqual([]);
 });
 
 it('preserves the newly selected day when a completed write is acknowledged during revalidation', async () => {
