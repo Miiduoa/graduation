@@ -1,5 +1,5 @@
 import type { CampusWalkingGraph, WalkingEdge, WalkingNode } from './campusWalkingGraph';
-import { excludesWalkingWay, hasWalkingRestriction, type CampusWalkingOsmCandidates } from './campusWalkingOsm';
+import { excludesWalkingWay, hasWalkingRestriction, validWalkingSourceTags, type CampusWalkingOsmCandidates } from './campusWalkingOsm';
 
 type ReviewedNode = WalkingNode & { version: number };
 export type CampusWalkingSegmentAudit = {
@@ -84,6 +84,10 @@ export function applyCampusWalkingSegmentAudits(
       candidates.graph.nodes.length > 2000 || candidates.graph.edges.length > 4000 ||
       candidates.nodes.length > 2000 || candidates.ways.length > 4000 ||
       audits.length > 4000) return null;
+  // A serialized candidate may have bypassed discovery's tag validation.
+  // Reject the snapshot rather than interpreting missing or malformed tags as open.
+  if (candidates.nodes.some(n => !validWalkingSourceTags(n.tags)) ||
+      candidates.ways.some(w => !validWalkingSourceTags(w.tags))) return null;
   const nodes = new Map(candidates.nodes.map(n => [n.id, n]));
   const ways = new Map(candidates.ways.map(w => [w.id, w]));
   if (nodes.size !== candidates.nodes.length || ways.size !== candidates.ways.length) return null;
