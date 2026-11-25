@@ -48,6 +48,7 @@ export const personalImportStorageKey = (scope: PersonalImportScope) =>
 const nativeReceiptKey = (key: string) => key + ':verified-write';
 const nativeBackupReceiptKey = (key: string) => key + ':verified-write-backup';
 const nativeRollbackResolutionKey = (key: string) => key + ':rollback-resolution';
+const nativeRejectionAttemptKey = (key: string) => key + ':rollback-rejected-attempt';
 // Native primary-only writes can outlive an earlier rejection file.
 const nativeRestoredRejectionPattern = /,"nativeRestoredRejection":"([a-f0-9]{64})"}$/;
 const checkpointPublicationPattern = /^verified:([a-z0-9:-]+(?: [a-z0-9:-]+)+)\n/;
@@ -75,15 +76,16 @@ async function readNativeStorage(key: string): Promise<string | null> {
   }
 }
 
-async function readNativeReceipt(receiptKey: string): Promise<string | null> {
-  return readNativeStorage(receiptKey).catch(() => null);
+async function readNativeReceipt(receiptKey: string, useBatchFallback = false): Promise<string | null> {
+  const read = useBatchFallback ? readNativeStorageWithBatchFallback : readNativeStorage;
+  return read(receiptKey).catch(() => null);
 }
 
-async function readNativeCheckpointPublication(checkpointKey: string): Promise<string | null> {
+async function readNativeStorageWithBatchFallback(key: string): Promise<string | null> {
   try {
-    return await readNativeStorage(checkpointKey);
+    return await readNativeStorage(key);
   } catch {
-    const [[, encoded]] = await AsyncStorage.multiGet([checkpointKey]);
+    const [[, encoded]] = await AsyncStorage.multiGet([key]);
     return encoded;
   }
 }
@@ -129,13 +131,19 @@ async function readLedgerSnapshot(
     rejectionMatches?.(null) === true;
   const attemptedPrimary = primary !== null && journal?.matchesAttemptedPrimary?.(primary) === true;
   const fallbackPrimary = primary !== null && journal?.matchesFallbackPrimary?.(primary) === true;
-  const needsReceipt = primaryVerified && (attemptedPrimary || fallbackPrimary || rejectionMatches !== undefined);
-  const receipt = needsReceipt ? await readNativeReceipt(nativeReceiptKey(key)) : null;
+  // A failed rollback-copy rewrite can leave the ordinary attempt intact.
+  // Only a denial carrying that exact attempt binding can override it.
+  const denial = primaryVerified && (attemptedPrimary || fallbackPrimary) && journal?.matchesRejectionAttempt
+    ? await readNativeReceipt(nativeRejectionAttemptKey(key), true)
+    : null;
+  const deniedAttempt = denial !== null && journal?.matchesRejectionAttempt?.(denial) === true;
+  const needsReceipt = !deniedAttempt && primaryVerified && (attemptedPrimary || fallbackPrimary || rejectionMatches !== undefined);
+  const receipt = needsReceipt ? await readNativeReceipt(nativeReceiptKey(key), true) : null;
   const fileReceipt = needsReceipt ? readNativeVerificationReceipt(key) : undefined;
-  const backupReceipt = needsReceipt ? await readNativeReceipt(nativeBackupReceiptKey(key)) : null;
-  const rollbackResolution = needsReceipt ? await readNativeReceipt(nativeRollbackResolutionKey(key)) : null;
+  const backupReceipt = needsReceipt ? await readNativeReceipt(nativeBackupReceiptKey(key), true) : null;
+  const rollbackResolution = needsReceipt ? await readNativeReceipt(nativeRollbackResolutionKey(key), true) : null;
   const checkpointPublication = needsReceipt
-    ? await readNativeCheckpointPublication(personalImportCheckpointKey(key)).catch(() => null)
+    ? await readNativeReceipt(personalImportCheckpointKey(key), true)
     : null;
   const checkpointReceipt = checkpointPublication?.match(checkpointPublicationPattern)?.[1].replace(/ /g, '\n');
   const receipts = [receipt, fileReceipt, backupReceipt, journal?.verifiedReceipt, rollbackResolution, checkpointReceipt];
@@ -156,7 +164,7 @@ async function readLedgerSnapshot(
   const checkpointRejection = restoredRejectionHash ? undefined : rejectionMatches;
   const resolvedUnreadableRejection = primary !== null && [rollbackResolution, checkpointReceipt].some((proof) =>
     typeof proof === 'string' && journal?.matchesUnreadableRejectionResolution?.(primary, proof));
-  const ordinaryPrimary = primaryVerified && primary !== null &&
+  const ordinaryPrimary = !deniedAttempt && primaryVerified && primary !== null &&
     journal?.matchesOrdinaryPrimary?.(primary) === true;
   const verifiedByJournal = primary !== null && (
     resolvedUnreadableRejection ||
@@ -164,14 +172,14 @@ async function readLedgerSnapshot(
     receipts.some((proof) => typeof proof === 'string' && journal?.matchesVerifiedReceipt?.(primary, proof)) ||
     ordinaryPrimary
   );
-  const rejectedPrimary = journal?.rejected && !ordinaryPrimary && !resolvedUnreadableRejection && (
+  const rejectedPrimary = deniedAttempt || journal?.rejected && !ordinaryPrimary && !resolvedUnreadableRejection && (
     journal.hasRejectedPayload || attemptedPrimary || journal.raw === primary ||
     fallbackPrimary ||
     (nativeRejectionBinding !== undefined && rejectionMatches === undefined) ||
     (journal.payloadError && hasNativeCommitEncoding(primary))
   );
   if (!primaryVerified || rejectedPrimary) {
-    if (journal?.markerError) throw journal.markerError;
+    if (journal?.markerError && !deniedAttempt) throw journal.markerError;
     if (journal?.payloadError) throw journal.payloadError;
   }
   // Legacy v1 ledgers may use the same field order as a guarded write.
@@ -185,13 +193,18 @@ async function readLedgerSnapshot(
   }
   const recovery: (Recovery & { ledger: PersonalImportLedger }) | null = browserRecovery
     ? selectPersonalImportBrowserRecovery(browserRecovery, primary, primaryVerified, (raw) => parseLedger(raw, scope))
-    : await readNativeRecovery(key, scope, primaryVerified, nativeJournal, restoredEmpty ? null : checkpoint, journal?.rejected,
+    : await readNativeRecovery(
+        key, scope, primaryVerified, nativeJournal, restoredEmpty ? null : checkpoint, deniedAttempt || journal?.rejected,
         allowEmptyPrimary && primary === null && !primaryError && !journal && !restorationPending,
-        checkpointRejection);
+        checkpointRejection,
+      );
   if (!recovery && primaryError) throw primaryError;
+  if (!recovery && deniedAttempt) {
+    throw new Error('無法確認匯入資料已還原，請保留此裝置上的資料並稍後重試。');
+  }
   // A pending restoration bypasses the primary read, so its on-disk bytes
   // cannot be checked against the previous attempt before replacing the hashes.
-  const preserveAttemptRejection = restorationPending || checkpointRejection !== undefined ||
+  const preserveAttemptRejection = restorationPending || deniedAttempt || checkpointRejection !== undefined ||
     (attemptedPrimary && !verifiedByJournal && recovery !== null && recovery.raw !== primary);
   return {
     primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection,
@@ -693,7 +706,7 @@ export function mutatePersonalImportLedger<T>(
                           assertWritable();
                           if (!clearVerifiedNativeRollback(key)) {
                             const checkpointKey = personalImportCheckpointKey(key);
-                            const checkpoint = await readNativeCheckpointPublication(checkpointKey)
+                            const checkpoint = await readNativeStorageWithBatchFallback(checkpointKey)
                               .catch(() => undefined);
                             assertWritable();
                             if (checkpoint !== undefined) {
@@ -704,7 +717,7 @@ export function mutatePersonalImportLedger<T>(
                               writingCheckpointPublication = true;
                               try {
                                 await writeNativeReceipt(checkpointKey, publication);
-                                await readNativeCheckpointPublication(checkpointKey);
+                                await readNativeStorageWithBatchFallback(checkpointKey);
                               } catch {
                                 // A checkpoint is optional once the primary is verified.
                               }
@@ -773,7 +786,7 @@ export function mutatePersonalImportLedger<T>(
                 }
               }
               try {
-                journal?.retainRejection();
+                await journal?.retainRejection((attempt) => writeNativeReceipt(nativeRejectionAttemptKey(key), attempt));
               } catch {
                 // Still try to restore the original primary and checkpoint.
               }

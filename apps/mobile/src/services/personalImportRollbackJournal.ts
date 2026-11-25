@@ -482,25 +482,35 @@ function fileExists(file: File): boolean {
   }
 }
 
-function journalFiles(key: string) {
+function journalFiles(key: string, recoverExistence = false) {
+  const markerExists = (marker: File) => {
+    try {
+      return fileExists(marker);
+    } catch (error) {
+      if (!recoverExistence) throw error;
+      // A readable marker establishes existence even when metadata fails.
+      readRollbackFile(marker);
+      return true;
+    }
+  };
   const directory = Paths.document;
   // An existing legacy marker remains authoritative until its write commits.
   // The escaped storage key is ASCII, so its length is also its byte count.
   const legacyName = key.replace(/[%:~]/g, (character) => `~${character.charCodeAt(0).toString(16)}`);
   if (legacyName.length + markerSuffix.length <= 255) {
     const marker = new File(directory, legacyName + markerSuffix);
-    if (fileExists(marker)) {
+    if (markerExists(marker)) {
       return { marker, payload: new File(directory, `${legacyName}.rollback.json`), marked: true };
     }
   }
 
   const name = `personal-imports-${sha256(key)}`;
   const marker = new File(directory, name + markerSuffix);
-  return { marker, payload: new File(directory, `${name}.rollback.json`), marked: fileExists(marker) };
+  return { marker, payload: new File(directory, `${name}.rollback.json`), marked: markerExists(marker) };
 }
 
 export function capturePersonalImportRollback(key: string) {
-  const { payload, marker, marked } = journalFiles(key);
+  const { payload, marker, marked } = journalFiles(key, true);
   const rejection = rejectionFile(key);
   const rejectionValue = fileExists(rejection) ? readOptionalFile(rejection) ??
     (!marked ? readOptionalFile(rejectionBackupFile(key)) : undefined) : resolvedRejection;
@@ -511,10 +521,10 @@ export function capturePersonalImportRollback(key: string) {
     (rejectionValue && primaryHashPattern.test(rejectionValue) ? rejectionValue : undefined);
   if (!marked) {
     const verifiedBinding = verifiedReceipt?.match(committedReceiptPattern);
-    if (!rejectionRecorded && !verifiedBinding) return undefined;
     // A primary-only write has no journal payload. Bind recovery to the
     // original bytes so an unrelated legacy checkpoint cannot be adopted.
     const checkpointHash = verifiedBinding?.[1] ?? rejectionHash;
+    if (checkpointHash === undefined) return undefined;
     return {
       rejected: true,
       rejectionHash: checkpointHash,
@@ -570,7 +580,7 @@ export function capturePersonalImportRollback(key: string) {
   // A rejection bound to this attempt can survive both marker reads failing.
   const rejectionBackup = rejectionBackupFile(key);
   const backupDenial = attempt && (rejectionUnreadable || markerError !== undefined) &&
-    fileExists(rejectionBackup) ? readOptionalFile(rejectionBackup) ?? attempt[0] : undefined;
+    fileExists(rejectionBackup) ? readOptionalFile(rejectionBackup) : undefined;
   const deniedAttempt = backupDenial !== undefined && backupDenial === attempt?.[0];
   // A revoked publication can leave its verified encoding in AsyncStorage
   // if restoring the original bytes there also fails.
@@ -628,6 +638,7 @@ export function capturePersonalImportRollback(key: string) {
     matchesAttemptedPrimary,
     matchesFallbackPrimary,
     matchesOrdinaryPrimary,
+    matchesRejectionAttempt: attempt && ((proof: string) => proof === attempt[0]),
     markerError: rejected && encoded !== undefined ? undefined : markerError,
     payloadError,
     // A separately verified resolution can disambiguate an unreadable
@@ -1043,16 +1054,20 @@ export function preparePersonalImportRollback(
         throw new Error('無法確認匯入資料的還原副本已寫入。');
       }
     },
-    retainRejection() {
+    async retainRejection(recordDenial: (attempt: string) => Promise<void>) {
       // Preserve the attempt binding even when the rollback copy is unreadable.
       try {
         payload.write(wrap(rejectedPrefix + encoded));
       } catch (error) {
         if (ordinary) {
           try {
-            rejectionBackupFile(key).write(attempt);
+            try {
+              rejectionBackupFile(key).write(attempt);
+            } finally {
+              marker.write(rejectedMarker);
+            }
           } finally {
-            marker.write(rejectedMarker);
+            await recordDenial(attempt);
           }
         }
         throw error;
