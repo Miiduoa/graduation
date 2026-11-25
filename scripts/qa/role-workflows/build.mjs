@@ -12,6 +12,23 @@ const boundaries = {
 export default function Link({children,prefetch,replace,scroll,...props}) {
   return createElement('a',props,children);
 }`,
+  navigation: `import {useMemo,useSyncExternalStore} from 'react';
+const subscribe=listener=>{
+  addEventListener('popstate',listener);
+  addEventListener('nuni-merchant-workspace-navigation',listener);
+  return ()=>{
+    removeEventListener('popstate',listener);
+    removeEventListener('nuni-merchant-workspace-navigation',listener);
+  };
+};
+const snapshot=()=>location.pathname+location.search;
+const useRoute=()=>useSyncExternalStore(subscribe,snapshot,snapshot);
+export function usePathname(){return new URL(useRoute(),location.origin).pathname;}
+export function useSearchParams(){
+  const route=useRoute();
+  return useMemo(()=>new URL(route,location.origin).searchParams,[route]);
+}
+export const useRouter=()=>({push:href=>location.assign(href),replace:href=>location.replace(href)});`,
   shell: `import {createElement} from 'react';
 export function SiteShell({children,title,subtitle}) {
   return createElement('section',{'data-fixture-shell':true},
@@ -66,6 +83,7 @@ const result = await build({
         const alias = (filter, name) =>
           builder.onResolve({ filter }, () => ({ path: name, namespace: 'fixture' }));
         alias(/^next\/link$/, 'link');
+        alias(/^next\/navigation$/, 'navigation');
         alias(/^@\/components\/SiteShell$/, 'shell');
         alias(/^@\/features\/nuni\/Session$/, 'session');
         builder.onLoad({ filter: /./, namespace: 'fixture' }, ({ path: name }) => ({
