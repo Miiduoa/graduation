@@ -380,7 +380,8 @@ export function MerchantOperations({
       // during an outage. Only a successful read can restore the controls.
       // Hidden refreshes can confirm shared detail for the next visible entry
       // without consuming that entry's post-write reconciliation.
-      const deferredRevision = visibleRef.current ? deferredWriteRevision.current : 0;
+      const visible = visibleRef.current;
+      const deferredRevision = visible ? deferredWriteRevision.current : 0;
       // A post-write read can outlast the visible entry that started it.
       // Only a read from the current visible entry can consume reconciliation.
       const entry = entryRun.current;
@@ -406,16 +407,17 @@ export function MerchantOperations({
         if (!merged) {
           // A concurrent list merge can invalidate the detail from a successful entry GET.
           // Check the shared confirmation before React publishes its next snapshot.
-          // A deferred refresh may rely on a newer access GET from the list.
-          const confirmedRevision = deferredRevision
-            ? Math.max(
-                entryAccessRevision.current,
-                (getAccessConfirmationRevision ?? localConfirmations.accessConfirmationRevision)(draftKey),
-              )
-            : entryAccessRevision.current;
+          // Shared access must come from a GET newer than the write being reconciled.
+          const sharedRevision = visible && reconciliationRevision
+            ? (getAccessConfirmationRevision ?? localConfirmations.accessConfirmationRevision)(draftKey)
+            : 0;
+          const confirmedRevision = Math.max(
+            entryAccessRevision.current > deferredRevision ? entryAccessRevision.current : 0,
+            sharedRevision > reconciliationRevision ? sharedRevision : 0,
+          );
           if (
             readMode !== 'regular' &&
-            confirmedRevision > deferredRevision &&
+            confirmedRevision > 0 &&
             confirmedRevision >= accessRevision.current &&
             confirmedRevision > Math.max(failedReadRevision.current, observedRevocation.current) &&
             (beginRequest ? getConfirmedDetail?.(draftKey) : localConfirmations.detailFor(draftKey))

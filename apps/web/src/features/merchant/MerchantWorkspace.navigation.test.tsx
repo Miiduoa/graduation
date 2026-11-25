@@ -2242,50 +2242,58 @@ const firstMenuReceipt = {
   createdItems: 1,
 };
 
-it('restores operations after a losing menu receipt and a stale post-write read', async () => {
-  const path = 'merchant-workspaces/campus-one/store-a';
-  const initial = { ...detail(), readinessVersion: 7 };
-  const reentered = { ...detail('store-a', true), readinessVersion: 8 };
-  let finishMenu!: (value: typeof firstMenuReceipt) => void;
-  const writeMenu = vi.fn(() => new Promise<typeof firstMenuReceipt>((resolve) => {
-    finishMenu = resolve;
-  }));
-  let finishRefresh!: (value: typeof initial) => void;
-  const refresh = new Promise<typeof initial>((resolve) => { finishRefresh = resolve; });
-  const readDetail = vi.fn()
-    .mockResolvedValueOnce(initial)
-    .mockResolvedValueOnce(initial)
-    .mockResolvedValueOnce(reentered)
-    .mockReturnValueOnce(refresh);
-  mocks.request.mockImplementation((resource) => {
-    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [initial] });
-    if (resource === path) return readDetail();
-    if (resource === `${path}/initial-menu`) return writeMenu();
-    return respond(resource);
-  });
+it.each(['entry GET', 'list background GET'])(
+  'restores operations after a losing menu receipt and a stale post-write read with v8 from the %s',
+  async (confirmationSource) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const initial = { ...detail(), readinessVersion: 7 };
+    const operating = { ...detail('store-a', true), readinessVersion: 8 };
+    let finishMenu!: (value: typeof firstMenuReceipt) => void;
+    const writeMenu = vi.fn(() => new Promise<typeof firstMenuReceipt>((resolve) => {
+      finishMenu = resolve;
+    }));
+    let finishRefresh!: (value: typeof initial) => void;
+    const refresh = new Promise<typeof initial>((resolve) => { finishRefresh = resolve; });
+    const confirmedOnList = confirmationSource === 'list background GET';
+    const readStores = vi.fn()
+      .mockResolvedValueOnce({ workspaces: [initial] })
+      .mockResolvedValue({ workspaces: [confirmedOnList ? operating : initial] });
+    const readDetail = vi.fn()
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(confirmedOnList ? operating : initial)
+      .mockResolvedValueOnce(confirmedOnList ? initial : operating)
+      .mockReturnValueOnce(refresh);
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') return readStores();
+      if (resource === path) return readDetail();
+      if (resource === `${path}/initial-menu`) return writeMenu();
+      return respond(resource);
+    });
 
-  render(<MerchantWorkspace view="workspace" />);
-  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
-  await screen.findByLabelText('品項 1 名稱');
-  submitFirstMenu();
-  expect(writeMenu).toHaveBeenCalledTimes(1);
-  await act(async () => window.history.back());
-  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
-  await act(async () => window.history.forward());
-  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
-  await act(async () => finishMenu(firstMenuReceipt));
-  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
-  expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
-  await act(async () => finishRefresh(initial));
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    await screen.findByLabelText('品項 1 名稱');
+    submitFirstMenu();
+    expect(writeMenu).toHaveBeenCalledTimes(1);
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+    if (confirmedOnList) await screen.findByText('營業中');
+    await act(async () => window.history.forward());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+    await act(async () => finishMenu(firstMenuReceipt));
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
+    expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
+    await act(async () => finishRefresh(initial));
 
-  expect(screen.getByText('營業中')).toBeTruthy();
-  expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
-  expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
-  expect(screen.queryByRole('alert')).toBeNull();
-  fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
-  await screen.findByRole('region', { name: '門市訂單工作台' });
-  expect(readDetail).toHaveBeenCalledTimes(4);
-});
+    expect(screen.getByText('營業中')).toBeTruthy();
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
+    expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
+    await screen.findByRole('region', { name: '門市訂單工作台' });
+    expect(readDetail).toHaveBeenCalledTimes(4);
+  },
+);
 
 it.each([200, 403, 404, 503])(
   'reconciles a losing menu write that settles on the list before history forward (GET %s)',
