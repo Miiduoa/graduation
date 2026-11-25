@@ -599,6 +599,7 @@ it.each(['pending', 'error'] as const)(
   },
 );
 it('does not let retained cancel or export controls act while the account is being checked', async () => {
+  const confirmDiscard = vi.spyOn(window, 'confirm').mockReturnValue(true);
   state.session = principal();
   await openDraft('已保存可匯出的行程');
   await saveNew();
@@ -611,13 +612,16 @@ it('does not let retained cancel or export controls act while the account is bei
   fireEvent.click(cancel);
   fireEvent.click(exportButton);
   expect(createObjectURL).not.toHaveBeenCalled();
+  expect(confirmDiscard).not.toHaveBeenCalled();
   await finishRefresh(pending);
   expect(draftTitle()).toBe(TITLE);
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(confirmDiscard).toHaveBeenCalledOnce();
   expectNoVisibleDraft();
   expect(readPersonalImports(scope())).toEqual(saved);
 });
 it('cancels an edit without changing the saved record', async () => {
+  const confirmDiscard = vi.spyOn(window, 'confirm').mockReturnValue(true);
   state.session = principal();
   await openDraft();
   await saveNew();
@@ -628,6 +632,7 @@ it('cancels an edit without changing the saved record', async () => {
     target: { value: '不應存入的修改' },
   });
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(confirmDiscard).toHaveBeenCalledOnce();
   expectNoVisibleDraft();
   expect(readPersonalImports(scope())).toEqual(saved);
 });
