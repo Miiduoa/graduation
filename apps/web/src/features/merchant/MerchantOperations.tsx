@@ -94,13 +94,15 @@ const detailReadError = '無法確認門市目前的資料。草稿已保留，�
 
 const initialAccess = {
   entryVerified: false,
+  orderEntryRevision: 0,
   loading: true,
   readUnavailable: false,
   entryConfirmation: null as DetailReadConfirmation | null,
 };
 
 type AccessAction =
-  | { type: 'entry-reset' | 'read-started' | 'read-finished' | 'locked' }
+  | { type: 'entry-reset'; orderEntryRevision?: number }
+  | { type: 'read-started' | 'read-finished' | 'locked' }
   | { type: 'verified'; read: DetailReadConfirmation }
   | { type: 'read-failed'; hideDetail: boolean };
 
@@ -109,7 +111,13 @@ type DetailReadMode = 'regular' | 'after-write' | 'after-confirmed-write';
 function accessReducer(state: typeof initialAccess, action: AccessAction): typeof initialAccess {
   switch (action.type) {
     case 'entry-reset':
-      return { ...state, entryVerified: false, readUnavailable: false, entryConfirmation: null };
+      return {
+        ...state,
+        entryVerified: false,
+        readUnavailable: false,
+        entryConfirmation: null,
+        orderEntryRevision: action.orderEntryRevision ?? state.orderEntryRevision,
+      };
     case 'read-started':
       return { ...state, readUnavailable: false, loading: true, entryConfirmation: null };
     case 'read-finished':
@@ -185,7 +193,7 @@ export function MerchantOperations({
     [context],
   );
   const [loadedDetail, setDetail] = useState<Detail | null>(null);
-  const [{ entryVerified, loading, readUnavailable, entryConfirmation }, updateAccess] =
+  const [{ entryVerified, loading, readUnavailable, entryConfirmation, orderEntryRevision }, updateAccess] =
     useReducer(accessReducer, initialAccess);
   const detail = entryVerified ? (confirmedDetail === undefined ? loadedDetail : confirmedDetail) : null;
   const [busy, setBusy] = useState<Action | null>(null);
@@ -253,6 +261,11 @@ export function MerchantOperations({
   const opened = useRef(false);
   const visibleRef = useRef(visible);
   const entryRun = useRef(0);
+  const needsOrderData = useCallback(
+    () => observations.needsOrderData(draftKey, orderEntryRevision),
+    [draftKey, observations, orderEntryRevision],
+  );
+  const orderDataPending = useSyncExternalStore(observations.subscribeReadChanges, needsOrderData, () => false);
   const readAfterWrite = useRef(false);
   const deferredWrite = useRef<{ revision: number; entry: number } | null>(null);
   const mutationRun = useRef(0);
@@ -513,9 +526,9 @@ export function MerchantOperations({
       opened.current = false;
     }
   }, [suspended, drafts, draftKey]);
-  const verifyEntry = useCallback(() => {
+  const verifyEntry = useCallback((orderEntryRevision?: number) => {
     entryReadRevision.current = 0;
-    updateAccess({ type: 'entry-reset' });
+    updateAccess({ type: 'entry-reset', orderEntryRevision });
     let checkingAccess = true;
     if (lock.current) {
       // Verify access now, and refresh controls again after the write settles.
@@ -538,13 +551,13 @@ export function MerchantOperations({
       return;
     }
     ++entryRun.current;
-    const retire = verifyEntry();
+    const retire = verifyEntry(nextRevision());
     return () => {
       retire();
       readAfterWrite.current = false;
       if (!lock.current) ++run.current;
     };
-  }, [suspended, visible, verifyEntry]);
+  }, [nextRevision, suspended, visible, verifyEntry]);
 
   // A retired read or the list can revoke data after the visible entry started verifying.
   // The entry's own denial already displays an error and allows a manual retry.
@@ -559,22 +572,23 @@ export function MerchantOperations({
 
   const orderReadFlight = useCallback(() => observations.orderReadScope(draftKey), [draftKey, observations]);
   const beginOrderRead = useCallback(() => {
-    const isSameSession = captureReadSession();
+    const isSameSession = captureSession?.() ?? captureReadSession();
     if (!isSameSession()) return null;
-    const read = observations.beginOrderRead(draftKey);
+    const read = observations.beginOrderRead(draftKey, orderEntryRevision);
     return {
       settle: read.settle,
       confirm() {
         if (isSameSession()) read.confirm();
       },
       reject(failure: unknown) {
-        rejectWorkspaceRead(isSameSession, failure, read.revision, visibleRef.current, 'orders');
+        rejectWorkspaceRead(isSameSession, failure, read.revision, active.current && visibleRef.current, 'orders');
       },
     };
-  }, [captureReadSession, draftKey, observations, rejectWorkspaceRead]);
+  }, [captureReadSession, captureSession, draftKey, observations, orderEntryRevision, rejectWorkspaceRead]);
 
   function hasCurrentAccess() {
-    return active.current && visibleRef.current && accessSnapshot() === 'confirmed';
+    return captureReadSession()() && visibleRef.current &&
+      accessSnapshot() === 'confirmed' && !needsOrderData();
   }
 
   async function mutate(
@@ -669,8 +683,11 @@ export function MerchantOperations({
   const displayedError = error || (!loading && entryVerified && access !== 'confirmed' ? detailReadError : '');
   const menuExists = menuReceipt !== null || !!detail?.publishedMenuItems;
   const operational = !!detail && isMerchantWorkspaceOperational(detail);
-  const ordersSuspended = !ordersOpen || !operational || blocked ||
-    (access !== 'confirmed' && !(access === 'orders-unavailable' && entryConfirmation));
+  const canReadOrders = !blocked &&
+    (access === 'confirmed' || (access === 'orders-unavailable' && !!entryConfirmation));
+  const ordersSuspended = !ordersOpen || !operational || !canReadOrders;
+  const readOrdersInOverview = !ordersOpen && orderDataPending && canReadOrders;
+  const writesLocked = locked || orderDataPending;
   // A same-version list can report an activation blocker while a legacy detail
   // still needs its own stock count to determine whether to show the menu form.
   const activationRequirements = detail?.missingRequirements ??
@@ -724,6 +741,9 @@ export function MerchantOperations({
         </Button>
       </div>
       {(loading || (!entryVerified && busy)) && <p role="status">正在確認門市資料…</p>}
+      {readOrdersInOverview && (
+        <p role="status">正在核對訂單與班別，完成後即可操作門市。</p>
+      )}
       {displayedError && <p role="alert">{displayedError}</p>}
       {!detail && summary && (
         <div role="status">
@@ -856,12 +876,12 @@ export function MerchantOperations({
                   <div role="alert">
                     <p>營運設定已有新版。你的草稿尚未儲存，請先選擇使用哪一份。</p>
                     <div className={styles.checks}>
-                      <Button type="button" disabled={locked} onClick={() => setSettings(null)}>
+                      <Button type="button" disabled={writesLocked} onClick={() => setSettings(null)}>
                         改用目前設定
                       </Button>
                       <Button
                         type="button"
-                        disabled={locked}
+                        disabled={writesLocked}
                         onClick={() =>
                           setSettings({ ...draft, baseVersion: detail.readinessVersion })
                         }
@@ -871,7 +891,7 @@ export function MerchantOperations({
                     </div>
                   </div>
                 )}
-                <fieldset disabled={locked}>
+                <fieldset disabled={writesLocked}>
                   <legend>提供哪些服務</legend>
                   <div className={styles.checks}>
                     {modes.map(([mode, label]) => (
@@ -926,7 +946,7 @@ export function MerchantOperations({
                   type="submit"
                   variant="primary"
                   disabled={
-                    locked || settingsChanged || !draft.agreed || !draft.serviceModes.length
+                    writesLocked || settingsChanged || !draft.agreed || !draft.serviceModes.length
                   }
                 >
                   儲存營運設定
@@ -942,7 +962,7 @@ export function MerchantOperations({
                 這間門市先前啟用了線上付款，目前尚未提供該服務。可保留原服務方式，改為現場櫃檯付款。
               </p>
               <Button
-                disabled={locked}
+                disabled={writesLocked}
                 onClick={() =>
                   void mutate('settings', async (current, revision) => {
                     const next = await operations.updateSettings(tenantId, locationId, {
@@ -1013,7 +1033,7 @@ export function MerchantOperations({
                       });
                     }}
                   >
-                    <fieldset disabled={locked || menuBlocked}>
+                    <fieldset disabled={writesLocked || menuBlocked}>
                       {menu.map((item, index) => {
                         const change = (field: keyof MenuDraft, value: string) => {
                           setMenu((items) =>
@@ -1103,7 +1123,7 @@ export function MerchantOperations({
                     <Button
                       type="submit"
                       variant="primary"
-                      disabled={locked || menuBlocked || !menuConfirmed}
+                      disabled={writesLocked || menuBlocked || !menuConfirmed}
                     >
                       確認建立並上架菜單
                     </Button>
@@ -1145,14 +1165,14 @@ export function MerchantOperations({
                   <label className={styles.confirmation}>
                     <input
                       type="checkbox"
-                      disabled={locked || !canActivate || !!settings}
+                      disabled={writesLocked || !canActivate || !!settings}
                       checked={activationConfirmed}
                       onChange={(event) => setActivationConfirmed(event.target.checked)}
                     />
                     我已確認門市、營運方式及菜單，現在開放接單
                   </label>
                   <Button
-                    disabled={locked || !canActivate || !!settings || !activationConfirmed}
+                    disabled={writesLocked || !canActivate || !!settings || !activationConfirmed}
                     variant="primary"
                     onClick={() =>
                       void mutate('activate', async (current, revision) => {
@@ -1180,7 +1200,7 @@ export function MerchantOperations({
                       : '目前暫停接單。恢復前會重新確認菜單與付款設定。'}
                   </p>
                   <Button
-                    disabled={locked}
+                    disabled={writesLocked}
                     onClick={() =>
                       void mutate('availability', async (current, revision) => {
                         const next = await operations.setAvailability(
@@ -1212,7 +1232,7 @@ export function MerchantOperations({
       )}
       {/* The workspace owns pending receipts across its sections and access refreshes. */}
       <div id="merchant-order-workspace" hidden={ordersSuspended}>
-        {ordersVisited && (
+        {(ordersVisited || readOrdersInOverview) && (
           <MerchantOrderDesk
             key={`${context}:${tenantId}:${locationId}`}
             context={context}
@@ -1220,8 +1240,9 @@ export function MerchantOperations({
             locationId={locationId}
             cache={foodDrafts ?? localFoodDrafts}
             canSend={hasCurrentAccess}
-            accessConfirmed={!locked}
+            accessConfirmed={!writesLocked}
             suspended={ordersSuspended}
+            readWhileSuspended={readOrdersInOverview}
             beginRead={beginOrderRead}
             readFlight={orderReadFlight}
             queue={navigation?.queue}

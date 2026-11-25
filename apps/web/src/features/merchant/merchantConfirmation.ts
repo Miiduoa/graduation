@@ -127,7 +127,11 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const orderReadFailures = new Map<string, number>();
   const readChangeListeners = new Set<() => void>();
   // Order rounds belong to the workspace session and survive desk navigation.
-  const orderReadScopes = new Map<string, { current: Promise<void> | null; revision: number }>();
+  const orderReadScopes = new Map<string, {
+    current: Promise<void> | null;
+    revision: number;
+    confirmedEntry?: number;
+  }>();
 
   function orderReadScope(key: string) {
     let scope = orderReadScopes.get(key);
@@ -528,25 +532,34 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         (hasUnsettledOrderFailure(key) || (failure !== undefined && read.revision <= failure));
     },
     orderReadScope,
-    beginOrderRead(key: string) {
+    // A successful round belongs to the entry that started it.
+    needsOrderData(key: string, entryRevision: number) {
+      const scope = orderReadScopes.get(key);
+      return !!scope && scope.confirmedEntry !== entryRevision;
+    },
+    beginOrderRead(key: string, entryRevision?: number) {
       const scope = orderReadScope(key);
       const revision = beginRequest();
       scope.revision = revision;
       const entry = entries.get(key);
       const detail = currentDetailRead(key);
+      let succeeded = false;
       return {
         revision,
         settle() {
           if (orderReadScopes.get(key) !== scope || scope.revision !== revision) return;
           const blocked = hasUnsettledOrderFailure(key);
+          const newEntry = succeeded && entryRevision !== undefined && scope.confirmedEntry !== entryRevision;
           scope.revision = 0;
-          if (blocked) publishReadChange();
+          if (newEntry) scope.confirmedEntry = entryRevision;
+          if (blocked || newEntry) publishReadChange();
         },
         confirm() {
           // Order data has no readiness version. It can renew access only for
           // the detail version that was still confirmed throughout this read.
           if (!entry || entries.get(key) !== entry || !detail || !confirmsWorkspaceAccess(key, detail) ||
               revision <= Math.max(entry.orderRead?.revision ?? 0, accessFloor(key))) return;
+          succeeded = true;
           const wasConfirmed = detailReadConfirmation(key);
           entry.orderRead = { revision, detail };
           if (!wasConfirmed && detailReadConfirmation(key)) {

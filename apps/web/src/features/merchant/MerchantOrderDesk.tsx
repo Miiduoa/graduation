@@ -61,6 +61,7 @@ export function MerchantOrderDesk({
   beginRead,
   readFlight,
   suspended = false,
+  readWhileSuspended = false,
   queue: controlledQueue,
   onQueueChange,
   queueHref,
@@ -74,6 +75,7 @@ export function MerchantOrderDesk({
   beginRead?: () => { confirm(): void; reject(failure: unknown): void; settle(): void } | null;
   readFlight?: () => FoodReadFlight;
   suspended?: boolean;
+  readWhileSuspended?: boolean;
   queue?: MerchantWorkspaceQueue;
   onQueueChange?: (event: MouseEvent<HTMLAnchorElement>, queue: MerchantWorkspaceQueue) => void;
   queueHref?: (queue: MerchantWorkspaceQueue) => string;
@@ -123,7 +125,12 @@ export function MerchantOrderDesk({
       observation?.settle();
     }
   }, [beginRead, client, tenantId, locationId, cursor]);
-  const data = useFoodRead(load, { pollMs: FOOD_POLL_MS, paused: suspended, serializeReads: !readFlight, readFlight });
+  const data = useFoodRead(load, {
+    pollMs: FOOD_POLL_MS,
+    paused: suspended && !readWhileSuspended,
+    serializeReads: !readFlight,
+    readFlight,
+  });
   const [opening, setOpening] = useFoodDraft(cache, `${scope}:opening`, '0');
   const [counted, setCounted] = useFoodDraft(cache, `${scope}:counted`, '');
   const [openNext, setOpenNext] = useFoodDraft(cache, `${scope}:open-next`, false);
@@ -188,6 +195,7 @@ export function MerchantOrderDesk({
     accountId,
     settleAfterUnmount: true,
     enabled: canSubmit,
+    canSend: hasSubmitAccess,
     execute,
     reload: data.reload,
     onSuccess(result, intent) {
@@ -213,7 +221,7 @@ export function MerchantOrderDesk({
     },
   });
   function sendOrderIntent(intent: FoodIntent) {
-    if (hasSubmitAccess()) void task.send(intent);
+    void task.send(intent);
   }
   const locked = !canSubmit || task.busy || !!task.pending || task.storageBlocked;
   const incomingOrders = useMemo(
@@ -365,7 +373,7 @@ export function MerchantOrderDesk({
           )}
         </div>
       )}
-      <FoodMutationStatus task={task} canRetry={hasSubmitAccess} retryDisabled={!canSubmit} />
+      <FoodMutationStatus task={task} retryDisabled={!canSubmit} />
       {receipt && <p role="status">{receipt}</p>}
       {data.data && (
         <div className={styles.stack}>

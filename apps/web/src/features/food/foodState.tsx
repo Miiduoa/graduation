@@ -219,12 +219,14 @@ export function useFoodMutation({
   onRejected,
   reload,
   enabled,
+  canSend,
   settleAfterUnmount = false,
 }: {
   cache: FoodDraftCache;
   scope: string;
   accountId: string;
   enabled: boolean;
+  canSend?(): boolean;
   settleAfterUnmount?: boolean;
   execute(intent: FoodIntent): Promise<unknown>;
   onSuccess(result: unknown, intent: FoodIntent): void;
@@ -291,7 +293,7 @@ export function useFoodMutation({
   async function send(intent: FoodIntent, retry = false) {
     if (
       !active.current || lock.current || (flightKey && foodMutationFlights.has(flightKey)) ||
-      storageBlocked || (!retry && (!enabled || pending))
+      storageBlocked || (!retry && (!enabled || pending)) || (canSend && !canSend())
     )
       return;
     if (!accountId) {
