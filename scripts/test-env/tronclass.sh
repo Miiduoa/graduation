@@ -528,7 +528,9 @@ tronclass_stop_logged() {
 
 cleanup() {
   local exit_status=$? sig="${1:-}" failed=0
-  trap - EXIT INT TERM
+  # Keep the first signal's exit status and finish reaping detached groups.
+  trap '' INT TERM
+  trap - EXIT
   local child launch_signal=TERM pending_cleaned='' jobs=() job child_start
   tronclass_kill_discovered_groups() {
     local journal_log record

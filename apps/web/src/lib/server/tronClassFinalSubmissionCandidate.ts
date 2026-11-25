@@ -70,7 +70,7 @@ type Dependencies = {
   /** Must atomically reserve the school student/activity across owners and processes. */
   claim(attempt: TronClassFinalCandidateClaim): Promise<boolean>;
   rememberAcknowledgment(attempt: TronClassFinalCandidateClaim, acknowledgment: Acknowledgment): Promise<void>;
-  readAttempt(ownerKey: string, operationId: string): Promise<TronClassFinalCandidateAttempt | null>;
+  readAttempt(ownerKey: string, operationId: string, expectedRevision?: string): Promise<TronClassFinalCandidateAttempt | null>;
   requireBinding(ownerKey: string): Promise<TronClassSubmissionBinding>;
   /** Fixed official student submission_list GET, with current ownership/visibility checked by the reader. */
   readHistory(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, signal: AbortSignal): Promise<unknown>;
@@ -300,7 +300,7 @@ export function createTronClassFinalSubmissionCandidate(dependencies: Dependenci
       // Reconciliation is read-only and remains available with writes disabled.
       return bounded(signal, async (signal, check) => {
         check();
-        const raw = await dependencies.readAttempt(ownerKey, operationId);
+        const raw = await dependencies.readAttempt(ownerKey, operationId, snapshot?.revision);
         check();
         const attempt = checkedAttempt(raw, ownerKey, operationId);
         const binding = snapshot ?? await dependencies.requireBinding(ownerKey);

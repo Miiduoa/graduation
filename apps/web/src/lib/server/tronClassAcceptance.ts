@@ -381,7 +381,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
     signal?: AbortSignal,
   ): Promise<TronClassAcceptanceResult> => {
     const binding = await current(plan, signal);
-    const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId);
+    const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId, plan.revision);
     checkSignal(signal);
     if (!attempt) return unknown(plan.operationId);
     scopeMatchesAttempt(plan, attempt);
@@ -394,7 +394,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
       );
       await current(plan, signal, binding);
       if (result.state !== 'verified-new-version') return unknown(plan.operationId);
-      const latest = await journal.readAttempt(plan.ownerKey, plan.operationId);
+      const latest = await journal.readAttempt(plan.ownerKey, plan.operationId, plan.revision);
       if (!latest) return unknown(plan.operationId);
       scopeMatchesAttempt(plan, latest);
       await current(plan, signal, binding);
@@ -506,7 +506,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
           fail(409, 'TRONCLASS_ACCEPTANCE_INPUT_CHANGED');
         }
         const binding = await current(plan, signal);
-        const existing = await journal.readAttempt(plan.ownerKey, plan.operationId);
+        const existing = await journal.readAttempt(plan.ownerKey, plan.operationId, plan.revision);
         checkSignal(signal);
         if (existing) {
           scopeMatchesAttempt(plan, existing);
@@ -535,7 +535,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
           );
           await current(plan, signal, binding);
           if (result.state !== 'verified-new-version') return unknown(plan.operationId);
-          const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId);
+          const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId, plan.revision);
           if (!attempt) return unknown(plan.operationId);
           scopeMatchesAttempt(plan, attempt);
           await current(plan, signal, binding);
@@ -547,7 +547,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
           // Another process may have won this same operation with a separately
           // reviewed body. Preserve that conflict instead of attributing its
           // unknown result to the losing plan. A journal failure is not a match.
-          const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId);
+          const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId, plan.revision);
           if (attempt) scopeMatchesAttempt(plan, attempt);
           return unknown(plan.operationId);
         }

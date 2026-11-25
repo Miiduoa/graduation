@@ -64,7 +64,7 @@ export function createTronClassOperationReconciler({
     // v1 parser, even when malformed or when a writer is currently disabled.
     if (!snapshot.exists || snapshot.data()?.version === 1) return legacyReconcile(ownerKey, expected, binding);
     if (snapshot.data()?.version !== 2) fail(409, 'TRONCLASS_OPERATION_CONFLICT');
-    const attempt = await journal.readAttempt(ownerKey, expected.operationId);
+    const attempt = await journal.readAttempt(ownerKey, expected.operationId, expected.revision);
     await current();
     // A preparing operation can still be claimed by another in-flight actor.
     // Only an atomic cancellation could establish that it will never dispatch;

@@ -379,10 +379,10 @@ export function createTronClassControlledJournal({ db, bindings, now = Date.now 
         tx.set(lock, { ...lockData, state: 'acknowledged', updatedAt: at, purgeAt: null });
       });
     },
-    async readAttempt(ownerKey: string, id: string): Promise<TronClassFinalCandidateAttempt | null> {
+    async readAttempt(ownerKey: string, id: string, expectedRevision?: string): Promise<TronClassFinalCandidateAttempt | null> {
       owner(ownerKey);
       operationId(id);
-      return current(ownerKey, undefined, async (tx, binding) => {
+      return current(ownerKey, expectedRevision, async (tx, binding) => {
         const operation = readOperation(await tx.get(operationRef(ownerKey, id)), ownerKey, id);
         if (!operation) return null;
         if (operation.studentId !== binding.userId) conflict();

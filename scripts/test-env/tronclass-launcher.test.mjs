@@ -2015,7 +2015,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 test('launcher cleans up the verified Next group if the wrapper cannot load the identity helper', { timeout: 20000 },
   () => assertServiceCleanup('SIGTERM', true));
 
-test('launcher cleanup stops web, emulator, and health in parallel under a shared 6-second deadline', { timeout: 20000 }, async () => {
+test('launcher cleanup stops web, emulator, and health in parallel under a shared 6-second deadline despite a second TERM', { timeout: 20000 }, async () => {
   const { spawn } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
   const { once } = await import('node:events');
@@ -2092,9 +2092,15 @@ if (arg && arg.endsWith('/firebase.js')) {
   builtin kill "$@"
 }
 python3() {
-  command python3 "$@" || return
   if [[ "\${3:-}" == *pidfd_send_signal* && "$8" == KILL && "$BASHPID" == "$$" ]]; then
+    if [[ ! -e "$TRONCLASS_RUNTIME_DIR/second-term" ]]; then
+      : > "$TRONCLASS_RUNTIME_DIR/second-term"
+      builtin kill -TERM "$$"
+    fi
+    command python3 "$@" || return
     printf '%s\\n' "-- $4" >> "$TRONCLASS_RUNTIME_DIR/launcher-kills"
+  else
+    command python3 "$@"
   fi
 }
 `);
@@ -2126,6 +2132,7 @@ python3() {
     const started = Date.now();
     assert.ok(proc.kill('SIGTERM'));
     assert.deepEqual(await exited, [143, null], output);
+    assert.ok(existsSync(marker('second-term')), 'sent TERM again before the first forced cleanup signal');
     const elapsed = Date.now() - started;
     assert.ok(elapsed < 8000, `cleanup took ${elapsed}ms; shared deadline should finish near 6s, not 6s per group`);
     const paused = readFileSync(marker('helpers-paused'), 'utf8').trim().split('\n').sort();

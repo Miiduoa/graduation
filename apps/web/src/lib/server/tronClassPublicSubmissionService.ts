@@ -273,7 +273,7 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
         const binding = await current(ownerKey, input.revision);
         if (result.operationId !== input.operationId) conflict();
         if (result.state !== 'verified-new-version') return unknown();
-        const attempt = await journal.readAttempt(ownerKey, input.operationId);
+        const attempt = await journal.readAttempt(ownerKey, input.operationId, input.revision);
         if (!attempt || attempt.courseId !== input.courseId || attempt.homeworkId !== input.homeworkId ||
           attempt.revision !== input.revision || attempt.studentId !== binding.userId) conflict();
         const confirmed = mapTronClassSubmissionConfirmation(ownerKey, attempt, result);
@@ -286,7 +286,7 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
           'TRONCLASS_CANDIDATE_TIMEOUT', 'TRONCLASS_CANDIDATE_UNCONFIRMED', 'TRONCLASS_CANDIDATE_ALREADY_DISPATCHED',
           'TRONCLASS_CANDIDATE_DISABLED', 'TRONCLASS_CANDIDATE_CSRF_UNVERIFIED', 'TRONCLASS_SUBMISSION_BLOCKED',
         ].includes(error.code)) throw error;
-        const attempt = await journal.readAttempt(ownerKey, input.operationId);
+        const attempt = await journal.readAttempt(ownerKey, input.operationId, input.revision);
         if (!attempt) throw error;
         if (attempt.courseId !== input.courseId || attempt.homeworkId !== input.homeworkId || attempt.revision !== input.revision) conflict();
         // A changed school permission can reject before candidate.claim checks

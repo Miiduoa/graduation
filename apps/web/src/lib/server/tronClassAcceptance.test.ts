@@ -463,6 +463,28 @@ describe('controlled first-text acceptance entry', () => {
     expect([...f.rows]).toEqual(saved);
   });
 
+  it.each([1, 2])('rejects a connected rebind to the same student after reconcile binding check %i', async (check) => {
+    const f = fixture();
+    const plan = await f.service().preflight(input());
+    f.setReadFailure(true);
+    expect((await f.service().dispatch(input(), plan, confirmation(plan))).status).toBe('unknown');
+    expect([...f.rows.values()].some((row) => row.state === 'acknowledged')).toBe(true);
+    f.setReadFailure(false);
+    f.unsealSession.mockClear();
+    f.readHistory.mockClear();
+    const assertCurrent = f.bindings.assertCurrent.getMockImplementation()!;
+    let remaining = check;
+    f.bindings.assertCurrent.mockImplementation(async (owner, revision) => {
+      await assertCurrent(owner, revision);
+      if (--remaining === 0) f.rebind('b'.repeat(32));
+    });
+
+    await expect(f.service().reconcile(plan)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    expect(f.unsealSession.mock.results.map(({ value }) => value.revision)).toEqual(Array(check).fill(REVISION));
+    expect(f.readHistory).not.toHaveBeenCalled();
+    expect(f.fetchSchool).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps a failed readback unknown with its original operation and lock intact', async () => {
     const f = fixture();
     const plan = await f.service().preflight(input());
