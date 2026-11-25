@@ -1551,6 +1551,13 @@ describe('continuing a search after opening a service', () => {
         expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
         act(() => window.history.replaceState(null, '', pushedUrl));
         expect(window.location.href).toBe(pushedUrl);
+        expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+        const syncEntry = Object.defineProperty(
+          { ...window.history.state, ...nextState },
+          APP_ROUTER_SYNC_HISTORY_QUERY,
+          { value: true },
+        );
+        act(() => window.history.replaceState(syncEntry, '', pushedUrl));
         expect(window.history.state).toMatchObject({
           __campusSearchHistoryEntry: intervening.__campusSearchHistoryEntry,
           __campusSearchResultReturn: intervening.__campusSearchResultReturn,
@@ -1640,6 +1647,10 @@ describe('continuing a search after opening a service', () => {
     act(() => window.history.replaceState(window.history.state, '', reencodedHref));
     expect(window.location.href).toBe(reencodedHref);
     expect(new URLSearchParams(window.location.search).toString()).toBe(queryString);
+    expect(search.value).toBe('公');
+
+    act(() => window.history.replaceState(null, '', reencodedHref));
+    expect(window.location.href).toBe(reencodedHref);
     expect(search.value).toBe('公');
     expect(window.history.state).toMatchObject({
       __campusSearchHistoryEntry: entry.__campusSearchHistoryEntry,

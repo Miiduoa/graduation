@@ -219,6 +219,16 @@ async def check_search_history(origin):
             await expect(library).to_be_focused()
             before = await page.evaluate(metadata)
             assert before['key'] and before['snapshot']['token'], before
+            href = page.url
+            await field.dispatch_event('compositionstart')
+            await field.fill('公')
+            await expect(page).to_have_url(href)
+            await page.evaluate("""() => history.replaceState(null, '', location.href)""")
+            await expect(field).to_have_value('公')
+            await expect(page).to_have_url(href)
+            assert await page.evaluate(metadata) == before
+            await field.fill('借書')
+            await field.dispatch_event('compositionend')
             await check_sync_after_native_replace()
             assert await page.evaluate(metadata) == before
 

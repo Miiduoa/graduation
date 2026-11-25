@@ -249,9 +249,9 @@ function installHistoryTracking() {
           (previousHref !== nextHref &&
             previousHref.split('#', 1)[0] === nextHref.split('#', 1)[0]);
         const queryString = currentQueryString();
-        // Match the Router's query representation so a native encoding-only rewrite
-        // cannot publish a filter arrival that would replace an in-progress draft.
-        const keepsNativeQuery = incomingNextFields.__NA && previousQueryString === queryString;
+        // Compare the committed URL with the previous URL independently of the
+        // caller's state. Next may add its fields inside this observer.
+        const queryChanged = previousQueryString !== queryString;
         const updatesQuery = targetUrl?.origin === window.location.origin &&
           !changesOnlyFragment && !routerReplace;
         // The explicit write can acknowledge an earlier native write, even on an
@@ -262,7 +262,7 @@ function installHistoryTracking() {
           arrival?.entryKey === entryKey && arrival.queryString === queryString;
         if (explicitSync) {
           publishReturn(null, { entryKey, queryString, saved: null, explicitSync: true });
-        } else if (updatesQuery && searchEntry && !keepsNativeQuery) {
+        } else if (updatesQuery && searchEntry && queryChanged) {
           if (!arrivalMatchesEntry || arrival.saved || pending) {
             publishReturn(null, { entryKey, queryString, saved: null });
           }

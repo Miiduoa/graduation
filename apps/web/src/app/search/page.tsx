@@ -187,15 +187,16 @@ function ServiceDirectory() {
     if (isHistoryArrival && queryString !== restoring.queryString) return;
     historyRestoration.current = null;
     if (filterArrival) {
-      // Apply this entry’s filter update independently of result focus.
+      // An accepted filter arrival supersedes any draft, including an active
+      // composition whose end event may still arrive after this render.
       restoredFilters.current = { scope: draftScope, queryString };
       editedFilters.current = null;
+      compositionScope.current = null;
       const next =
         filterArrival.saved?.filters ?? readCampusServiceFilters(new URLSearchParams(queryString));
       const expanded = restoreDirectorySearch('search', '/search', storageScope)?.expanded ?? [];
       if (filterArrival.explicitSync) {
         requestSequence.current += 1;
-        compositionScope.current = null;
         setAnalysis(null);
         // Persist the URL's filters, including an intentional empty query.
         rememberDirectorySearch('search', {
