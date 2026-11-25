@@ -2800,9 +2800,13 @@ it.each([
   { menuState: 'present', intermediateRequirements: ['settings'], retryVersion: 8, status: 200 },
   { menuState: 'legacy zero stock', intermediateRequirements: [], retryVersion: 9, status: 200 },
   { menuState: 'legacy zero stock', intermediateRequirements: [], retryVersion: 9, status: 503 },
+  { menuState: 'missing', intermediateRequirements: ['menu'], retryVersion: 8, status: 200,
+    expiration: { status: 401, code: 'UNAUTHORIZED' } },
+  { menuState: 'legacy zero stock', intermediateRequirements: [], retryVersion: 9, status: 503,
+    expiration: { status: 409, code: 'SESSION_CHANGED' } },
 ])(
-  'keeps a v7 first-menu receipt through automatic GET $status and session renewal with earlier v8 menu $menuState',
-  async ({ menuState, intermediateRequirements, retryVersion, status }) => {
+  'keeps a v7 first-menu receipt through automatic GET $status and session renewal ($expiration) with earlier v8 menu $menuState',
+  async ({ menuState, intermediateRequirements, retryVersion, status, expiration }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const initial = { ...detail(), readinessVersion: 7 };
     const published = {
@@ -2871,7 +2875,25 @@ it.each([
     expect(screen.getByText(success)).toBeTruthy();
     expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
 
-    mocks.auth.session = { platformAccountId: 'account-a', context: 'context-renewed' };
+    if (expiration) {
+      const rejectedRead = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+      const renewal = Promise.withResolvers<void>();
+      readDetail.mockReturnValueOnce(rejectedRead.promise);
+      mocks.auth.refresh.mockImplementationOnce(async () => {
+        await renewal.promise;
+        mocks.auth.session = { platformAccountId: 'account-a', context: 'context-renewed' };
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+      await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(5));
+      await act(async () => rejectedRead.reject(new NuniError(expiration.status, expiration.code)));
+      await screen.findByText('登入或帳號已變更，這次店家資料與草稿已清除。');
+      expect(mocks.auth.refresh).toHaveBeenCalledOnce();
+      expect(screen.queryByText(success)).toBeNull();
+      await act(async () => renewal.resolve());
+    } else {
+      mocks.auth.session = { platformAccountId: 'account-a', context: 'context-renewed' };
+    }
     view.rerender(<MerchantWorkspace view="workspace" />);
     await waitFor(() => expect(readRenewedDetail).toHaveBeenCalledTimes(1));
     await act(async () => renewedEntry.resolve(renewedDetail));

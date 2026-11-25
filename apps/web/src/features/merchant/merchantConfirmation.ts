@@ -767,8 +767,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       const entry = entries.get(key);
       return readFailureRevision(key) > 0 || verified.has(key) || revocations.has(key) || !!entry?.detail;
     },
-    clear() {
-      for (const draft of drafts.values()) draft.menuReceipt = null;
+    clearSession() {
+      // A renewed context for the same account restores settled receipts from its drafts.
       lists = {};
       listedWorkspaces = undefined;
       includeVerifiedWorkspaces = false;

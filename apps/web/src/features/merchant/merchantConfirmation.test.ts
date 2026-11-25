@@ -231,7 +231,7 @@ it.each(readMatrix)('$name $status $code while $lifetime', ({ source, status, co
   const capturedSession = session;
   const clear = () => {
     session++;
-    confirmed.clear();
+    confirmed.clearSession();
   };
   if (lifetime === 'cleared') {
     clear();

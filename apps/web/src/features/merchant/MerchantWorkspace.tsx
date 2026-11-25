@@ -343,7 +343,7 @@ function AccountWorkspace({
     publishOverview();
   }, [publishOverview]);
   const clearOverview = useCallback(() => {
-    confirmed.clear();
+    confirmed.clearSession();
     publishOverview();
   }, [confirmed, publishOverview]);
   const expire = useCallback(() => {

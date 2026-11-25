@@ -361,7 +361,7 @@ export function MerchantOperations({
 
   const clearExpiredSession = useCallback(
     () => {
-      localConfirmations.clear();
+      localConfirmations.clearSession();
       setNotice(null);
       setDetail(null);
       updateAccess({ type: 'locked' });
