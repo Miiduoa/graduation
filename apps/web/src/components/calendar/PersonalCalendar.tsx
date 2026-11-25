@@ -671,7 +671,7 @@ function PersonalCalendarWorkspace({
     const title = titleRef.current;
     if (!title) return;
     title.focus({ preventScroll: true });
-    revealForFocus(title);
+    revealForFocus(title, undefined, { revealInlineStart: true });
   };
 
   useEffect(() => {
@@ -679,7 +679,7 @@ function PersonalCalendarWorkspace({
     const revealFocusedEditorTitle = () => {
       const title = titleRef.current;
       if (!suspended.current && title && document.activeElement === title) {
-        revealForFocus(title);
+        revealForFocus(title, undefined, { revealInlineStart: true });
       }
     };
     const editor = editorRef.current;

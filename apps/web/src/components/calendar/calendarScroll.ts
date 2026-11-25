@@ -132,7 +132,11 @@ function horizontalScrollDistance(element: HTMLElement, { left, right }: { left:
   return nearestScrollDistance(rect.left, rect.right, left, right);
 }
 
-export function revealForFocus(element: HTMLElement, horizontalContainer?: HTMLElement) {
+export function revealForFocus(
+  element: HTMLElement,
+  horizontalContainer?: HTMLElement,
+  { revealInlineStart = false } = {},
+) {
   const maxScroll = horizontalContainer
     ? horizontalContainer.scrollWidth - horizontalContainer.clientWidth
     : 0;
@@ -149,8 +153,11 @@ export function revealForFocus(element: HTMLElement, horizontalContainer?: HTMLE
   const insets = measureStickyInsets();
   applyScrollMargins(element, insets);
   const bounds = horizontalVisibleBounds(element);
+  // A wide text field can span the viewport with its text start still offscreen.
   const needsHorizontalReveal =
-    bounds.right <= bounds.left || horizontalScrollDistance(element, bounds) !== 0;
+    bounds.right <= bounds.left ||
+    (revealInlineStart && element.getBoundingClientRect().left < bounds.left) ||
+    horizontalScrollDistance(element, bounds) !== 0;
   const nativeScroll = () => {
     // Native scrolling can pan the visual viewport even when the layout viewport cannot scroll.
     const rect = element.getBoundingClientRect();
