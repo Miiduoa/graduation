@@ -3311,8 +3311,9 @@ it.each(['availability', 'orders', 'orders-retry', 'orders-in-flight', 'orders-i
     failedList.reject(unavailable);
     await failedList.promise.catch(() => undefined);
     await Promise.resolve();
-    // Exercise the submit guard while React still shows the previously enabled button.
-    expect(submit.disabled).toBe(inFlight);
+    // Without an in-flight operation or poll, the list failure must block even
+    // before React updates the previously enabled control.
+    expect(submit.disabled).toBe(inFlight || !!pollResource);
     submit.click();
     expect(acceptOrder).toHaveBeenCalledTimes(retry || inFlight ? 1 : 0);
     expect(changeAvailability).toHaveBeenCalledTimes(1);
@@ -3816,7 +3817,14 @@ it('keeps settings locked when a v9 list invalidates the v8 GET before a v9 writ
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
-it.each(['orders', 'shift'])('locks both workspaces on a %s GET failure and recovers on an order poll', async (resourceName) => {
+it.each([
+  { resourceName: 'orders', recovery: 'order poll' },
+  { resourceName: 'shift', recovery: 'order poll' },
+  { resourceName: 'orders', recovery: 'overview reload' },
+  { resourceName: 'shift', recovery: 'overview reload' },
+])('locks both workspaces on a $resourceName GET failure until $recovery obtains both reads', async ({
+  resourceName, recovery,
+}) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const store = detail('store-a', true);
   const queue = {
@@ -3833,7 +3841,7 @@ it.each(['orders', 'shift'])('locks both workspaces on a %s GET failure and reco
   const accept = vi.fn()
     .mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'))
     .mockResolvedValue({ orderId: 'order-1', state: 'accepted', updatedAt: future, replayed: true, kitchenTicketId: 'ticket-1' });
-  const availability = vi.fn();
+  const availability = vi.fn().mockResolvedValue({ ...store, locationStatus: 'closed' });
   const readDetail = vi.fn().mockResolvedValue(store);
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [store] });
@@ -3868,6 +3876,20 @@ it.each(['orders', 'shift'])('locks both workspaces on a %s GET failure and reco
   fireEvent.click(pause);
   expect(availability).not.toHaveBeenCalled();
 
+  if (recovery === 'overview reload') {
+    fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+    await waitFor(() => expect(reads).toHaveBeenCalledTimes(3));
+    expect(readDetail).toHaveBeenCalledTimes(2);
+    expect(pause.disabled).toBe(true);
+    fireEvent.click(pause);
+    expect(availability).not.toHaveBeenCalled();
+    await act(async () => pendingRecovery.resolve(resourceName === 'orders' ? queue : shift));
+    await waitFor(() => expect(pause.disabled).toBe(false));
+    fireEvent.click(pause);
+    expect(availability).toHaveBeenCalledOnce();
+    return;
+  }
+
   await act(async () => window.history.back());
   await waitFor(() => expect(reads).toHaveBeenCalledTimes(3));
   expect(screen.getByRole<HTMLButtonElement>('button', { name: '重試同一份操作' }).disabled).toBe(true);
@@ -3899,6 +3921,9 @@ it.each([
   { firstResult: 'success', first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', navigation: 'overview' },
   { firstResult: 'success', first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', navigation: 'overview' },
   { firstResult: 'success', first: 'orders', second: 'shift', status: 200, code: 'OK', navigation: 'overview' },
+  { firstResult: 'success', first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', navigation: 'direct overview' },
+  { firstResult: 'success', first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', navigation: 'direct overview' },
+  { firstResult: 'success', first: 'orders', second: 'shift', status: 200, code: 'OK', navigation: 'direct overview' },
 ] as const)('settles the order round when $second reports $code after $first returns $firstResult ($navigation)', async ({
   firstResult, first, second, status, code, navigation,
 }) => {
@@ -3949,7 +3974,7 @@ it.each([
   } else {
     await act(async () => firstRead.resolve(responses[first]));
   }
-  expect(retry.disabled).toBe(firstResult === 'failure');
+  expect(retry.disabled).toBe(true);
   expect(mocks.auth.refresh).not.toHaveBeenCalled();
 
   reads.orders.mockResolvedValueOnce(queue);
@@ -3967,16 +3992,19 @@ it.each([
     }
     await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
     expect(screen.queryByRole('button', { name: '接單：A101' })).toBeNull();
+  } else if (navigation === 'direct overview') {
+    fireEvent.click(screen.getByRole('link', { name: '門市概況' }));
   } else if (navigation === 'next page') {
     fireEvent.click(screen.getByRole('button', { name: '下一頁待處理訂單' }));
   } else {
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
   }
-  const writeButton = navigation === 'overview'
+  const overview = navigation === 'overview' || navigation === 'direct overview';
+  const writeButton = overview
     ? await screen.findByRole<HTMLButtonElement>('button', { name: '暫停接單' })
     : retry;
-  const write = navigation === 'overview' ? availability : accept;
-  const initialWrites = navigation === 'overview' ? 0 : 1;
+  const write = overview ? availability : accept;
+  const initialWrites = overview ? 0 : 1;
   const expectWriteBlocked = () => {
     expect(writeButton.disabled).toBe(true);
     fireEvent.click(writeButton);
@@ -3989,15 +4017,17 @@ it.each([
 
   if (status === 200) {
     await act(async () => sibling.resolve(responses[second]));
-    // The new queue has resolved, but its shift is still pending.
-    expectWriteBlocked();
-    expect(reads.orders).toHaveBeenCalledTimes(3);
-    expect(reads.shift).toHaveBeenCalledTimes(3);
-    await act(async () => recovery.resolve());
+    if (navigation !== 'direct overview') {
+      // The new queue has resolved, but its shift is still pending.
+      expectWriteBlocked();
+      expect(reads.orders).toHaveBeenCalledTimes(3);
+      expect(reads.shift).toHaveBeenCalledTimes(3);
+      await act(async () => recovery.resolve());
+    }
     await waitFor(() => expect(writeButton.disabled).toBe(false));
     fireEvent.click(writeButton);
     expect(write).toHaveBeenCalledTimes(initialWrites + 1);
-    if (navigation !== 'overview') {
+    if (!overview) {
       const writes = mocks.request.mock.calls.filter(([resource]) => resource.endsWith('/accept'));
       expect(writes[1]?.[2]).toEqual(writes[0]?.[2]);
     }
@@ -4062,5 +4092,59 @@ it.each([false, true])('settles an order receipt after browser Back to the list 
   if (!reenterFirst) await enter();
   await screen.findByRole('button', { name: '接單：A101' });
   expect(screen.queryByRole('button', { name: '重試同一份操作' })).toBeNull();
+  expect(accept).toHaveBeenCalledOnce();
+});
+
+it.each([
+  { status: 401, code: 'UNAUTHORIZED' },
+  { status: 409, code: 'SESSION_CHANGED' },
+])('ignores an order receipt after the same account reloads following $code', async ({ status, code }) => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const store = detail('store-a', true);
+  const queue = {
+    orders: [{ ...queueFixture(), locationId: 'store-a', state: 'paid', allowedActions: ['accept'] }],
+  };
+  const readOrders = vi.fn().mockResolvedValue(queue);
+  const receipt = Promise.withResolvers<unknown>();
+  const accept = vi.fn(() => receipt.promise);
+  const pendingIntent = () => loadFoodPending('account-a', 'merchant-food:campus-one:store-a');
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [store] });
+    if (resource === path) return Promise.resolve(store);
+    if (resource === `${path}/orders`) return readOrders();
+    if (resource.endsWith('/accept')) return accept();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  const enter = async () => {
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    fireEvent.click(await screen.findByRole('link', { name: '處理訂單與收銀' }));
+  };
+  await enter();
+  fireEvent.click(await screen.findByRole('button', { name: '接單：A101' }));
+  fireEvent.click(screen.getByLabelText('我已確認這筆訂單與處理內容'));
+  fireEvent.click(screen.getByRole('button', { name: '確認：接單' }));
+  expect(accept).toHaveBeenCalledOnce();
+  const intent = pendingIntent();
+  expect(intent).toMatchObject({ action: 'accept', orderId: 'order-1' });
+
+  readOrders.mockRejectedValueOnce(new NuniError(status, code));
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  await screen.findByText('登入或帳號已變更，這次店家資料與草稿已清除。');
+  await act(async () => window.history.go(-2));
+  await waitFor(() => expect(window.location.search).toBe(''));
+  fireEvent.click(screen.getByRole('button', { name: '重新載入店家資料' }));
+  await enter();
+  const retry = await screen.findByRole<HTMLButtonElement>('button', { name: '重試同一份操作' });
+  await waitFor(() => expect(retry.disabled).toBe(false));
+  const readsBeforeReceipt = readOrders.mock.calls.length;
+
+  await act(async () => receipt.resolve({
+    orderId: 'order-1', state: 'accepted', updatedAt: future, replayed: false, kitchenTicketId: 'ticket-1',
+  }));
+  expect(readOrders).toHaveBeenCalledTimes(readsBeforeReceipt);
+  expect(pendingIntent()).toEqual(intent);
+  expect(retry.disabled).toBe(false);
   expect(accept).toHaveBeenCalledOnce();
 });

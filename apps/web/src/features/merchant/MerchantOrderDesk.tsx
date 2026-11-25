@@ -57,6 +57,7 @@ export function MerchantOrderDesk({
   locationId,
   cache,
   canSend,
+  captureSession,
   accessConfirmed = true,
   beginRead,
   readFlight,
@@ -71,6 +72,7 @@ export function MerchantOrderDesk({
   locationId: string;
   cache: FoodDraftCache;
   canSend?: () => boolean;
+  captureSession?: () => () => boolean;
   accessConfirmed?: boolean;
   beginRead?: () => { confirm(): void; reject(failure: unknown): void; settle(): void } | null;
   readFlight?: () => FoodReadFlight;
@@ -194,6 +196,7 @@ export function MerchantOrderDesk({
     scope,
     accountId,
     settleAfterUnmount: true,
+    captureSession,
     enabled: canSubmit,
     canSend: hasSubmitAccess,
     execute,

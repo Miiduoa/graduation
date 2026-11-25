@@ -206,9 +206,19 @@ export function useFoodRead<T>(
   return { data, error, loading, reload, quietReload };
 }
 
-// Durable operations own their receipts across views of the same account and scope.
-type FoodMutationFlight = Set<(confirmed: boolean) => void>;
+// Durable operations own their receipts across views within the same session.
+type FoodMutationFlight = {
+  isSameSession(): boolean;
+  listeners: Set<(confirmed: boolean) => void>;
+};
 const foodMutationFlights = new Map<string, FoodMutationFlight>();
+
+function currentFoodMutationFlight(key: string | null) {
+  const flight = key ? foodMutationFlights.get(key) : undefined;
+  return flight?.isSameSession() ? flight : undefined;
+}
+
+const alwaysCurrent = () => true;
 
 export function useFoodMutation({
   cache,
@@ -221,6 +231,7 @@ export function useFoodMutation({
   enabled,
   canSend,
   settleAfterUnmount = false,
+  captureSession,
 }: {
   cache: FoodDraftCache;
   scope: string;
@@ -228,6 +239,7 @@ export function useFoodMutation({
   enabled: boolean;
   canSend?(): boolean;
   settleAfterUnmount?: boolean;
+  captureSession?(): () => boolean;
   execute(intent: FoodIntent): Promise<unknown>;
   onSuccess(result: unknown, intent: FoodIntent): void;
   onRejected?(): void;
@@ -277,7 +289,7 @@ export function useFoodMutation({
 
   useEffect(() => {
     recoverStorage();
-    const flight = flightKey ? foodMutationFlights.get(flightKey) : undefined;
+    const flight = currentFoodMutationFlight(flightKey);
     if (!flight) return;
     setBusy(true);
     const settled = (confirmed: boolean) => {
@@ -286,13 +298,13 @@ export function useFoodMutation({
       setBusy(false);
       recoverStorage();
     };
-    flight.add(settled);
-    return () => { flight.delete(settled); };
+    flight.listeners.add(settled);
+    return () => { flight.listeners.delete(settled); };
   }, [flightKey, recoverStorage]);
 
   async function send(intent: FoodIntent, retry = false) {
     if (
-      !active.current || lock.current || (flightKey && foodMutationFlights.has(flightKey)) ||
+      !active.current || lock.current || currentFoodMutationFlight(flightKey) ||
       storageBlocked || (!retry && (!enabled || pending)) || (canSend && !canSend())
     )
       return;
@@ -300,6 +312,8 @@ export function useFoodMutation({
       setError('目前無法確認帳號，請重新確認後再操作。');
       return;
     }
+    const isSameSession = captureSession?.() ?? alwaysCurrent;
+    if (!isSameSession()) return;
     lock.current = true;
     setBusy(true);
     setError('');
@@ -323,14 +337,14 @@ export function useFoodMutation({
       setBusy(false);
       return;
     }
-    const flight: FoodMutationFlight | null = flightKey ? new Set() : null;
+    const flight: FoodMutationFlight | null = flightKey ? { isSameSession, listeners: new Set() } : null;
     if (flightKey && flight) foodMutationFlights.set(flightKey, flight);
-    const current = () => active.current && accountRef.current === owner;
+    const current = () => isSameSession() && active.current && accountRef.current === owner;
     let confirmed = false;
     try {
       const result = await callbacks.current.execute(frozen);
       confirmed = true;
-      if (!flight && !current()) return;
+      if (!isSameSession() || (!flight && !current())) return;
       const sent = JSON.stringify(frozen);
       try {
         if (!flight || JSON.stringify(loadFoodPending(owner, scope)) === sent) {
@@ -374,8 +388,10 @@ export function useFoodMutation({
       lock.current = false;
       if (current()) setBusy(false);
       if (flightKey && flight) {
-        foodMutationFlights.delete(flightKey);
-        for (const settled of flight) settled(confirmed);
+        if (foodMutationFlights.get(flightKey) === flight) foodMutationFlights.delete(flightKey);
+        if (isSameSession()) {
+          for (const settled of flight.listeners) settled(confirmed);
+        }
       }
     }
   }

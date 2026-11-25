@@ -266,6 +266,11 @@ export function MerchantOperations({
     [draftKey, observations, orderEntryRevision],
   );
   const orderDataPending = useSyncExternalStore(observations.subscribeReadChanges, needsOrderData, () => false);
+  const hasPendingOrderRead = useCallback(
+    () => observations.hasPendingOrderRead(draftKey),
+    [draftKey, observations],
+  );
+  const orderReadPending = useSyncExternalStore(observations.subscribeReadChanges, hasPendingOrderRead, () => false);
   const readAfterWrite = useRef(false);
   const deferredWrite = useRef<{ revision: number; entry: number } | null>(null);
   const mutationRun = useRef(0);
@@ -588,7 +593,7 @@ export function MerchantOperations({
 
   function hasCurrentAccess() {
     return captureReadSession()() && visibleRef.current &&
-      accessSnapshot() === 'confirmed' && !needsOrderData();
+      accessSnapshot() === 'confirmed' && !needsOrderData() && !hasPendingOrderRead();
   }
 
   async function mutate(
@@ -686,8 +691,8 @@ export function MerchantOperations({
   const canReadOrders = !blocked &&
     (access === 'confirmed' || (access === 'orders-unavailable' && !!entryConfirmation));
   const ordersSuspended = !ordersOpen || !operational || !canReadOrders;
-  const readOrdersInOverview = !ordersOpen && orderDataPending && canReadOrders;
-  const writesLocked = locked || orderDataPending;
+  const readOrdersInOverview = !ordersOpen && orderDataPending && !blocked && access === 'confirmed';
+  const writesLocked = locked || orderDataPending || orderReadPending;
   // A same-version list can report an activation blocker while a legacy detail
   // still needs its own stock count to determine whether to show the menu form.
   const activationRequirements = detail?.missingRequirements ??
@@ -1240,6 +1245,7 @@ export function MerchantOperations({
             locationId={locationId}
             cache={foodDrafts ?? localFoodDrafts}
             canSend={hasCurrentAccess}
+            captureSession={captureSession}
             accessConfirmed={!writesLocked}
             suspended={ordersSuspended}
             readWhileSuspended={readOrdersInOverview}

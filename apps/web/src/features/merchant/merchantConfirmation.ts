@@ -130,7 +130,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const orderReadScopes = new Map<string, {
     current: Promise<void> | null;
     revision: number;
-    confirmedEntry?: number;
+    confirmation?: { entry: number; revision: number };
   }>();
 
   function orderReadScope(key: string) {
@@ -535,7 +535,11 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     // A successful round belongs to the entry that started it.
     needsOrderData(key: string, entryRevision: number) {
       const scope = orderReadScopes.get(key);
-      return !!scope && scope.confirmedEntry !== entryRevision;
+      return !!scope && (scope.confirmation?.entry !== entryRevision ||
+        scope.confirmation.revision <= (orderReadFailures.get(key) ?? 0));
+    },
+    hasPendingOrderRead(key: string) {
+      return !!orderReadScopes.get(key)?.revision;
     },
     beginOrderRead(key: string, entryRevision?: number) {
       const scope = orderReadScope(key);
@@ -543,16 +547,17 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       scope.revision = revision;
       const entry = entries.get(key);
       const detail = currentDetailRead(key);
+      publishReadChange();
       let succeeded = false;
       return {
         revision,
         settle() {
           if (orderReadScopes.get(key) !== scope || scope.revision !== revision) return;
-          const blocked = hasUnsettledOrderFailure(key);
-          const newEntry = succeeded && entryRevision !== undefined && scope.confirmedEntry !== entryRevision;
           scope.revision = 0;
-          if (newEntry) scope.confirmedEntry = entryRevision;
-          if (blocked || newEntry) publishReadChange();
+          if (succeeded && entryRevision !== undefined) {
+            scope.confirmation = { entry: entryRevision, revision };
+          }
+          publishReadChange();
         },
         confirm() {
           // Order data has no readiness version. It can renew access only for
