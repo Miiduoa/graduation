@@ -483,11 +483,14 @@ function fileExists(file: File): boolean {
 }
 
 function journalFiles(key: string, recoverExistence = false) {
-  const markerExists = (marker: File) => {
+  const markerExists = (marker: File, legacy = false) => {
     try {
       return fileExists(marker);
     } catch (error) {
       if (!recoverExistence) throw error;
+      // An absent legacy path can fail both metadata probes and both reads.
+      // Continue to the current path if this optional marker is undiscoverable.
+      if (legacy) return readOptionalFile(marker) !== undefined;
       // A readable marker establishes existence even when metadata fails.
       readRollbackFile(marker);
       return true;
@@ -499,7 +502,7 @@ function journalFiles(key: string, recoverExistence = false) {
   const legacyName = key.replace(/[%:~]/g, (character) => `~${character.charCodeAt(0).toString(16)}`);
   if (legacyName.length + markerSuffix.length <= 255) {
     const marker = new File(directory, legacyName + markerSuffix);
-    if (markerExists(marker)) {
+    if (markerExists(marker, true)) {
       return { marker, payload: new File(directory, `${legacyName}.rollback.json`), marked: true };
     }
   }
@@ -1057,7 +1060,11 @@ export function preparePersonalImportRollback(
     async retainRejection(recordDenial: (attempt: string) => Promise<void>) {
       // Preserve the attempt binding even when the rollback copy is unreadable.
       try {
-        payload.write(wrap(rejectedPrefix + encoded));
+        const rejectedPayload = wrap(rejectedPrefix + encoded);
+        payload.write(rejectedPayload);
+        if (ordinary && readRollbackFile(payload) !== rejectedPayload) {
+          throw new Error('無法確認匯入資料的還原副本已寫入。');
+        }
       } catch (error) {
         if (ordinary) {
           try {

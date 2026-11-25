@@ -133,10 +133,12 @@ async function readLedgerSnapshot(
   const fallbackPrimary = primary !== null && journal?.matchesFallbackPrimary?.(primary) === true;
   // A failed rollback-copy rewrite can leave the ordinary attempt intact.
   // Only a denial carrying that exact attempt binding can override it.
-  const denial = primaryVerified && (attemptedPrimary || fallbackPrimary) && journal?.matchesRejectionAttempt
+  const denial = journal?.matchesRejectionAttempt &&
+    ((primaryVerified && (attemptedPrimary || fallbackPrimary)) || journal.rejected)
     ? await readNativeReceipt(nativeRejectionAttemptKey(key), true)
     : null;
-  const deniedAttempt = denial !== null && journal?.matchesRejectionAttempt?.(denial) === true;
+  const deniedAttempt = (attemptedPrimary || fallbackPrimary) &&
+    denial !== null && journal?.matchesRejectionAttempt?.(denial) === true;
   const needsReceipt = !deniedAttempt && primaryVerified && (attemptedPrimary || fallbackPrimary || rejectionMatches !== undefined);
   const receipt = needsReceipt ? await readNativeReceipt(nativeReceiptKey(key), true) : null;
   const fileReceipt = needsReceipt ? readNativeVerificationReceipt(key) : undefined;
@@ -364,6 +366,7 @@ async function rollbackLedger(
   assertWritable: () => void,
   keepJournal: boolean,
   rejectedPrimary?: string,
+  retryPrimaryRestoration = false,
 ) {
   const recovery: Recovery = { raw };
   pendingRestorations.set(key, recovery);
@@ -384,6 +387,28 @@ async function rollbackLedger(
       recordFailedPersonalImportRestoration(key, raw, rejectedPrimary);
     } catch {
       // The rollback payload and checkpoint may still preserve the original.
+    }
+    if (retryPrimaryRestoration) {
+      // An ordinary attempt can be accepted without a receipt. When its
+      // payload could not record rejection, repair the primary independently
+      // of whether the rejection sidecars will be readable on restart.
+      if (raw !== null) {
+        try {
+          await AsyncStorage.multiSet([[key, raw]]);
+          if (await readNativeStorageWithBatchFallback(key) === raw) {
+            pendingRestorations.delete(key);
+            return;
+          }
+        } catch {
+          // Keep the journal and checkpoint and invalidate the candidate.
+        }
+      }
+      try {
+        await AsyncStorage.removeItem(key).catch(() => AsyncStorage.multiRemove([key]));
+        return;
+      } catch {
+        // The retained rejection evidence remains available for recovery.
+      }
     }
     throw error;
   }
@@ -621,7 +646,12 @@ export function mutatePersonalImportLedger<T>(
                   writtenRaw = firstRaw;
                 }
                 assertWritable();
-                await verifyNativeLedgerWrite(key, writtenRaw);
+                // Both encodings hold the same verified ledger. A failed
+                // read here cannot undo verification of the first write.
+                const replacementReadback = await readNativeStorage(key).catch(() => undefined);
+                if (replacementReadback === replacement || replacementReadback === firstRaw) {
+                  writtenRaw = replacementReadback;
+                }
                 assertWritable();
                 const published = journal.publishVerifiedPrimary(
                   writtenRaw, assertWritable, options.allowNativePrimaryOnly,
@@ -638,14 +668,13 @@ export function mutatePersonalImportLedger<T>(
                     // The optional rewrite may fail before or after reaching disk.
                   }
                   assertWritable();
-                  const readback = await readNativeStorage(key);
-                  if (readback === raw) {
+                  const readback = await readNativeStorage(key).catch(() => undefined);
+                  if (readback === raw || (readback === undefined && fallbackWritten)) {
                     writtenRaw = raw;
                     if (options.allowNativePrimaryOnly) newReceipt = journal.verificationReceipt(raw);
-                  } else if (!fallbackWritten && readback === writtenRaw) {
-                    newReceipt = journal.verificationReceipt(writtenRaw);
                   } else {
-                    throw new Error('無法確認匯入資料已儲存，請稍後再試。');
+                    if (readback === replacement || readback === firstRaw) writtenRaw = readback;
+                    newReceipt = journal.verificationReceipt(writtenRaw);
                   }
                 }
                 assertWritable();
@@ -785,14 +814,19 @@ export function mutatePersonalImportLedger<T>(
                   // Preserve rejection through the rollback journal and checkpoint.
                 }
               }
+              let retryPrimaryRestoration = false;
               try {
-                await journal?.retainRejection((attempt) => writeNativeReceipt(nativeRejectionAttemptKey(key), attempt));
+                await journal?.retainRejection((attempt) => {
+                  retryPrimaryRestoration = true;
+                  return writeNativeReceipt(nativeRejectionAttemptKey(key), attempt);
+                });
               } catch {
                 // Still try to restore the original primary and checkpoint.
               }
               await rollbackLedger(
                 key, persistedRaw, assertWritable, cleaningRecovery,
                 nativeRestoredRejectionPattern.test(writtenRaw) ? writtenRaw : undefined,
+                retryPrimaryRestoration,
               );
               throw error;
             }
