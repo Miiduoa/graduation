@@ -249,6 +249,34 @@ it('does not offer a provisional classroom destination while the campus source i
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-zhugu');
 });
 
+it.each(['PH303', 'ZZ303'])('does not confirm classroom %s from bundled data after source failure', async (query) => {
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations)
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" query={query} />);
+  const result = within(screen.getByRole('region', { name: '教室定位結果' }));
+  expect(await result.findByText(/暫時無法確認這間教室的位置/)).toBeTruthy();
+  expect(result.queryByText(/可對應「主顧樓」的位置/)).toBeNull();
+  expect(result.queryByText(/目前地點資料無法確認/)).toBeNull();
+  expect(result.queryByRole('button', { name: '定位主顧樓' })).toBeNull();
+  expect(result.getByRole('link', { name: '核對校方地圖' })).toBeTruthy();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
+  expect(screen.queryByRole('link', { name: '從目前位置導航' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取地點資料' }));
+  expect(result.getByRole('status').textContent).toContain('正在確認地點資料');
+  await act(async () => source.resolve([]));
+  expect(result.queryByRole('status')).toBeNull();
+  const selected = JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected;
+  if (query === 'PH303') {
+    expect(result.getByText(/可對應「主顧樓」的位置/)).toBeTruthy();
+    expect(selected.id).toBe('pu-zhugu');
+  } else {
+    expect(result.getByText(/目前地點資料無法確認/)).toBeTruthy();
+    expect(selected).toBeNull();
+  }
+});
+
 it.each(['Bishop Kupfer Hall 303', 'Ｂｉｓｈｏｐ  Ｋｕｐｆｅｒ Ｈａｌｌ ３０３'])(
   'keeps the bus stop %s searchable without automatically opening the classroom alias',
   async (name) => {
