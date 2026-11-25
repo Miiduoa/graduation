@@ -682,6 +682,8 @@ function MapContent({
             setSelection('');
             setSearch('');
             setCategory('全部');
+            setNearbyOnly(false);
+            setOnlyFavorites(false);
           }}
         >
           看整個校園
