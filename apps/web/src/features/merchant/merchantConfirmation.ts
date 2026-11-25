@@ -288,24 +288,26 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     applicationListRevision = revision;
     const previous = new Map(lists.applications?.map((row) => [row.applicationId, row]));
     lists.applications = rows.map((row) => {
-      const receipt = receipts.get(row.applicationId);
+      const id = row.applicationId;
+      const receipt = receipts.get(id);
       if (receipt && receipt.revision > revision) return row;
-      const current = receipt?.value ?? previous.get(row.applicationId);
-      if (!current || current.tenantId !== row.tenantId) return row;
+      const current = receipt?.value ?? previous.get(id);
+      if (!current || current.tenantId !== row.tenantId) {
+        if (receipt) receipts.delete(id);
+        return row;
+      }
       const older = Date.parse(row.submittedAt) < Date.parse(current.submittedAt);
       const regressedToSubmitted =
         Date.parse(row.submittedAt) === Date.parse(current.submittedAt) &&
         current.state !== 'submitted' &&
         row.state === 'submitted';
-      return older || regressedToSubmitted ? current : row;
+      const value = older || regressedToSubmitted ? current : row;
+      if (receipt) receipts.set(id, { ...receipt, value });
+      return value;
     });
-    const listedIds = new Set(rows.map(({ applicationId }) => applicationId));
     for (const [id, receipt] of receipts) {
-      // A list started during the write can confirm a row it includes, but
-      // its omission cannot establish that the completed write is absent.
-      if (receipt.revision <= revision && (listedIds.has(id) || receipt.confirmedThrough < revision)) {
-        receipts.delete(id);
-      }
+      // Only a list started after receipt confirmation can end omission protection.
+      if (receipt.confirmedThrough < revision) receipts.delete(id);
     }
   }
 
@@ -393,7 +395,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     confirmApplication(receipt: NuniMerchantApplication, revision: number) {
       if (revision <= applicationRevocation) return false;
       const listed = lists.applications?.find((row) => row.applicationId === receipt.applicationId);
-      if (revision <= applicationListRevision && listed) return listed.tenantId === receipt.tenantId;
+      const confirmedByList = revision <= applicationListRevision ? listed : undefined;
+      if (confirmedByList && confirmedByList.tenantId !== receipt.tenantId) return false;
       const previous = receipts.get(receipt.applicationId);
       const current = previous?.value ?? listed;
       const useCurrent =
@@ -404,7 +407,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
             current.state !== 'submitted' &&
             receipt.state === 'submitted'));
       receipts.set(receipt.applicationId, {
-        value: useCurrent ? current : receipt,
+        value: confirmedByList ?? (useCurrent ? current : receipt),
         revision: Math.max(revision, previous?.revision ?? 0),
         confirmedThrough: request,
       });
@@ -433,6 +436,11 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         }
       }
       if (!Object.keys(lists).length && !membership && !keys.size && !receipts.size) return null;
+      const unlistedReceipts = new Map(receipts);
+      for (const { applicationId } of lists.applications ?? []) {
+        const receipt = unlistedReceipts.get(applicationId);
+        if (receipt && receipt.revision <= applicationListRevision) unlistedReceipts.delete(applicationId);
+      }
       return {
         programs: lists.programs ?? [],
         workspaces: [...keys].flatMap((key) => {
@@ -441,8 +449,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
           return row && (listedAfterRevocation || hasVerifiedAccess(key)) ? [row] : [];
         }),
         applications: [
-          ...[...receipts.values()].reverse().map(({ value }) => value),
-          ...(lists.applications ?? []).filter((row) => !receipts.has(row.applicationId)),
+          ...[...unlistedReceipts.values()].reverse().map(({ value }) => value),
+          ...(lists.applications ?? []).filter((row) => !unlistedReceipts.has(row.applicationId)),
         ],
       };
     },

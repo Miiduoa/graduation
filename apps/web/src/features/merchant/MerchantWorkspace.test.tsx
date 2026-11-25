@@ -709,20 +709,33 @@ it.each([403, 404, 503])(
   },
 );
 
-it.each(['before', 'after'])(
-  'keeps the application receipt when a list started during submission resolves %s the receipt',
-  async (listOrder) => {
+it.each([
+  { listOrder: 'before', includesApplication: false },
+  { listOrder: 'after', includesApplication: false },
+  { listOrder: 'before', includesApplication: true },
+  { listOrder: 'after', includesApplication: true },
+])(
+  'keeps the receipt when a list resolves $listOrder it (includes application: $includesApplication)',
+  async ({ listOrder, includesApplication }) => {
     window.history.replaceState(null, '', '/merchant');
     let showStore = false;
     let finishApplication!: (value: typeof application) => void;
     const receipt = new Promise<typeof application>((resolve) => { finishApplication = resolve; });
-    let finishList!: (value: { applications: [] }) => void;
-    const staleList = new Promise<{ applications: [] }>((resolve) => { finishList = resolve; });
+    let finishList!: (value: { applications: (typeof application)[] }) => void;
+    const pendingList = new Promise<{ applications: (typeof application)[] }>((resolve) => {
+      finishList = resolve;
+    });
+    let finishOmittingList!: (value: { applications: [] }) => void;
     const readApplications = vi.fn()
       .mockResolvedValueOnce({ applications: [] })
       .mockResolvedValueOnce({ applications: [] })
-      .mockReturnValueOnce(staleList)
+      .mockReturnValueOnce(pendingList)
       .mockResolvedValue({ applications: [] });
+    if (includesApplication) {
+      readApplications.mockReturnValueOnce(new Promise<{ applications: [] }>((resolve) => {
+        finishOmittingList = resolve;
+      }));
+    }
     mocks.request.mockImplementation((path, context, input) => {
       if (path === 'merchant-applications') return input ? receipt : readApplications();
       if (path === 'merchant-workspaces' && showStore)
@@ -744,9 +757,27 @@ it.each(['before', 'after'])(
     await act(async () => window.history.back());
     await waitFor(() => expect(readApplications).toHaveBeenCalledTimes(3));
 
-    if (listOrder === 'before') await act(async () => finishList({ applications: [] }));
+    if (includesApplication) {
+      await act(async () => window.history.forward());
+      await screen.findByRole('heading', { name: '餐坊／第一門市', level: 2 });
+      await act(async () => window.history.back());
+      await waitFor(() => expect(readApplications).toHaveBeenCalledTimes(4));
+    }
+
+    const resolveList = () => finishList({
+      applications: includesApplication
+        ? [{ ...application, state: 'under-review', reviewerNote: '已開始審核' }]
+        : [],
+    });
+    if (listOrder === 'before') await act(async () => resolveList());
     await act(async () => finishApplication(application));
-    if (listOrder === 'after') await act(async () => finishList({ applications: [] }));
+    if (listOrder === 'after') await act(async () => resolveList());
+
+    if (includesApplication) {
+      expect(screen.getByText('審核說明：已開始審核')).toBeTruthy();
+      await act(async () => finishOmittingList({ applications: [] }));
+      expect(screen.getByText('審核說明：已開始審核')).toBeTruthy();
+    }
 
     expect(screen.getByText(/申請已收件/)).toBeTruthy();
     expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
