@@ -21,6 +21,7 @@ import {
   parsePersonalImportStorageJson,
   selectPersonalImportBrowserRecovery,
   serializePersonalImportBrowserCommit,
+  writePersonalImportBrowserPrimary,
 } from '@campus/shared/src/imports/browserRecovery';
 import type { PersonalImportLocalState } from '@campus/shared/src/imports/syncEngine';
 
@@ -73,10 +74,7 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
         ? serializePersonalImportBrowserCommit(ledger)
         : JSON.stringify(ledger));
       assertSnapshot();
-      localStorage.setItem(key, published);
-      if (localStorage.getItem(key) !== published) {
-        throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
-      }
+      writePersonalImportBrowserPrimary(localStorage, key, published);
       if (firstWrite && adopted) recovery.retire(published, adopted.source);
       firstWrite = false;
       primary = published;

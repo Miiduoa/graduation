@@ -46,6 +46,20 @@ export function unwrapPersonalImportCheckpoint(encoded: string): unknown {
   return encoded.trimStart().startsWith('{') ? encoded : JSON.parse(encoded);
 }
 
+export function writePersonalImportBrowserPrimary(storage: Storage, key: string, published: string) {
+  storage.setItem(key, published);
+  let current: string | null;
+  try {
+    current = storage.getItem(key);
+  } catch {
+    // setItem completed atomically under the write lock. A read error cannot undo it.
+    return;
+  }
+  if (current !== published) {
+    throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
+  }
+}
+
 export function capturePersonalImportBrowserRecovery(
   storage: Storage,
   key: string,
@@ -109,7 +123,7 @@ export function capturePersonalImportBrowserRecovery(
           storage.removeItem(entry);
         }
       } catch {
-        // The primary commit has already been verified. Keep any surviving copy.
+        // The primary write has completed. Keep any surviving copy.
       }
     },
   };

@@ -383,6 +383,7 @@ test.each([
   ['all with primary and payload write errors', false],
   ['all with primary, payload and verification write errors', false],
   ['all with primary, payload and verification write errors and stale publication receipt', false],
+  ['all with primary, payload and verification write errors and publication receipt read fault after success', false],
   ['all with primary, payload and verification write errors after adopting a checkpoint', false],
   ['pending payload unreadable with commit encoding', false],
   ['pending payload unreadable with verification file', false],
@@ -421,6 +422,9 @@ test.each([
   const restorationFails = phase === 'all publication paths fail with temporarily unreadable payload';
   const lostReceiptAfterRetirement = phase.includes('no hash or receipt');
   const stalePublication = phase.endsWith('stale publication receipt');
+  const receiptReadFailsAfterSave = phase.endsWith('publication receipt read fault after success');
+  const receiptReadFault = jest.fn(() => { throw new Error('發佈憑據暫時無法讀取'); });
+  let receiptReadBlocked = false;
   const noRetirementFile = phase !== 'write' && phase !== 'readback';
   const primaryFault = jest.fn(() => { throw new Error('提交編碼主鍵 I/O 失敗'); });
   const payloadFault = jest.fn(() => { throw new Error('還原副本無法寫入主鍵雜湊'); });
@@ -491,6 +495,7 @@ test.each([
     writeFile.call(this, value, options);
   });
   const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+    if (receiptReadBlocked && this.uri.endsWith('.rollback.published')) receiptReadFault();
     if ((unreadablePayload || publicationFails) && retirementAttempts > 0 &&
         this.uri.endsWith('.rollback.json')) payloadReadFault();
     const value = textSync.call(this);
@@ -605,11 +610,18 @@ test.each([
       await nativeSet(key, raw);
       new File(Paths.document, `personal-imports-${sha256(key)}.rollback.verified`).write(sha256(raw));
     }
-    const retryGuardedSave = persistentMarkerReadFault || unreadablePayload || stalePublication;
+    if (receiptReadFailsAfterSave) {
+      receiptReadBlocked = true;
+      expect(await AsyncStorage.getItem(key)).toMatch(/^\{"records":.*統計/);
+      expect(readPersonalImportRollback(key)).toBe(JSON.stringify(previous));
+    }
+    const retryGuardedSave = persistentMarkerReadFault || unreadablePayload || stalePublication ||
+      receiptReadFailsAfterSave;
     const retrySave = !revoked && (phase === 'all' || phase === 'all with primary write error' || retryGuardedSave);
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
+      if (receiptReadFailsAfterSave) expect(receiptReadFault).toHaveBeenCalled();
       if (retrySave) {
         set.mockImplementation(nativeSet);
         const guard = { canContinue: () => active, canCommitFirstWrite: () => active };
@@ -2478,6 +2490,40 @@ test('an aborted IndexedDB write cannot publish after its failure is reported', 
   } finally {
     resume();
     restore();
+    cleanup();
+  }
+});
+
+test('Expo Web reports success and notifies when the primary readback throws after setItem', async () => {
+  const cleanup = useWebStorage();
+  const key = personalImportStorageKey(scope);
+  const storage = window.localStorage;
+  const { getItem, setItem } = Storage.prototype;
+  let failReadback = false;
+  const readFault = jest.fn(() => { throw new Error('主鍵暫時無法讀回'); });
+  const read = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, entry) {
+    if (this === storage && entry === key && failReadback) {
+      failReadback = false;
+      readFault();
+    }
+    return getItem.call(this, entry);
+  });
+  const write = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, entry, value) {
+    setItem.call(this, entry, value);
+    if (this === storage && entry === key) failReadback = true;
+  });
+  const reread = jest.fn(() => loadPersonalImports(scope));
+  const unsubscribe = subscribePersonalImports(reread);
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('new')]);
+    expect(readFault).toHaveBeenCalledTimes(1);
+    expect(reread).toHaveBeenCalledTimes(1);
+    await expect(reread.mock.results[0].value).resolves.toEqual(ledger);
+    expect(JSON.parse(getItem.call(storage, key)!)).toMatchObject(ledger);
+  } finally {
+    unsubscribe();
+    write.mockRestore();
+    read.mockRestore();
     cleanup();
   }
 });

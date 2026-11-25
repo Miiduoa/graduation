@@ -6,6 +6,7 @@ import {
   undoPersonalImports,
   changePersonalImport,
   personalImportsStorageKey,
+  PERSONAL_IMPORT_CHANGE,
 } from './personalImports';
 const scope = { owner: 'platform:one', schoolId: 'pu' };
 const rows = (text = '課程名稱,學分,成績\n資料庫,3,85') =>
@@ -65,6 +66,41 @@ it('does not lose old data on failed persistence or conflicting grades', async (
   ).rejects.toThrow('沒有存成');
   expect(localStorage.getItem(personalImportsStorageKey(scope))).toBe(original);
 });
+it('reports success and notifies when the primary readback throws after setItem', async () => {
+  const key = personalImportsStorageKey(scope);
+  const storageMethods = Object.hasOwn(localStorage, 'setItem')
+    ? localStorage
+    : Object.getPrototypeOf(localStorage);
+  const getItem = localStorage.getItem.bind(localStorage);
+  const setItem = localStorage.setItem.bind(localStorage);
+  let failReadback = false;
+  const readFault = vi.fn(() => { throw new Error('主鍵暫時無法讀回'); });
+  vi.spyOn(storageMethods, 'getItem').mockImplementation((...args: unknown[]) => {
+    const entry = args[0] as string;
+    if (entry === key && failReadback) {
+      failReadback = false;
+      readFault();
+    }
+    return getItem(entry);
+  });
+  vi.spyOn(storageMethods, 'setItem').mockImplementation((...args: unknown[]) => {
+    const [entry, value] = args as [string, string];
+    setItem(entry, value);
+    if (entry === key) failReadback = true;
+  });
+  const reread = vi.fn(() => readPersonalImports(scope));
+  window.addEventListener(PERSONAL_IMPORT_CHANGE, reread);
+  try {
+    await expect(savePersonalImportBatch(scope, rows())).resolves.toMatchObject({ added: 1 });
+    expect(readFault).toHaveBeenCalledTimes(1);
+    expect(reread).toHaveBeenCalledTimes(1);
+    expect(reread.mock.results[0].value).toEqual([expect.objectContaining({ title: '資料庫' })]);
+    expect(readPersonalImports(scope)).toEqual(reread.mock.results[0].value);
+  } finally {
+    window.removeEventListener(PERSONAL_IMPORT_CHANGE, reread);
+  }
+});
+
 it('undo preserves records imported later and records edited after the batch', async () => {
   const first = await savePersonalImportBatch(scope, rows());
   const original = readPersonalImports(scope)[0];

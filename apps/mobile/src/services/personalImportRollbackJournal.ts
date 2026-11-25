@@ -3,6 +3,7 @@ import {
   type capturePersonalImportBrowserRecovery,
   personalImportWebJournalPrefix as journalPrefix,
   serializePersonalImportBrowserCommit,
+  writePersonalImportBrowserPrimary,
 } from '@campus/shared/src/imports/browserRecovery';
 import { File, Paths } from 'expo-file-system';
 import { sha256 } from 'js-sha256';
@@ -327,7 +328,7 @@ export async function withPersonalImportWriteLock<T>(
       transaction.onabort = () => {
         aborted = transaction.error ?? new Error('匯入資料的寫入鎖定已中止，請稍後再試。');
         finished = true;
-        // IndexedDB only holds the lock. Its abort cannot undo verified localStorage writes.
+        // IndexedDB only holds the lock. Its abort cannot undo completed localStorage writes.
         if (committed && operation) operation.then(resolve, reject);
         else reject(aborted);
       };
@@ -374,8 +375,7 @@ export function commitWebPersonalImports(
     assertWritable();
     if (!ownsStage()) throw conflict();
     recoveryCopies.assertSnapshot(before, recoveryCheck.verifyCheckpoint, recoveryCheck.verifyJournal);
-    storage.setItem(key, published);
-    if (storage.getItem(key) !== published) throw conflict();
+    writePersonalImportBrowserPrimary(storage, key, published);
     return published;
   };
   const publish = (ownsStage = () => true) => {
@@ -527,9 +527,9 @@ export function capturePersonalImportRollback(key: string) {
   const verifiedHash = recordedHash && primaryHashPattern.test(recordedHash)
     ? recordedHash
     : undefined;
-  const receipt = stored === undefined
-    ? undefined
-    : readOptionalFile(publicationFile(key))?.match(committedReceiptPattern);
+  const receipt = stored === undefined ? undefined : (
+    readOptionalFile(publicationFile(key)) ?? readOptionalFile(publicationBackupFile(key))
+  )?.match(committedReceiptPattern);
   const receiptHash = receipt && stored !== undefined && receipt[1] === sha256(stored)
     ? receipt[2]
     : undefined;
@@ -578,6 +578,10 @@ function publicationFile(key: string): File {
   return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.published`);
 }
 
+function publicationBackupFile(key: string): File {
+  return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.published.bak`);
+}
+
 export function preparePersonalImportRollback(key: string, raw: string | null, primaryCommitted = false) {
   const encoded = raw ?? 'null';
   const { payload, marker, marked } = journalFiles(key);
@@ -602,13 +606,14 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   const retirement = retirementFile(key);
   const verification = verificationFile(key);
   const publication = publicationFile(key);
+  const publicationBackup = publicationBackupFile(key);
   const hadRetirement = fileExists(retirement);
   const previous = marked
     ? (primaryCommitted || hadRetirement ? readOptionalFile(payload) : payload.textSync())
     : undefined;
   const hadVerification = fileExists(verification);
   // Give each new attempt its own payload binding when old proofs may survive.
-  const rearmed = hadRetirement || hadVerification || fileExists(publication);
+  const rearmed = hadRetirement || hadVerification || fileExists(publication) || fileExists(publicationBackup);
   const prefix = rearmed ? `rearmed:${createPersonalImportId()}:\n` : '';
   const wrap = (value: string) => prefix + value;
   const previousBody = previous?.replace(rearmedPattern, '');
@@ -644,6 +649,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   if (hadRetirement) deleteMarker(retirement);
   if (hadVerification) deleteMarker(verification);
   discardPayload(publication);
+  discardPayload(publicationBackup);
   let retirementWriteCompleted = false;
   const retire = (assertWritable = () => {}, canDeleteMarker = true) => {
     // Commit synchronously so verification and commit cannot be separated by another JS event.
@@ -651,6 +657,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
       discardPayload(retirement);
       discardPayload(verification);
       discardPayload(publication);
+      discardPayload(publicationBackup);
       discardPayload(payload);
       return true;
     }
@@ -710,7 +717,13 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
       const receipt = sha256(readOptionalFile(payload) ?? replacement) + '\n' + hash;
       try {
         publication.write(receipt);
-        if (publication.textSync() !== receipt) {
+        const writtenReceipt = readOptionalFile(publication);
+        if (writtenReceipt !== undefined && writtenReceipt !== receipt) {
+          throw new Error('無法確認匯入資料已儲存，請稍後再試。');
+        }
+        // Verify the backup even if the original receipt is still temporarily unreadable.
+        publicationBackup.write(receipt);
+        if (publicationBackup.textSync() !== receipt) {
           throw new Error('無法確認匯入資料已儲存，請稍後再試。');
         }
       } catch (error) {
@@ -735,6 +748,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
       } finally {
         discardPayload(verification);
         discardPayload(publication);
+        discardPayload(publicationBackup);
       }
     },
   };
@@ -762,6 +776,7 @@ export function clearPersonalImportRollback(key: string): void {
     discardPayload(verificationFile(key));
     discardPayload(rejectionFile(key));
     discardPayload(publicationFile(key));
+    discardPayload(publicationBackupFile(key));
     discardPayload(payload);
   }
 }
