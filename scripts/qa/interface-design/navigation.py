@@ -14,8 +14,9 @@ async def check_navigation_geometry(page, config, report):
       return {nav:box(nav), fixed:getComputedStyle(nav).position === 'fixed',
         viewport:{width:innerWidth,height:innerHeight},
         contentPadding:parseFloat(getComputedStyle(document.body).paddingBottom),
-        items:[...nav.children].map(link => {
+        items:[...nav.querySelectorAll(':scope > a[href]')].map(link => {
           const label=link.querySelector('span'), icon=link.querySelector('svg');
+          if (!label || !icon) throw new Error('Primary navigation link is missing its label or icon');
           const range=document.createRange(); range.selectNodeContents(label);
           return {name:label.textContent,box:box(link),label:box(label),
             glyphs:[...range.getClientRects()].map(r=>({left:r.left,right:r.right,top:r.top,bottom:r.bottom})),
@@ -23,6 +24,8 @@ async def check_navigation_geometry(page, config, report):
             current:link.getAttribute('aria-current') === 'page'};
         })};
     }''')
+    assert [item['name'].strip() for item in geometry['items']] == ['今天', '探索', '課務', '交流', '我的'], geometry
+    assert sum(item['current'] for item in geometry['items']) == 1, geometry
     for item in geometry['items']:
         box = item['box']
         for part in [item['label'], item['icon'], *item['glyphs']]:
