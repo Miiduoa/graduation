@@ -46,6 +46,13 @@ export function capturePersonalImportBrowserRecovery(storage: Storage, key: stri
   return {
     ...copies,
     hasCopies: copies.journal !== null || copies.checkpoint !== null,
+    assertSnapshot(primary: string | null, checkCheckpoint: boolean, checkJournal = false) {
+      if (storage.getItem(key) !== primary ||
+          (checkCheckpoint && storage.getItem(entries.checkpoint) !== copies.checkpoint) ||
+          (checkJournal && storage.getItem(entries.journal) !== copies.journal)) {
+        throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
+      }
+    },
     retire(published: string, source: keyof typeof copies) {
       const entry = entries[source];
       const raw = copies[source];

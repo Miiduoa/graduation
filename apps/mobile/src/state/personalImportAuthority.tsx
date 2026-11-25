@@ -2,9 +2,9 @@ import React, { createContext, useContext, useLayoutEffect, useRef } from 'react
 import { useAuth } from './auth';
 import { useNuniSession } from './nuniSession';
 
-const RevokedNuniOwner = createContext<string | null>(null);
+const RevokedCampusEventDraftOwner = createContext<string | null>(null);
 
-/** Track the account transition above navigation so newly opened routes see the same revocation. */
+/** Track draft revocation above navigation so newly opened activity routes also observe it. */
 export function PersonalImportAuthorityProvider({ children }: { children: React.ReactNode }) {
   const { user, loading: firebaseLoading } = useAuth();
   const { session, loading, pendingLogout, error, signInGeneration } = useNuniSession();
@@ -37,9 +37,9 @@ export function PersonalImportAuthorityProvider({ children }: { children: React.
     previous.current = { hadFirebaseUser, nuniOwner: retainedOwner, revokedOwner, signInGeneration: verifiedGeneration };
   }, [hadFirebaseUser, retainedOwner, revokedOwner, verifiedGeneration]);
 
-  return <RevokedNuniOwner.Provider value={revokedOwner}>{children}</RevokedNuniOwner.Provider>;
+  return <RevokedCampusEventDraftOwner.Provider value={revokedOwner}>{children}</RevokedCampusEventDraftOwner.Provider>;
 }
 
-export function useRevokedPersonalImportOwner() {
-  return useContext(RevokedNuniOwner);
+export function useRevokedCampusEventDraftOwner() {
+  return useContext(RevokedCampusEventDraftOwner);
 }

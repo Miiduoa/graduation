@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { AIDetailScreen, AICard, AISection, AIRow, AIButton, aiTokens } from '../ui/aiFirst';
 import { useAuth } from '../state/auth';
+import { useRevokedCampusEventDraftOwner } from '../state/personalImportAuthority';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
@@ -1044,7 +1045,9 @@ export function CampusEventDetailScreen(props: Props) {
 }
 
 function ScopedCampusEventDetail({ navigation, route }: Props) {
-  const calendarScope = usePersonalImportScope();
+  const scope = usePersonalImportScope();
+  const revokedOwner = useRevokedCampusEventDraftOwner();
+  const calendarScope = scope?.owner === revokedOwner ? null : scope;
   const { school, selectionReady } = useSchool();
   const routeSchoolId = route?.params?.schoolId || '';
   const [boundSchool, setBoundSchool] = useState(

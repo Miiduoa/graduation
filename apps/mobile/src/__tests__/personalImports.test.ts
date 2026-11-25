@@ -31,6 +31,7 @@ import {
   selectPersonalTimetableCourses,
   undoLastPersonalImport,
 } from '../services/personalImports';
+import { syncPersonalImports } from '../services/personalImportSync';
 import { hasWebPersonalImportCommit } from '../services/personalImportRollbackJournal';
 
 const scope = { owner: 'nuni:account-a', schoolId: 'pu' };
@@ -88,6 +89,66 @@ test('append is durable, duplicate-safe, and isolated by account and school', as
     0,
   );
   expect((await loadPersonalImports({ ...scope, schoolId: 'ntu' })).records).toHaveLength(0);
+});
+
+test.each(['older ledger', 'null'] as const)('native primary wins over an unbound checkpoint (%s)', async (copy) => {
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  await appendPersonalImports(scope, [row('a', '行程 A')]);
+  const older = (await AsyncStorage.getItem(key))!;
+  const { ledger } = await appendPersonalImports(scope, [row('b', '行程 B')]);
+  await AsyncStorage.setItem(checkpoint, copy === 'null' ? 'null' : older);
+
+  await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+  await appendPersonalImports(scope, [row('c', '行程 C')]);
+  expect(JSON.parse((await AsyncStorage.getItem(key))!).records.map(({ title }: PersonalImportRecord) => title))
+    .toEqual(['行程 A', '行程 B', '行程 C']);
+});
+
+test.each([true, false])('Expo Web only replays pending sync from a current recovery snapshot (replaced: %s)', async (replaced) => {
+  const syncScope = { ...scope, owner: 'nuni:pa_11111111-1111-4111-8111-111111111111' };
+  const key = personalImportStorageKey(syncScope);
+  const checkpoint = key + ':checkpoint';
+  const cleanup = useWebStorage();
+  const storage = window.localStorage;
+  const getItem = Storage.prototype.getItem;
+  let getSpy: jest.SpyInstance | undefined;
+  try {
+    const { ledger } = await appendPersonalImports(syncScope, [row('a')]);
+    storage.removeItem(key);
+    const pending = { mutationId: 'recovered-pending', expectedRevision: 0, records: ledger.records };
+    const recovery = JSON.stringify({ ...ledger, sync: { enabled: true, base: null, pending } });
+    const replacement = JSON.stringify({ version: 1, records: [], batches: [] });
+    storage.setItem(checkpoint, recovery);
+    if (replaced) {
+      getSpy = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, storageKey) {
+        const raw = getItem.call(this, storageKey);
+        if (this === storage && storageKey === checkpoint && raw === recovery) {
+          storage.setItem(checkpoint, replacement);
+        }
+        return raw;
+      });
+    }
+    const transport = jest.fn(async () => ({
+      schoolId: syncScope.schoolId, revision: 1, records: ledger.records, updatedAt: '2026-11-25T00:00:00.000Z',
+    }));
+    const run = syncPersonalImports(syncScope, transport, () => true);
+    if (replaced) {
+      await expect(run).rejects.toThrow('匯入資料已在另一個分頁更新');
+      expect(transport).not.toHaveBeenCalled();
+      expect(storage.getItem(key)).toBeNull();
+      expect(storage.getItem(checkpoint)).toBe(replacement);
+    } else {
+      await run;
+      expect(transport).toHaveBeenCalledTimes(1);
+      expect(transport).toHaveBeenCalledWith('personal-imports/write', { schoolId: syncScope.schoolId, ...pending });
+      expect(JSON.parse(storage.getItem(key)!).batches).toEqual(ledger.batches);
+      expect(storage.getItem(checkpoint)).toBeNull();
+    }
+  } finally {
+    getSpy?.mockRestore();
+    cleanup();
+  }
 });
 
 test('Web reads an existing ledger without touching the unsupported Expo document directory', async () => {

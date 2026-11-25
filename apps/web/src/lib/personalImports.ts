@@ -18,7 +18,6 @@ import {
   capturePersonalImportBrowserRecovery,
   hasWebPersonalImportCommit,
   serializePersonalImportBrowserCommit,
-  personalImportCheckpointKey,
   unwrapPersonalImportCheckpoint,
 } from '@campus/shared/src/imports/browserRecovery';
 import type { PersonalImportLocalState } from '@campus/shared/src/imports/syncEngine';
@@ -35,7 +34,6 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
   const key = personalImportsStorageKey(scope);
   let primary = localStorage.getItem(key);
   const recovery = capturePersonalImportBrowserRecovery(localStorage, key);
-  const checkpointKey = personalImportCheckpointKey(key);
   const checkpoint = recovery.checkpoint;
   let raw = primary;
   let adoptedCheckpoint = false;
@@ -54,8 +52,10 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
   }
   const shouldMarkCommit = recovery.hasCopies &&
     (hasWebPersonalImportCommit(primary) || checkpoint === null || adoptedCheckpoint);
+  const assertSnapshot = () => recovery.assertSnapshot(primary, primary === null);
   return {
     raw,
+    assertSnapshot,
     write(state: PersonalImportLocalState) {
       // Keep a v1 commit marker while legacy recovery data may still exist.
       // Expo owns the undo history. Carry it through Web writes from the same
@@ -65,10 +65,7 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
       const published = shouldMarkCommit
         ? serializePersonalImportBrowserCommit(ledger)
         : JSON.stringify(ledger);
-      if (localStorage.getItem(key) !== primary ||
-          (primary === null && localStorage.getItem(checkpointKey) !== checkpoint)) {
-        throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
-      }
+      assertSnapshot();
       localStorage.setItem(key, published);
       if (localStorage.getItem(key) !== published) {
         throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
@@ -140,6 +137,7 @@ export async function withPersonalImportSyncLock<T>(
   action: (
     state: PersonalImportLocalState,
     checkpoint: (state: PersonalImportLocalState) => Promise<void>,
+    assertSnapshot: () => void,
   ) => Promise<{ state: PersonalImportLocalState; result: T }>,
   active = () => true,
 ): Promise<T> {
@@ -162,7 +160,7 @@ export async function withPersonalImportSyncLock<T>(
       persisted = state;
       window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
     };
-    const { state, result } = await action(persisted, checkpoint);
+    const { state, result } = await action(persisted, checkpoint, ledger.assertSnapshot);
     await checkpoint(state);
     return result;
   });

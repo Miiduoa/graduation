@@ -728,10 +728,16 @@ it('loads and saves the guest ledger on the same screen after Firebase and Nuni 
   const view = render(<PersonalCalendarScreen />, { wrapper: PersonalImportAuthorityProvider });
   await fillDraft(view, '登出前的帳號草稿');
 
-  // Firebase finishes first while Nuni still supplies the old account.
+  // The verified Nuni session can still save ordinary personal events.
   mockAuth = { user: null, loading: false };
   view.rerender(<PersonalCalendarScreen />);
   expect(view.queryByLabelText('標題')).toBeNull();
+  await fillDraft(view, 'Firebase 登出後新增的 Nuni 行程');
+  fireEvent.press(view.getByRole('button', { name: '儲存行程' }));
+  await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
+  expect((await loadPersonalImports(accountScope)).records.map(({ title }) => title)).toEqual([
+    'Firebase 登出後新增的 Nuni 行程',
+  ]);
 
   mockSession = null;
   view.rerender(<PersonalCalendarScreen />);
@@ -745,7 +751,9 @@ it('loads and saves the guest ledger on the same screen after Firebase and Nuni 
   expect((await loadPersonalImports(guestScope)).records.map(({ title }) => title)).toEqual(
     expect.arrayContaining(['既有訪客行程', '登出後新增的訪客行程']),
   );
-  expect((await loadPersonalImports(accountScope)).records).toEqual([]);
+  expect((await loadPersonalImports(accountScope)).records.map(({ title }) => title)).toEqual([
+    'Firebase 登出後新增的 Nuni 行程',
+  ]);
 });
 
 it.each(['new owner', 'same owner'])(
@@ -816,7 +824,7 @@ it.each(['', '已登出；裝置上的 Google 帳號選擇狀態尚未清除。'
 
     mockAuth = { user: null, loading: false };
     view.rerender(<PersonalCalendarScreen />);
-    expect(view.queryByRole('button', { name: '新增行程', disabled: false })).toBeNull();
+    await waitUntilEditable(view);
 
     mockSession = null;
     mockSessionError = logoutNotice;

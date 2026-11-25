@@ -2,8 +2,6 @@ import { createPersonalImportId } from '@campus/shared';
 import {
   type capturePersonalImportBrowserRecovery,
   personalImportBrowserCommitSuffix as compactWebCommitSuffix,
-  personalImportCheckpointKey,
-  personalImportWebJournalKey,
   personalImportWebJournalPrefix as journalPrefix,
   serializePersonalImportBrowserCommit,
 } from '@campus/shared/src/imports/browserRecovery';
@@ -355,15 +353,10 @@ export function commitWebPersonalImports(
   const id = createPersonalImportId();
   const committed = JSON.stringify({ ...JSON.parse(attempted), webCommit: id });
   const conflict = () => new Error('匯入資料已在另一個分頁更新，請重新載入。');
-  const checkpointKey = personalImportCheckpointKey(key);
-  const journalKey = personalImportWebJournalKey(key);
   const replace = (raw: string, ownsStage: () => boolean) => {
     assertWritable();
-    if (!ownsStage() || storage.getItem(key) !== before ||
-        (recoveryCheck.verifyCheckpoint && storage.getItem(checkpointKey) !== recoveryCopies.checkpoint) ||
-        (recoveryCheck.adopted === 'journal' && storage.getItem(journalKey) !== recoveryCopies.journal)) {
-      throw conflict();
-    }
+    if (!ownsStage()) throw conflict();
+    recoveryCopies.assertSnapshot(before, recoveryCheck.verifyCheckpoint, recoveryCheck.adopted === 'journal');
     storage.setItem(key, raw);
     if (storage.getItem(key) !== raw) throw conflict();
     return raw;
@@ -451,7 +444,7 @@ function journalFiles(key: string) {
   return { marker, payload: new File(directory, `${name}.rollback.json`), marked: marker.info().exists };
 }
 
-export async function readPersonalImportRollback(key: string): Promise<string | undefined> {
+export function readPersonalImportRollback(key: string): string | undefined {
   const { payload, marked } = journalFiles(key);
   return marked ? payload.textSync() : undefined;
 }

@@ -30,7 +30,7 @@ import {
 import { PersonalMonthCalendar } from './PersonalMonthCalendar';
 import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
-import { useRevokedPersonalImportOwner } from '../state/personalImportAuthority';
+import { useRevokedCampusEventDraftOwner } from '../state/personalImportAuthority';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { useNuniSession } from '../state/nuniSession';
 import { useAuth } from '../state/auth';
@@ -91,17 +91,19 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
   const platform = useNuniSession();
   const legacy = useAuth();
   const firebaseUid = legacy.user?.uid;
-  const revokedOwner = useRevokedPersonalImportOwner();
   const firebaseSignedOut = !legacy.loading && !firebaseUid;
   const lastFirebaseUid = useRef(firebaseUid);
   // Firebase and Nuni can resolve independently during an account transition.
   const firebaseChanged =
     !!firebaseUid && !!lastFirebaseUid.current &&
     firebaseUid !== lastFirebaseUid.current;
-  const workspaceUid = (scope && firebaseUid) || lastFirebaseUid.current;
+  // Retire the workspace that started under Firebase, even if Nuni can open a new one.
+  const firebaseJustSignedOut = firebaseSignedOut && !!lastFirebaseUid.current;
+  const workspaceUid = firebaseSignedOut ? undefined : (scope && firebaseUid) || lastFirebaseUid.current;
   useLayoutEffect(() => {
-    if (firebaseUid && (scope || !lastFirebaseUid.current)) lastFirebaseUid.current = firebaseUid;
-  }, [firebaseUid, scope]);
+    if (firebaseSignedOut) lastFirebaseUid.current = undefined;
+    else if (firebaseUid && (scope || !lastFirebaseUid.current)) lastFirebaseUid.current = firebaseUid;
+  }, [firebaseSignedOut, firebaseUid, scope]);
   const loggingOut = !!platform.pendingLogout;
   const sessionRejected = !platform.session && !!platform.error;
   const observedOwner = platform.session
@@ -112,11 +114,11 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
   const nuniRevalidating = platform.loading && !platform.session && !sessionRejected;
   const knownOwner = scope?.owner ?? (firebaseChanged ? null : observedOwner);
   const ownerSignedOut = (owner: string | undefined) =>
-    owner === revokedOwner || (firebaseSignedOut && !!owner?.startsWith('firebase:'));
+    firebaseSignedOut && !!owner?.startsWith('firebase:');
   // An explicit Nuni login starts a new workspace even for the same account.
   const nuniGeneration = platform.signInGeneration;
   return {
-    knownOwner, loggingOut, sessionRejected, firebaseChanged, ownerSignedOut, workspaceUid,
+    knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseJustSignedOut, ownerSignedOut, workspaceUid,
     nuniRevalidating, nuniGeneration,
   };
 }
@@ -131,6 +133,7 @@ export function CampusEventCalendarDraftScreen() {
       >
     >();
   const scope = usePersonalImportScope();
+  const revokedOwner = useRevokedCampusEventDraftOwner();
   const { knownOwner, loggingOut, sessionRejected, firebaseChanged, ownerSignedOut, nuniRevalidating, nuniGeneration } =
     useCalendarAccount(scope);
   const { school, schoolId, selectionReady } = useSchool();
@@ -148,7 +151,8 @@ export function CampusEventCalendarDraftScreen() {
   const nuniSignedInAgain =
     campusEvent?.owner.startsWith('nuni:') && draftGeneration.current !== nuniGeneration;
   const invalidated =
-    nuniSignedInAgain || firebaseChanged || ownerSignedOut(campusEvent?.owner) || ownerChanged || scopeChanged ||
+    nuniSignedInAgain || firebaseChanged || campusEvent?.owner === revokedOwner ||
+    ownerSignedOut(campusEvent?.owner) || ownerChanged || scopeChanged ||
     schoolChanged || sessionRejected || schoolCleared;
   const expired = useRef(false);
   useLayoutEffect(() => {
@@ -202,7 +206,7 @@ function parsePersonalImportKey(key: string): { owner: string; schoolId: string 
 
 export default function PersonalCalendarScreen() {
   const scope = usePersonalImportScope();
-  const { knownOwner, loggingOut, sessionRejected, firebaseChanged, ownerSignedOut, workspaceUid, nuniGeneration } =
+  const { knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseJustSignedOut, ownerSignedOut, workspaceUid, nuniGeneration } =
     useCalendarAccount(scope);
   const { school, schoolId, selectionReady } = useSchool();
   const route = useRoute();
@@ -213,7 +217,7 @@ export default function PersonalCalendarScreen() {
   const knownSchoolId = school?.id || schoolId || '';
   const schoolCleared = !!selectionReady && !knownSchoolId;
   const staleSticky = (() => {
-    if (firebaseChanged || loggingOut || sessionRejected || schoolCleared) return true;
+    if (firebaseChanged || firebaseJustSignedOut || loggingOut || sessionRejected || schoolCleared) return true;
     const previous = parsePersonalImportKey(lastReadyKey.current);
     if (!previous) return false;
     if (ownerSignedOut(previous.owner) || (knownOwner && previous.owner !== knownOwner)) return true;

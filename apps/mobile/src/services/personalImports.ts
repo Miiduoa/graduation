@@ -60,33 +60,59 @@ function isStorageRowTooLarge(error: unknown): boolean {
   );
 }
 
+async function readLedgerSnapshot(key: string, scope: PersonalImportScope) {
+  const web = Platform.OS === 'web';
+  const nativeJournal = web ? undefined : readPersonalImportRollback(key);
+  let primary: string | null = null;
+  let primaryError: unknown;
+  if (nativeJournal === undefined && (web || !pendingRestorations.has(key))) {
+    try {
+      primary = await AsyncStorage.getItem(key);
+    } catch (error) {
+      if (web || !isStorageRowTooLarge(error)) throw error;
+      primaryError = error;
+    }
+  }
+  const browserRecovery = web
+    ? capturePersonalImportBrowserRecovery(window.localStorage, key)
+    : undefined;
+  const recovery = await readRecovery(key, scope, primary, browserRecovery, nativeJournal);
+  if (!recovery && primaryError) throw primaryError;
+  return { primary, browserRecovery, recovery };
+}
+
 async function readRecovery(
   key: string,
   scope: PersonalImportScope,
-  webPrimary: string | null,
-  browserRecovery?: ReturnType<typeof capturePersonalImportBrowserRecovery>,
+  primary: string | null,
+  browserRecovery: ReturnType<typeof capturePersonalImportBrowserRecovery> | undefined,
+  nativeJournal: string | undefined,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
   let primaryVerified = false;
-  if (browserRecovery && webPrimary !== null) {
+  if (primary !== null) {
     try {
-      parseLedger(webPrimary, scope);
+      parseLedger(primary, scope);
       primaryVerified = true;
     } catch {
       // A damaged primary may still be recoverable from a legacy copy.
     }
-    if (primaryVerified && hasWebPersonalImportCommit(webPrimary)) return null;
+    if (browserRecovery && primaryVerified && hasWebPersonalImportCommit(primary)) return null;
   }
 
+  // A marked native journal or an in-process rollback can supersede an
+  // interrupted primary write. A standalone legacy checkpoint cannot.
+  const pending = pendingRestorations.get(key);
   if (!primaryVerified) {
     const checkpoint = await readLegacyCheckpoint(key, scope, browserRecovery?.checkpoint);
-    if (checkpoint) return checkpoint;
-    const pending = pendingRestorations.get(key);
+    if (checkpoint && (nativeJournal === undefined || (checkpoint.raw ?? 'null') === nativeJournal)) {
+      return checkpoint;
+    }
     if (pending) return { ...pending, ledger: parseLedger(pending.raw, scope) };
   }
 
   const journal = browserRecovery
-    ? readWebPersonalImportRollback(browserRecovery.journal, webPrimary, primaryVerified)
-    : await readPersonalImportRollback(key);
+    ? readWebPersonalImportRollback(browserRecovery.journal, primary, primaryVerified)
+    : nativeJournal;
   if (journal === undefined) return null;
   try {
     if (!journal) throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
@@ -204,21 +230,10 @@ export async function loadPersonalImports(
       continue;
     }
     const sequence = writeSequence;
-    const web = Platform.OS === 'web';
-    const webPrimary = web ? await AsyncStorage.getItem(key) : null;
-    const browserRecovery = web
-      ? capturePersonalImportBrowserRecovery(window.localStorage, key)
-      : undefined;
-    const recovery = await readRecovery(key, scope, webPrimary, browserRecovery);
-    if (web && webPrimary !== await AsyncStorage.getItem(key)) continue;
+    const { primary, recovery } = await readLedgerSnapshot(key, scope);
+    if (Platform.OS === 'web' && primary !== await AsyncStorage.getItem(key)) continue;
     if (sequence !== writeSequence) continue;
-    if (recovery) return recovery.ledger;
-    if (web) return parseLedger(webPrimary, scope);
-    const [stored] = await Promise.allSettled([AsyncStorage.getItem(key)]);
-    // A guarded write or a recovery may have changed the authoritative bytes during these reads.
-    if (sequence !== writeSequence) continue;
-    if (stored.status === 'rejected') throw stored.reason;
-    return parseLedger(stored.value, scope);
+    return recovery?.ledger ?? parseLedger(primary, scope);
   }
 }
 
@@ -292,6 +307,7 @@ export function mutatePersonalImportLedger<T>(
   update: (
     ledger: PersonalImportLedger,
     checkpoint: (ledger: PersonalImportLedger) => Promise<void>,
+    assertSnapshot: () => void,
   ) =>
     | { ledger: PersonalImportLedger; result: T }
     | Promise<{ ledger: PersonalImportLedger; result: T }>,
@@ -313,18 +329,23 @@ export function mutatePersonalImportLedger<T>(
         assertLockHeld();
       };
       assertWritable();
-      const web = Platform.OS === 'web';
-      const webPrimary = web ? await AsyncStorage.getItem(key) : null;
-      // Read the checkpoint from the same snapshot used to retire recovery copies.
-      const browserRecovery = web
-        ? capturePersonalImportBrowserRecovery(window.localStorage, key)
-        : undefined;
-      const recovery = await readRecovery(key, scope, webPrimary, browserRecovery);
-      let primaryRaw = web || recovery ? webPrimary : await AsyncStorage.getItem(key);
+      const { primary, browserRecovery, recovery } = await readLedgerSnapshot(key, scope);
+      let primaryRaw = primary;
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
       assertWritable();
       let persisted = current;
+      const recoveryCheck = () => ({
+        verifyCheckpoint: !hasPersisted && (primary === null || recovery?.source === 'checkpoint'),
+        adopted: hasPersisted ? undefined : recovery?.source,
+      });
+      const assertSnapshot = () => {
+        assertWritable();
+        if (browserRecovery) {
+          const { verifyCheckpoint, adopted } = recoveryCheck();
+          browserRecovery.assertSnapshot(primaryRaw, verifyCheckpoint, adopted === 'journal');
+        }
+      };
       const checkpoint = async (ledger: PersonalImportLedger) => {
         assertWritable();
         const raw = JSON.stringify(ledger);
@@ -337,10 +358,7 @@ export function mutatePersonalImportLedger<T>(
           if (browserRecovery) {
             writtenRaw = commitWebPersonalImports(
               key, primaryRaw, raw, assertWritable, browserRecovery,
-              {
-                verifyCheckpoint: !hasPersisted && (webPrimary === null || recovery?.source === 'checkpoint'),
-                adopted: hasPersisted ? undefined : recovery?.source,
-              },
+              recoveryCheck(),
               needsJournal ? { raw: persistedRaw } : undefined,
               lease,
             );
@@ -373,11 +391,11 @@ export function mutatePersonalImportLedger<T>(
             }
           }
         };
-        if (!web && !needsJournal) return write();
+        if (!browserRecovery && !needsJournal) return write();
         // Readers wait until the write commits or rollback establishes the verified ledger.
         await trackWrite(key, write);
       };
-      const { ledger, result } = await update(current, checkpoint);
+      const { ledger, result } = await update(current, checkpoint, assertSnapshot);
       await checkpoint(ledger);
       return result;
     }));
