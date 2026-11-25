@@ -2482,6 +2482,51 @@ test('an aborted IndexedDB write cannot publish after its failure is reported', 
   }
 });
 
+test('an IndexedDB abort after verified publication and notification preserves a successful edit', async () => {
+  const cleanup = useWebStorage();
+  const { abort, restore } = useIndexedDBLocks();
+  const key = personalImportStorageKey(scope);
+  const guard = { canContinue: () => true };
+  let notificationRead: ReturnType<typeof loadPersonalImports> | undefined;
+  let unsubscribe: (() => void) | undefined;
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original')], guard);
+    const storage = window.localStorage;
+    const getItem = Storage.prototype.getItem;
+    let lastPrimaryRead: string | null | undefined;
+    const readSpy = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
+      this: Storage, entry,
+    ) {
+      const value = getItem.call(this, entry);
+      if (this === storage && entry === key) lastPrimaryRead = value;
+      return value;
+    });
+    try {
+      const listener = jest.fn(() => {
+        const verifiedRaw = lastPrimaryRead;
+        notificationRead = loadPersonalImports(scope);
+        queueMicrotask(() => abort(key));
+        return verifiedRaw;
+      });
+      unsubscribe = subscribePersonalImports(listener);
+      const edited = await editPersonalImport(scope, ledger.records[0], row('original', '已儲存'), guard);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(edited.records[0].title).toBe('已儲存');
+      expect(listener).toHaveReturnedWith(getItem.call(storage, key));
+      await expect(notificationRead).resolves.toEqual(edited);
+      let reopened!: typeof import('../services/personalImports');
+      jest.isolateModules(() => { reopened = require('../services/personalImports'); });
+      await expect(reopened.loadPersonalImports(scope)).resolves.toEqual(edited);
+    } finally {
+      readSpy.mockRestore();
+    }
+  } finally {
+    unsubscribe?.();
+    restore();
+    cleanup();
+  }
+});
+
 test.each(['account switched', 'legacy primary changed', 'during cleanup', 'before publication'])(
   'Web preserves the other tab’s primary and stage without locks when %s',
   async (timing) => {

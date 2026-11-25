@@ -54,7 +54,11 @@ type BrowserLease = {
   canStage: () => boolean;
   releaseForAtomicWrite: () => void;
 };
-type BrowserWrite<T> = (assertLockHeld: () => void, lease?: BrowserLease) => Promise<T>;
+type BrowserWrite<T> = (
+  assertLockHeld: () => void,
+  lease?: BrowserLease,
+  markCommitted?: () => void,
+) => Promise<T>;
 
 function isQuotaExceeded(error: unknown): error is DOMException {
   return error instanceof DOMException && error.name === 'QuotaExceededError';
@@ -279,11 +283,11 @@ export async function withPersonalImportWriteLock<T>(
 ): Promise<T> {
   if (Platform.OS !== 'web') return write(noLockCheck);
   const ledgerHash = sha256(key);
-  const writeWithCleanup = async (assertLockHeld: () => void) => {
+  const writeWithCleanup = async (assertLockHeld: () => void, markCommitted?: () => void) => {
     await sweepLegacyStages(ledgerHash);
     sweepExpiredLeases(window.localStorage);
     assertLockHeld();
-    return write(assertLockHeld);
+    return write(assertLockHeld, undefined, markCommitted);
   };
   if (navigator.locks) {
     // Share the calendar lock and retain the legacy Expo lock while older tabs
@@ -302,7 +306,9 @@ export async function withPersonalImportWriteLock<T>(
       const store = transaction.objectStore(lockStore);
       let operation: Promise<T> | undefined;
       let finished = false;
+      let committed = false;
       let aborted: Error | undefined;
+      const markCommitted = () => { committed = true; };
       const assertLockHeld = () => {
         if (aborted) throw aborted;
       };
@@ -311,7 +317,7 @@ export async function withPersonalImportWriteLock<T>(
         store.get('lock').onsuccess = () => {
           if (finished) return;
           if (!operation) {
-            operation = writeWithCleanup(assertLockHeld).finally(() => { finished = true; });
+            operation = writeWithCleanup(assertLockHeld, markCommitted).finally(() => { finished = true; });
             // Observe rejection immediately. Deliver the result after releasing the lock.
             void operation.catch(() => undefined);
           }
@@ -321,7 +327,9 @@ export async function withPersonalImportWriteLock<T>(
       transaction.onabort = () => {
         aborted = transaction.error ?? new Error('匯入資料的寫入鎖定已中止，請稍後再試。');
         finished = true;
-        reject(aborted);
+        // IndexedDB only holds the lock. Its abort cannot undo verified localStorage writes.
+        if (committed && operation) operation.then(resolve, reject);
+        else reject(aborted);
       };
       transaction.oncomplete = () => {
         if (operation) operation.then(resolve, reject);

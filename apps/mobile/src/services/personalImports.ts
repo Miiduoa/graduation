@@ -369,7 +369,7 @@ export function mutatePersonalImportLedger<T>(
   const previous = locks.get(key);
   const task = (previous ?? Promise.resolve())
     .catch(() => undefined)
-    .then(() => withPersonalImportWriteLock(key, async (assertLockHeld, lease) => {
+    .then(() => withPersonalImportWriteLock(key, async (assertLockHeld, lease, markCommitted) => {
       let hasPersisted = false;
       const assertWritable = () => {
         assertLockHeld();
@@ -477,6 +477,7 @@ export function mutatePersonalImportLedger<T>(
           primaryRaw = writtenRaw;
           persistedRaw = browserRecovery ? raw : writtenRaw;
           persisted = ledger;
+          markCommitted?.();
           for (const listener of listeners) {
             try {
               listener({ scope, source });
