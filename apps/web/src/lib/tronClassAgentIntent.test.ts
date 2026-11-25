@@ -1711,6 +1711,35 @@ describe('three-way sentence classification', () => {
     expect(elapsed).toBeLessThan(200);
   });
 
+  it('keeps visible commands and course targets isolated while alternating requests and revisiting older ones', () => {
+    const scenarios = [
+      ['查玩課雲作業', 'clearly-read', 'homework', []],
+      ['查 玩課雲 作業', 'clearly-read', 'homework', []],
+      ['Please download TronClass materials', 'clearly-read', 'download', []],
+      ['Please  download  TronClass  materials', 'clearly-read', 'download', []],
+      ['幫我準備 TronClass 作業', 'clearly-write', 'prepare', []],
+      ['「幫我準備 TronClass 作業」', 'ambiguous', null, ['幫我準備 TronClass 作業']],
+      ['不要查玩課雲作業', 'ambiguous', null, []],
+      ['查玩課雲「資料庫」作業', 'clearly-read', 'homework', ['資料庫']],
+      ['查玩課雲「資料庫」作業是不是教材？', 'ambiguous', null, ['資料庫']],
+      ['查玩課雲作業，下載講義', 'clearly-read', null, []],
+      ['查玩課雲「公告」作業', 'clearly-read', 'homework', ['公告']],
+      ['查玩課雲［作業.pdf］', 'ambiguous', null, []],
+    ] as const;
+    for (const order of [scenarios, [...scenarios].reverse(), scenarios]) {
+      for (const [question, outcome, intent, quoted] of order) {
+        expect(classifyTronClassSentence(question)?.outcome, question).toBe(outcome);
+        expect(parseTronClassAgentIntent(question)?.intent ?? null, question).toBe(intent);
+        expect(tronClassQuotedTargets(question), question).toEqual(quoted);
+        // Visiting the other public parser must not alter the next call's
+        // original whitespace, quoted data or predicate visibility.
+        tronClassCompoundClauses(question);
+        expect(classifyTronClassSentence(question)?.outcome, question).toBe(outcome);
+        expect(tronClassQuotedTargets(question), question).toEqual(quoted);
+      }
+    }
+  });
+
   it('requires confirmation for read verb + object + 的 + noun within the 200 ms budget', () => {
     const objects = ['玩課雲作業', '玩課雲教材', 'TronClass 講義'];
     const nouns = ['老師', '紀錄', '時間', '情況'];

@@ -1313,7 +1313,7 @@ const ACTION_COMPLETION_MARKERS = new Set([
 const DESCRIPTIVE_ACTION_PREFIXES = new Set(['尚未', '還沒', '未', '沒', '待', '正在', '正']);
 
 function hasDescriptiveAction(text: string): boolean {
-  const tokens = visibleCommandTokens(text).filter(token => !isWhitespaceToken(token));
+  const tokens = significantCommandTokens(text);
   let descriptivePrefix = false;
   let experiencePrefix = false;
   let submissionStatus = false;
@@ -1951,8 +1951,19 @@ const DATA_TYPES = [
   { intent: 'unsupported', pattern: /問卷/u },
 ] as const;
 
+const readRequestByTokens = new WeakMap<Token[], ReturnType<typeof analyzeReadRequest>>();
+
 function parseReadRequest(question: string) {
   const text = question.normalize('NFKC').trim();
+  const tokens = tokensFor(text);
+  const cached = readRequestByTokens.get(tokens);
+  if (cached) return cached;
+  const request = analyzeReadRequest(text, tokens);
+  readRequestByTokens.set(tokens, request);
+  return request;
+}
+
+function analyzeReadRequest(text: string, tokens: Token[]) {
   const quotes = typographicQuoteSpans(text);
   const mask = dataTypeMask(text, false);
   const quoteEnds: number[] = [];
@@ -1966,7 +1977,7 @@ function parseReadRequest(question: string) {
   let complementAt = text.length;
   let sawRead = false;
   let conflict = false;
-  for (const token of tokensFor(text)) {
+  for (const token of tokens) {
     while (scanned <= token.start) {
       quoteEnd = Math.max(quoteEnd, quoteEnds[scanned++] ?? 0);
     }
@@ -2109,9 +2120,32 @@ function isPrepareActionValue(value: string): boolean {
   return PREPARE_ACTIONS.has(value) || PREPARE_ACTIONS.has(value.toLowerCase());
 }
 
+// Derived views keep the original token identity when nothing is removed. This
+// lets the existing grammar caches share a pass instead of analyzing an equal
+// but newly allocated array at every read, download and preparation check.
+// Weak keys follow the bounded token cache without adding message history.
+const visibleCommandTokensByTokens = new WeakMap<Token[], Token[]>();
+const significantCommandTokensByTokens = new WeakMap<Token[], Token[]>();
+
 function visibleCommandTokens(text: string): Token[] {
+  const tokens = tokensFor(text);
+  const cached = visibleCommandTokensByTokens.get(tokens);
+  if (cached) return cached;
   const mask = dataTypeMask(text);
-  return tokensFor(text).filter(token => token.kind !== 'filename' && !tokenIsProtected(token, mask));
+  const visible = tokens.filter(token => token.kind !== 'filename' && !tokenIsProtected(token, mask));
+  const result = visible.length === tokens.length ? tokens : visible;
+  visibleCommandTokensByTokens.set(tokens, result);
+  return result;
+}
+
+function significantCommandTokens(text: string): Token[] {
+  const tokens = visibleCommandTokens(text);
+  const cached = significantCommandTokensByTokens.get(tokens);
+  if (cached) return cached;
+  const significant = tokens.filter(token => !isWhitespaceToken(token));
+  const result = significant.length === tokens.length ? tokens : significant;
+  significantCommandTokensByTokens.set(tokens, result);
+  return result;
 }
 
 function prepareWordRole(tokens: Token[], index: number): 'command' | 'modifier' | 'doubt' | 'none' {
@@ -2221,10 +2255,13 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   const interior = modifierInteriorIndex(tokens);
   const negation = scanNegation(tokens, interior);
   if (negation === 'unresolved') return { outcome: 'ambiguous' };
+  // An unproven write always requires confirmation. Reuse the clause pass and
+  // stop before building the secondary write-route and regex coverage scans.
+  if (hasUnprovenWrite(unquoted)) return { outcome: 'ambiguous' };
   if (baConstructionState(unquoted) === 'unresolved') return { outcome: 'ambiguous' };
   if (writeLexiconAndRegexDisagree(unquoted)) return { outcome: 'ambiguous' };
   const writeRoute = writeCommandRoute(unquoted);
-  if (writeRoute === 'ambiguous' || hasUnprovenWrite(unquoted)) return { outcome: 'ambiguous' };
+  if (writeRoute === 'ambiguous') return { outcome: 'ambiguous' };
   if (!authorizesPrivateRead(original)) {
     // Translation, quotation, explanation, or a negated query is not a write
     // command, even if a write-verb token appears as an example word.
