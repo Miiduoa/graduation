@@ -91,6 +91,16 @@ jest.mock('expo-file-system', () => ({
   getInfoAsync: jest.fn(() => Promise.resolve({ exists: false })),
   makeDirectoryAsync: jest.fn(() => Promise.resolve()),
   Paths: { document: mockDocumentPath },
+  Directory: class {
+    constructor(...segments) {
+      this.uri = segments.join('/');
+    }
+    list() {
+      return [...mockDocumentFiles.keys()]
+        .filter((uri) => uri.startsWith(this.uri + '/'))
+        .map((uri) => ({ uri }));
+    }
+  },
   File: class {
     constructor(...segments) {
       this.uri = segments.join('/');
