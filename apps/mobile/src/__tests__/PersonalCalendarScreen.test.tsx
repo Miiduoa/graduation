@@ -657,7 +657,7 @@ it.each([
   ['edit', 'sign out before Nuni', 'nuni'],
   ['create', 'sign out before scope loss', 'nuni'],
   ['edit', 'sign out before scope loss', 'nuni'],
-] as const)('unmounts the old calendar and rejects a queued %s on Firebase %s for a %s ledger', async (mode, transition, owner) => {
+] as const)('rejects a queued %s on Firebase %s for a %s ledger', async (mode, transition, owner) => {
   mockAuth = { user: { uid: 'student-a' }, loading: false };
   if (owner === 'firebase') {
     mockSession = null;
@@ -705,6 +705,12 @@ it.each([
     read.resolve(stored);
     await expect(save).rejects.toThrow('帳號或學校已切換');
   });
+  if (transition === 'sign out before scope loss') {
+    expect(view.getByLabelText('標題').props.value).toBe('舊帳號的草稿');
+    mockScope = null;
+    mockSession = null;
+    view.rerender(<PersonalCalendarScreen />);
+  }
   expect(view.queryByLabelText('標題')).toBeNull();
   expect(setItem).not.toHaveBeenCalledWith(key, expect.any(String));
   expect(await AsyncStorage.getItem(key)).toBe(stored);
@@ -731,8 +737,8 @@ it('loads and saves the guest ledger on the same screen after Firebase and Nuni 
   // The verified Nuni session can still save ordinary personal events.
   mockAuth = { user: null, loading: false };
   view.rerender(<PersonalCalendarScreen />);
-  expect(view.queryByLabelText('標題')).toBeNull();
-  await fillDraft(view, 'Firebase 登出後新增的 Nuni 行程');
+  expect(view.getByLabelText('標題').props.value).toBe('登出前的帳號草稿');
+  fireEvent.changeText(view.getByLabelText('標題'), 'Firebase 登出後新增的 Nuni 行程');
   fireEvent.press(view.getByRole('button', { name: '儲存行程' }));
   await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
   expect((await loadPersonalImports(accountScope)).records.map(({ title }) => title)).toEqual([

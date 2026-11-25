@@ -150,9 +150,17 @@ async function retireNativeCheckpoint(key: string, adopted: string | undefined) 
   if (await AsyncStorage.getItem(checkpoint) === adopted) await AsyncStorage.multiRemove([checkpoint]);
 }
 
+async function verifyNativeLedgerWrite(key: string, raw: string | null) {
+  // Android can store a SQLite row that CursorWindow cannot read back.
+  if (await AsyncStorage.getItem(key) !== raw) {
+    throw new Error('無法確認匯入資料已儲存，請稍後再試。');
+  }
+}
+
 async function restoreLedger(key: string, { raw, checkpoint }: Recovery) {
   if (raw === null) await AsyncStorage.removeItem(key);
   else await AsyncStorage.setItem(key, raw);
+  await verifyNativeLedgerWrite(key, raw);
   await retireNativeCheckpoint(key, checkpoint);
   clearPersonalImportRollback(key);
   pendingRestorations.delete(key);
@@ -313,6 +321,8 @@ export function mutatePersonalImportLedger<T>(
             const commit = preparePersonalImportRollback(key, persistedRaw);
             try {
               await AsyncStorage.setItem(key, raw);
+              assertWritable();
+              await verifyNativeLedgerWrite(key, raw);
               assertWritable();
               await retireNativeCheckpoint(key, adoptedCheckpoint);
               assertWritable();

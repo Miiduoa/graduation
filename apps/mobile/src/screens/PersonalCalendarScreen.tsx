@@ -97,13 +97,15 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
   const firebaseChanged =
     !!firebaseUid && !!lastFirebaseUid.current &&
     firebaseUid !== lastFirebaseUid.current;
-  // Retire the workspace that started under Firebase, even if Nuni can open a new one.
   const firebaseJustSignedOut = firebaseSignedOut && !!lastFirebaseUid.current;
+  const lastLogoutGeneration = useRef(0);
+  const firebaseLogoutGeneration = lastLogoutGeneration.current + Number(firebaseJustSignedOut);
   const workspaceUid = firebaseSignedOut ? undefined : (scope && firebaseUid) || lastFirebaseUid.current;
   useLayoutEffect(() => {
+    lastLogoutGeneration.current = firebaseLogoutGeneration;
     if (firebaseSignedOut) lastFirebaseUid.current = undefined;
     else if (firebaseUid && (scope || !lastFirebaseUid.current)) lastFirebaseUid.current = firebaseUid;
-  }, [firebaseSignedOut, firebaseUid, scope]);
+  }, [firebaseLogoutGeneration, firebaseSignedOut, firebaseUid, scope]);
   const loggingOut = !!platform.pendingLogout;
   const sessionRejected = !platform.session && !!platform.error;
   const observedOwner = platform.session
@@ -112,6 +114,7 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
       ? `firebase:${firebaseUid}`
       : null;
   const nuniRevalidating = platform.loading && !platform.session && !sessionRejected;
+  const nuniSignedOut = !platform.session && !platform.loading && !loggingOut && !sessionRejected;
   const knownOwner = scope?.owner ?? (firebaseChanged ? null : observedOwner);
   const ownerSignedOut = (owner: string | undefined) =>
     firebaseSignedOut && !!owner?.startsWith('firebase:');
@@ -119,7 +122,7 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
   const nuniGeneration = platform.signInGeneration;
   return {
     knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseJustSignedOut, ownerSignedOut, workspaceUid,
-    nuniRevalidating, nuniGeneration,
+    nuniRevalidating, nuniSignedOut, nuniGeneration, firebaseLogoutGeneration,
   };
 }
 
@@ -181,6 +184,7 @@ export function CampusEventCalendarDraftScreen() {
       scopeKey={personalImportStorageKey(campusEvent)}
       scope={scope}
       writesRevoked={false}
+      writeGeneration={0}
       schoolName={school.name}
       initialDraft={campusEvent.draft}
     />
@@ -206,8 +210,10 @@ function parsePersonalImportKey(key: string): { owner: string; schoolId: string 
 
 export default function PersonalCalendarScreen() {
   const scope = usePersonalImportScope();
-  const { knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseJustSignedOut, ownerSignedOut, workspaceUid, nuniGeneration } =
-    useCalendarAccount(scope);
+  const {
+    knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseJustSignedOut,
+    ownerSignedOut, workspaceUid, nuniSignedOut, nuniGeneration, firebaseLogoutGeneration,
+  } = useCalendarAccount(scope);
   const { school, schoolId, selectionReady } = useSchool();
   const route = useRoute();
   const writesRevoked = loggingOut || sessionRejected || ownerSignedOut(scope?.owner);
@@ -220,6 +226,7 @@ export default function PersonalCalendarScreen() {
     if (firebaseChanged || firebaseJustSignedOut || loggingOut || sessionRejected || schoolCleared) return true;
     const previous = parsePersonalImportKey(lastReadyKey.current);
     if (!previous) return false;
+    if (nuniSignedOut && previous.owner.startsWith('nuni:')) return true;
     if (ownerSignedOut(previous.owner) || (knownOwner && previous.owner !== knownOwner)) return true;
     if (selectionReady && knownSchoolId && previous.schoolId !== knownSchoolId) return true;
     return false;
@@ -231,17 +238,24 @@ export default function PersonalCalendarScreen() {
   // Logout or a known owner/school switch is not revalidation: drop the sticky
   // key so the previous workspace cannot reappear or accept late reads.
   const workspaceKey = key || (!staleSticky && lastReadyKey.current) || 'pending';
+  const nuniWorkspace = parsePersonalImportKey(workspaceKey)?.owner.startsWith('nuni:');
+  // Keep the Nuni workspace mounted when Firebase signs out on its own.
+  const lastWorkspaceUid = useRef(workspaceUid);
+  useLayoutEffect(() => {
+    if (workspaceUid || !nuniWorkspace) lastWorkspaceUid.current = workspaceUid;
+  }, [workspaceUid, nuniWorkspace]);
   const focusEventId = (route.params as FocusParams)?.eventId;
   return (
     <PersonalCalendarWorkspace
       key={JSON.stringify([
         workspaceKey,
-        workspaceUid,
-        parsePersonalImportKey(workspaceKey)?.owner.startsWith('nuni:') ? nuniGeneration : null,
+        nuniWorkspace ? workspaceUid ?? lastWorkspaceUid.current : workspaceUid,
+        nuniWorkspace ? nuniGeneration : null,
       ])}
       scopeKey={workspaceKey === 'pending' ? '' : workspaceKey}
       scope={verifiedScope}
       writesRevoked={writesRevoked}
+      writeGeneration={firebaseLogoutGeneration}
       schoolName={school?.name || '未指定校園'}
       focusEventId={focusEventId}
     />
@@ -252,6 +266,7 @@ function PersonalCalendarWorkspace({
   scopeKey,
   scope,
   writesRevoked,
+  writeGeneration,
   schoolName,
   focusEventId,
   initialDraft,
@@ -259,6 +274,7 @@ function PersonalCalendarWorkspace({
   scopeKey: string;
   scope: PersonalImportScope | null;
   writesRevoked: boolean;
+  writeGeneration: number;
   schoolName: string;
   focusEventId?: string;
   initialDraft?: PersonalEventDraft;
@@ -269,7 +285,7 @@ function PersonalCalendarWorkspace({
   const latestRead = useRef({ ledger: 0, reminders: 0 });
   const resolvedKey = scope ? personalImportStorageKey(scope) : '';
   const verifiedKey = resolvedKey === scopeKey && !writesRevoked ? resolvedKey : '';
-  const currentScope = useRef({ resolvedKey, verifiedKey, writesRevoked });
+  const currentScope = useRef({ resolvedKey, verifiedKey, writesRevoked, writeGeneration });
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
   const ready = load.status === 'ready';
   const ledgerReady = useRef(ready);
@@ -309,10 +325,10 @@ function PersonalCalendarWorkspace({
   }, []);
 
   useLayoutEffect(() => {
-    // A return to the same account and school still starts a new verification.
-    currentScope.current = { resolvedKey, verifiedKey, writesRevoked };
+    // A scope change or Firebase logout starts a new verification for queued operations.
+    currentScope.current = { resolvedKey, verifiedKey, writesRevoked, writeGeneration };
     setReminderBusyId(null);
-  }, [resolvedKey, verifiedKey, writesRevoked]);
+  }, [resolvedKey, verifiedKey, writesRevoked, writeGeneration]);
 
   useLayoutEffect(() => {
     ledgerReady.current = ready;
@@ -416,7 +432,7 @@ function PersonalCalendarWorkspace({
         unsubJournal();
         unsubRuntime();
       };
-    }, [refresh, refreshReminders, scope]),
+    }, [refresh, refreshReminders, scope, writeGeneration]),
   );
 
   const monthEvents = useMemo(
@@ -496,7 +512,8 @@ function PersonalCalendarWorkspace({
     // Only an operation admitted while verified may continue through revalidation.
     const canContinue = () => {
       const latest = currentScope.current;
-      return active.current && !latest.writesRevoked &&
+      return active.current && requestedScope.writeGeneration === latest.writeGeneration &&
+        !latest.writesRevoked &&
         (!latest.resolvedKey || latest.verifiedKey === expected);
     };
     // A destructive confirmation belongs to a single uninterrupted verification.

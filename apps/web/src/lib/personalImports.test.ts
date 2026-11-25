@@ -180,6 +180,42 @@ it('preserves a recovery copy that was not used as the basis for a save', async 
   expect(localStorage.getItem(key + ':checkpoint')).toBe(checkpoint);
 });
 
+it.each([false, true])('keeps readable primary records when sync is damaged (legacy commit: %s)', async (legacyCommit) => {
+  const key = personalImportsStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  await savePersonalImportBatch(scope, rows());
+  const older = localStorage.getItem(key)!;
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n英文,2,90'));
+  const { records } = JSON.parse(localStorage.getItem(key)!);
+  const primary = JSON.stringify({
+    [legacyCommit ? '$commit' : 'version']: 1,
+    records,
+    sync: { enabled: 'damaged' },
+  });
+  localStorage.setItem(key, primary);
+  localStorage.setItem(checkpoint, older);
+
+  expect(readPersonalImports(scope).map(({ title }) => title)).toEqual(['資料庫', '英文']);
+  await expect(savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n微積分,2,90'))).rejects.toThrow();
+  expect(localStorage.getItem(key)).toBe(primary);
+  expect(localStorage.getItem(checkpoint)).toBe(older);
+});
+
+it('saves a legacy Expo Web commit as version 1 without adopting a stale checkpoint', async () => {
+  const key = personalImportsStorageKey(scope);
+  await savePersonalImportBatch(scope, rows());
+  const older = localStorage.getItem(key)!;
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n英文,2,90'));
+  const { version, ...ledger } = JSON.parse(localStorage.getItem(key)!);
+  localStorage.setItem(key, JSON.stringify({ $commit: version, ...ledger }));
+  localStorage.setItem(key + ':checkpoint', older);
+
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n微積分,2,90'));
+  expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ version: 1 });
+  expect(readPersonalImports(scope).map(({ title }) => title)).toEqual(['資料庫', '英文', '微積分']);
+  expect(localStorage.getItem(key + ':checkpoint')).toBe(older);
+});
+
 it('keeps a checkpoint replaced during sync and refuses to publish from the earlier snapshot', async () => {
   const { withPersonalImportSyncLock } = await import('./personalImports');
   const key = personalImportsStorageKey(scope);

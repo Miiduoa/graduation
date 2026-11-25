@@ -98,7 +98,7 @@ function readWebPersonalImportRollback(
   return original;
 }
 
-function parsePersonalImportStorageJson(raw: string, web: boolean) {
+export function parsePersonalImportStorageJson(raw: string, web: boolean) {
   const value = JSON.parse(raw);
   if (web && value?.[compactVersionKey] === 1 && !('version' in value)) {
     const { [compactVersionKey]: version, ...ledger } = value;

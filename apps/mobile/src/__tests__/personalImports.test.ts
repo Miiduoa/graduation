@@ -32,7 +32,7 @@ import {
   undoLastPersonalImport,
 } from '../services/personalImports';
 import { syncPersonalImports } from '../services/personalImportSync';
-import { hasWebPersonalImportCommit } from '../services/personalImportRollbackJournal';
+import { hasWebPersonalImportCommit, readPersonalImportRollback } from '../services/personalImportRollbackJournal';
 
 const scope = { owner: 'nuni:account-a', schoolId: 'pu' };
 const row = (id: string, title = '微積分'): PersonalImportRow => ({
@@ -139,6 +139,40 @@ test.each([false, true])('protected native save preserves an unadopted checkpoin
       .toEqual(['行程 A', '行程 B', '行程 C']);
   }
   expect(await AsyncStorage.getItem(checkpoint)).toBe(backup);
+});
+
+test.each([false, true])('native keeps an adopted checkpoint after an unreadable commit (rollback read fails: %s)', async (rollbackReadFails) => {
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  const { ledger } = await appendPersonalImports(scope, [row('a', '行程 A')]);
+  const original = (await AsyncStorage.getItem(key))!;
+  await AsyncStorage.setItem(checkpoint, original);
+  await AsyncStorage.removeItem(key);
+
+  const getItem = jest.mocked(AsyncStorage.getItem);
+  const nativeGet = getItem.getMockImplementation()!;
+  const rowLimitError = new Error('Row too big to fit into CursorWindow');
+  let readbackFailed = false;
+  getItem.mockImplementation(async (entry) => {
+    const raw = await nativeGet(entry);
+    if (entry === key && raw && (raw.length > original.length || (readbackFailed && rollbackReadFails))) {
+      readbackFailed = true;
+      throw rowLimitError;
+    }
+    return raw;
+  });
+  try {
+    await expect(appendPersonalImports(scope, [row('c', '行程 C')])).rejects.toBe(rowLimitError);
+    expect(await AsyncStorage.getItem(checkpoint)).toBe(original);
+    expect(readPersonalImportRollback(key)).toBe(rollbackReadFails ? original : undefined);
+    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+  } finally {
+    getItem.mockImplementation(nativeGet);
+  }
+
+  await appendPersonalImports(scope, [row('c', '行程 C')]);
+  expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
+    .toEqual(['行程 A', '行程 C']);
 });
 
 test.each([true, false])('Expo Web only replays pending sync from a current recovery snapshot (replaced: %s)', async (replaced) => {
@@ -1946,7 +1980,12 @@ test('a coalesced Android read failure from another key preserves a readable che
     await write;
     await concurrentRead;
     expect(failedBatch).toHaveBeenLastCalledWith([otherKey, checkpoint]);
-    expect(getItem).not.toHaveBeenCalledWith(key);
+    const primaryReads = getItem.mock.invocationCallOrder.filter(
+      (_, index) => getItem.mock.calls[index][0] === key,
+    );
+    // Recovery reads the checkpoint first. The sole primary read verifies the new write.
+    expect(primaryReads).toHaveLength(1);
+    expect(primaryReads[0]).toBeGreaterThan(jest.mocked(AsyncStorage.setItem).mock.invocationCallOrder.at(-1)!);
     expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['微積分', '統計']);
     expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
   } finally {

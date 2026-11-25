@@ -18,6 +18,7 @@ import {
   capturePersonalImportBrowserRecovery,
   hasWebPersonalImportCommit,
   parsePersonalImportLedger,
+  parsePersonalImportStorageJson,
   selectPersonalImportBrowserRecovery,
   serializePersonalImportBrowserCommit,
 } from '@campus/shared/src/imports/browserRecovery';
@@ -35,17 +36,16 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
   const key = personalImportsStorageKey(scope);
   let primary = localStorage.getItem(key);
   const recovery = capturePersonalImportBrowserRecovery(localStorage, key);
-  let primaryVerified = false;
+  let primaryRecordsReadable = false;
   if (primary !== null) {
     try {
       parsePersonalImportRecords(scope, primary);
-      parseLedgerSyncState(scope, primary);
-      primaryVerified = true;
+      primaryRecordsReadable = true;
     } catch {
-      // A damaged primary can still have a complete recovery copy.
+      // Unbound recovery can replace unreadable records. Sync is checked separately.
     }
   }
-  const adopted = selectPersonalImportBrowserRecovery(recovery, primary, primaryVerified, (raw) => {
+  const adopted = selectPersonalImportBrowserRecovery(recovery, primary, primaryRecordsReadable, (raw) => {
     const ledger = parsePersonalImportLedger(raw, scope.schoolId, true);
     if (ledger.records.length > PERSONAL_IMPORT_LIMIT) throw new Error();
     return ledger;
@@ -56,8 +56,8 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
     (hasWebPersonalImportCommit(primary) || recovery.checkpoint === null || adopted !== null);
   const assertSnapshot = () => recovery.assertSnapshot(
     primary,
-    firstWrite && !primaryVerified,
-    firstWrite && (!primaryVerified || adopted?.source === 'journal'),
+    firstWrite && !primaryRecordsReadable,
+    firstWrite && (!primaryRecordsReadable || adopted?.source === 'journal'),
   );
   return {
     records: () => adopted?.ledger.records ?? parsePersonalImportRecords(scope, raw),
@@ -87,7 +87,7 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
 function parsePersonalImportRecords(scope: PersonalImportScope, raw: string | null): PersonalImportRecord[] {
   if (!raw) return [];
   try {
-    const data: unknown = JSON.parse(raw);
+    const data: unknown = parsePersonalImportStorageJson(raw, true);
     if (
       !data ||
       typeof data !== 'object' ||
