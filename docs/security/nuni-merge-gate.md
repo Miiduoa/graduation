@@ -2,13 +2,17 @@
 
 This preserves ruleset [26004626](https://github.com/Miiduoa/graduation/rules/26004626) and the required check `審查通過` from App 5504170. It does not merge, deploy, change rules, or substitute a GitHub Actions check for the App. The owner delegates review judgment to a human or an agent acting on their behalf; a machine-verifiable attestation is not proof that a substantive review actually happened. Never attest without reading the exact diff, evaluating tests and risks, and addressing findings. The owner-account COMMENT is explicitly not independent human approval.
 
-## Bootstrap (owner, once)
+## Safety hold: read-only pilot
+
+Publication is deliberately disabled in policy.json while the merge-time enforcement finding remains unresolved. Even a successful preflight cannot mint an App token or publish a check. Missing or redacted `bypass_actors` is a denial, not an empty list. An earlier App success is not reused unless the exact PR, head, base, review and command identity matches. Do not change the publication flag merely to unblock PRs. A separate reviewed change must establish independent native enforcement of required current checks, applicable path-conditional tests, and unresolved discussions at merge time, and prove negative cases including failed reruns and newly opened threads. Until then continue using the existing genuine gate. No secret is needed for the read-only pilot.
+
+## Bootstrap (owner, once; publication remains on hold)
 
 1. Review and merge this security-sensitive PR using the existing genuine App/manual mechanism. Until the workflow is on main, issue comments cannot trigger it. Do not bypass the ruleset.
 2. In the existing ruleset keep App 5504170 required and enable **Require branches to be up to date before merging**. Current ruleset is loose; the pilot refuses to publish unless strict. Keep the no-bypass policy.
 3. Create environment `nuni-merge-gate` under repository Settings → Environments. Select deployment branches/tags → selected branches, allow only the branch named `main` (not all protected branches or tags). Enable required reviewers for the initial pilot if an independent reviewer is available; do not allow administrator bypass. The owner must ensure that no other trusted workflow grants unreviewed access to this environment. Use GitHub-hosted runners only.
 4. In the [existing App settings](https://github.com/settings/apps/nuni-merge-gate), confirm this App is installed only on the intended repository, with checks:write and metadata:read. Generate a new App private key if needed and store its PEM directly as the **environment** secret `NUNI_GATE_PRIVATE_KEY`. Do not use a repository-wide secret, paste the key into chat, commit it, or share it with any agent. The runtime restricts the short-lived installation token to this repository and checks:write, verifies App identity and revokes the token after use. No contents-write permission is needed.
-5. Test with `check` first; it does not read the App key or publish a check. After a genuine review and successful exact-head tests, use `approve`. Verify the resulting check's App ID and audit URL before merging with expected head SHA. Revalidate current main and the absence of failures immediately before merge; GitHub strict mode prevents stale-base merges.
+5. Test with `check` first; it does not read the App key or publish a check. `approve` is denied in the current pilot. After the separate merge-time enforcement change is reviewed, validated, and enabled, use `approve` only after a genuine review and successful exact-head tests. Verify the resulting check's App ID and audit URL before merging with expected head SHA. Revalidate current main and the absence of failures immediately before merge; GitHub strict mode prevents stale-base merges.
 
 ## Pilot scope
 

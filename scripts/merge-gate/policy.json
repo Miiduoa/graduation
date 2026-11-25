@@ -61,5 +61,6 @@
     "apps/web/src/app/map/campusWalkingOsm.ts",
     "apps/web/src/lib/wakeAwareRequest.test.ts",
     "packages/shared/src/wakeAwareRequest.ts"
-  ]
+  ],
+  "publicationEnabled": false
 }

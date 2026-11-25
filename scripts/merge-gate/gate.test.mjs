@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseCommand,expectedWorkflows,verifiedRuns,verifiedJob,validateReview,validateRule,validatePr,policy} from './gate.mjs';
+import {parseCommand,expectedWorkflows,verifiedRuns,verifiedJob,validateReview,validateRule,validatePr,matchesPublishedCheck,requirePublicationEnabled,policy} from './gate.mjs';
 
 const head='a'.repeat(40), base='b'.repeat(40);
 const cmd=parseCommand('/nuni-gate approve '+head+' '+base+' 123');
@@ -64,6 +64,9 @@ test('ruleset must retain exact App; strict false cannot publish',()=>{
   const wrong=structuredClone(rule);wrong.rules[1].parameters.required_status_checks[0].integration_id=15368;
   assert.throws(()=>validateRule(wrong));assert.throws(()=>validateRule({...rule,enforcement:'disabled'}));
   assert.throws(()=>validateRule({...rule,bypass_actors:[{actor_id:1}]}));
+  const {bypass_actors: omitted,...missing}=rule;
+  assert.throws(()=>validateRule(missing), /bypass actors/);
+  assert.throws(()=>validateRule({...rule,bypass_actors:null}), /bypass actors/);
 });
 test('PR must remain open, ready, conflict-free, same repository and exact base/head',()=>{
   const pr={number:1,state:'open',draft:false,mergeable:true,head:{sha:head,repo:{id:1190179363}},base:{sha:base,ref:'main',repo:{id:1190179363}}};
@@ -73,4 +76,17 @@ test('PR must remain open, ready, conflict-free, same repository and exact base/
     {...pr,head:{sha:head,repo:{id:1}}},{...pr,base:{...pr.base,sha:head}}])
     assert.throws(()=>validatePr(bad,main,cmd,1));
   assert.throws(()=>validatePr(pr,{commit:{sha:head}},cmd,1));
+});
+
+test('published success is reusable only for the exact attestation',()=>{
+  const externalId='nuni-gate:v1:796:'+head+':'+base+':123:456';
+  const check={name:'審查通過',app:{id:5504170},head_sha:head,status:'completed',conclusion:'success',external_id:externalId};
+  assert(matchesPublishedCheck(check,head,externalId));
+  for(const bad of [{...check,external_id:undefined},{...check,external_id:externalId+':old'},
+    {...check,app:{id:15368}},{...check,head_sha:base},{...check,conclusion:'failure'}])
+    assert(!matchesPublishedCheck(bad,head,externalId));
+});
+test('pilot publication stays disabled until independent merge-time enforcement is verified',()=>{
+  assert.equal(policy.publicationEnabled,false);
+  assert.throws(()=>requirePublicationEnabled(), /Publication disabled/);
 });

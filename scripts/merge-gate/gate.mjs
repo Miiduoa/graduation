@@ -20,10 +20,19 @@ function verifiedJob(job,checks,head){const check=checks.find(c=>c.id===job.id);
 
 function validateReview(review,cmd,owner,comment){const first="nuni-gate-review v1 head="+cmd.head+" base="+cmd.base+" outcome=pass";const body=typeof review.body==="string"?review.body:"";must(review.id===cmd.reviewId&&review.user?.id===owner&&review.author_association==="OWNER"&&["COMMENTED","APPROVED"].includes(review.state)&&review.commit_id===cmd.head&&body.startsWith(first+"\n")&&body.slice(first.length).trim().length>=120&&Number.isFinite(Date.parse(review.submitted_at))&&Date.parse(review.submitted_at)<=Date.parse(comment.created_at),"Missing exact owner-delegated review attestation");}
 
-function validateRule(rule){must(rule.id===26004626&&rule.enforcement==="active"&&rule.target==="branch"&&rule.conditions?.ref_name?.include?.includes("~DEFAULT_BRANCH")&&!rule.conditions?.ref_name?.exclude?.length,"Expected active default-branch ruleset missing");must(!rule.bypass_actors?.length,"Unexpected ruleset bypass actors");const checks=rule.rules?.filter(r=>r.type==="required_status_checks")??[];must(rule.rules?.some(r=>r.type==="pull_request")&&checks.some(r=>r.parameters?.required_status_checks?.some(c=>c.context==="審查通過"&&c.integration_id===5504170)),"Required App gate changed");return checks.some(r=>r.parameters?.strict_required_status_checks_policy===true&&r.parameters?.required_status_checks?.some(c=>c.context==="審查通過"&&c.integration_id===5504170));}
+function validateRule(rule){must(rule.id===26004626&&rule.enforcement==="active"&&rule.target==="branch"&&rule.conditions?.ref_name?.include?.includes("~DEFAULT_BRANCH")&&!rule.conditions?.ref_name?.exclude?.length,"Expected active default-branch ruleset missing");must(Array.isArray(rule.bypass_actors)&&rule.bypass_actors.length===0,"Missing or nonempty ruleset bypass actors");const checks=rule.rules?.filter(r=>r.type==="required_status_checks")??[];must(rule.rules?.some(r=>r.type==="pull_request")&&checks.some(r=>r.parameters?.required_status_checks?.some(c=>c.context==="審查通過"&&c.integration_id===5504170)),"Required App gate changed");return checks.some(r=>r.parameters?.strict_required_status_checks_policy===true&&r.parameters?.required_status_checks?.some(c=>c.context==="審查通過"&&c.integration_id===5504170));}
 
 function validatePr(pr,main,cmd,number){must(pr.number===number&&pr.state==="open"&&pr.draft===false&&pr.mergeable===true&&pr.head?.repo?.id===1190179363&&pr.base?.repo?.id===1190179363&&pr.base?.ref==="main"&&pr.head?.sha===cmd.head&&pr.base?.sha===cmd.base&&main.commit?.sha===cmd.base,"PR/head/base moved, draft, conflict or foreign repo");}
-export { parseCommand, expectedWorkflows, verifiedRuns, verifiedJob, validateReview, validateRule, validatePr, policy };
+// A previously successful check is not interchangeable with a different review, PR or base.
+function matchesPublishedCheck(check,head,externalId){
+  return check.name==='審查通過'&&check.app?.id===APP_ID&&check.head_sha===head&&
+    check.status==='completed'&&check.conclusion==='success'&&check.external_id===externalId;
+}
+function requirePublicationEnabled(){
+  must(policy.publicationEnabled===true,
+    'Publication disabled: independent merge-time CI and review enforcement not yet validated');
+}
+export { parseCommand, expectedWorkflows, verifiedRuns, verifiedJob, validateReview, validateRule, validatePr, matchesPublishedCheck, requirePublicationEnabled, policy };
 
 
 async function api(token, path, method = 'GET', body) {
@@ -129,6 +138,7 @@ function appJwt(key) {
   return unsigned+'.'+createSign('RSA-SHA256').update(unsigned).end().sign(key).toString('base64url');
 }
 async function publish(readToken, event, cmd, number) {
+  requirePublicationEnabled();
   const key = process.env.NUNI_GATE_PRIVATE_KEY;
   delete process.env.NUNI_GATE_PRIVATE_KEY;
   must(key, 'Protected environment App key is not configured');
@@ -152,9 +162,12 @@ async function publish(readToken, event, cmd, number) {
     const proof=await verify(readToken,event,cmd,number);
     must(proof.strict,'Enable strict up-to-date status checks; do not disable App gate');
     const externalId=['nuni-gate','v1',number,cmd.head,cmd.base,cmd.reviewId,event.comment.id].join(':');
-    if (proof.checks.some(c=>c.name==='審查通過'&&c.app?.id===APP_ID&&
-      c.head_sha===cmd.head&&c.status==='completed'&&c.conclusion==='success')) {
-      console.log('Existing genuine successful App check for this head; no duplicate published.');
+    const existing=proof.checks.filter(c=>c.name==='審查通過'&&c.app?.id===APP_ID&&
+      c.head_sha===cmd.head&&c.status==='completed'&&c.conclusion==='success');
+    if (existing.length) {
+      must(existing.length===1&&matchesPublishedCheck(existing[0],cmd.head,externalId),
+        'Existing successful App check belongs to different or ambiguous evidence; use manual gate');
+      console.log('Existing genuine successful App check for this exact attestation; no duplicate published.');
       return;
     }
     const runId = Number(process.env.GITHUB_RUN_ID);
@@ -200,6 +213,7 @@ async function main() {
   const token=process.env.GH_READ_TOKEN;
   if(stage==='publish') {
     must(cmd.mode==='approve','Read-only command cannot publish');
+    requirePublicationEnabled();
     // Do not even mint a token until the read-only preflight has passed again.
     const proof=await verify(token,event,cmd,number);
     must(proof.strict,'Strict up-to-date ruleset required before publication');
@@ -207,8 +221,11 @@ async function main() {
   } else {
     const proof=await verify(token,event,cmd,number);
     console.log(JSON.stringify({pr:number,head:cmd.head,base:cmd.base,verifiedRuns:proof.runs.map(r=>r.id),
-      strict:proof.strict,mode:cmd.mode,publicationAllowed:proof.strict&&cmd.mode==='approve'}));
-    if(cmd.mode==='approve')must(proof.strict,'Strict up-to-date ruleset required before publication');
+      strict:proof.strict,mode:cmd.mode,publicationAllowed:policy.publicationEnabled===true&&proof.strict&&cmd.mode==='approve'}));
+    if(cmd.mode==='approve'){
+      requirePublicationEnabled();
+      must(proof.strict,'Strict up-to-date ruleset required before publication');
+    }
   }
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
