@@ -140,9 +140,9 @@ function IdentityReader({
               </li>
             )}
             {stores.map((store) => (
-              <li key={`${store.name}:${store.campus}`}>
-                <Link href="/merchant/workspace">
-                  {store.name} · {store.campus} · {store.status}
+              <li key={`${store.tenantId}:${store.locationId}`}>
+                <Link href={store.href}>
+                  {store.name}／{store.locationName} · {store.campus} · {store.status}
                 </Link>
               </li>
             ))}
