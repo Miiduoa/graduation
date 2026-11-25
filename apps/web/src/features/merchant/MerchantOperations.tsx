@@ -128,6 +128,7 @@ export function MerchantOperations({
   onExpired,
   confirmedDetail,
   getConfirmedDetail,
+  getAccessConfirmationRevision,
   confirmedListRow,
   receiptFloorFor,
   accessRevocation = 0,
@@ -153,6 +154,7 @@ export function MerchantOperations({
   onExpired(): void;
   confirmedDetail?: Detail | null;
   getConfirmedDetail?(key: string): Detail | null;
+  getAccessConfirmationRevision?(key: string): number;
   confirmedListRow?: NuniMerchantWorkspace;
   receiptFloorFor?(readinessVersion?: number): number;
   accessRevocation?: number;
@@ -225,6 +227,7 @@ export function MerchantOperations({
   const opened = useRef(false);
   const visibleRef = useRef(visible);
   const readAfterWrite = useRef(false);
+  const deferredWriteRevision = useRef(0);
   const mutationRun = useRef(0);
   const changed = useRef(onChanged);
   const expire = useRef(onExpired);
@@ -236,6 +239,7 @@ export function MerchantOperations({
     ++sessionRun.current;
     ++run.current;
     ++mutationRun.current;
+    deferredWriteRevision.current = 0;
     pendingAccessRead.current = 0;
     entryAccessRevision.current = 0;
     failedReadRevision.current = 0;
@@ -373,7 +377,9 @@ export function MerchantOperations({
     async (reconcile = true, mode: DetailReadMode = 'regular') => {
       // A confirmed receipt may remain visible with the previously verified detail
       // during an outage. Only a successful read can restore the controls.
-      const hideDetail = mode === 'after-write';
+      const deferredRevision = deferredWriteRevision.current;
+      const readMode = mode === 'regular' && deferredRevision ? 'after-write' : mode;
+      const hideDetail = readMode === 'after-write';
       readAfterWrite.current = false;
       const session = sessionRun.current;
       const version = ++run.current;
@@ -392,13 +398,22 @@ export function MerchantOperations({
         if (!merged) {
           // A concurrent list merge can invalidate the detail from a successful entry GET.
           // Check the shared confirmation before React publishes its next snapshot.
-          const confirmedRevision = entryAccessRevision.current;
+          // A deferred refresh may rely on a newer access GET from the list.
+          const confirmedRevision = deferredRevision
+            ? Math.max(
+                entryAccessRevision.current,
+                (getAccessConfirmationRevision ?? localConfirmations.accessConfirmationRevision)(draftKey),
+              )
+            : entryAccessRevision.current;
           if (
-            mode !== 'regular' &&
+            readMode !== 'regular' &&
+            confirmedRevision > deferredRevision &&
             confirmedRevision >= accessRevision.current &&
             confirmedRevision > Math.max(failedReadRevision.current, observedRevocation.current) &&
             (beginRequest ? getConfirmedDetail?.(draftKey) : localConfirmations.detailFor(draftKey))
           ) {
+            accessRevision.current = confirmedRevision;
+            entryAccessRevision.current = confirmedRevision;
             updateAccess({ type: 'verified' });
             setError((current) => current === detailReadError ? '' : current);
             return;
@@ -433,13 +448,16 @@ export function MerchantOperations({
         }
       } finally {
         if (pendingAccessRead.current === revision) pendingAccessRead.current = 0;
-        if (current()) updateAccess({ type: 'read-finished' });
+        if (current()) {
+          if (deferredWriteRevision.current === deferredRevision) deferredWriteRevision.current = 0;
+          updateAccess({ type: 'read-finished' });
+        }
       }
     },
     [
       operations, tenantId, locationId, confirmDetail, confirmEntry, drafts, draftKey,
       expireSession, revokeDetail, nextRevision, beginRequest, getConfirmedDetail, localConfirmations,
-      setError, setUncertain, updateAccess,
+      getAccessConfirmationRevision, setError, setUncertain, updateAccess,
     ],
   );
   useLayoutEffect(() => {
@@ -917,7 +935,13 @@ export function MerchantOperations({
                           ? onMenuConfirmed(detail, revision, receipt.createdItems)
                           : localConfirmations.confirmMenu(draftKey, revision, receipt.createdItems);
                         setMenuConfirmed(false);
-                        if (!accepted) return;
+                        if (!accepted) {
+                          // A newer observation won. If the list is open, reconcile
+                          // on the next entry after the background access check.
+                          if (!visibleRef.current) deferredWriteRevision.current = revision;
+                          else if (!readAfterWrite.current) await read(true, 'after-write');
+                          return;
+                        }
                         setNotice({ value: receipt.createdItems, revision });
                         // Re-entered views refresh when the mutation settles.
                         if (!readAfterWrite.current) await read(true, 'after-confirmed-write');

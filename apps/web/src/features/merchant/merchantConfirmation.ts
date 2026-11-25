@@ -310,6 +310,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     },
     hasApplicationList: () => lists.applications !== undefined,
     detailFor,
+    accessConfirmationRevision,
     verifiedDetails() {
       const details = new Map<string, NuniMerchantWorkspaceDetail>();
       for (const key of entries.keys()) {
