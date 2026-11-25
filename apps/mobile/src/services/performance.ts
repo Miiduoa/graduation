@@ -364,7 +364,11 @@ class PerformanceService {
   // and subsequently re-enabled. Capture only the current permission epoch.
   private collectionPermission(): () => boolean {
     const epoch = this.collectionEpoch;
-    return () => this.enabled && this.dataCollectionEnabled && this.collectionEpoch === epoch;
+    return () => this.isCollectionAllowed() && this.collectionEpoch === epoch;
+  }
+
+  isCollectionAllowed(): boolean {
+    return this.enabled && this.dataCollectionEnabled;
   }
 
   isPerformanceCollectionEnabled(): boolean {
@@ -609,6 +613,9 @@ export async function fetchWithPerformance(
   url: string,
   options: RequestInit = {},
 ): Promise<Response> {
+  // Opted-out requests do not allocate metrics or inspect response metadata.
+  if (!performance.isCollectionAllowed()) return fetch(url, options);
+
   const started = startHttpMetric(
     url,
     options.method ?? 'GET',
