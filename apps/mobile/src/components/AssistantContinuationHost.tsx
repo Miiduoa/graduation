@@ -11,7 +11,7 @@ import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 
 type NavigationRef = {
   isReady: () => boolean;
-  getRootState: () => { key: string };
+  getRootState: () => { key: string } | undefined;
   getCurrentRoute: () => { key: string } | undefined;
   addListener: (event: 'state', listener: () => void) => () => void;
 };
@@ -35,7 +35,9 @@ export function AssistantContinuationHost({ navigationRef, hasTabBar = false }: 
       if (!current || !navigationRef.isReady()) return;
       // Once the original navigation tree is gone, the old return address
       // must not reappear even if a later tree exposes the same route again.
-      if (navigationRef.getRootState().key !== current.rootKey || !current.isCurrent()) {
+      const rootKey = navigationRef.getRootState()?.key;
+      if (!rootKey) return;
+      if (rootKey !== current.rootKey || !current.isCurrent()) {
         observedAway.current = null;
         dismissAssistantContinuation(current);
         return;
@@ -63,8 +65,8 @@ export function AssistantContinuationHost({ navigationRef, hasTabBar = false }: 
     const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));
     return () => { show.remove(); hide.remove(); };
   }, []);
-  if (!ticket || keyboardOpen || !ticket.isCurrent() || !navigationRef.isReady() ||
-      navigationRef.getRootState().key !== ticket.rootKey) return null;
+  if (!ticket || keyboardOpen || !navigationRef.isReady() ||
+      navigationRef.getRootState()?.key !== ticket.rootKey || !ticket.isCurrent()) return null;
   const activeKey = navigationRef.getCurrentRoute()?.key;
   if (!activeKey || activeKey === ticket.sourceRouteKey) return null;
   return (
@@ -73,7 +75,20 @@ export function AssistantContinuationHost({ navigationRef, hasTabBar = false }: 
       borderRadius: 24, borderWidth: 1, borderColor: theme.colors.border,
       shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 4 }}>
       <Pressable accessibilityRole="button" accessibilityLabel="接著問 nuni"
-        onPress={() => ticket.resume()} style={{ minHeight: 48, justifyContent: 'center', paddingLeft: 18, paddingRight: 12 }}>
+        onPress={() => {
+          // The press can be delivered after a navigation transition has hidden
+          // this view. Re-check the live destination before using its return address.
+          if (getAssistantContinuation() !== ticket || !navigationRef.isReady()) return;
+          const rootKey = navigationRef.getRootState()?.key;
+          if (!rootKey) return;
+          if (rootKey !== ticket.rootKey || !ticket.isCurrent()) {
+            dismissAssistantContinuation(ticket);
+            return;
+          }
+          const routeKey = navigationRef.getCurrentRoute()?.key;
+          if (!routeKey || routeKey === ticket.sourceRouteKey) return;
+          ticket.resume();
+        }} style={{ minHeight: 48, justifyContent: 'center', paddingLeft: 18, paddingRight: 12 }}>
         <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.accent }}>接著問 nuni</Text>
       </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel="收起接續入口"

@@ -1,5 +1,5 @@
 import React, { createContext, useContext } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -41,11 +41,12 @@ function fixture(withTabs = true) {
   const unhandled = jest.fn();
   // Only the host's view of navigation readiness is overridden. The underlying
   // navigation container still performs the actual service and return actions.
-  let snapshot: 'normal' | 'no-route' | 'new-root' = 'normal';
+  let snapshot: 'normal' | 'no-route' | 'no-root' | 'not-ready' | 'new-root' = 'normal';
   const hostListeners = new Set<() => void>();
   const hostNavigation = {
-    isReady: () => navigation.isReady(),
-    getRootState: () => ({ key: snapshot === 'new-root' ? 'replacement-root' : navigation.getRootState().key }),
+    isReady: () => snapshot !== 'not-ready' && navigation.isReady(),
+    getRootState: () => snapshot === 'no-root' ? undefined :
+      ({ key: snapshot === 'new-root' ? 'replacement-root' : navigation.getRootState().key }),
     getCurrentRoute: () => snapshot === 'no-route' ? undefined : navigation.getCurrentRoute(),
     addListener: (_event: 'state', listener: () => void) => {
       hostListeners.add(listener);
@@ -210,6 +211,37 @@ test('a temporarily unknown route hides the return action; a replacement root pe
   expect(view.queryByRole('button', { name: '接著問 nuni' })).toBeNull();
   act(() => expect(ticket?.resume()).toBe(false));
   expect(navigation.getCurrentRoute()?.name).toBe('MapV2');
+  expect(askCampusAssistant).toHaveBeenCalledTimes(1);
+  expect(unhandled).not.toHaveBeenCalled();
+});
+
+// A queued press from the last rendered button must not navigate while the
+// container is between states, even though the source route still exists.
+test.each(['no-root', 'no-route', 'not-ready'] as const)('a queued return press is ignored during %s and the valid return recovers', async (snapshot) => {
+  const { App, navigation, unhandled, setHostSnapshot } = fixture();
+  const view = render(<App />);
+  await waitFor(() => expect(navigation.isReady()).toBe(true));
+  const sourceKey = navigation.getCurrentRoute()?.key;
+  fireEvent.changeText(view.getByLabelText('說出或輸入想做的事'), '開啟校園地圖');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '詢問手機助理' })));
+  fireEvent.changeText(view.getByLabelText('說出或輸入想做的事'), '保留這份草稿');
+  fireEvent.press(view.getByRole('button', { name: '開啟校園地圖' }));
+  expect(await view.findByRole('button', { name: '接著問 nuni' })).toBeTruthy();
+  const ticket = getAssistantContinuation();
+  expect(ticket).not.toBeNull();
+  const queuedPress = view.UNSAFE_getAllByType(Pressable)
+    .find(button => button.props.accessibilityLabel === '接著問 nuni')?.props.onPress as (() => void) | undefined;
+  expect(queuedPress).toEqual(expect.any(Function));
+  act(() => setHostSnapshot(snapshot));
+  expect(view.queryByRole('button', { name: '接著問 nuni' })).toBeNull();
+  act(() => queuedPress?.());
+  expect(navigation.getCurrentRoute()?.name).toBe('MapV2');
+  expect(getAssistantContinuation()).toBe(ticket);
+  act(() => setHostSnapshot('normal'));
+  fireEvent.press(view.getByRole('button', { name: '接著問 nuni' }));
+  expect(navigation.getCurrentRoute()?.key).toBe(sourceKey);
+  expect(view.getByDisplayValue('保留這份草稿')).toBeTruthy();
+  expect(getAssistantContinuation()).toBeNull();
   expect(askCampusAssistant).toHaveBeenCalledTimes(1);
   expect(unhandled).not.toHaveBeenCalled();
 });
