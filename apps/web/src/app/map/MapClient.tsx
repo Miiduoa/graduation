@@ -319,37 +319,49 @@ function MapContent({
     // A distance filter cannot stay active without a current position.
     setNearbyOnly(false);
     setPositionError('');
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      setPositionStatus('error');
-      setPositionError('此瀏覽器無法取得位置。你仍可從地點列表指定步行起點。');
-      return;
+    // A request may settle only once, even if the browser throws after registering callbacks.
+    function finishRequest() {
+      if (!mounted.current || request !== positionGeneration.current) return false;
+      positionGeneration.current += 1;
+      return true;
     }
-    setPositionStatus('loading');
-    navigator.geolocation.getCurrentPosition(
-      ({ coords }) => {
-        if (!mounted.current || request !== positionGeneration.current) return;
-        if (
-          !Number.isFinite(coords.latitude) || Math.abs(coords.latitude) > 90 ||
-          !Number.isFinite(coords.longitude) || Math.abs(coords.longitude) > 180
-        ) {
-          setPositionStatus('error');
-          setPositionError('定位結果無效，請重新取得位置。');
-          return;
-        }
-        setMyLocation({ lat: coords.latitude, lng: coords.longitude });
-        setPositionStatus('idle');
-      },
-      (positionError) => {
-        if (!mounted.current || request !== positionGeneration.current) return;
+    try {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
         setPositionStatus('error');
-        setPositionError(
-          positionError.code === 1
-            ? '未取得位置權限。你仍可從地點列表指定步行起點。'
-            : '目前無法取得位置，請確認定位與網路後再試一次。',
-        );
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
-    );
+        setPositionError('此瀏覽器無法取得位置。你仍可從地點列表指定步行起點。');
+        return;
+      }
+      setPositionStatus('loading');
+      navigator.geolocation.getCurrentPosition(
+        ({ coords }) => {
+          if (!finishRequest()) return;
+          if (
+            !Number.isFinite(coords.latitude) || Math.abs(coords.latitude) > 90 ||
+            !Number.isFinite(coords.longitude) || Math.abs(coords.longitude) > 180
+          ) {
+            setPositionStatus('error');
+            setPositionError('定位結果無效，請重新取得位置。');
+            return;
+          }
+          setMyLocation({ lat: coords.latitude, lng: coords.longitude });
+          setPositionStatus('idle');
+        },
+        (positionError) => {
+          if (!finishRequest()) return;
+          setPositionStatus('error');
+          setPositionError(
+            positionError.code === 1
+              ? '未取得位置權限。你仍可從地點列表指定步行起點。'
+              : '目前無法取得位置，請確認定位與網路後再試一次。',
+          );
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
+      );
+    } catch {
+      if (!finishRequest()) return;
+      setPositionStatus('error');
+      setPositionError('目前無法取得位置，請確認定位與網路後再試一次。');
+    }
   }
 
   async function toggleFavorite(location: MapLocation) {
