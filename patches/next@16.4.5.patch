@@ -1,7 +1,16 @@
 diff --git a/dist/client/components/app-router.js b/dist/client/components/app-router.js
 --- a/dist/client/components/app-router.js
 +++ b/dist/client/components/app-router.js
-@@ -105,6 +105,9 @@
+@@ -70,7 +70,7 @@
+     }
+     (0, _navigator.traverse)(window.location.href, state.__PRIVATE_NEXTJS_INTERNALS_TREE);
+ }
+-function HistoryUpdater({ appRouterState }) {
++function HistoryUpdater({ appRouterState, committedRouterState }) {
+     (0, _react.useInsertionEffect)(()=>{
+         if (process.env.__NEXT_APP_NAV_FAIL_HANDLING) {
+             // clear pending URL as navigation is no longer
+@@ -105,13 +105,18 @@
          (0, _createhreffromurl.createHrefFromUrl)(new URL(window.location.href)) !== canonicalUrl) {
              // This intentionally mutates React state, pushRef is overwritten to ensure additional push/replace calls do not trigger an additional history entry.
              pushRef.pendingPush = false;
@@ -11,8 +20,40 @@ diff --git a/dist/client/components/app-router.js b/dist/client/components/app-r
          } else {
 +            Object.defineProperty(historyState, Symbol.for('nuni.app-router.history-replace'), { value: true });
              window.history.replaceState(historyState, '', canonicalUrl);
-@@ -302,8 +305,24 @@
-      */ window.history.replaceState = function replaceState(data, _unused, url) {
+         }
++        committedRouterState.current = appRouterState;
+         (0, _committedstate.setLastCommittedTree)(tree);
+     }, [
+-        appRouterState
++        appRouterState,
++        committedRouterState
+     ]);
+     (0, _react.useEffect)(()=>{
+         // The Next-Url and the base tree may affect the result of a prefetch
+@@ -155,6 +160,7 @@
+  * The global router that wraps the application components.
+  */ function Router({ actionQueue, globalError, webSocket, staticIndicatorState }) {
+     const state = (0, _useactionqueue.useActionQueue)(actionQueue);
++    const committedRouterState = (0, _react.useRef)(null);
+     const { canonicalUrl } = state;
+     // Add memoized pathname/query for useSearchParams and usePathname.
+     const { searchParams, pathname } = (0, _react.useMemo)(()=>{
+@@ -271,6 +277,14 @@
+         throw _unresolvedthenable.unresolvedThenable;
+     }
+     (0, _react.useEffect)(()=>{
++        const historyQuerySyncBlocked = Symbol.for('nuni.app-router.history-query-sync-blocked');
++        // The queue can advance before React commits the matching history entry.
++        const isHistoryQuerySyncBlocked = ()=>actionQueue.pending?.payload.type === 'navigate' ||
++            actionQueue.state !== committedRouterState.current;
++        Object.defineProperty(window.history, historyQuerySyncBlocked, {
++            configurable: true,
++            value: isHistoryQuerySyncBlocked
++        });
+         const originalPushState = window.history.pushState.bind(window.history);
+         const originalReplaceState = window.history.replaceState.bind(window.history);
+         // Ensure the canonical URL in the Next.js Router is updated when the URL is changed so that `usePathname` and `useSearchParams` hold the pushed values.
+@@ -303,6 +317,22 @@
              // TODO: Warn when Navigation API is available (navigation.navigate() should be used)
              // Avoid a loop when Next.js internals trigger pushState/replaceState
              if (data?.__NA || data?._N) {
@@ -21,10 +62,10 @@ diff --git a/dist/client/components/app-router.js b/dist/client/components/app-r
 +                    const current = new URL(window.location.href);
 +                    const target = new URL(url, current);
 +                    if (current.pathname === '/search' && current.origin === target.origin && current.pathname === target.pathname) {
++                        const syncBlocked = isHistoryQuerySyncBlocked();
 +                        const result = originalReplaceState(data, _unused, url);
-+                        // A query-only write must not supersede an in-flight navigation.
 +                        const routerUrl = new URL(actionQueue.state.canonicalUrl, current);
-+                        if (actionQueue.pending?.payload.type !== 'navigate' &&
++                        if (!syncBlocked && !isHistoryQuerySyncBlocked() &&
 +                            routerUrl.origin === current.origin && routerUrl.pathname === current.pathname &&
 +                            routerUrl.searchParams.toString() !== target.searchParams.toString()) {
 +                            applyUrlFromHistoryPushReplace(target);
@@ -35,11 +76,44 @@ diff --git a/dist/client/components/app-router.js b/dist/client/components/app-r
                  return originalReplaceState(data, _unused, url);
              }
              data = copyNextJsInternalHistoryState(data);
-             if (url) {
+@@ -320,6 +350,7 @@
+             }
+         }
+         return ()=>{
++            delete window.history[historyQuerySyncBlocked];
+             window.history.pushState = originalPushState;
+             window.history.replaceState = originalReplaceState;
+             window.removeEventListener('popstate', onPopState);
+@@ -434,7 +465,8 @@
+     return /*#__PURE__*/ (0, _jsxruntime.jsxs)(_jsxruntime.Fragment, {
+         children: [
+             /*#__PURE__*/ (0, _jsxruntime.jsx)(HistoryUpdater, {
+-                appRouterState: state
++                appRouterState: state,
++                committedRouterState
+             }),
+             process.env.TURBOPACK ? null : /*#__PURE__*/ (0, _jsxruntime.jsx)(RuntimeStylesForWebpack, {}),
+             /*#__PURE__*/ (0, _jsxruntime.jsx)(_hooksclientcontextsharedruntime.NavigationPromisesContext.Provider, {
 diff --git a/dist/esm/client/components/app-router.js b/dist/esm/client/components/app-router.js
 --- a/dist/esm/client/components/app-router.js
 +++ b/dist/esm/client/components/app-router.js
-@@ -93,6 +93,9 @@
+@@ -1,5 +1,5 @@
+ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
+-import React, { useEffect, useMemo, useInsertionEffect, useDeferredValue } from 'react';
++import React, { useEffect, useMemo, useInsertionEffect, useDeferredValue, useRef } from 'react';
+ import { AppRouterContext, LayoutRouterContext, GlobalLayoutRouterContext } from '../../shared/lib/app-router-context.shared-runtime';
+ import { createHrefFromUrl } from './router-reducer/create-href-from-url';
+ import { createHeadKey } from './router-reducer/create-segment-key';
+@@ -58,7 +58,7 @@
+     }
+     traverse(window.location.href, state.__PRIVATE_NEXTJS_INTERNALS_TREE);
+ }
+-function HistoryUpdater({ appRouterState }) {
++function HistoryUpdater({ appRouterState, committedRouterState }) {
+     useInsertionEffect(()=>{
+         if (process.env.__NEXT_APP_NAV_FAIL_HANDLING) {
+             // clear pending URL as navigation is no longer
+@@ -93,13 +93,18 @@
          createHrefFromUrl(new URL(window.location.href)) !== canonicalUrl) {
              // This intentionally mutates React state, pushRef is overwritten to ensure additional push/replace calls do not trigger an additional history entry.
              pushRef.pendingPush = false;
@@ -49,8 +123,40 @@ diff --git a/dist/esm/client/components/app-router.js b/dist/esm/client/componen
          } else {
 +            Object.defineProperty(historyState, Symbol.for('nuni.app-router.history-replace'), { value: true });
              window.history.replaceState(historyState, '', canonicalUrl);
-@@ -290,8 +293,24 @@
-      */ window.history.replaceState = function replaceState(data, _unused, url) {
+         }
++        committedRouterState.current = appRouterState;
+         setLastCommittedTree(tree);
+     }, [
+-        appRouterState
++        appRouterState,
++        committedRouterState
+     ]);
+     useEffect(()=>{
+         // The Next-Url and the base tree may affect the result of a prefetch
+@@ -143,6 +148,7 @@
+  * The global router that wraps the application components.
+  */ function Router({ actionQueue, globalError, webSocket, staticIndicatorState }) {
+     const state = useActionQueue(actionQueue);
++    const committedRouterState = useRef(null);
+     const { canonicalUrl } = state;
+     // Add memoized pathname/query for useSearchParams and usePathname.
+     const { searchParams, pathname } = useMemo(()=>{
+@@ -259,6 +265,14 @@
+         throw unresolvedThenable;
+     }
+     useEffect(()=>{
++        const historyQuerySyncBlocked = Symbol.for('nuni.app-router.history-query-sync-blocked');
++        // The queue can advance before React commits the matching history entry.
++        const isHistoryQuerySyncBlocked = ()=>actionQueue.pending?.payload.type === 'navigate' ||
++            actionQueue.state !== committedRouterState.current;
++        Object.defineProperty(window.history, historyQuerySyncBlocked, {
++            configurable: true,
++            value: isHistoryQuerySyncBlocked
++        });
+         const originalPushState = window.history.pushState.bind(window.history);
+         const originalReplaceState = window.history.replaceState.bind(window.history);
+         // Ensure the canonical URL in the Next.js Router is updated when the URL is changed so that `usePathname` and `useSearchParams` hold the pushed values.
+@@ -291,6 +305,22 @@
              // TODO: Warn when Navigation API is available (navigation.navigate() should be used)
              // Avoid a loop when Next.js internals trigger pushState/replaceState
              if (data?.__NA || data?._N) {
@@ -59,10 +165,10 @@ diff --git a/dist/esm/client/components/app-router.js b/dist/esm/client/componen
 +                    const current = new URL(window.location.href);
 +                    const target = new URL(url, current);
 +                    if (current.pathname === '/search' && current.origin === target.origin && current.pathname === target.pathname) {
++                        const syncBlocked = isHistoryQuerySyncBlocked();
 +                        const result = originalReplaceState(data, _unused, url);
-+                        // A query-only write must not supersede an in-flight navigation.
 +                        const routerUrl = new URL(actionQueue.state.canonicalUrl, current);
-+                        if (actionQueue.pending?.payload.type !== 'navigate' &&
++                        if (!syncBlocked && !isHistoryQuerySyncBlocked() &&
 +                            routerUrl.origin === current.origin && routerUrl.pathname === current.pathname &&
 +                            routerUrl.searchParams.toString() !== target.searchParams.toString()) {
 +                            applyUrlFromHistoryPushReplace(target);
@@ -73,4 +179,21 @@ diff --git a/dist/esm/client/components/app-router.js b/dist/esm/client/componen
                  return originalReplaceState(data, _unused, url);
              }
              data = copyNextJsInternalHistoryState(data);
-             if (url) {
+@@ -308,6 +338,7 @@
+             }
+         }
+         return ()=>{
++            delete window.history[historyQuerySyncBlocked];
+             window.history.pushState = originalPushState;
+             window.history.replaceState = originalReplaceState;
+             window.removeEventListener('popstate', onPopState);
+@@ -422,7 +453,8 @@
+     return /*#__PURE__*/ _jsxs(_Fragment, {
+         children: [
+             /*#__PURE__*/ _jsx(HistoryUpdater, {
+-                appRouterState: state
++                appRouterState: state,
++                committedRouterState
+             }),
+             process.env.TURBOPACK ? null : /*#__PURE__*/ _jsx(RuntimeStylesForWebpack, {}),
+             /*#__PURE__*/ _jsx(NavigationPromisesContext.Provider, {

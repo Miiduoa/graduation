@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type RefObjec
 import { readCampusServiceFilters, SERVICE_CATEGORIES, type ServiceCategory } from '@/lib/campusServices';
 
 import {
+  APP_ROUTER_HISTORY_QUERY_SYNC_BLOCKED,
   APP_ROUTER_HISTORY_PUSH,
   APP_ROUTER_HISTORY_REPLACE,
   APP_ROUTER_SYNC_HISTORY_QUERY,
@@ -174,6 +175,13 @@ function installHistoryTracking() {
       const incomingNextFields = changesPage ? {} : readNextHistoryFields(data);
       const syncQuery = data != null &&
         Object.getOwnPropertyDescriptor(data, APP_ROUTER_SYNC_HISTORY_QUERY)?.value === true;
+      const explicitSync = !push && previousPath === '/search' && !changesPage &&
+        targetUrl?.origin === window.location.origin && incomingNextFields.__NA && syncQuery;
+      // Both wrapper orders consult Next before the native write. A rejected
+      // opt-in must not queue filters or fall through to snapshot reconciliation.
+      const syncBlocked = explicitSync && (this as History & {
+        [APP_ROUTER_HISTORY_QUERY_SYNC_BLOCKED]?: () => boolean;
+      })[APP_ROUTER_HISTORY_QUERY_SYNC_BLOCKED]?.();
       const nextFields = changesPage ? {} : {
         ...(nativeState?.value === previousState ? nativeState?.nextFields : {}),
         ...readNextHistoryFields(previousState),
@@ -243,6 +251,7 @@ function installHistoryTracking() {
       } else if (previousPath === '/search' && !replacesPage && !writesReturn) {
         // Bind the new URL only after the browser accepts the same-page replacement.
         if (searchEntry) searchEntry.entries.searchUrl = currentUrl();
+        if (syncBlocked) return;
         const { arrival, pending } = returnState;
         const queryString = currentQueryString();
         // Compare the committed URL with the previous URL independently of the
@@ -256,12 +265,10 @@ function installHistoryTracking() {
         // The explicit write can acknowledge an earlier native write, even on an
         // entry that has never saved a result. A fragment change can accompany
         // that acknowledgement. Wait for Next to render the URL.
-        const explicitSync =
-          replacesSearchUrl && incomingNextFields.__NA && syncQuery;
         const entryKey = readEntryKey(this.state);
         const arrivalMatchesEntry =
           arrival?.entryKey === entryKey && arrival.queryString === queryString;
-        if (explicitSync) {
+        if (explicitSync && !routerReplace) {
           publishReturn(null, { entryKey, queryString, saved: null, explicitSync: true });
         } else if (searchEntry && replacesFilters) {
           if (!arrivalMatchesEntry || arrival.saved || pending) {

@@ -136,6 +136,68 @@ async def check_search_history(origin, fragment):
                   JSON.parse(sessionStorage.getItem('campus.directory.search.v1'))?.search?.query
                 """) == '公車'
 
+            async def check_navigation_before_commit():
+                await expect(field).to_have_value('借書')
+                await wait_for_history_commit()
+                source, destination = await field.evaluate("""field => new Promise((resolve, reject) => {
+                  const fiberKey = Object.keys(field).find(key => key.startsWith('__reactFiber$'));
+                  let fiber = field[fiberKey];
+                  while (fiber && !fiber.memoizedProps?.actionQueue) fiber = fiber.return;
+                  const queue = fiber?.memoizedProps.actionQueue;
+                  if (!queue) throw new Error('Could not find the real Next action queue');
+                  const source = new URL(location.href);
+                  source.hash = 'results';
+                  const destination = new URL(location.href);
+                  destination.searchParams.set('q', '公車');
+                  destination.searchParams.delete('category');
+                  destination.hash = '';
+                  const length = history.length;
+                  const action = queue.action;
+                  queue.action = function (state, payload) {
+                    const result = action.call(this, state, payload);
+                    if (payload.type !== 'navigate') return result;
+                    return {
+                      then(settle, fail) {
+                        Promise.resolve(result).then(nextState => {
+                          try {
+                            settle(nextState);
+                            // React cannot commit until this callback yields. Verify
+                            // the reducer actually finished while history is still old.
+                            if (queue.pending !== null ||
+                                new URL(queue.state.canonicalUrl, location.href).href !== destination.href ||
+                                new URL(location.href).searchParams.get('q') !== '借書' ||
+                                history.length !== length) {
+                              throw new Error('Expected a settled same-page navigation before its history commit');
+                            }
+                            const marked = Object.defineProperty({ ...history.state },
+                              Symbol.for('nuni.app-router.sync-history-query'), { value: true });
+                            history.replaceState(marked, '', source);
+                            if (location.href !== source.href || queue.state !== nextState) {
+                              throw new Error('Marked replacement preempted the settled navigation');
+                            }
+                            resolve([source.href, destination.href]);
+                          } catch (error) {
+                            reject(error);
+                          } finally {
+                            queue.action = action;
+                          }
+                        }, error => {
+                          queue.action = action;
+                          fail(error);
+                          reject(error);
+                        });
+                      },
+                    };
+                  };
+                  window.next.router.push(destination.pathname + destination.search);
+                })""")
+                await expect(page).to_have_url(destination)
+                await expect(field).to_have_value('公車')
+                await expect(bus).to_be_visible()
+                await page.go_back()
+                await expect(page).to_have_url(source)
+                await expect(field).to_have_value('借書')
+
             await page.wait_for_function("() => window.__searchHistoryOuterNext === true")
             await check_clear_without_snapshot()
             await page.evaluate("""() =>
@@ -169,6 +231,10 @@ async def check_search_history(origin, fragment):
             assert await page.evaluate(metadata) == before
             # The page's own filter cleanup must opt in before entering Next too.
             assert '/search?campus=nthu' in await page.evaluate('window.__searchHistoryOptIns')
+            await page.evaluate("""() =>
+              history.replaceState(null, '', '?campus=nthu&q=借書')
+            """)
+            await check_navigation_before_commit()
 
             # A fresh document starts with a Next entry and no search return key.
             await page.goto(f'{origin}/search?campus=pu&q=借書&category=campus')
@@ -246,6 +312,13 @@ async def check_search_history(origin, fragment):
             await field.dispatch_event('compositionend')
             await check_sync_after_native_replace()
             assert await page.evaluate(metadata) == before
+
+            await page.evaluate(replace_search_query, '借書')
+            await check_navigation_before_commit()
+            await page.evaluate("""(fragment) =>
+              history.replaceState(null, '', '?q=' + encodeURIComponent('公車') + fragment)
+            """, fragment)
+            await expect(field).to_have_value('公車')
 
             async def check_pending_navigation(source, target):
                 requested = asyncio.Event()

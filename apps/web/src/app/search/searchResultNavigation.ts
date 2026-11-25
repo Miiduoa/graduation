@@ -2,6 +2,9 @@
 export const APP_ROUTER_HISTORY_PUSH = Symbol.for('nuni.app-router.history-push');
 export const APP_ROUTER_HISTORY_REPLACE = Symbol.for('nuni.app-router.history-replace');
 export const APP_ROUTER_SYNC_HISTORY_QUERY = Symbol.for('nuni.app-router.sync-history-query');
+export const APP_ROUTER_HISTORY_QUERY_SYNC_BLOCKED = Symbol.for(
+  'nuni.app-router.history-query-sync-blocked',
+);
 
 // Link.onNavigate and Next's transition-start hook run in the same call stack.
 // Only that dispatch can claim the intent. Every later dispatch supersedes it.
