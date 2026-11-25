@@ -483,17 +483,13 @@ function fileExists(file: File): boolean {
 }
 
 function journalFiles(key: string, recoverExistence = false) {
-  const markerExists = (marker: File, legacy = false) => {
+  const markerExists = (marker: File) => {
     try {
       return fileExists(marker);
     } catch (error) {
       if (!recoverExistence) throw error;
-      // An absent legacy path can fail both metadata probes and both reads.
-      // Continue to the current path if this optional marker is undiscoverable.
-      if (legacy) return readOptionalFile(marker) !== undefined;
-      // A readable marker establishes existence even when metadata fails.
-      readRollbackFile(marker);
-      return true;
+      // A readable marker can establish existence when both probes fail.
+      return readOptionalFile(marker) === undefined ? undefined : true;
     }
   };
   const directory = Paths.document;
@@ -502,21 +498,32 @@ function journalFiles(key: string, recoverExistence = false) {
   const legacyName = key.replace(/[%:~]/g, (character) => `~${character.charCodeAt(0).toString(16)}`);
   if (legacyName.length + markerSuffix.length <= 255) {
     const marker = new File(directory, legacyName + markerSuffix);
-    if (markerExists(marker, true)) {
+    if (markerExists(marker)) {
       return { marker, payload: new File(directory, `${legacyName}.rollback.json`), marked: true };
     }
   }
 
   const name = `personal-imports-${sha256(key)}`;
   const marker = new File(directory, name + markerSuffix);
-  return { marker, payload: new File(directory, `${name}.rollback.json`), marked: markerExists(marker) };
+  const payload = new File(directory, `${name}.rollback.json`);
+  const markerPresent = markerExists(marker);
+  // If the marker cannot be probed or read, retain a readable rollback copy
+  // for binding against the primary.
+  const marked = markerPresent ?? (readOptionalFile(payload) !== undefined);
+  return { marker, payload, marked };
 }
 
 export function capturePersonalImportRollback(key: string) {
   const { payload, marker, marked } = journalFiles(key, true);
   const rejection = rejectionFile(key);
-  const rejectionValue = fileExists(rejection) ? readOptionalFile(rejection) ??
-    (!marked ? readOptionalFile(rejectionBackupFile(key)) : undefined) : resolvedRejection;
+  let rejectionExists: boolean | undefined;
+  try {
+    rejectionExists = fileExists(rejection);
+  } catch {
+    // Try the contents when neither metadata probe can establish existence.
+  }
+  const rejectionValue = rejectionExists === false ? resolvedRejection : readOptionalFile(rejection) ??
+    (!marked ? readOptionalFile(rejectionBackupFile(key)) : undefined);
   const verifiedReceipt = readRollbackResolution(rejectionValue);
   const rejectionRecorded = rejectionValue !== resolvedRejection && verifiedReceipt === undefined;
   const targetedRejection = rejectionValue?.match(targetedRejectionPattern);
@@ -987,7 +994,7 @@ export function preparePersonalImportRollback(
     verificationReceipt(primary: string) {
       return attempt + sha256(primary);
     },
-    publishVerifiedPrimary(primary: string, assertWritable: () => void, allowPrimaryOnly = false) {
+    publishVerifiedPrimary(primary: string, assertWritable: () => void) {
       const hash = sha256(primary);
       recordVerification(hash);
       try {
@@ -1003,16 +1010,10 @@ export function preparePersonalImportRollback(
         current = capturePersonalImportRollback(key);
         if (!fileExists(marker) || (current && !current.rejected &&
             current.matchesVerifiedPrimary?.(primary))) return true;
-      } catch (error) {
-        if (!allowPrimaryOnly) throw error;
+      } catch {
         return false;
       }
-      if (current?.rejected) {
-        // An auxiliary read can report rejection after the caller verified
-        // the primary. Let ordinary saves try the independent proof stores.
-        if (allowPrimaryOnly) return false;
-        throw new Error('無法確認匯入資料已儲存，請稍後再試。');
-      }
+      if (current?.rejected) return false;
       // Bind proof of publication to the rollback copy and the verified primary.
       const receipt = sha256(readOptionalFile(payload) ?? writtenPayload) + '\n' + hash;
       try {
@@ -1026,23 +1027,18 @@ export function preparePersonalImportRollback(
         if (publicationBackup.textSync() !== receipt) {
           throw new Error('無法確認匯入資料已儲存，請稍後再試。');
         }
-      } catch (error) {
+      } catch {
         // A readable rollback copy can bind settlement to this attempt even
         // when the pending marker could not be retired.
-        if (rejected) throw error;
-        if (!retirementWriteCompleted && readOptionalFile(payload) !== writtenPayload) {
-          if (allowPrimaryOnly) return false;
-          throw error;
+        if (rejected || (!retirementWriteCompleted && readOptionalFile(payload) !== writtenPayload)) {
+          return false;
         }
-        // Persist proof of the exact primary bytes verified by the caller.
         assertWritable();
         try {
-          if (settle(hash)) return true;
-        } catch (settlementError) {
-          if (!allowPrimaryOnly) throw settlementError;
+          return settle(hash);
+        } catch {
+          return false;
         }
-        if (allowPrimaryOnly) return false;
-        throw error;
       }
       return true;
     },

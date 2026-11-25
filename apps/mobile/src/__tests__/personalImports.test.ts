@@ -1053,7 +1053,7 @@ type RecoveryFault =
   | 'restart read once' | 'restart read' | 'restart readback' | 'publication read' | 'save read' | 'save read once' | 'save readback'
   | 'create no-op' | 'existence check' | 'exists check' | 'created marker probe'
   | 'reject payload' | 'reject payload no-op' | 'restore write' | 'restore read'
-  | 'optional primary write' | 'optional primary read';
+  | 'optional primary write' | 'optional primary read' | 'retire marker';
 type RecoveryPhase = 'save' | 'notification' | 'restart';
 type RecoveryApi = 'getItem' | 'multiGet' | 'setItem' | 'multiSet' | 'removeItem' |
   'multiRemove' | 'create' | 'write' | 'textSync' | 'delete' | 'info' | 'exists';
@@ -1070,6 +1070,8 @@ type RecoveryFaultCase = [
     restoredWithoutPending?: boolean;
     optionalReadAttempt?: number;
     rejectedPrimary?: 'restored' | 'removed';
+    entryPoint?: 'backup' | 'sync';
+    missingProbe?: '.rollback.pending' | '.rollback.rejected';
   }?,
 ];
 const blockPublicationLayers = (layers: readonly string[]): Array<[string, RecoveryFault]> =>
@@ -1169,6 +1171,24 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
     ['.rollback.pending', 'existence check', 'info', 'restart'],
     ['.rollback.pending', 'exists check', 'exists', 'restart'],
   ], { staleCopy: true }],
+  ...(['.rollback.pending', '.rollback.rejected'] as const).map((location): RecoveryFaultCase => [
+    'both probes fail for missing current ' + location,
+    [[location, 'existence check', 'info', 'restart'], [location, 'exists check', 'exists', 'restart']],
+    { missingProbe: location },
+  ]),
+  ...(['backup', 'sync'] as const).map((entryPoint): RecoveryFaultCase => [
+    entryPoint + ' keeps the verified primary after auxiliary publication fails',
+    [
+      ['.rollback.pending', 'remove', 'delete', 'save'],
+      ['.rollback.pending', 'retire marker', 'write', 'save'],
+      ['.rollback.committed', 'write', 'create', 'save'],
+      ['.rollback.verified', 'write', 'write', 'save'],
+      ['.rollback.published', 'write', 'write', 'save'],
+      ['.rollback.settled', 'write', 'write', 'save'],
+      ['', 'optional primary write', 'setItem', 'save'],
+    ],
+    { entryPoint },
+  ]),
   ['pending remains after delete returns', [['.rollback.pending', 'remove no-op']]],
   ['adopted checkpoint deletion', [[':checkpoint', 'remove']]],
   ['revoked primary and checkpoint rebuild write', [[':checkpoint', 'multiSet']]],
@@ -1314,11 +1334,19 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
 test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   name, failures, { staleCopy = false, primaryOnly = false, revokeFallback = false, landedRetirement = false,
     thirdWriteLands = false, revokeJournal = false, restoredWithoutPending = false,
-    optionalReadAttempt, rejectedPrimary } = {},
+    optionalReadAttempt, rejectedPrimary, entryPoint, missingProbe } = {},
 ) => {
-  const scope = { owner: 'nuni:recovery-matrix-' + name, schoolId: 'pu' };
+  const scope = { owner: entryPoint === 'sync' ? 'nuni:pa_11111111-1111-4111-8111-111111111111'
+    : 'nuni:recovery-matrix-' + name, schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
-  const { ledger: previous } = await appendPersonalImports(scope, [row('original')]);
+  const { ledger: original } = await appendPersonalImports(scope, [row('original')]);
+  const remote = { schoolId: scope.schoolId, revision: 1, records: original.records,
+    updatedAt: '2026-11-25T00:00:00.000Z' };
+  const previous = entryPoint === 'sync' ? { ...original, sync: { enabled: true, base: null } } : original;
+  if (entryPoint) {
+    const { version, records, ...rest } = previous;
+    await AsyncStorage.setItem(key, JSON.stringify({ records, ...rest, version }));
+  }
   const adopted = name === 'adopted checkpoint deletion';
   const revokeOnPrimary = name === 'revoked primary and checkpoint rebuild write';
   const revokeOnCheckpoint = name === 'revoked during checkpoint publication';
@@ -1398,8 +1426,8 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   const publicationFileFault = faults.has('.rollback.published') || faults.has('.rollback.published.bak');
   const backupRetirementFault = faults.has('.rollback.committed');
   const forceBackupRetirement = backupRetirementFault && !faults.has('.rollback.pending');
-  const keepPending = late || backupRetirementFault || publicationFileFault || faults.has(':checkpoint') ||
-    faults.has('.rollback.pending') || faults.has('.rollback.verified') || faults.has('.rollback.settled');
+  const keepPending = !missingProbe && (late || backupRetirementFault || publicationFileFault || faults.has(':checkpoint') ||
+    faults.has('.rollback.pending') || faults.has('.rollback.verified') || faults.has('.rollback.settled'));
   const failure = new Error('模擬儲存故障');
   const inject = (location: string, fault: RecoveryFault, api: RecoveryApi) => {
     if (!failures.some(([entry, mode, targetApi, targetPhase]) => (
@@ -1492,7 +1520,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     const retireMarker = location === '.rollback.pending' && value === 'committed';
     const bindPayload = location === '.rollback.json' && typeof value === 'string' && value.includes('\ncommitted:');
     if (location === '.rollback.json' && !authorized && inject(location, 'reject payload no-op', 'write')) return;
-    if (inject(location, 'write', 'write') ||
+    if ((retireMarker && inject(location, 'retire marker', 'write')) || inject(location, 'write', 'write') ||
         (location === '.rollback.json' && !authorized && inject(location, 'reject payload', 'write')) ||
         ((late || publicationFileFault) && (bindPayload || location === '.rollback.verified')) ||
         ((late || publicationFileFault || forceBackupRetirement || faults.has(':checkpoint')) && retireMarker && !landedRetirement) ||
@@ -1536,14 +1564,23 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     const guard = { canContinue: () => authorized };
     const save = revokeJournal
       ? editPersonalImport(scope, previous.records[0], row('original', '未提交的編輯'), guard)
-      : appendPersonalImports(scope, [row('new', '統計')], guard).then(({ ledger }) => ledger);
+      : entryPoint === 'sync'
+        ? syncPersonalImports(scope, async () => remote, guard.canContinue).then(({ state }) => ({
+          ...previous, ...state,
+        }))
+        : appendPersonalImports(scope, [row('new', '統計')], guard,
+          { restoreBackup: entryPoint === 'backup' }).then(({ ledger }) => ledger);
     let expected = previous;
     if (rejects) {
       await expect(save).rejects.toThrow();
       expect(notified).not.toHaveBeenCalled();
     } else {
       expected = await save;
-      expect(expected.records.map(({ id }) => id)).toEqual(['original', 'new']);
+      if (entryPoint === 'sync') {
+        expect(expected.sync?.base).toEqual(remote);
+      } else {
+        expect(expected.records.map(({ id }) => id)).toEqual(['original', 'new']);
+      }
       expect(notified).toHaveBeenCalledTimes(1);
       await expect(notified.mock.results[0].value).resolves.toEqual(expected);
     }
@@ -1613,6 +1650,11 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
       expect(new File(Paths.document, documentPrefix + '.rollback.pending').info().exists).toBe(false);
       expect(new File(Paths.document, documentPrefix + '.rollback.rejected').info().exists).toBe(true);
     }
+    if (missingProbe) {
+      const file = new File(Paths.document, documentPrefix + missingProbe);
+      expect(originalFile.exists.call(file)).toBe(false);
+      read.mockClear();
+    }
     phase = 'restart';
     const readsBeforeRestart = get.mock.calls.length;
     const batchReadsBeforeRestart = getMany.mock.calls.length;
@@ -1620,6 +1662,9 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
     });
+    if (missingProbe) {
+      expect(read.mock.contexts.filter((file) => fileLocation(file) === missingProbe)).toHaveLength(2);
+    }
     if (failures.some(([location, fault]) => location === rejectedAttempt && fault === 'restart read')) {
       expect(getMany.mock.calls.slice(batchReadsBeforeRestart)).toContainEqual([[key + rejectedAttempt]]);
     }
@@ -1644,7 +1689,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
         ((location === '.rollback.verified' || location === ':checkpoint' ||
           (fault === 'readback' && rollbackFiles.some((file) => file === location))) &&
           (fault === 'read' || fault === 'read once' || fault === 'readback'));
-      const layeredReadback = fault === 'readback' && (location === '.rollback.json' ||
+      const layeredReadback = fault === 'readback' && (location === '.rollback.json' || location === ':checkpoint' ||
         publicationLayers.some((layer) => layer === location));
       const expectedPhases: RecoveryPhase[] = targetPhase ? [targetPhase]
         : layeredReadback ? ['save', 'notification', 'restart']

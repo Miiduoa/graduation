@@ -654,7 +654,7 @@ export function mutatePersonalImportLedger<T>(
                 }
                 assertWritable();
                 const published = journal.publishVerifiedPrimary(
-                  writtenRaw, assertWritable, options.allowNativePrimaryOnly,
+                  writtenRaw, assertWritable,
                 );
                 if (!published) {
                   // Persist the ordinary encoding outside the tentative hashes
@@ -671,7 +671,7 @@ export function mutatePersonalImportLedger<T>(
                   const readback = await readNativeStorage(key).catch(() => undefined);
                   if (readback === raw || (readback === undefined && fallbackWritten)) {
                     writtenRaw = raw;
-                    if (options.allowNativePrimaryOnly) newReceipt = journal.verificationReceipt(raw);
+                    newReceipt = journal.verificationReceipt(raw);
                   } else {
                     if (readback === replacement || readback === firstRaw) writtenRaw = readback;
                     newReceipt = journal.verificationReceipt(writtenRaw);
@@ -691,8 +691,7 @@ export function mutatePersonalImportLedger<T>(
                   if (await readNativeReceipt(nativeReceiptKey(key)) !== newReceipt) {
                     throw new Error('無法確認匯入資料的儲存憑據。');
                   }
-                } catch (error) {
-                  if (!options.allowNativePrimaryOnly) throw error;
+                } catch {
                   // Both AsyncStorage APIs can fail on the same native key.
                   // Publish the verified bytes through the document directory.
                   assertWritable();
