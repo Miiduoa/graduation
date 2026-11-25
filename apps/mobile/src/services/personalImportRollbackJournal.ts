@@ -302,7 +302,7 @@ export function readWebPersonalImportRollback(
   try {
     journal = JSON.parse(encoded);
   } catch {
-    return primaryVerified ? undefined : encoded;
+    return undefined;
   }
   // Unbound legacy copies cannot establish that a verified primary was interrupted.
   if (!journal || typeof journal !== 'object' || 'version' in journal ||

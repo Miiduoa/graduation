@@ -93,7 +93,9 @@ async function readRecovery(
     const raw = journal === 'null' ? null : journal;
     return { raw, ledger: parseLedger(raw, scope), source: 'journal' };
   } catch (error) {
-    if (!primaryVerified) throw error;
+    if (!browserRecovery) throw error;
+    // Leave an invalid browser copy untouched and let the primary determine
+    // whether to load an empty ledger or report unreadable data.
     return null;
   }
 }

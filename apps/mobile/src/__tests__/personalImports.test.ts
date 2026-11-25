@@ -5,6 +5,7 @@ import { sha256 } from 'js-sha256';
 import {
   readPersonalImports as readWebCalendarImports,
   savePersonalImportBatch as saveWebCalendarBatch,
+  withPersonalImportSyncLock as withWebCalendarSyncLock,
 } from '../../../web/src/lib/personalImports';
 import {
   meetupWindows,
@@ -604,6 +605,43 @@ test('Expo and Web calendar saves preserve a standalone checkpoint with an extra
     expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
       .toEqual(['活動 A', '活動 C', '活動 D']);
     expect(storage.getItem(checkpoint)).toBe(backup);
+  } finally {
+    restoreLocks();
+    cleanup();
+  }
+});
+
+test.each(['save', 'sync'] as const)('Web %s preserves Expo undo history recovered from a checkpoint', async (operation) => {
+  const cleanup = useWebStorage();
+  const restoreLocks = withoutWebWriteLocks();
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: async (_key: string, write: () => unknown) => write() },
+  });
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('old', 'Expo 匯入')]);
+    storage.setItem(checkpoint, JSON.stringify(storage.getItem(key)));
+    storage.removeItem(key);
+
+    if (operation === 'save') {
+      await saveWebCalendarBatch(scope, [{ ...row('new', 'Web 匯入'), dayOfWeek: 2 }]);
+    } else {
+      await withWebCalendarSyncLock(scope, async (state) => {
+        expect(state.records).toEqual(ledger.records);
+        return { state: { ...state, sync: { enabled: true, base: null } }, result: undefined };
+      });
+    }
+    expect(storage.getItem(checkpoint)).toBeNull();
+    expect((await loadPersonalImports(scope)).batches).toEqual(ledger.batches);
+    await saveWebCalendarBatch(scope, [{ ...row('later', '後續 Web 匯入'), dayOfWeek: 3 }]);
+    const { removed, ledger: afterUndo } = await undoLastPersonalImport(scope, ledger.batches[0].id);
+    expect(removed).toBe(1);
+    expect(afterUndo.records.map(({ title }) => title)).toEqual(
+      operation === 'save' ? ['Web 匯入', '後續 Web 匯入'] : ['後續 Web 匯入'],
+    );
   } finally {
     restoreLocks();
     cleanup();
@@ -1357,7 +1395,8 @@ test.each([
 
     await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
     storage.removeItem(key);
-    await expect(loadPersonalImports(scope)).rejects.toThrow('儲存的匯入資料無法讀取');
+    await expect(loadPersonalImports(scope)).resolves.toMatchObject({ records: [] });
+    expect(storage.getItem(journal)).toBe(corrupt);
     storage.setItem(key, JSON.stringify(ledger));
 
     const edited = await editPersonalImport(scope, ledger.records[0], row('original', '已更新'), {
@@ -1365,6 +1404,34 @@ test.each([
     });
     expect(edited.records[0].title).toBe('已更新');
     await expect(loadPersonalImports(scope)).resolves.toEqual(edited);
+  } finally {
+    cleanup();
+  }
+});
+
+test.each(['append', 'sync'] as const)('Expo Web can %s with only a truncated journal', async (operation) => {
+  const cleanup = useWebStorage();
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+  const corrupted = '{"version":1,';
+  try {
+    storage.setItem(journal, corrupted);
+    await expect(loadPersonalImports(scope)).resolves.toMatchObject({ records: [] });
+    if (operation === 'append') {
+      await appendPersonalImports(scope, [row('new')], { canContinue: () => true });
+      expect((await loadPersonalImports(scope)).records).toHaveLength(1);
+    } else {
+      await mutatePersonalImportLedger(scope, { canContinue: () => true }, async (ledger, checkpoint) => {
+        expect(ledger.records).toEqual([]);
+        const changed = { ...ledger, sync: { enabled: true, base: null } };
+        await checkpoint(changed);
+        return { ledger: changed, result: undefined };
+      }, 'sync');
+      expect((await loadPersonalImports(scope)).sync).toEqual({ enabled: true, base: null });
+    }
+    expect(JSON.parse(storage.getItem(key)!).version).toBe(1);
+    expect(storage.getItem(journal)).toBe(corrupted);
   } finally {
     cleanup();
   }

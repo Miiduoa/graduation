@@ -58,7 +58,10 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
     raw,
     write(state: PersonalImportLocalState) {
       // Keep a v1 commit marker while legacy recovery data may still exist.
-      const ledger = { version: 1 as const, ...state };
+      // Expo owns the undo history. Carry it through Web writes from the same
+      // ledger snapshot as the records before retiring an adopted checkpoint.
+      const batches: unknown = raw ? JSON.parse(raw).batches : undefined;
+      const ledger = { version: 1 as const, ...state, batches };
       const published = shouldMarkCommit
         ? serializePersonalImportBrowserCommit(ledger)
         : JSON.stringify(ledger);
