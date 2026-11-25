@@ -1620,6 +1620,48 @@ test('reads the primary ledger when the checkpoint cannot be parsed', async () =
   expect(await loadPersonalImports(scope)).toEqual(ledger);
 });
 
+test('native rollback keeps the rebuilt checkpoint and restart journal after write authority is revoked', async () => {
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  const { ledger } = await appendPersonalImports(scope, [row('original')]);
+  const original = await AsyncStorage.getItem(key);
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  const nativeSet = setItem.getMockImplementation()!;
+  const remove = jest.mocked(AsyncStorage.multiRemove);
+  remove.mockClear();
+  let active = true;
+  setItem.mockImplementationOnce(async (entry, value) => {
+    await nativeSet(entry, value);
+    active = false;
+  });
+
+  await jest.isolateModulesAsync(async () => {
+    const beforeRestart = require('../services/personalImports') as typeof import('../services/personalImports');
+    const notify = jest.fn();
+    const unsubscribe = beforeRestart.subscribePersonalImports(notify);
+    try {
+      await expect(beforeRestart.deletePersonalImport(scope, ledger.records[0], {
+        canContinue: () => active,
+      })).rejects.toThrow('帳號或學校已切換');
+      expect(notify).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+    }
+  });
+  expect(await AsyncStorage.getItem(key)).toBe(original);
+  expect(await AsyncStorage.getItem(checkpoint)).toBe(original);
+  expect(remove).not.toHaveBeenCalled();
+  expect(readPersonalImportRollback(key)).toBe(original);
+
+  await jest.isolateModulesAsync(async () => {
+    const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+    await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+    await restarted.deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
+  });
+  expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
+  expect(readPersonalImportRollback(key)).toBeUndefined();
+});
+
 async function failedDeletionRollback(checkpointWriteFails = false) {
   const key = personalImportStorageKey(scope);
   const checkpoint = key + ':checkpoint';
@@ -1906,6 +1948,60 @@ test.each(['Web', 'Expo Web'] as const)('%s recovers a bound journal before an o
     restoreLocks();
     cleanup();
   }
+});
+
+describe.each(['Web', 'Expo Web'] as const)('%s interrupted browser write', (client) => {
+  test.each(['webCommit', 'version suffix', 'legacy tab', 'legacy compact'] as const)(
+    'recovers the bound original before saving over an attempted ledger with %s',
+    async (marker) => {
+      const cleanup = useWebStorage();
+      const restoreLocks = withoutWebWriteLocks();
+      Object.defineProperty(navigator, 'locks', {
+        configurable: true,
+        value: { request: async (_key: string, write: () => unknown) => write() },
+      });
+      try {
+        const { ledger } = await appendPersonalImports(scope, [row('original', '原有行程')]);
+        const storage = window.localStorage;
+        const key = personalImportStorageKey(scope);
+        const checkpoint = key + ':checkpoint';
+        const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+        const original = storage.getItem(key)!;
+        const empty = { records: [], batches: [] };
+        const attempted = {
+          webCommit: JSON.stringify({ version: 1, ...empty, webCommit: 'interrupted' }),
+          'version suffix': JSON.stringify({ ...empty, version: 1 }),
+          'legacy tab': JSON.stringify({ version: 1, ...empty }) + '\t',
+          'legacy compact': JSON.stringify({ $commit: 1, ...empty }),
+        }[marker];
+        const older = JSON.stringify({ version: 1, ...empty });
+        storage.setItem(key, attempted);
+        storage.setItem(checkpoint, older);
+        storage.setItem(journal, JSON.stringify({
+          id: 'interrupted',
+          original,
+          before: sha256(original),
+          attempted: sha256(attempted),
+        }));
+
+        if (client === 'Web') {
+          expect(readWebCalendarImports(scope)).toEqual(ledger.records);
+          await saveWebCalendarBatch(scope, [row('new', '新行程')]);
+        } else {
+          await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+          await appendPersonalImports(scope, [row('new', '新行程')]);
+        }
+        expect(readWebCalendarImports(scope).map(({ title }) => title)).toEqual(['原有行程', '新行程']);
+        expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
+          .toEqual(['原有行程', '新行程']);
+        expect(storage.getItem(checkpoint)).toBe(older);
+        expect(storage.getItem(journal)).toBeNull();
+      } finally {
+        restoreLocks();
+        cleanup();
+      }
+    },
+  );
 });
 
 test('Web retries from a legacy marked copy and retires it when the new ledger commits', async () => {

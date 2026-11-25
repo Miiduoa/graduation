@@ -120,8 +120,6 @@ export function selectPersonalImportBrowserRecovery<T>(
   primaryVerified: boolean,
   parse: (raw: string | null) => T,
 ): { raw: string | null; ledger: T; source: PersonalImportRecoverySource } | null {
-  if (primaryVerified && hasWebPersonalImportCommit(primary)) return null;
-
   const journal = readWebPersonalImportRollback(copies.journal, primary, primaryVerified);
   const recoverJournal = () => {
     if (!journal || journal.raw === '') return null;
@@ -133,7 +131,18 @@ export function selectPersonalImportBrowserRecovery<T>(
   };
   // A journal tied to this primary describes an interrupted write.
   const interrupted = journal?.bound ? recoverJournal() : null;
-  if (interrupted) return interrupted;
+  if (interrupted) {
+    if (primaryVerified && hasWebPersonalImportCommit(primary)) {
+      try {
+        parse(primary);
+      } catch {
+        // Keep readable records when a marked ledger's sync state is damaged.
+        // A verified write could not have published that invalid ledger.
+        return null;
+      }
+    }
+    return interrupted;
+  }
 
   if (!primaryVerified && copies.checkpoint !== null) {
     try {

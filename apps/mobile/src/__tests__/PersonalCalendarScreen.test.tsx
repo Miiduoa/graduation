@@ -1198,7 +1198,7 @@ it.each([
       expect(await AsyncStorage.getItem(key + ':checkpoint')).toBeNull();
     } else {
       expect(await AsyncStorage.getItem(key)).toBe(stored);
-      expect(await AsyncStorage.getItem(key + ':checkpoint')).toBe(phase === 'readback' ? stored : null);
+      expect(await AsyncStorage.getItem(key + ':checkpoint')).toBe(rebuildFails ? null : stored);
     }
   } finally {
     pending.resolve();

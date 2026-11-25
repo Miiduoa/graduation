@@ -150,7 +150,7 @@ async function readLegacyCheckpoint(
 async function retireNativeCheckpoint(
   key: string,
   adopted: string | undefined,
-  assertWritable?: () => void,
+  assertWritable: () => void,
 ) {
   if (adopted === undefined) return;
   const checkpoint = personalImportCheckpointKey(key);
@@ -161,7 +161,7 @@ async function retireNativeCheckpoint(
     // Leave the copy in place if it cannot be verified.
   }
   if (!unchanged) return;
-  assertWritable?.();
+  assertWritable();
   try {
     await AsyncStorage.multiRemove([checkpoint]);
   } catch {
@@ -176,16 +176,22 @@ async function verifyNativeLedgerWrite(key: string, raw: string | null) {
   }
 }
 
-async function restoreLedger(key: string, { raw, checkpoint }: Recovery) {
+async function restoreLedger(key: string, { raw, checkpoint }: Recovery, assertWritable: () => void) {
   if (raw === null) await AsyncStorage.removeItem(key);
   else await AsyncStorage.setItem(key, raw);
   await verifyNativeLedgerWrite(key, raw);
-  clearPersonalImportRollback(key);
   pendingRestorations.delete(key);
-  await retireNativeCheckpoint(key, checkpoint);
+  try {
+    await retireNativeCheckpoint(key, checkpoint, assertWritable);
+    assertWritable();
+  } catch {
+    // The original bytes are restored. Keep restart recovery until a verified write.
+    return;
+  }
+  clearPersonalImportRollback(key);
 }
 
-async function rollbackLedger(key: string, raw: string | null) {
+async function rollbackLedger(key: string, raw: string | null, assertWritable: () => void) {
   const recovery: Recovery = { raw };
   pendingRestorations.set(key, recovery);
   try {
@@ -198,7 +204,7 @@ async function rollbackLedger(key: string, raw: string | null) {
   } catch {
     // Try restoring the primary anyway. The journal still holds the verified bytes.
   }
-  await restoreLedger(key, recovery);
+  await restoreLedger(key, recovery, assertWritable);
 }
 
 async function trackWrite(key: string, write: () => Promise<void>) {
@@ -352,7 +358,7 @@ export function mutatePersonalImportLedger<T>(
               commit();
               pendingRestorations.delete(key);
             } catch (error) {
-              await rollbackLedger(key, persistedRaw);
+              await rollbackLedger(key, persistedRaw, assertWritable);
               throw error;
             }
           }
