@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Keyboard, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   dismissAssistantContinuation, getAssistantContinuation, subscribeAssistantContinuation,
+  type AssistantContinuation,
 } from '../services/assistantContinuation';
 import { theme } from '../ui/theme';
 import { useThemeVersion } from '../ui/useThemeStyleSheet';
@@ -26,7 +27,31 @@ export function AssistantContinuationHost({ navigationRef, hasTabBar = false }: 
   const [, updateNavigation] = useState(0);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const ticket = useSyncExternalStore(subscribeAssistantContinuation, getAssistantContinuation, getAssistantContinuation);
-  useEffect(() => navigationRef.addListener('state', () => updateNavigation((value) => value + 1)), [navigationRef]);
+  const observedAway = useRef<AssistantContinuation | null>(null);
+  useEffect(() => {
+    const observeReturn = () => {
+      const current = getAssistantContinuation();
+      if (observedAway.current !== current) observedAway.current = null;
+      if (!current || !navigationRef.isReady() ||
+          navigationRef.getRootState().key !== current.rootKey) return;
+      const activeKey = navigationRef.getCurrentRoute()?.key;
+      if (!activeKey) return;
+      if (activeKey !== current.sourceRouteKey) {
+        observedAway.current = current;
+      } else if (observedAway.current === current) {
+        // A manual back/tab return completes the handoff just like the return button.
+        observedAway.current = null;
+        dismissAssistantContinuation(current);
+      }
+    };
+    const unsubscribeState = navigationRef.addListener('state', () => {
+      observeReturn();
+      updateNavigation((value) => value + 1);
+    });
+    const unsubscribeTicket = subscribeAssistantContinuation(observeReturn);
+    observeReturn();
+    return () => { unsubscribeState(); unsubscribeTicket(); };
+  }, [navigationRef]);
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true));
     const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));

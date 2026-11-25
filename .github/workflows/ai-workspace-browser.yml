@@ -8,6 +8,11 @@ on:
   pull_request:
     branches: [main, develop]
     paths:
+      - 'apps/mobile/src/components/AssistantContinuationHost.tsx'
+      - 'apps/mobile/src/services/assistantContinuation.ts'
+      - 'apps/mobile/src/__tests__/AssistantContinuationNavigation.test.tsx'
+      - 'apps/mobile/src/__tests__/AssistantServiceReply.test.tsx'
+      - 'apps/mobile/src/__tests__/quickCampusActions.test.ts'
       - 'apps/web/src/components/AssistantWorkspace*'
       - 'apps/web/src/components/TodayCampusEntry*'
       - 'apps/web/src/components/QuickCampusEntry*'
@@ -15,6 +20,7 @@ on:
       - 'apps/web/src/components/CampusProviders*'
       - 'apps/web/src/components/DirectoryVisit*'
       - 'apps/web/src/components/ExploreExperiences*'
+      - 'apps/web/src/components/ExploreReturn.integration.test.tsx'
       - 'apps/web/src/components/ServiceBreadcrumbs*'
       - 'apps/web/src/app/explore/**'
       - 'apps/web/src/components/today/**'
@@ -39,6 +45,7 @@ on:
       - 'scripts/qa/browser/**'
       - 'package.json'
       - 'apps/web/package.json'
+      - 'apps/mobile/package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - '.github/workflows/ai-workspace-browser.yml'
@@ -83,14 +90,19 @@ jobs:
             src/components/AssistantWorkspaceProvider.test.tsx \
             src/components/AssistantWorkspace.integration.test.tsx \
             src/components/TodayCampusEntry.test.tsx \
+            src/components/ExploreReturn.integration.test.tsx \
             src/features/nuni/Assistant.courseworkTracking.test.tsx \
             src/features/nuni/assistant/AssistantThread.inlineWorkspace.test.tsx \
             src/app/ai-assistant/LegacyAssistant.workspaceDraft.test.tsx \
             --reporter=default --reporter=json \
             --outputFile=../../artifacts/ai-workspace/unit-tests.json
-      - name: Verify native campus shortcuts match existing registered screens
+      - name: Verify native service routing and real navigation continuation
         run: |
-          pnpm --filter mobile test src/__tests__/quickCampusActions.test.ts --ci --json --outputFile=../../artifacts/ai-workspace/mobile-quick-actions.json
+          pnpm --filter mobile test \
+            src/__tests__/quickCampusActions.test.ts \
+            src/__tests__/AssistantContinuationNavigation.test.tsx \
+            src/__tests__/AssistantServiceReply.test.tsx \
+            --ci --json --outputFile=../../artifacts/ai-workspace/mobile-quick-actions.json
       - name: Install Chromium and Chinese fonts
         run: |
           python -m pip install playwright==1.57.0

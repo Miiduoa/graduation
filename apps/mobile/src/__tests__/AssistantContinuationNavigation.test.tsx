@@ -139,3 +139,34 @@ test.each(['account', 'school'] as const)('changing the %s revokes the old retur
   expect(askCampusAssistant).toHaveBeenCalledTimes(1);
   expect(unhandled).not.toHaveBeenCalled();
 });
+
+test.each([false, true])('a manual return consumes the handoff without reopening it on a later unrelated visit: tabs=%s', async (withTabs) => {
+  const { App, navigation, unhandled } = fixture(withTabs);
+  const view = render(<App />);
+  await waitFor(() => expect(navigation.isReady()).toBe(true));
+  const sourceKey = navigation.getCurrentRoute()?.key;
+  fireEvent.changeText(view.getByLabelText('說出或輸入想做的事'), '開啟校園地圖');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '詢問手機助理' })));
+  fireEvent.changeText(view.getByLabelText('說出或輸入想做的事'), '保留這份草稿');
+  fireEvent.press(view.getByRole('button', { name: '開啟校園地圖' }));
+  expect(navigation.getCurrentRoute()?.name).toBe('MapV2');
+  expect(await view.findByRole('button', { name: '接著問 nuni' })).toBeTruthy();
+  const ticket = getAssistantContinuation();
+  expect(ticket).not.toBeNull();
+  act(() => {
+    if (withTabs) navigation.navigate('Today');
+    else navigation.goBack();
+  });
+  await waitFor(() => expect(navigation.getCurrentRoute()?.key).toBe(sourceKey));
+  expect(getAssistantContinuation()).toBeNull();
+  expect(view.getByDisplayValue('保留這份草稿')).toBeTruthy();
+  act(() => {
+    if (withTabs) navigation.navigate('校園', { screen: 'Earlier', initial: false });
+    else navigation.navigate('MapV2');
+  });
+  expect(navigation.getCurrentRoute()?.key).not.toBe(sourceKey);
+  expect(view.queryByRole('button', { name: '接著問 nuni' })).toBeNull();
+  act(() => expect(ticket?.resume()).toBe(false));
+  expect(askCampusAssistant).toHaveBeenCalledTimes(1);
+  expect(unhandled).not.toHaveBeenCalled();
+});
