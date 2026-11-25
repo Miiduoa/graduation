@@ -121,12 +121,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   // Explicit removal invalidates menu receipts independently of readiness label changes.
   const menuReceiptFloors = new Map<string, number>();
   const menuReceipts = new Map<string, MenuReceiptObservation>();
-  // Account drafts can outlive the session. Reconcile settled receipts with this session's reads.
-  for (const [key, draft] of drafts) {
-    if (draft.menuReceipt !== null) {
-      menuReceipts.set(key, { revision: 0, confirmedThrough: 0, menuVerified: false });
-    }
-  }
+  restoreMenuReceipts();
   const menuReceiptListeners = new Set<() => void>();
   const writeRevisions = new Map<string, number>();
   const statusReceiptFloors = new Map<string, Map<number, number>>();
@@ -178,6 +173,15 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
 
   function publishMenuReceiptChange() {
     for (const listener of menuReceiptListeners) listener();
+  }
+
+  function restoreMenuReceipts() {
+    // Account drafts can outlive the session. Reconcile settled receipts with its new reads.
+    for (const [key, draft] of drafts) {
+      if (draft.menuReceipt !== null && !menuReceipts.has(key)) {
+        menuReceipts.set(key, { revision: 0, confirmedThrough: 0, menuVerified: false });
+      }
+    }
   }
 
   function discardMenuReceipt(key: string) {
@@ -767,8 +771,12 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       const entry = entries.get(key);
       return readFailureRevision(key) > 0 || verified.has(key) || revocations.has(key) || !!entry?.detail;
     },
+    restoreSettledReceipts() {
+      restoreMenuReceipts();
+      publishMenuReceiptChange();
+    },
     clearSession() {
-      // A renewed context for the same account restores settled receipts from its drafts.
+      // Keep settled menu receipts in account drafts for recovery.
       lists = {};
       listedWorkspaces = undefined;
       includeVerifiedWorkspaces = false;

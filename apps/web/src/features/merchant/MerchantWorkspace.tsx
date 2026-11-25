@@ -652,7 +652,12 @@ function AccountWorkspace({
     return (
       <section className={styles.panel}>
         <p role="alert">登入或帳號已變更，這次店家資料與草稿已清除。</p>
-        <Button onClick={() => setInvalidSession(false)}>重新載入店家資料</Button>
+        <Button onClick={() => {
+          confirmed.restoreSettledReceipts();
+          setInvalidSession(false);
+        }}>
+          重新載入店家資料
+        </Button>
       </section>
     );
   if (selectedLocation) return withOperations();

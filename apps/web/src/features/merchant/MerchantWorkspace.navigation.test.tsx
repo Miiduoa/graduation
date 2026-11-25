@@ -2801,12 +2801,16 @@ it.each([
   { menuState: 'legacy zero stock', intermediateRequirements: [], retryVersion: 9, status: 200 },
   { menuState: 'legacy zero stock', intermediateRequirements: [], retryVersion: 9, status: 503 },
   { menuState: 'missing', intermediateRequirements: ['menu'], retryVersion: 8, status: 200,
-    expiration: { status: 401, code: 'UNAUTHORIZED' } },
+    expiration: { status: 401, code: 'UNAUTHORIZED' }, recoveryContext: 'context-renewed' },
+  { menuState: 'missing', intermediateRequirements: ['menu'], retryVersion: 8, status: 200,
+    expiration: { status: 401, code: 'UNAUTHORIZED' }, recoveryContext: 'context-a' },
   { menuState: 'legacy zero stock', intermediateRequirements: [], retryVersion: 9, status: 503,
-    expiration: { status: 409, code: 'SESSION_CHANGED' } },
+    expiration: { status: 409, code: 'SESSION_CHANGED' }, recoveryContext: 'context-renewed' },
+  { menuState: 'legacy zero stock', intermediateRequirements: [], retryVersion: 9, status: 503,
+    expiration: { status: 409, code: 'SESSION_CHANGED' }, recoveryContext: 'context-a' },
 ])(
-  'keeps a v7 first-menu receipt through automatic GET $status and session renewal ($expiration) with earlier v8 menu $menuState',
-  async ({ menuState, intermediateRequirements, retryVersion, status, expiration }) => {
+  'keeps a v7 first-menu receipt through automatic GET $status and session renewal ($expiration, $recoveryContext) with earlier v8 menu $menuState',
+  async ({ menuState, intermediateRequirements, retryVersion, status, expiration, recoveryContext = 'context-renewed' }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const initial = { ...detail(), readinessVersion: 7 };
     const published = {
@@ -2836,8 +2840,9 @@ it.each([
     const readRenewedDetail = vi.fn()
       .mockReturnValueOnce(renewedEntry.promise)
       .mockResolvedValue({ ...published, readinessVersion: 11 });
+    let recovered = false;
     mocks.request.mockImplementation((resource, context) => {
-      if (context === 'context-renewed') {
+      if (recovered && context === recoveryContext) {
         if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [renewedDetail] });
         if (resource === path) return readRenewedDetail();
       }
@@ -2881,7 +2886,7 @@ it.each([
       readDetail.mockReturnValueOnce(rejectedRead.promise);
       mocks.auth.refresh.mockImplementationOnce(async () => {
         await renewal.promise;
-        mocks.auth.session = { platformAccountId: 'account-a', context: 'context-renewed' };
+        mocks.auth.session = { platformAccountId: 'account-a', context: recoveryContext };
       });
 
       fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
@@ -2892,9 +2897,14 @@ it.each([
       expect(screen.queryByText(success)).toBeNull();
       await act(async () => renewal.resolve());
     } else {
-      mocks.auth.session = { platformAccountId: 'account-a', context: 'context-renewed' };
+      mocks.auth.session = { platformAccountId: 'account-a', context: recoveryContext };
     }
+    recovered = true;
     view.rerender(<MerchantWorkspace view="workspace" />);
+    if (recoveryContext === 'context-a') {
+      expect(readRenewedDetail).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: '重新載入店家資料' }));
+    }
     await waitFor(() => expect(readRenewedDetail).toHaveBeenCalledTimes(1));
     await act(async () => renewedEntry.resolve(renewedDetail));
     expect(screen.getByText(success)).toBeTruthy();
