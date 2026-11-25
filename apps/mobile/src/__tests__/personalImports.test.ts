@@ -373,8 +373,10 @@ test.each([[false, null], [true, null], [false, 'pending'], [false, 'settled']] 
     }
     expect(remove).toHaveBeenCalledTimes(1);
     expect(new File(Paths.document, prefix + '.rollback.pending').info().exists).toBe(true);
-    expect(new File(Paths.document, prefix + '.rollback.json').textSync())
-      .toBe(revoked ? 'rejected:\n' + original : original);
+    const rollbackPayload = new File(Paths.document, prefix + '.rollback.json').textSync();
+    const [attempt, ...rollbackLines] = rollbackPayload.split('\n');
+    expect(attempt).toMatch(/^attempt:/);
+    expect(rollbackLines.join('\n')).toBe(revoked ? 'rejected:\n' + original : original);
     if (!revoked) expect(committedRead).toHaveBeenCalled();
     restarting = true;
     await jest.isolateModulesAsync(async () => {
@@ -438,7 +440,7 @@ test('native retry publishes the verified replacement when the cleared rejection
   const payloadBindingFault = jest.fn(() => { throw new Error('副本雜湊無法寫入'); });
   const verificationFault = jest.fn(() => { throw new Error('驗證檔無法寫入'); });
   const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
-    if (this.uri === payload.uri && typeof value === 'string' && value.startsWith('committed:')) {
+    if (this.uri === payload.uri && typeof value === 'string' && /(?:^|\n)committed:/.test(value)) {
       payloadBindingFault();
     }
     if (this.uri.endsWith(prefix + 'verified')) verificationFault();
@@ -463,12 +465,13 @@ test('native retry publishes the verified replacement when the cleared rejection
     expect(notify).toHaveBeenCalledTimes(1);
 
     payloadUnreadable = false;
-    expect(payload.textSync()).toBe(original);
+    const rollbackPayload = payload.textSync();
+    expect(rollbackPayload.slice(rollbackPayload.indexOf('\n') + 1)).toBe(original);
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
     });
-    expect(receipt).toBe(sha256(original) + '\n' + sha256(replacement!));
+    expect(receipt).toBe(sha256(rollbackPayload) + '\n' + sha256(replacement!));
   } finally {
     unsubscribe();
     read.mockRestore();
@@ -590,11 +593,11 @@ test.each([
     }
     if (failVerification && this.uri.endsWith('.rollback.verified')) verificationFault();
     if (publicationFails && this.uri.endsWith('.rollback.json') &&
-        typeof value === 'string' && value.startsWith('rejected:')) {
+        typeof value === 'string' && /(?:^|\n)rejected:/.test(value)) {
       throw new Error('還原副本維持待處理');
     }
     if (failPayloadBinding && this.uri.endsWith('.rollback.json') &&
-        typeof value === 'string' && value.startsWith('committed:')) payloadFault();
+        typeof value === 'string' && /(?:^|\n)committed:/.test(value)) payloadFault();
     if (!markerReadFails && this.uri === markerUri && value === 'committed') {
       retirementAttempts++;
       if (phase === 'write' && revoked) active = false;
@@ -676,8 +679,8 @@ test.each([
         if (unreadablePayload) {
           expect(payloadReadFault).toHaveBeenCalled();
         } else {
-          expect(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.json`).textSync())
-            .toBe(JSON.stringify(previous));
+          const rawPayload = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.json`).textSync();
+          expect(rawPayload.slice(rawPayload.indexOf('\n') + 1)).toBe(JSON.stringify(previous));
         }
         expect(textSync.call(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.pending`)))
           .toBe('committed');
@@ -689,7 +692,8 @@ test.each([
       }
       if (failVerification && !markerReadFails) {
         const publication = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.published`);
-        expect(publication.textSync()).toBe(sha256(JSON.stringify(previous)) + '\n' + sha256(primary));
+        const rawPayload = textSync.call(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.json`));
+        expect(publication.textSync()).toBe(sha256(rawPayload) + '\n' + sha256(primary));
       }
       if (noRetirementFile) {
         expect(JSON.parse(primary)).toEqual(expected);
@@ -853,7 +857,7 @@ test.each([
         blockRetirementRead = true;
         return;
       }
-      if (this.uri.endsWith(prefix + 'json') && typeof value === 'string' && value.startsWith('rejected:')) {
+      if (this.uri.endsWith(prefix + 'json') && typeof value === 'string' && /(?:^|\n)rejected:/.test(value)) {
         rejectPayload();
       }
       if (rejection === 'neither' && this.uri.endsWith(prefix + 'pending') && value === 'rejected') {
@@ -895,7 +899,8 @@ test.each([
       const markerState = retirementReachedDisk ? 'committed' : rejection === 'pending marker' ? 'rejected' : '';
       expect(new File(Paths.document, prefix + 'pending').textSync()).toBe(markerState);
       expect(new File(Paths.document, prefix + 'rejected').info().exists).toBe(rejection === 'rejection file');
-      expect(new File(Paths.document, prefix + 'json').textSync()).toBe(JSON.stringify(ledger));
+      const rollbackPayload = new File(Paths.document, prefix + 'json').textSync();
+      expect(rollbackPayload.slice(rollbackPayload.indexOf('\n') + 1)).toBe(JSON.stringify(ledger));
       await jest.isolateModulesAsync(async () => {
         const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
         const textSync = File.prototype.textSync;
@@ -959,8 +964,13 @@ test.each(['', '{"version":1,"records":[', '{"version":1,"records":[],"batches":
   },
 );
 
-test.each([false, true])('native keeps newer #752 writes despite a stale pending copy (old proof: %s)', async (oldProof) => {
-  const scope = { owner: `nuni:legacy-primary-stale-pending-${oldProof}`, schoolId: 'pu' };
+test.each([
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true],
+])('native keeps newer #752 writes despite a stale pending copy (old proof: %s, records first: %s)', async (oldProof, recordsFirst) => {
+  const scope = { owner: `nuni:legacy-primary-stale-pending-${oldProof}-${recordsFirst}`, schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
   const { ledger: older } = await appendPersonalImports(scope, [row('original')]);
   const journal = preparePersonalImportRollback(key, JSON.stringify(older));
@@ -969,7 +979,10 @@ test.each([false, true])('native keeps newer #752 writes despite a stale pending
   if (oldProof) {
     new File(Paths.document, prefix + 'json').write(`committed:${sha256(JSON.stringify(older))}\n${JSON.stringify(older)}`);
   }
-  expect(await AsyncStorage.getItem(key)).toBe(JSON.stringify(newer));
+  const { records, version, ...metadata } = newer;
+  const primary = JSON.stringify(recordsFirst ? { records, ...metadata, version } : newer);
+  if (recordsFirst) await AsyncStorage.setItem(key, primary);
+  expect(await AsyncStorage.getItem(key)).toBe(primary);
   expect(readPersonalImportRollback(key)).toBe(JSON.stringify(older));
   try {
     await jest.isolateModulesAsync(async () => {
@@ -1071,7 +1084,7 @@ test.each([
   }
 });
 
-test('Expo Web reads the website’s first append after adopting an empty checkpoint', async () => {
+test.each([false, true])('Expo Web reads the website’s first append (empty checkpoint: %s)', async (checkpoint) => {
   const cleanup = useWebStorage();
   const restoreLocks = withoutWebWriteLocks();
   Object.defineProperty(navigator, 'locks', {
@@ -1079,17 +1092,34 @@ test('Expo Web reads the website’s first append after adopting an empty checkp
     value: { request: async (_key: string, write: () => unknown) => write() },
   });
   const key = personalImportStorageKey(scope);
+  const storage = window.localStorage;
+  const setItem = Storage.prototype.setItem;
+  const atQuota = jest.fn((raw: string) => {
+    const { version, records, sync } = JSON.parse(raw);
+    if (raw.length > JSON.stringify({ version, records, sync }).length) {
+      throw new DOMException('帳本已達配額', 'QuotaExceededError');
+    }
+  });
+  const write = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, entry, raw) {
+    if (!checkpoint && this === storage && entry === key) atQuota(raw);
+    setItem.call(this, entry, raw);
+  });
   try {
-    window.localStorage.setItem(key + ':checkpoint', 'null');
+    if (checkpoint) storage.setItem(key + ':checkpoint', 'null');
     await expect(saveWebCalendarBatch(scope, [row('first')])).resolves.toMatchObject({ added: 1 });
-    expect(window.localStorage.getItem(key + ':checkpoint')).toBeNull();
-    expect(JSON.parse(window.localStorage.getItem(key)!)).toMatchObject({
-      batches: [],
-      sync: { enabled: false, base: null },
-    });
+    expect(storage.getItem(key + ':checkpoint')).toBeNull();
+    const stored = JSON.parse(storage.getItem(key)!);
+    expect(stored.sync).toEqual({ enabled: false, base: null });
+    if (checkpoint) {
+      expect(stored.batches).toEqual([]);
+    } else {
+      expect(atQuota).toHaveBeenCalledWith(storage.getItem(key));
+      expect(Object.keys(stored).sort()).toEqual(['records', 'sync', 'version']);
+    }
     const ledger = await loadPersonalImports(scope);
     expect(ledger.records.map(({ id }) => id)).toEqual(['first']);
   } finally {
+    write.mockRestore();
     restoreLocks();
     cleanup();
   }
@@ -1164,6 +1194,68 @@ test.each([
   }
 });
 
+
+test('native append and edit survive a settled file that cannot be deleted, cleared or read', async () => {
+  const scope = { owner: 'nuni:retained-settlement', schoolId: 'pu' };
+  const key = personalImportStorageKey(scope);
+  const prefix = `personal-imports-${sha256(key)}.rollback.`;
+  const settlement = new File(Paths.document, prefix + 'settled');
+  const { delete: deleteFile, write: writeFile, textSync } = File.prototype;
+  let faulted = false;
+  const deleteFault = jest.fn(() => { throw new Error('無法刪除已完成標記'); });
+  const writeFault = jest.fn(() => { throw new Error('無法改寫已完成標記'); });
+  const readFault = jest.fn(() => { throw new Error('無法讀取已完成標記'); });
+  const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
+    if (this.uri.endsWith(prefix + 'pending')) throw new Error('無法刪除待處理標記');
+    if (faulted && this.uri === settlement.uri) deleteFault();
+    deleteFile.call(this);
+  });
+  const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+    if (faulted && this.uri === settlement.uri) writeFault();
+    writeFile.call(this, value, options);
+  });
+  const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+    if (faulted && this.uri === settlement.uri) readFault();
+    return textSync.call(this);
+  });
+  const guard = { canContinue: () => true, canCommitFirstWrite: () => true };
+  const notify = jest.fn();
+  const unsubscribe = subscribePersonalImports(notify);
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('first')], guard);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(new File(Paths.document, prefix + 'pending').textSync()).toBe('committed');
+    const originalProof = settlement.textSync();
+    expect(originalProof.endsWith(sha256((await AsyncStorage.getItem(key))!))).toBe(true);
+    faulted = true;
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      const reread = jest.fn(() => restarted.loadPersonalImports(scope));
+      const unsubscribeRestart = restarted.subscribePersonalImports(reread);
+      try {
+        await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+        const appended = await restarted.appendPersonalImports(scope, [row('second', '統計')], guard);
+        await expect(reread.mock.results[0].value).resolves.toEqual(appended.ledger);
+        const edited = await restarted.editPersonalImport(scope, appended.ledger.records[1], row('second', '化學'), guard);
+        expect(edited.records.map(({ title }) => title)).toEqual(['微積分', '化學']);
+        await expect(reread.mock.results[1].value).resolves.toEqual(edited);
+        expect(reread).toHaveBeenCalledTimes(2);
+        expect(JSON.parse((await AsyncStorage.getItem(key))!)).toEqual(edited);
+      } finally {
+        unsubscribeRestart();
+      }
+    });
+    expect(deleteFault).toHaveBeenCalled();
+    expect(writeFault).toHaveBeenCalled();
+    expect(readFault).toHaveBeenCalled();
+    expect(textSync.call(settlement)).toBe(originalProof);
+  } finally {
+    unsubscribe();
+    read.mockRestore();
+    write.mockRestore();
+    remove.mockRestore();
+  }
+});
 
 test.each(['committed', 'verified'] as const)('native calendar can append and edit with a retained .rollback.%s file', async (sidecar) => {
   const scope = { owner: `nuni:retained-${sidecar}`, schoolId: 'pu' };

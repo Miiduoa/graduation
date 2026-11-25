@@ -70,7 +70,7 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
       // Keep a v1 commit marker while legacy recovery data may still exist.
       // Expo owns the undo history. Carry it through Web writes from the same
       // ledger snapshot as the records before retiring an adopted checkpoint.
-      const batches: unknown = adopted?.ledger.batches ?? (raw ? JSON.parse(raw).batches : []);
+      const batches: unknown = adopted?.ledger.batches ?? (raw ? JSON.parse(raw).batches : undefined);
       const ledger = { version: 1 as const, ...state, batches: isPersonalImportBatchHistory(batches) ? batches : undefined };
       const published = recovery.detachJournal(shouldMarkCommit
         ? serializePersonalImportBrowserCommit(ledger)

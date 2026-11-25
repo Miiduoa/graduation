@@ -77,19 +77,19 @@ async function readLedgerSnapshot(
     : undefined;
   const primaryVerified = isReadableLedger(primary, scope);
   const verifiedByJournal = primary !== null && journal?.matchesVerifiedPrimary?.(primary) === true;
-  const nativeEncoding = !web && primaryVerified && hasNativeCommitEncoding(primary);
-  const rejectedPrimary = journal?.rejected && (nativeEncoding || journal.raw === primary);
-  const useNativeJournal = !primaryVerified ||
-    rejectedPrimary ||
-    (nativeEncoding && !verifiedByJournal);
+  const attemptedPrimary = primary !== null && journal?.matchesAttemptedPrimary?.(primary) === true;
+  const rejectedPrimary = journal?.rejected && (
+    attemptedPrimary || journal.raw === primary ||
+    (journal.payloadError && hasNativeCommitEncoding(primary))
+  );
   if (!primaryVerified || rejectedPrimary) {
     if (journal?.markerError) throw journal.markerError;
     if (journal?.payloadError) throw journal.payloadError;
   }
-  // Only an interrupted native commit can be superseded by a pending copy
-  // when the primary is readable. Older clients write ordinary v1 ledgers.
-  const nativeJournal = useNativeJournal
-    ? journal?.raw ?? (nativeEncoding && !verifiedByJournal ? journal?.committedRaw : undefined)
+  // Legacy v1 ledgers may use the same field order as a guarded write.
+  // Only a rollback bound to these primary bytes can supersede a readable ledger.
+  const nativeJournal = !primaryVerified || rejectedPrimary || (attemptedPrimary && !verifiedByJournal)
+    ? journal?.raw ?? (attemptedPrimary ? journal?.committedRaw : undefined)
     : undefined;
   if (primaryError && nativeJournal === undefined && !isStorageRowTooLarge(primaryError)) {
     throw primaryError;
@@ -430,11 +430,14 @@ export function mutatePersonalImportLedger<T>(
             }
             assertWritable();
             const primaryCommitted = hasPersisted || (primaryVerified && recovery === null);
-            const journal = preparePersonalImportRollback(key, persistedRaw, primaryCommitted);
             let cleaningRecovery = false;
-            // Mark the first replacement so it remains readable when the
-            // recovery files become unavailable during publication.
+            // Prepare rollback for either write before replacing the primary.
             const firstRaw = encodeNativeFirstWrite(ledger);
+            const replacement = encodeNativeReplacement(ledger);
+            const journal = preparePersonalImportRollback(key, persistedRaw, primaryCommitted, {
+              first: firstRaw,
+              replacement,
+            });
             try {
               await AsyncStorage.setItem(key, firstRaw);
               writtenRaw = firstRaw;
@@ -448,7 +451,6 @@ export function mutatePersonalImportLedger<T>(
               assertWritable();
               if (!journal.retire(assertWritable, checkpointRetired, firstRaw)) {
                 assertWritable();
-                const replacement = encodeNativeReplacement(ledger);
                 try {
                   journal.preparePrimaryCommit();
                   await AsyncStorage.setItem(key, replacement);
