@@ -2,6 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import {
   capturePersonalImportBrowserRecovery,
+  parsePersonalImportLedger,
+  type PersonalImportLedger,
+  selectPersonalImportBrowserRecovery,
   personalImportCheckpointKey,
   unwrapPersonalImportCheckpoint,
 } from '@campus/shared/src/imports/browserRecovery';
@@ -9,17 +12,10 @@ import { findCatalogSameSlotChange } from './publicCourseTimetableImport';
 import {
   clearPersonalImportRollback,
   commitWebPersonalImports,
-  hasWebPersonalImportCommit,
-  parsePersonalImportStorageJson,
   preparePersonalImportRollback,
   readPersonalImportRollback,
-  readWebPersonalImportRollback,
   withPersonalImportWriteLock,
 } from './personalImportRollbackJournal';
-import {
-  parsePersonalImportSyncState,
-  type PersonalImportSyncState,
-} from '@campus/shared/src/imports/sync';
 import {
   createPersonalImportId,
   periodCount,
@@ -37,18 +33,13 @@ import {
 } from '@campus/shared';
 
 export type PersonalImportScope = { owner: string; schoolId: string };
-export type PersonalImportLedger = {
-  version: 1;
-  records: PersonalImportRecord[];
-  batches: Array<{ id: string; createdAt: string; count: number }>;
-  sync?: PersonalImportSyncState;
-};
+export type { PersonalImportLedger } from '@campus/shared/src/imports/browserRecovery';
 export const personalImportStorageKey = (scope: PersonalImportScope) =>
   `campus.personal-imports.v1:${encodeURIComponent(scope.owner)}:${encodeURIComponent(scope.schoolId)}`;
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
 const locks = new Map<string, Promise<unknown>>();
 const pendingWrites = new Map<string, Promise<void>>();
-type Recovery = { raw: string | null; source?: 'checkpoint' | 'journal' };
+type Recovery = { raw: string | null; source?: 'checkpoint' | 'journal'; checkpoint?: string };
 const pendingRestorations = new Map<string, Recovery>();
 let writeSequence = 0;
 
@@ -76,85 +67,74 @@ async function readLedgerSnapshot(key: string, scope: PersonalImportScope) {
   const browserRecovery = web
     ? capturePersonalImportBrowserRecovery(window.localStorage, key)
     : undefined;
-  const recovery = await readRecovery(key, scope, primary, browserRecovery, nativeJournal);
+  const primaryVerified = isReadableLedger(primary, scope);
+  const recovery: (Recovery & { ledger: PersonalImportLedger }) | null = browserRecovery
+    ? selectPersonalImportBrowserRecovery(browserRecovery, primary, primaryVerified, (raw) => parseLedger(raw, scope))
+    : await readNativeRecovery(key, scope, primaryVerified, nativeJournal);
   if (!recovery && primaryError) throw primaryError;
-  return { primary, browserRecovery, recovery };
+  return { primary, primaryVerified, browserRecovery, recovery };
 }
 
-async function readRecovery(
+function isReadableLedger(raw: string | null, scope: PersonalImportScope): boolean {
+  if (raw === null) return false;
+  try {
+    parseLedger(raw, scope);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readNativeRecovery(
   key: string,
   scope: PersonalImportScope,
-  primary: string | null,
-  browserRecovery: ReturnType<typeof capturePersonalImportBrowserRecovery> | undefined,
+  primaryVerified: boolean,
   nativeJournal: string | undefined,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
-  let primaryVerified = false;
-  if (primary !== null) {
-    try {
-      parseLedger(primary, scope);
-      primaryVerified = true;
-    } catch {
-      // A damaged primary may still be recoverable from a legacy copy.
-    }
-    if (browserRecovery && primaryVerified && hasWebPersonalImportCommit(primary)) return null;
-  }
-
   // A marked native journal or an in-process rollback can supersede an
   // interrupted primary write. A standalone legacy checkpoint cannot.
   const pending = pendingRestorations.get(key);
   if (!primaryVerified) {
-    const checkpoint = await readLegacyCheckpoint(key, scope, browserRecovery?.checkpoint);
+    const checkpoint = await readLegacyCheckpoint(key, scope);
     if (checkpoint && (nativeJournal === undefined || (checkpoint.raw ?? 'null') === nativeJournal)) {
       return checkpoint;
     }
     if (pending) return { ...pending, ledger: parseLedger(pending.raw, scope) };
   }
 
-  const journal = browserRecovery
-    ? readWebPersonalImportRollback(browserRecovery.journal, primary, primaryVerified)
-    : nativeJournal;
-  if (journal === undefined) return null;
-  try {
-    if (!journal) throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
-    const raw = journal === 'null' ? null : journal;
-    return { raw, ledger: parseLedger(raw, scope), source: 'journal' };
-  } catch (error) {
-    if (!browserRecovery) throw error;
-    // Leave an invalid browser copy untouched and let the primary determine
-    // whether to load an empty ledger or report unreadable data.
-    return null;
-  }
+  if (nativeJournal === undefined) return null;
+  if (!nativeJournal) throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
+  const raw = nativeJournal === 'null' ? null : nativeJournal;
+  return { raw, ledger: parseLedger(raw, scope), source: 'journal' };
 }
 
 async function readLegacyCheckpoint(
   key: string,
   scope: PersonalImportScope,
-  encoded?: string | null,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
-  if (encoded === undefined) {
-    const checkpoint = personalImportCheckpointKey(key);
+  const checkpoint = personalImportCheckpointKey(key);
+  let encoded: string | null;
+  try {
+    [[, encoded]] = await AsyncStorage.multiGet([checkpoint]);
+  } catch (error) {
+    if (!isStorageRowTooLarge(error)) throw error;
+    // JS multiGet coalesces requests and can report another key's error.
+    // getItem issues its own native read, so only its error identifies this row.
     try {
-      [[, encoded]] = await AsyncStorage.multiGet([checkpoint]);
-    } catch (error) {
-      if (!isStorageRowTooLarge(error)) throw error;
-      // JS multiGet coalesces requests and can report another key's error.
-      // getItem issues its own native read, so only its error identifies this row.
-      try {
-        encoded = await AsyncStorage.getItem(checkpoint);
-      } catch (checkpointError) {
-        // A legacy wrapped ledger can exceed the row limit even when the primary fits.
-        if (!isStorageRowTooLarge(checkpointError)) throw checkpointError;
-        encoded = null;
-      }
+      encoded = await AsyncStorage.getItem(checkpoint);
+    } catch (checkpointError) {
+      // A legacy wrapped ledger can exceed the row limit even when the primary fits.
+      if (!isStorageRowTooLarge(checkpointError)) throw checkpointError;
+      encoded = null;
     }
   }
   if (encoded !== null) {
     try {
       // Older builds wrapped the original ledger in a second layer of JSON.
       const raw: unknown = unwrapPersonalImportCheckpoint(encoded);
-      if (raw === null) return { raw: null, ledger: empty(), source: 'checkpoint' };
+      if (raw === null) return { raw: null, ledger: empty(), source: 'checkpoint', checkpoint: encoded };
       if (typeof raw === 'string' && raw.trimStart().startsWith('{')) {
-        return { raw, ledger: parseLedger(raw, scope), source: 'checkpoint' };
+        return { raw, ledger: parseLedger(raw, scope), source: 'checkpoint', checkpoint: encoded };
       }
     } catch {
       // An invalid legacy checkpoint cannot supply the ledger.
@@ -164,20 +144,30 @@ async function readLegacyCheckpoint(
   return null;
 }
 
-async function restoreLedger(key: string, { raw }: Recovery) {
+async function retireNativeCheckpoint(key: string, adopted: string | undefined) {
+  if (adopted === undefined) return;
+  const checkpoint = personalImportCheckpointKey(key);
+  if (await AsyncStorage.getItem(checkpoint) === adopted) await AsyncStorage.multiRemove([checkpoint]);
+}
+
+async function restoreLedger(key: string, { raw, checkpoint }: Recovery) {
   if (raw === null) await AsyncStorage.removeItem(key);
   else await AsyncStorage.setItem(key, raw);
-  await AsyncStorage.multiRemove([personalImportCheckpointKey(key)]);
+  await retireNativeCheckpoint(key, checkpoint);
   clearPersonalImportRollback(key);
   pendingRestorations.delete(key);
 }
 
 async function rollbackLedger(key: string, raw: string | null) {
-  const recovery = { raw };
+  const recovery: Recovery = { raw };
   pendingRestorations.set(key, recovery);
   try {
-    // Preserve the AsyncStorage checkpoint format without JSON string escaping.
-    await AsyncStorage.multiSet([[personalImportCheckpointKey(key), raw ?? 'null']]);
+    const checkpoint = personalImportCheckpointKey(key);
+    if (await AsyncStorage.getItem(checkpoint) === null) {
+      const encoded = raw ?? 'null';
+      await AsyncStorage.multiSet([[checkpoint, encoded]]);
+      recovery.checkpoint = encoded;
+    }
   } catch {
     // Try restoring the primary anyway. The journal still holds the verified bytes.
   }
@@ -238,59 +228,7 @@ export async function loadPersonalImports(
 }
 
 function parseLedger(raw: string | null, scope: PersonalImportScope): PersonalImportLedger {
-  if (!raw) return empty();
-  let value: PersonalImportLedger;
-  try {
-    const { webCommit: _webCommit, ...ledger } = parsePersonalImportStorageJson(raw);
-    // The Web calendar stores records and sync state without an Expo undo stack.
-    if (Platform.OS === 'web' && 'sync' in ledger && !('batches' in ledger)) {
-      ledger.batches = [];
-    }
-    value = ledger as PersonalImportLedger;
-  } catch {
-    throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
-  }
-  if (
-    !value ||
-    value.version !== 1 ||
-    !Array.isArray(value.records) ||
-    !Array.isArray(value.batches) ||
-    value.records.some(
-      (row) =>
-        !row ||
-        row.schoolId !== scope.schoolId ||
-        typeof row.id !== 'string' ||
-        typeof row.batchId !== 'string' ||
-        !row.batchId.trim() ||
-        typeof row.importedAt !== 'string' ||
-        !Number.isFinite(Date.parse(row.importedAt)) ||
-        !row.source ||
-        !['paste', 'file', 'screenshot'].includes(row.source.type) ||
-        !Number.isInteger(row.source.line) ||
-        row.source.line < 1 ||
-        typeof row.source.rawText !== 'string' ||
-        (row.source.name !== undefined && typeof row.source.name !== 'string') ||
-        validatePersonalImportRow(row, {
-          periodProfile: periodProfileForSchool(scope.schoolId),
-        }).some((issue) => issue.severity === 'error'),
-    ) ||
-    new Set(value.records.map((row) => row.id)).size !== value.records.length ||
-    value.batches.some(
-      (batch) =>
-        !batch ||
-        typeof batch.id !== 'string' ||
-        !batch.id.trim() ||
-        typeof batch.createdAt !== 'string' ||
-        !Number.isFinite(Date.parse(batch.createdAt)) ||
-        !Number.isInteger(batch.count) ||
-        batch.count <= 0,
-    )
-  ) {
-    throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
-  }
-  if (value.sync !== undefined)
-    value.sync = parsePersonalImportSyncState(value.sync, scope.schoolId);
-  return value;
+  return parsePersonalImportLedger(raw, scope.schoolId, Platform.OS === 'web');
 }
 
 /** A verified operation may require uninterrupted verification through its first commit. */
@@ -329,21 +267,22 @@ export function mutatePersonalImportLedger<T>(
         assertLockHeld();
       };
       assertWritable();
-      const { primary, browserRecovery, recovery } = await readLedgerSnapshot(key, scope);
+      const { primary, primaryVerified, browserRecovery, recovery } = await readLedgerSnapshot(key, scope);
       let primaryRaw = primary;
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
       assertWritable();
       let persisted = current;
       const recoveryCheck = () => ({
-        verifyCheckpoint: !hasPersisted && (primary === null || recovery?.source === 'checkpoint'),
+        verifyCheckpoint: !hasPersisted && !primaryVerified,
+        verifyJournal: !hasPersisted && (!primaryVerified || recovery?.source === 'journal'),
         adopted: hasPersisted ? undefined : recovery?.source,
       });
       const assertSnapshot = () => {
         assertWritable();
         if (browserRecovery) {
-          const { verifyCheckpoint, adopted } = recoveryCheck();
-          browserRecovery.assertSnapshot(primaryRaw, verifyCheckpoint, adopted === 'journal');
+          const { verifyCheckpoint, verifyJournal } = recoveryCheck();
+          browserRecovery.assertSnapshot(primaryRaw, verifyCheckpoint, verifyJournal);
         }
       };
       const checkpoint = async (ledger: PersonalImportLedger) => {
@@ -365,12 +304,17 @@ export function mutatePersonalImportLedger<T>(
           } else if (!needsJournal) {
             await AsyncStorage.setItem(key, raw);
           } else {
+            const adoptedCheckpoint = hasPersisted ? undefined : recovery?.checkpoint;
+            if (adoptedCheckpoint !== undefined &&
+                await AsyncStorage.getItem(personalImportCheckpointKey(key)) !== adoptedCheckpoint) {
+              throw new Error('匯入資料已更新，請重新載入。');
+            }
             assertWritable();
             const commit = preparePersonalImportRollback(key, persistedRaw);
             try {
               await AsyncStorage.setItem(key, raw);
               assertWritable();
-              await AsyncStorage.multiRemove([personalImportCheckpointKey(key)]);
+              await retireNativeCheckpoint(key, adoptedCheckpoint);
               assertWritable();
               commit();
               pendingRestorations.delete(key);

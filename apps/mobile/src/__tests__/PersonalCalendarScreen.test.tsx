@@ -938,6 +938,9 @@ it.each([
       await nativeSetItem(storageKey, value);
     });
   } else {
+    await AsyncStorage.setItem(key + ':checkpoint', stored!);
+    await AsyncStorage.removeItem(key);
+    setItem.mockClear();
     setItem.mockImplementationOnce(nativeSetItem);
     multiRemove.mockImplementationOnce(async (keys) => {
       started();

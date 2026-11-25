@@ -282,6 +282,7 @@ test('清除檢查點時 Firebase 已切換，還原舊帳本且不發出變更�
   const original = mockScope;
   const view = await openDraft();
   const key = personalImportStorageKey(original);
+  await AsyncStorage.setItem(key + ':checkpoint', 'null');
   const multiRemove = jest.mocked(AsyncStorage.multiRemove);
   const nativeMultiRemove = multiRemove.getMockImplementation()!;
   const clearing = jest.fn();

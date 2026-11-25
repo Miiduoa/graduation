@@ -1,7 +1,6 @@
 import { createPersonalImportId } from '@campus/shared';
 import {
   type capturePersonalImportBrowserRecovery,
-  personalImportBrowserCommitSuffix as compactWebCommitSuffix,
   personalImportWebJournalPrefix as journalPrefix,
   serializePersonalImportBrowserCommit,
 } from '@campus/shared/src/imports/browserRecovery';
@@ -11,11 +10,6 @@ import { Platform } from 'react-native';
 
 const markerSuffix = '.rollback.pending';
 const legacyStagePattern = /^campus\.personal-imports\.rollback\.v1:([a-f0-9]{64}):stage:\d+:[^:]+$/;
-// Continue reading the compact version field written by earlier builds.
-const compactVersionKey = '$commit';
-
-const fingerprint = (raw: string | null) => sha256(raw ?? 'null');
-
 const lockStore = 'writes';
 const stagePrefix = 'campus.personal-imports.stage.v2:';
 const activeStages = new Set<string>();
@@ -290,47 +284,6 @@ export async function withPersonalImportWriteLock<T>(
   }
 }
 
-export function readWebPersonalImportRollback(
-  encoded: string | null,
-  primary: string | null,
-  primaryVerified: boolean,
-): string | undefined {
-  if (encoded === null) return undefined;
-  let journal: unknown;
-  try {
-    journal = JSON.parse(encoded);
-  } catch {
-    return undefined;
-  }
-  // Unbound legacy copies cannot establish that a verified primary was interrupted.
-  if (!journal || typeof journal !== 'object' || 'version' in journal ||
-      !('id' in journal) || typeof journal.id !== 'string' ||
-      !('before' in journal) || typeof journal.before !== 'string' ||
-      !('attempted' in journal) || typeof journal.attempted !== 'string' ||
-      !('original' in journal) || (journal.original !== null && typeof journal.original !== 'string')) {
-    if (primaryVerified) return undefined;
-    return typeof journal === 'string' ? journal : encoded;
-  }
-  const current = fingerprint(primary);
-  if (current !== journal.before && current !== journal.attempted) return undefined;
-  const original = typeof journal.original === 'string' ? journal.original : 'null';
-  if (fingerprint(original) !== journal.before) return undefined;
-  return original;
-}
-
-export function parsePersonalImportStorageJson(raw: string) {
-  const value = JSON.parse(raw);
-  if (Platform.OS === 'web' && value?.[compactVersionKey] === 1 && !('version' in value)) {
-    const { [compactVersionKey]: version, ...ledger } = value;
-    return { version, ...ledger };
-  }
-  if (Platform.OS === 'web' && raw.endsWith(compactWebCommitSuffix)) {
-    const { version, ...ledger } = value;
-    return { version, ...ledger };
-  }
-  return value;
-}
-
 export { hasWebPersonalImportCommit } from '@campus/shared/src/imports/browserRecovery';
 
 function sweepSessionStages(storage: Storage): void {
@@ -345,7 +298,7 @@ export function commitWebPersonalImports(
   attempted: string,
   assertWritable: () => void,
   recoveryCopies: ReturnType<typeof capturePersonalImportBrowserRecovery>,
-  recoveryCheck: { verifyCheckpoint: boolean; adopted?: 'checkpoint' | 'journal' },
+  recoveryCheck: { verifyCheckpoint: boolean; verifyJournal: boolean; adopted?: 'checkpoint' | 'journal' },
   recovery?: { raw: string | null },
   lease?: BrowserLease,
 ): string {
@@ -356,7 +309,7 @@ export function commitWebPersonalImports(
   const replace = (raw: string, ownsStage: () => boolean) => {
     assertWritable();
     if (!ownsStage()) throw conflict();
-    recoveryCopies.assertSnapshot(before, recoveryCheck.verifyCheckpoint, recoveryCheck.adopted === 'journal');
+    recoveryCopies.assertSnapshot(before, recoveryCheck.verifyCheckpoint, recoveryCheck.verifyJournal);
     storage.setItem(key, raw);
     if (storage.getItem(key) !== raw) throw conflict();
     return raw;

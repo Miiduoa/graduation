@@ -105,6 +105,42 @@ test.each(['older ledger', 'null'] as const)('native primary wins over an unboun
     .toEqual(['行程 A', '行程 B', '行程 C']);
 });
 
+test.each([false, true])('protected native save preserves an unadopted checkpoint (revoked: %s)', async (revoked) => {
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  await appendPersonalImports(scope, [row('a', '行程 A')]);
+  const original = (await AsyncStorage.getItem(key))!;
+  await appendPersonalImports(scope, [row('d', '行程 D')]);
+  const backup = (await AsyncStorage.getItem(key))!;
+  await AsyncStorage.setItem(checkpoint, backup);
+  await AsyncStorage.setItem(key, original);
+  const { ledger } = await appendPersonalImports(scope, [row('b', '行程 B')]);
+  let verified = true;
+
+  if (revoked) {
+    const setItem = jest.mocked(AsyncStorage.setItem);
+    const nativeSetItem = setItem.getMockImplementation()!;
+    setItem.mockImplementationOnce(async (entry, value) => {
+      await nativeSetItem(entry, value);
+      verified = false;
+    });
+  }
+
+  const write = appendPersonalImports(scope, [row('c', '行程 C')], {
+    canContinue: () => true,
+    canCommitFirstWrite: () => verified,
+  });
+  if (revoked) {
+    await expect(write).rejects.toThrow('目前無法確認行事曆可寫入');
+    expect(await loadPersonalImports(scope)).toEqual(ledger);
+  } else {
+    await write;
+    expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
+      .toEqual(['行程 A', '行程 B', '行程 C']);
+  }
+  expect(await AsyncStorage.getItem(checkpoint)).toBe(backup);
+});
+
 test.each([true, false])('Expo Web only replays pending sync from a current recovery snapshot (replaced: %s)', async (replaced) => {
   const syncScope = { ...scope, owner: 'nuni:pa_11111111-1111-4111-8111-111111111111' };
   const key = personalImportStorageKey(syncScope);
@@ -708,6 +744,109 @@ test.each(['save', 'sync'] as const)('Web %s preserves Expo undo history recover
     cleanup();
   }
 });
+
+test.each([{}, [{ id: 'incomplete', count: 1 }]])(
+  'Web save and sync leave an incomplete Expo checkpoint untouched (%j)',
+  async (batches) => {
+    const cleanup = useWebStorage();
+    const restoreLocks = withoutWebWriteLocks();
+    const storage = window.localStorage;
+    const key = personalImportStorageKey(scope);
+    const checkpoint = key + ':checkpoint';
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: { request: async (_key: string, write: () => unknown) => write() },
+    });
+    try {
+      const { ledger } = await appendPersonalImports(scope, [row('old', 'Expo 匯入')]);
+      const damaged = JSON.stringify({
+        ...ledger,
+        sync: { enabled: false, base: null },
+        batches,
+      });
+      storage.setItem(checkpoint, damaged);
+      storage.removeItem(key);
+      expect(readWebCalendarImports(scope)).toEqual([]);
+      await saveWebCalendarBatch(scope, [row('new', 'Web 匯入')]);
+      expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['Web 匯入']);
+      expect(storage.getItem(checkpoint)).toBe(damaged);
+
+      storage.removeItem(key);
+      await withWebCalendarSyncLock(scope, async (state) => {
+        expect(state.records).toEqual([]);
+        return { state: { ...state, sync: { enabled: true, base: null } }, result: undefined };
+      });
+      expect(await loadPersonalImports(scope)).toMatchObject({ version: 1, records: [], batches: [] });
+      expect(storage.getItem(checkpoint)).toBe(damaged);
+    } finally {
+      restoreLocks();
+      cleanup();
+    }
+  },
+);
+
+test.each(['save', 'sync', 'sync snapshot', 'sync commit'] as const)(
+  'Web uses and verifies the sole Expo journal during %s',
+  async (operation) => {
+    const cleanup = useWebStorage();
+    const restoreLocks = withoutWebWriteLocks();
+    const storage = window.localStorage;
+    const key = personalImportStorageKey(scope);
+    const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: { request: async (_key: string, write: () => unknown) => write() },
+    });
+    try {
+      const { ledger } = await appendPersonalImports(scope, [row('a', '行程 A')]);
+      const original = storage.getItem(key)!;
+      storage.removeItem(key);
+      storage.setItem(journal, original);
+      expect(await loadPersonalImports(scope)).toEqual(ledger);
+      expect(readWebCalendarImports(scope)).toEqual(ledger.records);
+
+      if (operation === 'save' || operation === 'sync') {
+        if (operation === 'save') {
+          await saveWebCalendarBatch(scope, [row('c', '行程 C')]);
+        } else {
+          await withWebCalendarSyncLock(scope, async (state, persist, assertSnapshot) => {
+            expect(state.records).toEqual(ledger.records);
+            assertSnapshot();
+            const next = { ...state, sync: { enabled: true, base: null } };
+            await persist(next);
+            assertSnapshot();
+            return { state: next, result: undefined };
+          });
+        }
+        const committed = await loadPersonalImports(scope);
+        expect(committed.records.map(({ title }) => title)).toEqual(
+          operation === 'save' ? ['行程 A', '行程 C'] : ['行程 A'],
+        );
+        expect(committed.batches).toEqual(ledger.batches);
+        expect(storage.getItem(journal)).toBeNull();
+      } else {
+        const replacement = JSON.stringify(original);
+        const upload = jest.fn();
+        await expect(withWebCalendarSyncLock(scope, async (state, _persist, assertSnapshot) => {
+          expect(state.records).toEqual(ledger.records);
+          storage.setItem(journal, replacement);
+          if (operation === 'sync snapshot') {
+            assertSnapshot();
+            upload();
+          }
+          const sync = { enabled: true, base: null };
+          return { state: { ...state, sync }, result: undefined };
+        })).rejects.toThrow();
+        expect(upload).not.toHaveBeenCalled();
+        expect(storage.getItem(key)).toBeNull();
+        expect(storage.getItem(journal)).toBe(replacement);
+      }
+    } finally {
+      restoreLocks();
+      cleanup();
+    }
+  },
+);
 
 test('Expo and Web preserve an unbound journal with an event skipped by the primary ledger', async () => {
   const cleanup = useWebStorage();
@@ -1336,11 +1475,11 @@ test.each([
     expect(await loadPersonalImports(scope)).toEqual(ledger);
     await deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
     expect((await loadPersonalImports(scope)).records).toEqual([]);
-    expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
   } finally {
     multiGet.mockImplementation(nativeMultiGet);
     getItem.mockImplementation(nativeGetItem);
   }
+  expect(await AsyncStorage.getItem(checkpoint)).toBe(encoded);
 });
 
 test('reads the primary ledger when the checkpoint cannot be parsed', async () => {
@@ -1645,10 +1784,10 @@ test('a recovered deletion can retry when storage only fits the smaller result',
     await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
 
     let verified = true;
-    const multiRemove = jest.mocked(AsyncStorage.multiRemove);
-    const nativeMultiRemove = multiRemove.getMockImplementation()!;
-    multiRemove.mockImplementationOnce(async (keys) => {
-      await nativeMultiRemove(keys);
+    const setItem = jest.mocked(AsyncStorage.setItem);
+    const nativeSetItem = setItem.getMockImplementation()!;
+    setItem.mockImplementationOnce(async (entry, value) => {
+      await nativeSetItem(entry, value);
       verified = false;
     });
     await expect(restarted.deletePersonalImport(scope, ledger.records[0], {
