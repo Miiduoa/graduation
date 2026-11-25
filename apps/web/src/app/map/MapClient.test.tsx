@@ -776,6 +776,47 @@ it('obtains position only on request and orders nearby locations by measured str
   }
 });
 
+it.each([[91, 120], [-91, 120], [24, 181], [24, -181], [NaN, 120], [24, Infinity]])(
+  'rejects invalid GPS coordinates (%s, %s), clears the nearby filter and permits retry',
+  async (latitude, longitude) => {
+    state.user = null;
+    const callbacks: PositionCallback[] = [];
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: { getCurrentPosition: (callback: PositionCallback) => { callbacks.push(callback); } },
+    });
+    try {
+      render(<MapClient school="pu" />);
+      await sourceSettled();
+      fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+      act(() => callbacks[0]({ coords: { latitude: gate.lat, longitude: gate.lng } } as GeolocationPosition));
+      const nearby = screen.getByRole('button', { name: '附近 1 公里' });
+      fireEvent.click(nearby);
+      expect(nearby.getAttribute('aria-pressed')).toBe('true');
+
+      fireEvent.click(screen.getByRole('button', { name: '更新我的位置' }));
+      expect(nearby.getAttribute('aria-pressed')).toBe('false');
+      expect(nearby.hasAttribute('disabled')).toBe(true);
+      act(() => callbacks[1]({ coords: { latitude, longitude } } as GeolocationPosition));
+      expect(screen.getByText('定位結果無效，請重新取得位置。')).toBeTruthy();
+      expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+      const google = new URL(screen.getByRole('link', { name: '從目前位置導航' }).getAttribute('href')!);
+      const apple = new URL(screen.getByRole('link', { name: '使用 Apple 地圖從目前位置導航' }).getAttribute('href')!);
+      expect(google.searchParams.has('origin')).toBe(false);
+      expect(apple.searchParams.has('saddr')).toBe(false);
+
+      fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+      act(() => callbacks[2]({ coords: { latitude: gate.lat, longitude: gate.lng } } as GeolocationPosition));
+      expect(nearby.hasAttribute('disabled')).toBe(false);
+      expect(nearby.getAttribute('aria-pressed')).toBe('false');
+      expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
+    } finally {
+      Object.defineProperty(navigator, 'geolocation', { configurable: true, value: undefined });
+    }
+  },
+);
+
 it('filters favorites without exposing unsaved locations or requiring a map redraw on login', async () => {
   vi.mocked(loadMapFavorites).mockResolvedValueOnce(['library']);
   render(<MapClient school="pu" />);
