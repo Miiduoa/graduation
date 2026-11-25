@@ -316,6 +316,8 @@ function MapContent({
   function locate() {
     const request = ++positionGeneration.current;
     setMyLocation(null);
+    // A distance filter cannot stay active without a current position.
+    setNearbyOnly(false);
     setPositionError('');
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setPositionStatus('error');
@@ -326,7 +328,10 @@ function MapContent({
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
         if (!mounted.current || request !== positionGeneration.current) return;
-        if (!Number.isFinite(coords.latitude) || !Number.isFinite(coords.longitude)) {
+        if (
+          !Number.isFinite(coords.latitude) || Math.abs(coords.latitude) > 90 ||
+          !Number.isFinite(coords.longitude) || Math.abs(coords.longitude) > 180
+        ) {
           setPositionStatus('error');
           setPositionError('定位結果無效，請重新取得位置。');
           return;
