@@ -1,6 +1,10 @@
 name: AI Workspace Browser
 
 on:
+  # Validate the exact stacked-PR head even before its base reaches main.
+  # This workflow is read-only and never deploys.
+  push:
+    branches: [feat/nuni-assistant-first-workspace-20261124]
   pull_request:
     branches: [main, develop]
     paths:
@@ -75,6 +79,7 @@ jobs:
         run: |
           mkdir -p artifacts/ai-workspace
           pnpm --filter web test \
+            src/lib/quickCampusActions.test.ts \
             src/components/AssistantWorkspaceProvider.test.tsx \
             src/components/AssistantWorkspace.integration.test.tsx \
             src/components/TodayCampusEntry.test.tsx \
@@ -83,6 +88,9 @@ jobs:
             src/app/ai-assistant/LegacyAssistant.workspaceDraft.test.tsx \
             --reporter=default --reporter=json \
             --outputFile=../../artifacts/ai-workspace/unit-tests.json
+      - name: Verify native campus shortcuts match existing registered screens
+        run: |
+          pnpm --filter mobile test src/__tests__/quickCampusActions.test.ts --ci --json --outputFile=../../artifacts/ai-workspace/mobile-quick-actions.json
       - name: Install Chromium and Chinese fonts
         run: |
           python -m pip install playwright==1.57.0
