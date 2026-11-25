@@ -11,6 +11,9 @@ import { CampusIcon } from '../../../apps/web/src/components/CampusIcon';
 import { QuickCampusEntry } from '../../../apps/web/src/components/QuickCampusEntry';
 import { PageRecovery } from '../../../apps/web/src/components/PageRecovery';
 import { ServiceDirectory } from '../../../apps/web/src/components/ServiceDirectory';
+import SearchPage from '../../../apps/web/src/app/search/page';
+import { CourseEditing } from './course-editing';
+import { RecordEditing } from './record-editing';
 import {
   applyWebAppearancePreferences,
   defaultWebPreferences,
@@ -232,6 +235,18 @@ function ActionFeedback() {
 
 function Fixture() {
   const pathname = usePathname();
+  if (pathname === '/search') {
+    return (
+      <SchoolLmsReadonlyProvider enabled>
+        <ToastProvider position="bottom-right">
+          <SearchPage />
+          <div className={home.main}>
+            <Controls />
+          </div>
+        </ToastProvider>
+      </SchoolLmsReadonlyProvider>
+    );
+  }
   return (
     <SchoolLmsReadonlyProvider enabled>
       <ToastProvider position="bottom-right">
@@ -307,6 +322,10 @@ function Fixture() {
               </>
             ) : pathname === '/interface-feedback' ? (
               <ActionFeedback />
+            ) : pathname === '/interface-course-editing' ? (
+              <CourseEditing />
+            ) : pathname === '/interface-record-editing' ? (
+              <RecordEditing />
             ) : pathname === '/life' || pathname === '/connect' ? (
               <>
                 <div className={home.heading}>
