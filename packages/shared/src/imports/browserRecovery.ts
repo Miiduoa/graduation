@@ -37,18 +37,33 @@ export function unwrapPersonalImportCheckpoint(encoded: string): unknown {
   return encoded.trimStart().startsWith('{') ? encoded : JSON.parse(encoded);
 }
 
-export function capturePersonalImportBrowserRecovery(storage: Storage, key: string) {
+export function capturePersonalImportBrowserRecovery(
+  storage: Storage,
+  key: string,
+  mode: 'read' | 'write',
+) {
   const entries = {
     journal: personalImportWebJournalKey(key),
     checkpoint: personalImportCheckpointKey(key),
   };
+  const readErrors: unknown[] = [];
+  const readCopy = (entry: string) => {
+    try {
+      return storage.getItem(entry);
+    } catch (error) {
+      if (mode === 'write') throw error;
+      readErrors.push(error);
+      return null;
+    }
+  };
   const copies = {
-    journal: storage.getItem(entries.journal),
-    checkpoint: storage.getItem(entries.checkpoint),
+    journal: readCopy(entries.journal),
+    checkpoint: readCopy(entries.checkpoint),
   };
 
   return {
     ...copies,
+    readErrors,
     hasCopies: copies.journal !== null || copies.checkpoint !== null,
     assertSnapshot(primary: string | null, checkCheckpoint: boolean, checkJournal = false) {
       if (storage.getItem(key) !== primary ||
@@ -164,7 +179,14 @@ export function selectPersonalImportBrowserRecovery<T>(
     }
   }
 
-  return journal?.bound ? null : recoverJournal();
+  const legacy = journal?.bound ? null : recoverJournal();
+  // A readable primary can still be displayed when an auxiliary key is
+  // unavailable. Without usable data, surface the I/O failure instead of
+  // presenting an empty ledger.
+  if (!legacy && !primaryVerified && copies.readErrors.length > 0) {
+    throw copies.readErrors[0];
+  }
+  return legacy;
 }
 
 function isPersonalImportBatchHistory(value: unknown): value is Array<{

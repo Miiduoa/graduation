@@ -58,6 +58,7 @@ let mockSignInGeneration: number | undefined;
 let mockSessionError = '';
 let mockAuth: { user: { uid: string } | null; loading: boolean };
 let mockUseLiveScope = false;
+let mockCalendarFocused = true;
 
 jest.mock('../state/personalImportScope', () => ({
   usePersonalImportScope: () =>
@@ -83,7 +84,7 @@ jest.mock('../state/auth', () => ({
 }));
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void | (() => void)) =>
-    require('react').useEffect(() => callback(), [callback]),
+    require('react').useEffect(() => mockCalendarFocused ? callback() : undefined, [callback, mockCalendarFocused]),
   useNavigation: () => ({ navigate: mockNavigate }),
   useRoute: () => ({ params: undefined }),
 }));
@@ -157,6 +158,7 @@ beforeEach(async () => {
   };
   mockSessionError = '';
   mockNuniLoading = false;
+  mockCalendarFocused = true;
   mockSignInGeneration = undefined;
   mockAuth = { user: null, loading: false };
   mockSchool = { id: 'pu', name: '靜宜大學' };
@@ -597,6 +599,32 @@ it.each(['availability', 'write'])('blocks an old export after same-account reva
   fireEvent.press(view.getByText('匯出所選月份'));
   await waitFor(() => expect(exportMock).toHaveBeenCalledTimes(2));
   expect(exportMock.mock.calls[1][2]?.()).toBe(true);
+});
+
+it('hides the loaded month grid during Nuni revalidation and retains the unsaved draft', async () => {
+  mockUseLiveScope = true;
+  const title = '驗證後才能顯示的行程';
+  const draftTitle = '尚未儲存的草稿';
+  const view = await fillAndSave(title);
+  fireEvent.press(view.getByText('月格'));
+  await fillDraft(view, draftTitle);
+  expect(view.getByLabelText('2026-10-20')).toBeTruthy();
+  expect(view.getByText(title)).toBeTruthy();
+
+  // A mounted screen can lose verification before its focus-driven refresh runs.
+  mockCalendarFocused = false;
+  mockNuniLoading = true;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(view.queryByLabelText('2026-10-20')).toBeNull();
+  expect(view.queryByText(title)).toBeNull();
+  expect(view.getByLabelText('標題').props.value).toBe(draftTitle);
+  expect(view.getByRole('button', { name: '儲存行程' })).toBeDisabled();
+
+  mockNuniLoading = false;
+  mockCalendarFocused = true;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(await view.findByText(title)).toBeTruthy();
+  expect(view.getByLabelText('標題').props.value).toBe(draftTitle);
 });
 
 it('blocks a started save until the account scope is revalidated', async () => {

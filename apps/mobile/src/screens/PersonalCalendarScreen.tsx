@@ -285,7 +285,9 @@ function PersonalCalendarWorkspace({
   const resolvedKey = scope ? personalImportStorageKey(scope) : '';
   const verifiedKey = resolvedKey === scopeKey && !writesRevoked ? resolvedKey : '';
   const currentScope = useRef({ resolvedKey, verifiedKey, writesRevoked, writeGeneration });
-  const [load, setLoad] = useState<LoadState>({ status: 'loading' });
+  const [loadedLedger, setLoad] = useState<LoadState>({ status: 'loading' });
+  // The workspace can retain a draft while the account is being verified.
+  const load: LoadState = verifiedKey ? loadedLedger : { status: 'loading' };
   const ready = load.status === 'ready';
   const ledgerReady = useRef(ready);
   const [month, setMonth] = useState(() =>
@@ -327,6 +329,11 @@ function PersonalCalendarWorkspace({
     // A scope change or Firebase logout starts a new verification for queued operations.
     currentScope.current = { resolvedKey, verifiedKey, writesRevoked, writeGeneration };
     setReminderBusyId(null);
+    if (!verifiedKey) {
+      setLoad({ status: 'loading' });
+      setReminders({});
+      setReminderBlocked(null);
+    }
   }, [resolvedKey, verifiedKey, writesRevoked, writeGeneration]);
 
   useLayoutEffect(() => {
@@ -372,11 +379,7 @@ function PersonalCalendarWorkspace({
   }, [beginRead, scope]);
 
   const refresh = useCallback(async () => {
-    if (!active.current) return;
-    if (!scope) {
-      if (!currentScope.current.verifiedKey) setLoad({ status: 'loading' });
-      return;
-    }
+    if (!active.current || !scope) return;
     const isCurrentRead = beginRead('ledger', personalImportStorageKey(scope));
     if (!isCurrentRead) return;
     try {
@@ -1010,7 +1013,7 @@ function PersonalCalendarWorkspace({
                 {issue.message}
               </Text>
             ))}
-            {mode === 'edit' && baseline ? reminderControls(baseline) : null}
+            {verifiedKey && mode === 'edit' && baseline ? reminderControls(baseline) : null}
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {mode === 'create' ? (
                 <Button

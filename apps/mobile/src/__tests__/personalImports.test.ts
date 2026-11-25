@@ -411,6 +411,71 @@ test.each([
   }
 });
 
+test.each([
+  ['Web', 'checkpoint'],
+  ['Web', 'journal'],
+  ['Expo Web', 'checkpoint'],
+  ['Expo Web', 'journal'],
+] as const)('%s rereads the published ledger while the %s is still unreadable', async (client, source) => {
+  const cleanup = useWebStorage();
+  const restoreLocks = withoutWebWriteLocks();
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: async (_key: string, write: () => unknown) => write() },
+  });
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const recoveryKey = source === 'checkpoint'
+    ? key + ':checkpoint'
+    : `campus.personal-imports.rollback.v1:${sha256(key)}`;
+  const getItem = Storage.prototype.getItem;
+  let published = false;
+  const reread = jest.fn(() => client === 'Web'
+    ? Promise.resolve().then(() => readWebCalendarImports(scope))
+    : loadPersonalImports(scope).then(({ records }) => records));
+  let unsubscribe: (() => void) | undefined;
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    const original = JSON.stringify(ledger);
+    if (source === 'checkpoint') storage.removeItem(key);
+    const recoveryCopy = source === 'checkpoint' ? original : JSON.stringify({
+      id: 'interrupted',
+      original,
+      before: sha256(original),
+      attempted: sha256('null'),
+    });
+    if (source === 'journal') storage.setItem(key, original);
+    storage.setItem(recoveryKey, recoveryCopy);
+    if (client === 'Web') window.addEventListener(PERSONAL_IMPORT_CHANGE, reread);
+    else unsubscribe = subscribePersonalImports(reread);
+    const setItem = Storage.prototype.setItem;
+    const write = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, entry, value) {
+      setItem.call(this, entry, value);
+      if (this === storage && entry === key) published = true;
+    });
+    const read = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, entry) {
+      if (published && this === storage && entry === recoveryKey) throw new Error('復原副本持續無法讀取');
+      return getItem.call(this, entry);
+    });
+    try {
+      const append = client === 'Web' ? saveWebCalendarBatch : appendPersonalImports;
+      await expect(append(scope, [row('new', '統計')])).resolves.toMatchObject({ added: 1 });
+      expect(reread).toHaveBeenCalledTimes(1);
+      const records = await reread.mock.results[0].value;
+      expect(records.map(({ title }) => title)).toEqual(['微積分', '統計']);
+      expect(getItem.call(storage, recoveryKey)).toBe(recoveryCopy);
+    } finally {
+      read.mockRestore();
+      write.mockRestore();
+    }
+  } finally {
+    unsubscribe?.();
+    window.removeEventListener(PERSONAL_IMPORT_CHANGE, reread);
+    restoreLocks();
+    cleanup();
+  }
+});
+
 test.each(['Web', 'Expo Web'] as const)('%s keeps a commit readable when it would match a retained journal fingerprint', async (client) => {
   const cleanup = useWebStorage();
   const restoreLocks = withoutWebWriteLocks();

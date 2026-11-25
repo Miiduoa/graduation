@@ -52,7 +52,11 @@ function isStorageRowTooLarge(error: unknown): boolean {
   );
 }
 
-async function readLedgerSnapshot(key: string, scope: PersonalImportScope) {
+async function readLedgerSnapshot(
+  key: string,
+  scope: PersonalImportScope,
+  mode: 'read' | 'write',
+) {
   const web = Platform.OS === 'web';
   const nativeJournal = web ? undefined : readPersonalImportRollback(key);
   let primary: string | null = null;
@@ -66,7 +70,7 @@ async function readLedgerSnapshot(key: string, scope: PersonalImportScope) {
     }
   }
   const browserRecovery = web
-    ? capturePersonalImportBrowserRecovery(window.localStorage, key)
+    ? capturePersonalImportBrowserRecovery(window.localStorage, key, mode)
     : undefined;
   const primaryVerified = isReadableLedger(primary, scope);
   const recovery: (Recovery & { ledger: PersonalImportLedger }) | null = browserRecovery
@@ -263,7 +267,7 @@ export async function loadPersonalImports(
       continue;
     }
     const sequence = writeSequence;
-    const { primary, recovery } = await readLedgerSnapshot(key, scope);
+    const { primary, recovery } = await readLedgerSnapshot(key, scope, 'read');
     if (Platform.OS === 'web' && primary !== await AsyncStorage.getItem(key)) continue;
     if (sequence !== writeSequence) continue;
     return recovery?.ledger ?? parseLedger(primary, scope);
@@ -310,7 +314,7 @@ export function mutatePersonalImportLedger<T>(
         assertLockHeld();
       };
       assertWritable();
-      const { primary, primaryVerified, browserRecovery, recovery } = await readLedgerSnapshot(key, scope);
+      const { primary, primaryVerified, browserRecovery, recovery } = await readLedgerSnapshot(key, scope, 'write');
       let primaryRaw = primary;
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
