@@ -1225,6 +1225,46 @@ it('刪除期間移到查看月份再主動離焦，完成後焦點留在 body',
   expect(readPersonalImports(scope())).toEqual([]);
 });
 
+it.each(['等待寫入', '等待 React 提交'])('刪除期間在%s時切到下一月，完成後不搶焦點', async (phase) => {
+  const stored = event('delete-before-navigation', '切月前選取的合成行程', '2026-11-14');
+  seed([stored]);
+  const pendingWrite = deferNextCalendarWrite();
+  render(<PersonalCalendar />);
+  await ready();
+  activate(screen.getByRole('button', { name: stored.date }));
+  activate(screen.getByRole('button', { name: stored.title }));
+  const editorField = titleField();
+  const submit = screen.getByRole('button', { name: '刪除這筆' });
+  const nextMonth = screen.getByRole('button', { name: '下一月' });
+  const monthField = screen.getByLabelText<HTMLInputElement>('查看月份');
+  activate(submit);
+  await waitFor(() => expect(pendingWrite()).toBeTypeOf('function'));
+
+  const navigateWithoutMovingFocus = () => {
+    expect(editorField.isConnected).toBe(true);
+    expect(monthField.value).toBe('2026-11');
+    expect(document.activeElement).toBe(submit);
+    fireEvent.click(nextMonth);
+    expect(document.activeElement).toBe(submit);
+  };
+  if (phase === '等待寫入') navigateWithoutMovingFocus();
+  await act(async () => {
+    pendingWrite()?.();
+    if (phase === '等待 React 提交') {
+      // Flush the write continuation while act keeps the editor mounted.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(readPersonalImports(scope())).toEqual([]);
+      navigateWithoutMovingFocus();
+    }
+  });
+
+  await screen.findByText('已刪除這筆個人行程。');
+  expect(monthField.value).toBe('2026-12');
+  expect(screen.queryByRole('textbox', { name: '標題' })).toBeNull();
+  expect(readPersonalImports(scope())).toEqual([]);
+  expect(document.activeElement).toBe(document.body);
+});
+
 it.each([
   { operation: '儲存', blurMonth: false },
   { operation: '儲存', blurMonth: true },

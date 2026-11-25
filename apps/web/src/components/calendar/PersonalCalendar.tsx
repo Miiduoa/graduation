@@ -854,6 +854,7 @@ function PersonalCalendarWorkspace({
   };
 
   const trackWriteFocus = () => {
+    const startedFromView = viewRevision.current;
     const editor = editorRef.current;
     let canUseBodyFallback =
       document.activeElement === document.body || Boolean(editor?.contains(document.activeElement));
@@ -884,6 +885,7 @@ function PersonalCalendarWorkspace({
     return {
       canHandoff: () =>
         !suspended.current &&
+        startedFromView === viewRevision.current &&
         (editor?.contains(document.activeElement) ||
           (canUseBodyFallback && document.activeElement === document.body)),
       stop: () => {
@@ -933,7 +935,6 @@ function PersonalCalendarWorkspace({
         pendingWriteFocus.current?.stop();
         pendingWriteFocus.current = {
           ...writeFocus,
-          canHandoff: () => savedFromView === viewRevision.current && writeFocus.canHandoff(),
           target: followSavedDate || selectedDate ? 'saved' : 'return',
         };
         focusQueued = true;
