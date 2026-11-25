@@ -11,10 +11,11 @@ import {
 } from '@campus/shared/src/imports/browserRecovery';
 import { findCatalogSameSlotChange } from './publicCourseTimetableImport';
 import {
+  capturePersonalImportRollback,
   clearPersonalImportRollback,
   commitWebPersonalImports,
   preparePersonalImportRollback,
-  readPersonalImportRollback,
+  retainRejectedPersonalImportRollback,
   withPersonalImportWriteLock,
 } from './personalImportRollbackJournal';
 import {
@@ -57,14 +58,15 @@ async function readLedgerSnapshot(
   scope: PersonalImportScope,
 ) {
   const web = Platform.OS === 'web';
-  const nativeJournal = web ? undefined : readPersonalImportRollback(key);
+  const journal = web ? undefined : capturePersonalImportRollback(key);
+  const checkpoint = journal ? await readLegacyCheckpoint(key, scope).catch(() => null) : undefined;
   let primary: string | null = null;
   let primaryError: unknown;
-  if (nativeJournal === undefined && (web || !pendingRestorations.has(key))) {
+  if (web || !pendingRestorations.has(key)) {
     try {
       primary = await AsyncStorage.getItem(key);
     } catch (error) {
-      if (web || !isStorageRowTooLarge(error)) throw error;
+      if (web) throw error;
       primaryError = error;
     }
   }
@@ -72,11 +74,16 @@ async function readLedgerSnapshot(
     ? capturePersonalImportBrowserRecovery(window.localStorage, key)
     : undefined;
   const primaryVerified = isReadableLedger(primary, scope);
+  const nativeCommit = !web && primaryVerified && hasNativeCommitEncoding(primary);
+  const nativeJournal = nativeCommit && !journal?.rejected ? undefined : journal?.raw;
+  if (primaryError && nativeJournal === undefined && !isStorageRowTooLarge(primaryError)) {
+    throw primaryError;
+  }
   const recovery: (Recovery & { ledger: PersonalImportLedger }) | null = browserRecovery
     ? selectPersonalImportBrowserRecovery(browserRecovery, primary, primaryVerified, (raw) => parseLedger(raw, scope))
-    : await readNativeRecovery(key, scope, primaryVerified, nativeJournal);
+    : await readNativeRecovery(key, scope, primaryVerified, nativeJournal, checkpoint);
   if (!recovery && primaryError) throw primaryError;
-  return { primary, primaryVerified, browserRecovery, recovery };
+  return { primary, primaryVerified, browserRecovery, recovery, nativeCommit };
 }
 
 function isReadableLedger(raw: string | null, scope: PersonalImportScope): boolean {
@@ -94,16 +101,19 @@ async function readNativeRecovery(
   scope: PersonalImportScope,
   primaryVerified: boolean,
   nativeJournal: string | undefined,
+  capturedCheckpoint?: Awaited<ReturnType<typeof readLegacyCheckpoint>>,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
   // A marked native journal or an in-process rollback can supersede an
   // interrupted primary write. A standalone legacy checkpoint cannot.
   const pending = pendingRestorations.get(key);
-  if (!primaryVerified) {
-    const checkpoint = await readLegacyCheckpoint(key, scope).catch((error: unknown) => {
-      // The legacy copy is optional when a rollback already has authoritative bytes.
-      if (pending === undefined && nativeJournal === undefined) throw error;
-      return null;
-    });
+  if (!primaryVerified || nativeJournal !== undefined) {
+    const checkpoint = capturedCheckpoint !== undefined
+      ? capturedCheckpoint
+      : await readLegacyCheckpoint(key, scope).catch((error: unknown) => {
+          // The legacy copy is optional when another rollback has authoritative bytes.
+          if (pending === undefined && nativeJournal === undefined) throw error;
+          return null;
+        });
     if (checkpoint &&
         (pending === undefined || checkpoint.raw === pending.raw) &&
         (nativeJournal === undefined || (checkpoint.raw ?? 'null') === nativeJournal)) {
@@ -280,8 +290,25 @@ export async function loadPersonalImports(
   }
 }
 
+function hasNativeCommitEncoding(raw: string | null): boolean {
+  return raw?.startsWith('{"batches":') === true && raw.endsWith(',"version":1}');
+}
+
+function encodeNativeCommit({ version, records, batches, ...metadata }: PersonalImportLedger) {
+  // Reserve a field order for commits whose journal files could not be retired.
+  // Replacing the same bytes in a different order fits at the same row limit.
+  return JSON.stringify({ batches, records, ...metadata, version });
+}
+
 function parseLedger(raw: string | null, scope: PersonalImportScope): PersonalImportLedger {
-  return parsePersonalImportLedger(raw, scope.schoolId, Platform.OS === 'web');
+  const web = Platform.OS === 'web';
+  const ledger = parsePersonalImportLedger(raw, scope.schoolId, web);
+  if (web || !hasNativeCommitEncoding(raw)) return ledger;
+  return nativeLedgerInDefaultOrder(ledger);
+}
+
+function nativeLedgerInDefaultOrder({ version, records, batches, ...metadata }: PersonalImportLedger) {
+  return { version, records, batches, ...metadata };
 }
 
 /** A verified operation may require uninterrupted verification through its first commit. */
@@ -320,12 +347,13 @@ export function mutatePersonalImportLedger<T>(
         assertLockHeld();
       };
       assertWritable();
-      const { primary, primaryVerified, browserRecovery, recovery } = await readLedgerSnapshot(key, scope);
+      const { primary, primaryVerified, browserRecovery, recovery, nativeCommit } = await readLedgerSnapshot(key, scope);
       let primaryRaw = primary;
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
       assertWritable();
       let persisted = current;
+      let keepNativeCommitEncoding = nativeCommit;
       const recoveryCheck = () => ({
         verifyCheckpoint: !hasPersisted && !primaryVerified,
         verifyJournal: !hasPersisted && (!primaryVerified || recovery?.source === 'journal'),
@@ -340,8 +368,11 @@ export function mutatePersonalImportLedger<T>(
       };
       const checkpoint = async (ledger: PersonalImportLedger) => {
         assertWritable();
-        const raw = JSON.stringify(ledger);
-        if (raw === JSON.stringify(persisted)) return;
+        const serialized = JSON.stringify(ledger);
+        if (serialized === JSON.stringify(persisted)) return;
+        const raw = !browserRecovery && hasNativeCommitEncoding(serialized)
+          ? JSON.stringify(nativeLedgerInDefaultOrder(ledger))
+          : serialized;
         // Keep the recovery copy authoritative until the replacement commits,
         // even if the recovered version no longer fits in AsyncStorage.
         const needsJournal = typeof guard !== 'function' || (recovery !== null && !hasPersisted);
@@ -355,7 +386,8 @@ export function mutatePersonalImportLedger<T>(
               lease,
             );
           } else if (!needsJournal) {
-            await AsyncStorage.setItem(key, raw);
+            writtenRaw = keepNativeCommitEncoding ? encodeNativeCommit(ledger) : raw;
+            await AsyncStorage.setItem(key, writtenRaw);
           } else {
             const adoptedCheckpoint = hasPersisted ? undefined : recovery?.checkpoint;
             if (adoptedCheckpoint !== undefined &&
@@ -363,8 +395,9 @@ export function mutatePersonalImportLedger<T>(
               throw new Error('匯入資料已更新，請重新載入。');
             }
             assertWritable();
-            const commit = preparePersonalImportRollback(key, persistedRaw);
+            const journal = preparePersonalImportRollback(key, persistedRaw);
             let cleaningRecovery = false;
+            let publishingCommitEncoding = false;
             try {
               await AsyncStorage.setItem(key, raw);
               assertWritable();
@@ -376,16 +409,32 @@ export function mutatePersonalImportLedger<T>(
               const checkpointRetired = adoptedCheckpoint === undefined ||
                 await retireNativeCheckpoint(key, adoptedCheckpoint, assertWritable);
               assertWritable();
-              commit(assertWritable, checkpointRetired);
+              keepNativeCommitEncoding = !journal.retire(assertWritable, checkpointRetired);
+              if (keepNativeCommitEncoding) {
+                journal.preparePrimaryCommit();
+                assertWritable();
+                publishingCommitEncoding = true;
+                writtenRaw = encodeNativeCommit(ledger);
+                await AsyncStorage.setItem(key, writtenRaw);
+                await verifyNativeLedgerWrite(key, writtenRaw);
+                assertWritable();
+              }
               pendingRestorations.delete(key);
             } catch (error) {
+              if (publishingCommitEncoding) {
+                try {
+                  retainRejectedPersonalImportRollback(key, persistedRaw);
+                } catch {
+                  // Still try to restore the original primary and checkpoint.
+                }
+              }
               await rollbackLedger(key, persistedRaw, assertWritable, cleaningRecovery);
               throw error;
             }
           }
           hasPersisted = true;
           primaryRaw = writtenRaw;
-          persistedRaw = raw;
+          persistedRaw = browserRecovery ? raw : writtenRaw;
           persisted = ledger;
           for (const listener of listeners) {
             try {

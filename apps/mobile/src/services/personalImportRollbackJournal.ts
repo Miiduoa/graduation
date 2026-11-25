@@ -10,7 +10,7 @@ import { Platform } from 'react-native';
 
 const markerSuffix = '.rollback.pending';
 const committedMarker = 'committed';
-const retiredInProcess = new Set<string>();
+const rejectedPrefix = 'rejected:\n';
 const legacyStagePattern = /^campus\.personal-imports\.rollback\.v1:([a-f0-9]{64}):stage:\d+:[^:]+$/;
 const lockStore = 'writes';
 const stagePrefix = 'campus.personal-imports.stage.v2:';
@@ -89,8 +89,7 @@ async function writeWithLease<T>(
     try {
       storage.setItem(leaseKey, value);
       reserved = true;
-    } catch (error) {
-      if (!isQuotaExceeded(error)) throw error;
+    } catch {
       // Without a persisted lease this attempt may only publish an in-place
       // replacement atomically. It cannot create or reuse a recovery stage.
     }
@@ -431,10 +430,31 @@ function journalFiles(key: string) {
   return { marker, payload: new File(directory, `${name}.rollback.json`), marked: marker.info().exists };
 }
 
-export function readPersonalImportRollback(key: string): string | undefined {
-  if (retiredInProcess.has(key) || retirementFile(key).info().exists) return undefined;
+export function capturePersonalImportRollback(key: string) {
+  if (retirementFile(key).info().exists) return undefined;
   const { payload, marker, marked } = journalFiles(key);
-  return marked && marker.textSync() !== committedMarker ? payload.textSync() : undefined;
+  if (!marked) return undefined;
+  const committed = marker.textSync() === committedMarker;
+  const encoded = committed ? readRetiredPayload(payload) : payload.textSync();
+  // A revoked publication can leave its verified encoding in AsyncStorage
+  // if restoring the original bytes there also fails.
+  if (encoded?.startsWith(rejectedPrefix)) {
+    return { raw: encoded.slice(rejectedPrefix.length), rejected: true };
+  }
+  if (!committed && encoded !== undefined) return { raw: encoded, rejected: false };
+}
+
+export function readPersonalImportRollback(key: string): string | undefined {
+  return capturePersonalImportRollback(key)?.raw;
+}
+
+function readRetiredPayload(payload: File): string | undefined {
+  try {
+    return payload.textSync();
+  } catch {
+    // A retired journal need not have a readable payload.
+    return undefined;
+  }
 }
 
 function retirementFile(key: string): File {
@@ -446,7 +466,9 @@ export function preparePersonalImportRollback(key: string, raw: string | null) {
   const { payload, marker, marked } = journalFiles(key);
   // The document directory survives process restarts and is outside AsyncStorage's quota.
   // A retry can reuse the verified copy without rewriting it.
-  if (!marked || payload.textSync() !== encoded) {
+  const previous = marked ? payload.textSync() : undefined;
+  const rejected = previous === rejectedPrefix + encoded;
+  if (previous !== encoded && !rejected) {
     payload.write(encoded);
     if (payload.textSync() !== encoded) {
       throw new Error('無法確認匯入資料的還原副本已寫入。');
@@ -464,19 +486,18 @@ export function preparePersonalImportRollback(key: string, raw: string | null) {
   if (retirement.info().exists && !deleteMarker(retirement)) {
     throw new Error('無法重新啟用匯入資料的還原標記。');
   }
-  retiredInProcess.delete(key);
-  return (assertWritable = () => {}, canDeleteMarker = true) => {
+  const retire = (assertWritable = () => {}, canDeleteMarker = true) => {
     // Commit synchronously so verification and commit cannot be separated by another JS event.
     if (canDeleteMarker && deleteMarker(marker)) {
       discardPayload(payload);
-      return;
+      return true;
     }
     // Retain the recovery files when cleanup fails, but retire this rollback
     // durably so a restart exposes the verified primary.
     assertWritable();
     try {
       marker.write(committedMarker);
-      if (marker.textSync() === committedMarker) return;
+      if (marker.textSync() === committedMarker && !rejected) return true;
     } catch {
       // A separate file can record retirement even if this marker cannot be updated.
     }
@@ -491,20 +512,37 @@ export function preparePersonalImportRollback(key: string, raw: string | null) {
       }
       throw error;
     }
-    retiredInProcess.add(key);
     try {
       retirement.create();
-      if (retirement.info().exists) retiredInProcess.delete(key);
+      return retirement.info().exists;
     } catch {
-      // Keep the verified primary visible in this process if retirement cannot be recorded.
+      return false;
     }
   };
+  return {
+    retire,
+    preparePrimaryCommit() {
+      // The tentative write is verified now, so a rejected primary from a
+      // previous attempt can no longer be exposed by clearing this flag.
+      if (!rejected) return;
+      payload.write(encoded);
+      if (payload.textSync() !== encoded) {
+        throw new Error('無法確認匯入資料的還原副本已寫入。');
+      }
+    },
+  };
+}
+
+export function retainRejectedPersonalImportRollback(key: string, raw: string | null): void {
+  const { payload } = journalFiles(key);
+  // Keep the old ledger authoritative when the in-place commit encoding may
+  // have reached disk but the final authority or readback check failed.
+  payload.write(rejectedPrefix + (raw ?? 'null'));
 }
 
 export function clearPersonalImportRollback(key: string): void {
   const { payload, marker, marked } = journalFiles(key);
   if (!marked || deleteMarker(marker)) {
-    retiredInProcess.delete(key);
     discardPayload(retirementFile(key));
     discardPayload(payload);
   }

@@ -376,22 +376,40 @@ test.each([false, true])('native marker deletion I/O preserves the correct ledge
 
 test.each([
   ['write', false], ['readback', false], ['write', true], ['readback', true],
+  ['all', false], ['all', true], ['publish', true],
 ] as const)('native marker retirement %s I/O keeps the correct primary and notification (revoked: %s)', async (phase, revoked) => {
   const scope = { owner: `nuni:retirement-${phase}-${revoked}`, schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
   const { ledger: previous } = await appendPersonalImports(scope, [row('original')]);
   const markerUri = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.pending`).uri;
-  const { delete: deleteFile, write: writeFile, textSync } = File.prototype;
+  const { create: createFile, delete: deleteFile, write: writeFile, textSync } = File.prototype;
   let active = true;
   let retirementAttempts = 0;
+  const set = jest.mocked(AsyncStorage.setItem);
+  const nativeSet = set.getMockImplementation()!;
+  const restoreError = new Error('主鍵無法還原');
+  if (phase === 'publish') {
+    set.mockImplementation(async (entry, value) => {
+      if (entry === key && !active) throw restoreError;
+      await nativeSet(entry, value);
+      if (entry === key && value.startsWith('{"batches":')) active = false;
+    });
+  }
+  const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
+    if ((phase === 'all' || phase === 'publish') && this.uri.endsWith('.rollback.committed')) {
+      if (phase === 'all' && revoked) active = false;
+      throw new Error('備用退役檔無法建立');
+    }
+    createFile.call(this, options);
+  });
   const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
     if (this.uri === markerUri) throw new Error('標記無法刪除');
     deleteFile.call(this);
   });
   const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
-    if (phase === 'write' && this.uri === markerUri && value === 'committed') {
+    if (phase !== 'readback' && this.uri === markerUri && value === 'committed') {
       retirementAttempts++;
-      if (revoked) active = false;
+      if (phase === 'write' && revoked) active = false;
       throw new Error('標記無法更新');
     }
     writeFile.call(this, value, options);
@@ -411,15 +429,30 @@ test.each([
     const append = appendPersonalImports(scope, [row('new', '統計')], { canContinue: () => active });
     let expected = previous;
     if (revoked) {
-      await expect(append).rejects.toThrow('帳號或學校已切換');
+      await expect(append).rejects.toThrow(phase === 'publish' ? restoreError : '帳號或學校已切換');
       expect(reread).not.toHaveBeenCalled();
-      expect(await AsyncStorage.getItem(key)).toBe(JSON.stringify(previous));
       expect(readPersonalImportRollback(key)).toBe(JSON.stringify(previous));
-      await AsyncStorage.removeItem(key);
+      if (phase === 'publish') {
+        expect(JSON.parse((await AsyncStorage.getItem(key))!).records.map(({ title }: PersonalImportRecord) => title))
+          .toEqual(['微積分', '統計']);
+      } else {
+        expect(await AsyncStorage.getItem(key)).toBe(JSON.stringify(previous));
+        await AsyncStorage.removeItem(key);
+      }
     } else {
       expected = (await append).ledger;
       expect(expected.records.map(({ title }) => title)).toEqual(['微積分', '統計']);
-      expect(await AsyncStorage.getItem(key)).toBe(JSON.stringify(expected));
+      const primary = (await AsyncStorage.getItem(key))!;
+      if (phase === 'all') {
+        expect(JSON.parse(primary)).toEqual(expected);
+        expect(Buffer.byteLength(primary)).toBe(Buffer.byteLength(JSON.stringify(expected)));
+        expect(create.mock.contexts.map((file: File) => file.uri)).toContain(
+          new File(Paths.document, `personal-imports-${sha256(key)}.rollback.committed`).uri,
+        );
+        expect(readPersonalImportRollback(key)).toBe(JSON.stringify(previous));
+      } else {
+        expect(primary).toBe(JSON.stringify(expected));
+      }
       expect(reread).toHaveBeenCalledTimes(1);
       await expect(reread.mock.results[0].value).resolves.toEqual(expected);
     }
@@ -427,12 +460,25 @@ test.each([
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
+      if (phase === 'all' && !revoked) {
+        const { ledger } = await restarted.appendPersonalImports(scope, [row('later', '物理')]);
+        await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+        expected = ledger;
+      }
     });
+    if (phase === 'all' && !revoked) {
+      await jest.isolateModulesAsync(async () => {
+        const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+        await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
+      });
+    }
   } finally {
     unsubscribe();
     read.mockRestore();
     write.mockRestore();
     remove.mockRestore();
+    create.mockRestore();
+    set.mockImplementation(nativeSet);
   }
 });
 
@@ -443,7 +489,7 @@ test.each([true, false])('native restart reads a valid journal despite persisten
   const { ledger } = await appendPersonalImports(scope, [row('original')]);
   const original = (await AsyncStorage.getItem(key))!;
   await AsyncStorage.setItem(checkpoint, original);
-  const clearJournal = preparePersonalImportRollback(key, original);
+  const { retire: clearJournal } = preparePersonalImportRollback(key, original);
   if (!restored) await AsyncStorage.removeItem(key);
   const multiGet = jest.mocked(AsyncStorage.multiGet);
   const nativeMultiGet = multiGet.getMockImplementation()!;
@@ -1037,38 +1083,51 @@ test.each(['Web Locks', 'IndexedDB', 'lease'] as const)(
   },
 );
 
-test.each(['access', 'remove', 'write', 'read'] as const)(
-  'Expo Web keeps adding, editing and syncing during persistent session storage %s failure',
+test.each(['session access', 'session remove', 'session write', 'session read', 'lease write'] as const)(
+  'Expo Web keeps adding, editing and syncing during persistent %s failure',
   async (failure) => {
     const cleanup = useWebStorage();
     const restoreLocks = withoutWebWriteLocks();
-    Object.defineProperty(navigator, 'locks', {
-      configurable: true,
-      value: { request: async (_key: string, write: () => unknown) => write() },
-    });
+    if (failure === 'lease write') {
+      Object.defineProperty(globalThis, 'indexedDB', {
+        configurable: true,
+        value: { open: () => { throw new DOMException('IndexedDB unavailable', 'SecurityError'); } },
+      });
+    } else {
+      Object.defineProperty(navigator, 'locks', {
+        configurable: true,
+        value: { request: async (_key: string, write: () => unknown) => write() },
+      });
+    }
     const stages = window.sessionStorage;
     const orphan = 'campus.personal-imports.stage.v2:orphan';
     const syncScope = { ...scope, owner: 'nuni:pa_00000000-0000-4000-a000-000000000001' };
     const key = personalImportStorageKey(syncScope);
     const guard = { canContinue: () => true };
     const { removeItem, setItem, getItem } = Storage.prototype;
-    const ioError = new DOMException('Session storage unavailable', 'SecurityError');
+    const ioError = new DOMException('Auxiliary storage unavailable', 'SecurityError');
     const unavailable = jest.fn(() => { throw ioError; });
     let fault: jest.SpyInstance | undefined;
     const reread = jest.fn(() => loadPersonalImports(syncScope));
     const unsubscribe = subscribePersonalImports(reread);
     try {
-      if (failure === 'access') {
+      if (failure === 'session access') {
         fault = jest.spyOn(window, 'sessionStorage', 'get').mockImplementation(unavailable);
-      } else if (failure === 'remove') {
+      } else if (failure === 'session remove') {
         stages.setItem(orphan, 'null');
         fault = jest.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, entry) {
           if (this === stages && entry === orphan) unavailable();
           removeItem.call(this, entry);
         });
-      } else if (failure === 'write') {
+      } else if (failure === 'session write') {
         fault = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, entry, value) {
           if (this === stages) unavailable();
+          setItem.call(this, entry, value);
+        });
+      } else if (failure === 'lease write') {
+        const storage = window.localStorage;
+        fault = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, entry, value) {
+          if (this === storage && entry.startsWith(webLeasePrefix(key))) unavailable();
           setItem.call(this, entry, value);
         });
       } else {
@@ -1095,7 +1154,7 @@ test.each(['access', 'remove', 'write', 'read'] as const)(
       await expect(reread.mock.results.at(-1)!.value).resolves.toEqual(latest);
       expect(JSON.parse(window.localStorage.getItem(key)!)).toMatchObject(latest);
       expect(unavailable.mock.calls.length).toBeGreaterThanOrEqual(3);
-      if (failure === 'remove') expect(stages.getItem(orphan)).toBe('null');
+      if (failure === 'session remove') expect(stages.getItem(orphan)).toBe('null');
     } finally {
       fault?.mockRestore();
       unsubscribe();
@@ -2774,7 +2833,7 @@ test('a coalesced Android read failure from another key preserves a readable che
     await expect(read).resolves.toEqual(ledger);
     await otherRead;
     expect(failedBatch).toHaveBeenCalledWith([checkpoint, otherKey]);
-    expect(getItem).not.toHaveBeenCalledWith(key);
+    expect(getItem).toHaveBeenCalledWith(key);
     expect(await AsyncStorage.getItem(key)).toBe(deletedRaw);
     expect(await AsyncStorage.getItem(checkpoint)).toBe(originalRaw);
 
@@ -2787,9 +2846,11 @@ test('a coalesced Android read failure from another key preserves a readable che
     const primaryReads = getItem.mock.invocationCallOrder.filter(
       (_, index) => getItem.mock.calls[index][0] === key,
     );
-    // Recovery reads the checkpoint first. The sole primary read verifies the new write.
-    expect(primaryReads).toHaveLength(1);
-    expect(primaryReads[0]).toBeGreaterThan(jest.mocked(AsyncStorage.setItem).mock.invocationCallOrder.at(-1)!);
+    // Read the primary for a durable commit before choosing recovery, then verify the new write.
+    const primaryWrite = jest.mocked(AsyncStorage.setItem).mock.invocationCallOrder.at(-1)!;
+    expect(primaryReads).toHaveLength(2);
+    expect(primaryReads[0]).toBeLessThan(primaryWrite);
+    expect(primaryReads[1]).toBeGreaterThan(primaryWrite);
     expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['微積分', '統計']);
     expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
   } finally {
