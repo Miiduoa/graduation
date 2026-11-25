@@ -6,6 +6,8 @@ The checked-in `firebase.json` remains compatible with the project's documented 
 
 Use this profile only for a project whose billing is already enabled and whose operator has approved TTL deletion. Firebase documents that TTL deletion is outside the free quota and requires billing: [quotas](https://firebase.google.com/docs/firestore/quotas), [TTL behavior](https://firebase.google.com/docs/firestore/ttl), [field configuration](https://firebase.google.com/docs/reference/firestore/indexes).
 
+The generator requires Linux procfs. It uses `/proc/self/fd` to traverse directories and create output files, and aborts if that interface is unavailable.
+
 Generate a separate configuration from the current complete index specification:
 
 ```sh

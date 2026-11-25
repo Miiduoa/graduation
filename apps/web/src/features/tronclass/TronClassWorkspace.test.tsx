@@ -1516,33 +1516,82 @@ it('refreshes added and removed course options from a newer sync and rejects a l
   expect(screen.queryByRole('option', { name: '資料庫' })).toBeNull();
 });
 
-it.each(['startup', 'retry'])('keeps the workspace binding when courses runs after rebinding on %s', async (stage) => {
+it.each([
+  'initial courses', 'retry courses', 'initial sync', 'retry sync', 'course sync', 'agent permissions', 'session refresh',
+])('waits for the student before reading a replacement binding after %s', async (stage) => {
+  const nextRevision = 'b'.repeat(32);
+  const replacement = { ...connection, revision: nextRevision, account: 'student-b', userName: '新帳號' };
+  const replacementSnapshot = { ...snapshot, revision: nextRevision,
+    homework: [{ ...homework, title: '新帳號的私人作業' }] };
   const schoolReads = vi.fn();
-  let currentRevision = revision;
-  let staleRequest = false;
+  const agentReads = vi.fn();
+  let rebound = false;
+  let replacementStatuses = 0;
   fetchMock.mockImplementation((url, init) => {
     const input = body(init);
-    if (input.action === 'status' && staleRequest) return Promise.resolve(json({ ...connection, connected: false }));
-    if (input.action === 'courses') {
-      if (stage === 'startup') currentRevision = 'b'.repeat(32);
-      if (input.revision !== currentRevision) {
-        staleRequest = true;
-        return Promise.resolve(json({ error: 'TRONCLASS_BINDING_CHANGED' }, 409));
-      }
-      schoolReads(currentRevision);
-      return Promise.resolve(json({ error: 'TRONCLASS_TIMEOUT' }, 504));
+    const bindingChanged = () => Promise.resolve(json({ error: 'TRONCLASS_BINDING_CHANGED' }, 409));
+    if (input.action === 'status' && rebound) {
+      replacementStatuses++;
+      return Promise.resolve(json(replacement));
     }
-    if (input.action === 'sync') return Promise.resolve(json({ error: 'TRONCLASS_TIMEOUT' }, 504));
+    if (String(url) === '/api/tronclass/agent-permissions') {
+      if (stage === 'agent permissions' && !rebound) {
+        rebound = true;
+        return bindingChanged();
+      }
+      if (rebound) {
+        agentReads(nextRevision);
+        return Promise.resolve(json({ revision: nextRevision, version: 'c'.repeat(32),
+          permissions: { readCourseData: true, downloadMaterials: true, prepareHomework: true }, updatedAt: null }));
+      }
+    }
+    if (input.action === 'courses' || input.action === 'sync') {
+      if ((stage === 'initial courses' && input.action === 'courses') ||
+          ((stage === 'initial sync' || stage === 'session refresh') && input.action === 'sync')) rebound = true;
+      if (input.revision !== (rebound ? nextRevision : revision)) return bindingChanged();
+      schoolReads(input.revision);
+      if (rebound) return Promise.resolve(json(input.action === 'courses' ? courseIndex(replacementSnapshot) : replacementSnapshot));
+      if (stage === 'retry courses') return Promise.resolve(json({ error: 'TRONCLASS_TIMEOUT' }, 504));
+    }
     return defaultResponse(url, init);
   });
-  render(<TronClassWorkspace />);
-  if (stage === 'retry') {
+  const view = render(<TronClassWorkspace />);
+  if (stage === 'retry courses') {
     const retry = await screen.findByRole('button', { name: '重新讀取課程清單' });
-    currentRevision = 'b'.repeat(32);
+    rebound = true;
     fireEvent.click(retry);
+  } else if (stage === 'retry sync' || stage === 'course sync') {
+    await screen.findByRole('heading', { name: homework.title });
+    rebound = true;
+    if (stage === 'retry sync') fireEvent.click(screen.getByRole('button', { name: '同步最新資料' }));
+    else fireEvent.change(screen.getByLabelText('課程'), { target: { value: '12' } });
   }
-  await waitFor(() => expect(calls('status')).toHaveLength(2));
-  const expected = { action: 'courses', revision };
-  expect(calls('courses').map(([, init]) => body(init))).toEqual(stage === 'retry' ? [expected, expected] : [expected]);
-  expect(schoolReads.mock.calls).toEqual(stage === 'retry' ? [[revision]] : []);
+
+  await screen.findByRole('button', { name: '繼續讀取目前帳號的課程' });
+  if (stage === 'session refresh') {
+    state.platform.loading = true;
+    view.rerender(<TronClassWorkspace />);
+    expect(screen.queryByRole('button', { name: '繼續讀取目前帳號的課程' })).toBeNull();
+    const beforeRefresh = replacementStatuses;
+    state.platform.loading = false;
+    view.rerender(<TronClassWorkspace />);
+    await screen.findByRole('button', { name: '繼續讀取目前帳號的課程' });
+    expect(replacementStatuses).toBeGreaterThan(beforeRefresh);
+  }
+  expect(screen.getByText(/student-b/)).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: homework.title })).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'TronClass 助理權限' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: '新帳號的私人作業' })).toBeNull();
+  expect(replacementStatuses).toBeGreaterThan(0);
+  for (const [, init] of [...calls('courses'), ...calls('sync')]) {
+    expect(body(init).revision).toBe(revision);
+  }
+  if (stage === 'course sync') expect(body(calls('sync').at(-1)?.[1]).courseId).toBe(12);
+  expect(schoolReads).not.toHaveBeenCalledWith(nextRevision);
+  expect(agentReads).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: '繼續讀取目前帳號的課程' }));
+  await screen.findByRole('heading', { name: '新帳號的私人作業' });
+  expect(body(calls('courses').at(-1)?.[1]).revision).toBe(nextRevision);
+  expect(body(calls('sync').at(-1)?.[1]).revision).toBe(nextRevision);
 });

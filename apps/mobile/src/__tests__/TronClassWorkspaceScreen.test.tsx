@@ -1390,26 +1390,53 @@ it('rejects a file selection in a second draft without deleting the first draft 
   expect(mockUpload).not.toHaveBeenCalled();
 });
 
-it.each(['startup', 'retry'])('keeps the workspace binding when courses runs after rebinding on %s', async (stage) => {
+it.each([
+  'initial courses', 'retry courses', 'initial sync', 'retry sync', 'course sync',
+])('clears the workspace and stops after a binding change during %s', async (stage) => {
+  const replacementRevision = 'b'.repeat(32);
+  let refreshStarted = false;
   const schoolReads = jest.fn();
-  let currentRevision = revision;
+  function rebind() {
+    mockConnection = { ...connection, revision: replacementRevision, account: 'student-b' };
+    mockSnapshot = { ...snapshot, revision: replacementRevision,
+      homework: [{ ...homework, title: '新帳號的私人作業' }] };
+  }
   mockBffRequest.mockImplementation((path, context, input) => {
-    if (input.action === 'courses') {
-      if (stage === 'startup') currentRevision = 'b'.repeat(32);
-      if (input.revision !== currentRevision) return Promise.reject(new NuniError(409, 'TRONCLASS_BINDING_CHANGED'));
-      schoolReads(currentRevision);
-      return Promise.reject(new NuniError(504, 'TRONCLASS_TIMEOUT'));
+    if (input.action === 'courses' || input.action === 'sync') {
+      if ((stage === 'initial courses' && input.action === 'courses') ||
+          ((stage === 'initial sync' || (stage === 'retry sync' && refreshStarted)) && input.action === 'sync' &&
+            mockConnection.revision === revision)) rebind();
+      if (input.revision !== mockConnection.revision) return Promise.reject(new NuniError(409, 'TRONCLASS_BINDING_CHANGED'));
+      schoolReads(input.revision);
+      if (stage === 'retry courses' && mockConnection.revision === revision)
+        return Promise.reject(new NuniError(504, 'TRONCLASS_TIMEOUT'));
     }
-    if (input.action === 'sync') return Promise.reject(new NuniError(504, 'TRONCLASS_TIMEOUT'));
     return defaultRequest(path, context, input);
   });
   const view = render(<TronClassWorkspaceScreen />);
-  if (stage === 'retry') {
+  if (stage === 'retry courses') {
     const retry = await view.findByRole('button', { name: '重新讀取課程清單' });
-    currentRevision = 'b'.repeat(32);
-    await act(async () => fireEvent.press(retry));
+    rebind();
+    fireEvent.press(retry);
+  } else if (stage === 'retry sync' || stage === 'course sync') {
+    await view.findByRole('button', { name: homework.title });
+    if (stage === 'retry sync') refreshStarted = true;
+    else rebind();
+    fireEvent.press(view.getByRole('button', { name: stage === 'course sync' ? '程式設計' : '重新整理課務資料' }));
   }
-  const expected = { action: 'courses', revision };
-  await waitFor(() => expect(actions('courses')).toEqual(stage === 'retry' ? [expected, expected] : [expected]));
-  expect(schoolReads.mock.calls).toEqual(stage === 'retry' ? [[revision]] : []);
+
+  await view.findByText('TronClass 連接已變更，請重新讀取狀態。');
+  expect(view.queryByRole('button', { name: homework.title })).toBeNull();
+  expect(view.queryByRole('button', { name: '程式設計' })).toBeNull();
+  expect(view.queryByRole('button', { name: '新帳號的私人作業' })).toBeNull();
+  // The next status would return connected B, but Mobile waits for a new action.
+  expect(actions('status')).toHaveLength(stage === 'retry sync' ? 2 : 1);
+  for (const input of [...actions('courses'), ...actions('sync')]) expect(input.revision).toBe(revision);
+  if (stage === 'course sync') expect(actions('sync').at(-1)?.courseId).toBe(10);
+  expect(schoolReads).not.toHaveBeenCalledWith(replacementRevision);
+
+  fireEvent.press(view.getByRole('button', { name: '重新讀取連接狀態' }));
+  await view.findByRole('button', { name: '新帳號的私人作業' });
+  expect(actions('courses').at(-1)?.revision).toBe(replacementRevision);
+  expect(actions('sync').at(-1)?.revision).toBe(replacementRevision);
 });
