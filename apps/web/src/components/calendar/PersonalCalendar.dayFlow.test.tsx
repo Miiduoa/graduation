@@ -1167,6 +1167,47 @@ function deferNextCalendarWrite() {
   return () => release;
 }
 
+it.each(['儲存', '刪除'])('%s從 body 啟動後點擊外部空白，寫入完成時焦點留在 body', async (action) => {
+  const stored = event('pending-write', '等待寫入的合成行程', '2026-11-14');
+  const deleting = action === '刪除';
+  if (deleting) seed([stored]);
+  const pendingWrite = deferNextCalendarWrite();
+  render(
+    <>
+      <div data-testid="outside-blank" />
+      <PersonalCalendar />
+    </>,
+  );
+  await ready();
+  activate(screen.getByRole('button', { name: stored.date }));
+  activate(screen.getByRole('button', { name: deleting ? stored.title : '新增行程' }));
+  if (!deleting) fireEvent.change(titleField(), { target: { value: stored.title } });
+
+  titleField().blur();
+  expect(document.activeElement).toBe(document.body);
+  // Model a browser that activates the button without focusing it.
+  fireEvent.click(screen.getByRole('button', { name: deleting ? '刪除這筆' : '儲存行程' }));
+  await waitFor(() => expect(pendingWrite()).toBeTypeOf('function'));
+  expect(document.activeElement).toBe(document.body);
+
+  const blank = screen.getByTestId('outside-blank');
+  fireEvent.pointerDown(blank);
+  fireEvent.pointerUp(blank);
+  fireEvent.click(blank);
+  expect(document.activeElement).toBe(document.body);
+
+  await act(async () => {
+    pendingWrite()?.();
+  });
+  await screen.findByText(deleting ? '已刪除這筆個人行程。' : personalImportSavedNotice(1));
+  expect(screen.queryByRole('textbox', { name: '標題' })).toBeNull();
+  expect(readPersonalImports(scope())).toMatchObject(
+    deleting ? [] : [{ title: stored.title, date: stored.date }],
+  );
+  expect(readPersonalImports(scope())).toHaveLength(deleting ? 0 : 1);
+  expect(document.activeElement).toBe(document.body);
+});
+
 it.each(['儲存按鈕', '查看月份'])(
   '單日儲存期間從%s主動離焦，完成後焦點留在 body',
   async (target) => {

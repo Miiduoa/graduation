@@ -537,10 +537,10 @@ function PersonalCalendarWorkspace({
       }
     };
     const cancelOnOutsidePointerDown = (event: PointerEvent) => {
-      if (!suspended.current || !linkedFocusOrigin.current) return;
+      if (!linkedFocusOrigin.current) return;
       const boundary = workspaceBoundary.current;
       if (boundary && !event.composedPath().includes(boundary)) {
-        // An outside press can move focus to body without a new focusin.
+        // An outside press can leave focus on body without emitting a focus event.
         cancelLinkedFocus();
       }
     };
@@ -866,6 +866,7 @@ function PersonalCalendarWorkspace({
   const trackWriteFocus = () => {
     const startedFromView = viewRevision.current;
     const editor = editorRef.current;
+    let pressedOutsideEditor = false;
     let canUseBodyFallback =
       document.activeElement === document.body || Boolean(editor?.contains(document.activeElement));
     const onFocusIn = (event: FocusEvent) => {
@@ -888,19 +889,25 @@ function PersonalCalendarWorkspace({
         canUseBodyFallback = false;
       }
     };
+    const onPointerDown = (event: PointerEvent) => {
+      if (editor && !event.composedPath().includes(editor)) pressedOutsideEditor = true;
+    };
     // Relinquishing a usable control can leave focus on the body without a focusin.
     // Hiding or disabling a control during the write can also trigger a browser blur.
     document.addEventListener('focusin', onFocusIn, true);
     document.addEventListener('focusout', onFocusOut, true);
+    document.addEventListener('pointerdown', onPointerDown, true);
     return {
       canHandoff: () =>
         !suspended.current &&
+        !pressedOutsideEditor &&
         startedFromView === viewRevision.current &&
         (editor?.contains(document.activeElement) ||
           (canUseBodyFallback && document.activeElement === document.body)),
       stop: () => {
         document.removeEventListener('focusin', onFocusIn, true);
         document.removeEventListener('focusout', onFocusOut, true);
+        document.removeEventListener('pointerdown', onPointerDown, true);
       },
     };
   };

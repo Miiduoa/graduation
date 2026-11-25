@@ -769,6 +769,7 @@ it.each([
   ['月份欄位', '暫停期間點擊工作區外空白處'],
   ['月份欄位', '暫停期間點擊工作區外空白處', 'offsetLeft'],
   ['月份欄位', '恢復後主動離開', 'offsetLeft'],
+  ['月份欄位', '因工作區隱藏而失焦，恢復後點擊工作區外空白處', 'offsetLeft'],
   ['日列表編輯按鈕', '因工作區卸載而失焦', 'offsetTop'],
 ] as const)('深連結從%s等待揭露時，重新驗證前後%s（恢復時裁切軸：%s）', async (origin, action, clippedAxis?) => {
   const target = focusEvent();
@@ -900,6 +901,15 @@ it.each([
     if (blursAfterResume) {
       expect(monthControl.closest('[hidden]')).toBeNull();
       monthControl.blur();
+      expect(document.activeElement).toBe(document.body);
+    }
+    if (action.includes('恢復後點擊工作區外空白處')) {
+      expect(monthControl.closest('[hidden]')).toBeNull();
+      expect(document.activeElement).toBe(document.body);
+      const blank = screen.getByTestId('outside-blank');
+      fireEvent.pointerDown(blank);
+      fireEvent.pointerUp(blank);
+      fireEvent.click(blank);
       expect(document.activeElement).toBe(document.body);
     }
     viewport[clippedAxis] = 0;
