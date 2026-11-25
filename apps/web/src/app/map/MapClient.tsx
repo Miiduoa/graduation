@@ -649,7 +649,7 @@ function MapContent({
       )}
       {placeState.source === 'ready' && route && !deepLinkRoute && routeDraft === null && (
         <p className={styles.notice} role="status">
-          這個連結的起點或終點已不在目前地點資料中，請從下方列表重新選擇。
+          這個連結的起點或終點已不在目前地點資料中，或無法唯一確認有效位置。請從下方列表重新選擇。
         </p>
       )}
       {!sourcePending && focus && !locations.some((location) => location.id === focus) && (
