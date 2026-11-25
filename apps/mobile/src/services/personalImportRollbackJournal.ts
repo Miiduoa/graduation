@@ -9,6 +9,7 @@ import { sha256 } from 'js-sha256';
 import { Platform } from 'react-native';
 
 const markerSuffix = '.rollback.pending';
+const committedMarker = 'committed';
 const legacyStagePattern = /^campus\.personal-imports\.rollback\.v1:([a-f0-9]{64}):stage:\d+:[^:]+$/;
 const lockStore = 'writes';
 const stagePrefix = 'campus.personal-imports.stage.v2:';
@@ -32,9 +33,13 @@ function hasLiveWriter(storage: Storage, hash: string): boolean {
 function sweepExpiredLeases(storage: Storage): void {
   for (const entry of Object.keys(storage)) {
     if (!leasePattern.test(entry)) continue;
-    const value = storage.getItem(entry);
-    if (value !== null && !isLiveLease(value) && storage.getItem(entry) === value) {
-      storage.removeItem(entry);
+    try {
+      const value = storage.getItem(entry);
+      if (value !== null && !isLiveLease(value) && storage.getItem(entry) === value) {
+        storage.removeItem(entry);
+      }
+    } catch {
+      // A lease that cannot be inspected is left in place.
     }
   }
 }
@@ -140,7 +145,13 @@ async function sweepLegacyStages(ledgerHash?: string): Promise<void> {
   for (const entry of Object.keys(storage)) {
     const hash = legacyStagePattern.exec(entry)?.[1];
     if (!hash) continue;
-    const value = storage.getItem(entry);
+    let value: string | null;
+    try {
+      value = storage.getItem(entry);
+    } catch {
+      // An unreadable legacy stage cannot be reclaimed safely.
+      continue;
+    }
     if (value === null) continue;
     const entries = stages.get(hash) ?? new Map<string, string>();
     entries.set(entry, value);
@@ -151,8 +162,12 @@ async function sweepLegacyStages(ledgerHash?: string): Promise<void> {
       for (const [entry, value] of entries) {
         // The legacy key has no lease ID. Any live attempt for its ledger may
         // own it. Recheck both the captured copy and ownership before deletion.
-        if (storage.getItem(entry) === value && !hasLiveWriter(storage, hash) &&
-            storage.getItem(entry) === value) storage.removeItem(entry);
+        try {
+          if (storage.getItem(entry) === value && !hasLiveWriter(storage, hash) &&
+              storage.getItem(entry) === value) storage.removeItem(entry);
+        } catch {
+          // Keep the stage if its ownership or contents cannot be confirmed.
+        }
       }
     };
     if (hash === ledgerHash || (typeof indexedDB === 'undefined' && !navigator.locks)) {
@@ -399,11 +414,11 @@ function journalFiles(key: string) {
 }
 
 export function readPersonalImportRollback(key: string): string | undefined {
-  const { payload, marked } = journalFiles(key);
-  return marked ? payload.textSync() : undefined;
+  const { payload, marker, marked } = journalFiles(key);
+  return marked && marker.textSync() !== committedMarker ? payload.textSync() : undefined;
 }
 
-export function preparePersonalImportRollback(key: string, raw: string | null): () => void {
+export function preparePersonalImportRollback(key: string, raw: string | null) {
   const encoded = raw ?? 'null';
   const { payload, marker, marked } = journalFiles(key);
   // The document directory survives process restarts and is outside AsyncStorage's quota.
@@ -418,18 +433,36 @@ export function preparePersonalImportRollback(key: string, raw: string | null): 
     marker.create();
     // On iOS, create() can return normally even if FileManager did not create the file.
     if (!marker.info().exists) throw new Error('無法建立匯入資料的還原標記。');
+  } else if (marker.textSync() === committedMarker) {
+    marker.write('');
+    if (marker.textSync() !== '') throw new Error('無法建立匯入資料的還原標記。');
   }
-  return () => {
+  return (assertWritable = () => {}, canDeleteMarker = true) => {
     // Commit synchronously so verification and commit cannot be separated by another JS event.
-    marker.delete();
-    discardPayload(payload);
+    if (canDeleteMarker && deleteMarker(marker)) {
+      discardPayload(payload);
+      return;
+    }
+    // Retain the recovery files when cleanup fails, but retire this rollback
+    // durably so a restart exposes the verified primary.
+    assertWritable();
+    marker.write(committedMarker);
+    if (marker.textSync() !== committedMarker) throw new Error('無法確認匯入資料的還原標記已更新。');
   };
 }
 
 export function clearPersonalImportRollback(key: string): void {
   const { payload, marker, marked } = journalFiles(key);
-  if (marked) marker.delete();
-  discardPayload(payload);
+  if (!marked || deleteMarker(marker)) discardPayload(payload);
+}
+
+function deleteMarker(marker: File): boolean {
+  try {
+    marker.delete();
+    return !marker.info().exists;
+  } catch {
+    return false;
+  }
 }
 
 function discardPayload(payload: File): void {

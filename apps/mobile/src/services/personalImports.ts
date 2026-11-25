@@ -364,7 +364,7 @@ export function mutatePersonalImportLedger<T>(
             }
             assertWritable();
             const commit = preparePersonalImportRollback(key, persistedRaw);
-            let cleaningAdoptedCheckpoint = false;
+            let cleaningRecovery = false;
             try {
               await AsyncStorage.setItem(key, raw);
               assertWritable();
@@ -372,17 +372,14 @@ export function mutatePersonalImportLedger<T>(
               assertWritable();
               // Keep the journal authoritative across a restart until the
               // checkpoint cleanup and final permission check have finished.
-              if (adoptedCheckpoint !== undefined) {
-                cleaningAdoptedCheckpoint = true;
-                // Cleanup I/O is best effort after readback. Permission checks
-                // still run before removing the copy and after awaiting cleanup.
+              cleaningRecovery = true;
+              const checkpointRetired = adoptedCheckpoint === undefined ||
                 await retireNativeCheckpoint(key, adoptedCheckpoint, assertWritable);
-                assertWritable();
-              }
-              commit();
+              assertWritable();
+              commit(assertWritable, checkpointRetired);
               pendingRestorations.delete(key);
             } catch (error) {
-              await rollbackLedger(key, persistedRaw, assertWritable, cleaningAdoptedCheckpoint);
+              await rollbackLedger(key, persistedRaw, assertWritable, cleaningRecovery);
               throw error;
             }
           }
