@@ -845,6 +845,16 @@ function PersonalCalendarWorkspace({
     const savedDate = draft.date;
     const savedMonth = savedDate.slice(0, 7);
     const monthList = calendarView === 'list' && !selectedDate;
+    const editor = editorRef.current;
+    let canUseBodyFallback =
+      document.activeElement === document.body || Boolean(editor?.contains(document.activeElement));
+    const recordFocus = (event: FocusEvent) => {
+      if (event.target instanceof Node && !editor?.contains(event.target)) {
+        canUseBodyFallback = false;
+      }
+    };
+    // A control outside the editor may lose focus again before the write finishes.
+    document.addEventListener('focusin', recordFocus, true);
     writing.current = true;
     setSaving(true);
     setFormError('');
@@ -869,7 +879,7 @@ function PersonalCalendarWorkspace({
         if (
           !suspended.current &&
           (editorRef.current?.contains(document.activeElement) ||
-            document.activeElement === document.body)
+            (canUseBodyFallback && document.activeElement === document.body))
         ) {
           pendingFocus.current = followSavedDate || selectedDate ? 'saved' : 'return';
         }
@@ -884,6 +894,7 @@ function PersonalCalendarWorkspace({
       if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
       setFormError(personalEventSaveError(error));
     } finally {
+      document.removeEventListener('focusin', recordFocus, true);
       if (active.current && ticket === requestId.current) {
         writing.current = false;
         setSaving(false);

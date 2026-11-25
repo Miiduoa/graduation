@@ -1150,6 +1150,45 @@ it('does not steal focus from another control when a pending save completes', as
   expect(readPersonalImports(scope())).toHaveLength(1);
 });
 
+it('單日儲存期間移到查看月份再主動離焦，儲存完成後焦點留在 body', async () => {
+  let release: (() => void) | undefined;
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: {
+      request: (_key: string, action: () => unknown) =>
+        new Promise((resolve, reject) => {
+          release = () => {
+            void Promise.resolve().then(action).then(resolve, reject);
+          };
+        }),
+    },
+  });
+  render(<PersonalCalendar />);
+  await ready();
+  const date = '2026-11-14';
+  activate(screen.getByRole('button', { name: date }));
+  activate(screen.getByRole('button', { name: '新增行程' }));
+  const title = '單日延遲儲存的合成行程';
+  fireEvent.change(titleField(), { target: { value: title } });
+  activate(screen.getByRole('button', { name: '儲存行程' }));
+  await waitFor(() => expect(release).toBeTypeOf('function'));
+
+  const monthField = screen.getByLabelText('查看月份');
+  monthField.focus();
+  expect(document.activeElement).toBe(monthField);
+  monthField.blur();
+  expect(document.activeElement).toBe(document.body);
+
+  await act(async () => {
+    release?.();
+  });
+  await screen.findByText(personalImportSavedNotice(1));
+  expect(document.activeElement).toBe(document.body);
+  expect(dayHeading(date)).toBeTruthy();
+  expect(screen.queryByRole('textbox', { name: '標題' })).toBeNull();
+  expect(readPersonalImports(scope())).toMatchObject([{ title, date }]);
+});
+
 it('preserves the newly selected day when a completed write is acknowledged during revalidation', async () => {
   let acknowledge: (() => void) | undefined;
   Object.defineProperty(navigator, 'locks', {
