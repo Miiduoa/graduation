@@ -995,3 +995,26 @@ it('orders share the failure floor and cannot renew a different detail version',
   expect(confirmed.detailReadConfirmation(key)?.version).toBe(9);
   expect(confirmed.canEnterWorkspace(key)).toBe(true);
 });
+
+it.each(['list', 'detail'] as const)('requires a current workspace GET after a %s failure followed by an order failure', (source) => {
+  const confirmed = createMerchantConfirmations(drafts);
+  const v8 = { ...initial(), readinessVersion: 8 };
+  const key = workspaceKey(v8);
+  confirmed.confirmDetail(v8, confirmed.beginRequest(), true);
+
+  const workspaceRequest = confirmed.beginRequest();
+  const orderRequest = confirmed.beginOrderRead(key);
+  confirmed.recordReadFailure(workspaceRequest, source === 'list' ? undefined : key);
+  confirmed.recordReadFailure(orderRequest.revision, key, 'orders');
+
+  confirmed.beginOrderRead(key).confirm();
+  expect(confirmed.detailReadConfirmation(key)).toBeUndefined();
+  expect(confirmed.canRecoverFromOrderRead(key)).toBe(false);
+  expect(confirmed.canEnterWorkspace(key)).toBe(false);
+
+  confirmed.confirmDetail({ ...v8, readinessVersion: 7 }, confirmed.beginRequest(), true);
+  expect(confirmed.detailReadConfirmation(key)).toBeUndefined();
+  confirmed.confirmDetail(v8, confirmed.beginRequest(), true);
+  expect(confirmed.detailReadConfirmation(key)?.version).toBe(8);
+  expect(confirmed.canEnterWorkspace(key)).toBe(true);
+});

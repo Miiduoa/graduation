@@ -18,7 +18,7 @@ type WorkspaceObservations = {
   versionedRow?: Observation;
   detail?: Observation<NuniMerchantWorkspaceDetail>;
   detailRead?: DetailReadConfirmation & { menu: 'present' | 'missing' | 'unknown' };
-  orderRead?: { revision: number; workspaceFailure: number };
+  orderRead?: { revision: number; detail: DetailReadConfirmation };
 };
 
 function workspaceSummary(entry: WorkspaceObservations | undefined): NuniMerchantWorkspace | undefined {
@@ -313,14 +313,18 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       read.revision > revokedThrough(key)) return read;
   }
 
-  function canUseAccess(key: string, confirmation: DetailReadConfirmation) {
+  function confirmsWorkspaceAccess(key: string, confirmation: DetailReadConfirmation) {
     const read = currentDetailRead(key);
-    if (!read || confirmation.version !== read.version || confirmation.revision > read.revision ||
-      confirmation.revision <= revokedThrough(key)) return false;
+    return !!read && confirmation.version === read.version && confirmation.revision <= read.revision &&
+      confirmation.revision > Math.max(workspaceReadFailure(key), revokedThrough(key));
+  }
+
+  function canUseAccess(key: string, confirmation: DetailReadConfirmation) {
+    if (!confirmsWorkspaceAccess(key, confirmation)) return false;
     const orderRead = entries.get(key)?.orderRead;
-    // An unversioned order read cannot cover a workspace failure that was
-    // still unobserved when it started.
-    const orderRevision = orderRead?.workspaceFailure === workspaceReadFailure(key)
+    // An order read can cover order failures only while the detail it started
+    // with still confirms the current workspace version and workspace failures.
+    const orderRevision = orderRead && confirmsWorkspaceAccess(key, orderRead.detail)
       ? orderRead.revision
       : 0;
     return Math.max(confirmation.revision, orderRevision) > accessFloor(key);
@@ -449,23 +453,23 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     canUseAccess,
     accessFloor,
     canRecoverFromOrderRead(key: string) {
-      return orderReadFailures.get(key) === accessFloor(key) && !!currentDetailRead(key);
+      const read = currentDetailRead(key);
+      const failure = orderReadFailures.get(key);
+      return !!read && failure !== undefined && read.revision <= failure && confirmsWorkspaceAccess(key, read);
     },
     beginOrderRead(key: string) {
       const revision = beginRequest();
       const entry = entries.get(key);
-      const version = currentDetailRead(key)?.version;
-      const workspaceFailure = workspaceReadFailure(key);
+      const detail = currentDetailRead(key);
       return {
         revision,
         confirm() {
           // Order data has no readiness version. It can renew access only for
           // the detail version that was still confirmed throughout this read.
-          if (!entry || entries.get(key) !== entry || version === undefined ||
-              currentDetailRead(key)?.version !== version || revision <= (entry.orderRead?.revision ?? 0) ||
-              revision <= accessFloor(key)) return;
+          if (!entry || entries.get(key) !== entry || !detail || !confirmsWorkspaceAccess(key, detail) ||
+              revision <= Math.max(entry.orderRead?.revision ?? 0, accessFloor(key))) return;
           const wasConfirmed = detailReadConfirmation(key);
-          entry.orderRead = { revision, workspaceFailure };
+          entry.orderRead = { revision, detail };
           if (!wasConfirmed && detailReadConfirmation(key)) {
             for (const listener of readChangeListeners) listener();
           }

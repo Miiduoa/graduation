@@ -3188,13 +3188,15 @@ it.each(['before', 'after'])(
   },
 );
 
-it.each(['availability', 'orders', 'orders-retry', 'orders-in-flight', 'orders-in-flight-overview', 'stale-entry'])('blocks %s immediately when a retired list GET returns 503', async (section) => {
+it.each(['availability', 'orders', 'orders-retry', 'orders-in-flight', 'orders-in-flight-overview', 'stale-entry', 'orders-then-queue-failure', 'orders-then-shift-failure'])('blocks %s immediately when a retired list GET returns 503', async (section) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const orders = section.startsWith('orders');
   const inFlight = section.startsWith('orders-in-flight');
   const switchToOverview = section === 'orders-in-flight-overview';
   const staleEntry = section === 'stale-entry';
-  const retry = section === 'orders-retry';
+  const pollResource = section === 'orders-then-queue-failure' ? 'orders'
+    : section === 'orders-then-shift-failure' ? 'shift' : null;
+  const retry = section === 'orders-retry' || pollResource !== null;
   const unavailable = new NuniError(503, 'UNAVAILABLE');
   const initial = {
     ...detail('store-a', true),
@@ -3220,18 +3222,18 @@ it.each(['availability', 'orders', 'orders-retry', 'orders-in-flight', 'orders-i
   };
   const pendingOrder = Promise.withResolvers<typeof orderReceipt>();
   const acceptOrder = vi.fn().mockResolvedValue(orderReceipt);
+  const failedPoll = Promise.withResolvers<never>();
+  const orderReads = vi.fn((resource: string) => Promise.resolve(resource === 'orders'
+    ? { orders: [{ ...queueFixture(), locationId: 'store-a', state: 'paid', allowedActions: ['accept'] }] }
+    : { ...shiftFixture(), locationId: 'store-a' }));
   if (inFlight) acceptOrder.mockReturnValueOnce(pendingOrder.promise);
   if (retry) acceptOrder.mockRejectedValueOnce(unavailable);
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') return readList();
     if (resource === path) return readDetail();
     if (resource === `${path}/availability`) return changeAvailability();
-    if (resource.endsWith('/orders')) {
-      return Promise.resolve({
-        orders: [{ ...queueFixture(), locationId: 'store-a', state: 'paid', allowedActions: ['accept'] }],
-      });
-    }
-    if (resource.endsWith('/shift')) return Promise.resolve({ ...shiftFixture(), locationId: 'store-a' });
+    if (resource.endsWith('/orders')) return orderReads('orders');
+    if (resource.endsWith('/shift')) return orderReads('shift');
     if (resource.endsWith('/accept')) return acceptOrder();
     return respond(resource);
   });
@@ -3293,6 +3295,15 @@ it.each(['availability', 'orders', 'orders-retry', 'orders-in-flight', 'orders-i
       expect(screen.queryByRole('region', { name: '門市訂單工作台' })).toBeNull();
     }
   }
+  if (pollResource) {
+    const originalRead = orderReads.getMockImplementation()!;
+    orderReads.mockImplementation((resource) => resource === pollResource
+      ? failedPoll.promise : originalRead(resource));
+    const previousReads = orderReads.mock.calls.length;
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(orderReads.mock.calls.slice(previousReads)).toContainEqual([pollResource]);
+    orderReads.mockImplementation(originalRead);
+  }
   await act(async () => {
     failedList.reject(unavailable);
     await failedList.promise.catch(() => undefined);
@@ -3303,6 +3314,19 @@ it.each(['availability', 'orders', 'orders-retry', 'orders-in-flight', 'orders-i
     expect(acceptOrder).toHaveBeenCalledTimes(retry || inFlight ? 1 : 0);
     expect(changeAvailability).toHaveBeenCalledTimes(1);
   });
+  if (pollResource) {
+    await act(async () => failedPoll.reject(unavailable));
+    const previousReads = orderReads.mock.calls.length;
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(orderReads).toHaveBeenCalledTimes(previousReads);
+    expect(screen.queryByRole('button', { name: '重試同一份操作' })).toBeNull();
+    fireEvent.click(screen.getByRole('link', { name: '門市概況' }));
+    const pause = screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' });
+    expect(pause.disabled).toBe(true);
+    fireEvent.click(pause);
+    expect(changeAvailability).toHaveBeenCalledTimes(1);
+    await act(async () => window.history.back());
+  }
   if (orders) {
     expect(screen.queryByRole('region', { name: '門市訂單工作台' })).toBeNull();
   } else {
