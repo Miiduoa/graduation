@@ -76,10 +76,17 @@ async function readLedgerSnapshot(
     ? capturePersonalImportBrowserRecovery(window.localStorage, key)
     : undefined;
   const primaryVerified = isReadableLedger(primary, scope);
+  // The first-write encoding can survive a revoked write. When both recovery
+  // files are unreadable, require the final encoding or an independent hash.
+  const ambiguousFirstWrite = journal?.markerError && !journal.payloadReadable &&
+    primary?.startsWith('{"records":');
   const nativeCommit = !web && primaryVerified &&
-    (hasNativeCommitEncoding(primary) || (primary !== null && !!journal?.matchesVerifiedPrimary?.(primary)));
-  if (journal?.markerError && (!nativeCommit || !journal.payloadReadable)) throw journal.markerError;
-  if (journal?.payloadError && !nativeCommit) throw journal.payloadError;
+    ((hasNativeCommitEncoding(primary) && !ambiguousFirstWrite) ||
+     (primary !== null && !!journal?.matchesVerifiedPrimary?.(primary)));
+  if (!nativeCommit) {
+    if (journal?.markerError) throw journal.markerError;
+    if (journal?.payloadError) throw journal.payloadError;
+  }
   const nativeJournal = nativeCommit && !journal?.rejected ? undefined : journal?.raw;
   if (primaryError && nativeJournal === undefined && !isStorageRowTooLarge(primaryError)) {
     throw primaryError;

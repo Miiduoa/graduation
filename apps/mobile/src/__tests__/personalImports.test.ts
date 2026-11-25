@@ -387,6 +387,8 @@ test.each([
   ['pending payload unreadable with commit encoding', false],
   ['pending payload unreadable with verification file', false],
   ['readback without retirement file', false],
+  ['readback without retirement file and unreadable payload', false],
+  ['readback without retirement file with verified first write and unreadable payload', false],
 ] as const)('native marker retirement %s I/O keeps the correct primary and notification (revoked: %s)', async (phase, revoked) => {
   const scope = { owner: `nuni:retirement-${phase}-${revoked}`, schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
@@ -407,12 +409,15 @@ test.each([
   const get = jest.mocked(AsyncStorage.getItem);
   const nativeSet = set.getMockImplementation()!;
   const nativeGet = get.getMockImplementation()!;
-  const markerReadFails = phase === 'readback' || phase === 'readback without retirement file';
+  const persistentMarkerReadFault = phase.startsWith('readback without retirement file');
+  const markerReadFails = phase === 'readback' || persistentMarkerReadFault;
+  const unreadableMetadata = phase === 'readback without retirement file and unreadable payload';
+  const verifiedFirstWrite = phase.includes('verified first write');
   const noRetirementFile = phase !== 'write' && phase !== 'readback';
   const primaryFault = jest.fn(() => { throw new Error('提交編碼主鍵 I/O 失敗'); });
   const payloadFault = jest.fn(() => { throw new Error('還原副本無法寫入主鍵雜湊'); });
   const failVerification = phase.startsWith('all with primary, payload and verification write errors');
-  const unreadablePayload = phase.startsWith('pending payload unreadable');
+  const unreadablePayload = phase.startsWith('pending payload unreadable') || phase.endsWith('unreadable payload');
   const sidecarOnly = phase === 'pending payload unreadable with verification file';
   const payloadReadFault = jest.fn(() => { throw new Error('還原副本無法讀取'); });
   const failPayloadBinding = phase === 'all with primary and payload write errors' || failVerification;
@@ -420,12 +425,12 @@ test.each([
   let encodedWrite = false;
   let markerReadBlocked = false;
   const restoreError = new Error('主鍵無法還原');
-  if (phase === 'publish' || phase.startsWith('all with primary')) {
+  if (phase === 'publish' || phase.startsWith('all with primary') || verifiedFirstWrite) {
     set.mockImplementation(async (entry, value) => {
       if (entry !== key) return nativeSet(entry, value);
       if (!active) throw restoreError;
       encodedWrite = value.startsWith('{"batches":');
-      if (encodedWrite && (phase === 'all with primary write error' || failPayloadBinding)) primaryFault();
+      if (encodedWrite && (phase === 'all with primary write error' || failPayloadBinding || verifiedFirstWrite)) primaryFault();
       await nativeSet(entry, value);
       if (encodedWrite && phase === 'publish') active = false;
     });
@@ -462,12 +467,18 @@ test.each([
     if (unreadablePayload && retirementAttempts > 0 && this.uri.endsWith('.rollback.json')) payloadReadFault();
     const value = textSync.call(this);
     if (this.uri === markerUri && (markerReadBlocked || (markerReadFails && value === 'committed'))) {
-      markerReadBlocked ||= phase === 'readback without retirement file';
+      markerReadBlocked ||= persistentMarkerReadFault;
       retirementAttempts++;
       if (revoked) active = false;
       throw new Error('更新後的標記無法讀回');
     }
     return value;
+  });
+  const fileInfo = File.prototype.info;
+  const metadataFault = jest.fn(() => { throw new Error('還原檔案的中繼資料無法讀取'); });
+  const info = jest.spyOn(File.prototype, 'info').mockImplementation(function (this: File) {
+    if (unreadableMetadata && retirementAttempts > 0 && this.uri.includes('.rollback.')) metadataFault();
+    return fileInfo.call(this);
   });
   const reread = jest.fn(() => loadPersonalImports(scope));
   const unsubscribe = subscribePersonalImports(reread);
@@ -489,6 +500,7 @@ test.each([
       expected = (await append).ledger;
       expect(expected.records.map(({ title }) => title)).toEqual(['微積分', '統計']);
       const primary = (await AsyncStorage.getItem(key))!;
+      if (verifiedFirstWrite) expect(primary.startsWith('{"records":')).toBe(true);
       if (noRetirementFile) {
         expect(JSON.parse(primary)).toEqual(expected);
         expect(Buffer.byteLength(primary)).toBe(Buffer.byteLength(JSON.stringify(expected)));
@@ -504,12 +516,12 @@ test.each([
       expect(reread).toHaveBeenCalledTimes(1);
       await expect(reread.mock.results[0].value).resolves.toEqual(expected);
     }
-    if (phase === 'readback without retirement file') {
+    if (persistentMarkerReadFault) {
       expect(retirementAttempts).toBeGreaterThan(1);
     } else {
       expect(retirementAttempts).toBe(1);
     }
-    if (phase.startsWith('all with primary')) expect(primaryFault).toHaveBeenCalledTimes(1);
+    if (phase.startsWith('all with primary') || verifiedFirstWrite) expect(primaryFault).toHaveBeenCalledTimes(1);
     if (failPayloadBinding) expect(payloadFault).toHaveBeenCalledTimes(1);
     if (failVerification) expect(verificationFault).toHaveBeenCalledTimes(1);
     if (adoptedCheckpoint) {
@@ -522,7 +534,7 @@ test.each([
       await nativeSet(key, raw);
       new File(Paths.document, `personal-imports-${sha256(key)}.rollback.verified`).write(sha256(raw));
     }
-    const retryGuardedSave = phase === 'readback without retirement file' || unreadablePayload;
+    const retryGuardedSave = persistentMarkerReadFault || unreadablePayload;
     const retrySave = !revoked && (phase === 'all' || phase === 'all with primary write error' || retryGuardedSave);
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
@@ -550,6 +562,7 @@ test.each([
       }
     });
     if (unreadablePayload) expect(payloadReadFault.mock.calls.length).toBeGreaterThanOrEqual(3);
+    if (unreadableMetadata) expect(metadataFault.mock.calls.length).toBeGreaterThanOrEqual(3);
     if (retrySave) {
       await jest.isolateModulesAsync(async () => {
         const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
@@ -558,6 +571,7 @@ test.each([
     }
   } finally {
     unsubscribe();
+    info.mockRestore();
     read.mockRestore();
     write.mockRestore();
     remove.mockRestore();
@@ -981,7 +995,7 @@ describe.each(['Web Locks', 'IndexedDB'])('Expo Web with %s at sessionStorage qu
   );
 });
 
-function useIndexedDBLocks() {
+function useIndexedDBLocks(beforeTransaction?: (name: string) => void) {
   const transactions = new Map<string, { abort: () => void }>();
   const queues = new Map<string, Promise<void>>();
   // Model IndexedDB's readwrite scheduling at database/object-store scope.
@@ -991,6 +1005,7 @@ function useIndexedDBLocks() {
       result: {
         close: jest.fn(),
         transaction: (storeName: string) => {
+          beforeTransaction?.(name);
           const queueKey = JSON.stringify([name, storeName]);
           const previous = queues.get(queueKey) ?? Promise.resolve();
           let release!: () => void;
@@ -1171,16 +1186,33 @@ const webLeasePrefix = (key: string) => `campus.personal-imports.write.v1:${sha2
 const legacyWebStage = (key: string, id: string) =>
   `campus.personal-imports.rollback.v1:${sha256(key)}:stage:${Date.now()}:${id}`;
 
-test.each(['Web Locks', 'IndexedDB', 'lease'] as const)(
-  'Expo Web adds, edits, and syncs with persistently unreadable legacy stages (%s)',
-  async (lock) => {
+test.each([
+  ['Web Locks', 'stage read'],
+  ['IndexedDB', 'stage read'],
+  ['lease', 'stage read'],
+  ['Web Locks', 'other ledger lock'],
+  ['IndexedDB', 'other ledger lock'],
+] as const)(
+  'Expo Web adds, edits, and syncs with %s and persistent %s failure',
+  async (lock, failure) => {
     const cleanup = useWebStorage();
     const restoreLocks = withoutWebWriteLocks();
-    const database = lock === 'IndexedDB' ? useIndexedDBLocks() : undefined;
+    const otherKey = personalImportStorageKey({ owner: 'nuni:other', schoolId: 'ntu' });
+    const otherHash = sha256(otherKey);
+    const otherLockFault = jest.fn(() => { throw new DOMException('其他帳本無法鎖定', 'SecurityError'); });
+    const database = lock === 'IndexedDB' ? useIndexedDBLocks((name) => {
+      if (failure === 'other ledger lock' && name === `campus.personal-imports.locks:${otherHash}`) otherLockFault();
+    }) : undefined;
     if (lock === 'Web Locks') {
       Object.defineProperty(navigator, 'locks', {
         configurable: true,
-        value: { request: async (_key: string, write: () => unknown) => write() },
+        value: {
+          request: async (key: string, options: { ifAvailable: boolean } | (() => unknown), probe?: (lock: object) => unknown) => {
+            if (typeof options === 'function') return options();
+            if (failure === 'other ledger lock' && key === `campus.personal-imports.rollback.v1:${otherHash}`) otherLockFault();
+            return probe!({});
+          },
+        },
       });
     }
     const syncScope = { ...scope, owner: 'nuni:pa_00000000-0000-4000-a000-000000000001' };
@@ -1188,7 +1220,7 @@ test.each(['Web Locks', 'IndexedDB', 'lease'] as const)(
     const storage = window.localStorage;
     const stages = [
       legacyWebStage(key, 'same-ledger'),
-      legacyWebStage(personalImportStorageKey({ owner: 'nuni:other', schoolId: 'ntu' }), 'other-ledger'),
+      legacyWebStage(otherKey, 'other-ledger'),
     ];
     const getItem = Storage.prototype.getItem;
     let read: jest.SpyInstance | undefined;
@@ -1199,7 +1231,9 @@ test.each(['Web Locks', 'IndexedDB', 'lease'] as const)(
       await setPersonalImportSyncEnabled(syncScope, true, () => true);
       for (const stage of stages) storage.setItem(stage, 'null');
       read = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, entry) {
-        if (this === storage && stages.includes(entry)) throw new Error('舊暫存鍵持續無法讀取');
+        if (failure === 'stage read' && this === storage && stages.includes(entry)) {
+          throw new Error('舊暫存鍵持續無法讀取');
+        }
         return getItem.call(this, entry);
       });
       unsubscribe = subscribePersonalImports(reread);
@@ -1218,9 +1252,15 @@ test.each(['Web Locks', 'IndexedDB', 'lease'] as const)(
       const persisted = await loadPersonalImports(syncScope);
       expect(persisted.records.map(({ title }) => title)).toEqual(['微積分', '物理']);
       expect(persisted.sync?.base).toEqual(snapshot);
-      for (const stage of stages) {
-        expect(read.mock.calls.filter(([entry]) => entry === stage).length).toBeGreaterThanOrEqual(3);
-        expect(getItem.call(storage, stage)).toBe('null');
+      if (failure === 'stage read') {
+        for (const stage of stages) {
+          expect(read.mock.calls.filter(([entry]) => entry === stage).length).toBeGreaterThanOrEqual(3);
+          expect(getItem.call(storage, stage)).toBe('null');
+        }
+      } else {
+        expect(otherLockFault.mock.calls.length).toBeGreaterThanOrEqual(3);
+        expect(getItem.call(storage, stages[0])).toBeNull();
+        expect(getItem.call(storage, stages[1])).toBe('null');
       }
     } finally {
       unsubscribe?.();
@@ -2872,7 +2912,7 @@ test('a recovered deletion can retry when storage only fits the smaller result',
   }
 });
 
-test('a temporary rollback journal read failure blocks reads and writes after restart', async () => {
+test('an unreadable rollback journal blocks use of a revoked first write after restart', async () => {
   const { key, ledger, deletedRaw } = await failedDeletionRollback(true);
   const failure = new Error('disk I/O error');
   const readJournal = jest.spyOn(File.prototype, 'textSync').mockImplementation(() => {
@@ -2888,6 +2928,20 @@ test('a temporary rollback journal read failure blocks reads and writes after re
     readJournal.mockRestore();
   }
   expect(await loadPersonalImports(scope)).toEqual(ledger);
+});
+
+test('a readable rejection overrides the native commit encoding when the pending marker is unreadable', async () => {
+  const { ledger } = await failedDeletionRollback(true);
+  const textSync = File.prototype.textSync;
+  const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+    if (this.uri.endsWith('.rollback.pending')) throw new Error('標記無法讀取');
+    return textSync.call(this);
+  });
+  try {
+    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+  } finally {
+    read.mockRestore();
+  }
 });
 
 test('a failed journal preparation leaves the verified ledger intact', async () => {

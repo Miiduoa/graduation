@@ -204,13 +204,17 @@ async function sweepLegacyStages(ledgerHash?: string): Promise<void> {
       remove();
       return;
     }
-    if (navigator.locks) {
-      await navigator.locks.request(journalPrefix + hash, { ifAvailable: true }, (lock) => {
-        if (lock) remove();
-      });
-      return;
+    try {
+      if (navigator.locks) {
+        await navigator.locks.request(journalPrefix + hash, { ifAvailable: true }, (lock) => {
+          if (lock) remove();
+        });
+      } else {
+        await sweepLegacyIndexedDBStages(hash, remove, ledgerHash === undefined);
+      }
+    } catch {
+      // Leave this ledger's stages alone if its lock cannot be acquired.
     }
-    await sweepLegacyIndexedDBStages(hash, remove, ledgerHash === undefined);
   }));
 }
 
@@ -443,6 +447,15 @@ export function commitWebPersonalImports(
   return published;
 }
 
+function fileExists(file: File): boolean {
+  try {
+    return file.info().exists;
+  } catch {
+    // Existence can still be checked when metadata such as file size is unreadable.
+    return file.exists;
+  }
+}
+
 function journalFiles(key: string) {
   const directory = Paths.document;
   // An existing legacy marker remains authoritative until its write commits.
@@ -450,20 +463,20 @@ function journalFiles(key: string) {
   const legacyName = key.replace(/[%:~]/g, (character) => `~${character.charCodeAt(0).toString(16)}`);
   if (legacyName.length + markerSuffix.length <= 255) {
     const marker = new File(directory, legacyName + markerSuffix);
-    if (marker.info().exists) {
+    if (fileExists(marker)) {
       return { marker, payload: new File(directory, `${legacyName}.rollback.json`), marked: true };
     }
   }
 
   const name = `personal-imports-${sha256(key)}`;
   const marker = new File(directory, name + markerSuffix);
-  return { marker, payload: new File(directory, `${name}.rollback.json`), marked: marker.info().exists };
+  return { marker, payload: new File(directory, `${name}.rollback.json`), marked: fileExists(marker) };
 }
 
 export function capturePersonalImportRollback(key: string) {
   const { payload, marker, marked } = journalFiles(key);
   if (!marked) return undefined;
-  const retired = retirementFile(key).info().exists;
+  const retired = fileExists(retirementFile(key));
   const retiredPayload = retired ? readOptionalFile(payload) : undefined;
   if (retired && !retiredPayload?.startsWith(rearmedPrefix)) return undefined;
   let committed: boolean;
@@ -535,7 +548,6 @@ function verificationFile(key: string): File {
 export function preparePersonalImportRollback(key: string, raw: string | null, primaryCommitted = false) {
   const encoded = raw ?? 'null';
   const { payload, marker, marked } = journalFiles(key);
-  let markerUnreadable = false;
   let resetMarker = false;
   if (marked) {
     try {
@@ -544,7 +556,6 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
       if (!primaryCommitted) throw error;
       // A verified primary supplies the rollback bytes even when the old
       // marker cannot report its state. Rearm it for the next guarded write.
-      markerUnreadable = true;
       resetMarker = true;
     }
   }
@@ -552,11 +563,11 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   // A retry can reuse the verified copy without rewriting it.
   const retirement = retirementFile(key);
   const verification = verificationFile(key);
-  const hadRetirement = retirement.info().exists;
+  const hadRetirement = fileExists(retirement);
   const previous = marked
     ? (primaryCommitted || hadRetirement ? readOptionalFile(payload) : payload.textSync())
     : undefined;
-  const hadVerification = verification.info().exists;
+  const hadVerification = fileExists(verification);
   // A fresh payload supersedes auxiliary files from the previous attempt.
   const rearmed = hadRetirement || hadVerification;
   const wrap = (value: string) => rearmed ? rearmedPrefix + value : value;
@@ -573,14 +584,14 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   if (!marked) {
     marker.create();
     // On iOS, create() can return normally even if FileManager did not create the file.
-    if (!marker.info().exists) throw new Error('無法建立匯入資料的還原標記。');
+    if (!fileExists(marker)) throw new Error('無法建立匯入資料的還原標記。');
   } else if (resetMarker) {
     marker.write('');
     let reset: string | undefined;
     try {
       reset = marker.textSync();
     } catch (error) {
-      if (!markerUnreadable) throw error;
+      if (!primaryCommitted) throw error;
     }
     if (reset !== undefined && reset !== '') throw new Error('無法建立匯入資料的還原標記。');
   }
@@ -618,7 +629,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
     if (rearmed) return false;
     try {
       retirement.create();
-      return retirement.info().exists;
+      return fileExists(retirement);
     } catch {
       return false;
     }
@@ -684,7 +695,7 @@ export function clearPersonalImportRollback(key: string): void {
 function deleteMarker(marker: File): boolean {
   try {
     marker.delete();
-    return !marker.info().exists;
+    return !fileExists(marker);
   } catch {
     return false;
   }
@@ -692,7 +703,7 @@ function deleteMarker(marker: File): boolean {
 
 function discardPayload(payload: File): void {
   try {
-    if (payload.info().exists) payload.delete();
+    if (fileExists(payload)) payload.delete();
   } catch {
     // The unmarked payload is inert. The next guarded write replaces it.
   }

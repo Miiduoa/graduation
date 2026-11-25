@@ -93,8 +93,10 @@ jest.mock('expo-file-system', () => ({
   File: class {
     constructor(...segments) {
       this.uri = segments.join('/');
-      this.exists = true;
       this.size = 12;
+    }
+    get exists() {
+      return mockDocumentFiles.has(this.uri);
     }
     async base64() {
       return '';
