@@ -22,7 +22,7 @@ export type TronClassAgentDependencies = {
   grants?: TronClassAgentGrants;
   bindings?: Pick<TronClassBindingService, 'requireBinding' | 'assertCurrent'>;
   read?: ReturnType<typeof createTronClassIntegrationReader>;
-  prepare?: (ownerKey: string, input: { courseId: number; homeworkId: number }) => Promise<TronClassPreparation>;
+  prepare?: (ownerKey: string, input: { courseId: number; homeworkId: number }, binding: TronClassSnapshotAuthorization['binding']) => Promise<TronClassPreparation>;
   now?: () => number;
   requestId?: () => string;
   /** Reauthenticate the nuni actor before the final grant check and response. */
@@ -70,8 +70,8 @@ function resolveCourse(
   allowSoleCourseFallback: boolean,
 ): number | undefined {
   if (scope.requiresConfirmation || snapshot.errors.some((error) => error.area === 'courses')) return;
-  const matches = snapshot.courses.filter((course) => scope.matches(course.name, course.code));
-  if (matches.length === 1) return matches[0].id;
+  const selected = scope.resolve(snapshot.courses);
+  if (selected !== undefined) return selected;
   if (allowSoleCourseFallback && scope.unqualified && snapshot.courses.length === 1 && !snapshot.partial &&
     isUnqualifiedRequest(question, ['公告', '通知'])) return snapshot.courses[0].id;
 }
@@ -140,7 +140,8 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
   // Stable automatic selection reads the course index three times: the overview,
   // a full-list recheck, and the index guard immediately before private reads.
   const read = dependencies.read ?? createTronClassIntegrationReader({ bindings, budgetMs: 20_000 });
-  const prepareSource = dependencies.prepare ?? (async (ownerKey, input) => (await getDefaultTronClassSubmissionService()).prepare(ownerKey, input));
+  const prepareSource: NonNullable<TronClassAgentDependencies['prepare']> = dependencies.prepare ??
+    (async (ownerKey, input, binding) => (await getDefaultTronClassSubmissionService()).prepare(ownerKey, input, undefined, binding));
   const now = dependencies.now ?? Date.now;
   const requestId = dependencies.requestId ?? randomUUID;
 
@@ -153,10 +154,18 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
     await grants.assertCurrent(ownerKey, grant, 'readCourseData');
     if (scope !== 'readCourseData') await grants.assertCurrent(ownerKey, grant, scope);
   }
-  async function prepareWithGrant(ownerKey: string, input: { courseId: number; homeworkId: number }, grant: TronClassRequiredAgentGrant) {
+  async function bindingForGrant(ownerKey: string, grant: TronClassRequiredAgentGrant) {
+    const binding = await bindings.requireBinding(ownerKey);
+    if (binding.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+    return binding;
+  }
+  async function prepareWithGrant(ownerKey: string, input: { courseId: number; homeworkId: number },
+    grant: TronClassRequiredAgentGrant, snapshot?: TronClassSnapshotAuthorization['binding']) {
     if (!positiveId(input.courseId) || !positiveId(input.homeworkId)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
     await assertScopes(ownerKey, grant, 'prepareHomework');
-    const result = await prepareSource(ownerKey, input);
+    const binding = snapshot ?? await bindingForGrant(ownerKey, grant);
+    await bindings.assertCurrent(ownerKey, binding.revision);
+    const result = await prepareSource(ownerKey, input, binding);
     if (result.revision !== grant.revision || result.courseId !== input.courseId || result.homeworkId !== input.homeworkId) {
       throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
     }
@@ -231,8 +240,7 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
       const guardedRead = async (courseId?: number, acceptCourseIndex?: TronClassSnapshotReadOptions['acceptCourseIndex']) => {
         await assertScopes(ownerKey, grant, scope);
         if (!authorization) {
-          const binding = await bindings.requireBinding(ownerKey);
-          if (binding.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+          const binding = await bindingForGrant(ownerKey, grant);
           authorization = { binding, assertGrant: () => assertScopes(ownerKey, grant, scope) };
         }
         const result = await read(ownerKey, snapshotRead(courseId, acceptCourseIndex), undefined, authorization);
@@ -297,7 +305,7 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
           return finish({ ...base, fetchedAt: snapshot.fetchedAt, snapshot: result, selection: 'homework', actions,
             answer: candidates.length ? '請選擇要準備的作業，我會讀取規則並開啟準備區。' : snapshot.partial ? '作業資料尚未讀完，請重新查詢後選擇。' : '這次沒有找到符合條件的作業。' });
         }
-        const preparation = await prepareWithGrant(ownerKey, { courseId: target.courseId, homeworkId: target.id }, grant);
+        const preparation = await prepareWithGrant(ownerKey, { courseId: target.courseId, homeworkId: target.id }, grant, authorization?.binding);
         steps.push({ id: 'prepare', tool: 'prepare_homework', status: 'completed', message: '已讀取作業規則並開啟準備區，尚未上傳或送交。' });
         return finish({ ...base, fetchedAt: new Date(now()).toISOString(), snapshot: result, preparation, answer: AGENT_PREPARATION_ONLY });
       }

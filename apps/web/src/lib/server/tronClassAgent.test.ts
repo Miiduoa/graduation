@@ -55,6 +55,41 @@ function fixture() {
 }
 
 describe('scoped deterministic TronClass Agent tools', () => {
+  it.each([
+    ['查玩課雲『外交』公告', '下載『CS101』', 'announcements'],
+    ['查玩課雲『外交』作業', '查『CS101』作業', 'homework'],
+    ['查玩課雲『外交』教材', '查『CS101』教材', 'materials'],
+    ['下載玩課雲『外交』教材', '下載『CS101』教材', 'materials'],
+  ] as const)('requires confirmation for conflicting course aliases in %s and %s', async (question, companion, area) => {
+    const diplomacy = { ...course, name: '外交' };
+    const collision = { ...course, id: 102, name: 'CS101', code: 'CS102' };
+    for (const other of [collision, { ...collision, name: '別門課' }]) {
+      const f = fixture();
+      f.read.mockResolvedValue({ ...snapshot, courses: [diplomacy, other] });
+      const result = await f.service.ask(owner, { question, compoundQuestion: `${question}，${companion}` });
+      if (other === collision) {
+        expect(result.selection).toBe('course');
+        expect(result.snapshot?.[area]).toEqual([]);
+        expect(result.actions).toEqual([]);
+        expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, listOnly);
+      } else {
+        expect(result.selection).toBeNull();
+        expect(f.read).toHaveBeenLastCalledWith(owner, privateReadFor(area));
+      }
+    }
+  });
+
+  it('accepts the same quoted name twice even when its course code is ambiguous', async () => {
+    const f = fixture();
+    const question = '查玩課雲『外交』公告';
+    f.read.mockResolvedValue({ ...snapshot, courses: [
+      { ...course, name: '外交' }, { ...course, id: 102, name: 'CS101', code: 'CS102' },
+    ] });
+    const result = await f.service.ask(owner, { question, compoundQuestion: `${question}，下載『外交』` });
+    expect(result.selection).toBeNull();
+    expect(f.read).toHaveBeenLastCalledWith(owner, privateReadFor('announcements'));
+  });
+
   it('reads this actor’s pending homework and preserves unknown states', async () => {
     const f = fixture();
     const result = await f.service.ask(owner, { question: '查 TronClass 未繳作業有哪些', courseId: 101 });
@@ -550,7 +585,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
   it('prepares the chosen assignment inline but never inherits future school write permission', async () => {
     const f = fixture();
     const result = await f.service.ask(owner, { question: '幫我準備 TronClass 期末報告作業', courseId: 101, homeworkId: 201 });
-    expect(f.prepare).toHaveBeenCalledWith(owner, { courseId: 101, homeworkId: 201 });
+    expect(f.prepare).toHaveBeenCalledWith(owner, { courseId: 101, homeworkId: 201 }, binding);
     expect(result.snapshot?.homework).toEqual([homework]);
     expect(result.preparation).toMatchObject({ courseId: 101, homeworkId: 201, canSubmit: false });
     expect(result.preparation?.blockedReason).toContain('不會代為上傳');

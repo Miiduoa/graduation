@@ -401,10 +401,11 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
       userName: row.userName ?? null, cookies: unseal(row), expiresAt: new Date(row.expiresAt!).toISOString() };
   };
 
-  const assertCurrent = async (ownerKey: string, revision: string): Promise<void> => {
+  const assertCurrent = async (ownerKey: string, revision: string, studentId?: number): Promise<void> => {
     checkedRevision(revision);
     const current = await read(ownerKey);
-    if (!current || current.revision !== revision || current.state !== 'connected') changed();
+    if (!current || current.revision !== revision || current.state !== 'connected' ||
+      (studentId !== undefined && current.userId !== studentId)) changed();
     if (!(current.expiresAt! > now())) reconnect();
   };
 

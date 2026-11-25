@@ -2544,3 +2544,33 @@ proc_send_signal() {
     });
   }
 });
+
+test('launcher refuses new runtime under a group-writable parent without sticky protection', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-runtime-parent-mode-'));
+  const parent = path.join(dir, 'runtime-parent');
+  const previous = path.join(parent, 'previous-runtime');
+  try {
+    mkdirSync(parent);
+    chmodSync(parent, 0o770);
+    mkdirSync(previous, { mode: 0o700 });
+    const previousKey = path.join(previous, 'bff-session.key');
+    writeFileSync(previousKey, 'fixture', { mode: 0o600 });
+    const before = statSync(previousKey);
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8', timeout: 5000,
+      env: { ...process.env, TRONCLASS_RUNTIME_DIR: parent, TRONCLASS_SIGNAL_SELFTEST: '1' },
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /runtime parent.*sticky bit/);
+    assert.deepEqual(readdirSync(parent), ['previous-runtime']);
+    assert.deepEqual(readdirSync(previous), ['bff-session.key']);
+    const after = statSync(previousKey);
+    assert.equal(after.ino, before.ino);
+    assert.equal(after.atimeMs, before.atimeMs);
+    assert.equal(after.mtimeMs, before.mtimeMs);
+    assert.equal(statSync(parent).mode & 0o7777, 0o770);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

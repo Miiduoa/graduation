@@ -30,7 +30,7 @@ export type TronClassPublicSubmitInput = OperationInput & {
 export type TronClassPublicSubmissionResult = TronClassSubmissionResult | TronClassAcknowledgedReadbackResult;
 export type TronClassPublicSubmissionService = {
   assertAttachmentWritesEnabled(): void;
-  prepare(ownerKey: string, scope: TronClassHomeworkScope, signal?: AbortSignal): Promise<TronClassPreparedSubmission>;
+  prepare(ownerKey: string, scope: TronClassHomeworkScope, signal?: AbortSignal, snapshot?: TronClassSubmissionBinding): Promise<TronClassPreparedSubmission>;
   upload(ownerKey: string, input: TronClassPublicUploadInput, signal?: AbortSignal): Promise<TronClassUploadedAttachment>;
   submit(ownerKey: string, input: TronClassPublicSubmitInput, signal?: AbortSignal): Promise<TronClassPublicSubmissionResult>;
   reconcile(ownerKey: string, input: { operationId: string; revision: string }): Promise<TronClassPublicSubmissionResult>;
@@ -40,8 +40,8 @@ export type TronClassPublicSubmissionService = {
 export type TronClassPublicSubmissionDependencies = {
   db: TronClassSubmissionFirestore;
   bindings: TronClassSubmissionBindings;
-  readonlyPrepare(ownerKey: string, scope: TronClassHomeworkScope, context?: TronClassPreparationRead): Promise<TronClassPreparedSubmission>;
-  legacyReconcile(ownerKey: string, input: { operationId: string; revision: string }): Promise<TronClassSubmissionResult>;
+  readonlyPrepare(ownerKey: string, scope: TronClassHomeworkScope, context?: TronClassPreparationRead, snapshot?: TronClassSubmissionBinding): Promise<TronClassPreparedSubmission>;
+  legacyReconcile(ownerKey: string, input: { operationId: string; revision: string }, snapshot?: TronClassSubmissionBinding): Promise<TronClassSubmissionResult>;
   /** Explicit server-owned tenant evidence; neither an HTTP field nor an environment toggle. */
   contractVerified?: boolean;
   enabled?: () => boolean;
@@ -121,9 +121,9 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
     guardWrites();
     if (!attachmentsConfigured) unavailable();
   };
-  async function current(ownerKey: string, revision: string, studentId?: number, read?: TronClassPreparationRead): Promise<TronClassSubmissionBinding> {
+  async function current(ownerKey: string, revision: string, studentId?: number, read?: TronClassPreparationRead, snapshot?: TronClassSubmissionBinding): Promise<TronClassSubmissionBinding> {
     read?.check();
-    const binding = await bindings.requireBinding(ownerKey);
+    const binding = snapshot ?? await bindings.requireBinding(ownerKey);
     read?.check();
     const at = now();
     if (!binding || binding.schoolId !== 'pu' || !positiveId(binding.userId) || binding.revision !== revision ||
@@ -171,16 +171,19 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
       // The journal transaction, never a client phase or absent response, decides.
       return journal.cancelPreparation(ownerKey, input, enabled);
     },
-    async prepare(ownerKey, input, signal) {
+    async prepare(ownerKey, input, signal, snapshot) {
       return withTronClassPreparationRead(signal, async read => {
         ownerAndScope(ownerKey, input);
         if (Object.keys(input).some(key => !['courseId', 'homeworkId'].includes(key))) invalid();
         const scope = Object.freeze({ courseId: input.courseId, homeworkId: input.homeworkId });
-        const base = structuredClone(await read.wait(() => readonlyPrepare(ownerKey, scope, read)));
+        const session = await read.wait(async () => snapshot ?? bindings.requireBinding(ownerKey));
+        const binding = await read.wait(() => current(ownerKey, session.revision, undefined, read, session));
+        const pinned = { ...binding, cookies: { ...binding.cookies } };
+        const base = structuredClone(await read.wait(() => readonlyPrepare(ownerKey, scope, read, pinned)));
         if (!base || base.source !== 'tronclass' || base.schoolId !== 'pu' || base.courseId !== scope.courseId ||
           base.homeworkId !== scope.homeworkId || typeof base.revision !== 'string' || !REVISION.test(base.revision) ||
           (base.availability !== undefined && !isTronClassSubmissionAvailability(base.availability, scope, base.revision))) unavailable();
-        const binding = await read.wait(() => current(ownerKey, base.revision, undefined, read));
+        await read.wait(() => current(ownerKey, base.revision, undefined, read, pinned));
         // Project the existing read-only DTO explicitly; do not spread provider data.
         const preparation: TronClassPreparedSubmission = {
           source: 'tronclass', schoolId: 'pu', ...scope, revision: base.revision,
@@ -191,8 +194,8 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
           ...(base.availability === undefined ? {} : { availability: base.availability }),
         };
         if (preparation.blockedReason) return preparation;
-        const granted: TronClassCandidateAuthorization = structuredClone(await read.wait(() => authorization!(ownerKey, scope, read.signal)));
-        await read.wait(() => current(ownerKey, base.revision, binding.userId, read));
+        const granted: TronClassCandidateAuthorization = structuredClone(await read.wait(() => authorization!(ownerKey, scope, read.signal, pinned)));
+        await read.wait(() => current(ownerKey, base.revision, binding.userId, read, pinned));
         if (!granted?.binding || granted.binding.revision !== base.revision || granted.binding.userId !== binding.userId ||
           granted.binding.schoolId !== binding.schoolId) fail(409, 'TRONCLASS_BINDING_CHANGED');
         if (!granted.assignment || granted.assignment.courseId !== scope.courseId || granted.assignment.homeworkId !== scope.homeworkId ||
@@ -215,7 +218,7 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
           }
         }
         const assignment = granted.assignment;
-        await read.wait(() => current(ownerKey, base.revision, binding.userId, read));
+        await read.wait(() => current(ownerKey, base.revision, binding.userId, read, pinned));
         reason = blockedReason() ?? reason;
         return {
           ...preparation, title: assignment.title, description: assignment.description, deadline: assignment.deadline,

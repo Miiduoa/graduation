@@ -56,8 +56,8 @@ describe('TronClass homework overview scope', () => {
     const question = `${clause}和${companion}`;
     expect(tronClassCompoundClauses(question)).toEqual([clause]);
     const scope = tronClassAgentCourseScope(clause, question);
-    expect(scope?.matches('外交', 'PS101')).toBe(matchesDiplomacy);
-    expect(scope?.matches('交通', 'TR101')).toBe(false);
+    expect(scope?.resolve([{ id: 1, name: '外交', code: 'PS101' }]) === 1).toBe(matchesDiplomacy);
+    expect(scope?.resolve([{ id: 1, name: '交通', code: 'TR101' }]) === 1).toBe(false);
   });
 
   it.each([
@@ -73,7 +73,7 @@ describe('TronClass homework overview scope', () => {
     for (const clause of clauses) {
       const scope = tronClassAgentCourseScope(clause, question);
       expect(scope?.requiresConfirmation).toBe(true);
-      expect(scope?.matches('外交', 'PS101')).toBe(false);
+      expect(scope?.resolve([{ id: 1, name: '外交', code: 'PS101' }]) === 1).toBe(false);
     }
   });
 
@@ -81,20 +81,20 @@ describe('TronClass homework overview scope', () => {
     const scope = tronClassAgentCourseScope(`查玩課雲 ${all} 『外交』作業`);
     expect(scope?.overview).toBe(false);
     expect(scope?.requiresConfirmation).toBe(true);
-    expect(scope?.matches('外交', 'PS101')).toBe(false);
+    expect(scope?.resolve([{ id: 1, name: '外交', code: 'PS101' }]) === 1).toBe(false);
   });
 
   it('treats a scope word inside a quoted course name as part of that name', () => {
     const scope = tronClassAgentCourseScope('查玩課雲『所有人的外交』作業');
     expect(scope?.requiresConfirmation).toBe(false);
-    expect(scope?.matches('所有人的外交', 'PS101')).toBe(true);
+    expect(scope?.resolve([{ id: 1, name: '所有人的外交', code: 'PS101' }]) === 1).toBe(true);
   });
 
   it('supplements an inherited homework read when its course name is also a service word', () => {
     const question = '查玩課雲課程，查交通作業';
     const clauses = tronClassCompoundClauses(question);
     expect(clauses).toEqual(['查玩課雲課程', '查交通作業 玩課雲']);
-    expect(tronClassAgentCourseScope(clauses[1]!, question)?.matches('交通', 'TR101')).toBe(true);
+    expect(tronClassAgentCourseScope(clauses[1]!, question)?.resolve([{ id: 1, name: '交通', code: 'TR101' }]) === 1).toBe(true);
   });
 
   it.each(['『外交』', '《外交》', '〈外交〉', '「外交和歷史」'])(
@@ -124,9 +124,9 @@ describe('TronClass homework overview scope', () => {
     const compoundQuestion = `${question}，${companion}`;
     expect(tronClassCompoundClauses(compoundQuestion)).toEqual([question]);
     const scope = tronClassAgentCourseScope(question, compoundQuestion);
-    expect(scope?.matches('資料庫', 'CS101')).toBe(false);
-    expect(scope?.matches('外交', 'PS101')).toBe(false);
-    expect(tronClassAgentCourseScope(question)?.matches('資料庫', 'CS101')).toBe(true);
+    expect(scope?.resolve([{ id: 1, name: '資料庫', code: 'CS101' }]) === 1).toBe(false);
+    expect(scope?.resolve([{ id: 1, name: '外交', code: 'PS101' }]) === 1).toBe(false);
+    expect(tronClassAgentCourseScope(question)?.resolve([{ id: 1, name: '資料庫', code: 'CS101' }]) === 1).toBe(true);
   });
 
   it.each([
@@ -139,8 +139,8 @@ describe('TronClass homework overview scope', () => {
     const question = clause + suffix;
     expect(tronClassCompoundClauses(question)).toContain(clause);
     const scope = tronClassAgentCourseScope(clause, question);
-    expect(scope?.matches('外交', 'PS101')).toBe(false);
-    expect(scope?.matches('交通', 'TR101')).toBe(false);
+    expect(scope?.resolve([{ id: 1, name: '外交', code: 'PS101' }]) === 1).toBe(false);
+    expect(scope?.resolve([{ id: 1, name: '交通', code: 'TR101' }]) === 1).toBe(false);
   });
 
   it('keeps one exact course when a quoted download precedes the explicit source', () => {
@@ -148,8 +148,8 @@ describe('TronClass homework overview scope', () => {
     const question = `下載『外交』，${clause}`;
     expect(tronClassCompoundClauses(question)).toEqual([clause]);
     const scope = tronClassAgentCourseScope(clause, question);
-    expect(scope?.matches('外交', 'PS101')).toBe(true);
-    expect(scope?.matches('外交史', 'PS102')).toBe(false);
+    expect(scope?.resolve([{ id: 1, name: '外交', code: 'PS101' }]) === 1).toBe(true);
+    expect(scope?.resolve([{ id: 1, name: '外交史', code: 'PS102' }]) === 1).toBe(false);
   });
 
   it.each(['和查公車', '，查校園公告'])('keeps %s outside the quoted course scope', suffix => {
@@ -157,8 +157,8 @@ describe('TronClass homework overview scope', () => {
     const question = clause + suffix;
     expect(tronClassCompoundClauses(question)).toEqual([clause]);
     const scope = tronClassAgentCourseScope(clause, question);
-    expect(scope?.matches('外交', 'PS101')).toBe(true);
-    expect(scope?.matches('外交史', 'PS101')).toBe(false);
+    expect(scope?.resolve([{ id: 1, name: '外交', code: 'PS101' }]) === 1).toBe(true);
+    expect(scope?.resolve([{ id: 1, name: '外交史', code: 'PS101' }]) === 1).toBe(false);
   });
 
   it.each(['查玩課雲公告', '查玩課雲教材', '下載玩課雲教材'])(
@@ -166,8 +166,8 @@ describe('TronClass homework overview scope', () => {
       const compoundQuestion = `查玩課雲『資料庫』課程，${question}`;
       expect(tronClassCompoundClauses(compoundQuestion)).toContain(question);
       const scope = tronClassAgentCourseScope(question, compoundQuestion);
-      expect(scope?.matches('資料庫', 'CS101')).toBe(true);
-      expect(scope?.matches('資料庫系統', 'CS201')).toBe(false);
+      expect(scope?.resolve([{ id: 1, name: '資料庫', code: 'CS101' }]) === 1).toBe(true);
+      expect(scope?.resolve([{ id: 1, name: '資料庫系統', code: 'CS201' }]) === 1).toBe(false);
     },
   );
 

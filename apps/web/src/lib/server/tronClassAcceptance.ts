@@ -282,9 +282,9 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
     if (!expiredAllowed && expires <= current) fail(409, 'TRONCLASS_ACCEPTANCE_PLAN_EXPIRED');
     return { ...body, signature: value.signature };
   };
-  const current = async (scope: Identity, allowReconnect = false, signal?: AbortSignal) => {
+  const current = async (scope: Identity, allowReconnect = false, signal?: AbortSignal, snapshot?: TronClassSubmissionBinding) => {
     checkSignal(signal);
-    const binding = await bindings.requireBinding(scope.ownerKey);
+    const binding = snapshot ?? await bindings.requireBinding(scope.ownerKey);
     checkSignal(signal);
     if (
       !binding ||
@@ -304,13 +304,14 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
     checkSignal(signal);
     return binding;
   };
-  const authorizeText = async (scope: Identity, signal?: AbortSignal) => {
-    await current(scope, false, signal);
+  const authorizeText = async (scope: Identity, signal: AbortSignal | undefined, binding: TronClassSubmissionBinding) => {
+    await current(scope, false, signal, binding);
     const granted = structuredClone(
       await authorize(
         scope.ownerKey,
         Object.freeze({ courseId: scope.courseId, homeworkId: scope.homeworkId }),
         signal,
+        binding,
       ),
     );
     checkSignal(signal);
@@ -335,7 +336,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
     )
       fail(409, 'TRONCLASS_SUBMISSION_BLOCKED');
     tronClassCandidateHeaders(granted.binding);
-    await current(scope, false, signal);
+    await current(scope, false, signal, binding);
     return granted;
   };
   const scopeMatchesAttempt = (
@@ -355,7 +356,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
     )
       conflict();
   };
-  const controlled = (scope: Identity, enabled: () => boolean) =>
+  const controlled = (scope: Identity, enabled: () => boolean, binding: TronClassSubmissionBinding) =>
     createTronClassControlledSubmission({
       db,
       bindings,
@@ -369,7 +370,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
           target.homeworkId !== scope.homeworkId
         )
           conflict();
-        return authorizeText(scope, signal);
+        return authorizeText(scope, signal, binding);
       },
       readHistory: (binding, target, signal) =>
         readHistory(scope.ownerKey, binding, target, signal),
@@ -379,28 +380,29 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
     plan: TronClassAcceptancePlan,
     signal?: AbortSignal,
   ): Promise<TronClassAcceptanceResult> => {
-    await current(plan, true, signal);
+    const binding = await current(plan, true, signal);
     const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId);
     checkSignal(signal);
     if (!attempt) return unknown(plan.operationId);
     scopeMatchesAttempt(plan, attempt);
     try {
-      const result = await controlled(plan, () => false).reconcile(
+      const result = await controlled(plan, () => false, binding).reconcile(
         plan.ownerKey,
         plan.operationId,
         signal,
+        binding,
       );
-      await current(plan, true, signal);
+      await current(plan, true, signal, binding);
       if (result.state !== 'verified-new-version') return unknown(plan.operationId);
       const latest = await journal.readAttempt(plan.ownerKey, plan.operationId);
       if (!latest) return unknown(plan.operationId);
       scopeMatchesAttempt(plan, latest);
-      await current(plan, true, signal);
+      await current(plan, true, signal, binding);
       return mapTronClassSubmissionConfirmation(plan.ownerKey, latest, result);
     } catch (error) {
       // The original operation/lock remain authoritative. Neither failure nor a
       // missing ack grants a fresh dispatch, and reconcile never calls authorize.
-      await current(plan, true, signal);
+      await current(plan, true, signal, binding);
       if (
         error instanceof NuniError &&
         [
@@ -419,7 +421,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
     async preflight(value: unknown, signal?: AbortSignal): Promise<TronClassAcceptancePlan> {
       return safe(async () => {
         const input = parseTronClassAcceptanceInput(value);
-        await current(input, false, signal);
+        const binding = await current(input, false, signal);
         // Existence is only a conservative refusal. Absence is NOT a reservation;
         // concurrent processes still compete for the core's durable final claim.
         const operation = await db
@@ -435,7 +437,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
           .get();
         checkSignal(signal);
         if (operation.exists || lock.exists) fail(409, 'TRONCLASS_ACCEPTANCE_RECONCILE_ONLY');
-        const granted = await authorizeText(input, signal);
+        const granted = await authorizeText(input, signal, binding);
         const issued = at();
         const expires = Math.min(
           issued + PLAN_TTL_MS,
@@ -503,7 +505,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
         ) {
           fail(409, 'TRONCLASS_ACCEPTANCE_INPUT_CHANGED');
         }
-        await current(plan, false, signal);
+        const binding = await current(plan, false, signal);
         const existing = await journal.readAttempt(plan.ownerKey, plan.operationId);
         checkSignal(signal);
         if (existing) {
@@ -519,7 +521,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
           return unknown(plan.operationId);
         }
         try {
-          const result = await controlled(plan, () => at() < Date.parse(plan.expiresAt)).dispatch(
+          const result = await controlled(plan, () => at() < Date.parse(plan.expiresAt), binding).dispatch(
             plan.ownerKey,
             {
               courseId: plan.courseId,
@@ -531,12 +533,12 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
             },
             signal,
           );
-          await current(plan, false, signal);
+          await current(plan, false, signal, binding);
           if (result.state !== 'verified-new-version') return unknown(plan.operationId);
           const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId);
           if (!attempt) return unknown(plan.operationId);
           scopeMatchesAttempt(plan, attempt);
-          await current(plan, false, signal);
+          await current(plan, false, signal, binding);
           return mapTronClassSubmissionConfirmation(plan.ownerKey, attempt, result);
         } catch {
           // Once the candidate has started, a thrown/late response or unavailable

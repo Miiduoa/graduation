@@ -151,14 +151,16 @@ try:
     # Share existing private directories. For other modes and the default
     # location, create a private child without changing any directory's mode.
     if not specified or stat.S_IMODE(opened.st_mode) not in (0o700, 0o2700):
+        # Protect every retained path component from replacement by another UID.
+        # A trusted sticky directory (such as /tmp) protects our child entries.
+        for fd in fds:
+            directory = os.fstat(fd)
+            if (directory.st_uid not in (os.getuid(), 0)
+                    or (directory.st_mode & 0o022 and not directory.st_mode & stat.S_ISVTX)):
+                sys.exit("TronClass runtime parent must be owned by the current user or root and must have the sticky bit if writable by others.")
         prefix = "run-" if specified else "campus-tronclass-emulator."
         os.umask(0o077)
         while True:
-            # A writer with rename permission on this parent (including the
-            # same UID) can move entries. mkdirat cannot return an fd, so a
-            # same-owner, same-mode substitution before openat is indistinguishable.
-            # Use a fresh unpredictable name and reject links at open; after
-            # open, all I/O stays on that inode regardless of subsequent renames.
             name = prefix + secrets.token_hex(16)
             try:
                 os.mkdir(name, 0o700, dir_fd=fds[-1])

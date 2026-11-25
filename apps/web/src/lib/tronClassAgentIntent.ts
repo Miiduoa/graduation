@@ -1945,8 +1945,19 @@ export function tronClassAgentCourseScope(question: string, compoundQuestion?: s
     overview: !compound && qualifiers.length === 0 && !isMultiClauseRequest(question),
     requiresConfirmation,
     unqualified: qualifiers.length === 0,
-    matches: (name: string, code: string) => !requiresConfirmation && qualifiers.length > 0 &&
-      qualifiers.every(scope => scope.matches(name, code)),
+    resolve(courses: readonly { id: number; name: string; code: string }[]): number | undefined {
+      if (requiresConfirmation || qualifiers.length === 0) return;
+      let selected: number | undefined;
+      // Each qualifier must resolve independently, including aliases shared by multiple courses.
+      for (const qualifier of qualifiers.flatMap(scope => scope.qualifiers)) {
+        const candidates = new Set(courses.filter(course => qualifier(course.name, course.code)).map(course => course.id));
+        if (candidates.size !== 1) return;
+        const [id] = candidates;
+        if (selected !== undefined && selected !== id) return;
+        selected = id;
+      }
+      return selected;
+    },
   };
 }
 
@@ -2091,24 +2102,19 @@ function readCourseScope(text: string, spans: readonly QuoteSpan[], intent: Tron
   const complete = !conflict && !hasReadBlockingDecoration(text);
   const onlyQuotedTargets = spans.length > 0 && isCourseReadFrame(text, intent, spans);
   const overview = complete && spans.length === 0 && isCourseReadFrame(text.replace(/所有/g, '全部'), intent);
-  return {
-    quoted,
-    overview,
-    explicitAll,
-    matches(...names: string[]): boolean {
-      if (!complete || explicitAll) return false;
-      const aliases = names.map(normalizeTarget).filter(Boolean);
-      if (targets.length) return onlyQuotedTargets && targets.every(value => aliases.includes(value));
-      return aliases.some(target => {
-        if (target.length < 2) return false;
-        const literal = new RegExp(Array.from(target, escapeRegex).join('\\s*'), 'u');
-        const match = literal.exec(text.toLocaleLowerCase());
-        // Retokenize the request frame at the boundary of an unquoted literal.
-        return !!match && isCourseReadFrame(
-          (text.slice(0, match.index) + ' ' + text.slice(match.index + match[0].length)).replace(/所有/g, '全部'), intent);
-      });
-    },
-  };
+  const matchesUnquoted = (...names: string[]) => complete && !explicitAll &&
+    names.map(normalizeTarget).filter(Boolean).some(target => {
+      if (target.length < 2) return false;
+      const literal = new RegExp(Array.from(target, escapeRegex).join('\\s*'), 'u');
+      const match = literal.exec(text.toLocaleLowerCase());
+      // Retokenize the request frame at the boundary of an unquoted literal.
+      return !!match && isCourseReadFrame(
+        (text.slice(0, match.index) + ' ' + text.slice(match.index + match[0].length)).replace(/所有/g, '全部'), intent);
+    });
+  const qualifiers = targets.length ? targets.map(value => (...names: string[]) =>
+    complete && !explicitAll && onlyQuotedTargets && !!value && names.some(name => normalizeTarget(name) === value))
+    : [matchesUnquoted];
+  return { quoted, overview, explicitAll, qualifiers, matches: (...names: string[]) => qualifiers.every(match => match(...names)) };
 }
 
 export function isTronClassHomeworkOverview(question: string): boolean {

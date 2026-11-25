@@ -116,7 +116,7 @@ export function createTronClassPuAuthorizationReader({
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) fail(400, 'TRONCLASS_INVALID_INPUT');
 
   return async function authorize(
-    ownerKey: string, input: TronClassHomeworkScope, signal?: AbortSignal,
+    ownerKey: string, input: TronClassHomeworkScope, signal?: AbortSignal, expected?: string | TronClassSubmissionBinding,
   ): Promise<TronClassCandidateAuthorization> {
     if (typeof ownerKey !== 'string' || !ownerKey || ownerKey.length > 200 ||
       !input || !positiveId(input.courseId) || !positiveId(input.homeworkId)) fail(400, 'TRONCLASS_INVALID_INPUT');
@@ -147,19 +147,18 @@ export function createTronClassPuAuthorizationReader({
       check();
       return result;
     };
-    let identity: Pick<TronClassSubmissionBinding, 'schoolId' | 'revision' | 'userId'> | undefined;
+    const suppliedBinding = typeof expected === 'object' ? expected : undefined;
+    let snapshot: TronClassSubmissionBinding | undefined;
     const current = async (): Promise<TronClassSubmissionBinding> => {
-      const binding = await guarded(() => bindings.requireBinding(ownerKey));
-      if (identity && (!binding || binding.schoolId !== identity.schoolId ||
-        binding.userId !== identity.userId || binding.revision !== identity.revision)) fail(409, 'TRONCLASS_BINDING_CHANGED');
+      const binding = snapshot ?? suppliedBinding ?? await guarded(() => bindings.requireBinding(ownerKey));
+      if (typeof expected === 'string' && binding?.revision !== expected) fail(409, 'TRONCLASS_BINDING_CHANGED');
       if (!binding || binding.schoolId !== 'pu' || !positiveId(binding.userId) ||
         typeof binding.revision !== 'string' || !/^[a-f0-9]{32}$/.test(binding.revision) ||
         typeof binding.expiresAt !== 'string' || !Number.isFinite(Date.parse(binding.expiresAt)) ||
         Date.parse(binding.expiresAt) <= checkedNow(now) || !record(binding.cookies) ||
         Object.values(binding.cookies).some(value => typeof value !== 'string')) fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
-      const snapshot = { ...binding, cookies: Object.freeze({ ...binding.cookies }) };
-      identity ??= Object.freeze({ schoolId: snapshot.schoolId, userId: snapshot.userId, revision: snapshot.revision });
-      await guarded(() => bindings.assertCurrent(ownerKey, snapshot.revision));
+      snapshot ??= { ...binding, cookies: Object.freeze({ ...binding.cookies }) };
+      await guarded(() => bindings.assertCurrent(ownerKey, binding.revision, binding.userId));
       if (Date.parse(snapshot.expiresAt) <= checkedNow(now)) fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
       return snapshot;
     };
@@ -172,8 +171,8 @@ export function createTronClassPuAuthorizationReader({
       return unavailable();
     };
     const operation = async (): Promise<TronClassCandidateAuthorization> => {
-      const binding = await current();
       const source = suppliedSource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
+      const binding = await current();
       check();
       if (!source.fetchHomeworkActivity || !source.fetchStudentSubmissionList || !source.fetchCoursePage) unavailable();
       // getAssignment owns the complete course/homework membership traversal.

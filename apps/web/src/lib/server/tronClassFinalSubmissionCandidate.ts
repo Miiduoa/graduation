@@ -64,7 +64,7 @@ export type TronClassFinalCandidateAttempt = TronClassFinalCandidateClaim & {
 
 type Dependencies = {
   enabled?: () => boolean;
-  authorize(ownerKey: string, scope: TronClassHomeworkScope, signal?: AbortSignal): Promise<TronClassCandidateAuthorization>;
+  authorize(ownerKey: string, scope: TronClassHomeworkScope, signal?: AbortSignal, expected?: string | TronClassSubmissionBinding): Promise<TronClassCandidateAuthorization>;
   assertCurrent(ownerKey: string, revision: string): Promise<void>;
   readUploadedFiles(ownerKey: string, input: Omit<TronClassFinalCandidateInput, 'content'>): Promise<TronClassCandidateUploadedFile[]>;
   /** Must atomically reserve the school student/activity across owners and processes. */
@@ -229,13 +229,13 @@ export function createTronClassFinalSubmissionCandidate(dependencies: Dependenci
       const scope = Object.freeze({ courseId: input.courseId, homeworkId: input.homeworkId });
       return bounded(signal, async (signal, check) => {
         check();
-        const raw = await dependencies.authorize(ownerKey, scope, signal);
+        const raw = await dependencies.authorize(ownerKey, scope, signal, input.revision);
         check();
         assertTronClassCandidateAuthorization(raw, scope, now(), !!input.content.trim());
         let authorization = capturedAuthorization(raw);
-        let binding = authorization.binding;
+        const binding = authorization.binding;
         if (input.revision !== binding.revision) fail(409, 'TRONCLASS_BINDING_CHANGED');
-        let headers = tronClassCandidateHeaders(binding);
+        const headers = tronClassCandidateHeaders(binding);
         const uploadScope = { ...scope, revision: input.revision, operationId: input.operationId, fileIds: [...input.fileIds] };
         const files = checkedFiles(await dependencies.readUploadedFiles(ownerKey, uploadScope), ownerKey, input, authorization);
         check();
@@ -261,15 +261,14 @@ export function createTronClassFinalSubmissionCandidate(dependencies: Dependenci
         // Uploads and the durable claim can take time. Re-read the actual school
         // rules and baseline before POST; a second school-tab submission or a
         // teacher's changed limits must not be accepted using our first snapshot.
-        const freshRaw = await dependencies.authorize(ownerKey, scope, signal);
+        const freshRaw = await dependencies.authorize(ownerKey, scope, signal, binding);
         check();
         assertTronClassCandidateAuthorization(freshRaw, scope, now(), !!input.content.trim());
         const fresh = capturedAuthorization(freshRaw);
         if (fresh.binding.revision !== binding.revision || fresh.binding.userId !== binding.userId) fail(409, 'TRONCLASS_BINDING_CHANGED');
         checkedFiles(files, ownerKey, input, fresh);
         authorization = fresh;
-        binding = fresh.binding;
-        headers = tronClassCandidateHeaders(binding);
+
         await guard();
         const fetchSchool = dependencies.fetch ?? createPuRelayFetch({
           directFetch: createTronClassCandidateFetch(undefined, files.map(file => file.uploadId)),
@@ -296,7 +295,7 @@ export function createTronClassFinalSubmissionCandidate(dependencies: Dependenci
         return readback({ ...attempt, acknowledgment }, binding, signal, check);
       });
     },
-    async reconcile(ownerKey: string, operationId: string, signal?: AbortSignal) {
+    async reconcile(ownerKey: string, operationId: string, signal?: AbortSignal, snapshot?: TronClassSubmissionBinding) {
       if (typeof ownerKey !== 'string' || !ownerKey || ownerKey.length > 300 || typeof operationId !== 'string' || !OPERATION_ID.test(operationId)) invalid();
       // Reconciliation is read-only and remains available with writes disabled.
       return bounded(signal, async (signal, check) => {
@@ -304,7 +303,7 @@ export function createTronClassFinalSubmissionCandidate(dependencies: Dependenci
         const raw = await dependencies.readAttempt(ownerKey, operationId);
         check();
         const attempt = checkedAttempt(raw, ownerKey, operationId);
-        const binding = await dependencies.requireBinding(ownerKey);
+        const binding = snapshot ?? await dependencies.requireBinding(ownerKey);
         check();
         if (!binding || binding.schoolId !== 'pu' || binding.userId !== attempt.studentId ||
           !REVISION.test(binding.revision) || !Number.isFinite(Date.parse(binding.expiresAt)) || Date.parse(binding.expiresAt) <= now()) {

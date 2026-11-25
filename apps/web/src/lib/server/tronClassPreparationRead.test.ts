@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { NuniError } from '@campus/shared/src/nuni';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTronClassPublicSubmissionService, type TronClassPublicSubmissionDependencies } from './tronClassPublicSubmissionService';
 import { createTronClassSubmissionService, type TronClassSubmissionFirestore } from './tronClassSubmission';
@@ -6,6 +7,8 @@ import { createTronClassSubmissionSource, type TronClassSubmissionBinding } from
 import type { LmsReadonlySource, LmsReadOptions } from './tronClassLmsSource';
 import type { TronClassCandidateAuthorization } from './tronClassSubmissionCandidate';
 import { TRONCLASS_PREPARATION_TIMEOUT_MS, withTronClassPreparationRead } from './tronClassPreparationRead';
+
+import { createTronClassAgentService } from './tronClassAgent';
 
 const NOW = Date.parse('2026-11-18T01:00:00.000Z');
 const OWNER = 'firebase:preparation-cancellation-fixture';
@@ -63,6 +66,42 @@ function fixture(contractVerified = false,
 afterEach(() => vi.useRealTimers());
 
 describe('one cancellation boundary through the real preparation readers', () => {
+  it.each(['explicit', 'automatic', 'expired'] as const)('keeps preparation on the authorized session for %s selection', async mode => {
+    const f = fixture(false);
+    const replacement = { ...f.identity, revision: 'b'.repeat(32), cookies: { session: 'other-fixture' } };
+    const grant = { revision: f.identity.revision, version: 'c'.repeat(32), updatedAt: null,
+      permissions: { readCourseData: true, downloadMaterials: true, prepareHomework: true } };
+    const course = { id: scope.courseId, name: '外交', code: 'PS101', teachers: [], semester: '', status: 'ongoing', href: '' };
+    const homework = { id: scope.homeworkId, courseId: scope.courseId, courseName: course.name, title: '測試作業',
+      deadline: null, deadlineLabel: '', submitted: false, description: '', href: '' };
+    f.bindings.requireBinding.mockResolvedValueOnce(f.identity).mockResolvedValue(replacement);
+    const agent = createTronClassAgentService({
+      bindings: f.bindings,
+      grants: { get: async () => grant, require: async () => grant, assertCurrent: async () => {} },
+      read: async () => ({
+        revision: grant.revision, fetchedAt: new Date(NOW).toISOString(), partial: false, errors: [],
+        courses: [course], homework: [homework], announcements: [], materials: [],
+      }),
+      prepare: (owner, input, binding) => f.service.prepare(owner, input, undefined, binding),
+    });
+    if (mode === 'expired') {
+      f.bindings.assertCurrent.mockRejectedValue(new NuniError(409, 'TRONCLASS_BINDING_CHANGED'));
+      await expect(agent.prepare(OWNER, scope)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+      expect(f.reads.fetchCourses).not.toHaveBeenCalled();
+      expect(f.reads.fetchHomeworkPage).not.toHaveBeenCalled();
+    } else {
+      const preparation = mode === 'explicit' ? await agent.prepare(OWNER, scope)
+        : (await agent.ask(OWNER, { question: '準備玩課雲『外交』作業' })).preparation;
+      expect(preparation).toMatchObject({ ...scope, revision: grant.revision, canSubmit: false });
+      expect(f.reads.fetchCourses).toHaveBeenCalled();
+      expect(f.reads.fetchHomeworkPage).toHaveBeenCalled();
+      for (const [cookies] of [...f.reads.fetchCourses.mock.calls, ...f.reads.fetchHomeworkPage.mock.calls]) {
+        expect(cookies).toEqual(f.identity.cookies);
+      }
+    }
+    expect(f.bindings.requireBinding).toHaveBeenCalledTimes(1);
+  });
+
   it('includes optional personal availability under the existing preparation signal', async () => {
     const readAvailability = vi.fn<NonNullable<Parameters<typeof createTronClassSubmissionService>[0]['readAvailability']>>(
       async () => structuredClone(availability),
@@ -71,7 +110,7 @@ describe('one cancellation boundary through the real preparation readers', () =>
     const result = await f.service.prepare(OWNER, scope);
     expect(result.availability).toEqual(availability);
     expect(readAvailability).toHaveBeenCalledExactlyOnceWith(OWNER, scope, f.identity.revision,
-      f.reads.fetchCourses.mock.calls[0][2]?.signal);
+      f.reads.fetchCourses.mock.calls[0][2]?.signal, f.identity);
     expect(f.authorization).not.toHaveBeenCalled();
     expect(f.db.doc).not.toHaveBeenCalled();
   });

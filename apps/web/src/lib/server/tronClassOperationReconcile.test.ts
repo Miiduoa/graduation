@@ -151,7 +151,7 @@ describe('public v1/v2 read-only reconciliation', () => {
     const s = await setup();
     s.rows.set(operationPath(), { version: 1 });
     await s.reconcile(OWNER, input);
-    expect(s.legacyReconcile).toHaveBeenCalledExactlyOnceWith(OWNER, input);
+    expect(s.legacyReconcile).toHaveBeenCalledExactlyOnceWith(OWNER, input, expect.objectContaining({ revision: input.revision }));
     s.rows.delete(operationPath());
     s.legacyReconcile.mockRejectedValue(new NuniError(404, 'TRONCLASS_SUBMISSION_NOT_FOUND'));
     await expect(s.reconcile(OWNER, input)).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_NOT_FOUND' });

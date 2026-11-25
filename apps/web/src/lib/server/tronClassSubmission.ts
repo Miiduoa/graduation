@@ -68,7 +68,7 @@ export type TronClassSubmissionFirestore = {
 };
 export type TronClassSubmissionBindings = {
   requireBinding(ownerKey: string): Promise<TronClassSubmissionBinding>;
-  assertCurrent(ownerKey: string, revision: string): Promise<void>;
+  assertCurrent(ownerKey: string, revision: string, studentId?: number): Promise<void>;
 };
 
 type LedgerFile = Omit<TronClassUploadedAttachment, 'status'> & {
@@ -197,7 +197,7 @@ export function createTronClassSubmissionService({ db, bindings, source, readAva
   bindings: TronClassSubmissionBindings;
   source: TronClassSubmissionSource;
   /** Optional injection: only the production factory supplies the live reader. */
-  readAvailability?: (ownerKey: string, scope: TronClassHomeworkScope, expectedRevision: string, signal?: AbortSignal) => Promise<TronClassSubmissionAvailability>;
+  readAvailability?: (ownerKey: string, scope: TronClassHomeworkScope, expectedRevision: string, signal?: AbortSignal, snapshot?: TronClassSubmissionBinding) => Promise<TronClassSubmissionAvailability>;
   now?: () => number;
   writeEnabled?: () => boolean;
 }) {
@@ -222,19 +222,22 @@ export function createTronClassSubmissionService({ db, bindings, source, readAva
       return run(tx);
     });
   }
-  async function bindingFor(ownerKey: string, revision?: string) {
+  async function bindingFor(ownerKey: string, revision?: string, snapshot?: TronClassSubmissionBinding) {
     if (!shortString(ownerKey, 300)) invalid();
-    const binding = await bindings.requireBinding(ownerKey);
+    const binding = snapshot ?? await bindings.requireBinding(ownerKey);
     if (!binding || binding.schoolId !== 'pu' || !positiveId(binding.userId) || !REVISION.test(binding.revision) ||
       canonicalInstant(binding.expiresAt) === null || canonicalInstant(binding.expiresAt)! <= now()) {
       fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
     }
     if (revision !== undefined && binding.revision !== revision) fail(409, 'TRONCLASS_BINDING_CHANGED');
-    return binding;
+    return { ...binding, cookies: { ...binding.cookies } };
   }
   async function assignmentFor(ownerKey: string, binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, context?: TronClassPreparationRead) {
     context?.check();
-    const assignment = await source.getAssignment(binding, scope, context);
+    await bindings.assertCurrent(ownerKey, binding.revision);
+    context?.check();
+    const assignment = await source.getAssignment(binding, scope, context,
+      () => bindings.assertCurrent(ownerKey, binding.revision));
     context?.check();
     await bindings.assertCurrent(ownerKey, binding.revision);
     context?.check();
@@ -242,6 +245,8 @@ export function createTronClassSubmissionService({ db, bindings, source, readAva
     return assignment;
   }
   async function receiptsFor(ownerKey: string, binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, context?: TronClassPreparationRead) {
+    context?.check();
+    await bindings.assertCurrent(ownerKey, binding.revision);
     context?.check();
     const value = await source.listSubmissions(binding, scope);
     context?.check();
@@ -320,12 +325,12 @@ export function createTronClassSubmissionService({ db, bindings, source, readAva
     return { status: 'submitted', operationId: operation.operationId, receipt };
   }
   return {
-    async prepare(ownerKey: string, input: TronClassHomeworkScope, context?: TronClassPreparationRead): Promise<TronClassPreparedSubmission> {
+    async prepare(ownerKey: string, input: TronClassHomeworkScope, context?: TronClassPreparationRead, snapshot?: TronClassSubmissionBinding): Promise<TronClassPreparedSubmission> {
       const prepareRead = async (read: TronClassPreparationRead): Promise<TronClassPreparedSubmission> => {
         read.check();
         validateScope(input);
         const scope = Object.freeze({ courseId: input.courseId, homeworkId: input.homeworkId });
-        const binding = await read.wait(() => bindingFor(ownerKey));
+        const binding = await read.wait(() => bindingFor(ownerKey, undefined, snapshot));
         const assignment = await read.wait(() => assignmentFor(ownerKey, binding, scope, read));
         const details = assignment.details === undefined ? undefined : structuredClone(assignment.details);
         let blockedReason = !writeEnabled() ? '目前暫停站內作業繳交，你仍可查看作業說明。'
@@ -351,7 +356,9 @@ export function createTronClassSubmissionService({ db, bindings, source, readAva
         let history: TronClassSubmissionHistory | undefined;
         if (source.readSubmissionHistory) {
           try {
-            const result = await read.wait(() => source.readSubmissionHistory!(binding, scope, read));
+            await read.wait(() => bindings.assertCurrent(ownerKey, binding.revision));
+            const result = await read.wait(() => source.readSubmissionHistory!(binding, scope, read,
+              () => bindings.assertCurrent(ownerKey, binding.revision)));
             await read.wait(() => bindings.assertCurrent(ownerKey, binding.revision));
             if (!isTronClassSubmissionHistory(result, scope)) fail(502, 'TRONCLASS_HISTORY_UNAVAILABLE');
             history = result;
@@ -369,7 +376,7 @@ export function createTronClassSubmissionService({ db, bindings, source, readAva
         let availability: TronClassSubmissionAvailability | undefined;
         if (readAvailability) {
           try {
-            const result = await read.wait(() => readAvailability(ownerKey, scope, binding.revision, read.signal));
+            const result = await read.wait(() => readAvailability(ownerKey, scope, binding.revision, read.signal, binding));
             await read.wait(() => bindings.assertCurrent(ownerKey, binding.revision));
             if (!isTronClassSubmissionAvailability(result, scope, binding.revision)) fail(502, 'TRONCLASS_AVAILABILITY_UNAVAILABLE');
             availability = structuredClone(result);
@@ -559,11 +566,11 @@ export function createTronClassSubmissionService({ db, bindings, source, readAva
       await bindings.assertCurrent(ownerKey, binding.revision);
       return reconcileOperation(ownerKey, binding, claim.operation);
     },
-    async reconcile(ownerKey: string, input: { operationId: string; revision: string }): Promise<TronClassSubmissionResult> {
+    async reconcile(ownerKey: string, input: { operationId: string; revision: string }, snapshot?: TronClassSubmissionBinding): Promise<TronClassSubmissionResult> {
       if (!input || typeof input.operationId !== 'string' || !ID.test(input.operationId) ||
         typeof input.revision !== 'string' || !REVISION.test(input.revision)) invalid();
       // Reconciliation stays available after the write switch is turned off.
-      const binding = await bindingFor(ownerKey, input.revision);
+      const binding = await bindingFor(ownerKey, input.revision, snapshot);
       const operation = readOperation(await operationRef(ownerKey, input.operationId).get(), ownerKey, input.operationId);
       if (!operation) fail(404, 'TRONCLASS_SUBMISSION_NOT_FOUND');
       // A refreshed login for the SAME verified school identity can recover an

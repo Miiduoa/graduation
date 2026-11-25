@@ -7,6 +7,7 @@ import {
   type TronClassSubmissionFirestore,
   type TronClassSubmissionResult,
 } from './tronClassSubmission';
+import type { TronClassSubmissionBinding } from './tronClassSubmissionSource';
 import { createTronClassControlledJournal } from './tronClassControlledJournal';
 import { createTronClassRawSubmissionHistoryReader } from './tronClassRawSubmissionHistory';
 import { verifyTronClassSubmissionReadback } from './tronClassSubmissionReadback';
@@ -17,7 +18,7 @@ type Result = TronClassSubmissionResult | TronClassAcknowledgedReadbackResult;
 type Dependencies = {
   db: TronClassSubmissionFirestore;
   bindings: TronClassSubmissionBindings;
-  legacyReconcile(ownerKey: string, input: Input): Promise<TronClassSubmissionResult>;
+  legacyReconcile(ownerKey: string, input: Input, snapshot?: TronClassSubmissionBinding): Promise<TronClassSubmissionResult>;
   readHistory?: ReturnType<typeof createTronClassRawSubmissionHistoryReader>;
   now?: () => number;
 };
@@ -43,28 +44,28 @@ export function createTronClassOperationReconciler({
       typeof input.revision !== 'string' || !revisionPattern.test(input.revision)) fail(400, 'TRONCLASS_INVALID_INPUT');
     const expected = Object.freeze({ operationId: input.operationId, revision: input.revision });
     const unknown = (): TronClassSubmissionResult => ({ status: 'unknown', operationId: expected.operationId, receipt: null });
-    const current = async (studentId?: number) => {
-      const binding = await bindings.requireBinding(ownerKey);
+    const session = await bindings.requireBinding(ownerKey);
+    const binding = { ...session, cookies: { ...session.cookies } };
+    const current = async () => {
       const at = now();
       if (binding.schoolId !== 'pu' || !Number.isSafeInteger(binding.userId) || binding.userId < 1 ||
-        binding.revision !== expected.revision || (studentId !== undefined && binding.userId !== studentId)) {
+        binding.revision !== expected.revision) {
         fail(409, 'TRONCLASS_BINDING_CHANGED');
       }
       if (!Number.isFinite(at) || !Number.isFinite(Date.parse(binding.expiresAt)) || Date.parse(binding.expiresAt) <= at) {
         fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
       }
       await bindings.assertCurrent(ownerKey, binding.revision);
-      return binding;
     };
-    const binding = await current();
+    await current();
     const snapshot = await db.doc(`${TRONCLASS_SUBMISSION_COLLECTION}/${hash(JSON.stringify([ownerKey, expected.operationId]))}`).get();
-    await current(binding.userId);
+    await current();
     // Select by the persisted format only. A v2 record cannot fall through to a
     // v1 parser, even when malformed or when a writer is currently disabled.
-    if (!snapshot.exists || snapshot.data()?.version === 1) return legacyReconcile(ownerKey, expected);
+    if (!snapshot.exists || snapshot.data()?.version === 1) return legacyReconcile(ownerKey, expected, binding);
     if (snapshot.data()?.version !== 2) fail(409, 'TRONCLASS_OPERATION_CONFLICT');
     const attempt = await journal.readAttempt(ownerKey, expected.operationId);
-    await current(binding.userId);
+    await current();
     // A preparing operation can still be claimed by another in-flight actor.
     // Only an atomic cancellation could establish that it will never dispatch;
     // this read-only path deliberately cannot make that claim.
@@ -79,7 +80,7 @@ export function createTronClassOperationReconciler({
     try {
       raw = await readHistory(ownerKey, binding, { courseId: attempt.courseId, homeworkId: attempt.homeworkId });
     } catch (error) {
-      await current(binding.userId);
+      await current();
       if (error instanceof NuniError && [
         'TRONCLASS_BINDING_CHANGED', 'TRONCLASS_RECONNECT_REQUIRED', 'TRONCLASS_NOT_CONNECTED',
         'TRONCLASS_COURSE_ACCESS_DENIED', 'TRONCLASS_HOMEWORK_NOT_FOUND', 'SESSION_CHANGED', 'SIGN_IN_REQUIRED',
@@ -87,7 +88,7 @@ export function createTronClassOperationReconciler({
       // A timeout or incomplete history cannot undo an already attempted POST.
       return unknown();
     }
-    await current(binding.userId);
+    await current();
     const at = now();
     const readback = verifyTronClassSubmissionReadback(raw, {
       acknowledgment: attempt.acknowledgment,
@@ -102,7 +103,7 @@ export function createTronClassOperationReconciler({
     });
     // Account closure, revocation or a student switch during verification must
     // prevent even a previously matched result from reaching the public API.
-    await current(binding.userId);
+    await current();
     return result;
   };
 }
