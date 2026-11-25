@@ -82,7 +82,12 @@ function specialWindow(
   if ((prototype === Object.prototype || prototype === null) && Reflect.ownKeys(envelope).length === 0) {
     return { state: 'none', updatedAt: null };
   }
-  if (!own(envelope, key)) return { state: 'unknown', updatedAt: null };
+  // Only the observed empty envelope or a single explicit record is evidence.
+  // A mixed error/record envelope must not report an open or absent window.
+  if ((prototype !== Object.prototype && prototype !== null) ||
+    Reflect.ownKeys(envelope).length !== 1 || !own(envelope, key)) {
+    return { state: 'unknown', updatedAt: null };
+  }
   if (envelope[key] === null) return { state: 'none', updatedAt: null };
   const row = record(envelope[key]);
   if (!row) return { state: 'unknown', updatedAt: null };
@@ -133,7 +138,7 @@ export function normalizeTronClassSubmissionAvailability(
   const attemptsKnown = countAgrees && duplicateSettingsAgree && (unlimited || limited);
   const remainingAttempts = attemptsKnown && limited ? Math.max(0, limit! - used!) : null;
   const knownHistory = history.entries.every(entry => entry.state !== 'unknown');
-  const kind = !knownHistory || used === null ? 'unknown'
+  const kind = !knownHistory || !countAgrees || used === null ? 'unknown'
     : used > 0 || history.entries.some(entry => entry.state !== 'draft') ? 'repeat' : 'first';
   let ordinary: TronClassSubmissionAvailability['ordinary']['state'] = 'unknown';
   if (activity.is_closed === true) ordinary = 'closed';
