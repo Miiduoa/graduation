@@ -848,9 +848,12 @@ export function preparePersonalImportRollback(
           throw new Error('無法確認匯入資料已儲存，請稍後再試。');
         }
       } catch (error) {
-        if (!retirementWriteCompleted || rejected) throw error;
-        // The earlier marker can be unreadable on restart and predates any
-        // replacement write. Persist proof of the exact bytes verified after it.
+        // A readable rollback copy can bind settlement to this attempt even
+        // when the pending marker could not be retired.
+        if (rejected || (!retirementWriteCompleted && readOptionalFile(payload) !== writtenPayload)) {
+          throw error;
+        }
+        // Persist proof of the exact primary bytes verified by the caller.
         assertWritable();
         if (!settle(hash)) throw error;
       }

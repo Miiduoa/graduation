@@ -79,6 +79,10 @@ async function readLedgerSnapshot(
     ? capturePersonalImportBrowserRecovery(window.localStorage, key)
     : undefined;
   const primaryVerified = isReadableLedger(primary, scope);
+  const rejectionMatches = journal?.checkpointRejection;
+  // A rejected primary-only write may already have restored the original bytes.
+  const checkpointRejection = primaryVerified && rejectionMatches?.(primary)
+    ? undefined : rejectionMatches;
   const verifiedByJournal = primary !== null && journal?.matchesVerifiedPrimary?.(primary) === true;
   const attemptedPrimary = primary !== null && journal?.matchesAttemptedPrimary?.(primary) === true;
   const rejectedPrimary = journal?.rejected && (
@@ -102,11 +106,11 @@ async function readLedgerSnapshot(
     ? selectPersonalImportBrowserRecovery(browserRecovery, primary, primaryVerified, (raw) => parseLedger(raw, scope))
     : await readNativeRecovery(key, scope, primaryVerified, nativeJournal, checkpoint, journal?.rejected,
         allowEmptyPrimary && primary === null && !primaryError && !journal && !restorationPending,
-        journal?.checkpointRejection);
+        checkpointRejection);
   if (!recovery && primaryError) throw primaryError;
   // A pending restoration bypasses the primary read, so its on-disk bytes
   // cannot be checked against the previous attempt before replacing the hashes.
-  const preserveAttemptRejection = restorationPending || journal?.checkpointRejection !== undefined ||
+  const preserveAttemptRejection = restorationPending || checkpointRejection !== undefined ||
     (attemptedPrimary && !verifiedByJournal && recovery !== null && recovery.raw !== primary);
   return { primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection };
 }

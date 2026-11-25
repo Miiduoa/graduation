@@ -569,6 +569,7 @@ test.each([
   ['readback without retirement file with verified first write and no hash or receipt and unreadable payload', false],
   ['readback without retirement file with verified first write and no hash or receipt and readable payload', false],
   ['readback without retirement file with verified replacement and no hash or receipt and readable payload', false],
+  ['all retirement writes fail with verified first write and no hash or receipt and readable payload', false],
   ['all publication paths fail with temporarily unreadable payload', false],
   ['all publication paths fail with temporarily unreadable payload and successful restoration', false],
 ] as const)('native marker retirement %s I/O keeps the correct primary and notification (revoked: %s)', async (phase, revoked) => {
@@ -595,6 +596,7 @@ test.each([
   const markerReadFails = phase === 'readback' || persistentMarkerReadFault;
   const unreadableMetadata = phase === 'readback without retirement file and unreadable payload';
   const verifiedFirstWrite = phase.includes('verified first write');
+  const retirementWritesFail = phase.startsWith('all retirement writes fail');
   const verifiedReplacement = phase.includes('verified replacement');
   const publicationFails = phase.startsWith('all publication paths fail');
   const restorationFails = phase === 'all publication paths fail with temporarily unreadable payload';
@@ -632,10 +634,13 @@ test.each([
       if (encodedWrite && phase === 'publish') active = false;
     });
   }
-  if (persistentPrimaryReadFault) {
+  const primaryReadBack = jest.fn();
+  if (persistentPrimaryReadFault || retirementWritesFail) {
     get.mockImplementation(async (entry) => {
       if (entry === key && primaryReadBlocked) primaryFault();
-      return nativeGet(entry);
+      const value = await nativeGet(entry);
+      if (entry === key && value?.startsWith('{"records":')) primaryReadBack(value);
+      return value;
     });
   }
   const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
@@ -737,6 +742,11 @@ test.each([
       expect(expected.records.map(({ title }) => title)).toEqual(['微積分', '統計']);
       const primary = (await AsyncStorage.getItem(key))!;
       if (verifiedFirstWrite) expect(primary.startsWith('{"records":')).toBe(true);
+      if (retirementWritesFail) {
+        expect(primaryReadBack).toHaveBeenCalledWith(primary);
+        expect(primaryReadBack.mock.invocationCallOrder[0]).toBeLessThan(primaryFault.mock.invocationCallOrder[0]);
+        expect(primaryReadBack.mock.invocationCallOrder[1]).toBeGreaterThan(primaryFault.mock.invocationCallOrder[0]);
+      }
       if (phase === 'all') {
         expect(primary.startsWith('{"batches":')).toBe(true);
         expect(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.verified`).textSync())
@@ -751,14 +761,14 @@ test.each([
           expect(rawPayload.slice(rawPayload.indexOf('\n') + 1)).toBe(JSON.stringify(previous));
         }
         expect(textSync.call(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.pending`)))
-          .toBe('committed');
+          .toBe(retirementWritesFail ? '' : 'committed');
         expect(set.mock.calls.slice(firstWriteCall).filter(([entry]) => entry === key).map(([, value]) => value))
           .toEqual(verifiedReplacement
             ? [expect.stringMatching(/^\{"records":/), primary]
             : [primary, expect.stringMatching(/^\{"batches":/)]);
         if (verifiedReplacement) expect(primary).toMatch(/^\{"batches":/);
       }
-      if (failVerification && !markerReadFails) {
+      if (failVerification && !markerReadFails && !lostReceiptAfterRetirement) {
         const publication = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.published`);
         const rawPayload = textSync.call(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.json`));
         expect(publication.textSync()).toBe(sha256(rawPayload) + '\n' + sha256(primary));
@@ -1614,6 +1624,88 @@ test('a rejected primary-only edit with no pending marker recovers its checkpoin
   } finally {
     unsubscribe();
     set.mockImplementation(writeStorage);
+    write.mockRestore();
+  }
+});
+
+test('a rejected primary-only edit can reopen its restored primary despite an older checkpoint', async () => {
+  const scope = { owner: 'nuni:restored-primary-with-older-checkpoint', schoolId: 'pu' };
+  const key = personalImportStorageKey(scope);
+  const prefix = `personal-imports-${sha256(key)}.rollback.`;
+  const pending = new File(Paths.document, prefix + 'pending');
+  const rejection = new File(Paths.document, prefix + 'rejected');
+  const { ledger: older } = await appendPersonalImports(scope, [row('first')]);
+  const { ledger: original } = await appendPersonalImports(scope, [row('second', '統計')]);
+  const originalRaw = (await AsyncStorage.getItem(key))!;
+  const checkpoint = JSON.stringify(older);
+  await AsyncStorage.setItem(key + ':checkpoint', checkpoint);
+  expect(sha256(checkpoint)).not.toBe(sha256(originalRaw));
+  expect(pending.info().exists).toBe(false);
+
+  const { write: writeFile } = File.prototype;
+  const payloadFault = jest.fn(() => { throw new Error('無法寫入還原副本'); });
+  const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+    if (this.uri.endsWith(prefix + 'json')) payloadFault();
+    writeFile.call(this, value, options);
+  });
+  const set = jest.mocked(AsyncStorage.setItem);
+  const get = jest.mocked(AsyncStorage.getItem);
+  const nativeSet = set.getMockImplementation()!;
+  const nativeGet = get.getMockImplementation()!;
+  let active = true;
+  let restored = false;
+  const restoreReadFault = jest.fn(() => { throw new Error('無法立即讀回已還原的主鍵'); });
+  set.mockImplementation(async (entry, value) => {
+    await nativeSet(entry, value);
+    if (entry !== key) return;
+    if (active) {
+      expect(JSON.parse(value).records[0].title).toBe('未提交的編輯');
+      active = false;
+    } else {
+      expect(value).toBe(originalRaw);
+      restored = true;
+    }
+  });
+  get.mockImplementation(async (entry) => {
+    if (entry === key && restored && restoreReadFault.mock.calls.length === 0) restoreReadFault();
+    return nativeGet(entry);
+  });
+  const listener = jest.fn();
+  const unsubscribe = subscribePersonalImports(listener);
+  const guard = { canContinue: () => active, canCommitFirstWrite: () => active };
+  try {
+    await expect(editPersonalImport(scope, original.records[0], row('first', '未提交的編輯'), guard))
+      .rejects.toThrow('無法立即讀回已還原的主鍵');
+    expect(payloadFault).toHaveBeenCalledTimes(1);
+    expect(restoreReadFault).toHaveBeenCalledTimes(1);
+    expect(listener).not.toHaveBeenCalled();
+    expect(pending.info().exists).toBe(false);
+    const restoredRaw = await AsyncStorage.getItem(key);
+    expect(restoredRaw).toBe(originalRaw);
+    expect(rejection.textSync()).toBe(sha256(restoredRaw!));
+    expect(await AsyncStorage.getItem(key + ':checkpoint')).toBe(checkpoint);
+
+    active = true;
+    set.mockImplementation(nativeSet);
+    write.mockRestore();
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(original);
+      const reread = jest.fn(() => restarted.loadPersonalImports(scope));
+      const unsubscribeRestart = restarted.subscribePersonalImports(reread);
+      try {
+        const edited = await restarted.editPersonalImport(scope, original.records[0], row('first', '化學'), guard);
+        expect(edited.records.map(({ title }) => title)).toEqual(['化學', '統計']);
+        expect(reread).toHaveBeenCalledTimes(1);
+        await expect(reread.mock.results[0].value).resolves.toEqual(edited);
+      } finally {
+        unsubscribeRestart();
+      }
+    });
+  } finally {
+    unsubscribe();
+    get.mockImplementation(nativeGet);
+    set.mockImplementation(nativeSet);
     write.mockRestore();
   }
 });
