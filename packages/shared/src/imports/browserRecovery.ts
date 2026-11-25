@@ -57,11 +57,30 @@ export function capturePersonalImportBrowserRecovery(storage: Storage, key: stri
         throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
       }
     },
+    detachJournal(published: string) {
+      // A verified commit must remain readable even if its old journal survives.
+      const matchesJournal = (raw: string) =>
+        readWebPersonalImportRollback(copies.journal, raw, true)?.bound === true;
+      if (!matchesJournal(published)) return published;
+
+      // Preserve the byte count for a quota-limited retry. At most two encodings
+      // can match the journal, so try distinct orders of the v1 fields.
+      const { version, records, ...metadata } = JSON.parse(published);
+      return [
+        JSON.stringify({ ...metadata, records, version }),
+        JSON.stringify({ version, records, ...metadata }),
+        JSON.stringify({ records, version, ...metadata }),
+      ].find((raw) => !matchesJournal(raw)) ?? published;
+    },
     retire(published: string, source: keyof typeof copies) {
       const entry = entries[source];
       const raw = copies[source];
-      if (raw !== null && storage.getItem(key) === published && storage.getItem(entry) === raw) {
-        storage.removeItem(entry);
+      try {
+        if (raw !== null && storage.getItem(key) === published && storage.getItem(entry) === raw) {
+          storage.removeItem(entry);
+        }
+      } catch {
+        // The primary commit has already been verified. Keep any surviving copy.
       }
     },
   };

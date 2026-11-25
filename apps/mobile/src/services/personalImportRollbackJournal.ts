@@ -307,12 +307,13 @@ export function commitWebPersonalImports(
   const committed = JSON.stringify({ ...JSON.parse(attempted), webCommit: id });
   const conflict = () => new Error('匯入資料已在另一個分頁更新，請重新載入。');
   const replace = (raw: string, ownsStage: () => boolean) => {
+    const published = recoveryCopies.detachJournal(raw);
     assertWritable();
     if (!ownsStage()) throw conflict();
     recoveryCopies.assertSnapshot(before, recoveryCheck.verifyCheckpoint, recoveryCheck.verifyJournal);
-    storage.setItem(key, raw);
-    if (storage.getItem(key) !== raw) throw conflict();
-    return raw;
+    storage.setItem(key, published);
+    if (storage.getItem(key) !== published) throw conflict();
+    return published;
   };
   const publish = (ownsStage = () => true) => {
     try {

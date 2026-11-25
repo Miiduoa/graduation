@@ -96,7 +96,11 @@ async function readNativeRecovery(
   // interrupted primary write. A standalone legacy checkpoint cannot.
   const pending = pendingRestorations.get(key);
   if (!primaryVerified) {
-    const checkpoint = await readLegacyCheckpoint(key, scope);
+    const checkpoint = await readLegacyCheckpoint(key, scope).catch((error: unknown) => {
+      // The legacy copy is optional when a rollback already has authoritative bytes.
+      if (pending === undefined && nativeJournal === undefined) throw error;
+      return null;
+    });
     if (checkpoint &&
         (pending === undefined || checkpoint.raw === pending.raw) &&
         (nativeJournal === undefined || (checkpoint.raw ?? 'null') === nativeJournal)) {

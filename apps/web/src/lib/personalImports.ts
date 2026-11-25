@@ -69,9 +69,9 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
       // ledger snapshot as the records before retiring an adopted checkpoint.
       const batches: unknown = raw ? JSON.parse(raw).batches : undefined;
       const ledger = { version: 1 as const, ...state, batches };
-      const published = shouldMarkCommit
+      const published = recovery.detachJournal(shouldMarkCommit
         ? serializePersonalImportBrowserCommit(ledger)
-        : JSON.stringify(ledger);
+        : JSON.stringify(ledger));
       assertSnapshot();
       localStorage.setItem(key, published);
       if (localStorage.getItem(key) !== published) {

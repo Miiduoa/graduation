@@ -3,6 +3,7 @@ import { File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
 import { sha256 } from 'js-sha256';
 import {
+  PERSONAL_IMPORT_CHANGE,
   readPersonalImports as readWebCalendarImports,
   savePersonalImportBatch as saveWebCalendarBatch,
   withPersonalImportSyncLock as withWebCalendarSyncLock,
@@ -33,7 +34,11 @@ import {
   undoLastPersonalImport,
 } from '../services/personalImports';
 import { syncPersonalImports } from '../services/personalImportSync';
-import { hasWebPersonalImportCommit, readPersonalImportRollback } from '../services/personalImportRollbackJournal';
+import {
+  hasWebPersonalImportCommit,
+  preparePersonalImportRollback,
+  readPersonalImportRollback,
+} from '../services/personalImportRollbackJournal';
 
 const scope = { owner: 'nuni:account-a', schoolId: 'pu' };
 const row = (id: string, title = '微積分'): PersonalImportRow => ({
@@ -319,6 +324,146 @@ test.each(['read', 'remove'] as const)('native retains restart recovery when ado
   } finally {
     get.mockImplementation(nativeGet);
     unsubscribe();
+  }
+});
+
+test.each([true, false])('native restart reads a valid journal despite persistent checkpoint I/O (restored primary: %s)', async (restored) => {
+  const scope = { owner: 'nuni:checkpoint-io-restart', schoolId: 'pu' };
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  const { ledger } = await appendPersonalImports(scope, [row('original')]);
+  const original = (await AsyncStorage.getItem(key))!;
+  await AsyncStorage.setItem(checkpoint, original);
+  const clearJournal = preparePersonalImportRollback(key, original);
+  if (!restored) await AsyncStorage.removeItem(key);
+  const multiGet = jest.mocked(AsyncStorage.multiGet);
+  const nativeMultiGet = multiGet.getMockImplementation()!;
+  multiGet.mockImplementation(async (keys) => {
+    if (keys.includes(checkpoint)) throw new Error('檢查點 I/O 失敗');
+    return nativeMultiGet(keys);
+  });
+  try {
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+    });
+    expect(await AsyncStorage.getItem(key)).toBe(restored ? original : null);
+    expect(readPersonalImportRollback(key)).toBe(original);
+  } finally {
+    multiGet.mockImplementation(nativeMultiGet);
+    clearJournal();
+  }
+});
+
+test.each([
+  ['Web', 'read'],
+  ['Web', 'remove'],
+  ['Expo Web', 'read'],
+  ['Expo Web', 'remove'],
+] as const)('%s publishes and notifies when recovery cleanup cannot %s', async (client, failure) => {
+  const cleanup = useWebStorage();
+  const restoreLocks = withoutWebWriteLocks();
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: async (_key: string, write: () => unknown) => write() },
+  });
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  const listener = jest.fn();
+  const unsubscribe = subscribePersonalImports(listener);
+  window.addEventListener(PERSONAL_IMPORT_CHANGE, listener);
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    listener.mockClear();
+    const original = JSON.stringify(ledger);
+    storage.setItem(checkpoint, original);
+    storage.removeItem(key);
+    const getItem = Storage.prototype.getItem;
+    const read = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, entry) {
+      if (failure === 'read' && this === storage && entry === checkpoint && getItem.call(this, key) !== null) {
+        throw new Error('無法讀取檢查點');
+      }
+      return getItem.call(this, entry);
+    });
+    const removeItem = Storage.prototype.removeItem;
+    const remove = jest.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, entry) {
+      if (failure === 'remove' && this === storage && entry === checkpoint) throw new Error('無法刪除檢查點');
+      return removeItem.call(this, entry);
+    });
+    try {
+      const append = client === 'Web' ? saveWebCalendarBatch : appendPersonalImports;
+      await expect(append(scope, [row('new', '統計')])).resolves.toMatchObject({ added: 1 });
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      read.mockRestore();
+      remove.mockRestore();
+    }
+    expect(storage.getItem(checkpoint)).toBe(original);
+    expect(readWebCalendarImports(scope).map(({ title }) => title)).toEqual(['微積分', '統計']);
+    expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['微積分', '統計']);
+  } finally {
+    unsubscribe();
+    window.removeEventListener(PERSONAL_IMPORT_CHANGE, listener);
+    restoreLocks();
+    cleanup();
+  }
+});
+
+test.each(['Web', 'Expo Web'] as const)('%s keeps a commit readable when it would match a retained journal fingerprint', async (client) => {
+  const cleanup = useWebStorage();
+  const restoreLocks = withoutWebWriteLocks();
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: async (_key: string, write: () => unknown) => write() },
+  });
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    const original = JSON.stringify(ledger);
+    const sync = { enabled: true, base: null };
+    const batches = client === 'Web' ? ledger.batches : [];
+    const attempted = JSON.stringify({ records: [], sync, batches, version: 1 });
+    const copy = JSON.stringify({ id: 'legacy', original, before: sha256(original), attempted: sha256(attempted) });
+    storage.setItem(key, attempted);
+    storage.setItem(journal, copy);
+    const setItem = Storage.prototype.setItem;
+    const write = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, entry, value) {
+      if (entry === key && JSON.parse(value).webCommit) throw new DOMException('quota', 'QuotaExceededError');
+      return setItem.call(this, entry, value);
+    });
+    const removeItem = Storage.prototype.removeItem;
+    const remove = jest.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, entry) {
+      if (this === storage && entry === journal) throw new Error('無法刪除日誌');
+      return removeItem.call(this, entry);
+    });
+    try {
+      if (client === 'Web') {
+        await withWebCalendarSyncLock(scope, async (state) => {
+          expect(state.records).toEqual(ledger.records);
+          return { state: { records: [], sync }, result: undefined };
+        });
+      } else {
+        await mutatePersonalImportLedger(scope, { canContinue: () => true }, (current) => {
+          expect(current.records).toEqual(ledger.records);
+          return { ledger: { version: 1, records: [], sync, batches: [] }, result: undefined };
+        });
+      }
+    } finally {
+      write.mockRestore();
+      remove.mockRestore();
+    }
+    expect(storage.getItem(journal)).toBe(copy);
+    expect(storage.getItem(key)).not.toBe(attempted);
+    expect(storage.getItem(key)).toHaveLength(attempted.length);
+    expect(readWebCalendarImports(scope)).toEqual([]);
+    expect((await loadPersonalImports(scope)).records).toEqual([]);
+  } finally {
+    restoreLocks();
+    cleanup();
   }
 });
 
