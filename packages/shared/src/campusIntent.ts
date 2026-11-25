@@ -62,7 +62,15 @@ export function suggestCampusDestinations(input: string): CampusQuickDestination
   const englishLocation = /\b(?:campus map|find (?:my |a |the )?classroom)\b/.test(normalized) ||
     (/\b(?:directions|where is|where's|where are|where can i find|how (?:do i |to )?get to)\b/.test(normalized) &&
       /\b(?:library(?! catalog(?:ue)?\b)|libraries|classrooms?|campus buildings?|cafeterias?|dormitory|dormitories|dorms?|bus stops?)\b/.test(normalized));
-  const locationQuestion = /在哪|位置|怎麼走|如何走|帶我去|走去|導航|找教室|地圖/.test(phrase) || englishLocation;
+  // A question about the location of an explicitly named online catalog
+  // is a library-service request. Preserve independent physical questions
+  // and floor/direction wording instead of treating every 在哪 as a map.
+  const physicalPhrase = phrase.replace(
+    /(?:圖書館)?館藏(?:查詢(?:系統)?|目錄|系統|搜尋)(?:的入口)?在哪(?:裡|裏|兒)?(?:看|查)?(?:呢|啊|嗎)?(?=$|[，。！？、；,.!?;])/g,
+    '',
+  );
+  const chineseLibraryLookup = physicalPhrase !== phrase;
+  const locationQuestion = /在哪|位置|怎麼走|如何走|帶我去|走去|導航|找教室|地圖/.test(physicalPhrase) || englishLocation;
   const englishBus = /\b(?:bus|buses|bus stop|shuttle)\b/;
   const busQuestion = /公車|巴士|站牌|到站|搭車|幾號車/.test(phrase) || englishBus.test(normalized);
 
@@ -71,7 +79,7 @@ export function suggestCampusDestinations(input: string): CampusQuickDestination
   match(/公車|巴士|站牌|到站|搭車|幾號車/, '/bus', englishBus);
   match(/交作業|繳作業|繳交作業|交報告|繳報告|作業|測驗|教材|上傳作業/, '/classroom', /\b(?:homework|assignments?|course materials?|quiz(?:zes)?)\b/);
   match(/課表|上什麼課|哪堂課|下堂課|空堂|排課|下一節課/, '/timetable', /\b(?:timetable|class schedule|next class)\b/);
-  if (!locationQuestion || englishLibraryCatalog) match(/借書|續借|館藏|找書|圖書館/, '/library', /\b(?:library|borrow books?|library catalog(?:ue)?|renew books?)\b/);
+  if (!locationQuestion || englishLibraryCatalog || chineseLibraryLookup) match(/借書|續借|館藏|找書|圖書館/, '/library', /\b(?:library|borrow books?|library catalog(?:ue)?|renew books?)\b/);
   match(/分數|成績|評分|學期成績/, '/grades');
   match(/學分|畢業門檻|畢業條件/, '/credit-planner');
   match(/午餐|晚餐|吃什麼|找吃的|餐廳|菜單|食堂/, '/cafeteria', /\b(?:cafeteria|campus dining|campus restaurant|lunch menu)\b/);

@@ -198,3 +198,20 @@ test.each([
 ])('keeps both the physical route and catalog for an explicit mixed request: %s', (phrase, first) => {
   expect(getMobileQuickActions(phrase).map(action => action.destination)).toEqual([first, '/library']);
 });
+
+test.each([
+  ["館藏查詢在哪裡？", ["/library"]],
+  ["圖書館館藏目錄在哪裡？", ["/library"]],
+  ["館藏查詢系統的入口在哪裡？", ["/library"]],
+  ["館藏搜尋在哪裡看？", ["/library"]],
+  ["圖書館在哪裡？", ["/map"]],
+  ["圖書館館藏查詢在哪一層？", ["/map"]],
+  ["教室在哪裡？館藏查詢在哪裡？", ["/map","/library"]],
+  ["館藏查詢在哪裡，圖書館怎麼走？", ["/map","/library"]],
+  ["館藏查詢在哪裡？公車站在哪裡？", ["/bus","/library"]],
+  ["館藏查詢在哪裡？今天課表", ["/timetable","/library"]],
+])('distinguishes Chinese catalog access from physical navigation: %s', (phrase, expected) => {
+  const actions = getMobileQuickActions(phrase);
+  expect(actions.map(action => action.destination)).toEqual(expected);
+  expect(actions.every(action => Boolean(ROUTE_TO_TAB[action.route]))).toBe(true);
+});
