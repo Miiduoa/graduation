@@ -141,15 +141,22 @@ export function findCampusWalkingRoute(
 
   // Bounded Dijkstra; only positive, sourced graph edges can be traversed.
   const distance = new Map<number, number>([[start, 0]]);
+  // Among equally short routes, keep the latest minimum audit expiry.
+  // The shortest-distance policy remains primary; never choose a longer detour.
+  const pathExpiry = new Map<number, number>([[start, Infinity]]);
   const previous = new Map<number, { from: number; way: number; expiresAt: number }>();
   const settled = new Set<number>();
   while (true) {
     let current: number | undefined;
     let best = Infinity;
+    let bestExpiry = -Infinity;
     for (const [id, cost] of distance) {
-      if (!settled.has(id) && (cost < best || (cost === best && current !== undefined && id < current))) {
+      const expiry = pathExpiry.get(id) ?? -Infinity;
+      if (!settled.has(id) && (cost < best || (cost === best &&
+          (expiry > bestExpiry || (expiry === bestExpiry && current !== undefined && id < current))))) {
         current = id;
         best = cost;
+        bestExpiry = expiry;
       }
     }
     if (current === undefined) return null;
@@ -157,8 +164,16 @@ export function findCampusWalkingRoute(
     settled.add(current);
     for (const arc of adjacency.get(current) ?? []) {
       const cost = best + arc.meters;
-      if (cost < (distance.get(arc.to) ?? Infinity)) {
+      const expiry = Math.min(bestExpiry, arc.expiresAt);
+      const oldCost = distance.get(arc.to) ?? Infinity;
+      const oldExpiry = pathExpiry.get(arc.to) ?? -Infinity;
+      const oldStep = previous.get(arc.to);
+      // Stable provenance for parallel ways with identical distance and expiry.
+      const preferredWay = oldStep?.from === current && arc.way < oldStep.way;
+      if (!settled.has(arc.to) && (cost < oldCost || (cost === oldCost &&
+          (expiry > oldExpiry || (expiry === oldExpiry && preferredWay))))) {
         distance.set(arc.to, cost);
+        pathExpiry.set(arc.to, expiry);
         previous.set(arc.to, { from: current, way: arc.way, expiresAt: arc.expiresAt });
       }
     }
