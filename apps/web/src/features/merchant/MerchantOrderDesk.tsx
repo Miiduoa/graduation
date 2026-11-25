@@ -22,6 +22,7 @@ import {
   useFoodDraft,
   useFoodMutation,
   useFoodRead,
+  type FoodReadFlight,
   type FoodDraftCache,
   type FoodIntent,
 } from '@/features/food/foodState';
@@ -58,6 +59,7 @@ export function MerchantOrderDesk({
   canSend,
   accessConfirmed = true,
   beginRead,
+  readFlight,
   suspended = false,
   queue: controlledQueue,
   onQueueChange,
@@ -69,7 +71,8 @@ export function MerchantOrderDesk({
   cache: FoodDraftCache;
   canSend?: () => boolean;
   accessConfirmed?: boolean;
-  beginRead?: () => { confirm(): void; reject(failure: unknown): void };
+  beginRead?: () => { confirm(): void; reject(failure: unknown): void; settle(): void } | null;
+  readFlight?: () => FoodReadFlight;
   suspended?: boolean;
   queue?: MerchantWorkspaceQueue;
   onQueueChange?: (event: MouseEvent<HTMLAnchorElement>, queue: MerchantWorkspaceQueue) => void;
@@ -92,30 +95,35 @@ export function MerchantOrderDesk({
   const queueHintId = useId();
   const load = useCallback(async () => {
     const observation = beginRead?.();
+    if (observation === null) throw new NuniError(409, 'SESSION_CHANGED');
     // Each request can invalidate the workspace even after its sibling fails.
     const reject = (failure: unknown): never => {
       observation?.reject(failure);
       throw failure;
     };
-    // Keep the poll in flight until both observations have settled.
-    const [queue, shift] = await Promise.allSettled([
-      client.listMerchantOrders(tenantId, locationId, { limit: 50, cursor }).catch(reject),
-      client.getShift(tenantId, locationId).catch((error: unknown) => {
-        if (
-          error instanceof NuniError &&
-          error.status === 404 &&
-          error.code === 'FOOD_SHIFT_NOT_FOUND'
-        )
-          return null;
-        return reject(error);
-      }),
-    ]);
-    if (queue.status === 'rejected') throw queue.reason;
-    if (shift.status === 'rejected') throw shift.reason;
-    observation?.confirm();
-    return { queue: queue.value, shift: shift.value };
+    try {
+      // Keep the poll in flight until both observations have settled.
+      const [queue, shift] = await Promise.allSettled([
+        client.listMerchantOrders(tenantId, locationId, { limit: 50, cursor }).catch(reject),
+        client.getShift(tenantId, locationId).catch((error: unknown) => {
+          if (
+            error instanceof NuniError &&
+            error.status === 404 &&
+            error.code === 'FOOD_SHIFT_NOT_FOUND'
+          )
+            return null;
+          return reject(error);
+        }),
+      ]);
+      if (queue.status === 'rejected') throw queue.reason;
+      if (shift.status === 'rejected') throw shift.reason;
+      observation?.confirm();
+      return { queue: queue.value, shift: shift.value };
+    } finally {
+      observation?.settle();
+    }
   }, [beginRead, client, tenantId, locationId, cursor]);
-  const data = useFoodRead(load, { pollMs: FOOD_POLL_MS, paused: suspended, serializeReads: true });
+  const data = useFoodRead(load, { pollMs: FOOD_POLL_MS, paused: suspended, serializeReads: !readFlight, readFlight });
   const [opening, setOpening] = useFoodDraft(cache, `${scope}:opening`, '0');
   const [counted, setCounted] = useFoodDraft(cache, `${scope}:counted`, '');
   const [openNext, setOpenNext] = useFoodDraft(cache, `${scope}:open-next`, false);

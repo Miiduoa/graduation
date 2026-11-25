@@ -353,13 +353,15 @@ function AccountWorkspace({
     setSubmitError('');
     void onExpired();
   }, [clearOverview, invalidate, onExpired]);
+  const captureSession = useCallback(() => {
+    const session = sessionGeneration.current;
+    return () => mounted.current && enabled.current && session === sessionGeneration.current;
+  }, []);
   const load = useCallback(async () => {
     const run = ++generation.current;
     const listRevision = confirmed.beginRequest();
-    const session = sessionGeneration.current;
     // Navigation can retire the loader while its observations still belong to this session.
-    const isSameSession = () =>
-      mounted.current && enabled.current && session === sessionGeneration.current;
+    const isSameSession = captureSession();
     const isCurrent = () => isSameSession() && run === generation.current;
     setLoading(true);
     setLoadError('');
@@ -491,7 +493,7 @@ function AccountWorkspace({
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [context, expire, operationDrafts, publishOverview, view, confirmed, visitedLocations]);
+  }, [captureSession, context, expire, operationDrafts, publishOverview, view, confirmed, visitedLocations]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -557,9 +559,7 @@ function AccountWorkspace({
     setBusy(true);
     setPending(payload);
     const revision = confirmed.beginRequest();
-    const session = sessionGeneration.current;
-    const isSameSession = () =>
-      mounted.current && enabled.current && session === sessionGeneration.current;
+    const isSameSession = captureSession();
     try {
       const application = parseMerchantApplication(
         await browserRequest('merchant-applications', context, payload),
@@ -649,6 +649,7 @@ function AccountWorkspace({
               : undefined
           }
           onExpired={expire}
+          captureSession={captureSession}
           confirmedDetail={details.get(key) ?? null}
           confirmations={confirmed}
           confirmedListRow={verifiedListedRows.get(key)}

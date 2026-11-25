@@ -3594,6 +3594,75 @@ it.each([
   expect(readNewStore).not.toHaveBeenCalled();
 });
 
+it.each([
+  { source: 'detail', status: 401, code: 'UNAUTHORIZED' },
+  { source: 'detail', status: 409, code: 'SESSION_CHANGED' },
+  { source: 'orders', status: 401, code: 'UNAUTHORIZED' },
+  { source: 'shift', status: 409, code: 'SESSION_CHANGED' },
+])('ignores a stale $source outage in the same batch as a background $code', async ({
+  source, status, code,
+}) => {
+  const store = detail('store-a', true);
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const background = Promise.withResolvers<never>();
+  const outage = Promise.withResolvers<never>();
+  const recovery = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+  const readBackground = vi.fn(() => recovery.promise).mockReturnValueOnce(background.promise);
+  const readForeground = vi.fn()
+    .mockResolvedValueOnce(store)
+    .mockReturnValue(source === 'detail' ? outage.promise : Promise.resolve(store));
+  const readOrders = vi.fn(() => source === 'orders' ? outage.promise : respond(`${path}/orders`));
+  const readShift = vi.fn(() => source === 'shift' ? outage.promise : respond(`${path}/shift`));
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [store] });
+    if (resource === path) return window.location.search ? readForeground() : readBackground();
+    if (resource === `${path}/orders`) return readOrders();
+    if (resource === `${path}/shift`) return readShift();
+    if (resource === 'merchant-applications') {
+      return Promise.resolve({ applications: [{
+        tenantId: store.tenantId,
+        applicationId: store.applicationId,
+        brandName: '核准申請',
+        locationName: store.locationName,
+        state: 'approved',
+        reviewerNote: '',
+        submittedAt: '2026-10-09T02:00:00.000Z',
+      }] });
+    }
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByRole('link', { name: '處理訂單與收銀' });
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readBackground).toHaveBeenCalledOnce());
+  await act(async () => window.history.forward());
+  await waitFor(() => expect(readForeground).toHaveBeenCalledTimes(2));
+  if (source !== 'detail') {
+    fireEvent.click(await screen.findByRole('link', { name: '處理訂單與收銀' }));
+    await waitFor(() => expect(readOrders).toHaveBeenCalledOnce());
+    expect(readShift).toHaveBeenCalledOnce();
+  }
+
+  // Keep both rejection handlers in the act batch before React commits
+  // the invalid-session screen.
+  await act(async () => {
+    background.reject(new NuniError(status, code));
+    outage.reject(new NuniError(503, 'UNAVAILABLE'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await screen.findByText('登入或帳號已變更，這次店家資料與草稿已清除。');
+  expect(mocks.auth.refresh).toHaveBeenCalledOnce();
+
+  await act(async () => window.history.go(source === 'detail' ? -1 : -2));
+  await waitFor(() => expect(window.location.search).toBe(''));
+  fireEvent.click(screen.getByRole('button', { name: '重新載入店家資料' }));
+  expect(await screen.findByRole('link', { name: '管理門市：一樓' })).toBeTruthy();
+  expect(await screen.findByRole('link', { name: '前往管理門市：一樓' })).toBeTruthy();
+  expect(readBackground).toHaveBeenCalledOnce();
+});
+
 it.each(['list', 'background detail'] as const)(
   'keeps a first-menu receipt arriving after a same-version %s observed the pre-write state',
   async (source) => {
@@ -3778,14 +3847,17 @@ it.each(['orders', 'shift'])('locks both workspaces on a %s GET failure and reco
 });
 
 it.each([
-  { first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', changePage: false },
-  { first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', changePage: false },
-  { first: 'shift', second: 'orders', status: 401, code: 'UNAUTHORIZED', changePage: false },
-  { first: 'shift', second: 'orders', status: 409, code: 'SESSION_CHANGED', changePage: false },
-  { first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', changePage: true },
-  { first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', changePage: true },
-] as const)('expires the workspace when $second reports $code after $first fails (change page: $changePage)', async ({
-  first, second, status, code, changePage,
+  { first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', navigation: 'poll' },
+  { first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', navigation: 'poll' },
+  { first: 'shift', second: 'orders', status: 401, code: 'UNAUTHORIZED', navigation: 'poll' },
+  { first: 'shift', second: 'orders', status: 409, code: 'SESSION_CHANGED', navigation: 'poll' },
+  { first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', navigation: 'next page' },
+  { first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', navigation: 'next page' },
+  { first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', navigation: 'remount' },
+  { first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', navigation: 'remount' },
+  { first: 'orders', second: 'shift', status: 200, code: 'OK', navigation: 'remount' },
+] as const)('settles the order round when $second reports $code after $first fails ($navigation)', async ({
+  first, second, status, code, navigation,
 }) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const store = { ...detail('store-a', true), readinessVersion: 8 };
@@ -3794,7 +3866,8 @@ it.each([
     nextCursor: 'page-2',
   };
   const outage = Promise.withResolvers<never>();
-  const sessionFailure = Promise.withResolvers<never>();
+  const sibling = Promise.withResolvers<unknown>();
+  const readDetail = vi.fn().mockResolvedValue(store);
   const recovery = Promise.withResolvers<void>();
   const shift = { ...shiftFixture(), locationId: 'store-a' };
   const reads = {
@@ -3804,7 +3877,7 @@ it.each([
   const accept = vi.fn().mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [store] });
-    if (resource === path) return Promise.resolve(store);
+    if (resource === path) return readDetail();
     if (resource === `${path}/orders`) return reads.orders();
     if (resource === `${path}/shift`) return reads.shift();
     if (resource.endsWith('/accept')) return accept();
@@ -3817,11 +3890,11 @@ it.each([
   fireEvent.click(await screen.findByRole('button', { name: '接單：A101' }));
   fireEvent.click(screen.getByLabelText('我已確認這筆訂單與處理內容'));
   fireEvent.click(screen.getByRole('button', { name: '確認：接單' }));
-  const retry = await screen.findByRole<HTMLButtonElement>('button', { name: '重試同一份操作' });
+  let retry = await screen.findByRole<HTMLButtonElement>('button', { name: '重試同一份操作' });
   expect(retry.disabled).toBe(false);
 
   reads[first].mockReturnValueOnce(outage.promise);
-  reads[second].mockReturnValueOnce(sessionFailure.promise);
+  reads[second].mockReturnValueOnce(sibling.promise);
   await act(async () => document.dispatchEvent(new Event('visibilitychange')));
   expect(reads.orders).toHaveBeenCalledTimes(2);
   expect(reads.shift).toHaveBeenCalledTimes(2);
@@ -3831,7 +3904,16 @@ it.each([
 
   reads.orders.mockReturnValueOnce(recovery.promise.then(() => queue));
   reads.shift.mockReturnValueOnce(recovery.promise.then(() => shift));
-  if (changePage) {
+  if (navigation === 'remount') {
+    await act(async () => window.history.go(-2));
+    await screen.findByRole('heading', { name: '已授權門市' });
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('region', { name: '門市訂單工作台' })).toBeNull();
+    await act(async () => window.history.go(2));
+    retry = await screen.findByRole<HTMLButtonElement>('button', { name: '重試同一份操作' });
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+    expect(screen.queryByRole('button', { name: '接單：A101' })).toBeNull();
+  } else if (navigation === 'next page') {
     fireEvent.click(screen.getByRole('button', { name: '下一頁待處理訂單' }));
   } else {
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
@@ -3845,7 +3927,16 @@ it.each([
   expect(reads.orders).toHaveBeenCalledTimes(2);
   expect(reads.shift).toHaveBeenCalledTimes(2);
 
-  await act(async () => sessionFailure.reject(new NuniError(status, code)));
+  if (status === 200) {
+    await act(async () => sibling.resolve(shift));
+    await waitFor(() => expect(retry.disabled).toBe(false));
+    expect(reads.orders).toHaveBeenCalledTimes(3);
+    expect(reads.shift).toHaveBeenCalledTimes(3);
+    expect(mocks.auth.refresh).not.toHaveBeenCalled();
+    return;
+  }
+
+  await act(async () => sibling.reject(new NuniError(status, code)));
   await screen.findByText('登入或帳號已變更，這次店家資料與草稿已清除。');
   expect(mocks.auth.refresh).toHaveBeenCalledOnce();
   await act(async () => document.dispatchEvent(new Event('visibilitychange')));

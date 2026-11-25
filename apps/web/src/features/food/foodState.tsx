@@ -56,6 +56,8 @@ function readErrorMessage(failure: unknown) {
     : '目前無法讀取最新資料。請重新讀取，已填寫的內容仍保留。';
 }
 
+export type FoodReadFlight = { current: Promise<void> | null };
+
 export function useFoodRead<T>(
   load: () => Promise<T>,
   options?: {
@@ -63,6 +65,8 @@ export function useFoodRead<T>(
     paused?: boolean;
     /** Drain a retired loader before starting a replacement read. */
     serializeReads?: boolean;
+    /** Share the in-flight read across mounts of the same workspace. */
+    readFlight?: () => FoodReadFlight;
     /** Return false to stop periodic polling (e.g. terminal order detail). */
     shouldPoll?: (data: T | null) => boolean;
   },
@@ -75,29 +79,32 @@ export function useFoodRead<T>(
   const pollMs = options?.pollMs;
   const paused = options?.paused;
   const serializeReads = options?.serializeReads;
+  const readFlight = options?.readFlight;
   shouldPollRef.current = options?.shouldPoll;
+  const localFlight = useRef<FoodReadFlight>({ current: null });
   const scopeRef = useRef<{
     active: boolean;
     loader: () => Promise<T>;
     revision: number;
-    inFlight: Promise<void> | null;
+    flight: FoodReadFlight;
     queued: Promise<void> | null;
   } | null>(null);
 
   const read = useCallback(function read(quiet: boolean): Promise<void> {
     const scope = scopeRef.current;
     if (!scope?.active) return Promise.resolve();
-    if (scope.inFlight) {
+    const inFlight = scope.flight.current;
+    if (inFlight) {
       // A post-mutation/manual refresh must run after the older read. Quiet
       // refreshes join it, so polling and returning to the tab cannot overlap.
-      if (quiet) return scope.queued ?? scope.inFlight;
+      if (quiet) return scope.queued ?? inFlight;
       if (scope.queued) return scope.queued;
       ++scope.revision;
       dataRef.current = null;
       setData(null);
       setError('');
       setLoading(true);
-      scope.queued = scope.inFlight.then(() => {
+      scope.queued = inFlight.then(() => {
         scope.queued = null;
         if (!scope.active || scopeRef.current !== scope) return;
         return read(false);
@@ -130,10 +137,10 @@ export function useFoodRead<T>(
         },
       )
       .finally(() => {
-        if (scope.inFlight === pending) scope.inFlight = null;
+        if (scope.flight.current === pending) scope.flight.current = null;
         if (current()) setLoading(false);
       });
-    scope.inFlight = pending;
+    scope.flight.current = pending;
     return pending;
   }, []);
   const reload = useCallback(() => read(false), [read]);
@@ -141,21 +148,19 @@ export function useFoodRead<T>(
 
   useLayoutEffect(() => {
     if (paused) return;
-    const previous = serializeReads ? scopeRef.current?.inFlight : null;
     const scope: NonNullable<typeof scopeRef.current> = {
-      active: true, loader: load, revision: 0, inFlight: null, queued: null,
+      active: true,
+      loader: load,
+      revision: 0,
+      flight: readFlight?.() ?? (serializeReads ? localFlight.current : { current: null }),
+      queued: null,
     };
-    if (previous) {
-      scope.inFlight = previous.then(() => {
-        scope.inFlight = null;
-      });
-    }
     scopeRef.current = scope;
     void reload();
     return () => {
       scope.active = false;
     };
-  }, [reload, load, paused, serializeReads]);
+  }, [reload, load, paused, serializeReads, readFlight]);
 
   useEffect(() => {
     if (paused || !pollMs || pollMs <= 0) return;

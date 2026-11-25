@@ -115,6 +115,26 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const readFailures = new Map<string, number>();
   const orderReadFailures = new Map<string, number>();
   const readChangeListeners = new Set<() => void>();
+  // Order rounds belong to the workspace session and survive desk navigation.
+  const orderReadScopes = new Map<string, { current: Promise<void> | null; revision: number }>();
+
+  function orderReadScope(key: string) {
+    let scope = orderReadScopes.get(key);
+    if (!scope) {
+      scope = { current: null, revision: 0 };
+      orderReadScopes.set(key, scope);
+    }
+    return scope;
+  }
+
+  function hasUnsettledOrderFailure(key: string) {
+    const revision = orderReadScopes.get(key)?.revision;
+    return !!revision && orderReadFailures.get(key) === revision;
+  }
+
+  function publishReadChange() {
+    for (const listener of readChangeListeners) listener();
+  }
   const verified = new Map<string, number>();
   let applicationRevocation = 0;
   let applicationListRevision = 0;
@@ -336,7 +356,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
 
   function detailReadConfirmation(key: string) {
     const read = currentDetailRead(key);
-    if (read && canUseAccess(key, read)) {
+    // Even a newer detail GET cannot restore access while a failed round can
+    // still report a session change from its other request.
+    if (read && !hasUnsettledOrderFailure(key) && canUseAccess(key, read)) {
       return { revision: read.revision, version: read.version };
     }
   }
@@ -455,14 +477,24 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     canRecoverFromOrderRead(key: string) {
       const read = currentDetailRead(key);
       const failure = orderReadFailures.get(key);
-      return !!read && failure !== undefined && read.revision <= failure && confirmsWorkspaceAccess(key, read);
+      return !!read && confirmsWorkspaceAccess(key, read) &&
+        (hasUnsettledOrderFailure(key) || (failure !== undefined && read.revision <= failure));
     },
+    orderReadScope,
     beginOrderRead(key: string) {
+      const scope = orderReadScope(key);
       const revision = beginRequest();
+      scope.revision = revision;
       const entry = entries.get(key);
       const detail = currentDetailRead(key);
       return {
         revision,
+        settle() {
+          if (orderReadScopes.get(key) !== scope || scope.revision !== revision) return;
+          const blocked = hasUnsettledOrderFailure(key);
+          scope.revision = 0;
+          if (blocked) publishReadChange();
+        },
         confirm() {
           // Order data has no readiness version. It can renew access only for
           // the detail version that was still confirmed throughout this read.
@@ -471,7 +503,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
           const wasConfirmed = detailReadConfirmation(key);
           entry.orderRead = { revision, detail };
           if (!wasConfirmed && detailReadConfirmation(key)) {
-            for (const listener of readChangeListeners) listener();
+            publishReadChange();
           }
         },
       };
@@ -489,7 +521,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         if (revision <= (failures.get(key) ?? 0)) return;
         failures.set(key, revision);
       }
-      for (const listener of readChangeListeners) listener();
+      publishReadChange();
     },
     verifiedDetails() {
       const details = new Map<string, NuniMerchantWorkspaceDetail>();
@@ -666,8 +698,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       verified.clear();
       readFailures.clear();
       orderReadFailures.clear();
+      orderReadScopes.clear();
       listReadFailure = 0;
-      for (const listener of readChangeListeners) listener();
+      publishReadChange();
     },
   };
 }

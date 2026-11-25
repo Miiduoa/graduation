@@ -138,6 +138,7 @@ export function MerchantOperations({
   navigation,
   onBack,
   onExpired,
+  captureSession,
   confirmedDetail,
   confirmations,
   confirmedListRow,
@@ -162,6 +163,7 @@ export function MerchantOperations({
   };
   onBack?(): void;
   onExpired(): void;
+  captureSession?(): () => boolean;
   confirmedDetail?: Detail | null;
   confirmations?: MerchantConfirmations;
   confirmedListRow?: NuniMerchantWorkspace;
@@ -284,6 +286,12 @@ export function MerchantOperations({
     };
   }, [context, suspended, invalidate]);
 
+  const captureReadSession = useCallback(() => {
+    const session = sessionRun.current;
+    const isSameSession = captureSession?.();
+    return () => active.current && session === sessionRun.current && (isSameSession?.() ?? true);
+  }, [captureSession]);
+
   const confirmDetail = useCallback(
     (next: Detail, verifiedAccess: boolean, revision: number) =>
       changed.current(next, verifiedAccess, revision) ??
@@ -386,13 +394,13 @@ export function MerchantOperations({
 
   const checkAccess = useCallback(
     async (current: () => boolean, verifiesEntry = false) => {
-      const session = sessionRun.current;
+      const isSameSession = captureReadSession();
       const revision = nextRevision();
       if (verifiesEntry) {
         accessRevision.current = Math.max(accessRevision.current, observedRevocation.current);
       }
       await operations.get(tenantId, locationId).then((next) => {
-        if (!active.current || session !== sessionRun.current) return;
+        if (!isSameSession()) return;
         const merged = confirmDetail(next, true, revision)?.detail ?? null;
         if (merged && verifiesEntry && current()) {
           // Keep the confirmed revision for a stale refresh fallback, while
@@ -404,11 +412,11 @@ export function MerchantOperations({
           );
         }
       }).catch((failure: unknown) => {
-        if (!active.current || session !== sessionRun.current) return;
+        if (!isSameSession()) return;
         rejectWorkspaceRead(failure, revision, current() && revision >= accessRevision.current);
       });
     },
-    [confirmDetail, confirmEntry, nextRevision, locationId, operations, rejectWorkspaceRead, tenantId],
+    [captureReadSession, confirmDetail, confirmEntry, nextRevision, locationId, operations, rejectWorkspaceRead, tenantId],
   );
 
   const rememberWrite = useCallback((revision: number) => {
@@ -434,9 +442,9 @@ export function MerchantOperations({
       const readMode = mode === 'regular' && deferred ? 'after-write' : mode;
       const hideDetail = readMode === 'after-write';
       readAfterWrite.current = false;
-      const session = sessionRun.current;
+      const isSameSession = captureReadSession();
       const version = ++run.current;
-      const current = () => active.current && version === run.current;
+      const current = () => isSameSession() && version === run.current;
       const revision = nextRevision();
       // A pending read may reconcile an intervening denial. Only an accepted
       // response can advance access past the revocation already being handled.
@@ -444,7 +452,7 @@ export function MerchantOperations({
       accessRevision.current = Math.max(accessRevision.current, observedRevocation.current);
       updateAccess({ type: 'read-started' });
       await operations.get(tenantId, locationId).then((next) => {
-        if (!active.current || session !== sessionRun.current) return;
+        if (!isSameSession()) return;
         const merged = confirmDetail(next, true, revision)?.detail ?? null;
         if (!current()) return;
         const confirmation = { revision, version: next.readinessVersion };
@@ -475,7 +483,7 @@ export function MerchantOperations({
         if (reconcile || !drafts.get(draftKey)?.uncertain) setError('');
       }).catch((failure: unknown) => {
         // Navigation retires view updates while the request still belongs to this session.
-        if (!active.current || session !== sessionRun.current) return;
+        if (!isSameSession()) return;
         if (rejectWorkspaceRead(failure, revision, current())) return;
         if (current()) {
           updateAccess({ type: 'read-failed', hideDetail });
@@ -496,7 +504,7 @@ export function MerchantOperations({
       });
     },
     [
-      operations, tenantId, locationId, confirmDetail, confirmEntry, drafts, draftKey,
+      captureReadSession, operations, tenantId, locationId, confirmDetail, confirmEntry, drafts, draftKey,
       rejectWorkspaceRead, nextRevision, observations,
       rememberWrite, setError, setUncertain, updateAccess,
     ],
@@ -553,20 +561,23 @@ export function MerchantOperations({
     }
   }, [accessRevocation, loading, readUnavailable, suspended, visible, verifyEntry]);
 
+  const orderReadFlight = useCallback(() => observations.orderReadScope(draftKey), [draftKey, observations]);
   const beginOrderRead = useCallback(() => {
-    const session = sessionRun.current;
+    const isSameSession = captureReadSession();
+    if (!isSameSession()) return null;
     const read = observations.beginOrderRead(draftKey);
     return {
+      settle: read.settle,
       confirm() {
-        if (active.current && session === sessionRun.current) read.confirm();
+        if (isSameSession()) read.confirm();
       },
       reject(failure: unknown) {
-        if (active.current && session === sessionRun.current) {
+        if (isSameSession()) {
           rejectWorkspaceRead(failure, read.revision, visibleRef.current, 'orders');
         }
       },
     };
-  }, [draftKey, observations, rejectWorkspaceRead]);
+  }, [captureReadSession, draftKey, observations, rejectWorkspaceRead]);
 
   function hasCurrentAccess() {
     return active.current && visibleRef.current && accessSnapshot() === 'confirmed';
@@ -1213,6 +1224,7 @@ export function MerchantOperations({
             accessConfirmed={!locked}
             suspended={ordersSuspended}
             beginRead={beginOrderRead}
+            readFlight={orderReadFlight}
             queue={navigation?.queue}
             queueHref={
               navigation && ((queue) =>
