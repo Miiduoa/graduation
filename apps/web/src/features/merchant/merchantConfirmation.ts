@@ -115,7 +115,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const receiptFloors = new Map<string, number>();
   // Explicit removal invalidates menu receipts independently of readiness label changes.
   const menuReceiptFloors = new Map<string, number>();
-  const menuReceipts = new Map<string, { revision: number; version: number; confirmedThrough: number }>();
+  const menuReceipts = new Map<string, { revision: number; version: number; confirmedThrough: number; menuVerified: boolean }>();
   const writeRevisions = new Map<string, number>();
   const statusReceiptFloors = new Map<string, Map<number, number>>();
   // Store-specific revocations override the list default for stores with newer confirmations.
@@ -130,7 +130,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const orderReadScopes = new Map<string, {
     current: Promise<void> | null;
     revision: number;
-    confirmation?: { entry: number; revision: number };
+    confirmation?: { entry: number; revision: number; version: number };
   }>();
 
   function orderReadScope(key: string) {
@@ -196,6 +196,11 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     workspaceKeysAwaitingConfirmation.add(key);
     discardWorkspace(key, revision);
     return revision;
+  }
+
+  function revokePendingAction(key: string, revision: number) {
+    // An in-flight action can report denial after an intervening detail succeeds.
+    return revoke(key, revision <= accessConfirmationRevision(key) ? beginRequest() : revision);
   }
 
   function listedMembership() {
@@ -320,11 +325,12 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const receipt = menuReceipts.get(key);
     const read = entry.detailRead;
     if (!receipt || !read || read.revision <= receipt.revision) return;
-    // A read already in flight when the receipt arrived may still see the pre-write state.
-    if (read.menu === 'missing' && read.revision > receipt.confirmedThrough && read.version > receipt.version) {
+    // Until a detail verifies the menu, even a new read can repeat the pre-write state.
+    if (receipt.menuVerified && read.menu === 'missing' &&
+        read.revision > receipt.confirmedThrough && read.version > receipt.version) {
       discardMenuReceipt(key);
     } else if (read.menu === 'present') {
-      menuReceipts.set(key, { ...receipt, version: read.version });
+      menuReceipts.set(key, { ...receipt, version: read.version, menuVerified: true });
       applyMenuReceipt(entry);
     }
   }
@@ -432,7 +438,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     // Start at the submitted version and let detail reads establish a later version.
     recordWrite(key, revision);
     draft.menuReceipt = createdItems;
-    menuReceipts.set(key, { revision, version, confirmedThrough: request });
+    menuReceipts.set(key, { revision, version, confirmedThrough: request, menuVerified: false });
     reconcileMenuReceipt(key, entry);
     applyMenuReceipt(entry);
     return true;
@@ -533,10 +539,11 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         (hasUnsettledOrderFailure(key) || (failure !== undefined && read.revision <= failure));
     },
     orderReadScope,
-    // A successful round belongs to the entry that started it.
+    // A successful round belongs to its entry and confirmed detail version.
     needsOrderData(key: string, entryRevision: number) {
       const scope = orderReadScopes.get(key);
       return !!scope && (scope.confirmation?.entry !== entryRevision ||
+        scope.confirmation.version !== currentDetailRead(key)?.version ||
         scope.confirmation.revision <= (orderReadFailures.get(key) ?? 0));
     },
     hasPendingOrderRead(key: string) {
@@ -555,9 +562,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         settle() {
           if (orderReadScopes.get(key) !== scope || scope.revision !== revision) return;
           scope.revision = 0;
-          if (succeeded && entryRevision !== undefined) {
-            scope.confirmation = { entry: entryRevision, revision };
-          }
+          scope.confirmation = succeeded && detail && entryRevision !== undefined
+            ? { entry: entryRevision, revision, version: detail.version }
+            : undefined;
           publishReadChange();
         },
         confirm() {
@@ -599,11 +606,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       if (kind === 'denied') {
         const { key, source } = target;
         const isPendingOrderRead = source === 'orders' && orderReadScopes.get(key)?.revision === revision;
-        // A detail GET cannot supersede an order denial that has yet to arrive.
-        const denialRevision = isPendingOrderRead && revision <= accessConfirmationRevision(key)
-          ? beginRequest()
-          : revision;
-        const revoked = revoke(key, denialRevision);
+        const revoked = isPendingOrderRead ? revokePendingAction(key, revision) : revoke(key, revision);
         if (isPendingOrderRead) recordReadFailure(revision, key, source);
         return { kind, revoked } as const;
       }
@@ -737,6 +740,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     confirmMenu,
     beginRequest,
     revoke,
+    revokePendingAction,
     needsAccessRefresh(key: string) {
       const entry = entries.get(key);
       return readFailureRevision(key) > 0 || verified.has(key) || revocations.has(key) || !!entry?.detail;

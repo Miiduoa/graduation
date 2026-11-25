@@ -1056,6 +1056,35 @@ it('requires a detail matching the winning list version before sending settings'
   );
 });
 
+it.each([403, 404])('shows write denial %s on the list after a newer background detail succeeds', async (status) => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const open = { ...detail('store-a', true), readinessVersion: 7 };
+  const receipt = Promise.withResolvers<never>();
+  const readDetail = vi.fn().mockResolvedValue(open);
+  const availability = vi.fn(() => receipt.promise);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
+    if (resource === path) return readDetail();
+    if (resource === `${path}/availability`) return availability();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+  expect(availability).toHaveBeenCalledOnce();
+
+  await act(async () => window.history.back());
+  await screen.findByRole('heading', { name: '已授權門市' });
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole('link', { name: '管理門市：一樓' })).toBeTruthy();
+
+  await act(async () => receipt.reject(new NuniError(status, 'DENIED')));
+  expect(screen.getByText('目前無法取得部分門市的管理權限，請重新載入。')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+  expect(readDetail).toHaveBeenCalledTimes(2);
+});
+
 it.each([403, 404])('does not restore a pause notice after list denial %s and renewed access', async (status) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const open = detail('store-a', true);
@@ -2372,18 +2401,16 @@ it.each([
     expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
     await act(async () => finishApplications({ applications: [] }));
     expect(screen.queryByText(/目前有 \d+ 項有庫存的上架品項/)).toBeNull();
-    if (listVersion !== detailVersion) {
-      expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
-      readDetail.mockResolvedValue({
-        ...initial,
-        ...missingMenu,
-        readinessVersion: listVersion,
-      });
-      fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
-    }
-    const menuName = await screen.findByLabelText<HTMLInputElement>('品項 1 名稱');
-    expect(menuName.value).toBe('蔬菜便當');
-    expect(screen.queryByText(/目前有 \d+ 項有庫存的上架品項/)).toBeNull();
+    expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
+    readDetail.mockResolvedValue({
+      ...initial,
+      ...missingMenu,
+      readinessVersion: listVersion,
+    });
+    fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+    await screen.findByText(/已建立 1 項首次菜單/);
+    expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
+    await screen.findByText(/目前有 0 項有庫存的上架品項/);
   },
 );
 
@@ -2784,7 +2811,7 @@ it.each(['missing', 'present'])(
       .mockResolvedValueOnce(initial)
       .mockReturnValueOnce(snapshot.promise)
       .mockResolvedValueOnce(intermediate)
-      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(intermediate)
       .mockResolvedValue(published);
     mocks.request.mockImplementation((resource) => {
       if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [initial] });
@@ -4016,6 +4043,8 @@ it.each([
   { firstResult: 'success', first: 'orders', second: 'shift', status: 401, code: 'UNAUTHORIZED', navigation: 'direct overview' },
   { firstResult: 'success', first: 'orders', second: 'shift', status: 409, code: 'SESSION_CHANGED', navigation: 'direct overview' },
   { firstResult: 'success', first: 'orders', second: 'shift', status: 200, code: 'OK', navigation: 'direct overview' },
+  { firstResult: 'success', first: 'orders', second: 'shift', status: 200, code: 'OK', navigation: 'new version overview' },
+  { firstResult: 'success', first: 'shift', second: 'orders', status: 200, code: 'OK', navigation: 'new version overview' },
   { firstResult: 'success', first: 'orders', second: 'shift', status: 403, code: 'FORBIDDEN', navigation: 'overview reload' },
   { firstResult: 'success', first: 'orders', second: 'shift', status: 404, code: 'NOT_FOUND', navigation: 'overview reload' },
   { firstResult: 'success', first: 'shift', second: 'orders', status: 403, code: 'FORBIDDEN', navigation: 'overview reload' },
@@ -4024,7 +4053,7 @@ it.each([
   firstResult, first, second, status, code, navigation,
 }) => {
   const path = 'merchant-workspaces/campus-one/store-a';
-  const store = { ...detail('store-a', true), readinessVersion: 8 };
+  const store = { ...detail('store-a', true), readinessVersion: 7 };
   const queue = {
     orders: [{ ...queueFixture(), locationId: 'store-a', state: 'paid', allowedActions: ['accept'] }],
     nextCursor: 'page-2',
@@ -4088,9 +4117,12 @@ it.each([
     }
     await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
     expect(screen.queryByRole('button', { name: '接單：A101' })).toBeNull();
-  } else if (navigation === 'direct overview' || navigation === 'overview reload') {
+  } else if (navigation === 'direct overview' || navigation === 'overview reload' || navigation === 'new version overview') {
     fireEvent.click(screen.getByRole('link', { name: '門市概況' }));
-    if (navigation === 'overview reload') {
+    if (navigation === 'new version overview') {
+      readDetail.mockResolvedValue({ ...store, readinessVersion: 8 });
+    }
+    if (navigation !== 'direct overview') {
       await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' })));
       expect(readDetail).toHaveBeenCalledTimes(2);
     }
@@ -4099,7 +4131,7 @@ it.each([
   } else {
     await act(async () => document.dispatchEvent(new Event('visibilitychange')));
   }
-  const overview = navigation === 'overview' || navigation === 'direct overview' || navigation === 'overview reload';
+  const overview = navigation.includes('overview');
   const writeButton = overview
     ? await screen.findByRole<HTMLButtonElement>('button', { name: '暫停接單' })
     : retry;

@@ -338,6 +338,10 @@ function AccountWorkspace({
     () => confirmed.subscribeReadChanges(publishOverview),
     [confirmed, publishOverview],
   );
+  const onWorkspaceRevoked = useCallback((showInList?: boolean) => {
+    if (showInList) setDetailError('目前無法取得部分門市的管理權限，請重新載入。');
+    publishOverview();
+  }, [publishOverview]);
   const clearOverview = useCallback(() => {
     confirmed.clear();
     publishOverview();
@@ -366,6 +370,7 @@ function AccountWorkspace({
     const isCurrent = () => isSameSession() && run === generation.current;
     setLoading(true);
     setLoadError('');
+    setDetailError('');
     const denied = (error: unknown) => readFailureKind(error) === 'denied';
     const targets = new Map<string, Pick<NuniMerchantWorkspaceDetail, 'tenantId' | 'locationId'>>();
     const addTargets = (items: Iterable<Pick<NuniMerchantWorkspaceDetail, 'tenantId' | 'locationId'>>) => {
@@ -466,13 +471,11 @@ function AccountWorkspace({
       publishOverview();
       if ([programs, submitted, stores].some((result) => result.status === 'rejected'))
         setLoadError('目前無法確認店家資料，請重新載入。');
-      setDetailError(
-        accessDenied
-          ? '目前無法取得部分門市的管理權限，請重新載入。'
-          : detailUnavailable
-            ? '目前無法更新部分門市資料，請重新載入。'
-            : '',
-      );
+      if (accessDenied) {
+        setDetailError('目前無法取得部分門市的管理權限，請重新載入。');
+      } else if (detailUnavailable) {
+        setDetailError((current) => current || '目前無法更新部分門市資料，請重新載入。');
+      }
     } catch (error) {
       if (isCurrent()) {
         if (expired(error)) expire();
@@ -635,7 +638,7 @@ function AccountWorkspace({
           accessRevocation={revocations.details.get(key) ?? revocations.list}
           onChanged={onWorkspaceChanged}
           onMenuConfirmed={onMenuConfirmed}
-          onRevoked={publishOverview}
+          onRevoked={onWorkspaceRevoked}
         />
       ))}
       {content}

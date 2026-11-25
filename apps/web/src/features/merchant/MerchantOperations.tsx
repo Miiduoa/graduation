@@ -180,7 +180,7 @@ export function MerchantOperations({
   accessRevocation?: number;
   onChanged(detail: Detail, verifiedAccess: boolean, revision: number): DetailConfirmation | null | void;
   onMenuConfirmed?(detail: Detail, revision: number, createdItems: number): boolean;
-  onRevoked?(): void;
+  onRevoked?(showInList?: boolean): void;
 }) {
   const draftKey = workspaceKey({ tenantId, locationId });
   const saved = drafts.get(draftKey);
@@ -336,8 +336,8 @@ export function MerchantOperations({
   };
 
   const showRevocation = useCallback(
-    (revoked: number, updateView: boolean) => {
-      onRevoked?.();
+    (revoked: number, updateView: boolean, showInList = false) => {
+      onRevoked?.(showInList);
       if (!confirmations) {
         setDetail(null);
         setNotice((current) => current && current.revision > revoked ? current : null);
@@ -349,14 +349,6 @@ export function MerchantOperations({
       }
     },
     [confirmations, onRevoked, setDetail, setNotice, setError, updateAccess],
-  );
-
-  const revokeDetail = useCallback(
-    (revision: number, updateView: boolean) => {
-      const revoked = observations.revoke(draftKey, revision);
-      if (revoked !== undefined) showRevocation(revoked, updateView);
-    },
-    [draftKey, observations, showRevocation],
   );
 
   const clearExpiredSession = useCallback(
@@ -644,7 +636,8 @@ export function MerchantOperations({
       }
       if (!current()) return;
       if (readFailureKind(failure) === 'denied') {
-        revokeDetail(revision, true);
+        const revoked = observations.revokePendingAction(draftKey, revision);
+        if (revoked !== undefined) showRevocation(revoked, true, !visibleRef.current);
       } else if (failure instanceof NuniError && failure.status === 409) {
         if (action === 'menu') setMenuBlocked(true);
         // A conflict always requires post-write reconciliation, even on the same entry.
