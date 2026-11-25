@@ -11,7 +11,7 @@ diff --git a/dist/client/components/app-router.js b/dist/client/components/app-r
          } else {
 +            Object.defineProperty(historyState, Symbol.for('nuni.app-router.history-replace'), { value: true });
              window.history.replaceState(historyState, '', canonicalUrl);
-@@ -302,8 +305,25 @@
+@@ -302,8 +305,24 @@
       */ window.history.replaceState = function replaceState(data, _unused, url) {
              // TODO: Warn when Navigation API is available (navigation.navigate() should be used)
              // Avoid a loop when Next.js internals trigger pushState/replaceState
@@ -24,8 +24,7 @@ diff --git a/dist/client/components/app-router.js b/dist/client/components/app-r
 +                        const result = originalReplaceState(data, _unused, url);
 +                        // A query-only write must not supersede an in-flight navigation.
 +                        const routerUrl = new URL(actionQueue.state.canonicalUrl, current);
-+                        const changesOnlyFragment = current.search === target.search && current.hash !== target.hash;
-+                        if (!changesOnlyFragment && actionQueue.pending?.payload.type !== 'navigate' &&
++                        if (actionQueue.pending?.payload.type !== 'navigate' &&
 +                            routerUrl.origin === current.origin && routerUrl.pathname === current.pathname &&
 +                            routerUrl.searchParams.toString() !== target.searchParams.toString()) {
 +                            applyUrlFromHistoryPushReplace(target);
@@ -50,7 +49,7 @@ diff --git a/dist/esm/client/components/app-router.js b/dist/esm/client/componen
          } else {
 +            Object.defineProperty(historyState, Symbol.for('nuni.app-router.history-replace'), { value: true });
              window.history.replaceState(historyState, '', canonicalUrl);
-@@ -290,8 +293,25 @@
+@@ -290,8 +293,24 @@
       */ window.history.replaceState = function replaceState(data, _unused, url) {
              // TODO: Warn when Navigation API is available (navigation.navigate() should be used)
              // Avoid a loop when Next.js internals trigger pushState/replaceState
@@ -63,8 +62,7 @@ diff --git a/dist/esm/client/components/app-router.js b/dist/esm/client/componen
 +                        const result = originalReplaceState(data, _unused, url);
 +                        // A query-only write must not supersede an in-flight navigation.
 +                        const routerUrl = new URL(actionQueue.state.canonicalUrl, current);
-+                        const changesOnlyFragment = current.search === target.search && current.hash !== target.hash;
-+                        if (!changesOnlyFragment && actionQueue.pending?.payload.type !== 'navigate' &&
++                        if (actionQueue.pending?.payload.type !== 'navigate' &&
 +                            routerUrl.origin === current.origin && routerUrl.pathname === current.pathname &&
 +                            routerUrl.searchParams.toString() !== target.searchParams.toString()) {
 +                            applyUrlFromHistoryPushReplace(target);

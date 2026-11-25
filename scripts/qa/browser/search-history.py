@@ -6,7 +6,7 @@ import sys
 from playwright.async_api import async_playwright, expect
 
 
-async def check_search_history(origin):
+async def check_search_history(origin, fragment):
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch()
         try:
@@ -74,9 +74,17 @@ async def check_search_history(origin):
                 has=page.get_by_role('heading', name='公車', exact=True),
             )
 
+            async def wait_for_history_commit():
+                # React can update the field before Next writes the URL from
+                # HistoryUpdater. Let that write settle before simulating drift.
+                await page.evaluate("""() => new Promise(resolve =>
+                  requestAnimationFrame(() => requestAnimationFrame(resolve))
+                )""")
+
             async def check_clear_without_snapshot():
                 await field.fill('借書')
                 await expect(library).to_be_visible()
+                await wait_for_history_commit()
                 await page.evaluate("""() => {
                   const state = history.state;
                   if (!state?.__NA || state.__campusSearchResultReturn) {
@@ -104,6 +112,7 @@ async def check_search_history(origin):
 
             async def check_sync_after_native_replace():
                 await expect(field).to_have_value('借書')
+                await wait_for_history_commit()
                 await page.evaluate("""() => {
                   if (!history.state?.__NA) throw new Error('Expected the real Next history marker');
                   const url = new URL(location.href);
@@ -113,13 +122,19 @@ async def check_search_history(origin):
                 }""")
                 await page.wait_for_function("() => new URL(location.href).searchParams.get('q') === '公車'")
                 await expect(field).to_have_value('借書')
-                await page.evaluate("""() => {
+                await page.evaluate("""(fragment) => {
                   const state = Object.defineProperty({ ...history.state },
                     Symbol.for('nuni.app-router.sync-history-query'), { value: true });
-                  history.replaceState(state, '', location.href);
-                }""")
+                  const url = new URL(location.href);
+                  url.hash = fragment;
+                  history.replaceState(state, '', url);
+                }""", fragment)
                 await expect(field).to_have_value('公車')
                 await expect(bus).to_be_visible()
+                assert await page.evaluate('location.hash') == fragment
+                assert await page.evaluate("""() =>
+                  JSON.parse(sessionStorage.getItem('campus.directory.search.v1'))?.search?.query
+                """) == '公車'
 
             await page.wait_for_function("() => window.__searchHistoryOuterNext === true")
             await check_clear_without_snapshot()
@@ -273,7 +288,7 @@ async def check_search_history(origin):
 
             # Next was installed first on this document. Keep the search observer
             # active while both ordinary and opted-in writes race a navigation.
-            await check_pending_navigation('/search?q=%E5%85%AC%E8%BB%8A', '/library')
+            await check_pending_navigation(f'/search?q=%E5%85%AC%E8%BB%8A{fragment}', '/library')
 
             # Keep the search observer installed while exercising an off-search query write.
             await page.evaluate("() => window.next.router.push('/library?campus=all')")
@@ -283,5 +298,10 @@ async def check_search_history(origin):
             await browser.close()
 
 
+async def main(origin):
+    for fragment in ('', '#results'):
+        await check_search_history(origin, fragment)
+
+
 if __name__ == '__main__':
-    asyncio.run(check_search_history(sys.argv[1].rstrip('/')))
+    asyncio.run(main(sys.argv[1].rstrip('/')))

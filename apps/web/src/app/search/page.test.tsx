@@ -1594,6 +1594,31 @@ describe('continuing a search after opening a service', () => {
     },
   );
 
+  it('applies an opted-in fragment replacement once Next catches up with the search query', async () => {
+    const entry = leaveLibrary();
+    await go(-1);
+    router.search = window.location.search;
+    const view = renderAfterFrame();
+    const field = screen.getByRole<HTMLInputElement>('searchbox');
+
+    act(() => move('?campus=pu&q=公車', window.history.state));
+    expect(field.value).toBe('借書');
+    const state = { ...window.history.state };
+    Object.defineProperty(state, APP_ROUTER_SYNC_HISTORY_QUERY, { value: true });
+    act(() => move('#results', state));
+    expect(field.value).toBe('借書');
+
+    router.search = window.location.search;
+    view.rerender(<SearchPage />);
+    expect(field.value).toBe('公車');
+    expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
+    expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toContain('公車');
+    expect(window.history.state).toMatchObject({
+      __campusSearchHistoryEntry: entry.__campusSearchHistoryEntry,
+      __campusSearchResultReturn: entry.__campusSearchResultReturn,
+    });
+  });
+
   it('keeps an IME draft through a fragment replacement and restores the saved search on the next Back', async () => {
     const entry = leaveLibrary();
     await go(-1);
@@ -1647,7 +1672,7 @@ describe('continuing a search after opening a service', () => {
     expect(window.location.href).toBe(href);
     expect(search.value).toBe('公');
 
-    const reencodedHref = href.replace('%20', '+');
+    const reencodedHref = href.replaceAll('%20', '+');
     expect(reencodedHref).not.toBe(href);
     act(() => window.history.replaceState(window.history.state, '', reencodedHref));
     expect(window.location.href).toBe(reencodedHref);

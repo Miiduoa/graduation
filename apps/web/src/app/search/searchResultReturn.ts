@@ -244,11 +244,6 @@ function installHistoryTracking() {
         // Bind the new URL only after the browser accepts the same-page replacement.
         if (searchEntry) searchEntry.entries.searchUrl = currentUrl();
         const { arrival, pending } = returnState;
-        const nextHref = window.location.href;
-        const changesOnlyFragment =
-          (typeof url === 'string' && url.trimStart().startsWith('#')) ||
-          (previousHref !== nextHref &&
-            previousHref.split('#', 1)[0] === nextHref.split('#', 1)[0]);
         const queryString = currentQueryString();
         // Compare the committed URL with the previous URL independently of the
         // caller's state. Next may add its fields inside this observer.
@@ -259,9 +254,10 @@ function installHistoryTracking() {
         const replacesFilters = replacesSearchUrl &&
           (queryChanged || filtersDifferFromUrl?.(queryString));
         // The explicit write can acknowledge an earlier native write, even on an
-        // entry that has never saved a result. Wait for Next to render the URL.
+        // entry that has never saved a result. A fragment change can accompany
+        // that acknowledgement. Wait for Next to render the URL.
         const explicitSync =
-          replacesSearchUrl && !changesOnlyFragment && incomingNextFields.__NA && syncQuery;
+          replacesSearchUrl && incomingNextFields.__NA && syncQuery;
         const entryKey = readEntryKey(this.state);
         const arrivalMatchesEntry =
           arrival?.entryKey === entryKey && arrival.queryString === queryString;
