@@ -32,8 +32,14 @@ export function AssistantContinuationHost({ navigationRef, hasTabBar = false }: 
     const observeReturn = () => {
       const current = getAssistantContinuation();
       if (observedAway.current !== current) observedAway.current = null;
-      if (!current || !navigationRef.isReady() ||
-          navigationRef.getRootState().key !== current.rootKey) return;
+      if (!current || !navigationRef.isReady()) return;
+      // Once the original navigation tree is gone, the old return address
+      // must not reappear even if a later tree exposes the same route again.
+      if (navigationRef.getRootState().key !== current.rootKey || !current.isCurrent()) {
+        observedAway.current = null;
+        dismissAssistantContinuation(current);
+        return;
+      }
       const activeKey = navigationRef.getCurrentRoute()?.key;
       if (!activeKey) return;
       if (activeKey !== current.sourceRouteKey) {
@@ -58,8 +64,9 @@ export function AssistantContinuationHost({ navigationRef, hasTabBar = false }: 
     return () => { show.remove(); hide.remove(); };
   }, []);
   if (!ticket || keyboardOpen || !ticket.isCurrent() || !navigationRef.isReady() ||
-      navigationRef.getRootState().key !== ticket.rootKey ||
-      navigationRef.getCurrentRoute()?.key === ticket.sourceRouteKey) return null;
+      navigationRef.getRootState().key !== ticket.rootKey) return null;
+  const activeKey = navigationRef.getCurrentRoute()?.key;
+  if (!activeKey || activeKey === ticket.sourceRouteKey) return null;
   return (
     <View style={{ position: 'absolute', right: 16, bottom: hasTabBar ? tabPadding + 8 : insets.bottom + 12,
       flexDirection: 'row', alignItems: 'center', backgroundColor: theme.colors.surface,

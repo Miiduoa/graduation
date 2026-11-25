@@ -39,6 +39,24 @@ function fixture(withTabs = true) {
   const Tabs = createBottomTabNavigator<RootTabParamList, undefined>();
   const navigation = createNavigationContainerRef<RootTabParamList & HomeParamList>();
   const unhandled = jest.fn();
+  // Only the host's view of navigation readiness is overridden. The underlying
+  // navigation container still performs the actual service and return actions.
+  let snapshot: 'normal' | 'no-route' | 'new-root' = 'normal';
+  const hostListeners = new Set<() => void>();
+  const hostNavigation = {
+    isReady: () => navigation.isReady(),
+    getRootState: () => ({ key: snapshot === 'new-root' ? 'replacement-root' : navigation.getRootState().key }),
+    getCurrentRoute: () => snapshot === 'no-route' ? undefined : navigation.getCurrentRoute(),
+    addListener: (_event: 'state', listener: () => void) => {
+      hostListeners.add(listener);
+      const unsubscribe = navigation.addListener('state', listener);
+      return () => { hostListeners.delete(listener); unsubscribe(); };
+    },
+  };
+  function setHostSnapshot(next: typeof snapshot) {
+    snapshot = next;
+    hostListeners.forEach(listener => listener());
+  }
   function HomeStack() {
     return <Home.Navigator id={undefined} screenOptions={{ headerShown: false }}>
       <Home.Screen name="AIChat" component={Source} />
@@ -60,12 +78,12 @@ function fixture(withTabs = true) {
             <Tabs.Screen name="Today" component={HomeStack} />
             <Tabs.Screen name="校園" component={LifeStack} />
           </Tabs.Navigator> : <HomeStack />}
-          <AssistantContinuationHost navigationRef={navigation} hasTabBar={withTabs} />
+          <AssistantContinuationHost navigationRef={hostNavigation} hasTabBar={withTabs} />
         </View>
       </NavigationContainer>
     </Scope.Provider>;
   }
-  return { App, navigation, unhandled };
+  return { App, navigation, unhandled, setHostSnapshot };
 }
 
 beforeEach(() => {
@@ -167,6 +185,31 @@ test.each([false, true])('a manual return consumes the handoff without reopening
   expect(navigation.getCurrentRoute()?.key).not.toBe(sourceKey);
   expect(view.queryByRole('button', { name: '接著問 nuni' })).toBeNull();
   act(() => expect(ticket?.resume()).toBe(false));
+  expect(askCampusAssistant).toHaveBeenCalledTimes(1);
+  expect(unhandled).not.toHaveBeenCalled();
+});
+
+test('a temporarily unknown route hides the return action; a replacement root permanently revokes it', async () => {
+  const { App, navigation, unhandled, setHostSnapshot } = fixture();
+  const view = render(<App />);
+  await waitFor(() => expect(navigation.isReady()).toBe(true));
+  fireEvent.changeText(view.getByLabelText('說出或輸入想做的事'), '開啟校園地圖');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '詢問手機助理' })));
+  fireEvent.press(view.getByRole('button', { name: '開啟校園地圖' }));
+  expect(await view.findByRole('button', { name: '接著問 nuni' })).toBeTruthy();
+  const ticket = getAssistantContinuation();
+  expect(ticket).not.toBeNull();
+  act(() => setHostSnapshot('no-route'));
+  expect(view.queryByRole('button', { name: '接著問 nuni' })).toBeNull();
+  expect(getAssistantContinuation()).toBe(ticket);
+  act(() => setHostSnapshot('normal'));
+  expect(view.getByRole('button', { name: '接著問 nuni' })).toBeTruthy();
+  act(() => setHostSnapshot('new-root'));
+  expect(getAssistantContinuation()).toBeNull();
+  act(() => setHostSnapshot('normal'));
+  expect(view.queryByRole('button', { name: '接著問 nuni' })).toBeNull();
+  act(() => expect(ticket?.resume()).toBe(false));
+  expect(navigation.getCurrentRoute()?.name).toBe('MapV2');
   expect(askCampusAssistant).toHaveBeenCalledTimes(1);
   expect(unhandled).not.toHaveBeenCalled();
 });
