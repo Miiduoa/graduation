@@ -155,3 +155,24 @@ test.each([
 ])('normalizes spoken and pasted search text %s', (phrase, destination, route) => {
   expect(getMobileQuickActions(phrase)[0]).toMatchObject({ destination, route });
 });
+
+test.each([
+  ['Where can I find the library?', '/map', 'MapV2'],
+  ['Where are the classrooms?', '/map', 'MapV2'],
+  ['Where can I find the campus buildings?', '/map', 'MapV2'],
+  ['Where are the libraries?', '/map', 'MapV2'],
+  ['lost-and-found', '/lost-found', 'PlatformLostFound'],
+  ['lost&found', '/lost-found', 'PlatformLostFound'],
+  ['Where can I find a bus stop?', '/bus', 'BusV2'],
+])('resolves natural location and directory wording: %s', (phrase, destination, route) => {
+  const action = getMobileQuickActions(phrase)[0];
+  expect(action).toMatchObject({ destination, route });
+  expect(ROUTE_TO_TAB[action.route]).toBeTruthy();
+});
+
+test.each(['where are my keys', 'where can i find my wallet', 'lostandfoundry'])(
+  'does not invent a service for an unrelated request: %s',
+  phrase => {
+    expect(getMobileQuickActions(phrase)).toEqual([]);
+  },
+);

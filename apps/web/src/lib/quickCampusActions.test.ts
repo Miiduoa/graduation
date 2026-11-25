@@ -170,3 +170,22 @@ it.each([
 ])('normalizes spoken and pasted search text %s', (phrase, href) => {
   expect(getQuickCampusActions(phrase)[0]?.href).toBe(href);
 });
+
+it.each([
+  ['Where can I find the library?', '/map'],
+  ['Where are the classrooms?', '/map'],
+  ['Where can I find the campus buildings?', '/map'],
+  ['Where are the libraries?', '/map'],
+  ['lost-and-found', '/lost-found'],
+  ['lost&found', '/lost-found'],
+  ['Where can I find a bus stop?', '/bus'],
+])('resolves natural location and directory wording: %s', (phrase, href) => {
+  expect(getQuickCampusActions(phrase)[0]?.href).toBe(href);
+});
+
+it.each(['where are my keys', 'where can i find my wallet', 'lostandfoundry'])(
+  'does not invent a service for an unrelated request: %s',
+  phrase => {
+    expect(getQuickCampusActions(phrase)).toEqual([]);
+  },
+);
