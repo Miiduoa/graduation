@@ -48,7 +48,7 @@ const TRONCLASS_KEYWORD = /(?:\btron\s*class\b|創課|玩課雲)/i;
 const LMS_SOURCE = '(?:玩課雲|創課|tron\\s*class)';
 // A clause without its own TronClass keyword continues the TronClass request only
 // when it names TronClass data and nothing that belongs to another service.
-const TRONCLASS_CONTINUATION = /(?:作業|教材|講義|附件|檔案|未交|未繳|待交|待繳|還沒交|還沒繳|沒交|沒繳|homework|assignments?|materials?|handouts?)/i;
+const TRONCLASS_CONTINUATION = /(?:作業|教材|講義|附件|檔案|公告|通知|announcements?|notices?|未交|未繳|待交|待繳|還沒交|還沒繳|沒交|沒繳|homework|assignments?|materials?|handouts?)/i;
 const OTHER_SERVICE_WORDS = [
   '頁面', '畫面', '入口', '校園', '學校', '系上', '社團', '公車', '交通', '課表', '成績',
   '行事曆', '日曆', '空堂', '時段', '安排', '排程', '提醒', '設定', '失物', '餐', '活動',
@@ -1892,7 +1892,7 @@ function parseTronClassCompound(question: string) {
     const courseScope = target.courseScope();
     // A course qualifier can contain a service word, even when the source is inherited.
     if (target.hasOutsideQuotes(OTHER_SERVICE_OR_SCHEDULE) &&
-      !(target.intent === 'homework' && (explicitSource || isPositivelyProvenRead(candidate)))) continue;
+      !explicitSource && !(target.intent === 'homework' && isPositivelyProvenRead(candidate))) continue;
     // Earlier companions can constrain the course. Supplemental answers still require established context.
     if (!context && !explicitSource) {
       courseScopes.push(courseScope);
@@ -1917,17 +1917,18 @@ export function tronClassCompoundClauses(question: string): string[] {
   return parseTronClassCompound(question)?.clauses ?? [];
 }
 
-export function tronClassAgentHomeworkScope(question: string, compoundQuestion?: string) {
+export function tronClassAgentCourseScope(question: string, compoundQuestion?: string) {
   const compound = compoundQuestion === undefined ? null : parseTronClassCompound(compoundQuestion);
   if (compoundQuestion !== undefined && !compound?.clauses.includes(question)) return null;
   const scopes = compound?.courseScopes ?? [parseReadRequest(question).courseScope()];
   const qualifiers = scopes.filter(scope => !scope.overview);
   // An unqualified clause can inherit a course, but an explicit all-course
   // clause retains its own scope even when its supplemental answer is deduplicated.
-  const requiresConfirmation = scopes.some(scope => scope.explicitAll && (compound !== null || !scope.overview));
+  const requiresConfirmation = scopes.some(scope => scope.explicitAll);
   return {
     overview: !compound && qualifiers.length === 0 && !isMultiClauseRequest(question),
     requiresConfirmation,
+    unqualified: qualifiers.length === 0,
     matches: (name: string, code: string) => !requiresConfirmation && qualifiers.length > 0 &&
       qualifiers.every(scope => scope.matches(name, code)),
   };
@@ -1976,6 +1977,7 @@ function analyzeReadRequest(text: string, tokens: Token[]) {
   let namedType: (typeof DATA_TYPES)[number] | undefined;
   let complementAt = text.length;
   let sawRead = false;
+  let sawDownload = false;
   let conflict = false;
   for (const token of tokens) {
     while (scanned <= token.start) {
@@ -1989,6 +1991,7 @@ function analyzeReadRequest(text: string, tokens: Token[]) {
       objectTypes.clear();
       complementAt = text.length;
       sawRead = false;
+      sawDownload = false;
       hasContent = false;
       continue;
     }
@@ -1998,6 +2001,7 @@ function analyzeReadRequest(text: string, tokens: Token[]) {
     const value = token.value.toLowerCase();
     const kind = predicateKindOf(token);
     sawRead ||= !quoted && (kind === 'read' || kind === 'download');
+    sawDownload ||= !quoted && kind === 'download';
     // In 「查有沒有作業」 the question introduces the object. Once the
     // object names a data type, a following question can only qualify it.
     const copula = COPULAS.has(value) || value === '是不是' || value === '是什麼';
@@ -2019,8 +2023,8 @@ function analyzeReadRequest(text: string, tokens: Token[]) {
   const intent = namedType?.intent;
   return {
     intent, complementAt, conflict,
-    courseScope: (scopeIntent = intent) => readCourseScope(text, quotes, scopeIntent, conflict,
-      scopeIntent === 'homework' && hasOutsideQuotes(/全部|所有|\ball\b/iu)),
+    courseScope: (scopeIntent = sawDownload ? 'materials' : intent) => readCourseScope(text, quotes, scopeIntent, conflict,
+      hasOutsideQuotes(/全部|所有|\ball\b/iu)),
     hasOutsideQuotes,
   };
   function hasOutsideQuotes(pattern: RegExp, end = text.length): boolean {

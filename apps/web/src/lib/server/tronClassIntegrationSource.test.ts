@@ -56,6 +56,27 @@ describe('independent TronClass source', () => {
     expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
   });
 
+  it('stops a guarded scoped read before contacting any private data feeds when the index becomes partial', async () => {
+    const { reader, source } = setup();
+    let upcomingReads = 0;
+    vi.mocked(source.fetchCourses).mockImplementation(async (_cookies, query) => {
+      if (query.status === 'ongoing') return [course];
+      if (++upcomingReads === 1) return [];
+      throw new Error('temporary school failure');
+    });
+    const index = await reader('platform:pa_fixture', { include: {} });
+    expect(index).toMatchObject({ partial: false, courses: [{ id: 101 }] });
+
+    const result = await reader('platform:pa_fixture', { courseId: 101, requireCompleteCourses: true,
+      include: { homework: true, announcements: true, materials: true } });
+    expect(result).toMatchObject({ partial: true, courses: [{ id: 101 }], errors: [{ area: 'courses' }],
+      homework: [], announcements: [], materials: [] });
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+    expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
+  });
+
   it('rejects a course index if the school binding changes during its course reads', async () => {
     const { source, bindings } = setup();
     bindings.assertCurrent.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined)

@@ -282,14 +282,15 @@ for (const mode of [0o300, 0o700, 0o755, 0o2700, 0o2750]) {
       const fixture = readFileSync(script, 'utf8')
         .replace(/    node -e 'const fs=require[^\n]+ &/, () => `    node -e 'console.log("started")' &`)
         .replace('  echo "WRAPPER_PID=$TRONCLASS_SELFTEST_WRAPPER"', () =>
-          '  echo "WRAPPER_PID=$TRONCLASS_SELFTEST_WRAPPER"\n  echo "RUNTIME=$TRONCLASS_RUNTIME_DIR"');
+          '  echo "WRAPPER_PID=$TRONCLASS_SELFTEST_WRAPPER"\n  echo "RUNTIME=$TRONCLASS_RUNTIME_DIR"\n  echo "OPENED=$(readlink "/proc/$$/fd/$runtime_fd")"');
       const result = spawnSync('bash', ['-c', fixture, script], {
         encoding: 'utf8',
         timeout: 5000,
         env: {
           ...process.env,
           PATH: `${dir}:${process.env.PATH}`,
-          TRONCLASS_RUNTIME_DIR: runtime,
+          // abspath can preserve two leading slashes. The fd path uses the actual directory name.
+          TRONCLASS_RUNTIME_DIR: `/${runtime}`,
           TRONCLASS_SIGNAL_SELFTEST: '1',
         },
       });
@@ -300,6 +301,7 @@ for (const mode of [0o300, 0o700, 0o755, 0o2700, 0o2750]) {
       const shared = mode === 0o700 || mode === 0o2700;
       const child = result.stdout.match(/^RUNTIME=(.+)$/m)?.[1];
       assert.ok(child);
+      assert.equal(child, result.stdout.match(/^OPENED=(.+)$/m)?.[1]);
       assert.equal(shared ? child : path.dirname(child), runtime);
       if (!shared) assert.match(path.basename(child), /^run-[a-f0-9]{32}$/);
       assert.equal(statSync(child).mode & 0o7777, 0o700 | (mode & 0o2000));

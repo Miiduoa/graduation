@@ -365,6 +365,7 @@ export function createTronClassCourseIndexReader(dependencies: TronClassReaderDe
 
 export type TronClassSnapshotReadOptions = {
   courseId?: number;
+  requireCompleteCourses?: boolean;
   include?: {
     homework?: boolean;
     announcements?: boolean;
@@ -397,6 +398,13 @@ export function createTronClassIntegrationReader(dependencies: TronClassReaderDe
       throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
     }
     return operation(ownerKey, async ({ binding, courses, errors: courseErrors, check, read, source, now }) => {
+      // Automatic course selection depends on this same index being complete.
+      if (options.requireCompleteCourses && courseErrors.some((error) => error.area === 'courses')) {
+        return {
+          revision: binding.revision, fetchedAt: new Date(now()).toISOString(), courses,
+          homework: [], announcements: [], materials: [], errors: courseErrors, partial: true,
+        };
+      }
       const include = resolveSnapshotInclude(options);
       const errors: TronClassSyncError[] = [...courseErrors];
       if (options.courseId && !courses.some((course) => course.id === options.courseId)) {

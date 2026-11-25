@@ -8,7 +8,7 @@ import type {
 import { TRONCLASS_AGENT_MAX_ACTIONS } from '../tronClassAgentTypes';
 import {
   hasTronClassReadTargetConflict, isTronClassCompoundDownloadAndPrepare, parseTronClassAgentIntent,
-  tronClassAgentHomeworkScope, tronClassReadCourseScope,
+  tronClassAgentCourseScope,
 } from '../tronClassAgentIntent';
 import type { TronClassHomeworkItem, TronClassPreparation, TronClassSnapshot } from '../tronClassIntegrationTypes';
 import { tronClassUploadKey } from '../tronClassIntegrationClient';
@@ -63,14 +63,14 @@ function isUnqualifiedRequest(question: string, names: string[]): boolean {
 
 function resolveCourse(
   snapshot: TronClassSnapshot,
-  scope: { matches: (name: string, code: string) => boolean; quoted?: readonly string[] },
-  requiresConfirmation: boolean,
+  scope: NonNullable<ReturnType<typeof tronClassAgentCourseScope>>,
   question: string,
+  allowSoleCourseFallback: boolean,
 ): number | undefined {
-  if (requiresConfirmation || snapshot.errors.some((error) => error.area === 'courses')) return;
+  if (scope.requiresConfirmation || snapshot.errors.some((error) => error.area === 'courses')) return;
   const matches = snapshot.courses.filter((course) => scope.matches(course.name, course.code));
   if (matches.length === 1) return matches[0].id;
-  if (scope.quoted?.length === 0 && snapshot.courses.length === 1 && !snapshot.partial &&
+  if (allowSoleCourseFallback && scope.unqualified && snapshot.courses.length === 1 && !snapshot.partial &&
     isUnqualifiedRequest(question, ['公告', '通知'])) return snapshot.courses[0].id;
 }
 
@@ -181,8 +181,8 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         : isTronClassCompoundDownloadAndPrepare(input.question) ? 'multiple_actions' : null;
       const query = unsupportedReason ? { intent: 'unsupported', pendingOnly: false, unsupportedReason } as const
         : parseTronClassAgentIntent(input.question);
-      const homeworkScope = tronClassAgentHomeworkScope(input.question, input.compoundQuestion);
-      if (!query || !homeworkScope || (input.courseId !== undefined && !positiveId(input.courseId)) ||
+      const courseScope = tronClassAgentCourseScope(input.question, input.compoundQuestion);
+      if (!query || !courseScope || (input.courseId !== undefined && !positiveId(input.courseId)) ||
         (input.homeworkId !== undefined && (!positiveId(input.homeworkId) || !input.courseId || query.intent !== 'prepare'))) {
         throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
       }
@@ -214,7 +214,8 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         steps: [{ id: 'capability', tool: 'select_target', status: query.intent === 'unsupported' ? 'blocked' : 'completed', message: '已核對 Agent 可用功能與授權範圍。' }] });
       }
       const readsHomework = query.intent === 'homework' || query.intent === 'prepare';
-      const snapshotRead = (courseId?: number) => ({
+      const snapshotRead = (courseId?: number, requireCompleteCourses = false) => ({
+        ...(requireCompleteCourses ? { requireCompleteCourses } : {}),
         ...(courseId !== undefined ? { courseId } : {}),
         include: {
           homework: readsHomework && courseId !== undefined,
@@ -222,11 +223,12 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
           materials: (query.intent === 'materials' || query.intent === 'download') && courseId !== undefined,
         },
       });
-      const guardedRead = async (courseId?: number) => {
+      const guardedRead = async (courseId?: number, requireCompleteCourses = false) => {
         await assertScopes(ownerKey, grant, scope);
-        const result = await read(ownerKey, snapshotRead(courseId));
+        const result = await read(ownerKey, snapshotRead(courseId, requireCompleteCourses));
         if (result.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
-        if (courseId && !result.courses.some((course) => course.id === courseId)) throw new NuniError(403, 'TRONCLASS_COURSE_NOT_FOUND');
+        if (courseId && !(requireCompleteCourses && result.errors.some((error) => error.area === 'courses')) &&
+          !result.courses.some((course) => course.id === courseId)) throw new NuniError(403, 'TRONCLASS_COURSE_NOT_FOUND');
         await assertScopes(ownerKey, grant, scope);
         return result;
       };
@@ -238,33 +240,33 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         answer: `${snapshot.partial ? '部分課程資料尚未讀完。' : ''}已讀取 ${snapshot.courses.length} 門 TronClass 課程，可在這裡選擇課程查看作業、公告與教材。` });
 
       if (!courseId) {
-        const courseScope = query.intent === 'announcements' || query.intent === 'materials' || query.intent === 'download'
-          ? tronClassReadCourseScope(input.question, query.intent)
-          : homeworkScope;
-        courseId = resolveCourse(snapshot, courseScope, readsHomework && homeworkScope.requiresConfirmation, input.question);
-        if (courseId) snapshot = await guardedRead(courseId);
-        else if (readsHomework) {
-          steps.push({ id: 'choose-course', tool: 'select_target', status: 'blocked', message: '尚未選定唯一課程。' });
-          return finish({ ...base, fetchedAt: snapshot.fetchedAt, snapshot: selectedSnapshot(snapshot), selection: 'course',
-            answer: homeworkScope.requiresConfirmation
-              ? '這個請求包含全部作業的範圍，請先確認要查詢哪一門課的作業。'
-              : '請確認要查詢哪一門課的作業。' });
+        courseId = resolveCourse(snapshot, courseScope, input.question, !readsHomework);
+        if (courseId) {
+          snapshot = await guardedRead(courseId, true);
+          if (snapshot.errors.some((error) => error.area === 'courses')) {
+            courseId = undefined;
+            steps.push({ id: 'courses-refresh', tool: 'read_courses', status: 'partial', message: '重新核對時未取得完整課程清單。' });
+          }
         }
       }
-      if (['materials', 'announcements', 'download'].includes(query.intent) && !courseId) {
-        steps.push({ id: 'choose-course', tool: 'select_target', status: 'blocked', message: '尚未選定唯一課程，沒有替你猜測教材或公告來源。' });
+      if (!courseId) {
+        steps.push({ id: 'choose-course', tool: 'select_target', status: 'blocked', message: '尚未選定唯一課程。' });
         return finish({ ...base, fetchedAt: snapshot.fetchedAt, snapshot: selectedSnapshot(snapshot), selection: 'course',
-          answer: snapshot.courses.length ? '請選擇要查詢的課程，我會接著讀取這門課的公告或教材。' : '這次未取得可選的課程，請重新整理 TronClass 連線。' });
+          answer: readsHomework
+            ? courseScope.requiresConfirmation
+              ? '這個請求包含全部作業的範圍，請先確認要查詢哪一門課的作業。'
+              : '請確認要查詢哪一門課的作業。'
+            : snapshot.courses.length ? '請選擇要查詢的課程，我會接著讀取這門課的公告或教材。' : '這次未取得可選的課程，請重新整理 TronClass 連線。' });
       }
       if (query.intent === 'homework') {
-        const homework = snapshot.homework.filter((item) => (!courseId || item.courseId === courseId) && (!query.pendingOnly || item.submitted !== true));
+        const homework = snapshot.homework.filter((item) => item.courseId === courseId && (!query.pendingOnly || item.submitted !== true));
         const result = selectedSnapshot(snapshot, { courseId, homework });
         steps.push({ id: 'homework', tool: 'read_homework', status: snapshot.partial ? 'partial' : 'completed', message: '已讀取作業與校方提供的繳交狀態；未回傳狀態的項目保留為待確認。' });
         const actions: TronClassAgentAction[] = capabilities.prepareHomework ? homework.map((item) => ({ kind: 'prepare_homework', id: `homework:${item.courseId}:${item.id}`, courseId: item.courseId, homeworkId: item.id, title: item.title, revision: grant.revision })) : [];
         return finish({ ...base, fetchedAt: snapshot.fetchedAt, snapshot: result, actions, answer: homeworkAnswer(result, query.pendingOnly) });
       }
       if (query.intent === 'prepare') {
-        const homework = snapshot.homework.filter((item) => (!courseId || item.courseId === courseId) && (!query.pendingOnly || item.submitted !== true));
+        const homework = snapshot.homework.filter((item) => item.courseId === courseId && (!query.pendingOnly || item.submitted !== true));
         const matches = input.homeworkId ? homework.filter((item) => item.id === input.homeworkId && item.courseId === input.courseId)
           : homework.filter((item) => containsName(input.question, item.title));
         const candidates = matches.length ? matches : homework;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { tronClassAgentHomeworkScope, tronClassReadCourseScope, tronClassQuotedTargets, matchesTronClassHomeworkCourse, isTronClassHomeworkOverview, isTronClassCompoundDownloadAndPrepare, canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs, tronClassReadRequestVerbs } from './tronClassAgentIntent';
+import { tronClassAgentCourseScope, tronClassReadCourseScope, tronClassQuotedTargets, matchesTronClassHomeworkCourse, isTronClassHomeworkOverview, isTronClassCompoundDownloadAndPrepare, canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs, tronClassReadRequestVerbs } from './tronClassAgentIntent';
 
 /** Unknown leftover tokens now make a sentence ambiguous (confirmation), which is acceptable. */
 function expectAuthorizedOrAmbiguous(
@@ -55,7 +55,7 @@ describe('TronClass homework overview scope', () => {
     const clause = '查玩課雲『外交』作業';
     const question = `${clause}和${companion}`;
     expect(tronClassCompoundClauses(question)).toEqual([clause]);
-    const scope = tronClassAgentHomeworkScope(clause, question);
+    const scope = tronClassAgentCourseScope(clause, question);
     expect(scope?.matches('外交', 'PS101')).toBe(matchesDiplomacy);
     expect(scope?.matches('交通', 'TR101')).toBe(false);
   });
@@ -71,21 +71,21 @@ describe('TronClass homework overview scope', () => {
     const clauses = tronClassCompoundClauses(question);
     expect(clauses.length).toBeGreaterThan(0);
     for (const clause of clauses) {
-      const scope = tronClassAgentHomeworkScope(clause, question);
+      const scope = tronClassAgentCourseScope(clause, question);
       expect(scope?.requiresConfirmation).toBe(true);
       expect(scope?.matches('外交', 'PS101')).toBe(false);
     }
   });
 
   it.each(['全部', '所有', 'all'])('requires confirmation for a single clause with %s and a quoted course', all => {
-    const scope = tronClassAgentHomeworkScope(`查玩課雲 ${all} 『外交』作業`);
+    const scope = tronClassAgentCourseScope(`查玩課雲 ${all} 『外交』作業`);
     expect(scope?.overview).toBe(false);
     expect(scope?.requiresConfirmation).toBe(true);
     expect(scope?.matches('外交', 'PS101')).toBe(false);
   });
 
   it('treats a scope word inside a quoted course name as part of that name', () => {
-    const scope = tronClassAgentHomeworkScope('查玩課雲『所有人的外交』作業');
+    const scope = tronClassAgentCourseScope('查玩課雲『所有人的外交』作業');
     expect(scope?.requiresConfirmation).toBe(false);
     expect(scope?.matches('所有人的外交', 'PS101')).toBe(true);
   });
@@ -94,7 +94,7 @@ describe('TronClass homework overview scope', () => {
     const question = '查玩課雲課程，查交通作業';
     const clauses = tronClassCompoundClauses(question);
     expect(clauses).toEqual(['查玩課雲課程', '查交通作業 玩課雲']);
-    expect(tronClassAgentHomeworkScope(clauses[1]!, question)?.matches('交通', 'TR101')).toBe(true);
+    expect(tronClassAgentCourseScope(clauses[1]!, question)?.matches('交通', 'TR101')).toBe(true);
   });
 
   it.each(['『外交』', '《外交》', '〈外交〉', '「外交和歷史」'])(
@@ -115,6 +115,29 @@ describe('TronClass homework overview scope', () => {
     expect(matchesTronClassHomeworkCourse(question, '資料庫')).toBe(false);
     expect(matchesTronClassHomeworkCourse(question, '資料庫實習')).toBe(true);
   });
+
+  it.each([
+    ['查玩課雲『資料庫』公告', '查『外交』公告'],
+    ['查玩課雲『資料庫』教材', '查『外交』教材'],
+    ['下載玩課雲『資料庫』教材', '下載『外交』教材'],
+  ])('combines the course scope of %s with a contextual read', (question, companion) => {
+    const compoundQuestion = `${question}，${companion}`;
+    expect(tronClassCompoundClauses(compoundQuestion)).toEqual([question]);
+    const scope = tronClassAgentCourseScope(question, compoundQuestion);
+    expect(scope?.matches('資料庫', 'CS101')).toBe(false);
+    expect(scope?.matches('外交', 'PS101')).toBe(false);
+    expect(tronClassAgentCourseScope(question)?.matches('資料庫', 'CS101')).toBe(true);
+  });
+
+  it.each(['查玩課雲公告', '查玩課雲教材', '下載玩課雲教材'])(
+    'inherits a single course from the original request for %s', question => {
+      const compoundQuestion = `查玩課雲『資料庫』課程，${question}`;
+      expect(tronClassCompoundClauses(compoundQuestion)).toContain(question);
+      const scope = tronClassAgentCourseScope(question, compoundQuestion);
+      expect(scope?.matches('資料庫', 'CS101')).toBe(true);
+      expect(scope?.matches('資料庫系統', 'CS201')).toBe(false);
+    },
+  );
 
   it.each(['查玩課雲%s公告', '查玩課雲%s教材', '下載玩課雲%s教材'])(
     'matches the full unquoted course range in %s', template => {

@@ -148,8 +148,6 @@ try:
         raise OSError("invalid runtime directory")
     verify_bindings()
 
-    target = os.path.abspath(absolute)
-
     # Share existing private directories. For other modes and the default
     # location, create a private child without changing any directory's mode.
     if not specified or stat.S_IMODE(opened.st_mode) not in (0o700, 0o2700):
@@ -168,12 +166,12 @@ try:
                 continue
             opened = open_directory(name)
             break
-        target = os.path.join(target, name)
         # setgid inheritance does not grant group access.
         if opened.st_uid != os.getuid() or stat.S_IMODE(opened.st_mode) not in (0o700, 0o2700):
             raise OSError("invalid newly created runtime directory")
 
     verify_bindings()
+    target = os.readlink(f"/proc/self/fd/{fds[-1]}")
     descriptor = f"/proc/{os.getpid()}/fd/{fds[-1]}".encode()
     # mkstemp creates and opens the same inode. The pathname is used only
     # to unlink our entry; a replacement, including a symlink, is ignored.
