@@ -3979,7 +3979,7 @@ it('drops a building preview when its selected campus location is withdrawn', as
   expect(screen.queryByRole('button', { name: '平面圖建模預覽' })).toBeNull();
 });
 
-it.each([true, false])('revokes navigation and preserves any open editor after a same-ID update (preview open: %s)', async (previewOpen) => {
+it.each([true, false])('revokes navigation and isolates unsaved editor changes after a same-ID update (preview open: %s)', async (previewOpen) => {
   const props = { school: 'other-school', onSelect: vi.fn() };
   const view = render(<CampusSpatialExplorer {...props} locations={places} selected={places[0]} />);
   const dialog = await open();
@@ -3998,9 +3998,9 @@ it.each([true, false])('revokes navigation and preserves any open editor after a
   const moved = { ...places[0], name: '更新後的圖書館', category: '學習', lat: places[0].lat + 0.002 };
   view.rerender(<CampusSpatialExplorer {...props} locations={[moved, ...places.slice(1)]} selected={moved} />);
   if (previewOpen) {
-    const preview = screen.getByRole('dialog', { name: '平面圖建模預覽', description: moved.name });
-    expect(within(preview).getByRole('group', { name: '未匯出的樓層名稱 樓層設定' })).toBeTruthy();
-    fireEvent.click(within(preview).getByRole('button', { name: '關閉視窗' }));
+    // Never relabel the existing editor or transfer unsaved edits to a replacement marker.
+    expect(screen.queryByRole('dialog', { name: '平面圖建模預覽' })).toBeNull();
+    expect(screen.getByText(/原圖面地點已變更或無法唯一確認/)).toBeTruthy();
   }
   const tour = within(screen.getByRole('dialog', { name: '校園空間導覽' }));
   expect(screen.queryByRole('dialog', { name: '平面圖建模預覽' })).toBeNull();
@@ -4019,7 +4019,10 @@ it.each([true, false])('revokes navigation and preserves any open editor after a
   expect(google.searchParams.get('destination')).toBe(`${places[1].lat},${places[1].lng}`);
   expect(apple.searchParams.get('daddr')).toBe(`${places[1].lat},${places[1].lng}`);
   fireEvent.click(tour.getByRole('button', { name: '平面圖建模預覽' }));
-  expect((await screen.findByRole('dialog', { name: '平面圖建模預覽' })).textContent).toContain(places[1].name);
+  const nextPreview = await screen.findByRole('dialog', { name: '平面圖建模預覽' });
+  expect(nextPreview.textContent).toContain(places[1].name);
+  expect(nextPreview.textContent).not.toContain('未匯出的樓層名稱');
+  expect(within(nextPreview).queryByRole('group', { name: '未匯出的樓層名稱 樓層設定' })).toBeNull();
 });
 
 it('adds source-checked Providence building shapes without changing navigation or hiding source dates', async () => {
