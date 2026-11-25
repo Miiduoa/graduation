@@ -636,6 +636,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   if (hadRetirement) deleteMarker(retirement);
   if (hadVerification) deleteMarker(verification);
   discardPayload(publication);
+  let retirementWriteCompleted = false;
   const retire = (assertWritable = () => {}, canDeleteMarker = true) => {
     // Commit synchronously so verification and commit cannot be separated by another JS event.
     if (canDeleteMarker && deleteMarker(marker)) {
@@ -650,7 +651,11 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
     assertWritable();
     try {
       marker.write(committedMarker);
+      // Native writes throw on I/O failure. Preserve the outcome of the write
+      // separately from the readback so publication can survive a read fault.
+      retirementWriteCompleted = true;
       if (marker.textSync() === committedMarker && !rejected) return true;
+      retirementWriteCompleted = false;
     } catch {
       // A separate file can record retirement even if this marker cannot be updated.
     }
@@ -695,9 +700,15 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
       if (current?.rejected) throw new Error('無法確認匯入資料已儲存，請稍後再試。');
       // Bind proof of publication to the rollback copy and the verified primary.
       const receipt = sha256(readOptionalFile(payload) ?? replacement) + '\n' + hash;
-      publication.write(receipt);
-      if (publication.textSync() !== receipt) {
-        throw new Error('無法確認匯入資料已儲存，請稍後再試。');
+      try {
+        publication.write(receipt);
+        if (publication.textSync() !== receipt) {
+          throw new Error('無法確認匯入資料已儲存，請稍後再試。');
+        }
+      } catch (error) {
+        // The completed marker write retires the rollback even if its contents
+        // remain unreadable and the redundant publication receipt fails.
+        if (!retirementWriteCompleted || !current?.markerError || rejected) throw error;
       }
     },
     preparePrimaryCommit() {

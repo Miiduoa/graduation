@@ -460,6 +460,7 @@ export function mutatePersonalImportLedger<T>(
                 } catch {
                   assertWritable();
                   journal.publishVerifiedFirstWrite(firstRaw);
+                  assertWritable();
                 }
               }
               pendingRestorations.delete(key);
