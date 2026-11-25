@@ -10,6 +10,7 @@ import { Platform } from 'react-native';
 
 const markerSuffix = '.rollback.pending';
 const committedMarker = 'committed';
+const retiredInProcess = new Set<string>();
 const legacyStagePattern = /^campus\.personal-imports\.rollback\.v1:([a-f0-9]{64}):stage:\d+:[^:]+$/;
 const lockStore = 'writes';
 const stagePrefix = 'campus.personal-imports.stage.v2:';
@@ -303,7 +304,12 @@ export { hasWebPersonalImportCommit } from '@campus/shared/src/imports/browserRe
 
 function sweepSessionStages(storage: Storage): void {
   for (const entry of Object.keys(storage)) {
-    if (entry.startsWith(stagePrefix) && !activeStages.has(entry)) storage.removeItem(entry);
+    if (!entry.startsWith(stagePrefix) || activeStages.has(entry)) continue;
+    try {
+      storage.removeItem(entry);
+    } catch {
+      // Stale stages are private and never used for recovery.
+    }
   }
 }
 
@@ -358,36 +364,48 @@ export function commitWebPersonalImports(
   const commit = () => {
     if (!recovery || lease?.canStage() === false) return publishWithQuotaRetry();
 
-    const stages = window.sessionStorage;
-    sweepSessionStages(stages);
+    let stages: Storage;
+    try {
+      stages = window.sessionStorage;
+      sweepSessionStages(stages);
+    } catch {
+      return publishWithQuotaRetry();
+    }
 
     // The private copy uses the verbatim ledger without JSON string escaping.
     const stageKey = stagePrefix + id;
     const encoded = recovery.raw ?? 'null';
-    const ownsStage = () => stages.getItem(stageKey) === encoded;
+    const readStage = () => {
+      try {
+        return stages.getItem(stageKey);
+      } catch {
+        return undefined;
+      }
+    };
+    const ownsStage = () => {
+      const staged = readStage();
+      return staged === undefined || staged === encoded;
+    };
     const discardStage = () => {
-      if (ownsStage()) stages.removeItem(stageKey);
+      try {
+        if (readStage() === encoded) stages.removeItem(stageKey);
+      } catch {
+        // An abandoned stage is inert and can be reclaimed by a later write.
+      }
     };
     assertWritable();
     activeStages.add(stageKey);
     try {
       try {
         stages.setItem(stageKey, encoded);
-      } catch (error) {
-        if (!isQuotaExceeded(error)) throw error;
-        // Session storage quota is independent of whether the primary can grow.
-        // Publish atomically against the primary snapshot under the current lock.
+      } catch {
+        // The primary can still be published under the lock and snapshot check.
         return publishWithQuotaRetry();
       }
       return publishWithQuotaRetry(ownsStage, discardStage);
     } finally {
-      try {
-        discardStage();
-      } catch {
-        // An abandoned stage is inert and can be reclaimed by a later write.
-      } finally {
-        activeStages.delete(stageKey);
-      }
+      discardStage();
+      activeStages.delete(stageKey);
     }
   };
 
@@ -414,8 +432,13 @@ function journalFiles(key: string) {
 }
 
 export function readPersonalImportRollback(key: string): string | undefined {
+  if (retiredInProcess.has(key) || retirementFile(key).info().exists) return undefined;
   const { payload, marker, marked } = journalFiles(key);
   return marked && marker.textSync() !== committedMarker ? payload.textSync() : undefined;
+}
+
+function retirementFile(key: string): File {
+  return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.committed`);
 }
 
 export function preparePersonalImportRollback(key: string, raw: string | null) {
@@ -437,6 +460,11 @@ export function preparePersonalImportRollback(key: string, raw: string | null) {
     marker.write('');
     if (marker.textSync() !== '') throw new Error('無法建立匯入資料的還原標記。');
   }
+  const retirement = retirementFile(key);
+  if (retirement.info().exists && !deleteMarker(retirement)) {
+    throw new Error('無法重新啟用匯入資料的還原標記。');
+  }
+  retiredInProcess.delete(key);
   return (assertWritable = () => {}, canDeleteMarker = true) => {
     // Commit synchronously so verification and commit cannot be separated by another JS event.
     if (canDeleteMarker && deleteMarker(marker)) {
@@ -446,14 +474,40 @@ export function preparePersonalImportRollback(key: string, raw: string | null) {
     // Retain the recovery files when cleanup fails, but retire this rollback
     // durably so a restart exposes the verified primary.
     assertWritable();
-    marker.write(committedMarker);
-    if (marker.textSync() !== committedMarker) throw new Error('無法確認匯入資料的還原標記已更新。');
+    try {
+      marker.write(committedMarker);
+      if (marker.textSync() === committedMarker) return;
+    } catch {
+      // A separate file can record retirement even if this marker cannot be updated.
+    }
+    try {
+      assertWritable();
+    } catch (error) {
+      // The write may have reached disk before the readback failed.
+      try {
+        marker.write('');
+      } catch {
+        // Preserve the rollback payload for the restoration path.
+      }
+      throw error;
+    }
+    retiredInProcess.add(key);
+    try {
+      retirement.create();
+      if (retirement.info().exists) retiredInProcess.delete(key);
+    } catch {
+      // Keep the verified primary visible in this process if retirement cannot be recorded.
+    }
   };
 }
 
 export function clearPersonalImportRollback(key: string): void {
   const { payload, marker, marked } = journalFiles(key);
-  if (!marked || deleteMarker(marker)) discardPayload(payload);
+  if (!marked || deleteMarker(marker)) {
+    retiredInProcess.delete(key);
+    discardPayload(retirementFile(key));
+    discardPayload(payload);
+  }
 }
 
 function deleteMarker(marker: File): boolean {

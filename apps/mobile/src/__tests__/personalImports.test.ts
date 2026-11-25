@@ -374,6 +374,68 @@ test.each([false, true])('native marker deletion I/O preserves the correct ledge
   }
 });
 
+test.each([
+  ['write', false], ['readback', false], ['write', true], ['readback', true],
+] as const)('native marker retirement %s I/O keeps the correct primary and notification (revoked: %s)', async (phase, revoked) => {
+  const scope = { owner: `nuni:retirement-${phase}-${revoked}`, schoolId: 'pu' };
+  const key = personalImportStorageKey(scope);
+  const { ledger: previous } = await appendPersonalImports(scope, [row('original')]);
+  const markerUri = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.pending`).uri;
+  const { delete: deleteFile, write: writeFile, textSync } = File.prototype;
+  let active = true;
+  let retirementAttempts = 0;
+  const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
+    if (this.uri === markerUri) throw new Error('標記無法刪除');
+    deleteFile.call(this);
+  });
+  const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+    if (phase === 'write' && this.uri === markerUri && value === 'committed') {
+      retirementAttempts++;
+      if (revoked) active = false;
+      throw new Error('標記無法更新');
+    }
+    writeFile.call(this, value, options);
+  });
+  const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+    const value = textSync.call(this);
+    if (phase === 'readback' && this.uri === markerUri && value === 'committed') {
+      retirementAttempts++;
+      if (revoked) active = false;
+      throw new Error('更新後的標記無法讀回');
+    }
+    return value;
+  });
+  const reread = jest.fn(() => loadPersonalImports(scope));
+  const unsubscribe = subscribePersonalImports(reread);
+  try {
+    const append = appendPersonalImports(scope, [row('new', '統計')], { canContinue: () => active });
+    let expected = previous;
+    if (revoked) {
+      await expect(append).rejects.toThrow('帳號或學校已切換');
+      expect(reread).not.toHaveBeenCalled();
+      expect(await AsyncStorage.getItem(key)).toBe(JSON.stringify(previous));
+      expect(readPersonalImportRollback(key)).toBe(JSON.stringify(previous));
+      await AsyncStorage.removeItem(key);
+    } else {
+      expected = (await append).ledger;
+      expect(expected.records.map(({ title }) => title)).toEqual(['微積分', '統計']);
+      expect(await AsyncStorage.getItem(key)).toBe(JSON.stringify(expected));
+      expect(reread).toHaveBeenCalledTimes(1);
+      await expect(reread.mock.results[0].value).resolves.toEqual(expected);
+    }
+    expect(retirementAttempts).toBe(1);
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
+    });
+  } finally {
+    unsubscribe();
+    read.mockRestore();
+    write.mockRestore();
+    remove.mockRestore();
+  }
+});
+
 test.each([true, false])('native restart reads a valid journal despite persistent checkpoint I/O (restored primary: %s)', async (restored) => {
   const scope = { owner: 'nuni:checkpoint-io-restart', schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
@@ -969,6 +1031,74 @@ test.each(['Web Locks', 'IndexedDB', 'lease'] as const)(
       unsubscribe?.();
       read?.mockRestore();
       database?.restore();
+      restoreLocks();
+      cleanup();
+    }
+  },
+);
+
+test.each(['access', 'remove', 'write', 'read'] as const)(
+  'Expo Web keeps adding, editing and syncing during persistent session storage %s failure',
+  async (failure) => {
+    const cleanup = useWebStorage();
+    const restoreLocks = withoutWebWriteLocks();
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: { request: async (_key: string, write: () => unknown) => write() },
+    });
+    const stages = window.sessionStorage;
+    const orphan = 'campus.personal-imports.stage.v2:orphan';
+    const syncScope = { ...scope, owner: 'nuni:pa_00000000-0000-4000-a000-000000000001' };
+    const key = personalImportStorageKey(syncScope);
+    const guard = { canContinue: () => true };
+    const { removeItem, setItem, getItem } = Storage.prototype;
+    const ioError = new DOMException('Session storage unavailable', 'SecurityError');
+    const unavailable = jest.fn(() => { throw ioError; });
+    let fault: jest.SpyInstance | undefined;
+    const reread = jest.fn(() => loadPersonalImports(syncScope));
+    const unsubscribe = subscribePersonalImports(reread);
+    try {
+      if (failure === 'access') {
+        fault = jest.spyOn(window, 'sessionStorage', 'get').mockImplementation(unavailable);
+      } else if (failure === 'remove') {
+        stages.setItem(orphan, 'null');
+        fault = jest.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, entry) {
+          if (this === stages && entry === orphan) unavailable();
+          removeItem.call(this, entry);
+        });
+      } else if (failure === 'write') {
+        fault = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, entry, value) {
+          if (this === stages) unavailable();
+          setItem.call(this, entry, value);
+        });
+      } else {
+        fault = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, entry) {
+          if (this === stages) unavailable();
+          return getItem.call(this, entry);
+        });
+      }
+      const { ledger } = await appendPersonalImports(syncScope, [row('original')], guard);
+      await expect(reread.mock.results[0].value).resolves.toEqual(ledger);
+      const edited = await editPersonalImport(syncScope, ledger.records[0], row('original', '物理'), guard);
+      await expect(reread.mock.results[1].value).resolves.toEqual(edited);
+      await setPersonalImportSyncEnabled(syncScope, true, guard.canContinue);
+      const snapshot = {
+        schoolId: syncScope.schoolId, revision: 1, records: edited.records,
+        updatedAt: '2026-11-25T00:00:00.000Z',
+      };
+      await syncPersonalImports(syncScope, async () => snapshot, guard.canContinue);
+      const { ledger: latest } = await appendPersonalImports(syncScope, [
+        { ...row('later', '統計'), dayOfWeek: 2 },
+      ], guard);
+      expect(latest.records.map(({ title }) => title)).toEqual(['物理', '統計']);
+      expect(latest.sync?.base).toEqual(snapshot);
+      await expect(reread.mock.results.at(-1)!.value).resolves.toEqual(latest);
+      expect(JSON.parse(window.localStorage.getItem(key)!)).toMatchObject(latest);
+      expect(unavailable.mock.calls.length).toBeGreaterThanOrEqual(3);
+      if (failure === 'remove') expect(stages.getItem(orphan)).toBe('null');
+    } finally {
+      fault?.mockRestore();
+      unsubscribe();
       restoreLocks();
       cleanup();
     }
