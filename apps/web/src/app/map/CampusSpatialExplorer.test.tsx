@@ -7201,3 +7201,38 @@ it('cancels an interrupted OSM reader after partial bytes and keeps external wal
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
   expect(dialog.getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
+
+it.each(['coordinates', 'name', 'floor', 'duplicate', 'removed', 'unchanged', 'wide-area'] as const)(
+  'keeps the local floor-plan editor scoped to the confirmed marker (%s)', async (change) => {
+    const onSelect = vi.fn();
+    const original = places[0];
+    const view = render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={original} onSelect={onSelect} />);
+    const dialog = await open();
+    fireEvent.click(within(dialog).getByRole('button', { name: '平面圖建模預覽' }));
+    const editor = screen.getByRole('dialog', { name: '平面圖建模預覽' });
+    expect(within(editor).getByLabelText('開啟編輯檔')).toBeTruthy();
+    const replacement = { ...original,
+      ...(change === 'coordinates' ? { lat: original.lat + 0.002 } : {}),
+      ...(change === 'name' ? { name: '另一個測試建築' } : {}),
+      ...(change === 'floor' ? { floor: '測試樓層' } : {}),
+    };
+    const next = change === 'removed' ? [places[1]]
+      : change === 'duplicate' ? [original, { ...original, lat: original.lat + 0.001 }, places[1]]
+      : change === 'wide-area' ? [original, { ...places[1], lat: 25 }]
+      : [replacement, places[1]];
+    view.rerender(<CampusSpatialExplorer school="other-school" locations={next}
+      selected={replacement} onSelect={onSelect} />);
+    if (change === 'unchanged' || change === 'wide-area') {
+      expect(screen.getByRole('dialog', { name: '平面圖建模預覽' })).toBe(editor);
+    } else {
+      expect(screen.queryByRole('dialog', { name: '平面圖建模預覽' })).toBeNull();
+      expect(screen.getByText(/原圖面地點已變更或無法唯一確認/)).toBeTruthy();
+      // A later return of the original marker is not consent to reopen the editor.
+      view.rerender(<CampusSpatialExplorer school="other-school" locations={places}
+        selected={original} onSelect={onSelect} />);
+      expect(screen.queryByRole('dialog', { name: '平面圖建模預覽' })).toBeNull();
+      expect(screen.getByText(/原圖面地點已變更或無法唯一確認/)).toBeTruthy();
+    }
+  },
+);
