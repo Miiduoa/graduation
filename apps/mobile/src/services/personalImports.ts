@@ -88,9 +88,8 @@ async function readLedgerSnapshot(
   }
   // Only an interrupted native commit can be superseded by a pending copy
   // when the primary is readable. Older clients write ordinary v1 ledgers.
-  const unverifiedReplacement = nativeEncoding && primary.startsWith('{"batches":') && !verifiedByJournal;
   const nativeJournal = useNativeJournal
-    ? journal?.raw ?? (unverifiedReplacement ? journal?.committedRaw : undefined)
+    ? journal?.raw ?? (nativeEncoding && !verifiedByJournal ? journal?.committedRaw : undefined)
     : undefined;
   if (primaryError && nativeJournal === undefined && !isStorageRowTooLarge(primaryError)) {
     throw primaryError;
@@ -447,7 +446,7 @@ export function mutatePersonalImportLedger<T>(
               const checkpointRetired = adoptedCheckpoint === undefined ||
                 await retireNativeCheckpoint(key, adoptedCheckpoint, assertWritable);
               assertWritable();
-              if (!journal.retire(assertWritable, checkpointRetired)) {
+              if (!journal.retire(assertWritable, checkpointRetired, firstRaw)) {
                 assertWritable();
                 const replacement = encodeNativeReplacement(ledger);
                 try {

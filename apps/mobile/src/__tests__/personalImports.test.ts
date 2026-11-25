@@ -323,8 +323,8 @@ test.each(['read', 'remove'] as const)('native preserves and publishes a verifie
   }
 });
 
-test.each([false, true])('native marker deletion I/O preserves the correct ledger after restart (revoked: %s)', async (revoked) => {
-  const scope = { owner: `nuni:marker-cleanup-${revoked}`, schoolId: 'pu' };
+test.each([[false, null], [true, null], [false, 'pending'], [false, 'settled']] as const)('native marker deletion I/O preserves the ledger after restart (revoked: %s, unreadable file: %s)', async (revoked, unreadableFile) => {
+  const scope = { owner: `nuni:marker-cleanup-${revoked}-${unreadableFile}`, schoolId: 'pu' };
   const key = personalImportStorageKey(scope);
   const { ledger: previous } = await appendPersonalImports(scope, [row('original')]);
   const original = (await AsyncStorage.getItem(key))!;
@@ -336,6 +336,20 @@ test.each([false, true])('native marker deletion I/O preserves the correct ledge
       throw new Error('還原標記刪除 I/O 失敗');
     }
     deleteFile.call(this);
+  });
+  const restartReadFault = jest.fn(() => { throw new Error('指定的還原標記暫時無法讀取'); });
+  const committedRead = jest.fn();
+  const textSync = File.prototype.textSync;
+  let restarting = false;
+  const prefix = `personal-imports-${sha256(key)}`;
+  const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+    const isPending = this.uri.endsWith(prefix + '.rollback.pending');
+    if (restarting && unreadableFile && this.uri.endsWith(prefix + '.rollback.' + unreadableFile)) {
+      restartReadFault();
+    }
+    const value = textSync.call(this);
+    if (isPending && value === 'committed') committedRead();
+    return value;
   });
   const reread = jest.fn(() => loadPersonalImports(scope));
   const unsubscribe = subscribePersonalImports(reread);
@@ -358,13 +372,16 @@ test.each([false, true])('native marker deletion I/O preserves the correct ledge
       expect(JSON.parse((await AsyncStorage.getItem(key))!)).toEqual(ledger);
     }
     expect(remove).toHaveBeenCalledTimes(1);
-    const prefix = `personal-imports-${sha256(key)}`;
     expect(new File(Paths.document, prefix + '.rollback.pending').info().exists).toBe(true);
     expect(new File(Paths.document, prefix + '.rollback.json').textSync())
       .toBe(revoked ? 'rejected:\n' + original : original);
+    if (!revoked) expect(committedRead).toHaveBeenCalled();
+    restarting = true;
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
+      if (unreadableFile) expect(restartReadFault).toHaveBeenCalledTimes(1);
+      restarting = false;
       if (!revoked) {
         const { ledger } = await restarted.appendPersonalImports(scope, [row('later', '物理')], guard);
         expect(ledger.records.map(({ title }) => title)).toEqual(['微積分', '統計', '物理']);
@@ -373,6 +390,7 @@ test.each([false, true])('native marker deletion I/O preserves the correct ledge
     });
   } finally {
     unsubscribe();
+    read.mockRestore();
     remove.mockRestore();
   }
 });
@@ -686,7 +704,7 @@ test.each([
 test.each([
   ['rejection file', 'records', false, false], ['pending marker', 'records', false, false],
   ['neither', 'records', false, false], ['neither', 'batches', false, false], ['neither', 'batches', true, false],
-  ['neither', 'batches', false, true],
+  ['neither', 'batches', false, true], ['neither', 'records', false, true],
 ] as const)(
   'native restart restores a revoked deletion (rejection: %s, primary: %s, pending read fails: %s, retirement reached disk: %s)',
   async (rejection, revokedWrite, pendingReadFails, retirementReachedDisk) => {
@@ -720,14 +738,21 @@ test.each([
           : nativeMultiSet(entries, callback),
       );
     }
+    const replacementFailsBeforeWrite = revokedWrite === 'records' && retirementReachedDisk;
+    const attemptReplacement = revokedWrite === 'batches' || replacementFailsBeforeWrite;
+    const replacementFault = jest.fn(() => { throw new Error('第二次主鍵寫入未落盤'); });
     let active = true;
     set.mockImplementation(async (entry, value) => {
       if (entry === key && !active) throw restoreError;
+      if (entry === key && replacementFailsBeforeWrite && value.startsWith('{"batches":')) {
+        active = false;
+        replacementFault();
+      }
       await nativeSet(entry, value);
-      if (entry === key && value.startsWith(`{"${revokedWrite}":`)) active = false;
+      if (entry === key && !replacementFailsBeforeWrite && value.startsWith(`{"${revokedWrite}":`)) active = false;
     });
     const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
-      if (revokedWrite === 'batches' && this.uri.endsWith(prefix + 'pending')) retireByDelete();
+      if (attemptReplacement && this.uri.endsWith(prefix + 'pending')) retireByDelete();
       deleteFile.call(this);
     });
     let blockRetirementRead = false;
@@ -737,7 +762,7 @@ test.each([
       return textSync.call(this);
     });
     const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
-      if (revokedWrite === 'batches' && this.uri.endsWith(prefix + 'pending') && value === 'committed') {
+      if (attemptReplacement && this.uri.endsWith(prefix + 'pending') && value === 'committed') {
         if (!retirementReachedDisk) retireByWrite();
         writeFile.call(this, value, options);
         blockRetirementRead = true;
@@ -752,7 +777,7 @@ test.each([
       writeFile.call(this, value, options);
     });
     const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
-      if (revokedWrite === 'batches' && this.uri.endsWith(prefix + 'committed')) retireByFile();
+      if (attemptReplacement && this.uri.endsWith(prefix + 'committed')) retireByFile();
       if (rejection !== 'rejection file' && this.uri.endsWith(prefix + 'rejected')) rejectFile();
       createFile.call(this, options);
     });
@@ -775,7 +800,8 @@ test.each([
       const primary = (await AsyncStorage.getItem(key))!;
       expect(primary.startsWith(`{"${revokedWrite}":`)).toBe(true);
       expect(JSON.parse(primary).records).toEqual([]);
-      if (revokedWrite === 'batches') {
+      expect(replacementFault).toHaveBeenCalledTimes(replacementFailsBeforeWrite ? 1 : 0);
+      if (attemptReplacement) {
         expect(retireByDelete).toHaveBeenCalledTimes(1);
         expect(retireByWrite).toHaveBeenCalledTimes(retirementReachedDisk ? 0 : 1);
         expect(retireReadFault).toHaveBeenCalledTimes(retirementReachedDisk ? 1 : 0);

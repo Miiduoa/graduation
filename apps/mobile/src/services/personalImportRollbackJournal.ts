@@ -538,8 +538,8 @@ export function capturePersonalImportRollback(key: string) {
     // An unreadable marker cannot establish retirement. Keep the payload
     // available so the caller can check it against the primary and publication evidence.
     raw: markerCommitted ? undefined : rollbackRaw,
-    // Retirement precedes the replacement write, so an unpublished
-    // replacement can still need the old bytes.
+    // Retirement precedes publication, so either native encoding can still
+    // need the old bytes until the exact primary is verified for publication.
     committedRaw: markerCommitted ? rollbackRaw : undefined,
     rejected,
     markerError: rejected && encoded !== undefined ? undefined : markerError,
@@ -667,7 +667,18 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   discardPayload(publication);
   discardPayload(publicationBackup);
   let retirementWriteCompleted = false;
-  const retire = (assertWritable = () => {}, canDeleteMarker = true) => {
+  const recordVerification = (hash: string) => {
+    try {
+      verification.write(rearmed ? sha256(replacement) + '\n' + hash : hash);
+    } catch {
+      // The other proofs can still settle this write.
+    }
+  };
+  const settle = (hash: string) => {
+    settlement.write(hash);
+    return settlement.textSync() === hash;
+  };
+  const retire = (assertWritable = () => {}, canDeleteMarker = true, primary?: string) => {
     // Commit synchronously so verification and commit cannot be separated by another JS event.
     if (canDeleteMarker && deleteMarker(marker)) {
       discardPayload(retirement);
@@ -680,13 +691,14 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
     // Retain the recovery files when cleanup fails, but retire this rollback
     // durably so a restart exposes the verified primary.
     assertWritable();
+    let markerReadBack = false;
     try {
       marker.write(committedMarker);
       // Native writes throw on I/O failure. Preserve the outcome of the write
       // separately from the readback so publication can survive a read fault.
       retirementWriteCompleted = true;
-      if (marker.textSync() === committedMarker && !rejected) return true;
-      retirementWriteCompleted = false;
+      markerReadBack = marker.textSync() === committedMarker;
+      retirementWriteCompleted = markerReadBack;
     } catch {
       // A separate file can record retirement even if this marker cannot be updated.
     }
@@ -701,6 +713,20 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
       }
       throw error;
     }
+    if (markerReadBack && !rejected) {
+      try {
+        // Keep proof of publication readable independently of the pending marker.
+        // A failed marker readback still goes through the replacement path.
+        if (primary === undefined) return true;
+        const hash = sha256(primary);
+        if (settle(hash)) {
+          recordVerification(hash);
+          return true;
+        }
+      } catch {
+        // The retirement file or verified replacement can still publish the write.
+      }
+    }
     if (rearmed) return false;
     try {
       retirement.create();
@@ -713,12 +739,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
     retire,
     publishVerifiedPrimary(primary: string, assertWritable: () => void) {
       const hash = sha256(primary);
-      try {
-        // Record verification independently of the rollback payload.
-        verification.write(rearmed ? sha256(replacement) + '\n' + hash : hash);
-      } catch {
-        // The rollback payload can still carry the verification.
-      }
+      recordVerification(hash);
       try {
         // Tie retirement to the verified bytes while keeping the rollback copy.
         payload.write(wrap(`committed:${hash}\n${encoded}`));
@@ -747,8 +768,7 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
         // The earlier marker can be unreadable on restart and predates any
         // replacement write. Persist proof of the exact bytes verified after it.
         assertWritable();
-        settlement.write(hash);
-        if (settlement.textSync() !== hash) throw error;
+        if (!settle(hash)) throw error;
       }
     },
     preparePrimaryCommit() {
