@@ -43,6 +43,11 @@ function id(value: unknown): number {
   return value;
 }
 
+function revision(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{16,100}$/.test(value)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+  return value;
+}
+
 export async function handleTronClassAgent(request: NextRequest, dependencies: TronClassAgentRouteDependencies = {}): Promise<Response> {
   try {
     if (process.env.TRONCLASS_INTEGRATION_ENABLED !== 'true') throw new NuniError(503, 'TRONCLASS_DISABLED');
@@ -68,7 +73,7 @@ export async function handleTronClassAgent(request: NextRequest, dependencies: T
         result = await service.capability(actor.ownerKey);
         break;
       case 'ask': {
-        only(input, ['action', 'question', 'compoundQuestion', 'courseId', 'homeworkId']);
+        only(input, ['action', 'question', 'compoundQuestion', 'courseId', 'homeworkId', 'revision']);
         if (typeof input.question !== 'string' || !input.question.trim() || input.question.length > 1000) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
         const compoundQuestion = input.compoundQuestion;
         if (compoundQuestion !== undefined && (typeof compoundQuestion !== 'string' ||
@@ -76,14 +81,15 @@ export async function handleTronClassAgent(request: NextRequest, dependencies: T
         if (!dependencies.rateLimit) readLimiter.check(actor.ownerKey);
         result = await service.ask(actor.ownerKey, { question: input.question, ...(compoundQuestion === undefined ? {} : { compoundQuestion }),
           ...(input.courseId === undefined ? {} : { courseId: id(input.courseId) }),
+          ...(input.courseId === undefined && input.revision === undefined ? {} : { revision: revision(input.revision) }),
           ...(input.homeworkId === undefined ? {} : { homeworkId: id(input.homeworkId) }),
         });
         break;
       }
       case 'prepare':
-        only(input, ['action', 'courseId', 'homeworkId']);
+        only(input, ['action', 'courseId', 'homeworkId', 'revision']);
         if (!dependencies.rateLimit) readLimiter.check(actor.ownerKey);
-        result = await service.prepare(actor.ownerKey, { courseId: id(input.courseId), homeworkId: id(input.homeworkId) });
+        result = await service.prepare(actor.ownerKey, { courseId: id(input.courseId), homeworkId: id(input.homeworkId), revision: revision(input.revision) });
         break;
       default: throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
     }

@@ -560,7 +560,7 @@ function ConnectedWorkspace({
     setError('');
     if (replace) setSnapshot(null);
     try {
-      const value = await client.sync(scope === 'all' ? undefined : Number(scope), controller.signal);
+      const value = await client.sync(scope === 'all' ? undefined : Number(scope), controller.signal, courseIndex?.revision ?? snapshot?.revision ?? revision);
       if (!alive.current || request !== generation.current) return;
       if (value.revision !== revision) {
         ++generation.current;

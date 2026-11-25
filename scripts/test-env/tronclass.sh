@@ -148,16 +148,16 @@ try:
         raise OSError("invalid runtime directory")
     verify_bindings()
 
-    # Share existing private directories. For other modes and the default
-    # location, create a private child without changing any directory's mode.
-    if not specified or stat.S_IMODE(opened.st_mode) not in (0o700, 0o2700):
-        # Protect every retained path component from replacement by another UID.
-        # A trusted sticky directory (such as /tmp) protects our child entries.
-        for fd in fds:
-            directory = os.fstat(fd)
-            if (directory.st_uid not in (os.getuid(), 0)
-                    or (directory.st_mode & 0o022 and not directory.st_mode & stat.S_ISVTX)):
-                sys.exit("TronClass runtime parent must be owned by the current user or root and must have the sticky bit if writable by others.")
+    # Each pinned parent must protect entries owned by the launcher.
+    share = specified and stat.S_IMODE(opened.st_mode) in (0o700, 0o2700)
+    for fd in (fds[:-1] if share else fds):
+        directory = os.fstat(fd)
+        if (directory.st_uid not in (os.getuid(), 0)
+                or (directory.st_mode & 0o022 and not directory.st_mode & stat.S_ISVTX)):
+            sys.exit("TronClass runtime parent must be owned by the current user or root and must have the sticky bit if writable by others.")
+
+    # Other modes and the default location get a private child.
+    if not share:
         prefix = "run-" if specified else "campus-tronclass-emulator."
         os.umask(0o077)
         while True:

@@ -313,7 +313,7 @@ it('continues an ambiguous material request with a verified course selection', a
   await ask('查 TronClass 教材');
   fireEvent.click(await screen.findByRole('button', { name: /私人資訊管理課程.*選擇這門課繼續/ }));
   await screen.findByText('這門課目前沒有教材。');
-  expect(calls[1]).toEqual({ action: 'ask', question: '查 TronClass 教材', courseId: 12 });
+  expect(calls[1]).toEqual({ action: 'ask', question: '查 TronClass 教材', courseId: 12, revision });
 });
 
 it('shows opt-in after a permission denial without granting or reading implicitly', async () => {
@@ -358,6 +358,25 @@ it('downloads a unique requested file once through the Agent endpoint, including
   expect((click.mock.instances[0] as HTMLAnchorElement).download).toBe('講義.pdf');
 });
 
+it('sends the homework card revision when preparing and shows a binding change', async () => {
+  const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (body(init).homeworkId) return json({
+      error: 'TRONCLASS_BINDING_CHANGED', message: 'TronClass 連線已變更，請重新查詢。',
+    }, 409);
+    return json({ ...base, capabilities: { ...base.capabilities, prepareHomework: true },
+      actions: [{ kind: 'prepare_homework', id: 'homework:12:51', courseId: 12, homeworkId: 51,
+        title: homework.title, revision }] });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant cloudEnabled={false} />);
+  await ask('查 TronClass 作業');
+  fireEvent.click(await screen.findByRole('button', { name: '準備 私人期中報告' }));
+  expect(await screen.findByText('TronClass 連線已變更，請重新查詢。')).toBeTruthy();
+  expect(body(fetch.mock.calls[1]?.[1])).toEqual({
+    action: 'ask', question: '幫我準備 TronClass 作業', courseId: 12, homeworkId: 51, revision,
+  });
+});
+
 it('opens the existing preview for Agent preparation without resuming or executing manual submission', async () => {
   const preparation: TronClassPreparation = { source: 'tronclass', schoolId: 'pu', courseId: 12, homeworkId: 51,
     revision, title: homework.title, description: homework.description, deadline: null, canSubmit: false,
@@ -379,6 +398,7 @@ it('opens the existing preview for Agent preparation without resuming or executi
   expect((screen.getByRole('button', { name: '確認送出到 TronClass' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByText('繳交結果待確認')).toBeNull();
   expect(fetch.mock.calls.every(([, init]) => ['ask', 'prepare'].includes(String(body(init).action)))).toBe(true);
+  expect(fetch.mock.calls.map(([, init]) => body(init))).toContainEqual({ action: 'prepare', courseId: 12, homeworkId: 51, revision });
   expect(sessionStorage.getItem('nuni.tronclass.pending:platform:alice:12:51')).toBe('manual-operation-123456');
 });
 

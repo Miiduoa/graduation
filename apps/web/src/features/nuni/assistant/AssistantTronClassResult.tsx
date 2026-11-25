@@ -47,10 +47,10 @@ export function AssistantTronClassResult({ data, question, client, owner, pendin
     };
   }, [client, owner, result?.revision, inactive]);
   const preparationClient = useMemo(() => ({
-    prepare: async (courseId: number, homeworkId: number) => {
+    prepare: async (courseId: number, homeworkId: number, revision: string) => {
       const controller = new AbortController();
       preparations.current.add(controller);
-      try { return await client.prepare(courseId, homeworkId, controller.signal); }
+      try { return await client.prepare(courseId, homeworkId, revision, controller.signal); }
       catch (reason) {
         if (!controller.signal.aborted && isTronClassAuthorityError(reason)) invalidate();
         throw reason;
@@ -68,7 +68,7 @@ export function AssistantTronClassResult({ data, question, client, owner, pendin
       <p className={styles.meta}>來源：靜宜大學 TronClass · 查詢時間：{tronClassTime(result.fetchedAt)}</p>
       {result.selection === 'course' || result.intent === 'courses' ? <div className={styles.choices} role="group" aria-label="選擇 TronClass 課程">
         {snapshot?.courses.map(course => <button key={course.id} className={styles.choice} disabled={pending || inactive}
-          onClick={() => onAsk({ question: result.selection === 'course' ? question : '查詢 TronClass 作業', courseId: course.id })}>
+          onClick={() => onAsk({ question: result.selection === 'course' ? question : '查詢 TronClass 作業', courseId: course.id, revision: result.revision })}>
           <strong>{course.name}</strong>
           <span>{[course.code, course.semester, ...course.teachers].filter(Boolean).join(' · ')}</span>
           <span>{result.selection === 'course' ? '選擇這門課繼續' : '查詢這門課的作業'}</span>
@@ -83,7 +83,7 @@ export function AssistantTronClassResult({ data, question, client, owner, pendin
             <p className={styles.meta}>{homework.submitted === true ? '已繳交' : homework.submitted === false ? '尚未繳交' : '尚未確認繳交狀態'}</p>
             {homework.description && <details><summary>作業要求</summary><p className={styles.literal}>{homework.description}</p></details>}
             {action && <button className="btn" disabled={pending || inactive}
-              onClick={() => onAsk({ question: '幫我準備 TronClass 作業', courseId: homework.courseId, homeworkId: homework.id })}>準備 {homework.title}</button>}
+              onClick={() => onAsk({ question: '幫我準備 TronClass 作業', courseId: homework.courseId, homeworkId: homework.id, revision: result.revision })}>準備 {homework.title}</button>}
           </li>;
         })}
       </ul>}

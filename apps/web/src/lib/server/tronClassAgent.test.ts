@@ -92,7 +92,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('reads this actor’s pending homework and preserves unknown states', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: '查 TronClass 未繳作業有哪些', courseId: 101 });
+    const result = await f.service.ask(owner, { question: '查 TronClass 未繳作業有哪些', courseId: 101, revision });
     expect(f.grants.require).toHaveBeenCalledWith(owner, 'readCourseData');
     expect(f.read.mock.calls).toEqual([
       [owner, { courseId: 101, include: { homework: true, announcements: false, materials: false } }],
@@ -226,7 +226,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
     expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
       include: { homework: false, announcements: false, materials: false },
     });
-    const confirmed = await f.service.ask(owner, { ...input, courseId: course.id });
+    const confirmed = await f.service.ask(owner, { ...input, courseId: course.id, revision });
     expect(confirmed.snapshot?.homework).toEqual([homework]);
   });
 
@@ -455,7 +455,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
   it('does not mistake an incomplete empty list for all assignments being submitted', async () => {
     const f = fixture();
     f.read.mockResolvedValue({ ...snapshot, homework: [], partial: true, errors: [{ courseId: 101, area: 'homework', message: '未讀完' }] });
-    const result = await f.service.ask(owner, { question: '查 TronClass 未繳作業', courseId: 101 });
+    const result = await f.service.ask(owner, { question: '查 TronClass 未繳作業', courseId: 101, revision });
     expect(result.snapshot?.partial).toBe(true);
     expect(result.answer).toContain('不能據此判定全部作業已繳交');
   });
@@ -463,7 +463,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
   it('bounds action choices without rejecting a complete large source snapshot', async () => {
     const f = fixture();
     f.read.mockResolvedValue({ ...snapshot, homework: Array.from({ length: 501 }, (_, index) => ({ ...homework, id: 201 + index })) });
-    const result = await f.service.ask(owner, { question: '查 TronClass 未交作業', courseId: 101 });
+    const result = await f.service.ask(owner, { question: '查 TronClass 未交作業', courseId: 101, revision });
     expect(result.snapshot?.homework).toHaveLength(501);
     expect(result.snapshot?.partial).toBe(false);
     expect(result.actions).toHaveLength(500);
@@ -544,7 +544,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it.each(['下載 TronClass 最新的講義', '下載 TronClass 第三週講義'])('does not automatically select an unrelated sole file for %s', async (question) => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question, courseId: 101 });
+    const result = await f.service.ask(owner, { question, courseId: 101, revision });
     expect(result.actions).toHaveLength(1);
     expect(result.actions[0]).toMatchObject({ automatic: false });
   });
@@ -554,7 +554,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
     const display = await f.service.ask(owner, { question: '查 TronClass「資料庫」教材' });
     expect(display.actions[0]).toMatchObject({ automatic: false });
     f.read.mockResolvedValue({ ...snapshot, partial: true });
-    await expect(f.service.ask(owner, { question: '下載 TronClass 講義.pdf', courseId: 101 })).rejects.toMatchObject({
+    await expect(f.service.ask(owner, { question: '下載 TronClass 講義.pdf', courseId: 101, revision })).rejects.toMatchObject({
       code: 'TRONCLASS_INVALID_INPUT', status: 422,
     });
   });
@@ -567,7 +567,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
       { name: '禁止.pdf', allowDownload: false, downloadHref: 'https://tronclass.pu.edu.tw/api/uploads/no-file/blob' },
       { name: '外站.pdf', allowDownload: true, downloadHref: 'https://attacker.test/download' },
     ] }] });
-    const result = await f.service.ask(owner, { question: '下載 TronClass 教材', courseId: 101 });
+    const result = await f.service.ask(owner, { question: '下載 TronClass 教材', courseId: 101, revision });
     expect(result.actions).toHaveLength(2);
     expect(result.actions.every((action) => action.kind === 'download_material' && !action.automatic)).toBe(true);
   });
@@ -576,7 +576,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
     const f = fixture();
     f.read.mockResolvedValue({ ...snapshot, materials: [{ ...material, files: [...material.files,
       { name: '另一份.pdf', allowDownload: true, downloadHref: 'https://tronclass.pu.edu.tw/api/uploads/another-file/blob' }] }] });
-    await expect(f.service.ask(owner, { question: '下載 TronClass 第一週教材的講義.pdf', courseId: 101 })).rejects.toMatchObject({
+    await expect(f.service.ask(owner, { question: '下載 TronClass 第一週教材的講義.pdf', courseId: 101, revision })).rejects.toMatchObject({
       code: 'TRONCLASS_INVALID_INPUT', status: 422,
     });
     expect(f.read).not.toHaveBeenCalled();
@@ -584,7 +584,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('prepares the chosen assignment inline but never inherits future school write permission', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: '幫我準備 TronClass 期末報告作業', courseId: 101, homeworkId: 201 });
+    const result = await f.service.ask(owner, { question: '幫我準備 TronClass 期末報告作業', courseId: 101, revision, homeworkId: 201 });
     expect(f.prepare).toHaveBeenCalledWith(owner, { courseId: 101, homeworkId: 201 }, binding);
     expect(result.snapshot?.homework).toEqual([homework]);
     expect(result.preparation).toMatchObject({ courseId: 101, homeworkId: 201, canSubmit: false });
@@ -595,7 +595,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('keeps multiple assignments as choices without preparing the first one', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: '幫我準備 TronClass 作業', courseId: 101 });
+    const result = await f.service.ask(owner, { question: '幫我準備 TronClass 作業', courseId: 101, revision });
     expect(result.selection).toBe('homework');
     expect(result.actions).toHaveLength(snapshot.homework.filter(item => item.courseId === 101).length);
     expect(f.prepare).not.toHaveBeenCalled();
@@ -605,7 +605,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
     const f = fixture();
     f.read.mockResolvedValue({ ...snapshot, homework: [homework], partial: true,
       errors: [{ courseId: 102, area: 'homework', message: '另一門課尚未讀完' }] });
-    const result = await f.service.ask(owner, { question: '幫我準備 TronClass 作業', courseId: 101 });
+    const result = await f.service.ask(owner, { question: '幫我準備 TronClass 作業', courseId: 101, revision });
     expect(result.selection).toBe('homework');
     expect(result.actions).toHaveLength(1);
     expect(result.preparation).toBeNull();
@@ -644,14 +644,14 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('rejects a homework ID outside the selected authorized course', async () => {
     const f = fixture();
-    await expect(f.service.ask(owner, { question: '準備 TronClass 作業', courseId: 102, homeworkId: 201 })).rejects.toMatchObject({ code: 'TRONCLASS_HOMEWORK_NOT_FOUND' });
+    await expect(f.service.ask(owner, { question: '準備 TronClass 作業', courseId: 102, revision, homeworkId: 201 })).rejects.toMatchObject({ code: 'TRONCLASS_HOMEWORK_NOT_FOUND' });
     expect(f.prepare).not.toHaveBeenCalled();
   });
 
   it('requires the preparation grant on each dedicated prepare read', async () => {
     const f = fixture();
     f.grants.require.mockResolvedValueOnce(grant).mockRejectedValueOnce(new NuniError(403, 'TRONCLASS_AGENT_PERMISSION_REQUIRED'));
-    await expect(f.service.prepare(owner, { courseId: 101, homeworkId: 201 })).rejects.toMatchObject({ status: 403 });
+    await expect(f.service.prepare(owner, { courseId: 101, revision, homeworkId: 201 })).rejects.toMatchObject({ status: 403 });
     expect(f.prepare).not.toHaveBeenCalled();
   });
 
@@ -661,7 +661,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
       f.grants.assertCurrent.mockRejectedValue(new NuniError(403, 'TRONCLASS_AGENT_PERMISSION_REQUIRED'));
       return preparation;
     });
-    await expect(f.service.prepare(owner, { courseId: 101, homeworkId: 201 })).rejects.toMatchObject({ status: 403 });
+    await expect(f.service.prepare(owner, { courseId: 101, revision, homeworkId: 201 })).rejects.toMatchObject({ status: 403 });
   });
 
   it('reports unsupported writes without reading school data', async () => {
@@ -693,7 +693,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('reads homework to prepare an explicitly selected assignment', async () => {
     const f = fixture();
-    await f.service.ask(owner, { question: '幫我準備 TronClass 期末報告作業', courseId: 101, homeworkId: 201 });
+    await f.service.ask(owner, { question: '幫我準備 TronClass 期末報告作業', courseId: 101, revision, homeworkId: 201 });
     expect(f.read.mock.calls.every((call) => call[1]?.include?.homework === true)).toBe(true);
   });
 });

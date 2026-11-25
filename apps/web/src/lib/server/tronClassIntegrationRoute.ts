@@ -180,10 +180,11 @@ export async function handleTronClassIntegration(
           result = await bindings.disconnect(actor.ownerKey, expectedRevision(input.expectedRevision));
           break;
         case 'sync':
-          only(input, ['action', 'courseId']);
+          only(input, ['action', 'courseId', 'revision']);
           if (!dependencies.rateLimit) syncLimiter.check(actor.ownerKey);
           result = await (dependencies.read ?? createTronClassIntegrationReader({ bindings }))(actor.ownerKey,
-            input.courseId === undefined ? {} : { courseId: id(input.courseId) }, request.signal);
+            { ...(input.courseId === undefined ? {} : { courseId: id(input.courseId) }),
+              ...(input.courseId === undefined && input.revision === undefined ? {} : { revision: revision(input.revision) }) }, request.signal);
           break;
         case 'courses':
           only(input, ['action']);
@@ -191,8 +192,10 @@ export async function handleTronClassIntegration(
           result = await (dependencies.courses ?? createTronClassCourseIndexReader({ bindings }))(actor.ownerKey, request.signal);
           break;
         case 'prepare':
-          only(input, ['action', 'courseId', 'homeworkId']);
-          result = await (await getSubmissions()).prepare(actor.ownerKey, { courseId: id(input.courseId), homeworkId: id(input.homeworkId) }, request.signal);
+          only(input, ['action', 'courseId', 'homeworkId', 'revision']);
+          result = await (await getSubmissions()).prepare(actor.ownerKey, {
+            courseId: id(input.courseId), homeworkId: id(input.homeworkId), revision: revision(input.revision),
+          }, request.signal);
           break;
         case 'submit':
           only(input, ['action', 'courseId', 'homeworkId', 'revision', 'operationId', 'content', 'attachments', 'confirmed']);

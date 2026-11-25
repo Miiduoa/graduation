@@ -213,7 +213,7 @@ describe('public HTTP to durable v2 school workflow', () => {
 
   it('prepares, transfers one attachment, submits and exposes only a scoped acknowledged confirmation', async () => {
     const s = environment();
-    const prepare = await s.post({ action: 'prepare', ...SCOPE });
+    const prepare = await s.post({ action: 'prepare', ...SCOPE, revision: REVISION });
     expect(prepare.status).toBe(200);
     expect(await prepare.json()).toMatchObject({ ...SCOPE, canSubmit: true, rules: { status: 'confirmed' } });
     const upload = await s.upload();

@@ -182,9 +182,10 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
       sameGrant(grant, await grants.get(ownerKey));
       return { source: 'tronclass', revision: grant.revision, grantVersion: grant.version, capabilities: tronClassAgentCapabilities(grant) };
     },
-    async prepare(ownerKey: string, input: { courseId: number; homeworkId: number }): Promise<TronClassPreparation> {
+    async prepare(ownerKey: string, input: { courseId: number; homeworkId: number; revision: string }): Promise<TronClassPreparation> {
       const grant = await requireScopes(ownerKey, 'prepareHomework');
-      const result = await prepareWithGrant(ownerKey, input, grant);
+      if (input.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+      const result = await prepareWithGrant(ownerKey, { courseId: input.courseId, homeworkId: input.homeworkId }, grant);
       await dependencies.beforeResult?.();
       await assertScopes(ownerKey, grant, 'prepareHomework');
       return result;
@@ -195,12 +196,13 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
       const query = unsupportedReason ? { intent: 'unsupported', pendingOnly: false, unsupportedReason } as const
         : parseTronClassAgentIntent(input.question);
       const courseScope = tronClassAgentCourseScope(input.question, input.compoundQuestion);
-      if (!query || !courseScope || (input.courseId !== undefined && !positiveId(input.courseId)) ||
+      if (!query || !courseScope || (input.courseId !== undefined && (!positiveId(input.courseId) || !input.revision)) ||
         (input.homeworkId !== undefined && (!positiveId(input.homeworkId) || !input.courseId || query.intent !== 'prepare'))) {
         throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
       }
       const scope = query.intent === 'download' ? 'downloadMaterials' : query.intent === 'prepare' ? 'prepareHomework' : 'readCourseData';
       const grant = await requireScopes(ownerKey, scope);
+      if (input.revision !== undefined && input.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
       const capabilities = tronClassAgentCapabilities(grant);
       const steps: TronClassAgentStep[] = [];
       const base = { source: 'tronclass' as const, requestId: requestId(), intent: query.intent,

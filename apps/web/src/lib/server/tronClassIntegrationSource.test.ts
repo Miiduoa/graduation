@@ -48,7 +48,7 @@ describe('independent TronClass source', () => {
       'rejects a replacement loaded after grant verification for explicit course reads of %s', async question => {
         const { service, bindings, source } = setupAgent();
         bindings.requireBinding.mockResolvedValue(replacement);
-        await expect(service.ask(owner, { question, courseId: course.id })).rejects.toMatchObject({
+        await expect(service.ask(owner, { question, courseId: course.id, revision: binding.revision })).rejects.toMatchObject({
           code: 'TRONCLASS_BINDING_CHANGED',
         });
         expect(source.fetchCourses).not.toHaveBeenCalled();
@@ -59,7 +59,7 @@ describe('independent TronClass source', () => {
     );
 
     it.each([
-      ['explicit', { courseId: course.id }, 1, 0],
+      ['explicit', { courseId: course.id, revision: binding.revision }, 1, 0],
       ['automatic before the final index', {}, 3, 4],
       ['automatic before private feeds', {}, null, 6],
     ] as const)('rejects a stale %s read before the next school request', async (_stage, selection, changeOnRead, expectedCalls) => {
@@ -89,7 +89,7 @@ describe('independent TronClass source', () => {
     it('uses the same authorized session for a valid explicit course read', async () => {
       const { service, bindings, source } = setupAgent();
       bindings.requireBinding.mockResolvedValueOnce(binding).mockResolvedValue(replacement);
-      await expect(service.ask(owner, { question: '查玩課雲公告', courseId: course.id })).resolves.toMatchObject({
+      await expect(service.ask(owner, { question: '查玩課雲公告', courseId: course.id, revision: binding.revision })).resolves.toMatchObject({
         intent: 'announcements', selection: null, revision: binding.revision,
       });
       expect(bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(owner);

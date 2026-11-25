@@ -30,7 +30,7 @@ export type TronClassPublicSubmitInput = OperationInput & {
 export type TronClassPublicSubmissionResult = TronClassSubmissionResult | TronClassAcknowledgedReadbackResult;
 export type TronClassPublicSubmissionService = {
   assertAttachmentWritesEnabled(): void;
-  prepare(ownerKey: string, scope: TronClassHomeworkScope, signal?: AbortSignal, snapshot?: TronClassSubmissionBinding): Promise<TronClassPreparedSubmission>;
+  prepare(ownerKey: string, scope: TronClassHomeworkScope & { revision?: string }, signal?: AbortSignal, snapshot?: TronClassSubmissionBinding): Promise<TronClassPreparedSubmission>;
   upload(ownerKey: string, input: TronClassPublicUploadInput, signal?: AbortSignal): Promise<TronClassUploadedAttachment>;
   submit(ownerKey: string, input: TronClassPublicSubmitInput, signal?: AbortSignal): Promise<TronClassPublicSubmissionResult>;
   reconcile(ownerKey: string, input: { operationId: string; revision: string }): Promise<TronClassPublicSubmissionResult>;
@@ -174,10 +174,10 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
     async prepare(ownerKey, input, signal, snapshot) {
       return withTronClassPreparationRead(signal, async read => {
         ownerAndScope(ownerKey, input);
-        if (Object.keys(input).some(key => !['courseId', 'homeworkId'].includes(key))) invalid();
+        if (Object.keys(input).some(key => !['courseId', 'homeworkId', 'revision'].includes(key))) invalid();
         const scope = Object.freeze({ courseId: input.courseId, homeworkId: input.homeworkId });
         const session = await read.wait(async () => snapshot ?? bindings.requireBinding(ownerKey));
-        const binding = await read.wait(() => current(ownerKey, session.revision, undefined, read, session));
+        const binding = await read.wait(() => current(ownerKey, input.revision ?? session.revision, undefined, read, session));
         const pinned = { ...binding, cookies: { ...binding.cookies } };
         const base = structuredClone(await read.wait(() => readonlyPrepare(ownerKey, scope, read, pinned)));
         if (!base || base.source !== 'tronclass' || base.schoolId !== 'pu' || base.courseId !== scope.courseId ||

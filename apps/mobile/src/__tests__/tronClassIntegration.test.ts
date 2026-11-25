@@ -310,6 +310,29 @@ it('checks the binding revision on both sync and fresh preparation', async () =>
   });
   await expect(client.prepare(10, 20, revision)).resolves.toEqual(preparation);
 });
+it('sends the selected binding revision before native preparation and scoped sync', async () => {
+  let activeRevision = revision;
+  const readSchool = jest.fn((action: string) => action === 'prepare' ? preparation : snapshot);
+  const request = jest.fn(async (input: Record<string, unknown>) => {
+    if (input.revision !== activeRevision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+    return readSchool(String(input.action));
+  });
+  const client = createNativeTronClassClient({
+    owner: 'platform:a', isCurrent: () => true, request, upload: jest.fn(),
+  });
+  await expect(client.prepare(10, 20, revision)).resolves.toEqual(preparation);
+  await expect(client.sync(revision, 10)).resolves.toEqual(snapshot);
+  expect(request.mock.calls.map(([input]) => input)).toEqual([
+    { action: 'prepare', courseId: 10, homeworkId: 20, revision },
+    { action: 'sync', courseId: 10, revision },
+  ]);
+
+  readSchool.mockClear();
+  activeRevision = 'b'.repeat(32);
+  await expect(client.prepare(10, 20, revision)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+  await expect(client.sync(revision, 10)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+  expect(readSchool).not.toHaveBeenCalled();
+});
 it('checks uploaded file ID, exact bytes metadata and SHA256 before submit can reference it', async () => {
   const upload = jest.fn(async () => ({
     status: 'uploaded',

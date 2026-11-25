@@ -367,7 +367,7 @@ describe('TronClass client response boundary', () => {
         vi.fn(async () => new Response('{}')),
       );
       const client = createTronClassClient({ kind: 'platform', context: 'context' });
-      const result = action === 'prepare' ? client.prepare(1, 2) : client[action]();
+      const result = action === 'prepare' ? client.prepare(1, 2, preparation.revision) : client[action]();
       await expect(result).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
     },
   );

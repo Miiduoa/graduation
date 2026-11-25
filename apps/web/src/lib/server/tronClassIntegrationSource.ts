@@ -280,7 +280,7 @@ function createTronClassCourseOperation(dependencies: TronClassReaderDependencie
   const source = dependencies.source ?? tronClassLmsReadonlySource;
   const now = dependencies.now ?? Date.now;
   return async <T>(ownerKey: string, readResult: (context: CourseReadContext) => Promise<T>,
-    signal?: AbortSignal, authorization?: TronClassSnapshotAuthorization): Promise<T> => {
+    signal?: AbortSignal, authorization?: TronClassSnapshotAuthorization, revision?: string): Promise<T> => {
     const deadline = now() + (dependencies.budgetMs ?? READ_BUDGET_MS);
     const controller = new AbortController();
     let failure: NuniError | undefined;
@@ -327,6 +327,7 @@ function createTronClassCourseOperation(dependencies: TronClassReaderDependencie
       try {
         active();
         const binding = authorization?.binding ?? await bindings.requireBinding(ownerKey);
+        if (revision !== undefined && binding.revision !== revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
         const check = () => checkBinding(binding.revision);
         await check();
         const courses = parseCourses(await read(readOptions => source.fetchCourses(binding.cookies, { userId: binding.userId, status: 'ongoing' }, readOptions)));
@@ -377,6 +378,7 @@ export function createTronClassCourseIndexReader(dependencies: TronClassReaderDe
 
 export type TronClassSnapshotReadOptions = {
   courseId?: number;
+  revision?: string;
   requireCompleteCourses?: boolean;
   acceptCourseIndex?: (index: Pick<TronClassSnapshot, 'courses' | 'errors' | 'partial'>) => boolean;
   include?: {
@@ -459,6 +461,6 @@ export function createTronClassIntegrationReader(dependencies: TronClassReaderDe
         announcements: contents.announcements, materials: contents.materials,
         errors, partial: errors.length > 0,
       };
-    }, signal, authorization);
+    }, signal, authorization, options.revision);
   };
 }

@@ -2574,3 +2574,39 @@ test('launcher refuses new runtime under a group-writable parent without sticky 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+for (const mode of [0o700, 0o2700]) {
+  test(`launcher rejects a shared ${mode.toString(8)} runtime below a group-writable ancestor`, () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-runtime-shared-parent-'));
+    const ancestor = path.join(dir, 'ancestor');
+    const parent = path.join(ancestor, 'parent');
+    const runtime = path.join(parent, 'runtime');
+    try {
+      mkdirSync(runtime, { recursive: true });
+      chmodSync(ancestor, 0o770);
+      chmodSync(runtime, mode);
+      const key = path.join(runtime, 'bff-session.key');
+      writeSessionKey(key);
+      writeSessionKey(path.join(runtime, 'tronclass-session.key'));
+      const before = statSync(key);
+      const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+      const fixture = readFileSync(script, 'utf8').replace(
+        /    node -e 'const fs=require[^\n]+ &/, () => "    node -e 'process.exit(0)' &",
+      );
+      const result = spawnSync('bash', ['-c', fixture, script], {
+        encoding: 'utf8', timeout: 5000,
+        env: { ...process.env, TRONCLASS_RUNTIME_DIR: runtime, TRONCLASS_SIGNAL_SELFTEST: '1' },
+      });
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(result.stderr, /runtime parent.*sticky bit/);
+      assert.doesNotMatch(result.stdout, /WRAPPER_PID=/);
+      assert.equal(statSync(key).atimeMs, before.atimeMs);
+      assert.equal(statSync(key).ino, before.ino);
+      assert.equal(statSync(runtime).mode & 0o7777, mode);
+      assert.equal(statSync(ancestor).mode & 0o7777, 0o770);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}

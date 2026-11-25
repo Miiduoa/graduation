@@ -72,4 +72,5 @@ export type TronClassAgentAskInput = {
   compoundQuestion?: string;
   courseId?: number;
   homeworkId?: number;
+  revision?: string;
 };

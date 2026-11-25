@@ -151,9 +151,13 @@ export function createTronClassAgentClient(identity: TronClassIdentity) {
       const intent = parseTronClassAgentIntent(input.question);
       if (!input.question.trim() || input.question.length > 1000 ||
         !intent ||
-        (input.courseId !== undefined && !id(input.courseId)) ||
+        (input.courseId !== undefined && (!id(input.courseId) || !revision(input.revision))) ||
+        (input.revision !== undefined && !revision(input.revision)) ||
         (input.homeworkId !== undefined && (!id(input.homeworkId) || !id(input.courseId) || intent.intent !== 'prepare'))) return invalid();
       const result = parseReply(await responseValue(await request('/api/tronclass/agent', { ...input, action: 'ask' }, signal)));
+      if (input.revision !== undefined && result.revision !== input.revision) {
+        throw new TronClassRequestError('TRONCLASS_BINDING_CHANGED', 'TronClass 連線已變更，請重新查詢。', 409);
+      }
       if (result.intent !== intent.intent || (input.homeworkId !== undefined && result.preparation &&
         (result.preparation.courseId !== input.courseId || result.preparation.homeworkId !== input.homeworkId)) ||
         (input.courseId !== undefined && result.snapshot && (
@@ -163,11 +167,11 @@ export function createTronClassAgentClient(identity: TronClassIdentity) {
         ))) return invalid();
       return result;
     },
-    async prepare(courseId: number, homeworkId: number, signal?: AbortSignal): Promise<TronClassPreparation> {
-      if (!id(courseId) || !id(homeworkId)) return invalid();
+    async prepare(courseId: number, homeworkId: number, expectedRevision: string, signal?: AbortSignal): Promise<TronClassPreparation> {
+      if (!id(courseId) || !id(homeworkId) || !revision(expectedRevision)) return invalid();
       const value = parseTronClassResult('prepare', await responseValue(await request('/api/tronclass/agent', {
-        action: 'prepare', courseId, homeworkId,
-      }, signal)), { courseId, homeworkId }) as TronClassPreparation;
+        action: 'prepare', courseId, homeworkId, revision: expectedRevision,
+      }, signal)), { courseId, homeworkId, revision: expectedRevision }) as TronClassPreparation;
       if (value.canSubmit) return invalid();
       return value;
     },

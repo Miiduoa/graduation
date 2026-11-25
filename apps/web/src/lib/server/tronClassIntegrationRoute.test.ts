@@ -67,11 +67,11 @@ it('passes request cancellation to the sync reader separately from caller-suppli
   const controller = new AbortController();
   const request = new NextRequest('https://nuni.tw/api/tronclass', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://nuni.tw' },
-    body: JSON.stringify({ action: 'sync', courseId: 101 }), signal: controller.signal,
+    body: JSON.stringify({ action: 'sync', courseId: 101, revision }), signal: controller.signal,
   });
   const response = await handleTronClassIntegration(request, dependencies);
   expect(response.status).toBe(200);
-  expect(read).toHaveBeenCalledExactlyOnceWith(ownerKey, { courseId: 101 }, request.signal);
+  expect(read).toHaveBeenCalledExactlyOnceWith(ownerKey, { courseId: 101, revision }, request.signal);
   controller.abort();
   expect(read.mock.calls[0][2].aborted).toBe(true);
 });
@@ -104,10 +104,10 @@ it('passes prepare cancellation to the submission reader without adding a client
   const controller = new AbortController();
   const request = new NextRequest('https://nuni.tw/api/tronclass', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://nuni.tw' },
-    body: JSON.stringify({ action: 'prepare', courseId: 101, homeworkId: 202 }), signal: controller.signal,
+    body: JSON.stringify({ action: 'prepare', courseId: 101, homeworkId: 202, revision }), signal: controller.signal,
   });
   expect((await handleTronClassIntegration(request, dependencies)).status).toBe(200);
-  expect(submissions.prepare).toHaveBeenCalledExactlyOnceWith(ownerKey, { courseId: 101, homeworkId: 202 }, request.signal);
+  expect(submissions.prepare).toHaveBeenCalledExactlyOnceWith(ownerKey, { courseId: 101, homeworkId: 202, revision }, request.signal);
   controller.abort();
   expect(submissions.prepare.mock.calls[0][2].aborted).toBe(true);
 });
@@ -146,9 +146,9 @@ it('keeps course-picker reads separate from the six-sync budget while limiting b
   expect((await request({ action: 'courses' })).status).toBe(200);
   expect((await request({ action: 'sync' })).status).toBe(200);
   for (const courseId of [101, 102, 103, 104, 105]) {
-    expect((await request({ action: 'sync', courseId })).status).toBe(200);
+    expect((await request({ action: 'sync', courseId, revision })).status).toBe(200);
   }
-  expect((await request({ action: 'sync', courseId: 106 })).status).toBe(429);
+  expect((await request({ action: 'sync', courseId: 106, revision })).status).toBe(429);
   expect(read).toHaveBeenCalledTimes(6);
   for (let attempt = 0; attempt < 5; attempt++) {
     expect((await request({ action: 'courses' })).status).toBe(200);

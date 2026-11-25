@@ -284,6 +284,9 @@ export function parseTronClassResult(action: string, value: unknown, input: Reco
       !(value.receipt === null || isReceipt(value.receipt))
     )
       return invalidResponse();
+    if (input.revision !== undefined && value.revision !== input.revision) {
+      throw new TronClassRequestError('TRONCLASS_BINDING_CHANGED', 'TronClass 連線已變更，請重新讀取後再操作。', 409);
+    }
     if (value.rules !== undefined) {
       const rules = value.rules;
       if (!isRecord(rules)) return invalidResponse();
@@ -446,8 +449,8 @@ export function createTronClassClient(identity: TronClassIdentity) {
     disconnect: (expectedRevision: string | null) =>
       request<TronClassConnection>('disconnect', { expectedRevision }),
     courses: (signal?: AbortSignal) => request<TronClassCourseIndex>('courses', {}, signal),
-    sync: (courseId?: number, signal?: AbortSignal) =>
-      request<TronClassSnapshot>('sync', courseId === undefined ? {} : { courseId }, signal),
+    sync: (courseId?: number, signal?: AbortSignal, revision?: string) =>
+      request<TronClassSnapshot>('sync', courseId === undefined ? {} : { courseId, revision }, signal),
     async downloadMaterial(input: {
       courseId: number;
       activityId: number;
@@ -479,8 +482,8 @@ export function createTronClassClient(identity: TronClassIdentity) {
       }
       return downloadFile('/api/tronclass/submission-attachment', input, signal);
     },
-    prepare: (courseId: number, homeworkId: number) =>
-      request<TronClassPreparation>('prepare', { courseId, homeworkId }),
+    prepare: (courseId: number, homeworkId: number, revision: string) =>
+      request<TronClassPreparation>('prepare', { courseId, homeworkId, revision }),
     submit: (input: {
       courseId: number;
       homeworkId: number;
