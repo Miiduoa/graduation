@@ -90,6 +90,31 @@ describe('trusted OSM walking segment audit bridge', () => {
     ], now)?.edges[0].access).toBe('reviewed-open');
   });
 
+  it('rejects malformed cached source tags on ways and either endpoint', () => {
+    const invalid: unknown[] = [
+      null, undefined, [], 'yes', { name: 123 }, { name: 'x'.repeat(1025) },
+      { '': 'yes' }, { ['x'.repeat(256)]: 'yes' },
+      JSON.parse('{"__proto__":"yes"}'), { constructor: 'yes' },
+      { prototype: 'yes' }, Object.fromEntries(Array.from({ length: 129 }, (_, i) => ['k' + i, 'v'])),
+    ];
+    for (const tags of invalid) {
+      for (const location of ['way', 'from', 'to']) {
+        const data = candidates();
+        const source = location === 'way' ? data.ways[0] : data.nodes[location === 'from' ? 0 : 1];
+        source.tags = (location === 'way' && tags && typeof tags === 'object' && !Array.isArray(tags)
+          ? { highway: 'footway', ...tags } : tags) as typeof source.tags;
+        expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)).toBeNull();
+      }
+    }
+    const data = candidates();
+    data.nodes[0].tags = Object.fromEntries(Array.from({ length: 128 }, (_, i) => ['k' + i, 'v']));
+    data.nodes[1].tags = { ['x'.repeat(255)]: 'y'.repeat(1024) };
+    expect(findCampusWalkingRoute(
+      applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!,
+      'fixture', bounds, 1, 2, now,
+    )).not.toBeNull();
+  });
+
   it('rejects invalid source revision numbers even when an audit agrees', () => {
     for (const version of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN]) {
       for (const location of ['way', 'from', 'to']) {
