@@ -406,7 +406,7 @@ function AccountWorkspace({
             addTargets(visitedLocations.values());
             if (error instanceof NuniError && error.status === 503) {
               // The list loader can be retired before it starts detail rechecks.
-              for (const key of targets.keys()) confirmed.recordDetailFailure(key, listRevision);
+              confirmed.recordReadFailure(listRevision, targets.keys());
             }
             confirmed.rejectWorkspaceList(denied(error), listRevision);
             publishOverview();
@@ -452,7 +452,7 @@ function AccountWorkspace({
                 publishOverview();
               }
             } else {
-              confirmed.recordDetailFailure(key, revision);
+              confirmed.recordReadFailure(revision, [key]);
               detailUnavailable = true;
             }
           }

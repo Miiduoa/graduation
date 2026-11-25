@@ -56,6 +56,7 @@ export function MerchantOrderDesk({
   locationId,
   cache,
   canSend,
+  suspended = false,
   queue: controlledQueue,
   onQueueChange,
   queueHref,
@@ -65,6 +66,7 @@ export function MerchantOrderDesk({
   locationId: string;
   cache: FoodDraftCache;
   canSend?: () => boolean;
+  suspended?: boolean;
   queue?: MerchantWorkspaceQueue;
   onQueueChange?: (event: MouseEvent<HTMLAnchorElement>, queue: MerchantWorkspaceQueue) => void;
   queueHref?: (queue: MerchantWorkspaceQueue) => string;
@@ -99,7 +101,7 @@ export function MerchantOrderDesk({
     ]);
     return { queue, shift };
   }, [client, tenantId, locationId, cursor]);
-  const data = useFoodRead(load, { pollMs: FOOD_POLL_MS });
+  const data = useFoodRead(load, { pollMs: FOOD_POLL_MS, paused: suspended });
   const [opening, setOpening] = useFoodDraft(cache, `${scope}:opening`, '0');
   const [counted, setCounted] = useFoodDraft(cache, `${scope}:counted`, '');
   const [openNext, setOpenNext] = useFoodDraft(cache, `${scope}:open-next`, false);
@@ -118,6 +120,15 @@ export function MerchantOrderDesk({
   const [confirmed, setConfirmed] = useState(false);
   const [receipt, setReceipt] = useState('');
   const [shiftOpen, setShiftOpen] = useState(true);
+  const [wasSuspended, setWasSuspended] = useState(suspended);
+  if (suspended !== wasSuspended) {
+    setWasSuspended(suspended);
+    if (suspended) {
+      setSelected(null);
+      setConfirmed(false);
+      setConfirmedShift(null);
+    }
+  }
   const execute = (intent: FoodIntent) => {
     const args = [tenantId, locationId] as const;
     switch (intent.action) {
@@ -149,7 +160,7 @@ export function MerchantOrderDesk({
     cache,
     scope,
     accountId,
-    enabled: !!data.data,
+    enabled: !suspended && !!data.data,
     execute,
     reload: data.reload,
     onSuccess(result, intent) {
@@ -290,6 +301,7 @@ export function MerchantOrderDesk({
       },
     });
   }
+  if (suspended) return null;
   return (
     <section className={styles.panel} aria-label="門市訂單工作台">
       <div className={styles.bar}>

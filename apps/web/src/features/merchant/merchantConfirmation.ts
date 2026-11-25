@@ -106,8 +106,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   // Store-specific revocations override the list default for stores with newer confirmations.
   const revocations = new Map<string, number>();
   // A failed GET limits access recovery without discarding the last confirmed overview.
-  const detailFailures = new Map<string, number>();
-  const detailFailureListeners = new Set<() => void>();
+  const readFailures = new Map<string, number>();
+  const readFailureListeners = new Set<() => void>();
   const verified = new Map<string, number>();
   let applicationRevocation = 0;
   let applicationListRevision = 0;
@@ -162,8 +162,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   function merge<T extends NuniMerchantWorkspaceListRow>(next: T, revision: number) {
     const key = workspaceKey(next);
     if (revision <= Math.max(listRevocation, revokedThrough(key))) return;
-    // A legacy list can update metadata, but only a versioned response can
-    // restore the row after a detail denial.
+    // After a denial, only versioned observations can rebuild the row.
+    // A successful detail read is still required to restore management access.
     if (next.readinessVersion === undefined && workspaceKeysAwaitingConfirmation.has(key)) return;
     const entry = entries.get(key) ?? {};
     const floor = revokedVersionFloors.get(key);
@@ -195,7 +195,6 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         }
       }
       entry.versionedRow = versioned;
-      workspaceKeysAwaitingConfirmation.delete(key);
     }
     // Use the same requirements source for the card and for invalidating receipts.
     const requirementsObservation = entry.versionedRow?.value.missingRequirements === undefined
@@ -225,15 +224,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         : next.readinessVersion !== undefined && next.readinessVersion > receipt.version)
     ) return next;
     const isDetail = 'publishedMenuItems' in next;
-    const currentDetail = entries.get(key)?.detail?.value;
-    const keepOmission = isDetail && currentDetail &&
-      currentDetail.readinessVersion === next.readinessVersion &&
-      currentDetail.missingRequirements === undefined;
     return {
       ...next,
-      missingRequirements: keepOmission
-        ? undefined
-        : next.missingRequirements.filter((item) => item !== 'menu'),
+      missingRequirements: next.missingRequirements.filter((item) => item !== 'menu'),
       // A receipt confirms creation. A pre-write detail cannot confirm available stock.
       ...(isDetail ? { publishedMenuItems: 0 } : {}),
     };
@@ -252,11 +245,30 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     if (!merged) return null;
     const { entry, value } = merged;
     if (next.readinessVersion !== entry.row?.version) return null;
-    entry.detail = latestObservation(entry.detail, value, revision);
+    const previous = entry.detail;
+    // An omitted field keeps the legacy detail on its stock-count fallback.
+    const detailValue =
+      previous?.version === next.readinessVersion && previous.value.missingRequirements === undefined
+        ? { ...value, missingRequirements: undefined }
+        : value;
+    entry.detail = latestObservation(previous, detailValue, revision);
     // A receipt can win on readiness version even when its request predates
     // the GET that verified access. Keep that GET's revision independently.
     if (verifiesAccess) {
-      if (revision > accessConfirmationRevision(key)) verified.set(key, revision);
+      if (revision > Math.max(accessConfirmationRevision(key), readFailureRevision(key))) {
+        verified.set(key, revision);
+        workspaceKeysAwaitingConfirmation.delete(key);
+      }
+      // A read that independently observes the menu can advance receipt protection.
+      const receipt = menuReceipts.get(key);
+      if (
+        receipt && revision > receipt.revision &&
+        (receipt.version === undefined || next.readinessVersion > receipt.version) &&
+        !next.missingRequirements?.includes('menu') &&
+        (next.missingRequirements !== undefined || next.publishedMenuItems > 0)
+      ) {
+        menuReceipts.set(key, { ...receipt, version: next.readinessVersion });
+      }
       if (revision > (entry.detailRead?.revision ?? 0)) {
         entry.detailRead = { revision, version: next.readinessVersion };
       }
@@ -268,12 +280,12 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     };
   }
 
-  function detailFailureRevision(key: string) {
-    return detailFailures.get(key) ?? 0;
+  function readFailureRevision(key: string) {
+    return readFailures.get(key) ?? 0;
   }
 
   function canUseAccess(key: string, revision: number) {
-    return revision > Math.max(detailFailureRevision(key), revokedThrough(key)) &&
+    return revision > Math.max(readFailureRevision(key), revokedThrough(key)) &&
       hasVerifiedAccess(key) && entries.get(key)?.detail !== undefined;
   }
 
@@ -376,15 +388,21 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       }
     },
     canUseAccess,
-    detailFailureRevision,
-    subscribeDetailFailures(listener: () => void) {
-      detailFailureListeners.add(listener);
-      return () => { detailFailureListeners.delete(listener); };
+    readFailureRevision,
+    subscribeReadFailures(listener: () => void) {
+      readFailureListeners.add(listener);
+      return () => { readFailureListeners.delete(listener); };
     },
-    recordDetailFailure(key: string, revision: number) {
-      if (revision <= (detailFailures.get(key) ?? 0)) return;
-      detailFailures.set(key, revision);
-      for (const listener of detailFailureListeners) listener();
+    recordReadFailure(revision: number, keys: Iterable<string>) {
+      let changed = false;
+      for (const key of keys) {
+        if (revision <= readFailureRevision(key)) continue;
+        readFailures.set(key, revision);
+        changed = true;
+      }
+      if (changed) {
+        for (const listener of readFailureListeners) listener();
+      }
     },
     verifiedDetails() {
       const details = new Map<string, NuniMerchantWorkspaceDetail>();
@@ -512,7 +530,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         programs: lists.programs ?? [],
         workspaces: [...keys].flatMap((key) => {
           const row = workspaceSummary(entries.get(key));
-          const listedAfterRevocation = membership?.has(key) && listedRevision > revokedThrough(key);
+          const listedAfterRevocation = membership?.has(key) && listedRevision > revokedThrough(key) &&
+            !workspaceKeysAwaitingConfirmation.has(key);
           return row && (listedAfterRevocation || hasVerifiedAccess(key)) ? [row] : [];
         }),
         applications: [
@@ -556,8 +575,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       workspaceKeysAwaitingConfirmation.clear();
       revocations.clear();
       verified.clear();
-      detailFailures.clear();
-      for (const listener of detailFailureListeners) listener();
+      readFailures.clear();
+      for (const listener of readFailureListeners) listener();
     },
   };
 }

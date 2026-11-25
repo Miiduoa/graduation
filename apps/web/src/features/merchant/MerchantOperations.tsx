@@ -227,11 +227,11 @@ export function MerchantOperations({
   const run = useRef(0);
   const accessRevision = useRef(0);
   const currentFailureRevision = useCallback(
-    () => observations.detailFailureRevision(draftKey),
+    () => observations.readFailureRevision(draftKey),
     [draftKey, observations],
   );
   const latestFailure = useSyncExternalStore(
-    observations.subscribeDetailFailures,
+    observations.subscribeReadFailures,
     currentFailureRevision,
     () => 0,
   );
@@ -370,7 +370,7 @@ export function MerchantOperations({
       if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
         return revokeDetail(revision, updateView);
       }
-      observations.recordDetailFailure(draftKey, revision);
+      observations.recordReadFailure(revision, [draftKey]);
       return false;
     },
     [draftKey, expireSession, observations, revokeDetail],
@@ -779,44 +779,18 @@ export function MerchantOperations({
                   {showOrders ? '收起訂單工作台' : '處理訂單與收銀'}
                 </Button>
               )}
-              <div id="merchant-order-workspace">
-                {!navigation && showOrders && !locked && (
-                  <MerchantOrderDesk
-                    key={`${context}:${tenantId}:${locationId}`}
-                    context={context}
-                    tenantId={tenantId}
-                    locationId={locationId}
-                    cache={foodDrafts ?? localFoodDrafts}
-                    canSend={hasCurrentAccess}
-                  />
-                )}
-              </div>
             </section>
           )}
 
           {navigation &&
             ordersOpen &&
             (operational ? (
-              locked ? (
+              locked && (
                 <p role="status">
                   {loading || busy
                     ? '正在重新確認門市，確認後會接回訂單工作台。'
                     : '請重新讀取門市狀態，再開啟訂單工作台。'}
                 </p>
-              ) : (
-                <MerchantOrderDesk
-                  key={`${context}:${tenantId}:${locationId}`}
-                  context={context}
-                  tenantId={tenantId}
-                  locationId={locationId}
-                  cache={foodDrafts ?? localFoodDrafts}
-                  canSend={hasCurrentAccess}
-                  queue={navigation.queue}
-                  queueHref={(queue) =>
-                    merchantWorkspaceHref({ tenantId, locationId, section: 'orders', queue })
-                  }
-                  onQueueChange={(event) => navigation.onNavigate(event)}
-                />
               )
             ) : (
               <section className={styles.panel} aria-labelledby="merchant-orders-unavailable-title">
@@ -1218,6 +1192,26 @@ export function MerchantOperations({
           )}
         </>
       )}
+      {/* Keep the mutation mounted while revalidation hides the desk. */}
+      <div id="merchant-order-workspace" hidden={!ordersOpen || locked || !operational}>
+        {ordersOpen && (
+          <MerchantOrderDesk
+            key={`${context}:${tenantId}:${locationId}`}
+            context={context}
+            tenantId={tenantId}
+            locationId={locationId}
+            cache={foodDrafts ?? localFoodDrafts}
+            canSend={hasCurrentAccess}
+            suspended={locked || !operational}
+            queue={navigation?.queue}
+            queueHref={
+              navigation && ((queue) =>
+                merchantWorkspaceHref({ tenantId, locationId, section: 'orders', queue }))
+            }
+            onQueueChange={navigation?.onNavigate}
+          />
+        )}
+      </div>
     </div>
   );
 }

@@ -59,6 +59,7 @@ export function useFoodRead<T>(
   load: () => Promise<T>,
   options?: {
     pollMs?: number;
+    paused?: boolean;
     /** Return false to stop periodic polling (e.g. terminal order detail). */
     shouldPoll?: (data: T | null) => boolean;
   },
@@ -69,6 +70,7 @@ export function useFoodRead<T>(
   const dataRef = useRef<T | null>(null);
   const shouldPollRef = useRef(options?.shouldPoll);
   const pollMs = options?.pollMs;
+  const paused = options?.paused;
   shouldPollRef.current = options?.shouldPoll;
   const scopeRef = useRef<{
     active: boolean;
@@ -134,16 +136,17 @@ export function useFoodRead<T>(
   const quietReload = useCallback(() => read(true), [read]);
 
   useLayoutEffect(() => {
+    if (paused) return;
     const scope = { active: true, loader: load, revision: 0, inFlight: null, queued: null };
     scopeRef.current = scope;
     void reload();
     return () => {
       scope.active = false;
     };
-  }, [reload, load]);
+  }, [reload, load, paused]);
 
   useEffect(() => {
-    if (!pollMs || pollMs <= 0) return;
+    if (paused || !pollMs || pollMs <= 0) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let inflight = false;
@@ -181,7 +184,7 @@ export function useFoodRead<T>(
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [pollMs, quietReload, load]);
+  }, [pollMs, quietReload, load, paused]);
 
   return { data, error, loading, reload, quietReload };
 }

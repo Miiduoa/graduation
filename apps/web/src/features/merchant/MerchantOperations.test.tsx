@@ -188,8 +188,9 @@ it('keeps a confirmed missing menu after a legacy list and an unavailable detail
 
   current = { ...current, readinessVersion: 8 };
   confirmed.confirmDetail(current, confirmed.beginRequest(), true);
-  const missingMenu = { ...current, missingRequirements: ['menu'] };
+  const missingMenu = { ...current, readinessVersion: 9, missingRequirements: ['menu'] };
   confirmed.mergeWorkspaceList([missingMenu], confirmed.beginRequest());
+  confirmed.confirmDetail(missingMenu, confirmed.beginRequest(), true);
   expect(drafts.get(key)?.menuReceipt).toBeNull();
   expect(confirmed.verifiedDetails().get(key)?.publishedMenuItems).toBe(0);
   mounted.rerender(workspace());
@@ -258,7 +259,9 @@ it('clears the initial menu success when a delayed versioned list confirms a mis
   mounted.rerender(workspace());
   expect(screen.getByText(success)).toBeTruthy();
 
-  confirmed.mergeWorkspaceList([{ ...current, missingRequirements: ['menu'] }], versionedList);
+  const missingMenu = { ...current, readinessVersion: 9, missingRequirements: ['menu'] };
+  confirmed.mergeWorkspaceList([missingMenu], versionedList);
+  confirmed.confirmDetail(missingMenu, confirmed.beginRequest(), true);
   mounted.rerender(workspace());
   expect(confirmed.verifiedDetails().get(key)?.publishedMenuItems).toBe(0);
   expect(screen.queryByText(success)).toBeNull();
@@ -866,7 +869,7 @@ it('ties shared access recovery to the GET version and the latest failure revisi
   expect(confirmed.detailReadConfirmation(key)).toBeUndefined();
   const backgroundRead = confirmed.beginRequest();
   const newerFailure = confirmed.beginRequest();
-  confirmed.recordDetailFailure(key, newerFailure);
+  confirmed.recordReadFailure(newerFailure, [key]);
   confirmed.confirmDetail(v8, backgroundRead, true);
 
   expect(confirmed.detailFor(key)?.readinessVersion).toBe(8);

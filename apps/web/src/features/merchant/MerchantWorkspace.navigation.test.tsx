@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import type { NuniMerchantWorkspace } from '@campus/shared/src/nuniMerchant';
 import type { NuniMerchantWorkspaceDetail } from '@campus/shared/src/nuniMerchantOperations';
+import { loadFoodPending } from '@/features/food/foodPersistence';
 import { future, queueFixture, shiftFixture } from '@/features/food/foodTestFixtures';
 import { merchantApplicationsHref, merchantWorkspaceHref } from '@/lib/merchantWorkspaceNavigation';
 import { MerchantWorkspace } from './MerchantWorkspace';
@@ -316,7 +317,9 @@ it.each([
       return respond(requestPath);
     });
     render(<MerchantWorkspace view="workspace" />);
-    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    const initialLink = await screen.findByRole<HTMLAnchorElement>('link', { name: '管理門市：一樓' });
+    const storeHref = initialLink.href;
+    fireEvent.click(initialLink);
     fireEvent.change(await screen.findByLabelText('品項 1 名稱'), {
       target: { value: '蔬菜便當' },
     });
@@ -358,7 +361,11 @@ it.each([
 
       currentList = true;
       await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
-      fireEvent.click(await within(locations).findByRole('link', { name: '管理門市：一樓' }));
+      expect(storeLink()).toBeNull();
+      await act(async () => {
+        window.history.pushState(null, '', storeHref);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
       await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
       expect(screen.queryByRole('heading', { name: '餐坊／一樓' })).toBeNull();
       expect(screen.queryByRole('button', { name: '儲存營運設定' })).toBeNull();
@@ -2657,9 +2664,9 @@ it('preserves deferred reconciliation when the first menu refresh finishes after
   await screen.findByRole('region', { name: '門市訂單工作台' });
 });
 
-it.each([undefined, 7, 8])('keeps the menu receipt through a list at version %s and a detail 503', async (version) => {
+it.each([undefined, 7, 8])('keeps a v7 menu receipt confirmed at v8 through list version %s and a stale detail', async (version) => {
   const path = 'merchant-workspaces/campus-one/store-a';
-  const initial = { ...detail(), readinessVersion: version === undefined ? 7 : 8 };
+  const initial = { ...detail(), readinessVersion: 7 };
   const published = {
     ...initial, readinessVersion: 8, missingRequirements: ['settings'], publishedMenuItems: 1,
   };
@@ -2671,7 +2678,7 @@ it.each([undefined, 7, 8])('keeps the menu receipt through a list at version %s 
     .mockResolvedValueOnce(initial)
     .mockResolvedValueOnce(published)
     .mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'))
-    .mockResolvedValue(published);
+    .mockResolvedValue({ ...published, missingRequirements: ['menu'] });
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') return readStores();
     if (resource === path) return readDetail();
@@ -3057,9 +3064,10 @@ it.each(['before', 'after'])(
   },
 );
 
-it.each(['availability', 'orders', 'orders-retry', 'stale-entry'])('blocks %s immediately when a retired list GET returns 503', async (section) => {
+it.each(['availability', 'orders', 'orders-retry', 'orders-in-flight', 'stale-entry'])('blocks %s immediately when a retired list GET returns 503', async (section) => {
   const path = 'merchant-workspaces/campus-one/store-a';
-  const orders = section === 'orders' || section === 'orders-retry';
+  const orders = section.startsWith('orders');
+  const inFlight = section === 'orders-in-flight';
   const staleEntry = section === 'stale-entry';
   const retry = section === 'orders-retry';
   const unavailable = new NuniError(503, 'UNAVAILABLE');
@@ -3082,9 +3090,12 @@ it.each(['availability', 'orders', 'orders-retry', 'stale-entry'])('blocks %s im
     .mockResolvedValueOnce(initial)
     .mockResolvedValue(updated);
   const changeAvailability = vi.fn().mockResolvedValue(updated);
-  const acceptOrder = vi.fn().mockResolvedValue({
+  const orderReceipt = {
     orderId: 'order-1', state: 'accepted', updatedAt: future, replayed: false, kitchenTicketId: 'ticket-1',
-  });
+  };
+  const pendingOrder = Promise.withResolvers<typeof orderReceipt>();
+  const acceptOrder = vi.fn().mockResolvedValue(orderReceipt);
+  if (inFlight) acceptOrder.mockReturnValueOnce(pendingOrder.promise);
   if (retry) acceptOrder.mockRejectedValueOnce(unavailable);
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') return readList();
@@ -3146,14 +3157,20 @@ it.each(['availability', 'orders', 'orders-retry', 'stale-entry'])('blocks %s im
   });
   expect(submit.disabled).toBe(false);
 
+  const pendingIntent = () => loadFoodPending('account-a', 'merchant-food:campus-one:store-a');
+  if (inFlight) {
+    fireEvent.click(submit);
+    expect(acceptOrder).toHaveBeenCalledTimes(1);
+    expect(pendingIntent()).toMatchObject({ action: 'accept', orderId: 'order-1' });
+  }
   await act(async () => {
     failedList.reject(unavailable);
     await failedList.promise.catch(() => undefined);
     await Promise.resolve();
     // Exercise the submit guard while React still shows the previously enabled button.
-    expect(submit.disabled).toBe(false);
+    expect(submit.disabled).toBe(inFlight);
     submit.click();
-    expect(acceptOrder).toHaveBeenCalledTimes(retry ? 1 : 0);
+    expect(acceptOrder).toHaveBeenCalledTimes(retry || inFlight ? 1 : 0);
     expect(changeAvailability).toHaveBeenCalledTimes(1);
   });
   if (orders) {
@@ -3164,8 +3181,16 @@ it.each(['availability', 'orders', 'orders-retry', 'stale-entry'])('blocks %s im
   expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
   expect(readDetail).toHaveBeenCalledTimes(3);
 
+  if (inFlight) {
+    await act(async () => pendingOrder.resolve(orderReceipt));
+    expect(pendingIntent()).toBeNull();
+  }
   fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
-  if (retry) {
+  if (inFlight) {
+    await screen.findByRole('button', { name: '接單：A101' });
+    expect(screen.queryByRole('button', { name: '重試同一份操作' })).toBeNull();
+    expect(acceptOrder).toHaveBeenCalledTimes(1);
+  } else if (retry) {
     fireEvent.click(await screen.findByRole('button', { name: '重試同一份操作' }));
     expect(acceptOrder).toHaveBeenCalledTimes(2);
   } else if (orders) {
@@ -3269,3 +3294,30 @@ it.each([
   }
   expect(screen.getByLabelText<HTMLInputElement>(/我已確認門市、營運方式及菜單/).disabled).toBe(true);
 });
+
+it.each([
+  { requirements: [] },
+  { requirements: ['settings'] },
+  { requirements: ['settings', 'menu'] },
+])('keeps an omitted detail requirement through a same-version GET reporting $requirements',
+  async ({ requirements }) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const initial: NuniMerchantWorkspaceDetail = { ...detail(), readinessVersion: 8 };
+    delete initial.missingRequirements;
+    const readDetail = vi.fn()
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValue({ ...initial, missingRequirements: requirements });
+    mocks.request.mockImplementation((resource) => {
+      if (resource === path) return readDetail();
+      if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [initial] });
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    await screen.findByLabelText('品項 1 名稱');
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' })));
+    expect(readDetail).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText('品項 1 名稱')).toBeTruthy();
+  },
+);
