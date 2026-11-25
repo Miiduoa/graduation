@@ -1,0 +1,25 @@
+name: nuni merge gate policy tests
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/merge-gate/**'
+      - '.github/workflows/nuni-merge-gate*.yml'
+      - 'docs/security/nuni-merge-gate.md'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/merge-gate/**'
+      - '.github/workflows/nuni-merge-gate*.yml'
+      - 'docs/security/nuni-merge-gate.md'
+permissions:
+  contents: read
+jobs:
+  policy-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: node --test scripts/merge-gate/gate.test.mjs

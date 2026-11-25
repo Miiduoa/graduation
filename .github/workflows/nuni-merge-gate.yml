@@ -1,0 +1,63 @@
+name: nuni delegated merge gate (pilot)
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  actions: read
+  checks: read
+concurrency:
+  group: nuni-merge-gate-publisher
+  cancel-in-progress: false
+jobs:
+  preflight:
+    if: >-
+      github.repository == 'Miiduoa/graduation' &&
+      github.ref == 'refs/heads/main' &&
+      github.event.issue.pull_request &&
+      github.event.comment.user.id == 107848266 &&
+      github.event.comment.author_association == 'OWNER' &&
+      github.actor == 'Miiduoa' &&
+      github.triggering_actor == 'Miiduoa' &&
+      startsWith(github.event.comment.body, '/nuni-gate ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch only trusted default-branch revision
+        run: |
+          set -euo pipefail
+          git init -q
+          git fetch --no-tags --depth=1 https://github.com/Miiduoa/graduation.git "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Read-only evidence validation
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+          NUNI_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: node scripts/merge-gate/gate.mjs preflight
+  publish:
+    needs: preflight
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'Miiduoa' &&
+      github.triggering_actor == 'Miiduoa' &&
+      startsWith(github.event.comment.body, '/nuni-gate approve ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: nuni-merge-gate
+    steps:
+      - name: Fetch only trusted default-branch revision
+        run: |
+          set -euo pipefail
+          git init -q
+          git fetch --no-tags --depth=1 https://github.com/Miiduoa/graduation.git "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Revalidate and publish authentic App check
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+          NUNI_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          NUNI_GATE_PRIVATE_KEY: ${{ secrets.NUNI_GATE_PRIVATE_KEY }}
+        run: node scripts/merge-gate/gate.mjs publish
