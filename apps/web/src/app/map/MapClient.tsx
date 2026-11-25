@@ -264,7 +264,7 @@ function MapContent({
   // A missing explicit destination must not silently turn into another building.
   // A later source update can make a room ambiguous; derive this instead of retaining a guess.
   const classroomPlace = classroomLinkActive && classroom.status === 'matched' ? classroom.matches[0] : null;
-  const automaticClassroomId = sourcePending ? undefined : classroomPlace?.id;
+  const automaticClassroomId = placeState.source === 'ready' ? classroomPlace?.id : undefined;
   const selectedId = selection ?? (focus ? focusedPlace?.id : automaticClassroomId);
   const selected = locations.find((location) => location.id === selectedId) ?? null;
   const deepLinkRoute = useMemo<[MapLocation, MapLocation] | null>(() => {
@@ -582,6 +582,8 @@ function MapContent({
           <h2>{initialQuery}</h2>
           {sourcePending ? (
             <p role="status">正在確認地點資料，尚未確認這間教室的位置。</p>
+          ) : placeState.source === 'error' ? (
+            <p role="status">暫時無法確認這間教室的位置，請重新讀取地點資料或核對校方地圖。</p>
           ) : classroom.status === 'matched' && classroomPlace ? <>
             <p>可對應「{classroomPlace.name}」的位置。抵達後請依課表與現場標示確認教室。</p>
             {selected?.id !== classroomPlace.id && (
@@ -605,7 +607,7 @@ function MapContent({
           </> : (
             <p>目前地點資料無法確認這間教室的位置。請改用建築全名搜尋，或核對校方地圖。</p>
           )}
-          {(classroom.status === 'ambiguous' || classroom.status === 'unmatched') && (
+          {(placeState.source === 'error' || (placeState.source === 'ready' && (classroom.status === 'ambiguous' || classroom.status === 'unmatched'))) && (
             <div className={styles.actions}>
               <button className="btn" type="button" onClick={() => {
                 searchInputRef.current?.focus();
