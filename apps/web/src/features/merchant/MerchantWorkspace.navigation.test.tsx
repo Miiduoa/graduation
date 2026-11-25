@@ -2482,6 +2482,47 @@ it.each([
   },
 );
 
+it('preserves deferred reconciliation when the first menu refresh finishes after history forward', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const initial = { ...detail(), readinessVersion: 7 };
+  const operating = { ...detail('store-a', true), readinessVersion: 8 };
+  const refresh = Promise.withResolvers<NuniMerchantWorkspaceDetail>();
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(initial)
+    .mockReturnValueOnce(refresh.promise)
+    .mockResolvedValueOnce(operating)
+    .mockResolvedValue(initial);
+  const writeMenu = vi.fn().mockResolvedValue(firstMenuReceipt);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [initial] });
+    if (resource === path) return readDetail();
+    if (resource === `${path}/initial-menu`) return writeMenu();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByLabelText('品項 1 名稱');
+  submitFirstMenu();
+  await screen.findByText(/已建立 1 項首次菜單/);
+  expect(writeMenu).toHaveBeenCalledTimes(1);
+  expect(readDetail).toHaveBeenCalledTimes(2);
+
+  await act(async () => window.history.back());
+  await screen.findByText('營業中');
+  expect(readDetail).toHaveBeenCalledTimes(3);
+  await act(async () => window.history.forward());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
+  expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
+
+  await act(async () => refresh.resolve(initial));
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(5));
+  expect((await screen.findByRole<HTMLButtonElement>('button', { name: '暫停接單' })).disabled).toBe(false);
+  expect(screen.queryByRole('alert')).toBeNull();
+  fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
+  await screen.findByRole('region', { name: '門市訂單工作台' });
+});
+
 it('keeps confirmed menu requirements and the receipt through a legacy list and a detail 503', async () => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const initial = { ...detail(), readinessVersion: 7 };

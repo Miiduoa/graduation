@@ -226,6 +226,7 @@ export function MerchantOperations({
   const sessionRun = useRef(0);
   const opened = useRef(false);
   const visibleRef = useRef(visible);
+  const entryRun = useRef(0);
   const readAfterWrite = useRef(false);
   const deferredWriteRevision = useRef(0);
   const mutationRun = useRef(0);
@@ -381,7 +382,8 @@ export function MerchantOperations({
       // without consuming that entry's post-write reconciliation.
       const deferredRevision = visibleRef.current ? deferredWriteRevision.current : 0;
       // A post-write read can outlast the visible entry that started it.
-      // Keep its write revision until a current read finishes on the store view.
+      // Only a read from the current visible entry can consume reconciliation.
+      const entry = entryRun.current;
       const reconciliationRevision = Math.max(deferredWriteRevision.current, writeRevision);
       deferredWriteRevision.current = reconciliationRevision;
       const readMode = mode === 'regular' && deferredRevision ? 'after-write' : mode;
@@ -455,7 +457,11 @@ export function MerchantOperations({
       } finally {
         if (pendingAccessRead.current === revision) pendingAccessRead.current = 0;
         if (current()) {
-          if (visibleRef.current && deferredWriteRevision.current === reconciliationRevision) {
+          if (
+            visibleRef.current &&
+            entry === entryRun.current &&
+            deferredWriteRevision.current === reconciliationRevision
+          ) {
             deferredWriteRevision.current = 0;
           }
           updateAccess({ type: 'read-finished' });
@@ -500,6 +506,7 @@ export function MerchantOperations({
       updateAccess({ type: 'entry-reset' });
       return;
     }
+    ++entryRun.current;
     const retire = verifyEntry();
     return () => {
       retire();
