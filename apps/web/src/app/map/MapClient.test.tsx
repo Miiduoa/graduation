@@ -817,6 +817,37 @@ it.each([[91, 120], [-91, 120], [24, 181], [24, -181], [NaN, 120], [24, Infinity
   },
 );
 
+it('recovers when geolocation throws synchronously and ignores callbacks from the failed request', async () => {
+  state.user = null;
+  const callbacks: PositionCallback[] = [];
+  const getCurrentPosition = vi.fn((callback: PositionCallback) => {
+    callbacks.push(callback);
+    if (callbacks.length === 1) throw new Error('Location unavailable');
+  });
+  Object.defineProperty(navigator, 'geolocation', {
+    configurable: true,
+    value: { getCurrentPosition },
+  });
+  try {
+    render(<MapClient school="pu" />);
+    await sourceSettled();
+    fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+    expect(screen.getByText('目前無法取得位置，請確認定位與網路後再試一次。')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '查看我的位置' }).hasAttribute('disabled')).toBe(false);
+    const position = { coords: { latitude: gate.lat, longitude: gate.lng } } as GeolocationPosition;
+    act(() => callbacks[0](position));
+    expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+    act(() => callbacks[1](position));
+    expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
+    act(() => callbacks[1]({ coords: { latitude: library.lat, longitude: library.lng } } as GeolocationPosition));
+    expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
+    expect(screen.queryByText('目前無法取得位置，請確認定位與網路後再試一次。')).toBeNull();
+  } finally {
+    Object.defineProperty(navigator, 'geolocation', { configurable: true, value: undefined });
+  }
+});
+
 it('filters favorites without exposing unsaved locations or requiring a map redraw on login', async () => {
   vi.mocked(loadMapFavorites).mockResolvedValueOnce(['library']);
   render(<MapClient school="pu" />);
