@@ -86,6 +86,7 @@ function ServiceRow({
   recommended,
   publicOnly,
   onVisit,
+  grouped,
 }: {
   service: CampusService;
   scope: string;
@@ -94,8 +95,10 @@ function ServiceRow({
   recommended: boolean;
   publicOnly: boolean;
   onVisit: (event: MouseEvent<HTMLAnchorElement>, serviceHref: string) => void;
+  grouped: boolean;
 }) {
   const id = useId();
+  const Heading = grouped ? 'h4' : 'h3';
   const children = showChildren
     ? secondaryCampusServices(service.href, schoolLmsEnabled).filter(
         (child) => !publicOnly || isDirectlyAvailable(child),
@@ -116,7 +119,7 @@ function ServiceRow({
         </span>
         <div className={styles.serviceBody}>
           <div className={styles.serviceTitle}>
-            <h3 id={`${id}-name`}>{service.name}</h3>
+            <Heading id={`${id}-name`}>{service.name}</Heading>
             {recommended && <span className={styles.recommended}>從這裡開始</span>}
           </div>
           <p id={`${id}-description`}>{service.text}</p>
@@ -170,6 +173,7 @@ export function ServiceDirectory({
   const id = useId();
   const composing = useRef(false);
   const search = useRef<HTMLInputElement>(null);
+  const resultsHeading = useRef<HTMLHeadingElement>(null);
   const directory = useRef<HTMLDivElement>(null);
   const historyReturn = useSyncExternalStore(
     subscribeDirectoryReturn,
@@ -217,6 +221,13 @@ export function ServiceDirectory({
   const filtering = Boolean(filters.query.trim() || filters.group !== 'all' || filters.publicOnly);
   const searching = Boolean(filters.query.trim());
   const resultsId = `${journey}-service-results`;
+  const resultsTitle = searching
+    ? '搜尋結果'
+    : filters.group !== 'all'
+      ? groups.find((group) => group.id === filters.group)?.label
+      : filters.publicOnly
+        ? '免登入服務'
+        : '服務目錄';
 
   useEffect(() => {
     if (
@@ -318,7 +329,7 @@ export function ServiceDirectory({
     search.current?.focus();
   }
 
-  const renderServices = (services: readonly CampusService[]) => (
+  const renderServices = (services: readonly CampusService[], grouped = false) => (
     <ul className={styles.serviceList}>
       {services.map((service) => (
         <ServiceRow
@@ -330,6 +341,7 @@ export function ServiceDirectory({
           recommended={!filtering && recommendedHref === service.href}
           publicOnly={Boolean(filters.publicOnly)}
           onVisit={rememberReturn}
+          grouped={grouped}
         />
       ))}
     </ul>
@@ -342,58 +354,67 @@ export function ServiceDirectory({
         <form
           role="search"
           aria-label={journey === 'life' ? '生活服務搜尋' : '交流服務搜尋'}
-          onSubmit={(event) => event.preventDefault()}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (composing.current) return;
+            // Only an explicit search leaves the field. Live filtering and
+            // category changes keep the user's current input position.
+            resultsHeading.current?.focus();
+          }}
         >
           <label className={styles.searchLabel} htmlFor={`${id}-search`}>
             快速找服務
           </label>
-          <div className={styles.searchField}>
-            <CampusIcon name="search" size={21} />
-            <input
-              ref={search}
-              id={`${id}-search`}
-              type="search"
-              value={filters.query}
-              onChange={(event) =>
-                updateFilters({ ...filters, query: event.target.value }, !composing.current)
-              }
-              onCompositionStart={() => {
-                composing.current = true;
-              }}
-              onCompositionEnd={(event) => {
-                composing.current = false;
-                updateFilters({ ...filters, query: event.currentTarget.value });
-              }}
-              onKeyDown={(event) => {
-                if (
-                  event.key === 'Escape' &&
-                  !event.nativeEvent.isComposing &&
-                  !composing.current &&
-                  filters.query
-                ) {
-                  event.preventDefault();
-                  updateFilters({ ...filters, query: '' });
+          <div className={styles.searchRow}>
+            <div className={styles.searchField}>
+              <CampusIcon name="search" size={21} />
+              <input
+                ref={search}
+                id={`${id}-search`}
+                type="search"
+                value={filters.query}
+                onChange={(event) =>
+                  updateFilters({ ...filters, query: event.target.value }, !composing.current)
                 }
-              }}
-              placeholder={journey === 'life' ? '借書、公車、取餐…' : '話題、訊息、好友…'}
-              autoComplete="off"
-              enterKeyHint="search"
-              maxLength={journey === 'life' ? 80 : 100}
-              aria-controls={resultsId}
-            />
-            {filters.query && (
-              <button
-                type="button"
-                className={styles.clearSearch}
-                aria-label="清除搜尋"
-                onClick={() => {
-                  updateFilters({ ...filters, query: '' });
-                  search.current?.focus();
+                onCompositionStart={() => {
+                  composing.current = true;
                 }}
-              >
-                清除
-              </button>
-            )}
+                onCompositionEnd={(event) => {
+                  composing.current = false;
+                  updateFilters({ ...filters, query: event.currentTarget.value });
+                }}
+                onKeyDown={(event) => {
+                  const usingInputMethod =
+                    event.nativeEvent.isComposing || composing.current || event.keyCode === 229;
+                  if (event.key === 'Enter' && usingInputMethod) event.preventDefault();
+                  if (event.key === 'Escape' && !usingInputMethod && filters.query) {
+                    event.preventDefault();
+                    updateFilters({ ...filters, query: '' });
+                  }
+                }}
+                placeholder={journey === 'life' ? '借書、公車、取餐…' : '話題、訊息、好友…'}
+                autoComplete="off"
+                enterKeyHint="search"
+                maxLength={journey === 'life' ? 80 : 100}
+                aria-controls={resultsId}
+              />
+              {filters.query && (
+                <button
+                  type="button"
+                  className={styles.clearSearch}
+                  aria-label="清除搜尋"
+                  onClick={() => {
+                    updateFilters({ ...filters, query: '' });
+                    search.current?.focus();
+                  }}
+                >
+                  清除
+                </button>
+              )}
+            </div>
+            <button type="submit" className={styles.searchSubmit} aria-controls={resultsId}>
+              查看結果
+            </button>
           </div>
         </form>
         <div className={styles.filterBar}>
@@ -419,27 +440,39 @@ export function ServiceDirectory({
             />
             只看免登入服務
           </label>
-          <p className={styles.resultCount} role="status" aria-live="polite" aria-atomic="true">
-            {filtering ? '找到' : '共'} {matches.length} 項服務
-          </p>
         </div>
       </div>
 
-      <div id={resultsId}>
+      <section id={resultsId} aria-label="服務搜尋結果">
+        <div className={styles.sectionHeading}>
+          <div className={styles.resultsSummary}>
+            <h2
+              ref={resultsHeading}
+              id={`${id}-results-title`}
+              tabIndex={-1}
+              className={styles.resultsTitle}
+              aria-describedby={`${id}-results-count`}
+            >
+              {resultsTitle}
+            </h2>
+            <p
+              id={`${id}-results-count`}
+              className={styles.resultCount}
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {filtering ? '找到' : '共'} {matches.length} 項服務
+            </p>
+          </div>
+          {filtering && (
+            <button type="button" className={styles.resetFilters} onClick={resetFilters}>
+              顯示全部服務
+            </button>
+          )}
+        </div>
         {filtering ? (
-          <section aria-labelledby={`${id}-results-title`}>
-            <div className={styles.sectionHeading}>
-              <h2 id={`${id}-results-title`}>
-                {searching
-                  ? '搜尋結果'
-                  : filters.group !== 'all'
-                    ? groups.find((group) => group.id === filters.group)?.label
-                    : '免登入服務'}
-              </h2>
-              <button type="button" className={styles.resetFilters} onClick={resetFilters}>
-                顯示全部服務
-              </button>
-            </div>
+          <>
             {matches.length > 0 ? (
               renderServices(matches)
             ) : (
@@ -449,7 +482,7 @@ export function ServiceDirectory({
                 <p>換個關鍵字，或顯示全部服務再找一次。</p>
               </div>
             )}
-          </section>
+          </>
         ) : (
           <div className={styles.groups}>
             {groups.map((group) => {
@@ -461,17 +494,17 @@ export function ServiceDirectory({
                 <section key={group.id} aria-labelledby={`${id}-${group.id}`}>
                   <div className={styles.sectionHeading}>
                     <div>
-                      <h2 id={`${id}-${group.id}`}>{group.label}</h2>
+                      <h3 id={`${id}-${group.id}`}>{group.label}</h3>
                       <p>{group.description}</p>
                     </div>
                   </div>
-                  {renderServices(services)}
+                  {renderServices(services, true)}
                 </section>
               );
             })}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }
