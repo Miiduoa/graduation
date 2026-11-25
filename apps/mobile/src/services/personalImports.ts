@@ -77,20 +77,23 @@ async function readLedgerSnapshot(
     ? capturePersonalImportBrowserRecovery(window.localStorage, key)
     : undefined;
   const primaryVerified = isReadableLedger(primary, scope);
+  const verifiedByJournal = primary !== null && journal?.matchesVerifiedPrimary?.(primary) === true;
   const nativeCommit = !web && primaryVerified &&
-    (hasNativeCommitEncoding(primary) ||
-     (primary !== null && !!journal?.matchesVerifiedPrimary?.(primary)));
+    (hasNativeCommitEncoding(primary) || verifiedByJournal);
   if (!primaryVerified || journal?.rejected) {
     if (journal?.markerError) throw journal.markerError;
     if (journal?.payloadError) throw journal.payloadError;
   }
-  const nativeJournal = nativeCommit && !journal?.rejected ? undefined : journal?.raw;
+  // A records-first primary can reach disk before the final authority check.
+  // A readable pending copy takes precedence until publication is recorded.
+  const published = nativeCommit && (verifiedByJournal || primary?.startsWith('{"batches":'));
+  const nativeJournal = published && !journal?.rejected ? undefined : journal?.raw;
   if (primaryError && nativeJournal === undefined && !isStorageRowTooLarge(primaryError)) {
     throw primaryError;
   }
   const recovery: (Recovery & { ledger: PersonalImportLedger }) | null = browserRecovery
     ? selectPersonalImportBrowserRecovery(browserRecovery, primary, primaryVerified, (raw) => parseLedger(raw, scope))
-    : await readNativeRecovery(key, scope, primaryVerified, nativeJournal, checkpoint);
+    : await readNativeRecovery(key, scope, primaryVerified, nativeJournal, checkpoint, journal?.rejected);
   if (!recovery && primaryError) throw primaryError;
   return { primary, primaryVerified, browserRecovery, recovery, nativeCommit };
 }
@@ -111,6 +114,7 @@ async function readNativeRecovery(
   primaryVerified: boolean,
   nativeJournal: string | undefined,
   capturedCheckpoint?: Awaited<ReturnType<typeof readLegacyCheckpoint>>,
+  rejected = false,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
   // A marked native journal or an in-process rollback can supersede an
   // interrupted primary write. A standalone legacy checkpoint cannot.
@@ -132,9 +136,14 @@ async function readNativeRecovery(
   }
 
   if (nativeJournal === undefined) return null;
-  if (!nativeJournal) throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
   const raw = nativeJournal === 'null' ? null : nativeJournal;
-  return { raw, ledger: parseLedger(raw, scope), source: 'journal' };
+  try {
+    if (!nativeJournal) throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
+    return { raw, ledger: parseLedger(raw, scope), source: 'journal' };
+  } catch (error) {
+    if (primaryVerified && !rejected) return null;
+    throw error;
+  }
 }
 
 async function readLegacyCheckpoint(
@@ -421,8 +430,8 @@ export function mutatePersonalImportLedger<T>(
             const primaryCommitted = hasPersisted || (primaryVerified && recovery === null);
             const journal = preparePersonalImportRollback(key, persistedRaw, primaryCommitted);
             let cleaningRecovery = false;
-            // The first replacement must carry the commit encoding even if
-            // every later attempt to retire the recovery files fails.
+            // Mark the first replacement so it remains readable when the
+            // recovery files become unavailable during publication.
             const firstRaw = encodeNativeFirstWrite(ledger);
             try {
               await AsyncStorage.setItem(key, firstRaw);
@@ -438,18 +447,17 @@ export function mutatePersonalImportLedger<T>(
               keepNativeCommitEncoding = !journal.retire(assertWritable, checkpointRetired);
               if (keepNativeCommitEncoding) {
                 assertWritable();
-                journal.recordVerifiedPrimary(firstRaw);
                 const encoded = encodeNativeCommit(ledger);
                 try {
                   journal.preparePrimaryCommit();
                   await AsyncStorage.setItem(key, encoded);
                   await verifyNativeLedgerWrite(key, encoded);
+                  assertWritable();
                   writtenRaw = encoded;
                 } catch {
                   assertWritable();
-                  journal.retainVerifiedPrimary(firstRaw);
+                  journal.publishVerifiedFirstWrite(firstRaw);
                 }
-                assertWritable();
               }
               pendingRestorations.delete(key);
             } catch (error) {

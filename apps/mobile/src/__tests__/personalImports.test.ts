@@ -269,9 +269,8 @@ test.each([false, true])('native checkpoint cleanup preserves the rollback copy 
     }
     expect(remove).toHaveBeenCalledWith([checkpoint]);
     expect(journalDuringCleanup).toBe(original);
-    // The first replacement was verified before cleanup. A fresh process
-    // can read it, while the running writer can still restore on revocation.
-    expect(restartedLedger?.records.map(({ title }) => title)).toEqual(['行程 A', '行程 C']);
+    // The pending copy remains authoritative during the cleanup authority check.
+    expect(restartedLedger?.records.map(({ title }) => title)).toEqual(['行程 A']);
     expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
     expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
       .toEqual(revoked ? ['行程 A'] : ['行程 A', '行程 C']);
@@ -503,6 +502,10 @@ test.each([
       expect(expected.records.map(({ title }) => title)).toEqual(['微積分', '統計']);
       const primary = (await AsyncStorage.getItem(key))!;
       if (verifiedFirstWrite) expect(primary.startsWith('{"records":')).toBe(true);
+      if (failVerification && !markerReadFails) {
+        const publication = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.published`);
+        expect(publication.textSync()).toBe(sha256(JSON.stringify(previous)) + '\n' + sha256(primary));
+      }
       if (noRetirementFile) {
         expect(JSON.parse(primary)).toEqual(expected);
         expect(Buffer.byteLength(primary)).toBe(Buffer.byteLength(JSON.stringify(expected)));
@@ -583,63 +586,115 @@ test.each([
   }
 });
 
-test.each([false, true])('native restart restores a revoked deletion after rollback write failures (rejection file fails: %s)', async (rejectFileFails) => {
-  const scope = { owner: `nuni:rejected-delete-with-pending-payload-${rejectFileFails}`, schoolId: 'pu' };
-  const { ledger } = await appendPersonalImports(scope, [row('original')]);
-  const key = personalImportStorageKey(scope);
-  const prefix = `personal-imports-${sha256(key)}.rollback.`;
-  const set = jest.mocked(AsyncStorage.setItem);
-  const nativeSet = set.getMockImplementation()!;
-  const writeFile = File.prototype.write;
-  const createFile = File.prototype.create;
-  const restoreError = new Error('主鍵無法還原');
-  const rejectPayload = jest.fn(() => { throw new Error('無法標記還原副本'); });
-  let active = true;
-  set.mockImplementation(async (entry, value) => {
-    if (entry === key && !active) throw restoreError;
-    await nativeSet(entry, value);
-    if (entry === key) active = false;
-  });
-  const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
-    if (this.uri.endsWith(prefix + 'json') && typeof value === 'string' && value.startsWith('rejected:')) {
-      rejectPayload();
+test.each(['rejection file', 'pending marker', 'neither'] as const)(
+  'native restart restores a revoked deletion after rollback write failures (rejection recorded by %s)',
+  async (rejection) => {
+    const scope = { owner: `nuni:rejected-delete-with-pending-payload-${rejection}`, schoolId: 'pu' };
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    const key = personalImportStorageKey(scope);
+    const prefix = `personal-imports-${sha256(key)}.rollback.`;
+    const set = jest.mocked(AsyncStorage.setItem);
+    const nativeSet = set.getMockImplementation()!;
+    const writeFile = File.prototype.write;
+    const createFile = File.prototype.create;
+    const restoreError = new Error('主鍵無法還原');
+    const rejectPayload = jest.fn(() => { throw new Error('無法標記還原副本'); });
+    const rejectMarker = jest.fn(() => { throw new Error('無法改寫待處理標記'); });
+    const rejectFile = jest.fn(() => { throw new Error('無法建立拒絕標記'); });
+    const checkpointWrite = jest.mocked(AsyncStorage.multiSet);
+    const nativeMultiSet = checkpointWrite.getMockImplementation()!;
+    const rejectCheckpoint = jest.fn().mockRejectedValue(new Error('無法重建檢查點'));
+    if (rejection === 'neither') {
+      checkpointWrite.mockImplementation((entries, callback) =>
+        entries.some(([entry]) => entry === key + ':checkpoint')
+          ? rejectCheckpoint(entries)
+          : nativeMultiSet(entries, callback),
+      );
     }
-    writeFile.call(this, value, options);
-  });
-  const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
-    if (rejectFileFails && this.uri.endsWith(prefix + 'rejected')) throw new Error('無法建立拒絕標記');
-    createFile.call(this, options);
-  });
-  const notify = jest.fn();
-  const unsubscribe = subscribePersonalImports(notify);
-  try {
-    await expect(deletePersonalImport(scope, ledger.records[0], {
-      canContinue: () => active,
-      canCommitFirstWrite: () => active,
-    })).rejects.toBe(restoreError);
-    expect(rejectPayload).toHaveBeenCalledTimes(1);
-    expect(notify).not.toHaveBeenCalled();
-    expect(await AsyncStorage.getItem(key)).toMatch(/^\{"records":\[\]/);
-    expect(new File(Paths.document, prefix + 'pending').textSync()).toBe(rejectFileFails ? 'rejected' : '');
-    expect(new File(Paths.document, prefix + 'json').textSync()).toBe(JSON.stringify(ledger));
-    await jest.isolateModulesAsync(async () => {
-      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
-      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
-      write.mockRestore();
-      set.mockImplementation(nativeSet);
-      const { ledger: updated } = await restarted.appendPersonalImports(scope, [row('next', '統計')], {
-        canContinue: () => true,
-      });
-      expect(updated.records.map(({ id }) => id)).toEqual(['original', 'next']);
-      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(updated);
+    let active = true;
+    set.mockImplementation(async (entry, value) => {
+      if (entry === key && !active) throw restoreError;
+      await nativeSet(entry, value);
+      if (entry === key) active = false;
     });
-  } finally {
-    unsubscribe();
-    write.mockRestore();
-    create.mockRestore();
-    set.mockImplementation(nativeSet);
-  }
-});
+    const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+      if (this.uri.endsWith(prefix + 'json') && typeof value === 'string' && value.startsWith('rejected:')) {
+        rejectPayload();
+      }
+      if (rejection === 'neither' && this.uri.endsWith(prefix + 'pending') && value === 'rejected') {
+        rejectMarker();
+      }
+      writeFile.call(this, value, options);
+    });
+    const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
+      if (rejection !== 'rejection file' && this.uri.endsWith(prefix + 'rejected')) rejectFile();
+      createFile.call(this, options);
+    });
+    const notify = jest.fn();
+    const unsubscribe = subscribePersonalImports(notify);
+    try {
+      await expect(deletePersonalImport(scope, ledger.records[0], {
+        canContinue: () => active,
+        canCommitFirstWrite: () => active,
+      })).rejects.toBe(restoreError);
+      expect(rejectPayload).toHaveBeenCalledTimes(1);
+      expect(rejectFile).toHaveBeenCalledTimes(rejection === 'rejection file' ? 0 : 1);
+      expect(rejectMarker).toHaveBeenCalledTimes(rejection === 'neither' ? 1 : 0);
+      if (rejection === 'neither') {
+        expect(rejectCheckpoint).toHaveBeenCalledWith([[key + ':checkpoint', JSON.stringify(ledger)]]);
+        expect(await AsyncStorage.getItem(key + ':checkpoint')).toBeNull();
+      }
+      expect(notify).not.toHaveBeenCalled();
+      expect(await AsyncStorage.getItem(key)).toMatch(/^\{"records":\[\]/);
+      expect(new File(Paths.document, prefix + 'pending').textSync()).toBe(rejection === 'pending marker' ? 'rejected' : '');
+      expect(new File(Paths.document, prefix + 'rejected').info().exists).toBe(rejection === 'rejection file');
+      expect(new File(Paths.document, prefix + 'json').textSync()).toBe(JSON.stringify(ledger));
+      await jest.isolateModulesAsync(async () => {
+        const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+        await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+        write.mockRestore();
+        set.mockImplementation(nativeSet);
+        const { ledger: updated } = await restarted.appendPersonalImports(scope, [row('next', '統計')], {
+          canContinue: () => true,
+        });
+        expect(updated.records.map(({ id }) => id)).toEqual(['original', 'next']);
+        await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(updated);
+      });
+    } finally {
+      unsubscribe();
+      write.mockRestore();
+      create.mockRestore();
+      set.mockImplementation(nativeSet);
+      checkpointWrite.mockImplementation(nativeMultiSet);
+    }
+  },
+);
+
+test.each(['', '{"version":1,"records":[', '{"version":1,"records":[],"batches":{}}'])(
+  'native can load and edit a legacy primary with a corrupt pending payload %j',
+  async (damaged) => {
+    const scope = { owner: `nuni:legacy-primary-with-pending-${sha256(damaged)}`, schoolId: 'pu' };
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    const key = personalImportStorageKey(scope);
+    expect(await AsyncStorage.getItem(key)).toBe(JSON.stringify(ledger));
+    const journal = preparePersonalImportRollback(key, JSON.stringify(ledger));
+    new File(Paths.document, `personal-imports-${sha256(key)}.rollback.json`).write(damaged);
+    try {
+      await jest.isolateModulesAsync(async () => {
+        const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+        await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+        const edited = await restarted.editPersonalImport(scope, ledger.records[0], row('original', '化學'), {
+          canContinue: () => true,
+          canCommitFirstWrite: () => true,
+        });
+        expect(edited.records.map(({ title }) => title)).toEqual(['化學']);
+        await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(edited);
+      });
+    } finally {
+      journal.retire();
+    }
+  },
+);
 
 test.each([true, false])('native restart reads a valid journal despite persistent checkpoint I/O (restored primary: %s)', async (restored) => {
   const scope = { owner: 'nuni:checkpoint-io-restart', schoolId: 'pu' };

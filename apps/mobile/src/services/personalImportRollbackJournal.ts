@@ -14,8 +14,8 @@ const rejectedMarker = 'rejected';
 const rejectedPrefix = 'rejected:\n';
 const rearmedPrefix = 'rearmed:\n';
 const committedPayloadPattern = /^committed:([a-f0-9]{64})\n/;
+const committedReceiptPattern = /^([a-f0-9]{64})\n([a-f0-9]{64})$/;
 const primaryHashPattern = /^[a-f0-9]{64}$/;
-const verifiedPrimaries = new Map<string, string>();
 const legacyStagePattern = /^campus\.personal-imports\.rollback\.v1:([a-f0-9]{64}):stage:\d+:[^:]+$/;
 const lockStore = 'writes';
 const stagePrefix = 'campus.personal-imports.stage.v2:';
@@ -515,13 +515,22 @@ export function capturePersonalImportRollback(key: string) {
   const recordedHash = verification?.startsWith(bindingPrefix) ? verification.slice(bindingPrefix.length) : undefined;
   const verifiedHash = recordedHash && primaryHashPattern.test(recordedHash)
     ? recordedHash
-    : verifiedPrimaries.get(key) ?? binding?.[1];
+    : binding?.[1];
+  const receipt = stored === undefined
+    ? undefined
+    : readOptionalFile(publicationFile(key))?.match(committedReceiptPattern);
+  const receiptHash = receipt && stored !== undefined && receipt[1] === sha256(stored)
+    ? receipt[2]
+    : undefined;
   return {
     raw: committed ? undefined : binding ? encoded?.slice(binding[0].length) : encoded,
     rejected,
     markerError: rejected && encoded !== undefined ? undefined : markerError,
     payloadError,
-    matchesVerifiedPrimary: verifiedHash ? (raw: string) => sha256(raw) === verifiedHash : undefined,
+    matchesVerifiedPrimary: verifiedHash || receiptHash ? (raw: string) => {
+      const hash = sha256(raw);
+      return hash === verifiedHash || hash === receiptHash;
+    } : undefined,
   };
 }
 
@@ -551,6 +560,10 @@ function verificationFile(key: string): File {
 
 function rejectionFile(key: string): File {
   return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.rejected`);
+}
+
+function publicationFile(key: string): File {
+  return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.published`);
 }
 
 export function preparePersonalImportRollback(key: string, raw: string | null, primaryCommitted = false) {
@@ -615,7 +628,11 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   }
   if (hadRetirement) deleteMarker(retirement);
   if (hadVerification) deleteMarker(verification);
-  verifiedPrimaries.delete(key);
+  const publication = publicationFile(key);
+  if (fileExists(publication) && !deleteMarker(publication)) {
+    publication.write('');
+    if (publication.textSync() !== '') throw new Error('無法更新匯入資料的還原標記。');
+  }
   const retire = (assertWritable = () => {}, canDeleteMarker = true) => {
     // Commit synchronously so verification and commit cannot be separated by another JS event.
     if (canDeleteMarker && deleteMarker(marker)) {
@@ -654,25 +671,33 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
   };
   return {
     retire,
-    recordVerifiedPrimary(primary: string) {
+    publishVerifiedFirstWrite(primary: string) {
+      const hash = sha256(primary);
       try {
-        // Record the first verified write before attempting another primary write.
-        // Keep the rollback payload independent of this verification.
-        const hash = sha256(primary);
+        // Record verification independently of the rollback payload.
         verification.write(rearmed ? sha256(replacement) + '\n' + hash : hash);
       } catch {
-        // The in-place commit and rollback payload remain available.
+        // The rollback payload can still carry the verification.
       }
-    },
-    retainVerifiedPrimary(primary: string) {
-      const hash = sha256(primary);
       try {
         // Tie retirement to the verified bytes while keeping the rollback copy.
         payload.write(wrap(`committed:${hash}\n${encoded}`));
       } catch {
-        // Keep the verified primary visible in this process if the journal
-        // also becomes unwritable.
-        verifiedPrimaries.set(key, hash);
+        // The verification file or publication receipt can still settle this write.
+      }
+      const current = capturePersonalImportRollback(key);
+      if (!current || (!current.rejected && current.matchesVerifiedPrimary?.(primary))) return;
+      if (current.rejected) throw new Error('無法確認匯入資料已儲存，請稍後再試。');
+      // Bind proof of publication to the rollback copy and the verified primary.
+      const receipt = sha256(readOptionalFile(payload) ?? replacement) + '\n' + hash;
+      try {
+        publication.write(receipt);
+        if (publication.textSync() !== receipt) {
+          throw new Error('無法確認匯入資料已儲存，請稍後再試。');
+        }
+      } catch (error) {
+        // The first-write encoding is sufficient when no pending copy is available.
+        if (current.raw !== undefined) throw error;
       }
     },
     preparePrimaryCommit() {
@@ -688,7 +713,6 @@ export function preparePersonalImportRollback(key: string, raw: string | null, p
 }
 
 export function retainRejectedPersonalImportRollback(key: string, raw: string | null): void {
-  verifiedPrimaries.delete(key);
   const { payload } = journalFiles(key);
   const rearmed = readOptionalFile(payload)?.startsWith(rearmedPrefix) === true;
   // Keep the old ledger authoritative when the commit encoding reached disk.
@@ -696,6 +720,7 @@ export function retainRejectedPersonalImportRollback(key: string, raw: string | 
     payload.write((rearmed ? rearmedPrefix : '') + rejectedPrefix + (raw ?? 'null'));
   } finally {
     discardPayload(verificationFile(key));
+    discardPayload(publicationFile(key));
   }
 }
 
@@ -717,10 +742,10 @@ export function recordFailedPersonalImportRestoration(key: string): void {
 export function clearPersonalImportRollback(key: string): void {
   const { payload, marker, marked } = journalFiles(key);
   if (!marked || deleteMarker(marker)) {
-    verifiedPrimaries.delete(key);
     discardPayload(retirementFile(key));
     discardPayload(verificationFile(key));
     discardPayload(rejectionFile(key));
+    discardPayload(publicationFile(key));
     discardPayload(payload);
   }
 }
