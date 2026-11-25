@@ -504,6 +504,32 @@ it('resolves deep links from loaded places and hands walking directions to a rea
   expect(screen.queryByRole('region', { name: '地點詳情' })).toBeNull();
 });
 
+it.each([false, true])('waits for bundled shared-route endpoints and honors cancellation (cancel=%s)', async (cancel) => {
+  const origin = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  const destination = PROVIDENCE_CAMPUS_PLACES.find((place) => place.name === '蓋夏圖書館')!;
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" route={origin.id + ',' + destination.id} />);
+  expect(screen.getByText(/正在確認連結的起點與終點/)).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route).toBeNull();
+  if (cancel) fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  // Synthetic coordinate change to model a source replacing a bundled marker.
+  const updated = { ...destination, lat: destination.lat + 0.001 };
+  await act(async () => source.resolve([origin, updated]));
+  expect(screen.queryByText(/正在確認連結的起點與終點/)).toBeNull();
+  if (cancel) {
+    expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+    expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route).toBeNull();
+  } else {
+    const card = screen.getByRole('region', { name: '步行導航' });
+    const google = new URL(within(card).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+    const apple = new URL(within(card).getByRole('link', { name: '使用 Apple 地圖規劃路線' }).getAttribute('href')!);
+    expect(google.searchParams.get('destination')).toBe(updated.lat + ',' + updated.lng);
+    expect(apple.searchParams.get('daddr')).toBe(google.searchParams.get('destination'));
+  }
+});
+
 it('provides keyboard-operable search, categories, selection and reset', async () => {
   state.user = null;
   render(<MapClient school="pu" />);
