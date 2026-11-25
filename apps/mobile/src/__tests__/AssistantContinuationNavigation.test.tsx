@@ -1,5 +1,5 @@
 import React, { createContext, useContext } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -229,12 +229,19 @@ test.each(['no-root', 'no-route', 'not-ready'] as const)('a queued return press 
   expect(await view.findByRole('button', { name: '接著問 nuni' })).toBeTruthy();
   const ticket = getAssistantContinuation();
   expect(ticket).not.toBeNull();
-  const queuedPress = view.UNSAFE_getAllByType(Pressable)
-    .find(button => button.props.accessibilityLabel === '接著問 nuni')?.props.onPress as (() => void) | undefined;
-  expect(queuedPress).toEqual(expect.any(Function));
+  // Start from the visible accessibility button. RN/Jest may represent
+  // Pressable as a host or forward-ref wrapper, so component-type matching
+  // is not stable. Capture its actual callback before navigation hides it.
+  let pressNode: ReturnType<typeof view.getByRole> | null = view.getByRole('button', { name: '接著問 nuni' });
+  while (pressNode && (pressNode.props.accessibilityLabel !== '接著問 nuni' ||
+    typeof pressNode.props.onPress !== 'function')) {
+    pressNode = pressNode.parent;
+  }
+  const queuedPress = pressNode?.props.onPress as (() => void) | undefined;
+  if (typeof queuedPress !== 'function') throw new Error('Visible return button must expose its real press callback');
   act(() => setHostSnapshot(snapshot));
   expect(view.queryByRole('button', { name: '接著問 nuni' })).toBeNull();
-  act(() => queuedPress?.());
+  act(() => queuedPress());
   expect(navigation.getCurrentRoute()?.name).toBe('MapV2');
   expect(getAssistantContinuation()).toBe(ticket);
   act(() => setHostSnapshot('normal'));
