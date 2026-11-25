@@ -569,7 +569,10 @@ async def run_scenario(browser, server_url, config):
                 }'''), 'Focus must land on the visible day heading'
                 report['checks'].append('Selecting Saturday pans to the day heading before focusing it')
 
-                await saturday.evaluate('button => button.scrollIntoView({block: "center", inline: "end"})')
+                await saturday.evaluate('''button => button.scrollIntoView({
+                  block: "center", inline: "end", behavior: "instant"
+                })''')
+                assert await page.evaluate('window.visualViewport.offsetLeft > 0'), 'The viewport must be panned before opening the editor'
                 # Preserve the current pan while opening the editor.
                 await page.get_by_role('button', name='新增行程', exact=True).evaluate('button => button.click()')
                 title = page.get_by_label('標題', exact=True)
