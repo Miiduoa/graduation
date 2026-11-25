@@ -868,7 +868,9 @@ test.each([
       owner: `nuni:rejected-delete-with-pending-payload-${rejection}-${revokedWrite}-${pendingReadFails}-${retirementReachedDisk}`,
       schoolId: 'pu',
     };
-    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    const retryAfterCommittedMarker = rejection === 'neither' && revokedWrite === 'batches' && retirementReachedDisk;
+    const rows = retryAfterCommittedMarker ? [row('original'), row('other', '物理')] : [row('original')];
+    const { ledger } = await appendPersonalImports(scope, rows);
     const key = personalImportStorageKey(scope);
     const prefix = `personal-imports-${sha256(key)}.rollback.`;
     const set = jest.mocked(AsyncStorage.setItem);
@@ -955,7 +957,7 @@ test.each([
       expect(notify).not.toHaveBeenCalled();
       const primary = (await AsyncStorage.getItem(key))!;
       expect(primary.startsWith(`{"${revokedWrite}":`)).toBe(true);
-      expect(JSON.parse(primary).records).toEqual([]);
+      expect(JSON.parse(primary).records).toEqual(ledger.records.slice(1));
       expect(replacementFault).toHaveBeenCalledTimes(replacementFailsBeforeWrite ? 1 : 0);
       if (attemptReplacement) {
         expect(retireByDelete).toHaveBeenCalledTimes(1);
@@ -968,6 +970,7 @@ test.each([
       expect(new File(Paths.document, prefix + 'rejected').info().exists).toBe(rejection === 'rejection file');
       const rollbackPayload = new File(Paths.document, prefix + 'json').textSync();
       expect(rollbackPayload.slice(rollbackPayload.indexOf('\n') + 1)).toBe(JSON.stringify(ledger));
+      expect(rollbackPayload.split('\n')[0]).toContain(sha256(primary));
       await jest.isolateModulesAsync(async () => {
         const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
         const textSync = File.prototype.textSync;
@@ -987,10 +990,45 @@ test.each([
         remove.mockRestore();
         create.mockRestore();
         set.mockImplementation(nativeSet);
+        if (retryAfterCommittedMarker) {
+          const marker = new File(Paths.document, prefix + 'pending');
+          const payload = new File(Paths.document, prefix + 'json');
+          const resetError = new Error('待處理標記重設未落盤');
+          const reset = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+            if (this.uri === marker.uri && value === '') throw resetError;
+            writeFile.call(this, value, options);
+          });
+          const retryNotify = jest.fn();
+          const unsubscribeRetry = restarted.subscribePersonalImports(retryNotify);
+          active = true;
+          set.mockClear();
+          try {
+            await expect(restarted.deletePersonalImport(scope, ledger.records[1], {
+              canContinue: () => active,
+              canCommitFirstWrite: () => active,
+            })).rejects.toBe(resetError);
+            const [attempt] = payload.textSync().split('\n');
+            expect(attempt).toMatch(/^attempt:/);
+            expect(attempt).not.toContain(sha256(primary));
+            expect(payload.textSync()).toContain(JSON.stringify(ledger));
+            expect(marker.textSync()).toBe('committed');
+            expect(new File(Paths.document, prefix + 'rejected').info().exists).toBe(false);
+            expect(set).not.toHaveBeenCalled();
+            expect(retryNotify).not.toHaveBeenCalled();
+            expect(await AsyncStorage.getItem(key)).toBe(primary);
+          } finally {
+            reset.mockRestore();
+            unsubscribeRetry();
+          }
+        }
+      });
+      await jest.isolateModulesAsync(async () => {
+        const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+        await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
         const { ledger: updated } = await restarted.appendPersonalImports(scope, [row('next', '統計')], {
           canContinue: () => true,
         });
-        expect(updated.records.map(({ id }) => id)).toEqual(['original', 'next']);
+        expect(updated.records.map(({ id }) => id)).toEqual([...rows.map(({ id }) => id), 'next']);
         await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(updated);
       });
     } finally {
@@ -1262,14 +1300,24 @@ test.each([
 });
 
 
-test.each(['payload write', 'pending creation', 'pending missing after creation'] as const)(
-  'native append and edit use the readable primary when journal preparation fails at %s',
-  async (phase) => {
-    const scope = { owner: `nuni:optional-rollback-${phase}`, schoolId: 'pu' };
+test.each([
+  ['payload write', true],
+  ['pending creation', true],
+  ['pending missing after creation', true],
+  ['payload readback', true],
+  ['payload write', false],
+  ['pending creation', false],
+] as const)(
+  'native append and edit survive journal preparation failure at %s (existing primary: %s)',
+  async (phase, existingPrimary) => {
+    const scope = { owner: `nuni:optional-rollback-${phase}-${existingPrimary}`, schoolId: 'pu' };
     const key = personalImportStorageKey(scope);
     const prefix = `personal-imports-${sha256(key)}.rollback.`;
-    const { ledger } = await appendPersonalImports(scope, [row('first')]);
-    const { write: writeFile, create: createFile } = File.prototype;
+    if (existingPrimary) await appendPersonalImports(scope, [row('first')]);
+    else expect(await AsyncStorage.getItem(key)).toBeNull();
+    const { write: writeFile, create: createFile, textSync } = File.prototype;
+    const payload = new File(Paths.document, prefix + 'json');
+    const pending = new File(Paths.document, prefix + 'pending');
     const fault = jest.fn();
     const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
       if (phase === 'payload write' && this.uri.endsWith(prefix + 'json')) {
@@ -1279,22 +1327,33 @@ test.each(['payload write', 'pending creation', 'pending missing after creation'
       writeFile.call(this, value, options);
     });
     const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
-      if (phase !== 'payload write' && this.uri.endsWith(prefix + 'pending')) {
+      if (this.uri === pending.uri && (phase === 'pending creation' || phase === 'pending missing after creation')) {
         fault();
         if (phase === 'pending creation') throw new Error('待處理標記無法建立');
         return;
       }
       createFile.call(this, options);
     });
+    const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+      if (phase === 'payload readback' && this.uri === payload.uri) {
+        expect(payload.info().exists).toBe(true);
+        expect(pending.info().exists).toBe(false);
+        fault();
+        throw new Error('還原副本持續無法讀回');
+      }
+      return textSync.call(this);
+    });
     const guard = { canContinue: () => true, canCommitFirstWrite: () => true };
     const reread = jest.fn(() => loadPersonalImports(scope));
     const unsubscribe = subscribePersonalImports(reread);
     try {
       const appended = await appendPersonalImports(scope, [row('second', '統計')], guard);
-      expect(appended.ledger.records.map(({ title }) => title)).toEqual(['微積分', '統計']);
+      expect(appended.ledger.records.map(({ title }) => title)).toEqual(existingPrimary ? ['微積分', '統計'] : ['統計']);
       await expect(reread.mock.results[0].value).resolves.toEqual(appended.ledger);
-      const edited = await editPersonalImport(scope, ledger.records[0], row('first', '化學'), guard);
-      expect(edited.records.map(({ title }) => title)).toEqual(['化學', '統計']);
+      const edited = await editPersonalImport(
+        scope, appended.ledger.records[0], row(existingPrimary ? 'first' : 'second', '化學'), guard,
+      );
+      expect(edited.records.map(({ title }) => title)).toEqual(existingPrimary ? ['化學', '統計'] : ['化學']);
       expect(reread).toHaveBeenCalledTimes(2);
       await expect(reread.mock.results[1].value).resolves.toEqual(edited);
       expect(fault).toHaveBeenCalledTimes(2);
@@ -1305,6 +1364,7 @@ test.each(['payload write', 'pending creation', 'pending missing after creation'
       });
     } finally {
       unsubscribe();
+      read.mockRestore();
       create.mockRestore();
       write.mockRestore();
     }

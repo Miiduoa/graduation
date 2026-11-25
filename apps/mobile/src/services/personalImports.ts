@@ -99,7 +99,9 @@ async function readLedgerSnapshot(
     ? selectPersonalImportBrowserRecovery(browserRecovery, primary, primaryVerified, (raw) => parseLedger(raw, scope))
     : await readNativeRecovery(key, scope, primaryVerified, nativeJournal, checkpoint, journal?.rejected);
   if (!recovery && primaryError) throw primaryError;
-  return { primary, primaryVerified, browserRecovery, recovery };
+  const preserveAttemptRejection = attemptedPrimary && !verifiedByJournal &&
+    recovery !== null && recovery.raw !== primary;
+  return { primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection };
 }
 
 function isReadableLedger(raw: string | null, scope: PersonalImportScope): boolean {
@@ -384,7 +386,8 @@ export function mutatePersonalImportLedger<T>(
         assertLockHeld();
       };
       assertWritable();
-      const { primary, primaryVerified, browserRecovery, recovery } = await readLedgerSnapshot(key, scope);
+      const { primary, primaryVerified, browserRecovery, recovery, preserveAttemptRejection } =
+        await readLedgerSnapshot(key, scope);
       let primaryRaw = primary;
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
@@ -441,12 +444,16 @@ export function mutatePersonalImportLedger<T>(
               journal = preparePersonalImportRollback(key, persistedRaw, primaryCommitted, {
                 first: firstRaw,
                 replacement,
+                preserveRejection: !hasPersisted && preserveAttemptRejection,
               });
             } catch (error) {
               if (!(error instanceof NativeRollbackUnavailableError)) throw error;
-              // A readable primary can support ordinary saves when the
-              // document directory cannot prepare an auxiliary copy.
-              if (!options.allowNativePrimaryOnly || !primaryCommitted) throw error.failure;
+              // AsyncStorage can support an ordinary save from a readable
+              // primary or a confirmed empty ledger without an auxiliary copy.
+              const emptyPrimary = primary === null && recovery === null;
+              if (!options.allowNativePrimaryOnly || (!primaryCommitted && !emptyPrimary)) {
+                throw error.failure;
+              }
             }
             assertWritable();
             try {

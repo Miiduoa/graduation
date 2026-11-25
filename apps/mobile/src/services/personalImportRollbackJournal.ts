@@ -622,7 +622,7 @@ export function preparePersonalImportRollback(
   key: string,
   raw: string | null,
   primaryCommitted = false,
-  attemptedPrimary?: { first: string; replacement: string },
+  attemptedPrimary?: { first: string; replacement: string; preserveRejection?: boolean },
 ) {
   const encoded = raw ?? 'null';
   const { payload, marker, marked } = journalFiles(key);
@@ -663,7 +663,9 @@ export function preparePersonalImportRollback(
     : '';
   const wrap = (value: string) => prefix + attempt + value;
   const previousBody = previous?.replace(rearmedPattern, '').replace(attemptPattern, '');
-  const rejected = markerRejected ||
+  // An adopted rollback may have only the previous attempt hashes to reject
+  // the primary. Carry that rejection across the payload overwrite.
+  const rejected = markerRejected || attemptedPrimary?.preserveRejection ||
     previousBody === rejectedPrefix + encoded;
   let writtenPayload = wrap(rejected ? rejectedPrefix + encoded : encoded);
   if (previous !== writtenPayload) {
@@ -673,7 +675,13 @@ export function preparePersonalImportRollback(
       if (!rejected && !hadRejection) throw new NativeRollbackUnavailableError(error);
       throw error;
     }
-    const written = marked && primaryCommitted ? readOptionalFile(payload) : payload.textSync();
+    let written: string | undefined;
+    try {
+      written = marked && primaryCommitted ? readOptionalFile(payload) : payload.textSync();
+    } catch (error) {
+      if (!marked && !rejected && !hadRejection) throw new NativeRollbackUnavailableError(error);
+      throw error;
+    }
     // On a read fault, the verified primary still holds the original bytes.
     if (written !== undefined && written !== writtenPayload) {
       throw new Error('無法確認匯入資料的還原副本已寫入。');
