@@ -63,7 +63,7 @@ export function AssignmentReplyActions({ read, snapshot, context, disabled, onAs
         <>
           <CampusAssignmentOpenButton assignment={single} context={{ ...context, snapshot }} navigation={context.navigation} disabled={disabled} />
           {single.dueAt && Number.isFinite(confirmedTimestamp(single.dueAt)) && (
-            <CampusAssignmentReminderAction step={{ title: campusAssignmentDisplayTitle(single.title), groupName: single.groupName,
+            <CampusAssignmentReminderAction step={{ title: single.title, groupName: single.groupName,
               dueAt: single.dueAt, evidence: 'authorized-assignments', route: '/classroom' }}
               reviewOnOpen={read.reviewReminder} snapshot={snapshot} userId={context.userId} schoolId={context.schoolId}
               isCurrent={context.isCurrent} disabled={disabled} />
