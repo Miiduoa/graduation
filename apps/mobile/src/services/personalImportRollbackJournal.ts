@@ -502,7 +502,8 @@ function journalFiles(key: string) {
 export function capturePersonalImportRollback(key: string) {
   const { payload, marker, marked } = journalFiles(key);
   const rejection = rejectionFile(key);
-  const rejectionValue = fileExists(rejection) ? readOptionalFile(rejection) : resolvedRejection;
+  const rejectionValue = fileExists(rejection) ? readOptionalFile(rejection) ??
+    (!marked ? readOptionalFile(rejectionBackupFile(key)) : undefined) : resolvedRejection;
   const verifiedReceipt = readRollbackResolution(rejectionValue);
   const rejectionRecorded = rejectionValue !== resolvedRejection && verifiedReceipt === undefined;
   const targetedRejection = rejectionValue?.match(targetedRejectionPattern);
@@ -547,6 +548,11 @@ export function capturePersonalImportRollback(key: string) {
       if (!markerCommitted) payloadError = error;
     }
   }
+  // Pending is created after the payload is verified. Verified cleanup can
+  // remove the payload even when deleting an older rejection file fails.
+  if (stored === undefined && !fileExists(payload) &&
+      (!rejected || (rejectionUnreadable && rejectionValue !== '')) &&
+      !fileExists(rejectionBackupFile(key))) return undefined;
   const rearmed = rearmedPattern.test(stored ?? '');
   const body = stored?.replace(rearmedPattern, '');
   const attempt = body?.match(attemptPattern);
@@ -559,11 +565,19 @@ export function capturePersonalImportRollback(key: string) {
   // explicit rejection makes their hash evidence for rolling back.
   const fallbackHash = attempt?.[4];
   const matchesFallbackPrimary = fallbackHash ? (raw: string) => sha256(raw) === fallbackHash : undefined;
+  const binding = encoded?.match(committedPayloadPattern);
+  const rollbackRaw = binding ? encoded?.slice(binding[0].length) : encoded;
+  // A rejection bound to this attempt can survive both marker reads failing.
+  const rejectionBackup = rejectionBackupFile(key);
+  const backupDenial = attempt && (rejectionUnreadable || markerError !== undefined) &&
+    fileExists(rejectionBackup) ? readOptionalFile(rejectionBackup) ?? attempt[0] : undefined;
+  const deniedAttempt = backupDenial !== undefined && backupDenial === attempt?.[0];
   // A revoked publication can leave its verified encoding in AsyncStorage
   // if restoring the original bytes there also fails.
-  if (encoded?.startsWith(rejectedPrefix)) {
+  const rejectedRaw = encoded?.startsWith(rejectedPrefix) ? encoded.slice(rejectedPrefix.length) : undefined;
+  if (rejectedRaw !== undefined || deniedAttempt) {
     return {
-      raw: encoded.slice(rejectedPrefix.length),
+      raw: rejectedRaw ?? rollbackRaw,
       rejected: true,
       // Preparing a retry can replace the attempt hashes before the primary
       // changes. The explicit rejection still protects the original bytes.
@@ -572,7 +586,6 @@ export function capturePersonalImportRollback(key: string) {
       matchesFallbackPrimary,
     };
   }
-  const binding = encoded?.match(committedPayloadPattern);
   const verification = readOptionalFile(verificationFile(key));
   // A surviving sidecar can verify a rearmed journal only when it describes
   // the same payload.
@@ -589,14 +602,10 @@ export function capturePersonalImportRollback(key: string) {
       if (receipt?.[1] === payloadHash) receiptHashes.push(receipt[2]);
     }
   }
-  const rollbackRaw = binding ? encoded?.slice(binding[0].length) : encoded;
-  // Ordinary edits to a readable ledger can use the hash in the prepared
-  // copy when publication fails. A rejected payload or marker wins. If the
-  // rejection file cannot be read, the exact ordinary attempt binding can
-  // still verify the primary. A readable blank rejection is evidence of failure.
   const matchesOrdinaryPrimary = attempt?.[1].startsWith(ordinaryAttemptPrefix) &&
     (!rejected || (rejectionUnreadable && rejectionValue !== ''))
-    ? matchesAttemptedPrimary
+    ? (raw: string) => matchesAttemptedPrimary?.(raw) === true ||
+      (rejectionUnreadable && matchesFallbackPrimary?.(raw) === true)
     : undefined;
   const settlement = readOptionalFile(settlementFile(key));
   const settlementPrefix = attempt?.[0] ?? '';
@@ -679,6 +688,10 @@ function rejectionFile(key: string): File {
   return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.rejected`);
 }
 
+function rejectionBackupFile(key: string): File {
+  return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.rejected.bak`);
+}
+
 export function publishNativeRollbackResolution(key: string, receipt: string): void {
   const file = rejectionFile(key);
   const resolution = verifiedRejectionPrefix + receipt;
@@ -689,10 +702,21 @@ export function publishNativeRollbackResolution(key: string, receipt: string): v
 }
 
 export function clearVerifiedNativeRollback(key: string): boolean {
-  const { payload, marked } = journalFiles(key);
-  const rejection = rejectionFile(key);
-  if (fileExists(rejection) && !deleteMarker(rejection)) return false;
-  return !marked || !fileExists(payload) || deleteMarker(payload);
+  const clear = (file: File) => !fileExists(file) || deleteMarker(file);
+  let rejectionCleared = false;
+  let payloadCleared = false;
+  try {
+    rejectionCleared = clear(rejectionFile(key));
+  } catch {
+    // An unreadable rejection file still needs a publication proof.
+  }
+  try {
+    const { payload, marked } = journalFiles(key);
+    payloadCleared = !marked || clear(payload);
+  } catch {
+    // A failed existence probe cannot confirm that cleanup completed.
+  }
+  return rejectionCleared && payloadCleared;
 }
 
 function publicationFile(key: string): File {
@@ -960,9 +984,15 @@ export function preparePersonalImportRollback(
       } catch {
         // The verification file or publication receipt can still settle this write.
       }
-      const current = capturePersonalImportRollback(key);
-      if (!fileExists(marker) || (current && !current.rejected &&
-          current.matchesVerifiedPrimary?.(primary))) return true;
+      let current: ReturnType<typeof capturePersonalImportRollback>;
+      try {
+        current = capturePersonalImportRollback(key);
+        if (!fileExists(marker) || (current && !current.rejected &&
+            current.matchesVerifiedPrimary?.(primary))) return true;
+      } catch (error) {
+        if (!allowPrimaryOnly) throw error;
+        return false;
+      }
       if (current?.rejected) {
         // An auxiliary read can report rejection after the caller verified
         // the primary. Let ordinary saves try the independent proof stores.
@@ -1018,9 +1048,13 @@ export function preparePersonalImportRollback(
       try {
         payload.write(wrap(rejectedPrefix + encoded));
       } catch (error) {
-        // The ordinary attempt can be recovered from its primary binding.
-        // If its payload cannot record rejection, try the pending marker too.
-        if (ordinary) marker.write(rejectedMarker);
+        if (ordinary) {
+          try {
+            rejectionBackupFile(key).write(attempt);
+          } finally {
+            marker.write(rejectedMarker);
+          }
+        }
         throw error;
       } finally {
         discardPayload(verification);
@@ -1047,6 +1081,11 @@ export function recordFailedPersonalImportRestoration(
       const evidence = rejectedPrimary === undefined
         ? originalHash
         : `rejected:${originalHash}:${sha256(rejectedPrimary)}`;
+      try {
+        rejectionBackupFile(key).write(evidence);
+      } catch {
+        // The other rejection file may still be writable.
+      }
       rejection.write(evidence);
     } else if (!fileExists(rejection)) {
       rejection.create();
@@ -1069,6 +1108,7 @@ export function clearPersonalImportRollback(key: string): void {
     discardPayload(retirementFile(key));
     discardPayload(verificationFile(key));
     discardPayload(rejectionFile(key));
+    discardPayload(rejectionBackupFile(key));
     discardPayload(publicationFile(key));
     discardPayload(publicationBackupFile(key));
     discardPayload(settlementFile(key));

@@ -128,7 +128,8 @@ async function readLedgerSnapshot(
   const restoredEmpty = primary === null && !primaryError && !restorationPending &&
     rejectionMatches?.(null) === true;
   const attemptedPrimary = primary !== null && journal?.matchesAttemptedPrimary?.(primary) === true;
-  const needsReceipt = primaryVerified && (attemptedPrimary || rejectionMatches !== undefined);
+  const fallbackPrimary = primary !== null && journal?.matchesFallbackPrimary?.(primary) === true;
+  const needsReceipt = primaryVerified && (attemptedPrimary || fallbackPrimary || rejectionMatches !== undefined);
   const receipt = needsReceipt ? await readNativeReceipt(nativeReceiptKey(key)) : null;
   const fileReceipt = needsReceipt ? readNativeVerificationReceipt(key) : undefined;
   const backupReceipt = needsReceipt ? await readNativeReceipt(nativeBackupReceiptKey(key)) : null;
@@ -165,7 +166,7 @@ async function readLedgerSnapshot(
   );
   const rejectedPrimary = journal?.rejected && !ordinaryPrimary && !resolvedUnreadableRejection && (
     journal.hasRejectedPayload || attemptedPrimary || journal.raw === primary ||
-    (primary !== null && journal.matchesFallbackPrimary?.(primary)) ||
+    fallbackPrimary ||
     (nativeRejectionBinding !== undefined && rejectionMatches === undefined) ||
     (journal.payloadError && hasNativeCommitEncoding(primary))
   );
@@ -627,6 +628,7 @@ export function mutatePersonalImportLedger<T>(
                   const readback = await readNativeStorage(key);
                   if (readback === raw) {
                     writtenRaw = raw;
+                    if (options.allowNativePrimaryOnly) newReceipt = journal.verificationReceipt(raw);
                   } else if (!fallbackWritten && readback === writtenRaw) {
                     newReceipt = journal.verificationReceipt(writtenRaw);
                   } else {
