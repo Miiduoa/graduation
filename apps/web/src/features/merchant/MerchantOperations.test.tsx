@@ -171,7 +171,7 @@ it('keeps a confirmed missing menu after a legacy list and an unavailable detail
       locationId={current.locationId}
       drafts={drafts}
       suspended={false}
-      beginRequest={confirmed.beginRequest}
+      confirmations={confirmed}
       confirmedDetail={confirmed.verifiedDetails().get(key) ?? null}
       onBack={vi.fn()}
       onChanged={(detail, verifiedAccess, revision) =>
@@ -223,7 +223,7 @@ it('clears the initial menu success when a delayed versioned list confirms a mis
       locationId={current.locationId}
       drafts={drafts}
       suspended={false}
-      beginRequest={confirmed.beginRequest}
+      confirmations={confirmed}
       confirmedDetail={confirmed.verifiedDetails().get(key) ?? null}
       onBack={vi.fn()}
       onChanged={(detail, verifiedAccess, revision) =>
@@ -298,7 +298,7 @@ it.each(['legacy list first', 'versioned suspension first'])(
         locationId={suspended.locationId}
         suspended={false}
         drafts={drafts}
-        beginRequest={confirmed.beginRequest}
+        confirmations={confirmed}
         onChanged={(detail, verifiedAccess, revision) =>
           confirmed.confirmDetail(detail, revision, verifiedAccess)
         }
@@ -363,7 +363,7 @@ it.each([true, false])(
         locationId={current.locationId}
         suspended={false}
         drafts={drafts}
-        beginRequest={confirmed.beginRequest}
+        confirmations={confirmed}
         onChanged={(detail, verifiedAccess, revision) =>
           confirmed.confirmDetail(detail, revision, verifiedAccess)
         }
@@ -435,7 +435,7 @@ it.each(['settings form', 'counter payment'])(
         locationId={current.locationId}
         suspended={false}
         drafts={drafts}
-        beginRequest={confirmed.beginRequest}
+        confirmations={confirmed}
         onChanged={(detail, verifiedAccess, revision) =>
           confirmed.confirmDetail(detail, revision, verifiedAccess)
         }
@@ -849,4 +849,73 @@ it('expires the account boundary when authorization is revoked', async () => {
   render(view());
   await waitFor(() => expect(onExpired).toHaveBeenCalledOnce());
   expect(screen.queryByLabelText('付款方式')).toBeNull();
+});
+
+it('ties shared access recovery to the GET version and the latest failure revision', () => {
+  const confirmed = createMerchantConfirmations(drafts);
+  const v7 = { ...initial(), readinessVersion: 7 };
+  const v8 = { ...v7, readinessVersion: 8 };
+  const key = workspaceKey(v7);
+  const entry = confirmed.beginRequest();
+  confirmed.confirmDetail(v7, entry, true);
+  const write = confirmed.beginRequest();
+  const preWriteRead = confirmed.beginRequest();
+  confirmed.confirmDetail(v7, preWriteRead, true);
+  confirmed.confirmDetail(v8, write, false);
+
+  expect(confirmed.detailReadConfirmation(key)).toBeUndefined();
+  const backgroundRead = confirmed.beginRequest();
+  const newerFailure = confirmed.beginRequest();
+  confirmed.recordDetailFailure(key, newerFailure);
+  confirmed.confirmDetail(v8, backgroundRead, true);
+
+  expect(confirmed.detailFor(key)?.readinessVersion).toBe(8);
+  expect(confirmed.detailReadConfirmation(key)).toBeUndefined();
+  expect(confirmed.canUseAccess(key, backgroundRead)).toBe(false);
+  expect(confirmed.confirmDetail(v7, confirmed.beginRequest(), true)).toBeNull();
+
+  const retry = confirmed.beginRequest();
+  confirmed.confirmDetail(v8, retry, true);
+  expect(confirmed.detailReadConfirmation(key)).toEqual({ revision: retry, version: 8 });
+  expect(confirmed.canUseAccess(key, retry)).toBe(true);
+});
+
+it.each([7, 8])('keeps a winning first-menu receipt through workspace snapshots at v%s', (version) => {
+  const before = { ...initial(), readinessVersion: 8 };
+  const key = workspaceKey(before);
+  const draft = { menuReceipt: null as number | null };
+  const confirmed = createMerchantConfirmations(new Map([[key, draft]]));
+  confirmed.mergeWorkspaceList([before], confirmed.beginRequest());
+  confirmed.confirmDetail(before, confirmed.beginRequest(), true);
+  const preWriteRead = confirmed.beginRequest();
+  expect(confirmed.confirmMenu(key, confirmed.beginRequest(), 1)).toBe(true);
+
+  const snapshot = { ...before, readinessVersion: version };
+  confirmed.confirmDetail(snapshot, preWriteRead, true);
+  confirmed.mergeWorkspaceList([snapshot], confirmed.beginRequest());
+  confirmed.confirmDetail(snapshot, confirmed.beginRequest(), false);
+  expect(draft.menuReceipt).toBe(1);
+  expect(confirmed.detailFor(key)?.missingRequirements).toEqual(['settings']);
+  expect(confirmed.overview()?.workspaces[0].missingRequirements).toEqual(['settings']);
+
+  confirmed.confirmDetail(
+    { ...before, publishedMenuItems: 1, missingRequirements: ['settings'] },
+    confirmed.beginRequest(),
+    true,
+  );
+  expect(draft.menuReceipt).toBe(1);
+  expect(confirmed.detailFor(key)?.publishedMenuItems).toBe(1);
+});
+
+it('keeps omitted requirements on legacy detail through a same-version pre-write snapshot', () => {
+  const legacy = { ...initial(), missingRequirements: undefined };
+  const key = workspaceKey(legacy);
+  const draft = { menuReceipt: null as number | null };
+  const confirmed = createMerchantConfirmations(new Map([[key, draft]]));
+  confirmed.confirmDetail(legacy, confirmed.beginRequest(), true);
+  expect(confirmed.confirmMenu(key, confirmed.beginRequest(), 1)).toBe(true);
+
+  confirmed.confirmDetail(initial(), confirmed.beginRequest(), true);
+  expect(confirmed.detailFor(key)?.missingRequirements).toBeUndefined();
+  expect(draft.menuReceipt).toBe(1);
 });

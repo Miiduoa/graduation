@@ -147,6 +147,14 @@ export function parseMerchantWorkspaceDetail(
   value: unknown,
   identity?: NuniMerchantWorkspaceIdentity,
 ): NuniMerchantWorkspaceDetail {
+  return parseWorkspaceDetail(value, identity, false);
+}
+
+function parseWorkspaceDetail(
+  value: unknown,
+  identity: NuniMerchantWorkspaceIdentity | undefined,
+  allowOmittedRequirements: boolean,
+): NuniMerchantWorkspaceDetail {
   const row = record(
     value,
     [
@@ -186,6 +194,8 @@ export function parseMerchantWorkspaceDetail(
   choice(base.merchantStatus, ['active', 'suspended'], invalidResponse);
   choice(base.locationStatus, ['open', 'closed', 'suspended'], invalidResponse);
   if (
+    base.activated === undefined ||
+    (!allowOmittedRequirements && base.missingRequirements === undefined) ||
     base.missingRequirements?.some((item) => !['settings', 'menu', 'online-payment'].includes(item))
   )
     return invalidResponse();
@@ -200,7 +210,7 @@ export function parseMerchantWorkspaceDetail(
     return invalidResponse();
   return {
     ...base,
-    activated: base.activated ?? false,
+    activated: base.activated,
     applicationId: text(row.applicationId, 1, 100, invalidResponse),
     merchantId: text(row.merchantId, 1, 120, invalidResponse),
     campusId: row.campusId === null ? null : text(row.campusId, 1, 64, invalidResponse),
@@ -244,7 +254,11 @@ export function parseMerchantInitialMenuReceipt(
   return { menuVersionId, createdItems };
 }
 
-export function createMerchantOperations(transport: NuniMerchantOperationsTransport) {
+export function createMerchantOperations(
+  transport: NuniMerchantOperationsTransport,
+  // Browser reads can retain legacy omissions. The server and mutation receipts use strict validation.
+  options?: { allowOmittedReadRequirements: true },
+) {
   function scope(tenantId: string, locationId: string) {
     const identity = validateMerchantWorkspaceIdentity({ tenantId, locationId });
     return { identity, path: `merchant-workspaces/${identity.tenantId}/${identity.locationId}` };
@@ -252,7 +266,11 @@ export function createMerchantOperations(transport: NuniMerchantOperationsTransp
   return {
     async get(tenantId: string, locationId: string) {
       const { identity, path } = scope(tenantId, locationId);
-      return parseMerchantWorkspaceDetail(await transport(path), identity);
+      return parseWorkspaceDetail(
+        await transport(path),
+        identity,
+        options?.allowOmittedReadRequirements === true,
+      );
     },
     async updateSettings(tenantId: string, locationId: string, value: unknown) {
       const { identity, path } = scope(tenantId, locationId);

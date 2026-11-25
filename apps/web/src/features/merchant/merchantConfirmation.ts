@@ -86,6 +86,8 @@ export const workspaceKey = ({
   locationId,
 }: Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'>) => `${tenantId}:${locationId}`;
 
+export type MerchantConfirmations = ReturnType<typeof createMerchantConfirmations>;
+
 export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuReceipt: number | null }>) {
   let lists: Partial<Omit<MerchantOverview, 'workspaces'>> = {};
   // Keep list membership separate from the revocable observations used to render rows.
@@ -157,7 +159,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     if (listedRevision > listRevocation || listedWorkspaces?.size === 0) return listedWorkspaces;
   }
 
-  function merge(next: NuniMerchantWorkspaceListRow, revision: number) {
+  function merge<T extends NuniMerchantWorkspaceListRow>(next: T, revision: number) {
     const key = workspaceKey(next);
     if (revision <= Math.max(listRevocation, revokedThrough(key))) return;
     // A legacy list can update metadata, but only a versioned response can
@@ -169,6 +171,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     if (floor !== undefined && next.readinessVersion !== undefined && next.readinessVersion < floor) {
       return;
     }
+    next = preserveMenuReceipt(next, revision);
     const observation = latestRow(entry.row, next, revision);
     const row = { ...observation, version: observation.version ?? floor };
     if (next.readinessVersion !== undefined) {
@@ -208,21 +211,31 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     }
     entry.row = row;
     entries.set(key, entry);
-    return entry;
+    return { entry, value: next };
   }
 
-  function preserveMenuReceipt<T extends NuniMerchantWorkspaceListRow>(next: T): T {
-    const receiptVersion = menuReceipts.get(workspaceKey(next))?.version;
+  function preserveMenuReceipt<T extends NuniMerchantWorkspaceListRow>(next: T, revision: number): T {
+    const key = workspaceKey(next);
+    const receipt = menuReceipts.get(key);
     // Both GETs can observe the pre-write menu at the version the receipt confirmed.
     if (
-      receiptVersion === undefined || next.readinessVersion === undefined ||
-      next.readinessVersion > receiptVersion || !next.missingRequirements?.includes('menu')
+      !receipt || !next.missingRequirements?.includes('menu') ||
+      (receipt.version === undefined
+        ? revision > receipt.revision && next.readinessVersion !== undefined
+        : next.readinessVersion !== undefined && next.readinessVersion > receipt.version)
     ) return next;
+    const isDetail = 'publishedMenuItems' in next;
+    const currentDetail = entries.get(key)?.detail?.value;
+    const keepOmission = isDetail && currentDetail &&
+      currentDetail.readinessVersion === next.readinessVersion &&
+      currentDetail.missingRequirements === undefined;
     return {
       ...next,
-      missingRequirements: next.missingRequirements.filter((item) => item !== 'menu'),
+      missingRequirements: keepOmission
+        ? undefined
+        : next.missingRequirements.filter((item) => item !== 'menu'),
       // A receipt confirms creation. A pre-write detail cannot confirm available stock.
-      ...('publishedMenuItems' in next ? { publishedMenuItems: 0 } : {}),
+      ...(isDetail ? { publishedMenuItems: 0 } : {}),
     };
   }
 
@@ -235,10 +248,11 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const version = entries.get(key)?.row?.version;
     // A stale detail must not confirm access or supersede an outstanding denial.
     if (version !== undefined && next.readinessVersion < version) return null;
-    if (verifiesAccess) next = preserveMenuReceipt(next);
-    const entry = merge(next, revision);
-    if (!entry || next.readinessVersion !== entry.row?.version) return null;
-    entry.detail = latestObservation(entry.detail, next, revision);
+    const merged = merge(next, revision);
+    if (!merged) return null;
+    const { entry, value } = merged;
+    if (next.readinessVersion !== entry.row?.version) return null;
+    entry.detail = latestObservation(entry.detail, value, revision);
     // A receipt can win on readiness version even when its request predates
     // the GET that verified access. Keep that GET's revision independently.
     if (verifiesAccess) {
@@ -252,6 +266,15 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       detail,
       won: entry.row.revision === revision && entry.detail.revision === revision,
     };
+  }
+
+  function detailFailureRevision(key: string) {
+    return detailFailures.get(key) ?? 0;
+  }
+
+  function canUseAccess(key: string, revision: number) {
+    return revision > Math.max(detailFailureRevision(key), revokedThrough(key)) &&
+      hasVerifiedAccess(key) && entries.get(key)?.detail !== undefined;
   }
 
   function hasVerifiedAccess(key: string) {
@@ -299,7 +322,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       readinessVersion: versioned?.readinessVersion,
       missingRequirements: summary.missingRequirements.filter((item) => item !== 'menu'),
     };
-    if (merge(next, revision)?.row?.value !== next) return false;
+    if (merge(next, revision)?.entry.row?.value !== next) return false;
     draft.menuReceipt = createdItems;
     menuReceipts.set(key, { revision, version: versioned?.readinessVersion });
     return true;
@@ -347,11 +370,13 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     hasApplicationList: () => lists.applications !== undefined,
     detailFor,
     detailReadConfirmation(key: string) {
-      return entries.get(key)?.detailRead;
+      const read = entries.get(key)?.detailRead;
+      if (read && canUseAccess(key, read.revision) && read.version === entries.get(key)?.detail?.version) {
+        return read;
+      }
     },
-    detailFailureRevision(key: string) {
-      return detailFailures.get(key) ?? 0;
-    },
+    canUseAccess,
+    detailFailureRevision,
     subscribeDetailFailures(listener: () => void) {
       detailFailureListeners.add(listener);
       return () => { detailFailureListeners.delete(listener); };
@@ -391,7 +416,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
           discardWorkspaceReceipts(key, revision);
         }
       }
-      for (const row of rows) merge(preserveMenuReceipt(row), revision);
+      for (const row of rows) merge(row, revision);
     },
     rejectWorkspaceList(denied: boolean, revision: number) {
       if (denied) {

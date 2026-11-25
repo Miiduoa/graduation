@@ -419,8 +419,9 @@ function AccountWorkspace({
 
       let accessDenied = false;
       let detailUnavailable = false;
-      const operations = createMerchantOperations((path, input, method) =>
-        browserRequest(path, context, input, method),
+      const operations = createMerchantOperations(
+        (path, input, method) => browserRequest(path, context, input, method),
+        { allowOmittedReadRequirements: true },
       );
       addTargets(confirmed.knownWorkspaces());
       addTargets(visitedLocations.values());
@@ -633,15 +634,10 @@ function AccountWorkspace({
           }
           onExpired={expire}
           confirmedDetail={details.get(key) ?? null}
-          getConfirmedDetail={confirmed.detailFor}
-          getDetailReadConfirmation={confirmed.detailReadConfirmation}
-          getDetailFailureRevision={confirmed.detailFailureRevision}
-          subscribeDetailFailures={confirmed.subscribeDetailFailures}
-          recordDetailFailure={confirmed.recordDetailFailure}
+          confirmations={confirmed}
           confirmedListRow={verifiedListedRows.get(key)}
           receiptFloorFor={(version) => confirmed.workspaceReceiptFloor(key, version)}
           accessRevocation={revocations.details.get(key) ?? revocations.list}
-          beginRequest={confirmed.beginRequest}
           onChanged={onWorkspaceChanged}
           onMenuConfirmed={onMenuConfirmed}
           onDenied={onWorkspaceDenied}

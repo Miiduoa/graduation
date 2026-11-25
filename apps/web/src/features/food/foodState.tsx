@@ -195,13 +195,11 @@ export function useFoodMutation({
   onRejected,
   reload,
   enabled,
-  canSend,
 }: {
   cache: FoodDraftCache;
   scope: string;
   accountId: string;
   enabled: boolean;
-  canSend?(): boolean;
   execute(intent: FoodIntent): Promise<unknown>;
   onSuccess(result: unknown, intent: FoodIntent): void;
   onRejected?(): void;
@@ -257,8 +255,7 @@ export function useFoodMutation({
 
   async function send(intent: FoodIntent, retry = false) {
     if (
-      !active.current || lock.current || storageBlocked || (!retry && (!enabled || pending)) ||
-      (canSend && !canSend())
+      !active.current || lock.current || storageBlocked || (!retry && (!enabled || pending))
     )
       return;
     if (!accountId) {
@@ -342,7 +339,13 @@ export function useFoodMutation({
   };
 }
 
-export function FoodMutationStatus({ task }: { task: ReturnType<typeof useFoodMutation> }) {
+export function FoodMutationStatus({
+  task,
+  canRetry,
+}: {
+  task: ReturnType<typeof useFoodMutation>;
+  canRetry?(): boolean;
+}) {
   return (
     <>
       {task.error && <p role="alert">{task.error}</p>}
@@ -355,7 +358,12 @@ export function FoodMutationStatus({ task }: { task: ReturnType<typeof useFoodMu
       {task.pending && (
         <div role="status">
           <p>{task.busy ? '正在確認這次操作…' : '尚未確認是否成功，請用下方按鈕重試。'}</p>
-          <Button disabled={task.busy || task.storageBlocked} onClick={task.retry}>
+          <Button
+            disabled={task.busy || task.storageBlocked}
+            onClick={() => {
+              if (!canRetry || canRetry()) task.retry();
+            }}
+          >
             重試同一份操作
           </Button>
         </div>

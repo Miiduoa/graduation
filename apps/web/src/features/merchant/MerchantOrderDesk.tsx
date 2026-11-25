@@ -150,7 +150,6 @@ export function MerchantOrderDesk({
     scope,
     accountId,
     enabled: !!data.data,
-    canSend,
     execute,
     reload: data.reload,
     onSuccess(result, intent) {
@@ -175,6 +174,9 @@ export function MerchantOrderDesk({
       }
     },
   });
+  function sendOrderIntent(intent: FoodIntent) {
+    if (!canSend || canSend()) void task.send(intent);
+  }
   const locked = !data.data || task.busy || !!task.pending || task.storageBlocked;
   const incomingOrders = useMemo(
     () =>
@@ -273,7 +275,7 @@ export function MerchantOrderDesk({
       (reasonRequired && form.reason === 'other' && form.detail.trim().length < 3)
     )
       return;
-    void task.send({
+    sendOrderIntent({
       action: selected.action,
       orderId: selected.orderId,
       input: {
@@ -324,7 +326,7 @@ export function MerchantOrderDesk({
           )}
         </div>
       )}
-      <FoodMutationStatus task={task} />
+      <FoodMutationStatus task={task} canRetry={canSend} />
       {receipt && <p role="status">{receipt}</p>}
       {data.data && (
         <div className={styles.stack}>
@@ -359,7 +361,7 @@ export function MerchantOrderDesk({
                   disabled={locked || !shiftConfirm || !cashValid(opening)}
                   onClick={() => {
                     if (!shiftConfirm || locked || !cashValid(opening)) return;
-                    void task.send({
+                    sendOrderIntent({
                       action: 'open-shift',
                       input: { openingCashMinor: Number(opening), idempotencyKey: foodKey() },
                     });
@@ -439,7 +441,7 @@ export function MerchantOrderDesk({
                       setConfirmed(false);
                     }}
                     onTicket={(action, ticketId) =>
-                      void task.send({
+                      sendOrderIntent({
                         action,
                         orderId: order.id,
                         ticketId,
@@ -466,7 +468,7 @@ export function MerchantOrderDesk({
                       setConfirmed(false);
                     }}
                     onTicket={(action, ticketId) =>
-                      void task.send({
+                      sendOrderIntent({
                         action,
                         orderId: order.id,
                         ticketId,
@@ -582,7 +584,7 @@ export function MerchantOrderDesk({
                         (openNext && !cashValid(nextCash))
                       )
                         return;
-                      void task.send({
+                      sendOrderIntent({
                         action: 'handover',
                         input: {
                           countedCashMinor: Number(counted),

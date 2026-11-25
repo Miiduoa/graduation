@@ -34,7 +34,9 @@ import {
 import {
   createMerchantConfirmations,
   workspaceKey,
-  type DetailConfirmation, type DetailReadConfirmation,
+  type DetailConfirmation,
+  type DetailReadConfirmation,
+  type MerchantConfirmations,
 } from './merchantConfirmation';
 
 type Detail = NuniMerchantWorkspaceDetail;
@@ -137,15 +139,10 @@ export function MerchantOperations({
   onBack,
   onExpired,
   confirmedDetail,
-  getConfirmedDetail,
-  getDetailReadConfirmation,
-  getDetailFailureRevision,
-  subscribeDetailFailures,
-  recordDetailFailure,
+  confirmations,
   confirmedListRow,
   receiptFloorFor,
   accessRevocation = 0,
-  beginRequest,
   onChanged,
   onDenied,
   onMenuConfirmed,
@@ -166,15 +163,10 @@ export function MerchantOperations({
   onBack?(): void;
   onExpired(): void;
   confirmedDetail?: Detail | null;
-  getConfirmedDetail?(key: string): Detail | null;
-  getDetailReadConfirmation?(key: string): DetailReadConfirmation | undefined;
-  getDetailFailureRevision?(key: string): number;
-  subscribeDetailFailures?(listener: () => void): () => void;
-  recordDetailFailure?(key: string, revision: number): void;
+  confirmations?: MerchantConfirmations;
   confirmedListRow?: NuniMerchantWorkspace;
   receiptFloorFor?(readinessVersion?: number): number;
   accessRevocation?: number;
-  beginRequest?(): number;
   onChanged(detail: Detail, verifiedAccess: boolean, revision: number): DetailConfirmation | null | void;
   onMenuConfirmed?(detail: Detail, revision: number, createdItems: number): boolean;
   onDenied?(tenantId: string, locationId: string, revision: number): number | undefined;
@@ -183,8 +175,9 @@ export function MerchantOperations({
   const saved = drafts.get(draftKey);
   const operations = useMemo(
     () =>
-      createMerchantOperations((path, input, method) =>
-        browserRequest(path, context, input, method),
+      createMerchantOperations(
+        (path, input, method) => browserRequest(path, context, input, method),
+        { allowOmittedReadRequirements: true },
       ),
     [context],
   );
@@ -206,7 +199,8 @@ export function MerchantOperations({
   const [menuConfirmed, setMenuConfirmed] = useState(false);
   const menuReceipt = saved?.menuReceipt ?? null;
   const [localConfirmations] = useState(() => createMerchantConfirmations(drafts));
-  const nextRevision = beginRequest ?? localConfirmations.beginRequest;
+  const observations = confirmations ?? localConfirmations;
+  const nextRevision = observations.beginRequest;
   const statusReceiptVersion = notice?.statusChange ? notice.readinessVersion : undefined;
   const noticeFloor = receiptFloorFor
     ? receiptFloorFor(statusReceiptVersion)
@@ -232,17 +226,15 @@ export function MerchantOperations({
   const lock = useRef(false);
   const run = useRef(0);
   const accessRevision = useRef(0);
-  const failureRevision = getDetailFailureRevision ?? localConfirmations.detailFailureRevision;
   const currentFailureRevision = useCallback(
-    () => failureRevision(draftKey),
-    [draftKey, failureRevision],
+    () => observations.detailFailureRevision(draftKey),
+    [draftKey, observations],
   );
   const latestFailure = useSyncExternalStore(
-    subscribeDetailFailures ?? localConfirmations.subscribeDetailFailures,
+    observations.subscribeDetailFailures,
     currentFailureRevision,
     () => 0,
   );
-  const recordFailure = recordDetailFailure ?? localConfirmations.recordDetailFailure;
   const entryDetailRead = useRef<DetailReadConfirmation | undefined>(undefined);
   const pendingAccessRead = useRef(0);
   const observedRevocation = useRef(accessRevocation);
@@ -290,17 +282,17 @@ export function MerchantOperations({
   const confirmDetail = useCallback(
     (next: Detail, verifiedAccess: boolean, revision: number) =>
       changed.current(next, verifiedAccess, revision) ??
-      (beginRequest ? null : localConfirmations.confirmDetail(next, revision, verifiedAccess)),
-    [beginRequest, localConfirmations],
+      (confirmations ? null : localConfirmations.confirmDetail(next, revision, verifiedAccess)),
+    [confirmations, localConfirmations],
   );
 
   const showDetail = useCallback(
     (merged: Detail) => {
-      if (!beginRequest) setDetail(merged);
+      if (!confirmations) setDetail(merged);
       setMenuConfirmed(false);
       setActivationConfirmed(false);
     },
-    [beginRequest, setDetail, setMenuConfirmed, setActivationConfirmed],
+    [confirmations, setDetail, setMenuConfirmed, setActivationConfirmed],
   );
 
   const accept = (next: Detail, revision: number) => {
@@ -313,11 +305,11 @@ export function MerchantOperations({
 
   const revokeDetail = useCallback(
     (revision: number, updateView: boolean) => {
-      const revoked = beginRequest
+      const revoked = confirmations
         ? onDenied?.(tenantId, locationId, revision)
         : localConfirmations.revoke(draftKey, revision);
       if (revoked === undefined) return false;
-      if (!beginRequest) {
+      if (!confirmations) {
         setDetail(null);
         setNotice((current) => current && current.revision > revoked ? current : null);
       }
@@ -330,7 +322,7 @@ export function MerchantOperations({
       return true;
     },
     [
-      beginRequest, draftKey, localConfirmations, locationId, onDenied, tenantId,
+      confirmations, draftKey, localConfirmations, locationId, onDenied, tenantId,
       setDetail, setNotice, setError, updateAccess,
     ],
   );
@@ -355,21 +347,33 @@ export function MerchantOperations({
   );
 
   const confirmEntry = useCallback(
-    (detail: Detail, revision: number, reveal: boolean) => {
+    (detail: Detail, read: DetailReadConfirmation, reveal: boolean) => {
+      const { revision } = read;
       if (
         revision < accessRevision.current ||
-        revision <= currentFailureRevision() ||
-        revision <= observedRevocation.current
+        !observations.canUseAccess(draftKey, revision)
       ) return;
       accessRevision.current = revision;
-      entryDetailRead.current = { revision, version: detail.readinessVersion };
+      entryDetailRead.current = read;
       showDetail(detail);
       if (reveal) {
         updateAccess({ type: 'verified', revision });
         setError((current) => current === detailReadError ? '' : current);
       }
     },
-    [currentFailureRevision, showDetail, setError, updateAccess],
+    [draftKey, observations, showDetail, setError, updateAccess],
+  );
+
+  const rejectDetailRead = useCallback(
+    (failure: unknown, revision: number, updateView: boolean) => {
+      if (expireSession(failure)) return true;
+      if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
+        return revokeDetail(revision, updateView);
+      }
+      observations.recordDetailFailure(draftKey, revision);
+      return false;
+    },
+    [draftKey, expireSession, observations, revokeDetail],
   );
 
   const checkAccess = useCallback(
@@ -385,19 +389,18 @@ export function MerchantOperations({
         if (merged && verifiesEntry && current()) {
           // Keep the confirmed revision for a stale refresh fallback, while
           // the write or its pending refresh still controls entry access.
-          confirmEntry(merged, revision, !readAfterWrite.current && !pendingAccessRead.current);
+          confirmEntry(
+            merged,
+            { revision, version: next.readinessVersion },
+            !readAfterWrite.current && !pendingAccessRead.current,
+          );
         }
       }).catch((failure: unknown) => {
         if (!active.current || session !== sessionRun.current) return;
-        if (expireSession(failure)) return;
-        if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-          revokeDetail(revision, current() && revision >= accessRevision.current);
-        } else {
-          recordFailure(draftKey, revision);
-        }
+        rejectDetailRead(failure, revision, current() && revision >= accessRevision.current);
       });
     },
-    [confirmDetail, confirmEntry, draftKey, expireSession, nextRevision, locationId, operations, recordFailure, revokeDetail, tenantId],
+    [confirmDetail, confirmEntry, nextRevision, locationId, operations, rejectDetailRead, tenantId],
   );
 
   const rememberWrite = useCallback((revision: number) => {
@@ -436,13 +439,13 @@ export function MerchantOperations({
         if (!active.current || session !== sessionRun.current) return;
         const merged = confirmDetail(next, true, revision)?.detail ?? null;
         if (!current()) return;
-        if (!merged || revision <= currentFailureRevision()) {
+        if (!merged || !observations.canUseAccess(draftKey, revision)) {
           // A concurrent list merge can invalidate the detail from a successful entry GET.
           // Check the shared confirmation before React publishes its next snapshot.
           // Shared access must come from a GET newer than the write being reconciled.
-          const detail = beginRequest ? getConfirmedDetail?.(draftKey) : localConfirmations.detailFor(draftKey);
+          const detail = observations.detailFor(draftKey);
           const sharedRead = visible && reconciliationRevision
-            ? (getDetailReadConfirmation ?? localConfirmations.detailReadConfirmation)(draftKey)
+            ? observations.detailReadConfirmation(draftKey)
             : undefined;
           // Immediate refreshes can retain access verified in the same entry.
           // Across entries, the verification must follow the deferred write.
@@ -458,7 +461,7 @@ export function MerchantOperations({
             readMode !== 'regular' &&
             confirmedRevision > 0 &&
             confirmedRevision >= accessRevision.current &&
-            confirmedRevision > Math.max(currentFailureRevision(), observedRevocation.current) &&
+            observations.canUseAccess(draftKey, confirmedRevision) &&
             detail
           ) {
             accessRevision.current = confirmedRevision;
@@ -471,7 +474,7 @@ export function MerchantOperations({
           setError(detailReadError);
           return;
         }
-        confirmEntry(merged, revision, !readAfterWrite.current);
+        confirmEntry(merged, { revision, version: next.readinessVersion }, !readAfterWrite.current);
         // A count of zero cannot prove a non-idempotent menu request failed:
         // an existing menu may have no remaining sellable stock.
         if (reconcile) {
@@ -483,13 +486,7 @@ export function MerchantOperations({
       }).catch((failure: unknown) => {
         // Navigation retires view updates while the request still belongs to this session.
         if (!active.current || session !== sessionRun.current) return;
-        if (expireSession(failure)) return;
-        if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-          if (revokeDetail(revision, current())) return;
-          if (current()) recordFailure(draftKey, revision);
-        } else {
-          recordFailure(draftKey, revision);
-        }
+        if (rejectDetailRead(failure, revision, current())) return;
         if (current()) {
           entryDetailRead.current = undefined;
           updateAccess({ type: 'read-failed', hideDetail });
@@ -511,8 +508,8 @@ export function MerchantOperations({
     },
     [
       operations, tenantId, locationId, confirmDetail, confirmEntry, drafts, draftKey,
-      expireSession, revokeDetail, nextRevision, beginRequest, getConfirmedDetail, localConfirmations,
-      getDetailReadConfirmation, currentFailureRevision, recordFailure, rememberWrite, setError, setUncertain, updateAccess,
+      rejectDetailRead, nextRevision, observations,
+      rememberWrite, setError, setUncertain, updateAccess,
     ],
   );
   useLayoutEffect(() => {
@@ -568,7 +565,7 @@ export function MerchantOperations({
   }, [accessRevocation, loading, readUnavailable, suspended, visible, verifyEntry]);
 
   function hasCurrentAccess() {
-    return verifiedRevision > Math.max(currentFailureRevision(), observedRevocation.current);
+    return active.current && observations.canUseAccess(draftKey, verifiedRevision);
   }
 
   async function mutate(
