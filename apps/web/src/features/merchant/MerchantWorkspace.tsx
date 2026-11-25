@@ -334,7 +334,7 @@ function AccountWorkspace({
     });
   }, [confirmed]);
   useLayoutEffect(
-    () => confirmed.subscribeReadFailures(publishOverview),
+    () => confirmed.subscribeReadChanges(publishOverview),
     [confirmed, publishOverview],
   );
   const clearOverview = useCallback(() => {

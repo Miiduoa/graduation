@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import {
   FoodStorageError,
   clearFoodPending,
+  foodPendingStorageKey,
   loadFoodPending,
   saveFoodPending,
 } from './foodPersistence';
@@ -189,6 +190,10 @@ export function useFoodRead<T>(
   return { data, error, loading, reload, quietReload };
 }
 
+// Durable operations own their receipts across views of the same account and scope.
+type FoodMutationFlight = Set<(confirmed: boolean) => void>;
+const foodMutationFlights = new Map<string, FoodMutationFlight>();
+
 export function useFoodMutation({
   cache,
   scope,
@@ -198,17 +203,20 @@ export function useFoodMutation({
   onRejected,
   reload,
   enabled,
+  settleAfterUnmount = false,
 }: {
   cache: FoodDraftCache;
   scope: string;
   accountId: string;
   enabled: boolean;
+  settleAfterUnmount?: boolean;
   execute(intent: FoodIntent): Promise<unknown>;
   onSuccess(result: unknown, intent: FoodIntent): void;
   onRejected?(): void;
   reload(): Promise<unknown>;
 }) {
   const pendingKey = `${scope}:pending`;
+  const flightKey = settleAfterUnmount && accountId ? foodPendingStorageKey(accountId, scope) : null;
   const [pending, setPending] = useFoodDraft<FoodIntent | null>(cache, pendingKey, null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -235,10 +243,7 @@ export function useFoodMutation({
     try {
       const stored = loadFoodPending(accountId, scope);
       if (!active.current || accountRef.current !== accountId) return;
-      if (stored) {
-        cache.set(pendingKey, stored);
-        setPending(stored);
-      }
+      if (stored || flightKey) setPending(stored);
       setStorageBlocked(false);
       setError('');
     } catch (failure) {
@@ -250,15 +255,27 @@ export function useFoodMutation({
           : '目前無法安全保存這次訂餐操作，請稍後再試。',
       );
     }
-  }, [accountId, scope, cache, pendingKey, setPending]);
+  }, [accountId, scope, flightKey, setPending]);
 
   useEffect(() => {
     recoverStorage();
-  }, [recoverStorage]);
+    const flight = flightKey ? foodMutationFlights.get(flightKey) : undefined;
+    if (!flight) return;
+    setBusy(true);
+    const settled = (confirmed: boolean) => {
+      if (!active.current) return;
+      if (confirmed) void callbacks.current.reload();
+      setBusy(false);
+      recoverStorage();
+    };
+    flight.add(settled);
+    return () => { flight.delete(settled); };
+  }, [flightKey, recoverStorage]);
 
   async function send(intent: FoodIntent, retry = false) {
     if (
-      !active.current || lock.current || storageBlocked || (!retry && (!enabled || pending))
+      !active.current || lock.current || (flightKey && foodMutationFlights.has(flightKey)) ||
+      storageBlocked || (!retry && (!enabled || pending))
     )
       return;
     if (!accountId) {
@@ -288,20 +305,30 @@ export function useFoodMutation({
       setBusy(false);
       return;
     }
+    const flight: FoodMutationFlight | null = flightKey ? new Set() : null;
+    if (flightKey && flight) foodMutationFlights.set(flightKey, flight);
+    const current = () => active.current && accountRef.current === owner;
+    let confirmed = false;
     try {
       const result = await callbacks.current.execute(frozen);
-      if (!active.current || accountRef.current !== owner) return;
+      confirmed = true;
+      if (!flight && !current()) return;
+      const sent = JSON.stringify(frozen);
       try {
-        clearFoodPending(owner, scope);
+        if (!flight || JSON.stringify(loadFoodPending(owner, scope)) === sent) {
+          clearFoodPending(owner, scope);
+        }
       } catch {
         /* Clear is best-effort after a confirmed result. */
       }
+      if (flight && JSON.stringify(cache.get(pendingKey)) === sent) cache.set(pendingKey, null);
+      if (!current()) return;
       setPending(null);
       callbacks.current.onSuccess(result, frozen);
       setNotice('已完成。');
       await callbacks.current.reload();
     } catch (failure) {
-      if (!active.current || accountRef.current !== owner) return;
+      if (!current()) return;
       if (
         !retry &&
         failure instanceof NuniError &&
@@ -327,7 +354,11 @@ export function useFoodMutation({
       }
     } finally {
       lock.current = false;
-      if (active.current && accountRef.current === owner) setBusy(false);
+      if (current()) setBusy(false);
+      if (flightKey && flight) {
+        foodMutationFlights.delete(flightKey);
+        for (const settled of flight) settled(confirmed);
+      }
     }
   }
   return {
@@ -345,9 +376,11 @@ export function useFoodMutation({
 export function FoodMutationStatus({
   task,
   canRetry,
+  retryDisabled,
 }: {
   task: ReturnType<typeof useFoodMutation>;
   canRetry?(): boolean;
+  retryDisabled?: boolean;
 }) {
   return (
     <>
@@ -362,7 +395,7 @@ export function FoodMutationStatus({
         <div role="status">
           <p>{task.busy ? '正在確認這次操作…' : '尚未確認是否成功，請用下方按鈕重試。'}</p>
           <Button
-            disabled={task.busy || task.storageBlocked}
+            disabled={task.busy || task.storageBlocked || retryDisabled}
             onClick={() => {
               if (!canRetry || canRetry()) task.retry();
             }}

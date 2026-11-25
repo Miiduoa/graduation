@@ -18,6 +18,7 @@ type WorkspaceObservations = {
   versionedRow?: Observation;
   detail?: Observation<NuniMerchantWorkspaceDetail>;
   detailRead?: DetailReadConfirmation & { menu: 'present' | 'missing' | 'unknown' };
+  orderRead?: { revision: number; workspaceFailure: number };
 };
 
 function workspaceSummary(entry: WorkspaceObservations | undefined): NuniMerchantWorkspace | undefined {
@@ -112,7 +113,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   // The list failure also applies to stores discovered after the failure.
   let listReadFailure = 0;
   const readFailures = new Map<string, number>();
-  const readFailureListeners = new Set<() => void>();
+  const orderReadFailures = new Map<string, number>();
+  const readChangeListeners = new Set<() => void>();
   const verified = new Map<string, number>();
   let applicationRevocation = 0;
   let applicationListRevision = 0;
@@ -207,6 +209,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     if (entry.detail && entry.detail.version !== row.version) {
       delete entry.detail;
       delete entry.detailRead;
+      delete entry.orderRead;
     }
     entry.row = row;
     entries.set(key, entry);
@@ -291,17 +294,36 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     }
   }
 
-  function readFailureRevision(key: string) {
+  function workspaceReadFailure(key: string) {
     return Math.max(listReadFailure, readFailures.get(key) ?? 0);
+  }
+
+  function readFailureRevision(key: string) {
+    return Math.max(workspaceReadFailure(key), orderReadFailures.get(key) ?? 0);
   }
 
   function accessFloor(key: string) {
     return Math.max(readFailureRevision(key), revokedThrough(key));
   }
 
-  function canUseAccess(key: string, revision: number) {
-    return revision > accessFloor(key) &&
-      hasVerifiedAccess(key) && entries.get(key)?.detail !== undefined;
+  function currentDetailRead(key: string) {
+    const entry = entries.get(key);
+    const read = entry?.detailRead;
+    if (read && read.version === entry.row?.version && read.version === entry.detail?.version &&
+      read.revision > revokedThrough(key)) return read;
+  }
+
+  function canUseAccess(key: string, confirmation: DetailReadConfirmation) {
+    const read = currentDetailRead(key);
+    if (!read || confirmation.version !== read.version || confirmation.revision > read.revision ||
+      confirmation.revision <= revokedThrough(key)) return false;
+    const orderRead = entries.get(key)?.orderRead;
+    // An unversioned order read cannot cover a workspace failure that was
+    // still unobserved when it started.
+    const orderRevision = orderRead?.workspaceFailure === workspaceReadFailure(key)
+      ? orderRead.revision
+      : 0;
+    return Math.max(confirmation.revision, orderRevision) > accessFloor(key);
   }
 
   function hasVerifiedAccess(key: string) {
@@ -309,9 +331,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   }
 
   function detailReadConfirmation(key: string) {
-    const entry = entries.get(key);
-    const read = entry?.detailRead;
-    if (read && canUseAccess(key, read.revision) && read.version === entry?.detail?.version) {
+    const read = currentDetailRead(key);
+    if (read && canUseAccess(key, read)) {
       return { revision: read.revision, version: read.version };
     }
   }
@@ -427,15 +448,44 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     canEnterWorkspace,
     canUseAccess,
     accessFloor,
-    subscribeReadFailures(listener: () => void) {
-      readFailureListeners.add(listener);
-      return () => { readFailureListeners.delete(listener); };
+    canRecoverFromOrderRead(key: string) {
+      return orderReadFailures.get(key) === accessFloor(key) && !!currentDetailRead(key);
     },
-    recordReadFailure(revision: number, key?: string) {
-      if (revision <= (key === undefined ? listReadFailure : readFailureRevision(key))) return;
-      if (key === undefined) listReadFailure = revision;
-      else readFailures.set(key, revision);
-      for (const listener of readFailureListeners) listener();
+    beginOrderRead(key: string) {
+      const revision = beginRequest();
+      const entry = entries.get(key);
+      const version = currentDetailRead(key)?.version;
+      const workspaceFailure = workspaceReadFailure(key);
+      return {
+        revision,
+        confirm() {
+          // Order data has no readiness version. It can renew access only for
+          // the detail version that was still confirmed throughout this read.
+          if (!entry || entries.get(key) !== entry || version === undefined ||
+              currentDetailRead(key)?.version !== version || revision <= (entry.orderRead?.revision ?? 0) ||
+              revision <= accessFloor(key)) return;
+          const wasConfirmed = detailReadConfirmation(key);
+          entry.orderRead = { revision, workspaceFailure };
+          if (!wasConfirmed && detailReadConfirmation(key)) {
+            for (const listener of readChangeListeners) listener();
+          }
+        },
+      };
+    },
+    subscribeReadChanges(listener: () => void) {
+      readChangeListeners.add(listener);
+      return () => { readChangeListeners.delete(listener); };
+    },
+    recordReadFailure(revision: number, key?: string, source: 'detail' | 'orders' = 'detail') {
+      if (key === undefined) {
+        if (revision <= listReadFailure) return;
+        listReadFailure = revision;
+      } else {
+        const failures = source === 'orders' ? orderReadFailures : readFailures;
+        if (revision <= (failures.get(key) ?? 0)) return;
+        failures.set(key, revision);
+      }
+      for (const listener of readChangeListeners) listener();
     },
     verifiedDetails() {
       const details = new Map<string, NuniMerchantWorkspaceDetail>();
@@ -611,8 +661,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       revocations.clear();
       verified.clear();
       readFailures.clear();
+      orderReadFailures.clear();
       listReadFailure = 0;
-      for (const listener of readFailureListeners) listener();
+      for (const listener of readChangeListeners) listener();
     },
   };
 }

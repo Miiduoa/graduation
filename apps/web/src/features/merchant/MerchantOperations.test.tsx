@@ -876,13 +876,13 @@ it('ties shared access recovery to the GET version and the latest failure revisi
 
   expect(confirmed.detailFor(key)?.readinessVersion).toBe(8);
   expect(confirmed.detailReadConfirmation(key)).toBeUndefined();
-  expect(confirmed.canUseAccess(key, backgroundRead)).toBe(false);
+  expect(confirmed.canUseAccess(key, { revision: backgroundRead, version: 8 })).toBe(false);
   expect(confirmed.confirmDetail(v7, confirmed.beginRequest(), true)).toBeNull();
 
   const retry = confirmed.beginRequest();
   confirmed.confirmDetail(v8, retry, true);
   expect(confirmed.detailReadConfirmation(key)).toEqual({ revision: retry, version: 8 });
-  expect(confirmed.canUseAccess(key, retry)).toBe(true);
+  expect(confirmed.canUseAccess(key, { revision: retry, version: 8 })).toBe(true);
 });
 
 it.each([7, 8])('keeps a winning first-menu receipt through workspace snapshots at v%s', (version) => {
@@ -962,4 +962,36 @@ it.each(['list', 'detail'])('reconciles a menu receipt when the %s response arri
   expect(confirmed.reusableDetailRead(key)).toEqual({ revision: recovery, version: 8 });
   confirmed.mergeWorkspaceList([{ ...published, readinessVersion: 9 }], confirmed.beginRequest());
   expect(confirmed.reusableDetailRead(key)).toBeUndefined();
+});
+
+it('orders share the failure floor and cannot renew a different detail version', () => {
+  const confirmed = createMerchantConfirmations(drafts);
+  const v8 = { ...initial(), readinessVersion: 8 };
+  const v9 = { ...v8, readinessVersion: 9 };
+  const key = workspaceKey(v8);
+  confirmed.confirmDetail(v8, confirmed.beginRequest(), true);
+
+  const retiredPoll = confirmed.beginOrderRead(key);
+  const outage = confirmed.beginOrderRead(key);
+  confirmed.recordReadFailure(outage.revision, key, 'orders');
+  retiredPoll.confirm();
+  expect(confirmed.detailReadConfirmation(key)).toBeUndefined();
+  expect(confirmed.canEnterWorkspace(key)).toBe(false);
+
+  confirmed.beginOrderRead(key).confirm();
+  expect(confirmed.detailReadConfirmation(key)?.version).toBe(8);
+  expect(confirmed.canEnterWorkspace(key)).toBe(true);
+
+  const newerDetail = confirmed.beginRequest();
+  const secondOutage = confirmed.beginOrderRead(key);
+  confirmed.recordReadFailure(secondOutage.revision, key, 'orders');
+  const v8Poll = confirmed.beginOrderRead(key);
+  confirmed.confirmDetail(v9, newerDetail, true);
+  v8Poll.confirm();
+  expect(confirmed.detailReadConfirmation(key)).toBeUndefined();
+  expect(confirmed.canEnterWorkspace(key)).toBe(false);
+
+  confirmed.beginOrderRead(key).confirm();
+  expect(confirmed.detailReadConfirmation(key)?.version).toBe(9);
+  expect(confirmed.canEnterWorkspace(key)).toBe(true);
 });

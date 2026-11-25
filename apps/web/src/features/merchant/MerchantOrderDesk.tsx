@@ -56,6 +56,8 @@ export function MerchantOrderDesk({
   locationId,
   cache,
   canSend,
+  accessConfirmed = true,
+  beginRead,
   suspended = false,
   queue: controlledQueue,
   onQueueChange,
@@ -66,6 +68,8 @@ export function MerchantOrderDesk({
   locationId: string;
   cache: FoodDraftCache;
   canSend?: () => boolean;
+  accessConfirmed?: boolean;
+  beginRead?: () => { confirm(): void; reject(failure: unknown): void };
   suspended?: boolean;
   queue?: MerchantWorkspaceQueue;
   onQueueChange?: (event: MouseEvent<HTMLAnchorElement>, queue: MerchantWorkspaceQueue) => void;
@@ -87,20 +91,27 @@ export function MerchantOrderDesk({
   const previousQueue = useRef(currentQueue);
   const queueHintId = useId();
   const load = useCallback(async () => {
-    const [queue, shift] = await Promise.all([
-      client.listMerchantOrders(tenantId, locationId, { limit: 50, cursor }),
-      client.getShift(tenantId, locationId).catch((error: unknown) => {
-        if (
-          error instanceof NuniError &&
-          error.status === 404 &&
-          error.code === 'FOOD_SHIFT_NOT_FOUND'
-        )
-          return null;
-        throw error;
-      }),
-    ]);
-    return { queue, shift };
-  }, [client, tenantId, locationId, cursor]);
+    const observation = beginRead?.();
+    try {
+      const [queue, shift] = await Promise.all([
+        client.listMerchantOrders(tenantId, locationId, { limit: 50, cursor }),
+        client.getShift(tenantId, locationId).catch((error: unknown) => {
+          if (
+            error instanceof NuniError &&
+            error.status === 404 &&
+            error.code === 'FOOD_SHIFT_NOT_FOUND'
+          )
+            return null;
+          throw error;
+        }),
+      ]);
+      observation?.confirm();
+      return { queue, shift };
+    } catch (failure) {
+      observation?.reject(failure);
+      throw failure;
+    }
+  }, [beginRead, client, tenantId, locationId, cursor]);
   const data = useFoodRead(load, { pollMs: FOOD_POLL_MS, paused: suspended });
   const [opening, setOpening] = useFoodDraft(cache, `${scope}:opening`, '0');
   const [counted, setCounted] = useFoodDraft(cache, `${scope}:counted`, '');
@@ -160,6 +171,7 @@ export function MerchantOrderDesk({
     cache,
     scope,
     accountId,
+    settleAfterUnmount: true,
     enabled: !suspended && !!data.data,
     execute,
     reload: data.reload,
@@ -188,7 +200,7 @@ export function MerchantOrderDesk({
   function sendOrderIntent(intent: FoodIntent) {
     if (!canSend || canSend()) void task.send(intent);
   }
-  const locked = !data.data || task.busy || !!task.pending || task.storageBlocked;
+  const locked = !accessConfirmed || !data.data || task.busy || !!task.pending || task.storageBlocked;
   const incomingOrders = useMemo(
     () =>
       (data.data?.queue.orders ?? []).filter((order) => merchantOrderBucket(order) === 'incoming'),
@@ -338,7 +350,7 @@ export function MerchantOrderDesk({
           )}
         </div>
       )}
-      <FoodMutationStatus task={task} canRetry={canSend} />
+      <FoodMutationStatus task={task} canRetry={canSend} retryDisabled={!accessConfirmed} />
       {receipt && <p role="status">{receipt}</p>}
       {data.data && (
         <div className={styles.stack}>
