@@ -31,6 +31,7 @@ export const schoolLinking: LinkingOptions<RootTabParamList> = {
           AddCourse: 'course/new',
           CourseHub: 'course-hub',
           CourseCatalog: 'course-catalog',
+          TronClassWorkspace: 'tronclass',
           CourseModules: 'course-modules',
           QuizCenter: 'quiz-center',
           Attendance: 'attendance',
