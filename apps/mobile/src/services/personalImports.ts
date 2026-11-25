@@ -145,7 +145,7 @@ async function readLedgerSnapshot(
   const candidatePrimary = attemptedPrimary || fallbackPrimary;
   const primaryAttempt = !web && primaryVerified ? matchNativePrimaryAttempt(primary) : undefined;
   const nativeRejectionBinding = primary?.match(nativeRestoredRejectionPattern)?.[1];
-  const needsReceipt = !deniedAttempt && primaryVerified && (candidatePrimary || rejectionMatches !== undefined || nativeRejectionBinding !== undefined || primaryAttempt !== undefined);
+  const needsReceipt = !deniedAttempt && primaryVerified && (candidatePrimary || journal?.payloadError || rejectionMatches !== undefined || nativeRejectionBinding !== undefined || primaryAttempt !== undefined);
   const receipt = needsReceipt ? await readNativeReceipt(nativeReceiptKey(key)) : null;
   const fileReceipt = needsReceipt ? readNativeVerificationReceipt(key) : undefined;
   const backupReceipt = needsReceipt ? await readNativeReceipt(nativeBackupReceiptKey(key)) : null;
@@ -199,7 +199,8 @@ async function readLedgerSnapshot(
   const verifiedByJournal = primary !== null && (
     publishedRejectionHash !== undefined ||
     journal?.matchesVerifiedPrimary?.(primary) === true ||
-    receipts.some((proof) => typeof proof === 'string' && journal?.matchesVerifiedReceipt?.(primary, proof))
+    receipts.some((proof) => typeof proof === 'string' && journal?.matchesVerifiedReceipt?.(primary, proof)) ||
+    await journal?.verifyWithoutPayload?.(primary, receipts, () => readNativeReceipt(nativeRejectionAttemptKey(key))) === true
   );
   const checkpointRejection = restoredRejectionHash || verifiedByJournal ? undefined : rejectionMatches;
   const uncommittedPrimary = candidatePrimary && !verifiedByJournal;
@@ -699,47 +700,37 @@ export function mutatePersonalImportLedger<T>(
               assertWritable();
               if (journal && !journal.retire(assertWritable, checkpointRetired, firstRaw)) {
                 assertWritable();
+                let verifiedRaw: string | undefined = firstRaw;
                 try {
                   journal.preparePrimaryCommit();
+                  // After dispatch, even a rejected write may have changed the bytes.
+                  verifiedRaw = undefined;
                   await AsyncStorage.setItem(key, replacement);
-                  writtenRaw = replacement;
                 } catch {
-                  // Confirm the first write survived a failed replacement before
-                  // publishing its bytes. A rejected write can still reach disk.
-                  writtenRaw = firstRaw;
+                  // Read back either candidate before publishing a proof.
                 }
                 assertWritable();
-                // Both encodings hold the same verified ledger. A failed
-                // read here cannot undo verification of the first write.
                 const replacementReadback = await readNativeStorageWithBatchFallback(key).catch(() => undefined);
                 if (replacementReadback === replacement || replacementReadback === firstRaw) {
-                  writtenRaw = replacementReadback;
+                  verifiedRaw = replacementReadback;
                 }
                 assertWritable();
-                const published = journal.publishVerifiedPrimary(
-                  writtenRaw, assertWritable,
-                );
-                if (!published) {
-                  // Try the ordinary encoding, then publish a receipt for
-                  // whichever encoding was persisted.
+                if (verifiedRaw === undefined || !journal.publishVerifiedPrimary(verifiedRaw, assertWritable)) {
                   assertWritable();
-                  let fallbackWritten = false;
                   try {
                     await AsyncStorage.setItem(key, raw);
-                    fallbackWritten = true;
                   } catch {
                     // The optional rewrite may fail before or after reaching disk.
                   }
                   assertWritable();
                   const readback = await readNativeStorageWithBatchFallback(key).catch(() => undefined);
-                  if (readback === raw || (readback === undefined && fallbackWritten)) {
-                    writtenRaw = raw;
-                    newReceipt = journal.verificationReceipt(raw);
-                  } else {
-                    if (readback === replacement || readback === firstRaw) writtenRaw = readback;
-                    newReceipt = journal.verificationReceipt(writtenRaw);
+                  if (readback !== raw && readback !== firstRaw && readback !== replacement) {
+                    throw new Error('無法確認匯入資料已儲存，請稍後再試。');
                   }
+                  verifiedRaw = readback;
+                  newReceipt = journal.verificationReceipt(verifiedRaw);
                 }
+                writtenRaw = verifiedRaw;
                 assertWritable();
               }
               newReceipt ??= primaryOnlyProof;

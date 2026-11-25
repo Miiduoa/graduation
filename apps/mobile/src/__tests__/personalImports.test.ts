@@ -1071,7 +1071,8 @@ type RecoveryFault =
   | 'restart read once' | 'restart read' | 'restart readback' | 'publication read' | 'save read' | 'save read once' | 'save readback'
   | 'create no-op' | 'existence check' | 'exists check' | 'created marker probe'
   | 'reject payload' | 'reject payload no-op' | 'restore write' | 'restore read'
-  | 'checkpoint proof write' | 'directory list' | 'bind payload' | 'optional primary write' | 'optional primary read' | 'retire marker';
+  | 'checkpoint proof write' | 'directory list' | 'bind payload' | 'optional primary write' | 'optional primary read'
+  | 'second primary response lost' | 'retire marker';
 type RecoveryPhase = 'save' | 'notification' | 'restart';
 type RecoveryApi = 'getItem' | 'multiGet' | 'setItem' | 'multiSet' | 'removeItem' |
   'multiRemove' | 'create' | 'write' | 'textSync' | 'delete' | 'info' | 'exists' | 'list';
@@ -1245,7 +1246,10 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
   ]),
   ...(['import', 'backup'] as const).map((entryPoint): RecoveryFaultCase => [
     entryPoint + ' can save with dual metadata faults on absent rollback files',
-    ['legacy.rollback.pending', '.rollback.pending', '.rollback.rejected'].flatMap((location): RecoveryFaultCase[1] => [
+    [
+      'legacy.rollback.pending', '.rollback.pending', '.rollback.rejected',
+      '.rollback.committed', '.rollback.verified', '.rollback.published', '.rollback.published.bak',
+    ].flatMap((location): RecoveryFaultCase[1] => [
       [location, 'existence check', 'info', 'save'],
       [location, 'exists check', 'exists', 'save'],
     ]), { entryPoint, functionGuard: true },
@@ -1256,6 +1260,15 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
     [':checkpoint', 'write'],
     ['.rollback.committed', 'existence check', 'info', 'restart'],
     ['.rollback.committed', 'exists check', 'exists', 'restart'],
+    ['documents', 'directory list', 'list', 'restart'],
+  ], { staleCopy: true }],
+  ['verified-write receipt survives unreadable rollback copy and unknown rejection metadata on restart', [
+    ...blockedAuxiliaryPublication,
+    ['.rollback.pending', 'remove', 'delete', 'save'],
+    [':checkpoint', 'write'],
+    ['.rollback.json', 'restart read', 'textSync', 'restart'],
+    ['.rollback.rejected', 'existence check', 'info', 'restart'],
+    ['.rollback.rejected', 'exists check', 'exists', 'restart'],
     ['documents', 'directory list', 'list', 'restart'],
   ], { staleCopy: true }],
   ...(['bound copy', 'checkpoint'] as const).map((recoverySource): RecoveryFaultCase => [
@@ -1394,6 +1407,21 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
       ['', 'optional primary write', 'setItem', 'save'], ['', 'optional primary read', 'getItem', 'save'],
       ['.rollback.pending', 'restart read'], ['.rollback.rejected', 'restart read']],
     { staleCopy: true, optionalReadAttempt: attempt, noCommitProof: true },
+  ]),
+  ...[false, true].map((readUnavailable): RecoveryFaultCase => [
+    'second primary response lost after the write lands with ' + (readUnavailable ? 'no' : 'a') + ' primary readback',
+    [
+      ...blockedAuxiliaryPublication.filter(([location]) =>
+        !readUnavailable || location === '.rollback.pending' || location === '.rollback.committed'),
+      ['.rollback.pending', 'remove', 'delete', 'save'],
+      ['', 'second primary response lost', 'setItem', 'save'],
+      ['', 'optional primary write', 'setItem', 'save'],
+      ...(readUnavailable ? [
+        ['', 'optional primary read', 'getItem', 'save'],
+        ['', 'optional primary read', 'multiGet', 'save'],
+      ] satisfies RecoveryFaultCase[1] : []),
+    ],
+    { staleCopy: true, noCommitProof: readUnavailable, optionalReadAttempt: 2 },
   ]),
   ['S7 with a landed third primary write and unavailable readback', [
     ...blockedPublication, [':checkpoint', 'write'],
@@ -1537,7 +1565,9 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     get: async (entry: string) => (await originalStorage.getMany([entry]))[0][1],
     remove: (entry: string) => originalStorage.removeMany([entry]),
   };
-  if (!unavailableJournal && !revokeJournal && (primaryOnly || failures.some(([location]) => location === '.rollback.rejected' &&
+  const unreadableCopy = name.startsWith('verified-write receipt survives unreadable rollback copy');
+  const secondResponseLost = failures.some(([, fault]) => fault === 'second primary response lost');
+  if (!unavailableJournal && !unreadableCopy && !revokeJournal && (primaryOnly || failures.some(([location]) => location === '.rollback.rejected' &&
       (staleCopy || failures.some(([entry, fault]) => entry === location && fault === 'remove')) &&
       !failures.some(([entry, fault]) => entry === location && fault === 'readback')))) {
     new File(Paths.document, documentPrefix + '.rollback.rejected')
@@ -1585,6 +1615,9 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     location: string, api: RecoveryApi, readValue: () => T, invalid: T,
   ): T => {
     const readPhase = phase !== 'save';
+    if (location === '' && optionalReadAttempt !== undefined &&
+        (primaryWrites.length === optionalReadAttempt || (secondResponseLost && primaryWrites.length === 3)) &&
+        inject(location, 'optional primary read', api)) throw failure;
     const once = (fault: RecoveryFault) => {
       const consumptionKey = JSON.stringify([phase, api, location, fault]);
       if (consumed.has(consumptionKey) || !inject(location, fault, api)) return false;
@@ -1608,6 +1641,12 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   set.mockImplementation(async (entry, value) => {
     const location = entry.slice(key.length);
     if (entry === key) primaryWrites.push(value);
+    if (entry === key && primaryWrites.length === 2 && inject(location, 'second primary response lost', 'setItem')) {
+      await native.set(entry, value);
+      landedStorageWrites.add(location);
+      landedPrimaryWrites.push(value);
+      throw failure;
+    }
     if (entry === key && primaryWrites.length > 1 && primaryWrites.length <= 3 && !(thirdWriteLands && primaryWrites.length === 3) &&
         inject(location, 'optional primary write', 'setItem')) throw failure;
     if ((value.startsWith('verified:') && inject(location, 'checkpoint proof write', 'setItem')) ||
@@ -1635,8 +1674,6 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   });
   get.mockImplementation(async (entry) => {
     const location = entry.slice(key.length);
-    if (entry === key && primaryWrites.length === optionalReadAttempt &&
-        inject(location, 'optional primary read', 'getItem')) throw failure;
     const value = await native.get(entry);
     if (entry === key && !authorized && landedPrimaryWrites.length === 2 &&
         inject(location, 'restore read', 'getItem')) throw failure;
@@ -1776,11 +1813,11 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
       expect(primaryWrites).toHaveLength(rejects ? 4 : 3);
       expect(primaryWrites[1]).toMatch(/^\{"batches":/);
       expect(landedPrimaryWrites).toEqual([
-        primaryWrites[0], ...(thirdWriteLands ? [primaryWrites[2]] : []),
+        primaryWrites[0], ...(secondResponseLost ? [primaryWrites[1]] : []), ...(thirdWriteLands ? [primaryWrites[2]] : []),
         ...(rejects && !preserveCandidate ? [previousRaw] : []),
       ]);
       expect(await native.get(key)).toBe(
-        rejects && !preserveCandidate ? previousRaw : primaryWrites[thirdWriteLands ? 2 : 0],
+        rejects && !preserveCandidate ? previousRaw : primaryWrites[thirdWriteLands ? 2 : secondResponseLost ? 1 : 0],
       );
       expect(originalFile.text.call(new File(Paths.document, documentPrefix + '.rollback.json')))
         .toContain(JSON.stringify(previous));
@@ -1824,7 +1861,24 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
       expect(payload).toContain(JSON.stringify(previous));
       expect(payload).not.toContain('rejected:\n');
     }
-    if (name.startsWith('verified-write receipt survives unknown retirement')) {
+    if (secondResponseLost && rejects) {
+      expect(injected.filter(([, fault, stage]) => fault === 'optional primary read' && stage === 'save'))
+        .toEqual([
+          ['', 'optional primary read', 'save', 'getItem'],
+          ['', 'optional primary read', 'save', 'getItem'],
+          ['', 'optional primary read', 'save', 'multiGet'],
+          ['', 'optional primary read', 'save', 'getItem'],
+          ['', 'optional primary read', 'save', 'getItem'],
+          ['', 'optional primary read', 'save', 'multiGet'],
+        ]);
+      expect(await native.get(key + ':verified-write')).toBeNull();
+      expect(landedStorageWrites.has(':verified-write')).toBe(false);
+    }
+    if (unreadableCopy) {
+      expect(originalFile.exists.call(new File(Paths.document, documentPrefix + '.rollback.rejected'))).toBe(false);
+      expect((await native.get(key))!).toMatch(/^\{"records":/);
+    }
+    if (name.startsWith('verified-write receipt survives') || (secondResponseLost && !rejects)) {
       const receipt = await native.get(key + ':verified-write');
       expect(receipt?.endsWith(sha256((await native.get(key))!))).toBe(true);
       const readbacks = await Promise.allSettled(get.mock.results
@@ -1890,6 +1944,11 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
     });
+    if (unreadableCopy) {
+      expect(injected.filter(([location, , stage]) => location === '.rollback.json' && stage === 'restart'))
+        .toEqual(Array(2).fill(['.rollback.json', 'restart read', 'restart', 'textSync']));
+      expect(get.mock.calls.slice(readsBeforeRestart)).toContainEqual([key + ':verified-write']);
+    }
     if (failures.some(([location]) => location === 'legacy.rollback.pending')) {
       expect(read.mock.contexts.slice(fileReadsBeforeRestart).some((file) =>
         fileLocation(file) === 'legacy.rollback.pending')).toBe(false);
@@ -1937,14 +1996,17 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
         const calls = injected.filter((event) =>
           event[0] === location && event[1] === fault && event[2] === expectedPhase && event[3] === api);
         expect(injected).toContainEqual([location, fault, expectedPhase, api]);
-        if (saveMissingProbe && (api === 'info' || api === 'exists')) expect(calls).toHaveLength(2);
+        if (saveMissingProbe && (api === 'info' || api === 'exists')) {
+          const prepareOnly = location === '.rollback.committed' || location === '.rollback.verified';
+          expect(calls).toHaveLength(prepareOnly ? 1 : 2);
+        }
         if (fault.endsWith(' once')) expect(calls).toHaveLength(1);
         if (batchReceipt && fault === 'save read') expect(calls).toHaveLength(2);
         if (fault === 'restart read' && api === 'textSync') expect(calls).toHaveLength(2);
         if (fault === 'optional primary read' || (location === rejectedAttempt && fault === 'restart read')) {
-          expect(calls).toHaveLength(api === 'multiGet' ? 1 : 2);
+          expect(calls).toHaveLength((api === 'multiGet' ? 1 : 2) * (secondResponseLost ? 2 : 1));
         }
-        if (fault === 'optional primary write') expect(calls).toHaveLength(thirdWriteLands ? 1 : 2);
+        if (fault === 'optional primary write') expect(calls).toHaveLength(thirdWriteLands || secondResponseLost ? 1 : 2);
         if (!targetApi && location === ':checkpoint' && (fault === 'restart read' || fault === 'publication read')) {
           expect(injected).toContainEqual([location, fault, expectedPhase, 'multiGet']);
         }

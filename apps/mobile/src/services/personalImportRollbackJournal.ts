@@ -670,6 +670,26 @@ export function capturePersonalImportRollback(key: string) {
     // The payload can carry an earlier rejection into a retry. Check proofs
     // for this attempt before falling back to those rejected bytes.
     matchesVerifiedReceipt: canUseCommitProof ? matchesAttemptReceipt : undefined,
+    // Attempt receipts carry the candidate hashes and the exact committed
+    // digest themselves. A read failure of the copy must not hide that proof.
+    verifyWithoutPayload: payloadError && stored === undefined && canUseCommitProof
+      ? async (
+        raw: string,
+        receipts: readonly (string | null | undefined)[],
+        readDenial: () => Promise<string | null>,
+      ) => {
+        const hash = sha256(raw);
+        if (targetedRejection?.[2] === hash) return false;
+        const proof = [...receipts, verification, settlement, retirementProof].find((receipt) => {
+          const bound = receipt?.match(attemptPattern);
+          return bound && (bound[2] === hash || bound[3] === hash || bound[4] === hash) &&
+            receipt?.slice(bound[0].length) === hash;
+        });
+        if (!proof) return false;
+        const attemptBinding = proof.slice(0, proof.indexOf('\n') + 1);
+        return readOptionalFile(rejectionBackup) !== attemptBinding && await readDenial() !== attemptBinding;
+      }
+      : undefined,
     verifiedReceipt,
     rejectionHash: orphanRejectionHash,
     checkpointRejection: orphanRejectionHash === undefined ? undefined
@@ -849,13 +869,14 @@ export function preparePersonalImportRollback(
   const publication = publicationFile(key);
   const publicationBackup = publicationBackupFile(key);
   const settlement = settlementFile(key);
-  const hadRetirement = fileExists(retirement);
+  const hadRetirement = probeJournalFile(retirement, true) === true;
   const previous = marked
     ? (primaryCommitted || hadRetirement ? readOptionalFile(payload) : readRollbackFile(payload))
     : undefined;
-  const hadVerification = fileExists(verification);
+  const hadVerification = probeJournalFile(verification, true) === true;
   // Give each new attempt its own payload binding when old proofs may survive.
-  const rearmed = hadRetirement || hadVerification || fileExists(publication) || fileExists(publicationBackup);
+  const rearmed = hadRetirement || hadVerification || probeJournalFile(publication, true) === true ||
+    probeJournalFile(publicationBackup, true) === true;
   const prefix = rearmed ? `rearmed:${createPersonalImportId()}:\n` : '';
   // Bind each possible write to this rollback copy without changing its row size.
   const ordinary = attemptedPrimary?.preferBoundPrimary && !attemptedPrimary.preserveRejection && !markerRejected;

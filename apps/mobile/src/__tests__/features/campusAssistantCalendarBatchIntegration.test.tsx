@@ -241,6 +241,39 @@ test('an unknown second write stops the third until same-ID readback and a fresh
   expectNoModelCalls();
 });
 
+test('a lost second write response stops the batch and late bytes without proof stay unconfirmed', async () => {
+  const targetKey = personalImportStorageKey(scope);
+  let writes = 0;
+  let lateLedger: string | undefined;
+  jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
+    if (key === targetKey && ++writes === 2) {
+      lateLedger = value;
+      throw new Error('lost native response');
+    }
+    await originalSet(key, value);
+  });
+  const view = render(<CampusAssistantScreen />);
+  await send(view, batchQuestion());
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '確認加入 3 筆行程' })));
+  await waitFor(() => expect(view.getAllByText(/目前沒有讀到這筆行程/).length).toBeGreaterThan(0));
+  expect(view.getByText('已核對 1／3 筆行程')).toBeTruthy();
+  expect(view.getByText('尚未開始')).toBeTruthy();
+  expect(view.queryByRole('button', { name: '確認接續剩餘 1 筆行程' })).toBeNull();
+  const journal = await readAssistantCalendarJournal(scope, () => true);
+  expect(journal.map((entry) => entry.proposal.event.title)).toEqual(['英文讀書', '程式練習']);
+  expect(lateLedger).toEqual(expect.any(String));
+  expect((await loadPersonalImports(scope)).records.map(({ id }) => id)).toEqual([journal[0].proposal.mutationId]);
+
+  const writesBeforeRecheck = ledgerWrites();
+  await originalSet(targetKey, lateLedger!);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '重新核對整份行程' })));
+  expect(view.getByText('已核對 1／3 筆行程')).toBeTruthy();
+  expect(view.queryByRole('button', { name: '確認接續剩餘 1 筆行程' })).toBeNull();
+  expect((await loadPersonalImports(scope)).records.map(({ id }) => id)).toEqual([journal[0].proposal.mutationId]);
+  expect(ledgerWrites()).toEqual(writesBeforeRecheck);
+  expectNoModelCalls();
+});
+
 test.each(['account', 'school'] as const)('a %s change during the first native write never authorizes later steps or exposes old results', async (change) => {
   const targetKey = personalImportStorageKey(scope);
   const gate = deferred();
