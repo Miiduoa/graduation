@@ -68,7 +68,11 @@ function confirmedRoutePlace(locations: readonly MapLocation[], chosen: MapLocat
   if (matches.length !== 1) return null;
   const place = matches[0];
   return place.name === chosen.name && place.category === chosen.category &&
-    place.lat === chosen.lat && place.lng === chosen.lng ? place : null;
+    place.lat === chosen.lat && place.lng === chosen.lng &&
+    (place.building ?? null) === (chosen.building ?? null) &&
+    (place.floor ?? null) === (chosen.floor ?? null) &&
+    Number.isFinite(place.lat) && Math.abs(place.lat) <= 90 &&
+    Number.isFinite(place.lng) && Math.abs(place.lng) <= 180 ? place : null;
 }
 
 export default function MapClient(props: MapProps) {
@@ -272,8 +276,8 @@ function MapContent({
     if (placeState.source !== 'ready') return null;
     const ids = route?.split(',').map((id) => id.trim());
     if (!ids || ids.length !== 2 || ids[0] === ids[1]) return null;
-    const from = locations.find((location) => location.id === ids[0]);
-    const to = locations.find((location) => location.id === ids[1]);
+    const from = confirmedRoutePlace(locations, locations.find((location) => location.id === ids[0]) ?? null);
+    const to = confirmedRoutePlace(locations, locations.find((location) => location.id === ids[1]) ?? null);
     return from && to ? [from, to] : null;
   }, [route, locations, placeState.source]);
   const routeStart = confirmedRoutePlace(locations, routeDraft?.from ?? null);
