@@ -573,6 +573,7 @@ test.each([
   ['all retirement writes fail with verified first write and no hash or receipt and readable payload without settlement', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with verification receipt write error', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient verification receipt read', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient readback', false],
   ['all publication paths fail with temporarily unreadable payload', false],
@@ -614,7 +615,18 @@ test.each([
   const stalePublication = phase.endsWith('stale publication receipt');
   const receiptReadFailsAfterSave = phase.endsWith('publication receipt read fault after success');
   const transientVerificationReceiptRead = phase.endsWith('with transient verification receipt read');
-  const verificationReceiptWriteFails = phase.endsWith('with verification receipt write error');
+  const persistentVerificationReceiptWriteFault = phase.endsWith('with persistent verification receipt write error');
+  const verificationReceiptWriteFails = phase.endsWith('with verification receipt write error') ||
+    persistentVerificationReceiptWriteFault;
+  const multiSet = jest.mocked(AsyncStorage.multiSet);
+  const nativeMultiSet = multiSet.getMockImplementation()!;
+  const multiSetReceiptFault = jest.fn(() => { throw new Error('原生批次寫入無法儲存憑據'); });
+  if (persistentVerificationReceiptWriteFault) {
+    multiSet.mockImplementation(async (entries) => {
+      if (entries.some(([entry]) => entry === key + ':verified-write')) multiSetReceiptFault();
+      return nativeMultiSet(entries);
+    });
+  }
   const verificationReceiptWriteFault = jest.fn(() => { throw new Error('已驗證寫入憑據無法儲存'); });
   const verificationReceiptReadFault = jest.fn(() => { throw new Error('已驗證寫入憑據暫時無法讀取'); });
   const receiptReadFault = jest.fn(() => { throw new Error('發佈憑據暫時無法讀取'); });
@@ -860,7 +872,12 @@ test.each([
       expect(verificationReceiptWriteFault.mock.invocationCallOrder[0])
         .toBeGreaterThan(primaryFault.mock.invocationCallOrder[1]);
       expect(active).toBe(true);
-      expect(await nativeGet(key + ':verified-write')).toEqual(expect.any(String));
+      if (persistentVerificationReceiptWriteFault) {
+        expect(multiSetReceiptFault).toHaveBeenCalledTimes(1);
+        expect(await nativeGet(key + ':verified-write')).toBeNull();
+      } else {
+        expect(await nativeGet(key + ':verified-write')).toEqual(expect.any(String));
+      }
     }
     if (transientVerificationReceiptRead) {
       const receiptKey = key + ':verified-write';
@@ -922,6 +939,7 @@ test.each([
     write.mockRestore();
     remove.mockRestore();
     create.mockRestore();
+    multiSet.mockImplementation(nativeMultiSet);
     set.mockImplementation(nativeSet);
     get.mockImplementation(nativeGet);
   }
@@ -1688,7 +1706,8 @@ test('a rejected primary-only edit with no pending marker recovers its checkpoin
 });
 
 test.each([
-  'payload write', 'payload write with receipt write fault', 'rejection delete',
+  'payload write', 'payload write with receipt write fault', 'payload write with persistent receipt write fault',
+  'rejection delete',
   'restored write', 'restored readback', 'restored write with transient receipt read',
 ] as const)('a restored primary remains editable after restart with an older checkpoint and a persistent %s fault', async (fault) => {
   const scope = { owner: `nuni:restored-primary-with-older-checkpoint-${fault}`, schoolId: 'pu' };
@@ -1732,6 +1751,17 @@ test.each([
   const get = jest.mocked(AsyncStorage.getItem);
   const nativeSet = set.getMockImplementation()!;
   const nativeGet = get.getMockImplementation()!;
+  const persistentReceiptWriteFault = fault === 'payload write with persistent receipt write fault';
+  const receiptWriteFails = fault === 'payload write with receipt write fault' || persistentReceiptWriteFault;
+  const multiSet = jest.mocked(AsyncStorage.multiSet);
+  const nativeMultiSet = multiSet.getMockImplementation()!;
+  const multiSetReceiptFault = jest.fn(() => { throw new Error('原生批次寫入無法儲存憑據'); });
+  if (persistentReceiptWriteFault) {
+    multiSet.mockImplementation(async (entries) => {
+      if (entries.some(([entry]) => entry === key + ':verified-write')) multiSetReceiptFault();
+      return nativeMultiSet(entries);
+    });
+  }
   let active = true;
   let restored = false;
   const restoreReadFault = jest.fn(() => { throw new Error('無法立即讀回已還原的主鍵'); });
@@ -1768,7 +1798,7 @@ test.each([
     active = true;
     const receiptWriteFault = jest.fn(() => { throw new Error('已驗證寫入憑據無法儲存'); });
     set.mockImplementation(async (entry, value) => {
-      if (fault === 'payload write with receipt write fault' && entry === key + ':verified-write') {
+      if (receiptWriteFails && entry === key + ':verified-write') {
         receiptWriteFault();
       }
       await nativeSet(entry, value);
@@ -1797,7 +1827,11 @@ test.each([
           expect(payloadFault).toHaveBeenCalledTimes(2);
           expect(pending.info().exists).toBe(false);
           expect(rejection.textSync()).toBe(sha256(originalRaw));
-          expect(receiptWriteFault).toHaveBeenCalledTimes(fault === 'payload write with receipt write fault' ? 1 : 0);
+          expect(receiptWriteFault).toHaveBeenCalledTimes(receiptWriteFails ? 1 : 0);
+          if (persistentReceiptWriteFault) {
+            expect(multiSetReceiptFault).toHaveBeenCalledTimes(1);
+            expect(await nativeGet(key + ':verified-write')).toBeNull();
+          }
         } else {
           expect(deleteFault).toHaveBeenCalledTimes(1);
           expect(payloadWritten).toHaveBeenCalledTimes(1);
@@ -1838,6 +1872,7 @@ test.each([
     read.mockRestore();
     unsubscribe();
     get.mockImplementation(nativeGet);
+    multiSet.mockImplementation(nativeMultiSet);
     set.mockImplementation(nativeSet);
     write.mockRestore();
     remove.mockRestore();

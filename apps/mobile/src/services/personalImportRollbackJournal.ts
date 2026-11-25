@@ -645,6 +645,26 @@ function settlementFile(key: string): File {
   return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.settled`);
 }
 
+function verificationReceiptFile(key: string): File {
+  return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.receipt`);
+}
+
+export function readNativeVerificationReceipt(key: string): string | undefined {
+  return readOptionalFile(verificationReceiptFile(key));
+}
+
+export function writeNativeVerificationReceipt(key: string, receipt: string): void {
+  const file = verificationReceiptFile(key);
+  file.write(receipt);
+  if (file.textSync() !== receipt) {
+    throw new Error('無法確認匯入資料的儲存憑據。');
+  }
+}
+
+export function clearNativeVerificationReceipt(key: string): void {
+  discardPayload(verificationReceiptFile(key));
+}
+
 export class NativeRollbackUnavailableError extends Error {
   constructor(readonly failure: unknown) {
     super('無法準備匯入資料的還原副本。');
@@ -793,6 +813,7 @@ export function preparePersonalImportRollback(
       discardPayload(verification);
       discardPayload(publication);
       discardPayload(publicationBackup);
+      clearNativeVerificationReceipt(key);
       discardPayload(payload);
       return true;
     }
@@ -949,6 +970,7 @@ export function clearPersonalImportRollback(key: string): void {
     discardPayload(publicationFile(key));
     discardPayload(publicationBackupFile(key));
     discardPayload(settlementFile(key));
+    clearNativeVerificationReceipt(key);
     discardPayload(payload);
   }
 }
