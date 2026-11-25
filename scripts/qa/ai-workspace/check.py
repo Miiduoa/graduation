@@ -7,8 +7,9 @@ import json
 import os
 import re
 import threading
+import time
 from pathlib import Path
-from urllib.parse import urlencode, urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 from playwright.async_api import async_playwright, expect
 
@@ -244,6 +245,46 @@ async def check_coursework(page, report):
         report['checks'].append('Today retry re-reads the original proof after failure while records, imports, proof and mutation counts remain unchanged')
 
 
+async def check_explore_return(page, report):
+    # Start at the real Explore component, with the existing guest/NTU scope.
+    # Fixture navigation is setup, not a user step; the service itself remains
+    # synthetic. Measure the same three explicit actions on both viewports.
+    await page.evaluate("window.__aiWorkspaceQA.navigate('/explore?school=NTU&schoolId=ntu&campus=ntu')")
+    search = page.get_by_role('searchbox', name='尋找想做的事', exact=True)
+    await expect(search).to_be_visible()
+    before = await page.evaluate('window.__aiWorkspaceQA.snapshot()')
+    journey = {'id': 'guest-explore-map-return', 'measurement': 'fixture automation, not human task time',
+               'steps': [], 'completed': False}
+    report.setdefault('journeys', []).append(journey)
+    started = time.perf_counter()
+
+    await search.fill('地圖')
+    card = page.locator('[data-experience-return="campus-map"]')
+    await expect(card).to_be_visible()
+    await expect(page.get_by_role('status').filter(has_text='1 個可以開始的起點')).to_be_visible()
+    journey['steps'].append('filter experiences')
+
+    await card.click()
+    await expect(page.get_by_role('region', name='合成目的地頁面')).to_be_visible()
+    await expect(page.get_by_test_id('fixture-route')).to_have_text('/map')
+    destination = urlparse(page.url)
+    assert dict(parse_qsl(destination.query)).get('schoolId') == 'ntu', destination
+    journey['steps'].append('open public map')
+
+    await page.get_by_role('link', name='返回探索', exact=True).click()
+    await expect(search).to_have_value('地圖')
+    await expect(card).to_be_focused()
+    returned = urlparse(page.url)
+    params = dict(parse_qsl(returned.query))
+    assert returned.path == '/explore' and params.get('schoolId') == 'ntu' and params.get('q') == '地圖', returned
+    journey['steps'].append('return to filtered card')
+    after = await page.evaluate('window.__aiWorkspaceQA.snapshot()')
+    assert after['requests'] == before['requests'], 'Public discovery must not send a model request'
+    journey.update({'completed': True, 'stepCount': len(journey['steps']),
+                    'elapsedMs': round((time.perf_counter() - started) * 1000, 1)})
+    report['checks'].append('Guest Explore opens the public map and returns to the same filtered card, campus and keyboard focus without a model request')
+
+
 async def run_scenario(browser, origin, config):
     report = {'config': config, 'status': 'running', 'checks': [], 'screenshots': [], 'geometry': []}
     context = await browser.new_context(viewport={'width': config['width'], 'height': config['height']},
@@ -355,6 +396,9 @@ async def run_scenario(browser, origin, config):
         await search.press('Escape')
         await expect(panel).not_to_be_visible()
         report['checks'].append('Guest handoff uses real local service search and Escape closes without a model call')
+
+        if config['name'] in ('desktop-light', 'phone-light'):
+            await check_explore_return(page, report)
 
         ledger = await page.evaluate('window.__aiWorkspaceQA.snapshot()')
         asks = [row for row in ledger['requests'] if row['path'].endswith('/ask')]
