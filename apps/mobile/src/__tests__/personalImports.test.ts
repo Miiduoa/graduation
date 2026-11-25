@@ -578,6 +578,8 @@ test.each([
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and file readback fault', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and backup write fault and file write fault', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and backup read fault and file readback fault', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and backup write fault and rejection write fault and file write fault', false],
+  ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and backup read fault and rejection read fault and file readback fault', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with persistent verification receipt write error and transient file read', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient verification receipt read', false],
   ['all retirement writes fail with verified first write and no hash or receipt without settlement or fallback with transient readback', false],
@@ -625,6 +627,11 @@ test.each([
     persistentVerificationReceiptWriteFault;
   const fileReceiptWriteFault = jest.fn(() => { throw new Error('檔案憑據無法寫入'); });
   const fileReceiptReadFault = jest.fn(() => { throw new Error('檔案憑據無法讀取'); });
+  const rejectionWriteFails = phase.includes('rejection write fault');
+  const rejectionReadFails = phase.includes('rejection read fault');
+  const resolutionWriteFault = jest.fn(() => { throw new Error('拒絕檔無法發佈'); });
+  const resolutionReadFault = jest.fn(() => { throw new Error('拒絕檔無法讀回'); });
+  let resolutionWritten = false;
   let restarting = false;
   const backupKey = key + ':verified-write-backup';
   const backupWriteFails = phase.includes('backup write fault');
@@ -730,6 +737,10 @@ test.each([
       if (phase === 'write' && revoked) active = false;
       throw new Error('標記無法更新');
     }
+    if (this.uri.endsWith('.rollback.rejected') && typeof value === 'string' && value.startsWith('verified:\n')) {
+      if (rejectionWriteFails) resolutionWriteFault();
+      resolutionWritten = true;
+    }
     writeFile.call(this, value, options);
   });
   const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
@@ -740,6 +751,7 @@ test.each([
     if (receiptReadBlocked && this.uri.endsWith('.rollback.published')) receiptReadFault();
     if ((unreadablePayload || publicationFails) && retirementAttempts > 0 &&
         this.uri.endsWith('.rollback.json')) payloadReadFault();
+    if (rejectionReadFails && resolutionWritten && this.uri.endsWith('.rollback.rejected')) resolutionReadFault();
     const value = textSync.call(this);
     if (this.uri === markerUri && (markerReadBlocked || (markerReadFails && value === 'committed'))) {
       markerReadBlocked ||= persistentMarkerReadFault;
@@ -923,6 +935,11 @@ test.each([
       expect(fileReceiptReadFault).not.toHaveBeenCalled();
       expect(textSync.call(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.receipt`))).toEqual(expect.any(String));
       expect(await nativeGet(key + ':verified-write-backup')).toBeNull();
+    }
+    expect(resolutionWriteFault).toHaveBeenCalledTimes(rejectionWriteFails ? 1 : 0);
+    if (rejectionReadFails) expect(resolutionReadFault).toHaveBeenCalled();
+    if (rejectionWriteFails || rejectionReadFails) {
+      expect(await nativeGet(key + ':rollback-resolution')).toEqual(expect.any(String));
     }
     restarting = true;
     await jest.isolateModulesAsync(async () => {
@@ -1746,6 +1763,8 @@ test.each([
   'payload write with persistent receipt write fault and file readback fault',
   'payload write with persistent receipt write fault and backup write fault and file write fault',
   'payload write with persistent receipt write fault and backup read fault and file readback fault',
+  'payload write with persistent receipt write fault and backup write fault and rejection write fault and file write fault',
+  'payload write with persistent receipt write fault and backup read fault and rejection read fault and file readback fault',
   'payload write with transient rejection read',
   'payload write with persistent receipt write fault and transient file read',
   'rejection delete',
@@ -1759,6 +1778,11 @@ test.each([
   const receiptFile = new File(Paths.document, prefix + 'receipt');
   const fileReceiptWriteFault = jest.fn(() => { throw new Error('檔案憑據無法寫入'); });
   const fileReceiptReadFault = jest.fn(() => { throw new Error('檔案憑據無法讀取'); });
+  const rejectionWriteFails = fault.includes('rejection write fault');
+  const rejectionReadFails = fault.includes('rejection read fault');
+  const resolutionWriteFault = jest.fn(() => { throw new Error('拒絕檔無法發佈'); });
+  const resolutionReadFault = jest.fn(() => { throw new Error('拒絕檔無法讀回'); });
+  let resolutionWritten = false;
   let restarting = false;
   let reopeningRestoredPrimary = false;
   const rejectionReadFault = jest.fn(() => { throw new Error('拒絕檔暫時無法讀取'); });
@@ -1791,6 +1815,7 @@ test.each([
     )) fileReceiptReadFault();
     if (reopeningRestoredPrimary && fault === 'payload write with transient rejection read' &&
         this.uri === rejection.uri && rejectionReadFault.mock.calls.length === 0) rejectionReadFault();
+    if (rejectionReadFails && resolutionWritten && this.uri.endsWith('.rollback.rejected')) resolutionReadFault();
     const value = textSync.call(this);
     if (fault === 'restored readback' && this.uri === rejection.uri && value === 'restored') resolvedFault();
     return value;
@@ -1805,6 +1830,10 @@ test.each([
       payloadWritten();
     }
     if (fault.startsWith('restored write') && this.uri === rejection.uri && value === 'restored') resolvedFault();
+    if (this.uri.endsWith('.rollback.rejected') && typeof value === 'string' && value.startsWith('verified:\n')) {
+      if (rejectionWriteFails) resolutionWriteFault();
+      resolutionWritten = true;
+    }
     writeFile.call(this, value, options);
   });
   const set = jest.mocked(AsyncStorage.setItem);
@@ -1868,6 +1897,7 @@ test.each([
     });
     payloadBlocked = fault.startsWith('payload write');
     get.mockClear();
+    set.mockClear();
     let saved: typeof original | undefined;
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
@@ -1885,6 +1915,9 @@ test.each([
         expect(edited.records.map(({ title }) => title)).toEqual(['化學', '統計']);
         const writeIndex = set.mock.calls.findLastIndex(([entry]) => entry === key);
         const writtenRaw = set.mock.calls[writeIndex][1];
+        if (rejectionWriteFails || rejectionReadFails) {
+          expect(set.mock.calls.filter(([entry]) => entry === key)).toEqual([[key, writtenRaw]]);
+        }
         expect(await nativeGet(key)).toBe(writtenRaw);
         expect(JSON.parse(writtenRaw).records).toEqual(edited.records);
         expect(get.mock.calls.some(([entry], index) =>
@@ -1894,7 +1927,11 @@ test.each([
         if (payloadBlocked) {
           expect(payloadFault).toHaveBeenCalledTimes(2);
           expect(pending.info().exists).toBe(false);
-          if (backupWriteFails || backupReadFails) {
+          if (rejectionWriteFails) {
+            expect(rejection.textSync()).toBe(sha256(originalRaw));
+          } else if (rejectionReadFails) {
+            expect(textSync.call(rejection)).toBe('verified:\n' + sha256(originalRaw) + '\n' + sha256(writtenRaw));
+          } else if (backupWriteFails || backupReadFails) {
             expect(rejection.textSync()).toBe('verified:\n' + sha256(originalRaw) + '\n' + sha256(writtenRaw));
           } else {
             expect(rejection.textSync()).toBe(sha256(originalRaw));
@@ -1946,6 +1983,11 @@ test.each([
       expect(fileReceiptReadFault).not.toHaveBeenCalled();
       expect(textSync.call(receiptFile)).toEqual(expect.any(String));
       expect(await nativeGet(key + ':verified-write-backup')).toBeNull();
+    }
+    expect(resolutionWriteFault).toHaveBeenCalledTimes(rejectionWriteFails ? 1 : 0);
+    if (rejectionReadFails) expect(resolutionReadFault).toHaveBeenCalled();
+    if (rejectionWriteFails || rejectionReadFails) {
+      expect(await nativeGet(key + ':rollback-resolution')).toEqual(expect.any(String));
     }
     restarting = true;
     await jest.isolateModulesAsync(async () => {

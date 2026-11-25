@@ -46,6 +46,7 @@ export const personalImportStorageKey = (scope: PersonalImportScope) =>
   `campus.personal-imports.v1:${encodeURIComponent(scope.owner)}:${encodeURIComponent(scope.schoolId)}`;
 const nativeReceiptKey = (key: string) => key + ':verified-write';
 const nativeBackupReceiptKey = (key: string) => key + ':verified-write-backup';
+const nativeRollbackResolutionKey = (key: string) => key + ':rollback-resolution';
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
 const locks = new Map<string, Promise<unknown>>();
 const pendingWrites = new Map<string, Promise<void>>();
@@ -112,7 +113,8 @@ async function readLedgerSnapshot(
   const receipt = needsReceipt ? await readNativeReceipt(nativeReceiptKey(key)) : null;
   const fileReceipt = needsReceipt ? readNativeVerificationReceipt(key) : undefined;
   const backupReceipt = needsReceipt ? await readNativeReceipt(nativeBackupReceiptKey(key)) : null;
-  const receipts = [receipt, fileReceipt, backupReceipt, journal?.verifiedReceipt];
+  const rollbackResolution = needsReceipt ? await readNativeReceipt(nativeRollbackResolutionKey(key)) : null;
+  const receipts = [receipt, fileReceipt, backupReceipt, journal?.verifiedReceipt, rollbackResolution];
   const rejectionHash = journal?.rejectionHash;
   const primaryHash = primaryVerified && primary !== null && rejectionMatches ? sha256(primary) : undefined;
   const publishedRejectionHash = primaryHash === undefined ? undefined : receipts
@@ -122,11 +124,14 @@ async function readLedgerSnapshot(
   const restoredRejectionHash = publishedRejectionHash ??
     ((primaryVerified || restoredEmpty) && rejectionMatches?.(primary) ? rejectionHash : undefined);
   const checkpointRejection = restoredRejectionHash ? undefined : rejectionMatches;
+  const resolvedUnreadableRejection = primary !== null && rollbackResolution !== null &&
+    journal?.matchesUnreadableRejectionResolution?.(primary, rollbackResolution) === true;
   const verifiedByJournal = primary !== null && (
+    resolvedUnreadableRejection ||
     journal?.matchesVerifiedPrimary?.(primary) === true ||
     receipts.some((proof) => typeof proof === 'string' && journal?.matchesVerifiedReceipt?.(primary, proof))
   );
-  const rejectedPrimary = journal?.rejected && (
+  const rejectedPrimary = journal?.rejected && !resolvedUnreadableRejection && (
     journal.hasRejectedPayload || attemptedPrimary || journal.raw === primary ||
     (primary !== null && journal.matchesFallbackPrimary?.(primary)) ||
     (journal.payloadError && hasNativeCommitEncoding(primary))
@@ -528,6 +533,8 @@ export function mutatePersonalImportLedger<T>(
             let previousFileReceipt: string | undefined;
             let writingBackupReceipt = false;
             let publishingRollbackResolution = false;
+            let previousRollbackResolution: string | null = null;
+            let writingRollbackResolution = false;
             try {
               writtenRaw = journal ? firstRaw : raw;
               await AsyncStorage.setItem(key, writtenRaw);
@@ -621,7 +628,21 @@ export function mutatePersonalImportLedger<T>(
                       // can confirm publication of the already verified primary.
                       assertWritable();
                       publishingRollbackResolution = true;
-                      publishNativeRollbackResolution(key, newReceipt);
+                      try {
+                        publishNativeRollbackResolution(key, newReceipt);
+                      } catch {
+                        // A document-directory fault can affect both receipt
+                        // and rejection files. Keep the same attempt binding
+                        // in storage that does not depend on either file.
+                        const resolutionKey = nativeRollbackResolutionKey(key);
+                        previousRollbackResolution = await readNativeReceipt(resolutionKey);
+                        assertWritable();
+                        writingRollbackResolution = true;
+                        await writeNativeReceipt(resolutionKey, newReceipt);
+                        if (await readNativeReceipt(resolutionKey) !== newReceipt) {
+                          throw new Error('無法確認匯入資料的還原狀態。');
+                        }
+                      }
                     }
                   }
                 }
@@ -631,6 +652,15 @@ export function mutatePersonalImportLedger<T>(
               }
               pendingRestorations.delete(key);
             } catch (error) {
+              if (writingRollbackResolution) {
+                const resolutionKey = nativeRollbackResolutionKey(key);
+                try {
+                  if (previousRollbackResolution === null) await AsyncStorage.removeItem(resolutionKey);
+                  else await writeNativeReceipt(resolutionKey, previousRollbackResolution);
+                } catch {
+                  // Continue restoring the rejection, journal and primary.
+                }
+              }
               if (publishingRollbackResolution) {
                 try {
                   recordFailedPersonalImportRestoration(key, persistedRaw);

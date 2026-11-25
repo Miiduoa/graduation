@@ -521,10 +521,12 @@ export function capturePersonalImportRollback(key: string) {
   if (retired && !rejectionRecorded && !rearmedPattern.test(retiredPayload ?? '')) return undefined;
   let markerCommitted = false;
   let rejected = rejectionRecorded;
+  let rejectionUnreadable = false;
   let markerError: unknown;
   try {
     const state = marker.textSync();
     rejected ||= state === rejectedMarker;
+    rejectionUnreadable = rejectionValue === undefined && state !== rejectedMarker;
     markerCommitted = !rejected && state === committedMarker;
   } catch (error) {
     markerError = error;
@@ -585,6 +587,9 @@ export function capturePersonalImportRollback(key: string) {
     ? settlement.slice(settlementPrefix.length)
     : undefined;
   const settledHash = settled && primaryHashPattern.test(settled) ? settled : undefined;
+  const matchesAttemptReceipt = attempt
+    ? (raw: string, proof: string) => proof === attempt[0] + sha256(raw)
+    : undefined;
   return {
     // An unreadable marker cannot establish retirement. Keep the payload
     // available so the caller can check it against the primary and publication evidence.
@@ -598,9 +603,10 @@ export function capturePersonalImportRollback(key: string) {
     matchesFallbackPrimary,
     markerError: rejected && encoded !== undefined ? undefined : markerError,
     payloadError,
-    matchesVerifiedReceipt: !rejected && attempt
-      ? (raw: string, proof: string) => proof === attempt[0] + sha256(raw)
-      : undefined,
+    // A separately verified resolution can disambiguate an unreadable
+    // rejection file. An explicit rejection marker or payload takes precedence.
+    matchesUnreadableRejectionResolution: rejectionUnreadable ? matchesAttemptReceipt : undefined,
+    matchesVerifiedReceipt: rejected ? undefined : matchesAttemptReceipt,
     verifiedReceipt,
     matchesVerifiedPrimary: verifiedHash || binding || receiptHash || settledHash ? (raw: string) => {
       const hash = sha256(raw);
