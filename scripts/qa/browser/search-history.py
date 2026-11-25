@@ -70,6 +70,29 @@ async def check_search_history(origin):
                 has=page.get_by_role('heading', name='圖書館', exact=True),
             )
             await expect(field).to_have_value('借書')
+            bus = results.get_by_role('link').filter(
+                has=page.get_by_role('heading', name='公車', exact=True),
+            )
+
+            async def check_sync_after_native_replace():
+                await expect(field).to_have_value('借書')
+                await page.evaluate("""() => {
+                  if (!history.state?.__NA) throw new Error('Expected the real Next history marker');
+                  const url = new URL(location.href);
+                  url.searchParams.set('q', '公車');
+                  url.searchParams.delete('category');
+                  history.replaceState(history.state, '', url);
+                }""")
+                await page.wait_for_function("() => new URL(location.href).searchParams.get('q') === '公車'")
+                await expect(field).to_have_value('借書')
+                await page.evaluate("""() => {
+                  const state = Object.defineProperty({ ...history.state },
+                    Symbol.for('nuni.app-router.sync-history-query'), { value: true });
+                  history.replaceState(state, '', location.href);
+                }""")
+                await expect(field).to_have_value('公車')
+                await expect(bus).to_be_visible()
+
             await page.wait_for_function("() => window.__searchHistoryOuterNext === true")
             await library.click()
             await page.wait_for_url('**/library?*')
@@ -82,6 +105,8 @@ async def check_search_history(origin):
             })"""
             before = await page.evaluate(metadata)
             assert before['key'] and before['snapshot']['token'], before
+            await check_sync_after_native_replace()
+            assert await page.evaluate(metadata) == before
             await page.evaluate("""() => {
               if (!history.state.__NA) throw new Error('Expected the real Next history marker');
               const state = Object.defineProperty({ ...history.state },
@@ -145,9 +170,7 @@ async def check_search_history(origin):
             }""")
             await expect(page).to_have_url(f'{origin}/search?q=%E5%85%AC%E8%BB%8A')
             await expect(field).to_have_value('公車')
-            await expect(results.get_by_role('link').filter(
-                has=page.get_by_role('heading', name='公車', exact=True),
-            )).to_be_visible()
+            await expect(bus).to_be_visible()
 
             # With the observer outside Next, its copy must forward explicit intent.
             replace_search_query = """(query) => {
@@ -155,9 +178,16 @@ async def check_search_history(origin):
                 Symbol.for('nuni.app-router.sync-history-query'), { value: true });
               history.replaceState(state, '', '?q=' + encodeURIComponent(query));
             }"""
-            for query in ('借書', '公車'):
-                await page.evaluate(replace_search_query, query)
-                await expect(field).to_have_value(query)
+            await page.evaluate(replace_search_query, '借書')
+            await expect(field).to_have_value('借書')
+            await library.click()
+            await page.wait_for_url('**/library?*')
+            await page.go_back()
+            await expect(library).to_be_focused()
+            before = await page.evaluate(metadata)
+            assert before['key'] and before['snapshot']['token'], before
+            await check_sync_after_native_replace()
+            assert await page.evaluate(metadata) == before
 
             async def check_pending_navigation(source, target):
                 requested = asyncio.Event()

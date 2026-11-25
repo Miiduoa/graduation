@@ -246,19 +246,17 @@ function installHistoryTracking() {
         // Match the Router's query representation so a native encoding-only rewrite
         // cannot publish a filter arrival that would replace an in-progress draft.
         const keepsNativeQuery = incomingNextFields.__NA && previousQueryString === queryString;
-        if (
-          url != null &&
-          previousKey &&
-          !changesOnlyFragment &&
-          !keepsNativeQuery &&
-          !routerReplace
-        ) {
-          publishReturn(null, {
-            entryKey: previousKey,
-            queryString,
-            saved: null,
-          });
-        } else if (arrival && !matchesRouterUrl(arrival.queryString)) {
+        const replacesFilters =
+          url != null && previousKey && !changesOnlyFragment && !keepsNativeQuery && !routerReplace;
+        // An opted-in write to the same URL can catch Next up to an earlier native
+        // write. Keep that entry's queued arrival until the Router renders its query.
+        const arrivalMatchesEntry =
+          arrival?.entryKey === previousKey && arrival.queryString === queryString;
+        if (replacesFilters) {
+          if (!arrivalMatchesEntry || arrival.saved || pending) {
+            publishReturn(null, { entryKey: previousKey, queryString, saved: null });
+          }
+        } else if (arrival && !arrivalMatchesEntry) {
           publishReturn(pending, null);
         }
       } else if (replacesPage && previousKey) {
