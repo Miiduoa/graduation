@@ -239,9 +239,22 @@ function MapContent({
     return () => window.removeEventListener('storage', onStorage);
   }, [uid, platformAccountId, school, favoriteAttempt]);
 
+  // Resolve duplicate IDs against the full source before applying any filter.
+  // Filtering or Map's last-write-wins would otherwise hide the ambiguity
+  // and expose an arbitrary destination to the flat map or spatial explorer.
+  const ambiguousPlaceIds = useMemo(() => {
+    const seen = new Set<string>();
+    const ambiguous = new Set<string>();
+    for (const location of locations) {
+      if (seen.has(location.id)) ambiguous.add(location.id);
+      seen.add(location.id);
+    }
+    return ambiguous;
+  }, [locations]);
   const categories = useMemo(
-    () => ['全部', ...new Set(locations.map((location) => location.category))],
-    [locations],
+    () => ['全部', ...new Set(locations.filter((location) => !ambiguousPlaceIds.has(location.id))
+      .map((location) => location.category))],
+    [locations, ambiguousPlaceIds],
   );
   const classroom = useMemo(
     () => resolveCampusClassroom({ schoolId: school, query: search, locations }),
@@ -252,6 +265,7 @@ function MapContent({
   const filtered = useMemo(() => {
     const matched = locations.filter(
       (location) =>
+        !ambiguousPlaceIds.has(location.id) &&
         (category === '全部' || location.category === category) &&
         (locationMatchesSearch(location, search) ||
           campusPlaceNameMatchesQuery(location.name, search) ||
@@ -262,7 +276,7 @@ function MapContent({
     if (myLocation)
       matched.sort((a, b) => distanceMeters(myLocation, a) - distanceMeters(myLocation, b));
     return matched;
-  }, [locations, category, search, classroomIds, onlyFavorites, favorites, nearbyOnly, myLocation]);
+  }, [locations, ambiguousPlaceIds, category, search, classroomIds, onlyFavorites, favorites, nearbyOnly, myLocation]);
   const focusedPlace = locations.find((location) => location.id === focus);
   // Explicit selections (including closing a detail) and focus links take priority.
   // A missing explicit destination must not silently turn into another building.
@@ -630,6 +644,11 @@ function MapContent({
             </div>
           )}
         </section>
+      )}
+      {ambiguousPlaceIds.size > 0 && (
+        <p className={styles.notice} role="status">
+          有 {ambiguousPlaceIds.size} 個地點識別碼重複，暫不顯示這些地點於地圖及列表，請核對校方資料。
+        </p>
       )}
       <MapCanvas
         schoolName={schoolName}
