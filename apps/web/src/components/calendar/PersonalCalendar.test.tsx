@@ -764,6 +764,8 @@ it.each([
   ['日列表編輯按鈕', '因工作區卸載而失焦'],
   ['日列表編輯按鈕', '隱藏前主動離開'],
   ['月份欄位', '因工作區隱藏而失焦', 'offsetLeft'],
+  ['月份欄位', '保留焦點', 'offsetLeft'],
+  ['月份欄位', '暫停期間主動離開', 'offsetLeft'],
   ['月份欄位', '恢復後主動離開', 'offsetLeft'],
   ['日列表編輯按鈕', '因工作區卸載而失焦', 'offsetTop'],
 ] as const)('深連結從%s等待揭露時，重新驗證前後%s（恢復時裁切軸：%s）', async (origin, action, clippedAxis?) => {
@@ -836,17 +838,25 @@ it.each([
   const outside = screen.getByRole('button', { name: '其他控制項' });
   expect(originControl.isConnected).toBe(!startsInDayList);
   expect(monthControl.closest('[hidden]')).toBeTruthy();
-  // JSDOM does not reset focus when an ancestor becomes hidden.
   const blursAfterResume = action === '恢復後主動離開';
-  if (!blursAfterResume && document.activeElement === monthControl) monthControl.blur();
-  expect(document.activeElement).toBe(blursAfterResume ? monthControl : document.body);
+  const blursDuringPause = action === '暫停期間主動離開';
+  if (blursDuringPause) {
+    expect(document.activeElement).toBe(monthControl);
+    monthControl.blur();
+    expect(document.activeElement).toBe(document.body);
+  } else if (action.startsWith('因工作區隱藏') || action.startsWith('隱藏後')) {
+    expect(document.activeElement).toBe(monthControl);
+    // JSDOM does not run the browser's focus fixup after the hidden commit.
+    HTMLElement.prototype.blur.call(monthControl);
+    expect(document.activeElement).toBe(document.body);
+  }
   if (action.includes('移到其他控制項')) outside.focus();
   if (action === '移到其他控制項後離開' || action === '隱藏後移到其他控制項又回到頁面本體') {
     outside.blur();
   }
   const focusDuringPause = document.activeElement;
   viewport.offsetLeft = clippedAxis === 'offsetLeft' ? 80 : 0;
-  if (clippedAxis === 'offsetTop') viewport.offsetTop = 120;
+  if (clippedAxis === 'offsetTop' || blursDuringPause) viewport.offsetTop = 120;
   scroll.mockClear();
   scrollIntoView.mockClear();
   viewport.dispatchEvent(new Event(clippedAxis ? 'scroll' : 'resize'));
@@ -880,7 +890,12 @@ it.each([
     }
     viewport[clippedAxis] = 0;
     viewport.dispatchEvent(new Event(clippedAxis === 'offsetLeft' ? 'scroll' : 'resize'));
-    expect(document.activeElement).toBe(blursAfterResume ? document.body : row);
+    if (blursDuringPause) {
+      expect(document.activeElement).toBe(document.body);
+      viewport.offsetTop = 80;
+      viewport.dispatchEvent(new Event('scroll'));
+    }
+    expect(document.activeElement).toBe(shouldHandoff ? row : document.body);
     expect(scroll).not.toHaveBeenCalled();
     expect(scrollIntoView).not.toHaveBeenCalled();
   }

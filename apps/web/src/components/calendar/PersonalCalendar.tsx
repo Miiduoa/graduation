@@ -622,6 +622,36 @@ function PersonalCalendarWorkspace({
   });
 
   useLayoutEffect(() => {
+    const element = linkedFocusOrigin.current?.element;
+    if (
+      !paused ||
+      !(element instanceof HTMLElement) ||
+      document.activeElement !== element ||
+      !workspaceBoundary.current?.contains(element)
+    ) {
+      return;
+    }
+    // A browser-driven blur after hiding can emit the same events as blur().
+    // Observe the explicit call at its source, only on the suspended focus origin.
+    const originalBlur = element.blur;
+    const ownBlur = Object.getOwnPropertyDescriptor(element, 'blur');
+    const observedBlur = function (this: HTMLElement) {
+      if (this === element && document.activeElement === element) cancelLinkedFocus();
+      originalBlur.call(this);
+    };
+    Object.defineProperty(element, 'blur', {
+      configurable: true,
+      writable: true,
+      value: observedBlur,
+    });
+    return () => {
+      if (element.blur !== observedBlur) return;
+      if (ownBlur) Object.defineProperty(element, 'blur', ownBlur);
+      else Reflect.deleteProperty(element, 'blur');
+    };
+  }, [paused, cancelLinkedFocus, workspaceBoundary]);
+
+  useLayoutEffect(() => {
     viewRevision.current += 1;
   }, [month, selectedDate, calendarView]);
 
