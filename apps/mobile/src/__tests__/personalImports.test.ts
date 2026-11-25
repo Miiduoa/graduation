@@ -2381,26 +2381,52 @@ test('a native create that returns without creating the marker blocks deletion b
 
 const androidRowLimitError = () => new Error('Row too big to fit into CursorWindow');
 
-test.each(['batch', 'single key'])('a temporary checkpoint read failure (%s) after restart blocks reads and guarded writes until recovery', async (phase) => {
+test.each(['batch', 'single key'])('a temporary checkpoint read failure (%s) after restart allows journal recovery and guarded writes', async (phase) => {
   const { key, checkpoint, ledger, originalRaw, deletedRaw } = await failedDeletionRollback();
+  expect(readPersonalImportRollback(key)).toBe(originalRaw);
   const failure = new Error('disk I/O error');
   const multiGet = jest.mocked(AsyncStorage.multiGet);
-  if (phase === 'batch') {
-    multiGet.mockRejectedValueOnce(failure).mockRejectedValueOnce(failure);
-  } else {
-    multiGet.mockRejectedValueOnce(androidRowLimitError()).mockRejectedValueOnce(androidRowLimitError());
-    jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(failure).mockRejectedValueOnce(failure);
-  }
-  const guard = { canContinue: () => true };
-  await expect(loadPersonalImports(scope)).rejects.toBe(failure);
-  await expect(appendPersonalImports(scope, [row('new', '統計')], guard)).rejects.toBe(failure);
-  expect(await AsyncStorage.getItem(key)).toBe(deletedRaw);
-  expect(await AsyncStorage.getItem(checkpoint)).toBe(originalRaw);
+  const getItem = jest.mocked(AsyncStorage.getItem);
+  const nativeMultiGet = multiGet.getMockImplementation()!;
+  const nativeGetItem = getItem.getMockImplementation()!;
+  const failCheckpointRead = jest.fn().mockRejectedValue(failure);
 
-  expect(await loadPersonalImports(scope)).toEqual(ledger);
-  await appendPersonalImports(scope, [row('new', '統計')], guard);
-  expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['微積分', '統計']);
-  expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
+  multiGet.mockImplementation(async (keys) => {
+    if (keys.includes(checkpoint)) {
+      if (phase === 'batch') return failCheckpointRead(checkpoint);
+      throw androidRowLimitError();
+    }
+    return nativeMultiGet(keys);
+  });
+  if (phase === 'single key') {
+    getItem.mockImplementation(async (storageKey) =>
+      storageKey === checkpoint ? failCheckpointRead(storageKey) : nativeGetItem(storageKey));
+  }
+
+  try {
+    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+    expect(failCheckpointRead).toHaveBeenCalledWith(checkpoint);
+    expect(await AsyncStorage.getItem(key)).toBe(deletedRaw);
+
+    failCheckpointRead.mockClear();
+    const guard = { canContinue: () => true, canCommitFirstWrite: () => true };
+    const result = await appendPersonalImports(scope, [row('new', '統計')], guard);
+    expect(failCheckpointRead).toHaveBeenCalledWith(checkpoint);
+    expect(result.ledger.records[0]).toEqual(ledger.records[0]);
+    expect(result.ledger.records.map(({ title }) => title)).toEqual(['微積分', '統計']);
+    expect(JSON.parse((await AsyncStorage.getItem(key))!)).toEqual(result.ledger);
+    expect(readPersonalImportRollback(key)).toBeUndefined();
+
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      failCheckpointRead.mockClear();
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(result.ledger);
+      expect(failCheckpointRead).not.toHaveBeenCalled();
+    });
+  } finally {
+    multiGet.mockImplementation(nativeMultiGet);
+    getItem.mockImplementation(nativeGetItem);
+  }
 });
 
 test('a coalesced Android read failure from another key preserves a readable checkpoint after restart', async () => {
