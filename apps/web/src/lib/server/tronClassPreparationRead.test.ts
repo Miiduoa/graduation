@@ -89,6 +89,7 @@ it('rejects stale Agent and workspace selections before any school call, includi
   });
   f.reads.fetchCourses.mockImplementation(async (_cookies, options) =>
     options.status === 'ongoing' ? [{ id: scope.courseId, name: '外交' }] : []);
+  f.reads.fetchCourseAnnouncements.mockResolvedValue({ ok: true, value: [] });
   const read = createTronClassIntegrationReader({ bindings: f.bindings, source: f.reads });
   const auth = { authenticate: async () => ({ ownerKey: OWNER, provider: 'firebase' as const }), rateLimit: () => {} };
   const integration = { ...auth, bindings: f.bindings as unknown as TronClassRouteDependencies['bindings'],
@@ -111,6 +112,16 @@ it('rejects stale Agent and workspace selections before any school call, includi
   const selected = await workspace.sync();
   expect(selected.homework).toEqual([expect.objectContaining({ id: scope.homeworkId, courseId: scope.courseId })]);
   const revision = selected.revision;
+  const announcement = '查玩課雲『外交』公告';
+  const homework = '查玩課雲『外交』作業';
+  const compoundQuestion = `${announcement}，${homework}`;
+  const first = await agentClient.ask({ question: announcement, compoundQuestion });
+  expect(first).toMatchObject({ revision, intent: 'announcements' });
+  expect(f.reads.fetchCourseAnnouncements).toHaveBeenCalledWith(f.identity.cookies, scope.courseId, expect.anything());
+  const nativeSync = () => dispatch('/api/tronclass', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fixture' },
+    body: JSON.stringify({ action: 'sync', revision }),
+  });
   const nativePrepare = () => dispatch('/api/tronclass', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fixture' },
     body: JSON.stringify({ action: 'prepare', ...scope, revision }),
@@ -123,6 +134,8 @@ it('rejects stale Agent and workspace selections before any school call, includi
 
   binding = { ...binding, revision: 'b'.repeat(32), userId: 404, cookies: { session: 'replacement-fixture' } };
   const attempts = [
+    agentClient.ask({ question: homework, compoundQuestion, revision: first.revision }),
+    workspace.sync(undefined, undefined, revision),
     agentClient.ask({ question: '幫我準備 TronClass 作業', ...scope, revision }),
     agentClient.ask({ question: '查 TronClass 作業', courseId: scope.courseId, revision }),
     agentClient.prepare(scope.courseId, scope.homeworkId, revision),
@@ -131,9 +144,10 @@ it('rejects stale Agent and workspace selections before any school call, includi
   ];
   await Promise.all(attempts.map(attempt =>
     expect(attempt).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' })));
-  const native = await nativePrepare();
-  expect(native.status).toBe(409);
-  expect(await native.json()).toMatchObject({ error: 'TRONCLASS_BINDING_CHANGED' });
+  for (const native of await Promise.all([nativePrepare(), nativeSync()])) {
+    expect(native.status).toBe(409);
+    expect(await native.json()).toMatchObject({ error: 'TRONCLASS_BINDING_CHANGED' });
+  }
   for (const endpoint of Object.values(f.reads)) expect(endpoint).not.toHaveBeenCalled();
 });
 

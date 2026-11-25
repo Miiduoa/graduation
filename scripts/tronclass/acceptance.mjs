@@ -80,6 +80,15 @@ function privateStat(stat, directory = false) {
     fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
   }
 }
+function trustedDirectory(stat) {
+  const uid = Number(stat.uid);
+  const mode = Number(stat.mode);
+  if (!stat.isDirectory() || (uid !== 0 && uid !== process.getuid()) ||
+    ((mode & 0o022) !== 0 && (mode & 0o1000) === 0)) {
+    fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
+  }
+}
+
 // Node does not expose openat. Linux procfs resolves children relative to
 // the open directory descriptor, including when the directory has been renamed.
 const O_PATH = 0o10000000;
@@ -105,6 +114,7 @@ async function withPrivateFileLocation(value, privateParent, action) {
       const flags = O_PATH | constants.O_DIRECTORY | constants.O_NOFOLLOW;
       const root = await open('/', flags);
       handles.push(root);
+      trustedDirectory(await root.stat());
       const stack = [root];
       const bindings = [];
       for (const part of parts) {
@@ -117,7 +127,9 @@ async function withPrivateFileLocation(value, privateParent, action) {
         const opened = await open(entry, flags);
         handles.push(opened);
         stack.push(opened);
-        bindings.push({ entry, opened: await opened.stat({ bigint: true }) });
+        const stat = await opened.stat({ bigint: true });
+        trustedDirectory(stat);
+        bindings.push({ entry, opened: stat });
       }
       const directory = stack.at(-1);
       bindings.reverse();
@@ -129,7 +141,8 @@ async function withPrivateFileLocation(value, privateParent, action) {
         // Check toward the root so a detached ancestor cannot hide a replacement.
         for (const { entry, opened } of bindings) {
           const current = await lstat(entry, { bigint: true });
-          if (!current.isDirectory() || current.dev !== opened.dev || current.ino !== opened.ino)
+          trustedDirectory(current);
+          if (current.dev !== opened.dev || current.ino !== opened.ino)
             fail('TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED');
         }
       }

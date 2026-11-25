@@ -412,11 +412,11 @@ export function createNativeTronClassClient(access: TronClassAccess) {
       return sameRevision(decodeTronClassCourseIndex(await request('courses')) ?? invalid(), expectedRevision);
     },
     async sync(expectedRevision: string, courseId?: number) {
-      if (courseId !== undefined && !id(courseId))
+      if (!revision(expectedRevision) || (courseId !== undefined && !id(courseId)))
         throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
       const value = sameRevision(
         parseNativeTronClassSnapshot(
-          await request('sync', courseId === undefined ? {} : { courseId, revision: expectedRevision }),
+          await request('sync', { ...(courseId === undefined ? {} : { courseId }), revision: expectedRevision }),
         ),
         expectedRevision,
       );

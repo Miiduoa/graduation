@@ -133,6 +133,40 @@ it.each([
   expect(screen.getByText('跨服務規劃結果')).toBeTruthy();
 });
 
+it('keeps automatic supplements on the first successful binding of the compound request', async () => {
+  const announcement = '查玩課雲『外交』公告';
+  const homework = '查玩課雲『外交』作業';
+  const compoundQuestion = `${announcement}，${homework}`;
+  const calls: Record<string, unknown>[] = [];
+  const homeworkReads = vi.fn();
+  let activeRevision = revision;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/nuni/assistant/ask') return json({ answer: '複合請求結果', steps: [], cards: [] });
+    if (url !== '/api/tronclass/agent') throw new Error(`Unexpected request: ${url}`);
+    const input = body(init);
+    calls.push(input);
+    if (input.question === announcement) {
+      activeRevision = 'c'.repeat(32);
+      return json({ ...base, intent: 'announcements', answer: '已讀取公告。',
+        snapshot: { ...base.snapshot!, homework: [] }, steps: [] });
+    }
+    if (input.revision !== undefined && input.revision !== activeRevision)
+      return json({ error: 'TRONCLASS_BINDING_CHANGED', message: 'TronClass 連線已變更，請重新查詢。' }, 409);
+    homeworkReads(activeRevision);
+    return json({ ...base, revision: activeRevision, snapshot: { ...base.snapshot!, revision: activeRevision } });
+  }));
+  render(<Assistant />);
+  fireEvent.click(await screen.findByRole('checkbox'));
+  await ask(compoundQuestion);
+  expect(await screen.findByText('TronClass 連線已變更，請重新查詢。')).toBeTruthy();
+  expect(calls).toEqual([
+    { action: 'ask', question: announcement, compoundQuestion },
+    { action: 'ask', question: homework, compoundQuestion, revision },
+  ]);
+  expect(homeworkReads).not.toHaveBeenCalled();
+});
+
 it.each([
   ['查玩課雲未交作業和校園公告', '查玩課雲未交作業'],
   ['查玩課雲『外交』作業和查玩課雲交通作業', '查玩課雲『外交』作業'],

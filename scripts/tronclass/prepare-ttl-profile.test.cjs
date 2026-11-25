@@ -77,15 +77,60 @@ test('creates a fresh explicit private directory and rejects existing output wit
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }
 });
 
-test('rejects output under a parent owned by another user', () => {
-  const uid = process.getuid();
-  const fixture = uid === 0 ? fs.mkdtempSync(path.join(os.tmpdir(), 'tronclass-ttl-foreign-')) : null;
+test('accepts a trusted parent alias and preserves the existing parent mode', t => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'tronclass-ttl-safe-'));
+  t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
+  const parent = path.join(workspace, 'parent');
+  const alias = path.join(workspace, 'alias');
+  fs.mkdirSync(parent);
+  fs.chmodSync(parent, 0o755);
+  fs.symlinkSync('parent', alias, 'dir');
+  const result = prepareTronClassTtlProfile({ outDir: path.join(alias, 'profile') });
+  assert.equal(result.outDir, path.join(fs.realpathSync(parent), 'profile'));
+  assertPrivateDirectory(result.outDir);
+  assert.equal(fs.statSync(parent).mode & 0o7777, 0o755);
+});
+
+test('rejects output under a parent owned by another user', t => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'tronclass-ttl-foreign-'));
   try {
-    if (fixture) fs.chownSync(fixture, 65534, -1);
-    const parent = fixture ?? '/';
-    assert.notEqual(fs.statSync(parent).uid, uid);
-    assert.throws(() => prepareTronClassTtlProfile({ outDir: path.join(parent, 'ttl-profile') }), /controlled by the current user/);
+    const uid = process.getuid();
+    if (uid === 0) {
+      fs.chownSync(fixture, 65534, -1);
+    } else {
+      const fstat = fs.fstatSync;
+      const expected = fs.statSync(fixture, { bigint: true });
+      t.mock.method(fs, 'fstatSync', (fd, options) => {
+        const stat = fstat(fd, options);
+        if (stat.dev === expected.dev && stat.ino === expected.ino) stat.uid = BigInt(uid + 1);
+        return stat;
+      });
+    }
+    assert.throws(() => prepareTronClassTtlProfile({ outDir: path.join(fixture, 'ttl-profile') }), /controlled by the current user/);
   } finally {
-    if (fixture) fs.rmdirSync(fixture);
+    fs.rmdirSync(fixture);
   }
+});
+
+test('rejects an ancestor where other users can rename entries before creating or changing output', t => {
+  const ancestor = fs.mkdtempSync(path.join(os.tmpdir(), 'tronclass-ttl-unsafe-'));
+  t.after(() => fs.rmSync(ancestor, { recursive: true, force: true }));
+  const parent = path.join(ancestor, 'parent');
+  fs.mkdirSync(parent, { mode: 0o755 });
+  fs.chmodSync(ancestor, 0o777);
+  const mode = fs.statSync(parent).mode;
+  const open = fs.openSync;
+  const entries = [];
+  t.mock.method(fs, 'openSync', (filename, ...options) => {
+    if (filename.startsWith('/proc/self/fd/')) entries.push(path.basename(filename));
+    return open(filename, ...options);
+  });
+  for (const method of ['mkdirSync', 'chmodSync', 'writeFileSync']) {
+    t.mock.method(fs, method, () => assert.fail(`Unexpected ${method}`));
+  }
+  assert.throws(() => prepareTronClassTtlProfile({ outDir: path.join(parent, 'profile') }), /controlled by the current user/);
+  assert.ok(entries.includes(path.basename(ancestor)));
+  assert.ok(!entries.includes(path.basename(parent)));
+  assert.deepEqual(fs.readdirSync(parent), []);
+  assert.equal(fs.statSync(parent).mode, mode);
 });

@@ -711,13 +711,15 @@ function V2Conversation({
     const scope = controller.current;
     const stops = askStops.current;
     const epoch = tronClassAuthorityEpoch.current;
-    await ask();
+    let revision = await ask();
     for (const clause of clauses) {
       // Stop after a user stop, a scope change or any change in TronClass authority
       // (disabled, disconnected or permission required is reported at most once).
       if (!active() || controller.current !== scope || askStops.current !== stops ||
         tronClassAuthorityEpoch.current !== epoch || busy.current) return;
-      await ask(undefined, { question: clause, compoundQuestion: current });
+      const resultRevision = await ask(undefined, { question: clause, compoundQuestion: current,
+        ...(revision === undefined ? {} : { revision }) });
+      revision ??= resultRevision;
     }
   }
   async function ask(selection?: AssistantCourseworkSelection, tronClassSelection?: TronClassAgentQuestion) {
@@ -889,6 +891,7 @@ function V2Conversation({
             reply: { answer: result.answer, steps: [], cards: [], dataRead: true },
             tronClass: { result, ...(compoundQuestion ? { compoundQuestion } : {}) } }]);
           setRecoverableQuestion(previous => previous === current ? '' : previous);
+          return result.revision;
         } catch (reason) {
           if (tronClassEpoch !== tronClassAuthorityEpoch.current) return;
           if (pendingAsk.signal.aborted || scopeSignal.aborted || !(reason instanceof TronClassRequestError)) throw reason;

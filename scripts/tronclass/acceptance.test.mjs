@@ -609,6 +609,39 @@ test('builds and loads the real server runtime, then runs private-file preflight
     contentSha256: plan.contentSha256,
     confirmed: true,
   });
+  const shared = path.join(root, 'shared');
+  const alternate = path.join(shared, 'alternate');
+  const selected = path.join(shared, 'selected');
+  await mkdir(alternate, { recursive: true, mode: 0o700 });
+  const alternateInput = path.join(alternate, 'input.json');
+  const alternatePlan = path.join(alternate, 'plan.json');
+  await privateJson(alternateInput, {
+    ...f.input, operationId: 'synthetic_cli_operation_2', content: '另一份確認內容',
+  });
+  assert.equal(await runAcceptanceCli([
+    'preflight', '--input', alternateInput, '--plan', alternatePlan,
+  ], { ...options, stdout: () => {} }), 0);
+  const reviewedAlternate = await readPrivateJson(alternatePlan);
+  assert.notEqual(reviewedAlternate.contentSha256, plan.contentSha256);
+  await privateJson(path.join(alternate, 'confirm.json'), {
+    operationId: reviewedAlternate.operationId,
+    contentSha256: reviewedAlternate.contentSha256,
+    confirmed: true,
+  });
+  await rename(alternate, selected);
+  await chmod(shared, 0o777);
+  let unsafeError = '';
+  assert.equal(await runAcceptanceCli([
+    'dispatch', '--input', path.join(selected, 'input.json'),
+    '--plan', path.join(selected, 'plan.json'), '--confirm', path.join(selected, 'confirm.json'),
+  ], {
+    ...options,
+    stdout: () => assert.fail('An unsafe ancestor must not yield a dispatch result'),
+    stderr: value => { unsafeError += value; },
+  }), 1);
+  assert.equal(unsafeError, 'TRONCLASS_ACCEPTANCE_PRIVATE_FILE_REQUIRED\n');
+  assert.equal(f.posts(), 0);
+  await assert.rejects(stat(path.join(selected, 'plan.json.dispatch')), { code: 'ENOENT' });
   const command = ['dispatch', '--input', inputPath, '--plan', planPath, '--confirm', confirmPath];
   assert.equal(await runAcceptanceCli(command, options), 0);
   assert.equal((await stat(`${planPath}.dispatch`)).mode & 0o777, 0o600);

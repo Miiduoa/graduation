@@ -450,7 +450,7 @@ export function createTronClassClient(identity: TronClassIdentity) {
       request<TronClassConnection>('disconnect', { expectedRevision }),
     courses: (signal?: AbortSignal) => request<TronClassCourseIndex>('courses', {}, signal),
     sync: (courseId?: number, signal?: AbortSignal, revision?: string) =>
-      request<TronClassSnapshot>('sync', courseId === undefined ? {} : { courseId, revision }, signal),
+      request<TronClassSnapshot>('sync', { courseId, revision }, signal),
     async downloadMaterial(input: {
       courseId: number;
       activityId: number;

@@ -310,7 +310,7 @@ it('checks the binding revision on both sync and fresh preparation', async () =>
   });
   await expect(client.prepare(10, 20, revision)).resolves.toEqual(preparation);
 });
-it('sends the selected binding revision before native preparation and scoped sync', async () => {
+it('sends the selected binding revision before native preparation and both sync scopes', async () => {
   let activeRevision = revision;
   const readSchool = jest.fn((action: string) => action === 'prepare' ? preparation : snapshot);
   const request = jest.fn(async (input: Record<string, unknown>) => {
@@ -322,15 +322,18 @@ it('sends the selected binding revision before native preparation and scoped syn
   });
   await expect(client.prepare(10, 20, revision)).resolves.toEqual(preparation);
   await expect(client.sync(revision, 10)).resolves.toEqual(snapshot);
+  await expect(client.sync(revision)).resolves.toEqual(snapshot);
   expect(request.mock.calls.map(([input]) => input)).toEqual([
     { action: 'prepare', courseId: 10, homeworkId: 20, revision },
     { action: 'sync', courseId: 10, revision },
+    { action: 'sync', revision },
   ]);
 
   readSchool.mockClear();
   activeRevision = 'b'.repeat(32);
   await expect(client.prepare(10, 20, revision)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
   await expect(client.sync(revision, 10)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+  await expect(client.sync(revision)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
   expect(readSchool).not.toHaveBeenCalled();
 });
 it('checks uploaded file ID, exact bytes metadata and SHA256 before submit can reference it', async () => {
