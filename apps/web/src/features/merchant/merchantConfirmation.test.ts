@@ -147,8 +147,8 @@ it('preserves a newer application receipt through older list responses until a s
 
   const delayedWrite = confirmed.beginRequest();
   confirmed.mergeApplications([], confirmed.beginRequest());
-  expect(confirmed.confirmApplication(receipt, delayedWrite)).toBe(false);
-  expect(confirmed.overview()?.applications).toEqual([]);
+  expect(confirmed.confirmApplication(receipt, delayedWrite)).toBe(true);
+  expect(confirmed.overview()?.applications).toEqual([receipt]);
 });
 
 it('keeps newer application receipt status and notes until a later list confirms them', () => {

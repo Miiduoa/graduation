@@ -90,7 +90,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   let listedWorkspaces: Map<string, Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'>> | undefined;
   let includeVerifiedWorkspaces = false;
   const retainedWorkspaceKeys = new Set<string>();
-  const receipts = new Map<string, Observation<NuniMerchantApplication>>();
+  const receipts = new Map<string, Observation<NuniMerchantApplication> & { confirmedThrough: number }>();
   const entries = new Map<string, WorkspaceObservations>();
   const revokedVersionFloors = new Map<string, number>();
   const workspaceKeysAwaitingConfirmation = new Set<string>();
@@ -299,8 +299,14 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         row.state === 'submitted';
       return older || regressedToSubmitted ? current : row;
     });
-    // The successful list owns membership through its request revision.
-    discardReceiptsThrough(revision);
+    const listedIds = new Set(rows.map(({ applicationId }) => applicationId));
+    for (const [id, receipt] of receipts) {
+      // A list started during the write can confirm a row it includes, but
+      // its omission cannot establish that the completed write is absent.
+      if (receipt.revision <= revision && (listedIds.has(id) || receipt.confirmedThrough < revision)) {
+        receipts.delete(id);
+      }
+    }
   }
 
   return {
@@ -387,7 +393,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     confirmApplication(receipt: NuniMerchantApplication, revision: number) {
       if (revision <= applicationRevocation) return false;
       const listed = lists.applications?.find((row) => row.applicationId === receipt.applicationId);
-      if (revision <= applicationListRevision) return listed?.tenantId === receipt.tenantId;
+      if (revision <= applicationListRevision && listed) return listed.tenantId === receipt.tenantId;
       const previous = receipts.get(receipt.applicationId);
       const current = previous?.value ?? listed;
       const useCurrent =
@@ -400,6 +406,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       receipts.set(receipt.applicationId, {
         value: useCurrent ? current : receipt,
         revision: Math.max(revision, previous?.revision ?? 0),
+        confirmedThrough: request,
       });
       return true;
     },

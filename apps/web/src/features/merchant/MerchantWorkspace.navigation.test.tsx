@@ -856,6 +856,39 @@ it.each(['receipt', 'unknown', 'unknown while on the list'] as const)(
   },
 );
 
+it('restores operations from the confirmed detail after an availability write settles on the list', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const open = { ...detail('store-a', true), readinessVersion: 7 };
+  const paused = { ...open, locationStatus: 'closed', publicAccess: false, readinessVersion: 8 };
+  let finishWrite!: (value: typeof paused) => void;
+  const write = new Promise<typeof paused>((resolve) => { finishWrite = resolve; });
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(open)
+    .mockResolvedValueOnce(open)
+    .mockResolvedValueOnce(paused)
+    .mockResolvedValueOnce(open);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
+    if (resource === path) return readDetail();
+    if (resource === `${path}/availability`) return write;
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+  await act(async () => finishWrite(paused));
+  expect(readDetail).toHaveBeenCalledTimes(3);
+  await act(async () => window.history.forward());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
+
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '恢復接單' }).disabled).toBe(false);
+  expect(screen.getByRole('link', { name: '處理訂單與收銀' })).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
 it.each(['browser Back', 'return link from application progress'])(
   'retains loaded locations and applications after %s when refreshing the list fails',
   async (returnVia) => {

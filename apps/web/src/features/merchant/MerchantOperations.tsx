@@ -545,7 +545,11 @@ export function MerchantOperations({
     const revision = nextRevision();
     try {
       await task(current, revision);
-      if (current() && !visibleRef.current) await checkAccess(current);
+      if (current() && !visibleRef.current) {
+        // A hidden access check cannot consume the next visible entry's reconciliation.
+        deferredWriteRevision.current = Math.max(deferredWriteRevision.current, revision);
+        await checkAccess(current);
+      }
     } catch (failure) {
       if (!active.current || session !== sessionRun.current) return;
       if (expireSession(failure) || !current()) return;
@@ -943,9 +947,7 @@ export function MerchantOperations({
                           ? onMenuConfirmed(detail, revision, receipt.createdItems)
                           : localConfirmations.confirmMenu(draftKey, revision, receipt.createdItems);
                         setMenuConfirmed(false);
-                        // Reconcile on the next entry whenever the receipt arrives on the list.
                         const visible = visibleRef.current;
-                        if (!visible) deferredWriteRevision.current = revision;
                         if (accepted) setNotice({ value: receipt.createdItems, revision });
                         // Re-entered views refresh when the mutation settles.
                         if (!readAfterWrite.current && (visible || accepted)) {

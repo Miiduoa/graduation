@@ -709,6 +709,54 @@ it.each([403, 404, 503])(
   },
 );
 
+it.each(['before', 'after'])(
+  'keeps the application receipt when a list started during submission resolves %s the receipt',
+  async (listOrder) => {
+    window.history.replaceState(null, '', '/merchant');
+    let showStore = false;
+    let finishApplication!: (value: typeof application) => void;
+    const receipt = new Promise<typeof application>((resolve) => { finishApplication = resolve; });
+    let finishList!: (value: { applications: [] }) => void;
+    const staleList = new Promise<{ applications: [] }>((resolve) => { finishList = resolve; });
+    const readApplications = vi.fn()
+      .mockResolvedValueOnce({ applications: [] })
+      .mockResolvedValueOnce({ applications: [] })
+      .mockReturnValueOnce(staleList)
+      .mockResolvedValue({ applications: [] });
+    mocks.request.mockImplementation((path, context, input) => {
+      if (path === 'merchant-applications') return input ? receipt : readApplications();
+      if (path === 'merchant-workspaces' && showStore)
+        return Promise.resolve({ workspaces: [continuityStore] });
+      if (path === 'merchant-workspaces/campus-one/location-1')
+        return Promise.resolve(continuityStore);
+      return respond(path, context, input);
+    });
+
+    render(<MerchantWorkspace />);
+    await fillApplication();
+    showStore = true;
+    fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+    const storeLink = await screen.findByRole('link', { name: '管理門市：第一門市' });
+    fireEvent.click(screen.getByRole('button', { name: '送出進駐申請' }));
+    await screen.findByRole('button', { name: '正在確認收件…' });
+    fireEvent.click(storeLink);
+    await screen.findByRole('heading', { name: '餐坊／第一門市', level: 2 });
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readApplications).toHaveBeenCalledTimes(3));
+
+    if (listOrder === 'before') await act(async () => finishList({ applications: [] }));
+    await act(async () => finishApplication(application));
+    if (listOrder === 'after') await act(async () => finishList({ applications: [] }));
+
+    expect(screen.getByText(/申請已收件/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
+
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+    expect(screen.queryByText(/申請已收件/)).toBeNull();
+    expect(screen.getByText('你還沒有送出進駐申請。')).toBeTruthy();
+  },
+);
+
 it('keeps review progress for an application received inside a store until a list denial', async () => {
   window.history.replaceState(null, '', '/merchant');
   let showStore = false;
