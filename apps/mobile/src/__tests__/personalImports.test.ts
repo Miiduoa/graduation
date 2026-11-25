@@ -29,6 +29,7 @@ import {
   personalImportCourses,
   personalImportStorageKey,
   selectPersonalTimetableCourses,
+  subscribePersonalImports,
   undoLastPersonalImport,
 } from '../services/personalImports';
 import { syncPersonalImports } from '../services/personalImportSync';
@@ -123,19 +124,19 @@ test.each(['native', 'web', 'web compact commit'] as const)(
       });
       await AsyncStorage.setItem(key, primary);
       await AsyncStorage.setItem(checkpoint, older);
-      const interrupted = JSON.stringify({
-        id: 'interrupted',
+      const staleJournal = JSON.stringify({
+        id: 'stale',
         before: sha256(older),
-        attempted: sha256(primary),
+        attempted: sha256(JSON.stringify({ version, ...body })),
         original: older,
       });
-      if (format === 'web compact commit') window.localStorage.setItem(journal, interrupted);
+      if (format === 'web compact commit') window.localStorage.setItem(journal, staleJournal);
 
       await expect(loadPersonalImports(scope)).rejects.toThrow('同步紀錄無法讀取');
       await expect(appendPersonalImports(scope, [row('c', '行程 C')])).rejects.toThrow('同步紀錄無法讀取');
       expect(await AsyncStorage.getItem(key)).toBe(primary);
       expect(await AsyncStorage.getItem(checkpoint)).toBe(older);
-      if (format === 'web compact commit') expect(window.localStorage.getItem(journal)).toBe(interrupted);
+      if (format === 'web compact commit') expect(window.localStorage.getItem(journal)).toBe(staleJournal);
     } finally {
       restoreStorage?.();
     }
@@ -270,6 +271,54 @@ test.each([false, true])('native checkpoint cleanup keeps restart recovery until
   } finally {
     get.mockImplementation(nativeGet);
     multiSet.mockImplementation(nativeMultiSet);
+  }
+});
+
+test.each(['read', 'remove'] as const)('native retains restart recovery when adopted checkpoint cleanup fails during %s', async (failure) => {
+  const scope = { owner: `nuni:checkpoint-cleanup-${failure}`, schoolId: 'pu' };
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  const { ledger } = await appendPersonalImports(scope, [row('a', '原有行程')]);
+  const original = (await AsyncStorage.getItem(key))!;
+  await AsyncStorage.setItem(checkpoint, original);
+  await AsyncStorage.removeItem(key);
+
+  const ioError = new Error('檢查點 I/O 失敗');
+  const get = jest.mocked(AsyncStorage.getItem);
+  const nativeGet = get.getMockImplementation()!;
+  let checkpointReads = 0;
+  if (failure === 'read') {
+    get.mockImplementation(async (entry) => {
+      if (entry === checkpoint && ++checkpointReads === 2) throw ioError;
+      return nativeGet(entry);
+    });
+  } else {
+    jest.mocked(AsyncStorage.multiRemove).mockRejectedValueOnce(ioError);
+  }
+  const listener = jest.fn();
+  const unsubscribe = subscribePersonalImports(listener);
+  const append = () => appendPersonalImports(scope, [row('b', '新增行程')], { canContinue: () => true });
+  try {
+    await expect(append()).rejects.toBe(ioError);
+    expect(listener).not.toHaveBeenCalled();
+    expect(await AsyncStorage.getItem(key)).toBe(original);
+    expect(await AsyncStorage.getItem(checkpoint)).toBe(original);
+    expect(readPersonalImportRollback(key)).toBe(original);
+    await AsyncStorage.removeItem(key);
+    await AsyncStorage.removeItem(checkpoint);
+    await jest.isolateModulesAsync(async () => {
+      const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+      await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+    });
+
+    await AsyncStorage.setItem(checkpoint, original);
+    await expect(append()).resolves.toMatchObject({ added: 1 });
+    expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
+    expect(readPersonalImportRollback(key)).toBeUndefined();
+    expect(listener).toHaveBeenCalledTimes(1);
+  } finally {
+    get.mockImplementation(nativeGet);
+    unsubscribe();
   }
 });
 
@@ -1012,6 +1061,48 @@ test('Expo and Web preserve an unbound journal with an event skipped by the prim
       '主帳本行程', 'Expo 新增', 'Web 新增',
     ]);
     expect(storage.getItem(journal)).toBe(copy);
+  } finally {
+    restoreLocks();
+    cleanup();
+  }
+});
+
+test.each([
+  ['Web', 'webCommit'],
+  ['Expo Web', '$commit'],
+] as const)('%s saves from a bound journal when a %s primary has invalid sync', async (client, marker) => {
+  const cleanup = useWebStorage();
+  const restoreLocks = withoutWebWriteLocks();
+  const key = personalImportStorageKey(scope);
+  const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+  const storage = window.localStorage;
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: async (_key: string, write: () => unknown) => write() },
+  });
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original', '原有行程')]);
+    const original = storage.getItem(key)!;
+    const { version, ...body } = ledger;
+    const attempted = JSON.stringify({
+      ...(marker === '$commit' ? { $commit: version } : { version, webCommit: 'interrupted' }),
+      ...body,
+      records: [{ ...ledger.records[0], title: '中斷寫入的行程' }],
+      sync: { enabled: 'invalid' },
+    });
+    storage.setItem(key, attempted);
+    storage.setItem(journal, JSON.stringify({
+      id: 'interrupted', before: sha256(original), attempted: sha256(attempted), original,
+    }));
+
+    expect(readWebCalendarImports(scope)).toEqual(ledger.records);
+    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+    const added = { ...row('new', '新增行程'), dayOfWeek: 2 };
+    if (client === 'Web') await saveWebCalendarBatch(scope, [added]);
+    else await appendPersonalImports(scope, [added], { canContinue: () => true });
+    expect(storage.getItem(journal)).toBeNull();
+    expect(readWebCalendarImports(scope).map(({ title }) => title)).toEqual(['原有行程', '新增行程']);
+    await expect(loadPersonalImports(scope)).resolves.toMatchObject({ records: readWebCalendarImports(scope) });
   } finally {
     restoreLocks();
     cleanup();

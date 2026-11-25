@@ -154,18 +154,13 @@ async function retireNativeCheckpoint(
 ) {
   if (adopted === undefined) return;
   const checkpoint = personalImportCheckpointKey(key);
-  let unchanged = false;
-  try {
-    unchanged = await AsyncStorage.getItem(checkpoint) === adopted;
-  } catch {
-    // Leave the copy in place if it cannot be verified.
-  }
-  if (!unchanged) return;
+  const current = await AsyncStorage.getItem(checkpoint);
+  if (current === null) return;
+  if (current !== adopted) throw new Error('匯入資料已更新，請重新載入。');
   assertWritable();
-  try {
-    await AsyncStorage.multiRemove([checkpoint]);
-  } catch {
-    // The primary is already durable. Cleanup can leave the redundant copy in place.
+  await AsyncStorage.multiRemove([checkpoint]);
+  if (await AsyncStorage.getItem(checkpoint) !== null) {
+    throw new Error('無法確認匯入資料的檢查點已清除，請稍後再試。');
   }
 }
 
@@ -176,11 +171,17 @@ async function verifyNativeLedgerWrite(key: string, raw: string | null) {
   }
 }
 
-async function restoreLedger(key: string, { raw, checkpoint }: Recovery, assertWritable: () => void) {
+async function restoreLedger(
+  key: string,
+  { raw, checkpoint }: Recovery,
+  assertWritable: () => void,
+  keepJournal: boolean,
+) {
   if (raw === null) await AsyncStorage.removeItem(key);
   else await AsyncStorage.setItem(key, raw);
   await verifyNativeLedgerWrite(key, raw);
   pendingRestorations.delete(key);
+  if (keepJournal) return;
   try {
     await retireNativeCheckpoint(key, checkpoint, assertWritable);
     assertWritable();
@@ -191,7 +192,12 @@ async function restoreLedger(key: string, { raw, checkpoint }: Recovery, assertW
   clearPersonalImportRollback(key);
 }
 
-async function rollbackLedger(key: string, raw: string | null, assertWritable: () => void) {
+async function rollbackLedger(
+  key: string,
+  raw: string | null,
+  assertWritable: () => void,
+  keepJournal: boolean,
+) {
   const recovery: Recovery = { raw };
   pendingRestorations.set(key, recovery);
   try {
@@ -204,7 +210,7 @@ async function rollbackLedger(key: string, raw: string | null, assertWritable: (
   } catch {
     // Try restoring the primary anyway. The journal still holds the verified bytes.
   }
-  await restoreLedger(key, recovery, assertWritable);
+  await restoreLedger(key, recovery, assertWritable, keepJournal);
 }
 
 async function trackWrite(key: string, write: () => Promise<void>) {
@@ -344,6 +350,7 @@ export function mutatePersonalImportLedger<T>(
             }
             assertWritable();
             const commit = preparePersonalImportRollback(key, persistedRaw);
+            let cleaningAdoptedCheckpoint = false;
             try {
               await AsyncStorage.setItem(key, raw);
               assertWritable();
@@ -352,13 +359,14 @@ export function mutatePersonalImportLedger<T>(
               // Keep the journal authoritative across a restart until the
               // checkpoint cleanup and final permission check have finished.
               if (adoptedCheckpoint !== undefined) {
+                cleaningAdoptedCheckpoint = true;
                 await retireNativeCheckpoint(key, adoptedCheckpoint, assertWritable);
                 assertWritable();
               }
               commit();
               pendingRestorations.delete(key);
             } catch (error) {
-              await rollbackLedger(key, persistedRaw, assertWritable);
+              await rollbackLedger(key, persistedRaw, assertWritable, cleaningAdoptedCheckpoint);
               throw error;
             }
           }
