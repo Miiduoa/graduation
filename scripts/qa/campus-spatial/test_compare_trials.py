@@ -29,7 +29,75 @@ class AuditTrialsTests(unittest.TestCase):
         self.assertEqual(result["pending"], [])
         self.assertEqual(len(result["ready"]), 1)
         self.assertEqual(result["ready"][0]["metrics"]["nuni"]["median_seconds"], 12.5)
+        self.assertEqual(result["ready"][0]["app_versions"],
+                         {product: "test-build" for product in PRODUCTS})
         self.assertNotIn("winner", result["ready"][0])
+
+    def test_stable_distinct_product_versions_are_reported(self):
+        records = complete()
+        for entry in records:
+            entry["app_version"] = entry["product"] + "-v1"
+        report = audit_rows(records)
+        self.assertEqual(report["errors"], [])
+        self.assertEqual(report["pending"], [])
+        self.assertEqual(report["ready"][0]["app_versions"],
+                         {product: product + "-v1" for product in PRODUCTS})
+
+    def test_version_drift_in_any_product_blocks_cohort_metrics(self):
+        for product in PRODUCTS:
+            with self.subTest(product=product):
+                records = complete()
+                next(entry for entry in records if entry["product"] == product
+                     and entry["repeat"] == "2")["app_version"] = "updated-build"
+                report = audit_rows(records)
+                self.assertEqual(report["errors"], [])
+                self.assertEqual(report["ready"], [])
+                self.assertTrue(any("mixed-version metrics" in str(item)
+                                    and product in str(item)
+                                    for item in report["pending"]))
+
+    def test_version_drift_in_fourth_repeat_cannot_be_cherry_picked(self):
+        records = complete(4)
+        records[-1]["app_version"] = "updated-build"
+        independent = [dict(entry, scenario_id="synthetic-building-02") for entry in complete()]
+        report = audit_rows(records + independent)
+        self.assertEqual(report["errors"], [])
+        self.assertEqual(len(report["ready"]), 1)
+        self.assertEqual(report["ready"][0]["conditions"]["scenario_id"], "synthetic-building-02")
+        self.assertTrue(any(item.get("repeats") == [1, 2, 3, 4]
+                            and "mixed-version metrics" in str(item) for item in report["pending"]))
+
+    def test_complete_fourth_repeat_with_condition_drift_blocks_partial_metrics(self):
+        for field, value in (
+            ("device_id", "other-iphone"), ("os_version", "other-os"),
+            ("network", "cellular"), ("setup_state", "fresh-install"),
+            ("ground_truth_ref", "https://example.org/other"),
+            ("ground_truth_date", "2026-11-13"),
+        ):
+            with self.subTest(field=field):
+                records = complete(4)
+                for entry in records:
+                    if entry["repeat"] == "4":
+                        entry[field] = value
+                independent = [dict(entry, scenario_id="synthetic-building-02")
+                               for entry in complete()]
+                report = audit_rows(records + independent)
+                self.assertEqual(report["errors"], [])
+                self.assertEqual(len(report["ready"]), 1)
+                self.assertEqual(report["ready"][0]["conditions"]["scenario_id"],
+                                 "synthetic-building-02")
+                self.assertTrue(any("conditions changed across repeats" in str(item)
+                                    for item in report["pending"]))
+
+    def test_two_complete_cohorts_cannot_share_one_scenario_id(self):
+        records = complete(6)
+        for entry in records:
+            if int(entry["repeat"]) > 3:
+                entry.update(task="classroom", verified_target="classroom")
+        report = audit_rows(records)
+        self.assertEqual(report["errors"], [])
+        self.assertEqual(report["ready"], [])
+        self.assertEqual(len(report["pending"]), 2)
 
     def test_missing_competitor_cannot_be_reported_as_complete(self):
         records = [entry for entry in complete() if not (entry["product"] == "apple-maps" and entry["repeat"] == "1")]

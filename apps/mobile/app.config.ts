@@ -198,6 +198,16 @@ export default ({ config }: any) => {
     isReleaseLike,
     1,
   );
+  if (isReleaseLike && versionCode <= 8) {
+    throw new Error('[app.config] ANDROID_VERSION_CODE must be greater than 8');
+  }
+  const blockedAndroidPermissions = Array.from(
+    new Set([
+      ...(config.android?.blockedPermissions ?? []),
+      'android.permission.ACTIVITY_RECOGNITION',
+      'com.google.android.gms.permission.ACTIVITY_RECOGNITION',
+    ]),
+  );
   const deepLinkHost = featureAvailability.deeplinks
     ? (requireReleaseValue(
         'EXPO_PUBLIC_DEEP_LINK_HOST',
@@ -335,7 +345,8 @@ export default ({ config }: any) => {
         'USE_FINGERPRINT',
         'USE_BIOMETRIC',
         'NFC',
-      ],
+      ].filter((permission) => !/ACTIVITY_RECOGNITION/i.test(permission)),
+      blockedPermissions: blockedAndroidPermissions,
       config: mapsApiKey ? { googleMaps: { apiKey: mapsApiKey } } : undefined,
       intentFilters: androidIntentFilters,
     },
