@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, Text, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { listAttendanceSessions } from '../data/courseSpaceSource';
@@ -10,6 +10,7 @@ import { useSchool } from '../state/school';
 import { Button, Card, LoadingState } from '../ui/components';
 import { courseChipScrollContentStyle } from '../ui/courseChipShell';
 import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 import { safeNavigate } from '../utils/safeNavigate';
 import { SESSION_FOCUS_MISSING, parseSessionFocusId } from './sessionDeepLink';
 
@@ -24,6 +25,7 @@ type RouteProps = {
 };
 
 export default function AttendanceMultiMethodScreen(props: RouteProps) {
+  useThemeVersion();
   const navigation = useNavigation();
   const auth = useAuth();
   const { school } = useSchool();
@@ -99,7 +101,7 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
+      style={{ flex: 1, backgroundColor: theme.colors.bg }}
       contentContainerStyle={courseChipScrollContentStyle(true)}
       accessibilityLabel="課堂簽到與點名紀錄"
       refreshControl={
@@ -108,12 +110,10 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
     >
       <View style={{ gap: 16 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <View style={{ width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: theme.colors.accentSoft }}>
-            <Ionicons name="qr-code-outline" color={theme.colors.accent} size={25} />
-          </View>
+          <Ionicons name="qr-code-outline" color={theme.colors.accent} size={22} />
           <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 24, fontWeight: '700', color: theme.colors.text }}>課堂簽到</Text>
-            <Text style={{ fontSize: 12, lineHeight: 21, color: theme.colors.muted }}>只顯示授課教師正式開啟的點名</Text>
+            <Text accessibilityRole="header" style={{ fontSize: 22, fontWeight: '700', color: theme.colors.text }}>課堂簽到</Text>
+            <Text style={{ fontSize: 12, lineHeight: 21, color: theme.colors.textSecondary }}>只顯示授課教師正式開啟的點名</Text>
           </View>
         </View>
         {loading ? (
@@ -162,7 +162,7 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
             {enabled ? <Button text="重新確認" kind="ghost" onPress={refresh} /> : null}
           </Card>
         ) : null}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16, borderRadius: 16, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }}>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.separator }}>
           <Ionicons name="shield-checkmark-outline" size={21} color={theme.colors.accent} />
           <View style={{ flex: 1, gap: 4 }}>
             <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '700' }}>以伺服器簽到結果為準</Text>

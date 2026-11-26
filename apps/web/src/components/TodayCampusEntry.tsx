@@ -7,16 +7,20 @@ import {
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
+  type Dispatch,
   type Ref,
+  type SetStateAction,
 } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { areFunctionsConfigured } from '@/lib/functionsUrl';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
-import { useCampusNavigationSearch } from '@/lib/campusNavigation';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { currentReturnPath } from '@/lib/navigation';
 import { AssistantLinkNavigation, useAssistantLinkNavigation } from './AssistantReplyLink';
 import { useLocationHash } from '@/lib/useLocationHash';
@@ -25,8 +29,13 @@ import { useAuth } from './AuthGuard';
 import { LoginLink } from './LoginLink';
 import { CampusIcon } from './CampusIcon';
 import { QuickCampusEntry } from './QuickCampusEntry';
+import { useOptionalAssistantWorkspace } from './AssistantWorkspaceContext';
+import { AssistantWorkspaceEntry } from './AssistantWorkspaceEntry';
 import styles from './TodayCampusEntry.module.css';
-import type { AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
+import {
+  getAssistantRoleWorkflow,
+  type AssistantWorkContext,
+} from '@campus/shared/src/assistantRoleWorkflows';
 
 const NuniConversation = lazy(async () => ({
   default: (await import('@/features/nuni/Assistant')).Conversation,
@@ -39,20 +48,28 @@ type Account =
   | { kind: 'nuni'; context: string; accountId: string }
   | { kind: 'school'; uid: string; localOwner: string };
 
+type InlineDraft = { text: string; setText: Dispatch<SetStateAction<string>> };
+
 function TodayConversation({
   account,
   schoolId,
   cloudEnabled,
   preferredWorkContext,
   onNavigate,
+  inlineDraft,
+  paused = false,
 }: {
   account: Account;
   schoolId: string;
   cloudEnabled: boolean;
   preferredWorkContext?: AssistantWorkContext;
   onNavigate?: (href: string) => void;
+  inlineDraft?: InlineDraft;
+  paused?: boolean;
 }) {
-  const [text, setText] = useState('');
+  const [localText, setLocalText] = useState('');
+  const text = inlineDraft?.text ?? localText;
+  const setText = inlineDraft?.setText ?? setLocalText;
   const [nuniFreeform, setNuniFreeform] = useState(false);
   const canAsk =
     account.kind === 'school' ? areFunctionsConfigured() : !cloudEnabled || nuniFreeform;
@@ -60,9 +77,18 @@ function TodayConversation({
   const conversation = useRef<HTMLDivElement>(null);
   const searchId = useId();
   const draft = { text, setText };
+  useLayoutEffect(() => {
+    if (!paused) return;
+    // Read requests can be stopped; an already-confirmed mutation keeps its
+    // journal so its outcome can be checked after the identity is verified.
+    const root = conversation.current;
+    stopAssistantVoice(root);
+    root?.querySelectorAll<HTMLButtonElement>('[data-assistant-stop-read]')
+      .forEach((button) => button.click());
+  }, [paused]);
 
   return (
-    <section className={styles.conversation} aria-label="校園助理對話入口">
+    <section className={styles.conversation} aria-label="校園助理對話入口" hidden={paused} inert={paused}>
       <div className={styles.tools}>
         {canAsk && <p className={styles.hint}>語音聽寫可能由瀏覽器的語音服務處理。</p>}
         <button
@@ -84,7 +110,7 @@ function TodayConversation({
             onAsk={
               canAsk
                 ? (phrase) => {
-                    setText(phrase);
+                    draft.setText(phrase);
                     setSearchOpen(false);
                     conversation.current?.querySelector('textarea')?.focus();
                   }
@@ -128,14 +154,19 @@ export function TodayCampusEntry({
   returnAnchor = 'today-voice-entry',
   preferredWorkContext,
   onNavigate,
+  inlineDraft,
+  paused = false,
 }: {
   preferredWorkContext?: AssistantWorkContext;
   onNavigate?: (href: string) => void;
+  inlineDraft?: InlineDraft;
+  paused?: boolean;
   active?: boolean;
   focusRequest?: number;
   returnAnchor?: 'today-voice-entry' | 'campus-assistant-entry';
 } = {}) {
   const entry = useRef<HTMLDivElement>(null);
+  const completedFocusRequest = useRef(0);
   const pathname = usePathname();
   const params = useSearchParams();
   const campusSearch = useCampusNavigationSearch(params);
@@ -145,7 +176,13 @@ export function TodayCampusEntry({
   const returnPath = currentReturnPath(pathname, returnSearch.toString(), `#${returnAnchor}`);
   useEffect(() => {
     const root = entry.current;
-    if (!active || !focusRequest || !root) return;
+    if (paused) {
+      // Rechecking a session must never reclaim focus when it settles. Only a
+      // subsequent explicit open produces another focus request.
+      completedFocusRequest.current = focusRequest;
+      return;
+    }
+    if (!active || !focusRequest || completedFocusRequest.current === focusRequest || !root) return;
     const initialFocus = document.activeElement;
     function focusInput() {
       // A delayed capability response must not take focus after the user has
@@ -155,6 +192,7 @@ export function TodayCampusEntry({
         document.activeElement !== document.body &&
         initialFocus?.isConnected
       ) {
+        completedFocusRequest.current = focusRequest;
         observer.disconnect();
         return;
       }
@@ -163,6 +201,7 @@ export function TodayCampusEntry({
       );
       if (!field) return;
       field.focus({ preventScroll: true });
+      completedFocusRequest.current = focusRequest;
       field.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
       observer.disconnect();
     }
@@ -175,7 +214,7 @@ export function TodayCampusEntry({
     });
     focusInput();
     return () => observer.disconnect();
-  }, [active, focusRequest]);
+  }, [active, paused, focusRequest]);
   return (
     <div ref={entry}>
       <AssistantLinkNavigation.Provider value={onNavigate}>
@@ -183,6 +222,8 @@ export function TodayCampusEntry({
           returnPath={returnPath}
           preferredWorkContext={preferredWorkContext}
           onNavigate={onNavigate}
+          inlineDraft={inlineDraft}
+          paused={paused}
         />
       </AssistantLinkNavigation.Provider>
     </div>
@@ -193,10 +234,14 @@ function CampusEntryContent({
   returnPath,
   preferredWorkContext,
   onNavigate,
+  inlineDraft,
+  paused = false,
 }: {
   returnPath: string;
   preferredWorkContext?: AssistantWorkContext;
   onNavigate?: (href: string) => void;
+  inlineDraft?: InlineDraft;
+  paused?: boolean;
 }) {
   const hydrated = useClientHydrated();
   const navigateLink = useAssistantLinkNavigation();
@@ -208,6 +253,41 @@ function CampusEntryContent({
   const uid = auth.user?.uid;
   const functionsConfigured = areFunctionsConfigured();
   const platformAvailable = !!session && !nuni.error;
+  const identity = JSON.stringify([
+    uid, session?.context, session?.platformAccountId, enabled, functionsConfigured,
+    Boolean(auth.error), Boolean(nuni.error), nuni.pendingLogout,
+  ]);
+  const [retained, setRetained] = useState<{
+    identity: string; account: Account; schoolId: string;
+  } | null>(null);
+  if (retained && retained.identity !== identity) setRetained(null);
+  const preferSchoolEngine = !enabled && functionsConfigured && !!uid && !auth.error;
+  const account: Account | null =
+    session && !nuni.error && !preferSchoolEngine
+      ? { kind: 'nuni', context: session.context, accountId: session.platformAccountId }
+      : uid && !auth.error
+        ? { kind: 'school', uid, localOwner: session ? 'platform:' + session.platformAccountId : 'school:' + uid }
+        : null;
+  const checking = !hydrated || nuni.loading ||
+    (auth.loading && !(platformAvailable && (enabled || !functionsConfigured))) || campus.status === 'loading';
+  const confirmed = !checking && !paused && !nuni.pendingLogout && account &&
+    campus.status === 'ready' && campus.schoolId
+    ? { identity, account, schoolId: campus.schoolId } : null;
+  if (confirmed && (retained?.identity !== identity || retained.schoolId !== confirmed.schoolId))
+    setRetained(confirmed);
+  const conversationScope = confirmed ?? (paused && retained?.identity === identity ? retained : null);
+  if (conversationScope) return (
+    <TodayConversation
+      preferredWorkContext={preferredWorkContext}
+      onNavigate={onNavigate}
+      inlineDraft={inlineDraft}
+      paused={paused}
+      key={JSON.stringify([identity, conversationScope.account.kind, conversationScope.schoolId])}
+      account={conversationScope.account}
+      schoolId={conversationScope.schoolId}
+      cloudEnabled={enabled}
+    />
+  );
   if (
     !hydrated ||
     nuni.loading ||
@@ -216,23 +296,21 @@ function CampusEntryContent({
     return <p role="status">正在確認登入狀態…</p>;
   if (nuni.pendingLogout) return <p role="status">正在確認登出狀態…</p>;
   if (campus.status === 'loading') return <p role="status">正在確認瀏覽校園…</p>;
-  const preferSchoolEngine = !enabled && functionsConfigured && !!uid && !auth.error;
-  const account: Account | null =
-    session && !nuni.error && !preferSchoolEngine
-      ? { kind: 'nuni', context: session.context, accountId: session.platformAccountId }
-      : uid && !auth.error
-        ? {
-            kind: 'school',
-            uid,
-            localOwner: session ? 'platform:' + session.platformAccountId : 'school:' + uid,
-          }
-        : null;
   if (!account || campus.status !== 'ready' || !campus.schoolId) {
+    const preparedQuestion = inlineDraft?.text.trim();
+    // Drafts belong to this document's memory. Login resumes the original route
+    // and filters without serializing an unsent draft into the return URL.
     return (
       <>
+        {preparedQuestion && (
+          <p className={styles.preparedQuestion}>你的問題：{preparedQuestion}</p>
+        )}
         {!uid && !session ? (
           <p className={styles.hint}>
-            <LoginLink returnPath={returnPath} onNavigateClick={navigateLink}>
+            <LoginLink
+              returnPath={returnPath}
+              onNavigateClick={navigateLink}
+            >
               登入後，接著詢問校園助理
             </LoginLink>
           </p>
@@ -244,28 +322,12 @@ function CampusEntryContent({
           key={JSON.stringify([uid, session?.context, campus.schoolId])}
           onAsk={null}
           onNavigate={onNavigate}
+          inlineDraft={inlineDraft}
         />
       </>
     );
   }
-  return (
-    <TodayConversation
-      preferredWorkContext={preferredWorkContext}
-      onNavigate={onNavigate}
-      key={JSON.stringify([
-        uid,
-        session?.context,
-        session?.platformAccountId,
-        account.kind,
-        campus.schoolId,
-        enabled,
-        functionsConfigured,
-      ])}
-      account={account}
-      schoolId={campus.schoolId}
-      cloudEnabled={enabled}
-    />
-  );
+  return <p role="status">正在確認登入與校園…</p>;
 }
 
 export type TodayAssistantHandle = { openAssistant(): void };
@@ -301,12 +363,70 @@ export function TodayAssistantDisclosure({
   ref: Ref<TodayAssistantHandle>;
   onOpenChange: (open: boolean) => void;
 }) {
+  const workspace = useOptionalAssistantWorkspace();
+  return workspace ? (
+    <AssistantWorkspaceEntry
+      workspace={workspace}
+      ref={ref}
+      onOpenChange={onOpenChange}
+      preferredWorkContext={preferredWorkContext}
+    />
+  ) : (
+    <LocalAssistantDisclosure
+      ref={ref}
+      onOpenChange={onOpenChange}
+      preferredWorkContext={preferredWorkContext}
+    />
+  );
+}
+
+function LocalAssistantDisclosure({
+  ref,
+  onOpenChange,
+  preferredWorkContext,
+}: {
+  preferredWorkContext?: AssistantWorkContext;
+  ref: Ref<TodayAssistantHandle>;
+  onOpenChange: (open: boolean) => void;
+}) {
   const disclosure = useRef<HTMLDetailsElement>(null);
   const openingTrigger = useRef<HTMLElement | null>(null);
   const hash = useLocationHash();
   const [opened, setOpened] = useState(false);
   const [hasOpened, setHasOpened] = useState(false);
   const [focusRequest, setFocusRequest] = useState(0);
+  const questionInput = useRef<HTMLTextAreaElement>(null);
+  const questionId = useId();
+  const auth = useAuth();
+  const nuni = useNuniSession();
+  const campus = useCampusBrowseContext();
+  const params = useSearchParams();
+  const campusSearch = useCampusNavigationSearch(params);
+  const draftScope = JSON.stringify([
+    auth.user?.uid,
+    Boolean(auth.error),
+    nuni.session?.context,
+    nuni.session?.platformAccountId,
+    nuni.pendingLogout,
+    Boolean(nuni.error),
+    campus.schoolId,
+    preferredWorkContext,
+  ]);
+  const [draftState, setDraftState] = useState({ scope: draftScope, text: '' });
+  const text = draftState.scope === draftScope ? draftState.text : '';
+  if (draftState.scope !== draftScope) setDraftState({ scope: draftScope, text: '' });
+  const setText = useCallback<Dispatch<SetStateAction<string>>>(
+    (value) =>
+      setDraftState((current) => ({
+        scope: draftScope,
+        text:
+          typeof value === 'function'
+            ? value(current.scope === draftScope ? current.text : '')
+            : value,
+      })),
+    [draftScope],
+  );
+  const workflow = getAssistantRoleWorkflow(preferredWorkContext);
 
   const openAssistant = useCallback(() => {
     const panel = disclosure.current;
@@ -336,43 +456,108 @@ export function TodayAssistantDisclosure({
   );
 
   return (
-    <details
-      ref={disclosure}
-      id="today-voice-entry"
-      className={styles.disclosure}
-      onKeyDown={(event) => {
-        if (event.key !== 'Escape' || event.nativeEvent.isComposing || !event.currentTarget.open)
-          return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.currentTarget.open = false;
-        setOpened(false);
-        onOpenChange(false);
-        stopAssistantVoice(event.currentTarget);
-        clearAssistantAnchor('today-voice-entry');
-        const trigger = openingTrigger.current;
-        (trigger?.isConnected ? trigger : event.currentTarget.querySelector('summary'))?.focus();
-      }}
-      onToggle={({ currentTarget: panel, target }) => {
-        if (target !== panel) return;
-        setOpened(panel.open);
-        onOpenChange(panel.open);
-        if (panel.open) {
-          setHasOpened(true);
-          return;
-        }
-        stopAssistantVoice(panel);
-        clearAssistantAnchor('today-voice-entry');
-      }}
-    >
-      <summary className={styles.trigger}>
-        <CampusIcon name="social" size={20} />
-        <strong>校園助理</strong>
-        <span className={styles.triggerHint}>打字或語音詢問</span>
-      </summary>
-      <div className={styles.body}>
-        {hasOpened && <TodayCampusEntry active={opened} focusRequest={focusRequest} preferredWorkContext={preferredWorkContext} />}
+    <section className={styles.starter} aria-labelledby={`${questionId}-title`}>
+      <div className={styles.starterHeading}>
+        <h2 id={`${questionId}-title`}>今天想完成什麼？</h2>
+        <Link href={campusServiceHref('/explore', campusSearch)} className={styles.exploreLink}>
+          探索用法
+        </Link>
       </div>
-    </details>
+      {!opened && (
+        <>
+          <p className={styles.starterDescription}>{workflow.purpose}</p>
+          <form
+            className={styles.starterComposer}
+            aria-label="開始一個任務"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (text.trim()) openAssistant();
+            }}
+          >
+            <label className={styles.srOnly} htmlFor={questionId}>
+              今天想完成的事
+            </label>
+            <textarea
+              id={questionId}
+              ref={questionInput}
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              placeholder={
+                workflow.id === 'student'
+                  ? '問問題、整理課業，或安排接下來的時間'
+                  : workflow.placeholder
+              }
+              rows={2}
+              maxLength={1000}
+            />
+            <div className={styles.composerFooter}>
+              <span>先寫下想法，再一起完成</span>
+              <button type="submit" disabled={!text.trim()}>
+                繼續
+              </button>
+            </div>
+          </form>
+          <div className={styles.suggestions} aria-label="試試這些問題">
+            {workflow.suggestions.slice(0, 3).map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                onClick={() => {
+                  setText(suggestion);
+                  questionInput.current?.focus({ preventScroll: true });
+                }}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <details
+        ref={disclosure}
+        id="today-voice-entry"
+        className={styles.disclosure}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || event.nativeEvent.isComposing || !event.currentTarget.open)
+            return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.currentTarget.open = false;
+          setOpened(false);
+          onOpenChange(false);
+          stopAssistantVoice(event.currentTarget);
+          clearAssistantAnchor('today-voice-entry');
+          const trigger = openingTrigger.current;
+          (trigger?.isConnected ? trigger : event.currentTarget.querySelector('summary'))?.focus();
+        }}
+        onToggle={({ currentTarget: panel, target }) => {
+          if (target !== panel) return;
+          setOpened(panel.open);
+          onOpenChange(panel.open);
+          if (panel.open) {
+            setHasOpened(true);
+            return;
+          }
+          stopAssistantVoice(panel);
+          clearAssistantAnchor('today-voice-entry');
+        }}
+      >
+        <summary className={styles.trigger}>
+          <CampusIcon name="social" size={20} />
+          <strong>校園助理</strong>
+          <span className={styles.triggerHint}>打字或語音詢問</span>
+        </summary>
+        <div className={styles.body}>
+          {hasOpened && (
+            <TodayCampusEntry
+              active={opened}
+              focusRequest={focusRequest}
+              preferredWorkContext={preferredWorkContext}
+              inlineDraft={{ text, setText }}
+            />
+          )}
+        </div>
+      </details>
+    </section>
   );
 }

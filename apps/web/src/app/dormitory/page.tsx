@@ -438,8 +438,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
         {view === 'overview' && <DormWorkflow schoolId={schoolId} uid={cloudUid} building={data.building} room={data.room} onTonightLeaveChange={setTonightLeave} onOwnRepairsChange={setOwnRepairs} />}
         <section className={styles.hero}>
           <div className={styles.heroIntro}>
-            <p className={styles.eyebrow}>{schoolName} / 住宿生活</p>
-            <h2>{data.building || '住得安心，事情好處理'}</h2>
+            <h2>{data.building || '我的住宿紀錄'}</h2>
             <p>{data.room
               ? '寢室 ' + data.room + (data.bed ? ' · ' + data.bed : '') + '｜你自己的住宿紀錄'
               : '把要辦的事、需要修的設備和重要日期放在一起。住宿資格仍以校方系統為準。'}</p>
@@ -500,7 +499,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
         {view === 'overview' && (
           <div className={styles.columns}>
             <section className={styles.panel}>
-              <div className={styles.sectionTitle}><div><p className={styles.eyebrow}>個人資料</p><h3>我的住宿資訊</h3></div><span className={styles.status}>僅此裝置</span></div>
+              <div className={styles.sectionTitle}><div><h3>我的住宿資訊</h3></div><span className={styles.status}>僅此裝置</span></div>
               <p className={styles.muted}>這是自己保存的備忘，不會變更校方床位或住宿資格。</p>
               <div className={styles.formGrid}>
                 <label>宿舍或學苑名稱<input maxLength={70} value={infoDraft.building} onChange={(e) => setInfoDraft({ ...infoDraft, building: e.target.value })} placeholder="例如：○○學苑" /></label>
@@ -602,7 +601,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
             </li>)}</ul>
             <h3>我自己記的</h3>
             <div className={styles.sectionTitle}>
-              <div><p className={styles.eyebrow}>MAINTENANCE NOTES</p><h3>設備問題紀錄</h3></div>
+              <div><h3>設備問題紀錄</h3></div>
               <button type="button" className={styles.primary} onClick={() => beginRepair()}>＋ 記錄問題</button>
             </div>
             <p className={styles.muted}>{DORM_REPAIR_COPY.intro}</p>
@@ -785,7 +784,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
         {view === 'dates' && (
           <section className={styles.panel}>
             <div className={styles.sectionTitle}>
-              <div><p className={styles.eyebrow}>個人行程</p><h3>重要日期</h3></div>
+              <div><h3>重要日期</h3></div>
               <button type="button" className={styles.primary} onClick={() => beginMilestone()}>＋ 新增日期</button>
             </div>
             <p className={styles.muted}>自行記下申請、繳費、搬入與退宿日期。這裡不會自動讀取校方期限，也不會送出申請或通知。</p>
@@ -831,10 +830,10 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
 
         {view === 'checklist' && (
           <div className={styles.checklist}>
-            <div className={styles.panel}><p className={styles.eyebrow}>PERSONAL CHECKLIST</p><h3>入住與退宿清單</h3><p>勾選只記錄自己的準備進度，不會建立校方申請。總進度：{progress.completed} / {progress.total}</p><progress max={progress.total} value={progress.completed} aria-label="準備事項完成進度" /></div>
+            <div className={styles.panel}><h3>入住與退宿清單</h3><p>勾選只記錄自己的準備進度，不會建立校方申請。總進度：{progress.completed} / {progress.total}</p><progress max={progress.total} value={progress.completed} aria-label="準備事項完成進度" /></div>
             <section className={styles.panel}>
               <div className={styles.sectionTitle}>
-                <div><p className={styles.eyebrow}>入住檢查</p><h3>房況與設備點檢</h3></div>
+                <div><h3>房況與設備點檢</h3></div>
                 <span className={styles.status}>{inspectionProgress.checked}/{inspectionProgress.total} 已確認</span>
               </div>
               <p className={styles.muted}>入住時逐項確認房況；這是你的個人記錄，不是校方驗收。發現異常，可直接預填設備問題，再依學校正式方式通報。</p>
@@ -885,7 +884,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
         {view === 'laundry' && (
           <div className={styles.columns}>
             <section className={styles.panel}>
-              <p className={styles.eyebrow}>LAUNDRY TIMER</p><h3>個人洗衣計時</h3>
+              <h3>個人洗衣計時</h3>
               <p>手動記錄這次洗衣或烘衣的預估完成時間。沒有連線洗衣機，也不顯示即時空機狀態。</p>
               <div className={styles.clock} role="status" aria-live="off">
                 <strong>{data.laundryEndAt ? (remaining ? remaining + ' 分鐘' : '預估已完成') : '尚未開始'}</strong>

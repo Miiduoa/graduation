@@ -20,6 +20,7 @@ import {
   type ShopStorefront,
 } from '../services/shopCatalog';
 import { parseMenuCsv, storefrontUrlIssue } from '@campus/shared/src/merchantMode';
+import { WorkspaceStart } from '../components/WorkspaceStart';
 
 const TABS = [
   { key: 'pending', label: '待接單' },
@@ -51,6 +52,10 @@ export default function ShopDockScreen({ navigation }: ServiceScreenProps = {}) 
 
   return (
     <Screen title="店家工作台" subtitle="菜單、店面主頁與營業時間寫進本店資料。金流還沒接到，這裡不會收款。">
+      <View style={{ paddingHorizontal: theme.layout.screenHorizontalPadding }}>
+        <WorkspaceStart navigation={navigation} workContext="merchant" compact
+          scope={JSON.stringify([auth.user?.uid, auth.profile?.schoolId, countShop?.cafeteriaId])} />
+      </View>
       {shop && (
         <View style={{ flexDirection: 'row', paddingHorizontal: 12, gap: 8 }}>
           {TABS.map((item) => (

@@ -11,18 +11,25 @@ import { currentTimetableTermKey } from '@campus/shared/src/todayPriority';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { loadPersonalImports } from '../services/personalImports';
-import { loadPersonalTimetable, personalTimetableRecords } from '../services/personalTimetable';
+import { loadPersonalTimetable, scopedPersonalTimetableRecords } from '../services/personalTimetable';
 import {
   currentSavedClasses,
   nextSavedClasses,
   type SavedClassOccurrence,
 } from '../services/nextSavedClasses';
 import { theme } from '../ui/theme';
+import { TodayClassCalendarOverlap } from './TodayClassCalendarOverlap';
+import { subscribeTodayTimetableSources } from '../hooks/subscribeTodayTimetableSources';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 
 type Props = {
   onOpenImport(): void;
   onOpenTimetable(termKey?: string): void;
+  eventAction?: {
+    accountId: string;
+    expiresAt: number;
+    open(eventId: string, eventScope: string): void;
+  };
   refreshKey?: number;
   /**
    * Signed-in platform landing only. Receives a generic prompt for the assistant's
@@ -101,6 +108,7 @@ function courseworkAsks(
 export function TodayTimetablePanel({
   onOpenImport,
   onOpenTimetable,
+  eventAction,
   refreshKey = 0,
   onAskCoursework,
   assistantAccountId,
@@ -135,11 +143,10 @@ export function TodayTimetablePanel({
       ]);
       if (run === generation.current && currentScope.current === scopeKey) {
         const canonical = toPublicSchoolId(current.schoolId) || current.schoolId;
-        const imported = ledger.records.filter(row => row.kind === 'timetable' && row.schoolId === current.schoolId);
         setSnapshot({
           scope: scopeKey,
           status: 'ready',
-          records: personalTimetableRecords(timetable, imported),
+          records: scopedPersonalTimetableRecords(timetable, ledger.records, current.schoolId),
           assistantSchoolId: toPublicSchoolId(timetable.schoolId) === canonical ? canonical : undefined,
         });
       }
@@ -151,6 +158,7 @@ export function TodayTimetablePanel({
   useFocusEffect(
     useCallback(() => {
       void load();
+      const unsubscribe = scopeKey ? subscribeTodayTimetableSources(JSON.parse(scopeKey), load) : undefined;
       const timer = setInterval(() => setNow(new Date(Date.now())), 30_000);
       const subscription = AppState.addEventListener('change', (state) => {
         if (state === 'active') void load();
@@ -158,9 +166,10 @@ export function TodayTimetablePanel({
       return () => {
         generation.current += 1;
         clearInterval(timer);
+        unsubscribe?.();
         subscription.remove();
       };
-    }, [load, refreshKey]),
+    }, [load, refreshKey, scopeKey]),
   );
   const selectedTermKey = selection.scope === scopeKey ? selection.term : undefined;
   const planAt = useCallback(
@@ -270,12 +279,9 @@ export function TodayTimetablePanel({
   );
   return (
     <View style={s.panel} testID="today-timetable">
-      <View style={s.headingRow}>
-        <View style={s.headingAccent} accessibilityElementsHidden />
-        <Text accessibilityRole="header" style={s.heading}>
-          今天的課表
-        </Text>
-      </View>
+      <Text accessibilityRole="header" style={s.heading}>
+        今天的課表
+      </Text>
       {!scopeKey ? (
         <Text style={s.detail}>正在確認帳號，暫時不顯示個人課表。</Text>
       ) : !visible || visible.status === 'loading' ? (
@@ -291,6 +297,15 @@ export function TodayTimetablePanel({
         </>
       ) : plan.terms.length ? (
         <>
+          {eventAction && scope?.owner === `nuni:${eventAction.accountId}` && eventAction.expiresAt > now.getTime() && (
+            <TodayClassCalendarOverlap
+              records={visible.records}
+              schoolId={scope.schoolId}
+              selectedTerm={selection.scope === scopeKey && selection.term === plan.termKey ? selection.term : undefined}
+              now={now}
+              onOpenEvent={(eventId) => eventAction.open(eventId, scopeKey)}
+            />
+          )}
           <Text style={s.detail}>
             目前課表：{selectedTerm?.academicYear}／{selectedTerm?.semester} · 個人課表
           </Text>
@@ -392,30 +407,26 @@ const createStyles = () =>
   StyleSheet.create({
     panel: {
       gap: 10,
-      padding: 18,
-      marginVertical: 14,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: 14,
-      backgroundColor: theme.colors.surface,
+      paddingTop: 18,
+      paddingBottom: 8,
+      marginVertical: 10,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
     },
-    headingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 3 },
-    headingAccent: { width: 3, height: 19, backgroundColor: theme.colors.accent, borderRadius: 2 },
-    heading: { color: theme.colors.text, fontSize: 19, lineHeight: 27, fontWeight: '600', flex: 1 },
+    heading: { color: theme.colors.text, fontSize: 20, lineHeight: 28, fontWeight: '600' },
     detail: { color: theme.colors.textSecondary, fontSize: 14, lineHeight: 22 },
     note: { color: theme.colors.muted, fontSize: 12, lineHeight: 19 },
     course: {
       paddingVertical: 14,
-      paddingHorizontal: 14,
-      gap: 6,
-      borderLeftWidth: 2,
+      paddingLeft: 14,
+      gap: 4,
+      borderLeftWidth: StyleSheet.hairlineWidth,
       borderLeftColor: theme.colors.border,
     },
     currentCourse: {
-      backgroundColor: theme.colors.focusSurface,
+      borderLeftWidth: 2,
+      paddingLeft: 12,
       borderLeftColor: theme.colors.accent,
-      borderTopRightRadius: 8,
-      borderBottomRightRadius: 8,
     },
     time: {
       color: theme.colors.accent,

@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Linking, Text, View } from 'react-native';
 import Constants from 'expo-constants';
 import { AIDetailScreen, AISection, AIRow, AICard, AIButton, aiTokens } from '../ui/aiFirst';
+import { SegmentedControl } from '../ui/interactive/SegmentedControl';
 import { useAuth } from '../state/auth';
 import { useOptionalNuniSession } from '../state/nuniSession';
 import { useThemeMode } from '../state/theme';
@@ -14,7 +15,7 @@ type Navigation = { goBack?: () => void; navigate?: (screen: string) => void };
 export default function SettingsAiFirstScreen({ navigation }: { navigation?: Navigation }) {
   const auth = useAuth();
   const platform = useOptionalNuniSession();
-  const { mode, setMode } = useThemeMode();
+  const { mode, appearanceMode, setMode } = useThemeMode();
   const uid = auth.user?.uid;
   const profile = auth.profile?.uid === uid ? auth.profile : null;
   const currentUid = useRef(uid);
@@ -115,18 +116,15 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
             <Text style={{ color: aiTokens.muted }}>
               目前使用{mode === 'dark' ? '深色' : '淺色'}模式。
             </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              <AIButton
-                label="淺色"
-                variant={mode === 'light' ? 'primary' : 'ghost'}
-                onPress={() => setMode('light')}
-              />
-              <AIButton
-                label="深色"
-                variant={mode === 'dark' ? 'primary' : 'ghost'}
-                onPress={() => setMode('dark')}
-              />
-            </View>
+            <SegmentedControl
+              selected={appearanceMode}
+              options={[
+                { id: 'system', label: '跟隨系統' },
+                { id: 'light', label: '淺色' },
+                { id: 'dark', label: '深色' },
+              ]}
+              onChange={setMode}
+            />
           </View>
         </AICard>
         <AIRow

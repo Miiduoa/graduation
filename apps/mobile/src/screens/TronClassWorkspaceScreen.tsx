@@ -1,3 +1,4 @@
+import { createTronClassBindingConsent, type TronClassBindingConsent } from '@campus/shared/src/tronClassBindingConsent';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Linking, Pressable, Text, TextInput, View } from 'react-native';
 import { NavigationContext } from '@react-navigation/native';
@@ -96,6 +97,7 @@ export function TronClassWorkspaceScreen() {
 
 /** One independently verified BFF owner, with platform-session precedence over Firebase. */
 function EnabledTronClassWorkspace() {
+  const [bindingConsent] = useState(createTronClassBindingConsent);
   const platform = useNuniSession();
   const school = useAuth();
   const navigation = React.useContext(NavigationContext);
@@ -112,6 +114,7 @@ function EnabledTronClassWorkspace() {
     !school.user.uid.startsWith('demo_')
       ? school.user.uid
       : null;
+  const owner = platformSession ? `platform:${platformSession.platformAccountId}` : `firebase:${schoolUid}`;
   const scope = platformSession
     ? `platform:${platformSession.platformAccountId}:${platformSession.context}`
     : schoolUid
@@ -232,10 +235,14 @@ function EnabledTronClassWorkspace() {
         </AICard>
       </AIScreen>
     );
-  return <NativeTronClassWorkspace key={scope} client={access.client} />;
+  return <NativeTronClassWorkspace key={scope} client={access.client} owner={owner} bindingConsent={bindingConsent} />;
 }
 
-function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient }) {
+function NativeTronClassWorkspace({ client, owner, bindingConsent }: {
+  client: NativeTronClassClient;
+  owner: string;
+  bindingConsent: TronClassBindingConsent;
+}) {
   const navigation = React.useContext(NavigationContext);
   const [connection, setConnection] = useState<TronClassConnection | null>(null);
   const [snapshot, setSnapshot] = useState<TronClassSnapshot | null>(null);
@@ -246,6 +253,7 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState('正在讀取連接狀態…');
   const [error, setError] = useState('');
+  const [awaitingBindingConsent, setAwaitingBindingConsent] = useState(false);
   const [statusKnown, setStatusKnown] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -299,6 +307,8 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     latestConnection.current = value;
     setConnection(value);
     setStatusKnown(true);
+    setAwaitingBindingConsent(false);
+    if (value.connected) bindingConsent.accept(owner, value.revision);
     setAccount(value.account || '');
     setReconnecting(!value.connected);
   }
@@ -359,6 +369,8 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     } finally { if (matches()) setCourseLoading(false); }
   }
   function lost(failure: unknown) {
+    if (failure instanceof NuniError && failure.code === 'TRONCLASS_BINDING_CHANGED')
+      bindingConsent.changed(owner, latestConnection.current?.revision ?? null);
     ++courseRequest.current;
     ++indexRequest.current;
     setCourseIndex(null);
@@ -399,6 +411,16 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     try {
       const value = await client.status();
       if (!current()) return;
+      if (value.connected && !bindingConsent.permits(owner, value.revision)) {
+        setConnection(value);
+        latestConnection.current = value;
+        setAccount(value.account ?? '');
+        setAwaitingBindingConsent(true);
+        setStatusKnown(true);
+        setReconnecting(false);
+        setError('TronClass 連接已變更。請確認目前的學校帳號，再繼續讀取課程。');
+        return;
+      }
       acceptConnection(value);
       synchronize(value);
     } catch (failure) {
@@ -522,7 +544,10 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     setDisconnecting(false);
     try {
       const value = await client.disconnect(connection.revision);
-      if (current()) acceptConnection(value);
+      if (current()) {
+        bindingConsent.accept(owner, value.revision);
+        acceptConnection(value);
+      }
     } catch (failure) {
       if (current()) {
         setConnection(null);
@@ -712,10 +737,16 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
           </View>
         ) : null}
         <AIButton
-          label={statusKnown ? '重新整理課務資料' : '重新讀取連接狀態'}
+          label={awaitingBindingConsent ? '繼續讀取目前帳號的課程' : statusKnown ? '重新整理課務資料' : '重新讀取連接狀態'}
           variant="ghost"
           disabled={!!busy || assignmentBusy}
-          onPress={() => void load()}
+          onPress={() => {
+            if (awaitingBindingConsent && connection?.connected && current()) {
+              acceptConnection(connection);
+              setError('');
+              synchronize(connection);
+            } else void load();
+          }}
         />
       </AICard>
       {busy ? (

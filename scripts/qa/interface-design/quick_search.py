@@ -16,7 +16,7 @@ async def check_quick_search(page, config, report, capture):
     field = form.get_by_role('searchbox', name='想做什麼？', exact=True)
     await expect(field).to_be_visible()
     root = await page.locator('html').evaluate('node => parseFloat(getComputedStyle(node).fontSize)')
-    expected = max(16, root * (1.0625 if config.get('font') == 'large' else .9375))
+    expected = max(16, root * (1.125 if config.get('font') == 'large' else 1))
     size = await field.evaluate('node => parseFloat(getComputedStyle(node).fontSize)')
     assert abs(size - expected) < .1, ('Quick search lost the active text preference', size, expected)
     await capture('quick-start')

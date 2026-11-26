@@ -209,10 +209,15 @@ describe('cross-service task results', () => {
     const view = render(<AssistantTaskPlan plan={plan(step())} cards={[card]}
       states={{ [card.mutationId]: { ...state, local: 'unavailable' } }} />);
     expect(screen.getByText(/帳號已儲存，此裝置尚未更新/)).toBeTruthy();
+    expect(screen.getByText('待核對')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toBe('已完成 0/1 項');
     view.rerender(<AssistantTaskPlan plan={plan(step())} cards={[card]}
       states={{ [card.mutationId]: { ...state, verificationWarning: '最近一次查核失敗' } }} />);
     expect(screen.getByText('待核對')).toBeTruthy();
     expect(screen.getByRole('status').textContent).toBe('已完成 0/1 項');
+    view.rerender(<AssistantTaskPlan plan={plan(step())} cards={[card]}
+      states={{ [card.mutationId]: state }} />);
+    expect(screen.getByRole('status').textContent).toBe('已完成 1/1 項');
   });
 
   it('preserves partial work when another card is unknown or a source remains incomplete', () => {
@@ -263,6 +268,19 @@ describe('cross-service task results', () => {
     view.rerender(<AssistantTaskPlan plan={plan(step({ status: 'completed' }))} cards={[eventCard()]} states={{}} />);
     expect(screen.getByText('待確認')).toBeTruthy();
     expect(screen.getByRole('status').textContent).toContain('已完成 0/1');
+  });
+
+  it.each(['foreign-calendar', 'non-calendar'])('does not claim remote storage from a %s receipt when local sync is unavailable', (kind) => {
+    const card = kind === 'non-calendar' ? foodCard : eventCard();
+    const state = verified(eventCard('calendar-other-task'));
+    if (state.status !== 'verified') throw new Error('fixture');
+    render(<AssistantTaskPlan plan={plan(step({ cardIds: [card.mutationId] }))} cards={[card]}
+      states={{ [card.mutationId]: { ...state, local: 'unavailable' } }} />);
+    expect(screen.getByText('待核對')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toBe('已完成 0/1 項');
+    expect(screen.queryByText(/帳號已儲存/)).toBeNull();
+    expect(screen.queryByText(/不需重新建立/)).toBeNull();
+    expect(screen.getByText('另有操作結果尚未核對，請從下方確認卡查核原結果。')).toBeTruthy();
   });
 });
 

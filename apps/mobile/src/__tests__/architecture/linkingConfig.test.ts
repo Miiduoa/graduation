@@ -30,7 +30,7 @@ describe('navigation linking config', () => {
           name: '校園',
           state: {
             index: 1,
-            routes: [{ name: 'CampusHome' }, { name: 'Dormitory', params: { schoolId: 'pu' } }],
+            routes: [{ name: 'Explore' }, { name: 'Dormitory', params: { schoolId: 'pu' } }],
           },
         },
       ],

@@ -158,7 +158,7 @@ it('offers the first two stores on home and keeps further stores and application
     '/merchant/workspace?tenant=school-one&location=loc-3',
   );
   expect(links.getByRole('link', { name: '查看申請進度（1）' }).getAttribute('href')).toBe(
-    '/merchant/workspace#merchant-applications-title',
+    '/merchant/workspace?view=applications#merchant-applications-title',
   );
   expect(links.getByRole('link', { name: /開始今天的門市工作/ })).toBeTruthy();
 });

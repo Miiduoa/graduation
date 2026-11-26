@@ -1,9 +1,8 @@
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { AmbientCueSignalType } from '../data/types';
-import { shadowStyle, theme } from './theme';
+import { theme } from './theme';
 import { useThemeVersion } from './useThemeStyleSheet';
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -14,42 +13,42 @@ function getAmbientCuePalette(signalType: AmbientCueSignalType) {
       return {
         fg: theme.colors.fresh,
         bg: theme.colors.freshSoft,
-        border: `${theme.colors.fresh}30`,
+        border: theme.colors.border,
         icon: 'pulse-outline' as IconName,
       };
     case 'teaching_review':
       return {
         fg: theme.colors.warning,
         bg: theme.colors.warningSoft,
-        border: `${theme.colors.warning}30`,
+        border: theme.colors.border,
         icon: 'checkmark-circle-outline' as IconName,
       };
     case 'leaderboard_momentum':
       return {
         fg: theme.colors.success,
         bg: theme.colors.successSoft,
-        border: `${theme.colors.success}30`,
+        border: theme.colors.border,
         icon: 'trophy-outline' as IconName,
       };
     case 'campus_popularity':
       return {
         fg: theme.colors.accent,
         bg: theme.colors.accentSoft,
-        border: `${theme.colors.accent}30`,
+        border: theme.colors.border,
         icon: 'people-outline' as IconName,
       };
     case 'approval_backlog':
       return {
         fg: theme.colors.warning,
         bg: theme.colors.warningSoft,
-        border: `${theme.colors.warning}30`,
+        border: theme.colors.border,
         icon: 'layers-outline' as IconName,
       };
     case 'admin_activity':
       return {
         fg: theme.colors.roleAdmin,
         bg: theme.colors.roleAdminSoft,
-        border: `${theme.colors.roleAdmin}30`,
+        border: theme.colors.border,
         icon: 'sparkles-outline' as IconName,
       };
     case 'course_completion':
@@ -57,7 +56,7 @@ function getAmbientCuePalette(signalType: AmbientCueSignalType) {
       return {
         fg: theme.colors.accent,
         bg: theme.colors.accentSoft,
-        border: `${theme.colors.accent}30`,
+        border: theme.colors.border,
         icon: 'trending-up-outline' as IconName,
       };
   }
@@ -73,11 +72,13 @@ export function ContextStrip(props: {
   return (
     <View
       style={{
-        padding: theme.space.lg,
-        borderRadius: theme.radius.xl,
+        paddingVertical: theme.space.md,
+        paddingHorizontal: theme.space.md,
+        borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.surface,
-        gap: theme.space.sm,
-        ...shadowStyle(theme.shadows.md),
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.border,
+        gap: theme.space.xs,
       }}
     >
       <View
@@ -88,13 +89,14 @@ export function ContextStrip(props: {
           gap: theme.space.md,
         }}
       >
-        <View style={{ flex: 1, gap: theme.space.xs }}>
+        <View style={{ flex: 1, gap: theme.space.xxs }}>
           <Text
             style={{
               color: theme.colors.accent,
               fontSize: theme.typography.overline.fontSize,
-              fontWeight: theme.typography.overline.fontWeight ?? '700',
-              letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
+              lineHeight: theme.typography.overline.lineHeight,
+              fontWeight: theme.typography.overline.fontWeight ?? '600',
+              letterSpacing: theme.typography.overline.letterSpacing ?? 0.6,
               textTransform: 'uppercase',
             }}
           >
@@ -104,12 +106,25 @@ export function ContextStrip(props: {
             style={{
               color: theme.colors.text,
               fontSize: theme.typography.h2.fontSize,
-              fontWeight: theme.typography.h2.fontWeight ?? '700',
+              lineHeight: theme.typography.h2.lineHeight,
+              fontWeight: theme.typography.h2.fontWeight ?? '600',
               letterSpacing: theme.typography.h2.letterSpacing,
             }}
           >
             {props.title}
           </Text>
+          {props.description ? (
+            <Text
+              style={{
+                color: theme.colors.textSecondary,
+                fontSize: theme.typography.bodySmall.fontSize,
+                lineHeight: theme.typography.bodySmall.lineHeight,
+                marginTop: 2,
+              }}
+            >
+              {props.description}
+            </Text>
+          ) : null}
         </View>
         {props.right}
       </View>
@@ -135,13 +150,13 @@ export function ConfidenceBadge(props: {
     <View
       style={{
         alignSelf: 'flex-start',
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: theme.radius.full,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: theme.radius.sm,
         backgroundColor: colors.bg,
       }}
     >
-      <Text style={{ color: colors.fg, fontSize: 11, fontWeight: '700', letterSpacing: 0.1 }}>
+      <Text style={{ color: colors.fg, fontSize: 11, fontWeight: '600', letterSpacing: 0.1 }}>
         {props.label}
       </Text>
     </View>
@@ -162,57 +177,55 @@ export function HeroActionCard(props: {
   useThemeVersion();
   const tone = props.tone ?? 'accent';
   const fg = theme.colors[tone];
-  const gradColors: [string, string] = [theme.colors[`${tone}Soft`], theme.colors.surface];
 
   const content = (
-    <LinearGradient
-      colors={gradColors as [string, string]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
+    <View
       style={{
-        padding: 22,
-        borderRadius: theme.radius.xl,
-        gap: 16,
-        ...shadowStyle(theme.shadows.lg),
+        padding: theme.space.md,
+        borderRadius: theme.radius.lg,
+        backgroundColor: theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        borderLeftWidth: 3,
+        borderLeftColor: fg,
+        gap: 10,
       }}
     >
-      {/* Top row: icon + meta */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <View
-          style={{
-            width: 52,
-            height: 52,
-            borderRadius: theme.radius.lg,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: theme.colors.surface,
-          }}
-        >
-          <Ionicons name={props.icon} size={24} color={fg} />
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+          <Ionicons name={props.icon} size={15} color={fg} />
+          <Text
+            style={{
+              color: fg,
+              fontSize: theme.typography.overline.fontSize,
+              lineHeight: theme.typography.overline.lineHeight,
+              fontWeight: '600',
+              letterSpacing: 0.6,
+              textTransform: 'uppercase',
+            }}
+            numberOfLines={1}
+          >
+            {props.eyebrow}
+          </Text>
         </View>
         {props.meta ? <ConfidenceBadge state="live" label={props.meta} /> : null}
       </View>
 
-      {/* Content */}
-      <View style={{ gap: 6 }}>
-        <Text
-          style={{
-            color: fg,
-            fontSize: 11,
-            fontWeight: '700',
-            letterSpacing: 1.5,
-            textTransform: 'uppercase',
-          }}
-        >
-          {props.eyebrow}
-        </Text>
+      <View style={{ gap: 4 }}>
         <Text
           style={{
             color: theme.colors.text,
-            fontSize: 20,
+            fontSize: theme.typography.h1.fontSize,
             fontWeight: '700',
-            letterSpacing: -0.4,
-            lineHeight: 26,
+            letterSpacing: theme.typography.h1.letterSpacing,
+            lineHeight: theme.typography.h1.lineHeight,
           }}
         >
           {props.title}
@@ -221,9 +234,8 @@ export function HeroActionCard(props: {
           <Text
             style={{
               color: theme.colors.textSecondary,
-              fontSize: 14,
-              lineHeight: 21,
-              marginTop: 2,
+              fontSize: theme.typography.bodySmall.fontSize,
+              lineHeight: theme.typography.bodySmall.lineHeight,
             }}
           >
             {props.description}
@@ -231,21 +243,22 @@ export function HeroActionCard(props: {
         )}
       </View>
 
-      {/* Action Button */}
       {props.actionLabel ? (
         <View
           style={{
-            alignSelf: 'flex-start',
-            paddingHorizontal: 18,
-            paddingVertical: 10,
-            borderRadius: theme.radius.md,
-            backgroundColor: theme.colors.surface,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 5,
+            paddingTop: 6,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: theme.colors.separator,
           }}
         >
-          <Text style={{ color: fg, fontSize: 14, fontWeight: '700' }}>{props.actionLabel}</Text>
+          <Text style={{ color: fg, fontSize: 14, fontWeight: '600' }}>{props.actionLabel}</Text>
+          <Ionicons name="arrow-forward" size={14} color={fg} />
         </View>
       ) : null}
-    </LinearGradient>
+    </View>
   );
 
   if (!props.onPress) return content;
@@ -264,8 +277,7 @@ export function HeroActionCard(props: {
         .join('，')}
       accessibilityRole="button"
       style={({ pressed }) => ({
-        opacity: pressed ? 0.85 : 1,
-        transform: [{ scale: pressed ? 0.98 : 1 }],
+        opacity: pressed ? 0.78 : 1,
       })}
     >
       {content}
@@ -294,47 +306,45 @@ export function TimelineCard(props: {
         .join('，')}
       accessibilityRole={props.onPress ? 'button' : undefined}
       style={({ pressed }) => ({
-        padding: 16,
-        borderRadius: theme.radius.xl,
-        backgroundColor: theme.colors.surface,
-        gap: 10,
-        opacity: pressed ? 0.85 : 1,
-        transform: [{ scale: pressed ? 0.98 : 1 }],
-        ...shadowStyle(theme.shadows.md),
+        paddingVertical: 13,
+        paddingHorizontal: 14,
+        borderRadius: theme.radius.md,
+        backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.border,
+        gap: 6,
       })}
     >
       <View
         style={{
           flexDirection: 'row',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           justifyContent: 'space-between',
-          gap: 14,
+          gap: 12,
         }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1 }}>
-          <LinearGradient
-            colors={[`${tint}25`, `${tint}10`]}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: theme.radius.md,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Ionicons name={props.icon} size={20} color={tint} />
-          </LinearGradient>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, flex: 1 }}>
+          <View style={{ width: 22, paddingTop: 2, alignItems: 'center' }}>
+            <Ionicons name={props.icon} size={17} color={tint} />
+          </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '600' }}>
+            <Text
+              style={{
+                color: theme.colors.text,
+                fontSize: theme.typography.h3.fontSize,
+                lineHeight: theme.typography.h3.lineHeight,
+                fontWeight: '600',
+              }}
+            >
               {props.title}
             </Text>
             {props.description && (
               <Text
                 style={{
                   color: theme.colors.textSecondary,
-                  fontSize: 13,
-                  marginTop: 3,
-                  lineHeight: 19,
+                  fontSize: theme.typography.bodySmall.fontSize,
+                  lineHeight: theme.typography.bodySmall.lineHeight,
+                  marginTop: 2,
                 }}
               >
                 {props.description}
@@ -343,20 +353,28 @@ export function TimelineCard(props: {
           </View>
         </View>
         {props.meta ? (
-          <View
+          <Text
             style={{
-              paddingHorizontal: 10,
-              paddingVertical: 4,
-              borderRadius: 10,
-              backgroundColor: `${tint}12`,
+              color: theme.colors.muted,
+              fontSize: 12,
+              fontWeight: '600',
+              paddingTop: 2,
+              fontVariant: ['tabular-nums'],
             }}
           >
-            <Text style={{ color: tint, fontSize: 11, fontWeight: '700' }}>{props.meta}</Text>
-          </View>
+            {props.meta}
+          </Text>
         ) : null}
       </View>
       {props.hint ? (
-        <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18, paddingLeft: 58 }}>
+        <Text
+          style={{
+            color: theme.colors.muted,
+            fontSize: 12,
+            lineHeight: 17,
+            paddingLeft: 32,
+          }}
+        >
           {props.hint}
         </Text>
       ) : null}
@@ -377,12 +395,12 @@ export function ActionableInboxRow(props: {
   useThemeVersion();
   const palette =
     props.urgency === 'critical'
-      ? { bg: theme.colors.dangerSoft, fg: theme.colors.danger }
+      ? { fg: theme.colors.danger }
       : props.urgency === 'high'
-        ? { bg: theme.colors.warningSoft, fg: theme.colors.warning }
+        ? { fg: theme.colors.warning }
         : props.urgency === 'medium'
-          ? { bg: theme.colors.accentSoft, fg: theme.colors.accent }
-          : { bg: theme.colors.infoSoft, fg: theme.colors.info };
+          ? { fg: theme.colors.accent }
+          : { fg: theme.colors.info };
 
   return (
     <Pressable
@@ -398,13 +416,12 @@ export function ActionableInboxRow(props: {
         .join('，')}
       accessibilityRole="button"
       style={({ pressed }) => ({
-        padding: 18,
-        borderRadius: theme.radius.xl,
-        backgroundColor: theme.colors.surface,
-        gap: 14,
-        opacity: pressed ? 0.85 : 1,
-        transform: [{ scale: pressed ? 0.97 : 1 }],
-        ...shadowStyle(theme.shadows.md),
+        padding: 15,
+        borderRadius: theme.radius.lg,
+        backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        gap: 10,
       })}
     >
       <View
@@ -412,27 +429,31 @@ export function ActionableInboxRow(props: {
           flexDirection: 'row',
           alignItems: 'flex-start',
           justifyContent: 'space-between',
-          gap: 14,
+          gap: 10,
         }}
       >
-        <View style={{ flexDirection: 'row', gap: 14, flex: 1 }}>
-          <LinearGradient
-            colors={[`${palette.fg}25`, `${palette.fg}10`]}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: theme.radius.md,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Ionicons name={props.icon} size={20} color={palette.fg} />
-          </LinearGradient>
-          <View style={{ flex: 1, gap: 4 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>
+        <View style={{ flexDirection: 'row', gap: 10, flex: 1 }}>
+          <View style={{ width: 22, paddingTop: 2, alignItems: 'center' }}>
+            <Ionicons name={props.icon} size={17} color={palette.fg} />
+          </View>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text
+              style={{
+                color: theme.colors.text,
+                fontSize: theme.typography.h3.fontSize,
+                lineHeight: theme.typography.h3.lineHeight,
+                fontWeight: '600',
+              }}
+            >
               {props.title}
             </Text>
-            <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 19 }}>
+            <Text
+              style={{
+                color: theme.colors.textSecondary,
+                fontSize: theme.typography.bodySmall.fontSize,
+                lineHeight: theme.typography.bodySmall.lineHeight,
+              }}
+            >
               {props.reason}
             </Text>
           </View>
@@ -453,32 +474,34 @@ export function ActionableInboxRow(props: {
 
       <View
         style={{
-          padding: 12,
-          borderRadius: theme.radius.md,
-          backgroundColor: theme.colors.surface2,
-          gap: 4,
+          marginLeft: 32,
+          paddingTop: 8,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.colors.separator,
+          gap: 3,
         }}
       >
-        <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '600' }}>
+        <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '500' }}>
           影響：{props.consequence}
         </Text>
-        <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
+        <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 17 }}>
           下一步：{props.nextStep}
         </Text>
       </View>
 
       <View
         style={{
-          alignSelf: 'flex-start',
-          paddingHorizontal: 16,
-          paddingVertical: 10,
-          borderRadius: theme.radius.md,
-          backgroundColor: palette.bg,
+          marginLeft: 32,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 4,
+          paddingTop: 2,
         }}
       >
-        <Text style={{ color: palette.fg, fontSize: 13, fontWeight: '700' }}>
+        <Text style={{ color: palette.fg, fontSize: 13, fontWeight: '600' }}>
           {props.actionLabel}
         </Text>
+        <Ionicons name="arrow-forward" size={13} color={palette.fg} />
       </View>
     </Pressable>
   );
@@ -506,44 +529,51 @@ export function AmbientCueCard(props: {
         .join('，')}
       accessibilityRole={props.onPress ? 'button' : undefined}
       style={({ pressed }) => ({
-        padding: 18,
-        borderRadius: theme.radius.xl,
-        backgroundColor: theme.colors.surface,
-        gap: 14,
-        opacity: pressed ? 0.85 : 1,
-        transform: [{ scale: pressed ? 0.98 : 1 }],
-        ...shadowStyle(theme.shadows.md),
+        padding: 15,
+        borderRadius: theme.radius.lg,
+        backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
+        borderWidth: 1,
+        borderColor: palette.border,
+        gap: 10,
       })}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
-        <LinearGradient
-          colors={[`${palette.fg}25`, `${palette.fg}10`]}
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: theme.radius.md,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Ionicons name={palette.icon} size={20} color={palette.fg} />
-        </LinearGradient>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+        <View style={{ width: 22, paddingTop: 2, alignItems: 'center' }}>
+          <Ionicons name={palette.icon} size={17} color={palette.fg} />
+        </View>
 
-        <View style={{ flex: 1, gap: 4 }}>
+        <View style={{ flex: 1, gap: 3 }}>
           <Text
-            style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700', lineHeight: 21 }}
+            style={{
+              color: theme.colors.text,
+              fontSize: theme.typography.h3.fontSize,
+              fontWeight: '600',
+              lineHeight: theme.typography.h3.lineHeight,
+            }}
           >
             {props.headline}
           </Text>
           {props.body && (
-            <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 19 }}>
+            <Text
+              style={{
+                color: theme.colors.textSecondary,
+                fontSize: theme.typography.bodySmall.fontSize,
+                lineHeight: theme.typography.bodySmall.lineHeight,
+              }}
+            >
               {props.body}
             </Text>
           )}
         </View>
 
         {props.onDismiss ? (
-          <Pressable onPress={props.onDismiss} hitSlop={8} style={{ padding: 4 }}>
+          <Pressable
+            onPress={props.onDismiss}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="關閉提示"
+            style={{ padding: 4 }}
+          >
             <Ionicons name="close" size={16} color={theme.colors.muted} />
           </Pressable>
         ) : null}
@@ -551,6 +581,10 @@ export function AmbientCueCard(props: {
 
       <View
         style={{
+          marginLeft: 32,
+          paddingTop: 8,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.colors.separator,
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -558,33 +592,18 @@ export function AmbientCueCard(props: {
         }}
       >
         {props.metric ? (
-          <View
-            style={{
-              paddingHorizontal: 10,
-              paddingVertical: 5,
-              borderRadius: 12,
-              backgroundColor: palette.bg,
-            }}
-          >
-            <Text style={{ color: palette.fg, fontSize: 12, fontWeight: '700' }}>
-              {props.metric}
-            </Text>
-          </View>
+          <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: '600' }}>
+            {props.metric}
+          </Text>
         ) : (
           <View />
         )}
 
-        <View
-          style={{
-            paddingHorizontal: 16,
-            paddingVertical: 8,
-            borderRadius: theme.radius.md,
-            backgroundColor: palette.bg,
-          }}
-        >
-          <Text style={{ color: palette.fg, fontSize: 13, fontWeight: '700' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <Text style={{ color: palette.fg, fontSize: 13, fontWeight: '600' }}>
             {props.actionLabel}
           </Text>
+          <Ionicons name="arrow-forward" size={13} color={palette.fg} />
         </View>
       </View>
     </Pressable>
@@ -604,7 +623,6 @@ export function RoleCtaCard(props: {
   const role =
     props.tone === 'admin' ? 'roleAdmin' : props.tone === 'teacher' ? 'roleTeacher' : 'roleStudent';
   const fg = theme.colors[role];
-  const gradColors: [string, string] = [theme.colors[`${role}Soft`], theme.colors.surface];
 
   return (
     <Pressable
@@ -614,74 +632,57 @@ export function RoleCtaCard(props: {
         .join('，')}
       accessibilityRole="button"
       style={({ pressed }) => ({
-        opacity: pressed ? 0.85 : 1,
-        transform: [{ scale: pressed ? 0.97 : 1 }],
+        padding: 16,
+        borderRadius: theme.radius.lg,
+        backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        borderLeftWidth: 3,
+        borderLeftColor: fg,
+        gap: 10,
       })}
     >
-      <LinearGradient
-        colors={gradColors as unknown as [string, string, ...string[]]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={{
-          padding: 22,
-          borderRadius: theme.radius.xl,
-          gap: 14,
-          ...shadowStyle(theme.shadows.md),
-        }}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-          <View
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: theme.radius.lg,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: theme.colors.surface,
-            }}
-          >
-            <Ionicons name={props.icon} size={22} color={fg} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text
-              style={{
-                color: fg,
-                fontSize: 11,
-                fontWeight: '700',
-                letterSpacing: 1.5,
-                textTransform: 'uppercase',
-              }}
-            >
-              {props.roleLabel}
-            </Text>
-            <Text
-              style={{
-                color: theme.colors.text,
-                fontSize: 16,
-                fontWeight: '700',
-                marginTop: 3,
-              }}
-            >
-              {props.title}
-            </Text>
-          </View>
-        </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Ionicons name={props.icon} size={16} color={fg} />
+        <Text
+          style={{
+            color: fg,
+            fontSize: theme.typography.overline.fontSize,
+            fontWeight: '600',
+            letterSpacing: 0.6,
+            textTransform: 'uppercase',
+          }}
+        >
+          {props.roleLabel}
+        </Text>
+      </View>
+      <View style={{ gap: 4 }}>
+        <Text
+          style={{
+            color: theme.colors.text,
+            fontSize: theme.typography.h2.fontSize,
+            lineHeight: theme.typography.h2.lineHeight,
+            fontWeight: '600',
+          }}
+        >
+          {props.title}
+        </Text>
         {props.description && (
           <Text
             style={{
               color: theme.colors.textSecondary,
-              lineHeight: 21,
-              fontSize: 14,
+              lineHeight: theme.typography.bodySmall.lineHeight,
+              fontSize: theme.typography.bodySmall.fontSize,
             }}
           >
             {props.description}
           </Text>
         )}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Text style={{ color: fg, fontSize: 14, fontWeight: '700' }}>{props.actionLabel}</Text>
-          <Ionicons name="arrow-forward" size={14} color={fg} />
-        </View>
-      </LinearGradient>
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingTop: 2 }}>
+        <Text style={{ color: fg, fontSize: 13, fontWeight: '600' }}>{props.actionLabel}</Text>
+        <Ionicons name="arrow-forward" size={14} color={fg} />
+      </View>
     </Pressable>
   );
 }
@@ -695,35 +696,25 @@ export function CompletionState(props: {
 }) {
   useThemeVersion();
   return (
-    <LinearGradient
-      colors={[theme.colors.successSoft, theme.colors.surface]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
+    <View
       style={{
-        padding: 24,
-        borderRadius: theme.radius.xl,
+        padding: 20,
+        borderRadius: theme.radius.lg,
+        backgroundColor: theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
         alignItems: 'center',
-        gap: 14,
-        ...shadowStyle(theme.shadows.md),
+        gap: 10,
       }}
     >
-      <View
-        style={{
-          width: 60,
-          height: 60,
-          borderRadius: theme.radius.full,
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: theme.colors.surface,
-        }}
-      >
-        <Ionicons name="checkmark-done" size={28} color={theme.colors.success} />
-      </View>
+      <Ionicons name="checkmark-done" size={24} color={theme.colors.success} />
       <Text
         style={{
           color: theme.colors.text,
-          fontSize: 17,
-          fontWeight: '700',
+          fontSize: theme.typography.h2.fontSize,
+          lineHeight: theme.typography.h2.lineHeight,
+          fontWeight: '600',
+          textAlign: 'center',
         }}
       >
         {props.title}
@@ -731,8 +722,8 @@ export function CompletionState(props: {
       <Text
         style={{
           color: theme.colors.textSecondary,
-          fontSize: 14,
-          lineHeight: 21,
+          fontSize: theme.typography.bodySmall.fontSize,
+          lineHeight: theme.typography.bodySmall.lineHeight,
           textAlign: 'center',
         }}
       >
@@ -744,18 +735,21 @@ export function CompletionState(props: {
           accessibilityRole="button"
           style={({ pressed }) => ({
             marginTop: 4,
-            paddingHorizontal: 22,
-            paddingVertical: 12,
+            minHeight: 44,
+            justifyContent: 'center',
+            paddingHorizontal: 18,
+            paddingVertical: 10,
             borderRadius: theme.radius.md,
-            backgroundColor: theme.colors.surface,
-            opacity: pressed ? 0.8 : 1,
+            backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
           })}
         >
-          <Text style={{ color: theme.colors.success, fontSize: 14, fontWeight: '700' }}>
+          <Text style={{ color: theme.colors.accent, fontSize: 14, fontWeight: '600' }}>
             {props.actionLabel}
           </Text>
         </Pressable>
       ) : null}
-    </LinearGradient>
+    </View>
   );
 }

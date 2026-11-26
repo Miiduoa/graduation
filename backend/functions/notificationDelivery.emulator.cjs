@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { initializeApp, deleteApp } = require('firebase-admin/app');
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const { createNotificationService } = require('./lib/notificationService');
+const { createDormWorkflowHandler } = require('./dormWorkflow');
 const { createSchoolAnnouncementNotifyHandler } = require('./lib/coherenceNotify');
 
 const match = /^(?:127\.0\.0\.1|localhost|0\.0\.0\.0):([0-9]{1,5})$/.exec(
@@ -77,6 +78,68 @@ test('staff announcement retry preserves its read time order and reaches only lo
   assert.equal(retry.docs[0].get('read'), true);
   assert.ok(original.get('createdAt').isEqual(retry.docs[0].get('createdAt')));
   assert.deepEqual(attempts, ['alice', 'alice']);
+});
+
+test('dorm publication binds the Expo message to each resident’s private inbox, including on retry', async () => {
+  const seed = db.batch();
+  seed.set(db.doc('schools/pu'), { dormWorkflowEnabled: true });
+  seed.set(db.doc('schools/pu/members/staff'), { role: 'staff' });
+  seed.set(db.doc('schools/pu/dormStaffRoles/staff'), { status: 'active', packages: true, buildings: ['A'] });
+  const residents = ['alice', 'bob', 'muted'];
+  for (const uid of residents) {
+    seed.set(db.doc(`users/${uid}`), { schoolId: 'pu' });
+    seed.set(db.doc(`schools/pu/members/${uid}`), { role: 'student', status: 'active' });
+    seed.set(db.doc(`schools/pu/dormResidents/${uid}`), { userId: uid, building: 'A', active: true });
+    seed.set(db.doc(`users/${uid}/pushTokens/device`), { token: `ExpoPushToken[test-${uid}]`, type: 'expo' });
+  }
+  seed.set(db.doc('users/muted/settings/notifications'), { announcements: false });
+  await seed.commit();
+
+  const messages = [];
+  const service = createNotificationService({
+    db,
+    now: () => now,
+    fetch: async (_url, init) => {
+      const batch = JSON.parse(init.body);
+      return ok(batch.map((message) => {
+        messages.push(message);
+        return { status: 'ok', id: `ticket-${messages.length}` };
+      }));
+    },
+  });
+  const publish = createDormWorkflowHandler({ db, sendPushToUser: service.sendPushToUser });
+  const request = { auth: { uid: 'staff' }, data: {
+    schoolId: 'pu', action: 'announce', building: 'A', title: '停水', body: '明日施工', key: 'first-publication',
+  } };
+  const receipt = await publish(request);
+  assert.equal(receipt.acceptedRecipients, 2);
+  assert.equal(receipt.recipients, 3);
+  const keys = new Set();
+  for (const uid of residents) {
+    const inbox = await db.collection(`users/${uid}/notifications`).get();
+    assert.equal(inbox.size, 1);
+    const [row] = inbox.docs;
+    const data = row.get('data');
+    assert.match(data.deliveryKey, /^[0-9a-f-]{36}$/);
+    assert.deepEqual(data, {
+      type: 'announcement', schoolId: 'pu', channel: 'dormitory', dormAnnouncementId: receipt.id,
+      inboxNotificationId: row.id, deliveryKey: data.deliveryKey,
+    });
+    keys.add(data.deliveryKey);
+    const token = `ExpoPushToken[test-${uid}]`;
+    const message = messages.find((item) => item.to === token);
+    if (uid === 'muted') assert.equal(message, undefined);
+    else assert.deepEqual(message, {
+      to: token, title: '宿舍公告', body: '開啟宿舍頁查看本棟公告。', sound: 'default', channelId: 'dormitory', data,
+    });
+    await row.ref.update({ read: true });
+  }
+  assert.equal(keys.size, residents.length);
+  assert.deepEqual(await publish(request), receipt);
+  assert.equal(messages.length, 2);
+  const afterRetry = await db.collectionGroup('notifications').get();
+  assert.equal(afterRetry.size, residents.length);
+  assert.ok(afterRetry.docs.every((row) => row.get('read') && keys.has(row.get('data.deliveryKey'))));
 });
 
 test('accepted provider response cannot recreate token receipt after deletion starts', async () => {

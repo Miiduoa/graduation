@@ -2122,8 +2122,18 @@ test('announcement retries preserve one publication and count accepted recipient
   expect(await call('staff', input)).toEqual(receipt);
   await expect(call('staff', { ...input, title: '另一則公告' })).rejects.toMatchObject({ code: 'failed-precondition' });
   expect(sendPushToUser.mock.calls.map(([uid]) => uid)).toEqual(['student', 'muted']);
-  expect(sendPushToUser).toHaveBeenCalledWith('student', { title: '宿舍公告', body: '開啟宿舍頁查看本棟公告。' },
-    { type: 'announcement', schoolId: 'pu', channel: 'dormitory', dormAnnouncementId: receipt.id }, 'announcements');
+  const deliveries = sendPushToUser.mock.calls.map(([uid, message, destination, category]) => {
+    expect(message).toEqual({ title: '宿舍公告', body: '開啟宿舍頁查看本棟公告。' });
+    expect(category).toBe('announcements');
+    expect(destination).toEqual({
+      type: 'announcement', schoolId: 'pu', channel: 'dormitory', dormAnnouncementId: receipt.id,
+      inboxNotificationId: expect.stringMatching(/^dorm_[0-9a-f]{64}$/),
+      deliveryKey: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    });
+    expect(data.get(`users/${uid}/notifications/${destination.inboxNotificationId}`).data).toEqual(destination);
+    return destination.deliveryKey;
+  });
+  expect(new Set(deliveries).size).toBe(2);
   expect((await call('student', { action: 'mine' })).announcements).toHaveLength(1);
 });
 
@@ -2302,7 +2312,10 @@ test('eligible residents receive a private inbox link without a push token or en
     expect(item).toEqual({
       title: '宿舍公告', body: '開啟宿舍頁查看本棟公告。', type: 'announcement', schoolId: 'pu',
       read: false, createdAt: expect.anything(),
-      data: { type: 'announcement', channel: 'dormitory', schoolId: 'pu', dormAnnouncementId: result.id },
+      data: {
+        type: 'announcement', channel: 'dormitory', schoolId: 'pu', dormAnnouncementId: result.id,
+        inboxNotificationId: path.split('/').at(-1), deliveryKey: expect.any(String),
+      },
     });
     const records = await call(path.split('/')[1], { action: 'mine' });
     expect(records.announcements.find((a) => a.id === item.data.dormAnnouncementId)).toMatchObject({

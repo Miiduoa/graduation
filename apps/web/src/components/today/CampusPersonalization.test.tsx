@@ -58,7 +58,7 @@ describe('CampusPersonalization', () => {
       ...createDefaultCampusPreferences(), stage: 'year-4', focus: 'life', configured: true,
     });
     expect(screen.queryByRole('form')).toBeNull();
-    expect(screen.getByRole('heading', { name: '接下來可以做' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '依偏好推薦的服務' })).toBeTruthy();
     expect(screen.getByRole('status').textContent).toBe('首頁安排已更新。');
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '調整安排' }));
   });

@@ -24,6 +24,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   // ── Today tab ──────────────────────────────────────────
   TodayHome: 'Today',
   AIChat: 'Today',
+  NuniTimetableAssistant: '我的',
   公告總覽: 'Today',
   公告詳情: 'Today',
   活動總覽: 'Today',
@@ -88,6 +89,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
 
   // ── 校園 tab ───────────────────────────────────────────
   CampusHome: '校園',
+  Explore: '校園',
   Map: '校園',
   MapV2: '校園',
   Library: '校園',

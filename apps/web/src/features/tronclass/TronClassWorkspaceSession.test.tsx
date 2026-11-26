@@ -126,6 +126,8 @@ describe('TronClass real platform-session refresh', () => {
     expect(screen.queryByRole('button', { name: '準備作業' })).toBeNull();
     expect(screen.queryByDisplayValue(PRIVATE_TEXT)).toBeNull();
     await act(async () => nextStatus.resolve(json(connection(f.state.revision))));
+    expect(calls('prepare')).toHaveLength(prepareCount);
+    fireEvent.click(await screen.findByRole('button', { name: '繼續讀取目前帳號的課程' }));
     fireEvent.click(await screen.findByRole('button', { name: '繼續編輯保留的草稿' }));
     await waitFor(() => expect(calls('prepare')).toHaveLength(prepareCount + 1));
     const input = screen.getByLabelText('作業內容') as HTMLTextAreaElement;

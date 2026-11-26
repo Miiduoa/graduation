@@ -1,7 +1,7 @@
 'use client';
 
 import { use } from 'react';
-import { EventList } from '@/components/events/EventList';
+import { CampusEventsWorkspace } from '@/components/events/CampusEventsWorkspace';
 import styles from '@/components/events/events.module.css';
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
@@ -19,7 +19,7 @@ export default function CampusEventsPage(props: {
     <SiteShell
       schoolName={context.status === 'ready' ? context.schoolName : undefined}
       title="校園活動"
-      subtitle="瀏覽校園公開活動與講座資訊。報名需另行確認學校帳號資格。"
+      subtitle="瀏覽校園公開活動，並把想參加的活動收藏在這個裝置。報名需另行確認學校帳號資格。"
     >
       {context.status !== 'ready' || !schoolId ? (
         <section className={styles.status}>
@@ -35,7 +35,7 @@ export default function CampusEventsPage(props: {
           ) : null}
         </section>
       ) : (
-        <EventList key={schoolId} schoolId={schoolId} schoolSearch={context.schoolSearch}
+        <CampusEventsWorkspace key={schoolId} schoolId={schoolId} schoolSearch={context.schoolSearch}
           initialFilters={readCampusEventFilters(params)} />
       )}
     </SiteShell>

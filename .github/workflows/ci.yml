@@ -98,6 +98,8 @@ jobs:
           node --test scripts/demo/seed-account-demo.test.mjs
           node --test scripts/test-env/tronclass-launcher.test.mjs scripts/test-env/seed.test.cjs
           bash scripts/qa/browser/install-playwright.test.sh
+          python3 scripts/verify-android-page-sizes.test.py
+          bash scripts/qa/android-llama-cpu/run.sh
           python3 deploy/nuni-api/food-ordering/build_test.py
           python3 scripts/platform-lost-found/prepare_test.py
           python3 deploy/nuni-api/assistant-permissions/prepare_test.py
@@ -114,6 +116,14 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/public-cafeteria-test" --ignore-scripts --no-audit --no-fund fastify@5.10.0 pg@8.22.0 typescript@5.9.3 @types/node@22.20.5
           node scripts/test-public-cafeterias.mjs
           python3 -m unittest discover -s scripts/public-cafeterias -p '*_test.py'
+
+      - name: Test isolated Google account linking contracts
+        env:
+          GOOGLE_LINK_TEST_DATABASE_URL: postgresql://cafeteria_test:cafeteria_test_only@127.0.0.1:5432/cafeteria_test
+          GOOGLE_LINK_TEST_DEPS: ${{ runner.temp }}/public-cafeteria-test/node_modules
+        run: |
+          node --test deploy/nuni-api/account-linking/google-link-service.test.mjs deploy/nuni-api/account-linking/google-link-routes.test.mjs
+          node --test deploy/nuni-api/account-linking/google-link-postgres.ci.mjs
 
       - name: Test personal imports and course access against PostgreSQL
         env:
@@ -496,6 +506,7 @@ jobs:
     name: Build Web
     # Match the OS supported by the pinned Chromium tooling used by browser checks.
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     needs: [security-gates, lint-and-typecheck]
     steps:
       - name: Checkout
@@ -567,8 +578,18 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-1.57.0
+          restore-keys: |
+            ${{ runner.os }}-admin-playwright-1.57.0
+            ${{ runner.os }}-playwright-
       - name: Install TronClass browser test tools
+        timeout-minutes: 25
         run: |
+          set -euo pipefail
           python -m pip install playwright==1.57.0
           bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk
 

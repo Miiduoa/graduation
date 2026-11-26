@@ -74,11 +74,11 @@ export function TeacherToday({
         <h1 className={styles.title}>今天</h1>
         <p className={styles.date}>{formatTodayHeaderDate(now)}</p>
       </header>
+      {assistant}
       {workspaces}
       {unsigned ? (
         <>
           <p className={styles.empty}>登入後，接續你的課表與已獲授權的授課課程。</p>
-          {assistant}
         </>
       ) : (
         <div className={styles.flow}>
@@ -218,7 +218,6 @@ export function TeacherToday({
               </ul>
             </section>
           )}
-          {assistant}
         </div>
       )}
     </div>

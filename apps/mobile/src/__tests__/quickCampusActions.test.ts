@@ -69,3 +69,172 @@ test('失物捷徑與平台 Google 入口一致，並支援從其他 tab 開啟'
   expect(ROUTE_TO_TAB.PlatformLostFound).toBe('校園');
   expect(ROUTE_TO_TAB.LostFound).toBe('校園');
 });
+
+// International students should reach the same registered screens without AI.
+test.each([
+  [
+    "Where is the library?",
+    "/map",
+    "MapV2"
+  ],
+  [
+    "Where is the bus stop?",
+    "/bus",
+    "BusV2"
+  ],
+  [
+    "library catalog",
+    "/library",
+    "Library"
+  ],
+  [
+    "class schedule",
+    "/timetable",
+    "PersonalTimetable"
+  ],
+  [
+    "homework deadline",
+    "/classroom",
+    "CoursesHome"
+  ],
+  [
+    "cafeteria menu",
+    "/cafeteria",
+    "餐廳總覽"
+  ],
+  [
+    "campus events",
+    "/events",
+    "活動總覽"
+  ],
+  [
+    "lost and found",
+    "/lost-found",
+    "PlatformLostFound"
+  ],
+  [
+    "ＢＵＳ arrival",
+    "/bus",
+    "BusV2"
+  ]
+])('matches bilingual campus intent %s', (phrase, destination, route) => {
+  expect(getMobileQuickActions(phrase)[0]).toMatchObject({ destination, route });
+});
+
+test.each(['business plan', 'busyness', 'libraryish', 'where is my wallet'])('does not infer a campus service from a partial word or ungrounded location (%s)', phrase => {
+  expect(getMobileQuickActions(phrase)).toEqual([]);
+});
+
+// Dictation and pasted text can contain repeated spaces or typographic apostrophes.
+test.each([
+  [
+    "class   schedule",
+    "/timetable",
+    "PersonalTimetable"
+  ],
+  [
+    "Where’s the library?",
+    "/map",
+    "MapV2"
+  ],
+  [
+    "campus\t events",
+    "/events",
+    "活動總覽"
+  ],
+  [
+    "quiz",
+    "/classroom",
+    "CoursesHome"
+  ],
+  [
+    "quizzes",
+    "/classroom",
+    "CoursesHome"
+  ]
+])('normalizes spoken and pasted search text %s', (phrase, destination, route) => {
+  expect(getMobileQuickActions(phrase)[0]).toMatchObject({ destination, route });
+});
+
+test.each([
+  ['Where can I find the library?', '/map', 'MapV2'],
+  ['Where are the classrooms?', '/map', 'MapV2'],
+  ['Where can I find the campus buildings?', '/map', 'MapV2'],
+  ['Where are the libraries?', '/map', 'MapV2'],
+  ['lost-and-found', '/lost-found', 'PlatformLostFound'],
+  ['lost&found', '/lost-found', 'PlatformLostFound'],
+  ['Where can I find a bus stop?', '/bus', 'BusV2'],
+])('resolves natural location and directory wording: %s', (phrase, destination, route) => {
+  const action = getMobileQuickActions(phrase)[0];
+  expect(action).toMatchObject({ destination, route });
+  expect(ROUTE_TO_TAB[action.route]).toBeTruthy();
+});
+
+test.each(['where are my keys', 'where can i find my wallet', 'lostandfoundry'])(
+  'does not invent a service for an unrelated request: %s',
+  phrase => {
+    expect(getMobileQuickActions(phrase)).toEqual([]);
+  },
+);
+
+test.each([
+  ['Where can I find the library catalog?', '/library', 'Library'],
+  ['Where is the library catalogue?', '/library', 'Library'],
+  ['Where’s the library catalog?', '/library', 'Library'],
+  ['Where can I find the library   catalog?', '/library', 'Library'],
+  ['Where can I find the library?', '/map', 'MapV2'],
+  ['Where can I find the library cataloging department?', '/map', 'MapV2'],
+])('distinguishes online library resources from physical navigation: %s', (phrase, destination, route) => {
+  const actions = getMobileQuickActions(phrase);
+  expect(actions).toHaveLength(1);
+  expect(actions[0]).toMatchObject({ destination, route });
+  expect(ROUTE_TO_TAB[route]).toBeTruthy();
+});
+
+test.each([
+  ['Directions to the library to use the library catalog', '/map'],
+  ['Where can I find the library catalog and classrooms?', '/map'],
+  ['Where can I find the library catalogue and bus stop?', '/bus'],
+])('keeps both the physical route and catalog for an explicit mixed request: %s', (phrase, first) => {
+  expect(getMobileQuickActions(phrase).map(action => action.destination)).toEqual([first, '/library']);
+});
+
+test.each([
+  ["館藏查詢在哪裡？", ["/library"]],
+  ["圖書館館藏目錄在哪裡？", ["/library"]],
+  ["館藏查詢系統的入口在哪裡？", ["/library"]],
+  ["館藏搜尋在哪裡看？", ["/library"]],
+  ["圖書館在哪裡？", ["/map"]],
+  ["圖書館館藏查詢在哪一層？", ["/map"]],
+  ["教室在哪裡？館藏查詢在哪裡？", ["/map","/library"]],
+  ["館藏查詢在哪裡，圖書館怎麼走？", ["/map","/library"]],
+  ["館藏查詢在哪裡？公車站在哪裡？", ["/bus","/library"]],
+  ["館藏查詢在哪裡？今天課表", ["/timetable","/library"]],
+])('distinguishes Chinese catalog access from physical navigation: %s', (phrase, expected) => {
+  const actions = getMobileQuickActions(phrase);
+  expect(actions.map(action => action.destination)).toEqual(expected);
+  expect(actions.every(action => Boolean(ROUTE_TO_TAB[action.route]))).toBe(true);
+});
+
+test.each([
+  ["作業在哪裡交？",["/classroom"]],
+  ["作業在哪裡可以上傳？",["/classroom"]],
+  ["教材在哪裡下載？",["/classroom"]],
+  ["課表在哪裡看？",["/timetable"]],
+  ["成績在哪裡查詢？",["/grades"]],
+  ["行事曆在哪裡查看？",["/calendar"]],
+  ["公告在哪裡看？",["/announcements"]],
+  ["通知在哪裡看？",["/messages"]],
+  ["課表在哪裡看？教室怎麼走？",["/map","/timetable"]],
+  ["作業在哪裡交？圖書館在哪裡？",["/map","/classroom"]],
+  ["作業在哪一間教室交？",["/map","/classroom"]],
+  ["課表在哪裡看？館藏查詢在哪裡？",["/timetable","/library"]],
+  ["課表在哪裡看？公車站在哪裡？",["/bus","/timetable"]],
+  ["課表在哪裡看？作業在哪裡交？成績在哪裡查？",["/classroom","/timetable","/grades"]],
+  ["作業在哪裡交給老師？",["/map","/classroom"]],
+  ["教材在哪一層領取？",["/map","/classroom"]],
+])('routes digital coursework and service access without losing physical destinations: %s', (phrase, expected) => {
+  const actions = getMobileQuickActions(phrase);
+  expect(actions.map(action => action.destination)).toEqual(expected);
+  expect(actions.every(action => Boolean(ROUTE_TO_TAB[action.route]))).toBe(true);
+});

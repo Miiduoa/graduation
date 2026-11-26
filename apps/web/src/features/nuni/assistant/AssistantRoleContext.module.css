@@ -1,22 +1,20 @@
 .context {
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
+  padding: 12px 0 18px;
   color: var(--text);
   margin-block: 8px 16px;
   font-size: .875rem;
+  border-bottom: 1px solid var(--border-strong);
 }
 .heading { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .heading label { font-weight: 600; }
 .heading select {
   max-width: 100%; min-height: 44px; padding: 8px 32px 8px 12px;
-  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
   color: inherit; background: var(--surface); font: inherit;
 }
 .heading select:focus-visible, .details summary:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
 .description { margin: 8px 0; line-height: 1.7; }
-.details summary { cursor: pointer; min-height: 30px; line-height: 30px; }
+.details summary { cursor: pointer; min-height: 44px; line-height: 1.55; align-content: center; color: var(--brand); }
 .details ul { margin: 8px 0; padding-left: 18px; }
 .details li { margin-block: 8px; line-height: 1.6; }
 .details li span { display: block; color: var(--muted); font-size: .75rem; }

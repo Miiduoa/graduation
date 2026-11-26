@@ -7,6 +7,7 @@ project; external requests and service workers are blocked.
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -124,6 +125,27 @@ async def main():
             await expect(page.get_by_role('article')).to_have_count(30)
             checks.append('empty filters reset without losing loaded events and restore keyboard focus')
 
+            later_title = '第二頁的天文觀測活動'
+            later_card = page.get_by_role('article').filter(has=page.get_by_role('link', name=later_title, exact=True))
+            await later_card.get_by_role('button', name=re.compile('^收藏')).click()
+            await expect(later_card.get_by_role('button', name=re.compile('^取消收藏'))).to_be_visible()
+            await goto(page, '/events?campus=nthu&schoolId=nthu&saved=1')
+            saved = page.get_by_role('region', name='我的收藏活動')
+            await saved.get_by_role('link', name=later_title, exact=True).click()
+            await detail_ready(page, 'event-026', later_title)
+            assert query(page.url).get('source') == ['school-club-events']
+            assert query(page.url).get('schoolId') == ['nthu']
+            await page.get_by_role('link', name='回到收藏活動', exact=True).click()
+            await expect(saved.get_by_role('link', name=later_title, exact=True)).to_be_visible()
+            assert query(page.url).get('saved') == ['1']
+            await saved.get_by_role('button', name=re.compile('^取消收藏')).click()
+            empty_shortlist = saved.get_by_role('heading', name='還沒有收藏的活動')
+            await expect(empty_shortlist).to_be_visible()
+            await page.reload(wait_until='load')
+            await expect(empty_shortlist).to_be_visible()
+            await saved.get_by_role('button', name='瀏覽活動', exact=True).click()
+            checks.append('saved event from page two survives a fresh visit, opens the exact live detail, returns and stays removed after reload')
+
             await page.get_by_role('link', name='校園攝影散步', exact=True).click()
             await detail_ready(page, 'event-001', '校園攝影散步')
             async with page.expect_download() as pending:
@@ -137,7 +159,7 @@ async def main():
             assert 'BEGIN:VALARM' not in content and 'ATTENDEE:' not in content
             event_url = next(line[4:] for line in content.split('\r\n') if line.startswith('URL:'))
             assert urlparse(event_url).path == '/events/event-001'
-            assert query(event_url) == {'schoolId': ['nthu'], 'campus': ['nthu'], 'source': ['school-club-events']}
+            assert query(event_url) == {'schoolId': ['nthu'], 'source': ['school-club-events']}
             await expect(page.get_by_text('行事曆檔案已備妥，開啟下載的檔案即可加入；活動報名請另行完成。', exact=True)).to_be_visible()
             checks.append('a real browser download produces a calendar snapshot with canonical school/source and no implicit registration or alarm')
 

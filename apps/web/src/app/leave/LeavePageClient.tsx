@@ -105,7 +105,7 @@ function LeaveRequestLookup({ uid, schoolId, schoolName, requestId, loginHref, b
   return (
     <section ref={panelRef} tabIndex={-1} className={`${styles.panel} ${styles.lookup}`} aria-labelledby="leave-linked-title">
       <div className={styles.sectionHead}>
-        <div><p className={styles.kicker}>REQUEST LOOKUP</p><h2 id="leave-linked-title">這筆請假紀錄</h2></div>
+        <div><h2 id="leave-linked-title">這筆請假紀錄</h2></div>
         {(view.status === 'ready' || view.status === 'empty' || view.status === 'forbidden') && (
           <button type="button" className={styles.refresh} disabled={busy} onClick={retry}>重新查詢</button>
         )}
@@ -368,9 +368,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled, linkedRequ
       <div className={styles.workspace}>
         <section className={styles.intro} aria-label="請假說明">
           <div>
-            <p className={styles.kicker}>LEAVE REQUESTS</p>
-            <h2>一次整理，不再逐門重填。</h2>
-            <p>nuni 幫你整理缺課日期、課程與站內核閱進度。學校正式准假與出缺席紀錄仍以校方系統為準。</p>
+            <p>選擇缺課日期與課程後，老師可以逐門核閱。正式准假及出缺席紀錄以校方系統為準。</p>
           </div>
           <div className={styles.official}>
             <span>正式請假</span>
@@ -423,7 +421,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled, linkedRequ
             <div className={styles.layout}>
               <section className={styles.panel} aria-labelledby="leave-new-title">
                 <div className={styles.sectionHead}>
-                  <div><p className={styles.kicker}>NEW REQUEST</p><h2 id="leave-new-title" tabIndex={-1}>新增請假</h2></div>
+                  <h2 id="leave-new-title" tabIndex={-1}>新增請假</h2>
                   <span className={styles.step}>01 — 03</span>
                 </div>
                 <div className={styles.form}>
@@ -499,7 +497,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled, linkedRequ
 
               <section className={styles.history} aria-labelledby="leave-history-title">
                 <div className={styles.sectionHead}>
-                  <div><p className={styles.kicker}>YOUR REQUESTS</p><h2 id="leave-history-title">我的請假紀錄</h2></div>
+                  <h2 id="leave-history-title">我的請假紀錄</h2>
                   <div className={styles.historyActions}>
                     <a className={styles.textLink} href="#leave-new-title">新增請假</a>
                     <button type="button" className={styles.refresh} disabled={busy} onClick={() => { setLookupVersion((current) => current + 1); void load(); }}>更新</button>

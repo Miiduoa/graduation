@@ -1,21 +1,23 @@
 'use client';
 
 import { buildPersonalToday, type PersonalTodayEntry } from '@campus/shared/src/imports/today';
-import type { PersonalImportRecord } from '@campus/shared/src/imports/types';
+import { PERSONAL_IMPORT_MAX_ID_LENGTH, type PersonalImportRecord } from '@campus/shared/src/imports/types';
+import { isTodayClassCalendarOverlapQuestion } from '@campus/shared/src/classCalendarOverlapQuestion';
+import { formatTodayClassCalendarOverlapAnswer } from '@campus/shared/src/classCalendarOverlap';
 import { exclusiveAllDayEnd } from '@campus/shared/src/imports/eventCalendar';
 import {
   classDate,
   manualClassRecords,
   validClassDate,
-  withClassExceptions,
 } from '@campus/shared/src/timetable/classExceptions';
+import { withScopedClassExceptions } from '@campus/shared/src/timetable/scopedClassExceptions';
 import type { AssistantServiceId } from '@campus/shared/src/assistantServices';
 import { readPersonalImports, type PersonalImportScope } from './personalImports';
 import { readPersonalTimetableOnDevice } from './timetable/store';
 
 type DayPart = 'morning' | 'noon' | 'afternoon' | 'evening';
 export type LocalScheduleIntent = {
-  kind: 'classes' | 'next-class' | 'events';
+  kind: 'classes' | 'next-class' | 'events' | 'conflicts';
   day: number | string;
   part?: DayPart;
 };
@@ -23,6 +25,7 @@ type LocalScheduleAnswer = {
   content: string;
   serviceIds: AssistantServiceId[];
   availability: 'available' | 'missing' | 'unavailable';
+  calendarEvents?: Array<{ id: string; title: string }>;
 };
 
 const DAY_MS = 86_400_000;
@@ -40,6 +43,7 @@ const PART_LABELS: Readonly<Record<DayPart, string>> = {
 /** Only complete read questions are local; mixed requests and mutations keep their task handlers. */
 export function parseLocalScheduleIntent(question: string): LocalScheduleIntent | null {
   if (question.length > 160 || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(question)) return null;
+  if (isTodayClassCalendarOverlapQuestion(question)) return { kind: 'conflicts', day: 0 };
   let text = question.normalize('NFKC').trim().replace(/[?!.。]+$/u, '').trim();
   text = text.replace(/^(?:(?:請問|請|麻煩)(?:你)?\s*)?(?:(?:可以|能不能|可不可以)(?:幫我|告訴我)?\s*)?(?:(?:幫我|替我|我想知道|我想看|我要看)\s*)?(?:(?:查詢|查看|查一下|看一下|看看|告訴我|列出)\s*)?/u, '');
   text = text.replace(/(?:好嗎|可以嗎|謝謝)$/u, '').trim();
@@ -149,25 +153,34 @@ export function answerLocalSchedule(
   scope: PersonalImportScope,
   now = new Date(),
 ): LocalScheduleAnswer {
-  const serviceIds: AssistantServiceId[] = intent.kind === 'events' ? ['calendar', 'import'] : ['timetable', 'import'];
+  const serviceIds: AssistantServiceId[] = intent.kind === 'conflicts' ? ['calendar', 'timetable']
+    : intent.kind === 'events' ? ['calendar', 'import'] : ['timetable', 'import'];
   if (!/^(?:platform|school):[^\s:][^\r\n]{0,199}$/.test(scope.owner))
     return { content: '請先登入目前使用的帳號，才能核對這個帳號保存的課表與個人行程。', serviceIds, availability: 'unavailable' };
   if (!Number.isFinite(now.getTime()))
     return { content: '目前無法確認裝置日期，請確認系統時間後重試。', serviceIds, availability: 'unavailable' };
   try {
     const imported = readPersonalImports(scope);
-    let answer: Pick<LocalScheduleAnswer, 'content' | 'availability'>;
+    let answer: Omit<LocalScheduleAnswer, 'serviceIds'>;
     if (intent.kind === 'events') {
       answer = imported.some((row) => row.kind === 'events')
         ? { availability: 'available', content: eventAnswer(intent, imported, now) }
         : { availability: 'missing', content: '還沒讀到這個帳號在此瀏覽器保存的個人事件，無法判定當天是否有行程。' };
     } else {
       const local = readPersonalTimetableOnDevice(scope.schoolId, scope.owner);
-      const records = withClassExceptions(
+      const records = withScopedClassExceptions(
         [...imported, ...(local.found ? manualClassRecords(local.timetable) : [])],
-        local.timetable.classExceptions,
+        local.timetable.classExceptions ?? [], scope.schoolId,
       );
-      answer = timetableAnswer(intent, records, scope.schoolId, now);
+      if (intent.kind === 'conflicts') {
+        const { content, overlaps } = formatTodayClassCalendarOverlapAnswer(records, scope.schoolId, now, '這個瀏覽器');
+        const calendarEvents = [...new Map(overlaps.slice(0, 3)
+          .filter(item => item.eventId.length > 0 && item.eventId.length <= PERSONAL_IMPORT_MAX_ID_LENGTH)
+          .map(item => [item.eventId, { id: item.eventId, title: safeText(item.eventTitle) }])).values()];
+        answer = { content, calendarEvents, availability: 'available' };
+      } else {
+        answer = timetableAnswer(intent, records, scope.schoolId, now);
+      }
     }
     return { ...answer, content: answer.content + `\n裝置資料讀取時間：${stamp(now)}（台灣時間）。`, serviceIds };
   } catch {

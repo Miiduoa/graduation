@@ -442,8 +442,26 @@ function PublicCourseSearchForm({
 
   // Match native's source-freshness guidance: a successful search does not
   // establish that the university has published an up-to-date offering.
-  // Capture the comparison clock with the accepted response, so selecting a
-  // course does not change its freshness evidence. A new search checks again.
+  // The accepted response establishes the initial comparison clock. Refresh
+  // it on return to the page and once a minute while timestamped results are
+  // visible, without refetching or changing the original source provenance.
+  const hasFreshnessClock = result?.status === 'ready' && Boolean(result.fetchedAt);
+  useEffect(() => {
+    if (!hasFreshnessClock) return;
+    const update = () => {
+      const now = Date.now();
+      setResult(current => current?.status === 'ready' && current.fetchedAt && current.checkedAt !== now
+        ? { ...current, checkedAt: now } : current);
+    };
+    const timer = window.setInterval(update, 60_000);
+    window.addEventListener('focus', update);
+    document.addEventListener('visibilitychange', update);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', update);
+      document.removeEventListener('visibilitychange', update);
+    };
+  }, [hasFreshnessClock]);
   const fetchAgeMs = result?.status === 'ready' && result.fetchedAt
     ? result.checkedAt - Date.parse(result.fetchedAt) : null;
   const fetchIsOld = fetchAgeMs !== null && fetchAgeMs > 24 * 60 * 60 * 1000;

@@ -12,6 +12,10 @@ import {
   type MobileQuickAction,
 } from '../services/quickCampusActions';
 import { interpretMobileCampusRequest } from '../services/campusIntentClient';
+import { mobileWorkspaceSuggestions } from '../services/workspaceEntry';
+import { AssistantServiceReply } from '../screens/AssistantServiceReply';
+import type { ServiceScreenProps } from '../screens/UnavailableFeatureScreen';
+import { useAssistantContinuation } from '../services/assistantContinuation';
 
 const favorites = [
   { label: '課表', phrase: '我的課表' },
@@ -45,24 +49,46 @@ function classQuestions(reply?: CampusAssistantMessage, uid?: string | null, sch
   return questions;
 }
 
-export function QuickCampusEntry({
-  uid,
-  schoolId,
-  onOpen,
-  onOpenAssistantRoute,
-}: {
+type QuickCampusEntryProps = {
   uid?: string | null;
   schoolId?: string | null;
-  onOpen: (action: MobileQuickAction) => void;
-  onOpenAssistantRoute?: (route: string) => void;
-}) {
+  /** The home workspace keeps the same scoped conversation and service actions. */
+  presentation?: 'compact' | 'workspace';
+  navigation?: ServiceScreenProps['navigation'];
+  onOpen: (action: MobileQuickAction) => boolean | void;
+  onOpenAssistantRoute?: (route: string) => boolean | void;
+  onExplore?: () => void;
+};
+
+/** A new account or school must never inherit the previous conversation or draft. */
+export function QuickCampusEntry(props: QuickCampusEntryProps) {
+  return (
+    <ScopedQuickCampusEntry
+      key={JSON.stringify([props.uid ?? null, props.schoolId ?? null])}
+      {...props}
+    />
+  );
+}
+
+function ScopedQuickCampusEntry({
+  uid,
+  schoolId,
+  presentation = 'compact',
+  navigation,
+  onOpen,
+  onOpenAssistantRoute,
+  onExplore,
+}: QuickCampusEntryProps) {
   useThemeVersion();
   const { colors, radius, typography } = theme;
   const dark = theme.mode === 'dark';
   const textColor = dark ? '#F2F3F1' : '#252729';
   const mutedColor = dark ? '#A5AAA7' : '#686C70';
   const borderColor = dark ? '#292B2D' : '#E6E7E8';
+  const workspace = presentation === 'workspace';
+  const input = useRef<TextInput>(null);
   const [query, setQuery] = useState('');
+  const [submittedSearch, setSubmittedSearch] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [history, setHistory] = useState<CampusAssistantMessage[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -71,6 +97,7 @@ export function QuickCampusEntry({
   const pending = useRef<AbortController | null>(null);
   const sequence = useRef(0);
   const mounted = useRef(true);
+  const openWithContinuation = useAssistantContinuation(navigation, () => mounted.current);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -96,9 +123,13 @@ export function QuickCampusEntry({
   const signedIn = Boolean(uid);
   const canAsk = Boolean(uid && schoolId);
   const modelBusy = shown?.status === 'loading';
+  const starters = canAsk
+    ? mobileWorkspaceSuggestions('student', false)
+    : ['圖書館開放時間', '公車到站時間'];
 
   function update(value: string) {
     sequence.current += 1;
+    setSubmittedSearch(null);
     setAnalysis(null);
     setAskError(null);
     setQuery(value.slice(0, 160));
@@ -108,6 +139,7 @@ export function QuickCampusEntry({
     const utterance = raw.trim().slice(0, 160);
     if (!uid || !utterance) return;
     const requested = ++sequence.current;
+    setSubmittedSearch(null);
     setAnalysis({ query: utterance, status: 'loading' });
     try {
       const result = await interpretMobileCampusRequest({
@@ -159,6 +191,23 @@ export function QuickCampusEntry({
     }
   }
 
+  function submitInput() {
+    if (canAsk) {
+      void ask();
+      return;
+    }
+    if (!phrase) return;
+    Keyboard.dismiss();
+    sequence.current += 1;
+    setAnalysis(null);
+    setSubmittedSearch(phrase);
+  }
+
+  function cancelAnalysis() {
+    sequence.current += 1;
+    setAnalysis(null);
+  }
+
   function stop() {
     pending.current?.abort();
     pending.current = null;
@@ -166,20 +215,42 @@ export function QuickCampusEntry({
   }
 
   function open(action: MobileQuickAction) {
+    if (!mounted.current) return;
     Keyboard.dismiss();
-    onOpen(action);
+    openWithContinuation(() => onOpen(action) !== false);
+  }
+
+  function openReplyRoute(route: string) {
+    if (!mounted.current || !onOpenAssistantRoute) return;
+    Keyboard.dismiss();
+    openWithContinuation(() => onOpenAssistantRoute(route) !== false);
   }
 
   return (
     <View
       style={{
-        gap: 8,
-        borderTopWidth: 1,
+        gap: workspace ? 12 : 8,
+        borderTopWidth: workspace ? 0 : 1,
         borderTopColor: borderColor,
-        paddingTop: 20,
+        paddingTop: workspace ? 0 : 20,
       }}
       accessibilityLabel="校園助理與常用服務"
+      testID={workspace ? 'today-task-workspace' : undefined}
     >
+      {workspace && (
+        <View style={{ gap: 6 }}>
+          <Text accessibilityRole="header" style={{ fontSize: 23, lineHeight: 31, fontWeight: '600', color: textColor }}>
+            {lastReply ? '接著想了解什麼？' : '今天想完成什麼？'}
+          </Text>
+          <Text style={{ ...typography.bodySmall, color: mutedColor }}>
+            {lastReply
+              ? '接著追問，沿用這次對話的內容。'
+              : canAsk
+                ? '問課表、找校園服務，接著在這裡追問。'
+                : '輸入想找的服務，或直接開啟課表與校園資訊。'}
+          </Text>
+        </View>
+      )}
       {earlierTurns > 0 && (
         <View style={{ gap: 8 }}>
           <Pressable
@@ -210,8 +281,13 @@ export function QuickCampusEntry({
           <Text accessibilityLiveRegion="polite" selectable style={{ ...typography.body, color: textColor }}>
             {lastReply.content}
           </Text>
-          {replyAction && onOpenAssistantRoute && (
-            <Pressable accessibilityRole="button" onPress={() => onOpenAssistantRoute(replyAction.route)}
+          {lastReply.serviceSelection ? (
+            <AssistantServiceReply selection={lastReply.serviceSelection}
+              audience={uid ? 'campus' : 'guest'} schoolId={schoolId} navigation={navigation}
+              disabled={asking} isCurrent={() => mounted.current} />
+          ) : null}
+          {!lastReply.serviceSelection && replyAction && onOpenAssistantRoute && (
+            <Pressable accessibilityRole="button" onPress={() => openReplyRoute(replyAction.route)}
               style={{ alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center' }}>
               <Text style={{ color: colors.accent, ...typography.bodySmall }}>開啟{replyAction.label}</Text>
             </Pressable>
@@ -223,7 +299,9 @@ export function QuickCampusEntry({
           flexDirection: 'row',
           alignItems: 'center',
           backgroundColor: dark ? '#151617' : '#F5F6F7',
-          borderRadius: radius.md,
+          borderRadius: workspace ? radius.lg : radius.md,
+          borderWidth: workspace ? 1 : 0,
+          borderColor,
           paddingLeft: 12,
           paddingRight: 6,
           gap: 8,
@@ -231,18 +309,19 @@ export function QuickCampusEntry({
       >
         <Ionicons name={canAsk ? 'chatbubble-outline' : 'search-outline'} size={18} color={mutedColor} />
         <TextInput
+          ref={input}
           accessibilityLabel="說出或輸入想做的事"
           accessibilityHint={canAsk ? '可使用鍵盤聽寫，送出後在這裡查看回答。' : '輸入需求，尋找校園服務。'}
-          placeholder={lastReply ? '接著問…' : canAsk ? '問校園助理…' : '找校園服務'}
+          placeholder={lastReply ? '接著問…' : workspace ? '輸入想做的事…' : canAsk ? '問校園助理…' : '找校園服務'}
           placeholderTextColor={mutedColor}
           autoCorrect={false}
           autoCapitalize="none"
           maxLength={160}
           editable={!asking}
-          returnKeyType="send"
+          returnKeyType={canAsk ? "send" : "search"}
           value={query}
           onChangeText={update}
-          onSubmitEditing={() => void ask()}
+          onSubmitEditing={submitInput}
           style={{ flex: 1, minWidth: 0, minHeight: 48, paddingVertical: 10, fontSize: 15, color: textColor }}
         />
         {query.length > 0 && !asking ? (
@@ -255,8 +334,65 @@ export function QuickCampusEntry({
             <Ionicons name="close-circle-outline" size={21} color={mutedColor} />
           </Pressable>
         ) : null}
+        {workspace && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={asking ? '停止回答' : canAsk ? '詢問手機助理' : '查看搜尋結果'}
+            accessibilityState={{ disabled: !phrase && !asking }}
+            disabled={!phrase && !asking}
+            onPress={asking ? stop : submitInput}
+            style={({ pressed }) => ({
+              width: 44, height: 44, borderRadius: radius.md,
+              alignItems: 'center', justifyContent: 'center',
+              backgroundColor: phrase || asking ? textColor : colors.surface2,
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <Ionicons name={asking ? 'stop' : canAsk ? 'arrow-up' : 'search-outline'} size={20}
+              color={phrase || asking ? (dark ? '#151617' : '#FFFFFF') : mutedColor} />
+          </Pressable>
+        )}
       </View>
-      {!!phrase && canAsk && (
+      {workspace && !phrase && !lastReply && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {starters.map(starter => (
+            <Pressable
+              key={starter}
+              accessibilityRole="button"
+              accessibilityLabel={'填入需求：' + starter}
+              accessibilityHint="先填入輸入框，可編輯後再送出。"
+              onPress={() => {
+                update(starter);
+                input.current?.focus();
+              }}
+              style={({ pressed }) => ({
+                minHeight: 44, paddingHorizontal: 12, justifyContent: 'center',
+                borderWidth: 1, borderColor, borderRadius: radius.full,
+                backgroundColor: pressed ? colors.surface2 : 'transparent',
+              })}
+            >
+              <Text style={{ ...typography.bodySmall, color: textColor }}>{starter}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+      {!!phrase && !canAsk && !workspace && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="查看搜尋結果"
+          onPress={submitInput}
+          style={{ alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingHorizontal: 12,
+            borderRadius: radius.lg, backgroundColor: colors.surface2 }}
+        >
+          <Text style={{ ...typography.bodySmall, color: textColor, fontWeight: '600' }}>查看搜尋結果</Text>
+        </Pressable>
+      )}
+      {submittedSearch === phrase && !!phrase && !canAsk && (
+        <Text accessibilityLiveRegion="polite" style={{ ...typography.bodySmall, color: mutedColor }}>
+          {suggestions.length ? `找到 ${suggestions.length} 個服務，請選擇要開啟的項目。` : '沒有相符的服務，試試課表、公車或圖書館。'}
+        </Text>
+      )}
+      {!!phrase && canAsk && !workspace && (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={asking ? '停止回答' : '詢問手機助理'}
@@ -268,6 +404,11 @@ export function QuickCampusEntry({
             {asking ? '回答中 · 停止' : '詢問手機助理'}
           </Text>
         </Pressable>
+      )}
+      {workspace && asking && (
+        <Text accessibilityLiveRegion="polite" style={{ ...typography.bodySmall, color: mutedColor }}>
+          手機助理正在回答，可隨時停止並保留問題。
+        </Text>
       )}
       {askError && (
         <View>
@@ -285,10 +426,12 @@ export function QuickCampusEntry({
       {!!phrase && signedIn && !asking && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="用雲端 AI 找相關服務"
-          accessibilityState={{ disabled: modelBusy }}
-          disabled={modelBusy}
+          accessibilityLabel={modelBusy ? '停止雲端搜尋' : '用雲端 AI 找相關服務'}
           onPress={() => {
+            if (modelBusy) {
+              cancelAnalysis();
+              return;
+            }
             Keyboard.dismiss();
             void analyze(phrase);
           }}
@@ -299,11 +442,10 @@ export function QuickCampusEntry({
             paddingHorizontal: 15,
             borderRadius: 11,
             backgroundColor: colors.surface2,
-            opacity: modelBusy ? 0.55 : 1,
-          }}
+           }}
         >
           <Text style={{ color: textColor, ...typography.bodySmall, fontWeight: '600' }}>
-            {modelBusy ? 'AI 正在理解…' : '用雲端 AI 找相關服務'}
+            {modelBusy ? '停止雲端搜尋' : '用雲端 AI 找相關服務'}
           </Text>
         </Pressable>
       )}
@@ -314,7 +456,7 @@ export function QuickCampusEntry({
       )}
       {modelBusy && (
         <Text accessibilityLiveRegion="polite" style={{ color: mutedColor, ...typography.bodySmall }}>
-          正在理解你的目標；不會自動執行任何操作。
+          正在理解你的目標；可停止等待並繼續使用基本捷徑。
         </Text>
       )}
 
@@ -417,14 +559,22 @@ export function QuickCampusEntry({
                 </Pressable>
               ))}
             </>
-          ) : semantic?.status !== 'clarify' ? (
+          ) : semantic?.status !== 'clarify' && !(submittedSearch === phrase && !canAsk) ? (
             <Text style={{ ...typography.bodySmall, color: mutedColor }}>
-              尚未找到對應服務，可以補充需求或詢問助理。
+              {canAsk ? '尚未找到對應服務，可以補充需求或詢問助理。' : '尚未找到對應服務，試試其他關鍵字。'}
             </Text>
           ) : null}
         </View>
       )}
 
+      {workspace && onExplore ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="探索更多 nuni 用法"
+          onPress={() => { if (mounted.current) { Keyboard.dismiss(); onExplore(); } }}
+          style={{ minHeight: 44, flexDirection: 'row', gap: 8, alignItems: 'center', alignSelf: 'flex-start' }}>
+          <Ionicons name="compass-outline" size={18} color={colors.accent} />
+          <Text style={{ ...typography.bodySmall, color: colors.accent }}>探索更多用法</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

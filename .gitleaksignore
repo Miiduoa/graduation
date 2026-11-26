@@ -75,3 +75,7 @@ a818d9e02eb57cadd7fe0a0041a1fedba452e8a4:apps/mobile/ios/Podfile.lock:generic-ap
 a818d9e02eb57cadd7fe0a0041a1fedba452e8a4:apps/mobile/ios/Podfile.lock:generic-api-key:2573
 08d3aa3e283b506e8e462f7aa6e1b771112e59a2:apps/mobile/ios/Podfile.lock:generic-api-key:2526
 08d3aa3e283b506e8e462f7aa6e1b771112e59a2:apps/mobile/ios/Podfile.lock:generic-api-key:2573
+
+# #616 main squash of the byte-identical, loopback-only public emulator helper.
+# The verifier pins both complete file blobs; new same-position markers remain rejected.
+149cfbe2f806ee15da1985854b34dfe72a7e07d9:scripts/test-env/verify-tronclass.cjs:generic-api-key:53

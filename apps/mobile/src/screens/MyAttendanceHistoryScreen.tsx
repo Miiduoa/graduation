@@ -5,6 +5,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { courseChipScrollContentStyle } from '../ui/courseChipShell';
 import { safeNavigate } from '../utils/safeNavigate';
 import {
@@ -50,6 +51,7 @@ function historyRecordHint(entry: AttendanceHistoryEntry): string {
 }
 
 export default function MyAttendanceHistoryScreen() {
+  const styles = useThemeStyleSheet(createStyles);
   const navigation = useNavigation();
   const auth = useAuth();
   const { school } = useSchool();
@@ -104,10 +106,8 @@ export default function MyAttendanceHistoryScreen() {
       }
     >
       <View style={styles.content}>
-        <View style={styles.heading}>
-          <View style={styles.headingIcon}>
-            <Ionicons name="checkmark-done-outline" size={24} color={theme.colors.accent} />
-          </View>
+        <View style={styles.heading} accessibilityRole="header">
+          <Ionicons name="checkmark-done-outline" size={22} color={theme.colors.accent} />
           <View style={styles.headingText}>
             <Text style={styles.title}>我的課堂出席</Text>
             <Text style={styles.subtitle}>以課堂系統保存的個人紀錄為準</Text>
@@ -174,11 +174,12 @@ export default function MyAttendanceHistoryScreen() {
                 <Text style={styles.muted}>這裡只顯示 nuni 正式課程。外部 LMS 的資料尚未匯入時，不會以範例成績取代。</Text>
               </View>
             ) : (
-              current.courses.map((course) => {
+              <View style={styles.courseGroup}>
+              {current.courses.map((course, courseIndex) => {
                 const complete = course.sessions.filter((row) => row.status === 'present' || row.status === 'late').length;
                 const isExpanded = expanded === course.courseId;
                 return (
-                  <View key={course.courseId} style={styles.courseCard}>
+                  <View key={course.courseId} style={[styles.courseCard, courseIndex > 0 && styles.courseDivider]}>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`展開${course.courseName}點名紀錄`}
@@ -236,7 +237,8 @@ export default function MyAttendanceHistoryScreen() {
                     )}
                   </View>
                 );
-              })
+              })}
+              </View>
             )}
             <Text style={styles.footer}>
               「尚無紀錄」不是缺席。系統只統計可驗證的簽到收據；若有請假或外部教務資料，請以學校正式紀錄為準。
@@ -248,37 +250,38 @@ export default function MyAttendanceHistoryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: theme.colors.surfaceMuted },
+const createStyles = () => StyleSheet.create({
+  page: { flex: 1, backgroundColor: theme.colors.bg },
   content: { gap: 16 },
-  heading: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
-  headingIcon: { width: 48, height: 48, borderRadius: 16, backgroundColor: theme.colors.accentSoft, alignItems: 'center', justifyContent: 'center' },
+  heading: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
   headingText: { flex: 1, gap: 3 },
-  title: { fontSize: 24, fontWeight: '800', color: theme.colors.text },
-  subtitle: { fontSize: 13, color: theme.colors.muted },
-  summary: { padding: 22, borderRadius: 22, backgroundColor: theme.colors.surfaceElevated, borderWidth: 1, borderColor: theme.colors.border, gap: 5 },
+  title: { fontSize: 22, fontWeight: '700', color: theme.colors.text },
+  subtitle: { fontSize: 13, color: theme.colors.textSecondary },
+  summary: { paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.separator, gap: 4 },
   summaryEyebrow: { fontSize: 13, fontWeight: '600', color: theme.colors.textSecondary },
-  summaryValue: { fontSize: 44, fontWeight: '800', color: theme.colors.accent, fontVariant: ['tabular-nums'] },
+  summaryValue: { fontSize: 40, fontWeight: '700', color: theme.colors.text, fontVariant: ['tabular-nums'] },
   summaryUnit: { fontSize: 16, fontWeight: '500', color: theme.colors.muted },
   summaryDescription: { fontSize: 12, lineHeight: 20, color: theme.colors.muted },
-  metrics: { flexDirection: 'row', marginTop: 16, borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: 14 },
-  metric: { flex: 1, alignItems: 'center', gap: 3 },
-  metricValue: { fontSize: 22, fontWeight: '700', color: theme.colors.text, fontVariant: ['tabular-nums'] },
+  metrics: { flexDirection: 'row', marginTop: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.separator, paddingTop: 12 },
+  metric: { flex: 1, alignItems: 'flex-start', gap: 3 },
+  metricValue: { fontSize: 20, fontWeight: '700', color: theme.colors.text, fontVariant: ['tabular-nums'] },
   metricLabel: { fontSize: 12, color: theme.colors.textSecondary },
-  panel: { padding: 22, borderRadius: 18, gap: 12, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border },
-  panelTitle: { fontSize: 17, fontWeight: '700', color: theme.colors.text },
+  panel: { paddingVertical: 16, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.separator },
+  panelTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.text },
   muted: { color: theme.colors.muted, lineHeight: 21, fontSize: 13 },
   loadingPanel: { minHeight: 150, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: theme.colors.text },
+  sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8 },
+  sectionTitle: { fontSize: 17, fontWeight: '700', color: theme.colors.text },
   sectionCaption: { fontSize: 12, color: theme.colors.muted },
-  courseCard: { backgroundColor: theme.colors.surface, borderRadius: 18, borderWidth: 1, borderColor: theme.colors.border, overflow: 'hidden' },
-  courseTop: { padding: 18, flexDirection: 'row', alignItems: 'center', minHeight: 80, gap: 12 },
-  courseTitleArea: { flex: 1, gap: 6 },
+  courseGroup: { borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.separator },
+  courseCard: { overflow: 'hidden' },
+  courseDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.separator },
+  courseTop: { paddingVertical: 14, flexDirection: 'row', alignItems: 'center', minHeight: 64, gap: 12 },
+  courseTitleArea: { flex: 1, gap: 4 },
   courseName: { fontSize: 16, fontWeight: '700', color: theme.colors.text },
   courseSub: { fontSize: 12, color: theme.colors.muted },
-  courseDetails: { borderTopWidth: 1, borderTopColor: theme.colors.border, padding: 16, gap: 12 },
-  recordRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 8 },
+  courseDetails: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.separator, paddingVertical: 8, gap: 4 },
+  recordRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 8, minHeight: 44 },
   recordMain: { flex: 1, gap: 3 },
   recordDate: { fontSize: 13, fontWeight: '600', color: theme.colors.text },
   recordHint: { fontSize: 11, color: theme.colors.muted },
@@ -286,10 +289,10 @@ const styles = StyleSheet.create({
   successText: { color: theme.colors.success },
   mutedText: { color: theme.colors.muted },
   warningStatus: { color: theme.colors.warning },
-  secondaryButton: { marginTop: 8, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 9, minHeight: 44, paddingHorizontal: 14, borderRadius: 12, backgroundColor: theme.colors.accentSoft },
+  secondaryButton: { marginTop: 8, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 9, minHeight: 44, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border },
   actionText: { color: theme.colors.accent, fontWeight: '700', fontSize: 13 },
-  warningPanel: { padding: 14, borderRadius: 14, backgroundColor: theme.colors.warningSoft, flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  warningPanel: { paddingVertical: 12, paddingLeft: 12, borderLeftWidth: 3, borderLeftColor: theme.colors.warning, flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
   warningText: { flex: 1, fontSize: 12, lineHeight: 18, color: theme.colors.text },
-  notePanel: { padding: 14, borderRadius: 14, backgroundColor: theme.colors.surface },
+  notePanel: { paddingVertical: 4 },
   footer: { fontSize: 12, color: theme.colors.muted, lineHeight: 21, paddingVertical: 16 },
 });

@@ -198,7 +198,6 @@ export default function MapCanvas({
     <div className={styles.mapFrame}>
       <div className={styles.mapMasthead} aria-hidden="true">
         <div>
-          <span className={styles.mapCaption}>CAMPUS MAP</span>
           <strong>{schoolName || '校園地圖'}</strong>
         </div>
         <span className={styles.north}>N</span>

@@ -59,7 +59,7 @@ export default function PostDetailPage() {
   const { user } = useAuth();
   const params = useParams<{ postId: string }>();
   return (
-    <SiteShell title="貼文" subtitle="校園交流" schoolName={ready ? schoolName : undefined}>
+    <SiteShell title="貼文" schoolName={ready ? schoolName : undefined}>
       {ready ? (
         <CommunityAccess>
           <PostDetailInner

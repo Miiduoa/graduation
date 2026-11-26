@@ -24,8 +24,8 @@ function setup() {
       if (owner !== OWNER) throw new NuniError(401, 'TRONCLASS_NOT_CONNECTED');
       return structuredClone(binding);
     }),
-    assertCurrent: vi.fn(async (owner: string, revision: string) => {
-      if (owner !== OWNER || revision !== binding.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+    assertCurrent: vi.fn(async (owner: string, revision: string, studentId?: number) => {
+      if (owner !== OWNER || revision !== binding.revision || studentId !== binding.userId || Date.parse(binding.expiresAt) <= NOW) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
     }),
   };
   const source: LmsReadonlySource = {
@@ -37,7 +37,7 @@ function setup() {
     fetchHomeworkActivity: vi.fn(async () => ({ ok: true as const, value: ACTIVITY })),
     fetchStudentSubmissionList: vi.fn(async () => ({ ok: true as const, value: { list: [SUBMISSION] } })),
   };
-  const expected = { schoolId: binding.schoolId, userId: binding.userId, revision: binding.revision };
+  const expected = structuredClone(binding);
   return { bindings, source, expected, reader: createTronClassRawSubmissionHistoryReader({ bindings, source, now: () => NOW }),
     changeBinding(change: Partial<TronClassSubmissionBinding>) { binding = { ...binding, ...change }; } };
 }
@@ -46,7 +46,9 @@ afterEach(() => vi.useRealTimers());
 describe('private authenticated raw school history', () => {
   it('reads only the currently bound student, retaining exact escaped text for internal comparison', async () => {
     const s = setup();
+    s.bindings.requireBinding.mockRejectedValue(new Error('Unexpected binding reload'));
     const raw = await s.reader(OWNER, s.expected, SCOPE);
+    expect(s.bindings.requireBinding).not.toHaveBeenCalled();
     expect(raw).toEqual({ list: [SUBMISSION] });
     expect(raw).not.toBe(SUBMISSION);
     expect(s.source.fetchStudentSubmissionList).toHaveBeenCalledExactlyOnceWith({ session: 'current-server-cookie' }, 202, 303,

@@ -1,21 +1,14 @@
-import React, { useState } from 'react';
-import {
-  LayoutChangeEvent,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-  useWindowDimensions,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../../ui/theme';
-import { adminWorkbenchStyles as styles } from './adminWorkbenchStyles';
+import React from 'react';
+import { Pressable, ScrollView, Text } from 'react-native';
+import type { Ionicons } from '@expo/vector-icons';
+import { useAdminWorkbenchStyles } from './adminWorkbenchStyles';
 
 export type AdminTabKey = 'overview' | 'announcements' | 'events' | 'members' | 'settings';
 
 export type AdminTabItem = {
   key: AdminTabKey;
   label: string;
+  /** Kept for callers that still pass icons; the text-tab layout does not render it. */
   icon: keyof typeof Ionicons.glyphMap;
 };
 
@@ -27,11 +20,12 @@ export const ADMIN_TABS: AdminTabItem[] = [
   { key: 'settings', label: '設定', icon: 'settings-outline' },
 ];
 
-function TabChip(props: {
+function TabItem(props: {
   item: AdminTabItem;
   active: boolean;
   onPress: () => void;
 }) {
+  const styles = useAdminWorkbenchStyles();
   return (
     <Pressable
       onPress={props.onPress}
@@ -40,11 +34,6 @@ function TabChip(props: {
       accessibilityLabel={props.item.label}
       style={[styles.tabButton, props.active ? styles.tabButtonActive : null]}
     >
-      <Ionicons
-        name={props.item.icon}
-        size={18}
-        color={props.active ? theme.colors.accent : theme.colors.muted}
-      />
       <Text style={[styles.tabLabel, props.active ? styles.tabLabelActive : null]}>
         {props.item.label}
       </Text>
@@ -53,55 +42,33 @@ function TabChip(props: {
 }
 
 /**
- * Horizontal scroll when tabs would squeeze; wrap layout when the row is wide enough.
- * Component-level layout checks are not a substitute for real-device acceptance.
+ * Text tabs with an underlined active item. The row always scrolls horizontally,
+ * so large text sizes or narrow screens never squeeze or clip a tab.
  */
 export function AdminTabBar(props: {
   active: AdminTabKey;
   onChange: (key: AdminTabKey) => void;
   items?: AdminTabItem[];
 }) {
+  const styles = useAdminWorkbenchStyles();
   const items = props.items ?? ADMIN_TABS;
-  const { width } = useWindowDimensions();
-  const [contentWidth, setContentWidth] = useState(0);
-  const needsScroll = width > 0 && contentWidth > width - 8;
-
-  const onContentLayout = (event: LayoutChangeEvent) => {
-    setContentWidth(event.nativeEvent.layout.width);
-  };
-
-  const chips = items.map((item) => (
-    <TabChip
-      key={item.key}
-      item={item}
-      active={props.active === item.key}
-      onPress={() => props.onChange(item.key)}
-    />
-  ));
-
-  if (needsScroll) {
-    return (
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.tabScroll}
-        contentContainerStyle={styles.tabScrollContent}
-        accessibilityRole="tablist"
-      >
-        <View style={{ flexDirection: 'row', gap: 8 }} onLayout={onContentLayout}>
-          {chips}
-        </View>
-      </ScrollView>
-    );
-  }
 
   return (
-    <View
-      style={styles.tabWrap}
-      onLayout={onContentLayout}
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.tabScroll}
+      contentContainerStyle={styles.tabScrollContent}
       accessibilityRole="tablist"
     >
-      {chips}
-    </View>
+      {items.map((item) => (
+        <TabItem
+          key={item.key}
+          item={item}
+          active={props.active === item.key}
+          onPress={() => props.onChange(item.key)}
+        />
+      ))}
+    </ScrollView>
   );
 }

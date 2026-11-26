@@ -9,8 +9,8 @@ it('starts with the actual timetable task and keeps four campus services navigab
   const { container } = render(
     <TodayWelcome importHref={importHref} timetableHref={timetableHref} />,
   );
-  const hero = screen.getByRole('region', { name: '先把課表放進來。' });
-  expect(within(hero).getByRole('heading', { level: 2 }).textContent).toBe('先把課表放進來。');
+  const hero = screen.getByRole('region', { name: '建立第一份課表' });
+  expect(within(hero).getByRole('heading', { level: 2 }).textContent).toBe('建立第一份課表');
   expect(screen.queryByText('你的校園日常')).toBeNull();
   expect(screen.queryByText('免登入')).toBeNull();
   expect(within(hero).getByRole('link', { name: '匯入我的課表' }).getAttribute('href')).toBe(
@@ -34,7 +34,7 @@ it('starts with the actual timetable task and keeps four campus services navigab
 
 it('opens an existing timetable instead of starting setup again', () => {
   render(<TodayWelcome hasTimetable importHref={importHref} timetableHref={timetableHref} />);
-  expect(screen.getByRole('heading', { name: '課表準備好了。' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '本週課表' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '查看這週課表' }).getAttribute('href')).toBe(
     timetableHref,
   );
@@ -50,7 +50,7 @@ it('guides an unselected guest to choose a campus while keeping public services 
       timetableHref="/timetable?campus=all"
     />,
   );
-  expect(screen.getByRole('heading', { name: '先選擇你的校園。' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '選擇課表所屬校園' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '選校園、整理課表' }).getAttribute('href')).toBe(
     '/timetable?campus=all',
   );

@@ -10,10 +10,8 @@
   align-items: stretch;
   justify-content: space-between;
   gap: 26px;
-  padding: clamp(22px, 4vw, 38px);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: linear-gradient(125deg, var(--surface-strong) 0%, var(--surface) 100%);
+  padding-block: 4px 24px;
+  border-bottom: 1px solid var(--border-strong);
 }
 
 .heroIntro {
@@ -40,8 +38,8 @@
 }
 
 .heroPrimary {
-  background: var(--text);
-  color: var(--bg);
+  background: var(--brand);
+  color: var(--on-brand);
 }
 
 .heroSecondary {
@@ -52,9 +50,7 @@
 .hero h2 {
   margin: 6px 0 10px;
   color: var(--text);
-  font-size: clamp(23px, 3vw, 32px);
-  letter-spacing: -.03em;
-  line-height: 1.25;
+  font: 600 var(--font-h1-size) / 1.4 var(--font-heading);
 }
 
 .hero p {
@@ -86,9 +82,10 @@
   padding: 16px;
   text-align: left;
   font: inherit;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  border: 0;
+  border-top: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--brand);
   cursor: pointer;
 }
 
@@ -124,9 +121,9 @@
 .tabs button,
 .filters button {
   min-height: 44px;
-  padding: 9px 16px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
   color: var(--muted);
   background: transparent;
   cursor: pointer;
@@ -138,17 +135,15 @@
 .tabs button[aria-pressed='true'],
 .filters button[aria-pressed='true'] {
   color: var(--text);
-  background: var(--surface-strong);
-  border-color: var(--text);
+  background: transparent;
+  border-color: var(--brand);
   font-weight: 700;
 }
 
 .panel {
   min-width: 0;
-  padding: clamp(20px, 3vw, 28px);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  padding-block: 18px;
+  border-top: 1px solid var(--border);
 }
 
 .panel h3,
@@ -276,8 +271,8 @@
 }
 
 .primary {
-  background: var(--text);
-  color: var(--bg);
+  background: var(--brand);
+  color: var(--on-brand);
   border-color: var(--text);
 }
 
@@ -378,10 +373,9 @@
 .handoff a { margin-top: 0; }
 
 .empty {
-  padding: 34px 20px;
-  text-align: center;
-  background: var(--surface-strong);
-  border-radius: var(--radius);
+  padding: 14px 16px;
+  border-inline-start: 2px solid var(--border-strong);
+  background: var(--bg-soft);
 }
 
 .inspectionList {
@@ -548,7 +542,7 @@
   }
   .hero {
     display: grid;
-    padding: 22px;
+    padding-block: 4px 16px;
   }
   .heroStats { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .formGrid {
