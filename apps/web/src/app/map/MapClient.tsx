@@ -375,7 +375,9 @@ function MapContent({
           if (!finishRequest()) return;
           if (
             !Number.isFinite(coords.latitude) || Math.abs(coords.latitude) > 90 ||
-            !Number.isFinite(coords.longitude) || Math.abs(coords.longitude) > 180
+            !Number.isFinite(coords.longitude) || Math.abs(coords.longitude) > 180 ||
+            // Match the campus POI policy: a zero-origin placeholder is not a usable GPS fix.
+            (coords.latitude === 0 && coords.longitude === 0)
           ) {
             setPositionStatus('error');
             setPositionError('定位結果無效，請重新取得位置。');

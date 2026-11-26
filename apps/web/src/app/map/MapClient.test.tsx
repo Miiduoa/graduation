@@ -1071,7 +1071,7 @@ it('obtains position only on request and orders nearby locations by measured str
   }
 });
 
-it.each([[91, 120], [-91, 120], [24, 181], [24, -181], [NaN, 120], [24, Infinity]])(
+it.each([[91, 120], [-91, 120], [24, 181], [24, -181], [NaN, 120], [24, Infinity], [0, 0], [-0, 0]])(
   'rejects invalid GPS coordinates (%s, %s), clears the nearby filter and permits retry',
   async (latitude, longitude) => {
     state.user = null;
