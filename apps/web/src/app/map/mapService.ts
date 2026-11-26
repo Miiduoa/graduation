@@ -164,7 +164,7 @@ export async function setMapFavorite(
 export function isUsableMapCoordinate(
   place: MapCoordinate | null | undefined,
 ): place is MapCoordinate {
-  return Boolean(place) &&
+  return place != null &&
     Number.isFinite(place.lat) && Math.abs(place.lat) <= 90 &&
     Number.isFinite(place.lng) && Math.abs(place.lng) <= 180 &&
     !(place.lat === 0 && place.lng === 0);
