@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { buildCampusSpatialModel } from './campusSpatialModel';
 import {
@@ -904,12 +904,18 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     onManualStart();
   };
   const paused = status === 'ready' && renderSuspended;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (paused) {
-      // An offscreen suspension is not a navigation request. Leave keyboard
-      // focus on directions/other controls unless the 3D host held it.
-      if (restoreFocusAfterPause.current) {
-        try { restartButton.current?.focus({ preventScroll: true }); } catch { /* Focus is advisory. */ }
+      // Inert can blur a focused marker before commit, or a WebView can leave
+      // focus on the now-inert host. Recover either case before paint, without
+      // overriding a deliberate move to directions or another dialog control.
+      if (host) {
+        const focused = host.ownerDocument.activeElement;
+        if (host.contains(focused) ||
+            (restoreFocusAfterPause.current && focused === host.ownerDocument.body)) {
+          restoreFocusAfterPause.current = true;
+          try { restartButton.current?.focus({ preventScroll: true }); } catch { /* Focus is advisory. */ }
+        }
       }
       return;
     }

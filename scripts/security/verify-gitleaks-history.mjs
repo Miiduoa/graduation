@@ -3,10 +3,25 @@ import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const SHA = /^[a-f0-9]{40}$/;
+// These two fixed, nonfunctional strings test that CLI errors do not echo
+// private input. Their squash commits repeat the complete reviewed test blobs.
+// The inventory is intentionally exact: another commit, line or file needs review.
+const reviewedTestFixtures = Object.freeze([
+  {
+    reviewed: '86922724ef4de26b36b8e25ce96a751a9d5c7e9c:scripts/audit-group-post-visibility.test.cjs:generic-api-key:51',
+    observed: '2a9bad18dd88a6873b08063df8b308e5df2cf9e0:scripts/audit-group-post-visibility.test.cjs:generic-api-key:51',
+    reviewedBlob: '95536dff7ce30ef1e27d43182c816019977caf71',
+  },
+  {
+    reviewed: '7a26c85c0fc3a68943ce1887fde8c371e76977f8:scripts/qa/course-study/compare.test.mjs:generic-api-key:494',
+    observed: '66a88348a216bbeee31e332968ca8cc39e4eea70:scripts/qa/course-study/compare.test.mjs:generic-api-key:494',
+    reviewedBlob: '03dcd5a143da8c61ac4400ff9b3525b0b87ad0c2',
+  },
+]);
 const FINGERPRINT = /^([a-f0-9]{40}):([A-Za-z0-9_./-]+):([a-z0-9-]+):([1-9][0-9]*)$/;
 export function parseFingerprint(value) {
   const match = typeof value === 'string' && value.match(FINGERPRINT);
@@ -34,16 +49,28 @@ export function validateAliases(manifest, baseline, candidate) {
   const reviewed = ignoreEntries(baseline);
   const expected = new Set(reviewed);
   for (const alias of manifest.aliases) {
+    assert.ok(reviewed.has(alias.reviewed), 'Alias has no previously reviewed fingerprint');
+  }
+  const fixtures = manifest.reviewedTestFixtures === undefined ? [] : manifest.reviewedTestFixtures;
+  assert.ok(Array.isArray(fixtures) && fixtures.length <= reviewedTestFixtures.length, 'Invalid reviewed fixture count');
+  for (const fixture of fixtures) {
+    assert.ok(fixture && typeof fixture === 'object' && !Array.isArray(fixture), 'Invalid reviewed test fixture');
+    const { reviewed, observed, reviewedBlob } = fixture;
+    const pinned = reviewedTestFixtures.find((entry) => entry.observed === observed);
+    assert.ok(pinned, 'Unknown reviewed test fixture');
+    assert.deepEqual({ reviewed, observed, reviewedBlob }, pinned, 'Historical test fixture must keep its exact reviewed fingerprint and blob');
+  }
+  const pairs = [...manifest.aliases, ...fixtures];
+  for (const alias of pairs) {
     const before = parseFingerprint(alias.reviewed);
     const after = parseFingerprint(alias.observed);
-    assert.ok(reviewed.has(alias.reviewed), 'Alias has no previously reviewed fingerprint');
     assert.notEqual(before.commit, after.commit, 'Alias must identify a different commit');
     assert.deepEqual([before.path, before.rule, before.line], [after.path, after.rule, after.line], 'An alias cannot change its path, rule or line');
     assert.ok(!expected.has(alias.observed), 'Duplicate or already reviewed alias');
     expected.add(alias.observed);
   }
   assert.deepEqual(ignoreEntries(candidate), expected, 'Candidate must preserve every original entry and add only the declared exact aliases');
-  return manifest.aliases;
+  return pairs;
 }
 export async function verifyAliases(aliases, resolveBlob) {
   const cache = new Map();
@@ -58,6 +85,7 @@ export async function verifyAliases(aliases, resolveBlob) {
     const [before, after] = await Promise.all([resolve(alias.reviewed), resolve(alias.observed)]);
     assert.ok(SHA.test(before) && SHA.test(after), 'Missing or invalid Git blob identity');
     assert.equal(after, before, `Historical file differs from the reviewed blob: ${alias.observed}`);
+    if (alias.reviewedBlob !== undefined) assert.equal(before, alias.reviewedBlob, 'Historical test fixture differs from its pinned review');
     evidence.push({ ...alias, identicalFileBlob: after });
   }
   return evidence;
@@ -86,6 +114,13 @@ function positiveControl() {
     // Generated, nonfunctional test marker. Never print or upload its value.
     const marker = ['AIza', randomBytes(32).toString('base64url').slice(0, 35)].join('');
     writeFileSync(join(root, 'apps/mobile/eas.json'), ['{', ...Array(53).fill(''), `"apiKey": "${marker}"`, '}'].join('\n'));
+    const manifest = JSON.parse(readFileSync('scripts/security/gitleaks-history-aliases.json', 'utf8'));
+    const positions = (manifest.reviewedTestFixtures ?? []).map(({ observed }) => parseFingerprint(observed));
+    for (const { path, line } of positions) {
+      const file = join(root, path);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, [...Array(line - 1).fill(''), `const secret = '${randomBytes(32).toString('base64url')}';`, ''].join('\n'));
+    }
     const git = (...args) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
     git('init', '-q'); git('config', 'user.name', 'Scanner control'); git('config', 'user.email', 'scanner@example.invalid');
     git('add', '.'); git('commit', '-qm', 'Synthetic scanner positive control');
@@ -94,7 +129,10 @@ function positiveControl() {
     assert.equal(result.status, 1, 'Scanner must reject a new marker despite the historical ignore list');
     const findings = JSON.parse(readFileSync(report, 'utf8'));
     assert.ok(findings.some((item) => item.RuleID === 'gcp-api-key' && item.File === 'apps/mobile/eas.json' && item.StartLine === 55), 'Same-path/same-line new commit must still be detected');
-    console.log('Positive control passed: the default rule detects a new marker at the previously reviewed path and line.');
+    for (const { path, rule, line } of positions) {
+      assert.ok(findings.some((item) => item.RuleID === rule && item.File === path && item.StartLine === line), 'New commit at a reviewed position must still be detected');
+    }
+    console.log(`Positive control passed: default rules detected new markers at all ${positions.length + 1} reviewed positions.`);
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
 async function main() {
