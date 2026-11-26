@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 /**
  * Firebase Performance Monitoring Service
  * 效能監控服務
@@ -508,29 +507,48 @@ export const TraceNames = {
 } as const;
 
 // Performance hooks for React components
-export function usePerformanceTrace(traceName: string, deps: any[] = []) {
-  const traceRef = { current: null as PerformanceTrace | null };
+export function usePerformanceTrace(traceName: string, deps: React.DependencyList = []) {
+  const traceRef = React.useRef<{ scope: object; trace: PerformanceTrace } | null>(null);
+  // Old async completions must not stop a replacement dependency scope's trace.
+  const scope = React.useMemo(
+    () => ({}),
+    // The caller owns the dependency list, just as with useEffect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [traceName, ...deps],
+  );
+  const getTrace = React.useCallback(() => {
+    const active = traceRef.current;
+    return active?.scope === scope ? active.trace : null;
+  }, [scope]);
+  const stopTrace = React.useCallback(() => {
+    const trace = getTrace();
+    if (!trace) return;
+    traceRef.current = null;
+    trace.stop();
+  }, [getTrace]);
 
-  // Start trace on mount
-  if (!traceRef.current) {
-    traceRef.current = performance.startTrace(traceName);
-  }
+  React.useEffect(() => {
+    const trace = performance.startTrace(traceName);
+    traceRef.current = { scope, trace };
+    return stopTrace;
+  }, [traceName, scope, stopTrace]);
 
-  return {
-    trace: traceRef.current,
-    stopTrace: () => {
-      if (traceRef.current) {
-        traceRef.current.stop();
-        traceRef.current = null;
-      }
-    },
-    addAttribute: (name: string, value: string) => {
-      traceRef.current?.putAttribute(name, value);
-    },
-    addMetric: (name: string, value: number) => {
-      traceRef.current?.putMetric(name, value);
-    },
-  };
+  return React.useMemo(
+    () => ({
+      // Effects begin after commit; a getter keeps retained controls current.
+      get trace() {
+        return getTrace();
+      },
+      stopTrace,
+      addAttribute: (name: string, value: string) => {
+        getTrace()?.putAttribute(name, value);
+      },
+      addMetric: (name: string, value: number) => {
+        getTrace()?.putMetric(name, value);
+      },
+    }),
+    [getTrace, stopTrace],
+  );
 }
 
 // Screen render performance HOC
@@ -539,11 +557,21 @@ export function withScreenPerformance<P extends object>(
   screenName: string,
 ): React.ComponentType<P> {
   return function PerformanceTrackedComponent(props: P) {
-    const trace = performance.startTrace(`screen_render_${screenName}`);
-    trace.putAttribute('platform', Platform.OS);
-
-    // Stop trace after render
-    setTimeout(() => trace.stop(), 0);
+    React.useEffect(() => {
+      const trace = performance.startTrace(`screen_render_${screenName}`);
+      trace.putAttribute('platform', Platform.OS);
+      let stopped = false;
+      const stop = () => {
+        if (stopped) return;
+        stopped = true;
+        trace.stop();
+      };
+      const timer = setTimeout(stop, 0);
+      return () => {
+        clearTimeout(timer);
+        stop();
+      };
+    });
 
     return React.createElement(WrappedComponent, props);
   };
