@@ -215,12 +215,26 @@ describe('read-only personal submission windows', () => {
     { row: { is_draft: true, marked_submitted: undefined }, used: 0 },
     { row: { is_draft: undefined, marked_submitted: false }, used: 0 },
     { row: { is_draft: true, is_redo: true, marked_submitted: false }, used: 0 },
+    { row: { is_draft: true, submit_by_instructor: true, marked_submitted: false }, used: 0 },
   ])('does not infer an open ordinary window or select a draft from ambiguous history: %j', ({ row, used }) => {
     const result = project({
       activity: { user_submit_count: used },
       history: { list: [{ ...SUBMISSION, ...row }] },
     });
     expect(result.ordinary).toEqual({ state: 'unknown', kind: 'unknown', remainingAttempts: null });
+    expect(result.draft).toEqual({ state: 'unknown', count: null, submissionId: null });
+    expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
+  });
+
+  it.each([
+    [{ is_closed: true, is_in_progress: false }, 'closed'],
+    [{ is_started: false, is_in_progress: false }, 'not-started'],
+  ])('keeps an explicit closed or not-started window when history is contradictory: %j', (activity, state) => {
+    const result = project({
+      activity: { ...activity, user_submit_count: 1 },
+      history: { list: [{ ...SUBMISSION, is_draft: true, marked_submitted: true }] },
+    });
+    expect(result.ordinary).toEqual({ state, kind: 'unknown', remainingAttempts: null });
     expect(result.draft).toEqual({ state: 'unknown', count: null, submissionId: null });
     expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
   });
