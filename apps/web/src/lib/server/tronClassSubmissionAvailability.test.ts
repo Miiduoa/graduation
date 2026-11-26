@@ -153,6 +153,16 @@ describe('read-only personal submission windows', () => {
     expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
   });
 
+  it.each([
+    { activity: { data: { non_submit_times: true } } },
+    { activity: { data: { submit_times: 9 } } },
+    { activity: { user_submit_count: 1, data: { non_submit_times: true } }, history: { list: [SUBMISSION] } },
+  ])('does not label a first or repeat attempt when attempt settings disagree: %j', change => {
+    const result = project(change);
+    expect(result.ordinary).toEqual({ state: 'unknown', kind: 'unknown', remainingAttempts: null });
+    expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
+  });
+
   it.each([null, MAKE_UP])('does not treat a mixed make-up error envelope as absent or open: %j', row => {
     expect(project({ makeUp: { make_up_record: row, error: 'synthetic-error' } }).makeUp)
       .toEqual({ state: 'unknown', updatedAt: null });
@@ -198,6 +208,35 @@ describe('read-only personal submission windows', () => {
     const returned = project({ history: { list: [{ ...SUBMISSION, is_redo: true, marked_submitted: false }] } });
     expect(returned.draft).toEqual({ state: 'none', count: 0, submissionId: null });
     expect(returned.ordinary.kind).toBe('repeat');
+  });
+
+  it.each([
+    { row: { is_draft: true, marked_submitted: true }, used: 1 },
+    { row: { is_draft: true, marked_submitted: undefined }, used: 0 },
+    { row: { is_draft: undefined, marked_submitted: false }, used: 0 },
+    { row: { is_draft: true, is_redo: true, marked_submitted: false }, used: 0 },
+    { row: { is_draft: true, submit_by_instructor: true, marked_submitted: false }, used: 0 },
+  ])('does not infer an open ordinary window or select a draft from ambiguous history: %j', ({ row, used }) => {
+    const result = project({
+      activity: { user_submit_count: used },
+      history: { list: [{ ...SUBMISSION, ...row }] },
+    });
+    expect(result.ordinary).toEqual({ state: 'unknown', kind: 'unknown', remainingAttempts: null });
+    expect(result.draft).toEqual({ state: 'unknown', count: null, submissionId: null });
+    expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
+  });
+
+  it.each([
+    [{ is_closed: true, is_in_progress: false }, 'closed'],
+    [{ is_started: false, is_in_progress: false }, 'not-started'],
+  ])('keeps an explicit closed or not-started window when history is contradictory: %j', (activity, state) => {
+    const result = project({
+      activity: { ...activity, user_submit_count: 1 },
+      history: { list: [{ ...SUBMISSION, is_draft: true, marked_submitted: true }] },
+    });
+    expect(result.ordinary).toEqual({ state, kind: 'unknown', remainingAttempts: null });
+    expect(result.draft).toEqual({ state: 'unknown', count: null, submissionId: null });
+    expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
   });
 
   it('does not select a draft arbitrarily when there are several or flags are incomplete', () => {

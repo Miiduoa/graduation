@@ -449,7 +449,7 @@ it('discards previous account results and cancels its Agent request on a session
   await waitFor(() => expect(finish).toBeTypeOf('function'));
   state.context = 'b'.repeat(43); state.accountId = 'bob';
   view.rerender(<Assistant cloudEnabled={false} />);
-  expect(signal?.aborted).toBe(true);
+  await waitFor(() => expect(signal?.aborted).toBe(true));
   await act(async () => finish(json(base)));
   expect(screen.queryByRole('heading', { name: '私人期中報告' })).toBeNull();
   expect(screen.queryByText('查 TronClass 未交作業')).toBeNull();
@@ -473,7 +473,7 @@ it('cancels student-source downloads on a role change and requires a new query a
   const selector = screen.getByLabelText('目前要處理');
   fireEvent.change(selector, { target: { value: 'teacher' } });
   expect((selector as HTMLSelectElement).value).toBe('teacher');
-  expect(downloadSignal?.aborted).toBe(true);
+  await waitFor(() => expect(downloadSignal?.aborted).toBe(true));
   expect(screen.queryByLabelText('TronClass 查詢結果')).toBeNull();
 
   // The transport may finish despite cancellation. It must not revive private
@@ -526,7 +526,7 @@ it('aborts an earlier turn’s pending download after permissions are revoked in
   fireEvent.click(await screen.findByRole('checkbox', { name: /讀取課程、作業/ }));
   fireEvent.click(screen.getByRole('button', { name: '儲存助理權限' }));
   await screen.findByText('已關閉助理的 TronClass 存取權限。');
-  expect(downloadSignal?.aborted).toBe(true);
+  await waitFor(() => expect(downloadSignal?.aborted).toBe(true));
   await act(async () => finishDownload(new Response('%PDF ignored', { headers: {
     'Content-Type': 'application/pdf', 'Content-Disposition': "attachment; filename*=UTF-8''lecture.pdf",
   } })));
@@ -572,7 +572,7 @@ it('discards an old pending ask through revoke and regrant, while a fresh reques
   fireEvent.click(screen.getByRole('checkbox', { name: /讀取課程、作業/ }));
   fireEvent.click(screen.getByRole('button', { name: '儲存助理權限' }));
   await screen.findByText('已關閉助理的 TronClass 存取權限。');
-  expect(pendingSignal?.aborted).toBe(true);
+  await waitFor(() => expect(pendingSignal?.aborted).toBe(true));
   await waitFor(() => expect((screen.getByRole('checkbox', { name: /讀取課程、作業/ }) as HTMLInputElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('checkbox', { name: /讀取課程、作業/ }));
   fireEvent.click(screen.getByRole('checkbox', { name: /代為下載教材/ }));

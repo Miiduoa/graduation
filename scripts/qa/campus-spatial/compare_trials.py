@@ -71,6 +71,22 @@ def _date(value: str, label: str) -> date:
         raise ValueError(f"{label}: expected YYYY-MM-DD") from error
 
 
+def _cohort_app_versions(repeats: dict[int, list[dict]]) -> tuple[dict[str, str] | None, tuple[str, ...]]:
+    versions: dict[str, str] = {}
+    drifted: set[str] = set()
+    for batch in repeats.values():
+        for entry in batch:
+            product, version = entry["product"], entry["app_version"]
+            previous = versions.get(product)
+            if previous is not None and previous != version:
+                drifted.add(product)
+            else:
+                versions[product] = version
+    if drifted:
+        return None, tuple(sorted(drifted))
+    return versions, ()
+
+
 def audit_rows(rows: list[dict[str, str]]) -> dict:
     """Return machine-readable findings, including incomplete/unscored cases."""
     errors: list[str] = []
@@ -169,6 +185,13 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
         else:
             grouped[values][int(repeat)] = records
 
+    # A scenario represents one fixed set of conditions across all repeats.
+    # Do not publish a three-repeat subset if a later complete repeat used a
+    # different device, task, source or other cohort condition.
+    cohort_counts: dict[str, int] = defaultdict(int)
+    for metadata in grouped:
+        cohort_counts[metadata[0]] += 1
+
     ready: list[dict] = []
     for metadata, repeats in sorted(grouped.items()):
         if metadata[0] in blocked_scenarios:
@@ -177,9 +200,21 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
             pending.append({"scenario_id": metadata[0], "repeats": sorted(repeats),
                             "reasons": ["another repeat in this scenario is incomplete or invalid; no partial-cohort metrics"]})
             continue
+        if cohort_counts[metadata[0]] > 1:
+            pending.append({"scenario_id": metadata[0], "repeats": sorted(repeats),
+                            "reasons": ["scenario conditions changed across repeats; no partial-cohort metrics"]})
+            continue
         if len(repeats) < MIN_REPEATS:
             pending.append({"scenario_id": metadata[0], "repeats": sorted(repeats),
                             "reasons": [f"only {len(repeats)} complete repeats; need {MIN_REPEATS}"]})
+            continue
+        # Never pool measurements of different releases of any one product.
+        # A fourth repeat after an update must not be silently discarded either.
+        versions, drifted_products = _cohort_app_versions(repeats)
+        if versions is None:
+            named = ", ".join(drifted_products)
+            pending.append({"scenario_id": metadata[0], "repeats": sorted(repeats),
+                            "reasons": [f"product app versions changed across repeats ({named}); no mixed-version metrics"]})
             continue
         # Performance and visual medians are comparable only when every product
         # has measured the metric in every repeat; do not cherry-pick samples.
@@ -205,6 +240,7 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
             }
         ready.append({"conditions": dict(zip(COHORT_FIELDS, metadata)),
                       "repeats": sorted(repeats),
+                      "app_versions": versions,
                       "paired_optional_metrics": {"fps": paired_fps, "visual_rating": paired_visual},
                       "metrics": metrics})
     return {"errors": errors, "ready": ready, "pending": pending,
