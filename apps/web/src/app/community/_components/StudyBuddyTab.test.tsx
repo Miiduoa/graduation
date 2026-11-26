@@ -173,9 +173,11 @@ it('keeps review fields, rating and privacy choice after failure and allows a de
   expect((screen.getByLabelText('匿名評價') as HTMLInputElement).checked).toBe(true);
   expect(screen.getByLabelText('課程名稱').matches(':disabled')).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '送出評價' }));
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(document.activeElement).toBe(opener);
-  expect(document.body.style.overflow).toBe('');
+  await waitFor(() => {
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+    expect(document.body.style.overflow).toBe('');
+  });
   fireEvent.click(opener);
   expect(screen.getByLabelText<HTMLInputElement>('課程名稱').value).toBe('');
   expect(mocks.submitReview).toHaveBeenCalledTimes(2);

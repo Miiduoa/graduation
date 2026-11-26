@@ -1008,8 +1008,10 @@ it.each([false, true])('saves feedback and opens the next awaiting receipt only 
   expect(within(peerReceipt).getByText(/目前批改這一份/)).toBeTruthy();
   expect(within(peerReceipt).getByLabelText('給陳同學的回饋')).toBeTruthy();
   expect(within(peerReceipt).getByRole('button', { name: '儲存回饋' })).toBeTruthy();
-  expect(scroll).toHaveBeenLastCalledWith({ block: 'nearest', behavior: reduced ? 'instant' : 'smooth' });
-  expect(document.activeElement).toBe(within(peerReceipt).getByLabelText('給陳同學的回饋'));
+  await waitFor(() => {
+    expect(scroll).toHaveBeenLastCalledWith({ block: 'nearest', behavior: reduced ? 'instant' : 'smooth' });
+    expect(document.activeElement).toBe(within(peerReceipt).getByLabelText('給陳同學的回饋'));
+  });
 });
 
 it('keeps the draft and selected receipt when save-and-next fails', async () => {
