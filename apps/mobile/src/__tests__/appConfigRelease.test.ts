@@ -1,7 +1,11 @@
+import fs from 'fs';
+import path from 'path';
+
 import createAppConfig from '../../app.config';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import appJson from '../../app.json';
 
 const releaseEnvironment = {
   EXPO_PUBLIC_FIREBASE_API_KEY: 'firebase-public-test-key',
@@ -20,16 +24,17 @@ const releaseEnvironment = {
 const keys = [
   ...Object.keys(releaseEnvironment),
   'APP_ENV',
+  'ANDROID_VERSION_CODE',
   'EXPO_PUBLIC_AI_PROVIDER',
   'EXPO_PUBLIC_RELEASE_AI_PROVIDER',
   'EXPO_PUBLIC_GEMINI_API_KEY',
   'EAS_BUILD', 'EAS_BUILD_PLATFORM', 'EXPO_OS', 'GOOGLE_SERVICES_JSON', 'ANDROID_PACKAGE_NAME',
 ];
 
-describe('Expo release configuration', () => {
+describe('Expo release AI configuration', () => {
   let original: Record<string, string | undefined>;
   let projectRoot: string;
-  const resolveConfig = () => createAppConfig({ config: {}, projectRoot });
+  const resolveConfig = () => createAppConfig({ config: { android: { versionCode: 9 } }, projectRoot });
 
   beforeEach(() => {
     original = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
@@ -43,6 +48,7 @@ describe('Expo release configuration', () => {
     delete process.env.EXPO_PUBLIC_RELEASE_AI_PROVIDER;
     delete process.env.EXPO_PUBLIC_GEMINI_API_KEY;
     delete process.env.EXPO_PUBLIC_AI_PROVIDER;
+    delete process.env.ANDROID_VERSION_CODE;
   });
 
   afterEach(() => {
@@ -89,7 +95,7 @@ describe('Expo release configuration', () => {
     process.env.APP_ENV = 'preview';
     process.env.EXPO_PUBLIC_RELEASE_AI_PROVIDER = 'cloud';
 
-    expect(createAppConfig({ config: {} }).extra.aiProvider).toBe('cloud');
+    expect(resolveConfig().extra.aiProvider).toBe('cloud');
   });
 
   it('keeps local AI experiments confined to development', () => {
@@ -158,5 +164,70 @@ describe('Expo release configuration', () => {
       writeFileSync(join(projectRoot, 'google-services.json'), 'private-fixture-data');
       expect(resolveConfig).toThrow('Android Firebase configuration must be a readable google-services.json file.');
     });
+  });
+});
+
+describe('Android activity recognition and versionCode', () => {
+  let original: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    original = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    for (const [key, value] of Object.entries(releaseEnvironment)) {
+      process.env[key] = value;
+    }
+    delete process.env.EXPO_PUBLIC_RELEASE_AI_PROVIDER;
+    delete process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+    delete process.env.EXPO_PUBLIC_AI_PROVIDER;
+    delete process.env.ANDROID_VERSION_CODE;
+  });
+
+  afterEach(() => {
+    for (const key of keys) {
+      const value = original[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+
+  it('blocks ACTIVITY_RECOGNITION declared by expo-sensors', () => {
+    const sensorsRoot = path.dirname(require.resolve('expo-sensors/package.json'));
+    const manifest = fs.readFileSync(
+      path.join(sensorsRoot, 'android/src/main/AndroidManifest.xml'),
+      'utf8',
+    );
+    expect(manifest).toContain('android.permission.ACTIVITY_RECOGNITION');
+
+    process.env.APP_ENV = 'production';
+    const config = createAppConfig({ config: appJson.expo });
+
+    expect(config.android.versionCode).toBeGreaterThan(8);
+    expect(config.android.blockedPermissions).toEqual(
+      expect.arrayContaining([
+        'android.permission.ACTIVITY_RECOGNITION',
+        'com.google.android.gms.permission.ACTIVITY_RECOGNITION',
+      ]),
+    );
+    expect(config.android.permissions.join(',')).not.toMatch(/ACTIVITY_RECOGNITION/i);
+  });
+
+  it('rejects a release versionCode of 8 or lower', () => {
+    process.env.APP_ENV = 'production';
+
+    expect(() => createAppConfig({ config: { android: { versionCode: 8 } } })).toThrow(
+      'ANDROID_VERSION_CODE must be greater than 8',
+    );
+  });
+
+  it('keeps campus navigation motion sensors without Pedometer', () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, '../screens/ARNavigationScreen.tsx'),
+      'utf8',
+    );
+    expect(source).toMatch(/import \{ Magnetometer, Accelerometer \} from 'expo-sensors'/);
+    expect(source).not.toMatch(/\bPedometer\b/);
+    expect(source).not.toMatch(/\bDeviceMotion\b/);
   });
 });
