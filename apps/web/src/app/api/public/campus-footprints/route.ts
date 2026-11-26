@@ -316,6 +316,13 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
       'User-Agent': 'nuni-campus-spatial/1.0 (https://nuni.tw)',
     },
   });
+  // Fetch implementations may resolve headers after our deadline even when
+  // they ignored AbortSignal. Release the unused body before opening a reader
+  // or starting a fallback text read; the expired request cannot refresh cache.
+  if (signal.aborted) {
+    cancelUnreadBody(response);
+    throw new Error('OSM response aborted');
+  }
   // Overpass returns one complete JSON document on HTTP 200. Fetch's ok flag
   // also accepts 206 Partial Content and other 2xx codes: a truncated or
   // intermediary-transformed reply must never become a 24-hour OSM snapshot.
