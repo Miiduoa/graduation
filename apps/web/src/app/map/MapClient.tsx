@@ -672,9 +672,14 @@ function MapContent({
         </p>
       )}
       {placeState.source === 'ready' && route && !deepLinkRoute && routeDraft === null && (
-        <p className={styles.notice} role="status">
-          這個連結的起點或終點已不在目前地點資料中，或無法唯一確認有效位置。請從下方列表重新選擇。
-        </p>
+        <div className={styles.notice}>
+          <p role="status">
+            這個連結的起點或終點已不在目前地點資料中，或無法唯一確認有效位置。請從下方列表重新選擇。
+          </p>
+          <button className="btn" type="button" onClick={() => setRouteDraft({ from: null, to: null })}>
+            清除路線
+          </button>
+        </div>
       )}
       {selection === 'revoked' && (
         <p className={styles.notice} role="status">

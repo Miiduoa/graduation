@@ -838,6 +838,10 @@ it('does not resolve a shared route with duplicate endpoint IDs', async () => {
   const markers = await screen.findByLabelText('地圖狀態');
   expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
   expect(JSON.parse(markers.textContent!).route).toBeNull();
+  expect(screen.getByText(/這個連結的起點或終點已不在目前地點資料中/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  expect(screen.queryByText(/這個連結的起點或終點已不在目前地點資料中/)).toBeNull();
+  expect(JSON.parse(markers.textContent!).route).toBeNull();
 });
 
 it.each([false, true])('does not expose conflicting markers even when filtering hides one (%s)', async (reverse) => {
@@ -911,6 +915,19 @@ it('preserves a pending untouched route link but drops it when the source cannot
   await act(async () => source.resolve([library, gate]));
   expect(returnRoute()).toBeNull();
   expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  expect(screen.getByText(/這個連結的起點或終點已不在目前地點資料中/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  expect(screen.queryByText(/這個連結的起點或終點已不在目前地點資料中/)).toBeNull();
+  expect(returnRoute()).toBeNull();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route).toBeNull();
+
+  // Recover without leaving the map or restoring the invalid shared link.
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為終點' }));
+  expect(returnRoute()).toBe('gate,library');
+  expect(screen.getByRole('region', { name: '步行導航' })).toBeTruthy();
 });
 
 it('obtains position only on request and orders nearby locations by measured straight-line distance', async () => {
