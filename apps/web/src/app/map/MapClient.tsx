@@ -21,6 +21,7 @@ import {
   appleWalkingDirectionsUrl,
   distanceMeters,
   formatDistance,
+  isUsableMapCoordinate,
   type MapCoordinate,
   type MapLocation,
 } from './mapService';
@@ -71,8 +72,7 @@ function confirmedRoutePlace(locations: readonly MapLocation[], chosen: MapLocat
     place.lat === chosen.lat && place.lng === chosen.lng &&
     (place.building ?? null) === (chosen.building ?? null) &&
     (place.floor ?? null) === (chosen.floor ?? null) &&
-    Number.isFinite(place.lat) && Math.abs(place.lat) <= 90 &&
-    Number.isFinite(place.lng) && Math.abs(place.lng) <= 180 ? place : null;
+    isUsableMapCoordinate(place) ? place : null;
 }
 
 export default function MapClient(props: MapProps) {
@@ -373,12 +373,7 @@ function MapContent({
       navigator.geolocation.getCurrentPosition(
         ({ coords }) => {
           if (!finishRequest()) return;
-          if (
-            !Number.isFinite(coords.latitude) || Math.abs(coords.latitude) > 90 ||
-            !Number.isFinite(coords.longitude) || Math.abs(coords.longitude) > 180 ||
-            // Match the campus POI policy: a zero-origin placeholder is not a usable GPS fix.
-            (coords.latitude === 0 && coords.longitude === 0)
-          ) {
+          if (!isUsableMapCoordinate({ lat: coords.latitude, lng: coords.longitude })) {
             setPositionStatus('error');
             setPositionError('定位結果無效，請重新取得位置。');
             return;

@@ -14,7 +14,7 @@ import {
   type CampusSpatialCamera,
 } from './campusSpatialCamera';
 import type { CampusSpatialScene } from './campusSpatialScene';
-import { appleWalkingDirectionsUrl, walkingDirectionsUrl, type MapLocation } from './mapService';
+import { appleWalkingDirectionsUrl, isUsableMapCoordinate, walkingDirectionsUrl, type MapLocation } from './mapService';
 import { isProvidencePendingVerification, providencePlaceSourceUrl } from './providenceCampus';
 import { PROVIDENCE_CAMPUS_PLACES, PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
 import { MAX_VERTICES, MAX_WAYS, parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
@@ -1189,8 +1189,7 @@ function spatialRouteOrigin(
       spatialDestinationIdentity(route[1]) !== spatialDestinationIdentity(destination)) return undefined;
   const confirmed = (endpoint: MapLocation) => {
     const matches = locations.filter((location) => location.id === endpoint.id);
-    return matches.length === 1 && Number.isFinite(endpoint.lat) && Math.abs(endpoint.lat) <= 90 &&
-      Number.isFinite(endpoint.lng) && Math.abs(endpoint.lng) <= 180 &&
+    return matches.length === 1 && isUsableMapCoordinate(endpoint) &&
       spatialDestinationIdentity(matches[0]) === spatialDestinationIdentity(endpoint);
   };
   return confirmed(route[0]) && confirmed(route[1]) ? route[0] : undefined;

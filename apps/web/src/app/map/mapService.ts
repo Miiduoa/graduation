@@ -160,13 +160,23 @@ export async function setMapFavorite(
   assertCurrent(uid, current);
 }
 
+/** Finite WGS-84 point that is not the (0, 0) missing-fix sentinel. */
+export function isUsableMapCoordinate(
+  place: MapCoordinate | null | undefined,
+): place is MapCoordinate {
+  return Boolean(place) &&
+    Number.isFinite(place.lat) && Math.abs(place.lat) <= 90 &&
+    Number.isFinite(place.lng) && Math.abs(place.lng) <= 180 &&
+    !(place.lat === 0 && place.lng === 0);
+}
+
 export function walkingDirectionsUrl(destination: MapCoordinate, origin?: MapCoordinate): string {
   const parameters = new URLSearchParams({
     api: '1',
     destination: `${destination.lat},${destination.lng}`,
     travelmode: 'walking',
   });
-  if (origin) parameters.set('origin', `${origin.lat},${origin.lng}`);
+  if (isUsableMapCoordinate(origin)) parameters.set('origin', `${origin.lat},${origin.lng}`);
   return `https://www.google.com/maps/dir/?${parameters.toString()}`;
 }
 
@@ -178,6 +188,6 @@ export function appleWalkingDirectionsUrl(destination: MapCoordinate, origin?: M
     daddr: `${destination.lat},${destination.lng}`,
     dirflg: 'w',
   });
-  if (origin) parameters.set('saddr', `${origin.lat},${origin.lng}`);
+  if (isUsableMapCoordinate(origin)) parameters.set('saddr', `${origin.lat},${origin.lng}`);
   return `https://maps.apple.com/?${parameters.toString()}`;
 }

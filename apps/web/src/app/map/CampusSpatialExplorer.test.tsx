@@ -350,6 +350,13 @@ it('preserves the flat-map route origin only for the matching spatial destinatio
   expect(origin()).toEqual([null, null]);
   expect(dialog.queryByText(/沿用平面地圖設定的起點/)).toBeNull();
 
+  view.rerender(<CampusSpatialExplorer {...props} mapRoute={[
+    { ...places[0], lat: 0, lng: 0 },
+    places[1],
+  ]} />);
+  expect(origin()).toEqual([null, null]);
+  expect(dialog.queryByText(/沿用平面地圖設定的起點/)).toBeNull();
+
   view.rerender(<CampusSpatialExplorer {...props} mapRoute={null} />);
   expect(origin()).toEqual([null, null]);
 });

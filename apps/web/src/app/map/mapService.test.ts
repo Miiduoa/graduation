@@ -4,6 +4,7 @@ import {
   formatDistance,
   walkingDirectionsUrl,
   appleWalkingDirectionsUrl,
+  isUsableMapCoordinate,
   loadMapFavorites,
   loadMapLocations,
   MapSourceTimeoutError,
@@ -75,6 +76,17 @@ it('builds Google and Apple walking links from exact marker coordinates without 
     .toBe('24.23,120.56');
   expect(new URL(walkingDirectionsUrl(location, start)).searchParams.get('origin'))
     .toBe('24.23,120.56');
+
+  for (const origin of [
+    { lat: 0, lng: 0 },
+    { lat: -0, lng: 0 },
+    { lat: 91, lng: 120 },
+    { lat: 24, lng: NaN },
+  ]) {
+    expect(isUsableMapCoordinate(origin)).toBe(false);
+    expect(new URL(walkingDirectionsUrl(location, origin)).searchParams.has('origin')).toBe(false);
+    expect(new URL(appleWalkingDirectionsUrl(location, origin)).searchParams.has('saddr')).toBe(false);
+  }
 });
 
 beforeEach(() => {
