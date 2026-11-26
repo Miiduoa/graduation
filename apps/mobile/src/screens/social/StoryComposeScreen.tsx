@@ -288,7 +288,9 @@ function StoryComposer(props: any) {
                   <Pressable
                     key={c}
                     onPress={() => setBgColor(c)}
-                    style={[styles.swatch, { backgroundColor: c, borderColor: on ? theme.colors.accent : 'rgba(0,0,0,0.15)', borderWidth: on ? 3 : 1 }]}
+                    style={[styles.swatch, { backgroundColor: c, borderColor: on ? theme.colors.accent : theme.colors.border, borderWidth: on ? 3 : 1 }]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
                     accessibilityLabel={`背景色 ${c}`}
                   />
                 );
@@ -313,7 +315,7 @@ function StoryComposer(props: any) {
           <View style={styles.poiChip}>
             <Ionicons name="location" size={12} color={theme.colors.accent} />
             <Text style={styles.poiChipTxt}>{poiName ?? poiId}</Text>
-            <Pressable onPress={() => { setPoiId(null); setPoiName(null); }} hitSlop={6}>
+            <Pressable accessibilityRole="button" accessibilityLabel="移除地點" onPress={() => { setPoiId(null); setPoiName(null); }} hitSlop={12}>
               <Ionicons name="close-circle" size={14} color={theme.colors.muted} />
             </Pressable>
           </View>
@@ -326,6 +328,7 @@ function StoryComposer(props: any) {
             value={allowReplies}
             disabled={busy}
             onValueChange={setAllowReplies}
+            trackColor={{ false: theme.colors.disabledBg, true: theme.colors.accent }}
           />
         </View>
 
@@ -344,7 +347,7 @@ function StoryComposer(props: any) {
 
 const createStyles = () => StyleSheet.create({
   label: { fontSize: 13, fontWeight: '700', color: theme.colors.text, marginTop: 12, marginBottom: 6 },
-  counter: { textAlign: 'right', fontSize: 10, color: theme.colors.muted, marginTop: 4 },
+  counter: { textAlign: 'right', fontSize: 12, color: theme.colors.muted, marginTop: 4 },
 
   preview: {
     aspectRatio: 9 / 16,
@@ -368,12 +371,12 @@ const createStyles = () => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    paddingHorizontal: 10,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 999,
+    borderRadius: theme.radius.sm,
   },
-  previewPoiTxt: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  previewPoiTxt: { color: '#fff', fontSize: 12, fontWeight: '700' },
 
   kindRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12, alignItems: 'center' },
   kindBtn: {
@@ -383,7 +386,7 @@ const createStyles = () => StyleSheet.create({
     gap: 5,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 999,
+    borderRadius: theme.radius.sm,
     backgroundColor: theme.colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
@@ -391,7 +394,7 @@ const createStyles = () => StyleSheet.create({
   kindBtnOn: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
   kindBtnTxt: { color: theme.colors.textSecondary, fontSize: 13, fontWeight: '700' },
   kindClear: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 'auto' },
-  kindClearTxt: { color: theme.colors.danger, fontSize: 12, fontWeight: '700' },
+  kindClearTxt: { color: theme.colors.danger, fontSize: 13, fontWeight: '700' },
 
   palette: { flexDirection: 'row', gap: 10 },
   swatch: { width: 36, height: 36, borderRadius: 18 },
@@ -413,13 +416,10 @@ const createStyles = () => StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: theme.colors.accentSoft ?? 'rgba(124,93,250,0.10)',
-    marginTop: 8,
+    minHeight: 44,
+    marginTop: 4,
   },
-  poiChipTxt: { color: theme.colors.accent, fontSize: 12, fontWeight: '700' },
+  poiChipTxt: { color: theme.colors.accent, fontSize: 13, fontWeight: '700' },
 
   replyPreference: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 52, marginTop: 12 },
   replyPreferenceText: { flex: 1, color: theme.colors.text, fontSize: 15 },
@@ -431,7 +431,7 @@ const createStyles = () => StyleSheet.create({
     marginTop: 16,
   },
   btnTx: { color: theme.colors.onAccent, fontWeight: '700', fontSize: 16 },
-  hintMuted: { fontSize: 11, color: theme.colors.textSecondary, marginTop: 8, textAlign: 'center' },
+  hintMuted: { fontSize: 12, color: theme.colors.textSecondary, marginTop: 8, textAlign: 'center' },
 });
 
 export default StoryComposeScreen;

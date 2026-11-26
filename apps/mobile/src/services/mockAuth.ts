@@ -17,6 +17,13 @@ export type MockAuthSession = {
 };
 
 const STORAGE_KEY = 'campus.mockAuthSession.v1';
+let pendingWrite = Promise.resolve();
+
+function queueWrite(write: () => Promise<void>): Promise<void> {
+  const result = pendingWrite.then(write);
+  pendingWrite = result.catch(() => undefined);
+  return result;
+}
 
 export async function loadMockAuthSession(): Promise<MockAuthSession | null> {
   if (getReleaseConfig().appEnv === 'production') return null;
@@ -46,9 +53,29 @@ export async function loadMockAuthSession(): Promise<MockAuthSession | null> {
 
 export async function saveMockAuthSession(session: MockAuthSession): Promise<void> {
   if (getReleaseConfig().appEnv === 'production') throw new Error('正式環境不支援測試帳號');
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  await queueWrite(() => AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(session)));
 }
 
 export async function clearMockAuthSession(): Promise<void> {
-  await AsyncStorage.removeItem(STORAGE_KEY);
+  await queueWrite(() => AsyncStorage.removeItem(STORAGE_KEY));
+}
+
+
+// A role refresh must not overwrite a later login/logout or update a different mock identity.
+export async function updateMockAuthRole(
+  uid: string, schoolId: string, role: UserRole, assertCurrent: () => void,
+): Promise<void> {
+  await queueWrite(async () => {
+    assertCurrent();
+    const current = await loadMockAuthSession();
+    assertCurrent();
+    if (!current || current.uid !== uid || current.schoolId !== schoolId || current.role === role) return;
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, role }));
+    try {
+      assertCurrent();
+    } catch (error) {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+      throw error;
+    }
+  });
 }

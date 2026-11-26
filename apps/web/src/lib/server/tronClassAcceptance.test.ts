@@ -89,10 +89,13 @@ function fixture() {
       return next;
     },
   };
+  const unsealSession = vi.fn(() => structuredClone(currentBinding));
   const bindings = {
-    requireBinding: vi.fn(async (ownerKey: string) => {
+    requireBinding: vi.fn(async (ownerKey: string, sourceRevision?: string) => {
       if (ownerKey !== OWNER) throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED');
-      return structuredClone(currentBinding);
+      if (sourceRevision !== undefined && sourceRevision !== currentBinding.revision)
+        throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+      return unsealSession();
     }),
     assertCurrent: vi.fn(async (ownerKey: string, revision: string) => {
       if (ownerKey !== OWNER || revision !== currentBinding.revision)
@@ -193,6 +196,7 @@ function fixture() {
     db,
     rows,
     bindings,
+    unsealSession,
     authorize,
     fetchSchool,
     readHistory,
@@ -242,7 +246,9 @@ describe('controlled first-text acceptance entry', () => {
       expiresAt: new Date(NOW + 300_000).toISOString(),
     });
     expect(plan.signature).toMatch(/^[a-f0-9]{64}$/);
-    expect(f.authorize).toHaveBeenCalledTimes(1);
+    expect(f.authorize).toHaveBeenCalledExactlyOnceWith(OWNER, { courseId: 101, homeworkId: 202 },
+      undefined, expect.objectContaining({ revision: REVISION, userId: 303 }));
+    expect(f.bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(OWNER, REVISION);
     expect(f.fetchSchool).not.toHaveBeenCalled();
     expect(f.readHistory).not.toHaveBeenCalled();
     expect(f.writes()).toBe(0);
@@ -418,7 +424,7 @@ describe('controlled first-text acceptance entry', () => {
     });
   });
 
-  it('reconciles an expired plan after same-student reconnect without authorizing writes or changing the original revision', async () => {
+  it('reconciles an expired plan on its original binding without authorizing writes', async () => {
     const f = fixture();
     const plan = await f.service().preflight(input());
     f.setReadFailure(true);
@@ -428,13 +434,55 @@ describe('controlled first-text acceptance entry', () => {
     );
     f.setReadFailure(false);
     f.setClock(NOW + 600_000);
-    f.rebind('b'.repeat(32));
     f.authorize.mockRejectedValue(new Error('write permission unavailable'));
     const calls = f.authorize.mock.calls.length;
     expect((await f.service().reconcile(plan)).status).toBe('confirmed');
     expect(f.authorize).toHaveBeenCalledTimes(calls);
     expect(f.fetchSchool).toHaveBeenCalledTimes(1);
     expect([...f.rows].filter(([path]) => !path.startsWith('_tronClassBindings/'))).toEqual(saved);
+  });
+
+  it.each([303, 404])('rejects an acknowledged plan after rebinding to student %i before opening the session', async (studentId) => {
+    const f = fixture();
+    const plan = await f.service().preflight(input());
+    f.setReadFailure(true);
+    expect((await f.service().dispatch(input(), plan, confirmation(plan))).status).toBe('unknown');
+    expect([...f.rows.values()].some((row) => row.state === 'acknowledged')).toBe(true);
+    f.setReadFailure(false);
+    f.rebind('b'.repeat(32), studentId);
+    const saved = structuredClone([...f.rows]);
+    f.bindings.requireBinding.mockClear();
+    f.unsealSession.mockClear();
+    f.readHistory.mockClear();
+
+    await expect(f.service().reconcile(plan)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    expect(f.bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(OWNER, REVISION);
+    expect(f.unsealSession).not.toHaveBeenCalled();
+    expect(f.readHistory).not.toHaveBeenCalled();
+    expect(f.fetchSchool).toHaveBeenCalledTimes(1);
+    expect([...f.rows]).toEqual(saved);
+  });
+
+  it.each([1, 2])('rejects a connected rebind to the same student after reconcile binding check %i', async (check) => {
+    const f = fixture();
+    const plan = await f.service().preflight(input());
+    f.setReadFailure(true);
+    expect((await f.service().dispatch(input(), plan, confirmation(plan))).status).toBe('unknown');
+    expect([...f.rows.values()].some((row) => row.state === 'acknowledged')).toBe(true);
+    f.setReadFailure(false);
+    f.unsealSession.mockClear();
+    f.readHistory.mockClear();
+    const assertCurrent = f.bindings.assertCurrent.getMockImplementation()!;
+    let remaining = check;
+    f.bindings.assertCurrent.mockImplementation(async (owner, revision) => {
+      await assertCurrent(owner, revision);
+      if (--remaining === 0) f.rebind('b'.repeat(32));
+    });
+
+    await expect(f.service().reconcile(plan)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    expect(f.unsealSession.mock.results.map(({ value }) => value.revision)).toEqual(Array(check).fill(REVISION));
+    expect(f.readHistory).not.toHaveBeenCalled();
+    expect(f.fetchSchool).toHaveBeenCalledTimes(1);
   });
 
   it('keeps a failed readback unknown with its original operation and lock intact', async () => {

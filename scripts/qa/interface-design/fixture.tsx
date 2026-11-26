@@ -67,6 +67,13 @@ function Controls() {
         >
           查看課務分頁
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => navigate('/life?schoolId=pu&campus=pu')}
+        >
+          查看生活服務
+        </Button>
         <Button type="button" variant="ghost" onClick={() => navigate('/')}>
           返回今天
         </Button>

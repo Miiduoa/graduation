@@ -5,6 +5,9 @@ import { AssistantEnabledProvider } from './AssistantEnabledProvider';
 import { AssistantWorkspaceProvider } from './AssistantWorkspaceProvider';
 import { AppHeader } from './AppHeader';
 import { TodayAssistantDisclosure, type TodayAssistantHandle } from './TodayCampusEntry';
+import { ExploreExperiences } from './ExploreExperiences';
+import { AssistantWorkspacePage } from './AssistantWorkspacePage';
+import LegacyAssistant from '@/app/ai-assistant/LegacyAssistant';
 
 const state = vi.hoisted(() => ({
   account: 'alpha',
@@ -15,8 +18,10 @@ const state = vi.hoisted(() => ({
   pendingLogout: false,
   nuniLoading: false,
   campusLoading: false,
+  campusError: false,
+  schoolUid: null as string | null,
 }));
-vi.mock('./AuthGuard', () => ({ useAuth: () => ({ user: null, loading: false, error: null }) }));
+vi.mock('./AuthGuard', () => ({ useAuth: () => ({ user: state.schoolUid ? { uid: state.schoolUid } : null, loading: false, error: null }) }));
 vi.mock('./SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('./CampusServiceMenu', () => ({ CampusServiceMenu: () => null }));
 vi.mock('@/features/nuni/Session', () => {
@@ -35,7 +40,7 @@ vi.mock('./SelectedSchoolProvider', () => ({
         ? { id: state.school, name: state.school === 'pu' ? '靜宜大學' : '中興大學' }
         : null,
     selectedSchoolId: state.campusLoading ? null : state.school || null,
-    catalogStatus: 'ready',
+    catalogStatus: state.campusError ? 'error' : 'ready',
     loading: state.campusLoading,
   }),
 }));
@@ -65,6 +70,8 @@ function Fixture() {
         </label>
         {state.pathname === '/' ? (
           <TodayAssistantDisclosure ref={entry} onOpenChange={() => {}} />
+        ) : state.pathname === '/explore' ? <ExploreExperiences /> : state.pathname === '/ai-assistant' ? (
+          <AssistantWorkspacePage><div data-testid="scoped-assistant"><LegacyAssistant /></div></AssistantWorkspacePage>
         ) : (
           <h1>課程工作區</h1>
         )}
@@ -92,6 +99,8 @@ beforeEach(() => {
     pendingLogout: false,
     nuniLoading: false,
     campusLoading: false,
+    campusError: false,
+    schoolUid: null,
   });
   localStorage.clear();
   sessionStorage.clear();
@@ -217,6 +226,72 @@ it('clears drafts when the campus changes and shares a guest request with local 
   expect(askRequests()).toHaveLength(0);
 });
 
+it.each([
+  { name: 'home', pathname: '/', search: 'campus=pu', task: {}, initialQuestion: '' },
+  { name: 'service directory', pathname: '/life', search: 'campus=pu&group=resources&q=借書',
+    task: { group: 'resources', q: '借書' }, initialQuestion: '' },
+  { name: 'explicit assistant link', pathname: '/ai-assistant',
+    search: 'campus=pu&taskProfile=teacher&q=查我的授課概況',
+    task: { taskProfile: 'teacher', q: '查我的授課概況' }, initialQuestion: '查我的授課概況' },
+])('keeps a guest draft out of login URLs and storage while returning to the $name', async ({ pathname, search, task, initialQuestion }) => {
+  state.context = null;
+  state.pathname = pathname;
+  state.search = search;
+  window.history.replaceState({}, '', `${pathname}?${search}`);
+  const view = render(<Fixture />);
+  const privateDraft = '明天下課後想去圖書館，這是尚未送出的私人草稿';
+  if (pathname === '/') {
+    fireEvent.change(screen.getByLabelText('想完成的事'), { target: { value: privateDraft } });
+    fireEvent.submit(screen.getByRole('form', { name: '開始校園任務' }));
+  } else if (pathname !== '/ai-assistant') {
+    fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  }
+  const panel = await screen.findByRole('region', { name: '校園助理' });
+  const field = await within(panel).findByRole('searchbox', { name: '想做什麼？' });
+  if (initialQuestion) await waitFor(() => expect(field).toHaveProperty('value', initialQuestion));
+  fireEvent.change(field, { target: { value: privateDraft } });
+  fireEvent.click(within(panel).getByRole('button', { name: '收合' }));
+  fireEvent.click(screen.getByRole('button', {
+    name: pathname === '/ai-assistant' ? '開啟目前任務' : '開啟校園助理',
+  }));
+  expect(field).toHaveProperty('value', privateDraft);
+
+  const link = within(panel).getByRole('link', { name: '登入後，接著詢問校園助理' });
+  const login = new URL(link.getAttribute('href')!, window.location.origin);
+  const returnPath = login.searchParams.get('returnUrl')!;
+  const destination = new URL(returnPath, window.location.origin);
+  expect(destination.pathname).toBe(pathname);
+  expect(Object.fromEntries(destination.searchParams)).toEqual({
+    ...task, schoolId: 'pu', campus: 'pu', school: 'PU',
+  });
+  expect(destination.hash).toBe('#campus-assistant-entry');
+  expect(Object.fromEntries(login.searchParams)).toEqual({
+    returnUrl: returnPath, schoolId: 'pu', campus: 'pu', school: 'PU',
+  });
+  for (const storage of [localStorage, sessionStorage]) {
+    const values = Array.from({ length: storage.length }, (_, index) => storage.getItem(storage.key(index)!));
+    expect(values.join('\n')).not.toContain(privateDraft);
+  }
+  expect(askRequests()).toHaveLength(0);
+
+  // A full-document login return creates a new workspace. Only an existing,
+  // explicit URL question may seed it; the locally edited draft is gone.
+  view.unmount();
+  state.pathname = destination.pathname;
+  state.search = destination.search.slice(1);
+  window.history.replaceState({}, '', returnPath);
+  render(<Fixture />);
+  const returned = await screen.findByRole('region', { name: '校園助理' });
+  const returnedField = await within(returned).findByRole('searchbox', { name: '想做什麼？' });
+  await waitFor(() => expect(returnedField).toHaveProperty('value', initialQuestion));
+  expect(within(returned).queryByText(`你的問題：${privateDraft}`)).toBeNull();
+  expect(askRequests()).toHaveLength(0);
+  expect(window.location.pathname).toBe(pathname);
+  expect(Object.fromEntries(new URLSearchParams(window.location.search))).toEqual({
+    ...task, schoolId: 'pu', campus: 'pu', school: 'PU',
+  });
+});
+
 it('pauses private content during a same-session recheck, then restores history and the unsent draft', async () => {
   const view = render(<Fixture />);
   const panel = await openQuestion('協助我思考報告的開場');
@@ -322,4 +397,195 @@ it('keeps an unconfirmed action visible across navigation without confirming or 
     '/api/nuni/assistant/capability',
     '/api/nuni/assistant/ask',
   ]);
+  fireEvent.change(within(panel).getByLabelText('問題'), { target: { value: '尚未送出的後續問題' } });
+  state.pathname = '/explore';
+  state.search = 'campus=pu&workContext=teacher';
+  view.rerender(<Fixture />);
+  fireEvent.click(screen.getByRole('link', { name: '試著問 nuni：掌握授課進度' }));
+  fireEvent.click(screen.getByRole('button', { name: '取代草稿並帶入' }));
+  await screen.findByText(/先完成、取消或核對目前的安排/);
+  expect(within(panel).getByLabelText('問題')).toHaveProperty('value', '尚未送出的後續問題');
+  expect(within(panel).getByRole('combobox', { name: '目前處理的工作' })).toHaveProperty('value', 'student');
+  expect(within(panel).getByRole('button', { name: '確認' })).toBe(confirmation);
+  expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+    '/api/nuni/assistant/capability', '/api/nuni/assistant/ask',
+  ]);
+});
+
+it('brings an exploration into the existing conversation with its explicit task profile and no automatic request', async () => {
+  const view = render(<Fixture />);
+  const panel = await openQuestion('協助我思考報告的開場');
+  fireEvent.click(within(panel).getByRole('checkbox'));
+  fireEvent.submit(within(panel).getByRole('form', { name: '傳送問題' }));
+  await within(panel).findByText('先整理目標，再確認需要的資料。');
+  state.pathname = '/explore';
+  state.search = 'campus=pu&workContext=teacher';
+  view.rerender(<Fixture />);
+  fireEvent.click(screen.getByRole('link', { name: '試著問 nuni：掌握授課進度' }));
+  await waitFor(() => expect(within(panel).getByLabelText('問題')).toHaveProperty('value', '查我的授課概況'));
+  expect(screen.getByRole('region', { name: '校園助理' })).toBe(panel);
+  expect(within(panel).getByRole('combobox', { name: '目前處理的工作' })).toHaveProperty('value', 'teacher');
+  expect(askRequests()).toHaveLength(1);
+  fireEvent.change(within(panel).getByLabelText('問題'), { target: { value: '協助我思考報告的架構' } });
+  fireEvent.submit(within(panel).getByRole('form', { name: '傳送問題' }));
+  await waitFor(() => expect(askRequests()).toHaveLength(2));
+  expect(JSON.parse(askRequests()[1][1].body)).toMatchObject({ taskProfile: 'teacher', schoolId: 'pu' });
+  expect(fetcher.mock.calls.filter(([url]) => url === '/api/nuni/assistant/capability')).toHaveLength(1);
+});
+
+it('keeps an unsent draft until replacement is explicit and discards an outstanding entry on a school change', async () => {
+  const view = render(<Fixture />);
+  const panel = await openQuestion('我還沒寫完的問題');
+  state.pathname = '/explore';
+  state.search = 'campus=pu&workContext=teacher';
+  view.rerender(<Fixture />);
+  const entry = screen.getByRole('link', { name: '試著問 nuni：掌握授課進度' });
+  fireEvent.click(entry);
+  expect(within(panel).getByLabelText('問題')).toHaveProperty('value', '我還沒寫完的問題');
+  fireEvent.click(screen.getByRole('button', { name: '保留目前任務' }));
+  expect(within(panel).getByLabelText('問題')).toHaveProperty('value', '我還沒寫完的問題');
+  fireEvent.click(entry);
+  fireEvent.click(screen.getByRole('button', { name: '取代草稿並帶入' }));
+  await waitFor(() => expect(within(panel).getByLabelText('問題')).toHaveProperty('value', '查我的授課概況'));
+  fireEvent.change(within(panel).getByLabelText('問題'), { target: { value: '第二份草稿' } });
+  fireEvent.click(entry);
+  state.school = 'nchu';
+  state.search = 'campus=nchu';
+  view.rerender(<Fixture />);
+  expect(screen.queryByRole('region', { name: '帶入新的問題' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  const newPanel = await screen.findByRole('region', { name: '校園助理' });
+  await within(newPanel).findByRole('textbox', { name: '問題' });
+  expect(within(newPanel).getByLabelText('問題')).toHaveProperty('value', '');
+  expect(askRequests()).toHaveLength(0);
+});
+
+it('opens a direct assistant question in one workspace and consumes its URL draft only once', async () => {
+  state.pathname = '/ai-assistant';
+  state.search = 'campus=pu&taskProfile=teacher&q=查我的授課概況';
+  const view = render(<Fixture />);
+  const panel = await screen.findByRole('region', { name: '校園助理' });
+  await waitFor(() => expect(within(panel).getByLabelText('問題')).toHaveProperty('value', '查我的授課概況'));
+  expect(screen.queryByTestId('scoped-assistant')).toBeNull();
+  expect(within(panel).getByRole('combobox', { name: '目前處理的工作' })).toHaveProperty('value', 'teacher');
+  fireEvent.change(within(panel).getByLabelText('問題'), { target: { value: '我修改後的問題' } });
+  view.rerender(<Fixture />);
+  expect(within(panel).getByLabelText('問題')).toHaveProperty('value', '我修改後的問題');
+  expect(askRequests()).toHaveLength(0);
+  expect(fetcher.mock.calls.filter(([url]) => url === '/api/nuni/assistant/capability')).toHaveLength(1);
+});
+
+it.each(['courseId', 'groupId'])('keeps an explicit %s deep link in its real scoped reader without mounting another conversation', async (key) => {
+  state.pathname = '/ai-assistant';
+  state.search = `campus=pu&${key}=course-42&q=這門課的作業`;
+  state.schoolUid = 'school-alice';
+  window.history.replaceState({}, '', `/ai-assistant?${state.search}#campus-assistant-entry`);
+  render(<Fixture />);
+  expect(screen.getByTestId('scoped-assistant')).toBeTruthy();
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '你的問題' })).toHaveProperty('value', '這門課的作業'));
+  expect(screen.queryByRole('region', { name: '校園助理' })).toBeNull();
+  expect(fetcher.mock.calls.filter(([url]) => url === '/api/nuni/assistant/capability')).toHaveLength(0);
+});
+
+it.each(['error', 'unselected'])('preserves an explicit URL question through campus %s recovery before opening the real workspace', async (status) => {
+  state.pathname = '/ai-assistant';
+  state.search = 'campus=pu&taskProfile=teacher&q=查我的授課概況';
+  state.campusError = status === 'error';
+  state.school = status === 'unselected' ? '' : 'pu';
+  const view = render(<Fixture />);
+  expect(screen.getByRole('textbox', { name: '保留的問題' })).toHaveProperty('value', '查我的授課概況');
+  expect(screen.queryByRole('region', { name: '校園助理' })).toBeNull();
+  expect(fetcher.mock.calls.filter(([url]) => url === '/api/nuni/assistant/capability')).toHaveLength(0);
+  state.campusError = false;
+  state.school = 'pu';
+  view.rerender(<Fixture />);
+  const panel = await screen.findByRole('region', { name: '校園助理' });
+  await waitFor(() => expect(within(panel).getByLabelText('問題')).toHaveProperty('value', '查我的授課概況'));
+  expect(within(panel).getByRole('combobox', { name: '目前處理的工作' })).toHaveProperty('value', 'teacher');
+  expect(askRequests()).toHaveLength(0);
+  expect(fetcher.mock.calls.filter(([url]) => url === '/api/nuni/assistant/capability')).toHaveLength(1);
+});
+
+it.each([false, true])('does not replay a pending URL question after changing the account before school recovery (campus URL rewrite: %s)', async (rewriteCampus) => {
+  state.pathname = '/ai-assistant';
+  state.search = 'campus=pu&taskProfile=teacher&q=原本帳號尚未送出的問題';
+  state.school = '';
+  const view = render(<Fixture />);
+  expect(screen.getByRole('textbox', { name: '保留的問題' })).toBeTruthy();
+  state.account = 'beta';
+  state.context = 'b'.repeat(43);
+  view.rerender(<Fixture />);
+  expect(screen.queryByRole('textbox', { name: '保留的問題' })).toBeNull();
+  state.school = rewriteCampus ? 'nchu' : 'pu';
+  if (rewriteCampus) state.search = 'schoolId=nchu&campus=nchu&school=NCHU&taskProfile=teacher&q=原本帳號尚未送出的問題';
+  view.rerender(<Fixture />);
+  const panel = await screen.findByRole('region', { name: '校園助理' });
+  await within(panel).findByRole('textbox', { name: '問題' });
+  expect(within(panel).getByLabelText('問題')).toHaveProperty('value', '');
+  expect(askRequests()).toHaveLength(0);
+});
+
+it('follows the exploration URL when no school can receive the question, then recovers the same draft after selection', async () => {
+  state.pathname = '/explore';
+  state.search = 'campus=all&workContext=teacher';
+  state.school = '';
+  const view = render(<Fixture />);
+  const link = screen.getByRole('link', { name: '試著問 nuni：掌握授課進度' });
+  const destination = new URL(link.getAttribute('href')!, 'http://localhost');
+  expect(fireEvent.click(link)).toBe(true);
+  expect(screen.queryByRole('region', { name: '校園助理' })).toBeNull();
+  state.pathname = destination.pathname;
+  state.search = destination.search.slice(1);
+  view.rerender(<Fixture />);
+  expect(screen.getByRole('textbox', { name: '保留的問題' })).toHaveProperty('value', '查我的授課概況');
+  destination.searchParams.set('campus', 'pu');
+  destination.searchParams.set('schoolId', 'pu');
+  state.school = 'pu';
+  state.search = destination.searchParams.toString();
+  view.rerender(<Fixture />);
+  const panel = await screen.findByRole('region', { name: '校園助理' });
+  await waitFor(() => expect(within(panel).getByLabelText('問題')).toHaveProperty('value', '查我的授課概況'));
+  expect(within(panel).getByRole('combobox', { name: '目前處理的工作' })).toHaveProperty('value', 'teacher');
+  expect(askRequests()).toHaveLength(0);
+});
+
+it('binds an already known URL owner during a paused initial render before a different account becomes ready', async () => {
+  state.pathname = '/ai-assistant';
+  state.search = 'campus=pu&taskProfile=teacher&q=原本帳號尚未送出的問題';
+  state.nuniLoading = true;
+  state.campusLoading = true;
+  const view = render(<Fixture />);
+  expect(screen.getByRole('textbox', { name: '保留的問題' })).toBeTruthy();
+  state.account = 'beta';
+  state.context = 'b'.repeat(43);
+  state.search = 'schoolId=nchu&campus=nchu&school=NCHU&taskProfile=teacher&q=原本帳號尚未送出的問題';
+  view.rerender(<Fixture />);
+  expect(screen.queryByRole('textbox', { name: '保留的問題' })).toBeNull();
+  state.nuniLoading = false;
+  state.campusLoading = false;
+  state.school = 'nchu';
+  view.rerender(<Fixture />);
+  const panel = await screen.findByRole('region', { name: '校園助理' });
+  await within(panel).findByRole('textbox', { name: '問題' });
+  expect(within(panel).getByLabelText('問題')).toHaveProperty('value', '');
+  expect(askRequests()).toHaveLength(0);
+});
+
+it('allows an explicit URL question to bind to its first identity after unknown initial hydration', async () => {
+  state.pathname = '/ai-assistant';
+  state.search = 'campus=pu&taskProfile=teacher&q=查我的授課概況';
+  state.context = null;
+  state.nuniLoading = true;
+  state.campusLoading = true;
+  const view = render(<Fixture />);
+  expect(screen.getByRole('textbox', { name: '保留的問題' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '校園助理' })).toBeNull();
+  state.context = 'a'.repeat(43);
+  state.nuniLoading = false;
+  state.campusLoading = false;
+  view.rerender(<Fixture />);
+  const panel = await screen.findByRole('region', { name: '校園助理' });
+  await waitFor(() => expect(within(panel).getByLabelText('問題')).toHaveProperty('value', '查我的授課概況'));
+  expect(within(panel).getByRole('combobox', { name: '目前處理的工作' })).toHaveProperty('value', 'teacher');
+  expect(askRequests()).toHaveLength(0);
 });

@@ -4,6 +4,8 @@ import { QuickCampusEntry } from '../components/QuickCampusEntry';
 import { askCampusAssistant, OnDeviceAssistantError } from '../features/campusAssistant';
 import { interpretMobileCampusRequest } from '../services/campusIntentClient';
 import { applyTheme } from '../ui/theme';
+import { resolveAssistantServiceIntent } from '@campus/shared/src/assistantServices';
+import { serviceDirectoryReply } from '../features/nuniWorkContextReply';
 
 jest.mock('../features/campusAssistant', () => ({
   askCampusAssistant: jest.fn(),
@@ -31,8 +33,8 @@ test('the home workspace prepares an editable task and sends only the final ques
   const input = view.getByLabelText('說出或輸入想做的事');
   const send = view.getByRole('button', { name: '詢問手機助理' });
   expect(send).toBeDisabled();
-  fireEvent.press(view.getByRole('button', { name: '填入需求：下一堂課在哪裡？' }));
-  expect(input.props.value).toBe('下一堂課在哪裡？');
+  fireEvent.press(view.getByRole('button', { name: '填入需求：下一堂課在哪裡' }));
+  expect(input.props.value).toBe('下一堂課在哪裡');
   expect(ask).not.toHaveBeenCalled();
   expect(interpret).not.toHaveBeenCalled();
   expect(open).not.toHaveBeenCalled();
@@ -50,10 +52,27 @@ test('the home workspace prepares an editable task and sends only the final ques
   expect(interpret).not.toHaveBeenCalled();
 });
 
+test('the inline service catalog renders the real grouped actions after a question is sent', async () => {
+  const intent = resolveAssistantServiceIntent('開啟所有服務');
+  if (!intent) throw Error('The catalog prompt must be supported');
+  jest.mocked(askCampusAssistant).mockResolvedValueOnce(serviceDirectoryReply(intent));
+  const navigation = { navigate: jest.fn(), getState: () => ({ routeNames: ['MapV2', 'PersonalTimetable'] }) };
+  const view = render(<QuickCampusEntry uid="alice" schoolId="pu" presentation="workspace"
+    navigation={navigation} onOpen={jest.fn()} />);
+  fireEvent.press(view.getByRole('button', { name: '填入需求：開啟所有服務' }));
+  expect(askCampusAssistant).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '詢問手機助理' })));
+  expect(view.getByRole('button', { name: '開啟我的課表' })).toBeTruthy();
+  fireEvent.press(view.getByRole('tab', { name: '校園' }));
+  fireEvent.press(view.getByRole('button', { name: '開啟校園地圖' }));
+  expect(navigation.navigate).toHaveBeenCalledWith('MapV2', undefined);
+  expect(askCampusAssistant).toHaveBeenCalledTimes(1);
+});
+
 test.each([null, 'alice'])('the home workspace offers local service discovery without a selected campus (%s)', (uid) => {
   const open = jest.fn();
   const view = render(<QuickCampusEntry uid={uid} schoolId={null} presentation="workspace" onOpen={open} />);
-  expect(view.queryByRole('button', { name: '填入需求：下一堂課在哪裡？' })).toBeNull();
+  expect(view.queryByRole('button', { name: '填入需求：下一堂課在哪裡' })).toBeNull();
   fireEvent.press(view.getByRole('button', { name: '填入需求：圖書館開放時間' }));
   fireEvent.press(view.getByRole('button', { name: '查看搜尋結果' }));
   expect(view.getByText('找到 1 個服務，請選擇要開啟的項目。')).toBeTruthy();
@@ -69,20 +88,20 @@ test('the home workspace retains a stopped question and a same-scope appearance 
   let finish!: (value: Awaited<ReturnType<typeof askCampusAssistant>>) => void;
   ask.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
   const view = render(<QuickCampusEntry uid="alice" schoolId="pu" presentation="workspace" onOpen={jest.fn()} />);
-  fireEvent.press(view.getByRole('button', { name: '填入需求：下一堂課在哪裡？' }));
+  fireEvent.press(view.getByRole('button', { name: '填入需求：下一堂課在哪裡' }));
   fireEvent.press(view.getByRole('button', { name: '詢問手機助理' }));
   const request = ask.mock.lastCall![0];
   expect(view.getByText('手機助理正在回答，可隨時停止並保留問題。')).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '停止回答' }));
   expect(request.signal?.aborted).toBe(true);
   act(() => applyTheme('dark'));
-  expect(view.getByDisplayValue('下一堂課在哪裡？')).toBeTruthy();
+  expect(view.getByDisplayValue('下一堂課在哪裡')).toBeTruthy();
   expect(view.queryByText('手機助理正在回答，可隨時停止並保留問題。')).toBeNull();
   await act(async () => finish({ source: 'device', hasActions: false, content: '停止後的舊答案' }));
   expect(view.queryByText('停止後的舊答案')).toBeNull();
   fireEvent.press(view.getByRole('button', { name: '清除快速需求' }));
   expect(view.getByRole('button', { name: '詢問手機助理' })).toBeDisabled();
-  expect(view.getByRole('button', { name: '填入需求：下一堂課在哪裡？' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '填入需求：下一堂課在哪裡' })).toBeTruthy();
 });
 
 test('asks the model to understand several goals only when the student submits', async () => {

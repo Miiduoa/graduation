@@ -82,6 +82,24 @@ it.each([
   }
 });
 
+it('rechecks freshness after the device clock advances while the page stays open', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  try {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-23T04:00:00.000Z' })));
+    render(<PublicCourseSearch {...props} />);
+    submit('005076');
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
+    now.mockReturnValue(Date.parse('2026-11-24T04:00:01.000Z'));
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(screen.getByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeTruthy();
+  } finally {
+    now.mockRestore();
+  }
+});
+
 it.each([
   '2026-11-22T04:01:00.000Z',
   '2026-11-23T04:04:00.000Z',

@@ -28,7 +28,12 @@ export function isHomeworkSubmitted(homework: { submitted?: unknown }): boolean 
 }
 
 export function isHomeworkTodo(homework: { submitted?: unknown }): boolean {
-  return !isHomeworkSubmitted(homework);
+  return homework.submitted === false;
+}
+
+export function homeworkSubmissionLabel(submitted: boolean | null): string {
+  if (submitted === null) return '繳交狀態待確認';
+  return submitted ? '已交' : '未交';
 }
 
 export function isUploadDownloadable(upload: { allow_download?: unknown }): boolean {
@@ -119,7 +124,7 @@ export function homeworkDeadlineBucket(
   return 'later';
 }
 
-export function selectDeadlineAxis<T extends { submitted: boolean; deadline: string | null }>(
+export function selectDeadlineAxis<T extends { submitted: boolean | null; deadline: string | null }>(
   items: readonly T[],
   now: Date,
 ): { overdue: T[]; today: T[]; next7Days: T[] } {
@@ -127,7 +132,7 @@ export function selectDeadlineAxis<T extends { submitted: boolean; deadline: str
   const today: T[] = [];
   const next7Days: T[] = [];
   for (const item of items) {
-    if (item.submitted === true) continue;
+    if (!isHomeworkTodo(item)) continue;
     const bucket = homeworkDeadlineBucket(item.deadline, now);
     if (bucket === 'overdue') overdue.push(item);
     else if (bucket === 'today') today.push(item);

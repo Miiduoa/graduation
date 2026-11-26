@@ -22,7 +22,6 @@ export function CreditPlanFeasibility({ plan, scenarioWriter, scenarioBlocked }:
   return (
     <section className={styles.panel} aria-labelledby="credit-feasibility-title">
       <div className={styles.heading}>
-        <span className={styles.kicker}>PLAN CHECK</span>
         <h3 id="credit-feasibility-title">距離你的修課目標，還需要什麼？</h3>
         <p>
           以你自行輸入的學分與學期安排試算。下列結果全部假設候選及已選課都能通過、而且獲得採計。

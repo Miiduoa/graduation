@@ -84,6 +84,8 @@ const nonOutdoor = (tags: Tags) =>
   (tags.tunnel !== undefined && !NEGATIVE_TUNNEL_VALUES.has(tags.tunnel.trim().toLowerCase()));
 
 export const excludesWalkingWay = (tags: Tags) =>
+  // Cached source tags must still match the same discovery allowlist.
+  !HIGHWAYS.includes(tags.highway) ||
   tags.foot === 'use_sidepath' ||
   !!(tags.area && tags.area !== 'no') ||
   nonOutdoor(tags);

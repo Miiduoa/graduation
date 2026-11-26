@@ -3,7 +3,12 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { PERSONAL_IMPORT_MAX_ID_LENGTH } from '@campus/shared/src/imports/types';
 import { buildPersonalToday } from '@campus/shared';
+import {
+  currentTermClassCalendarMeetings,
+  findClassCalendarOverlaps,
+} from '@campus/shared/src/classCalendarOverlap';
 import {
   formatTodayHeaderDate,
   formatTodoDueLine,
@@ -32,6 +37,10 @@ import styles from './StudentToday.module.css';
 import { TodayUnreadNotifications } from './TodayUnreadNotifications';
 import { TodayClassRows } from './TodayClassRows';
 import { TodayServiceShortcuts, TodayWelcome } from './TodayWelcome';
+import {
+  TodayClassCalendarConflict,
+  type TodayClassCalendarConflictItem,
+} from './TodayClassCalendarConflict';
 import { CampusPersonalizationSection } from './CampusPersonalizationSection';
 
 export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigned-scope';
@@ -42,6 +51,8 @@ type Props = {
   workspaces?: ReactNode;
   agent?: ReactNode;
   personalization?: ReactNode;
+  /** Only passed once the signed-in account's current campus data is fully confirmed. */
+  conflict?: TodayClassCalendarConflictItem | null;
   scopeKey?: string;
   /** The actual personal timetable scope, which can differ from the signed-in school. */
   timetableSchoolId?: string | null;
@@ -166,6 +177,9 @@ export function StudentToday(props: Props) {
       <div className={styles.assistance} data-testid="today-workspace-entry">
         {props.assistant}
       </div>
+      {props.conflict && !props.unsigned && !props.skeleton && props.timetableStatus === 'ready' ? (
+        <TodayClassCalendarConflict key={props.scopeKey} conflict={props.conflict} />
+      ) : null}
       {props.workspaces}
       {showWelcome && (
         <div data-testid={showSignedInSetup ? 'next-action' : undefined}>
@@ -521,6 +535,26 @@ export function StudentTodayPage(props: BoundProps) {
     now,
     termKey: currentTimetableTermKey(timetableRecords, schoolId, now),
   });
+  const conflictReady =
+    props.signedIn &&
+    !props.unsigned &&
+    !props.skeleton &&
+    !!props.now &&
+    scope.canPrepareSchoolDraft &&
+    scope.scope.owner !== 'guest' &&
+    timetableStatus === 'ready' &&
+    records.imported.ready &&
+    !records.imported.error;
+  let conflict: TodayClassCalendarConflictItem | null = null;
+  if (conflictReady) {
+    const { classes } = currentTermClassCalendarMeetings(timetableRecords, schoolId, now);
+    const overlap = findClassCalendarOverlaps(classes, records.imported.records, schoolId, now.getTime())
+      .find((item) => item.eventId.length <= PERSONAL_IMPORT_MAX_ID_LENGTH);
+    if (overlap) {
+      const query = new URLSearchParams({ campus: schoolId, eventId: overlap.eventId });
+      conflict = { ...overlap, href: `/calendar?${query}` };
+    }
+  }
   const classes = todayClassesFromSchedule(schedule.today, now);
   return (
     <StudentToday
@@ -541,6 +575,7 @@ export function StudentTodayPage(props: BoundProps) {
           />
         ) : null
       }
+      conflict={conflict}
       scopeKey={records.scopeKey}
       timetableSchoolId={schoolId}
       timetableTermKey={schedule.termKey}

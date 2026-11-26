@@ -272,7 +272,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
             }}
           >
             <CampusIcon name="social" size={18} />
-            <span>{workspace?.hasStarted ? '接續任務' : '助理'}</span>
+            <span>{workspace?.hasStarted ? '接續任務' : '問 nuni'}</span>
           </button>
           <CampusServiceMenu />
           <Link
@@ -418,17 +418,44 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
           ) : null}
         </div>
         <nav ref={primaryNavigation} aria-label="主要導覽" className={headerStyles.nav}>
+          <span className={headerStyles.navigationHeading} aria-hidden="true">你的工作空間</span>
           {PRIMARY_DESTINATIONS.map((destination) => (
             <Link
               key={destination.id}
               href={href(destination.href)}
               aria-current={activeSection === destination.id ? 'page' : undefined}
-              title={destination.id === 'study' ? '課務：課表、課程與作業、成績' : undefined}
+              title={
+                destination.id === 'study'
+                  ? '課務：課表、課程與作業、成績'
+                  : destination.id === 'life'
+                    ? '探索：發現 nuni 的用法與校園服務'
+                    : undefined
+              }
             >
               <CampusIcon name={destination.icon} size={17} />
               <span className={headerStyles.navLabel}>{destination.label}</span>
             </Link>
           ))}
+        </nav>
+        <nav className={headerStyles.workspaceTools} aria-label="工作工具">
+          <Link href={href('/ai-assistant')} aria-current={pathname === '/ai-assistant' ? 'page' : undefined}
+            data-assistant-workspace-trigger={workspace ? true : undefined}
+            onClick={(event) => {
+              if (!workspace || !isCurrentTabNavigationClick(event, event.currentTarget)) return;
+              event.preventDefault();
+              workspace.openWorkspace();
+            }}>
+            <CampusIcon name="social" size={18} />
+            <span>助理工作區</span>
+          </Link>
+          <Link href={href('/life')}>
+            <CampusIcon name="map" size={18} />
+            <span>校園生活</span>
+          </Link>
+          <Link href={href('/search')}>
+            <CampusIcon name="search" size={18} />
+            <span>搜尋服務</span>
+          </Link>
         </nav>
       </header>
       {panel && !onOpenAssistant && !workspace && (
@@ -459,6 +486,9 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
               關閉
             </button>
           </div>
+          <p className={headerStyles.voiceContext}>
+            在這裡接著處理眼前的事，也可以<Link href={href('/explore')}>探索更多用法</Link>。
+          </p>
           <Suspense fallback={<p role="status">正在開啟校園助理…</p>}>
             <CampusAssistantEntry
               active={assistantOpen}

@@ -103,6 +103,7 @@
     },
     "patchedDependencies": {
       "llama.rn@0.4.8": "patches/llama.rn@0.4.8.patch",
+      "next@16.4.5": "patches/next@16.4.5.patch",
       "query-string@7.1.3": "patches/query-string@7.1.3.patch"
     }
   },

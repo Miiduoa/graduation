@@ -27,99 +27,32 @@
 }
 
 .gradeBook {
-  --grade-paper: #fbf8ef;
-  --grade-ink: #273a3f;
-  --grade-muted: #536360;
-  --grade-rule: #bbc0b5;
-  --grade-edge: #b5b8aa;
-  --grade-margin: #c7a7a1;
-  --grade-link: #754b39;
-  --grade-cover: #4c5f70;
-  --grade-cover-edge: #354555;
-  position: relative;
-  isolation: isolate;
   min-width: 0;
-  padding: 10px 10px 16px 22px;
-  border: 1px solid var(--grade-cover-edge);
-  border-radius: 2px 5px 5px 2px;
-  background:
-    repeating-linear-gradient(0deg, #ffffff08 0 1px, transparent 1px 4px),
-    repeating-linear-gradient(90deg, #ffffff06 0 1px, transparent 1px 3px),
-    var(--grade-cover);
-  box-shadow: 0 5px 12px #172c3b1a, inset 5px 0 5px #00000018;
-}
-
-.gradeBook::before {
-  content: '';
-  position: absolute;
-  top: 12px;
-  bottom: 12px;
-  left: 10px;
-  border-left: 1px dashed #f4efe2a8;
-  pointer-events: none;
-}
-
-.gradeBook::after {
-  content: '';
-  position: absolute;
-  right: 10px;
-  bottom: 7px;
-  left: 22px;
-  height: 10px;
-  border: 1px solid var(--grade-edge);
-  background: repeating-linear-gradient(
-    to bottom,
-    var(--grade-paper) 0 2px,
-    var(--grade-edge) 2px 3px
-  );
-  pointer-events: none;
+  border-top: 2px solid var(--text);
 }
 
 .paper {
-  position: relative;
-  z-index: 1;
   min-width: 0;
-  padding: clamp(18px, 3vw, 32px);
-  border: 1px solid var(--grade-edge);
-  background: linear-gradient(100deg, #ffffff35, transparent 35%), var(--grade-paper);
-  color: var(--grade-ink);
-  box-shadow: 1px 2px 3px #172c3b20, inset 3px 0 5px #5363600d;
-  transform-origin: left top;
-  animation: none;
-  animation-delay: 0s;
-  transition: none;
-  transition-delay: 0s;
-}
-
-.paper::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: clamp(7px, 1vw, 13px);
-  width: 1px;
-  background: var(--grade-margin);
-  pointer-events: none;
+  padding-block: clamp(16px, 2.5vw, 28px);
+  color: var(--text);
 }
 
 .paperHeading {
   padding-bottom: 18px;
-  border-bottom: 3px double var(--grade-rule);
+  border-bottom: 1px solid var(--border-strong);
 }
 
 .paperHeading p {
   margin: 0 0 8px;
-  color: var(--grade-muted);
+  color: var(--muted);
   font-size: 0.75rem;
   letter-spacing: 0.08em;
 }
 
 .paperHeading h3 {
   margin: 0;
-  color: var(--grade-ink);
-  font-size: clamp(1.125rem, 2vw, 1.5rem);
-  font-weight: 650;
-  line-height: 1.6;
+  color: var(--text);
+  font: 600 var(--font-h2-size) / 1.5 var(--font-heading);
   overflow-wrap: anywhere;
 }
 
@@ -127,13 +60,13 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 18px 0;
-  border-bottom: 1px solid var(--grade-rule);
+  border-bottom: 1px solid var(--border);
 }
 
 .metric {
   min-width: 0;
   padding: 0 18px 18px;
-  border-left: 1px solid var(--grade-rule);
+  border-left: 1px solid var(--border);
 }
 
 .metric:first-child {
@@ -147,7 +80,7 @@
 
 .metric p {
   margin: 0;
-  color: var(--grade-muted);
+  color: var(--muted);
   font-size: 0.8125rem;
   line-height: 1.6;
 }
@@ -164,17 +97,13 @@
 
 .metric small {
   display: block;
-  color: var(--grade-muted);
+  color: var(--muted);
   font-size: 0.75rem;
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
 
 .officialSummary {
-  --text: var(--grade-ink);
-  --muted: var(--grade-muted);
-  --surface: var(--grade-paper);
-  --border: var(--grade-rule);
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -183,7 +112,7 @@
   margin: 18px 0;
   padding: 0 0 18px;
   border: 0;
-  border-bottom: 1px solid var(--grade-rule);
+  border-bottom: 1px solid var(--border);
   border-radius: 0;
   background: transparent;
 }
@@ -224,7 +153,7 @@
   grid-template-columns: minmax(0, 1fr) minmax(6.25rem, 24%);
   gap: 18px;
   padding: 18px 0;
-  border-bottom: 1px solid var(--grade-rule);
+  border-bottom: 1px solid var(--border);
 }
 
 .course {
@@ -234,7 +163,7 @@
 
 .course h3 {
   margin: 0;
-  color: var(--grade-ink);
+  color: var(--text);
   font-size: 1rem;
   font-weight: 650;
   line-height: 1.65;
@@ -242,7 +171,7 @@
 
 .course p {
   margin: 6px 0;
-  color: var(--grade-muted);
+  color: var(--muted);
   font-size: 0.8125rem;
   line-height: 1.7;
 }
@@ -251,7 +180,7 @@
   display: inline-block;
   min-height: 32px;
   padding: 6px 0;
-  color: var(--grade-link);
+  color: var(--brand);
   font-size: 0.8125rem;
   line-height: 1.6;
   text-decoration: underline;
@@ -259,7 +188,7 @@
 }
 
 .course a:focus-visible {
-  outline: 3px solid var(--grade-link);
+  outline: 3px solid var(--brand);
   outline-offset: 3px;
   border-radius: 2px;
 }
@@ -273,14 +202,14 @@
   gap: 4px 6px;
   min-width: 0;
   padding-left: 18px;
-  border-left: 1px solid var(--grade-rule);
+  border-left: 1px solid var(--border);
   text-align: right;
   overflow-wrap: anywhere;
 }
 
 .scoreLabel {
   flex-basis: 100%;
-  color: var(--grade-muted);
+  color: var(--muted);
   font-size: 0.75rem;
   line-height: 1.7;
 }
@@ -299,21 +228,21 @@
 }
 
 .score small {
-  color: var(--grade-muted);
+  color: var(--muted);
   font-size: 0.8125rem;
 }
 
 .empty {
   margin: 0;
   padding: 24px 0;
-  border-bottom: 1px solid var(--grade-rule);
+  border-bottom: 1px solid var(--border);
   line-height: 1.8;
   overflow-wrap: anywhere;
 }
 
 .note {
   margin: 20px 0 0;
-  color: var(--grade-muted);
+  color: var(--muted);
   font-size: 0.8125rem;
   line-height: 1.8;
   overflow-wrap: anywhere;
@@ -322,24 +251,6 @@
 @media (max-width: 600px) {
   .toolbar > label {
     max-width: 100%;
-  }
-
-  .gradeBook {
-    padding: 7px 7px 13px 17px;
-  }
-
-  .gradeBook::before {
-    left: 7px;
-  }
-
-  .gradeBook::after {
-    right: 7px;
-    bottom: 5px;
-    left: 17px;
-  }
-
-  .paper {
-    padding: 16px;
   }
 
   .overview {
@@ -353,7 +264,7 @@
     gap: 4px 12px;
     padding: 14px 0;
     border: 0;
-    border-bottom: 1px dotted var(--grade-rule);
+    border-bottom: 1px dotted var(--border);
   }
 
   .metric:first-child {
@@ -394,63 +305,9 @@
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :global(:where(:root:not([data-theme='light']))) .gradeBook {
-    --grade-paper: #eee9db;
-    --grade-rule: #aeb4a5;
-    --grade-edge: #a6ad9f;
-    --grade-cover: #263744;
-    --grade-cover-edge: #15222c;
-  }
-}
-
-:global(:where(:root[data-theme='dark'])) .gradeBook {
-  --grade-paper: #eee9db;
-  --grade-rule: #aeb4a5;
-  --grade-edge: #a6ad9f;
-  --grade-cover: #263744;
-  --grade-cover-edge: #15222c;
-}
-
-@keyframes gradeSheetTurn {
-  from {
-    opacity: 0.75;
-    transform: perspective(1200px) rotateY(-2deg) translateX(2px);
-  }
-  to {
-    opacity: 1;
-    transform: perspective(1200px) rotateY(0) translateX(0);
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  :global(:root[data-reduced-motion='false']) .paper {
-    animation: gradeSheetTurn 180ms ease-out;
-  }
-}
-
 @media (forced-colors: active) {
   .gradeBook {
-    --grade-paper: Canvas;
-    --grade-ink: CanvasText;
-    --grade-muted: CanvasText;
-    --grade-rule: CanvasText;
-    --grade-edge: CanvasText;
-    --grade-link: LinkText;
     border-color: CanvasText;
-    background: Canvas;
-    box-shadow: none;
-  }
-
-  .gradeBook::before,
-  .gradeBook::after,
-  .paper::before {
-    display: none;
-  }
-
-  .paper {
-    background: Canvas;
-    box-shadow: none;
   }
 
   .course a:focus-visible {

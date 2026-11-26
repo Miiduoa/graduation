@@ -13,25 +13,11 @@
   position: relative;
   overflow: hidden;
   padding: clamp(24px, 4vw, 34px);
-  border-radius: 22px;
+  border-radius: var(--radius-lg);
   color: #fffdf7;
-  background: #163d34;
+  background: #214c3d;
   border: 1px solid #294e43;
-  box-shadow: 0 14px 28px -20px #05271d66;
-}
-.card::after {
-  content: '';
-  pointer-events: none;
-  position: absolute;
-  width: 240px;
-  height: 240px;
-  right: -115px;
-  top: 44px;
-  border: 1px solid #fffdf718;
-  border-radius: 50%;
-  box-shadow:
-    0 0 0 32px #fffdf707,
-    0 0 0 64px #fffdf705;
+  color-scheme: dark;
 }
 .cardHeader {
   display: flex;
@@ -110,9 +96,7 @@
 }
 .cardBottom .source {
   font-size: 11px;
-  border: 1px solid #d1e2d64d;
-  padding: 4px 8px;
-  border-radius: 6px;
+  font-weight: 600;
   flex-shrink: 0;
 }
 .actions {
@@ -132,7 +116,7 @@
   text-align: center;
   font: inherit;
   font-weight: 600;
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   text-decoration: none;
   cursor: pointer;
 }
@@ -268,15 +252,14 @@
   max-height: calc(100svh - 32px);
   margin: auto;
   padding: 0;
-  color: #102d24;
-  background: #f8faf5;
-  border: 0;
-  border-radius: 24px;
-  box-shadow: 0 24px 100px #0005;
+  color: var(--text);
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
   overscroll-behavior: contain;
 }
 .presentation::backdrop {
-  background: #061c16ad;
+  background: var(--overlay);
 }
 .sheet {
   padding: 24px;
@@ -287,7 +270,7 @@
   min-height: min(560px, 100svh - 32px);
 }
 .sheetBrand {
-  color: #416557;
+  color: var(--brand);
   font-weight: 700;
   font-size: 22px;
   letter-spacing: -0.05em;
@@ -295,7 +278,7 @@
 .sheetSchool {
   font-size: 18px;
   font-weight: 600;
-  color: #183f36;
+  color: var(--text);
   margin: 12px 0 0;
   overflow-wrap: anywhere;
   max-width: 100%;
@@ -303,14 +286,14 @@
 .sheet h2 {
   font-size: 14px;
   font-weight: 500;
-  color: #40574d;
+  color: var(--muted);
   margin: 10px 0 18px;
 }
 .qr {
   display: block;
   width: min(256px, 100%);
   height: auto;
-  border-radius: 12px;
+  background: #fff;
   margin-bottom: 14px;
 }
 .number {
@@ -322,13 +305,13 @@
   max-width: 100%;
 }
 .sheetNote {
-  color: #40574d;
+  color: var(--muted);
   font-size: 14px;
   line-height: 1.6;
   margin: 6px 0;
 }
 .timer {
-  color: #40574d;
+  color: var(--muted);
   font-size: 13px;
   margin: 8px 0 20px;
   font-variant-numeric: tabular-nums;
@@ -336,8 +319,8 @@
 .close {
   width: 100%;
   margin-top: auto;
-  background: #163d34;
-  color: #fff;
+  background: var(--brand);
+  color: var(--on-brand);
   border: 1px solid #163d34;
 }
 @media (max-width: 760px) {
@@ -360,7 +343,7 @@
   }
   .card {
     padding: 20px;
-    border-radius: 18px;
+    border-radius: var(--radius-lg);
   }
   .sheet {
     padding: 20px 16px;

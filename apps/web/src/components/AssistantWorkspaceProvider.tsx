@@ -23,7 +23,11 @@ import { useAssistantEnabled } from './AssistantEnabledProvider';
 import {
   ASSISTANT_WORKSPACE_ID,
   AssistantWorkspaceContext,
+  AssistantWorkspaceHandoffContext,
+  acceptsAssistantWorkspaceRoute,
   type AssistantWorkspace,
+  type AssistantWorkspaceEntryRequest,
+  type AssistantWorkspaceEntryHandler,
 } from './AssistantWorkspaceContext';
 import { CampusIcon } from './CampusIcon';
 import styles from './AssistantWorkspace.module.css';
@@ -119,6 +123,8 @@ export function AssistantWorkspaceProvider({ children }: { children: ReactNode }
     auth.error || nuni.error || nuni.pendingLogout || campus.status === 'error',
   );
   const paused = auth.loading || nuni.loading || campus.status === 'loading';
+  const observableIdentity = auth.user || nuni.session || (!auth.loading && !nuni.loading)
+    ? identityKey : null;
   const initialOwnerKey = JSON.stringify([identityKey, campus.schoolId, failureKey]);
   const [saved, setSaved] = useState(() =>
     emptyWorkspace(initialOwnerKey, identityKey, campus.schoolId, campus.schoolName),
@@ -147,6 +153,17 @@ export function AssistantWorkspaceProvider({ children }: { children: ReactNode }
   // The epoch prevents Alice → Bob → Alice from reviving a callback belonging
   // to the first Alice session, even if all supplied identity strings repeat.
   const scopeKey = JSON.stringify([ownerKey, generation]);
+  const [incoming, setIncoming] = useState<{
+    scopeKey: string;
+    entry: AssistantWorkspaceEntryRequest;
+    replace: string | null;
+    attempted: boolean;
+    error?: string;
+  } | null>(null);
+  if (incoming && incoming.scopeKey !== scopeKey) setIncoming(null);
+  const pendingEntry = incoming?.scopeKey === scopeKey ? incoming : null;
+  const receiver = useRef<AssistantWorkspaceEntryHandler | null>(null);
+  const [receiverVersion, setReceiverVersion] = useState(0);
   const panel = useRef<HTMLElement>(null);
   const openingTrigger = useRef<HTMLElement | null>(null);
   const activeScope = useRef({ ownerKey, generation, paused });
@@ -209,6 +226,58 @@ export function AssistantWorkspaceProvider({ children }: { children: ReactNode }
     [ownerKey, generation, setSaved],
   );
 
+  const handoff = useMemo(() => ({
+    register(handler: NonNullable<typeof receiver.current>) {
+      receiver.current = handler;
+      setReceiverVersion((version) => version + 1);
+      return () => {
+        if (receiver.current === handler) {
+          receiver.current = null;
+          setReceiverVersion((version) => version + 1);
+        }
+      };
+    },
+  }), []);
+
+  const requestEntry = useCallback((entry: AssistantWorkspaceEntryRequest) => {
+    if (activeScope.current.ownerKey !== ownerKey ||
+        activeScope.current.generation !== generation || activeScope.current.paused || failed ||
+        campus.status !== 'ready' || !schoolId ||
+        (entry.schoolId != null && entry.schoolId !== schoolId)) return false;
+    const prompt = entry.prompt.trim().slice(0, 1000);
+    if (!prompt) { openWorkspace(); return true; }
+    setIncoming({ scopeKey, entry: { ...entry, prompt }, replace: null, attempted: false });
+    openWorkspace();
+    return true;
+  }, [ownerKey, generation, failed, campus.status, schoolId, scopeKey, openWorkspace]);
+
+  const replacesDraft = Boolean(pendingEntry && state.draft.trim() && state.draft !== pendingEntry.entry.prompt);
+  const reviewEntry = pendingEntry && replacesDraft ? pendingEntry.entry : null;
+  useLayoutEffect(() => {
+    if (!paused && state.open && reviewEntry)
+      panel.current?.querySelector<HTMLButtonElement>('[data-workspace-entry-review] button')?.focus({ preventScroll: true });
+    // A same-identity pause/resume must not reclaim focus.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.open, reviewEntry]);
+  useEffect(() => {
+    if (!pendingEntry || pendingEntry.attempted || paused || !state.open ||
+        (replacesDraft && pendingEntry.replace !== state.draft)) return;
+    // Guests use the existing public service finder. Signed-in entries wait for
+    // their real engine so its operation/profile lock remains authoritative.
+    if (!receiver.current && (auth.user || nuni.session)) return;
+    const result = receiver.current?.(pendingEntry.entry) ?? { ok: true as const };
+    if (!result.ok) {
+      setIncoming((current) => current === pendingEntry ? { ...current, attempted: true, error: result.message } : current);
+      return;
+    }
+    setDraft(pendingEntry.entry.prompt);
+    setSaved((current) => current.ownerKey === ownerKey && current.generation === generation
+      ? { ...current, focusRequest: current.focusRequest + 1,
+          ...(pendingEntry.entry.workContext ? { workContext: pendingEntry.entry.workContext } : {}) }
+      : current);
+    setIncoming((current) => current === pendingEntry ? null : current);
+  }, [pendingEntry, paused, state.open, state.draft, replacesDraft, receiverVersion, auth.user, nuni.session, setDraft, ownerKey, generation]);
+
   const minimize = useCallback(
     (restoreFocus = true) => {
       if (
@@ -241,6 +310,9 @@ export function AssistantWorkspaceProvider({ children }: { children: ReactNode }
   }, [scopeKey, state.open, state.focusRequest, paused]);
 
   const routeKey = `${pathname ?? ''}?${params?.toString() ?? ''}`;
+  const workspaceRoute = pathname === '/ai-assistant' && campus.status === 'ready' && acceptsAssistantWorkspaceRoute(params);
+  const routeReady = pathname !== '/ai-assistant' || campus.status === 'ready';
+  const scopedAssistantRoute = pathname === '/ai-assistant' && !acceptsAssistantWorkspaceRoute(params);
   const lastLocation = useRef<{ routeKey: string; hash: string; scopeKey: string } | null>(null);
   useEffect(() => {
     // App Router may commit pushState after this render's hash snapshot. Read
@@ -254,13 +326,13 @@ export function AssistantWorkspaceProvider({ children }: { children: ReactNode }
       previous.routeKey !== routeKey ||
       previous.hash !== committedHash ||
       previous.scopeKey !== scopeKey;
-    if (isAssistantAnchor(committedHash)) {
+    if (routeReady && !scopedAssistantRoute && (isAssistantAnchor(committedHash) || workspaceRoute)) {
       // Returning from login only opens the composer. It never submits a draft.
       if (!paused && (changed || !state.hasStarted)) openWorkspace();
     } else if (changed && previous && previous.routeKey !== routeKey) {
       minimize(false);
     }
-  }, [routeKey, hash, scopeKey, paused, state.hasStarted, openWorkspace, minimize]);
+  }, [routeKey, workspaceRoute, routeReady, scopedAssistantRoute, hash, scopeKey, paused, state.hasStarted, openWorkspace, minimize]);
 
   const value = useMemo<AssistantWorkspace>(
     () => ({
@@ -270,8 +342,10 @@ export function AssistantWorkspaceProvider({ children }: { children: ReactNode }
       draft: paused ? '' : state.draft,
       setDraft,
       openWorkspace,
+      requestEntry,
       minimize,
       scopeKey,
+      identityKey: observableIdentity,
     }),
     [
       state.open,
@@ -280,8 +354,10 @@ export function AssistantWorkspaceProvider({ children }: { children: ReactNode }
       paused,
       setDraft,
       openWorkspace,
+      requestEntry,
       minimize,
       scopeKey,
+      observableIdentity,
     ],
   );
 
@@ -331,6 +407,21 @@ export function AssistantWorkspaceProvider({ children }: { children: ReactNode }
             </button>
           </header>
           <div className={styles.wsBody}>
+            {!paused && pendingEntry && (replacesDraft || pendingEntry.error) && (
+              <section className={styles.wsHandoff} aria-label="帶入新的問題" data-workspace-entry-review>
+                <h3>{replacesDraft ? '目前還有未送出的草稿' : '目前任務尚未完成'}</h3>
+                <p>{replacesDraft ? '確認後才會用這個問題取代草稿；目前對話與已確認的安排會保留。' : '先處理目前的安排，再選擇帶入新問題。'}</p>
+                <blockquote>{pendingEntry.entry.prompt}</blockquote>
+                {pendingEntry.error && <p role="alert">{pendingEntry.error}</p>}
+                <div className={styles.wsHandoffActions}>
+                  <button type="button" onClick={() => { setIncoming(null); openWorkspace(); }}>保留目前任務</button>
+                  <button type="button" onClick={() => setIncoming((current) => current?.scopeKey === scopeKey
+                    ? { ...current, replace: state.draft, attempted: false, error: undefined } : null)}>
+                    {replacesDraft ? '取代草稿並帶入' : '帶入問題'}
+                  </button>
+                </div>
+              </section>
+            )}
             {paused && (
               <p className={styles.wsLoading} role="status">
                 正在確認登入與校園狀態，完成後會接續原本的任務。
@@ -344,16 +435,18 @@ export function AssistantWorkspaceProvider({ children }: { children: ReactNode }
                   </p>
                 }
               >
+                <AssistantWorkspaceHandoffContext.Provider value={handoff}>
                 <TodayCampusEntry
                   key={scopeKey}
                   active={state.open}
                   paused={paused}
-                  focusRequest={state.focusRequest}
+                  focusRequest={pendingEntry && (replacesDraft || pendingEntry.error) ? 0 : state.focusRequest}
                   returnAnchor="campus-assistant-entry"
                   preferredWorkContext={state.workContext}
                   inlineDraft={{ text: state.draft, setText: setDraft }}
                   onNavigate={() => minimize(false)}
                 />
+                </AssistantWorkspaceHandoffContext.Provider>
               </Suspense>
             </div>
           </div>

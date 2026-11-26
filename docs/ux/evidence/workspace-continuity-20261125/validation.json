@@ -1,0 +1,144 @@
+{
+  "date": "2026-11-25",
+  "timezone": "Asia/Taipei",
+  "repository": "Miiduoa/graduation",
+  "pullRequest": 789,
+  "parents": [
+    "a778fb13abd16d3adaacb2d85ba084a1a2cfada6",
+    "2272829f5249a427327ddafb79dc979c51741fd2"
+  ],
+  "includedMain": "c6a2d12059795d2aac9b5daecb13853ca5b7d7e2",
+  "nodeVersion": "22.23.5",
+  "pnpmVersion": "10.28.2",
+  "testBatches": [
+    {
+      "name": "Web coursework tracking, imports and public course search",
+      "suites": 8,
+      "passed": 455,
+      "failed": 0
+    },
+    {
+      "name": "Map integration",
+      "suites": 5,
+      "passed": 216,
+      "failed": 0
+    },
+    {
+      "name": "Final Web workspace, ownership, return and receipt guards",
+      "suites": 4,
+      "passed": 103,
+      "failed": 0
+    },
+    {
+      "name": "Web home and legacy compatibility",
+      "suites": 9,
+      "passed": 320,
+      "failed": 0,
+      "overlapsOtherBatches": true
+    },
+    {
+      "name": "Native services and continuation",
+      "suites": 8,
+      "passed": 168,
+      "failed": 0
+    },
+    {
+      "name": "Selected Native real platform journey",
+      "suites": 1,
+      "passed": 1,
+      "failed": 0,
+      "notSelected": 32
+    },
+    {
+      "name": "Latest upstream assignment handoff delta",
+      "suites": 3,
+      "passed": 61,
+      "failed": 0
+    },
+    {
+      "name": "UI design gate unit tests",
+      "passed": 8,
+      "failed": 0
+    }
+  ],
+  "doNotSumOverlappingBatches": true,
+  "commands": [
+    {
+      "command": "pnpm --filter web typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --filter mobile typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --filter web build",
+      "exitCode": 0
+    },
+    {
+      "command": "node scripts/qa/ai-workspace/build.mjs",
+      "exitCode": 0
+    },
+    {
+      "command": "node scripts/ui-design-gate.mjs --base a778fb13abd16d3adaacb2d85ba084a1a2cfada6",
+      "exitCode": 0
+    },
+    {
+      "command": "node scripts/ui-design-gate.mjs --base 6eb2c4c7b7bd657f5a40cc65ad6a79f8bd886eaf",
+      "exitCode": 0
+    }
+  ],
+  "browser": {
+    "environment": "Local production Next server; signed-out guest; Providence University selected",
+    "syntheticAuthentication": false,
+    "realAccountWrites": false,
+    "passedObservations": [
+      "Home draft remains when opening the workspace and navigating to Explore",
+      "Explore requests explicit keep-or-replace for an unsent draft",
+      "Keeping preserves the previous draft; replacing prefills the chosen prompt without sending",
+      "Only one workspace is mounted",
+      "Map service return preserves Explore query, student context, campus category and original card focus",
+      "Direct URL in a new tab preserves the prompt during hydration and after returning home"
+    ],
+    "documentWidthsCssPx": [
+      {
+        "state": "desktop home",
+        "clientWidth": 1357,
+        "scrollWidth": 1357
+      },
+      {
+        "state": "400 percent zoom home and open workspace",
+        "viewportWidth": 340,
+        "clientWidth": 334,
+        "scrollWidth": 334
+      }
+    ],
+    "limitations": [
+      "Narrow layout used browser zoom, not a physical mobile device or software keyboard",
+      "Map showed a visible upstream-source fallback and 34 available locations",
+      "Captured console tail contained browser-extension metadata delivery errors; no zero-error claim"
+    ]
+  },
+  "fixture": {
+    "sourceCount": 370,
+    "sourceHashMismatches": 0,
+    "synthetic": true,
+    "automatedScenariosRerun": false
+  },
+  "lint": {
+    "webChangedScopeErrors": 0,
+    "webChangedScopeWarnings": 1,
+    "webWarning": "consumed state updates only after external workspace accepts the direct entry",
+    "nativeNewWarningsFixed": 5,
+    "nativeExistingHookWarnings": 2
+  },
+  "release": {
+    "merged": false,
+    "deployed": false,
+    "draft": true,
+    "requiredGate": "審查通過",
+    "requiredAppId": 5504170,
+    "rulesetId": 26004626,
+    "oldHeadChecksAreNotEvidenceForThisCandidate": true
+  }
+}

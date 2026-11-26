@@ -129,7 +129,7 @@ await writeFile(
       replacedImportBoundaries: [...replaced].sort(),
       files,
       scope:
-        'Actual AssistantWorkspaceProvider, AppHeader, TodayAssistantDisclosure, StudentToday, TodayAgent/Panel, QuickCampusEntry, Conversation, AssistantThread, journal, calendar mirroring, tracking storage and product CSS. Synthetic auth/session/campus/routing, home records and an isolated capability/ask/plan/confirm/reconcile/followup ledger. Coursework cases use real browser storage and native Web Locks, with one synthetic backend write after explicit confirmation. contractSources are fingerprinted for version binding only; server signing/authentication and CI workflow execution are not performed by this browser fixture. No production backend, real identity, provider quality, remote authorization/write, native runtime or deployment claim.',
+        'Actual AssistantWorkspaceProvider, AppHeader, TodayAssistantDisclosure, StudentToday, TodayAgent/Panel, QuickCampusEntry, Conversation, AssistantThread, ExploreExperiences, DirectoryVisitProvider, ServiceBreadcrumbs, journal, calendar mirroring, tracking storage and product CSS. Synthetic auth/session/campus/routing, home records, destination service content and an isolated capability/ask/plan/confirm/reconcile/followup ledger. Coursework cases use real browser storage and native Web Locks, with one synthetic backend write after explicit confirmation. contractSources are fingerprinted for version binding only; server signing/authentication and CI workflow execution are not performed by this browser fixture. No production backend, real identity, provider quality, remote authorization/write, native runtime or deployment claim.',
     },
     null,
     2,

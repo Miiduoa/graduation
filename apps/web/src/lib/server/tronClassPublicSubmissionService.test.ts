@@ -523,7 +523,7 @@ describe('public v2 upload and final mapping', () => {
     const f = fixture();
     f.rows.set(operationPath, { version: 1 });
     await f.service.reconcile(OWNER, { operationId: OPERATION, revision: REVISION });
-    expect(f.legacyReconcile).toHaveBeenCalledExactlyOnceWith(OWNER, { operationId: OPERATION, revision: REVISION });
+    expect(f.legacyReconcile).toHaveBeenCalledExactlyOnceWith(OWNER, { operationId: OPERATION, revision: REVISION }, f.identity);
     expect(f.fetchSchool).not.toHaveBeenCalled();
   });
 

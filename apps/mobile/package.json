@@ -74,6 +74,7 @@
     "expo-web-browser": "^15.0.10",
     "firebase": "^12.8.0",
     "ical.js": "^2.2.1",
+    "js-sha256": "0.11.1",
     "llama.rn": "^0.4.8",
     "react": "19.1.0",
     "react-dom": "19.1.0",

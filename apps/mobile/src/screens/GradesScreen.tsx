@@ -1,12 +1,11 @@
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { ScrollView, Text, View, Pressable, Alert, RefreshControl, Linking } from 'react-native';
+import { ScrollView, StyleSheet, Text, View, Pressable, Alert, RefreshControl, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Screen,
   Card,
-  Pill,
   Button,
   AnimatedCard,
   SegmentedControl,
@@ -18,7 +17,7 @@ import {
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { useTabPanelScroll } from '../hooks/useTabPanelScroll';
 import { theme } from '../ui/theme';
-import { useThemeMode } from '../state/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
@@ -138,21 +137,133 @@ const MOCK_SEMESTERS: Semester[] = [
   },
 ];
 
-const GRADE_COLORS: Record<string, string> = {
-  'A+': '#22C55E',
-  A: '#22C55E',
-  'A-': '#4ADE80',
-  get 'B+'() { return theme.colors.info; },
-  get B() { return theme.colors.info; },
-  'B-': '#60A5FA',
-  'C+': '#FF9500',
-  C: '#FF9500',
-  'C-': '#FBBF24',
-  D: '#FF3B30',
-  F: '#D70015',
-  通過: '#22C55E',
-  不通過: '#D70015',
+/** 等第色彩：一律取自即時 theme 的語意色，隨亮／暗切換 */
+function gradeTone(grade?: string): string {
+  if (grade === '通過' || grade === 'Pass' || /^A[+-]?$/.test(grade ?? '')) return theme.colors.success;
+  if (/^B[+-]?$/.test(grade ?? '')) return theme.colors.info;
+  if (/^C[+-]?$/.test(grade ?? '')) return theme.colors.warning;
+  if (grade === 'D' || grade === 'F' || grade === '不通過') return theme.colors.danger;
+  return theme.colors.muted;
+}
+
+const CATEGORY_LABELS: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap }> = {
+  required: { label: '必修', icon: 'school-outline' },
+  elective: { label: '選修', icon: 'options-outline' },
+  general: { label: '通識', icon: 'globe-outline' },
+  english: { label: '英文', icon: 'language-outline' },
 };
+
+type GradeStyles = ReturnType<typeof createStyles>;
+
+/** 以分隔線區分的數據列（取代彩色數字方塊） */
+function StatStrip({
+  items,
+  styles: s,
+}: {
+  items: { value: string | number; label: string; color?: string }[];
+  styles: GradeStyles;
+}) {
+  return (
+    <View style={s.statStrip}>
+      {items.map((item, index) => (
+        <View key={item.label} style={[s.statCell, index > 0 && s.statDivider]}>
+          <Text style={[s.statValue, item.color ? { color: item.color } : null]}>{item.value}</Text>
+          <Text style={s.statLabel}>{item.label}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function GradeRow({ course, first }: { course: Grade; first: boolean }) {
+  const s = useThemeStyleSheet(createStyles);
+  const categoryInfo = CATEGORY_LABELS[course.category];
+  const gradeColor = gradeTone(course.grade);
+  const source = course.gradeSource?.startsWith('school-official')
+    ? '校方正式'
+    : course.gradeSource === 'firebase-course'
+      ? 'nuni 課程'
+      : '未知';
+  const published = (course.publishedAt ? formatTaipeiDateTime(course.publishedAt) : '') || '未知';
+
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityHint="開啟原始紀錄"
+      onPress={() =>
+        void Linking.openURL(
+          course.gradeSource?.startsWith('school-official')
+            ? 'https://ecampus.pu.edu.tw/'
+            : `https://nuni.tw/course/${encodeURIComponent(course.courseId || '')}`,
+        )
+      }
+      style={({ pressed }) => [s.row, !first && s.rowDivider, pressed && s.rowPressed]}
+    >
+      <View style={s.rowTop}>
+        <View style={s.rowBody}>
+          <Text style={s.rowTitle}>{course.courseName}</Text>
+          <Text style={s.rowMeta}>
+            {categoryInfo.label} · {course.courseCode ? `${course.courseCode} · ` : ''}
+            {course.credits} 學分{course.instructor ? ` · ${course.instructor}` : ''}
+          </Text>
+          <Text style={s.rowMeta}>
+            來源：{source} · 公布時間：{published} · 點選查看原始紀錄
+          </Text>
+        </View>
+
+        {course.status === 'completed' && course.grade ? (
+          <View style={s.gradeBox}>
+            <Text style={[s.gradeLetter, { color: gradeColor }]}>{course.grade}</Text>
+            {course.gpa !== undefined && (
+              <Text style={s.rowMeta}>GPA {course.gpa.toFixed(1)}</Text>
+            )}
+          </View>
+        ) : null}
+
+        {course.status === 'in_progress' ? (
+          <View style={s.gradeBox}>
+            <Text style={s.progressText}>進行中</Text>
+            {course.midterm !== undefined && <Text style={s.rowMeta}>期中 {course.midterm}</Text>}
+          </View>
+        ) : null}
+      </View>
+
+      {course.status === 'completed' &&
+        course.midterm !== undefined &&
+        course.final !== undefined && (
+          <View style={s.scoreLine}>
+            <Text style={s.rowMeta}>
+              期中 <Text style={s.scoreValue}>{course.midterm}</Text>
+            </Text>
+            <Text style={s.rowMeta}>
+              期末 <Text style={s.scoreValue}>{course.final}</Text>
+            </Text>
+          </View>
+        )}
+    </Pressable>
+  );
+}
+
+function GradeList({ courses, styles: s }: { courses: Grade[]; styles: GradeStyles }) {
+  return (
+    <View style={s.group}>
+      {courses.map((course, index) => (
+        <GradeRow key={course.id} course={course} first={index === 0} />
+      ))}
+    </View>
+  );
+}
+
+function EmptyNote({ title, text, styles: s }: { title: string; text: string; styles: GradeStyles }) {
+  return (
+    <View style={s.group}>
+      <View style={s.emptyBody}>
+        <Text style={s.rowTitle}>{title}</Text>
+        <Text style={s.rowMeta}>{text}</Text>
+      </View>
+    </View>
+  );
+}
 
 // Infer category from course code patterns
 function inferCategory(courseCode?: string, courseName?: string): Grade['category'] {
@@ -165,106 +276,6 @@ function inferCategory(courseCode?: string, courseName?: string): Grade['categor
   return 'required';
 }
 
-const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
-  required: { label: '必修', get color() { return theme.colors.accent; } },
-  elective: { label: '選修', color: '#AF52DE' },
-  general: { label: '通識', color: '#34C759' },
-  english: { label: '英文', color: '#FF9500' },
-};
-
-function GradeCard({ course }: { course: Grade }) {
-  useThemeMode();
-  const categoryInfo = CATEGORY_LABELS[course.category];
-  const gradeColor = course.grade
-    ? (GRADE_COLORS[course.grade] ?? theme.colors.muted)
-    : theme.colors.muted;
-
-  return (
-    <Pressable
-      accessibilityRole="link"
-      onPress={() => void Linking.openURL(course.gradeSource?.startsWith('school-official') ? 'https://ecampus.pu.edu.tw/' : `https://nuni.tw/course/${encodeURIComponent(course.courseId || '')}`)}
-      style={{
-        padding: 14,
-        borderRadius: theme.radius.md,
-        backgroundColor: theme.colors.surface2,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-      }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
-              {course.courseName}
-            </Text>
-            <View
-              style={{
-                paddingHorizontal: 6,
-                paddingVertical: 2,
-                borderRadius: 4,
-                backgroundColor: `${categoryInfo.color}20`,
-              }}
-            >
-              <Text style={{ color: categoryInfo.color, fontSize: 10, fontWeight: '600' }}>
-                {categoryInfo.label}
-              </Text>
-            </View>
-          </View>
-          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
-            {course.courseCode} · {course.credits} 學分 · {course.instructor}
-          </Text>
-          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-            來源：{course.gradeSource?.startsWith('school-official') ? '校方正式' : course.gradeSource === 'firebase-course' ? 'nuni 課程' : '未知'} · 公布時間：{(course.publishedAt ? formatTaipeiDateTime(course.publishedAt) : '') || '未知'} · 點選查看原始紀錄
-          </Text>
-        </View>
-
-        {course.status === 'completed' && course.grade && (
-          <View style={{ alignItems: 'center' }}>
-            <Text style={{ color: gradeColor, fontWeight: '700', fontSize: 24 }}>
-              {course.grade}
-            </Text>
-            {course.gpa !== undefined && (
-              <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
-                GPA {course.gpa.toFixed(1)}
-              </Text>
-            )}
-          </View>
-        )}
-
-        {course.status === 'in_progress' && (
-          <View style={{ alignItems: 'center' }}>
-            <Pill text="進行中" kind="accent" />
-            {course.midterm !== undefined && (
-              <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 4 }}>
-                期中 {course.midterm}
-              </Text>
-            )}
-          </View>
-        )}
-      </View>
-
-      {course.status === 'completed' &&
-        course.midterm !== undefined &&
-        course.final !== undefined && (
-          <View style={{ marginTop: 10, flexDirection: 'row', gap: 16 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>期中：</Text>
-              <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 12 }}>
-                {course.midterm}
-              </Text>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>期末：</Text>
-              <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 12 }}>
-                {course.final}
-              </Text>
-            </View>
-          </View>
-        )}
-    </Pressable>
-  );
-}
-
 const GRADE_TABS = [
   { id: 'current', label: '本學期' },
   { id: 'history', label: '歷史成績' },
@@ -272,7 +283,7 @@ const GRADE_TABS = [
 ] as const;
 
 export function GradesScreen(props: Record<string, unknown>) {
-  useThemeMode();
+  const s = useThemeStyleSheet(createStyles);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const nav = props?.navigation as any;
   const auth = useAuth();
@@ -396,7 +407,7 @@ export function GradesScreen(props: Record<string, unknown>) {
   const historySemesters = semesters.slice(1);
 
   const allCourses = useMemo(() => {
-    return semesters.flatMap((s) => s.courses);
+    return semesters.flatMap((sem) => sem.courses);
   }, [semesters]);
 
   const completedCourses = useMemo(() => {
@@ -448,9 +459,7 @@ export function GradesScreen(props: Record<string, unknown>) {
       <Screen>
         <PersonalImportSummary kind="grades" />
         <AnimatedCard title="成績查詢" subtitle="請先登入">
-          <Text style={{ color: theme.colors.muted, marginBottom: 12 }}>
-            登入後才能查看成績資料
-          </Text>
+          <Text style={s.noteText}>登入後才能查看成績資料</Text>
           <Button text="前往登入" kind="primary" onPress={() => nav?.navigate?.('MeHome')} />
         </AnimatedCard>
       </Screen>
@@ -461,24 +470,28 @@ export function GradesScreen(props: Record<string, unknown>) {
     return (
       <Screen>
         <PersonalImportSummary kind="grades" />
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={s.loading}>
           <Spinner />
-          <Text style={{ color: theme.colors.muted, marginTop: 12 }}>載入成績中...</Text>
+          <Text style={s.noteText}>載入成績中...</Text>
         </View>
       </Screen>
     );
   }
 
+  const completedSemesters = semesters.filter((x) => x.courses.some((c) => c.status === 'completed'));
+
   return (
     <Screen>
       <PersonalImportSummary kind="grades" />
-      <Text style={{ color: theme.colors.muted }}>參考 GPA＝已知績點乘學分的總和 ÷ 有績點的學分總和；待評與未取得不當成零分，無可計算資料顯示未知。</Text>
-      <View style={{ flex: 1 }}>
+      <Text style={s.formulaNote}>
+        參考 GPA＝已知績點乘學分的總和 ÷ 有績點的學分總和；待評與未取得不當成零分，無可計算資料顯示未知。
+      </Text>
+      <View style={s.flex}>
         <SegmentedControl options={GRADE_TABS} selected={selectedTab} onChange={setSelectedTab} />
 
         <ScrollView
           ref={panelScroll}
-          style={{ flex: 1, marginTop: 12 }}
+          style={s.scroll}
           contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
           showsVerticalScrollIndicator={false}
           refreshControl={
@@ -490,168 +503,107 @@ export function GradesScreen(props: Record<string, unknown>) {
           }
         >
           {selectedTab === 'current' && (
-            <View style={{ gap: 12 }}>
+            <View style={s.panel}>
               {currentSemester ? (
                 <>
-                  <AnimatedCard
-                    title={currentSemester.name}
-                    subtitle={
-                      currentSemester.courses.some((c) => c.status === 'completed')
+                  <View style={s.section}>
+                    <SectionTitle text={currentSemester.name} />
+                    <Text style={s.sectionSub}>
+                      {currentSemester.courses.some((c) => c.status === 'completed')
                         ? `GPA: ${currentSemester.gpa?.toFixed(2) ?? '未知'}`
-                        : '進行中'
-                    }
-                  >
-                    <View style={{ flexDirection: 'row', gap: 16, marginBottom: 16 }}>
-                      <View style={{ flex: 1, alignItems: 'center' }}>
-                        <Text
-                          style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 28 }}
-                        >
-                          {currentSemester.credits}
-                        </Text>
-                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>修課學分</Text>
-                      </View>
-                      <View style={{ flex: 1, alignItems: 'center' }}>
-                        <Text
-                          style={{ color: theme.colors.success, fontWeight: '700', fontSize: 28 }}
-                        >
-                          {currentSemester.courses.length}
-                        </Text>
-                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>修課數</Text>
-                      </View>
-                      <View style={{ flex: 1, alignItems: 'center' }}>
-                        <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 28 }}>
-                          {currentSemester.courses.filter((c) => c.midterm !== undefined).length}
-                        </Text>
-                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                          已出期中成績
-                        </Text>
-                      </View>
-                    </View>
-
+                        : '進行中'}
+                    </Text>
+                    <StatStrip
+                      styles={s}
+                      items={[
+                        { value: currentSemester.credits, label: '修課學分' },
+                        { value: currentSemester.courses.length, label: '修課數' },
+                        {
+                          value: currentSemester.courses.filter((c) => c.midterm !== undefined)
+                            .length,
+                          label: '已出期中成績',
+                        },
+                      ]}
+                    />
                     {currentSemester.courses.some((c) => c.status === 'in_progress') && (
-                      <View
-                        style={{
-                          padding: 12,
-                          borderRadius: theme.radius.md,
-                          backgroundColor: theme.colors.accentSoft,
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          gap: 10,
-                        }}
-                      >
-                        <Ionicons name="information-circle" size={20} color={theme.colors.accent} />
-                        <Text style={{ color: theme.colors.text, fontSize: 13, flex: 1 }}>
-                          期末成績尚未公布，目前僅顯示期中成績
-                        </Text>
+                      <View style={s.notice}>
+                        <Ionicons
+                          name="information-circle-outline"
+                          size={18}
+                          color={theme.colors.info}
+                        />
+                        <Text style={s.noticeText}>期末成績尚未公布，目前僅顯示期中成績</Text>
                       </View>
                     )}
-                  </AnimatedCard>
+                  </View>
 
-                  <SectionTitle text="本學期課程" />
-
-                  {currentSemester.courses.length > 0 ? (
-                    currentSemester.courses.map((course) => (
-                      <GradeCard key={course.id} course={course} />
-                    ))
-                  ) : (
-                    <AnimatedCard title="無課程" subtitle="">
-                      <Text style={{ color: theme.colors.muted }}>本學期沒有課程記錄</Text>
-                    </AnimatedCard>
-                  )}
+                  <View style={s.section}>
+                    <SectionTitle text="本學期課程" />
+                    {currentSemester.courses.length > 0 ? (
+                      <GradeList courses={currentSemester.courses} styles={s} />
+                    ) : (
+                      <EmptyNote title="無課程" text="本學期沒有課程記錄" styles={s} />
+                    )}
+                  </View>
                 </>
               ) : (
-                <AnimatedCard title="無成績數據" subtitle="">
-                  <Text style={{ color: theme.colors.muted }}>未取得成績數據</Text>
-                </AnimatedCard>
+                <EmptyNote title="無成績數據" text="未取得成績數據" styles={s} />
               )}
             </View>
           )}
 
           {selectedTab === 'history' && (
-            <View style={{ gap: 12 }}>
+            <View style={s.panel}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  {semesters
-                    .filter((s) => s.courses.some((c) => c.status === 'completed'))
-                    .map((sem) => (
+                <View style={s.chipRow}>
+                  {completedSemesters.map((sem) => {
+                    const active = selectedSemester === sem.id;
+                    return (
                       <Pressable
                         key={sem.id}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
                         onPress={() => setSelectedSemester(sem.id)}
-                        style={{
-                          paddingHorizontal: 16,
-                          paddingVertical: 10,
-                          borderRadius: 999,
-                          backgroundColor:
-                            selectedSemester === sem.id
-                              ? theme.colors.accentSoft
-                              : theme.colors.surface2,
-                          borderWidth: 1,
-                          borderColor:
-                            selectedSemester === sem.id ? theme.colors.accent : theme.colors.border,
-                        }}
+                        style={[s.chip, active && s.chipActive]}
                       >
-                        <Text
-                          style={{
-                            color:
-                              selectedSemester === sem.id
-                                ? theme.colors.accent
-                                : theme.colors.muted,
-                            fontWeight: '700',
-                          }}
-                        >
+                        <Text style={[s.chipText, active && s.chipTextActive]}>
                           {sem.name.replace('學年度', '').replace('學期', '')}
                         </Text>
                       </Pressable>
-                    ))}
+                    );
+                  })}
                 </View>
               </ScrollView>
 
               {(() => {
-                const sem = semesters.find((s) => s.id === selectedSemester);
+                const sem = semesters.find((x) => x.id === selectedSemester);
                 if (!sem) return null;
                 const completedInSem = sem.courses.filter((c) => c.status === 'completed');
                 if (completedInSem.length === 0) {
-                  return (
-                    <AnimatedCard title={sem.name} subtitle="尚無成績">
-                      <Text style={{ color: theme.colors.muted }}>本學期成績尚未公布</Text>
-                    </AnimatedCard>
-                  );
+                  return <EmptyNote title={sem.name} text="本學期成績尚未公布" styles={s} />;
                 }
 
                 return (
                   <>
-                    <AnimatedCard title={sem.name} subtitle={`GPA: ${sem.gpa?.toFixed(2) ?? '未知'}`}>
-                      <View style={{ flexDirection: 'row', gap: 16 }}>
-                        <View style={{ flex: 1, alignItems: 'center' }}>
-                          <Text
-                            style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 28 }}
-                          >
-                            {sem.gpa?.toFixed(2) ?? '未知'}
-                          </Text>
-                          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>學期 GPA</Text>
-                        </View>
-                        <View style={{ flex: 1, alignItems: 'center' }}>
-                          <Text
-                            style={{ color: theme.colors.success, fontWeight: '700', fontSize: 28 }}
-                          >
-                            {completedInSem.reduce((sum, c) => sum + c.credits, 0)}
-                          </Text>
-                          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>取得學分</Text>
-                        </View>
-                        <View style={{ flex: 1, alignItems: 'center' }}>
-                          <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 28 }}>
-                            {completedInSem.length}
-                          </Text>
-                          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>修課數</Text>
-                        </View>
-                      </View>
-                    </AnimatedCard>
+                    <View style={s.section}>
+                      <SectionTitle text={sem.name} />
+                      <StatStrip
+                        styles={s}
+                        items={[
+                          { value: sem.gpa?.toFixed(2) ?? '未知', label: '學期 GPA' },
+                          {
+                            value: completedInSem.reduce((sum, c) => sum + c.credits, 0),
+                            label: '取得學分',
+                          },
+                          { value: completedInSem.length, label: '修課數' },
+                        ]}
+                      />
+                    </View>
 
-                    <SectionTitle text="課程成績" />
-
-                    {completedInSem.map((course) => (
-                      <GradeCard key={course.id} course={course} />
-                    ))}
+                    <View style={s.section}>
+                      <SectionTitle text="課程成績" />
+                      <GradeList courses={completedInSem} styles={s} />
+                    </View>
                   </>
                 );
               })()}
@@ -659,220 +611,102 @@ export function GradesScreen(props: Record<string, unknown>) {
           )}
 
           {selectedTab === 'statistics' && (
-            <View style={{ gap: 12 }}>
-              <AnimatedCard title="成績總覽" subtitle="累積表現">
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20 }}>
-                  <ProgressRing
-                    progress={Math.min(1, (overallGPA ?? 0) / 4.0)}
-                    size={100}
-                    strokeWidth={10}
-                    color={theme.colors.accent}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>累積 GPA</Text>
-                    <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 36 }}>
-                      {overallGPA?.toFixed(2) ?? '未知'}
-                    </Text>
-                    <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
-                      滿分 4.0
-                    </Text>
+            <View style={s.panel}>
+              <View style={s.section}>
+                <SectionTitle text="成績總覽" />
+                <View style={s.group}>
+                  <View style={s.overview}>
+                    <ProgressRing
+                      progress={Math.min(1, (overallGPA ?? 0) / 4.0)}
+                      size={88}
+                      strokeWidth={9}
+                      color={theme.colors.accent}
+                    />
+                    <View style={s.rowBody}>
+                      <Text style={s.rowMeta}>累積 GPA</Text>
+                      <Text style={s.overviewValue}>{overallGPA?.toFixed(2) ?? '未知'}</Text>
+                      <Text style={s.rowMeta}>滿分 4.0</Text>
+                    </View>
                   </View>
                 </View>
+                <StatStrip
+                  styles={s}
+                  items={[
+                    { value: totalCredits, label: '已修學分' },
+                    { value: completedCourses.length, label: '完成課程' },
+                    { value: completedSemesters.length, label: '完成學期' },
+                  ]}
+                />
+              </View>
 
-                <View style={{ marginTop: 16, flexDirection: 'row', gap: 12 }}>
-                  <View
-                    style={{
-                      flex: 1,
-                      padding: 12,
-                      borderRadius: theme.radius.md,
-                      backgroundColor: theme.colors.surface2,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 24 }}>
-                      {totalCredits}
-                    </Text>
-                    <Text style={{ color: theme.colors.muted, fontSize: 11 }}>已修學分</Text>
-                  </View>
-                  <View
-                    style={{
-                      flex: 1,
-                      padding: 12,
-                      borderRadius: theme.radius.md,
-                      backgroundColor: theme.colors.surface2,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 24 }}>
-                      {completedCourses.length}
-                    </Text>
-                    <Text style={{ color: theme.colors.muted, fontSize: 11 }}>完成課程</Text>
-                  </View>
-                  <View
-                    style={{
-                      flex: 1,
-                      padding: 12,
-                      borderRadius: theme.radius.md,
-                      backgroundColor: theme.colors.surface2,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <Text style={{ color: theme.colors.info, fontWeight: '700', fontSize: 24 }}>
-                      {
-                        semesters.filter((s) => s.courses.some((c) => c.status === 'completed'))
-                          .length
-                      }
-                    </Text>
-                    <Text style={{ color: theme.colors.muted, fontSize: 11 }}>完成學期</Text>
-                  </View>
-                </View>
-              </AnimatedCard>
-
-              <AnimatedCard title="成績分布" subtitle="依等第分類" delay={100}>
-                <View style={{ gap: 12 }}>
-                  {Object.entries(gradeDistribution).map(([label, count]) => {
+              <View style={s.section}>
+                <SectionTitle text="成績分布" />
+                <View style={s.group}>
+                  {Object.entries(gradeDistribution).map(([label, count], index) => {
                     const total = completedCourses.length || 1;
                     const percent = (count / total) * 100;
                     const color =
                       label === 'A系列'
-                        ? '#22C55E'
+                        ? theme.colors.success
                         : label === 'B系列'
                           ? theme.colors.info
                           : label === 'C系列'
-                            ? '#FF9500'
+                            ? theme.colors.warning
                             : theme.colors.muted;
 
                     return (
-                      <View key={label}>
-                        <View
-                          style={{
-                            flexDirection: 'row',
-                            justifyContent: 'space-between',
-                            marginBottom: 4,
-                          }}
-                        >
-                          <Text style={{ color: theme.colors.text, fontWeight: '600' }}>
-                            {label}
-                          </Text>
-                          <Text style={{ color: theme.colors.muted }}>
+                      <View key={label} style={[s.distRow, index > 0 && s.rowDivider]}>
+                        <View style={s.distHead}>
+                          <Text style={s.distLabel}>{label}</Text>
+                          <Text style={s.rowMeta}>
                             {count} 門 ({percent.toFixed(0)}%)
                           </Text>
                         </View>
-                        <View
-                          style={{
-                            height: 8,
-                            borderRadius: 4,
-                            backgroundColor: theme.colors.border,
-                            overflow: 'hidden',
-                          }}
-                        >
+                        <View style={s.track}>
                           <View
-                            style={{
-                              height: '100%',
-                              width: `${percent}%`,
-                              backgroundColor: color,
-                              borderRadius: 4,
-                            }}
+                            style={[s.fill, { width: `${percent}%`, backgroundColor: color }]}
                           />
                         </View>
                       </View>
                     );
                   })}
                 </View>
-              </AnimatedCard>
+              </View>
 
-              <AnimatedCard title="學分分類" subtitle="依類別統計" delay={200}>
-                <View style={{ gap: 10 }}>
-                  {Object.entries(CATEGORY_LABELS).map(([key, info]) => {
-                    const credits = categoryStats[key]?.completed ?? 0;
-                    return (
-                      <View
-                        key={key}
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          padding: 12,
-                          borderRadius: theme.radius.md,
-                          backgroundColor: theme.colors.surface2,
-                          gap: 12,
-                        }}
-                      >
-                        <View
-                          style={{
-                            width: 40,
-                            height: 40,
-                            borderRadius: 10,
-                            backgroundColor: `${info.color}20`,
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          }}
-                        >
-                          <Ionicons
-                            name={
-                              key === 'required'
-                                ? 'school'
-                                : key === 'elective'
-                                  ? 'options'
-                                  : key === 'general'
-                                    ? 'globe'
-                                    : 'language'
-                            }
-                            size={20}
-                            color={info.color}
-                          />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ color: theme.colors.text, fontWeight: '600' }}>
-                            {info.label}
-                          </Text>
-                        </View>
-                        <Text style={{ color: info.color, fontWeight: '700', fontSize: 18 }}>
-                          {credits} 學分
-                        </Text>
-                      </View>
-                    );
-                  })}
+              <View style={s.section}>
+                <SectionTitle text="學分分類" />
+                <View style={s.group}>
+                  {Object.entries(CATEGORY_LABELS).map(([key, info], index) => (
+                    <View key={key} style={[s.catRow, index > 0 && s.rowDivider]}>
+                      <Ionicons name={info.icon} size={20} color={theme.colors.textSecondary} />
+                      <Text style={s.catLabel}>{info.label}</Text>
+                      <Text style={s.catValue}>{categoryStats[key]?.completed ?? 0} 學分</Text>
+                    </View>
+                  ))}
                 </View>
-              </AnimatedCard>
+              </View>
 
-              <AnimatedCard title="GPA 趨勢" subtitle="各學期表現" delay={300}>
-                <View style={{ gap: 8 }}>
-                  {semesters
-                    .filter((s) => s.courses.some((c) => c.status === 'completed'))
-                    .map((sem) => (
-                      <View
-                        key={sem.id}
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: 12,
-                          borderRadius: theme.radius.md,
-                          backgroundColor: theme.colors.surface2,
-                        }}
-                      >
-                        <Text style={{ color: theme.colors.text, fontWeight: '600' }}>
-                          {sem.name.replace('學年度', '').replace('學期', '')}
-                        </Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                            {sem.courses
-                              .filter((c) => c.status === 'completed')
-                              .reduce((s, c) => s + c.credits, 0)}{' '}
-                            學分
-                          </Text>
-                          <Text
-                            style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 16 }}
-                          >
-                            {sem.gpa?.toFixed(2) ?? '未知'}
-                          </Text>
-                        </View>
-                      </View>
-                    ))}
+              <View style={s.section}>
+                <SectionTitle text="GPA 趨勢" />
+                <View style={s.group}>
+                  {completedSemesters.map((sem, index) => (
+                    <View key={sem.id} style={[s.catRow, index > 0 && s.rowDivider]}>
+                      <Text style={s.catLabel}>
+                        {sem.name.replace('學年度', '').replace('學期', '')}
+                      </Text>
+                      <Text style={s.rowMeta}>
+                        {sem.courses
+                          .filter((c) => c.status === 'completed')
+                          .reduce((sum, c) => sum + c.credits, 0)}{' '}
+                        學分
+                      </Text>
+                      <Text style={s.catValue}>{sem.gpa?.toFixed(2) ?? '未知'}</Text>
+                    </View>
+                  ))}
                 </View>
-              </AnimatedCard>
+              </View>
 
-              <View style={{ marginTop: 8 }}>
+              <View style={s.cta}>
                 <Button
                   text="前往學分試算"
                   kind="primary"
@@ -886,3 +720,119 @@ export function GradesScreen(props: Record<string, unknown>) {
     </Screen>
   );
 }
+
+const createStyles = () =>
+  StyleSheet.create({
+    flex: { flex: 1 },
+    scroll: { flex: 1, marginTop: theme.space.md },
+    panel: { gap: theme.layout.sectionGap },
+    section: { gap: theme.space.sm },
+    sectionSub: { color: theme.colors.textSecondary, fontSize: 13, lineHeight: 18 },
+    loading: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: theme.space.md },
+    noteText: { color: theme.colors.textSecondary, marginBottom: theme.space.md },
+    formulaNote: {
+      color: theme.colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 18,
+      marginBottom: theme.space.sm,
+    },
+    group: {
+      borderRadius: theme.radius.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+      overflow: 'hidden',
+    },
+    statStrip: {
+      flexDirection: 'row',
+      borderRadius: theme.radius.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+    },
+    statCell: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: theme.space.md,
+      paddingHorizontal: theme.space.xs,
+    },
+    statDivider: {
+      borderLeftWidth: StyleSheet.hairlineWidth,
+      borderLeftColor: theme.colors.separator,
+    },
+    statValue: { color: theme.colors.text, fontWeight: '700', fontSize: 22, lineHeight: 28 },
+    statLabel: {
+      color: theme.colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 16,
+      textAlign: 'center',
+    },
+    notice: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.space.sm,
+      paddingVertical: theme.space.sm,
+    },
+    noticeText: { flex: 1, color: theme.colors.textSecondary, fontSize: 13, lineHeight: 18 },
+    row: {
+      minHeight: 56,
+      paddingVertical: theme.layout.listItemVertical,
+      paddingHorizontal: theme.space.md,
+    },
+    rowDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.separator,
+    },
+    rowPressed: { backgroundColor: theme.colors.surfaceInteractive },
+    rowTop: { flexDirection: 'row', alignItems: 'center', gap: theme.space.sm + 4 },
+    rowBody: { flex: 1 },
+    rowTitle: { color: theme.colors.text, fontWeight: '600', fontSize: 15, lineHeight: 21 },
+    rowMeta: { color: theme.colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 2 },
+    gradeBox: { alignItems: 'center', minWidth: 52 },
+    gradeLetter: { fontWeight: '700', fontSize: 22, lineHeight: 28 },
+    progressText: { color: theme.colors.textSecondary, fontWeight: '600', fontSize: 13 },
+    scoreLine: { flexDirection: 'row', gap: theme.space.md, marginTop: theme.space.sm },
+    scoreValue: { color: theme.colors.text, fontWeight: '600' },
+    emptyBody: { padding: theme.space.md, gap: 2 },
+    chipRow: { flexDirection: 'row', gap: theme.space.sm },
+    chip: {
+      minHeight: 44,
+      justifyContent: 'center',
+      paddingHorizontal: theme.space.md,
+      borderRadius: theme.radius.full,
+      backgroundColor: theme.colors.surface,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    chipActive: { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accent },
+    chipText: { color: theme.colors.textSecondary, fontWeight: '600' },
+    chipTextActive: { color: theme.colors.text },
+    overview: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.space.lg,
+      padding: theme.space.md,
+    },
+    overviewValue: { color: theme.colors.text, fontWeight: '700', fontSize: 34, lineHeight: 40 },
+    distRow: { padding: theme.space.md, gap: theme.space.xs },
+    distHead: { flexDirection: 'row', justifyContent: 'space-between' },
+    distLabel: { color: theme.colors.text, fontWeight: '600' },
+    track: {
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: theme.colors.separator,
+      overflow: 'hidden',
+    },
+    fill: { height: '100%', borderRadius: 3 },
+    catRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.space.sm + 4,
+      minHeight: 48,
+      paddingHorizontal: theme.space.md,
+      paddingVertical: theme.space.sm + 4,
+    },
+    catLabel: { flex: 1, color: theme.colors.text, fontWeight: '600', fontSize: 15 },
+    catValue: { color: theme.colors.text, fontWeight: '700', fontSize: 16 },
+    cta: { marginTop: theme.space.sm },
+  });

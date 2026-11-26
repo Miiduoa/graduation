@@ -7,8 +7,9 @@ import json
 import os
 import re
 import threading
+import time
 from pathlib import Path
-from urllib.parse import urlencode, urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 from playwright.async_api import async_playwright, expect
 
@@ -142,14 +143,22 @@ async def check_coursework(page, report):
     assert not before['coursework']['journal'] and before['coursework']['nativeLocks'], before
     report['checks'].append('Actual Today is already mounted with an unsent preview and native Web Locks')
 
+    journey = {'id': 'coursework-confirm-to-today', 'measurement': 'fixture automation, not human task time',
+               'variant': report['config']['coursework'], 'steps': [], 'completed': False}
+    report.setdefault('journeys', []).append(journey)
+    started = time.perf_counter()
     await page.get_by_role('textbox', name='想完成的事', exact=True).fill('幫我規劃資料模型的準備時間')
+    journey['steps'].append('enter task')
     await page.get_by_role('button', name='開啟任務', exact=True).click()
+    journey['steps'].append('open task')
     panel = page.get_by_role('region', name='校園助理', exact=True)
     await expect(panel.get_by_role('textbox', name='問題', exact=True)).to_have_value('幫我規劃資料模型的準備時間')
     unconsented = await snapshot('draft-before-consent')
     assert actions(unconsented).count('ask') == 0 and not unconsented['coursework']['writes'], unconsented
     await panel.get_by_role('checkbox').check()
+    journey['steps'].append('grant consent')
     await panel.get_by_role('button', name='送出', exact=True).click()
+    journey['steps'].append('send task')
     confirm = panel.get_by_role('button', name='確認', exact=True)
     await expect(confirm).to_be_visible()
     preview = await snapshot('chat-preview')
@@ -157,6 +166,7 @@ async def check_coursework(page, report):
     assert not preview['coursework']['writes'] and not preview['coursework']['proofs'], preview
     report['checks'].append('Home draft and explicit consent reach the actual chat; previews do not write records or tracking proofs')
     await confirm.click()
+    journey['steps'].append('confirm arrangement')
 
     failed = report['config']['coursework'] == 'read-failure'
     if failed:
@@ -171,6 +181,7 @@ async def check_coursework(page, report):
         report['checks'].append('A failed tracking read retains the verified event and recovery journal without claiming completion or offering confirmation again')
         await page.evaluate('window.__aiWorkspaceQA.setFollowupFailure(false)')
         await panel.get_by_role('button', name='重新核對結果', exact=True).click()
+        journey['steps'].append('retry verification')
 
     tracked = home.get_by_role('group', name='「合成資料模型作業」的安排追蹤', exact=True)
     await expect(tracked).to_contain_text('已安排')
@@ -212,6 +223,12 @@ async def check_coursework(page, report):
     report['checks'].append('The already mounted Today reads the same signed proof immediately and retires its unsent duplicate preview without reload')
     if failed:
         report['checks'].append('Chat recovery issues reconcile and followup reads only, with no second ask, plan or confirmation')
+    # Stop before optional navigation/screenshots; count only explicit user actions.
+    assert len(journey['steps']) == (6 if failed else 5), journey
+    journey.update({'completed': True, 'stepCount': len(journey['steps']),
+                    'elapsedMs': round((time.perf_counter() - started) * 1000, 1),
+                    'confirmRequests': actions(verified).count('confirm'),
+                    'verifiedRecords': len(data['records'])})
 
     await panel.get_by_role('button', name='收合', exact=True).click()
     await expect(panel).not_to_be_visible()
@@ -242,6 +259,46 @@ async def check_coursework(page, report):
         assert actions(retried).count('followup') == expected_reads + 2, retried
         await inspect_layout(page, report, 'today-read-recovered')
         report['checks'].append('Today retry re-reads the original proof after failure while records, imports, proof and mutation counts remain unchanged')
+
+
+async def check_explore_return(page, report):
+    # Start at the real Explore component, with the existing guest/NTU scope.
+    # Fixture navigation is setup, not a user step; the service itself remains
+    # synthetic. Measure the same three explicit actions across all guest configurations.
+    await page.evaluate("window.__aiWorkspaceQA.navigate('/explore?school=NTU&schoolId=ntu&campus=ntu')")
+    search = page.get_by_role('searchbox', name='尋找想做的事', exact=True)
+    await expect(search).to_be_visible()
+    before = await page.evaluate('window.__aiWorkspaceQA.snapshot()')
+    journey = {'id': 'guest-explore-map-return', 'measurement': 'fixture automation, not human task time',
+               'steps': [], 'completed': False}
+    report.setdefault('journeys', []).append(journey)
+    started = time.perf_counter()
+
+    await search.fill('地圖')
+    card = page.locator('[data-experience-return="campus-map"]')
+    await expect(card).to_be_visible()
+    await expect(page.get_by_role('status').filter(has_text='1 個可以開始的起點')).to_be_visible()
+    journey['steps'].append('filter experiences')
+
+    await card.click()
+    await expect(page.get_by_role('region', name='合成目的地頁面')).to_be_visible()
+    await expect(page.get_by_test_id('fixture-route')).to_have_text('/map')
+    destination = urlparse(page.url)
+    assert dict(parse_qsl(destination.query)).get('schoolId') == 'ntu', destination
+    journey['steps'].append('open public map')
+
+    await page.get_by_role('link', name='返回探索', exact=True).click()
+    await expect(search).to_have_value('地圖')
+    await expect(card).to_be_focused()
+    returned = urlparse(page.url)
+    params = dict(parse_qsl(returned.query))
+    assert returned.path == '/explore' and params.get('schoolId') == 'ntu' and params.get('q') == '地圖', returned
+    journey['steps'].append('return to filtered card')
+    after = await page.evaluate('window.__aiWorkspaceQA.snapshot()')
+    assert after['requests'] == before['requests'], 'Public discovery must not send a model request'
+    journey.update({'completed': True, 'stepCount': len(journey['steps']),
+                    'elapsedMs': round((time.perf_counter() - started) * 1000, 1)})
+    report['checks'].append('Guest Explore opens the public map and returns to the same filtered card, campus and keyboard focus without a model request')
 
 
 async def run_scenario(browser, origin, config):
@@ -356,6 +413,9 @@ async def run_scenario(browser, origin, config):
         await expect(panel).not_to_be_visible()
         report['checks'].append('Guest handoff uses real local service search and Escape closes without a model call')
 
+        await check_explore_return(page, report)
+        await inspect_layout(page, report, 'explore-return')
+
         ledger = await page.evaluate('window.__aiWorkspaceQA.snapshot()')
         asks = [row for row in ledger['requests'] if row['path'].endswith('/ask')]
         assert len(asks) == 1 and asks[0]['body']['question'] == prompt and asks[0]['body']['consent'] is True, asks
@@ -392,6 +452,15 @@ async def main():
                 report = await run_scenario(browser, origin, config)
                 reports.append(report)
                 print(config['name'] + ': ' + report['status'], flush=True)
+                for journey in report.get('journeys', []):
+                    # Report only test metadata, never account identifiers or task contents.
+                    print('fixture journey: ' + json.dumps({
+                        'scenario': config['name'], 'id': journey['id'],
+                        'completed': journey['completed'],
+                        'steps': journey.get('stepCount', len(journey['steps'])),
+                        'elapsedMs': journey.get('elapsedMs'),
+                        'measurement': journey['measurement'],
+                    }, ensure_ascii=False), flush=True)
                 if report['status'] != 'passed':
                     break
             await browser.close()

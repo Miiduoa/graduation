@@ -5,7 +5,6 @@
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const { writeRuntimeReport } = require('./write-runtime-report.cjs');
-const path = require('node:path');
 
 const projectId = process.env.TEST_PROJECT_ID;
 const origin = process.env.WEB_PUBLIC_ORIGIN;
@@ -95,7 +94,7 @@ async function main() {
       accountIsolationVerified: true, productionWorkersDisabled: true,
       productionStoresAbsent: true, schoolLoginPerformed: false, schoolWritesPerformed: false };
     if (process.env.TRONCLASS_RUNTIME_DIR) {
-      writeRuntimeReport(process.env.TRONCLASS_RUNTIME_DIR, 'acceptance.json', report);
+      writeRuntimeReport(Number(process.env.TRONCLASS_REPORT_DIR_FD), 'acceptance.json', report);
     }
     console.log(JSON.stringify(report));
   } finally {

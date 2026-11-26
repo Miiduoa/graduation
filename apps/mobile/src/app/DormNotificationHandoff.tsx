@@ -134,7 +134,7 @@ export function DormNotificationHandoff({
     if (!loginSchool || isSchoolLoginEntryAvailable(loginSchool)) return;
     let active = true;
     setEntry(null);
-    void loadSchoolLoginProviderKinds({ recheckUnavailable: true }).then(() => {
+    void loadSchoolLoginProviderKinds(loginSchool, { recheckUnavailable: true }).then(() => {
       if (active)
         setEntry({ school: loginSchool, available: isSchoolLoginEntryAvailable(loginSchool) });
     });

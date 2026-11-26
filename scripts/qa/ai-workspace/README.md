@@ -1,8 +1,9 @@
 # AI workspace browser checks
 
 This fixture bundles the real Web workspace provider, header, home composer,
-StudentToday, TodayAgent/Panel, lazy TodayCampusEntry, Conversation, AssistantThread
-and their CSS. Journal, calendar receipt mirroring, tracking storage and Web Locks
+StudentToday, TodayAgent/Panel, lazy TodayCampusEntry, Conversation, AssistantThread,
+ExploreExperiences, DirectoryVisitProvider, ServiceBreadcrumbs and their CSS.
+Journal, calendar receipt mirroring, tracking storage and Web Locks
 also remain actual product implementations.
 Only account/session providers, selected-campus hooks, Next navigation, home
 records and the transport responses are synthetic.
@@ -48,6 +49,13 @@ entrance animation and the home composer's focus transitions are disabled.
 Other checks cover homepage entry visibility, explicit consent, actual question/response UI,
 shared drafts, minimize/resume, navigation to coursework and map, account/campus
 isolation, same-session revalidation, guest local search and keyboard closing.
+
+The real Explore screen is also available from the product navigation for browser
+review of task handoffs and service-directory return. A synthetic destination
+renders the real breadcrumb; its service content remains synthetic. Review draft
+replacement/cancellation, role changes, unchanged conversation history, preserved
+campus query parameters, and filtered-card focus on return. The existing automated
+scenario count does not include these manual checks.
 
 The two coursework scenarios keep the real Today already mounted while the real
 chat prepares and explicitly confirms a different coursework card. Assertions

@@ -76,26 +76,18 @@ function BusDirectory({ schoolId, schoolName, navigation }: Props & { schoolId: 
   return (
     <AIDetailScreen
       title="校園公車"
-      subtitle="選擇路線與站牌，查詢目前可取得的到站資訊。"
+      subtitle={schoolName}
       onBack={() => navigation?.goBack?.()}
     >
-      {schoolId === 'pu' ? (
-        <AICard title="臺中市公車查詢">
-          <View style={{ gap: theme.space.md }}>
-            <Text style={body}>路線異動、完整班次與營運資訊，請查看官方公車網站。</Text>
-            <AIButton
-              label={opening ? '正在開啟…' : '開啟官方公車查詢'}
-              disabled={opening}
-              onPress={() => void openOfficial()}
-            />
-            {linkError ? (
-              <Text accessibilityRole="alert" style={body}>
-                無法開啟公車網站，請確認網路連線後重試。
-              </Text>
-            ) : null}
-          </View>
-        </AICard>
+      {selected ? (
+        <CampusBusArrivals
+          key={`${selected.route.id}:${selected.stop.id}`}
+          schoolId={schoolId}
+          route={selected.route}
+          stop={selected.stop}
+        />
       ) : null}
+      <PublicTransitExplorer key={schoolId} schoolId={schoolId} schoolName={schoolName} />
       {status === 'loading' ? (
         <AICard>
           <Text accessibilityRole="progressbar" style={body}>
@@ -118,15 +110,6 @@ function BusDirectory({ schoolId, schoolName, navigation }: Props & { schoolId: 
           <Text style={body}>目前沒有學校發布的路線與站牌資料。</Text>
         </AICard>
       ) : null}
-      {selected ? (
-        <CampusBusArrivals
-          key={`${selected.route.id}:${selected.stop.id}`}
-          schoolId={schoolId}
-          route={selected.route}
-          stop={selected.stop}
-        />
-      ) : null}
-      <PublicTransitExplorer key={schoolId} schoolId={schoolId} schoolName={schoolName} />
       {routes.map((route) => (
         <AICard key={route.id} title={route.name}>
           <View style={{ gap: theme.space.md }}>
@@ -146,6 +129,24 @@ function BusDirectory({ schoolId, schoolName, navigation }: Props & { schoolId: 
           </View>
         </AICard>
       ))}
+      {schoolId === 'pu' ? (
+        <AICard title="臺中市公車查詢">
+          <View style={{ gap: theme.space.md }}>
+            <Text style={body}>路線異動、完整班次與營運資訊，請查看官方公車網站。</Text>
+            <AIButton
+              label={opening ? '正在開啟…' : '開啟官方公車查詢'}
+              variant="ghost"
+              disabled={opening}
+              onPress={() => void openOfficial()}
+            />
+            {linkError ? (
+              <Text accessibilityRole="alert" style={body}>
+                無法開啟公車網站，請確認網路連線後重試。
+              </Text>
+            ) : null}
+          </View>
+        </AICard>
+      ) : null}
     </AIDetailScreen>
   );
 }

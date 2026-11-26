@@ -241,6 +241,19 @@ describe('availability reader ownership and freshness', () => {
     expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
   });
 
+  it('uses the preparation snapshot for the course and all student-specific records', async () => {
+    const s = setup();
+    const binding = await s.bindings.requireBinding(OWNER);
+    s.bindings.requireBinding.mockClear().mockResolvedValue({ ...binding, revision: 'b'.repeat(32), cookies: {} });
+    await expect(s.reader(OWNER, SCOPE, REVISION, undefined, binding)).resolves.toMatchObject({ revision: REVISION });
+    expect(s.bindings.requireBinding).not.toHaveBeenCalled();
+    for (const method of [s.source.fetchCourses, s.source.fetchStudentSubmissionList!,
+      s.source.fetchStudentMakeUpRecord!, s.source.fetchStudentResubmitRecord!]) {
+      expect(method).toHaveBeenCalled();
+      for (const [cookies] of vi.mocked(method).mock.calls) expect(cookies).toEqual(binding.cookies);
+    }
+  });
+
   it('does not mix a preparation with an already replaced binding', async () => {
     const s = setup();
     s.changeBinding({ revision: 'b'.repeat(32) });

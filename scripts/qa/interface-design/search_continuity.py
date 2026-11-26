@@ -32,11 +32,13 @@ async def assert_results_visible(page, target, report):
     geometry = await title.evaluate('''title => {
       const nav = document.querySelector('nav[aria-label="主要導覽"]');
       const navBox = nav?.getBoundingClientRect();
+      const titleBox = title.getBoundingClientRect();
       const viewport = window.visualViewport;
       const top = viewport?.offsetTop ?? 0;
       const bottom = top + (viewport?.height ?? innerHeight);
       const fixedNavigation = nav && getComputedStyle(nav).position === 'fixed'
-        && navBox.bottom > top && navBox.top < bottom;
+        && navBox.bottom > top && navBox.top < bottom
+        && navBox.right > titleBox.left && navBox.left < titleBox.right;
       const visibleBottom = fixedNavigation ? Math.min(bottom, navBox.top) : bottom;
       const range = document.createRange();
       range.selectNodeContents(title);
@@ -64,7 +66,10 @@ async def assert_results_visible(page, target, report):
 
 async def check_directory_submit(page, config, report, capture):
     for destination, name, term in [('生活', '生活服務搜尋', '借書'), ('交流', '交流服務搜尋', '訊息')]:
-        await page.get_by_role('navigation', name='主要導覽', exact=True).get_by_role('link', name=destination, exact=True).click()
+        if destination == '生活':
+            await page.get_by_role('button', name='查看生活服務', exact=True).click()
+        else:
+            await page.get_by_role('navigation', name='主要導覽', exact=True).get_by_role('link', name=destination, exact=True).click()
         form = page.get_by_role('search', name=name, exact=True)
         field = form.get_by_role('searchbox', name='快速找服務', exact=True)
         results = page.locator('[id="' + await field.get_attribute('aria-controls') + '"]')
@@ -111,8 +116,6 @@ async def check_directory_submit(page, config, report, capture):
         })''')
         assert all(row['width'] >= 43.5 and row['height'] >= 43.5 for row in sizes), sizes
         if config.get('motion') == 'reduce' or config.get('system_motion') == 'reduce':
-            # The global reduced-motion rule retains a 0.01ms duration for
-            # transition events; this control removes transition properties.
             await expect(form.get_by_role('button', name='查看結果', exact=True)).to_have_css('transition-property', 'none')
     report['checks'].append('Life and Connect: live filtering preserves input; IME Enter/Escape preserves composition; explicit search reaches visible named results for matches, empty, public-only and all services; reset returns to input; 44px controls and reduced motion stay intact')
 
@@ -136,6 +139,7 @@ async def check_search_return(page, config, report, capture):
     await library.focus()
     await library.press('Enter')
     await page.wait_for_url(target_url)
+    await expect(form).to_have_count(0)
     await page.go_back()
     assert page.url == source_url
     await expect(field).to_have_value('借書')
@@ -143,12 +147,40 @@ async def check_search_return(page, config, report, capture):
     await capture('search-library-return', full_page=False)
     await page.go_forward()
     await page.wait_for_url(target_url)
+    await expect(form).to_have_count(0)
     await page.go_back()
     await assert_results_visible(page, library, report)
 
+    for shape in ('map', 'array'):
+        replacement_url = await page.evaluate("""shape => {
+          const previous = history.state;
+          const url = new URL(location.href);
+          if (shape === 'map') {
+            url.searchParams.delete('q');
+            url.hash = 'results';
+          } else {
+            url.searchParams.set('view', 'compact');
+          }
+          const payload = shape === 'map' ? new Map([['view', 'compact']]) : ['compact'];
+          history.replaceState(payload, '', url);
+          if (history.state.__campusSearchHistoryEntry !== previous.__campusSearchHistoryEntry ||
+              history.state.__campusSearchResultReturn?.token !== previous.__campusSearchResultReturn.token) {
+            throw new Error('Same-page replacement lost the search entry metadata');
+          }
+          return location.href;
+        }""", shape)
+        await page.go_forward()
+        await page.wait_for_url(target_url)
+        await expect(form).to_have_count(0)
+        await page.go_back()
+        assert page.url == replacement_url
+        await expect(field).to_have_value('借書')
+        await assert_results_visible(page, library, report)
+    await page.evaluate("url => history.replaceState(history.state, '', url)", source_url)
+
     # New-tab activation must preserve the current source, not replay a return.
     async with page.context.expect_page() as opened:
-        await library.click(modifiers=['ControlOrMeta'])
+        await library.click(modifiers=['Control'])
     other = await opened.value
     await other.wait_for_url(target_url)
     await other.close()
@@ -181,6 +213,90 @@ async def check_search_return(page, config, report, capture):
     await expect(field).to_have_value('借書')
     await assert_results_visible(page, library, report)
     await capture('search-library-settled-return', full_page=False)
+
+    # Insert a native application push between the fixture's Router dispatch
+    # and its marked commit. Back must land on the intervening search entry.
+    for shape in ['record', 'array']:
+        pushed_url = await page.evaluate("""shape => {
+          const trackedPush = history.pushState;
+          const routerPush = Symbol.for('nuni.app-router.history-push');
+          const target = new URL(location.href);
+          if (shape === 'array') target.searchParams.set('q', '公車');
+          else target.hash = 'results';
+          history.pushState = function (data, unused, url) {
+            if (data?.[routerPush]) {
+              history.pushState = trackedPush;
+              const state = Object.assign(shape === 'array' ? ['compact'] : {}, {
+                __NA: true,
+                __PRIVATE_NEXTJS_INTERNALS_TREE: structuredClone(
+                  history.state.__PRIVATE_NEXTJS_INTERNALS_TREE
+                ),
+              });
+              trackedPush.call(this, state, '', target);
+            }
+            trackedPush.call(this, data, unused, url);
+          };
+          return target.href;
+        }""", shape)
+        await library.press('Enter')
+        await page.wait_for_url(target_url)
+        await expect(form).to_have_count(0)
+        await page.go_back()
+        assert page.url == pushed_url
+        await expect(field).to_have_value('借書')
+        await assert_results_visible(page, library, report)
+        report['checks'].append(f'Search: Back from a committed result restores focus after an intervening application push with a {shape}')
+        if shape == 'array':
+            await page.evaluate("""url => {
+              const previous = history.state;
+              history.replaceState(null, '', url);
+              if (history.state.__campusSearchHistoryEntry !== previous.__campusSearchHistoryEntry ||
+                  history.state.__campusSearchResultReturn?.token !== previous.__campusSearchResultReturn.token) {
+                throw new Error('Same-URL replacement lost the search entry metadata');
+              }
+            }""", pushed_url)
+            assert page.url == pushed_url
+            await expect(field).to_have_value('公車')
+            await expect(results.get_by_role('heading', name='公車', exact=True)).to_be_visible()
+            await expect(library).to_have_count(0)
+            await page.go_forward()
+            await page.wait_for_url(target_url)
+            await expect(form).to_have_count(0)
+            await page.go_back()
+            assert page.url == pushed_url
+            await expect(field).to_have_value('借書')
+            await assert_results_visible(page, library, report)
+            report['checks'].append('Search: a same-URL replacement reapplies URL filters after the array insertion return, and Forward/Back restores the saved filters and focus again')
+
+            entry_metadata = """() => ({
+              key: history.state.__campusSearchHistoryEntry,
+              token: history.state.__campusSearchResultReturn?.token,
+            })"""
+            entry = await page.evaluate(entry_metadata)
+            assert entry.get('key') and entry.get('token'), entry
+            for composing in (False, True):
+                await field.focus()
+                if composing:
+                    await field.dispatch_event('compositionstart')
+                await field.fill('公')
+                if composing:
+                    assert page.url == pushed_url
+                else:
+                    assert page.url != pushed_url
+                    await field.fill('公車')
+                    await expect(results.get_by_role('heading', name='公車', exact=True)).to_be_visible()
+                    assert page.url == pushed_url
+                await expect(field).to_have_value('公' if composing else '公車')
+                edited_entry = await page.evaluate(entry_metadata)
+                assert edited_entry == entry, (composing, entry, edited_entry)
+                await page.go_forward()
+                await page.wait_for_url(target_url)
+                await expect(form).to_have_count(0)
+                await page.go_back()
+                assert page.url == pushed_url
+                await expect(field).to_have_value('借書')
+                await assert_results_visible(page, library, report)
+            report['checks'].append('Search: typing and unfinished IME composition preserve the array entry snapshot for the next Back and restore the library focus')
 
     await form.get_by_role('button', name='清除搜尋', exact=True).click()
     await expect(field).to_be_focused()

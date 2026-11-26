@@ -104,17 +104,17 @@ export default function AiCompliancePage() {
 
   return (
     <RequireAdmin>
-      <h1 style={{ marginTop: 0 }}>資料處理設定（保留期／個資／跨境）</h1>
-      <p style={{ color: '#3C3C43', lineHeight: 1.6 }}>
+      <h2>資料處理設定（保留期／個資／跨境）</h2>
+      <p style={{ color: 'var(--muted)', lineHeight: 1.6 }}>
         對應 <code>ai_compliance_policies</code>；Edge function <code>material-ai-pipeline</code>／<code>ai-course-assistant</code>{' '}
         會根據此組態套用 quota 與保留期。修改後請通知 SRE／法務 留底。
       </p>
 
       {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
-      {!draft ? <p style={{ color: '#8E8E93' }}>載入中…（或 migration 未到帳）</p> : null}
+      {!draft ? <p style={{ color: 'var(--muted)' }}>載入中…（或 migration 未到帳）</p> : null}
 
       {draft ? (
-        <div style={{ background: '#fff', border: '1px solid #E5E5EA', borderRadius: 12, padding: 20, marginTop: 16 }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginTop: 16 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
             <Field label="啟用 AI 管道">
               <input
@@ -214,7 +214,7 @@ export default function AiCompliancePage() {
                 borderRadius: 10,
                 border: '1px solid var(--brand)',
                 background: 'var(--brand)',
-                color: '#fff',
+                color: 'var(--on-brand)',
                 fontWeight: 700,
                 cursor: busy ? 'wait' : 'pointer',
               }}>
@@ -227,8 +227,8 @@ export default function AiCompliancePage() {
               style={{
                 padding: '10px 16px',
                 borderRadius: 10,
-                border: '1px solid #fca5a5',
-                background: '#fff',
+                border: '1px solid var(--danger)',
+                background: 'var(--surface)',
                 fontWeight: 700,
                 cursor: busy ? 'wait' : 'pointer',
               }}>
@@ -236,7 +236,7 @@ export default function AiCompliancePage() {
             </button>
             {info ? <span style={{ color: 'var(--success)', alignSelf: 'center' }}>{info}</span> : null}
             {policy ? (
-              <span style={{ color: '#8E8E93', alignSelf: 'center', fontSize: 12 }}>
+              <span style={{ color: 'var(--muted)', alignSelf: 'center', fontSize: 12 }}>
                 最後更新：{new Date(policy.updated_at).toLocaleString()}
               </span>
             ) : null}
@@ -245,13 +245,13 @@ export default function AiCompliancePage() {
       ) : null}
 
       <h2 style={{ marginTop: 28, fontSize: 18 }}>Quota 概況（最近 500 列）</h2>
-      <p style={{ color: '#8E8E93', fontSize: 13 }}>
+      <p style={{ color: 'var(--muted)', fontSize: 13 }}>
         紅底列為已達當日上限的使用者。請與法務／系所對齊配額是否合理。
       </p>
-      <div style={{ overflowX: 'auto', background: '#fff', border: '1px solid #E5E5EA', borderRadius: 12 }}>
+      <div style={{ overflowX: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ background: '#F2F2F7' }}>
+            <tr style={{ background: 'var(--bg-soft)' }}>
               <th style={cellStyle}>user_id</th>
               <th style={cellStyle}>日期</th>
               <th style={cellStyle}>使用</th>
@@ -262,7 +262,7 @@ export default function AiCompliancePage() {
           </thead>
           <tbody>
             {quota.map((q, i) => (
-              <tr key={`${q.user_id}-${q.usage_date}-${i}`} style={{ background: q.over_limit ? '#fef2f2' : undefined }}>
+              <tr key={`${q.user_id}-${q.usage_date}-${i}`} style={{ background: q.over_limit ? 'var(--danger-soft)' : undefined }}>
                 <td style={{ ...cellStyle, fontFamily: 'monospace', fontSize: 11 }}>{q.user_id}</td>
                 <td style={cellStyle}>{q.usage_date}</td>
                 <td style={cellStyle}>{q.requests}</td>
@@ -276,7 +276,7 @@ export default function AiCompliancePage() {
           </tbody>
         </table>
       </div>
-      {quota.length === 0 ? <p style={{ color: '#8E8E93' }}>尚無 AI usage 資料。</p> : null}
+      {quota.length === 0 ? <p style={{ color: 'var(--muted)' }}>尚無 AI usage 資料。</p> : null}
     </RequireAdmin>
   );
 }
@@ -293,7 +293,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const inputStyle: React.CSSProperties = {
   padding: '8px 10px',
   borderRadius: 8,
-  border: '1px solid #d1d5db',
+  border: '1px solid var(--border-strong)',
   fontSize: 14,
   width: '100%',
   maxWidth: 320,
@@ -301,6 +301,6 @@ const inputStyle: React.CSSProperties = {
 
 const cellStyle: React.CSSProperties = {
   padding: 8,
-  border: '1px solid #E5E5EA',
+  border: '1px solid var(--border)',
   textAlign: 'left',
 };

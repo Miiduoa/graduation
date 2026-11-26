@@ -31,8 +31,9 @@ function evidenceLink(s: string): boolean {
   } catch { return false; }
 }
 const key = (way: number, from: number, to: number) => [way, from, to].join(':');
+const validRevision = (version: number) => Number.isSafeInteger(version) && version > 0;
 function matchesNode(review: ReviewedNode, node: ReviewedNode | undefined): boolean {
-  return !!node && review.id === node.id && review.version === node.version &&
+  return !!node && validRevision(node.version) && review.id === node.id && review.version === node.version &&
     review.lat === node.lat && review.lng === node.lng;
 }
 
@@ -76,7 +77,8 @@ export function applyCampusWalkingSegmentAudits(
   now: number,
 ): CampusWalkingGraph | null {
   const base = utcMillis(candidates.osmBaseAt);
-  if (!schoolId || candidates.graph.schoolId !== schoolId || !Number.isFinite(now) ||
+  if (!schoolId || candidates.graph.schoolId !== schoolId ||
+      candidates.graph.osmBaseAt !== candidates.osmBaseAt || !Number.isFinite(now) ||
       !Number.isFinite(base) || base > now + 5 * 60 * 1000 || now - base > 2 * DAY_MS ||
       candidates.graph.nodes.length > 2000 || candidates.graph.edges.length > 4000 ||
       candidates.nodes.length > 2000 || candidates.ways.length > 4000 ||
@@ -94,6 +96,30 @@ export function applyCampusWalkingSegmentAudits(
     if (!source || graphNodeIds.has(node.id) ||
         node.lat !== source.lat || node.lng !== source.lng) return null;
     graphNodeIds.add(node.id);
+  }
+  // Reapply the parser's retained-segment budget at the cache/audit boundary.
+  // Index ordered adjacency once, rather than scanning the whole way per audit.
+  let segmentCount = 0;
+  for (const way of ways.values()) {
+    if (way.nodes.length < 2) return null;
+    segmentCount += way.nodes.length - 1;
+    if (segmentCount > 4000) return null;
+  }
+  const adjacentSegments = new Set<string>();
+  const undirectedSegments = new Set<string>();
+  for (const way of ways.values()) {
+    if (excludesWalkingWay(way.tags)) continue;
+    for (let i = 1; i < way.nodes.length; i += 1) {
+      const a = nodes.get(way.nodes[i - 1]);
+      const b = nodes.get(way.nodes[i]);
+      if (!a || !b) continue;
+      // Match discovery's topology invariant even when candidates came from cache.
+      const unordered = key(way.id, Math.min(a.id, b.id), Math.max(a.id, b.id));
+      if (a.id === b.id || undirectedSegments.has(unordered) ||
+          (a.lat === b.lat && a.lng === b.lng)) return null;
+      undirectedSegments.add(unordered);
+      adjacentSegments.add(key(way.id, a.id, b.id));
+    }
   }
   const reviews = new Map<string, CampusWalkingSegmentAudit>();
   const duplicates = new Set<string>();
@@ -124,8 +150,8 @@ export function applyCampusWalkingSegmentAudits(
     const audit = reviews.get(segment);
     if (!audit || duplicates.has(segment)) return blocked;
     if (!matchesNode(audit.from, from) || !matchesNode(audit.to, to) ||
-        audit.wayVersion !== way.version ||
-        !way.nodes.some((id, i) => id === edge.from && way.nodes[i + 1] === edge.to) ||
+        !validRevision(way.version) || audit.wayVersion !== way.version ||
+        !adjacentSegments.has(segment) ||
         !['both', 'forward', 'reverse'].includes(audit.direction) ||
         !evidenceLink(audit.evidenceUrl) ||
         !permitsAuditedDirection(way.tags, audit.direction) ||
@@ -136,7 +162,7 @@ export function applyCampusWalkingSegmentAudits(
     const expiry = utcMillis(audit.validUntil);
     const edited = Math.max(utcMillis(way.editedAt), utcMillis(from.editedAt), utcMillis(to.editedAt));
     if (![reviewed, expiry, edited].every(Number.isFinite) ||
-        reviewed < edited || reviewed > now || expiry <= now ||
+        edited > base || reviewed < edited || reviewed > now || expiry <= now ||
         expiry - reviewed > MAX_AUDIT_AGE_MS) return blocked;
     return { ...edge, access: 'reviewed-open', direction: audit.direction, validUntil: audit.validUntil };
   });

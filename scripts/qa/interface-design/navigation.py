@@ -6,7 +6,9 @@ async def check_navigation_geometry(page, config, report):
       await document.fonts.ready;
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     }''')
-    geometry = await page.get_by_role('navigation', name='主要導覽', exact=True).evaluate('''nav => {
+    navigation = page.get_by_role('navigation', name='主要導覽', exact=True)
+    await expect(navigation.get_by_role('link')).to_have_count(5)
+    geometry = await navigation.evaluate('''nav => {
       const box = node => {
         const r = node.getBoundingClientRect();
         return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height};
@@ -14,15 +16,22 @@ async def check_navigation_geometry(page, config, report):
       return {nav:box(nav), fixed:getComputedStyle(nav).position === 'fixed',
         viewport:{width:innerWidth,height:innerHeight},
         contentPadding:parseFloat(getComputedStyle(document.body).paddingBottom),
-        items:[...nav.children].map(link => {
+        // The workspace heading is decorative; measure every real destination.
+        items:[...nav.querySelectorAll(':scope > a[href]')].map(link => {
           const label=link.querySelector('span'), icon=link.querySelector('svg');
+          if (!label || !icon) throw new Error('Primary navigation link is missing its label or icon');
           const range=document.createRange(); range.selectNodeContents(label);
-          return {name:label.textContent,box:box(link),label:box(label),
+          return {name:label.textContent,path:new URL(link.href).pathname,box:box(link),label:box(label),
             glyphs:[...range.getClientRects()].map(r=>({left:r.left,right:r.right,top:r.top,bottom:r.bottom})),
             icon:icon.checkVisibility()?box(icon):null,
             current:link.getAttribute('aria-current') === 'page'};
         })};
     }''')
+    assert [(item['name'], item['path']) for item in geometry['items']] == [
+        ('今天', '/'), ('探索', '/explore'), ('課務', '/timetable'),
+        ('交流', '/connect'), ('我的', '/profile'),
+    ], geometry
+    assert sum(item['current'] for item in geometry['items']) == 1, geometry
     for item in geometry['items']:
         box = item['box']
         for part in [item['label'], item['icon'], *item['glyphs']]:
@@ -198,7 +207,7 @@ async def check_service_navigation(page, config, report, capture):
     report['serviceNavigation'] = {'layout': panel, 'realBrowserHistory': True, 'realModifierTab': True}
     report['checks'].append('Services adapt to panel width and text size; hover keeps words still; new-tab click preserves the task; real Back restores the source menu and Escape clears its draft; Enter retains query and campus without submitting during IME composition')
 
-    await page.get_by_role('navigation', name='主要導覽', exact=True).get_by_role('link', name='生活', exact=True).click()
+    await page.get_by_role('button', name='查看生活服務', exact=True).click()
     await expect(page.get_by_role('heading', name='生活', exact=True)).to_be_visible()
     card = page.locator('a[data-service-href="/library"]')
     await card.scroll_into_view_if_needed()

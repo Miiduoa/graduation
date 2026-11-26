@@ -33,7 +33,7 @@ export function SchoolAccountRequired({
   const schoolReady = !selection || (
     !selection.loading && selection.catalogStatus === 'ready' && Boolean(selection.selectedSchoolId)
   );
-  const options = useSignInOptions(selection?.selectedSchoolId ?? null, schoolReady);
+  const options = useSignInOptions(selection?.selectedSchoolId ?? null, schoolReady, 'school');
   const destination = campusServiceHref(returnUrl, campusSearch);
   const google = !!nuni?.session;
   const Heading = headingLevel === 3 ? 'h3' : 'h2';

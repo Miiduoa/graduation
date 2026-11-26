@@ -634,13 +634,13 @@ export function NuniMerchantWorkspace({
                   ) : null}
                 </>
               ) : null}
-              {workspace.missingRequirements.length ? (
+              {workspace.missingRequirements?.length ? (
                 <Copy>請先完成營運設定、有庫存的菜單與收款資格。</Copy>
               ) : null}
               {!activationReview ? (
                 <Action
                   disabled={
-                    unavailable || !!settingsDraft || workspace.missingRequirements.length > 0
+                    unavailable || !!settingsDraft || (workspace.missingRequirements?.length ?? 0) > 0
                   }
                   onPress={() => setActivationReview(true)}
                 >

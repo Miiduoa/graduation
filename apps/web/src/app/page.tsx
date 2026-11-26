@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
+import { toCampusRole } from '@campus/shared/src/roles';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFrame } from '@/components/AppFrame';
 import { StudentCardEntry } from '@/components/StudentCardEntry';
@@ -285,7 +286,15 @@ export default function HomePage() {
   const assistant = (
     <TodayAssistantDisclosure
       key={`assistant:${assistantScope}`}
-      preferredWorkContext={teacherOnly ? 'teacher' : undefined}
+      preferredWorkContext={
+        !sessionLoading && !blocked && nuni.session?.isPlatformOperator
+          ? 'operator'
+          : teacherOnly
+            ? 'teacher'
+            : uid && ['staff', 'department_head', 'principal', 'admin'].includes(toCampusRole(role) ?? '')
+              ? 'staff'
+              : undefined
+      }
       ref={assistantEntry}
       onOpenChange={handleAssistantToggle}
     />

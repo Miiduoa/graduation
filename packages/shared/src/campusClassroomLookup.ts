@@ -1,3 +1,4 @@
+import { toPublicSchoolId } from './schoolIds';
 import {
   PROVIDENCE_BUS_STOPS,
   PROVIDENCE_CAMPUS_PLACES,
@@ -458,6 +459,9 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
   if (!query) return { query, status: 'empty', matches: [] };
   const school = validSchoolId(schoolId);
   if (!school) return { query, status: 'unmatched', matches: [] };
+  // Only catalog metadata uses the public alias. Candidate school markers
+  // still have to match the exact bound school above and below.
+  const publicSchool = toPublicSchoolId(school)!;
   const comparable = comparisonText(query);
   // Imported map records are runtime data even when TypeScript callers use the
   // CampusMapPlaceLike interface. A single null row or a numeric ID must not
@@ -499,30 +503,30 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     // Classroom identity accepts normalized names and verified bilingual aliases.
     // Once the supplied name is verified, use the catalog name for attribution's
     // exact-name check while preserving its coordinate check and the original POI.
-    const published = school === 'pu' ? PUBLISHED_PROVIDENCE_PLACES.get(location.id) : undefined;
+    const published = publicSchool === 'pu' ? PUBLISHED_PROVIDENCE_PLACES.get(location.id) : undefined;
     const aliases = published ? PROVIDENCE_ENGLISH_ALIASES.get(published.id) : undefined;
     if (
       published &&
       // Source identity and source category are both necessary: a matching
       // ID/name/coordinate does not make a restaurant a classroom building.
       (isExplicitNonClassroomCategory(published.category) ||
-        (!isSourcedBuildingLabel(school, published, location.name) &&
+        (!isSourcedBuildingLabel(publicSchool, published, location.name) &&
           !aliases?.some((name) => campusPlaceNameMatchesQuery(name, location.name))) ||
-        !providencePlaceSourceUrl(school, { ...location, name: published.name }))
+        !providencePlaceSourceUrl(publicSchool, { ...location, name: published.name }))
     ) continue;
     // A nearby transit stop can be named after a hall or carry its building
     // field in Firestore. Never promote that stop into a classroom destination.
-    if (hasTransitStopIdentity(location, school) || isExplicitNonClassroomCategory(location.category) ||
-        closerToPublishedStopThanSourcedHall(school, location, published)) continue;
+    if (hasTransitStopIdentity(location, publicSchool) || isExplicitNonClassroomCategory(location.category) ||
+        closerToPublishedStopThanSourcedHall(publicSchool, location, published)) continue;
     // A sourced clinic, chapel or sports POI must not navigate to another
     // building through an unsourced Firestore `building` override.
-    const building = sourcedBuildingLabel(school, published, location.building);
+    const building = sourcedBuildingLabel(publicSchool, published, location.building);
     // Only public fields accepted by the existing resolver and legacy codes
     // can outrank names supplied by the catalog.
     if (
-      (!published || isSourcedBuildingLabel(school, published, location.name)) &&
+      (!published || isSourcedBuildingLabel(publicSchool, published, location.name)) &&
       [location.name, building].some((name) =>
-        nameMatchesRoom(comparable, name) || nameMatchesVerifiedCode(school, comparable, name)
+        nameMatchesRoom(comparable, name) || nameMatchesVerifiedCode(publicSchool, comparable, name)
       )
     ) {
       primaryMatches.push(location);

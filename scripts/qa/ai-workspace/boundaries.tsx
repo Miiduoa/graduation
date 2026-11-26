@@ -113,11 +113,13 @@ if (courseworkScenario) {
     removeItem.call(this, key);
   };
 }
-export function navigate(href: string) {
+export function navigate(href: string, options?: { replace?: boolean }) {
   const url = new URL(href, location.origin);
   if (url.origin !== location.origin) throw new Error('Fixture navigation must stay local');
   ledger.navigations.push(url.pathname + url.search + url.hash);
-  history.pushState({}, '', url.pathname + url.search + url.hash);
+  history[options?.replace ? 'replaceState' : 'pushState'](
+    {}, '', url.pathname + url.search + url.hash,
+  );
   update({ pathname: url.pathname, search: url.search.slice(1) });
   window.dispatchEvent(new HashChangeEvent('hashchange'));
 }
@@ -129,8 +131,9 @@ export default function Link({
   href = '/',
   onClick,
   children,
+  replace,
   ...props
-}: AnchorHTMLAttributes<HTMLAnchorElement>) {
+}: AnchorHTMLAttributes<HTMLAnchorElement> & { replace?: boolean }) {
   function follow(event: MouseEvent<HTMLAnchorElement>) {
     onClick?.(event);
     if (
@@ -143,7 +146,7 @@ export default function Link({
     )
       return;
     event.preventDefault();
-    navigate(String(href));
+    navigate(String(href), { replace });
   }
   return (
     <a {...props} href={href} onClick={follow}>
@@ -156,7 +159,10 @@ export function useSearchParams() {
   const query = useFixture().search;
   return useMemo(() => new URLSearchParams(query), [query]);
 }
-export const useRouter = () => ({ push: navigate, replace: navigate });
+export const useRouter = () => ({
+  push: (href: string) => navigate(href),
+  replace: (href: string) => navigate(href, { replace: true }),
+});
 export function switchAccount() {
   update({ owner: state.owner === 'qa-alpha' ? 'qa-beta' : 'qa-alpha', guest: false });
 }

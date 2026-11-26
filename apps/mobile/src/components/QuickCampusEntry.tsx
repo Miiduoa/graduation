@@ -12,6 +12,10 @@ import {
   type MobileQuickAction,
 } from '../services/quickCampusActions';
 import { interpretMobileCampusRequest } from '../services/campusIntentClient';
+import { mobileWorkspaceSuggestions } from '../services/workspaceEntry';
+import { AssistantServiceReply } from '../screens/AssistantServiceReply';
+import type { ServiceScreenProps } from '../screens/UnavailableFeatureScreen';
+import { useAssistantContinuation } from '../services/assistantContinuation';
 
 const favorites = [
   { label: '課表', phrase: '我的課表' },
@@ -50,8 +54,10 @@ type QuickCampusEntryProps = {
   schoolId?: string | null;
   /** The home workspace keeps the same scoped conversation and service actions. */
   presentation?: 'compact' | 'workspace';
-  onOpen: (action: MobileQuickAction) => void;
-  onOpenAssistantRoute?: (route: string) => void;
+  navigation?: ServiceScreenProps['navigation'];
+  onOpen: (action: MobileQuickAction) => boolean | void;
+  onOpenAssistantRoute?: (route: string) => boolean | void;
+  onExplore?: () => void;
 };
 
 /** A new account or school must never inherit the previous conversation or draft. */
@@ -68,8 +74,10 @@ function ScopedQuickCampusEntry({
   uid,
   schoolId,
   presentation = 'compact',
+  navigation,
   onOpen,
   onOpenAssistantRoute,
+  onExplore,
 }: QuickCampusEntryProps) {
   useThemeVersion();
   const { colors, radius, typography } = theme;
@@ -89,6 +97,7 @@ function ScopedQuickCampusEntry({
   const pending = useRef<AbortController | null>(null);
   const sequence = useRef(0);
   const mounted = useRef(true);
+  const openWithContinuation = useAssistantContinuation(navigation, () => mounted.current);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -115,7 +124,7 @@ function ScopedQuickCampusEntry({
   const canAsk = Boolean(uid && schoolId);
   const modelBusy = shown?.status === 'loading';
   const starters = canAsk
-    ? ['下一堂課在哪裡？', '圖書館開放時間']
+    ? mobileWorkspaceSuggestions('student', false)
     : ['圖書館開放時間', '公車到站時間'];
 
   function update(value: string) {
@@ -206,8 +215,15 @@ function ScopedQuickCampusEntry({
   }
 
   function open(action: MobileQuickAction) {
+    if (!mounted.current) return;
     Keyboard.dismiss();
-    onOpen(action);
+    openWithContinuation(() => onOpen(action) !== false);
+  }
+
+  function openReplyRoute(route: string) {
+    if (!mounted.current || !onOpenAssistantRoute) return;
+    Keyboard.dismiss();
+    openWithContinuation(() => onOpenAssistantRoute(route) !== false);
   }
 
   return (
@@ -265,8 +281,13 @@ function ScopedQuickCampusEntry({
           <Text accessibilityLiveRegion="polite" selectable style={{ ...typography.body, color: textColor }}>
             {lastReply.content}
           </Text>
-          {replyAction && onOpenAssistantRoute && (
-            <Pressable accessibilityRole="button" onPress={() => onOpenAssistantRoute(replyAction.route)}
+          {lastReply.serviceSelection ? (
+            <AssistantServiceReply selection={lastReply.serviceSelection}
+              audience={uid ? 'campus' : 'guest'} schoolId={schoolId} navigation={navigation}
+              disabled={asking} isCurrent={() => mounted.current} />
+          ) : null}
+          {!lastReply.serviceSelection && replyAction && onOpenAssistantRoute && (
+            <Pressable accessibilityRole="button" onPress={() => openReplyRoute(replyAction.route)}
               style={{ alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center' }}>
               <Text style={{ color: colors.accent, ...typography.bodySmall }}>開啟{replyAction.label}</Text>
             </Pressable>
@@ -546,6 +567,14 @@ function ScopedQuickCampusEntry({
         </View>
       )}
 
+      {workspace && onExplore ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="探索更多 nuni 用法"
+          onPress={() => { if (mounted.current) { Keyboard.dismiss(); onExplore(); } }}
+          style={{ minHeight: 44, flexDirection: 'row', gap: 8, alignItems: 'center', alignSelf: 'flex-start' }}>
+          <Ionicons name="compass-outline" size={18} color={colors.accent} />
+          <Text style={{ ...typography.bodySmall, color: colors.accent }}>探索更多用法</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

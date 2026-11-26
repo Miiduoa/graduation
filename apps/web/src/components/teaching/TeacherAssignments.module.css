@@ -1,52 +1,429 @@
+/* Teacher assignments & grading ledger — paper-and-ink review desk */
+
 .panel {
-  border-top: 1px solid var(--border);
-  padding-top: 30px;
-  margin-top: 34px;
+  border-top: 2px solid var(--border-strong);
+  padding-top: 28px;
+  margin-top: 32px;
+  min-width: 0;
 }
-.heading h2 { margin: 0 0 8px; font-size: 23px; }
-.heading p, .note { color: var(--muted); line-height: 1.65; }
-.compose { border: 1px solid var(--border); border-radius: 10px; margin: 22px 0; }
-.compose summary { cursor: pointer; padding: 16px 20px; font-weight: 650; }
-.compose[open] summary { border-bottom: 1px solid var(--border); }
-.form { display: grid; gap: 15px; padding: 20px; }
-.form label { display: grid; gap: 7px; font-weight: 560; }
-.form input:not([type='checkbox']), .form textarea {
-  box-sizing: border-box; min-width: 0; width: 100%; border: 1px solid var(--border);
-  border-radius: 7px; background: var(--surface, transparent); color: inherit;
-  padding: 11px 12px; font: inherit;
+
+.heading {
+  display: grid;
+  gap: 6px;
 }
-.form textarea { resize: vertical; }
-.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.form .check { display: flex; gap: 10px; align-items: center; }
-.check input { width: 17px; height: 17px; }
-.action, .secondary {
-  border-radius: 7px; padding: 10px 16px; font: inherit; cursor: pointer;
+
+.heading h2 {
+  margin: 0;
+  font-size: var(--font-h2-size);
+  line-height: var(--font-h2-line-height);
+  font-weight: 700;
+  letter-spacing: var(--font-h2-letter-spacing);
+  color: var(--text);
 }
-.action { color: var(--on-brand); background: var(--brand); border: 1px solid var(--brand); justify-self: start; }
-.secondary { background: transparent; border: 1px solid var(--border); color: inherit; text-decoration: none; display: inline-flex; align-items: center; }
-.action:disabled, .secondary:disabled { opacity: .55; cursor: not-allowed; }
-.error { color: var(--danger); white-space: pre-wrap; }
-.success { color: var(--success); }
-.reviews { margin-top: 24px; }
-.reviews h3 { font-size: 19px; }
-.reviewItem { border-top: 1px solid var(--border); padding: 14px 0; }
-.reviewHeading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
-.reviewHeading span { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
-.submissions { padding: 12px 0; }
-.submissionList { display: grid; gap: 14px; }
-.queueFilters { display: flex; flex-wrap: wrap; gap: 8px; }
-.queueFilters button[aria-pressed='true'] {
+
+.heading p,
+.note {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+  line-height: 1.65;
+}
+
+/* ── Expandable Assignment Composer ── */
+
+.compose {
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface);
+  margin: 20px 0;
+}
+
+.compose summary {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  cursor: pointer;
+  padding: 12px 20px;
+  font-size: var(--font-body-size);
+  font-weight: 700;
+  color: var(--text);
+  list-style: none;
+}
+
+.compose summary::-webkit-details-marker {
+  display: none;
+}
+
+.compose summary::after {
+  content: '+';
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 1.25rem;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.compose[open] summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.compose[open] summary::after {
+  content: '−';
+}
+
+.compose summary:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -3px;
+}
+
+/* ── Forms & Quiet Inputs ── */
+
+.form {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  min-width: 0;
+}
+
+.form label {
+  display: grid;
+  gap: 6px;
+  font-size: var(--font-label-size);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.form input:not([type='checkbox']),
+.form textarea {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: var(--font-body-size);
+  line-height: 1.5;
+}
+
+.form input:not([type='checkbox']):focus-visible,
+.form textarea:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-color: var(--brand);
+}
+
+.form textarea {
+  resize: vertical;
+  min-height: 96px;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.form .check {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.check input {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--brand);
+}
+
+/* ── Quiet Ink Controls ── */
+
+.action,
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border-radius: 2px;
+  padding: 8px 16px;
+  font: inherit;
+  font-size: var(--font-body-sm-size);
+  font-weight: 650;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+}
+
+.action {
+  color: var(--on-brand);
+  background: var(--brand);
+  border: 1px solid var(--brand);
+  justify-self: start;
+}
+
+.action:hover:not(:disabled) {
+  background: var(--brand2);
+  border-color: var(--brand2);
+}
+
+.secondary {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--bg-soft);
   border-color: var(--brand);
   color: var(--brand);
-  font-weight: 650;
 }
-.submission { padding: 16px; border: 1px solid var(--border); border-radius: 9px; min-width: 0; }
-.submission .form { padding: 0; }
-.answer { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
-.published { border-left: 3px solid var(--brand); padding-left: 12px; }
-@media (max-width: 700px) { .fields { grid-template-columns: minmax(0, 1fr); } .form { padding: 16px; } }
 
-.history { margin: 14px 0 0; padding: 0 0 0 24px; }
-.history li { padding: 12px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
-.history li p { margin: 6px 0; white-space: pre-wrap; }
-.published .form { margin: 16px 0; }
+.action:focus-visible,
+.secondary:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.action:disabled,
+.secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Status & Semantic Callouts ── */
+
+.error {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  border-left: 3px solid var(--danger);
+  border-radius: 0 2px 2px 0;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--font-body-sm-size);
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.success {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--success);
+  border-radius: 0 2px 2px 0;
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: var(--font-body-sm-size);
+  font-weight: 600;
+  line-height: 1.65;
+}
+
+/* ── Assignment Review Ledger ── */
+
+.reviews {
+  margin-top: 24px;
+}
+
+.reviews h3 {
+  margin: 0 0 12px;
+  font-size: var(--font-h3-size);
+  line-height: var(--font-h3-line-height);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.reviewItem {
+  border-top: 1px solid var(--border);
+  padding: 16px 4px;
+}
+
+.reviewItem[data-assignment-focused='true'] {
+  border-left: 3px solid var(--brand);
+  padding-left: 14px;
+  background: var(--bg-soft);
+}
+
+.reviewItem[data-assignment-focused='true'] .queueFilters {
+  background: var(--bg-soft);
+}
+
+.reviewHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 10px;
+}
+
+.reviewHeading span {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--font-body-size);
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* ── Submission Queue & Grading Sheets ── */
+
+.submissions {
+  padding: 14px 0 4px;
+}
+
+.submissionList {
+  display: grid;
+  gap: 14px;
+}
+
+.queueFilters {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.queueFilters button {
+  font-variant-numeric: tabular-nums;
+}
+
+.queueFilters button[aria-pressed='true'] {
+  border-color: var(--brand);
+  border-bottom: 2px solid var(--brand);
+  background: var(--accent-soft);
+  color: var(--brand);
+  font-weight: 700;
+}
+
+.submission {
+  display: grid;
+  gap: 12px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface);
+  min-width: 0;
+}
+
+.submission .form {
+  padding: 0;
+}
+
+.answer {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: var(--font-body-size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--font-body-line-height);
+}
+
+.published {
+  display: grid;
+  gap: 8px;
+  border-left: 3px solid var(--brand);
+  padding: 12px 14px;
+  background: var(--bg-soft);
+}
+
+.published strong {
+  font-size: var(--font-body-size);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.published p {
+  margin: 0;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.published .form {
+  margin: 12px 0 4px;
+}
+
+/* ── Revision Audit Trail ── */
+
+.history {
+  margin: 10px 0 0;
+  padding: 0 0 0 20px;
+  border-left: 2px solid var(--border-strong);
+}
+
+.history li {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  font-size: var(--font-body-sm-size);
+  overflow-wrap: anywhere;
+}
+
+.history li:first-child {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.history li strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.history li p {
+  margin: 4px 0;
+  white-space: pre-wrap;
+}
+
+:global(:root[data-density='compact']) .submission {
+  padding: 14px 16px;
+}
+
+:global(:root[data-density='compact']) .form {
+  padding: 14px;
+}
+
+@media (max-width: 700px) {
+  .fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .form {
+    padding: 16px;
+  }
+
+  .submission {
+    padding: 16px;
+  }
+
+  .reviewHeading {
+    align-items: stretch;
+  }
+
+  .reviewHeading span {
+    flex-basis: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action,
+  .secondary {
+    transition: none;
+  }
+}

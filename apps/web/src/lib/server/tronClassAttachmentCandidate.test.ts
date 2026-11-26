@@ -104,6 +104,8 @@ describe('controlled attachment transfer', () => {
     s.fetchStorage.mockImplementationOnce(async () => { stages.push('binary'); return new Response(null, { status: 201 }); });
     const result = await s.candidate.dispatch(OWNER, s.file);
     expect(stages).toEqual(['claim', 'metadata', 'binary', 'callback']);
+    expect(s.authorize).toHaveBeenCalledExactlyOnceWith(OWNER, { courseId: 10, homeworkId: 20 },
+      expect.any(AbortSignal), s.file.revision);
     expect(result).toEqual({ state: 'transferred', confirmation: 'awaiting-confirmation', ownerKey: OWNER,
       uploadId: 40, courseId: 10, homeworkId: 20, studentId: 30, revision: REVISION,
       operationId: s.file.operationId, fileId: s.file.fileId, name: s.file.name,

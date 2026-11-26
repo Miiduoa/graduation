@@ -2,6 +2,7 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { CampusHubScreen } from './CampusHubScreen';
+import { ExploreScreen } from './ExploreScreen';
 import { ARNavigationScreen } from './ARNavigationScreen';
 import { AccessibleRouteScreen } from './AccessibleRouteScreen';
 import { OnBusModeScreen } from './OnBusModeScreen';
@@ -44,9 +45,10 @@ export function MapStack() {
   return (
     <Stack.Navigator
       id={undefined}
-      initialRouteName="CampusHome"
+      initialRouteName="Explore"
       screenOptions={createStackScreenOptions()}
     >
+      <Stack.Screen name="Explore" component={ExploreScreen} options={{ title: '探索', headerShown: false }} />
       <Stack.Screen
         name="CampusHome"
         component={CampusHubScreen}

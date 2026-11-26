@@ -163,11 +163,11 @@ async def check_dialogs_and_fields(page, config, report, capture, suffix=''):
         await expect(dialog).to_have_css('animation-name', 'none')
 
     root_size = await page.locator('html').evaluate('node => parseFloat(getComputedStyle(node).fontSize)')
-    expected_body = root_size * (1.0625 if config.get('font') == 'large' else .9375)
+    expected_body = root_size * (1.125 if config.get('font') == 'large' else 1)
     field_sizes = {
         '#fixture-task-title': expected_body,
         '#fixture-large-field': root_size * (1.1875 if config.get('font') == 'large' else 1.0625),
-        '#fixture-small-field': root_size * (.9375 if config.get('font') == 'large' else .8125),
+        '#fixture-small-field': root_size * (1 if config.get('font') == 'large' else .875),
         '#fixture-password': expected_body,
         '#fixture-icon-field': expected_body,
         '#fixture-reminder-time': expected_body,
@@ -651,14 +651,18 @@ async def scenario(browser, origin, config, report):
         await trigger.scroll_into_view_if_needed()
         box = await trigger.bounding_box()
         await page.mouse.move(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+        await expect(trigger).to_have_css('opacity', '1')
         await page.mouse.down()
+        assert await trigger.evaluate("node => node.matches(':active')"), 'The real button was not pressed'
+        await expect(trigger).to_have_css('opacity', '0.86')
         reduced = config.get('motion') == 'reduce' or config.get('system_motion') == 'reduce'
         if reduced:
             assert await trigger.evaluate("node => getComputedStyle(node).transform === 'none'"), 'Reduced motion did not suppress press displacement'
             assert await trigger.evaluate("node => getComputedStyle(node).transitionDuration.split(',').every(value => parseFloat(value) <= .001)"), 'Reduced motion transition remained active'
         else:
-            await expect(trigger).to_have_css('transform', 'matrix(0.98, 0, 0, 0.98, 0, 0)')
+            await expect(trigger).to_have_css('transform', 'none')
         await page.mouse.up()
+        await expect(trigger).to_have_css('opacity', '1')
         notification = page.get_by_role('status').filter(has_text='已儲存安排')
         close = page.get_by_role('button', name='關閉通知：已儲存安排', exact=True)
         await expect(notification).to_be_visible()
@@ -725,9 +729,9 @@ async def scenario(browser, origin, config, report):
         await check_section('loading-feedback', lambda: check_loading_feedback(page, config, report, capture))
         await check_section('quick-search', lambda: check_quick_search(page, config, report, capture))
         await check_section('service-navigation', lambda: check_service_navigation(page, config, report, capture))
+        await check_section('search-continuity', lambda: check_search_continuity(page, config, report, capture))
         await check_section('course-editing', lambda: check_course_editing(page, config, report, capture))
         await check_section('record-editing', lambda: check_record_editing(page, config, report, capture))
-        await check_section('search-continuity', lambda: check_search_continuity(page, config, report, capture))
         if config['name'] in ('desktop-light', 'compact-dark-site-motion'):
             await check_section('short-services', lambda: check_short_service_menu(page, report, capture))
             await check_section('short-navigation', lambda: check_short_navigation_panels(page, report, capture))

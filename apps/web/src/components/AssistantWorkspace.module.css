@@ -99,6 +99,23 @@
   font-size: var(--font-body-sm-size, 13px);
 }
 
+.wsHandoff {
+  margin-bottom: 20px;
+  padding: 16px;
+  border: 1px solid var(--control-border);
+  border-radius: 14px;
+  background: var(--surface);
+  font-size: var(--font-body-sm-size);
+  line-height: 1.6;
+}
+
+.wsHandoff h3 { margin: 0 0 8px; font-size: var(--font-body-size); }
+.wsHandoff p { margin: 8px 0; }
+.wsHandoff blockquote { margin: 12px 0; padding-inline-start: 12px; border-inline-start: 2px solid var(--brand); overflow-wrap: anywhere; }
+.wsHandoffActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.wsHandoffActions button { min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font: inherit; cursor: pointer; }
+.wsHandoffActions button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
+
 .wsResume {
   position: fixed;
   z-index: 60;

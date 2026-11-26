@@ -13,12 +13,13 @@
  */
 
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { Pressable, ScrollView, Text, View, Alert, Share } from 'react-native';
+import { Pressable, ScrollView, Text, View, Alert, Share, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Screen } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { pageTitleFont } from '../ui/styles';
 import { useThemeMode } from '../state/theme';
 import { analytics } from '../services/analytics';
 import { upsertSavedPlace } from '../services/savedPlaces';
@@ -26,7 +27,6 @@ import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { VerifiedBusStopArrivals } from '../components/VerifiedBusStopArrivals';
 import {
-  CAMPUS_BUS_ROUTES,
   getAllBusStops,
   getRoutesByStop,
   haversineMeters,
@@ -120,57 +120,46 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 40, gap: 16 }}
       >
-        {/* Hero */}
         <View
           style={{
-            backgroundColor: theme.colors.accent,
-            padding: 20,
-            borderRadius: 20,
-            marginHorizontal: 12,
-            marginTop: 8,
+            paddingVertical: 12,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderColor: theme.colors.border,
           }}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <View
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 14,
-                backgroundColor: 'rgba(255,255,255,0.2)',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Ionicons name="bus" size={22} color="#fff" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{
-                  color: 'rgba(255,255,255,0.85)',
-                  fontSize: 11,
-                  fontWeight: '700',
-                  letterSpacing: 2,
-                }}
-              >
-                公車站
-              </Text>
-              <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700' }}>{stop.name}</Text>
-            </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name="bus-outline" size={16} color={theme.colors.accent} />
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 13 }}>公車站</Text>
           </View>
-          <View style={{ flexDirection: 'row', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
-            {stop.hasShelter && <FeatureChip text="遮雨棚" />}
-            {stop.hasInfoBoard && <FeatureChip text="LED 看板" />}
-            {stop.insideCampus && <FeatureChip text="校內" />}
-            <FeatureChip text={`${routesAtStop.length} 條路線`} />
-          </View>
+          <Text
+            accessibilityRole="header"
+            style={{
+              color: theme.colors.text,
+              fontFamily: pageTitleFont,
+              fontSize: 30,
+              marginVertical: 6,
+            }}
+          >
+            {stop.name}
+          </Text>
+          <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 21 }}>
+            {[
+              `${routesAtStop.length} 條路線`,
+              stop.hasShelter && '遮雨棚',
+              stop.hasInfoBoard && 'LED 看板',
+              stop.insideCampus && '校內',
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
-            <CtaBtn icon="navigate" label="在地圖上查看" onPress={handleStartNav} />
+            <CtaBtn icon="navigate" primary label="在地圖上查看" onPress={handleStartNav} />
             <CtaBtn icon="bookmark-outline" label="儲存" onPress={handleSavePlace} />
             <CtaBtn icon="share-outline" label="分享" onPress={handleShareStop} />
           </View>
         </View>
 
-        <View style={{ paddingHorizontal: 12, gap: 10 }}>
+        <View style={{ gap: 10 }}>
           <Text style={{ color: theme.colors.muted, lineHeight: 21 }}>
             站點與路線來源：App
             內建參考資料，非即時班表。營運時間、班距與停靠資訊可能有異動，請以官方公告為準。
@@ -183,7 +172,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
         </View>
 
         {/* Routes section */}
-        <View style={{ paddingHorizontal: 12, gap: 10 }}>
+        <View style={{ gap: 10 }}>
           <Text style={{ ...SECTION_HEADER }}>經過此站的路線</Text>
           {routesAtStop.length === 0 && (
             <Text style={{ color: theme.colors.muted, textAlign: 'center', paddingVertical: 20 }}>
@@ -196,20 +185,17 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
               <View
                 key={rt.id}
                 style={{
-                  backgroundColor: theme.colors.surface,
-                  borderRadius: 16,
-                  borderWidth: 1,
+                  borderBottomWidth: StyleSheet.hairlineWidth,
                   borderColor: theme.colors.border,
-                  borderLeftWidth: 4,
-                  borderLeftColor: rt.color,
-                  overflow: 'hidden',
                 }}
               >
                 {/* Route header */}
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${rt.code} ${rt.shortName}`}
                   onPress={() => nav.navigate('BusV2', { initialRouteId: rt.id })}
                   style={({ pressed }) => ({
-                    padding: 14,
+                    paddingVertical: 14,
                     backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
                     flexDirection: 'row',
                     alignItems: 'center',
@@ -218,13 +204,14 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
                 >
                   <View
                     style={{
-                      paddingHorizontal: 10,
-                      paddingVertical: 4,
-                      borderRadius: 8,
-                      backgroundColor: rt.color,
+                      paddingLeft: 10,
+                      paddingRight: 4,
+                      paddingVertical: 2,
+                      borderLeftWidth: 3,
+                      borderLeftColor: rt.color,
                     }}
                   >
-                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
+                    <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
                       {rt.code}
                     </Text>
                   </View>
@@ -251,7 +238,6 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
                   style={{
                     flexDirection: 'row',
                     gap: 4,
-                    paddingHorizontal: 14,
                     paddingBottom: 12,
                     flexWrap: 'wrap',
                   }}
@@ -260,8 +246,8 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
                   <MiniTag
                     text={`參考班距 ${rt.peakFrequencyMin}-${rt.offPeakFrequencyMin} 分鐘`}
                   />
-                  {rt.studentFree && <MiniTag text="學生免費" color="#34D399" />}
-                  {rt.hasAccessibleBus && <MiniTag text="♿ 低底盤" color="#34D399" />}
+                  {rt.studentFree && <MiniTag text="學生免費" color={theme.colors.success} />}
+                  {rt.hasAccessibleBus && <MiniTag text="♿ 低底盤" color={theme.colors.success} />}
                 </View>
               </View>
             );
@@ -270,15 +256,11 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
 
         {/* Transfer routes */}
         {stop.transferRoutes && stop.transferRoutes.length > 0 && (
-          <View style={{ paddingHorizontal: 12 }}>
+          <View style={{ gap: 4 }}>
             <Text style={{ ...SECTION_HEADER }}>可在此站轉乘</Text>
             <View
               style={{
-                padding: 14,
-                backgroundColor: theme.colors.surface,
-                borderRadius: 14,
-                borderWidth: 1,
-                borderColor: theme.colors.border,
+                paddingVertical: 8,
                 flexDirection: 'row',
                 gap: 6,
                 flexWrap: 'wrap',
@@ -288,12 +270,8 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
                 <View
                   key={id}
                   style={{
-                    paddingHorizontal: 10,
-                    paddingVertical: 5,
-                    backgroundColor: theme.colors.surface2,
-                    borderRadius: 99,
-                    borderWidth: 1,
-                    borderColor: theme.colors.border,
+                    paddingRight: 12,
+                    paddingVertical: 4,
                   }}
                 >
                   <Text style={{ color: theme.colors.text, fontSize: 11, fontWeight: '700' }}>
@@ -307,25 +285,26 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
 
         {/* Nearby POIs */}
         {nearbyPois.length > 0 && (
-          <View style={{ paddingHorizontal: 12 }}>
+          <View style={{ gap: 4 }}>
             <Text style={{ ...SECTION_HEADER }}>步行 5 分鐘內</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 8 }}
+              contentContainerStyle={{ gap: 14 }}
             >
               {nearbyPois.map((poi) => {
                 const d = haversineMeters(stop.lat, stop.lng, poi.lat, poi.lng);
                 return (
                   <Pressable
                     key={poi.id}
+                    accessibilityRole="button"
                     onPress={() => nav.navigate('PoiDetail', { id: poi.id })}
                     style={({ pressed }) => ({
                       width: 160,
-                      padding: 10,
-                      borderRadius: 12,
-                      backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface,
-                      borderWidth: 1,
+                      paddingVertical: 10,
+                      minHeight: 44,
+                      backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
+                      borderTopWidth: StyleSheet.hairlineWidth,
                       borderColor: theme.colors.border,
                     })}
                   >
@@ -349,23 +328,18 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
   );
 }
 
-function FeatureChip({ text }: { text: string }) {
-  useThemeMode();
-  return (
-    <View
-      style={{
-        paddingHorizontal: 9,
-        paddingVertical: 3,
-        backgroundColor: 'rgba(255,255,255,0.18)',
-        borderRadius: 99,
-      }}
-    >
-      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{text}</Text>
-    </View>
-  );
-}
-
-function CtaBtn({ icon, label, onPress }: { icon: any; label: string; onPress: () => void }) {
+function CtaBtn({
+  icon,
+  label,
+  onPress,
+  primary = false,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  primary?: boolean;
+}) {
+  const ink = primary ? theme.colors.onAccent : theme.colors.accent;
   useThemeMode();
   return (
     <Pressable
@@ -373,18 +347,24 @@ function CtaBtn({ icon, label, onPress }: { icon: any; label: string; onPress: (
       accessibilityLabel={label}
       onPress={onPress}
       style={({ pressed }) => ({
-        flex: 1,
-        paddingVertical: 10,
-        borderRadius: 12,
-        backgroundColor: pressed ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.16)',
+        flexGrow: primary ? 2 : 1,
+        minHeight: 44,
+        paddingHorizontal: 8,
+        borderRadius: theme.radius.sm,
+        backgroundColor: primary
+          ? theme.colors.accent
+          : pressed
+            ? theme.colors.surface2
+            : 'transparent',
+        opacity: pressed && primary ? 0.85 : 1,
         flexDirection: 'row',
         gap: 4,
         alignItems: 'center',
         justifyContent: 'center',
       })}
     >
-      <Ionicons name={icon} size={14} color="#fff" />
-      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{label}</Text>
+      <Ionicons name={icon} size={16} color={ink} />
+      <Text style={{ color: ink, fontSize: 14, fontWeight: '600' }}>{label}</Text>
     </Pressable>
   );
 }
@@ -394,32 +374,23 @@ function MiniTag({ text, color }: { text: string; color?: string }) {
   return (
     <View
       style={{
-        paddingHorizontal: 7,
+        paddingRight: 6,
         paddingVertical: 2,
-        borderRadius: 6,
-        backgroundColor: color ? `${color}25` : theme.colors.surface2,
-        borderWidth: 1,
-        borderColor: color ? `${color}55` : theme.colors.border,
       }}
     >
-      <Text style={{ color: color ?? theme.colors.muted, fontSize: 10, fontWeight: '700' }}>
-        {text}
-      </Text>
+      <Text style={{ color: color ?? theme.colors.muted, fontSize: 12 }}>{text}</Text>
     </View>
   );
 }
 
 const SECTION_HEADER = {
   get color() {
-    return theme.colors.muted;
+    return theme.colors.text;
   },
-  fontSize: 11,
-  fontWeight: '700' as const,
-  letterSpacing: 2,
-  textTransform: 'uppercase' as const,
+  fontSize: 18,
+  fontWeight: '600' as const,
   marginTop: 4,
   marginBottom: 8,
-  marginLeft: 4,
 };
 
 export default BusStopDetailScreen;

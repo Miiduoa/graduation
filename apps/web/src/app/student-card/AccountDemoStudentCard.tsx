@@ -267,8 +267,7 @@ function DemoWallet({
         </p>
       </div>
       <aside className={styles.guide}>
-        <p className={styles.eyebrow}>學生證展示</p>
-        <h2>從卡面到出示，一次走完</h2>
+        <h2>如何出示展示學生證</h2>
         <ol>
           <li>
             <strong>打開自己的卡片</strong>

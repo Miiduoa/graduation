@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useId, useImperativeHandle, useRef, type Ref } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   getAssistantRoleWorkflow,
   type AssistantWorkContext,
@@ -9,9 +11,10 @@ import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useAuth } from './AuthGuard';
 import { CampusIcon } from './CampusIcon';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import type { AssistantWorkspace } from './AssistantWorkspaceContext';
 import type { TodayAssistantHandle } from './TodayCampusEntry';
-import styles from './AssistantWorkspaceEntry.module.css';
+import styles from './TodayCampusEntry.module.css';
 
 /** The home composer is the same draft as the persistent workspace, never a second conversation. */
 export function AssistantWorkspaceEntry({
@@ -29,6 +32,8 @@ export function AssistantWorkspaceEntry({
   const field = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
   const campus = useCampusBrowseContext();
+  const search = useSearchParams();
+  const campusSearch = useCampusNavigationSearch(search);
   const auth = useAuth();
   const nuni = useNuniSession();
   const personal = Boolean(auth.user || nuni.session) && campus.status === 'ready';
@@ -45,24 +50,18 @@ export function AssistantWorkspaceEntry({
   }, [onOpenChange, workspace.open]);
 
   return (
-    <section className={styles.entry} aria-labelledby={`${id}-title`}>
-      <div className={styles.heading}>
-        <div>
-          <p className={styles.eyebrow}>nuni 助理</p>
+    <section className={styles.starter} aria-labelledby={`${id}-title`}>
+      <div className={styles.starterHeading}>
           <h2 id={`${id}-title`}>今天想完成什麼？</h2>
-        </div>
-        <span className={styles.context}>
-          <CampusIcon name={personal ? 'course' : 'search'} size={15} />
-          {campus.status === 'ready' ? campus.schoolName : '先找校園服務'}
-        </span>
+        <Link href={campusServiceHref('/explore', campusSearch)} className={styles.exploreLink}>探索用法</Link>
       </div>
-      <p className={styles.description}>
+      <p className={styles.starterDescription}>
         {personal
-          ? '查課表、整理待辦，或把想做的事說出來。'
+          ? workflow.purpose
           : '先找需要的服務，登入後再接上你的課表與待辦。'}
       </p>
       <form
-        className={styles.composer}
+        className={styles.starterComposer}
         aria-label="開始校園任務"
         onSubmit={(event) => {
           event.preventDefault();

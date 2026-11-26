@@ -26,7 +26,7 @@ beforeEach(() => {
 });
 
 it.each([
-  ['/library/unavailable', '生活', '/life'],
+  ['/library/unavailable', '探索', '/explore'],
   ['/classroom/course/missing', '課務', '/timetable'],
   ['/community/post/missing', '交流', '/connect'],
   ['/student-card/missing', '我的', '/profile'],
@@ -44,16 +44,19 @@ it.each([
   expect(screen.queryByRole('button', { name: '重新載入' })).toBeNull();
 });
 
-it('retries only on request and keeps an alternative out of a failing section root', () => {
-  navigation.pathname = '/life';
+it.each([
+  ['/explore', '今天', '/'],
+  ['/life', '探索', '/explore'],
+])('retries only on request and keeps an alternative out of the failing route %s', (pathname, label, href) => {
+  navigation.pathname = pathname;
   const retry = vi.fn();
   render(<PageRecovery kind="error" onRetry={retry} />);
   expect(retry).not.toHaveBeenCalled();
   expect(screen.getByRole('heading', { name: '這個頁面暫時打不開' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
   expect(retry).toHaveBeenCalledOnce();
-  expect(screen.getByRole('link', { name: '返回今天' }).getAttribute('href')).toBe(
-    '/?schoolId=pu&campus=pu',
+  expect(screen.getByRole('link', { name: `返回${label}` }).getAttribute('href')).toBe(
+    `${href}?schoolId=pu&campus=pu`,
   );
 });
 
@@ -64,8 +67,8 @@ it('uses the current campus when the selected school has changed since the broke
     catalogStatus: 'ready',
   };
   render(<PageRecovery kind="error" onRetry={() => {}} />);
-  expect(screen.getByRole('link', { name: '返回生活' }).getAttribute('href')).toBe(
-    '/life?schoolId=nchu&campus=nchu&school=NCHU',
+  expect(screen.getByRole('link', { name: '返回探索' }).getAttribute('href')).toBe(
+    '/explore?schoolId=nchu&campus=nchu&school=NCHU',
   );
   expect(screen.getByRole('link', { name: '查看全部校園服務' }).getAttribute('href')).toBe(
     '/search?schoolId=nchu&campus=nchu&school=NCHU',
@@ -75,8 +78,8 @@ it('uses the current campus when the selected school has changed since the broke
 it('preserves an explicit all-campus selection instead of reviving the broken URL campus', () => {
   navigation.selection = { selectedSchool: null, loading: false, catalogStatus: 'ready' };
   render(<PageRecovery kind="missing" />);
-  expect(screen.getByRole('link', { name: '返回生活' }).getAttribute('href')).toBe(
-    '/life?campus=all',
+  expect(screen.getByRole('link', { name: '返回探索' }).getAttribute('href')).toBe(
+    '/explore?campus=all',
   );
 });
 

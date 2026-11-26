@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import * as ecampusPolicy from '@campus/shared/src/puEcampusDataPolicy';
 import {
   isSchoolLoginEntryAvailable,
   isStudentIdLoginAvailable,
@@ -6,9 +7,8 @@ import {
   resetSchoolLoginProviderCache,
   setSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
-import { nuniPlatformRequest } from '../services/nuniClient';
 import { signInWithStudentId } from '../services/studentIdAuth';
-import { setTCSavedCredentials } from '../services/tronClassClient';
+import { tcLogin } from '../services/tronClassClient';
 
 jest.mock('../services/nuniClient', () => ({ nuniPlatformRequest: jest.fn() }));
 jest.mock('../services/mockAuth', () => ({ saveMockAuthSession: jest.fn() }));
@@ -18,8 +18,7 @@ jest.mock('../services/puDirectScraper', () => ({
 }));
 jest.mock('../services/tronClassClient', () => ({
   setTCBackendSession: jest.fn(),
-  setTCSavedCredentials: jest.fn(),
-  clearTCSavedCredentials: jest.fn(),
+  tcLogin: jest.fn(),
   clearTCSession: jest.fn(),
 }));
 jest.mock('../services/puDataCache', () => ({}));
@@ -32,11 +31,19 @@ jest.mock('../firebase', () => ({
 }));
 jest.mock('../services/testSeedData', () => ({ seedTestData: jest.fn() }));
 jest.mock('../services/postLoginContextFromCaches', () => ({}));
-jest.mock('../services/postLoginDataRouter', () => ({}));
+jest.mock('../services/postLoginDataRouter', () => ({
+  clearPostLoginCache: jest.fn(async () => undefined),
+}));
 
 beforeEach(() => {
   jest.clearAllMocks();
   resetSchoolLoginProviderCache();
+  Object.assign(Constants.expoConfig!, {
+    extra: {
+      appEnv: 'production',
+      release: { releasedSchoolIds: ['pu'], features: { enabled: true, sso: true } },
+    },
+  });
 });
 test.each([
   { appEnv: 'production', release: { releasedSchoolIds: [], features: { sso: true } } },
@@ -56,7 +63,7 @@ test.each([
     await expect(
       signInWithStudentId({ schoolId: 'pu', studentId: 's123', password: 'secret' }),
     ).rejects.toThrow('帳號連線尚未開放');
-    expect(setTCSavedCredentials).not.toHaveBeenCalled();
+    expect(tcLogin).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
     globalThis.fetch = priorFetch;
   },
@@ -77,28 +84,56 @@ test('accepted SSO still refuses to send a different school credentials to Provi
   setSchoolLoginProviderKinds(['google-consumer']);
   expect(isSchoolLoginEntryAvailable('pu')).toBe(false);
   setSchoolLoginProviderKinds(['school-issued']);
-  expect(isSchoolLoginEntryAvailable('pu')).toBe(true);
+  expect(isSchoolLoginEntryAvailable('pu')).toBe(false);
+  const source = jest.spyOn(ecampusPolicy, 'isPuEcampusDataFetchEnabled').mockReturnValue(true);
+  try {
+    expect(isSchoolLoginEntryAvailable('pu')).toBe(true);
+  } finally {
+    source.mockRestore();
+  }
   expect(isStudentIdLoginAvailable('other-school')).toBe(false);
   await expect(
     signInWithStudentId({ schoolId: 'other-school', studentId: 's123', password: 'secret' }),
   ).rejects.toThrow('帳號連線尚未開放');
-  expect(setTCSavedCredentials).not.toHaveBeenCalled();
+  expect(tcLogin).not.toHaveBeenCalled();
 });
 
 test('a temporary provider error can recover on the next lookup', async () => {
-  jest.mocked(nuniPlatformRequest)
+  const source = jest.spyOn(ecampusPolicy, 'isPuEcampusDataFetchEnabled').mockReturnValue(true);
+  const priorFetch = globalThis.fetch;
+  const request = jest.fn()
     .mockRejectedValueOnce(new Error('offline'))
-    .mockResolvedValueOnce({ kinds: ['school-issued'] });
-  await expect(loadSchoolLoginProviderKinds()).resolves.toEqual([]);
-  await expect(loadSchoolLoginProviderKinds()).resolves.toEqual(['school-issued']);
-  expect(nuniPlatformRequest).toHaveBeenCalledTimes(2);
+    .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ studentId: true }) });
+  globalThis.fetch = request;
+  try {
+    await expect(loadSchoolLoginProviderKinds('pu')).resolves.toEqual([]);
+    await expect(loadSchoolLoginProviderKinds('pu')).resolves.toEqual(['student-id']);
+    expect(request).toHaveBeenCalledTimes(2);
+  } finally {
+    globalThis.fetch = priorFetch;
+    source.mockRestore();
+  }
 });
 
 test('retry refreshes a cached unavailable provider and keeps a usable result', async () => {
+  const source = jest.spyOn(ecampusPolicy, 'isPuEcampusDataFetchEnabled').mockReturnValue(true);
+  const priorFetch = globalThis.fetch;
+  const request = jest.fn().mockResolvedValueOnce({
+    ok: true, text: async () => JSON.stringify({ studentId: true }),
+  });
+  globalThis.fetch = request;
   setSchoolLoginProviderKinds(['google-consumer']);
-  jest.mocked(nuniPlatformRequest).mockResolvedValueOnce({ kinds: ['school-issued'] });
-  await expect(loadSchoolLoginProviderKinds()).resolves.toEqual(['google-consumer']);
-  await expect(loadSchoolLoginProviderKinds({ recheckUnavailable: true })).resolves.toEqual(['school-issued']);
-  await expect(loadSchoolLoginProviderKinds({ recheckUnavailable: true })).resolves.toEqual(['school-issued']);
-  expect(nuniPlatformRequest).toHaveBeenCalledTimes(1);
+  try {
+    await expect(loadSchoolLoginProviderKinds('pu')).resolves.toEqual(['google-consumer']);
+    await expect(loadSchoolLoginProviderKinds('pu', { recheckUnavailable: true })).resolves.toEqual(['student-id']);
+    await expect(loadSchoolLoginProviderKinds('pu', { recheckUnavailable: true })).resolves.toEqual(['student-id']);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith(
+      'https://nuni.tw/api/nuni/sign-in-options?scope=school&schoolId=pu',
+      expect.objectContaining({ credentials: 'omit', redirect: 'error' }),
+    );
+  } finally {
+    globalThis.fetch = priorFetch;
+    source.mockRestore();
+  }
 });

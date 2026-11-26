@@ -4,6 +4,7 @@ import { NuniError } from '@campus/shared/src/nuni';
 import type { TronClassRequiredAgentGrant } from '@campus/shared/src/tronClassAgentPermissions';
 import type { TronClassPreparation, TronClassSnapshot } from '../tronClassIntegrationTypes';
 import type { TronClassSnapshotReadOptions } from './tronClassIntegrationSource';
+import { tronClassCompoundClauses } from '../tronClassAgentIntent';
 import { createTronClassAgentService } from './tronClassAgent';
 
 const owner = 'firebase:agent-fixture';
@@ -22,24 +23,80 @@ const snapshot: TronClassSnapshot = {
 const preparation: TronClassPreparation = { source: 'tronclass', schoolId: 'pu', courseId: 101, homeworkId: 201, revision,
   title: '期末報告', description: '作業規則', deadline: null, canSubmit: true, blockedReason: null, maxFiles: 4,
   maxFileBytes: 10 * 1024 * 1024, allowedContentTypes: ['application/pdf'], receipt: null };
+const listOnly = { include: { homework: false, announcements: false, materials: false } };
+const courseReads = [
+  ['homework', '查玩課雲%s作業', '查%s作業', 'homework'],
+  ['announcements', '查玩課雲%s公告', '查%s公告', 'announcements'],
+  ['materials', '查玩課雲%s教材', '查%s教材', 'materials'],
+  ['download', '下載玩課雲%s教材', '下載%s教材', 'materials'],
+] as const;
+
+function privateReadFor(area: keyof typeof listOnly.include) {
+  return {
+    courseId: 101, requireCompleteCourses: true, acceptCourseIndex: expect.any(Function),
+    include: { ...listOnly.include, [area]: true },
+  };
+}
+
+const binding = { schoolId: 'pu' as const, revision, account: 'fixture', userId: 12, userName: null,
+  cookies: { session: 'fixture' }, expiresAt: '2026-11-14T00:00:00Z' };
+
 function fixture() {
+  const bindings = { requireBinding: vi.fn(async () => binding), assertCurrent: vi.fn(async () => {}) };
   const grants = { get: vi.fn(async () => grant), require: vi.fn(async () => grant), assertCurrent: vi.fn(async () => {}) };
   const read = vi.fn(async (_owner: string, options: TronClassSnapshotReadOptions = {}): Promise<TronClassSnapshot> => ({ ...snapshot,
     announcements: options.courseId ? snapshot.announcements : [], materials: options.courseId ? snapshot.materials : [],
   }));
   const prepare = vi.fn(async () => preparation);
   const beforeResult = vi.fn(async () => {});
-  const service = createTronClassAgentService({ grants, read, prepare, beforeResult,
+  const service = createTronClassAgentService({ grants, bindings, read: (owner, options) => read(owner, options), prepare, beforeResult,
     now: () => Date.parse('2026-11-13T00:01:00.000Z'), requestId: () => 'agent-request-12345678' });
   return { service, grants, read, prepare, beforeResult };
 }
 
 describe('scoped deterministic TronClass Agent tools', () => {
+  it.each([
+    ['查玩課雲『外交』公告', '下載『CS101』', 'announcements'],
+    ['查玩課雲『外交』作業', '查『CS101』作業', 'homework'],
+    ['查玩課雲『外交』教材', '查『CS101』教材', 'materials'],
+    ['下載玩課雲『外交』教材', '下載『CS101』教材', 'materials'],
+  ] as const)('requires confirmation for conflicting course aliases in %s and %s', async (question, companion, area) => {
+    const diplomacy = { ...course, name: '外交' };
+    const collision = { ...course, id: 102, name: 'CS101', code: 'CS102' };
+    for (const other of [collision, { ...collision, name: '別門課' }]) {
+      const f = fixture();
+      f.read.mockResolvedValue({ ...snapshot, courses: [diplomacy, other] });
+      const result = await f.service.ask(owner, { question, compoundQuestion: `${question}，${companion}` });
+      if (other === collision) {
+        expect(result.selection).toBe('course');
+        expect(result.snapshot?.[area]).toEqual([]);
+        expect(result.actions).toEqual([]);
+        expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, listOnly);
+      } else {
+        expect(result.selection).toBeNull();
+        expect(f.read).toHaveBeenLastCalledWith(owner, privateReadFor(area));
+      }
+    }
+  });
+
+  it('accepts the same quoted name twice even when its course code is ambiguous', async () => {
+    const f = fixture();
+    const question = '查玩課雲『外交』公告';
+    f.read.mockResolvedValue({ ...snapshot, courses: [
+      { ...course, name: '外交' }, { ...course, id: 102, name: 'CS101', code: 'CS102' },
+    ] });
+    const result = await f.service.ask(owner, { question, compoundQuestion: `${question}，下載『外交』` });
+    expect(result.selection).toBeNull();
+    expect(f.read).toHaveBeenLastCalledWith(owner, privateReadFor('announcements'));
+  });
+
   it('reads this actor’s pending homework and preserves unknown states', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: 'TronClass 未繳作業有哪些' });
-    expect(f.grants.require).toHaveBeenCalledWith(owner, 'readCourseData');
-    expect(f.read).toHaveBeenCalledWith(owner, { include: { homework: true, announcements: false, materials: false } });
+    const result = await f.service.ask(owner, { question: '查 TronClass 未繳作業有哪些', courseId: 101, revision });
+    expect(f.grants.require).toHaveBeenCalledWith(owner, 'readCourseData', revision);
+    expect(f.read.mock.calls).toEqual([
+      [owner, { courseId: 101, include: { homework: true, announcements: false, materials: false } }],
+    ]);
     expect(result.snapshot?.homework.map((item) => [item.id, item.submitted])).toEqual([[201, false], [203, null]]);
     expect(result.answer).toContain('已確認 1 份作業尚未繳交');
     expect(result.answer).toContain('另有 1 份的繳交狀態尚未確認');
@@ -48,10 +105,313 @@ describe('scoped deterministic TronClass Agent tools', () => {
     expect(f.beforeResult).toHaveBeenCalledOnce();
   });
 
+  it.each(['查 TronClass 未繳作業有哪些', '列出所有玩課雲作業', '幫我準備 TronClass 作業'])(
+    'requires course selection before reading private homework for %s', async question => {
+      const f = fixture();
+      f.read.mockResolvedValue({ ...snapshot, courses: [course] });
+      const result = await f.service.ask(owner, { question });
+      expect(result.selection).toBe('course');
+      expect(result.snapshot?.homework).toEqual([]);
+      expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
+        include: { homework: false, announcements: false, materials: false },
+      });
+      expect(f.prepare).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['查玩課雲『外交』作業', '查玩課雲外交作業', '查玩課雲「PS101」作業'])(
+    'resolves the course index before any private read for %s', async (question) => {
+      const f = fixture();
+      const courses = [{ ...course, name: '外交', code: 'PS101' }, snapshot.courses[1]];
+      f.read.mockImplementation(async (_owner, options) => {
+        if (!options?.include?.homework) return { ...snapshot, courses, homework: [] };
+        if (options.courseId !== 101) throw new NuniError(403, 'TRONCLASS_COURSE_ACCESS_DENIED');
+        return { ...snapshot, courses, homework: [{ ...homework, courseName: '外交' }] };
+      });
+
+      const result = await f.service.ask(owner, { question });
+      expect(f.read.mock.calls).toEqual([
+        [owner, { include: { homework: false, announcements: false, materials: false } }],
+        [owner, listOnly],
+        [owner, privateReadFor('homework')],
+      ]);
+      expect(result.snapshot?.courses).toEqual([courses[0]]);
+      expect(result.snapshot?.homework).toEqual([{ ...homework, courseName: '外交' }]);
+    },
+  );
+
+  it.each([
+    '查玩課雲『外交』未交作業和校園公告',
+    '查玩課雲《外交》未交作業和校園公告',
+    '查玩課雲『外交』課程，查未交作業，查校園公告',
+    '查玩課雲未交作業，查玩課雲『外交』課程，查校園公告',
+    '查玩課雲外交教材，查未交作業',
+    '查『外交』作業，查玩課雲未交作業和校園公告',
+    '查玩課雲『外交』未交作業和查公車',
+    '查玩課雲『外交』未交作業和查交通',
+  ])('uses the original compound course scope for %s', async (compoundQuestion) => {
+    const f = fixture();
+    const courses = [{ ...course, name: '外交' }, { ...snapshot.courses[1]!, name: '交通' }];
+    const privateHomework = { ...homework, courseName: '外交' };
+    f.read.mockImplementation(async (_owner, options) => ({ ...snapshot, courses,
+      homework: options?.include?.homework ? [privateHomework, { ...homework, courseId: 102 }] : [],
+    }));
+    const clauses = tronClassCompoundClauses(compoundQuestion).filter(clause => clause.includes('未交作業'));
+    expect(clauses).toHaveLength(1);
+    const result = await f.service.ask(owner, { question: clauses[0]!, compoundQuestion });
+    expect(f.read.mock.calls).toEqual([
+      [owner, { include: { homework: false, announcements: false, materials: false } }],
+      [owner, listOnly],
+      [owner, privateReadFor('homework')],
+    ]);
+    expect(result.snapshot?.homework).toEqual([privateHomework]);
+  });
+
+  it.each([
+    ['查玩課雲『外交』作業和查玩課雲交通作業', '查玩課雲『外交』作業'],
+    ['查玩課雲『外交』作業和查交通作業', '查玩課雲『外交』作業'],
+    ['查交通作業和查玩課雲『外交』作業', '查玩課雲『外交』作業'],
+    ['查玩課雲交通作業和查外交作業', '查玩課雲交通作業'],
+    ['查玩課雲交通作業和查玩課雲『外交』作業', '查玩課雲交通作業'],
+  ])('confirms conflicting homework courses without reading homework for %s', async (compoundQuestion, question) => {
+    const f = fixture();
+    const courses = [{ ...course, name: '外交' }, { ...snapshot.courses[1]!, name: '交通' }];
+    f.read.mockResolvedValue({ ...snapshot, courses, homework: [] });
+    expect(tronClassCompoundClauses(compoundQuestion)).toEqual([question]);
+    const result = await f.service.ask(owner, { question, compoundQuestion });
+    expect(result.selection).toBe('course');
+    expect(result.snapshot?.homework).toEqual([]);
+    expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
+      include: { homework: false, announcements: false, materials: false },
+    });
+  });
+
+  it.each([
+    '查玩課雲未交作業和校園公告',
+    '查玩課雲「資料庫」未交作業，查玩課雲「計算機概論」未交作業',
+    '查玩課雲「資料庫」外交未交作業和校園公告',
+    '查玩課雲「外交」未交作業和校園公告',
+  ])('requests confirmation without a private read for %s', async (compoundQuestion) => {
+    const f = fixture();
+    const clauses = tronClassCompoundClauses(compoundQuestion);
+    expect(clauses).toHaveLength(1);
+    const result = await f.service.ask(owner, { question: clauses[0]!, compoundQuestion });
+    expect(result.selection).toBe('course');
+    expect(result.snapshot?.homework).toEqual([]);
+    expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
+      include: { homework: false, announcements: false, materials: false },
+    });
+  });
+
+  it.each([
+    '查玩課雲全部作業和查玩課雲『外交』作業',
+    '查玩課雲全部課程『外交』作業和查公車',
+    '查玩課雲所有課程「外交」未交作業，查校園公告',
+    '查玩課雲 all 『外交』作業和查公車',
+    '查玩課雲全部課程『外交』作業',
+    '查玩課雲所有課程「外交」作業',
+    '查玩課雲「外交」作業，查所有作業',
+    '查所有作業，查玩課雲外交作業',
+    '查玩課雲所有作業',
+  ])('asks for a course before reading homework for %s', async (original) => {
+    const f = fixture();
+    const courses = [{ ...course, name: '外交' }];
+    f.read.mockImplementation(async (_owner, options) => ({
+      ...snapshot, courses, homework: options?.include?.homework ? [homework] : [],
+    }));
+    const clauses = tronClassCompoundClauses(original);
+    const input = clauses.length ? { question: clauses[0]!, compoundQuestion: original } : { question: original };
+    const result = await f.service.ask(owner, input);
+    expect(result.selection).toBe('course');
+    expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
+      include: { homework: false, announcements: false, materials: false },
+    });
+    const confirmed = await f.service.ask(owner, { ...input, courseId: course.id, revision });
+    expect(confirmed.snapshot?.homework).toEqual([homework]);
+  });
+
+  it('rejects a supplemental clause that dropped its quoted target', async () => {
+    const f = fixture();
+    await expect(f.service.ask(owner, { question: '查玩課雲未交作業',
+      compoundQuestion: '查玩課雲『外交』未交作業和校園公告',
+    })).rejects.toMatchObject({ status: 422 });
+    expect(f.read).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '查玩課雲『外交』作業',
+    '查玩課雲外交作業',
+    '查玩課雲「資料庫實習」作業',
+    '查玩課雲「資料庫」「外交」作業',
+  ])('requests confirmation without reading other homework for %s', async (question) => {
+    const f = fixture();
+    const result = await f.service.ask(owner, { question });
+    expect(result.selection).toBe('course');
+    expect(result.snapshot?.homework).toEqual([]);
+    expect(f.read.mock.calls).toEqual([
+      [owner, { include: { homework: false, announcements: false, materials: false } }],
+    ]);
+  });
+
+  it('requires course selection when multiple courses share the requested name', async () => {
+    const f = fixture();
+    f.read.mockResolvedValue({ ...snapshot, courses: [course, { ...course, id: 102 }] });
+    const result = await f.service.ask(owner, { question: '查玩課雲「資料庫」作業' });
+    expect(result.selection).toBe('course');
+    expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
+      include: { homework: false, announcements: false, materials: false },
+    });
+  });
+
+  it.each([
+    ['homework', '查玩課雲『資料庫』作業'],
+    ['announcements', '查玩課雲『資料庫』公告'],
+    ['materials', '查玩課雲『資料庫』教材'],
+    ['download', '下載玩課雲『資料庫』教材'],
+  ])('requires course confirmation for %s when the course index is incomplete', async (intent, question) => {
+    const f = fixture();
+    f.read.mockResolvedValue({ ...snapshot, courses: [course], partial: true,
+      errors: [{ courseId: null, area: 'courses', message: '課程索引尚未讀完' }] });
+    const result = await f.service.ask(owner, { question });
+    expect(result).toMatchObject({ intent, selection: 'course', actions: [], preparation: null,
+      snapshot: { homework: [], announcements: [], materials: [] } });
+    expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
+      include: { homework: false, announcements: false, materials: false },
+    });
+  });
+
+  it.each([
+    ['homework', '查玩課雲『資料庫』作業'],
+    ['announcements', '查玩課雲『資料庫』公告'],
+    ['materials', '查玩課雲『資料庫』教材'],
+    ['download', '下載玩課雲『資料庫』教材'],
+  ])('asks for confirmation when the selected course index becomes incomplete for %s', async (intent, question) => {
+    const f = fixture();
+    f.read.mockResolvedValueOnce(snapshot).mockResolvedValueOnce({
+      ...snapshot, homework: [], announcements: [], materials: [], partial: true,
+      errors: [{ courseId: null, area: 'courses', message: '課程索引尚未讀完' }],
+    });
+    const result = await f.service.ask(owner, { question });
+    expect(result).toMatchObject({ intent, selection: 'course', actions: [], preparation: null,
+      snapshot: { partial: true, homework: [], announcements: [], materials: [] } });
+    expect(result.steps).toContainEqual(expect.objectContaining({ tool: 'read_courses', status: 'partial' }));
+    expect(f.read).toHaveBeenCalledTimes(2);
+    expect(f.read).toHaveBeenNthCalledWith(2, owner, listOnly);
+  });
+
+  it.each(courseReads)('retains service-conflicting course qualifiers for %s', async (intent, template, companion, area) => {
+    const question = template.replace('%s', '『外交』');
+    const courses = [{ ...course, name: '外交' }, { ...snapshot.courses[1]!, name: '交通' }];
+    const f = fixture();
+    f.read.mockResolvedValue({ ...snapshot, courses });
+
+    const compoundQuestion = `${question}和${companion.replace('%s', '交通')}`;
+    expect(tronClassCompoundClauses(compoundQuestion)).toEqual([question]);
+    expect(await f.service.ask(owner, { question, compoundQuestion })).toMatchObject({
+      intent, selection: 'course', actions: [], snapshot: { homework: [], announcements: [], materials: [] },
+    });
+    expect(f.read.mock.calls).toEqual([[owner, listOnly]]);
+
+    for (const suffix of ['', '和查公車', '，查校園公告']) {
+      f.read.mockClear();
+      const compoundQuestion = suffix ? question + suffix : undefined;
+      if (compoundQuestion) expect(tronClassCompoundClauses(compoundQuestion)).toEqual([question]);
+      expect(await f.service.ask(owner, { question, compoundQuestion })).toMatchObject({
+        intent, selection: null, snapshot: { courses: [courses[0]] },
+      });
+      expect(f.read.mock.calls).toEqual([[owner, listOnly], [owner, listOnly], [owner, privateReadFor(area)]]);
+    }
+  });
+
+  it.each([
+    ['查玩課雲『外交』公告', '下載『交通』'],
+    ['查玩課雲『外交』教材', '查『交通』公告'],
+    ['下載玩課雲『外交』', '查『交通』教材'],
+    ['查玩課雲『外交』公告', '查『交通』'],
+    ['查玩課雲『外交』公告', '查『任意課名』'],
+  ])('includes inherited quoted read targets in the whole request: %s，%s', async (question, companion) => {
+    const f = fixture();
+    f.read.mockResolvedValue({ ...snapshot,
+      courses: [{ ...course, name: '外交' }, { ...snapshot.courses[1]!, name: companion.includes('任意課名') ? '任意課名' : '交通' }] });
+    const compoundQuestion = `${question}，${companion}`;
+    const clauses = tronClassCompoundClauses(compoundQuestion);
+    expect(clauses[0]).toBe(question);
+    for (const clause of clauses) {
+      expect(await f.service.ask(owner, { question: clause, compoundQuestion })).toMatchObject({
+        selection: 'course', actions: [], snapshot: { homework: [], announcements: [], materials: [] },
+      });
+    }
+    expect(f.read.mock.calls).toEqual(clauses.map(() => [owner, listOnly]));
+  });
+
+  it.each(['查交通教材', '下載交通教材'])(
+    'keeps %s in the scope of an earlier announcement', async (companion) => {
+      const f = fixture();
+      f.read.mockResolvedValue({ ...snapshot,
+        courses: [{ ...course, name: '外交' }, { ...snapshot.courses[1]!, name: '交通' }] });
+      const question = '查玩課雲『外交』公告';
+      const compoundQuestion = `${question}和${companion}`;
+      const clauses = tronClassCompoundClauses(compoundQuestion);
+      expect(clauses).toHaveLength(2);
+      expect(clauses[0]).toBe(question);
+      for (const clause of clauses) {
+        expect(await f.service.ask(owner, { question: clause, compoundQuestion })).toMatchObject({
+          selection: 'course', actions: [], snapshot: { homework: [], announcements: [], materials: [] },
+        });
+      }
+      expect(f.read.mock.calls).toEqual(clauses.map(() => [owner, listOnly]));
+    },
+  );
+
+  describe.each(courseReads)('refreshes the automatic %s selection before private reads', (intent, template, _companion, area) => {
+    const question = template.replace('%s', '『資料庫』');
+    it.each([
+      ['duplicate', [course, { ...course, id: 102, code: 'CS102' }], 'course'],
+      ['renamed', [{ ...course, name: '資料庫系統' }], 'course'],
+      ['stable', [course], null],
+    ] as const)('checks the %s index', async (_change, refreshedCourses, selection) => {
+      const f = fixture();
+      f.read.mockResolvedValueOnce({ ...snapshot, courses: [course] })
+        .mockResolvedValue({ ...snapshot, courses: [...refreshedCourses] });
+      const result = await f.service.ask(owner, { question });
+      expect(result).toMatchObject({ intent, selection });
+      if (selection) {
+        expect(result.snapshot).toMatchObject({ homework: [], announcements: [], materials: [] });
+        expect(f.read.mock.calls).toEqual([[owner, listOnly], [owner, listOnly]]);
+      } else {
+        expect(result.snapshot?.[area]).not.toHaveLength(0);
+        expect(f.read.mock.calls).toEqual([[owner, listOnly], [owner, listOnly], [owner, privateReadFor(area)]]);
+      }
+    });
+  });
+
+  it.each([
+    ['announcements', '查玩課雲', '公告'],
+    ['materials', '查玩課雲', '教材'],
+    ['download', '下載玩課雲', '教材'],
+    ['download', '下載玩課雲', ''],
+  ])('confirms conflicting or all-course ranges before reading %s', async (intent, command, object) => {
+    const question = `${command}『資料庫』${object}`;
+    const compoundQuestion = `${question}，${command}『外交』${object}`;
+    expect(tronClassCompoundClauses(compoundQuestion)).toEqual([question]);
+    for (const input of [
+      { question, compoundQuestion },
+      ...['全部', '所有', ' all '].map(all => ({ question: `${command}${all}課程『資料庫』${object}` })),
+    ]) {
+      const f = fixture();
+      f.read.mockResolvedValue({ ...snapshot, courses: [course, { ...course, id: 102, name: '外交', code: 'PS101' }] });
+      expect(await f.service.ask(owner, input)).toMatchObject({ intent, selection: 'course', actions: [],
+        snapshot: { homework: [], announcements: [], materials: [] } });
+      expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
+        include: { homework: false, announcements: false, materials: false },
+      });
+    }
+  });
+
   it('requires read permission before school access', async () => {
     const f = fixture();
     f.grants.require.mockRejectedValue(new NuniError(403, 'TRONCLASS_AGENT_PERMISSION_REQUIRED'));
-    await expect(f.service.ask(owner, { question: 'TronClass 課程' })).rejects.toMatchObject({ status: 403 });
+    await expect(f.service.ask(owner, { question: '查 TronClass 課程' })).rejects.toMatchObject({ status: 403 });
     expect(f.read).not.toHaveBeenCalled();
   });
 
@@ -75,7 +435,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
       f.grants.assertCurrent.mockRejectedValue(new NuniError(403, 'TRONCLASS_AGENT_PERMISSION_REQUIRED'));
       return snapshot;
     });
-    await expect(f.service.ask(owner, { question: 'TronClass 未繳作業' })).rejects.toMatchObject({ status: 403 });
+    await expect(f.service.ask(owner, { question: '查 TronClass 未繳作業' })).rejects.toMatchObject({ status: 403 });
   });
 
   it('checks grants again after final nuni authentication', async () => {
@@ -83,19 +443,19 @@ describe('scoped deterministic TronClass Agent tools', () => {
     f.beforeResult.mockImplementation(async () => {
       f.grants.assertCurrent.mockRejectedValue(new NuniError(409, 'TRONCLASS_AGENT_PERMISSION_CHANGED'));
     });
-    await expect(f.service.ask(owner, { question: 'TronClass 課程' })).rejects.toMatchObject({ status: 409 });
+    await expect(f.service.ask(owner, { question: '查 TronClass 課程' })).rejects.toMatchObject({ status: 409 });
   });
 
   it('rejects a result from a new school binding', async () => {
     const f = fixture();
     f.read.mockResolvedValue({ ...snapshot, revision: 'c'.repeat(32) });
-    await expect(f.service.ask(owner, { question: 'TronClass 課程' })).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    await expect(f.service.ask(owner, { question: '查 TronClass 課程' })).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
   });
 
   it('does not mistake an incomplete empty list for all assignments being submitted', async () => {
     const f = fixture();
     f.read.mockResolvedValue({ ...snapshot, homework: [], partial: true, errors: [{ courseId: 101, area: 'homework', message: '未讀完' }] });
-    const result = await f.service.ask(owner, { question: 'TronClass 未繳作業' });
+    const result = await f.service.ask(owner, { question: '查 TronClass 未繳作業', courseId: 101, revision });
     expect(result.snapshot?.partial).toBe(true);
     expect(result.answer).toContain('不能據此判定全部作業已繳交');
   });
@@ -103,7 +463,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
   it('bounds action choices without rejecting a complete large source snapshot', async () => {
     const f = fixture();
     f.read.mockResolvedValue({ ...snapshot, homework: Array.from({ length: 501 }, (_, index) => ({ ...homework, id: 201 + index })) });
-    const result = await f.service.ask(owner, { question: 'TronClass 未交作業' });
+    const result = await f.service.ask(owner, { question: '查 TronClass 未交作業', courseId: 101, revision });
     expect(result.snapshot?.homework).toHaveLength(501);
     expect(result.snapshot?.partial).toBe(false);
     expect(result.actions).toHaveLength(500);
@@ -113,7 +473,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('asks for an actual course choice instead of picking the first course', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: 'TronClass 公告' });
+    const result = await f.service.ask(owner, { question: '查 TronClass 公告' });
     expect(result.selection).toBe('course');
     expect(result.snapshot?.courses).toHaveLength(2);
     expect(result.snapshot?.homework).toEqual([]);
@@ -121,12 +481,52 @@ describe('scoped deterministic TronClass Agent tools', () => {
     expect(f.read).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ['查玩課雲%s公告', 'announcements'],
+    ['查玩課雲%s教材', 'materials'],
+    ['下載玩課雲%s教材', 'download'],
+    ['下載玩課雲%s', 'download'],
+  ] as const)('resolves the complete course range in %s', async (template, intent) => {
+    for (const target of ['『資料庫系統』', '『資料庫』『計算機概論』']) {
+      const f = fixture();
+      const result = await f.service.ask(owner, { question: template.replace('%s', target) });
+      expect(result).toMatchObject({ intent, selection: 'course', actions: [],
+        snapshot: { announcements: [], materials: [] } });
+      expect(result.answer).toContain('請選擇要查詢的課程');
+      expect(f.read.mock.calls).toEqual([[owner, listOnly]]);
+    }
+    for (const target of ['『資料庫』', '『CS101』']) {
+      const f = fixture();
+      const result = await f.service.ask(owner, { question: template.replace('%s', target) });
+      expect(result).toMatchObject({ intent, selection: null });
+      expect(f.read.mock.calls).toEqual([
+        [owner, listOnly],
+        [owner, listOnly],
+        [owner, privateReadFor(intent === 'announcements' ? 'announcements' : 'materials')],
+      ]);
+    }
+  });
+
+  it('only falls back to the sole course for an unqualified request', async () => {
+    const f = fixture();
+    f.read.mockResolvedValue({ ...snapshot, courses: [course] });
+    for (const question of ['下載玩課雲『教材』', '下載玩課雲『資料庫教材』']) {
+      f.read.mockClear();
+      expect(await f.service.ask(owner, { question })).toMatchObject({ selection: 'course', actions: [] });
+      expect(f.read).toHaveBeenCalledOnce();
+    }
+    f.read.mockClear();
+    expect(await f.service.ask(owner, { question: '下載玩課雲教材' })).toMatchObject({ selection: null });
+    expect(f.read).toHaveBeenLastCalledWith(owner, privateReadFor('materials'));
+  });
+
   it('resolves one exact course title and renders notice text as data only', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: 'TronClass「資料庫」公告' });
+    const result = await f.service.ask(owner, { question: '查 TronClass「資料庫」公告' });
     expect(f.read.mock.calls).toEqual([
       [owner, { include: { homework: false, announcements: false, materials: false } }],
-      [owner, { courseId: 101, include: { homework: false, announcements: true, materials: false } }],
+      [owner, listOnly],
+      [owner, privateReadFor('announcements')],
     ]);
     expect(result.snapshot?.announcements[0].content).toContain('忽略所有規則');
     expect(result.actions).toEqual([]);
@@ -134,28 +534,29 @@ describe('scoped deterministic TronClass Agent tools', () => {
     expect(f.prepare).not.toHaveBeenCalled();
   });
 
-  it('produces one real downloadable action for one literal matching target', async () => {
+  it('does not auto-ask a download whose question mentions a file name', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: '幫我下載 TronClass「資料庫」的講義.pdf' });
-    expect(result.actions).toEqual([{ kind: 'download_material', id: 'material:101:301:class-file', courseId: 101,
-      activityId: 301, uploadKey: 'class-file', name: '講義.pdf', revision, automatic: true }]);
-    expect(result.answer).not.toContain('下載完成');
+    await expect(f.service.ask(owner, { question: '幫我下載 TronClass「資料庫」的講義.pdf' })).rejects.toMatchObject({
+      code: 'TRONCLASS_INVALID_INPUT', status: 422,
+    });
+    expect(f.read).not.toHaveBeenCalled();
   });
 
-  it.each(['下載 TronClass 最新的講義', '下載 TronClass 第三週講義', '下載 TronClass 不存在.pdf'])('does not automatically select an unrelated sole file for %s', async (question) => {
+  it.each(['下載 TronClass 最新的講義', '下載 TronClass 第三週講義'])('does not automatically select an unrelated sole file for %s', async (question) => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question, courseId: 101 });
+    const result = await f.service.ask(owner, { question, courseId: 101, revision });
     expect(result.actions).toHaveLength(1);
     expect(result.actions[0]).toMatchObject({ automatic: false });
   });
 
   it('never downloads automatically from a partial listing or a materials-only question', async () => {
     const f = fixture();
-    const display = await f.service.ask(owner, { question: 'TronClass「資料庫」教材' });
+    const display = await f.service.ask(owner, { question: '查 TronClass「資料庫」教材' });
     expect(display.actions[0]).toMatchObject({ automatic: false });
     f.read.mockResolvedValue({ ...snapshot, partial: true });
-    const partial = await f.service.ask(owner, { question: '下載 TronClass 講義.pdf', courseId: 101 });
-    expect(partial.actions[0]).toMatchObject({ automatic: false });
+    await expect(f.service.ask(owner, { question: '下載 TronClass 講義.pdf', courseId: 101, revision })).rejects.toMatchObject({
+      code: 'TRONCLASS_INVALID_INPUT', status: 422,
+    });
   });
 
   it('offers choices for multiple files and omits denied or foreign download URLs', async () => {
@@ -166,24 +567,25 @@ describe('scoped deterministic TronClass Agent tools', () => {
       { name: '禁止.pdf', allowDownload: false, downloadHref: 'https://tronclass.pu.edu.tw/api/uploads/no-file/blob' },
       { name: '外站.pdf', allowDownload: true, downloadHref: 'https://attacker.test/download' },
     ] }] });
-    const result = await f.service.ask(owner, { question: '下載 TronClass 教材', courseId: 101 });
+    const result = await f.service.ask(owner, { question: '下載 TronClass 教材', courseId: 101, revision });
     expect(result.actions).toHaveLength(2);
     expect(result.actions.every((action) => action.kind === 'download_material' && !action.automatic)).toBe(true);
   });
 
-  it('selects an exact file before a general material title with multiple attachments', async () => {
+  it('does not auto-select an exact file name mentioned in the question', async () => {
     const f = fixture();
     f.read.mockResolvedValue({ ...snapshot, materials: [{ ...material, files: [...material.files,
       { name: '另一份.pdf', allowDownload: true, downloadHref: 'https://tronclass.pu.edu.tw/api/uploads/another-file/blob' }] }] });
-    const result = await f.service.ask(owner, { question: '下載 TronClass 第一週教材的講義.pdf', courseId: 101 });
-    expect(result.actions).toHaveLength(1);
-    expect(result.actions[0]).toMatchObject({ uploadKey: 'class-file', automatic: true });
+    await expect(f.service.ask(owner, { question: '下載 TronClass 第一週教材的講義.pdf', courseId: 101, revision })).rejects.toMatchObject({
+      code: 'TRONCLASS_INVALID_INPUT', status: 422,
+    });
+    expect(f.read).not.toHaveBeenCalled();
   });
 
   it('prepares the chosen assignment inline but never inherits future school write permission', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: '幫我準備 TronClass 期末報告作業', courseId: 101, homeworkId: 201 });
-    expect(f.prepare).toHaveBeenCalledWith(owner, { courseId: 101, homeworkId: 201 });
+    const result = await f.service.ask(owner, { question: '幫我準備 TronClass 期末報告作業', courseId: 101, revision, homeworkId: 201 });
+    expect(f.prepare).toHaveBeenCalledWith(owner, { courseId: 101, homeworkId: 201 }, binding);
     expect(result.snapshot?.homework).toEqual([homework]);
     expect(result.preparation).toMatchObject({ courseId: 101, homeworkId: 201, canSubmit: false });
     expect(result.preparation?.blockedReason).toContain('不會代為上傳');
@@ -193,9 +595,9 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('keeps multiple assignments as choices without preparing the first one', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: '幫我準備 TronClass 作業' });
+    const result = await f.service.ask(owner, { question: '幫我準備 TronClass 作業', courseId: 101, revision });
     expect(result.selection).toBe('homework');
-    expect(result.actions).toHaveLength(3);
+    expect(result.actions).toHaveLength(snapshot.homework.filter(item => item.courseId === 101).length);
     expect(f.prepare).not.toHaveBeenCalled();
   });
 
@@ -203,33 +605,53 @@ describe('scoped deterministic TronClass Agent tools', () => {
     const f = fixture();
     f.read.mockResolvedValue({ ...snapshot, homework: [homework], partial: true,
       errors: [{ courseId: 102, area: 'homework', message: '另一門課尚未讀完' }] });
-    const result = await f.service.ask(owner, { question: '幫我準備 TronClass 作業' });
+    const result = await f.service.ask(owner, { question: '幫我準備 TronClass 作業', courseId: 101, revision });
     expect(result.selection).toBe('homework');
     expect(result.actions).toHaveLength(1);
     expect(result.preparation).toBeNull();
     expect(f.prepare).not.toHaveBeenCalled();
   });
 
-  it('does not run either operation in a compound download and prepare request', async () => {
+  it.each([
+    '下載 TronClass「資料庫」教材並準備作業',
+    '下載 TronClass 教材並請幫我準備作業',
+    '幫我下載 TronClass 講義，麻煩替我準備作業',
+    '下載 TronClass 教材並 please，代我準備作業',
+  ])('does not run either operation in %s', async question => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: '下載 TronClass「資料庫」教材並準備作業' });
-    expect(result.intent).toBe('unsupported');
+    const result = await f.service.ask(owner, { question });
+    expect(result).toMatchObject({
+      intent: 'unsupported', snapshot: null, preparation: null, actions: [],
+      steps: [expect.objectContaining({ tool: 'select_target', status: 'blocked' })],
+    });
     expect(result.answer).toContain('先選擇');
     expect(f.read).not.toHaveBeenCalled();
     expect(f.prepare).not.toHaveBeenCalled();
-    expect(result.actions).toEqual([]);
+  });
+
+  it.each([
+    '查玩課雲公告是不是『作業』？',
+    '查玩課雲『公告』是不是作業？',
+    '查玩課雲教材是不是「作業」？',
+  ])('asks for clarification without reading either target in %s', async question => {
+    const f = fixture();
+    const result = await f.service.ask(owner, { question });
+    expect(result.answer).toContain('請先確認');
+    expect(result.snapshot).toBeNull();
+    expect(f.read).not.toHaveBeenCalled();
+    expect(f.prepare).not.toHaveBeenCalled();
   });
 
   it('rejects a homework ID outside the selected authorized course', async () => {
     const f = fixture();
-    await expect(f.service.ask(owner, { question: '準備 TronClass 作業', courseId: 102, homeworkId: 201 })).rejects.toMatchObject({ code: 'TRONCLASS_HOMEWORK_NOT_FOUND' });
+    await expect(f.service.ask(owner, { question: '準備 TronClass 作業', courseId: 102, revision, homeworkId: 201 })).rejects.toMatchObject({ code: 'TRONCLASS_HOMEWORK_NOT_FOUND' });
     expect(f.prepare).not.toHaveBeenCalled();
   });
 
   it('requires the preparation grant on each dedicated prepare read', async () => {
     const f = fixture();
     f.grants.require.mockResolvedValueOnce(grant).mockRejectedValueOnce(new NuniError(403, 'TRONCLASS_AGENT_PERMISSION_REQUIRED'));
-    await expect(f.service.prepare(owner, { courseId: 101, homeworkId: 201 })).rejects.toMatchObject({ status: 403 });
+    await expect(f.service.prepare(owner, { courseId: 101, revision, homeworkId: 201 })).rejects.toMatchObject({ status: 403 });
     expect(f.prepare).not.toHaveBeenCalled();
   });
 
@@ -239,7 +661,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
       f.grants.assertCurrent.mockRejectedValue(new NuniError(403, 'TRONCLASS_AGENT_PERMISSION_REQUIRED'));
       return preparation;
     });
-    await expect(f.service.prepare(owner, { courseId: 101, homeworkId: 201 })).rejects.toMatchObject({ status: 403 });
+    await expect(f.service.prepare(owner, { courseId: 101, revision, homeworkId: 201 })).rejects.toMatchObject({ status: 403 });
   });
 
   it('reports unsupported writes without reading school data', async () => {
@@ -261,20 +683,17 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('never asks the source to read homework when answering announcements or materials', async () => {
     const f = fixture();
-    await f.service.ask(owner, { question: 'TronClass「資料庫」公告' });
+    await f.service.ask(owner, { question: '查 TronClass「資料庫」公告' });
     expect(f.read.mock.calls.every((call) => call[1]?.include?.homework !== true)).toBe(true);
     f.read.mockClear();
-    await f.service.ask(owner, { question: 'TronClass「資料庫」教材' });
+    await f.service.ask(owner, { question: '查 TronClass「資料庫」教材' });
     expect(f.read.mock.calls.every((call) => call[1]?.include?.homework !== true)).toBe(true);
     expect(f.read.mock.calls.some((call) => call[1]?.include?.materials === true)).toBe(true);
   });
 
-  it('still requests homework for homework and preparation questions', async () => {
+  it('reads homework to prepare an explicitly selected assignment', async () => {
     const f = fixture();
-    await f.service.ask(owner, { question: 'TronClass 未繳作業有哪些' });
-    expect(f.read).toHaveBeenCalledWith(owner, { include: { homework: true, announcements: false, materials: false } });
-    f.read.mockClear();
-    await f.service.ask(owner, { question: '幫我準備 TronClass 期末報告作業', courseId: 101, homeworkId: 201 });
+    await f.service.ask(owner, { question: '幫我準備 TronClass 期末報告作業', courseId: 101, revision, homeworkId: 201 });
     expect(f.read.mock.calls.every((call) => call[1]?.include?.homework === true)).toBe(true);
   });
 });

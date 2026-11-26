@@ -69,7 +69,11 @@ function confirmedRoutePlace(locations: readonly MapLocation[], chosen: MapLocat
   if (matches.length !== 1) return null;
   const place = matches[0];
   return place.name === chosen.name && place.category === chosen.category &&
-    place.lat === chosen.lat && place.lng === chosen.lng ? place : null;
+    place.lat === chosen.lat && place.lng === chosen.lng &&
+    (place.building ?? null) === (chosen.building ?? null) &&
+    (place.floor ?? null) === (chosen.floor ?? null) &&
+    Number.isFinite(place.lat) && Math.abs(place.lat) <= 90 &&
+    Number.isFinite(place.lng) && Math.abs(place.lng) <= 180 ? place : null;
 }
 
 export default function MapClient(props: MapProps) {
@@ -179,7 +183,7 @@ function MapContent({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const routeNoteId = useId();
   const detailNoteId = useId();
-  const [selection, setSelection] = useState<string | null>(null);
+  const [selection, setSelection] = useState<MapLocation | '' | 'revoked' | null>(null);
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [nearbyOnly, setNearbyOnly] = useState(false);
   const [myLocation, setMyLocation] = useState<MapCoordinate | null>(null);
@@ -239,9 +243,22 @@ function MapContent({
     return () => window.removeEventListener('storage', onStorage);
   }, [uid, platformAccountId, school, favoriteAttempt]);
 
+  // Resolve duplicate IDs against the full source before applying any filter.
+  // Filtering or Map's last-write-wins would otherwise hide the ambiguity
+  // and expose an arbitrary destination to the flat map or spatial explorer.
+  const ambiguousPlaceIds = useMemo(() => {
+    const seen = new Set<string>();
+    const ambiguous = new Set<string>();
+    for (const location of locations) {
+      if (seen.has(location.id)) ambiguous.add(location.id);
+      seen.add(location.id);
+    }
+    return ambiguous;
+  }, [locations]);
   const categories = useMemo(
-    () => ['全部', ...new Set(locations.map((location) => location.category))],
-    [locations],
+    () => ['全部', ...new Set(locations.filter((location) => !ambiguousPlaceIds.has(location.id))
+      .map((location) => location.category))],
+    [locations, ambiguousPlaceIds],
   );
   const classroom = useMemo(
     () => resolveCampusClassroom({ schoolId: school, query: search, locations }),
@@ -252,6 +269,7 @@ function MapContent({
   const filtered = useMemo(() => {
     const matched = locations.filter(
       (location) =>
+        !ambiguousPlaceIds.has(location.id) &&
         (category === '全部' || location.category === category) &&
         (locationMatchesSearch(location, search) ||
           campusPlaceNameMatchesQuery(location.name, search) ||
@@ -262,22 +280,29 @@ function MapContent({
     if (myLocation)
       matched.sort((a, b) => distanceMeters(myLocation, a) - distanceMeters(myLocation, b));
     return matched;
-  }, [locations, category, search, classroomIds, onlyFavorites, favorites, nearbyOnly, myLocation]);
+  }, [locations, ambiguousPlaceIds, category, search, classroomIds, onlyFavorites, favorites, nearbyOnly, myLocation]);
   const focusedPlace = locations.find((location) => location.id === focus);
   // Explicit selections (including closing a detail) and focus links take priority.
   // A missing explicit destination must not silently turn into another building.
   // A later source update can make a room ambiguous; derive this instead of retaining a guess.
   const classroomPlace = classroomLinkActive && classroom.status === 'matched' ? classroom.matches[0] : null;
-  const automaticClassroomId = sourcePending ? undefined : classroomPlace?.id;
-  const selectedId = selection ?? (focus ? focusedPlace?.id : automaticClassroomId);
-  const selected = locations.find((location) => location.id === selectedId) ?? null;
+  const automaticClassroomId = placeState.source === 'ready' ? classroomPlace?.id : undefined;
+  const automaticPlace = focus ? focusedPlace : locations.find((location) => location.id === automaticClassroomId);
+  const selected = typeof selection === 'object' && selection !== null
+    ? confirmedRoutePlace(locations, selection)
+    : selection === null ? confirmedRoutePlace(locations, automaticPlace ?? null) : null;
+  // Explicitly chosen markers must not silently move or reactivate after a source refresh.
+  if (typeof selection === 'object' && selection !== null && !selected) setSelection('revoked');
+  const selectedId = selected?.id;
   const deepLinkRoute = useMemo<[MapLocation, MapLocation] | null>(() => {
+    // A shared route is not an explicit confirmation of provisional bundled markers.
+    if (placeState.source !== 'ready') return null;
     const ids = route?.split(',').map((id) => id.trim());
     if (!ids || ids.length !== 2 || ids[0] === ids[1]) return null;
-    const from = locations.find((location) => location.id === ids[0]);
-    const to = locations.find((location) => location.id === ids[1]);
+    const from = confirmedRoutePlace(locations, locations.find((location) => location.id === ids[0]) ?? null);
+    const to = confirmedRoutePlace(locations, locations.find((location) => location.id === ids[1]) ?? null);
     return from && to ? [from, to] : null;
-  }, [route, locations]);
+  }, [route, locations, placeState.source]);
   const routeStart = confirmedRoutePlace(locations, routeDraft?.from ?? null);
   const routeEnd = confirmedRoutePlace(locations, routeDraft?.to ?? null);
   const routeNeedsConfirmation = Boolean(
@@ -299,7 +324,7 @@ function MapContent({
     // in login return URLs so it can be restored if the source later recovers.
     returnParams.set('route', route);
   }
-  const returnFocus = selection ?? focus ?? selectedId;
+  const returnFocus = selection === null ? focus ?? selectedId : selectedId;
   if (returnFocus) returnParams.set('focus', returnFocus);
   const returnQuery = normalizeCampusClassroomQuery(search);
   if (returnQuery) returnParams.set('query', returnQuery);
@@ -307,7 +332,7 @@ function MapContent({
   const platformLoginHref = `/login?returnUrl=${returnUrl}`;
   const schoolLoginHref = `/login?reconnect=school&returnUrl=${returnUrl}`;
   const pendingRoutePlaces = routeLocations?.filter((place) => isProvidencePendingVerification(publicSchool, place)) ?? [];
-  const selectLocation = useCallback((location: MapLocation) => setSelection(location.id), []);
+  const selectLocation = useCallback((location: MapLocation) => setSelection({ ...location }), []);
   const walkFrom = myLocation ?? (bundled ? PROVIDENCE_WALK_ORIGIN : null);
   const walkFromGate = Boolean(walkFrom && !myLocation);
   const mapLocations = useMemo(() => {
@@ -320,35 +345,52 @@ function MapContent({
   function locate() {
     const request = ++positionGeneration.current;
     setMyLocation(null);
+    // A distance filter cannot stay active without a current position.
+    setNearbyOnly(false);
     setPositionError('');
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      setPositionStatus('error');
-      setPositionError('此瀏覽器無法取得位置。你仍可從地點列表指定步行起點。');
-      return;
+    // A request may settle only once, even if the browser throws after registering callbacks.
+    function finishRequest() {
+      if (!mounted.current || request !== positionGeneration.current) return false;
+      positionGeneration.current += 1;
+      return true;
     }
-    setPositionStatus('loading');
-    navigator.geolocation.getCurrentPosition(
-      ({ coords }) => {
-        if (!mounted.current || request !== positionGeneration.current) return;
-        if (!Number.isFinite(coords.latitude) || !Number.isFinite(coords.longitude)) {
-          setPositionStatus('error');
-          setPositionError('定位結果無效，請重新取得位置。');
-          return;
-        }
-        setMyLocation({ lat: coords.latitude, lng: coords.longitude });
-        setPositionStatus('idle');
-      },
-      (positionError) => {
-        if (!mounted.current || request !== positionGeneration.current) return;
+    try {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
         setPositionStatus('error');
-        setPositionError(
-          positionError.code === 1
-            ? '未取得位置權限。你仍可從地點列表指定步行起點。'
-            : '目前無法取得位置，請確認定位與網路後再試一次。',
-        );
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
-    );
+        setPositionError('此瀏覽器無法取得位置。你仍可從地點列表指定步行起點。');
+        return;
+      }
+      setPositionStatus('loading');
+      navigator.geolocation.getCurrentPosition(
+        ({ coords }) => {
+          if (!finishRequest()) return;
+          if (
+            !Number.isFinite(coords.latitude) || Math.abs(coords.latitude) > 90 ||
+            !Number.isFinite(coords.longitude) || Math.abs(coords.longitude) > 180
+          ) {
+            setPositionStatus('error');
+            setPositionError('定位結果無效，請重新取得位置。');
+            return;
+          }
+          setMyLocation({ lat: coords.latitude, lng: coords.longitude });
+          setPositionStatus('idle');
+        },
+        (positionError) => {
+          if (!finishRequest()) return;
+          setPositionStatus('error');
+          setPositionError(
+            positionError.code === 1
+              ? '未取得位置權限。你仍可從地點列表指定步行起點。'
+              : '目前無法取得位置，請確認定位與網路後再試一次。',
+          );
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
+      );
+    } catch {
+      if (!finishRequest()) return;
+      setPositionStatus('error');
+      setPositionError('目前無法取得位置，請確認定位與網路後再試一次。');
+    }
   }
 
   async function toggleFavorite(location: MapLocation) {
@@ -477,6 +519,16 @@ function MapContent({
           </button>
         </div>
       )}
+      {placeState.source !== 'ready' && route && routeDraft === null && (
+        <div className={styles.notice}>
+          <p role="status">{sourcePending
+            ? '正在確認連結的起點與終點，確認後才會提供步行導航。'
+            : '暫時無法確認連結的起點與終點，請重新讀取地點資料，或清除路線後手動選擇。'}</p>
+          <button className="btn" type="button" onClick={() => setRouteDraft({ from: null, to: null })}>
+            清除路線
+          </button>
+        </div>
+      )}
       {routeLocations && (
         <section className={`card ${styles.route}`} aria-label="步行導航">
           <div>
@@ -555,7 +607,11 @@ function MapContent({
         <section className={`card ${styles.classroom}`} aria-label="教室定位結果">
           <p className={styles.eyebrow}>課表教室</p>
           <h2>{initialQuery}</h2>
-          {classroom.status === 'matched' && classroomPlace ? <>
+          {sourcePending ? (
+            <p role="status">正在確認地點資料，尚未確認這間教室的位置。</p>
+          ) : placeState.source === 'error' ? (
+            <p role="status">暫時無法確認這間教室的位置，請重新讀取地點資料或核對校方地圖。</p>
+          ) : classroom.status === 'matched' && classroomPlace ? <>
             <p>可對應「{classroomPlace.name}」的位置。抵達後請依課表與現場標示確認教室。</p>
             {selected?.id !== classroomPlace.id && (
               <button className="btn" type="button" onClick={() => selectLocation(classroomPlace)}>
@@ -576,11 +632,9 @@ function MapContent({
               ))}
             </ul>
           </> : (
-            <p>{sourcePending
-              ? '正在確認地點資料，尚未找到能對應這間教室的位置。'
-              : '目前地點資料無法確認這間教室的位置。請改用建築全名搜尋，或核對校方地圖。'}</p>
+            <p>目前地點資料無法確認這間教室的位置。請改用建築全名搜尋，或核對校方地圖。</p>
           )}
-          {(classroom.status === 'ambiguous' || classroom.status === 'unmatched') && (
+          {(placeState.source === 'error' || (placeState.source === 'ready' && (classroom.status === 'ambiguous' || classroom.status === 'unmatched'))) && (
             <div className={styles.actions}>
               <button className="btn" type="button" onClick={() => {
                 searchInputRef.current?.focus();
@@ -594,6 +648,11 @@ function MapContent({
             </div>
           )}
         </section>
+      )}
+      {ambiguousPlaceIds.size > 0 && (
+        <p className={styles.notice} role="status">
+          有 {ambiguousPlaceIds.size} 個地點識別碼重複，暫不顯示這些地點於地圖及列表，請核對校方資料。
+        </p>
       )}
       <MapCanvas
         schoolName={schoolName}
@@ -616,9 +675,14 @@ function MapContent({
           正在同步校方地點資料，已先顯示靜宜的預載地點。
         </p>
       )}
-      {!sourcePending && route && !deepLinkRoute && routeDraft === null && (
+      {placeState.source === 'ready' && route && !deepLinkRoute && routeDraft === null && (
         <p className={styles.notice} role="status">
-          這個連結的起點或終點已不在目前地點資料中，請從下方列表重新選擇。
+          這個連結的起點或終點已不在目前地點資料中，或無法唯一確認有效位置。請從下方列表重新選擇。
+        </p>
+      )}
+      {selection === 'revoked' && (
+        <p className={styles.notice} role="status">
+          先前選擇的地點已變更或無法唯一確認，已停用地點導航。請重新選擇地點。
         </p>
       )}
       {!sourcePending && focus && !locations.some((location) => location.id === focus) && (
@@ -656,6 +720,7 @@ function MapContent({
           school={school}
           locations={mapLocations}
           selected={selected}
+          mapRoute={routeLocations}
           onSelect={selectLocation}
         />
         {officialMapUrl && (
@@ -669,6 +734,8 @@ function MapContent({
             setSelection('');
             setSearch('');
             setCategory('全部');
+            setNearbyOnly(false);
+            setOnlyFavorites(false);
           }}
         >
           看整個校園

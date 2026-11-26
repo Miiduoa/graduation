@@ -8,6 +8,7 @@ import { mobileAssistantServiceDestination } from '../services/assistantServiceN
 import { safeNavigate } from '../utils/safeNavigate';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
+import { useAssistantContinuation } from '../services/assistantContinuation';
 
 /** The conversation owns the state, including the receipt after the next turn. */
 export function AssistantCalendarAction({ task, context, navigation, disabled, onChange }: {
@@ -23,6 +24,7 @@ export function AssistantCalendarAction({ task, context, navigation, disabled, o
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const current = () => active.current && context.isCurrent() &&
     assistantCalendarOwner(context) === task.proposal.owner && context.schoolId === task.proposal.schoolId;
+  const openWithContinuation = useAssistantContinuation(navigation, current);
   const execute = async (action: 'confirm' | 'check') => {
     if (disabled || lock.current || !current() ||
         (action === 'confirm' ? task.state !== 'review' : task.state !== 'unknown' && task.state !== 'verified')) return;
@@ -51,7 +53,7 @@ export function AssistantCalendarAction({ task, context, navigation, disabled, o
     // that the same event exists there; only the registered local screen is used.
     const target = mobileAssistantServiceDestination('calendar', context.platformTimetable ? 'platform' : 'campus', navigation);
     if (target?.kind !== 'native' || target.route !== 'PersonalCalendar' ||
-        !safeNavigate(navigation, 'PersonalCalendar', { eventId: task.receipt.record.id }, { fallbackMessage: null })) {
+        !openWithContinuation(() => safeNavigate(navigation, 'PersonalCalendar', { eventId: task.receipt.record.id }, { fallbackMessage: null }))) {
       setError('目前無法從此頁開啟行事曆。行程已保存，可從個人行事曆查看。');
     }
   };

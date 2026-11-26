@@ -1,4 +1,5 @@
 import { AssistantReplyLink } from '@/components/AssistantReplyLink';
+import { useAssistantWorkspaceHandoff } from '@/components/AssistantWorkspaceContext';
 import type { ReactNode } from 'react';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
@@ -23,7 +24,8 @@ import { isAssistantTaskRetryQuestion, type AssistantTaskRetry } from '@campus/s
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { accountDemoAssistantIntent, type AccountDemoAssistantScope } from '@/lib/accountDemoAssistant';
 import { AccountDemoAssistantCard } from './AccountDemoAssistantCard';
-import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
+import { AssistantServiceLinks, LocalAssistantLinks } from '@/components/AssistantServiceLinks';
+import { TODAY_CONFLICT_QUESTION } from '@campus/shared/src/classCalendarOverlapQuestion';
 import { parseLocalScheduleIntent } from '@/lib/assistantLocalSchedule';
 import { personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
 import { canAnswerTronClassQuestion, tronClassExplicitNavigationQuestion } from '@/lib/tronClassAgentIntent';
@@ -190,6 +192,15 @@ export function AssistantThread({
     setWorkContext(next);
     if (!taskProfileLocked) onTaskProfile?.(assistantTaskProfileForWorkContext(next));
   }
+  useAssistantWorkspaceHandoff(inline, (entry) => {
+    if (taskProfileLocked || pending || onStop) return {
+      ok: false,
+      message: '先完成、取消或核對目前的安排，再帶入新的問題與工作情境。原草稿尚未變更。',
+    };
+    if (entry.workContext) chooseWorkContext(entry.workContext);
+    onQuestion(entry.prompt);
+    return { ok: true };
+  });
   const workflow = getAssistantRoleWorkflow(workContext);
   useEffect(() => {
     const root = shell.current;
@@ -262,6 +273,7 @@ export function AssistantThread({
   const studentWork = taskProfile === 'student' && workContext === 'student';
   const suggestions = useProfileExamples ? profile.examples.map(example => example.prompt)
     : [...(studentWork ? [PRIORITY_SUGGESTION] : []), ...workflow.suggestions,
+      ...(studentWork ? [TODAY_CONFLICT_QUESTION] : []),
       ...(foodPickupEnabled && taskProfile === 'student' ? [PICKUP_SUGGESTION] : [])];
   const canSubmit = !pending && !onStop && !!question.trim() &&
     ((!!demoScope && !!accountDemoAssistantIntent(question)) || readRoute.roleGuide || (foodPickup ? foodPickupEnabled
@@ -392,7 +404,7 @@ export function AssistantThread({
                   pending={pending || !!onStop} blockedReason={eventBlockedReason}
                   sourceOnly={turn.reply.campusEventPreview === true}
                   onSelect={onEventTarget ? target => onEventTarget(turn, target) : undefined} />
-                {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
+                {turn.reply.local && <LocalAssistantLinks result={turn.reply.local} schoolId={schoolId} audience="platform" />}
                 {turn.reply.demo ? <p className={styles.sim}>本人帳號展示資料</p> : null}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 <AssistantTaskPlan schoolId={schoolId} plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states}
@@ -570,7 +582,7 @@ export function AssistantThread({
         </p>
         {inline && (studentWork || ready || foodPickupEnabled) && !turns.length && !question && !pending && (
           <div className={styles.chips} aria-label="試著問">
-            {(studentWork ? [PRIORITY_SUGGESTION, '下一堂課在哪裡？', '這週有哪些作業要交？', ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
+            {(studentWork ? [PRIORITY_SUGGESTION, '下一堂課在哪裡？', '這週有哪些作業要交？', TODAY_CONFLICT_QUESTION, ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
               <button type="button" key={phrase} className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>

@@ -53,6 +53,14 @@ test('old account or school controls cannot navigate or open a website', async (
   expect(navigation.navigate).not.toHaveBeenCalled();
 });
 
+test.each(['platform', 'campus', 'guest'] as const)('a %s website handoff keeps the selected campus without forwarding the question or identity', async (audience) => {
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+  const view = render(<AssistantServiceReply selection={{ kind: 'open', serviceIds: ['events'] }}
+    audience={audience} schoolId="nthu" navigation={undefined} disabled={false} isCurrent={() => true} />);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '在網頁開啟校園活動' })));
+  expect(open).toHaveBeenCalledWith('https://nuni.tw/events?schoolId=nthu');
+});
+
 test('a failed website launch stays retryable and rapid taps only dispatch once', async () => {
   let reject!: (error: Error) => void;
   const open = jest.spyOn(Linking, 'openURL').mockImplementationOnce(() => new Promise((_, no) => { reject = no; }));

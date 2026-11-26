@@ -1,20 +1,16 @@
 import Link from 'next/link';
 import { CampusIcon, type CampusIconName } from '@/components/CampusIcon';
+import { TODAY_SERVICE_SHORTCUTS, TODAY_TIMETABLE_SETUP_DETAIL } from '@campus/shared/src/todayServiceShortcuts';
 import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigationLinks';
 import { loginHref } from '@/lib/navigation';
 import styles from './TodayWelcome.module.css';
 
-const shortcuts: ReadonlyArray<{
-  href: string;
-  label: string;
-  detail: string;
-  icon: CampusIconName;
-}> = [
-  { href: '/map', label: '找教室', detail: '校園地圖', icon: 'map' },
-  { href: '/bus', label: '查公車', detail: '路線與到站時間', icon: 'bus' },
-  { href: '/cafeteria', label: '找餐廳', detail: '菜單與營業資訊', icon: 'cafeteria' },
-  { href: '/library', label: '查館藏', detail: '借閱與續借入口', icon: 'library' },
-];
+const shortcutIcons: Record<(typeof TODAY_SERVICE_SHORTCUTS)[number]['destination'], CampusIconName> = {
+  '/map': 'map',
+  '/bus': 'bus',
+  '/cafeteria': 'cafeteria',
+  '/library': 'library',
+};
 
 export function TodayWelcome({
   importHref,
@@ -37,10 +33,10 @@ export function TodayWelcome({
   const params = new URL(timetableHref, 'https://campus.local').searchParams;
   const campusSearch = serviceSearch ?? buildCampusNavigationSearch(params);
   const title = needsSchool
-    ? '先選擇你的校園。'
+    ? '選擇課表所屬校園'
     : hasTimetable
-      ? '課表準備好了。'
-      : '先把課表放進來。';
+      ? '本週課表'
+      : '建立第一份課表';
 
   return (
     <section className={styles.welcome} aria-labelledby="today-welcome-title">
@@ -48,10 +44,10 @@ export function TodayWelcome({
         <h2 id="today-welcome-title">{title}</h2>
         <p className={styles.description}>
           {needsSchool
-            ? '選好學校，再整理課表；也可以先使用下方公開服務。'
+            ? '選擇學校後就能建立課表。校園服務也開放訪客使用。'
             : hasTimetable
               ? '查看本週的上課時間與教室。'
-              : '匯入課表截圖或檔案，下次打開就能查看上課時間與教室。'}
+              : TODAY_TIMETABLE_SETUP_DETAIL}
         </p>
         <div className={styles.actions}>
           <Link
@@ -110,13 +106,13 @@ export function TodayServiceShortcuts({
         <Heading>校園服務</Heading>
       </div>
       <div className={styles.shortcutGrid}>
-        {shortcuts.map((item) => (
+        {TODAY_SERVICE_SHORTCUTS.map((item) => (
           <Link
-            key={item.href}
-            href={campusServiceHref(item.href, campusSearch)}
+            key={item.destination}
+            href={campusServiceHref(item.destination, campusSearch)}
             className={styles.shortcut}
           >
-            <CampusIcon name={item.icon} size={22} />
+            <CampusIcon name={shortcutIcons[item.destination]} size={22} />
             <span>
               <strong>{item.label}</strong>
               <small>{item.detail}</small>

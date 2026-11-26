@@ -3,11 +3,15 @@ import { createRoot } from 'react-dom/client';
 import { AppHeader } from '@/components/AppHeader';
 import { AssistantWorkspaceProvider } from '@/components/AssistantWorkspaceProvider';
 import { AssistantEnabledProvider } from '@/components/AssistantEnabledProvider';
+import { DirectoryVisitProvider } from '@/components/DirectoryVisit';
+import { ExploreExperiences } from '@/components/ExploreExperiences';
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
+import { ServiceBreadcrumbs } from '@/components/ServiceBreadcrumbs';
 import { TodayAssistantDisclosure, type TodayAssistantHandle } from '@/components/TodayCampusEntry';
 import { StudentToday } from '@/components/today/StudentToday';
 import { TodayAgent } from '@/features/nuni/TodayAgent';
 import home from '@/app/home.module.css';
+import frame from '@/components/AppFrame.module.css';
 import '@/app/globals.css';
 import Link, {
   fixtureOptions,
@@ -95,8 +99,17 @@ function ProductPages() {
               ) : undefined
             }
           />
+        ) : current.pathname === '/explore' ? (
+          <section aria-label="探索任務">
+            <header className={home.heading}>
+              <div><h1>探索</h1></div>
+              <p className={home.intro}>從一件想完成的事開始。</p>
+            </header>
+            <ExploreExperiences />
+          </section>
         ) : (
           <section className="fixture-destination" aria-label="合成目的地頁面">
+            <ServiceBreadcrumbs title="合成服務內容" />
             <p className="fixture-note">
               此區只代表導覽目的地；工作區、頂部導覽與對話仍為真正產品元件。
             </p>
@@ -142,14 +155,25 @@ function ProductPages() {
   );
 }
 
-createRoot(document.getElementById('root')!).render(
-  <SchoolLmsReadonlyProvider enabled>
-    <AssistantEnabledProvider enabled>
-      <div className={home.page + ' ' + home.todayPage} data-product="ai-workspace">
-        <AssistantWorkspaceProvider>
-          <ProductPages />
-        </AssistantWorkspaceProvider>
-      </div>
-    </AssistantEnabledProvider>
-  </SchoolLmsReadonlyProvider>,
-);
+function FixtureApp() {
+  const current = useFixture();
+  const scope = current.checking
+    ? undefined
+    : JSON.stringify([current.guest ? 'guest' : current.owner, current.schoolId]);
+  return (
+    <SchoolLmsReadonlyProvider enabled>
+      <AssistantEnabledProvider enabled>
+        <div className={[home.page, home.todayPage, frame.workspace].join(' ')}
+          data-workspace-shell="true" data-product="ai-workspace">
+          <DirectoryVisitProvider scope={scope}>
+            <AssistantWorkspaceProvider>
+              <ProductPages />
+            </AssistantWorkspaceProvider>
+          </DirectoryVisitProvider>
+        </div>
+      </AssistantEnabledProvider>
+    </SchoolLmsReadonlyProvider>
+  );
+}
+
+createRoot(document.getElementById('root')!).render(<FixtureApp />);

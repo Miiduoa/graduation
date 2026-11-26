@@ -31,9 +31,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { useAuth } from '../state/auth';
 import { usePermissions } from '../hooks/usePermissions';
@@ -55,7 +55,6 @@ import {
   reviewLeaveRequest,
   getModeName,
   getModeIcon,
-  getStatusColor,
   getHighRiskStudents,
   type HighRiskStudent,
   getAdminAnalytics,
@@ -70,13 +69,28 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 // Sub-components
 // ============================================================================
 
+/** 出席率 → 即時 theme 語意色 */
+function rateTone(rate: number, good = 80, fair = 60): string {
+  return rate >= good ? theme.colors.success : rate >= fair ? theme.colors.warning : theme.colors.danger;
+}
+
+function leaveTone(status: string): string {
+  return status === 'pending'
+    ? theme.colors.warning
+    : status === 'approved'
+      ? theme.colors.success
+      : theme.colors.danger;
+}
+
 function GroupedCard({ children }: { children: React.ReactNode }) {
+  useThemeVersion();
   return (
     <View
       style={{
         marginHorizontal: theme.space.lg,
-        borderRadius: 16,
-        backgroundColor: theme.colors.surface,
+        borderTopWidth: 1,
+        borderBottomWidth: 1,
+        borderColor: theme.colors.separator,
         overflow: 'hidden',
       }}
     >
@@ -86,24 +100,24 @@ function GroupedCard({ children }: { children: React.ReactNode }) {
 }
 
 function SectionHeader({ title, trailing }: { title: string; trailing?: React.ReactNode }) {
+  useThemeVersion();
   return (
     <View
+      accessibilityRole="header"
       style={{
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         paddingHorizontal: theme.space.lg,
-        marginTop: 28,
-        marginBottom: 10,
+        marginTop: 24,
+        marginBottom: 8,
       }}
     >
       <Text
         style={{
-          color: theme.colors.textSecondary,
-          fontSize: 13,
-          fontWeight: '600',
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
+          color: theme.colors.text,
+          fontSize: 16,
+          fontWeight: '700',
         }}
       >
         {title}
@@ -122,6 +136,7 @@ function StatPill({
   value: string | number;
   color: string;
 }) {
+  useThemeVersion();
   return (
     <View style={{ flex: 1, alignItems: 'center', paddingVertical: 12 }}>
       <Text style={{ fontSize: 22, fontWeight: '700', color }}>{value}</Text>
@@ -166,6 +181,7 @@ function getAttendanceRateKind(rate?: number): "success" | "default" | "danger" 
 }
 
 export function AttendanceScreen(props: any) {
+  useThemeVersion();
   const nav = props?.navigation;
   const insets = useSafeAreaInsets();
   const auth = useAuth();
@@ -352,8 +368,7 @@ export function AttendanceScreen(props: any) {
   // ── Derived ──
   const pendingLeaves = leaveRequests.filter((r) => r.status === 'pending');
   const hasMeasuredAttendance = studentCourses.some((course) => course.totalSessions > 0);
-  const rateColor =
-    overallRate >= 85 ? theme.colors.success : overallRate >= 70 ? '#FF9500' : theme.colors.danger;
+  const rateColor = rateTone(overallRate, 85, 70);
   const todayStr = new Date().toLocaleDateString('zh-TW', {
     month: 'long',
     day: 'numeric',
@@ -395,13 +410,12 @@ export function AttendanceScreen(props: any) {
         }
       >
         {/* ═══ Header ═══ */}
-        <LinearGradient
-          colors={
-            theme.mode === 'dark'
-              ? (['#1A0A3E', '#0D1B3E', theme.colors.bg] as [string, string, string])
-              : (['#F2F2F7', '#FFFFFF', theme.colors.bg] as [string, string, string])
-          }
-          style={{ paddingTop: insets.top + 12, paddingBottom: 24 }}
+        <View
+          style={{
+            paddingTop: insets.top + 12,
+            paddingBottom: 16,
+            backgroundColor: theme.colors.bg,
+          }}
         >
           {/* Back + Title */}
           <View
@@ -412,26 +426,25 @@ export function AttendanceScreen(props: any) {
               marginBottom: 16,
             }}
           >
-            <Pressable onPress={() => nav?.goBack?.()} hitSlop={12} style={{ marginRight: 12 }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="返回"
+              onPress={() => nav?.goBack?.()}
+              hitSlop={12}
+              style={{ marginRight: 12 }}
+            >
               <Ionicons name="arrow-back" size={22} color={theme.colors.text} />
             </Pressable>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 24, fontWeight: '700', color: theme.colors.text }}>
+              <Text accessibilityRole="header" style={{ fontSize: 22, fontWeight: '700', color: theme.colors.text }}>
                 智慧點名
               </Text>
               <Text style={{ fontSize: 12, color: theme.colors.textSecondary, marginTop: 2 }}>
                 {todayStr}
               </Text>
             </View>
-            <View
-              style={{
-                backgroundColor: isTeacher ? theme.colors.accent : theme.colors.success,
-                paddingHorizontal: 12,
-                paddingVertical: 5,
-                borderRadius: 100,
-              }}
-            >
-              <Text style={{ color: isTeacher ? theme.colors.onAccent : theme.colors.onSuccess, fontSize: 11, fontWeight: '600' }}>
+            <View>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
                 {isTeacher ? '教師' : '學生'} · {myCourses.length} 門課
               </Text>
             </View>
@@ -449,8 +462,8 @@ export function AttendanceScreen(props: any) {
               marginBottom: 12,
               padding: 16,
               minHeight: 52,
-              borderRadius: 14,
-              backgroundColor: theme.colors.accentSoft,
+              borderRadius: 12,
+              backgroundColor: 'transparent',
               flexDirection: 'row',
               alignItems: 'center',
               gap: 12,
@@ -471,8 +484,9 @@ export function AttendanceScreen(props: any) {
             style={{
               flexDirection: 'row',
               marginHorizontal: theme.space.lg,
-              backgroundColor: theme.colors.surface,
-              borderRadius: 16,
+              borderTopWidth: 1,
+              borderBottomWidth: 1,
+              borderColor: theme.colors.separator,
               overflow: 'hidden',
             }}
           >
@@ -484,7 +498,7 @@ export function AttendanceScreen(props: any) {
                   color={activeSessions.length > 0 ? theme.colors.danger : theme.colors.text}
                 />
                 <View
-                  style={{ width: 1, backgroundColor: theme.colors.border, marginVertical: 12 }}
+                  style={{ width: 1, backgroundColor: theme.colors.separator, marginVertical: 12 }}
                 />
                 <StatPill
                   label="本學期"
@@ -492,29 +506,29 @@ export function AttendanceScreen(props: any) {
                   color={theme.colors.text}
                 />
                 <View
-                  style={{ width: 1, backgroundColor: theme.colors.border, marginVertical: 12 }}
+                  style={{ width: 1, backgroundColor: theme.colors.separator, marginVertical: 12 }}
                 />
                 <StatPill
                   label="待審假單"
                   value={pendingLeaves.length}
-                  color={pendingLeaves.length > 0 ? '#FF9500' : theme.colors.text}
+                  color={pendingLeaves.length > 0 ? theme.colors.warning : theme.colors.text}
                 />
               </>
             ) : (
               <>
                 <StatPill label="出席率" value={hasMeasuredAttendance ? `${overallRate}%` : '—'} color={hasMeasuredAttendance ? rateColor : theme.colors.muted} />
                 <View
-                  style={{ width: 1, backgroundColor: theme.colors.border, marginVertical: 12 }}
+                  style={{ width: 1, backgroundColor: theme.colors.separator, marginVertical: 12 }}
                 />
                 <StatPill label="修課" value={studentCourses.length} color={theme.colors.text} />
                 <View
-                  style={{ width: 1, backgroundColor: theme.colors.border, marginVertical: 12 }}
+                  style={{ width: 1, backgroundColor: theme.colors.separator, marginVertical: 12 }}
                 />
                 <StatPill label="請假" value={leaveRequests.length} color={theme.colors.text} />
               </>
             )}
           </View>
-        </LinearGradient>
+        </View>
 
         {/* ═══ Active Sessions Alert ═══ */}
         {activeSessions.length > 0 && (
@@ -534,16 +548,14 @@ export function AttendanceScreen(props: any) {
                     paddingVertical: 16,
                     paddingHorizontal: 16,
                     borderBottomWidth: idx < activeSessions.length - 1 ? 1 : 0,
-                    borderBottomColor: theme.colors.border,
+                    borderBottomColor: theme.colors.separator,
                     opacity: pressed ? 0.6 : 1,
                   })}
                 >
                   <View
                     style={{
-                      width: 40,
+                      width: 24,
                       height: 40,
-                      borderRadius: 12,
-                      backgroundColor: theme.colors.danger + '15',
                       justifyContent: 'center',
                       alignItems: 'center',
                     }}
@@ -626,24 +638,13 @@ export function AttendanceScreen(props: any) {
                       paddingVertical: 14,
                       paddingHorizontal: 16,
                       borderBottomWidth: idx < teacherCourses.length - 1 ? 1 : 0,
-                      borderBottomColor: theme.colors.border,
+                      borderBottomColor: theme.colors.separator,
                       opacity: pressed ? 0.6 : 1,
                     })}
                   >
-                    <LinearGradient
-                      colors={
-                        [`${theme.colors.accent}20`, `${theme.colors.accent}08`] as [string, string]
-                      }
-                      style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: 12,
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <Ionicons name="book" size={18} color={theme.colors.accent} />
-                    </LinearGradient>
+                    <View style={{ width: 24, alignItems: 'center' }}>
+                      <Ionicons name="book-outline" size={20} color={theme.colors.accent} />
+                    </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.text }}>
                         {course.name}
@@ -652,15 +653,8 @@ export function AttendanceScreen(props: any) {
                         {course.courseCode} · {course.studentCount} 位學生
                       </Text>
                     </View>
-                    <View
-                      style={{
-                        backgroundColor: theme.colors.accent + '15',
-                        paddingHorizontal: 10,
-                        paddingVertical: 5,
-                        borderRadius: 8,
-                      }}
-                    >
-                      <Text style={{ fontSize: 12, fontWeight: '600', color: theme.colors.accent }}>
+                    <View style={{ minHeight: 44, justifyContent: 'center' }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: theme.colors.accent }}>
                         啟動
                       </Text>
                     </View>
@@ -676,14 +670,7 @@ export function AttendanceScreen(props: any) {
                   title="假單審核"
                   trailing={
                     pendingLeaves.length > 0 ? (
-                      <View
-                        style={{
-                          backgroundColor: theme.colors.danger + '20',
-                          paddingHorizontal: 8,
-                          paddingVertical: 2,
-                          borderRadius: 100,
-                        }}
-                      >
+                      <View>
                         <Text
                           style={{ fontSize: 11, fontWeight: '600', color: theme.colors.danger }}
                         >
@@ -701,7 +688,7 @@ export function AttendanceScreen(props: any) {
                         paddingVertical: 14,
                         paddingHorizontal: 16,
                         borderBottomWidth: idx < Math.min(leaveRequests.length, 10) - 1 ? 1 : 0,
-                        borderBottomColor: theme.colors.border,
+                        borderBottomColor: theme.colors.separator,
                       }}
                     >
                       <View
@@ -739,6 +726,9 @@ export function AttendanceScreen(props: any) {
                         {req.status === 'pending' ? (
                           <View style={{ flexDirection: 'row', gap: 8, marginLeft: 12 }}>
                             <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel={`批准${req.studentName}的假單`}
+                              hitSlop={4}
                               onPress={() => handleReviewLeave(req.id, true)}
                               style={{
                                 backgroundColor: theme.colors.success,
@@ -752,6 +742,9 @@ export function AttendanceScreen(props: any) {
                               <Ionicons name="checkmark" size={20} color={theme.colors.onSuccess} />
                             </Pressable>
                             <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel={`拒絕${req.studentName}的假單`}
+                              hitSlop={4}
                               onPress={() => handleReviewLeave(req.id, false)}
                               style={{
                                 backgroundColor: theme.colors.danger,
@@ -766,17 +759,7 @@ export function AttendanceScreen(props: any) {
                             </Pressable>
                           </View>
                         ) : (
-                          <View
-                            style={{
-                              backgroundColor:
-                                (req.status === 'approved'
-                                  ? theme.colors.success
-                                  : theme.colors.danger) + '15',
-                              paddingHorizontal: 10,
-                              paddingVertical: 4,
-                              borderRadius: 100,
-                            }}
-                          >
+                          <View>
                             <Text
                               style={{
                                 fontSize: 11,
@@ -806,8 +789,8 @@ export function AttendanceScreen(props: any) {
                   {riskStudents.slice(0, 10).map((stu, idx) => {
                     const ratePercent = Math.round(stu.attendanceRate * 100);
                     const isDanger = ratePercent < 60;
-                    const statusColor = isDanger ? '#FF3B30' : '#FF9500';
-                    const statusBg = isDanger ? '#FEE2E2' : '#FEF3C7';
+                    const statusColor = isDanger ? theme.colors.danger : theme.colors.warning;
+                    const statusBg = isDanger ? theme.colors.dangerSoft : theme.colors.warningSoft;
                     const statusLabel = isDanger ? '危險' : '警告';
                     return (
                       <View
@@ -818,7 +801,7 @@ export function AttendanceScreen(props: any) {
                           paddingVertical: 12,
                           paddingHorizontal: 16,
                           borderBottomWidth: idx < Math.min(riskStudents.length, 10) - 1 ? 0.5 : 0,
-                          borderBottomColor: theme.colors.border,
+                          borderBottomColor: theme.colors.separator,
                         }}
                       >
                         <View
@@ -868,15 +851,7 @@ export function AttendanceScreen(props: any) {
                           >
                             {ratePercent}%
                           </Text>
-                          <View
-                            style={{
-                              backgroundColor: statusBg,
-                              paddingHorizontal: 6,
-                              paddingVertical: 2,
-                              borderRadius: 4,
-                              marginTop: 2,
-                            }}
-                          >
+                          <View style={{ marginTop: 2 }}>
                             <Text
                               style={{
                                 color: statusColor,
@@ -925,12 +900,7 @@ export function AttendanceScreen(props: any) {
                 </View>
               ) : (
                 studentCourses.map((course, idx) => {
-                  const rc =
-                    course.rate >= 85
-                      ? theme.colors.success
-                      : course.rate >= 70
-                        ? '#FF9500'
-                        : theme.colors.danger;
+                  const rc = rateTone(course.rate, 85, 70);
                   return (
                     <View
                       key={course.id}
@@ -938,7 +908,7 @@ export function AttendanceScreen(props: any) {
                         paddingVertical: 14,
                         paddingHorizontal: 16,
                         borderBottomWidth: idx < studentCourses.length - 1 ? 1 : 0,
-                        borderBottomColor: theme.colors.border,
+                        borderBottomColor: theme.colors.separator,
                       }}
                     >
                       <View
@@ -986,7 +956,7 @@ export function AttendanceScreen(props: any) {
                         <Text style={{ fontSize: 11, color: theme.colors.success }}>
                           出席 {course.attended}
                         </Text>
-                        <Text style={{ fontSize: 11, color: '#FF9500' }}>遲到 {course.late}</Text>
+                        <Text style={{ fontSize: 11, color: theme.colors.warning }}>遲到 {course.late}</Text>
                         <Text style={{ fontSize: 11, color: theme.colors.danger }}>
                           缺席 {course.absent}
                         </Text>
@@ -1017,22 +987,13 @@ export function AttendanceScreen(props: any) {
                   paddingVertical: 14,
                   paddingHorizontal: 16,
                   borderBottomWidth: leaveRequests.length > 0 ? 1 : 0,
-                  borderBottomColor: theme.colors.border,
+                  borderBottomColor: theme.colors.separator,
                   opacity: pressed ? 0.6 : 1,
                 })}
               >
-                <LinearGradient
-                  colors={['#FF950020', '#FF950008'] as [string, string]}
-                  style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 12,
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                  }}
-                >
-                  <Ionicons name="add-circle" size={18} color="#FF9500" />
-                </LinearGradient>
+                <View style={{ width: 24, alignItems: 'center' }}>
+                  <Ionicons name="add-circle-outline" size={20} color={theme.colors.accent} />
+                </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.text }}>
                     申請請假
@@ -1054,24 +1015,10 @@ export function AttendanceScreen(props: any) {
                     paddingVertical: 14,
                     paddingHorizontal: 16,
                     borderBottomWidth: idx < Math.min(leaveRequests.length, 5) - 1 ? 1 : 0,
-                    borderBottomColor: theme.colors.border,
+                    borderBottomColor: theme.colors.separator,
                   }}
                 >
-                  <View
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 12,
-                      backgroundColor:
-                        (req.status === 'pending'
-                          ? '#FF9500'
-                          : req.status === 'approved'
-                            ? theme.colors.success
-                            : theme.colors.danger) + '15',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                    }}
-                  >
+                  <View style={{ width: 24, alignItems: 'center' }}>
                     <Ionicons
                       name={
                         req.status === 'pending'
@@ -1080,14 +1027,8 @@ export function AttendanceScreen(props: any) {
                             ? 'checkmark-circle'
                             : 'close-circle'
                       }
-                      size={18}
-                      color={
-                        req.status === 'pending'
-                          ? '#FF9500'
-                          : req.status === 'approved'
-                            ? theme.colors.success
-                            : theme.colors.danger
-                      }
+                      size={20}
+                      color={leaveTone(req.status)}
                     />
                   </View>
                   <View style={{ flex: 1 }}>
@@ -1098,29 +1039,12 @@ export function AttendanceScreen(props: any) {
                       {req.reason} · {new Date(req.submittedAt).toLocaleDateString('zh-TW')}
                     </Text>
                   </View>
-                  <View
-                    style={{
-                      backgroundColor:
-                        (req.status === 'pending'
-                          ? '#FF9500'
-                          : req.status === 'approved'
-                            ? theme.colors.success
-                            : theme.colors.danger) + '15',
-                      paddingHorizontal: 8,
-                      paddingVertical: 3,
-                      borderRadius: 100,
-                    }}
-                  >
+                  <View>
                     <Text
                       style={{
                         fontSize: 11,
                         fontWeight: '600',
-                        color:
-                          req.status === 'pending'
-                            ? '#FF9500'
-                            : req.status === 'approved'
-                              ? theme.colors.success
-                              : theme.colors.danger,
+                        color: leaveTone(req.status),
                       }}
                     >
                       {{ pending: '審核中', approved: '已批准', rejected: '已拒絕' }[req.status]}
@@ -1144,8 +1068,7 @@ export function AttendanceScreen(props: any) {
                         ((session.presentCount + session.lateCount) / session.totalStudents) * 100,
                       )
                     : 0;
-                const rc =
-                  rate >= 80 ? theme.colors.success : rate >= 60 ? '#FF9500' : theme.colors.danger;
+                const rc = rateTone(rate);
                 return (
                   <View
                     key={session.id}
@@ -1156,17 +1079,15 @@ export function AttendanceScreen(props: any) {
                       paddingVertical: 14,
                       paddingHorizontal: 16,
                       borderBottomWidth: idx < Math.min(completedSessions.length, 8) - 1 ? 1 : 0,
-                      borderBottomColor: theme.colors.border,
+                      borderBottomColor: theme.colors.separator,
                     }}
                   >
                     <View
                       style={{
-                        width: 40,
+                        width: 44,
                         height: 40,
-                        borderRadius: 12,
-                        backgroundColor: rc + '15',
                         justifyContent: 'center',
-                        alignItems: 'center',
+                        alignItems: 'flex-start',
                       }}
                     >
                       <Text style={{ fontSize: 14, fontWeight: '700', color: rc }}>{rate}%</Text>
@@ -1202,7 +1123,7 @@ export function AttendanceScreen(props: any) {
                   paddingVertical: 16,
                   paddingHorizontal: 16,
                   borderBottomWidth: 0.5,
-                  borderBottomColor: theme.colors.border,
+                  borderBottomColor: theme.colors.separator,
                 }}
               >
                 {[
@@ -1214,7 +1135,7 @@ export function AttendanceScreen(props: any) {
                     <Ionicons
                       name={item.icon}
                       size={20}
-                      color={item.icon === 'warning' && item.value > 0 ? '#FF3B30' : theme.colors.accent}
+                      color={item.icon === 'warning' && item.value > 0 ? theme.colors.danger : theme.colors.accent}
                     />
                     <Text
                       style={{
@@ -1233,7 +1154,7 @@ export function AttendanceScreen(props: any) {
                 ))}
               </View>
               {/* 全系平均出席率 */}
-              <View style={{ paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 0.5, borderBottomColor: theme.colors.border }}>
+              <View style={{ paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 0.5, borderBottomColor: theme.colors.separator }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '600' }}>
                     全系平均出席率
@@ -1245,8 +1166,8 @@ export function AttendanceScreen(props: any) {
                       color: adminAnalytics.overallAttendanceRate >= 80
                         ? theme.colors.success
                         : adminAnalytics.overallAttendanceRate >= 60
-                          ? '#FF9500'
-                          : '#FF3B30',
+                          ? theme.colors.warning
+                          : theme.colors.danger,
                     }}
                   >
                     {adminAnalytics.overallAttendanceRate}%
@@ -1269,8 +1190,8 @@ export function AttendanceScreen(props: any) {
                         adminAnalytics.overallAttendanceRate >= 80
                           ? theme.colors.success
                           : adminAnalytics.overallAttendanceRate >= 60
-                            ? '#FF9500'
-                            : '#FF3B30',
+                            ? theme.colors.warning
+                            : theme.colors.danger,
                       borderRadius: 3,
                     }}
                   />
@@ -1288,8 +1209,8 @@ export function AttendanceScreen(props: any) {
                       course.averageRate >= 80
                         ? theme.colors.success
                         : course.averageRate >= 60
-                          ? '#FF9500'
-                          : '#FF3B30';
+                          ? theme.colors.warning
+                          : theme.colors.danger;
                     return (
                       <View
                         key={course.courseId}
@@ -1299,7 +1220,7 @@ export function AttendanceScreen(props: any) {
                           paddingVertical: 12,
                           paddingHorizontal: 16,
                           borderBottomWidth: idx < Math.min(adminAnalytics.courseRanking.length, 8) - 1 ? 0.5 : 0,
-                          borderBottomColor: theme.colors.border,
+                          borderBottomColor: theme.colors.separator,
                         }}
                       >
                         <View
@@ -1307,7 +1228,7 @@ export function AttendanceScreen(props: any) {
                             width: 24,
                             height: 24,
                             borderRadius: 12,
-                            backgroundColor: idx < 3 ? theme.colors.accent + '20' : theme.colors.border,
+                            backgroundColor: idx < 3 ? theme.colors.accentSoft : theme.colors.surface2,
                             alignItems: 'center',
                             justifyContent: 'center',
                             marginRight: 12,
@@ -1366,7 +1287,7 @@ export function AttendanceScreen(props: any) {
                         paddingVertical: 12,
                         paddingHorizontal: 16,
                         borderBottomWidth: idx < adminAnalytics.departmentSummary.length - 1 ? 0.5 : 0,
-                        borderBottomColor: theme.colors.border,
+                        borderBottomColor: theme.colors.separator,
                       }}
                     >
                       <View style={{ flex: 1 }}>
@@ -1381,7 +1302,7 @@ export function AttendanceScreen(props: any) {
                         style={{
                           fontSize: 15,
                           fontWeight: '700',
-                          color: dept.avgRate >= 80 ? theme.colors.success : dept.avgRate >= 60 ? '#FF9500' : '#FF3B30',
+                          color: dept.avgRate >= 80 ? theme.colors.success : dept.avgRate >= 60 ? theme.colors.warning : theme.colors.danger,
                         }}
                       >
                         {dept.avgRate}%
@@ -1408,18 +1329,9 @@ export function AttendanceScreen(props: any) {
               opacity: pressed ? 0.6 : 1,
             })}
           >
-            <LinearGradient
-              colors={[`${theme.colors.accent}20`, `${theme.colors.accent}08`] as [string, string]}
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 12,
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}
-            >
-              <Ionicons name="analytics" size={18} color={theme.colors.accent} />
-            </LinearGradient>
+            <View style={{ width: 24, alignItems: 'center' }}>
+              <Ionicons name="analytics-outline" size={20} color={theme.colors.accent} />
+            </View>
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.text }}>
                 AI 出席分析
@@ -1440,12 +1352,14 @@ export function AttendanceScreen(props: any) {
         animationType="slide"
         onRequestClose={() => setShowCreateModal(false)}
       >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
+        <View style={{ flex: 1, backgroundColor: theme.colors.overlay, justifyContent: 'flex-end' }}>
           <View
             style={{
               backgroundColor: theme.colors.bg,
-              borderTopLeftRadius: 24,
-              borderTopRightRadius: 24,
+              borderTopLeftRadius: 16,
+              borderTopRightRadius: 16,
+              borderTopWidth: 1,
+              borderColor: theme.colors.separator,
               paddingHorizontal: theme.space.lg,
               paddingTop: 20,
               paddingBottom: insets.bottom + 20,
@@ -1479,8 +1393,6 @@ export function AttendanceScreen(props: any) {
                 fontWeight: '600',
                 color: theme.colors.textSecondary,
                 marginBottom: 10,
-                textTransform: 'uppercase',
-                letterSpacing: 0.5,
               }}
             >
               點名方式
@@ -1508,23 +1420,25 @@ export function AttendanceScreen(props: any) {
                     style={{
                       flex: 1,
                       padding: 16,
-                      borderRadius: 16,
+                      borderRadius: 12,
                       alignItems: 'center',
-                      backgroundColor: sel ? theme.colors.accent : theme.colors.surface,
-                      borderWidth: sel ? 0 : 1,
-                      borderColor: theme.colors.border,
+                      backgroundColor: sel ? theme.colors.accentSoft : theme.colors.surface,
+                      borderWidth: sel ? 2 : 1,
+                      borderColor: sel ? theme.colors.accent : theme.colors.border,
                     }}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: sel }}
                   >
                     <Ionicons
                       name={mode.icon as any}
                       size={28}
-                      color={sel ? '#fff' : theme.colors.accent}
+                      color={theme.colors.accent}
                     />
                     <Text
                       style={{
                         fontSize: 13,
                         fontWeight: '700',
-                        color: sel ? '#fff' : theme.colors.text,
+                        color: theme.colors.text,
                         marginTop: 8,
                       }}
                     >
@@ -1533,7 +1447,7 @@ export function AttendanceScreen(props: any) {
                     <Text
                       style={{
                         fontSize: 10,
-                        color: sel ? 'rgba(255,255,255,0.7)' : theme.colors.muted,
+                        color: theme.colors.textSecondary,
                         marginTop: 2,
                       }}
                     >
@@ -1551,8 +1465,6 @@ export function AttendanceScreen(props: any) {
                 fontWeight: '600',
                 color: theme.colors.textSecondary,
                 marginBottom: 8,
-                textTransform: 'uppercase',
-                letterSpacing: 0.5,
               }}
             >
               上課地點（選填）
@@ -1585,7 +1497,7 @@ export function AttendanceScreen(props: any) {
                 opacity: pressed ? 0.85 : 1,
               })}
             >
-              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>啟動點名</Text>
+              <Text style={{ color: theme.colors.onAccent, fontSize: 16, fontWeight: '700' }}>啟動點名</Text>
             </Pressable>
 
             <Pressable
@@ -1605,12 +1517,14 @@ export function AttendanceScreen(props: any) {
         animationType="slide"
         onRequestClose={() => setShowLeaveModal(false)}
       >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
+        <View style={{ flex: 1, backgroundColor: theme.colors.overlay, justifyContent: 'flex-end' }}>
           <View
             style={{
               backgroundColor: theme.colors.bg,
-              borderTopLeftRadius: 24,
-              borderTopRightRadius: 24,
+              borderTopLeftRadius: 16,
+              borderTopRightRadius: 16,
+              borderTopWidth: 1,
+              borderColor: theme.colors.separator,
               paddingHorizontal: theme.space.lg,
               paddingTop: 20,
               paddingBottom: insets.bottom + 20,
@@ -1647,8 +1561,6 @@ export function AttendanceScreen(props: any) {
                   fontWeight: '600',
                   color: theme.colors.textSecondary,
                   marginBottom: 10,
-                  textTransform: 'uppercase',
-                  letterSpacing: 0.5,
                 }}
               >
                 選擇課程
@@ -1677,7 +1589,7 @@ export function AttendanceScreen(props: any) {
                       style={{
                         fontSize: 12,
                         fontWeight: '600',
-                        color: leaveCourseId === c.id ? '#fff' : theme.colors.text,
+                        color: leaveCourseId === c.id ? theme.colors.onAccent : theme.colors.text,
                       }}
                     >
                       {c.name}
@@ -1693,8 +1605,6 @@ export function AttendanceScreen(props: any) {
                   fontWeight: '600',
                   color: theme.colors.textSecondary,
                   marginBottom: 10,
-                  textTransform: 'uppercase',
-                  letterSpacing: 0.5,
                 }}
               >
                 假別
@@ -1720,13 +1630,13 @@ export function AttendanceScreen(props: any) {
                     <Ionicons
                       name={cat.icon as any}
                       size={14}
-                      color={leaveCategory === cat.id ? '#fff' : theme.colors.accent}
+                      color={leaveCategory === cat.id ? theme.colors.onAccent : theme.colors.accent}
                     />
                     <Text
                       style={{
                         fontSize: 12,
                         fontWeight: '600',
-                        color: leaveCategory === cat.id ? '#fff' : theme.colors.text,
+                        color: leaveCategory === cat.id ? theme.colors.onAccent : theme.colors.text,
                       }}
                     >
                       {cat.label}
@@ -1742,8 +1652,6 @@ export function AttendanceScreen(props: any) {
                   fontWeight: '600',
                   color: theme.colors.textSecondary,
                   marginBottom: 8,
-                  textTransform: 'uppercase',
-                  letterSpacing: 0.5,
                 }}
               >
                 請假原因
@@ -1779,7 +1687,7 @@ export function AttendanceScreen(props: any) {
                   opacity: pressed ? 0.85 : 1,
                 })}
               >
-                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>提交請假</Text>
+                <Text style={{ color: theme.colors.onAccent, fontSize: 14, fontWeight: '700' }}>提交請假</Text>
               </Pressable>
 
               <Pressable

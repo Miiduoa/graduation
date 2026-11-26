@@ -1287,3 +1287,39 @@ describe('catalog names and codes yield to an exact public name on another place
     }
   });
 });
+describe('bound Providence alias with public catalogue metadata', () => {
+  it('matches bilingual names without changing the supplied place or bound school marker', () => {
+    const catalog = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-renyuan')!;
+    const local = { ...catalog, schoolId: 'tw-pu' };
+    const foreign = { ...catalog, schoolId: 'pu' };
+    expect(resolveCampusClassroom({
+      schoolId: 'tw-pu', query: 'Anthony Kuo Hall 303', locations: [local],
+    })).toMatchObject({ status: 'matched', matchKind: 'catalog', matches: [local] });
+    expect(resolveCampusClassroom({
+      schoolId: 'tw-pu', query: 'Anthony Kuo Hall 303', locations: [foreign],
+    })).toMatchObject({ status: 'unmatched', matches: [] });
+  });
+
+  it.each([
+    ['PH', 'pu-zhugu', 'primary'],
+    ['Providence Hall ', 'pu-zhugu', 'catalog'],
+    ['AK', 'pu-renyuan', 'alias'],
+    ['Bishop Kupfer Hall ', 'pu-wenxing', 'alias'],
+  ] as const)('keeps %s room lookup scoped while rejecting an ambiguous floor range', (prefix, placeId, matchKind) => {
+    const catalog = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === placeId)!;
+    const local = { ...catalog, schoolId: 'tw-pu' };
+    for (const suffix of ['3F-4F', '3樓4F', 'B1F B2F']) {
+      expect(resolveCampusClassroom({
+        schoolId: 'tw-pu', query: prefix + suffix, locations: [local],
+      }), prefix + suffix).toMatchObject({ status: 'unmatched', matches: [] });
+    }
+    for (const suffix of ['3F303', '303F']) {
+      expect(resolveCampusClassroom({
+        schoolId: 'tw-pu', query: prefix + suffix, locations: [local],
+      }), prefix + suffix).toMatchObject({ status: 'matched', matchKind, matches: [local] });
+      expect(resolveCampusClassroom({
+        schoolId: 'tw-pu', query: prefix + suffix, locations: [{ ...catalog, schoolId: 'pu' }],
+      }), prefix + suffix).toMatchObject({ status: 'unmatched', matches: [] });
+    }
+  });
+});

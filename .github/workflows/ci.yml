@@ -117,6 +117,14 @@ jobs:
           node scripts/test-public-cafeterias.mjs
           python3 -m unittest discover -s scripts/public-cafeterias -p '*_test.py'
 
+      - name: Test isolated Google account linking contracts
+        env:
+          GOOGLE_LINK_TEST_DATABASE_URL: postgresql://cafeteria_test:cafeteria_test_only@127.0.0.1:5432/cafeteria_test
+          GOOGLE_LINK_TEST_DEPS: ${{ runner.temp }}/public-cafeteria-test/node_modules
+        run: |
+          node --test deploy/nuni-api/account-linking/google-link-service.test.mjs deploy/nuni-api/account-linking/google-link-routes.test.mjs
+          node --test deploy/nuni-api/account-linking/google-link-postgres.ci.mjs
+
       - name: Test personal imports and course access against PostgreSQL
         env:
           IMPORT_SYNC_TEST_DATABASE_URL: postgresql://cafeteria_test:cafeteria_test_only@127.0.0.1:5432/cafeteria_test

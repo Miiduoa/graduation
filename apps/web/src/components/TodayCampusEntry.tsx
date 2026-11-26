@@ -10,16 +10,17 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type Ref,
   type Dispatch,
+  type Ref,
   type SetStateAction,
 } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { areFunctionsConfigured } from '@/lib/functionsUrl';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
-import { useCampusNavigationSearch } from '@/lib/campusNavigation';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { currentReturnPath } from '@/lib/navigation';
 import { AssistantLinkNavigation, useAssistantLinkNavigation } from './AssistantReplyLink';
 import { useLocationHash } from '@/lib/useLocationHash';
@@ -31,7 +32,10 @@ import { QuickCampusEntry } from './QuickCampusEntry';
 import { useOptionalAssistantWorkspace } from './AssistantWorkspaceContext';
 import { AssistantWorkspaceEntry } from './AssistantWorkspaceEntry';
 import styles from './TodayCampusEntry.module.css';
-import type { AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
+import {
+  getAssistantRoleWorkflow,
+  type AssistantWorkContext,
+} from '@campus/shared/src/assistantRoleWorkflows';
 
 const NuniConversation = lazy(async () => ({
   default: (await import('@/features/nuni/Assistant')).Conversation,
@@ -106,7 +110,7 @@ function TodayConversation({
             onAsk={
               canAsk
                 ? (phrase) => {
-                    setText(phrase);
+                    draft.setText(phrase);
                     setSearchOpen(false);
                     conversation.current?.querySelector('textarea')?.focus();
                   }
@@ -293,11 +297,20 @@ function CampusEntryContent({
   if (nuni.pendingLogout) return <p role="status">正在確認登出狀態…</p>;
   if (campus.status === 'loading') return <p role="status">正在確認瀏覽校園…</p>;
   if (!account || campus.status !== 'ready' || !campus.schoolId) {
+    const preparedQuestion = inlineDraft?.text.trim();
+    // Drafts belong to this document's memory. Login resumes the original route
+    // and filters without serializing an unsent draft into the return URL.
     return (
       <>
+        {preparedQuestion && (
+          <p className={styles.preparedQuestion}>你的問題：{preparedQuestion}</p>
+        )}
         {!uid && !session ? (
           <p className={styles.hint}>
-            <LoginLink returnPath={returnPath} onNavigateClick={navigateLink}>
+            <LoginLink
+              returnPath={returnPath}
+              onNavigateClick={navigateLink}
+            >
               登入後，接著詢問校園助理
             </LoginLink>
           </p>
@@ -382,6 +395,38 @@ function LocalAssistantDisclosure({
   const [opened, setOpened] = useState(false);
   const [hasOpened, setHasOpened] = useState(false);
   const [focusRequest, setFocusRequest] = useState(0);
+  const questionInput = useRef<HTMLTextAreaElement>(null);
+  const questionId = useId();
+  const auth = useAuth();
+  const nuni = useNuniSession();
+  const campus = useCampusBrowseContext();
+  const params = useSearchParams();
+  const campusSearch = useCampusNavigationSearch(params);
+  const draftScope = JSON.stringify([
+    auth.user?.uid,
+    Boolean(auth.error),
+    nuni.session?.context,
+    nuni.session?.platformAccountId,
+    nuni.pendingLogout,
+    Boolean(nuni.error),
+    campus.schoolId,
+    preferredWorkContext,
+  ]);
+  const [draftState, setDraftState] = useState({ scope: draftScope, text: '' });
+  const text = draftState.scope === draftScope ? draftState.text : '';
+  if (draftState.scope !== draftScope) setDraftState({ scope: draftScope, text: '' });
+  const setText = useCallback<Dispatch<SetStateAction<string>>>(
+    (value) =>
+      setDraftState((current) => ({
+        scope: draftScope,
+        text:
+          typeof value === 'function'
+            ? value(current.scope === draftScope ? current.text : '')
+            : value,
+      })),
+    [draftScope],
+  );
+  const workflow = getAssistantRoleWorkflow(preferredWorkContext);
 
   const openAssistant = useCallback(() => {
     const panel = disclosure.current;
@@ -411,43 +456,108 @@ function LocalAssistantDisclosure({
   );
 
   return (
-    <details
-      ref={disclosure}
-      id="today-voice-entry"
-      className={styles.disclosure}
-      onKeyDown={(event) => {
-        if (event.key !== 'Escape' || event.nativeEvent.isComposing || !event.currentTarget.open)
-          return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.currentTarget.open = false;
-        setOpened(false);
-        onOpenChange(false);
-        stopAssistantVoice(event.currentTarget);
-        clearAssistantAnchor('today-voice-entry');
-        const trigger = openingTrigger.current;
-        (trigger?.isConnected ? trigger : event.currentTarget.querySelector('summary'))?.focus();
-      }}
-      onToggle={({ currentTarget: panel, target }) => {
-        if (target !== panel) return;
-        setOpened(panel.open);
-        onOpenChange(panel.open);
-        if (panel.open) {
-          setHasOpened(true);
-          return;
-        }
-        stopAssistantVoice(panel);
-        clearAssistantAnchor('today-voice-entry');
-      }}
-    >
-      <summary className={styles.trigger}>
-        <CampusIcon name="social" size={20} />
-        <strong>校園助理</strong>
-        <span className={styles.triggerHint}>打字或語音詢問</span>
-      </summary>
-      <div className={styles.body}>
-        {hasOpened && <TodayCampusEntry active={opened} focusRequest={focusRequest} preferredWorkContext={preferredWorkContext} />}
+    <section className={styles.starter} aria-labelledby={`${questionId}-title`}>
+      <div className={styles.starterHeading}>
+        <h2 id={`${questionId}-title`}>今天想完成什麼？</h2>
+        <Link href={campusServiceHref('/explore', campusSearch)} className={styles.exploreLink}>
+          探索用法
+        </Link>
       </div>
-    </details>
+      {!opened && (
+        <>
+          <p className={styles.starterDescription}>{workflow.purpose}</p>
+          <form
+            className={styles.starterComposer}
+            aria-label="開始一個任務"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (text.trim()) openAssistant();
+            }}
+          >
+            <label className={styles.srOnly} htmlFor={questionId}>
+              今天想完成的事
+            </label>
+            <textarea
+              id={questionId}
+              ref={questionInput}
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              placeholder={
+                workflow.id === 'student'
+                  ? '問問題、整理課業，或安排接下來的時間'
+                  : workflow.placeholder
+              }
+              rows={2}
+              maxLength={1000}
+            />
+            <div className={styles.composerFooter}>
+              <span>先寫下想法，再一起完成</span>
+              <button type="submit" disabled={!text.trim()}>
+                繼續
+              </button>
+            </div>
+          </form>
+          <div className={styles.suggestions} aria-label="試試這些問題">
+            {workflow.suggestions.slice(0, 3).map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                onClick={() => {
+                  setText(suggestion);
+                  questionInput.current?.focus({ preventScroll: true });
+                }}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <details
+        ref={disclosure}
+        id="today-voice-entry"
+        className={styles.disclosure}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || event.nativeEvent.isComposing || !event.currentTarget.open)
+            return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.currentTarget.open = false;
+          setOpened(false);
+          onOpenChange(false);
+          stopAssistantVoice(event.currentTarget);
+          clearAssistantAnchor('today-voice-entry');
+          const trigger = openingTrigger.current;
+          (trigger?.isConnected ? trigger : event.currentTarget.querySelector('summary'))?.focus();
+        }}
+        onToggle={({ currentTarget: panel, target }) => {
+          if (target !== panel) return;
+          setOpened(panel.open);
+          onOpenChange(panel.open);
+          if (panel.open) {
+            setHasOpened(true);
+            return;
+          }
+          stopAssistantVoice(panel);
+          clearAssistantAnchor('today-voice-entry');
+        }}
+      >
+        <summary className={styles.trigger}>
+          <CampusIcon name="social" size={20} />
+          <strong>校園助理</strong>
+          <span className={styles.triggerHint}>打字或語音詢問</span>
+        </summary>
+        <div className={styles.body}>
+          {hasOpened && (
+            <TodayCampusEntry
+              active={opened}
+              focusRequest={focusRequest}
+              preferredWorkContext={preferredWorkContext}
+              inlineDraft={{ text, setText }}
+            />
+          )}
+        </div>
+      </details>
+    </section>
   );
 }

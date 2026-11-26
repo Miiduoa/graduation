@@ -221,7 +221,13 @@ tags:
 - waitForAnimationToEnd:
     timeout: 2500
 
-- takeScreenshot: demo_11_campus_hub
+- takeScreenshot: demo_11_explore
+
+# 探索保留完整校園服務目錄，舊服務可直接接續。
+- tapOn: '查看全部校園服務'
+
+- waitForAnimationToEnd:
+    timeout: 1500
 
 # 點 BusV2
 - tapOn: '校園公車'
@@ -238,7 +244,7 @@ tags:
 - waitForAnimationToEnd:
     timeout: 2000
 
-- tapOn: '校園地圖 V2'
+- tapOn: '校園地圖'
 
 - waitForAnimationToEnd:
     timeout: 4000

@@ -4,6 +4,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { theme } from './theme';
+import { pageTitleFont } from './styles';
 import { useThemeVersion } from './useThemeStyleSheet';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 
@@ -15,109 +16,30 @@ export function CockpitHero(props: { eyebrow: string; title: string; summary?: s
   useThemeVersion();
   return (
     <View style={{ marginBottom: theme.space.lg }}>
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: theme.space.sm,
-          marginBottom: theme.space.md,
-        }}
-      >
-        <HeaderAvatarButton size={42} />
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text
-            style={{
-              fontSize: theme.typography.labelSmall.fontSize,
-              lineHeight: theme.typography.labelSmall.lineHeight,
-              fontWeight: '700',
-              letterSpacing: theme.typography.labelSmall.letterSpacing,
-              color: theme.colors.muted,
-            }}
-            numberOfLines={1}
-          >
-            {props.eyebrow}
-          </Text>
-          <Text
-            style={{
-              color: theme.colors.text,
-              fontSize: theme.typography.bodySmall.fontSize,
-              lineHeight: theme.typography.bodySmall.lineHeight,
-              marginTop: 1,
-            }}
-            numberOfLines={1}
-          >
-            nuni
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
+        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+          {props.eyebrow && props.eyebrow !== props.title ? (
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 13 }}>{props.eyebrow}</Text>
+          ) : null}
+          <Text accessibilityRole="header" style={{
+            color: theme.colors.text, fontFamily: pageTitleFont, fontSize: 28, fontWeight: '600',
+          }}>
+            {props.title}
           </Text>
         </View>
-        <View
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: theme.radius.md,
-            backgroundColor: theme.colors.accentSoft,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Ionicons name="layers-outline" size={18} color={theme.colors.accent} />
-        </View>
+        <HeaderAvatarButton size={40} />
       </View>
-      <View
-        style={{
-          padding: theme.space.lg,
-          borderRadius: theme.radius.lg,
-          backgroundColor: theme.colors.surface,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          borderLeftWidth: 4,
-          borderLeftColor: theme.colors.accent,
-        }}
-      >
-        <Text
-          style={{
-            color: theme.colors.accent,
-            fontSize: theme.typography.overline.fontSize,
-            lineHeight: theme.typography.overline.lineHeight,
-            fontWeight: theme.typography.overline.fontWeight ?? '700',
-            letterSpacing: theme.typography.overline.letterSpacing,
-          }}
-        >
-          接下來
+      {props.summary ? (
+        <Text style={{ color: theme.colors.textSecondary, marginTop: 8, fontSize: 15, lineHeight: 22 }}>
+          {props.summary}
         </Text>
-        <Text
-          style={{
-            fontSize: theme.typography.hero?.fontSize ?? theme.typography.display.fontSize,
-            lineHeight: theme.typography.hero?.lineHeight ?? theme.typography.display.lineHeight,
-            letterSpacing:
-              theme.typography.hero?.letterSpacing ?? theme.typography.display.letterSpacing,
-            fontWeight: '700',
-            color: theme.colors.text,
-            marginTop: theme.space.xs,
-          }}
-          numberOfLines={3}
-        >
-          {props.title}
-        </Text>
-        {props.summary ? (
-          <Text
-            style={{
-              fontSize: theme.typography.body.fontSize,
-              lineHeight: theme.typography.body.lineHeight,
-              color: theme.colors.textSecondary,
-              marginTop: theme.space.sm + 2,
-            }}
-            numberOfLines={4}
-          >
-            {props.summary}
-          </Text>
-        ) : null}
-      </View>
+      ) : null}
     </View>
   );
 }
 
 // ─────────────────────────────────────────────────────────
-// Metric Row — 玻璃感卡片
+// Metric Row — 精簡數字列
 // ─────────────────────────────────────────────────────────
 
 export function CockpitMetricRow(props: { children: React.ReactNode }) {
@@ -154,10 +76,10 @@ export function CockpitMetricChip(props: {
     <View
       style={{
         flex: 1,
-        minWidth: 132,
-        minHeight: 82,
-        paddingVertical: theme.space.md,
-        paddingHorizontal: theme.space.md,
+        minWidth: 128,
+        minHeight: 72,
+        paddingVertical: 12,
+        paddingHorizontal: 14,
         borderRadius: theme.radius.md,
         backgroundColor: theme.colors.surface,
         borderWidth: StyleSheet.hairlineWidth,
@@ -172,6 +94,7 @@ export function CockpitMetricChip(props: {
           letterSpacing: theme.typography.h1.letterSpacing ?? 0,
           fontWeight: '700',
           color: tint,
+          fontVariant: ['tabular-nums'],
         }}
         numberOfLines={1}
       >
@@ -194,7 +117,7 @@ export function CockpitMetricChip(props: {
 }
 
 // ─────────────────────────────────────────────────────────
-// Section — 細分隔線、大 touch target、smooth chevron
+// Section — 細分隔線、大 touch target、收合節奏
 // ─────────────────────────────────────────────────────────
 
 export function CockpitSection(props: {
@@ -225,9 +148,10 @@ export function CockpitSection(props: {
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
-          paddingVertical: theme.space.md,
+          minHeight: 48,
+          paddingVertical: 13,
           paddingHorizontal: theme.space.md,
-          opacity: pressed ? 0.55 : 1,
+          backgroundColor: pressed ? theme.colors.surfaceMuted : 'transparent',
         })}
       >
         <Text
@@ -236,7 +160,7 @@ export function CockpitSection(props: {
             lineHeight: theme.typography.h3.lineHeight,
             fontWeight: '600',
             color: theme.colors.text,
-            letterSpacing: 0,
+            letterSpacing: theme.typography.h3.letterSpacing,
           }}
           numberOfLines={1}
         >
@@ -244,30 +168,20 @@ export function CockpitSection(props: {
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.sm }}>
           {props.count !== undefined && (
-            <View
+            <Text
               style={{
-                paddingHorizontal: theme.space.xs + 2,
-                paddingVertical: 2,
-                borderRadius: theme.radius.sm,
-                backgroundColor: theme.colors.surfaceMuted,
-                minWidth: 22,
-                alignItems: 'center',
+                fontSize: theme.typography.labelSmall.fontSize,
+                color: theme.colors.muted,
+                fontWeight: '600',
+                fontVariant: ['tabular-nums'],
               }}
             >
-              <Text
-                style={{
-                  fontSize: theme.typography.labelSmall.fontSize,
-                  color: theme.colors.muted,
-                  fontWeight: '600',
-                }}
-              >
-                {props.count}
-              </Text>
-            </View>
+              {props.count}
+            </Text>
           )}
           <Ionicons
             name={props.open ? 'chevron-up' : 'chevron-down'}
-            size={14}
+            size={15}
             color={theme.colors.muted}
           />
         </View>
@@ -276,7 +190,7 @@ export function CockpitSection(props: {
         <View
           style={{
             paddingHorizontal: theme.space.md,
-            paddingBottom: theme.space.sm,
+            paddingBottom: theme.space.xs,
             borderTopWidth: StyleSheet.hairlineWidth,
             borderTopColor: theme.colors.separator,
           }}
@@ -289,7 +203,7 @@ export function CockpitSection(props: {
 }
 
 // ─────────────────────────────────────────────────────────
-// Row — 列表 item，hairline divider 風格
+// Row — 扁平列表列，文字對齊細線分隔
 // ─────────────────────────────────────────────────────────
 
 export function CockpitRow(props: {
@@ -314,28 +228,22 @@ export function CockpitRow(props: {
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        minHeight: 58,
-        paddingVertical: theme.space.sm,
-        gap: theme.space.sm,
+        minHeight: 52,
+        paddingVertical: 11,
+        gap: 10,
       }}
     >
       {props.icon ? (
-        <View
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: theme.radius.sm,
-            backgroundColor: theme.colors.surfaceMuted,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderWidth: StyleSheet.hairlineWidth,
-            borderColor: theme.colors.border,
-          }}
-        >
-          <Text style={{ fontSize: 16 }}>{props.icon}</Text>
+        <View style={{ width: 22, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontSize: 15 }}>{props.icon}</Text>
         </View>
       ) : null}
-      <View style={{ flex: 1 }}>
+      <View
+        style={{
+          flex: 1,
+          minWidth: 0,
+        }}
+      >
         <Text
           style={{
             fontSize: theme.typography.body.fontSize,
@@ -364,7 +272,7 @@ export function CockpitRow(props: {
       </View>
       {props.rightSlot}
       {props.onPress && !props.rightSlot && (
-        <Ionicons name="chevron-forward" size={14} color={theme.colors.muted} />
+        <Ionicons name="chevron-forward" size={15} color={theme.colors.muted} />
       )}
     </View>
   );
@@ -374,8 +282,7 @@ export function CockpitRow(props: {
         onPress={props.onPress}
         accessibilityRole="button"
         style={({ pressed }) => ({
-          opacity: pressed ? 0.55 : 1,
-          transform: [{ scale: pressed ? 0.99 : 1 }],
+          opacity: pressed ? 0.65 : 1,
         })}
       >
         {Inner}
@@ -386,7 +293,7 @@ export function CockpitRow(props: {
 }
 
 // ─────────────────────────────────────────────────────────
-// Tool Chip — 圓角 capsule + 微互動
+// Tool Chip — 中性平面工具鍵
 // ─────────────────────────────────────────────────────────
 
 export function CockpitToolChip(props: {
@@ -405,17 +312,15 @@ export function CockpitToolChip(props: {
         alignItems: 'center',
         gap: 6,
         minHeight: 44,
-        paddingVertical: theme.space.xs + 6,
-        paddingHorizontal: theme.space.sm + 4,
+        paddingVertical: 10,
+        paddingHorizontal: 13,
         borderRadius: theme.radius.md,
-        backgroundColor: theme.colors.surface,
+        backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface,
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: theme.colors.border,
-        opacity: pressed ? 0.6 : 1,
-        transform: [{ scale: pressed ? 0.97 : 1 }],
       })}
     >
-      <Ionicons name={props.icon} size={14} color={theme.colors.text} />
+      <Ionicons name={props.icon} size={15} color={theme.colors.textSecondary} />
       <Text
         style={{
           color: theme.colors.text,
@@ -431,7 +336,7 @@ export function CockpitToolChip(props: {
 }
 
 // ─────────────────────────────────────────────────────────
-// Accent CTA Card — 焦點黑卡，現代簡約風
+// Accent CTA Card — 深林主焦點卡
 // ─────────────────────────────────────────────────────────
 
 export function CockpitAccentCard(props: {
@@ -452,11 +357,10 @@ export function CockpitAccentCard(props: {
       disabled={!props.onPress}
       accessibilityRole={props.onPress ? 'button' : undefined}
       style={({ pressed }) => ({
-        padding: theme.space.lg,
+        padding: theme.space.md,
         borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.accent,
-        opacity: pressed ? 0.88 : 1,
-        transform: [{ scale: pressed ? 0.99 : 1 }],
+        opacity: pressed ? 0.9 : 1,
         marginBottom: theme.space.lg,
       })}
     >
@@ -464,10 +368,11 @@ export function CockpitAccentCard(props: {
         <Text
           style={{
             color: theme.colors.onAccent,
-            fontSize: theme.typography.labelSmall.fontSize,
-            fontWeight: '500',
-            letterSpacing: 0,
+            fontSize: theme.typography.overline.fontSize,
+            fontWeight: '600',
+            letterSpacing: 0.6,
             textTransform: 'uppercase',
+            opacity: 0.85,
           }}
         >
           {props.eyebrow}
@@ -479,8 +384,8 @@ export function CockpitAccentCard(props: {
           fontSize: theme.typography.h2.fontSize,
           lineHeight: theme.typography.h2.lineHeight,
           fontWeight: '700',
-          marginTop: theme.space.xs + 2,
-          letterSpacing: 0,
+          marginTop: props.eyebrow ? 4 : 0,
+          letterSpacing: theme.typography.h2.letterSpacing,
         }}
         numberOfLines={2}
       >
@@ -491,7 +396,8 @@ export function CockpitAccentCard(props: {
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
-          marginTop: theme.space.md,
+          marginTop: 14,
+          gap: 10,
         }}
       >
         {props.meta ? (
@@ -499,6 +405,7 @@ export function CockpitAccentCard(props: {
             style={{
               color: theme.colors.onAccent,
               fontSize: theme.typography.bodySmall.fontSize,
+              opacity: 0.9,
             }}
           >
             {props.meta}
@@ -511,21 +418,21 @@ export function CockpitAccentCard(props: {
             style={{
               flexDirection: 'row',
               alignItems: 'center',
-              gap: 6,
-              paddingHorizontal: theme.space.sm + 4,
-              paddingVertical: theme.space.xs + 4,
-              borderRadius: theme.radius.full,
+              gap: 5,
+              paddingHorizontal: 12,
+              paddingVertical: 7,
+              borderRadius: theme.radius.md,
               backgroundColor: theme.colors.surface,
             }}
           >
             {props.ctaIcon && (
-              <Ionicons name={props.ctaIcon} size={12} color={theme.colors.accent} />
+              <Ionicons name={props.ctaIcon} size={13} color={theme.colors.accent} />
             )}
             <Text
               style={{
                 color: theme.colors.accent,
                 fontSize: theme.typography.bodySmall.fontSize,
-                fontWeight: '700',
+                fontWeight: '600',
                 letterSpacing: 0,
               }}
             >

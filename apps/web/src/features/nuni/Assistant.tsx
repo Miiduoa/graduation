@@ -325,7 +325,7 @@ function V2Conversation({
   const askRequest = useRef<AbortController | null>(null);
   const tronClassAskRequest = useRef<AbortController | null>(null);
   const tronClassAuthorityEpoch = useRef(0);
-  const tronClassObservedGrant = useRef<{ revision: string; version: string } | null>(null);
+  const tronClassObservedGrant = useRef<{ revision: string; version: string | null } | null>(null);
   const askStops = useRef(0);
   const [error, setError] = useState('');
   const [recoverableQuestion, setRecoverableQuestion] = useState('');
@@ -489,7 +489,6 @@ function V2Conversation({
   }
   function invalidateTronClassAuthority(currentRequest?: AbortController) {
     tronClassAuthorityEpoch.current += 1;
-    tronClassObservedGrant.current = null;
     if (tronClassAskRequest.current !== currentRequest) tronClassAskRequest.current?.abort();
     setTurns(previous => previous.map(item => item.tronClass
       ? { ...item, tronClass: { ...item.tronClass, inactive: true } } : item));
@@ -717,20 +716,25 @@ function V2Conversation({
     const scope = controller.current;
     const stops = askStops.current;
     const epoch = tronClassAuthorityEpoch.current;
-    await ask();
+    let revision = tronClassObservedGrant.current?.revision;
+    const firstRevision = await ask();
+    revision ??= firstRevision ?? tronClassObservedGrant.current?.revision;
     for (const clause of clauses) {
       // Stop after a user stop, a scope change or any change in TronClass authority
       // (disabled, disconnected or permission required is reported at most once).
       if (!active() || controller.current !== scope || askStops.current !== stops ||
         tronClassAuthorityEpoch.current !== epoch || busy.current) return;
-      await ask(undefined, { question: clause }, true);
+      const resultRevision = await ask(undefined, { question: clause, compoundQuestion: current,
+        ...(revision === undefined ? {} : { revision }) });
+      revision ??= resultRevision;
     }
   }
-  async function ask(selection?: AssistantCourseworkSelection, tronClassSelection?: TronClassAgentQuestion, compoundClause = false) {
+  async function ask(selection?: AssistantCourseworkSelection, tronClassSelection?: TronClassAgentQuestion) {
     const current = tronClassSelection?.question ?? (selection
       ? `幫「${selection.target.title}」${selection.date ? '在 ' + selection.date + ' ' : ''}找 30 分鐘準備時間`
       : question.trim());
     if (!current || busy.current || ((selection || tronClassSelection) && taskProfile !== 'student')) return;
+    const compoundQuestion = tronClassSelection?.compoundQuestion;
     const navigationQuestion = !selection && !tronClassSelection ? tronClassExplicitNavigationQuestion(current) : null;
     const tronClass = taskProfile === 'student' && !selection && !navigationQuestion && (!!tronClassSelection || canAnswerTronClassQuestion(current));
     const tronClassEpoch = tronClassAuthorityEpoch.current;
@@ -779,7 +783,7 @@ function V2Conversation({
       // selected source is not a full list and cannot reveal an older list.
       const eligible: V2Turn[] = [];
       for (const turn of [...turns].reverse()) {
-        if (turn.tronClass?.compound) continue;
+        if (turn.tronClass?.compoundQuestion) continue;
         if (turn.reply.campusEventPreview) {
           if (turn.campusEventDiscovery) break;
           continue;
@@ -821,7 +825,7 @@ function V2Conversation({
     const followup = taskProfile === 'student' && !tronClass && !publicCompound && !publicCourseIntent && !selection ? courseworkStudyFollowup(current) : null;
     // TronClass supplements of a multi-clause request follow the planner turn
     // and must not hide the coursework it listed.
-    const contextTurn = [...turns].reverse().find(turn => !turn.tronClass?.compound);
+    const contextTurn = [...turns].reverse().find(turn => !turn.tronClass?.compoundQuestion);
     const targets = parseAssistantCourseworkTargets(contextTurn?.reply.courseworkTargets);
     const studyDate = followup?.date ?? contextTurn?.reply.courseworkDate;
     let studySelection = selection;
@@ -877,7 +881,7 @@ function V2Conversation({
     setPendingAction('ask');
     setPending(true);
     // A compound clause follows the planner's reply and must not hide its error.
-    if (!compoundClause) setError('');
+    if (!compoundQuestion) setError('');
     // Free the composer immediately so the next thought can be typed during a slow response.
     // The sent content remains captured in `current` and can be recovered on failure.
     if (!selection && !tronClassSelection) setQuestion('');
@@ -885,7 +889,10 @@ function V2Conversation({
     try {
       if (tronClass) {
         try {
-          const result = await tronClassAgent.ask(tronClassSelection ?? { question: current }, pendingAsk.signal);
+          const sourceRevision = tronClassObservedGrant.current?.revision;
+          const result = await tronClassAgent.ask(tronClassSelection ?? {
+            question: current, ...(sourceRevision === undefined ? {} : { revision: sourceRevision }),
+          }, pendingAsk.signal);
           if (pendingAsk.signal.aborted || scopeSignal.aborted || tronClassEpoch !== tronClassAuthorityEpoch.current) return;
           const observed = tronClassObservedGrant.current;
           if (observed && (observed.revision !== result.revision || observed.version !== result.grantVersion))
@@ -893,14 +900,17 @@ function V2Conversation({
           tronClassObservedGrant.current = { revision: result.revision, version: result.grantVersion };
           setTurns(previous => [...previous, { question: current,
             reply: { answer: result.answer, steps: [], cards: [], dataRead: true },
-            tronClass: { result, ...(compoundClause ? { compound: true as const } : {}) } }]);
+            tronClass: { result, ...(compoundQuestion ? { compoundQuestion } : {}) } }]);
           setRecoverableQuestion(previous => previous === current ? '' : previous);
+          return result.revision;
         } catch (reason) {
           if (tronClassEpoch !== tronClassAuthorityEpoch.current) return;
           if (pendingAsk.signal.aborted || scopeSignal.aborted || !(reason instanceof TronClassRequestError)) throw reason;
           if (isTronClassAuthorityError(reason)) invalidateTronClassAuthority(pendingAsk);
+          if (reason.sourceRevision && tronClassObservedGrant.current?.revision !== reason.sourceRevision)
+            tronClassObservedGrant.current = { revision: reason.sourceRevision, version: null };
           // The planner already answered the whole request, including any LMS handoff.
-          if (compoundClause && reason.status === 503 && reason.code === 'TRONCLASS_DISABLED') return;
+          if (compoundQuestion && reason.status === 503 && reason.code === 'TRONCLASS_DISABLED') return;
           if (!tronClassSelection && reason.status === 503 && reason.code === 'TRONCLASS_DISABLED') {
             const navigationQuestion = tronClassDisabledNavigationQuestion(current);
             const readRoute = navigationQuestion && assistantQuestionReadRoute(taskProfile, navigationQuestion);
@@ -919,9 +929,10 @@ function V2Conversation({
           setTurns(previous => [...previous, { question: current,
             reply: { answer: reason.message, steps: [], cards: [], dataRead: true },
             tronClass: {
+              sourceRevision: tronClassSelection?.revision ?? reason.sourceRevision ?? tronClassObservedGrant.current?.revision,
               accessRequired: reason.code.includes('AGENT_PERMISSION'),
               unconnected: reason.status === 401 || /RECONNECT_REQUIRED|NOT_CONNECTED|BINDING_CHANGED/.test(reason.code),
-              ...(compoundClause ? { compound: true as const } : {}),
+              ...(compoundQuestion ? { compoundQuestion } : {}),
             } }]);
           }
         }
@@ -1514,7 +1525,12 @@ function V2Conversation({
         key={turn.tronClass.result?.requestId ?? turn.question} data={turn.tronClass} question={turn.question}
         client={tronClassAgent} owner={localScope.owner} pending={pending}
         onAuthorityChanged={() => invalidateTronClassAuthority()}
-        onAsk={input => void ask(undefined, input)} /> : null}
+        onGrantRead={(grant, acceptedCurrent) => {
+          if (acceptedCurrent || !tronClassObservedGrant.current)
+            tronClassObservedGrant.current = { revision: grant.revision, version: grant.version };
+        }}
+        onAsk={input => void ask(undefined, input.question === turn.question && turn.tronClass?.compoundQuestion
+          ? { ...input, compoundQuestion: turn.tronClass.compoundQuestion } : input)} /> : null}
       renderPlanComparison={turn => {
         const comparison = planComparisons.current.get(turn);
         return comparison ? comparison.shiftedIndices !== undefined
