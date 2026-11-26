@@ -4,11 +4,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { parseAssistantCalendarExecutionResult } from '@campus/shared/src/assistantExecution';
 import { parseAssistantFoodPickupTarget, type AssistantFoodPickupTarget } from '@campus/shared/src/assistantFoodPickupTarget';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { NuniNextStep } from '@/components/NuniNextStep';
 import { useAssistantEnabled } from '@/components/AssistantEnabledProvider';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Input';
-import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal, removeAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
 import { AssistantCard } from '@/features/nuni/assistant/AssistantCards';
@@ -310,11 +310,11 @@ function ScopedFoodPickupAgent({ scope, ...props }: Props & { scope: Scope }) {
 
 export function FoodPickupAgent(props: Props) {
   const enabled = useAssistantEnabled();
-  const campus = useCampusBrowseContext();
-  if (!enabled || campus.status !== 'ready' || !campus.schoolId ||
+  const schoolId = toPublicSchoolId(props.tenantId);
+  if (!enabled || !schoolId ||
       !/^[A-Za-z0-9_-]{43}$/.test(props.context) || !/^[A-Za-z0-9_-]{1,128}$/.test(props.accountId)) return null;
   let target: AssistantFoodPickupTarget;
   try { target = parseAssistantFoodPickupTarget({ tenantId: props.tenantId, orderId: props.orderId }); } catch { return null; }
-  const scope = { context: props.context, accountId: props.accountId, schoolId: campus.schoolId };
+  const scope = { context: props.context, accountId: props.accountId, schoolId };
   return <ScopedFoodPickupAgent key={JSON.stringify([scope, target.tenantId, target.orderId])} scope={scope} {...props} />;
 }

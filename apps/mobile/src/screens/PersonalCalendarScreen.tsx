@@ -137,8 +137,10 @@ export function CampusEventCalendarDraftScreen() {
     >();
   const scope = usePersonalImportScope();
   const revokedOwner = useRevokedCampusEventDraftOwner();
-  const { knownOwner, loggingOut, sessionRejected, firebaseChanged, ownerSignedOut, nuniRevalidating, nuniGeneration } =
-    useCalendarAccount(scope);
+  const {
+    knownOwner, loggingOut, sessionRejected, firebaseChanged, ownerSignedOut,
+    nuniRevalidating, nuniGeneration, firebaseLogoutGeneration,
+  } = useCalendarAccount(scope);
   const { school, schoolId, selectionReady } = useSchool();
   const campusEvent = params?.campusEvent;
   const knownSchoolId = school?.id || schoolId || '';
@@ -153,15 +155,16 @@ export function CampusEventCalendarDraftScreen() {
   const draftGeneration = useRef(nuniGeneration);
   const nuniSignedInAgain =
     campusEvent?.owner.startsWith('nuni:') && draftGeneration.current !== nuniGeneration;
+  const writesRevoked = loggingOut || sessionRejected || ownerSignedOut(campusEvent?.owner);
   const invalidated =
     nuniSignedInAgain || firebaseChanged || campusEvent?.owner === revokedOwner ||
     ownerSignedOut(campusEvent?.owner) || ownerChanged || scopeChanged ||
-    schoolChanged || sessionRejected || schoolCleared;
+    schoolChanged || schoolCleared;
   const expired = useRef(false);
   useLayoutEffect(() => {
     if (invalidated) expired.current = true;
   }, [invalidated]);
-  const needsNewDraft = invalidated || expired.current || loggingOut;
+  const needsNewDraft = invalidated || expired.current;
   if (!campusEvent?.draft || needsNewDraft) {
     return (
       <Screen>
@@ -183,8 +186,9 @@ export function CampusEventCalendarDraftScreen() {
       ])}
       scopeKey={personalImportStorageKey(campusEvent)}
       scope={scope}
-      writesRevoked={false}
-      writeGeneration={0}
+      writesRevoked={writesRevoked}
+      writeGeneration={firebaseLogoutGeneration}
+      nuniGeneration={campusEvent.owner.startsWith('nuni:') ? nuniGeneration : undefined}
       schoolName={school.name}
       initialDraft={campusEvent.draft}
     />
@@ -212,7 +216,7 @@ export default function PersonalCalendarScreen() {
   const scope = usePersonalImportScope();
   const {
     knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseJustSignedOut,
-    ownerSignedOut, workspaceUid, nuniSignedOut, nuniGeneration, firebaseLogoutGeneration,
+    ownerSignedOut, workspaceUid, nuniRevalidating, nuniSignedOut, nuniGeneration, firebaseLogoutGeneration,
   } = useCalendarAccount(scope);
   const { school, schoolId, selectionReady } = useSchool();
   const route = useRoute();
@@ -226,8 +230,12 @@ export default function PersonalCalendarScreen() {
     if (firebaseChanged || firebaseJustSignedOut || loggingOut || sessionRejected || schoolCleared) return true;
     const previous = parsePersonalImportKey(lastReadyKey.current);
     if (!previous) return false;
+    // A Firebase fallback cannot identify a Nuni workspace while Nuni is revalidating.
+    const awaitingNuniOwner = nuniRevalidating && previous.owner.startsWith('nuni:');
     if (nuniSignedOut && previous.owner.startsWith('nuni:')) return true;
-    if (ownerSignedOut(previous.owner) || (knownOwner && previous.owner !== knownOwner)) return true;
+    if (!awaitingNuniOwner && (ownerSignedOut(previous.owner) || (knownOwner && previous.owner !== knownOwner))) {
+      return true;
+    }
     if (selectionReady && knownSchoolId && previous.schoolId !== knownSchoolId) return true;
     return false;
   })();
@@ -862,6 +870,13 @@ function PersonalCalendarWorkspace({
 
   // Revalidation may hide an idle unsaved campus draft, but never hide an
   // in-flight save or the error/receipt that tells the user what happened.
+  if (initialDraft && writesRevoked && !saving && !formError && !notice) {
+    return (
+      <Screen>
+        <Text style={{ color: theme.colors.text }}>請回到目前校園的活動頁重新開啟草稿。</Text>
+      </Screen>
+    );
+  }
   if (initialDraft && !scope && !saving && !formError && !notice) {
     return (
       <Screen>

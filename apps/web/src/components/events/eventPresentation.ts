@@ -72,14 +72,14 @@ const NON_PHYSICAL_LOCATION = /待(?:定|公告|通知)|尚未(?:公布|公告|�
 export function campusEventNextStep(event: CampusEvent, now: number) {
   const time = event.calendarTime ?? event;
   const phase = campusEventPhase(time, now);
-  if (!time.startsAt || (phase !== 'upcoming' && phase !== 'ongoing')) return null;
+  if (!time.startsAt || (phase !== 'upcoming' && phase !== 'ongoing' && phase !== 'started')) return null;
   const location = event.location?.trim();
   const startingSoon = Date.parse(time.startsAt) - now <= EVENT_ARRIVAL_WINDOW_MS;
   if (startingSoon && location && !NON_PHYSICAL_LOCATION.test(location) &&
       Array.from(location).length <= MAX_CAMPUS_CLASSROOM_QUERY_LENGTH) {
     const href = buildCampusClassroomMapHref({ schoolId: event.schoolId, location });
     if (href) return {
-      reason: `「${event.title}」${phase === 'ongoing' ? '正在進行' : '將在半小時內開始'}，活動地點是「${location}」。`,
+      reason: `「${event.title}」${phase === 'upcoming' ? '將在半小時內開始' : phase === 'started' ? '已開始' : '正在進行'}，活動地點是「${location}」。`,
       label: '在校園地圖查地點',
       href,
     };

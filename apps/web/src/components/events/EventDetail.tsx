@@ -212,8 +212,9 @@ export function EventDetail({
   }
 
   const event = view.event;
+  const eventTime = event.calendarTime ?? event;
   const nextStep = campusEventNextStep(event, now);
-  const phase = campusEventPhase(event, now);
+  const phase = campusEventPhase(eventTime, now);
   return (
     <article className={styles.detail}>
       <div className={styles.meta}>

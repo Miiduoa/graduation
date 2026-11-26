@@ -165,6 +165,46 @@ it('keeps a legacy display date without recommending plans for an ambiguous sour
   render(<EventDetail schoolId="nthu" schoolSearch="?schoolId=nthu" eventId="legacy" sourceParam="legacy-events" />);
   await screen.findByRole('heading', { name: '舊活動' });
   expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
+  expect(screen.getByText('時間待公告')).toBeTruthy();
+  expect(screen.queryByText('即將開始')).toBeNull();
+});
+
+it('keeps the badge on calendarTime when the display start would look upcoming', async () => {
+  const start = Date.parse('2027-11-30T16:20:00Z');
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+  try {
+    loadCampusEvent.mockResolvedValue(event({
+      id: 'legacy', title: '舊顯示時間', source: 'legacy-events', location: '禮堂',
+      startsAt: new Date(start + 86_400_000).toISOString(),
+      calendarTime: { startsAt: new Date(start - 5 * 60_000).toISOString() },
+    }));
+    render(<EventDetail schoolId="nthu" schoolSearch="?schoolId=nthu" eventId="legacy" sourceParam="legacy-events" />);
+    await screen.findByRole('heading', { name: '舊顯示時間' });
+    expect(screen.getByText('已開始')).toBeTruthy();
+    expect(screen.queryByText('即將開始')).toBeNull();
+    expect(screen.getByRole('link', { name: '在校園地圖查地點' })).toBeTruthy();
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+it('still offers the venue map after a physical event has started without an end time', async () => {
+  const start = Date.parse('2027-11-30T16:20:00Z');
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(start + 5 * 60_000);
+  try {
+    loadCampusEvent.mockResolvedValue(event({
+      id: 'open-end', title: '開放式活動', source: 'school-events', location: '禮堂',
+      startsAt: new Date(start).toISOString(),
+    }));
+    render(<EventDetail schoolId="nthu" schoolSearch="?schoolId=nthu" eventId="open-end" sourceParam="school-events" />);
+    const suggestion = within(await screen.findByRole('region', { name: 'nuni 建議' }));
+    expect(suggestion.getByText(/已開始/)).toBeTruthy();
+    expect(suggestion.getByRole('link', { name: '在校園地圖查地點' }).getAttribute('href'))
+      .toBe(`/map?${new URLSearchParams({ schoolId: 'nthu', query: '禮堂' })}`);
+    expect(screen.getByText('已開始')).toBeTruthy();
+  } finally {
+    clock.mockRestore();
+  }
 });
 
 it('rejects invalid source without probing collections by id alone', async () => {

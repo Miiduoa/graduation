@@ -669,6 +669,50 @@ it('hides the loaded month grid during Nuni revalidation and retains the unsaved
   expect(view.getByLabelText('標題').props.value).toBe(draftTitle);
 });
 
+it('keeps the unsaved draft when Nuni revalidates with a null session while Firebase stays signed in', async () => {
+  mockUseLiveScope = true;
+  mockAuth = { user: { uid: 'firebase-student' }, loading: false };
+  const title = '已存的同帳行程';
+  const draftTitle = '重驗時仍要保留的草稿';
+  const view = await fillAndSave(title);
+  fireEvent.press(view.getByText('月格'));
+  await fillDraft(view, draftTitle);
+
+  mockCalendarFocused = false;
+  mockSession = null;
+  mockNuniLoading = true;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(view.queryByLabelText('2026-10-20')).toBeNull();
+  expect(view.queryByText(title)).toBeNull();
+  expect(view.queryByText('請回到目前校園的活動頁重新開啟草稿。')).toBeNull();
+  expect(view.getByLabelText('標題').props.value).toBe(draftTitle);
+  expect(view.getByRole('button', { name: '儲存行程' })).toBeDisabled();
+
+  mockSession = {
+    platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
+  };
+  mockNuniLoading = false;
+  mockCalendarFocused = true;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(await view.findByText(title)).toBeTruthy();
+  expect(view.getByLabelText('標題').props.value).toBe(draftTitle);
+});
+
+it('drops the unsaved draft when the signed-in account actually switches during Nuni loading', async () => {
+  mockUseLiveScope = true;
+  mockAuth = { user: { uid: 'firebase-student' }, loading: false };
+  const view = await fillAndSave('原帳行程');
+  fireEvent.press(view.getByText('月格'));
+  await fillDraft(view, '不該帶到新帳的草稿');
+
+  mockCalendarFocused = false;
+  mockSession = { platformAccountId: 'pa_22222222-2222-4222-8222-222222222222' };
+  mockNuniLoading = false;
+  mockCalendarFocused = true;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(view.queryByLabelText('標題')).toBeNull();
+});
+
 it('keeps the ordinary draft after an interactive login to the same Nuni account', async () => {
   mockUseLiveScope = true;
   mockSignInGeneration = 1;
