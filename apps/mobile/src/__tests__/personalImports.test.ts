@@ -43,6 +43,8 @@ import {
   readPersonalImportRollback,
 } from '../services/personalImportRollbackJournal';
 
+const markerState = (value: unknown) => typeof value === 'string' ? value.split('\n')[0] : undefined;
+
 const scope = { owner: 'nuni:account-a', schoolId: 'pu' };
 const row = (id: string, title = '微積分'): PersonalImportRow => ({
   id,
@@ -350,7 +352,7 @@ test.each([[false, null], [true, null], [false, 'pending'], [false, 'settled']] 
       restartReadFault();
     }
     const value = textSync.call(this);
-    if (isPending && value === 'committed') committedRead();
+    if (isPending && markerState(value) === 'committed') committedRead();
     return value;
   });
   const reread = jest.fn(() => loadPersonalImports(scope));
@@ -540,7 +542,7 @@ test('native retry publishes the verified replacement when the cleared rejection
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
     });
-    expect(receipt).toBe(sha256(rollbackPayload) + '\n' + sha256(replacement!));
+    expect(receipt).toBe(rollbackPayload.match(/^attempt:.*$/m)![0] + '\n' + sha256(replacement!));
   } finally {
     unsubscribe();
     read.mockRestore();
@@ -764,7 +766,7 @@ test.each([
     }
     if (failPayloadBinding && this.uri.endsWith('.rollback.json') &&
         typeof value === 'string' && /(?:^|\n)committed:/.test(value)) payloadFault();
-    if (!markerReadFails && this.uri === markerUri && value === 'committed') {
+    if (!markerReadFails && this.uri === markerUri && markerState(value) === 'committed') {
       retirementAttempts++;
       if (phase === 'write' && revoked) active = false;
       throw new Error('標記無法更新');
@@ -789,7 +791,7 @@ test.each([
         restartMarkerFault.mock.calls.length === 0) restartMarkerFault();
     const value = textSync.call(this);
     if (!retirementReadsRecovered && this.uri === markerUri &&
-        (markerReadBlocked || (markerReadFails && value === 'committed'))) {
+        (markerReadBlocked || (markerReadFails && markerState(value) === 'committed'))) {
       markerReadBlocked ||= persistentMarkerReadFault;
       retirementAttempts++;
       if (revoked) active = false;
@@ -864,7 +866,7 @@ test.each([
           }
         }
         expect(textSync.call(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.pending`)))
-          .toBe(retirementWritesFail ? '' : 'committed');
+          .toMatch(retirementWritesFail ? /^$/ : /^committed(?:\n|$)/);
         const attemptedWrites = set.mock.calls.slice(firstWriteCall)
           .filter(([entry]) => entry === key).map(([, value]) => value);
         if (settlementFails) {
@@ -885,7 +887,7 @@ test.each([
       if (failVerification && !markerReadFails && !lostReceiptAfterRetirement) {
         const publication = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.published`);
         const rawPayload = textSync.call(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.json`));
-        expect(publication.textSync()).toBe(sha256(rawPayload) + '\n' + sha256(primary));
+        expect(publication.textSync()).toBe(rawPayload.match(/^attempt:.*$/m)![0] + '\n' + sha256(primary));
       }
       if (noRetirementFile) {
         expect(JSON.parse(primary)).toEqual(expected);
@@ -1097,6 +1099,7 @@ type RecoveryFaultCase = [
     batchReceipt?: string;
     noCommitProof?: boolean;
     preserveCandidate?: boolean;
+    solePublication?: string;
     missingProbe?: '.rollback.pending' | '.rollback.rejected';
   }?,
 ];
@@ -1271,6 +1274,16 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
     ['.rollback.rejected', 'exists check', 'exists', 'restart'],
     ['documents', 'directory list', 'list', 'restart'],
   ], { staleCopy: true }],
+  ...(['.rollback.published', '.rollback.published.bak'] as const).map((solePublication): RecoveryFaultCase => [
+    solePublication + ' survives unreadable rollback copy and unknown rejection metadata on restart', [
+      ...blockedAuxiliaryPublication.filter(([location]) => location !== solePublication && location !== '.rollback.settled'),
+      ['.rollback.pending', 'remove', 'delete', 'save'],
+      ['.rollback.json', 'restart read', 'textSync', 'restart'],
+      ['.rollback.rejected', 'existence check', 'info', 'restart'],
+      ['.rollback.rejected', 'exists check', 'exists', 'restart'],
+      ['documents', 'directory list', 'list', 'restart'],
+    ], { solePublication },
+  ]),
   ...(['bound copy', 'checkpoint'] as const).map((recoverySource): RecoveryFaultCase => [
     'primary-only save reloads from ' + recoverySource + ' when neither proof nor primary repair survives', [
       ...blockPublicationLayers(publicationLayers),
@@ -1493,7 +1506,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   name, failures, { staleCopy = false, primaryOnly = false, revokeFallback = false, landedRetirement = false,
     thirdWriteLands = false, revokeJournal = false, restoredWithoutPending = false,
     optionalReadAttempt, rejectedPrimary, entryPoint, functionGuard = false, rejectedRetry = false, batchReceipt,
-    missingProbe, unavailableJournal = false, noCommitProof = false, preserveCandidate = false, lateInitialWrite = false } = {},
+    missingProbe, solePublication, unavailableJournal = false, noCommitProof = false, preserveCandidate = false, lateInitialWrite = false } = {},
 ) => {
   const scope = { owner: entryPoint === 'sync' ? 'nuni:pa_11111111-1111-4111-8111-111111111111'
     : 'nuni:recovery-matrix-' + name, schoolId: 'pu' };
@@ -1565,7 +1578,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     get: async (entry: string) => (await originalStorage.getMany([entry]))[0][1],
     remove: (entry: string) => originalStorage.removeMany([entry]),
   };
-  const unreadableCopy = name.startsWith('verified-write receipt survives unreadable rollback copy');
+  const unreadableCopy = solePublication || name.startsWith('verified-write receipt survives unreadable rollback copy');
   const secondResponseLost = failures.some(([, fault]) => fault === 'second primary response lost');
   if (!unavailableJournal && !unreadableCopy && !revokeJournal && (primaryOnly || failures.some(([location]) => location === '.rollback.rejected' &&
       (staleCopy || failures.some(([entry, fault]) => entry === location && fault === 'remove')) &&
@@ -1591,7 +1604,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   let phase: RecoveryPhase = 'save';
   const saveMissingProbe = functionGuard && failures.some(([, fault]) => fault === 'exists check');
   const late = staleCopy || (entryPoint !== undefined && noCommitProof) || landedRetirement ||
-    (!saveMissingProbe && failures.some(([location]) => publicationLayers.some((layer) => layer === location)));
+    (!saveMissingProbe && !solePublication && failures.some(([location]) => publicationLayers.some((layer) => layer === location)));
   let committedMarkerWritten = false;
   let pendingCreated = false;
   const primaryWrites: string[] = [];
@@ -1697,21 +1710,21 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
     const location = fileLocation(this);
     if (inject(location, 'write', 'create') ||
-        ((late || publicationFileFault || faults.has(':checkpoint')) && location === '.rollback.committed')) throw failure;
+        ((late || (publicationFileFault && !solePublication) || faults.has(':checkpoint')) && location === '.rollback.committed')) throw failure;
     if (inject(location, 'create no-op', 'create')) return;
     originalFile.create.call(this, options);
     if (location === '.rollback.pending') pendingCreated = true;
   });
   const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
     const location = fileLocation(this);
-    const retireMarker = location === '.rollback.pending' && value === 'committed';
+    const retireMarker = location === '.rollback.pending' && markerState(value) === 'committed';
     const bindPayload = location === '.rollback.json' && typeof value === 'string' && value.includes('\ncommitted:');
     if (location === '.rollback.json' && !authorized && inject(location, 'reject payload no-op', 'write')) return;
     if ((bindPayload && inject(location, 'bind payload', 'write')) || (retireMarker && inject(location, 'retire marker', 'write')) || inject(location, 'write', 'write') ||
         (location === '.rollback.json' && typeof value === 'string' && value.includes('\nrejected:\n') &&
           inject(location, 'reject payload', 'write')) ||
-        ((late || publicationFileFault) && (bindPayload || location === '.rollback.verified')) ||
-        ((late || publicationFileFault || forceBackupRetirement || faults.has(':checkpoint')) && retireMarker && !landedRetirement) ||
+        ((late || (publicationFileFault && !solePublication)) && (bindPayload || location === '.rollback.verified')) ||
+        ((late || (publicationFileFault && !solePublication) || forceBackupRetirement || faults.has(':checkpoint')) && retireMarker && !landedRetirement) ||
         (late && ['.rollback.published', '.rollback.published.bak', '.rollback.settled'].includes(location))) {
       throw failure;
     }
@@ -1822,13 +1835,13 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
       expect(originalFile.text.call(new File(Paths.document, documentPrefix + '.rollback.json')))
         .toContain(JSON.stringify(previous));
       if (!rejects) {
-        expect(originalFile.text.call(new File(Paths.document, documentPrefix + '.rollback.pending')))
+        expect(markerState(originalFile.text.call(new File(Paths.document, documentPrefix + '.rollback.pending'))))
           .toBe(landedRetirement ? 'committed' : '');
       }
       if (faults.get('.rollback.rejected') === 'publication read') {
         expect(deleteFile.mock.contexts.some((file) => fileLocation(file) === '.rollback.pending')).toBe(true);
         expect(write.mock.calls.some(([value], index) =>
-          fileLocation(write.mock.contexts[index]) === '.rollback.pending' && value === 'committed')).toBe(true);
+          fileLocation(write.mock.contexts[index]) === '.rollback.pending' && markerState(value) === 'committed')).toBe(true);
         expect(create.mock.contexts.some((file) => fileLocation(file) === '.rollback.committed')).toBe(true);
         expect(injected.filter(([location, fault, stage, api]) =>
           location === '.rollback.rejected' && fault === 'publication read' &&
@@ -1876,7 +1889,25 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     }
     if (unreadableCopy) {
       expect(originalFile.exists.call(new File(Paths.document, documentPrefix + '.rollback.rejected'))).toBe(false);
-      expect((await native.get(key))!).toMatch(/^\{"records":/);
+      if (!solePublication) expect((await native.get(key))!).toMatch(/^\{"records":/);
+    }
+    if (solePublication) {
+      const publication = new File(Paths.document, documentPrefix + solePublication);
+      const payload = originalFile.text.call(new File(Paths.document, documentPrefix + '.rollback.json'));
+      const proof = payload.split('\n')[0] + '\n' + sha256((await native.get(key))!);
+      expect(originalFile.text.call(publication)).toBe(proof);
+      expect(read.mock.results.some(({ type, value }, index) =>
+        type === 'return' && value === proof &&
+        read.mock.contexts[index].uri === publication.uri &&
+        read.mock.invocationCallOrder[index] < notified.mock.invocationCallOrder[0])).toBe(true);
+      for (const location of publicationLayers.filter((location) => location.startsWith(':'))) {
+        expect(await native.get(key + location)).toBeNull();
+      }
+      for (const location of [...rollbackFiles, '.rollback.committed', '.rollback.receipt']) {
+        if (location === solePublication || location === '.rollback.json' || location === '.rollback.pending') continue;
+        expect(originalFile.exists.call(new File(Paths.document, documentPrefix + location))).toBe(false);
+      }
+      expect(await native.get(key + ':checkpoint')).not.toMatch(/^verified:/);
     }
     if (name.startsWith('verified-write receipt survives') || (secondResponseLost && !rejects)) {
       const receipt = await native.get(key + ':verified-write');
@@ -2058,6 +2089,120 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   }
 });
 
+test.each(['bound', 'unrelated'] as const)(
+  'restart before settlement with an unreadable rollback copy and a %s checkpoint',
+  async (checkpointKind) => {
+    const scope = { owner: 'nuni:interrupted-retirement-' + checkpointKind, schoolId: 'pu' };
+    const key = personalImportStorageKey(scope);
+    const { ledger: original } = await appendPersonalImports(scope, [row('original')]);
+    const previousRaw = (await AsyncStorage.getItem(key))!;
+    await AsyncStorage.setItem(key + ':checkpoint', checkpointKind === 'bound'
+      ? previousRaw : JSON.stringify({ ...original, records: [] }));
+    const prefix = 'personal-imports-' + sha256(key) + '.rollback.';
+    const pending = new File(Paths.document, prefix + 'pending');
+    const payload = new File(Paths.document, prefix + 'json');
+    const settlement = new File(Paths.document, prefix + 'settled');
+    const fault = new Error('模擬在發佈提交證明前中止');
+    const blockedSettlement = jest.fn(() => { throw fault; });
+    const blockedRetirement = jest.fn(() => { throw fault; });
+    const blockedDelete = jest.fn(() => { throw fault; });
+    const payloadReadFault = jest.fn(() => { throw fault; });
+    let interrupt!: () => void;
+    let resume!: () => void;
+    const interrupted = new Promise<void>((resolve) => { interrupt = resolve; });
+    const resumed = new Promise<void>((resolve) => { resume = resolve; });
+    let restarting = false;
+    let authorized = true;
+    const set = jest.mocked(AsyncStorage.setItem);
+    const nativeSet = set.getMockImplementation()!;
+    const primaryWrite = jest.fn(nativeSet);
+    set.mockImplementation(async (entry, value) => {
+      if (entry === key) {
+        if (blockedSettlement.mock.calls.length > 0 && authorized) {
+          interrupt();
+          await resumed;
+          throw fault;
+        }
+        return primaryWrite(entry, value);
+      }
+      return nativeSet(entry, value);
+    });
+    const get = jest.mocked(AsyncStorage.getItem);
+    const nativeWrite = File.prototype.write;
+    const nativeCreate = File.prototype.create;
+    const nativeDelete = File.prototype.delete;
+    const nativeText = File.prototype.textSync;
+    const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+      if (this.uri === settlement.uri) blockedSettlement();
+      nativeWrite.call(this, value, options);
+    });
+    const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
+      if (this.uri.endsWith(prefix + 'committed')) blockedRetirement();
+      nativeCreate.call(this, options);
+    });
+    const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
+      if (this.uri === pending.uri) blockedDelete();
+      nativeDelete.call(this);
+    });
+    const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+      if (restarting && this.uri === payload.uri) payloadReadFault();
+      return nativeText.call(this);
+    });
+    const notified = jest.fn();
+    const unsubscribe = subscribePersonalImports(notified);
+    const save = appendPersonalImports(scope, [row('new', '統計')], { canContinue: () => authorized });
+    const failedSave = expect(save).rejects.toThrow();
+    try {
+      await Promise.race([interrupted, save]);
+      expect(primaryWrite).toHaveBeenCalledTimes(1);
+      const candidate = primaryWrite.mock.calls[0][1];
+      const [state, attempt, originalHash] = nativeText.call(pending).split('\n');
+      expect(state).toBe('committed');
+      expect(attempt).toContain(sha256(candidate));
+      expect(originalHash).toBe(sha256(previousRaw));
+      expect(get.mock.calls.some(([entry], index) => entry === key &&
+        get.mock.invocationCallOrder[index] > primaryWrite.mock.invocationCallOrder[0] &&
+        get.mock.invocationCallOrder[index] < blockedSettlement.mock.invocationCallOrder[0])).toBe(true);
+      expect(await AsyncStorage.getItem(key)).toBe(candidate);
+      expect(blockedDelete).toHaveBeenCalledTimes(1);
+      expect(blockedSettlement).toHaveBeenCalledTimes(1);
+      expect(blockedRetirement).toHaveBeenCalledTimes(1);
+      for (const suffix of ['settled', 'rejected', 'committed', 'verified', 'published', 'published.bak', 'receipt']) {
+        expect(new File(Paths.document, prefix + suffix).info().exists).toBe(false);
+      }
+      for (const suffix of [':verified-write', ':verified-write-backup', ':rollback-resolution']) {
+        expect(await AsyncStorage.getItem(key + suffix)).toBeNull();
+      }
+      restarting = true;
+      await jest.isolateModulesAsync(async () => {
+        const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+        const load = restarted.loadPersonalImports(scope);
+        if (checkpointKind === 'bound') {
+          await expect(load).resolves.toEqual(original);
+        } else {
+          await expect(load).rejects.toThrow('無法確認匯入資料已還原');
+        }
+      });
+      expect(payloadReadFault).toHaveBeenCalledTimes(2);
+      expect(notified).not.toHaveBeenCalled();
+    } finally {
+      restarting = false;
+      authorized = false;
+      resume();
+      try {
+        await failedSave;
+      } finally {
+        unsubscribe();
+        set.mockImplementation(nativeSet);
+        write.mockRestore();
+        create.mockRestore();
+        remove.mockRestore();
+        read.mockRestore();
+      }
+    }
+  },
+);
+
 test.each([
   ['rejection file', 'records', false, false, 'no retry'],
   ['pending marker', 'records', false, false, 'no retry'],
@@ -2126,7 +2271,7 @@ test.each([
       return textSync.call(this);
     });
     const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
-      if (attemptReplacement && this.uri.endsWith(prefix + 'pending') && value === 'committed') {
+      if (attemptReplacement && this.uri.endsWith(prefix + 'pending') && markerState(value) === 'committed') {
         if (!retirementReachedDisk) retireByWrite();
         writeFile.call(this, value, options);
         blockRetirementRead = true;
@@ -2171,8 +2316,8 @@ test.each([
         expect(retireReadFault).toHaveBeenCalledTimes(retirementReachedDisk ? 1 : 0);
         expect(retireByFile).toHaveBeenCalledTimes(1);
       }
-      const markerState = retirementReachedDisk ? 'committed' : rejection === 'pending marker' ? 'rejected' : '';
-      expect(new File(Paths.document, prefix + 'pending').textSync()).toBe(markerState);
+      const expectedMarker = retirementReachedDisk ? 'committed' : rejection === 'pending marker' ? 'rejected' : '';
+      expect(markerState(new File(Paths.document, prefix + 'pending').textSync())).toBe(expectedMarker);
       expect(new File(Paths.document, prefix + 'rejected').info().exists).toBe(rejection === 'rejection file');
       const rollbackPayload = new File(Paths.document, prefix + 'json').textSync();
       expect(rollbackPayload.slice(rollbackPayload.indexOf('\n') + 1)).toBe(JSON.stringify(ledger));
@@ -2208,7 +2353,7 @@ test.each([
           expect(attempt).toMatch(/^attempt:/);
           expect(attempt).not.toContain(sha256(primary));
           expect(payload.textSync()).toContain(JSON.stringify(ledger));
-          expect(marker.textSync()).toBe('committed');
+          expect(markerState(marker.textSync())).toBe('committed');
           expect(new File(Paths.document, prefix + 'rejected').info().exists).toBe(false);
           expect(set).not.toHaveBeenCalled();
           if (retryBeforeRestart) expect(get).not.toHaveBeenCalledWith(key);
@@ -2643,7 +2788,7 @@ test('native append and edit survive a pending reset failure after verified reti
   });
   const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
     const value = textSync.call(this);
-    if (this.uri === marker.uri && value === 'committed') committedRead();
+    if (this.uri === marker.uri && markerState(value) === 'committed') committedRead();
     if (this.uri === payload.uri && expectedBackup && value.endsWith('\n' + expectedBackup)) {
       payloadReadBack = true;
     }
@@ -2652,7 +2797,7 @@ test('native append and edit survive a pending reset failure after verified reti
   const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
     if (expectedBackup && this.uri === marker.uri && value === '') {
       expect(payloadReadBack).toBe(true);
-      expect(textSync.call(marker)).toBe('committed');
+      expect(markerState(textSync.call(marker))).toBe('committed');
       resetFault();
     }
     writeFile.call(this, value, options);
@@ -2727,7 +2872,7 @@ test('a revoked native edit using the primary fallback is rejected after restart
     const { ledger: original } = await appendPersonalImports(scope, [row('first')], guard);
     expect(listener).toHaveBeenCalledTimes(1);
     listener.mockClear();
-    expect(marker.textSync()).toBe('committed');
+    expect(markerState(marker.textSync())).toBe('committed');
     const originalRaw = (await AsyncStorage.getItem(key))!;
     let backupRead = false;
     read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
@@ -2754,7 +2899,7 @@ test('a revoked native edit using the primary fallback is rejected after restart
     expect(resetFault).toHaveBeenCalledTimes(1);
     expect(restoreFault).toHaveBeenCalledTimes(1);
     expect(listener).not.toHaveBeenCalled();
-    expect(marker.textSync()).toBe('committed');
+    expect(markerState(marker.textSync())).toBe('committed');
     expect(rejection.info().exists).toBe(true);
     expect(payload.textSync()).toContain(originalRaw);
     const primary = (await AsyncStorage.getItem(key))!;
@@ -3275,7 +3420,7 @@ test('native append and edit survive a settled file that cannot be deleted, clea
   try {
     const { ledger } = await appendPersonalImports(scope, [row('first')], guard);
     expect(notify).toHaveBeenCalledTimes(1);
-    expect(new File(Paths.document, prefix + 'pending').textSync()).toBe('committed');
+    expect(markerState(new File(Paths.document, prefix + 'pending').textSync())).toBe('committed');
     const originalProof = settlement.textSync();
     expect(originalProof.endsWith(sha256((await AsyncStorage.getItem(key))!))).toBe(true);
     faulted = true;
@@ -3321,7 +3466,7 @@ test.each(['committed', 'verified'] as const)('native calendar can append and ed
     deleteFile.call(this);
   });
   const markerWrite = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
-    if (this.uri.endsWith('.rollback.pending') && value === 'committed') throw new Error('無法更新 pending 標記');
+    if (this.uri.endsWith('.rollback.pending') && markerState(value) === 'committed') throw new Error('無法更新 pending 標記');
     write.call(this, value, options);
   });
   const retire = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {

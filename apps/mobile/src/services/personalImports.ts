@@ -202,8 +202,11 @@ async function readLedgerSnapshot(
     receipts.some((proof) => typeof proof === 'string' && journal?.matchesVerifiedReceipt?.(primary, proof)) ||
     await journal?.verifyWithoutPayload?.(primary, receipts, () => readNativeReceipt(nativeRejectionAttemptKey(key))) === true
   );
-  const checkpointRejection = restoredRejectionHash || verifiedByJournal ? undefined : rejectionMatches;
-  const uncommittedPrimary = candidatePrimary && !verifiedByJournal;
+  const uncommittedPrimary = !verifiedByJournal && (candidatePrimary ||
+    (journal?.unreadableCommittedCopy === true && !journal.matchesAttemptedPrimary));
+  const checkpointRejection = restoredRejectionHash || verifiedByJournal
+    ? undefined
+    : rejectionMatches ?? (uncommittedPrimary ? journal?.matchesCommittedCheckpoint : undefined);
   const rejectedPrimary = deniedAttempt || journal?.rejected && !verifiedByJournal && (
     journal.hasRejectedPayload || candidatePrimary || journal.raw === primary ||
     (nativeRejectionBinding !== undefined && rejectionMatches === undefined) ||
