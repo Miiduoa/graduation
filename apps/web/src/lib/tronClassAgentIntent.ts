@@ -55,7 +55,7 @@ const OTHER_SERVICE_WORDS = [
   '地圖', '教室', '今天', '明天', '後天', '早上', '上午', '中午', '下午', '晚上', '分鐘', '小時',
   '近期',
 ];
-const OTHER_SERVICE_OR_SCHEDULE = new RegExp(`(?:${OTHER_SERVICE_WORDS.join('|')}|\d{1,2}\s*[:：點])`, 'u');
+const OTHER_SERVICE_OR_SCHEDULE = new RegExp(String.raw`(?:${OTHER_SERVICE_WORDS.join('|')}|\d{1,2}\s*[:：點])`, 'u');
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

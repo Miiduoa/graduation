@@ -1130,6 +1130,11 @@ test('launcher cleans up a detached port holder when signalled before assigning 
   const source = readFileSync(script, 'utf8').replace(
     String.raw`require(\"node:fs\").writeFileSync(process.env.TRONCLASS_SELFTEST_GRANDCHILD,String(process.pid));setInterval(()=>{},1000);`,
     String.raw`require(\"node:net\").createServer().listen(0,\"127.0.0.1\",function(){require(\"node:fs\").writeFileSync(process.env.TRONCLASS_SELFTEST_GRANDCHILD,process.pid+\" \"+this.address().port);});`,
+  ).replace(
+    '    const publication = spawnSync(',
+    // The child is released from its bootstrap before the sidecar is published.
+    // Exercise that real scheduling gap instead of depending on runner speed.
+    '    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);\n    const publication = spawnSync(',
   );
   assert.notEqual(source, readFileSync(script, 'utf8'));
   for (const [signal, expected] of [['INT', 130], ['TERM', 143]]) {
@@ -1138,7 +1143,8 @@ test('launcher cleans up a detached port holder when signalled before assigning 
       const descendantFile = path.join(dir, 'descendant');
       const fixture = source.replace('  TRONCLASS_SELFTEST_WRAPPER=$!', () => `
         deadline=$((SECONDS + 4))
-        until [ -s "$TRONCLASS_SELFTEST_GRANDCHILD" ]; do
+        until [ -s "$TRONCLASS_SELFTEST_GRANDCHILD" ] &&
+          [ -s "$TRONCLASS_LAUNCHING_LOG.pgid.$TRONCLASS_RUN_ID" ]; do
           [ "$SECONDS" -lt "$deadline" ] || exit 1
           sleep 0.02
         done
