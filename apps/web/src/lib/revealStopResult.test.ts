@@ -51,7 +51,7 @@ it('uses instant scrolling when the user prefers reduced motion', () => {
   const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   const { node } = paneAt(400);
   revealStopResult(node);
-  expect(scrollTo).toHaveBeenCalledWith({ top: 376, left: 0, behavior: 'auto' });
+  expect(scrollTo).toHaveBeenCalledWith({ top: 376, left: 0, behavior: 'instant' });
 });
 
 it('honors changes to the site animation preference when the system allows motion', () => {
@@ -61,7 +61,7 @@ it('honors changes to the site animation preference when the system allows motio
 
   document.documentElement.dataset.reducedMotion = 'true';
   revealStopResult(node);
-  expect(scrollTo).toHaveBeenLastCalledWith({ top: 376, left: 0, behavior: 'auto' });
+  expect(scrollTo).toHaveBeenLastCalledWith({ top: 376, left: 0, behavior: 'instant' });
 
   document.documentElement.dataset.reducedMotion = 'false';
   revealStopResult(node);

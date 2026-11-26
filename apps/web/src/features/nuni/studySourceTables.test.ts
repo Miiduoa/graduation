@@ -13,6 +13,13 @@ const realTable = (startLine: number) => [{
   rows: [['資料庫', '3']],
 }];
 
+describe('escaped HTML form controls', () => {
+  it('does not suppress an ordinary table after an escaped form-control example', () => {
+    const source = ['範例：\\<select> 不會開啟真實表單。', ...visibleTable].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+});
+
 describe('valid Markdown fence boundaries for course source tables', () => {
   it('keeps a public table after an invalid backtick-fence info string', () => {
     // A backtick in a backtick fence info string makes that opener invalid.
@@ -706,6 +713,18 @@ describe('Markdown programming tables with escaped pipes and inline code', () =>
   });
 });
 
+describe('tables after nested HTML examples', () => {
+  it('keeps the following public table selectable after all nested wrappers close', () => {
+    const source = [
+      '<template>', '<template>',
+      '| 教師答案 | 數量 |', '| --- | --- |', '| 隱藏 | 99 |',
+      '</template>', '</template>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(8));
+  });
+});
+
 describe('HTML slash endings cannot expose hidden lesson tables', () => {
   it.each([
     ['div', 'hidden'],
@@ -1312,9 +1331,7 @@ describe('invalid CSS declarations cannot override hidden teacher-only source ta
     '<aside style="opacity:0;opacity:transparent">',
     '<aside style="opacity:0!important;opacity:broken!important">',
     '<p style="opacity:0e0;opacity:not-a-number">',
-    '<div style="opacity&colon;0&period;0">',
-    '<section style="opacity&colon;0&percnt;">',
-    '<p style="opacity&colon;&plus;0">',
+    '<p style="opacity:0;opacity:0 1">',
   ])('does not disclose explicitly invisible source rows when style contains %s', (opening) => {
     const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
     const source = [
@@ -1336,6 +1353,8 @@ describe('invalid CSS declarations cannot override hidden teacher-only source ta
     '<aside style="opacity:0;opacity:0.5">',
     '<aside style="opacity:0!important;opacity:1e0!important">',
     '<div style="opacity:0;opacity:initial">',
+    '<div style="display:none;display:inline flex">',
+    '<div style="display:none!important;display:block grid!important">',
   ])('keeps legitimate visible CSS overrides eligible for source tables: %s', (opening) => {
     const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
     expect(extractStudySourceTables([opening, ...visibleTable, `</${tag}>`].join('\n')))
@@ -1343,6 +1362,41 @@ describe('invalid CSS declarations cannot override hidden teacher-only source ta
   });
 });
 
+
+describe('CSS-wide values match merge-base for visible default wrappers', () => {
+  it.each(['display', 'opacity', 'visibility', 'content-visibility'])('keeps %s defaults and fallback values visible', (property) => {
+    for (const value of ['inherit', 'initial', 'unset', 'revert', 'revert-layer',
+      'var(--missing, var(--other, inherit))']) {
+      const source = ['<main>', `<div style="${property}:${value}">`, ...visibleTable, '</div>', '</main>'].join('\n');
+      expect(extractStudySourceTables(source)).toEqual(realTable(3));
+    }
+  });
+
+  it.each([
+    ['display:none', 'display:initial', false],
+    ['opacity:0', 'opacity:unset', false],
+    ['content-visibility:hidden', 'content-visibility:revert', false],
+    ['visibility:hidden', 'visibility:inherit', false],
+    ['visibility:hidden', 'visibility:unset', false],
+    ['visibility:hidden', 'visibility:var(--missing, unset)', false],
+    ['visibility:hidden', 'visibility:initial', false],
+    ['visibility:hidden', 'visibility:visible', false],
+  ])('applies parent style %s and child style %s (%s)', (parentStyle, childStyle, visible) => {
+    const source = [`<div style="${parentStyle}">`, `<div style="${childStyle}">`,
+      ...visibleTable, '</div>', '</div>', '', ...visibleTable].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(visible
+      ? [...realTable(3), ...realTable(9)] : realTable(9));
+  });
+
+  it.each([
+    '<div hidden style="display:unset">',
+    '<div style="display:unset; visibility:hidden">',
+    '<div style="display:none!important;display:unset">',
+    '<div style="display:unset;opacity:0">',
+  ])('keeps independently hidden wrappers hidden with %s', (opening) => {
+    expect(extractStudySourceTables([opening, ...visibleTable, '</div>'].join('\n'))).toEqual([]);
+  });
+});
 
 describe('classic Mac and mixed-line-ending course handouts', () => {
   it('reconstructs a public Markdown table from CR-only TXT without changing the source line', () => {
@@ -1388,5 +1442,39 @@ describe('classic Mac and mixed-line-ending course handouts', () => {
     const source = ['第一節', '第二節', ...visibleTable].join('\r\n')
       .replace('第一節\r\n第二節\r\n', '第一節\r第二節\n');
     expect(extractStudySourceTables(source)).toEqual(realTable(3));
+  });
+});
+
+
+describe('custom HTML lesson wrappers', () => {
+  it('preserves an ordinary visible custom element and an escaped hidden example', () => {
+    const source = [
+      '<course-outline>',
+      ...visibleTable,
+      '</course-outline>',
+      '\\<course-answer hidden>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([
+      ...realTable(2),
+      ...realTable(7),
+    ]);
+  });
+});
+
+
+describe('visible HTML wrappers', () => {
+  it('does not suppress ordinary visible wrappers or Markdown-escaped tag examples', () => {
+    const source = [
+      '<center>',
+      ...visibleTable,
+      '</center>',
+      '\\<center hidden>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([
+      ...realTable(2),
+      ...realTable(7),
+    ]);
   });
 });

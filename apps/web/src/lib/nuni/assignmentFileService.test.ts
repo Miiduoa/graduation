@@ -2,7 +2,7 @@
 import sharp from 'sharp';
 import { createPhotoPdf } from '@campus/shared/src/photoPdf';
 import { createRequire } from 'node:module';
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FILE_ONLY_SUBMISSION_BODY } from '@campus/shared/src/assignmentFiles';
 import { NuniError, type NuniAssignment, type NuniWorkspace } from '@campus/shared/src/nuni';
 import {
@@ -811,49 +811,56 @@ it('restores the previous file receipt after a failed revision and replaces it o
   await expect(api.readContent(workspaceId, assignmentId, old.id, old.downloadExp, old.downloadSig)).rejects.toMatchObject({ status: 404 });
 });
 
-it.each(storeModes)('recovers confirmed attachment alignment after the deadline across service restarts (%s)', async mode => {
-  const index = await recoveryIndex(mode);
-  const stores = { index, blobs: createTtlMemoryBlobStore() };
-  let clock = new Date('2026-10-21T11:59:58.000Z');
-  let current = assignment();
-  const submit = vi.fn(async (_actor, _workspace, _assignment, body: string) => {
-    current = assignment({ submissionCount: 1, mySubmission: {
-      assignmentId, platformAccountId: studentId, displayName: '同學', body,
-      state: 'submitted', submittedAt: '2026-10-21T11:59:59.000Z', teacherFeedback: null, reviewedAt: null,
-    } });
-    return current;
-  });
-  const upstream = { ...platform({ submit }), assignment: async () => current };
-  const make = () => createAssignmentFileService({ secret, stores, platform: upstream, now: () => clock });
-  let api = make();
-  const student = actor(studentId);
-  const intent = await api.createIntent(student, workspaceId, assignmentId, {
-    originalName: 'shot.jpg', contentType: 'image/jpeg', byteSize: 64, idempotencyKey: 'recover-intent',
-  });
-  await api.putContent(student, workspaceId, assignmentId, intent.id, jpeg());
-  const put = index.putFile.bind(index);
-  let unavailable = true;
-  index.putFile = async (record, version) => {
-    if (unavailable && record.submittedAt === '2026-10-21T11:59:59.000Z') throw new Error('alignment unavailable');
-    return put(record, version);
-  };
-  const input = { body: '原操作', fileIds: [intent.id], idempotencyKey: 'recover-submit' };
-  await expect(api.submitFiles(student, workspaceId, assignmentId, input)).rejects.toMatchObject({ status: 503 });
-  await expect(api.hydrateSubmission(student, workspace('student'), current, current.mySubmission, studentId))
-    .rejects.toMatchObject({ status: 503 });
-  clock = new Date('2026-10-21T12:00:00.001Z');
-  unavailable = false;
-  api = make();
-  await expect(api.submitFiles(student, workspaceId, assignmentId, { ...input, body: '修改原操作' }))
-    .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
-  await expect(api.submitFiles(student, workspaceId, assignmentId, { ...input, idempotencyKey: 'new-operation' }))
-    .rejects.toMatchObject({ code: 'ASSIGNMENT_REVISION_CLOSED' });
-  const receipt = await api.submitFiles(student, workspaceId, assignmentId, input);
-  expect(submit).toHaveBeenCalledTimes(1);
-  expect(receipt.mySubmission?.files?.map(file => file.id)).toEqual([intent.id]);
-  const hydrated = await api.hydrateSubmission(student, workspace('student'), receipt, receipt.mySubmission, studentId);
-  expect(hydrated?.files?.map(file => file.id)).toEqual([intent.id]);
-  expect((await index.getFile(intent.id))?.submittedAt).toBe(receipt.mySubmission?.submittedAt);
+describe.each(storeModes)('attachment alignment recovery (%s)', mode => {
+  let index: Awaited<ReturnType<typeof recoveryIndex>>;
+  beforeAll(async () => {
+    // Driver initialization, connection and isolated DDL are fixture setup, not recovery work.
+    index = await recoveryIndex(mode);
+  }, mode === 'postgres' ? 20_000 : 5_000);
+
+  it('recovers confirmed attachment alignment after the deadline across service restarts', async () => {
+    const stores = { index, blobs: createTtlMemoryBlobStore() };
+    let clock = new Date('2026-10-21T11:59:58.000Z');
+    let current = assignment();
+    const submit = vi.fn(async (_actor, _workspace, _assignment, body: string) => {
+      current = assignment({ submissionCount: 1, mySubmission: {
+        assignmentId, platformAccountId: studentId, displayName: '同學', body,
+        state: 'submitted', submittedAt: '2026-10-21T11:59:59.000Z', teacherFeedback: null, reviewedAt: null,
+      } });
+      return current;
+    });
+    const upstream = { ...platform({ submit }), assignment: async () => current };
+    const make = () => createAssignmentFileService({ secret, stores, platform: upstream, now: () => clock });
+    let api = make();
+    const student = actor(studentId);
+    const intent = await api.createIntent(student, workspaceId, assignmentId, {
+      originalName: 'shot.jpg', contentType: 'image/jpeg', byteSize: 64, idempotencyKey: 'recover-intent',
+    });
+    await api.putContent(student, workspaceId, assignmentId, intent.id, jpeg());
+    const put = index.putFile.bind(index);
+    let unavailable = true;
+    index.putFile = async (record, version) => {
+      if (unavailable && record.submittedAt === '2026-10-21T11:59:59.000Z') throw new Error('alignment unavailable');
+      return put(record, version);
+    };
+    const input = { body: '原操作', fileIds: [intent.id], idempotencyKey: 'recover-submit' };
+    await expect(api.submitFiles(student, workspaceId, assignmentId, input)).rejects.toMatchObject({ status: 503 });
+    await expect(api.hydrateSubmission(student, workspace('student'), current, current.mySubmission, studentId))
+      .rejects.toMatchObject({ status: 503 });
+    clock = new Date('2026-10-21T12:00:00.001Z');
+    unavailable = false;
+    api = make();
+    await expect(api.submitFiles(student, workspaceId, assignmentId, { ...input, body: '修改原操作' }))
+      .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    await expect(api.submitFiles(student, workspaceId, assignmentId, { ...input, idempotencyKey: 'new-operation' }))
+      .rejects.toMatchObject({ code: 'ASSIGNMENT_REVISION_CLOSED' });
+    const receipt = await api.submitFiles(student, workspaceId, assignmentId, input);
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(receipt.mySubmission?.files?.map(file => file.id)).toEqual([intent.id]);
+    const hydrated = await api.hydrateSubmission(student, workspace('student'), receipt, receipt.mySubmission, studentId);
+    expect(hydrated?.files?.map(file => file.id)).toEqual([intent.id]);
+    expect((await index.getFile(intent.id))?.submittedAt).toBe(receipt.mySubmission?.submittedAt);
+  }, 5_000);
 });
 
 it('uses visible counts for successive withdrawals and a submission by another student', async () => {

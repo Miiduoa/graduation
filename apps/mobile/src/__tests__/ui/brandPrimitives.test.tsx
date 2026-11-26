@@ -156,6 +156,10 @@ test('search announces its purpose and keeps clear and typing on the same prefer
     />,
   );
   const input = view.getByRole('search', { name: '搜尋成員' });
+  const nativeFocus = jest.spyOn(view.UNSAFE_getByType(TextInput).instance, 'focus');
+  nativeFocus.mockClear();
+  expect(input.props.autoCorrect).toBe(false);
+  expect(input.props.autoCapitalize).toBe('none');
   fireEvent(input, 'focus');
   fireEvent.changeText(input, '陳同學');
   fireEvent(input, 'submitEditing');
@@ -163,6 +167,7 @@ test('search announces its purpose and keeps clear and typing on the same prefer
   expect(clear).toHaveStyle({ width: 44, height: 44 });
   expect(input).toHaveStyle({ fontSize: 15 });
   fireEvent.press(clear);
+  expect(nativeFocus).toHaveBeenCalledTimes(1);
   expect(onChangeText.mock.calls).toEqual([['陳同學'], ['']]);
   expect(onChange).not.toHaveBeenCalled();
   expect(onFocus).toHaveBeenCalledTimes(1);
@@ -182,6 +187,8 @@ test('disabled search prevents editing, clearing, submitting and focus actions',
     <SearchBar value="王同學" disabled onChange={onChange} onFocus={onFocus} onSubmit={onSubmit} />,
   );
   const input = view.getByRole('search', { name: '搜尋' });
+  const nativeFocus = jest.spyOn(view.UNSAFE_getByType(TextInput).instance, 'focus');
+  nativeFocus.mockClear();
   expect(input).toHaveAccessibilityState({ disabled: true });
   expect(view.UNSAFE_getByType(TextInput).props.editable).toBe(false);
   expect(view.getByRole('button', { name: '清除搜尋' })).toBeDisabled();
@@ -192,6 +199,7 @@ test('disabled search prevents editing, clearing, submitting and focus actions',
   expect(onChange).not.toHaveBeenCalled();
   expect(onFocus).not.toHaveBeenCalled();
   expect(onSubmit).not.toHaveBeenCalled();
+  expect(nativeFocus).not.toHaveBeenCalled();
 });
 
 test('segments expose the controlled selection and disable unavailable options', () => {

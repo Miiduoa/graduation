@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BufferGeometry, Camera, ExtrudeGeometry, InstancedMesh, Material, Matrix4, Mesh, PlaneGeometry, Scene, Vector3 } from 'three';
+import { BufferGeometry, Camera, ExtrudeGeometry, InstancedMesh, Material, Matrix4, Mesh, MeshStandardMaterial, PlaneGeometry, Scene, Vector3 } from 'three';
 import { buildCampusSpatialModel } from './campusSpatialModel';
 import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
 import { parseProvidenceOsmFootprints, parseProvidenceFootprintResponse, type ProvidenceFootprint } from './providenceFootprints';
@@ -235,6 +235,27 @@ describe('optional spatial canvas lifecycle', () => {
     const target = focusOnGround(renderer.render.mock.calls.at(-1)![1] as Camera);
     expect(target.x).toBeCloseTo(model.points[0].x, 6);
     expect(target.z).toBeCloseTo(model.points[0].z, 6);
+  });
+
+  it('removes marker buttons from the tab order while the scene is inactive', () => {
+    const { scene, container } = setup();
+    drawFrame();
+    const markers = [...container.querySelectorAll<HTMLButtonElement>('[data-spatial-marker]')];
+    expect(markers.length).toBeGreaterThan(0);
+    const layer = markers[0].parentElement;
+    for (const button of markers) expect(button.tabIndex).toBe(0);
+    expect(layer?.hasAttribute('inert')).toBe(false);
+    expect(layer?.getAttribute('aria-hidden')).toBe(null);
+
+    scene.setActive(false);
+    expect(layer?.hasAttribute('inert')).toBe(true);
+    expect(layer?.getAttribute('aria-hidden')).toBe('true');
+    for (const button of markers) expect(button.tabIndex).toBe(-1);
+
+    scene.setActive(true);
+    expect(layer?.hasAttribute('inert')).toBe(false);
+    expect(layer?.getAttribute('aria-hidden')).toBe(null);
+    for (const button of markers) expect(button.tabIndex).toBe(0);
   });
 
   it('ignores identical resize notifications while redrawing on DPR changes and tab resume', () => {
@@ -857,6 +878,49 @@ it('extrudes OSM footprints in geographically aligned meters only for known spat
 });
 
 
+
+it('visually distinguishes unsurveyed 12m volume height without losing the warning after selection or theme changes', () => {
+  // Synthetic dimensions only: this test does not assert any actual campus height.
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const campus = buildCampusSpatialModel([library]);
+  const { lat, lng } = campus.points[0].location;
+  const base: ProvidenceFootprint = {
+    poiId: library.id, name: library.name, sourceUrl: library.sourceUrl,
+    outline: [
+      [lng - 0.00005, lat - 0.00005], [lng + 0.00005, lat - 0.00005],
+      [lng + 0.00005, lat + 0.00005], [lng - 0.00005, lat + 0.00005],
+    ],
+    heightMeters: 12, heightBasis: 'illustrative',
+  };
+  const materialState = (footprint: ProvidenceFootprint) => {
+    const { scene, renderer } = setup(campus, undefined, [footprint]);
+    drawFrame();
+    const graph = renderer.render.mock.calls.at(-1)![0] as Scene;
+    const volumes: Mesh[] = [];
+    graph.traverse((item) => {
+      if (item instanceof Mesh && item.geometry instanceof ExtrudeGeometry) volumes.push(item);
+    });
+    expect(volumes).toHaveLength(1);
+    const material = volumes[0].material as MeshStandardMaterial;
+    const read = () => ({
+      transparent: material.transparent,
+      opacity: material.opacity,
+      depthWrite: material.depthWrite,
+    });
+    const initial = read();
+    scene.setView({ selectedId: library.id, overhead: false, motion: false, dark: true });
+    drawFrame();
+    return { initial, selectedDark: read() };
+  };
+
+  const illustration = materialState(base);
+  const sourced = materialState({ ...base, heightBasis: 'osm-tag', heightMeters: 18 });
+  expect(illustration.initial).toEqual({ transparent: true, opacity: 0.44, depthWrite: false });
+  expect(illustration.selectedDark).toEqual(illustration.initial);
+  expect(sourced.initial).toEqual({ transparent: false, opacity: 1, depthWrite: true });
+  expect(sourced.selectedDark).toEqual(sourced.initial);
+});
+
 it('does not zoom out for a tall building whose POI is absent from the current campus view', () => {
   // A filtering change can keep an older API footprint in memory. It must not
   // make an unrelated map look tiny despite that building never being drawn.
@@ -1098,4 +1162,39 @@ it('does not lift POIs on OSM wall boundaries or corners onto a claimed rooftop'
   expect(interior).toBeGreaterThan(18);
   expect(wall).toBeLessThan(18);
   expect(corner).toBeLessThan(18);
+});
+
+it('distinguishes duplicate 3D POI names by category and list position without inventing entrances', () => {
+  // Synthetic POIs: neither the names nor these coordinates claim to identify
+  // real campus buildings or accessible building entrances.
+  const repeated: MapLocation[] = [
+    { id: 'office-a', name: '同名大樓', category: '行政', description: '', lat: 24, lng: 120 },
+    { id: 'office-b', name: '同名大樓', category: '行政', description: '', lat: 24.001, lng: 120.001 },
+    { id: 'teaching', name: '同名大樓', category: '教學', description: '', lat: 24.002, lng: 120.002 },
+    { id: 'library', name: '圖書館', category: '圖書館', description: '', lat: 24.003, lng: 120.003 },
+    { id: 'unknown-empty', name: '同名站點', category: '', description: '', lat: 24.004, lng: 120.004 },
+    { id: 'unknown-label', name: '同名站點', category: '未分類', description: '', lat: 24.005, lng: 120.005 },
+  ];
+  const { container, onSelect } = setup(buildCampusSpatialModel(repeated));
+  const getMarker = (id: string) => container.querySelector<HTMLButtonElement>(
+    `button[data-spatial-marker="${id}"]`,
+  )!;
+
+  expect(getMarker('office-a').textContent).toBe('同名大樓（行政 · 清單第 1 項）');
+  expect(getMarker('office-b').textContent).toBe('同名大樓（行政 · 清單第 2 項）');
+  expect(getMarker('teaching').textContent).toBe('同名大樓（教學）');
+  expect(getMarker('library').textContent).toBe('圖書館');
+  // Two raw categories render as the *same* visible 未分類 label. The
+  // ordinal must disambiguate them too, not just identical raw strings.
+  expect(getMarker('unknown-empty').textContent).toBe('同名站點（未分類 · 清單第 5 項）');
+  expect(getMarker('unknown-label').textContent).toBe('同名站點（未分類 · 清單第 6 項）');
+  expect(getMarker('office-a').getAttribute('aria-label'))
+    .toBe('聚焦同名大樓（行政 · 清單第 1 項） · 地圖座標 24, 120');
+  expect(getMarker('office-b').getAttribute('aria-label'))
+    .toBe('聚焦同名大樓（行政 · 清單第 2 項） · 地圖座標 24.001, 120.001');
+  expect(getMarker('teaching').getAttribute('aria-label')).toBe('聚焦同名大樓（教學）');
+  expect(new Set(repeated.map(({ id }) => getMarker(id).getAttribute('aria-label'))).size)
+    .toBe(repeated.length);
+  getMarker('office-b').click();
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith('office-b');
 });
