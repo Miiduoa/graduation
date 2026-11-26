@@ -570,6 +570,7 @@ it('resolves deep links from loaded places and hands walking directions to a rea
   vi.mocked(loadMapLocations).mockReturnValueOnce(loading.promise);
   render(<MapClient school="pu" route="gate,library" focus="library" />);
   expect(screen.queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '交換起點與終點' })).toBeNull();
   await act(async () => loading.resolve([library, gate]));
   const destination = new URL(
     screen.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!,
@@ -812,7 +813,10 @@ it('lets visitors choose a campus starting point and destination without locatio
   const apple = new URL(screen.getByRole('link', { name: '使用 Apple 地圖規劃路線' }).getAttribute('href')!);
   expect(apple.searchParams.get('saddr')).toBe(url.searchParams.get('origin'));
   expect(apple.searchParams.get('daddr')).toBe(url.searchParams.get('destination'));
-  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  const clear = screen.getByRole('button', { name: '清除路線' });
+  clear.focus();
+  fireEvent.click(clear);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
   expect(screen.queryByRole('link', { name: '開啟步行導航' })).toBeNull();
   expect(screen.queryByRole('link', { name: '使用 Apple 地圖規劃路線' })).toBeNull();
 });
@@ -848,7 +852,10 @@ it.each(['origin', 'destination', 'origin-building', 'destination-floor', 'uncha
     expect(returned.searchParams.get('route')).toBeNull();
     expect(screen.getByText(/原先選擇的地點已變更或無法確認/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: '設為終點' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '清除待確認路線' }));
+    const clear = screen.getByRole('button', { name: '清除待確認路線' });
+    clear.focus();
+    fireEvent.click(clear);
+    expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
     expect(screen.queryByText(/原先選擇的地點已變更或無法確認/)).toBeNull();
   }
 });
@@ -860,6 +867,13 @@ it('does not resolve a shared route with duplicate endpoint IDs', async () => {
   render(<MapClient school="other-school" route="gate,library" />);
   const markers = await screen.findByLabelText('地圖狀態');
   expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  expect(JSON.parse(markers.textContent!).route).toBeNull();
+  expect(screen.getByText(/這個連結的起點或終點已不在目前地點資料中/)).toBeTruthy();
+  const clear = screen.getByRole('button', { name: '清除路線' });
+  clear.focus();
+  fireEvent.click(clear);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
+  expect(screen.queryByText(/這個連結的起點或終點已不在目前地點資料中/)).toBeNull();
   expect(JSON.parse(markers.textContent!).route).toBeNull();
 });
 
@@ -890,11 +904,30 @@ it.each(['pu', 'tw-pu'])('keeps both login returns in sync with manually changed
     return destination.searchParams.get('route');
   });
   expect(returnRoutes()).toEqual(['gate,library', 'gate,library']);
+  const reverse = screen.getByRole('button', { name: '交換起點與終點' });
+  reverse.focus();
+  fireEvent.click(reverse);
+  expect(document.activeElement).toBe(reverse);
+  expect(returnRoutes()).toEqual(['library,gate', 'library,gate']);
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route.map((place: MapLocation) => place.id)).toEqual(['library', 'gate']);
+  const google = new URL(screen.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  const apple = new URL(screen.getByRole('link', { name: '使用 Apple 地圖規劃路線' }).getAttribute('href')!);
+  expect(google.searchParams.get('origin')).toBe('24.2275,120.5635');
+  expect(google.searchParams.get('destination')).toBe('24.22495,120.56535');
+  expect(apple.searchParams.get('saddr')).toBe(google.searchParams.get('origin'));
+  expect(apple.searchParams.get('daddr')).toBe(google.searchParams.get('destination'));
+  expect(screen.getByRole('region', { name: '步行導航' }).textContent).toContain('不代表已核實的建築入口');
+  fireEvent.click(reverse);
+  expect(returnRoutes()).toEqual(['gate,library', 'gate,library']);
   fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  expect(screen.queryByRole('button', { name: '交換起點與終點' })).toBeNull();
   expect(returnRoutes()).toEqual([null, null]);
   fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
   expect(returnRoutes()).toEqual([null, null]);
-  fireEvent.click(screen.getByRole('button', { name: '取消起點' }));
+  const cancel = screen.getByRole('button', { name: '取消起點' });
+  cancel.focus();
+  fireEvent.click(cancel);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
   expect(screen.queryByText(/已設定「蓋夏圖書館」為起點/)).toBeNull();
   expect(returnRoutes()).toEqual([null, null]);
   fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
@@ -934,6 +967,22 @@ it('preserves a pending untouched route link but drops it when the source cannot
   await act(async () => source.resolve([library, gate]));
   expect(returnRoute()).toBeNull();
   expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  expect(screen.getByText(/這個連結的起點或終點已不在目前地點資料中/)).toBeTruthy();
+  const clear = screen.getByRole('button', { name: '清除路線' });
+  clear.focus();
+  fireEvent.click(clear);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
+  expect(screen.queryByText(/這個連結的起點或終點已不在目前地點資料中/)).toBeNull();
+  expect(returnRoute()).toBeNull();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route).toBeNull();
+
+  // Recover without leaving the map or restoring the invalid shared link.
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為終點' }));
+  expect(returnRoute()).toBe('gate,library');
+  expect(screen.getByRole('region', { name: '步行導航' })).toBeTruthy();
 });
 
 it('obtains position only on request and orders nearby locations by measured straight-line distance', async () => {

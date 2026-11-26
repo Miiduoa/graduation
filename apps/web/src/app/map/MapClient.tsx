@@ -190,6 +190,11 @@ function MapContent({
   const [positionStatus, setPositionStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [positionError, setPositionError] = useState('');
   const [routeDraft, setRouteDraft] = useState<RouteDraft | null>(null);
+  function clearRoute() {
+    setRouteDraft({ from: null, to: null });
+    // The dismiss button disappears; return keyboard focus to the next planning action.
+    searchInputRef.current?.focus();
+  }
   const [favorites, setFavorites] = useState<FavoritesState>({ status: 'loading', ids: new Set() });
   const [favoriteAttempt, setFavoriteAttempt] = useState(0);
   const [pending, setPending] = useState<string | null>(null);
@@ -506,7 +511,7 @@ function MapContent({
       {routeNeedsConfirmation && (
         <div className={styles.notice}>
           <p role="status">原先選擇的地點已變更或無法確認，請重新選擇起點及終點。</p>
-          <button className="btn" onClick={() => setRouteDraft({ from: null, to: null })}>
+          <button className="btn" onClick={clearRoute}>
             清除待確認路線
           </button>
         </div>
@@ -514,7 +519,7 @@ function MapContent({
       {routeStart && !routeLocations && !routeNeedsConfirmation && (
         <div className={styles.notice}>
           <p role="status">已設定「{routeStart.name}」為起點。請選擇其他地點，再按「設為終點」。</p>
-          <button className="btn" onClick={() => setRouteDraft({ from: null, to: null })}>
+          <button className="btn" onClick={clearRoute}>
             取消起點
           </button>
         </div>
@@ -524,7 +529,7 @@ function MapContent({
           <p role="status">{sourcePending
             ? '正在確認連結的起點與終點，確認後才會提供步行導航。'
             : '暫時無法確認連結的起點與終點，請重新讀取地點資料，或清除路線後手動選擇。'}</p>
-          <button className="btn" type="button" onClick={() => setRouteDraft({ from: null, to: null })}>
+          <button className="btn" type="button" onClick={clearRoute}>
             清除路線
           </button>
         </div>
@@ -533,7 +538,7 @@ function MapContent({
         <section className={`card ${styles.route}`} aria-label="步行導航">
           <div>
             <p className={styles.eyebrow}>前往目的地</p>
-            <h2>
+            <h2 aria-live="polite" aria-atomic="true">
               {routeLocations[0].name} → {routeLocations[1].name}
             </h2>
             <p>
@@ -566,7 +571,14 @@ function MapContent({
             >
               使用 Apple 地圖規劃路線
             </a>
-            <button className="btn" onClick={() => setRouteDraft({ from: null, to: null })}>
+            <button
+              className="btn"
+              type="button"
+              onClick={() => setRouteDraft({ from: { ...routeLocations[1] }, to: { ...routeLocations[0] } })}
+            >
+              交換起點與終點
+            </button>
+            <button className="btn" onClick={clearRoute}>
               清除路線
             </button>
           </div>
@@ -676,9 +688,14 @@ function MapContent({
         </p>
       )}
       {placeState.source === 'ready' && route && !deepLinkRoute && routeDraft === null && (
-        <p className={styles.notice} role="status">
-          這個連結的起點或終點已不在目前地點資料中，或無法唯一確認有效位置。請從下方列表重新選擇。
-        </p>
+        <div className={styles.notice}>
+          <p role="status">
+            這個連結的起點或終點已不在目前地點資料中，或無法唯一確認有效位置。請從下方列表重新選擇。
+          </p>
+          <button className="btn" type="button" onClick={clearRoute}>
+            清除路線
+          </button>
+        </div>
       )}
       {selection === 'revoked' && (
         <p className={styles.notice} role="status">

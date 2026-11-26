@@ -4,13 +4,10 @@ tags:
   - smoke
   - map
 ---
-# The workflow installs one iOS Debug app and runs onboarding before this flow.
-# Maestro's clearState reinstalls the app on iOS and can discard the Metro
-# Debug bundle URL; the saved failure screenshot showed a native
-# "No script URL provided" redbox, not a failed guest map assertion.
-# Restart the installed app without resetting its native Debug configuration.
-# Guest isolation is still explicitly checked below before any map action.
-- launchApp
+# Each guest flow starts independently. CI embeds a Release bundle, so resetting
+# app state preserves the installed bundle and removes earlier Firebase sessions.
+- launchApp:
+    clearState: true
 
 - extendedWaitUntil:
     visible:
@@ -19,22 +16,28 @@ tags:
 - assertNotVisible:
     id: tab-Today
 
-# The map shortcut is available before choosing a school.
+# Choose this flow's campus independently of onboarding or prior signed-in runs.
+- scrollUntilVisible:
+    element:
+      id: school-picker-open
+    direction: DOWN
+    centerElement: false
+    timeout: 30000
+- runFlow: ../helpers/select-nthu.yaml
+
+# Keep the tap target clear of the development warning banner at the screen edge.
+# A cold iOS accessibility swipe can exceed 20s; allow subsequent swipes to run.
+- scrollUntilVisible:
+    element:
+      id: public-Map
+    direction: DOWN
+    centerElement: true
+    timeout: 60000
+- assertVisible:
+    id: public-Map
+
 - tapOn:
     id: public-Map
-- extendedWaitUntil:
-    visible: '選擇校園 · 校園地圖|找到校園地點，再安排怎麼過去。'
-    timeout: 20000
-- runFlow:
-    when:
-      visible:
-        id: school-picker-search
-    commands:
-      - tapOn:
-          id: school-picker-search
-      - inputText: 'NTHU'
-      - tapOn:
-          id: school-picker-option-nthu
 
 # The landing-page button also says "校園地圖"; require the map-only subtitle.
 - extendedWaitUntil:

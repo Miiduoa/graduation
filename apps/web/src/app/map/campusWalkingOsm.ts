@@ -56,21 +56,24 @@ export function buildCampusWalkingOverpassQuery(bounds: CampusWalkingBounds): st
     HIGHWAYS.join('|') + ')$"](' + bbox + ');>;);out meta;';
 }
 
+// Cached candidates must satisfy the same tag constraints as fresh Overpass JSON.
+export function validWalkingSourceTags(value: unknown): value is Tags {
+  const raw = record(value);
+  if (!raw) return false;
+  const entries = Object.entries(raw);
+  return entries.length <= 128 && entries.every(([key, val]) =>
+    key.length > 0 && key.length <= 255 && typeof val === 'string' &&
+    val.length <= 1024 && !['__proto__', 'constructor', 'prototype'].includes(key));
+}
+
 function revision(value: Record<string, unknown>, baseMs: number): Revision | null {
   const editedAt = value.timestamp;
   const editedMs = dateMillis(editedAt);
   if (!positiveId(value.version) || typeof editedAt !== 'string' ||
       editedMs === null || editedMs > baseMs) return null;
   const raw = value.tags === undefined ? {} : record(value.tags);
-  if (!raw) return null;
-  const entries = Object.entries(raw);
-  if (entries.length > 128) return null;
-  const tags: Tags = {};
-  for (const [key, val] of entries) {
-    if (!key || key.length > 255 || typeof val !== 'string' || val.length > 1024 ||
-        ['__proto__', 'constructor', 'prototype'].includes(key)) return null;
-    tags[key] = val;
-  }
+  if (!validWalkingSourceTags(raw)) return null;
+  const tags: Tags = { ...raw };
   return { version: value.version, editedAt, tags };
 }
 
@@ -103,7 +106,13 @@ const restrictsWalking = (tags: Tags) =>
   hasNonPublicAccess(tags.foot) ||
   hasNonPublicAccess(tags.access) ||
   !!(tags.barrier && tags.barrier !== 'no') ||
-  !!tags['access:conditional'] || !!tags['foot:conditional'] || !!tags['opening_hours'];
+  // Locked gates/doors may lack a separate barrier tag. A conditional lock
+  // or malformed access schedule is not a verified all-hours passage.
+  // https://wiki.openstreetmap.org/wiki/Key:locked
+  (tags.locked !== undefined && tags.locked !== 'no') ||
+  tags['locked:conditional'] !== undefined ||
+  tags['access:conditional'] !== undefined || tags['foot:conditional'] !== undefined ||
+  tags.opening_hours !== undefined;
 
 export function hasWalkingRestriction(way: Tags, from: Tags, to: Tags): boolean {
   return restrictsWalking(way) || restrictsWalking(from) || restrictsWalking(to);

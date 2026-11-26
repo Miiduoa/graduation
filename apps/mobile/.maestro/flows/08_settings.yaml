@@ -1,111 +1,61 @@
-# 08_settings.yaml
-# 頭像抽屜 → 一般設定（SettingsScreen）
-
 appId: ${APP_ID}
-name: Settings Flow
-tags:
-  - smoke
-  - settings
-
+name: Authenticated settings, theme, accessibility and language
+tags: [smoke, settings]
 ---
-- launchApp
-
-- extendedWaitUntil:
-    visible:
-      id: 'tab-Today'
-    timeout: 45000
-
-- waitForAnimationToEnd:
-    timeout: 2500
-
-- extendedWaitUntil:
-    visible:
-      id: 'header-avatar-button'
-    timeout: 120000
-
-- waitForAnimationToEnd:
-    timeout: 1500
-
+- runFlow: ../helpers/sign-in-student.yaml
 - tapOn:
-    id: 'header-avatar-button'
-
-- extendedWaitUntil:
-    visible: '個人'
-    timeout: 8000
-
+    id: tab-我的
 - scrollUntilVisible:
     element:
-      text: '一般設定'
+      text: '使用設定'
     direction: DOWN
     timeout: 20000
-
-- tapOn:
-    text: '一般設定'
-
+- tapOn: '使用設定'
 - extendedWaitUntil:
-    visible: '主題模式'
-    timeout: 10000
-
-- takeScreenshot: settings_screen
-
-- tapOn:
-    text: '深色'
-    optional: true
-
-- takeScreenshot: settings_dark_mode_optional
-
-- tapOn:
-    text: '無障礙設定'
-
+    visible: '目前登入帳號'
+    timeout: 15000
+- assertVisible: '測試學生甲'
+- scrollUntilVisible:
+    element:
+      text: '^深色$'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '^深色$'
+- assertVisible: '目前使用深色模式。'
+- tapOn: '^淺色$'
+- assertVisible: '目前使用淺色模式。'
+- scrollUntilVisible:
+    element:
+      text: '無障礙設定'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '無障礙設定'
 - extendedWaitUntil:
-    visible: '文字大小'
+    visible: '閱讀與操作'
     timeout: 10000
-
+- assertVisible: 'VoiceOver 螢幕閱讀器'
 - takeScreenshot: accessibility_settings
-
-- tapOn:
-    text: '大'
-    optional: true
-
-- takeScreenshot: accessibility_large_text
-
-- back
-
-- tapOn:
-    text: '語言設定'
-
+- tapOn: '返回'
+- scrollUntilVisible:
+    element:
+      text: '^介面語言$'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '^介面語言$'
 - extendedWaitUntil:
-    visible: '可用語言'
+    visible: 'English'
     timeout: 10000
-    optional: true
-
-- takeScreenshot: language_settings
-
-- tapOn:
-    text: 'English'
-    optional: true
-
+- tapOn: 'English'
 - takeScreenshot: settings_english
-
-- tapOn:
-    text: '繁體中文'
-    optional: true
-
-- back
-
+- tapOn: '繁體中文'
+- tapOn: '返回'
 - scrollUntilVisible:
     element:
       text: '匯出我的資料'
     direction: DOWN
-
-- tapOn:
-    text: '匯出我的資料'
-
+    timeout: 20000
+- tapOn: '匯出我的資料'
 - extendedWaitUntil:
-    visible: '資料匯出'
+    visible: '選擇內容，將資料保存到自己的裝置。'
     timeout: 10000
-    optional: true
-
 - takeScreenshot: data_export
-
-- back

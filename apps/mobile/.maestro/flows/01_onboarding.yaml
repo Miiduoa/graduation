@@ -6,7 +6,8 @@ tags:
 
 ---
 # Guest access must not depend on a Google or university login.
-- launchApp
+- launchApp:
+    clearState: true
 - extendedWaitUntil:
     visible:
       id: login-landing

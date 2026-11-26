@@ -1218,6 +1218,7 @@ it('cancels a queued removal and keeps the record open for editing', async () =>
   fireEvent.click(within(confirmation).getByRole('button', { name: '確認移除' }));
   fireEvent.click(within(confirmation).getByRole('button', { name: '取消等待' }));
   await within(editor).findByText('已取消等待，這次操作未變更個人紀錄。');
+  await waitFor(() => expect(confirmation.textContent).toContain('已取消等待，這次操作未變更個人紀錄。'));
   expect(lock.request.mock.calls[0][1].signal?.aborted).toBe(true);
   await act(async () => lock.release());
   expect(readPersonalImports(context)).toHaveLength(1);

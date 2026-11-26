@@ -114,6 +114,16 @@ export function validateAliases(manifest, baseline, candidate, readHistoricalPod
     assert.ok(!expected.has(alias.observed), 'Duplicate or already reviewed alias');
     expected.add(alias.observed);
   }
+  if (manifest.publicWorkflowReference !== undefined) {
+    const ref = manifest.publicWorkflowReference;
+    const { path, rule } = parseFingerprint(ref.fingerprint);
+    assert.ok(path === 'scripts/merge-gate/policy.json' && rule === 'generic-api-key', 'Unexpected public-reference fingerprint');
+    assert.match(ref.policyBlob, SHA);
+    assert.match(ref.workflowBlob, SHA);
+    assert.match(ref.workflowPath, /^\.github\/workflows\/[a-z0-9-]+\.ya?ml$/);
+    assert.ok(!expected.has(ref.fingerprint), 'Duplicate public-reference fingerprint');
+    expected.add(ref.fingerprint);
+  }
   assert.deepEqual(ignoreEntries(candidate), expected, 'Candidate must preserve every original entry and add only the declared exact aliases');
   return pairs;
 }
@@ -134,6 +144,29 @@ export async function verifyAliases(aliases, resolveBlob) {
     evidence.push({ ...alias, identicalFileBlob: after });
   }
   return evidence;
+}
+// Git tree lookups only inspect metadata. Read the original public policy after its object ID is confirmed.
+function regularBlobAt(commit, path) {
+  const entry = execFileSync('git', ['ls-tree', '-z', commit, '--', path], { encoding: 'utf8' });
+  const match = /^100644 blob ([0-9a-f]{40})\t([^\0]+)\0$/.exec(entry);
+  assert.ok(match && match[2] === path, 'Expected a regular file in the historical Git tree');
+  return match[1];
+}
+export function verifyPublicWorkflowReference(ref, resolveBlob = regularBlobAt,
+  readPolicy = sha => execFileSync('git', ['cat-file', 'blob', sha], { encoding: 'utf8' })) {
+  const { commit, path, line } = parseFingerprint(ref.fingerprint);
+  assert.equal(resolveBlob(commit, path), ref.policyBlob, 'Original policy file identity changed');
+  const source = readPolicy(ref.policyBlob);
+  assert.equal(blobSha(source), ref.policyBlob, 'Original policy content differs from its Git object');
+  const policy = JSON.parse(source);
+  assert.match(policy.baseline, SHA);
+  const mapping = JSON.stringify(ref.workflowPath) + ': ' + JSON.stringify(ref.workflowBlob);
+  const originalLine = source.split('\n')[line - 1]?.trim();
+  assert.ok((originalLine === mapping || originalLine === mapping + ',') &&
+    policy.workflowBlobs?.[ref.workflowPath] === ref.workflowBlob, 'Reported line must contain only the reviewed workflow and its blob ID');
+  for (const revision of [commit, policy.baseline])
+    assert.equal(resolveBlob(revision, ref.workflowPath), ref.workflowBlob, 'Workflow ID does not match the historical Git tree');
+  return { ...ref, workflowBaseline: policy.baseline };
 }
 async function githubBlob(commit, path) {
   const repository = process.env.GITHUB_REPOSITORY;
@@ -159,11 +192,12 @@ function positiveControl() {
     // Generated, nonfunctional test marker. Never print or upload its value.
     const marker = ['AIza', randomBytes(32).toString('base64url').slice(0, 35)].join('');
     writeFileSync(join(root, 'apps/mobile/eas.json'), ['{', ...Array(53).fill(''), `"apiKey": "${marker}"`, '}'].join('\n'));
-    const { reviewedTestFixtures, reviewedTronclassEmulatorFixture: emulatorFixture } = JSON.parse(readFileSync('scripts/security/gitleaks-history-aliases.json', 'utf8'));
+    const { reviewedTestFixtures, reviewedTronclassEmulatorFixture: emulatorFixture, publicWorkflowReference } = JSON.parse(readFileSync('scripts/security/gitleaks-history-aliases.json', 'utf8'));
     const fixturePositions = reviewedTestFixtures.map(({ observed }) => parseFingerprint(observed));
     if (emulatorFixture) fixturePositions.push(parseFingerprint(emulatorFixture.observed));
     const podPositions = reviewedPodspecs.map(({ line }) => ({ path: podfilePath, rule: 'generic-api-key', line }));
     const positions = [...fixturePositions, ...podPositions];
+    if (publicWorkflowReference) positions.push(parseFingerprint(publicWorkflowReference.fingerprint));
     const files = new Map();
     for (const { path, line } of positions) {
       if (!files.has(path)) files.set(path, []);
@@ -200,10 +234,11 @@ async function main() {
   const baseline = execFileSync('git', ['show', `${manifest.reviewBase}:.gitleaksignore`], { encoding: 'utf8' });
   const readHistoricalPodfile = (commit) => execFileSync('git', ['show', `${commit}:${podfilePath}`], { encoding: 'utf8' });
   const aliases = validateAliases(manifest, baseline, readFileSync('.gitleaksignore', 'utf8'), readHistoricalPodfile);
+  const publicWorkflowReference = manifest.publicWorkflowReference && verifyPublicWorkflowReference(manifest.publicWorkflowReference);
   const evidence = await verifyAliases(aliases, githubBlob);
   mkdirSync('security-evidence', { recursive: true });
   writeFileSync('security-evidence/verified-podspecs.json', JSON.stringify({ commits: podfileCommits, path: podfilePath, blob: podfileBlob, podspecs: reviewedPodspecs }, null, 2) + '\n');
-  writeFileSync('security-evidence/verified-aliases.json', `${JSON.stringify({ reviewBase: manifest.reviewBase, count: evidence.length, evidence }, null, 2)}\n`);
+  writeFileSync('security-evidence/verified-aliases.json', `${JSON.stringify({ reviewBase: manifest.reviewBase, count: evidence.length, evidence, publicWorkflowReference }, null, 2)}\n`);
   console.log(`Verified ${evidence.length} exact fingerprints against their reviewed file blobs.`);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

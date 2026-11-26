@@ -1305,3 +1305,24 @@ it('hides a previously selected LMS while the campus is unresolved or unavailabl
   view.rerender(<LoginPage />);
   expect(view.container.querySelector(officialLink)).toBeNull();
 });
+
+
+it('keeps the development emulator fixture usable while actual PU student login stays paused', async () => {
+  vi.stubEnv('NODE_ENV', 'development');
+  vi.mocked(isPuEcampusDataFetchEnabled).mockReturnValue(false);
+  state.emulator = true;
+  state.user = null;
+  state.studentId = true;
+  state.selectedSchoolId = 'pu';
+  state.params = new URLSearchParams({ returnUrl: '/tronclass' });
+  render(<LoginPage />);
+  fireEvent.change(screen.getByLabelText('教師帳號'), { target: { value: '410000001' } });
+  expect((screen.getByLabelText('密碼') as HTMLInputElement).disabled).toBe(true);
+  fireEvent.submit(screen.getByLabelText('密碼').closest('form')!);
+  expect(signIn).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '使用本機測試學生甲' }));
+  await waitFor(() => expect(signIn).toHaveBeenCalledExactlyOnceWith(
+    'S0000001', 'campus-test-1234', expect.any(AbortSignal), 'pu',
+  ));
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/tronclass'));
+});

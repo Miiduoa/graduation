@@ -3,26 +3,6 @@ name: Campus Spatial Browser
 on:
   pull_request:
     branches: [main, develop]
-    paths:
-      - 'apps/web/src/app/map/**'
-      - 'apps/web/src/app/globals.css'
-      - 'apps/web/src/components/ui/Modal*'
-      - 'apps/web/src/components/ui/modalSession*'
-      - 'apps/web/src/components/ui/Button*'
-      - 'apps/web/src/lib/personalImportImagePreview*'
-      - 'packages/shared/src/providenceCampus*'
-      - 'packages/shared/src/campusGeo*'
-      - 'packages/shared/src/campusMapRecords*'
-      - 'packages/shared/src/campusClassroomLookup*'
-      - 'packages/shared/src/campusMapLookup*'
-      - 'scripts/qa/campus-spatial/**'
-      - 'scripts/qa/browser/**'
-      - 'apps/web/tsconfig.json'
-      - 'apps/web/package.json'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - '.github/workflows/campus-spatial-browser.yml'
   workflow_dispatch:
 
 permissions:
@@ -33,7 +13,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    name: Classify spatial PR paths
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      required: ${{ steps.scope.outputs.required }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+          sparse-checkout: /scripts/merge-gate/pr-scope.mjs
+          sparse-checkout-cone-mode: false
+      - id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/merge-gate/pr-scope.mjs spatial
+
   browser:
+    needs: scope
+    if: >-
+      always() && !cancelled() && (github.event_name != 'pull_request' ||
+      (needs.scope.result == 'success' && needs.scope.outputs.required == 'true'))
     name: Spatial explorer browser checks
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -42,6 +49,8 @@ jobs:
       NEXT_TELEMETRY_DISABLED: '1'
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
           version: '10.28.2'
@@ -75,3 +84,24 @@ jobs:
           name: campus-spatial-browser
           path: artifacts/campus-spatial
           retention-days: 7
+
+  pr-result:
+    # Even a skipped job can satisfy a required check. Only a PR targeting main uses the required name.
+    name: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && 'Spatial browser PR result' || 'Spatial browser other result' }}
+    if: always() && github.event_name == 'pull_request'
+    needs: [scope, browser]
+    permissions: {}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require the applicable test result
+        env:
+          SCOPE: ${{ needs.scope.result }}
+          REQUIRED: ${{ needs.scope.outputs.required }}
+          TEST: ${{ needs.browser.result }}
+        run: |
+          case "$SCOPE/$REQUIRED/$TEST" in
+            success/true/success) echo 'Required suite passed' ;;
+            success/false/skipped) echo 'Suite is outside this PR diff' ;;
+            *) echo "::error::Unverified suite result ($SCOPE/$REQUIRED/$TEST)"; exit 1 ;;
+          esac

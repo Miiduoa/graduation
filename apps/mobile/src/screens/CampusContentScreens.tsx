@@ -316,6 +316,7 @@ function ContentSearch({
       <Text style={{ color: aiTokens.text, fontSize: 15, fontWeight: '600' }}>搜尋{kind}</Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <TextInput
+          testID={kind === '公告' ? 'announcement-search' : 'event-search'}
           accessibilityLabel={`搜尋${kind}`}
           placeholder={kind === '公告' ? '標題、內容或發布單位' : '名稱、介紹、地點或主辦單位'}
           placeholderTextColor={aiTokens.muted}

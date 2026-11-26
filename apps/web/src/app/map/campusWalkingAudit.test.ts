@@ -90,6 +90,31 @@ describe('trusted OSM walking segment audit bridge', () => {
     ], now)?.edges[0].access).toBe('reviewed-open');
   });
 
+  it('rejects malformed cached source tags on ways and either endpoint', () => {
+    const invalid: unknown[] = [
+      null, undefined, [], 'yes', { name: 123 }, { name: 'x'.repeat(1025) },
+      { '': 'yes' }, { ['x'.repeat(256)]: 'yes' },
+      JSON.parse('{"__proto__":"yes"}'), { constructor: 'yes' },
+      { prototype: 'yes' }, Object.fromEntries(Array.from({ length: 129 }, (_, i) => ['k' + i, 'v'])),
+    ];
+    for (const tags of invalid) {
+      for (const location of ['way', 'from', 'to']) {
+        const data = candidates();
+        const source = location === 'way' ? data.ways[0] : data.nodes[location === 'from' ? 0 : 1];
+        source.tags = (location === 'way' && tags && typeof tags === 'object' && !Array.isArray(tags)
+          ? { highway: 'footway', ...tags } : tags) as typeof source.tags;
+        expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)).toBeNull();
+      }
+    }
+    const data = candidates();
+    data.nodes[0].tags = Object.fromEntries(Array.from({ length: 128 }, (_, i) => ['k' + i, 'v']));
+    data.nodes[1].tags = { ['x'.repeat(255)]: 'y'.repeat(1024) };
+    expect(findCampusWalkingRoute(
+      applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!,
+      'fixture', bounds, 1, 2, now,
+    )).not.toBeNull();
+  });
+
   it('rejects invalid source revision numbers even when an audit agrees', () => {
     for (const version of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN]) {
       for (const location of ['way', 'from', 'to']) {
@@ -122,6 +147,30 @@ describe('trusted OSM walking segment audit bridge', () => {
     expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)).toBeNull();
     data.ways[1].nodes = [];
     expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)).toBeNull();
+  });
+
+  it('rejects malformed cached way member IDs even outside the retained graph', () => {
+    const sparse = new Array<number>(3);
+    sparse[0] = 1;
+    sparse[2] = 2;
+    const invalid: unknown[] = [
+      null, undefined, '12', {}, { length: 2, 0: 1, 1: 2 }, [1],
+      [1, 2, 0], [1, 2, -1], [1, 2, 2.5], [1, 2, '3'],
+      [1, 2, null], [1, 2, NaN], [1, 2, Infinity],
+      [1, 2, Number.MAX_SAFE_INTEGER + 1], sparse,
+    ];
+    for (const members of invalid) {
+      const data = candidates();
+      data.ways[0].nodes = members as typeof data.ways[0]['nodes'];
+      expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)).toBeNull();
+    }
+    // Positive IDs outside the retained campus graph remain valid members,
+    // but must not create an inferred connection to an outside node.
+    const data = candidates();
+    data.ways[0].nodes.push(Number.MAX_SAFE_INTEGER);
+    const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).not.toBeNull();
+    expect(graph.edges.some(edge => edge.to === Number.MAX_SAFE_INTEGER)).toBe(false);
   });
 
   it('rejects cached ways with repeated in-scope segments or self loops', () => {
@@ -194,6 +243,28 @@ describe('trusted OSM walking segment audit bridge', () => {
     expect(data.graph.edges[0].access).toBe('unknown');
   });
 
+  it('quarantines reversed duplicate audits of the same physical way segment in either order', () => {
+    const forward = audit(1, 2, { direction: 'forward' });
+    const reversed = audit(2, 1, { direction: 'forward' });
+    const neighbor = audit(2, 3);
+    for (const reviews of [[forward, reversed], [reversed, forward], [forward, forward]]) {
+      const graph = apply([...reviews, neighbor]);
+      expect(graph.edges[0].access).toBe('unknown');
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1, now)).toBeNull();
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 3, now)).not.toBeNull();
+    }
+    expect(apply([reversed]).edges[0].access).toBe('unknown');
+    for (const unrelated of [
+      audit(2, 1, { schoolId: 'other' }),
+      audit(2, 1, { osmWayId: 999 }),
+    ]) {
+      const graph = apply([forward, unrelated, neighbor]);
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 3, now)?.nodes.map(n => n.id)).toEqual([1, 2, 3]);
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1, now)).toBeNull();
+    }
+  });
+
   it('keeps purpose-limited or unrecognised access closed on ways and endpoints', () => {
     const restrictions = ['agricultural', 'forestry', 'delivery', 'emergency',
       'discouraged', 'unknown', 'yes;private', ''];
@@ -220,6 +291,44 @@ describe('trusted OSM walking segment audit bridge', () => {
         }
       }
     }
+  });
+
+  it('keeps locked and conditionally locked routes closed even without a barrier tag', () => {
+    const restrictions: Record<string, string>[] = [
+      { locked: 'yes' }, { locked: 'unknown' }, { locked: '' },
+      { locked: 'no', 'locked:conditional': 'yes @ (sunset-sunrise)' },
+      { 'locked:conditional': '' }, { opening_hours: '' },
+      { 'access:conditional': '' }, { 'foot:conditional': '' },
+    ];
+    for (const tags of restrictions) {
+      for (const location of ['way', 'from', 'to']) {
+        const data = parseCampusWalkingOsmCandidates({
+          osm3s: { timestamp_osm_base: '2026-11-24T08:00:00Z' },
+          elements: [
+            { ...points[0], tags: location === 'from' ? tags : {} },
+            { ...points[1], tags: location === 'to' ? tags : {} },
+            { type: 'way', id: 101, nodes: [1, 2],
+              tags: { highway: 'footway', ...(location === 'way' ? tags : {}) }, ...revision },
+          ],
+        }, 'fixture', bounds, now)!;
+        expect(data.graph.edges[0].access).toBe('restricted');
+        // An old cached candidate must not erase the source restriction.
+        data.graph.edges[0].access = 'unknown';
+        const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+        expect(graph.edges[0].access).toBe('restricted');
+        expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+        expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1, now)).toBeNull();
+      }
+    }
+  });
+
+  it('does not treat an unlocked tag alone as an access audit', () => {
+    const data = candidates();
+    data.nodes[0].tags.locked = 'no';
+    data.ways[0].tags.locked = 'no';
+    expect(findCampusWalkingRoute(data.graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+    const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).not.toBeNull();
   });
 
   it('allows explicitly open access only after a matching audit', () => {

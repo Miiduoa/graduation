@@ -2125,3 +2125,36 @@ it.each([{ refresh: 'yes' }, { sessionId: LMS_ID }, { status: 'ongoing' }, { cou
   expect((await request(data)).status).toBe(400);
   expect(source.fetchCourses).not.toHaveBeenCalled();
 });
+
+
+it('refetches a decoded unconfirmed submission belonging to a foreign cached course', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const cached = store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot & {
+    unconfirmedHomework: { index: number; item: LmsReadonlySnapshot['homework'][number] }[];
+  };
+  const foreign = { ...cached.homework.shift()!, courseId: 99999, title: '其他課程的未確認作業', submitted: null };
+  cached.unconfirmedHomework = [{ index: 0, item: foreign }];
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+  const body = await (await request()).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(JSON.stringify(body)).not.toContain('其他課程的未確認作業');
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+});
+
+it('uses the complete cache TTL after decoding submission-only compatibility warnings', async () => {
+  const { request, source, store } = setup();
+  const { submitted, ...missingStatus } = LMS_FIXTURE_HOMEWORK_OPEN;
+  expect(submitted).toBe(false);
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValue({
+    ok: true, value: { homework_activities: [missingStatus, LMS_FIXTURE_HOMEWORK_DONE], total: 2 },
+  });
+  expect((await request()).status).toBe(200);
+  const snapshot = store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot;
+  snapshot.fetchedAt = new Date(Date.now() - 61_000).toISOString();
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+  const body = await (await request()).json();
+  expect(body.result.cache.hit).toBe(true);
+  expect(body.result.unconfirmedHomework).toHaveLength(1);
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+});

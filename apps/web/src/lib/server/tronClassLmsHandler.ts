@@ -483,6 +483,15 @@ function publicSnapshot(value: unknown, uid: string, nowMs: number): LmsReadonly
     !Array.isArray(row.courses) || !Array.isArray(row.contentsLoadedFor) ||
     !Array.isArray(row.homework) || !Array.isArray(row.announcements) || !Array.isArray(row.materials) ||
     !validCourseErrors(row.courseErrors)) return null;
+  // Decode the compatibility projection before authorizing every homework row
+  // and calculating partial-feed TTLs. Unconfirmed submissions are rows too;
+  // their synthetic legacy warnings are not source failures.
+  let decoded: ReturnType<typeof decodeLmsSubmissions>;
+  try {
+    decoded = decodeLmsSubmissions(row);
+  } catch {
+    return null;
+  }
   // A matching session version is not proof that every row in an older
   // snapshot belongs to one of the courses in that snapshot. Never display
   // cached homework or course errors for a foreign course.
@@ -499,22 +508,18 @@ function publicSnapshot(value: unknown, uid: string, nowMs: number): LmsReadonly
     courseIds.add(id);
     courses.push({ id, name });
   }
-  if (row.homework.some(item => !courseIds.has(positiveId(record(item).courseId) ?? 0)) ||
+  if (decoded.homework.some(item => !courseIds.has(item.courseId)) ||
     row.contentsLoadedFor.some(id => !courseIds.has(positiveId(id) ?? 0)) ||
     // Older snapshots could persist a source-level 401 as a partial success.
     // A matching session version must not turn rejected authentication into a cache hit.
-    (row.courseErrors as LmsCourseError[]).some(error => !courseIds.has(error.courseId) || error.status === 401)) return null;
+    (decoded.courseErrors as LmsCourseError[]).some(error => !courseIds.has(error.courseId) || error.status === 401)) return null;
   // Legacy partial snapshots can still have an outer ten-minute TTL. Clamp
   // them by fetchedAt as well, without trusting the stored expiry alone.
   if (Date.parse(row.fetchedAt as string) + baseSnapshotRetryMs(
-    row.courseErrors as LmsCourseError[],
+    decoded.courseErrors as LmsCourseError[],
     row.upcomingCoursesError as LmsReadonlySnapshot['upcomingCoursesError'],
   ) <= nowMs) return null;
-  try {
-    return { ...row, ...decodeLmsSubmissions(row), courses } as LmsReadonlySnapshot;
-  } catch {
-    return null;
-  }
+  return { ...row, courses, ...decoded } as LmsReadonlySnapshot;
 }
 
 // A 401 can be returned as a per-feed failure rather than a thrown session error.

@@ -124,7 +124,7 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
   const knownOwner = scope?.owner ?? (firebaseChanged ? null : observedOwner);
   const ownerSignedOut = (owner: string | undefined) =>
     firebaseSignedOut && !!owner?.startsWith('firebase:');
-  // An explicit Nuni login starts a new workspace even for the same account.
+  // Campus drafts and queued writes are bound to the interactive login.
   const nuniGeneration = platform?.signInGeneration;
   return {
     knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseJustSignedOut, ownerSignedOut, workspaceUid,
@@ -260,13 +260,13 @@ export default function PersonalCalendarScreen({ stackTitled = false }: { stackT
       key={JSON.stringify([
         workspaceKey,
         nuniWorkspace ? workspaceUid ?? lastWorkspaceUid.current : workspaceUid,
-        nuniWorkspace ? nuniGeneration : null,
       ])}
       scopeKey={workspaceKey === 'pending' ? '' : workspaceKey}
       scope={verifiedScope}
       writesRevoked={writesRevoked}
       writeGeneration={firebaseLogoutGeneration}
       stackTitled={stackTitled}
+      nuniGeneration={nuniWorkspace ? nuniGeneration : undefined}
       schoolName={school?.name || '未指定校園'}
       focusEventId={focusEventId}
     />
@@ -279,6 +279,7 @@ function PersonalCalendarWorkspace({
   scope,
   writesRevoked,
   writeGeneration,
+  nuniGeneration,
   schoolName,
   focusEventId,
   initialDraft,
@@ -288,6 +289,7 @@ function PersonalCalendarWorkspace({
   scope: PersonalImportScope | null;
   writesRevoked: boolean;
   writeGeneration: number;
+  nuniGeneration?: number;
   schoolName: string;
   focusEventId?: string;
   initialDraft?: PersonalEventDraft;
@@ -298,7 +300,7 @@ function PersonalCalendarWorkspace({
   const latestRead = useRef({ ledger: 0, reminders: 0 });
   const resolvedKey = scope ? personalImportStorageKey(scope) : '';
   const verifiedKey = resolvedKey === scopeKey && !writesRevoked ? resolvedKey : '';
-  const currentScope = useRef({ resolvedKey, verifiedKey, writesRevoked, writeGeneration });
+  const currentScope = useRef({ resolvedKey, verifiedKey, writesRevoked, writeGeneration, nuniGeneration });
   const [loadedLedger, setLoad] = useState<LoadState>({ status: 'loading' });
   // The workspace can retain a draft while the account is being verified.
   const load: LoadState = verifiedKey ? loadedLedger : { status: 'loading' };
@@ -340,15 +342,15 @@ function PersonalCalendarWorkspace({
   }, []);
 
   useLayoutEffect(() => {
-    // A scope change or Firebase logout starts a new verification for queued operations.
-    currentScope.current = { resolvedKey, verifiedKey, writesRevoked, writeGeneration };
+    // A scope or login generation change revokes queued operations.
+    currentScope.current = { resolvedKey, verifiedKey, writesRevoked, writeGeneration, nuniGeneration };
     setReminderBusyId(null);
     if (!verifiedKey) {
       setLoad({ status: 'loading' });
       setReminders({});
       setReminderBlocked(null);
     }
-  }, [resolvedKey, verifiedKey, writesRevoked, writeGeneration]);
+  }, [resolvedKey, verifiedKey, writesRevoked, writeGeneration, nuniGeneration]);
 
   useLayoutEffect(() => {
     ledgerReady.current = ready;
@@ -356,9 +358,10 @@ function PersonalCalendarWorkspace({
 
   const beginVerifiedOperation = useCallback((expected: string) => {
     const verification = currentScope.current;
-    if (!active.current || verification.verifiedKey !== expected) return;
+    if (!active.current || verification.verifiedKey !== expected ||
+        verification.writeGeneration !== writeGeneration || verification.nuniGeneration !== nuniGeneration) return;
     return () => active.current && currentScope.current === verification;
-  }, []);
+  }, [writeGeneration, nuniGeneration]);
 
   const beginRead = useCallback((resource: keyof typeof latestRead.current, expected: string) => {
     const isCurrent = beginVerifiedOperation(expected);
@@ -448,7 +451,7 @@ function PersonalCalendarWorkspace({
         unsubJournal();
         unsubRuntime();
       };
-    }, [refresh, refreshReminders, scope, writeGeneration]),
+    }, [refresh, refreshReminders, scope]),
   );
 
   const monthEvents = useMemo(
@@ -529,6 +532,7 @@ function PersonalCalendarWorkspace({
     const canReportResult = () => {
       const latest = currentScope.current;
       return active.current && requestedScope.writeGeneration === latest.writeGeneration &&
+        requestedScope.nuniGeneration === latest.nuniGeneration &&
         !latest.writesRevoked &&
         (!latest.resolvedKey || latest.verifiedKey === expected);
     };

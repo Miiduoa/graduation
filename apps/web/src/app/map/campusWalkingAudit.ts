@@ -1,5 +1,5 @@
 import type { CampusWalkingGraph, WalkingEdge, WalkingNode } from './campusWalkingGraph';
-import { excludesWalkingWay, hasWalkingRestriction, type CampusWalkingOsmCandidates } from './campusWalkingOsm';
+import { excludesWalkingWay, hasWalkingRestriction, validWalkingSourceTags, type CampusWalkingOsmCandidates } from './campusWalkingOsm';
 
 type ReviewedNode = WalkingNode & { version: number };
 export type CampusWalkingSegmentAudit = {
@@ -31,6 +31,7 @@ function evidenceLink(s: string): boolean {
   } catch { return false; }
 }
 const key = (way: number, from: number, to: number) => [way, from, to].join(':');
+const unorderedKey = (way: number, from: number, to: number) => key(way, Math.min(from, to), Math.max(from, to));
 const validRevision = (version: number) => Number.isSafeInteger(version) && version > 0;
 function matchesNode(review: ReviewedNode, node: ReviewedNode | undefined): boolean {
   return !!node && validRevision(node.version) && review.id === node.id && review.version === node.version &&
@@ -83,6 +84,10 @@ export function applyCampusWalkingSegmentAudits(
       candidates.graph.nodes.length > 2000 || candidates.graph.edges.length > 4000 ||
       candidates.nodes.length > 2000 || candidates.ways.length > 4000 ||
       audits.length > 4000) return null;
+  // A serialized candidate may have bypassed discovery's tag validation.
+  // Reject the snapshot rather than interpreting missing or malformed tags as open.
+  if (candidates.nodes.some(n => !validWalkingSourceTags(n.tags)) ||
+      candidates.ways.some(w => !validWalkingSourceTags(w.tags))) return null;
   const nodes = new Map(candidates.nodes.map(n => [n.id, n]));
   const ways = new Map(candidates.ways.map(w => [w.id, w]));
   if (nodes.size !== candidates.nodes.length || ways.size !== candidates.ways.length) return null;
@@ -101,9 +106,14 @@ export function applyCampusWalkingSegmentAudits(
   // Index ordered adjacency once, rather than scanning the whole way per audit.
   let segmentCount = 0;
   for (const way of ways.values()) {
-    if (way.nodes.length < 2) return null;
+    if (!Array.isArray(way.nodes) || way.nodes.length < 2) return null;
     segmentCount += way.nodes.length - 1;
     if (segmentCount > 4000) return null;
+    // Retained member IDs may be outside the campus, but must still be real
+    // positive integer OSM identities. for-of also rejects sparse cache arrays.
+    for (const id of way.nodes) {
+      if (!Number.isSafeInteger(id) || id <= 0) return null;
+    }
   }
   const adjacentSegments = new Set<string>();
   const undirectedSegments = new Set<string>();
@@ -122,11 +132,16 @@ export function applyCampusWalkingSegmentAudits(
     }
   }
   const reviews = new Map<string, CampusWalkingSegmentAudit>();
+  // Require one audit per physical way segment, even if a conflicting record
+  // reverses its endpoints. The ordered key still governs actual promotion.
+  const seenReviews = new Set<string>();
   const duplicates = new Set<string>();
   for (const audit of audits) {
     if (audit.schoolId !== schoolId) continue;
     const segment = key(audit.osmWayId, audit.from.id, audit.to.id);
-    if (reviews.has(segment)) duplicates.add(segment);
+    const physicalSegment = unorderedKey(audit.osmWayId, audit.from.id, audit.to.id);
+    if (seenReviews.has(physicalSegment)) duplicates.add(physicalSegment);
+    seenReviews.add(physicalSegment);
     reviews.set(segment, audit);
   }
 
@@ -148,7 +163,7 @@ export function applyCampusWalkingSegmentAudits(
     if (!from || !to || !way || edge.access !== 'unknown') return blocked;
     const segment = key(edge.osmWayId, edge.from, edge.to);
     const audit = reviews.get(segment);
-    if (!audit || duplicates.has(segment)) return blocked;
+    if (!audit || duplicates.has(unorderedKey(edge.osmWayId, edge.from, edge.to))) return blocked;
     if (!matchesNode(audit.from, from) || !matchesNode(audit.to, to) ||
         !validRevision(way.version) || audit.wayVersion !== way.version ||
         !adjacentSegments.has(segment) ||
