@@ -380,8 +380,11 @@ function hasConsistentAuditedNodePositions(elements: unknown[]): boolean {
     const way = object(candidate);
     if (!way || way.type !== 'way' || typeof way.id !== 'number' ||
         !knownWays.has(way.id) || way.nodes === undefined) continue;
+    // Apply the same per-way budget as safeOutline before walking node IDs.
+    // An oversized audited way cannot establish snapshot-wide node consistency.
     if (!Array.isArray(way.nodes) || !Array.isArray(way.geometry) ||
-        way.nodes.length !== way.geometry.length) return false;
+        way.nodes.length !== way.geometry.length ||
+        way.nodes.length > MAX_VERTICES + 1) return false;
     for (let index = 0; index < way.nodes.length; index += 1) {
       const id = way.nodes[index];
       const point = safeCoordinate(way.geometry[index]);
