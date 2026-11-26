@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { blobSha, parseFingerprint, summarizeFindings, validateAliases, verifyAliases } from './verify-gitleaks-history.mjs';
 
 const oldCommit = 'a'.repeat(40), newCommit = 'b'.repeat(40);
@@ -38,27 +39,39 @@ test('requires identical complete file blobs', async () => {
   assert.equal(evidence[0].identicalFileBlob, 'c'.repeat(40));
   await assert.rejects(verifyAliases(manifest().aliases, async (commit) => commit));
 });
-test('a newly reviewed fixture exempts only its observed commit and must match its pinned complete blob', async () => {
-  const fixture = {
-    reviewed: `${oldCommit}:scripts/example.test.mjs:generic-api-key:51`,
-    observed: `${newCommit}:scripts/example.test.mjs:generic-api-key:51`,
-    reviewedBlob: 'c'.repeat(40),
-  };
-  const m = { ...manifest(), reviewedTestFixtures: [fixture] };
-  const ignore = candidate + fixture.observed + '\n';
-  const pairs = validateAliases(m, baseline, ignore);
-  assert.equal((await verifyAliases(pairs, async () => fixture.reviewedBlob)).length, 2);
-  await assert.rejects(verifyAliases(pairs, async () => 'd'.repeat(40)), /pinned review/);
-  assert.throws(() => validateAliases(m, baseline, ignore + fixture.reviewed + '\n'));
-  assert.throws(() => validateAliases({ ...manifest(), aliases: [fixture] }, baseline, ignore), /no previously reviewed fingerprint/);
+const privacyFixtures = JSON.parse(readFileSync(new URL('./gitleaks-history-aliases.json', import.meta.url), 'utf8')).reviewedTestFixtures;
+test('accepts only the two reviewed CLI privacy fixture squashes', async () => {
+  assert.equal(privacyFixtures.length, 2);
+  const m = { ...manifest(), reviewedTestFixtures: privacyFixtures };
+  const updated = candidate + privacyFixtures.map((f) => f.observed).join('\n') + '\n';
+  const pairs = validateAliases(m, baseline, updated);
+  assert.equal(pairs.length, 3);
+  const resolve = async (_commit, path) => privacyFixtures.find((f) => parseFingerprint(f.observed).path === path)?.reviewedBlob ?? 'c'.repeat(40);
+  assert.equal((await verifyAliases(pairs, resolve)).length, 3);
+  await assert.rejects(verifyAliases(pairs, async () => 'c'.repeat(40)), /pinned review/);
+});
+test('rejects changed fixture commit, path, rule, line and full blob', () => {
+  const fixture = privacyFixtures[0];
   for (const change of [
-    { reviewedBlob: undefined },
-    { reviewed: fixture.reviewed.replace('.test.mjs', '.mjs') },
+    { reviewed: fixture.reviewed.replace(/^.{40}/, oldCommit) },
+    { observed: fixture.observed.replace(/^.{40}/, newCommit) },
+    { reviewed: fixture.reviewed.replace('.test.cjs', '.test.mjs') },
+    { observed: fixture.observed.replace('generic-api-key', 'gcp-api-key') },
     { observed: fixture.observed.replace(':51', ':52') },
-    { observed: fixture.reviewed },
+    { reviewedBlob: 'd'.repeat(40) },
+    { reviewedBlob: undefined },
   ]) {
-    assert.throws(() => validateAliases({ ...m, reviewedTestFixtures: [{ ...fixture, ...change }] }, baseline, ignore));
+    const altered = { ...fixture, ...change };
+    assert.throws(() => validateAliases({ ...manifest(), reviewedTestFixtures: [altered] }, baseline, candidate + altered.observed + '\n'));
   }
+});
+test('fixture inventory rejects duplicates, malformed entries and undeclared ignore records', () => {
+  const fixture = privacyFixtures[0];
+  assert.throws(() => validateAliases({ ...manifest(), reviewedTestFixtures: [fixture, fixture] }, baseline, candidate + fixture.observed + '\n'), /Duplicate/);
+  for (const value of [null, {}, [null], ['not a fixture'], [...privacyFixtures, fixture]]) {
+    assert.throws(() => validateAliases({ ...manifest(), reviewedTestFixtures: value }, baseline, candidate));
+  }
+  assert.throws(() => validateAliases({ ...manifest(), reviewedTestFixtures: privacyFixtures }, baseline, candidate), /Candidate must preserve/);
 });
 test('fails closed on missing blobs or lookup failures', async () => {
   await assert.rejects(verifyAliases(manifest().aliases, async () => undefined));
@@ -93,7 +106,7 @@ test('allows only the reviewed TronClass main squash and requires its complete s
   for (const invalid of [null, [], 'invalid']) {
     assert.throws(() => validateAliases({ ...m, reviewedTronclassEmulatorFixture: invalid }, baseline, ignore), /Invalid reviewed emulator/);
   }
-  assert.throws(() => validateAliases({ ...manifest(), reviewedTestFixtures: [fixture] }, baseline, ignore), /test script/);
+  assert.throws(() => validateAliases({ ...manifest(), reviewedTestFixtures: [fixture] }, baseline, ignore), /Unknown reviewed test fixture/);
 });
 test('the dedicated emulator record does not increase the two test-script fixture limit', () => {
   const fixtures = [1, 2, 3].map((line) => ({
