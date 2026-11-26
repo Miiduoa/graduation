@@ -144,6 +144,25 @@ describe('read-only personal submission windows', () => {
     expect(project({ activity }).ordinary.state).toBe(state);
   });
 
+  it.each([
+    { activity: { user_submit_count: 1 }, history: { list: [] } },
+    { activity: { user_submit_count: 0 }, history: { list: [SUBMISSION] } },
+  ])('does not label a first or repeat attempt when history and activity counts disagree: %j', change => {
+    const result = project(change);
+    expect(result.ordinary).toEqual({ state: 'unknown', kind: 'unknown', remainingAttempts: null });
+    expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
+  });
+
+  it.each([null, MAKE_UP])('does not treat a mixed make-up error envelope as absent or open: %j', row => {
+    expect(project({ makeUp: { make_up_record: row, error: 'synthetic-error' } }).makeUp)
+      .toEqual({ state: 'unknown', updatedAt: null });
+  });
+
+  it.each([null, RESUBMIT])('does not treat a mixed resubmit error envelope as absent or open: %j', row => {
+    expect(project({ resubmit: { resubmit_record: row, error: 'synthetic-error' } }).resubmit)
+      .toEqual({ state: 'unknown', updatedAt: null });
+  });
+
   it('accepts explicit unlimited and exact decimal limits but not missing attempt counts', () => {
     expect(project({ activity: { non_submit_times: true, submit_times: null } }).ordinary)
       .toEqual({ state: 'open', kind: 'first', remainingAttempts: null });
