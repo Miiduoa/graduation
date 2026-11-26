@@ -40,6 +40,7 @@ export function FoodOrders({
   accountId,
   context,
   tenantId,
+  schoolId,
   initialOrder,
   orderHref,
 }: {
@@ -48,6 +49,7 @@ export function FoodOrders({
   accountId: string;
   context?: string;
   tenantId: string;
+  schoolId: string;
   initialOrder: string;
   /** A host page can keep its own URL while reusing the same order actions. */
   orderHref?: (orderId?: string) => string;
@@ -126,6 +128,7 @@ export function FoodOrders({
           accountId={accountId}
           context={context}
           tenantId={tenantId}
+          schoolId={schoolId}
           orderId={selected}
           onChange={orders.reload}
           onBack={closeOrder}
@@ -261,6 +264,7 @@ export function FoodOrderDetail({
   accountId,
   context,
   tenantId,
+  schoolId,
   orderId,
   onChange,
   onBack,
@@ -270,6 +274,7 @@ export function FoodOrderDetail({
   accountId: string;
   context?: string;
   tenantId: string;
+  schoolId: string;
   orderId: string;
   onChange(): Promise<unknown>;
   onBack(): void;
