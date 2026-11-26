@@ -71,6 +71,17 @@ def _date(value: str, label: str) -> date:
         raise ValueError(f"{label}: expected YYYY-MM-DD") from error
 
 
+def _cohort_app_versions(repeats: dict[int, list[dict]]) -> dict[str, str] | None:
+    versions: dict[str, str] = {}
+    for batch in repeats.values():
+        for entry in batch:
+            product, version = entry["product"], entry["app_version"]
+            if product in versions and versions[product] != version:
+                return None
+            versions[product] = version
+    return versions
+
+
 def audit_rows(rows: list[dict[str, str]]) -> dict:
     """Return machine-readable findings, including incomplete/unscored cases."""
     errors: list[str] = []
@@ -181,6 +192,13 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
             pending.append({"scenario_id": metadata[0], "repeats": sorted(repeats),
                             "reasons": [f"only {len(repeats)} complete repeats; need {MIN_REPEATS}"]})
             continue
+        # Never pool measurements of different releases of any one product.
+        # A fourth repeat after an update must not be silently discarded either.
+        versions = _cohort_app_versions(repeats)
+        if versions is None:
+            pending.append({"scenario_id": metadata[0], "repeats": sorted(repeats),
+                            "reasons": ["product app versions changed across repeats; no mixed-version metrics"]})
+            continue
         # Performance and visual medians are comparable only when every product
         # has measured the metric in every repeat; do not cherry-pick samples.
         paired_fps = all(entry["fps"].strip() for batch in repeats.values() for entry in batch)
@@ -205,6 +223,7 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
             }
         ready.append({"conditions": dict(zip(COHORT_FIELDS, metadata)),
                       "repeats": sorted(repeats),
+                      "app_versions": versions,
                       "paired_optional_metrics": {"fps": paired_fps, "visual_rating": paired_visual},
                       "metrics": metrics})
     return {"errors": errors, "ready": ready, "pending": pending,
