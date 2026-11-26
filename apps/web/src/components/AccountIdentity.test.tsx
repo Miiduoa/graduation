@@ -7,7 +7,6 @@ import {
   IDENTITY_NO_MERCHANT_COPY,
   IDENTITY_NO_TEACHING_COPY,
   IDENTITY_RETRY_COPY,
-  STORE_NOT_OPEN_COPY,
 } from '@/lib/accountIdentity';
 
 const request = vi.fn();
@@ -82,12 +81,86 @@ it('lists each role on its own line and links teaching to the course, not /teach
   ).not.toContain('/teacher');
   expect(
     screen
-      .getByRole('link', { name: `測試餐坊 · 主校區 · ${STORE_NOT_OPEN_COPY}` })
+      .getByRole('link', { name: '測試餐坊／第一門市 · 主校區 · 暫停接單' })
       .getAttribute('href'),
-  ).toBe('/merchant/workspace');
+  ).toBe('/merchant/workspace?tenant=school-one&location=loc-1');
   expect(screen.getByRole('link', { name: '林家麵 · 已送出' }).getAttribute('href')).toBe(
     '/merchant/workspace',
   );
+});
+
+it('links stores with the same brand and campus to their own location, including after a reorder', async () => {
+  const second = { ...store, locationId: 'loc-2', locationName: '第二門市' };
+  let workspaces = [store, second];
+  request.mockImplementation(async (path: string) => {
+    if (path === 'class-workspaces') return { workspaces: [] };
+    if (path === 'merchant-applications') return { applications: [] };
+    if (path === 'merchant-workspaces') return { workspaces };
+    throw new Error(path);
+  });
+  const view = render(
+    <AccountIdentity context="ctx-a" accountId="pa_33333333-3333-4333-8333-333333333333" />,
+  );
+  const firstLink = await screen.findByRole('link', { name: /測試餐坊／第一門市/ });
+  expect(firstLink.getAttribute('href')).toBe(
+    '/merchant/workspace?tenant=school-one&location=loc-1',
+  );
+  expect(screen.getByRole('link', { name: /測試餐坊／第二門市/ }).getAttribute('href')).toBe(
+    '/merchant/workspace?tenant=school-one&location=loc-2',
+  );
+  workspaces = [second, store];
+  view.rerender(
+    <AccountIdentity context="ctx-renewed" accountId="pa_33333333-3333-4333-8333-333333333333" />,
+  );
+  await screen.findByRole('link', { name: /測試餐坊／第二門市/ });
+  const stores = screen.getAllByRole('link');
+  expect(stores.map((link) => link.getAttribute('href'))).toEqual([
+    '/merchant/workspace?tenant=school-one&location=loc-2',
+    '/merchant/workspace?tenant=school-one&location=loc-1',
+  ]);
+});
+
+it('offers the first two stores on home and keeps further stores and application progress reachable', async () => {
+  request.mockImplementation(async (path: string) => {
+    if (path === 'class-workspaces') return { workspaces: [] };
+    if (path === 'merchant-applications') return { applications: [application] };
+    if (path === 'merchant-workspaces')
+      return {
+        workspaces: [
+          store,
+          { ...store, locationId: 'loc-2', locationName: '第二門市' },
+          { ...store, locationId: 'loc-3', locationName: '第三門市' },
+        ],
+      };
+    throw new Error(path);
+  });
+  render(
+    <AccountIdentity
+      variant="home"
+      context="ctx-a"
+      accountId="pa_33333333-3333-4333-8333-333333333333"
+    />,
+  );
+  const group = await screen.findByRole('region', { name: '門市工作' });
+  const links = within(group);
+  expect(links.getByRole('link', { name: /測試餐坊／第一門市/ }).getAttribute('href')).toBe(
+    '/merchant/workspace?tenant=school-one&location=loc-1',
+  );
+  expect(links.getByRole('link', { name: /測試餐坊／第二門市/ }).getAttribute('href')).toBe(
+    '/merchant/workspace?tenant=school-one&location=loc-2',
+  );
+  const more = group.querySelector('details')!;
+  expect(more.open).toBe(false);
+  expect(more.querySelector('summary')?.textContent).toBe('其他門市（1）');
+  fireEvent.click(more.querySelector('summary')!);
+  expect(more.open).toBe(true);
+  expect(links.getByRole('link', { name: /測試餐坊／第三門市/ }).getAttribute('href')).toBe(
+    '/merchant/workspace?tenant=school-one&location=loc-3',
+  );
+  expect(links.getByRole('link', { name: '查看申請進度（1）' }).getAttribute('href')).toBe(
+    '/merchant/workspace?view=applications#merchant-applications-title',
+  );
+  expect(links.getByRole('link', { name: /開始今天的門市工作/ })).toBeTruthy();
 });
 
 it('says empty only after a real empty result, and retries a failed lookup', async () => {
