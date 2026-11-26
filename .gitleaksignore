@@ -69,3 +69,7 @@ d8628868502fe68b12e47bd26207042701ad29d0:docs/API.md:generic-api-key:115
 # Exact squash fingerprints of reviewed CLI privacy-test fixtures.
 2a9bad18dd88a6873b08063df8b308e5df2cf9e0:scripts/audit-group-post-visibility.test.cjs:generic-api-key:51
 66a88348a216bbeee31e332968ca8cc39e4eea70:scripts/qa/course-study/compare.test.mjs:generic-api-key:494
+
+# #616 main squash of the byte-identical, loopback-only public emulator helper.
+# The verifier pins both complete file blobs; new same-position markers remain rejected.
+149cfbe2f806ee15da1985854b34dfe72a7e07d9:scripts/test-env/verify-tronclass.cjs:generic-api-key:53

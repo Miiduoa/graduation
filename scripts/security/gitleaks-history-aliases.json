@@ -110,5 +110,19 @@
       "observed": "66a88348a216bbeee31e332968ca8cc39e4eea70:scripts/qa/course-study/compare.test.mjs:generic-api-key:494",
       "reviewedBlob": "03dcd5a143da8c61ac4400ff9b3525b0b87ad0c2"
     }
-  ]
+  ],
+  "reviewedTronclassEmulatorFixture": {
+    "reviewed": "220cb2e2d74f0847a7d0241878413097dd183d6b:scripts/test-env/verify-tronclass.cjs:generic-api-key:53",
+    "observed": "149cfbe2f806ee15da1985854b34dfe72a7e07d9:scripts/test-env/verify-tronclass.cjs:generic-api-key:53",
+    "reviewedBlob": "d85bd50fa1d4f0b86a36247b316822831f0d375a",
+    "evidence": {
+      "sourcePullRequest": "https://github.com/Miiduoa/graduation/pull/616",
+      "sourceRun": "https://github.com/Miiduoa/graduation/actions/runs/45638914780",
+      "sanitizedArtifact": "https://github.com/Miiduoa/graduation/actions/runs/45638914780/artifacts/15033089971",
+      "fileSha256": "041fd00f154b66dd3bc73096e4e9627abaa8eb21043f01e3c5a7ab96a6cd6292",
+      "reviewedSeedFingerprint": "042a30484fd7f8c926a99d5fb1db27d1da2403fb:scripts/test-env/seed.cjs:generic-api-key:20",
+      "reviewedSeedBlob": "e250bf7f7868faad7ad0cee9329c36183e11de8a",
+      "reason": "Main's #616 squash repeats the complete source helper blob. The fixed public emulator password equals the previously reviewed seed fixture; the helper requires demo-campus-one, loopback emulators and development mode, and rejects service-account and production connection secrets. No credential value is recorded here. Only this squash fingerprint is exempt; another commit, path, line or file blob must be reviewed again."
+    }
+  }
 }

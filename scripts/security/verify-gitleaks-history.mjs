@@ -22,6 +22,13 @@ const reviewedTestFixtures = Object.freeze([
     reviewedBlob: '03dcd5a143da8c61ac4400ff9b3525b0b87ad0c2',
   },
 ]);
+// #616's main squash repeats the byte-identical, loopback-only emulator helper.
+// This is one reviewed file identity, not another general script allowlist.
+const reviewedTronclassEmulatorFixture = Object.freeze({
+  reviewed: '220cb2e2d74f0847a7d0241878413097dd183d6b:scripts/test-env/verify-tronclass.cjs:generic-api-key:53',
+  observed: '149cfbe2f806ee15da1985854b34dfe72a7e07d9:scripts/test-env/verify-tronclass.cjs:generic-api-key:53',
+  reviewedBlob: 'd85bd50fa1d4f0b86a36247b316822831f0d375a',
+});
 const FINGERPRINT = /^([a-f0-9]{40}):([A-Za-z0-9_./-]+):([a-z0-9-]+):([1-9][0-9]*)$/;
 export function parseFingerprint(value) {
   const match = typeof value === 'string' && value.match(FINGERPRINT);
@@ -60,7 +67,13 @@ export function validateAliases(manifest, baseline, candidate) {
     assert.ok(pinned, 'Unknown reviewed test fixture');
     assert.deepEqual({ reviewed, observed, reviewedBlob }, pinned, 'Historical test fixture must keep its exact reviewed fingerprint and blob');
   }
-  const pairs = [...manifest.aliases, ...fixtures];
+  const emulatorFixture = manifest.reviewedTronclassEmulatorFixture;
+  if (emulatorFixture !== undefined) {
+    assert.ok(emulatorFixture && typeof emulatorFixture === 'object' && !Array.isArray(emulatorFixture), 'Invalid reviewed emulator fixture');
+    const { reviewed, observed, reviewedBlob } = emulatorFixture;
+    assert.deepEqual({ reviewed, observed, reviewedBlob }, reviewedTronclassEmulatorFixture, 'Only the reviewed TronClass squash fingerprint and complete blob are allowed');
+  }
+  const pairs = [...manifest.aliases, ...fixtures, ...(emulatorFixture ? [emulatorFixture] : [])];
   for (const alias of pairs) {
     const before = parseFingerprint(alias.reviewed);
     const after = parseFingerprint(alias.observed);
@@ -149,6 +162,7 @@ function positiveControl() {
     writeFileSync(join(root, 'apps/mobile/eas.json'), ['{', ...Array(53).fill(''), `"apiKey": "${marker}"`, '}'].join('\n'));
     const manifest = JSON.parse(readFileSync('scripts/security/gitleaks-history-aliases.json', 'utf8'));
     const positions = (manifest.reviewedTestFixtures ?? []).map(({ observed }) => parseFingerprint(observed));
+    if (manifest.reviewedTronclassEmulatorFixture) positions.push(parseFingerprint(manifest.reviewedTronclassEmulatorFixture.observed));
     if (manifest.publicWorkflowReference) positions.push(parseFingerprint(manifest.publicWorkflowReference.fingerprint));
     for (const { path, line } of positions) {
       const file = join(root, path);
