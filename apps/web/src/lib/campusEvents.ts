@@ -11,6 +11,7 @@ import {
   where,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
+import { campusEventInstant, type CampusEventTime } from '@campus/shared/src/campusEventTime';
 import { getDb, isFirebaseConfigured } from './firebase';
 import { guardedPublicCampusRead, type PublicCampusReadGuard } from './publicCampusReadGuard';
 
@@ -23,6 +24,7 @@ export type CampusEvent = {
   description: string;
   startsAt: string;
   endsAt?: string;
+  calendarTime?: CampusEventTime;
   location?: string;
   organizer?: string;
   capacity?: number;
@@ -90,24 +92,10 @@ function isCampusEventSource(value: unknown): value is CampusEventSource {
   return typeof value === 'string' && EVENT_SOURCES.includes(value as CampusEventSource);
 }
 
-function dateString(value: unknown, requireInstant = false): string {
-  // Agent actions must not turn a date-only or timezone-free source into a
-  // guessed instant. Keep the existing page reader's display behavior intact.
-  if (requireInstant && typeof value === 'string') {
-    if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(value)) return '';
-    const day = new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
-    if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0, 10) !== value.slice(0, 10)) return '';
-  }
-  const date =
-    typeof value === 'string'
-      ? new Date(value)
-      : value &&
-          typeof value === 'object' &&
-          'toDate' in value &&
-          typeof (value as { toDate?: unknown }).toDate === 'function'
-        ? (value as { toDate: () => Date }).toDate()
-        : null;
-  return date instanceof Date && Number.isFinite(date.getTime()) ? date.toISOString() : '';
+function dateString(value: unknown): string {
+  if (typeof value !== 'string') return campusEventInstant(value);
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : '';
 }
 
 function nonnegativeNumber(value: unknown): number | undefined {
@@ -133,13 +121,16 @@ function parseEventDocument(
   if (!document.id || document.id.includes('/')) {
     throw new Error('Invalid campus content');
   }
+  const calendarTime = { startsAt: campusEventInstant(data.startsAt), endsAt: campusEventInstant(data.endsAt) };
+  // Preserve legacy display dates while keeping ambiguous source clocks out of agent actions.
   return {
     id: document.id,
     schoolId,
     title: data.title,
     description: typeof data.description === 'string' ? data.description : '',
-    startsAt: dateString(data.startsAt, requireInstant),
-    endsAt: dateString(data.endsAt, requireInstant) || undefined,
+    startsAt: requireInstant ? calendarTime.startsAt : calendarTime.startsAt || dateString(data.startsAt),
+    endsAt: (requireInstant ? calendarTime.endsAt : calendarTime.endsAt || dateString(data.endsAt)) || undefined,
+    calendarTime,
     location: typeof data.location === 'string' ? data.location : undefined,
     organizer: typeof data.organizer === 'string' ? data.organizer : undefined,
     capacity: nonnegativeNumber(data.capacity),

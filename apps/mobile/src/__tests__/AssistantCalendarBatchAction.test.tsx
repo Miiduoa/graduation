@@ -73,16 +73,31 @@ test('cancelling an unstarted batch persists the decision without claiming to de
     plan: { id: initial.plan.id, cancelledAt: expect.any(String) } });
 });
 
-test('stop remains enabled during an in-flight native write and prevents the next operation', async () => {
-  const initial = await prepareAssistantCalendarBatch(events, context);
+const heldStages = ['native write', 'post-commit readback'] as const;
+
+function holdLedgerOperation(stage: typeof heldStages[number]) {
   const held = deferred();
+  let saved = false;
+  let readsAfterWrite = 0;
   jest.mocked(AsyncStorage.setItem).mockImplementation(async (storageKey, value) => {
     await originalSet(storageKey, value);
-    if (storageKey === key) await held.promise;
+    if (storageKey !== key) return;
+    saved = true;
+    if (stage === 'native write') await held.promise;
   });
+  jest.mocked(AsyncStorage.getItem).mockImplementation(async (storageKey) => {
+    if (stage === 'post-commit readback' && storageKey === key && saved && ++readsAfterWrite > 1) await held.promise;
+    return originalGet(storageKey);
+  });
+  return { ...held, didStart: () => stage === 'native write' ? saved : readsAfterWrite > 1 };
+}
+
+test.each(heldStages)('stop remains enabled during %s and prevents the next operation', async (stage) => {
+  const initial = await prepareAssistantCalendarBatch(events, context);
+  const held = holdLedgerOperation(stage);
   const view = render(<Harness initial={initial} />);
   act(() => fireEvent.press(view.getByRole('button', { name: '確認加入 2 筆行程' })));
-  await waitFor(() => expect(writes()).toHaveLength(1));
+  await waitFor(() => expect(held.didStart()).toBe(true));
   const stop = view.getByRole('button', { name: '停止後續行程' });
   expect(stop).toBeEnabled();
   fireEvent.press(stop);
@@ -92,28 +107,30 @@ test('stop remains enabled during an in-flight native write and prevents the nex
   expect(writes()).toHaveLength(1);
   expect(view.queryByText('已逐筆保存並核對 2 筆行程。')).toBeNull();
   await act(async () => fireEvent.press(view.getByRole('button', { name: '重新核對整份行程' })));
-  expect(view.getByRole('button', { name: '確認接續剩餘 1 筆行程' })).toBeTruthy();
+  const resume = view.queryByRole('button', { name: '確認接續剩餘 1 筆行程' });
+  if (stage === 'native write') {
+    expect(resume).toBeNull();
+    expect(view.getByRole('button', { name: '重新核對整份行程' })).toBeTruthy();
+  } else {
+    expect(resume).toBeTruthy();
+  }
   expect(writes()).toHaveLength(1);
 });
 
-test('unmount aborts subsequent steps and drops late callbacks without deleting the first result', async () => {
+test.each(heldStages)('unmount during %s aborts subsequent steps and drops late callbacks', async (stage) => {
   const initial = await prepareAssistantCalendarBatch(events, context);
-  const held = deferred();
-  jest.mocked(AsyncStorage.setItem).mockImplementation(async (storageKey, value) => {
-    await originalSet(storageKey, value);
-    if (storageKey === key) await held.promise;
-  });
+  const held = holdLedgerOperation(stage);
   const changed = jest.fn();
   const view = render(<Harness initial={initial} changed={changed} />);
   act(() => fireEvent.press(view.getByRole('button', { name: '確認加入 2 筆行程' })));
-  await waitFor(() => expect(writes()).toHaveLength(1));
+  await waitFor(() => expect(held.didStart()).toBe(true));
   view.unmount();
   const callbacks = changed.mock.calls.length;
   await act(async () => held.resolve());
   const restored = await restoreAssistantCalendarBatches(context);
   expect(changed).toHaveBeenCalledTimes(callbacks);
   expect(writes()).toHaveLength(1);
-  expect(restored[0].progress).toMatchObject({ verified: 1, notStarted: 1 });
+  expect(restored[0].progress).toMatchObject({ verified: stage === 'native write' ? 0 : 1, notStarted: 1 });
 });
 
 test('old account controls do not start or cancel a plan after the scope changes', async () => {
