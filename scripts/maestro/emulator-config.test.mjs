@@ -28,3 +28,14 @@ test('normal entrypoint does not import the Maestro authentication harness', () 
   assert.equal(app.main, 'index.ts');
   assert.doesNotMatch(readFileSync('apps/mobile/index.ts', 'utf8'), /index\.maestro|e2e\/|MaestroApp/);
 });
+
+test('Maestro entrypoint registers the overlay harness instead of a native modal', () => {
+  const entry = readFileSync('apps/mobile/index.maestro.ts', 'utf8');
+  const harness = readFileSync('apps/mobile/e2e/MaestroApp.tsx', 'utf8');
+  const linking = readFileSync('apps/mobile/src/app/maestroHarnessLink.ts', 'utf8');
+  assert.match(entry, /registerRootComponent\(MaestroApp\)/);
+  assert.match(harness, /testID="maestro-emulator-login"/);
+  assert.match(harness, /expo-linking/);
+  assert.doesNotMatch(harness, /\bModal\b/);
+  assert.match(linking, /campus:\/\/maestro\/sign-in/);
+});

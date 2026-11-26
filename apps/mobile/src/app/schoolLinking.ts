@@ -2,6 +2,7 @@ import { getStateFromPath, type LinkingOptions } from '@react-navigation/native'
 import * as Linking from 'expo-linking';
 import type { RootTabParamList } from './rootNavigation';
 import { rewriteLegacyShopsPath } from './legacyShopsPath';
+import { isReservedMaestroHarnessUrl } from './maestroHarnessLink';
 
 /** Keep public URI paths stable while resolving school-session links to their current tab. */
 export const schoolLinking: LinkingOptions<RootTabParamList> = {
@@ -127,4 +128,14 @@ export const schoolLinking: LinkingOptions<RootTabParamList> = {
     },
   },
   getStateFromPath: (path, options) => getStateFromPath(rewriteLegacyShopsPath(path), options),
+  getInitialURL: async () => {
+    const url = await Linking.getInitialURL();
+    return isReservedMaestroHarnessUrl(url) ? null : url;
+  },
+  subscribe: (listener) => {
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      if (!isReservedMaestroHarnessUrl(url)) listener(url);
+    });
+    return () => subscription.remove();
+  },
 };

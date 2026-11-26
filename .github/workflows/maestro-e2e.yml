@@ -182,6 +182,15 @@ jobs:
           # Fail before Maestro if the native app still has no bundled JS.
           test -s "$APP_PATH/main.jsbundle"
           echo "Verified embedded iOS JS bundle inside Release simulator app."
+          # The full suite opens campus://maestro/sign-in. Fail before Maestro if
+          # ENTRY_FILE did not actually embed the emulator-login harness.
+          python3 - "$APP_PATH/main.jsbundle" <<'PYTHON'
+          import pathlib, sys
+          bundle = pathlib.Path(sys.argv[1]).read_text(errors='ignore')
+          if 'maestro-emulator-login' not in bundle:
+              raise SystemExit('embedded bundle is missing the Maestro emulator login harness')
+          print('Verified Maestro emulator login harness is inside the Release JS bundle.')
+          PYTHON
           APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")
           echo "APP_ID=$APP_ID" >> "$GITHUB_ENV"
           xcrun simctl install "$SIMULATOR_UDID" "$APP_PATH"

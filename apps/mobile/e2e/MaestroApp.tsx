@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Linking, Modal, Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { getAuthInstance } from '../src/firebase';
+import { isReservedMaestroHarnessUrl } from '../src/app/maestroHarnessLink';
 import {
   assertMaestroEmulatorConfig,
-  MAESTRO_LOGIN_LINK,
   MAESTRO_STUDENT_EMAIL,
   MAESTRO_STUDENT_UID,
 } from './emulatorConfig';
@@ -37,7 +38,7 @@ export function MaestroApp() {
   useEffect(() => {
     let active = true;
     const open = (url: string | null) => {
-      if (active && url === MAESTRO_LOGIN_LINK) {
+      if (active && isReservedMaestroHarnessUrl(url)) {
         setError('');
         setEmail('');
         setPassword('');
@@ -76,22 +77,46 @@ export function MaestroApp() {
 
   return <>
     <App />
-    <Modal visible={visible} animationType="none" onRequestClose={() => setVisible(false)}>
-      <View testID="maestro-emulator-login" style={{ flex: 1, padding: 24, paddingTop: 80, gap: 20, backgroundColor: '#fff' }}>
-        <Text style={{ color: '#111', fontSize: 22 }}>Firebase 模擬器測試登入</Text>
-        <Text style={{ color: '#333' }}>僅連線本機 demo-campus-one；登入與權限由 Firebase 驗證。</Text>
+    {visible ? (
+      <View
+        testID="maestro-emulator-login"
+        accessibilityViewIsModal
+        collapsable={false}
+        pointerEvents="auto"
+        style={styles.overlay}
+      >
+        <Text style={styles.title}>Firebase 模擬器測試登入</Text>
+        <Text style={styles.copy}>僅連線本機 demo-campus-one；登入與權限由 Firebase 驗證。</Text>
         <TextInput testID="maestro-email" accessibilityLabel="測試帳號" value={email} onChangeText={setEmail}
           autoCapitalize="none" autoCorrect={false} keyboardType="email-address"
-          style={{ color: '#111', borderWidth: 1, padding: 12, minHeight: 48 }} />
+          style={styles.field} />
         <TextInput testID="maestro-password" accessibilityLabel="測試密碼" value={password} onChangeText={setPassword}
           secureTextEntry autoCapitalize="none" autoCorrect={false}
-          style={{ color: '#111', borderWidth: 1, padding: 12, minHeight: 48 }} />
+          style={styles.field} />
         <Pressable testID="maestro-sign-in" accessibilityRole="button" disabled={busy}
-          onPress={() => void login()} style={{ padding: 16, backgroundColor: '#14213d' }}>
-          <Text style={{ color: '#fff' }}>{busy ? '登入中' : '登入測試學生'}</Text>
+          onPress={() => void login()} style={styles.submit}>
+          <Text style={styles.submitLabel}>{busy ? '登入中' : '登入測試學生'}</Text>
         </Pressable>
-        {error ? <Text testID="maestro-login-error" accessibilityRole="alert" style={{ color: '#a00' }}>{error}</Text> : null}
+        {error ? <Text testID="maestro-login-error" accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       </View>
-    </Modal>
+    ) : null}
   </>;
 }
+
+const styles = StyleSheet.create({
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 9999,
+    elevation: 9999,
+    padding: 24,
+    paddingTop: 80,
+    gap: 20,
+    backgroundColor: '#fff',
+  },
+  title: { color: '#111', fontSize: 22 },
+  copy: { color: '#333' },
+  field: { color: '#111', borderWidth: 1, padding: 12, minHeight: 48 },
+  submit: { padding: 16, backgroundColor: '#14213d' },
+  submitLabel: { color: '#fff' },
+  error: { color: '#a00' },
+});

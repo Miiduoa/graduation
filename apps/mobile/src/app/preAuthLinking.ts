@@ -2,7 +2,12 @@ import { getStateFromPath, type LinkingOptions } from '@react-navigation/native'
 import * as Linking from 'expo-linking';
 import type { PreAuthStackParamList } from '../screens/preAuthTypes';
 import { rewriteLegacyShopsPath } from './legacyShopsPath';
+import { isReservedMaestroHarnessUrl } from './maestroHarnessLink';
 import { parseStudentCardDeepLink } from './studentCardDeepLink';
+
+function ignorePublicNavigationUrl(url: string | null | undefined): boolean {
+  return Boolean(parseStudentCardDeepLink(url) || isReservedMaestroHarnessUrl(url));
+}
 
 /** Platform accounts have their own entry before a school account is connected. */
 export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
@@ -41,11 +46,11 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
   getStateFromPath: (path, options) => getStateFromPath(rewriteLegacyShopsPath(path), options),
   getInitialURL: async () => {
     const url = await Linking.getInitialURL();
-    return parseStudentCardDeepLink(url) ? null : url;
+    return ignorePublicNavigationUrl(url) ? null : url;
   },
   subscribe: (listener) => {
     const subscription = Linking.addEventListener('url', ({ url }) => {
-      if (!parseStudentCardDeepLink(url)) listener(url);
+      if (!ignorePublicNavigationUrl(url)) listener(url);
     });
     return () => subscription.remove();
   },
