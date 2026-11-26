@@ -122,6 +122,22 @@ function copyResponseHeaders(from: Headers, placement: string): Headers {
   return out;
 }
 
+/**
+ * Log only the shape of a path. Numeric IDs, attachment keys and file identifiers
+ * (any segment with 8+ characters containing a digit, any 16+ character segment,
+ * and the segment after /uploads/) must not be correlatable through logs.
+ */
+function redactRelayLogPath(path: string): string {
+  const parts = path.split('/');
+  return parts.map((segment, index) => {
+    if (!segment) return segment;
+    if (/^\d+$/.test(segment)) return ':id';
+    if (/^(?=.*\d)[^/]{8,}$/.test(segment) || segment.length >= 16) return ':id';
+    if (parts[index - 1]?.toLowerCase() === 'uploads') return ':id';
+    return segment;
+  }).join('/');
+}
+
 function logRelay(fields: {
   host?: string;
   path?: string;
@@ -134,7 +150,7 @@ function logRelay(fields: {
     JSON.stringify({
       msg: 'pu_edge_relay',
       ...(fields.host ? { host: fields.host } : {}),
-      ...(fields.path ? { path: fields.path } : {}),
+      ...(fields.path ? { path: redactRelayLogPath(fields.path) } : {}),
       status: fields.status,
       ms: fields.ms,
       ...(fields.colo ? { colo: fields.colo } : {}),

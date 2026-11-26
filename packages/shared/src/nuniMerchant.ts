@@ -34,7 +34,12 @@ export type NuniMerchantWorkspace = {
   publicAccess: boolean;
   activated: boolean;
   missingRequirements: string[];
+  readinessVersion?: number;
 };
+export type NuniMerchantWorkspaceListRow =
+  Omit<NuniMerchantWorkspace, 'activated' | 'missingRequirements'> &
+  Partial<Pick<NuniMerchantWorkspace, 'activated' | 'missingRequirements'>>;
+
 export type NuniMerchantApplicationInput = {
   tenantId: string;
   campusId: string;
@@ -108,10 +113,24 @@ export function parseMerchantOverview(value: unknown): {
     applications: rows(row.applications, parseMerchantApplication),
   };
 }
-export function parseMerchantWorkspaces(value: unknown): NuniMerchantWorkspace[] {
+export function parseMerchantWorkspaces(value: unknown): NuniMerchantWorkspace[];
+export function parseMerchantWorkspaces(
+  value: unknown,
+  options: { preserveMissingReadiness: true },
+): NuniMerchantWorkspaceListRow[];
+export function parseMerchantWorkspaces(
+  value: unknown,
+  options?: { preserveMissingReadiness: true },
+): NuniMerchantWorkspaceListRow[] {
   return rows(nuniRecord(value).workspaces, (value) => {
     const row = nuniRecord(value);
+    const readinessVersion = row.readinessVersion;
+    const hasVersion =
+      typeof readinessVersion === 'number' &&
+      Number.isSafeInteger(readinessVersion) &&
+      readinessVersion >= 1;
     return {
+      ...(hasVersion ? { readinessVersion } : {}),
       tenantId: text(row.tenantId, 200),
       tenantName: text(row.tenantName, 200),
       merchantName: text(row.merchantName, 200),
@@ -121,8 +140,10 @@ export function parseMerchantWorkspaces(value: unknown): NuniMerchantWorkspace[]
       merchantStatus: text(row.merchantStatus, 40),
       locationStatus: text(row.locationStatus, 40),
       publicAccess: boolean(row.publicAccess),
-      activated: boolean(row.activated),
-      missingRequirements: rows(row.missingRequirements, (value) => text(value, 100)),
+      ...(!options || row.activated !== undefined ? { activated: boolean(row.activated) } : {}),
+      ...(!options || row.missingRequirements !== undefined
+        ? { missingRequirements: rows(row.missingRequirements, (value) => text(value, 100)) }
+        : {}),
     };
   });
 }
@@ -155,7 +176,9 @@ export function merchantApplicationStateLabel(state: MerchantApplicationState): 
     withdrawn: '已撤回',
   }[state];
 }
-export function merchantWorkspaceStateLabel(workspace: NuniMerchantWorkspace): string {
+export function merchantWorkspaceStateLabel(
+  workspace: Pick<NuniMerchantWorkspace, 'activated' | 'merchantStatus' | 'locationStatus' | 'publicAccess'>,
+): string {
   if (!workspace.activated) return '已核准，待完成營運設定';
   if (workspace.merchantStatus !== 'active' || workspace.locationStatus === 'suspended')
     return '已停權，請聯絡場域管理者';

@@ -5,8 +5,10 @@ import {
   IDENTITY_LOOKUP_FAILED_HINT,
   IDENTITY_RETRY_COPY,
   type AccountIdentity,
+  type StoreIdentity,
   type TeachingIdentity,
 } from '@/lib/accountIdentity';
+import { merchantApplicationsHref } from '@/lib/merchantWorkspaceNavigation';
 import styles from './AccountWorkspaces.module.css';
 
 type Props = {
@@ -44,6 +46,18 @@ export function AccountWorkspaces({
       <Link href={course.href}>
         <span>{course.name}</span>
         <span className={styles.meta}>{course.role}</span>
+      </Link>
+    </li>
+  );
+  const storeLink = (store: StoreIdentity) => (
+    <li key={`${store.tenantId}:${store.locationId}`}>
+      <Link href={store.href}>
+        <span>
+          {store.name}／{store.locationName}
+        </span>
+        <span className={styles.meta}>
+          {store.campus} · {store.status}
+        </span>
       </Link>
     </li>
   );
@@ -113,6 +127,18 @@ export function AccountWorkspaces({
               {data?.merchantNextStep?.description ??
                 '部分店家資料尚未確認，請進入工作台重新讀取。'}
             </p>
+            {stores.length > 0 && <ul>{stores.slice(0, 2).map(storeLink)}</ul>}
+            {stores.length > 2 && (
+              <details>
+                <summary className={styles.more}>其他門市（{stores.length - 2}）</summary>
+                <ul>{stores.slice(2).map(storeLink)}</ul>
+              </details>
+            )}
+            {applications.length > 0 && (
+              <Link className={styles.action} href={merchantApplicationsHref}>
+                查看申請進度（{applications.length}）
+              </Link>
+            )}
           </section>
         )}
         {isPlatformOperator && (

@@ -1,0 +1,387 @@
+// @vitest-environment node
+import { EventEmitter } from 'node:events';
+import type { IncomingHttpHeaders, IncomingMessage } from 'node:http';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { NuniError } from '@campus/shared/src/nuni';
+import { createTronClassBoundedBinaryFetch, createTronClassMaterialDownloader, TRONCLASS_DOWNLOAD_MAX_BYTES } from './tronClassMaterialDownload';
+import type { LmsReadonlySource } from './tronClassLmsSource';
+
+const input = { courseId: 101, activityId: 202, uploadKey: 'upload-fixture-1', revision: 'a'.repeat(32) };
+const owner = 'firebase:download-fixture';
+const binding = {
+  schoolId: 'pu' as const, revision: input.revision, account: 'student-fixture', userId: 303,
+  userName: null, cookies: { session: 'server-only-fixture' }, expiresAt: '2026-11-20T08:00:00.000Z',
+};
+const material = { id: 202, course_id: 101, type: 'material', title: '課堂講義',
+  uploads: [{ key: input.uploadKey, name: '第一週講義.pdf', allow_download: true }] };
+const fixtureBytes = Buffer.from('%PDF-test');
+afterEach(() => vi.useRealTimers());
+
+function fixture(timeoutMs?: number, mediaFetch?: (url: string, init?: RequestInit) => Promise<Response>) {
+  const bindings = { requireBinding: vi.fn(async () => binding), assertCurrent: vi.fn(async () => {}) };
+  const source: LmsReadonlySource = {
+    fetchCourses: vi.fn(async (_cookies, options) => options.status === 'ongoing' ? [{ id: 101 }] : []),
+    fetchActivities: vi.fn(async (_cookies, _course, query) => ({ ok: true as const, value: query === '' ? [material] : [] })),
+    fetchHomeworkPage: vi.fn(), fetchCourseAnnouncements: vi.fn(), fetchSiteAnnouncements: vi.fn(),
+  };
+  const fetch = vi.fn(async () => new Response(fixtureBytes, { headers: { 'Content-Type': 'application/pdf', 'Content-Length': String(fixtureBytes.length) } }));
+  const download = createTronClassMaterialDownloader({ bindings, source, fetch, mediaFetch, timeoutMs });
+  return { bindings, source, fetch, download };
+}
+
+describe('authorized material download', () => {
+  it('downloads only the owned material upload with server cookies and returns no session data', async () => {
+    const f = fixture();
+    const result = await f.download(owner, input);
+    expect(result).toEqual({ bytes: fixtureBytes, name: '第一週講義.pdf', contentType: 'application/pdf' });
+    expect(f.fetch).toHaveBeenCalledWith('https://tronclass.pu.edu.tw/api/uploads/upload-fixture-1/blob', expect.objectContaining({
+      method: 'GET', redirect: 'manual', cache: 'no-store',
+      headers: { Cookie: 'session=server-only-fixture', Accept: 'application/octet-stream, */*', 'Accept-Encoding': 'identity' },
+    }));
+    expect(f.source.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 303, status: 'ongoing' },
+      { signal: expect.any(AbortSignal), timeoutMs: expect.any(Number) });
+    expect(f.source.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 303, status: 'upcoming' },
+      { signal: expect.any(AbortSignal), timeoutMs: expect.any(Number) });
+    expect(JSON.stringify(result)).not.toContain('server-only-fixture');
+  });
+
+  it('rejects an unowned course without inspecting activities or downloading bytes', async () => {
+    const f = fixture();
+    await expect(f.download(owner, { ...input, courseId: 999 })).rejects.toMatchObject({ status: 403, code: 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED' });
+    expect(f.source.fetchActivities).not.toHaveBeenCalled();
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+
+  it('completes an owned material download through the verified PU media route and rechecks its source', async () => {
+    const mediaUrl = `https://media.pu.edu.tw/download/file/${'a'.repeat(40)}?timestamp=1795000000&token=${'b'.repeat(32)}&name=notes.pdf`;
+    const mediaFetch = vi.fn(async () => new Response(fixtureBytes, {
+      headers: { 'Content-Type': 'application/pdf', 'Content-Length': String(fixtureBytes.length) },
+    }));
+    const f = fixture(undefined, mediaFetch);
+    f.fetch.mockResolvedValue(new Response(null, { status: 302, headers: { Location: mediaUrl } }));
+    expect(await f.download(owner, input)).toEqual({ bytes: fixtureBytes, name: '第一週講義.pdf', contentType: 'application/pdf' });
+    expect(f.fetch).toHaveBeenCalledOnce();
+    expect(mediaFetch).toHaveBeenCalledExactlyOnceWith(mediaUrl, expect.objectContaining({
+      headers: { Accept: 'application/octet-stream, */*', 'Accept-Encoding': 'identity' },
+      signal: expect.any(AbortSignal), redirect: 'manual', credentials: 'omit',
+    }));
+    expect(f.source.fetchCourses).toHaveBeenCalledTimes(4);
+    expect(f.source.fetchActivities).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(f.source.fetchActivities).mock.invocationCallOrder.at(-1))
+      .toBeGreaterThan(mediaFetch.mock.invocationCallOrder[0]);
+  });
+
+  it('downloads an official ID-only file and revalidates the same metadata after receiving bytes', async () => {
+    const f = fixture();
+    const row = { ...material, uploads: [{ id: 741, key: 'storage-key', name: '官方講義.pdf',
+      size: fixtureBytes.length, allow_download: true }] };
+    vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [row] });
+    const result = await f.download(owner, { ...input, uploadKey: '741' });
+    expect(result).toEqual({ bytes: fixtureBytes, name: '官方講義.pdf', contentType: 'application/pdf' });
+    expect(f.fetch).toHaveBeenCalledOnce();
+    expect(f.fetch).toHaveBeenCalledWith('https://tronclass.pu.edu.tw/api/uploads/741/blob', expect.anything());
+    expect(f.source.fetchCourses).toHaveBeenCalledTimes(4);
+    expect(f.source.fetchActivities).toHaveBeenCalledTimes(4);
+    const denied = fixture();
+    vi.mocked(denied.source.fetchActivities).mockResolvedValue({ ok: true, value: [row] });
+    await expect(denied.download(owner, { ...input, uploadKey: 'storage-key' }))
+      .rejects.toMatchObject({ code: 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED' });
+    expect(denied.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { reference_id: 91 }, { source: 'LARK' }, { source: 'auto-generated-pdf' },
+    { audit_status: 'pending' }, { deleted: true }, { from_project: true },
+    { type: 'link' }, { status: 'uploading' },
+  ])('does not fetch bytes for an unsupported numeric upload: %j', async (flags) => {
+    const f = fixture();
+    vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [{ ...material,
+      uploads: [{ id: 741, name: 'resource.pdf', allow_download: true, ...flags }],
+    }] });
+    await expect(f.download(owner, { ...input, uploadKey: '741' }))
+      .rejects.toMatchObject({ code: 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED' });
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a duplicate numeric ID even when only one copy permits download', async () => {
+    const f = fixture();
+    vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [{ ...material,
+      uploads: [{ id: 741, name: 'resource.pdf', allow_download: true },
+        { id: 741, name: 'resource.pdf', allow_download: false }],
+    }] });
+    await expect(f.download(owner, { ...input, uploadKey: '741' }))
+      .rejects.toMatchObject({ code: 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED' });
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(['permission', 'course', 'filename', 'size'] as const)(
+    'discards received file bytes if the school changes %s during download', async (change) => {
+      const f = fixture();
+      const file = { id: 741, name: 'notes.pdf', size: fixtureBytes.length, allow_download: true };
+      vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [{ ...material, uploads: [file] }] });
+      f.fetch.mockImplementation(async () => {
+        if (change === 'course') vi.mocked(f.source.fetchCourses).mockResolvedValue([]);
+        else vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [{ ...material,
+          uploads: [{ ...file, ...(change === 'permission' ? { allow_download: false }
+            : change === 'filename' ? { name: 'different.pdf' } : { size: fixtureBytes.length + 1 }) }],
+        }] });
+        return new Response(fixtureBytes, { headers: { 'Content-Type': 'application/pdf' } });
+      });
+      await expect(f.download(owner, { ...input, uploadKey: '741' })).rejects.toMatchObject({
+        code: ['course', 'permission'].includes(change) ? 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED' : 'TRONCLASS_DOWNLOAD_UNAVAILABLE',
+      });
+      expect(f.fetch).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('rejects bytes that disagree with the school file size before releasing the download', async () => {
+    const f = fixture();
+    vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [{ ...material,
+      uploads: [{ id: 741, name: 'notes.pdf', size: fixtureBytes.length + 1, allow_download: true }],
+    }] });
+    await expect(f.download(owner, { ...input, uploadKey: '741' }))
+      .rejects.toMatchObject({ code: 'TRONCLASS_DOWNLOAD_UNAVAILABLE' });
+    expect(f.fetch).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { ...material, course_id: 999 },
+    { ...material, type: 'homework' },
+    { ...material, hidden: true },
+    { ...material, is_hidden: true },
+    { ...material, is_hidden: 1 },
+    { ...material, hidden: 1 },
+    { ...material, published: false },
+    { ...material, published: 0 },
+    { ...material, hidden: false, is_hidden: 1, published: true },
+    { ...material, hidden: 'false' },
+    { ...material, uploads: [{ key: input.uploadKey, name: 'private.pdf' }] },
+    { ...material, uploads: [{ key: input.uploadKey, name: 'private.pdf', allow_download: false }] },
+    { ...material, uploads: [{ key: 'different-upload', name: 'other.pdf', allow_download: true }] },
+    { ...material, uploads: [...material.uploads, ...material.uploads] },
+    { ...material, uploads: [{ ...material.uploads[0], is_hidden: 1 }] },
+    { ...material, uploads: [{ ...material.uploads[0], published: false }] },
+  ])('requires exact activity/course/file identity and explicit download authority: %j', async (row) => {
+    const f = fixture();
+    vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [row] });
+    await expect(f.download(owner, input)).rejects.toMatchObject({ status: 403 });
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+
+  it('accepts the known visible boolean and numeric flags without granting authority to a hidden duplicate', async () => {
+    const f = fixture();
+    vi.mocked(f.source.fetchActivities)
+      .mockResolvedValueOnce({ ok: true, value: [{ ...material, is_hidden: 0, hidden: false, published: 1 }] })
+      .mockResolvedValueOnce({ ok: true, value: [{ ...material, is_hidden: false, hidden: 0, published: true }] });
+    expect((await f.download(owner, input)).bytes).toEqual(fixtureBytes);
+
+    const denied = fixture();
+    vi.mocked(denied.source.fetchActivities)
+      .mockResolvedValueOnce({ ok: true, value: [{ ...material, is_hidden: 0, published: true }] })
+      .mockResolvedValueOnce({ ok: true, value: [{ ...material, is_hidden: 1, published: true }] });
+    await expect(denied.download(owner, input)).rejects.toMatchObject({ code: 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED' });
+    expect(denied.fetch).not.toHaveBeenCalled();
+  });
+
+  it('tolerates only the optional courseware endpoint being absent', async () => {
+    const f = fixture();
+    vi.mocked(f.source.fetchActivities).mockResolvedValueOnce({ ok: true, value: [material] }).mockResolvedValueOnce({ ok: false, status: 404 });
+    expect((await f.download(owner, input)).bytes).toEqual(fixtureBytes);
+    const unavailable = fixture();
+    vi.mocked(unavailable.source.fetchActivities).mockResolvedValueOnce({ ok: false, status: 404 });
+    await expect(unavailable.download(owner, input)).rejects.toMatchObject({ code: 'TRONCLASS_DOWNLOAD_UNAVAILABLE' });
+    expect(unavailable.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(['../other', '..', '.', 'https://other.test/file', 'a/b', 'a?query', 'a\\b', 'a\n'])('rejects a caller-controlled path or URL: %s', async (uploadKey) => {
+    const f = fixture();
+    await expect(f.download(owner, { ...input, uploadKey })).rejects.toMatchObject({ code: 'TRONCLASS_INVALID_INPUT' });
+    expect(f.bindings.requireBinding).not.toHaveBeenCalled();
+  });
+
+  it('rejects a replacement session before fetching course metadata or file bytes', async () => {
+    const f = fixture();
+    f.bindings.requireBinding.mockResolvedValue({ ...binding, revision: 'b'.repeat(32), cookies: { session: 'replacement-fixture' } });
+    await expect(f.download(owner, input)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    expect(f.source.fetchCourses).not.toHaveBeenCalled();
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+
+  it('cancels and discards the binary response if the binding changes while fetching', async () => {
+    const f = fixture();
+    const cancel = vi.fn();
+    f.fetch.mockImplementation(async () => {
+      f.bindings.assertCurrent.mockRejectedValue(new NuniError(409, 'TRONCLASS_BINDING_CHANGED'));
+      return new Response(new ReadableStream({ cancel }), { headers: { 'Content-Type': 'application/pdf' } });
+    });
+    await expect(f.download(owner, input)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it.each([301, 302, 307, 308])('rejects redirect %s without requesting its location', async (status) => {
+    const f = fixture();
+    f.fetch.mockResolvedValue(new Response(null, { status, headers: { Location: 'https://other.test/secret' } }));
+    await expect(f.download(owner, input)).rejects.toMatchObject({ status: 502, code: 'TRONCLASS_DOWNLOAD_REDIRECT_UNSUPPORTED' });
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['text/html', 'application/json', 'image/svg+xml'])('rejects active or login content %s before reading it', async (type) => {
+    const f = fixture();
+    const cancel = vi.fn();
+    f.fetch.mockResolvedValue(new Response(new ReadableStream({ cancel }), { headers: { 'Content-Type': type } }));
+    await expect(f.download(owner, input)).rejects.toMatchObject({ code: 'TRONCLASS_DOWNLOAD_TYPE_UNSUPPORTED' });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('recognizes a login page mislabeled as a generic binary file', async () => {
+    const f = fixture();
+    f.fetch.mockResolvedValue(new Response('<!doctype html><form>sign in</form>', { headers: { 'Content-Type': 'application/octet-stream' } }));
+    await expect(f.download(owner, input)).rejects.toMatchObject({ code: 'TRONCLASS_RECONNECT_REQUIRED' });
+  });
+
+  it('rejects an oversized declaration without reading the body', async () => {
+    const f = fixture();
+    const cancel = vi.fn();
+    f.fetch.mockResolvedValue(new Response(new ReadableStream({ cancel }), {
+      headers: { 'Content-Type': 'application/pdf', 'Content-Length': String(TRONCLASS_DOWNLOAD_MAX_BYTES + 1) },
+    }));
+    await expect(f.download(owner, input)).rejects.toMatchObject({ code: 'TRONCLASS_DOWNLOAD_TOO_LARGE' });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('cancels an oversized streamed body even without a declared length', async () => {
+    const f = fixture();
+    const cancel = vi.fn();
+    f.fetch.mockResolvedValue(new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new Uint8Array(TRONCLASS_DOWNLOAD_MAX_BYTES + 1)); }, cancel,
+    }), { headers: { 'Content-Type': 'application/pdf' } }));
+    await expect(f.download(owner, input)).rejects.toMatchObject({ code: 'TRONCLASS_DOWNLOAD_TOO_LARGE' });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('times out and cancels a stalled body instead of holding a buffered download indefinitely', async () => {
+    const f = fixture(20);
+    const cancel = vi.fn();
+    f.fetch.mockResolvedValue(new Response(new ReadableStream({ cancel }), { headers: { 'Content-Type': 'application/pdf' } }));
+    await expect(f.download(owner, input)).rejects.toMatchObject({ status: 504, code: 'TRONCLASS_DOWNLOAD_TIMEOUT' });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('includes binding checks in the total budget and aborts stalled course metadata requests', async () => {
+    vi.useFakeTimers();
+    const f = fixture(100);
+    f.bindings.requireBinding.mockImplementation(() => new Promise(resolve => {
+      setTimeout(() => resolve(binding), 20);
+    }));
+    vi.mocked(f.source.fetchCourses).mockImplementation((_cookies, _query, options) => new Promise((_resolve, reject) => {
+      options!.signal!.addEventListener('abort', () => reject(new Error('metadata cancelled')), { once: true });
+    }));
+    const pending = expect(f.download(owner, input)).rejects.toMatchObject({ status: 504, code: 'TRONCLASS_DOWNLOAD_TIMEOUT' });
+    await vi.advanceTimersByTimeAsync(20);
+    const calls = vi.mocked(f.source.fetchCourses).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls.map(call => call[2]?.timeoutMs)).toEqual([80, 80]);
+    expect(new Set(calls.map(call => call[2]?.signal)).size).toBe(1);
+    await vi.advanceTimersByTimeAsync(80);
+    await pending;
+    expect(calls.every(call => call[2]?.signal?.aborted)).toBe(true);
+    expect(f.source.fetchActivities).not.toHaveBeenCalled();
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+
+  it('cancels both activity metadata feeds when the client disconnects before the file request', async () => {
+    const f = fixture();
+    const controller = new AbortController();
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    const signals: AbortSignal[] = [];
+    vi.mocked(f.source.fetchActivities).mockImplementation((_cookies, _course, _query, options) => new Promise((_resolve, reject) => {
+      signals.push(options!.signal!);
+      if (signals.length === 2) started();
+      options!.signal!.addEventListener('abort', () => reject(new Error('metadata cancelled')), { once: true });
+    }));
+    const pending = expect(f.download(owner, input, controller.signal)).rejects.toMatchObject({ status: 504, code: 'TRONCLASS_DOWNLOAD_TIMEOUT' });
+    await ready;
+    controller.abort();
+    await pending;
+    expect(signals.every(signal => signal.aborted)).toBe(true);
+    expect(new Set(signals).size).toBe(1);
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+
+  it('maps expired source authentication to reconnect and never downloads', async () => {
+    const f = fixture();
+    vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: false, status: 401 });
+    await expect(f.download(owner, input)).rejects.toMatchObject({ code: 'TRONCLASS_RECONNECT_REQUIRED' });
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+});
+
+type RequestFn = NonNullable<Parameters<typeof createTronClassBoundedBinaryFetch>[0]>;
+function transport(status = 200, headers: IncomingHttpHeaders = {}, maximum = 10) {
+  let callback: ((response: IncomingMessage) => void) | undefined;
+  const req = Object.assign(new EventEmitter(), { end: vi.fn(), destroy: vi.fn() });
+  const upstream = Object.assign(new EventEmitter(), { statusCode: status, headers });
+  const request = vi.fn<RequestFn>((_options, handler) => { callback = handler; return req as unknown as ReturnType<RequestFn>; });
+  return { request, req, upstream, fetch: createTronClassBoundedBinaryFetch(request, maximum),
+    sendHeaders: () => callback?.(upstream as unknown as IncomingMessage) };
+}
+const blobUrl = 'https://tronclass.pu.edu.tw/api/uploads/fixture/blob';
+
+describe('bounded direct binary transport', () => {
+  it('pins IPv4 on the fixed school host and never forwards source response cookies', async () => {
+    const f = transport(200, { 'content-type': 'application/pdf', 'set-cookie': ['secret=must-not-leak'] });
+    const pending = f.fetch(blobUrl);
+    f.sendHeaders();
+    f.upstream.emit('data', Buffer.from('PDF'));
+    f.upstream.emit('end');
+    const response = await pending;
+    expect(f.request).toHaveBeenCalledWith(expect.objectContaining({ hostname: 'tronclass.pu.edu.tw', family: 4, path: '/api/uploads/fixture/blob' }), expect.any(Function));
+    expect(await response.text()).toBe('PDF');
+    expect(response.headers.get('set-cookie')).toBeNull();
+  });
+
+  it.each(['https://other.test/api/uploads/fixture/blob', 'http://tronclass.pu.edu.tw/api/uploads/fixture/blob', `${blobUrl}?url=other`, 'https://tronclass.pu.edu.tw/api/uploads/a%2Fb/blob'])('refuses unsafe targets before opening a socket: %s', async (url) => {
+    const f = transport();
+    await expect(f.fetch(url)).rejects.toMatchObject({ code: 'TRONCLASS_INVALID_INPUT' });
+    expect(f.request).not.toHaveBeenCalled();
+  });
+
+  it('destroys a response before buffering an excessive declared length', async () => {
+    const f = transport(200, { 'content-length': '11' });
+    const pending = expect(f.fetch(blobUrl)).rejects.toMatchObject({ code: 'TRONCLASS_DOWNLOAD_TOO_LARGE' });
+    f.sendHeaders();
+    await pending;
+    expect(f.req.destroy).toHaveBeenCalledOnce();
+    expect(() => f.upstream.emit('error', new Error('socket destroyed after headers'))).not.toThrow();
+  });
+
+  it('destroys an oversized chunked response and ignores late success', async () => {
+    const f = transport();
+    const pending = expect(f.fetch(blobUrl)).rejects.toMatchObject({ code: 'TRONCLASS_DOWNLOAD_TOO_LARGE' });
+    f.sendHeaders();
+    f.upstream.emit('data', Buffer.alloc(6));
+    f.upstream.emit('data', Buffer.alloc(5));
+    f.upstream.emit('end');
+    await pending;
+    expect(f.req.destroy).toHaveBeenCalledOnce();
+  });
+
+  it('does not open a socket for an already cancelled request', async () => {
+    const f = transport();
+    await expect(f.fetch(blobUrl, { signal: AbortSignal.abort() })).rejects.toMatchObject({ code: 'TRONCLASS_DOWNLOAD_TIMEOUT' });
+    expect(f.request).not.toHaveBeenCalled();
+  });
+
+  it('destroys a pending download when cancelled and ignores a late body', async () => {
+    const f = transport();
+    const controller = new AbortController();
+    const pending = expect(f.fetch(blobUrl, { signal: controller.signal })).rejects.toMatchObject({ code: 'TRONCLASS_DOWNLOAD_TIMEOUT' });
+    f.sendHeaders();
+    controller.abort();
+    f.upstream.emit('data', Buffer.from('late'));
+    f.upstream.emit('end');
+    await pending;
+    expect(f.req.destroy).toHaveBeenCalledOnce();
+  });
+});

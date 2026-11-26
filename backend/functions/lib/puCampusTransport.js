@@ -207,6 +207,17 @@ function headerLookup(headers, name) {
   return found;
 }
 
+function redactRelayLogPath(path) {
+  const parts = path.split('/');
+  return parts.map((segment, index) => {
+    if (!segment) return segment;
+    if (/^\d+$/.test(segment)) return ':id';
+    if (/^(?=.*\d)[^/]{8,}$/.test(segment) || segment.length >= 16) return ':id';
+    if (parts[index - 1]?.toLowerCase() === 'uploads') return ':id';
+    return segment;
+  }).join('/');
+}
+
 function createCjsRelayFetch(config, fetchImpl = globalThis.fetch, now = Date.now, nonceFn = randomRelayNonce) {
   if (typeof fetchImpl !== 'function') {
     throw new Error('Campus relay fetch is unavailable');
@@ -257,7 +268,7 @@ function createCjsRelayFetch(config, fetchImpl = globalThis.fetch, now = Date.no
         JSON.stringify({
           msg: 'pu_edge_relay_client',
           host: parsed.hostname,
-          path: parsed.pathname,
+          path: redactRelayLogPath(parsed.pathname),
           status: response.status,
           ms: Date.now() - started,
           ...(colo ? { colo } : {}),
@@ -313,6 +324,13 @@ function nodeHeadersFromResponse(response) {
 }
 
 async function sendWithCampusFetch(options) {
+  const cancelled = () => {
+    const error = new Error('Campus request cancelled');
+    error.name = 'AbortError';
+    error.code = 'ABORT_ERR';
+    return error;
+  };
+  if (options.signal?.aborted) throw cancelled();
   const fetchImpl = options.fetch || getCampusHttpFetch(options.env);
   if (!fetchImpl) return null;
   const url = String(options.url);
@@ -323,12 +341,16 @@ async function sendWithCampusFetch(options) {
     headers.Cookie = cookieString(options.cookies);
   }
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal?.addEventListener('abort', abort, { once: true });
+  if (options.signal?.aborted) abort();
   const timer =
     timeoutMs != null
       ? setTimeout(() => controller.abort(), timeoutMs)
       : null;
   timer?.unref?.();
   try {
+    if (controller.signal.aborted) throw cancelled();
     const response = await fetchImpl(url, {
       method,
       headers,
@@ -336,7 +358,9 @@ async function sendWithCampusFetch(options) {
       redirect: 'manual',
       signal: controller.signal,
     });
-    const buffer = Buffer.from(await response.arrayBuffer());
+    if (controller.signal.aborted) throw cancelled();
+    const buffer = await readCampusResponseBuffer(response, options.maxResponseBytes, controller.signal);
+    if (controller.signal.aborted) throw cancelled();
     if (options.maxResponseBytes && buffer.length > options.maxResponseBytes) {
       throw new Error('Campus response is too large');
     }
@@ -350,6 +374,7 @@ async function sendWithCampusFetch(options) {
       url,
     };
   } catch (error) {
+    if (options.signal?.aborted) throw cancelled();
     if (error && typeof error === 'object' && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
       const timed = new Error(options.timeoutMessage || 'Campus request timed out');
       timed.code = 'ETIMEDOUT';
@@ -358,6 +383,37 @@ async function sendWithCampusFetch(options) {
     throw error;
   } finally {
     if (timer) clearTimeout(timer);
+    options.signal?.removeEventListener('abort', abort);
+  }
+}
+
+async function readCampusResponseBuffer(response, maxBytes, signal) {
+  // Stop a bounded real fetch body while reading it, rather than first buffering
+  // an unlimited response. Plain response doubles keep their arrayBuffer path.
+  if (!maxBytes || !response.body?.getReader) return Buffer.from(await response.arrayBuffer());
+  const reader = response.body.getReader();
+  const chunks = [];
+  let bytes = 0;
+  const abort = () => { void reader.cancel().catch(() => {}); };
+  signal.addEventListener('abort', abort, { once: true });
+  if (signal.aborted) abort();
+  try {
+    while (true) {
+      if (signal.aborted) throw Object.assign(new Error('Campus request cancelled'), { name: 'AbortError' });
+      const next = await reader.read();
+      if (signal.aborted) throw Object.assign(new Error('Campus request cancelled'), { name: 'AbortError' });
+      if (next.done) break;
+      bytes += next.value.byteLength;
+      if (bytes > maxBytes) {
+        void reader.cancel().catch(() => {});
+        throw new Error('Campus response is too large');
+      }
+      chunks.push(Buffer.from(next.value));
+    }
+    return Buffer.concat(chunks, bytes);
+  } finally {
+    signal.removeEventListener('abort', abort);
+    reader.releaseLock();
   }
 }
 
