@@ -452,6 +452,11 @@ export function LearnStack() {
         options={{ title: '課綱查詢', headerShown: false }}
       />
       <Stack.Screen
+        name="TronClassWorkspace"
+        getComponent={() => require('./TronClassWorkspaceScreen').TronClassWorkspaceScreen}
+        options={{ title: 'TronClass 課務' }}
+      />
+      <Stack.Screen
         name="QuizCenter"
         component={QuizCenterAiFirstScreen}
         options={{ title: '測驗', headerShown: false }}

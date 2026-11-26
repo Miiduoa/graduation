@@ -169,3 +169,15 @@ export function walkingDirectionsUrl(destination: MapCoordinate, origin?: MapCoo
   if (origin) parameters.set('origin', `${origin.lat},${origin.lng}`);
   return `https://www.google.com/maps/dir/?${parameters.toString()}`;
 }
+
+/** Opens Apple Maps walking directions to the existing marker, not a verified building entrance. */
+export function appleWalkingDirectionsUrl(destination: MapCoordinate, origin?: MapCoordinate): string {
+  // The documented legacy map URL also works on older iOS versions and WebViews.
+  // An omitted saddr lets Maps choose the user's actual starting position.
+  const parameters = new URLSearchParams({
+    daddr: `${destination.lat},${destination.lng}`,
+    dirflg: 'w',
+  });
+  if (origin) parameters.set('saddr', `${origin.lat},${origin.lng}`);
+  return `https://maps.apple.com/?${parameters.toString()}`;
+}

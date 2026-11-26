@@ -372,6 +372,15 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
       courseCode: importedRow?.courseCode,
     });
   };
+  const savedEditingCourse = editing
+    ? timetable?.courses.find((course) => course.id === editing.id)
+    : undefined;
+  // Discarding an edit opens the saved course, even if its draft name was changed or cleared.
+  // A new course has no saved identity yet and keeps its draft-based search entry.
+  const editingCourseWorkSource = savedEditingCourse ?? editing;
+  const editingCourseWorkHref = editingCourseWorkSource?.name.trim()
+    ? courseWorkHrefFor(editingCourseWorkSource)
+    : undefined;
   const openCourse = (course: PersonalCourse) => {
     if (busy || savingRef.current) return;
     // Imported rows: choose between import editor and the course-work shell.
@@ -1121,7 +1130,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           key={editing.id}
           course={editing}
           courses={timetable.courses}
-          existing={timetable.courses.some((course) => course.id === editing.id)}
+          existing={Boolean(savedEditingCourse)}
           busy={busy}
           feedback={notice}
           onChange={setEditing}
@@ -1131,7 +1140,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             if (!savingRef.current) setEditing(null);
           }}
           periodProfile={periodProfile}
-          courseWorkHref={editing.name.trim() ? courseWorkHrefFor(editing) : undefined}
+          courseWorkHref={editingCourseWorkHref}
         />
       )}
 
