@@ -28,34 +28,44 @@ interface QueuedEvent {
 
 let inMemoryQueue: QueuedEvent[] = [];
 let flushing = false;
+let queueTail: Promise<void> = Promise.resolve();
+
+// Serialize storage read/modify/write operations, not network requests.
+function withQueue<T>(operation: () => Promise<T>): Promise<T> {
+  const result = queueTail.then(operation);
+  queueTail = result.then(() => undefined, () => undefined);
+  return result;
+}
 
 function genEventId(kind: CompanionEventKind): string {
   return `${Date.now().toString(36)}_${kind}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 async function loadQueue(): Promise<QueuedEvent[]> {
+  // A storage read or parse failure is not an empty queue; never overwrite unread data.
+  const raw = await AsyncStorage.getItem(QUEUE_KEY);
+  if (!raw) return [];
+  let parsed: unknown;
   try {
-    const raw = await AsyncStorage.getItem(QUEUE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    parsed = JSON.parse(raw);
   } catch {
-    return [];
+    throw new Error('companion queue is unreadable');
   }
+  if (!Array.isArray(parsed)) {
+    throw new Error('companion queue is unreadable');
+  }
+  return parsed as QueuedEvent[];
 }
 
 async function saveQueue(q: QueuedEvent[]): Promise<void> {
-  try {
-    // 控制體積
-    let serialized = JSON.stringify(q);
-    while (serialized.length > MAX_QUEUE_BYTES && q.length > 0) {
-      q.shift();
-      serialized = JSON.stringify(q);
-    }
-    await AsyncStorage.setItem(QUEUE_KEY, serialized);
-  } catch {
-    /* swallow */
+  let serialized = JSON.stringify(q);
+  while (serialized.length > MAX_QUEUE_BYTES && q.length > 0) {
+    q.shift();
+    serialized = JSON.stringify(q);
   }
+  await AsyncStorage.setItem(QUEUE_KEY, serialized);
+  // Keep only the bounded, successfully persisted snapshot in memory.
+  inMemoryQueue = q;
 }
 
 /**
@@ -78,11 +88,12 @@ export async function recordCompanionEvent(
     payload: options.payload,
     uid: options.uid ?? undefined,
   };
-  inMemoryQueue.push(evt);
   try {
-    const persisted = await loadQueue();
-    persisted.push(evt);
-    await saveQueue(persisted);
+    await withQueue(async () => {
+      const persisted = await loadQueue();
+      persisted.push(evt);
+      await saveQueue(persisted);
+    });
   } catch {
     /* swallow */
   }
@@ -98,19 +109,22 @@ export async function recordCompanionEvent(
 export async function flushCompanionEvents(): Promise<{ flushed: number; remaining: number }> {
   if (flushing) return { flushed: 0, remaining: inMemoryQueue.length };
   flushing = true;
+  let flushed = 0;
   try {
-    const persisted = await loadQueue();
+    const persisted = await withQueue(async () => {
+      const snapshot = await loadQueue();
+      inMemoryQueue = snapshot;
+      return snapshot;
+    });
     if (persisted.length === 0) return { flushed: 0, remaining: 0 };
 
     const app = getFirebaseApp();
     const db = getFirestore(app);
-    let flushed = 0;
-    const remaining: QueuedEvent[] = [];
+    const sentIds = new Set<string>();
     for (const evt of persisted) {
       const uid = evt.uid;
       if (!uid) {
         // 沒有 uid 的事件先保留在佇列，登入後再 flush
-        remaining.push(evt);
         continue;
       }
       try {
@@ -125,14 +139,23 @@ export async function flushCompanionEvents(): Promise<{ flushed: number; remaini
           },
           { merge: true },
         );
+        sentIds.add(evt.eventId);
         flushed += 1;
-      } catch (e) {
-        remaining.push(evt);
+      } catch {
+        // Keep failed events for the next flush.
       }
     }
-    inMemoryQueue = remaining;
-    await saveQueue(remaining);
-    return { flushed, remaining: remaining.length };
+    return await withQueue(async () => {
+      // Events recorded during network I/O must survive this flush.
+      const latest = await loadQueue();
+      const remaining = latest.filter((evt) => !sentIds.has(evt.eventId));
+      if (sentIds.size > 0) await saveQueue(remaining);
+      else inMemoryQueue = remaining;
+      return { flushed, remaining: remaining.length };
+    });
+  } catch {
+    // Leave persisted events intact when storage or Firebase initialization fails.
+    return { flushed, remaining: inMemoryQueue.length };
   } finally {
     flushing = false;
   }
@@ -143,9 +166,11 @@ export async function flushCompanionEvents(): Promise<{ flushed: number; remaini
  */
 export async function primeCompanionRecorder(): Promise<void> {
   try {
-    inMemoryQueue = await loadQueue();
+    await withQueue(async () => {
+      inMemoryQueue = await loadQueue();
+    });
   } catch {
-    inMemoryQueue = [];
+    // Keep the last known snapshot on storage failure.
   }
 }
 
