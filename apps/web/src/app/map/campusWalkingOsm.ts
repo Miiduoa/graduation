@@ -110,6 +110,11 @@ const restrictsWalking = (tags: Tags) =>
   // https://wiki.openstreetmap.org/wiki/Tag:motorroad=yes
   (tags.motorroad !== undefined && !['no', 'false', '0'].includes(tags.motorroad)) ||
   tags['motorroad:conditional'] !== undefined ||
+  // Conflicting direct lifecycle tags on an active highway require review.
+  // Historical namespace tags alone may describe a repurposed, usable path.
+  // https://wiki.openstreetmap.org/wiki/Lifecycle_prefix
+  (tags.highway !== undefined && ['construction', 'disused', 'abandoned'].some(key =>
+    tags[key] !== undefined && !['no', 'false', '0'].includes(tags[key]))) ||
   !!(tags.barrier && tags.barrier !== 'no') ||
   // Locked gates/doors may lack a separate barrier tag. A conditional lock
   // or malformed access schedule is not a verified all-hours passage.
