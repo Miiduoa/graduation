@@ -86,9 +86,17 @@ export function routeToCampusEntrance(
   segmentAudits: readonly CampusWalkingSegmentAudit[],
   now: number,
 ): EntranceRouteResult {
+  // A reviewed entrance does not establish a destination outside the trusted
+  // campus extent. Validate the marker as well as the solver's network nodes.
   if (!schoolId || candidates.graph.schoolId !== schoolId || !Number.isFinite(now) ||
       !destination.id || !destination.name || !Number.isFinite(destination.lat) ||
-      !Number.isFinite(destination.lng) || entranceReviews.length > 2000) {
+      !Number.isFinite(destination.lng) ||
+      ![bounds.south, bounds.north, bounds.west, bounds.east].every(Number.isFinite) ||
+      bounds.south < -90 || bounds.north > 90 || bounds.west < -180 || bounds.east > 180 ||
+      bounds.south >= bounds.north || bounds.west >= bounds.east ||
+      destination.lat < bounds.south || destination.lat > bounds.north ||
+      destination.lng < bounds.west || destination.lng > bounds.east ||
+      entranceReviews.length > 2000) {
     return { status: 'unverified-entrance' };
   }
   const matches = entranceReviews.filter(review =>

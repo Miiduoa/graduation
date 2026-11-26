@@ -100,6 +100,37 @@ describe('reviewed outdoor entrance route handoff', () => {
       [review], [segment], now).status).toBe('route-unavailable');
   });
 
+  it('does not route to a reviewed entrance for a destination outside the trusted campus extent', () => {
+    const data = candidates();
+    const resolve = (place: typeof destination, extent = bounds) => routeToCampusEntrance(
+      data, 'fixture', extent, 1, place, [{ ...review, destination: place }], [segment], now);
+    for (const place of [
+      { ...destination, lat: bounds.south - 0.0001 },
+      { ...destination, lat: bounds.north + 0.0001 },
+      { ...destination, lng: bounds.west - 0.0001 },
+      { ...destination, lng: bounds.east + 0.0001 },
+    ]) expect(resolve(place).status).toBe('unverified-entrance');
+    // Both exact boundary markers are valid; the route still ends at the
+    // independently reviewed entrance, not the marker.
+    for (const place of [
+      { ...destination, lat: bounds.south, lng: bounds.west },
+      { ...destination, lat: bounds.north, lng: bounds.east },
+      destination,
+    ]) {
+      const result = resolve(place);
+      expect(result.status).toBe('ready');
+      if (result.status !== 'ready') throw new Error('missing route');
+      expect(result.route.nodes.at(-1)?.id).toBe(entrance.id);
+    }
+    for (const extent of [
+      { ...bounds, north: NaN },
+      { ...bounds, south: bounds.north },
+      { ...bounds, west: bounds.east },
+      { ...bounds, north: 91 },
+      { ...bounds, west: -181 },
+    ]) expect(resolve(destination, extent).status).toBe('unverified-entrance');
+  });
+
   it('requires matching destination identity and a current exact source revision', () => {
     for (const changed of [
       { ...destination, name: 'Other' }, { ...destination, category: 'Other' },
