@@ -3,6 +3,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { assertPrivacyRequestOwner } = require('./userDataExport');
 const { releaseDeletedUserEventRegistration } = require('./eventRegistration');
 const { closeCampusStoryAccess } = require('./campusStoryAccessBinding');
+const { closeTronClassOwner } = require('./tronClassAccountLifecycle');
 
 const PAGE_SIZE = 200;
 // Account closure removes access and private account data. These shared records
@@ -194,6 +195,12 @@ function createDeleteUserAccountHandler({
       },
     });
 
+    // Independent LMS bindings use provider-qualified owners, not ownerUid.
+    // Close their write barrier before erasing credentials and private ledgers.
+    // 獨立綁定只會替符合 TronClass 擁有者格式的 UID 建立；其他 UID 不可能有綁定，
+    // 略過即可，避免原本合法的刪帳被這個步驟擋住。
+    if (uid.length >= 1 && uid.length <= 128 && !/[\s/]/.test(uid) && ![...uid].some((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127))
+      await closeTronClassOwner({ db, ownerKey: `firebase:${uid}`, now: () => currentTime });
     // Isolated dorm cleanup: revoke dorm authority and erase new private records.
     await require('./dormAccountDeletion').clearDormAccountData({ db, uid, scanPages });
 
