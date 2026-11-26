@@ -56,21 +56,24 @@ export function buildCampusWalkingOverpassQuery(bounds: CampusWalkingBounds): st
     HIGHWAYS.join('|') + ')$"](' + bbox + ');>;);out meta;';
 }
 
+// Cached candidates must satisfy the same tag constraints as fresh Overpass JSON.
+export function validWalkingSourceTags(value: unknown): value is Tags {
+  const raw = record(value);
+  if (!raw) return false;
+  const entries = Object.entries(raw);
+  return entries.length <= 128 && entries.every(([key, val]) =>
+    key.length > 0 && key.length <= 255 && typeof val === 'string' &&
+    val.length <= 1024 && !['__proto__', 'constructor', 'prototype'].includes(key));
+}
+
 function revision(value: Record<string, unknown>, baseMs: number): Revision | null {
   const editedAt = value.timestamp;
   const editedMs = dateMillis(editedAt);
   if (!positiveId(value.version) || typeof editedAt !== 'string' ||
       editedMs === null || editedMs > baseMs) return null;
   const raw = value.tags === undefined ? {} : record(value.tags);
-  if (!raw) return null;
-  const entries = Object.entries(raw);
-  if (entries.length > 128) return null;
-  const tags: Tags = {};
-  for (const [key, val] of entries) {
-    if (!key || key.length > 255 || typeof val !== 'string' || val.length > 1024 ||
-        ['__proto__', 'constructor', 'prototype'].includes(key)) return null;
-    tags[key] = val;
-  }
+  if (!validWalkingSourceTags(raw)) return null;
+  const tags: Tags = { ...raw };
   return { version: value.version, editedAt, tags };
 }
 
@@ -84,6 +87,8 @@ const nonOutdoor = (tags: Tags) =>
   (tags.tunnel !== undefined && !NEGATIVE_TUNNEL_VALUES.has(tags.tunnel.trim().toLowerCase()));
 
 export const excludesWalkingWay = (tags: Tags) =>
+  // Cached source tags must still match the same discovery allowlist.
+  !HIGHWAYS.includes(tags.highway) ||
   tags.foot === 'use_sidepath' ||
   !!(tags.area && tags.area !== 'no') ||
   nonOutdoor(tags);
@@ -100,8 +105,27 @@ const restrictsWalking = (tags: Tags) =>
   nonOutdoor(tags) ||
   hasNonPublicAccess(tags.foot) ||
   hasNonPublicAccess(tags.access) ||
+  // Motorroad commonly implies motor-vehicle-only access; conflicting or
+  // unrecognised values must not be promoted to a reviewed walking route.
+  // https://wiki.openstreetmap.org/wiki/Tag:motorroad=yes
+  (tags.motorroad !== undefined && !['no', 'false', '0'].includes(tags.motorroad)) ||
+  tags['motorroad:conditional'] !== undefined ||
+  // Conflicting direct lifecycle tags require review, including endpoints
+  // that lack a highway key. Historical namespace tags alone may describe
+  // a repurposed, usable path.
+  // https://wiki.openstreetmap.org/wiki/Lifecycle_prefix
+  ['construction', 'disused', 'abandoned'].some(key =>
+    tags[key] !== undefined && !['no', 'false', '0'].includes(tags[key])) ||
   !!(tags.barrier && tags.barrier !== 'no') ||
-  !!tags['access:conditional'] || !!tags['foot:conditional'] || !!tags['opening_hours'];
+  // Locked gates/doors may lack a separate barrier tag. A conditional lock
+  // or malformed access schedule is not a verified all-hours passage.
+  // Explicit negatives match motorroad and lifecycle so locked=false/0
+  // is not treated as a restriction.
+  // https://wiki.openstreetmap.org/wiki/Key:locked
+  (tags.locked !== undefined && !['no', 'false', '0'].includes(tags.locked)) ||
+  tags['locked:conditional'] !== undefined ||
+  tags['access:conditional'] !== undefined || tags['foot:conditional'] !== undefined ||
+  tags.opening_hours !== undefined;
 
 export function hasWalkingRestriction(way: Tags, from: Tags, to: Tags): boolean {
   return restrictsWalking(way) || restrictsWalking(from) || restrictsWalking(to);
