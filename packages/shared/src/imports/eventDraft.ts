@@ -106,7 +106,10 @@ export function personalEventExportNotice(count: number) {
   return `已匯出 ${count} 筆個人行程快照（Asia/Taipei）。不會代你報名或設定提醒。`;
 }
 
-export function filterPersonalEvents(records: readonly PersonalImportRecord[], month = '') {
+export function filterPersonalEvents<T extends PersonalImportRow>(
+  records: readonly T[],
+  month = '',
+) {
   return records
     .filter(
       (row) =>

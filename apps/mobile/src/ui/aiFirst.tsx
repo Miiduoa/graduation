@@ -1,11 +1,13 @@
 /** Shared screen primitives. Existing export names remain compatible with screen imports. */
 import React, { useMemo, useSyncExternalStore } from 'react';
 import {
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
+  useWindowDimensions,
   type ScrollViewProps,
   type ViewStyle,
   type TextStyle,
@@ -130,6 +132,9 @@ export function AIScreen({
   children,
   bottomPadding,
   contentContainerStyle,
+  keyboardShouldPersistTaps = 'handled',
+  keyboardDismissMode = Platform.OS === 'ios' ? 'interactive' : 'on-drag',
+  automaticallyAdjustKeyboardInsets = Platform.OS === 'ios',
   ...rest
 }: {
   children: React.ReactNode;
@@ -144,6 +149,9 @@ export function AIScreen({
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
         {...rest}
+        keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+        keyboardDismissMode={keyboardDismissMode}
+        automaticallyAdjustKeyboardInsets={automaticallyAdjustKeyboardInsets}
         contentContainerStyle={[
           { paddingTop: insets.top, paddingBottom: bottomPadding ?? defaultPadding },
           contentContainerStyle,
@@ -699,42 +707,55 @@ export function AIDetailHeader({
   subtitle,
   onBack,
   rightAction,
+  hideHeading = false,
 }: {
   title: string;
   subtitle?: string;
   onBack?: () => void;
   rightAction?: React.ReactNode;
+  hideHeading?: boolean;
 }) {
   const version = useVisualTheme();
   const detailStyles = useMemo(createDetailStyles, [version]);
   const insets = useSafeAreaInsets();
+  const { width, fontScale } = useWindowDimensions();
+  const stackAction = !hideHeading && Boolean(rightAction) && width / fontScale < 360;
   return (
     <View style={[detailStyles.header, { paddingTop: insets.top + 12 }]}>
-      {onBack ? (
-        // iOS Nav Bar Back Button：chevron-back + tint accent
-        <TouchableOpacity
-          onPress={onBack}
-          hitSlop={10}
-          style={detailStyles.backBtn}
-          accessibilityLabel="返回"
-          accessibilityRole="button"
-        >
-          <Ionicons name="chevron-back" size={26} color={aiTokens.ai} />
-        </TouchableOpacity>
-      ) : (
-        <View style={detailStyles.backBtn} />
-      )}
-      <View style={{ flex: 1 }}>
-        <Text style={detailStyles.title} numberOfLines={1}>
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text style={detailStyles.subtitle} numberOfLines={1}>
-            {subtitle}
-          </Text>
-        ) : null}
+      <View style={detailStyles.headerRow}>
+        {onBack ? (
+          // iOS Nav Bar Back Button：chevron-back + tint accent
+          <TouchableOpacity
+            onPress={onBack}
+            hitSlop={10}
+            style={detailStyles.backBtn}
+            accessibilityLabel="返回"
+            accessibilityRole="button"
+          >
+            <Ionicons name="chevron-back" size={26} color={aiTokens.ai} />
+          </TouchableOpacity>
+        ) : (
+          <View style={detailStyles.backBtn} />
+        )}
+        <View style={detailStyles.heading}>
+          {!hideHeading ? (
+            <Text style={detailStyles.title} accessibilityRole="header" numberOfLines={2}>
+              {title}
+            </Text>
+          ) : null}
+          {!hideHeading && subtitle ? (
+            <Text style={detailStyles.subtitle} numberOfLines={2}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+        {stackAction ? (
+          <View style={detailStyles.backBtn} />
+        ) : (
+          (rightAction ?? <View style={detailStyles.backBtn} />)
+        )}
       </View>
-      {rightAction ?? <View style={detailStyles.backBtn} />}
+      {stackAction ? <View style={detailStyles.stackedAction}>{rightAction}</View> : null}
     </View>
   );
 }
@@ -751,8 +772,9 @@ export function AIDetailScreen({
   bottomPadding,
   scrollRef,
   onScroll,
-  keyboardShouldPersistTaps,
-  keyboardDismissMode,
+  keyboardShouldPersistTaps = 'handled',
+  keyboardDismissMode = Platform.OS === 'ios' ? 'interactive' : 'on-drag',
+  automaticallyAdjustKeyboardInsets = Platform.OS === 'ios',
 }: {
   title: string;
   subtitle?: string;
@@ -764,12 +786,25 @@ export function AIDetailScreen({
   onScroll?: ScrollViewProps['onScroll'];
   keyboardShouldPersistTaps?: ScrollViewProps['keyboardShouldPersistTaps'];
   keyboardDismissMode?: ScrollViewProps['keyboardDismissMode'];
+  automaticallyAdjustKeyboardInsets?: ScrollViewProps['automaticallyAdjustKeyboardInsets'];
 }) {
-  useVisualTheme();
+  const version = useVisualTheme();
+  const detailStyles = useMemo(createDetailStyles, [version]);
   const defaultPadding = useTabBarContentBottomPadding();
+  const { width, fontScale } = useWindowDimensions();
+  // Keep the navigation controls reachable while complete, larger headings scroll
+  // with their content. Dynamic course/shop names must not consume the viewport.
+  const headingInContent =
+    width / fontScale < 360 || title.length > 24 || (subtitle?.length ?? 0) > 40;
   return (
     <View style={{ flex: 1, backgroundColor: aiTokens.bg }}>
-      <AIDetailHeader title={title} subtitle={subtitle} onBack={onBack} rightAction={rightAction} />
+      <AIDetailHeader
+        title={title}
+        subtitle={subtitle}
+        onBack={onBack}
+        rightAction={rightAction}
+        hideHeading={headingInContent}
+      />
       <ScrollView
         ref={scrollRef}
         onScroll={onScroll}
@@ -779,7 +814,16 @@ export function AIDetailScreen({
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps={keyboardShouldPersistTaps}
         keyboardDismissMode={keyboardDismissMode}
+        automaticallyAdjustKeyboardInsets={automaticallyAdjustKeyboardInsets}
       >
+        {headingInContent ? (
+          <View style={detailStyles.contentHeading}>
+            <Text style={detailStyles.title} accessibilityRole="header">
+              {title}
+            </Text>
+            {subtitle ? <Text style={detailStyles.subtitle}>{subtitle}</Text> : null}
+          </View>
+        ) : null}
         {children}
       </ScrollView>
     </View>
@@ -895,17 +939,35 @@ export function AILegacyLink(_props: { label?: string; onPress?: () => void }) {
 const createDetailStyles = () =>
   StyleSheet.create({
     header: {
-      flexDirection: 'row',
-      alignItems: 'center',
       paddingHorizontal: aiTokens.space.sm,
       paddingBottom: 12,
       backgroundColor: aiTokens.bg,
       borderBottomWidth: 1,
       borderBottomColor: aiTokens.border,
     },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    heading: {
+      flex: 1,
+      minWidth: 0,
+      paddingHorizontal: 4,
+    },
+    stackedAction: {
+      alignItems: 'flex-end',
+      marginTop: 8,
+      paddingHorizontal: 12,
+    },
+    contentHeading: {
+      paddingHorizontal: aiTokens.space.md,
+      paddingTop: 16,
+      paddingBottom: 8,
+    },
     backBtn: {
       width: 44,
       height: 44,
+      flexShrink: 0,
       alignItems: 'center',
       justifyContent: 'center',
     },

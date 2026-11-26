@@ -12,6 +12,9 @@ import { QuickCampusEntry } from '../../../apps/web/src/components/QuickCampusEn
 import { PageRecovery } from '../../../apps/web/src/components/PageRecovery';
 import { PageLoadingCard } from '../../../apps/web/src/components/PageLoadingCard';
 import { ServiceDirectory } from '../../../apps/web/src/components/ServiceDirectory';
+import SearchPage from '../../../apps/web/src/app/search/page';
+import { CourseEditing } from './course-editing';
+import { RecordEditing } from './record-editing';
 import {
   applyWebAppearancePreferences,
   defaultWebPreferences,
@@ -236,6 +239,18 @@ function ActionFeedback() {
 
 function Fixture() {
   const pathname = usePathname();
+  if (pathname === '/search') {
+    return (
+      <SchoolLmsReadonlyProvider enabled>
+        <ToastProvider position="bottom-right">
+          <SearchPage />
+          <div className={home.main}>
+            <Controls />
+          </div>
+        </ToastProvider>
+      </SchoolLmsReadonlyProvider>
+    );
+  }
   return (
     <SchoolLmsReadonlyProvider enabled>
       <ToastProvider position="bottom-right">
@@ -318,6 +333,10 @@ function Fixture() {
                 <PageLoadingCard message="正在確認登入狀態…" compact />
                 <PageLoadingCard message="正在讀取跨領域人工智慧實務與應用專題課程的教材與作業資料…" />
               </section>
+            ) : pathname === '/interface-course-editing' ? (
+              <CourseEditing />
+            ) : pathname === '/interface-record-editing' ? (
+              <RecordEditing />
             ) : pathname === '/life' || pathname === '/connect' ? (
               <>
                 <div className={home.heading}>

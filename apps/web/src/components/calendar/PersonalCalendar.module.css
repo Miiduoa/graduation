@@ -1,0 +1,308 @@
+.root {
+  gap: 1.5rem;
+}
+
+.panel {
+  padding: clamp(1rem, 3vw, 1.75rem);
+  border-radius: var(--radius-lg, 1.25rem);
+}
+
+.heading {
+  align-items: flex-start;
+  gap: 1rem 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.heading h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  line-height: 1.4;
+}
+
+.eyebrow {
+  margin: 0 0 0.375rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.subtitle {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+  font-size: 0.9375rem;
+  line-height: 1.7;
+}
+
+.storage {
+  margin-bottom: 1.25rem;
+  font-size: 0.875rem;
+}
+
+.storage summary {
+  width: fit-content;
+  max-width: 100%;
+  min-height: 2.75rem;
+  padding: 0.625rem 0;
+  box-sizing: border-box;
+}
+
+.storage p {
+  max-width: 72ch;
+  font-size: 0.875rem;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+  padding-block: 1rem;
+  border-block: 1px solid var(--border);
+}
+
+.monthField {
+  flex: 0 1 12rem;
+  font-size: 0.875rem;
+}
+
+.monthField input {
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.nativeValue {
+  display: none;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.monthNavigation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-inline-start: auto;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.875rem;
+  background: var(--bg);
+}
+
+.views button {
+  min-width: 3.5rem;
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.views button[aria-pressed='true'] {
+  color: var(--text);
+  border-color: var(--border-strong, var(--border));
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 6%);
+}
+
+.daySummary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  margin-block: 1.5rem 1rem;
+  scroll-margin-top: var(--calendar-sticky-header-height, 6rem);
+  scroll-margin-bottom: var(--calendar-sticky-footer-height, 2rem);
+}
+
+.daySummary h3 {
+  margin: 0;
+  font-size: 1.125rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.daySummary p {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.editor {
+  min-width: 0;
+  margin-block: 1.25rem;
+  padding: clamp(0.875rem, 3vw, 1.5rem);
+  background: var(--bg);
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 1rem;
+  scroll-margin-top: var(--calendar-sticky-header-height, 6rem);
+  scroll-margin-bottom: var(--calendar-sticky-footer-height, 2rem);
+}
+
+.editor h3 {
+  margin: 0 0 1rem;
+  font-size: 1.125rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.editor fieldset > div {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.editor fieldset label {
+  font-size: 0.875rem;
+}
+
+.editor fieldset > div > label:first-child,
+.editor fieldset > div > label:last-child {
+  grid-column: 1 / -1;
+}
+
+.editor input:not([type='checkbox']) {
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  font-size: 1rem;
+}
+
+.editor input[type='checkbox'] {
+  flex: 0 0 auto;
+}
+
+.editor label:has(input[type='checkbox']) {
+  min-height: 2.75rem;
+  margin: 0;
+}
+
+.editor input {
+  scroll-margin-top: var(--calendar-sticky-header-height, 6rem);
+  scroll-margin-bottom: var(--calendar-sticky-footer-height, 2rem);
+}
+
+.editor p,
+.editor li {
+  font-size: 0.875rem;
+}
+
+.agenda {
+  margin-top: 1rem;
+}
+
+.agenda > li {
+  align-items: center;
+  gap: 1rem;
+  padding-block: 1.25rem;
+}
+
+.agenda h3 {
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.agenda time,
+.agenda small,
+.agenda p {
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+
+.root button,
+.root a {
+  max-width: 100%;
+  min-height: 2.75rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  touch-action: manipulation;
+}
+
+.storage summary:focus-visible,
+.daySummary h3:focus-visible,
+.root button:focus-visible,
+.root a:focus-visible {
+  outline: 3px solid var(--focus-ring, var(--brand));
+  outline-offset: 3px;
+}
+
+@keyframes editorAppear {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :global(:root:not([data-reduced-motion='true'])) .editor {
+    animation: editorAppear 160ms ease-out;
+  }
+
+  :global(:root:not([data-reduced-motion='true'])) .views button {
+    transition:
+      background-color 140ms ease,
+      border-color 140ms ease;
+  }
+}
+
+@media (max-width: 540px) {
+  .panel {
+    padding: 14px;
+  }
+  .editor {
+    padding: 12px;
+  }
+  .nativeValue {
+    display: block;
+  }
+  .toolbar {
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .monthField {
+    flex: 1 1 100%;
+  }
+  .monthNavigation {
+    flex: 1 1 100%;
+  }
+  .monthNavigation button {
+    flex: 1 1 auto;
+  }
+  .views {
+    margin-inline-start: 0;
+  }
+  .editor fieldset > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .agenda > li {
+    align-items: flex-start;
+  }
+}
+
+@media (forced-colors: active) {
+  .views button[aria-pressed='true'] {
+    border-color: Highlight;
+    box-shadow: none;
+  }
+  .editor {
+    border-color: CanvasText;
+  }
+}

@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { LegacyAssignmentReminders } from '../screens/LegacyAssignmentReminders';
 import { CampusAssignmentReminderAction } from '../screens/CampusAssignmentReminderAction';
+import { AssignmentReplyActions } from '../screens/AssignmentReplyActions';
 import { reconcileSubmittedAssignmentReminders } from '../services/submittedAssignmentReminders';
 import { useSubmittedAssignmentReminders } from '../app/useSubmittedAssignmentReminders';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
@@ -126,6 +127,43 @@ async function optIn() {
   expect(await view.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
   return view;
 }
+
+test('單筆長標題回覆可開啟作業並為同一份作業設定和取消提醒', async () => {
+  const snapshot = mockSnapshot();
+  const title = '長'.repeat(130) + '題';
+  const item = snapshot.assignments.items[0];
+  item.title = title;
+  snapshot.assignments.items.push({
+    ...item, title: title.slice(0, 130), source: { ...source, assignmentId: 'other-work' },
+  });
+  snapshot.assignments.count = 2;
+  mockReader.getAssignment.mockResolvedValue({ id: 'work', groupId: 'course', title, dueAt });
+  const navigate = jest.fn();
+  const reply = <AssignmentReplyActions
+    read={{
+      userId: snapshot.userId, schoolId: snapshot.schoolId, checkedAt: snapshot.checkedAt,
+      filterQuestion: '查詢作業', items: [item],
+    }}
+    snapshot={snapshot}
+    context={{ userId: scope.uid, schoolId: scope.schoolId, isCurrent: current, navigation: { navigate } }}
+    disabled={false}
+    onAsk={jest.fn()}
+  />;
+  let view = render(reply);
+  fireEvent.press(view.getByText('查看這份作業'));
+  expect(navigate).toHaveBeenCalledWith('學習', {
+    initial: false, screen: 'HomeworkSubmit', params: { groupId: 'course', assignmentId: 'work' },
+  });
+  fireEvent.press(await view.findByText('設定手機本機截止提醒'));
+  fireEvent.press(view.getByText('確認設定本機提醒'));
+  expect(await view.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
+  expect(mockAlarms.size).toBe(1);
+  view.unmount();
+  view = render(reply);
+  fireEvent.press(await view.findByText('取消這項本機提醒'));
+  await view.findByText('已退訂並清除提醒偏好，撤回或延期後也不會自動恢復。');
+  expect(mockAlarms.size).toBe(0);
+});
 test('使用者設定提醒，伺服器確認已繳後取消；撤回後恢復原提醒', async () => {
   let view = await optIn();
   expect(mockAlarms.size).toBe(1);
