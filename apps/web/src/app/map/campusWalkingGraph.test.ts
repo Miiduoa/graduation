@@ -119,6 +119,74 @@ describe('audited outdoor campus walking graph', () => {
     expect(isCampusWalkingRouteCurrent(result, 'other', now)).toBe(false);
   });
 
+  it('prefers later route audit expiry for equally short parallel ways regardless of input order', () => {
+    const early = '2026-11-24T09:00:00Z';
+    const late = '2026-11-25T08:00:00Z';
+    const edges = [
+      { ...graph.edges[0], validUntil: early },
+      { ...graph.edges[0], osmWayId: 200, validUntil: late },
+      { ...graph.edges[1], validUntil: late },
+    ];
+    for (const ordered of [edges, [...edges].reverse()]) {
+      const result = route({ ...graph, edges: ordered })!;
+      expect(result.osmWayIds).toEqual([200, 101]);
+      expect(result.reviewExpiresAtMs).toBe(Date.parse(late));
+      expect(isCampusWalkingRouteCurrent(result, 'fixture', Date.parse(early))).toBe(true);
+      expect(route({ ...graph, edges: ordered }, 3, 1)?.osmWayIds).toEqual([101, 200]);
+    }
+    const equal = edges.map(edge => ({ ...edge, validUntil: late }));
+    expect(route({ ...graph, edges: equal })?.osmWayIds).toEqual([101, 101]);
+    expect(route({ ...graph, edges: [...equal].reverse() })?.osmWayIds).toEqual([101, 101]);
+  });
+
+  it('compares the minimum expiry across an entire equal-distance route, not just the last edge', () => {
+    const early = '2026-11-24T09:00:00Z';
+    const late = '2026-11-25T08:00:00Z';
+    // Node 5 shares coordinates with node 2 but remains a distinct explicit path.
+    const edges = [
+      { ...graph.edges[0], validUntil: early },
+      { ...graph.edges[1], validUntil: late },
+      { ...graph.edges[0], to: 5, osmWayId: 200, validUntil: late },
+      { ...graph.edges[1], from: 5, osmWayId: 200, validUntil: late },
+    ];
+    for (const ordered of [edges, [...edges].reverse()]) {
+      const result = route({ ...graph, edges: ordered })!;
+      expect(result.nodes.map(n => n.id)).toEqual([1, 5, 3]);
+      expect(result.reviewExpiresAtMs).toBe(Date.parse(late));
+    }
+  });
+
+  it('discards stale queue entries when a shorter path is found after discovery', () => {
+    const changed = { ...graph, nodes: graph.nodes.map(node => node.id === 2
+      ? { ...node, lat: 10.1005, lng: 20.1 }
+      : node.id === 4 ? { ...node, lat: 10.1, lng: 20.101 } : node) };
+    expect(route(changed)?.nodes.map(node => node.id)).toEqual([1, 4, 3]);
+    expect(route(changed, 3, 1)?.nodes.map(node => node.id)).toEqual([3, 4, 1]);
+  });
+
+  it('routes a near-limit connected grid consistently when edge order changes', () => {
+    const side = 40;
+    const nodes = Array.from({ length: side * side }, (_, index) => ({
+      id: index + 1, lat: 10.1 + Math.floor(index / side) * 0.0001,
+      lng: 20.1 + index % side * 0.0001,
+    }));
+    const edges: CampusWalkingGraph['edges'][number][] = [];
+    const connect = (from: number, to: number) => edges.push({
+      from, to, osmWayId: edges.length + 1, access: 'reviewed-open',
+      direction: 'both', ...open,
+    });
+    for (const node of nodes) {
+      if (node.id % side !== 0) connect(node.id, node.id + 1);
+      if (node.id + side <= nodes.length) connect(node.id, node.id + side);
+    }
+    const first = route({ ...graph, nodes, edges }, 1, nodes.length);
+    const reversed = route({ ...graph, nodes, edges: [...edges].reverse() }, 1, nodes.length);
+    expect(first?.nodes).toHaveLength(2 * side - 1);
+    expect(first?.osmWayIds).toHaveLength(2 * side - 2);
+    expect(first?.reviewExpiresAtMs).toBe(Date.parse(open.validUntil));
+    expect(reversed).toEqual(first);
+  });
+
   it('invalidates cached routes when the snapshot expires or clock is invalid', () => {
     const result = route(graph)!;
     const deadline = Date.parse(graph.osmBaseAt) + 48 * 60 * 60 * 1000;

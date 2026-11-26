@@ -1,0 +1,156 @@
+import { describe, expect, it } from 'vitest';
+import { isCampusEntranceRouteCurrent, routeToCampusEntrance, type CampusEntranceReview } from './campusWalkingEntrance';
+import type { CampusWalkingSegmentAudit } from './campusWalkingAudit';
+import { isCampusWalkingRouteCurrent } from './campusWalkingGraph';
+import { parseCampusWalkingOsmCandidates } from './campusWalkingOsm';
+
+// Synthetic geometry, IDs, reviews and evidence; not a real campus.
+const bounds = { south: 10, north: 10.01, west: 20, east: 20.01 };
+const now = Date.parse('2026-11-24T08:01:00Z');
+const revision = { version: 1, timestamp: '2026-11-20T00:00:00Z' };
+const origin = { id: 1, lat: 10.001, lng: 20.001, version: 1 };
+const entrance = { id: 2, lat: 10.001, lng: 20.002, version: 1 };
+const destination = { id: 'fixture-building', name: 'Fixture building', category: '教學大樓',
+  lat: 10.002, lng: 20.003, building: 'Fixture', floor: '2' };
+const candidates = (tags: Record<string, string> = { entrance: 'main' }) =>
+  parseCampusWalkingOsmCandidates({
+    osm3s: { timestamp_osm_base: '2026-11-24T08:00:00Z' },
+    elements: [
+      { ...origin, lon: origin.lng, type: 'node', ...revision },
+      { ...entrance, lon: entrance.lng, type: 'node', tags, ...revision },
+      { id: 101, type: 'way', nodes: [1, 2], tags: { highway: 'footway' }, ...revision },
+    ],
+  }, 'fixture', bounds, now)!;
+const review: CampusEntranceReview = { schoolId: 'fixture', destination, entrance,
+  reviewedAt: '2026-11-23T08:00:00Z', validUntil: '2026-11-25T00:00:00Z',
+  evidenceUrl: 'https://example.invalid/entrance' };
+const segment: CampusWalkingSegmentAudit = { schoolId: 'fixture', osmWayId: 101, wayVersion: 1,
+  from: origin, to: entrance, direction: 'both', reviewedAt: review.reviewedAt,
+  validUntil: '2026-12-01T00:00:00Z', evidenceUrl: 'https://example.invalid/segment' };
+const plan = (reviews: CampusEntranceReview[] = [review], audits = [segment]) =>
+  routeToCampusEntrance(candidates(), 'fixture', bounds, 1, destination, reviews, audits, now);
+
+describe('reviewed outdoor entrance route handoff', () => {
+  it('ends at the reviewed entrance rather than the marker or indoor floor', () => {
+    const result = plan();
+    expect(result.status).toBe('ready');
+    if (result.status !== 'ready') throw new Error('missing route');
+    expect(result.route.nodes.map(node => node.id)).toEqual([1, 2]);
+    expect(result.route.nodes[1]).toMatchObject({ lat: entrance.lat, lng: entrance.lng });
+    expect(result.route.attribution).toBe('https://www.openstreetmap.org/copyright');
+    expect(result.entranceEvidenceUrl).toBe(review.evidenceUrl);
+    const expiry = Date.parse(review.validUntil);
+    expect(result.route.reviewExpiresAtMs).toBe(expiry);
+    expect(isCampusWalkingRouteCurrent(result.route, 'fixture', expiry - 1)).toBe(true);
+    expect(isCampusWalkingRouteCurrent(result.route, 'fixture', expiry)).toBe(false);
+  });
+
+  it('invalidates a cached entrance route when the current navigation context changes', () => {
+    const selected = { ...destination };
+    const data = candidates();
+    const result = routeToCampusEntrance(data, 'fixture', bounds, 1, selected, [review], [segment], now);
+    expect(result.status).toBe('ready');
+    const current = (place = destination, school = 'fixture', start = 1, snapshot = data.osmBaseAt,
+      time = now) => isCampusEntranceRouteCurrent(result, { ...data, osmBaseAt: snapshot },
+      school, bounds, start, place, [review], [segment], time);
+    expect(current()).toBe(true);
+    for (const changed of [
+      { ...destination, id: 'other' }, { ...destination, name: 'Other' },
+      { ...destination, category: 'Other' }, { ...destination, lat: 10.003 },
+      { ...destination, lng: 20.004 }, { ...destination, building: 'Other' },
+      { ...destination, floor: '3' },
+    ]) expect(current(changed)).toBe(false);
+    expect(current(destination, 'other')).toBe(false);
+    expect(current(destination, 'fixture', 2)).toBe(false);
+    expect(current(destination, 'fixture', 1, '2026-11-24T08:00:30Z')).toBe(false);
+    expect(current(destination, 'fixture', 1, data.osmBaseAt, Date.parse(review.validUntil))).toBe(false);
+    selected.floor = '3';
+    expect(current(selected)).toBe(false);
+    expect(current()).toBe(true);
+    expect(isCampusEntranceRouteCurrent(plan([]), data, 'fixture', bounds, 1, destination, [review], [segment], now)).toBe(false);
+    expect(isCampusEntranceRouteCurrent(plan([review], []), data, 'fixture', bounds, 1, destination, [review], [segment], now)).toBe(false);
+  });
+
+  it('invalidates previously ready routes when trusted reviews change without an OSM update', () => {
+    const data = candidates();
+    const result = plan();
+    expect(result.status).toBe('ready');
+    const current = (reviews = [review], audits = [segment], source = data) =>
+      isCampusEntranceRouteCurrent(result, source, 'fixture', bounds, 1, destination, reviews, audits, now);
+    expect(current()).toBe(true);
+    expect(current([{ ...review }], [{ ...segment }])).toBe(true);
+    expect(current([])).toBe(false);
+    expect(current([review], [])).toBe(false);
+    expect(current([review, review])).toBe(false);
+    expect(current([review], [segment, segment])).toBe(false);
+    expect(current([{ ...review, evidenceUrl: 'https://example.invalid/replaced' }])).toBe(false);
+    expect(current([{ ...review, validUntil: '2026-11-24T09:00:00Z' }])).toBe(false);
+    expect(current([review], [{ ...segment, validUntil: '2026-11-24T09:00:00Z' }])).toBe(false);
+    expect(current([review], [{ ...segment, direction: 'reverse' }])).toBe(false);
+    expect(current([review], [segment], candidates({ entrance: 'main', locked: 'yes' }))).toBe(false);
+  });
+
+  it('distinguishes an unverified entrance from an unavailable network', () => {
+    expect(plan([]).status).toBe('unverified-entrance');
+    expect(plan([review, review]).status).toBe('unverified-entrance');
+    expect(plan([{ ...review, schoolId: 'other' }]).status).toBe('unverified-entrance');
+    expect(plan([review, { ...review, schoolId: 'other' }]).status).toBe('ready');
+    expect(plan([review], []).status).toBe('route-unavailable');
+    expect(routeToCampusEntrance(candidates(), 'fixture', bounds, 99, destination,
+      [review], [segment], now).status).toBe('route-unavailable');
+  });
+
+  it('does not route to a reviewed entrance for a destination outside the trusted campus extent', () => {
+    const data = candidates();
+    const resolve = (place: typeof destination, extent = bounds) => routeToCampusEntrance(
+      data, 'fixture', extent, 1, place, [{ ...review, destination: place }], [segment], now);
+    for (const place of [
+      { ...destination, lat: bounds.south - 0.0001 },
+      { ...destination, lat: bounds.north + 0.0001 },
+      { ...destination, lng: bounds.west - 0.0001 },
+      { ...destination, lng: bounds.east + 0.0001 },
+    ]) expect(resolve(place).status).toBe('unverified-entrance');
+    // Both exact boundary markers are valid; the route still ends at the
+    // independently reviewed entrance, not the marker.
+    for (const place of [
+      { ...destination, lat: bounds.south, lng: bounds.west },
+      { ...destination, lat: bounds.north, lng: bounds.east },
+      destination,
+    ]) {
+      const result = resolve(place);
+      expect(result.status).toBe('ready');
+      if (result.status !== 'ready') throw new Error('missing route');
+      expect(result.route.nodes.at(-1)?.id).toBe(entrance.id);
+    }
+    for (const extent of [
+      { ...bounds, north: NaN },
+      { ...bounds, south: bounds.north },
+      { ...bounds, west: bounds.east },
+      { ...bounds, north: 91 },
+      { ...bounds, west: -181 },
+    ]) expect(resolve(destination, extent).status).toBe('unverified-entrance');
+  });
+
+  it('requires matching destination identity and a current exact source revision', () => {
+    for (const changed of [
+      { ...destination, name: 'Other' }, { ...destination, category: 'Other' },
+      { ...destination, lat: 10.003 }, { ...destination, lng: 20.004 },
+      { ...destination, building: 'Other' }, { ...destination, floor: '3' },
+    ]) expect(routeToCampusEntrance(candidates(), 'fixture', bounds, 1, changed,
+      [review], [segment], now).status).toBe('unverified-entrance');
+    for (const changed of [
+      { ...review, entrance: { ...entrance, version: 2 } },
+      { ...review, entrance: { ...entrance, lng: 20.004 } },
+      { ...review, validUntil: '2026-11-24T08:01:00Z' },
+      { ...review, reviewedAt: '2026-11-19T00:00:00Z' },
+      { ...review, evidenceUrl: 'http://example.invalid/entrance' },
+    ]) expect(plan([changed]).status).toBe('unverified-entrance');
+    const invalidTags: Record<string, string>[] = [{}, { entrance: 'exit' }, { entrance: 'service' }, { entrance: 'no' }];
+    for (const tags of invalidTags) {
+      expect(routeToCampusEntrance(candidates(tags), 'fixture', bounds, 1, destination,
+        [review], [segment], now).status).toBe('unverified-entrance');
+    }
+    expect(routeToCampusEntrance(candidates({ entrance: 'main', locked: 'yes' }), 'fixture',
+      bounds, 1, destination, [review], [segment], now).status).toBe('route-unavailable');
+  });
+});
