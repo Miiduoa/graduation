@@ -159,7 +159,10 @@ it('keeps a confirmed selected marker visible across filters until the detail is
   expect(screen.queryByRole('button', { name: '查看' + gate.name })).toBeNull();
   expect(ids()).toEqual([library.id, gate.id]);
   expect(mapState().selected).toEqual(gate);
-  fireEvent.click(screen.getByRole('button', { name: '關閉地點詳情' }));
+  const close = screen.getByRole('button', { name: '關閉地點詳情' });
+  close.focus();
+  fireEvent.click(close);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
   expect(mapState().selected).toBeNull();
   expect(ids()).toEqual([library.id]);
 });
@@ -713,7 +716,11 @@ it('provides keyboard-operable search, categories, selection and reset', async (
   expect(screen.getByRole('link', { name: '用 Google 帳號收藏' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '收藏蓋夏圖書館' })).toBeNull();
   fireEvent.change(input, { target: { value: '不存在' } });
-  fireEvent.click(screen.getByRole('button', { name: '清除搜尋條件' }));
+  const reset = screen.getByRole('button', { name: '清除搜尋條件' });
+  reset.focus();
+  fireEvent.click(reset);
+  expect(document.activeElement).toBe(input);
+  expect(screen.queryByRole('button', { name: '清除搜尋條件' })).toBeNull();
   expect(screen.getByRole('button', { name: '查看正門' })).toBeTruthy();
 });
 

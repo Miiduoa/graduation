@@ -913,7 +913,11 @@ function MapContent({
           <button
             className={styles.close}
             aria-label="關閉地點詳情"
-            onClick={() => setSelection('')}
+            onClick={() => {
+              setSelection('');
+              // The detail's close button unmounts, even if its marker is filtered out.
+              searchInputRef.current?.focus();
+            }}
           >
             ×
           </button>
@@ -979,6 +983,8 @@ function MapContent({
                 setCategory('全部');
                 setNearbyOnly(false);
                 setOnlyFavorites(false);
+                // Reset removes this empty-state button; keep keyboard navigation in the search.
+                searchInputRef.current?.focus();
               }}
             >
               清除搜尋條件
