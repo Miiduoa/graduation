@@ -6,7 +6,7 @@ import json
 import os
 import threading
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from playwright.async_api import async_playwright, expect
 
@@ -205,6 +205,13 @@ async def account_scenario(browser, origin, width, theme, reports, empty=False):
             await expect(page.get_by_text('學生身分的課程', exact=True)).to_have_count(0)
             await expect(page.get_by_role('link', name='1 筆申請需要補件 →', exact=True)).to_have_attribute(
                 'href', '/merchant/workspace')
+            merchant = page.get_by_role('region', name='門市工作', exact=True)
+            await expect(merchant.get_by_role('link').filter(has_text='山城餐坊／北區準備門市')).to_have_attribute(
+                'href', '/merchant/workspace?tenant=qa-campus&location=qa-preparing')
+            await expect(merchant.get_by_role('link').filter(has_text='山城餐坊／東區營運門市')).to_have_attribute(
+                'href', '/merchant/workspace?tenant=qa-campus&location=qa-operating')
+            await expect(merchant.get_by_role('link', name='查看申請進度（1）', exact=True)).to_have_attribute(
+                'href', '/merchant/workspace?view=applications#merchant-applications-title')
             await expect(page.get_by_role('link', name='進入平台工作台 →', exact=True)).to_have_attribute('href', '/admin')
             scenario.checked('Teaching/merchant/platform destinations match confirmed synthetic roles and retain exact course IDs')
         await scenario.layout('recovered')
@@ -266,13 +273,15 @@ async def merchant_scenario(browser, origin, width, theme, reports):
         await expect(page.get_by_role('heading', name='申請進度', exact=True)).to_be_focused()
         scenario.checked('Existing merchant sees the pending task, not a new application form; keyboard link focuses its destination')
 
-        await page.get_by_role('button', name='管理門市：北區準備門市', exact=True).click()
+        preparing_link = page.get_by_role('link', name='管理門市：北區準備門市', exact=True)
+        await expect(preparing_link).to_have_attribute('href', '/merchant/workspace?tenant=qa-campus&location=qa-preparing')
+        await preparing_link.click()
         name = page.get_by_label('品項 1 名稱', exact=True)
         await name.fill('保留的蔬菜便當草稿')
         await page.get_by_label('品項 1 售價（元）', exact=True).fill('85')
         await page.get_by_label('品項 1 初始庫存', exact=True).fill('20')
-        await page.get_by_role('button', name='返回我的門市', exact=True).click()
-        await page.get_by_role('button', name='管理門市：北區準備門市', exact=True).click()
+        await page.get_by_role('link', name='返回我的門市', exact=True).click()
+        await page.get_by_role('link', name='管理門市：北區準備門市', exact=True).click()
         await expect(name).to_have_value('保留的蔬菜便當草稿')
         await expect(page.get_by_label('品項 1 售價（元）', exact=True)).to_have_value('85')
         await expect(page.get_by_label('品項 1 初始庫存', exact=True)).to_have_value('20')
@@ -280,22 +289,25 @@ async def merchant_scenario(browser, origin, width, theme, reports):
         scenario.checked('Returning from the selected store preserves its menu draft and does not inherit submission consent')
         await scenario.layout('menu-draft-return')
 
-        await page.get_by_role('button', name='返回我的門市', exact=True).click()
-        await page.get_by_role('button', name='管理門市：東區營運門市', exact=True).click()
+        await page.get_by_role('link', name='返回我的門市', exact=True).click()
+        await page.get_by_role('link', name='管理門市：東區營運門市', exact=True).click()
         daily = page.get_by_role('region', name='門市工作台', exact=True)
         await expect(daily).to_be_visible()
         assert await daily.evaluate('node => !!(node.compareDocumentPosition(document.getElementById("merchant-activate-title")) & Node.DOCUMENT_POSITION_FOLLOWING)')
-        await page.get_by_role('button', name='處理訂單與收銀', exact=True).click()
+        await page.get_by_role('link', name='處理訂單與收銀', exact=True).click()
+        assert parse_qs(urlparse(page.url).query) == {
+            'tenant': ['qa-campus'], 'location': ['qa-operating'], 'section': ['orders']}
         await expect(page.get_by_text('這一頁沒有待處理的訂單。', exact=True)).to_be_visible()
         await page.get_by_label('期初現金（元）', exact=True).fill('150')
-        await page.get_by_role('button', name='收起訂單工作台', exact=True).click()
-        await page.get_by_role('button', name='處理訂單與收銀', exact=True).click()
+        await page.get_by_role('navigation', name='門市工作', exact=True).get_by_role('link', name='門市概況', exact=True).click()
+        await expect(page.get_by_role('region', name='門市訂單工作台', exact=True)).to_have_count(0)
+        await page.get_by_role('navigation', name='門市工作', exact=True).get_by_role('link', name='訂單與收銀', exact=True).click()
         await expect(page.get_by_label('期初現金（元）', exact=True)).to_have_value('150')
         await expect(page.get_by_role('button', name='確認開班', exact=True)).to_be_disabled()
-        scenario.checked('Daily orders precede settings; collapsing and reopening keeps the cash draft without confirming a shift')
+        scenario.checked('Daily work is reachable before settings; switching overview/orders preserves the store URL and cash draft without confirming a shift')
         await scenario.layout('daily-orders')
 
-        await page.get_by_role('button', name='返回我的門市', exact=True).click()
+        await page.get_by_role('link', name='返回我的門市', exact=True).click()
         await page.get_by_role('link', name='申請新門市', exact=True).click()
         await expect(page.get_by_role('heading', name='這個帳號已有進駐申請', exact=True)).to_be_visible()
         await expect(page.get_by_label('申請場域', exact=True)).to_have_count(0)

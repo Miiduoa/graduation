@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import {
   FoodStorageError,
   clearFoodPending,
+  foodPendingStorageKey,
   loadFoodPending,
   saveFoodPending,
 } from './foodPersistence';
@@ -55,10 +56,17 @@ function readErrorMessage(failure: unknown) {
     : '目前無法讀取最新資料。請重新讀取，已填寫的內容仍保留。';
 }
 
+export type FoodReadFlight = { current: Promise<void> | null };
+
 export function useFoodRead<T>(
   load: () => Promise<T>,
   options?: {
     pollMs?: number;
+    paused?: boolean;
+    /** Drain a retired loader before starting a replacement read. */
+    serializeReads?: boolean;
+    /** Share the in-flight read across mounts of the same workspace. */
+    readFlight?: () => FoodReadFlight;
     /** Return false to stop periodic polling (e.g. terminal order detail). */
     shouldPoll?: (data: T | null) => boolean;
   },
@@ -69,29 +77,34 @@ export function useFoodRead<T>(
   const dataRef = useRef<T | null>(null);
   const shouldPollRef = useRef(options?.shouldPoll);
   const pollMs = options?.pollMs;
+  const paused = options?.paused;
+  const serializeReads = options?.serializeReads;
+  const readFlight = options?.readFlight;
   shouldPollRef.current = options?.shouldPoll;
+  const localFlight = useRef<FoodReadFlight>({ current: null });
   const scopeRef = useRef<{
     active: boolean;
     loader: () => Promise<T>;
     revision: number;
-    inFlight: Promise<void> | null;
+    flight: FoodReadFlight;
     queued: Promise<void> | null;
   } | null>(null);
 
   const read = useCallback(function read(quiet: boolean): Promise<void> {
     const scope = scopeRef.current;
     if (!scope?.active) return Promise.resolve();
-    if (scope.inFlight) {
+    const inFlight = scope.flight.current;
+    if (inFlight) {
       // A post-mutation/manual refresh must run after the older read. Quiet
       // refreshes join it, so polling and returning to the tab cannot overlap.
-      if (quiet) return scope.queued ?? scope.inFlight;
+      if (quiet) return scope.queued ?? inFlight;
       if (scope.queued) return scope.queued;
       ++scope.revision;
       dataRef.current = null;
       setData(null);
       setError('');
       setLoading(true);
-      scope.queued = scope.inFlight.then(() => {
+      scope.queued = inFlight.then(() => {
         scope.queued = null;
         if (!scope.active || scopeRef.current !== scope) return;
         return read(false);
@@ -124,26 +137,33 @@ export function useFoodRead<T>(
         },
       )
       .finally(() => {
-        if (scope.inFlight === pending) scope.inFlight = null;
+        if (scope.flight.current === pending) scope.flight.current = null;
         if (current()) setLoading(false);
       });
-    scope.inFlight = pending;
+    scope.flight.current = pending;
     return pending;
   }, []);
   const reload = useCallback(() => read(false), [read]);
   const quietReload = useCallback(() => read(true), [read]);
 
   useLayoutEffect(() => {
-    const scope = { active: true, loader: load, revision: 0, inFlight: null, queued: null };
+    if (paused) return;
+    const scope: NonNullable<typeof scopeRef.current> = {
+      active: true,
+      loader: load,
+      revision: 0,
+      flight: readFlight?.() ?? (serializeReads ? localFlight.current : { current: null }),
+      queued: null,
+    };
     scopeRef.current = scope;
     void reload();
     return () => {
       scope.active = false;
     };
-  }, [reload, load]);
+  }, [reload, load, paused, serializeReads, readFlight]);
 
   useEffect(() => {
-    if (!pollMs || pollMs <= 0) return;
+    if (paused || !pollMs || pollMs <= 0) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let inflight = false;
@@ -181,10 +201,24 @@ export function useFoodRead<T>(
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [pollMs, quietReload, load]);
+  }, [pollMs, quietReload, load, paused]);
 
   return { data, error, loading, reload, quietReload };
 }
+
+// Durable operations own their receipts across views within the same session.
+type FoodMutationFlight = {
+  isSameSession(): boolean;
+  listeners: Set<(confirmed: boolean) => void>;
+};
+const foodMutationFlights = new Map<string, FoodMutationFlight>();
+
+function currentFoodMutationFlight(key: string | null) {
+  const flight = key ? foodMutationFlights.get(key) : undefined;
+  return flight?.isSameSession() ? flight : undefined;
+}
+
+const alwaysCurrent = () => true;
 
 export function useFoodMutation({
   cache,
@@ -195,17 +229,24 @@ export function useFoodMutation({
   onRejected,
   reload,
   enabled,
+  canSend,
+  settleAfterUnmount = false,
+  captureSession,
 }: {
   cache: FoodDraftCache;
   scope: string;
   accountId: string;
   enabled: boolean;
+  canSend?(): boolean;
+  settleAfterUnmount?: boolean;
+  captureSession?(): () => boolean;
   execute(intent: FoodIntent): Promise<unknown>;
   onSuccess(result: unknown, intent: FoodIntent): void;
   onRejected?(): void;
   reload(): Promise<unknown>;
 }) {
   const pendingKey = `${scope}:pending`;
+  const flightKey = settleAfterUnmount && accountId ? foodPendingStorageKey(accountId, scope) : null;
   const [pending, setPending] = useFoodDraft<FoodIntent | null>(cache, pendingKey, null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -232,10 +273,7 @@ export function useFoodMutation({
     try {
       const stored = loadFoodPending(accountId, scope);
       if (!active.current || accountRef.current !== accountId) return;
-      if (stored) {
-        cache.set(pendingKey, stored);
-        setPending(stored);
-      }
+      if (stored || flightKey) setPending(stored);
       setStorageBlocked(false);
       setError('');
     } catch (failure) {
@@ -247,19 +285,35 @@ export function useFoodMutation({
           : '目前無法安全保存這次訂餐操作，請稍後再試。',
       );
     }
-  }, [accountId, scope, cache, pendingKey, setPending]);
+  }, [accountId, scope, flightKey, setPending]);
 
   useEffect(() => {
     recoverStorage();
-  }, [recoverStorage]);
+    const flight = currentFoodMutationFlight(flightKey);
+    if (!flight) return;
+    setBusy(true);
+    const settled = (confirmed: boolean) => {
+      if (!active.current) return;
+      if (confirmed) void callbacks.current.reload();
+      setBusy(false);
+      recoverStorage();
+    };
+    flight.listeners.add(settled);
+    return () => { flight.listeners.delete(settled); };
+  }, [flightKey, recoverStorage]);
 
   async function send(intent: FoodIntent, retry = false) {
-    if (!active.current || lock.current || storageBlocked || (!retry && (!enabled || pending)))
+    if (
+      !active.current || lock.current || currentFoodMutationFlight(flightKey) ||
+      storageBlocked || (!retry && (!enabled || pending)) || (canSend && !canSend())
+    )
       return;
     if (!accountId) {
       setError('目前無法確認帳號，請重新確認後再操作。');
       return;
     }
+    const isSameSession = captureSession?.() ?? alwaysCurrent;
+    if (!isSameSession()) return;
     lock.current = true;
     setBusy(true);
     setError('');
@@ -283,20 +337,30 @@ export function useFoodMutation({
       setBusy(false);
       return;
     }
+    const flight: FoodMutationFlight | null = flightKey ? { isSameSession, listeners: new Set() } : null;
+    if (flightKey && flight) foodMutationFlights.set(flightKey, flight);
+    const current = () => isSameSession() && active.current && accountRef.current === owner;
+    let confirmed = false;
     try {
       const result = await callbacks.current.execute(frozen);
-      if (!active.current || accountRef.current !== owner) return;
+      confirmed = true;
+      if (!isSameSession() || (!flight && !current())) return;
+      const sent = JSON.stringify(frozen);
       try {
-        clearFoodPending(owner, scope);
+        if (!flight || JSON.stringify(loadFoodPending(owner, scope)) === sent) {
+          clearFoodPending(owner, scope);
+        }
       } catch {
         /* Clear is best-effort after a confirmed result. */
       }
+      if (flight && JSON.stringify(cache.get(pendingKey)) === sent) cache.set(pendingKey, null);
+      if (!current()) return;
       setPending(null);
       callbacks.current.onSuccess(result, frozen);
       setNotice('已完成。');
       await callbacks.current.reload();
     } catch (failure) {
-      if (!active.current || accountRef.current !== owner) return;
+      if (!current()) return;
       if (
         !retry &&
         failure instanceof NuniError &&
@@ -322,7 +386,13 @@ export function useFoodMutation({
       }
     } finally {
       lock.current = false;
-      if (active.current && accountRef.current === owner) setBusy(false);
+      if (current()) setBusy(false);
+      if (flightKey && flight) {
+        if (foodMutationFlights.get(flightKey) === flight) foodMutationFlights.delete(flightKey);
+        if (isSameSession()) {
+          for (const settled of flight.listeners) settled(confirmed);
+        }
+      }
     }
   }
   return {
@@ -337,7 +407,15 @@ export function useFoodMutation({
   };
 }
 
-export function FoodMutationStatus({ task }: { task: ReturnType<typeof useFoodMutation> }) {
+export function FoodMutationStatus({
+  task,
+  canRetry,
+  retryDisabled,
+}: {
+  task: ReturnType<typeof useFoodMutation>;
+  canRetry?(): boolean;
+  retryDisabled?: boolean;
+}) {
   return (
     <>
       {task.error && <p role="alert">{task.error}</p>}
@@ -350,7 +428,12 @@ export function FoodMutationStatus({ task }: { task: ReturnType<typeof useFoodMu
       {task.pending && (
         <div role="status">
           <p>{task.busy ? '正在確認這次操作…' : '尚未確認是否成功，請用下方按鈕重試。'}</p>
-          <Button disabled={task.busy || task.storageBlocked} onClick={task.retry}>
+          <Button
+            disabled={task.busy || task.storageBlocked || retryDisabled}
+            onClick={() => {
+              if (!canRetry || canRetry()) task.retry();
+            }}
+          >
             重試同一份操作
           </Button>
         </div>

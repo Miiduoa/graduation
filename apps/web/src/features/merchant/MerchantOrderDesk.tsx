@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { NuniError } from '@campus/shared/src/nuni';
 import {
   createNuniFoodClient,
@@ -21,12 +22,19 @@ import {
   useFoodDraft,
   useFoodMutation,
   useFoodRead,
+  type FoodReadFlight,
   type FoodDraftCache,
   type FoodIntent,
 } from '@/features/food/foodState';
 import { merchantOrderBucket, merchantOrderNextStep } from '@/features/food/foodOrderGuidance';
+import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
+import {
+  merchantWorkspaceHref,
+  type MerchantWorkspaceQueue,
+} from '@/lib/merchantWorkspaceNavigation';
 import styles from '@/features/food/Food.module.css';
 import { PickupScanner } from './PickupScanner';
+import deskStyles from './MerchantOrderDesk.module.css';
 
 const actionLabels: Record<string, string> = {
   'record-counter-payment': '登記櫃檯收款',
@@ -48,11 +56,31 @@ export function MerchantOrderDesk({
   tenantId,
   locationId,
   cache,
+  canSend,
+  captureSession,
+  accessConfirmed = true,
+  beginRead,
+  readFlight,
+  suspended = false,
+  readWhileSuspended = false,
+  queue: controlledQueue,
+  onQueueChange,
+  queueHref,
 }: {
   context: string;
   tenantId: string;
   locationId: string;
   cache: FoodDraftCache;
+  canSend?: () => boolean;
+  captureSession?: () => () => boolean;
+  accessConfirmed?: boolean;
+  beginRead?: () => { confirm(): void; reject(failure: unknown): void; settle(): void } | null;
+  readFlight?: () => FoodReadFlight;
+  suspended?: boolean;
+  readWhileSuspended?: boolean;
+  queue?: MerchantWorkspaceQueue;
+  onQueueChange?: (event: MouseEvent<HTMLAnchorElement>, queue: MerchantWorkspaceQueue) => void;
+  queueHref?: (queue: MerchantWorkspaceQueue) => string;
 }) {
   const auth = useNuniSession();
   const accountId = auth.session?.platformAccountId ?? '';
@@ -64,23 +92,47 @@ export function MerchantOrderDesk({
     [context],
   );
   const scope = `merchant-food:${tenantId}:${locationId}`;
-  const [cursor, setCursor] = useState<string | undefined>();
+  const [cursor, setCursor] = useFoodDraft<string | undefined>(cache, `${scope}:cursor`, undefined);
+  const [localQueue, setLocalQueue] = useState<MerchantWorkspaceQueue>('all');
+  const currentQueue = controlledQueue ?? localQueue;
+  const previousQueue = useRef(currentQueue);
+  const queueHintId = useId();
   const load = useCallback(async () => {
-    const [queue, shift] = await Promise.all([
-      client.listMerchantOrders(tenantId, locationId, { limit: 50, cursor }),
-      client.getShift(tenantId, locationId).catch((error: unknown) => {
-        if (
-          error instanceof NuniError &&
-          error.status === 404 &&
-          error.code === 'FOOD_SHIFT_NOT_FOUND'
-        )
-          return null;
-        throw error;
-      }),
-    ]);
-    return { queue, shift };
-  }, [client, tenantId, locationId, cursor]);
-  const data = useFoodRead(load, { pollMs: FOOD_POLL_MS });
+    const observation = beginRead?.();
+    if (observation === null) throw new NuniError(409, 'SESSION_CHANGED');
+    // Each request can invalidate the workspace even after its sibling fails.
+    const reject = (failure: unknown): never => {
+      observation?.reject(failure);
+      throw failure;
+    };
+    try {
+      // Keep the poll in flight until both observations have settled.
+      const [queue, shift] = await Promise.allSettled([
+        client.listMerchantOrders(tenantId, locationId, { limit: 50, cursor }).catch(reject),
+        client.getShift(tenantId, locationId).catch((error: unknown) => {
+          if (
+            error instanceof NuniError &&
+            error.status === 404 &&
+            error.code === 'FOOD_SHIFT_NOT_FOUND'
+          )
+            return null;
+          return reject(error);
+        }),
+      ]);
+      if (queue.status === 'rejected') throw queue.reason;
+      if (shift.status === 'rejected') throw shift.reason;
+      observation?.confirm();
+      return { queue: queue.value, shift: shift.value };
+    } finally {
+      observation?.settle();
+    }
+  }, [beginRead, client, tenantId, locationId, cursor]);
+  const data = useFoodRead(load, {
+    pollMs: FOOD_POLL_MS,
+    paused: suspended && !readWhileSuspended,
+    serializeReads: !readFlight,
+    readFlight,
+  });
   const [opening, setOpening] = useFoodDraft(cache, `${scope}:opening`, '0');
   const [counted, setCounted] = useFoodDraft(cache, `${scope}:counted`, '');
   const [openNext, setOpenNext] = useFoodDraft(cache, `${scope}:open-next`, false);
@@ -99,6 +151,15 @@ export function MerchantOrderDesk({
   const [confirmed, setConfirmed] = useState(false);
   const [receipt, setReceipt] = useState('');
   const [shiftOpen, setShiftOpen] = useState(true);
+  const [wasSuspended, setWasSuspended] = useState(suspended);
+  if (suspended !== wasSuspended) {
+    setWasSuspended(suspended);
+    if (suspended) {
+      setSelected(null);
+      setConfirmed(false);
+      setConfirmedShift(null);
+    }
+  }
   const execute = (intent: FoodIntent) => {
     const args = [tenantId, locationId] as const;
     switch (intent.action) {
@@ -126,11 +187,18 @@ export function MerchantOrderDesk({
         throw new Error('Unsupported action');
     }
   };
+  // A remounted desk must load its own queue and shift before sending, even
+  // when the workspace detail is already confirmed and an old round is draining.
+  const canSubmit = !suspended && accessConfirmed && !!data.data;
+  const hasSubmitAccess = () => canSubmit && (canSend?.() ?? true);
   const task = useFoodMutation({
     cache,
     scope,
     accountId,
-    enabled: !!data.data,
+    settleAfterUnmount: true,
+    captureSession,
+    enabled: canSubmit,
+    canSend: hasSubmitAccess,
     execute,
     reload: data.reload,
     onSuccess(result, intent) {
@@ -155,7 +223,10 @@ export function MerchantOrderDesk({
       }
     },
   });
-  const locked = !data.data || task.busy || !!task.pending || task.storageBlocked;
+  function sendOrderIntent(intent: FoodIntent) {
+    void task.send(intent);
+  }
+  const locked = !canSubmit || task.busy || !!task.pending || task.storageBlocked;
   const incomingOrders = useMemo(
     () =>
       (data.data?.queue.orders ?? []).filter((order) => merchantOrderBucket(order) === 'incoming'),
@@ -166,6 +237,37 @@ export function MerchantOrderDesk({
       (data.data?.queue.orders ?? []).filter((order) => merchantOrderBucket(order) === 'active'),
     [data.data],
   );
+  useEffect(() => {
+    if (previousQueue.current === currentQueue) return;
+    // Already submitted work retains its original confirmation and recovery path.
+    if (task.busy || task.pending) return;
+    previousQueue.current = currentQueue;
+    setSelected(null);
+    setConfirmed(false);
+  }, [currentQueue, task.busy, task.pending]);
+  const hrefForQueue = (value: MerchantWorkspaceQueue) =>
+    queueHref?.(value) ??
+    merchantWorkspaceHref({ tenantId, locationId, section: 'orders', queue: value });
+  const changeQueue = (event: MouseEvent<HTMLAnchorElement>, value: MerchantWorkspaceQueue) => {
+    if (onQueueChange) {
+      onQueueChange(event, value);
+      return;
+    }
+    if (controlledQueue !== undefined || !isCurrentTabNavigationClick(event, event.currentTarget))
+      return;
+    event.preventDefault();
+    setLocalQueue(value);
+    if (value !== currentQueue && !task.busy && !task.pending) {
+      setSelected(null);
+      setConfirmed(false);
+    }
+  };
+  const visibleOrderCount =
+    currentQueue === 'incoming'
+      ? incomingOrders.length
+      : currentQueue === 'active'
+        ? activeOrders.length
+        : incomingOrders.length + activeOrders.length;
   useEffect(() => {
     if (!confirmedShift || !data.data || task.busy || task.pending) return;
     const shift = data.data.shift;
@@ -222,7 +324,7 @@ export function MerchantOrderDesk({
       (reasonRequired && form.reason === 'other' && form.detail.trim().length < 3)
     )
       return;
-    void task.send({
+    sendOrderIntent({
       action: selected.action,
       orderId: selected.orderId,
       input: {
@@ -237,6 +339,7 @@ export function MerchantOrderDesk({
       },
     });
   }
+  if (suspended) return null;
   return (
     <section className={styles.panel} aria-label="門市訂單工作台">
       <div className={styles.bar}>
@@ -255,8 +358,25 @@ export function MerchantOrderDesk({
       </div>
       <p>暫停接單後，已收到的餐點仍會留在這裡。每個動作依目前訂單與你的門市權限提供。</p>
       {data.loading && <p role="status">正在核對訂單與班別…</p>}
-      {data.error && <p role="alert">{data.error}</p>}
-      <FoodMutationStatus task={task} />
+      {data.error && (
+        <div>
+          <p role="alert">{data.error}</p>
+          {cursor && (
+            <Button
+              disabled={task.busy}
+              onClick={() => {
+                setSelected(null);
+                setConfirmed(false);
+                setShiftConfirm(false);
+                setCursor(undefined);
+              }}
+            >
+              回到第一頁待處理訂單
+            </Button>
+          )}
+        </div>
+      )}
+      <FoodMutationStatus task={task} retryDisabled={!canSubmit} />
       {receipt && <p role="status">{receipt}</p>}
       {data.data && (
         <div className={styles.stack}>
@@ -291,7 +411,7 @@ export function MerchantOrderDesk({
                   disabled={locked || !shiftConfirm || !cashValid(opening)}
                   onClick={() => {
                     if (!shiftConfirm || locked || !cashValid(opening)) return;
-                    void task.send({
+                    sendOrderIntent({
                       action: 'open-shift',
                       input: { openingCashMinor: Number(opening), idempotencyKey: foodKey() },
                     });
@@ -307,8 +427,55 @@ export function MerchantOrderDesk({
               <h3>待處理訂單</h3>
               <p className={styles.muted}>先處理待收款與確認，再進行備餐與取餐。</p>
             </div>
-            {!data.data.queue.orders.length && <p>這一頁沒有待處理的訂單。</p>}
-            {incomingOrders.length > 0 && (
+            <div className={deskStyles.filters}>
+              <nav aria-label="訂單篩選" aria-describedby={queueHintId}>
+                {(
+                  [
+                    { value: 'all', label: '全部', count: data.data.queue.orders.length },
+                    { value: 'incoming', label: '待收款與確認', count: incomingOrders.length },
+                    { value: 'active', label: '備餐與取餐', count: activeOrders.length },
+                  ] as const
+                ).map(({ value, label, count }) => (
+                  <Link
+                    key={value}
+                    href={hrefForQueue(value)}
+                    prefetch={false}
+                    aria-current={currentQueue === value ? 'page' : undefined}
+                    aria-label={`${label}，本頁 ${count} 筆`}
+                    onClick={(event) => changeQueue(event, value)}
+                  >
+                    <span>{label}</span>
+                    <span className={deskStyles.count} aria-hidden="true">
+                      {count}
+                    </span>
+                  </Link>
+                ))}
+              </nav>
+              <p id={queueHintId} className={deskStyles.hint}>
+                數字只包含目前這一頁已載入的訂單。
+              </p>
+            </div>
+            {visibleOrderCount === 0 && (
+              <div className={deskStyles.empty}>
+                <p>
+                  {currentQueue === 'all'
+                    ? '這一頁沒有待處理的訂單。'
+                    : currentQueue === 'incoming'
+                      ? '這一頁沒有待收款與確認的訂單。'
+                      : '這一頁沒有備餐與取餐的訂單。'}
+                </p>
+                {currentQueue !== 'all' && (
+                  <Link
+                    href={hrefForQueue('all')}
+                    prefetch={false}
+                    onClick={(event) => changeQueue(event, 'all')}
+                  >
+                    清除篩選，查看本頁全部訂單
+                  </Link>
+                )}
+              </div>
+            )}
+            {currentQueue !== 'active' && incomingOrders.length > 0 && (
               <div className={styles.orderGroup} aria-label="待收款與確認">
                 <h4 className={styles.orderGroupTitle}>
                   待收款與確認 <span>{incomingOrders.length}</span>
@@ -324,7 +491,7 @@ export function MerchantOrderDesk({
                       setConfirmed(false);
                     }}
                     onTicket={(action, ticketId) =>
-                      void task.send({
+                      sendOrderIntent({
                         action,
                         orderId: order.id,
                         ticketId,
@@ -335,7 +502,7 @@ export function MerchantOrderDesk({
                 ))}
               </div>
             )}
-            {activeOrders.length > 0 && (
+            {currentQueue !== 'incoming' && activeOrders.length > 0 && (
               <div className={styles.orderGroup} aria-label="進行中訂單">
                 <h4 className={styles.orderGroupTitle}>
                   備餐與取餐 <span>{activeOrders.length}</span>
@@ -351,7 +518,7 @@ export function MerchantOrderDesk({
                       setConfirmed(false);
                     }}
                     onTicket={(action, ticketId) =>
-                      void task.send({
+                      sendOrderIntent({
                         action,
                         orderId: order.id,
                         ticketId,
@@ -467,7 +634,7 @@ export function MerchantOrderDesk({
                         (openNext && !cashValid(nextCash))
                       )
                         return;
-                      void task.send({
+                      sendOrderIntent({
                         action: 'handover',
                         input: {
                           countedCashMinor: Number(counted),
