@@ -314,7 +314,10 @@ it.each([true, false])('plans a classroom destination using an existing origin (
   const card = within(screen.getByRole('region', { name: '教室定位結果' }));
   const action = () => card.queryByRole('button', { name: '將主顧樓設為終點' });
   expect(action()).toBeNull();
-  await act(async () => source.resolve([library, gate]));
+  // A non-empty live catalogue replaces the bundled places; include the real
+  // destination explicitly instead of expecting a silent fallback to bundled data.
+  const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  await act(async () => source.resolve([library, gate, classroom]));
   if (!shared) {
     expect(action()).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
@@ -337,12 +340,25 @@ it.each([true, false])('plans a classroom destination using an existing origin (
 });
 
 it('does not restore an origin from an invalid shared route for classroom planning', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
   render(<MapClient school="pu" query="PH303" route="missing-origin,library" />);
   await sourceSettled();
   const card = within(screen.getByRole('region', { name: '教室定位結果' }));
   expect(card.getByRole('link', { name: '使用 Google 地圖前往主顧樓' })).toBeTruthy();
   expect(card.queryByRole('button', { name: '將主顧樓設為終點' })).toBeNull();
   expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+});
+
+it('keeps a valid shared route when the live catalogue omits the classroom building', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([library, gate]);
+  render(<MapClient school="pu" query="PH303" route="gate,library" />);
+  await sourceSettled();
+  const card = within(screen.getByRole('region', { name: '教室定位結果' }));
+  expect(card.getByText(/目前地點資料無法確認/)).toBeTruthy();
+  expect(card.queryByRole('button', { name: '將主顧樓設為終點' })).toBeNull();
+  expect(card.queryByRole('link', { name: '使用 Google 地圖前往主顧樓' })).toBeNull();
+  const map = JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(map.route.map((place: MapLocation) => place.id)).toEqual(['gate', 'library']);
 });
 
 it('does not offer a provisional classroom destination while the campus source is syncing', async () => {
