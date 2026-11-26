@@ -22,6 +22,7 @@ import {
   appleWalkingDirectionsUrl,
   distanceMeters,
   formatDistance,
+  isUsableMapCoordinate,
   type MapCoordinate,
   type MapLocation,
 } from './mapService';
@@ -72,8 +73,7 @@ function confirmedRoutePlace(locations: readonly MapLocation[], chosen: MapLocat
     place.lat === chosen.lat && place.lng === chosen.lng &&
     (place.building ?? null) === (chosen.building ?? null) &&
     (place.floor ?? null) === (chosen.floor ?? null) &&
-    Number.isFinite(place.lat) && Math.abs(place.lat) <= 90 &&
-    Number.isFinite(place.lng) && Math.abs(place.lng) <= 180 ? place : null;
+    isUsableMapCoordinate(place) ? place : null;
 }
 
 export default function MapClient(props: MapProps) {
@@ -183,6 +183,7 @@ function MapContent({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const routeNoteId = useId();
   const detailNoteId = useId();
+  const classroomNoteId = useId();
   const [selection, setSelection] = useState<MapLocation | '' | 'revoked' | null>(null);
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [nearbyOnly, setNearbyOnly] = useState(false);
@@ -290,7 +291,8 @@ function MapContent({
   // Explicit selections (including closing a detail) and focus links take priority.
   // A missing explicit destination must not silently turn into another building.
   // A later source update can make a room ambiguous; derive this instead of retaining a guess.
-  const classroomPlace = classroomLinkActive && classroom.status === 'matched' ? classroom.matches[0] : null;
+  const classroomPlace = classroomLinkActive && classroom.status === 'matched'
+    ? confirmedRoutePlace(locations, classroom.matches[0] ?? null) : null;
   const automaticClassroomId = placeState.source === 'ready' ? classroomPlace?.id : undefined;
   const automaticPlace = focus ? focusedPlace : locations.find((location) => location.id === automaticClassroomId);
   const selected = typeof selection === 'object' && selection !== null
@@ -336,16 +338,24 @@ function MapContent({
   const returnUrl = encodeURIComponent(`/map?${returnParams}${hash}`);
   const platformLoginHref = `/login?returnUrl=${returnUrl}`;
   const schoolLoginHref = `/login?reconnect=school&returnUrl=${returnUrl}`;
+
   const pendingRoutePlaces = routeLocations?.filter((place) => isProvidencePendingVerification(publicSchool, place)) ?? [];
   const selectLocation = useCallback((location: MapLocation) => setSelection({ ...location }), []);
   const walkFrom = myLocation ?? (bundled ? PROVIDENCE_WALK_ORIGIN : null);
+
   const walkFromGate = Boolean(walkFrom && !myLocation);
-  const mapLocations = useMemo(() => {
-    const visible = new Map(filtered.map((location) => [location.id, location]));
-    for (const location of [...(routeLocations ?? []), ...(routeStart ? [routeStart] : []), ...(selected ? [selected] : [])])
-      visible.set(location.id, location);
-    return [...visible.values()];
-  }, [filtered, selected, routeLocations, routeStart]);
+  // `selected` is the unique current-source marker; an ID lookup on the
+  // full list would pick the first duplicate instead of the confirmed place.
+  const mapLocations = [
+    ...new Map(
+      [
+        ...filtered,
+        ...(routeLocations ?? []),
+        ...(routeStart ? [routeStart] : []),
+        ...(selected ? [selected] : []),
+      ].map((location) => [location.id, location] as const),
+    ).values(),
+  ];
 
   function locate() {
     const request = ++positionGeneration.current;
@@ -369,14 +379,22 @@ function MapContent({
       navigator.geolocation.getCurrentPosition(
         ({ coords }) => {
           if (!finishRequest()) return;
-          if (
-            !Number.isFinite(coords.latitude) || Math.abs(coords.latitude) > 90 ||
-            !Number.isFinite(coords.longitude) || Math.abs(coords.longitude) > 180
-          ) {
+
+          if (!isUsableMapCoordinate({ lat: coords.latitude, lng: coords.longitude })) {
+
             setPositionStatus('error');
             setPositionError('定位結果無效，請重新取得位置。');
             return;
           }
+
+          // Building-level navigation needs a reasonably precise fix. This is a
+          // product cutoff, not a guarantee that a reported fix is correct.
+          if (!Number.isFinite(coords.accuracy) || coords.accuracy < 0 || coords.accuracy > 100) {
+            setPositionStatus('error');
+            setPositionError('定位精度不足（需在 100 公尺內），請到空曠處重新定位，或手動選擇起點。');
+            return;
+          }
+
           setMyLocation({ lat: coords.latitude, lng: coords.longitude });
           setPositionStatus('idle');
         },
@@ -625,11 +643,27 @@ function MapContent({
             <p role="status">暫時無法確認這間教室的位置，請重新讀取地點資料或核對校方地圖。</p>
           ) : classroom.status === 'matched' && classroomPlace ? <>
             <p>可對應「{classroomPlace.name}」的位置。抵達後請依課表與現場標示確認教室。</p>
-            {selected?.id !== classroomPlace.id && (
-              <button className="btn" type="button" onClick={() => selectLocation(classroomPlace)}>
-                定位{classroomPlace.name}
-              </button>
-            )}
+            <p id={classroomNoteId}>
+              導航終點是建築地點標記，並非已核實的入口或室內教室；路線由第三方地圖規劃。
+              {isProvidencePendingVerification(school, classroomPlace) && (
+                <strong>這個地點只有單一資料來源，位置待再次確認。</strong>
+              )}
+            </p>
+            <div className={styles.actions}>
+              <a className="btn primary" href={walkingDirectionsUrl(classroomPlace, myLocation ?? undefined)}
+                aria-describedby={classroomNoteId} target="_blank" rel="noopener noreferrer">
+                使用 Google 地圖前往{classroomPlace.name}
+              </a>
+              <a className="btn" href={appleWalkingDirectionsUrl(classroomPlace, myLocation ?? undefined)}
+                aria-describedby={classroomNoteId} target="_blank" rel="noopener noreferrer">
+                使用 Apple 地圖前往{classroomPlace.name}
+              </a>
+              {selected?.id !== classroomPlace.id && (
+                <button className="btn" type="button" onClick={() => selectLocation(classroomPlace)}>
+                  定位{classroomPlace.name}
+                </button>
+              )}
+            </div>
           </> : classroom.status === 'ambiguous' ? <>
             <p>有多個相符地點，請核對位置後選擇。</p>
             <ul className={styles.classroomCandidates}>
@@ -646,7 +680,9 @@ function MapContent({
           </> : (
             <p>目前地點資料無法確認這間教室的位置。請改用建築全名搜尋，或核對校方地圖。</p>
           )}
-          {(placeState.source === 'error' || (placeState.source === 'ready' && (classroom.status === 'ambiguous' || classroom.status === 'unmatched'))) && (
+
+          {(placeState.source === 'error' || (placeState.source === 'ready' && (classroom.status !== 'matched' || !classroomPlace))) && (
+
             <div className={styles.actions}>
               <button className="btn" type="button" onClick={() => {
                 searchInputRef.current?.focus();
@@ -702,10 +738,20 @@ function MapContent({
           先前選擇的地點已變更或無法唯一確認，已停用地點導航。請重新選擇地點。
         </p>
       )}
-      {!sourcePending && focus && !locations.some((location) => location.id === focus) && (
-        <p className={styles.notice} role="status">
-          找不到連結指定的地點，請搜尋地點名稱。
-        </p>
+      {!sourcePending && focus && selection === null && !selected && (
+        <div className={styles.notice}>
+          <p role="status">
+            {ambiguousPlaceIds.has(focus)
+              ? '連結指定的地點識別碼重複，無法確認位置。'
+              : '找不到連結指定的地點，請搜尋地點名稱。'}
+          </p>
+          <button className="btn" type="button" onClick={() => {
+            setSelection('');
+            searchInputRef.current?.focus();
+          }}>
+            清除連結地點
+          </button>
+        </div>
       )}
       {bundled && (
         <section className={`card ${styles.source}`} aria-label="地圖資料來源">
@@ -883,7 +929,11 @@ function MapContent({
           <button
             className={styles.close}
             aria-label="關閉地點詳情"
-            onClick={() => setSelection('')}
+            onClick={() => {
+              setSelection('');
+              // The detail's close button unmounts, even if its marker is filtered out.
+              searchInputRef.current?.focus();
+            }}
           >
             ×
           </button>
@@ -949,6 +999,8 @@ function MapContent({
                 setCategory('全部');
                 setNearbyOnly(false);
                 setOnlyFavorites(false);
+                // Reset removes this empty-state button; keep keyboard navigation in the search.
+                searchInputRef.current?.focus();
               }}
             >
               清除搜尋條件

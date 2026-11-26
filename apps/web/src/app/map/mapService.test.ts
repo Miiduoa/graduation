@@ -4,6 +4,7 @@ import {
   formatDistance,
   walkingDirectionsUrl,
   appleWalkingDirectionsUrl,
+  isUsableMapCoordinate,
   loadMapFavorites,
   loadMapLocations,
   MapSourceTimeoutError,
@@ -75,6 +76,17 @@ it('builds Google and Apple walking links from exact marker coordinates without 
     .toBe('24.23,120.56');
   expect(new URL(walkingDirectionsUrl(location, start)).searchParams.get('origin'))
     .toBe('24.23,120.56');
+
+  for (const origin of [
+    { lat: 0, lng: 0 },
+    { lat: -0, lng: 0 },
+    { lat: 91, lng: 120 },
+    { lat: 24, lng: NaN },
+  ]) {
+    expect(isUsableMapCoordinate(origin)).toBe(false);
+    expect(new URL(walkingDirectionsUrl(location, origin)).searchParams.has('origin')).toBe(false);
+    expect(new URL(appleWalkingDirectionsUrl(location, origin)).searchParams.has('saddr')).toBe(false);
+  }
 });
 
 beforeEach(() => {
@@ -361,6 +373,54 @@ it('fails a stuck map source after the timeout instead of loading forever', asyn
     const settled = expect(result).rejects.toBeInstanceOf(MapSourceTimeoutError);
     await vi.advanceTimersByTimeAsync(50);
     await settled;
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('does not start a legacy POI read when the canonical response arrives after the deadline', async () => {
+  vi.useFakeTimers();
+  try {
+    let complete!: (value: ReturnType<typeof snapshot>) => void;
+    vi.mocked(getDocsFromServer).mockReturnValueOnce(new Promise((resolve) => {
+      complete = resolve;
+    }) as never);
+    // Supply a response to detect an unexpected extra read without an unhandled error.
+    respond(snapshot());
+    const result = loadMapLocations('pu', { timeoutMs: 50 });
+    const rejected = expect(result).rejects.toBeInstanceOf(MapSourceTimeoutError);
+    await vi.advanceTimersByTimeAsync(50);
+    await rejected;
+    complete(snapshot());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+    // Consume the queued response with a fresh request, not the expired one.
+    respond(snapshot(entry('library', { ...location, schoolId: 'pu' })));
+    await expect(loadMapLocations('pu')).resolves.toEqual([location]);
+    expect(getDocsFromServer).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.resetAllMocks();
+    vi.useRealTimers();
+  }
+});
+
+it('does not parse a legacy POI response that arrives after the shared deadline', async () => {
+  vi.useFakeTimers();
+  try {
+    respond(snapshot());
+    let complete!: (value: ReturnType<typeof snapshot>) => void;
+    vi.mocked(getDocsFromServer).mockReturnValueOnce(new Promise((resolve) => {
+      complete = resolve;
+    }) as never);
+    const readData = vi.fn(() => ({ ...location, schoolId: 'pu' }));
+    const result = loadMapLocations('pu', { timeoutMs: 50 });
+    const rejected = expect(result).rejects.toBeInstanceOf(MapSourceTimeoutError);
+    await vi.advanceTimersByTimeAsync(50);
+    await rejected;
+    expect(getDocsFromServer).toHaveBeenCalledTimes(2);
+    complete({ empty: false, docs: [{ id: 'library', data: readData }] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readData).not.toHaveBeenCalled();
   } finally {
     vi.useRealTimers();
   }
