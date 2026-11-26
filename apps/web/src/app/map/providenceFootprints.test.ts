@@ -526,6 +526,38 @@ describe('Providence OSM building outlines', () => {
     expect(parseProvidenceOsmFootprints({ elements: [{ ...way(255784049), geometry: Array(200).fill(library[0]) }] })).toEqual([]);
   });
 
+  it('bounds audited node consistency work before reading oversized rings', () => {
+    // The closed ring has one extra entry for its repeated first node.
+    // Use a synthetic oversized source and count indexed reads, not timing.
+    for (const count of [162, 200, 2000]) {
+      let reads = 0;
+      const nodes = new Proxy(Array.from({ length: count }, (_, index) => index + 1), {
+        get(target, key, receiver) {
+          if (typeof key === 'string' && /^\d+$/.test(key)) reads += 1;
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      const geometry = Array.from({ length: count }, () => library[0]);
+      expect(parseProvidenceOsmFootprints({
+        elements: [{ ...way(255784049, geometry), nodes }],
+      })).toEqual([]);
+      expect(reads, 'oversized node references must not be scanned').toBe(0);
+    }
+    // The inclusive limit (160 vertices plus closure) still accepts a
+    // simple synthetic ring around the fixture POI, with distinct node IDs.
+    const geometry = Array.from({ length: 160 }, (_, index) => {
+      const angle = 2 * Math.PI * index / 160;
+      return { lat: 24.22629 + Math.sin(angle) * 0.0001,
+        lon: 120.58137 + Math.cos(angle) * 0.0001 };
+    });
+    geometry.push({ ...geometry[0] });
+    const nodes = Array.from({ length: 160 }, (_, index) => index + 1);
+    nodes.push(nodes[0]);
+    expect(parseProvidenceOsmFootprints({
+      elements: [{ ...way(255784049, geometry), nodes }],
+    })).toHaveLength(1);
+  });
+
   it('rejects repeated trusted OSM way IDs rather than trusting the first outline', () => {
     const first = way(255784049, library, { building: 'yes', height: '12' });
     const conflicting = way(255784049, library, { building: 'yes', height: '90' });
