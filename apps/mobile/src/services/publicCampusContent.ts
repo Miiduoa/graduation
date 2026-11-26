@@ -25,6 +25,7 @@ import {
 } from '@campus/shared/src/campusAnnouncements';
 import { parseCampusAnnouncementSource, type CampusAnnouncementSource } from './campusAnnouncementSource';
 import { getRawAppEnv } from './release';
+import { campusEventInstant, type CampusEventTime } from '@campus/shared/src/campusEventTime';
 
 type SourceDocument = { id: string; data: () => Record<string, unknown> };
 
@@ -268,7 +269,7 @@ export async function loadCampusAnnouncement(
 }
 
 export type CampusEventSource = 'school-club-events' | 'school-events' | 'legacy-events';
-export type CampusEvent = ClubEvent & { source: CampusEventSource };
+export type CampusEvent = ClubEvent & { source: CampusEventSource; calendarTime?: CampusEventTime };
 export type CampusEventCursor = {
   schoolId: string;
   source: CampusEventSource;
@@ -338,10 +339,15 @@ export async function loadCampusEvent(
   for (const candidate of source ? [source as CampusEventSource] : EVENT_SOURCES) {
     const snapshot = await getDocFromServer(doc(db, ...eventPath(schoolId, candidate), id));
     if (!snapshot.exists()) continue;
-    if (candidate === 'legacy-events' && snapshot.data().schoolId !== schoolId) return null;
+    const data = snapshot.data()!;
+    if (candidate === 'legacy-events' && data.schoolId !== schoolId) return null;
     return {
-      ...event({ id: snapshot.id, data: () => snapshot.data()! }, schoolId),
+      ...event({ id: snapshot.id, data: () => data }, schoolId),
       source: candidate,
+      calendarTime: {
+        startsAt: campusEventInstant(data.startsAt),
+        endsAt: campusEventInstant(data.endsAt),
+      },
     };
   }
   return null;

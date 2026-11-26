@@ -433,6 +433,16 @@ test('old event links use the producer first, and legacy fallback checks school 
   await expect(loadCampusEvent('pu', 'e2')).resolves.toBeNull();
 });
 
+test.each(['2026-10-09', '2026-10-09T09:30', '2026-02-30T09:30:00+08:00'])(
+  'an ambiguous or invalid source date %s cannot seed a timed calendar draft',
+  async (startsAt) => {
+    jest
+      .mocked(getDocFromServer)
+      .mockResolvedValueOnce(eventDocument('e1', 'schools/pu/clubEvents', { startsAt }) as never);
+    expect((await loadCampusEvent('pu', 'e1'))?.calendarTime?.startsAt).toBe('');
+  },
+);
+
 test('pagination traverses more than 100 events without imposing a total-result cap', async () => {
   const docs = Array.from({ length: 131 }, (_, index) =>
     eventDocument(`e${String(index).padStart(3, '0')}`, 'schools/pu/clubEvents'),

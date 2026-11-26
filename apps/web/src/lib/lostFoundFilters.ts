@@ -1,4 +1,5 @@
 import {
+  categoryLabel,
   isOpenLostFoundStatus,
   type LostFoundItem,
 } from './lostFound';
@@ -6,6 +7,7 @@ import {
 export type LostFoundListFilters = {
   query: string;
   type: 'all' | 'lost' | 'found';
+  category?: string;
   status: 'all' | 'open' | 'resolved';
   mine: boolean;
 };
@@ -25,6 +27,7 @@ export function filterLostFoundItems(
   const needle = filters.query.trim().toLocaleLowerCase('zh-TW');
   return items.filter((item) => {
     if (filters.type !== 'all' && item.type !== filters.type) return false;
+    if (filters.category && item.category !== filters.category) return false;
     if (filters.status === 'open' && !isOpenLostFoundStatus(item.status)) return false;
     if (
       filters.status === 'resolved' &&
@@ -53,6 +56,7 @@ export function describeLostFoundFilterScope(
   const parts = [`範圍：${schoolName}`];
   if (filters.type === 'lost') parts.push('類型：遺失');
   if (filters.type === 'found') parts.push('類型：拾獲');
+  if (filters.category) parts.push(`分類：${categoryLabel(filters.category)}`);
   if (filters.status === 'open') parts.push('狀態：尋找中');
   if (filters.status === 'resolved') parts.push('狀態：已結案／過期');
   if (filters.mine) parts.push('僅顯示我刊登的');

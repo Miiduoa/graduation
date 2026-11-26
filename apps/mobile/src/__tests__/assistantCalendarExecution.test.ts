@@ -107,7 +107,7 @@ test('confirm writes exactly the reviewed row, reads it back, and preserves unre
     mutationId: task.proposal.mutationId, record: { ...event, id: task.proposal.mutationId,
       batchId: task.proposal.mutationId, source: { type: 'paste', name: '助理行程', line: 1, rawText: '' } } });
   expect(ledgerWrites()).toHaveLength(1);
-  expect(ledgerReads()).toHaveLength(2); // locked read, then independent readback
+  expect(ledgerReads()).toHaveLength(3); // locked read, primary verification, then independent readback
   const stored = await loadPersonalImports(scope);
   expect(stored.records).toEqual([JSON.parse(JSON.stringify(grade)), result.receipt.record]);
   expect(stored.batches.at(-1)).toEqual({ id: task.proposal.mutationId, createdAt: task.proposal.createdAt, count: 1 });

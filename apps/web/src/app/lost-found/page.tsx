@@ -25,6 +25,7 @@ import { replaceServiceListQuery, type ServiceListSearchParams } from '@/lib/ser
 import { useServiceListQuery } from '@/lib/useServiceListQuery';
 import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import { LostFoundItemTag } from '@/components/lost-found/LostFoundItemTag';
+import { LostFoundCategoryFilter } from '@/components/lost-found/LostFoundCategoryFilter';
 import styles from '@/components/lost-found/LostFound.module.css';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { PlatformLostFound, platformLostFoundHref } from '@/features/lost-found/PlatformLostFound';
@@ -148,7 +149,8 @@ function LostFoundPageContent({
     );
   }
   const hasFilters = Boolean(
-    filters.query.trim() || filters.type !== 'all' || filters.status !== 'all' || filters.mine,
+    filters.query.trim() || filters.type !== 'all' || filters.category ||
+      filters.status !== 'all' || filters.mine,
   );
 
   return (
@@ -231,6 +233,10 @@ function LostFoundPageContent({
                       status: event.target.value as LostFoundListFilters['status'],
                     })
                   }
+                />
+                <LostFoundCategoryFilter
+                  value={filters.category}
+                  onChange={(category) => patchFilters({ category })}
                 />
                 <label className={styles.muted} htmlFor={`${filterId}-mine`}>
                   <input

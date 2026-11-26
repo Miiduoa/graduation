@@ -1037,6 +1037,35 @@ it('responds to a new eventId without changing either event or entering edit mod
   expect(readPersonalImports({ owner: context.owner, schoolId: context.schoolId })).toHaveLength(2);
 });
 
+it('opens the scoped day from a campus event and lets the user keep browsing without creating a record', async () => {
+  const first = focusEvent();
+  const other = focusEvent('other', { title: '隔天行程', date: '2027-03-15' });
+  seedFocusedEvents([first, other]);
+  context.search = 'schoolId=pu&date=2027-03-14';
+  const view = render(<PersonalCalendar />);
+  await screen.findByRole('heading', { name: '2027-03-14 的行程' });
+  expect(screen.getByRole('heading', { name: first.title })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: other.title })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '下一月' }));
+  await act(async () => { window.dispatchEvent(new Event('campus-personal-imports-change')); });
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2027-04');
+  context.search = 'schoolId=pu&date=2027-03-15';
+  view.rerender(<PersonalCalendar />);
+  await screen.findByRole('heading', { name: other.title });
+  expect(screen.queryByRole('heading', { name: first.title })).toBeNull();
+  expect(screen.queryByLabelText('標題')).toBeNull();
+  expect(readPersonalImports({ owner: context.owner, schoolId: context.schoolId })).toHaveLength(2);
+});
+
+it.each(['schoolId=other&date=2027-03-14', 'schoolId=pu&date=2027-02-31'])(
+  'ignores an out-of-scope or invalid day request %s', (search) => {
+    context.search = search;
+    render(<PersonalCalendar />);
+    expect(screen.queryByRole('heading', { name: / 的行程$/ })).toBeNull();
+    expect(screen.getByRole('button', { name: '月格' }).getAttribute('aria-pressed')).toBe('true');
+  },
+);
+
 it.each(['移動焦點', '開始編輯'])(
   '深連結首次揭露失敗後，使用者%s會取消定位重試',
   async (action) => {

@@ -157,6 +157,25 @@ afterEach(() => {
 });
 
 describe('Google platform lost-found entry and identity', () => {
+  it('continues from my selected found item to open lost notices for its category at the same school', async () => {
+    vi.mocked(browserRequest).mockResolvedValueOnce({
+      item: { ...item, schoolId: 'ncu', category: 'keys', type: 'found' },
+    });
+    const view = render(<PlatformLostFound mode="detail" id={id}
+      search={{ schoolId: 'ncu', mine: '1', q: '舊搜尋' }} />);
+    const next = await screen.findByRole('link', { name: '查看同類遺失物' });
+    const url = new URL(next.getAttribute('href')!, window.location.origin);
+    expect(url.pathname).toBe('/lost-found/platform');
+    const search = Object.fromEntries(url.searchParams);
+    expect(search).toEqual({ schoolId: 'ncu', category: 'keys', type: 'lost', status: 'open' });
+    expect(browserRequest).toHaveBeenCalledTimes(1);
+    view.rerender(<PlatformLostFound mode="list" search={search} />);
+    expect(await screen.findByText('目前沒有符合條件的刊登。')).toBeTruthy();
+    expect((screen.getByLabelText('物品分類') as HTMLSelectElement).value).toBe('keys');
+    expect(browserRequest).toHaveBeenLastCalledWith('lost-found/list', 'context-a', {
+      ...search, q: '', mine: false, limit: 30,
+    });
+  });
   it('offers Google login with the original detail/campus and makes no anonymous read', () => {
     state.auth.session = null;
     render(<PlatformLostFound mode="detail" id={id} search={{ schoolId: 'ncu' }} />);
@@ -243,6 +262,7 @@ describe('Google platform lost-found entry and identity', () => {
       else state.auth[flag] = true;
       view.rerender(<PlatformLostFound mode="detail" id={id} search={{ schoolId: 'pu' }} />);
       expect(screen.queryByText(fields.contactInfo)).toBeNull();
+      expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
       expect(screen.queryByRole('button', { name: '編輯刊登' })).toBeNull();
     },
   );
@@ -404,6 +424,7 @@ describe('platform listing and recoverable writes', () => {
     vi.mocked(browserRequest).mockResolvedValueOnce({ item: { ...item, isOwner: false } });
     render(<PlatformLostFound mode="detail" id={id} search={{ schoolId: 'pu' }} />);
     expect(await screen.findByText(fields.contactInfo)).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
     expect(screen.queryByRole('button', { name: '編輯刊登' })).toBeNull();
     expect(screen.queryByRole('button', { name: '下架刊登' })).toBeNull();
   });

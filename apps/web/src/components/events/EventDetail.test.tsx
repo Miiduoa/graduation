@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { EventDetail } from './EventDetail';
 import type { CampusEvent } from '@/lib/campusEvents';
@@ -64,6 +64,147 @@ it('does not offer a calendar download until a real event time exists', async ()
   await screen.findByRole('heading', { name: '待公告活動' });
   expect((screen.getByRole('button', { name: '加入行事曆' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText('活動時間待公告，提供開始時間後即可加入行事曆。')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
+});
+
+it('offers the Taipei calendar day, then the scoped venue search as the event approaches, even without cloud chat', async () => {
+  const start = Date.parse('2027-11-30T16:20:00Z');
+  const end = start + 60 * 60_000;
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(start - 31 * 60_000);
+  const activity = event({
+    id: 'meet', title: '冬日演出', source: 'school-events', location: '禮堂 B1 & 北門',
+    startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString(),
+  });
+  loadCampusEvent.mockResolvedValue(activity);
+  try {
+    render(<EventDetail schoolId="nthu" schoolSearch="?schoolId=nthu&campus=nthu" eventId="meet"
+      sourceParam="school-events" listFilters={{ q: '搜尋', view: 'upcoming' }} />);
+    const suggestion = within(await screen.findByRole('region', { name: 'nuni 建議' }));
+    const dayLink = suggestion.getByRole('link', { name: '查看活動當天的個人行程' });
+    expect(dayLink.getAttribute('href')).toBe('/calendar?schoolId=nthu&date=2027-12-01');
+    expect(suggestion.getByText(/冬日演出/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '加入行事曆' })).toBeTruthy();
+    clock.mockReturnValue(start - 30 * 60_000);
+    fireEvent.focus(window);
+    const mapLink = suggestion.getByRole('link', { name: '在校園地圖查地點' });
+    const map = new URL(mapLink.getAttribute('href')!, 'https://campus.local');
+    expect(map.pathname).toBe('/map');
+    expect(Object.fromEntries(map.searchParams)).toEqual({ schoolId: 'nthu', query: activity.location });
+    expect(suggestion.queryByRole('link', { name: '查看活動當天的個人行程' })).toBeNull();
+    clock.mockReturnValue(start);
+    fireEvent.focus(window);
+    expect(suggestion.getByText(/正在進行/)).toBeTruthy();
+    clock.mockReturnValue(end);
+    fireEvent.focus(window);
+    expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+it.each(['線上講座', 'Google Meet', '地點待公告', 'https://meet.example/join', undefined])(
+  'does not send an ongoing event with location %s to a physical map', async (location) => {
+    loadCampusEvent.mockResolvedValue(event({
+      id: 'remote', title: '同步活動', source: 'school-events', location,
+      startsAt: new Date(Date.now() - 60_000).toISOString(), endsAt: new Date(Date.now() + 60_000).toISOString(),
+    }));
+    render(<EventDetail schoolId="nthu" schoolSearch="?schoolId=nthu" eventId="remote" sourceParam="school-events" />);
+    await screen.findByRole('heading', { name: '同步活動' });
+    expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
+  },
+);
+
+it('switches the current action and retires it at exact timer boundaries without focus or a reload', async () => {
+  vi.useFakeTimers();
+  const now = Date.UTC(2027, 1, 3, 4, 5, 6);
+  const start = now + 30 * 60_000 + 850;
+  vi.setSystemTime(now);
+  loadCampusEvent.mockResolvedValue(event({
+    id: 'tour', title: '校園導覽', location: '圖書館', source: 'school-events',
+    startsAt: new Date(start).toISOString(), endsAt: new Date(start + 1_000).toISOString(),
+  }));
+  try {
+    await act(async () => {
+      render(<EventDetail schoolId="nthu" schoolSearch="?schoolId=nthu" eventId="tour" sourceParam="school-events" />);
+    });
+    act(() => vi.advanceTimersByTime(849));
+    expect(screen.getByRole('link', { name: '查看活動當天的個人行程' }).getAttribute('href'))
+      .toBe('/calendar?schoolId=nthu&date=2027-02-03');
+    act(() => vi.advanceTimersByTime(1));
+    const map = screen.getByRole('link', { name: '在校園地圖查地點' });
+    expect(map.getAttribute('href')).toBe(`/map?${new URLSearchParams({ schoolId: 'nthu', query: '圖書館' })}`);
+    act(() => vi.advanceTimersByTime(30 * 60_000));
+    expect(screen.getByText(/「校園導覽」正在進行/)).toBeTruthy();
+    act(() => vi.advanceTimersByTime(999));
+    expect(screen.getByRole('link', { name: '在校園地圖查地點' })).toBe(map);
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
+    expect(screen.getByText('已結束')).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('withdraws the visible suggestion when a reload finds that the selected event was removed', async () => {
+  loadCampusEvent.mockResolvedValueOnce(event({
+    id: 'workshop', title: '工作坊', source: 'school-events', startsAt: new Date(Date.now() + 86_400_000).toISOString(),
+  })).mockResolvedValueOnce(null);
+  render(<EventDetail schoolId="nthu" schoolSearch="?schoolId=nthu" eventId="workshop" sourceParam="school-events" />);
+  await screen.findByRole('region', { name: 'nuni 建議' });
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
+  expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
+  await screen.findByRole('heading', { name: '找不到這場活動' });
+  expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
+});
+
+it('keeps a legacy display date without recommending plans for an ambiguous source time', async () => {
+  loadCampusEvent.mockResolvedValue(event({
+    id: 'legacy', title: '舊活動', source: 'legacy-events',
+    startsAt: new Date(Date.now() + 86_400_000).toISOString(), calendarTime: { startsAt: '', endsAt: '' },
+  }));
+  render(<EventDetail schoolId="nthu" schoolSearch="?schoolId=nthu" eventId="legacy" sourceParam="legacy-events" />);
+  await screen.findByRole('heading', { name: '舊活動' });
+  expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
+  expect(screen.getByText('時間待公告')).toBeTruthy();
+  expect(screen.queryByText('即將開始')).toBeNull();
+});
+
+it('keeps the badge on calendarTime when the display start would look upcoming', async () => {
+  const start = Date.parse('2027-11-30T16:20:00Z');
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+  try {
+    loadCampusEvent.mockResolvedValue(event({
+      id: 'legacy', title: '舊顯示時間', source: 'legacy-events', location: '禮堂',
+      startsAt: new Date(start + 86_400_000).toISOString(),
+      calendarTime: { startsAt: new Date(start - 5 * 60_000).toISOString() },
+    }));
+    render(<EventDetail schoolId="nthu" schoolSearch="?schoolId=nthu" eventId="legacy" sourceParam="legacy-events" />);
+    await screen.findByRole('heading', { name: '舊顯示時間' });
+    expect(screen.getByText('已開始')).toBeTruthy();
+    expect(screen.queryByText('即將開始')).toBeNull();
+    expect(screen.getByRole('link', { name: '在校園地圖查地點' })).toBeTruthy();
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+it('still offers the venue map after a physical event has started without an end time', async () => {
+  const start = Date.parse('2027-11-30T16:20:00Z');
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(start + 5 * 60_000);
+  try {
+    loadCampusEvent.mockResolvedValue(event({
+      id: 'open-end', title: '開放式活動', source: 'school-events', location: '禮堂',
+      startsAt: new Date(start).toISOString(),
+    }));
+    render(<EventDetail schoolId="nthu" schoolSearch="?schoolId=nthu" eventId="open-end" sourceParam="school-events" />);
+    const suggestion = within(await screen.findByRole('region', { name: 'nuni 建議' }));
+    expect(suggestion.getByText(/已開始/)).toBeTruthy();
+    expect(suggestion.getByRole('link', { name: '在校園地圖查地點' }).getAttribute('href'))
+      .toBe(`/map?${new URLSearchParams({ schoolId: 'nthu', query: '禮堂' })}`);
+    expect(screen.getByText('已開始')).toBeTruthy();
+  } finally {
+    clock.mockRestore();
+  }
 });
 
 it('rejects invalid source without probing collections by id alone', async () => {
