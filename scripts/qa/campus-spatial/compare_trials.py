@@ -71,15 +71,20 @@ def _date(value: str, label: str) -> date:
         raise ValueError(f"{label}: expected YYYY-MM-DD") from error
 
 
-def _cohort_app_versions(repeats: dict[int, list[dict]]) -> dict[str, str] | None:
+def _cohort_app_versions(repeats: dict[int, list[dict]]) -> tuple[dict[str, str] | None, tuple[str, ...]]:
     versions: dict[str, str] = {}
+    drifted: set[str] = set()
     for batch in repeats.values():
         for entry in batch:
             product, version = entry["product"], entry["app_version"]
-            if product in versions and versions[product] != version:
-                return None
-            versions[product] = version
-    return versions
+            previous = versions.get(product)
+            if previous is not None and previous != version:
+                drifted.add(product)
+            else:
+                versions[product] = version
+    if drifted:
+        return None, tuple(sorted(drifted))
+    return versions, ()
 
 
 def audit_rows(rows: list[dict[str, str]]) -> dict:
@@ -205,10 +210,11 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
             continue
         # Never pool measurements of different releases of any one product.
         # A fourth repeat after an update must not be silently discarded either.
-        versions = _cohort_app_versions(repeats)
+        versions, drifted_products = _cohort_app_versions(repeats)
         if versions is None:
+            named = ", ".join(drifted_products)
             pending.append({"scenario_id": metadata[0], "repeats": sorted(repeats),
-                            "reasons": ["product app versions changed across repeats; no mixed-version metrics"]})
+                            "reasons": [f"product app versions changed across repeats ({named}); no mixed-version metrics"]})
             continue
         # Performance and visual medians are comparable only when every product
         # has measured the metric in every repeat; do not cherry-pick samples.

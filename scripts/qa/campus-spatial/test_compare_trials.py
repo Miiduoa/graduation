@@ -29,6 +29,8 @@ class AuditTrialsTests(unittest.TestCase):
         self.assertEqual(result["pending"], [])
         self.assertEqual(len(result["ready"]), 1)
         self.assertEqual(result["ready"][0]["metrics"]["nuni"]["median_seconds"], 12.5)
+        self.assertEqual(result["ready"][0]["app_versions"],
+                         {product: "test-build" for product in PRODUCTS})
         self.assertNotIn("winner", result["ready"][0])
 
     def test_stable_distinct_product_versions_are_reported(self):
@@ -51,6 +53,7 @@ class AuditTrialsTests(unittest.TestCase):
                 self.assertEqual(report["errors"], [])
                 self.assertEqual(report["ready"], [])
                 self.assertTrue(any("mixed-version metrics" in str(item)
+                                    and product in str(item)
                                     for item in report["pending"]))
 
     def test_version_drift_in_fourth_repeat_cannot_be_cherry_picked(self):
