@@ -140,7 +140,7 @@ describe('reviewed outdoor entrance route handoff', () => {
       null,
       {},
       [review, null],
-      [review, ,],
+      Object.assign(new Array<unknown>(2), { 0: review }),
       [review, { schoolId: 'fixture' }],
       [review, { schoolId: 'fixture', destination: { id: 2 } }],
       [review, { schoolId: 'fixture', destination: { id: ' fixture-building ' } }],
