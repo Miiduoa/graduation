@@ -338,18 +338,18 @@ function MapContent({
   const selectLocation = useCallback((location: MapLocation) => setSelection({ ...location }), []);
   const walkFrom = myLocation ?? (school === 'pu' ? PROVIDENCE_WALK_ORIGIN : null);
   const walkFromGate = Boolean(walkFrom && !myLocation);
-  const mapLocations = useMemo(() => {
-    const visible = new Map(filtered.map((location) => [location.id, location]));
-    for (const location of [...(routeLocations ?? []), ...(routeStart ? [routeStart] : [])])
-      visible.set(location.id, location);
-    // The ID comes from the unique, validated selection above. Read the marker
-    // from the current source rather than depending on the aliased selection object.
-    if (selectedId !== undefined) {
-      const place = locations.find((location) => location.id === selectedId);
-      if (place) visible.set(selectedId, place);
-    }
-    return [...visible.values()];
-  }, [filtered, locations, selectedId, routeLocations, routeStart]);
+  // `selected` is the unique current-source marker; an ID lookup on the
+  // full list would pick the first duplicate instead of the confirmed place.
+  const mapLocations = [
+    ...new Map(
+      [
+        ...filtered,
+        ...(routeLocations ?? []),
+        ...(routeStart ? [routeStart] : []),
+        ...(selected ? [selected] : []),
+      ].map((location) => [location.id, location] as const),
+    ).values(),
+  ];
 
   function locate() {
     const request = ++positionGeneration.current;
