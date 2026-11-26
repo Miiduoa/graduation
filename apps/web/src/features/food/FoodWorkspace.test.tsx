@@ -460,7 +460,7 @@ it('surfaces pickup as the next step for a ready order without inventing credent
   render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" />);
   await screen.findByText('米飯店 · 可以取餐');
   const detail = screen.getByRole('region', { name: '訂單詳情' });
-  expect(detail.textContent).toContain('餐點好了。請到店出示取餐憑證。');
+  expect(detail.textContent).toContain('「米飯店」的餐點已備妥，請在櫃檯出示取餐憑證。');
   expect(screen.getByRole('button', { name: '出示取餐憑證' })).toBeTruthy();
   expect(screen.queryByLabelText('一次性取餐憑證')).toBeNull();
   expect(screen.queryByText('已結束的訂單')).toBeNull();

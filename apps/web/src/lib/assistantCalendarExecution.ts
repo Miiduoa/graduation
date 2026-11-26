@@ -151,7 +151,15 @@ export async function mirrorAssistantCalendarReceipt(
       nextSync = parsePersonalImportSyncState({ ...sync, acknowledged }, target.schoolId);
     }
     const next = { records: existing ? state.records : [...state.records, record], sync: nextSync };
-    await checkpoint(next);
+    try {
+      await checkpoint(next);
+    } catch (error) {
+      requireScope(target, active);
+      blocked(
+        'ASSISTANT_CALENDAR_LOCAL_VERIFY_FAILED',
+        error instanceof Error ? error.message : '無法確認這台裝置已保存行程，請重新核對顯示。',
+      );
+    }
     requireScope(target, active);
     const saved = readPersonalImports(target).filter((row) => row.id === record.id);
     if (!personalImportRecordsEqual(saved, [record]) ||
