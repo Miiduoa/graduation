@@ -7,7 +7,7 @@ const {
   assertSucceeds,
   initializeTestEnvironment,
 } = require('@firebase/rules-unit-testing');
-const { serverTimestamp, deleteField } = require('firebase/firestore');
+const { serverTimestamp, deleteField, documentId } = require('firebase/firestore');
 const { getBytes } = require('firebase/storage');
 
 const projectId = 'demo-campus-security';
@@ -97,6 +97,961 @@ after(async () => {
 });
 
 describe('firestore security rules', () => {
+
+  test('health records require the target-school role or patient ownership', async () => {
+    const paths = [
+      'schools/pu/healthRecords/private-record',
+      'schools/pu/healthAppointments/private-appointment',
+    ];
+    await seedFirestore(async (db) => {
+      for (const uid of ['admin', 'healthStaff', 'patient', 'student']) {
+        await db.doc('users/' + uid).set(campusBoundProfile('pu'));
+        await db.doc('schools/pu/members/' + uid).set({
+          status: 'active', role: uid === 'admin' ? 'admin' : 'student',
+        });
+      }
+      await db.doc('schools/pu/serviceRoles/healthStaff').set({
+        status: 'active', health: true,
+      });
+      for (const path of paths) {
+        await db.doc(path).set({
+          userId: 'patient', notes: 'Synthetic private care details',
+        });
+      }
+    });
+    const admin = testEnv.authenticatedContext('admin').firestore();
+    const staff = testEnv.authenticatedContext('healthStaff').firestore();
+    const patient = testEnv.authenticatedContext('patient').firestore();
+    const student = testEnv.authenticatedContext('student').firestore();
+    const stranger = testEnv.authenticatedContext('stranger').firestore();
+    const check = async (db, allowed) => {
+      for (const path of paths) {
+        const read = db.doc(path).get({ source: 'server' });
+        if (allowed) await assertSucceeds(read);
+        else await assertFails(read);
+      }
+    };
+    await check(admin, true);
+    await check(staff, true);
+    await check(patient, true);
+    await check(student, false);
+    await check(stranger, false);
+
+    for (const profile of [null, { status: 'active' }]) {
+      await seedFirestore(async (db) => {
+        for (const uid of ['admin', 'healthStaff']) {
+          const ref = db.doc('users/' + uid);
+          if (profile === null) await ref.delete();
+          else await ref.set(profile);
+        }
+      });
+      await Promise.all([check(admin, true), check(staff, true)]);
+    }
+
+    // Retain source-school administrator/service grants and the same auth context.
+    await seedFirestore(async (db) => {
+      await db.doc('users/admin').set(campusBoundProfile('other'));
+      await db.doc('users/healthStaff').set(campusBoundProfile('other'));
+    });
+    await Promise.all([check(admin, true), check(staff, true)]);
+    // Patients must still be able to retrieve their own records after transfer.
+    await seedFirestore(db => db.doc('users/patient').set(campusBoundProfile('other')));
+    await check(patient, true);
+
+    // Either profile field can differ while the target-school role stays active.
+    await seedFirestore(async (db) => {
+      await db.doc('users/admin').set({
+        status: 'active', schoolId: 'pu', primarySchoolId: 'other',
+      });
+      await db.doc('users/healthStaff').set({
+        status: 'active', schoolId: 'other', primarySchoolId: 'pu',
+      });
+    });
+    await Promise.all([check(admin, true), check(staff, true)]);
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/admin').set(campusBoundProfile('pu'));
+      await db.doc('users/healthStaff').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/admin').update({ status: 'revoked' });
+      await db.doc('schools/pu/serviceRoles/healthStaff').update({ status: 'revoked' });
+    });
+    await Promise.all([check(admin, false), check(staff, false)]);
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/admin').update({ status: 'active' });
+      await db.doc('schools/pu/serviceRoles/healthStaff').update({ status: 'active' });
+    });
+    await Promise.all([check(admin, true), check(staff, true)]);
+    await seedFirestore(async (db) => {
+      await db.doc('users/healthStaff').delete();
+      await db.doc('schools/pu/serviceRoles/healthStaff').update({ status: 'revoked' });
+    });
+    await check(staff, false);
+  });
+
+
+  test('private knowledge reads follow active school and course roles', async () => {
+    const group = 'groups/ai-knowledge-campus-transfer';
+    const schoolOnly = 'schools/pu/aiKnowledge/school-only';
+    const staffOnly = 'schools/pu/aiKnowledge/staff-only';
+    const publicChunk = 'schools/pu/aiKnowledge/public-chunk';
+    const groupOnly = group + '/aiKnowledge/private-course-chunk';
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      for (const uid of ['alice', 'editor']) {
+        await db.doc('users/' + uid).set(campusBoundProfile('pu'));
+        await db.doc('schools/pu/members/' + uid)
+          .set({ status: 'active', role: uid === 'editor' ? 'editor' : 'student' });
+        await db.doc(group + '/members/' + uid).set({ status: 'active', role: 'member' });
+      }
+      await db.doc(schoolOnly).set({ visibility: 'school', content: 'Campus-only synthetic fragment' });
+      await db.doc(staffOnly).set({ visibility: 'restricted', content: 'Staff-only synthetic fragment' });
+      await db.doc(publicChunk).set({ visibility: 'public', content: 'Public synthetic fragment' });
+      await db.doc(groupOnly).set({ content: 'Private course synthetic fragment' });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const editor = testEnv.authenticatedContext('editor').firestore();
+    const outsider = testEnv.authenticatedContext('outsider').firestore();
+
+    await assertSucceeds(alice.doc(schoolOnly).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(groupOnly).get({ source: 'server' }));
+    await assertFails(alice.doc(staffOnly).get({ source: 'server' }));
+    await assertSucceeds(editor.doc(staffOnly).get({ source: 'server' }));
+    await assertSucceeds(outsider.doc(publicChunk).get({ source: 'server' }));
+    await assertFails(outsider.doc(schoolOnly).get({ source: 'server' }));
+    await assertFails(outsider.doc(groupOnly).get({ source: 'server' }));
+
+    // Membership and SDK auth context remain unchanged across both transfers.
+    await seedFirestore((db) => db.doc('users/alice').set(campusBoundProfile('other')));
+    for (let replay = 0; replay < 2; replay++) {
+      await assertSucceeds(alice.doc(schoolOnly).get({ source: 'server' }));
+      await assertSucceeds(alice.doc(groupOnly).get({ source: 'server' }));
+    }
+    await assertSucceeds(alice.doc(publicChunk).get({ source: 'server' }));
+    await seedFirestore((db) => db.doc('users/editor').set(campusBoundProfile('other')));
+    await assertSucceeds(editor.doc(staffOnly).get({ source: 'server' }));
+
+    // Split profile bindings leave the active target memberships unchanged.
+    await seedFirestore((db) => db.doc('users/alice').set({
+      status: 'active', schoolId: 'other', primarySchoolId: 'pu',
+    }));
+    await assertSucceeds(alice.doc(schoolOnly).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(groupOnly).get({ source: 'server' }));
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('users/editor').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/alice').update({ status: 'revoked' });
+    });
+    await assertFails(alice.doc(schoolOnly).get({ source: 'server' }));
+    await assertFails(alice.doc(groupOnly).get({ source: 'server' }));
+    await seedFirestore((db) => db.doc('schools/pu/members/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.doc(schoolOnly).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(groupOnly).get({ source: 'server' }));
+    await seedFirestore((db) => db.doc(group + '/members/alice').update({ status: 'revoked' }));
+    await assertFails(alice.doc(groupOnly).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(schoolOnly).get({ source: 'server' }));
+    await seedFirestore((db) => db.doc(group + '/members/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.doc(groupOnly).get({ source: 'server' }));
+    await seedFirestore((db) => db.doc('users/editor').delete());
+    await assertSucceeds(editor.doc(staffOnly).get({ source: 'server' }));
+    await seedFirestore((db) => db.doc('users/editor').set(campusBoundProfile('pu')));
+    await assertSucceeds(editor.doc(staffOnly).get({ source: 'server' }));
+  });
+
+
+  test('new group creation requires active membership in the target school', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      // Keep both memberships active to model simultaneous enrollment.
+      await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'student' });
+      await db.doc('schools/other-school/members/alice').set({ status: 'active', role: 'student' });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const createGroup = (id, schoolId = 'pu') =>
+      alice.doc('groups/' + id).set({
+        schoolId, createdBy: 'alice', name: 'Course',
+        type: 'course', verification: { status: 'unverified' },
+      });
+    await assertSucceeds(createGroup('school-create-valid'));
+    await assertSucceeds(createGroup('school-create-wrong-campus', 'other-school'));
+
+    // Both memberships remain active after the login school changes.
+    await seedFirestore(db => db.doc('users/alice').set(campusBoundProfile('other-school')));
+    await Promise.all([
+      assertSucceeds(createGroup('school-create-old-replay-1')),
+      assertSucceeds(createGroup('school-create-old-replay-2')),
+    ]);
+    await assertSucceeds(createGroup('school-create-new-valid', 'other-school'));
+
+    // Split profile bindings still permit creation at either active school.
+    await seedFirestore(db => db.doc('users/alice').set({
+      status: 'active', schoolId: 'other-school', primarySchoolId: 'pu',
+    }));
+    await assertSucceeds(createGroup('school-create-conflict-pu'));
+    await assertSucceeds(createGroup('school-create-conflict-other', 'other-school'));
+
+    // Active membership still authorizes creation when the profile is missing.
+    await seedFirestore(db => db.doc('users/alice').delete());
+    await assertSucceeds(createGroup('school-create-profile-missing'));
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/alice').update({ status: 'removed' });
+    });
+    await assertFails(createGroup('school-create-membership-revoked'));
+    await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'active' }));
+    await assertSucceeds(createGroup('school-create-restored'));
+  });
+
+  test('course materials and quizzes require active school and manager membership', async () => {
+    const groupId = 'course-curriculum-replay';
+    const root = 'groups/' + groupId;
+    const paths = [
+      root + '/knowledgeBase/course-handout',
+      root + '/modules/week-one',
+      root + '/modules/week-one/materials/lecture',
+      root + '/quizzes/unit-quiz',
+      root + '/milestones/first-milestone',
+    ];
+    await seedFirestore(async (db) => {
+      await db.doc(root).set({ schoolId: 'pu', type: 'course', createdBy: 'teacher' });
+      await db.doc('users/teacher').set(campusBoundProfile('pu'));
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/teacher').set({ role: 'faculty', status: 'active' });
+      await db.doc('schools/pu/members/alice').set({ role: 'student', status: 'active' });
+      await db.doc(root + '/members/teacher').set({ role: 'instructor', status: 'active' });
+      await db.doc(root + '/members/alice').set({ role: 'member', status: 'active' });
+      for (const [i, p] of paths.entries()) {
+        await db.doc(p).set({ title: 'Original ' + i, type: 'reference' });
+      }
+    });
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const student = testEnv.authenticatedContext('alice').firestore();
+    // Normal instructor workflows remain possible; students cannot edit them.
+    for (const p of paths) {
+      await assertFails(student.doc(p).update({ title: 'Student takeover' }));
+      await assertSucceeds(teacher.doc(p).update({ title: 'Current instructor edit' }));
+    }
+
+    // The same teaching grants stay active after login at another school.
+    await seedFirestore(db => db.doc('users/teacher').set(campusBoundProfile('other-school')));
+    for (const [i, p] of paths.entries()) {
+      await assertSucceeds(teacher.doc(p).update({ title: 'Stale manager write' }));
+      await assertSucceeds(teacher.doc(p + '-replay-' + i).set({ title: 'Replayed new item' }));
+    }
+    // A split profile binding also leaves both grants intact.
+    await seedFirestore(db => db.doc('users/teacher').set({
+      status: 'active', schoolId: 'other-school', primarySchoolId: 'pu',
+    }));
+    for (const p of paths) {
+      await assertSucceeds(teacher.doc(p).update({ title: 'Conflicting campus' }));
+    }
+    await seedFirestore(async db => {
+      await db.doc('users/teacher').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/teacher').update({ status: 'revoked' });
+    });
+    for (const p of paths) {
+      await assertFails(teacher.doc(p).update({ title: 'School revoked' }));
+    }
+    await seedFirestore(async db => {
+      await db.doc('schools/pu/members/teacher').update({ status: 'active' });
+      await db.doc(root + '/members/teacher').update({ status: 'revoked' });
+    });
+    for (const p of paths) {
+      await assertFails(teacher.doc(p).update({ title: 'Course revoked' }));
+    }
+    await seedFirestore(db => db.doc(root + '/members/teacher').update({ status: 'active' }));
+    for (const [i, p] of paths.entries()) {
+      await assertSucceeds(teacher.doc(p).update({ title: 'Reauthorized edit ' + i }));
+      // KnowledgeBase deletions are intentionally forbidden even for teachers.
+      if (p.includes('/knowledgeBase/')) {
+        await assertFails(teacher.doc(p).delete());
+      } else {
+        await assertSucceeds(teacher.doc(p).delete());
+      }
+      await assertSucceeds(teacher.doc(p + '-restored-' + i).set({ title: 'Reauthorized create' }));
+    }
+  });
+
+  test('group administration requires an active target-school manager', async () => {
+    const groupPath = 'groups/campus-admin-replay';
+    const memberPath = groupPath + '/members/alice';
+    const managerPath = groupPath + '/members/teacher';
+    const legacyPath = 'groupMembers/campus-admin-replay-alice';
+    await seedFirestore(async (db) => {
+      await db.doc(groupPath).set({
+        schoolId: 'pu', type: 'course', createdBy: 'teacher', title: 'Course',
+      });
+      await db.doc('users/teacher').set(campusBoundProfile('pu'));
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/teacher').set({ status: 'active', role: 'faculty' });
+      await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'student' });
+      await db.doc(managerPath).set({ role: 'instructor', status: 'active' });
+      await db.doc(memberPath).set({ role: 'member', status: 'active' });
+      await db.doc(legacyPath).set({
+        groupId: 'campus-admin-replay', userId: 'alice', role: 'member', status: 'active',
+      });
+    });
+    // Reuse the same authenticated contexts throughout revocation and restoration.
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const group = teacher.doc(groupPath);
+    const member = teacher.doc(memberPath);
+    const legacy = teacher.doc(legacyPath);
+    await assertFails(alice.doc(groupPath).update({ title: 'Student takeover' }));
+    await assertFails(alice.doc(memberPath).update({ status: 'removed' }));
+    await assertFails(alice.doc(legacyPath).update({ status: 'removed' }));
+    await assertSucceeds(group.update({ title: 'Instructor edit' }));
+    await assertSucceeds(member.update({ status: 'removed' }));
+    await assertSucceeds(legacy.update({ status: 'removed' }));
+    await seedFirestore(async (db) => {
+      await db.doc(memberPath).update({ status: 'active' });
+      await db.doc(legacyPath).update({ status: 'active' });
+      await db.doc('users/teacher').set(campusBoundProfile('other-school'));
+    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await assertSucceeds(group.update({ title: 'Stale instructor edit' }));
+      await assertSucceeds(member.update({ status: 'removed' }));
+      await assertSucceeds(legacy.update({ status: 'removed' }));
+    }
+    // Group administration follows the target memberships.
+    await seedFirestore(async (db) => {
+      await db.doc('users/teacher').set({
+        status: 'active', schoolId: 'other-school', primarySchoolId: 'pu',
+      });
+    });
+    await assertSucceeds(group.update({ title: 'Conflicting campus edit' }));
+    await assertSucceeds(member.update({ status: 'removed' }));
+    await assertSucceeds(legacy.update({ status: 'removed' }));
+    await seedFirestore(async (db) => {
+      await db.doc('users/teacher').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/teacher').update({ status: 'removed' });
+    });
+    await assertFails(group.update({ title: 'School revoked' }));
+    await assertFails(member.delete());
+    await assertFails(legacy.update({ status: 'removed' }));
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/teacher').update({ status: 'active' });
+      await db.doc(managerPath).update({ status: 'removed' });
+    });
+    await assertFails(group.update({ title: 'Class revoked' }));
+    await assertFails(member.update({ status: 'removed' }));
+    await seedFirestore(async (db) => {
+      await db.doc(managerPath).update({ status: 'active' });
+    });
+    await assertSucceeds(group.update({ title: 'Restored manager edit' }));
+    await assertSucceeds(legacy.update({ status: 'removed' }));
+    await assertSucceeds(member.delete());
+    await assertSucceeds(group.delete());
+  });
+
+  test('post authors cannot reopen manager-held publication states or replay a stale edit', async () => {
+    const groupId = 'publication-boundary';
+    const path = (name) => `groups/${groupId}/posts/${name}`;
+    await seedFirestore(async (db) => {
+      await db.doc(`groups/${groupId}`).set({ schoolId: 'pu', type: 'course' });
+      for (const uid of ['alice', 'bob', 'charlie', 'mallory']) {
+        const school = uid === 'mallory' ? 'other' : 'pu';
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: school });
+        await db.doc(`schools/${school}/members/${uid}`).set({ status: 'active', role: 'student' });
+      }
+      for (const [uid, role] of [['alice', 'student'], ['bob', 'instructor'], ['charlie', 'student']]) {
+        await db.doc(`groups/${groupId}/members/${uid}`).set({ status: 'active', role });
+      }
+      for (const state of ['draft', 'scheduled', 'pending', 'unpublished', 'archived', 'deleted', 'cancelled']) {
+        await db.doc(path(state)).set({
+          authorId: 'alice', kind: 'post', title: state, body: 'private until published',
+          status: state, likes: 0, likedBy: [],
+        });
+      }
+      await db.doc(path('hidden')).set({
+        authorId: 'alice', kind: 'post', title: 'Hidden', body: 'not public',
+        published: false, likes: 0, likedBy: [],
+      });
+      await db.doc(path('visible')).set({
+        authorId: 'alice', kind: 'post', title: 'Open', body: 'public',
+        status: 'published', published: true, deleted: false, deletedAt: null,
+        likes: 0, likedBy: [],
+      });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+
+    // An author cannot turn old scheduled, withdrawn or archived content public.
+    for (const state of ['draft', 'scheduled', 'pending', 'unpublished', 'archived', 'deleted', 'cancelled']) {
+      await assertFails(alice.doc(path(state)).update({ status: 'published', body: 'replayed write' }));
+      await assertFails(alice.doc(path(state)).update({ title: 'unauthorized edit while hidden' }));
+    }
+    await assertFails(alice.doc(path('hidden')).update({ published: true }));
+    await assertFails(alice.doc(path('visible')).update({ published: false }));
+    await assertFails(alice.doc(path('visible')).update({ status: 'scheduled' }));
+    await assertFails(charlie.doc(path('visible')).update({ body: 'another member edit' }));
+    await assertFails(mallory.doc(path('visible')).update({ body: 'another school edit' }));
+
+    // Only current management may explicitly reopen the held post; normal author
+    // edits and the ordinary student vote path keep working afterwards.
+    await assertSucceeds(bob.doc(path('archived')).update({ status: 'published' }));
+    await assertSucceeds(alice.doc(path('archived')).update({ title: 'reopened by manager' }));
+    await assertSucceeds(alice.doc(path('visible')).update({ body: 'ordinary edit' }));
+    await assertSucceeds(charlie.doc(path('visible')).update({ likedBy: ['charlie'], likes: 1 }));
+
+    // A manager can withdraw an active post between a read and a stale write.
+    await assertSucceeds(bob.doc(path('visible')).update({ status: 'archived' }));
+    await assertFails(alice.doc(path('visible')).update({ status: 'published', body: 'stale overwrite' }));
+    await assertFails(alice.doc(path('visible')).update({ body: 'post withdrawal edit' }));
+    await assertSucceeds(bob.doc(path('visible')).update({ status: 'published' }));
+    await seedFirestore(async (db) => {
+      await db.doc(`groups/${groupId}/members/alice`).update({ status: 'revoked' });
+    });
+    await assertFails(alice.doc(path('visible')).update({ body: 'revoked token replay' }));
+    await seedFirestore(async (db) => {
+      await db.doc(`groups/${groupId}/members/alice`).update({ status: 'active' });
+    });
+    await assertSucceeds(alice.doc(path('visible')).update({ body: 'authorized after restoration' }));
+  });
+
+  test('authors cannot hard-delete held group posts or replay deletes after moderation', async () => {
+    const groupId = 'moderated-delete-boundary';
+    const path = (id) => `groups/${groupId}/posts/${id}`;
+    await seedFirestore(async (db) => {
+      await db.doc(`groups/${groupId}`).set({ schoolId: 'pu', type: 'course' });
+      for (const [uid, school] of [['alice', 'pu'], ['bob', 'pu'], ['charlie', 'pu'], ['mallory', 'other']]) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: school });
+        await db.doc(`schools/${school}/members/${uid}`).set({ status: 'active' });
+      }
+      for (const [uid, role] of [['alice', 'student'], ['bob', 'instructor'], ['charlie', 'student']]) {
+        await db.doc(`groups/${groupId}/members/${uid}`).set({ status: 'active', role });
+      }
+      for (const status of ['draft', 'scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled', 'deleted']) {
+        await db.doc(path(status)).set({ authorId: 'alice', kind: 'post', status, body: 'held by moderator' });
+      }
+      await db.doc(path('hidden')).set({ authorId: 'alice', kind: 'post', published: false });
+      for (const id of ['visible', 'stale', 'revoked']) {
+        await db.doc(path(id)).set({
+          authorId: 'alice', kind: 'post', status: 'published',
+          published: true, deleted: false, deletedAt: null,
+        });
+      }
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+
+    // GET permission and knowledge of the path must not permit destructive
+    // deletion after publication has been held by moderation.
+    for (const status of ['draft', 'scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled', 'deleted', 'hidden']) {
+      await assertFails(alice.doc(path(status)).delete());
+    }
+    await assertFails(charlie.doc(path('visible')).delete());
+    await assertFails(mallory.doc(path('visible')).delete());
+    await assertFails(guest.doc(path('visible')).delete());
+    await assertSucceeds(alice.doc(path('visible')).delete());
+    await assertSucceeds(bob.doc(path('archived')).delete());
+
+    // Reusing the same signed-in client after a manager's withdrawal must not
+    // turn a stale author delete into a successful destructive operation.
+    await seedFirestore(db => db.doc(path('stale')).update({ status: 'archived' }));
+    await assertFails(alice.doc(path('stale')).delete());
+    await assertSucceeds(bob.doc(path('stale')).update({ status: 'published' }));
+    await assertSucceeds(alice.doc(path('stale')).delete());
+
+    // Account suspension, group revocation, and school revocation each take
+    // effect for a previously authorized client without an auth-token refresh.
+    await seedFirestore(db => db.doc('users/alice').update({ status: 'suspended' }));
+    await assertFails(alice.doc(path('revoked')).delete());
+    await seedFirestore(async db => {
+      await db.doc('users/alice').update({ status: 'active' });
+      await db.doc(`groups/${groupId}/members/alice`).update({ status: 'revoked' });
+    });
+    await assertFails(alice.doc(path('revoked')).delete());
+    await seedFirestore(async db => {
+      await db.doc(`groups/${groupId}/members/alice`).update({ status: 'active' });
+      await db.doc('schools/pu/members/alice').update({ status: 'inactive' });
+    });
+    await assertFails(alice.doc(path('revoked')).delete());
+    await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.doc(path('revoked')).delete());
+  });
+
+  test('direct group post writes reject oversized text without breaking legacy metadata updates', async () => {
+    const group = 'post-text-resource-boundary';
+    const path = (id) => `groups/${group}/posts/${id}`;
+    await seedFirestore(async (db) => {
+      await db.doc(`groups/${group}`).set({ schoolId: 'pu', type: 'course' });
+      for (const [uid, school] of [['alice', 'pu'], ['bob', 'pu'], ['mallory', 'other']]) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: school });
+        await db.doc(`schools/${school}/members/${uid}`).set({ status: 'active' });
+        await db.doc(`groups/${group}/members/${uid}`).set({ status: 'active', role: 'student' });
+      }
+      // Older posts can be missing one or both text fields; do not prevent
+      // unrelated ordinary edits from continuing to work.
+      await db.doc(path('legacy')).set({ authorId: 'alice', kind: 'post' });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const valid = { authorId: 'alice', kind: 'post', title: 'Class notes', body: 'Discussion', likes: 0, likedBy: [] };
+    await assertSucceeds(alice.doc(path('normal')).set(valid));
+    await assertSucceeds(alice.doc(path('edge')).set({ ...valid, title: 'T'.repeat(120), body: 'B'.repeat(8000) }));
+    await assertFails(alice.doc(path('huge-title')).set({ ...valid, title: 'T'.repeat(121) }));
+    await assertFails(alice.doc(path('huge-body')).set({ ...valid, body: 'B'.repeat(8001) }));
+    await assertFails(alice.doc(path('nontext')).set({ ...valid, title: 123 }));
+    await assertFails(alice.doc(path('normal')).update({ title: 'T'.repeat(121) }));
+    await assertFails(alice.doc(path('normal')).update({ body: 'B'.repeat(8001) }));
+    await assertFails(alice.doc(path('normal')).update({ body: { nested: 'not text' } }));
+    await assertFails(bob.doc(path('normal')).update({ body: 'Another user' }));
+    await assertFails(mallory.doc(path('normal')).update({ body: 'Cross-school write' }));
+    await assertSucceeds(alice.doc(path('legacy')).update({ topic: 'Unrelated legacy field' }));
+    await assertSucceeds(alice.doc(path('normal')).update({ title: 'New title', body: 'New content' }));
+
+    // Reusing the same authenticated SDK after revocation must remain denied,
+    // even if the submitted text itself is within all limits.
+    await seedFirestore((db) => db.doc(`groups/${group}/members/alice`).update({ status: 'revoked' }));
+    await assertFails(alice.doc(path('normal')).update({ body: 'Stale session replay' }));
+    await seedFirestore(async (db) => {
+      await db.doc(`groups/${group}/members/alice`).update({ status: 'active' });
+      await db.doc('schools/pu/members/alice').update({ status: 'revoked' });
+    });
+    await assertFails(alice.doc(path('normal')).update({ body: 'School revoked' }));
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').update({ status: 'active' });
+      await db.doc('users/alice').update({ status: 'suspended' });
+    });
+    await assertFails(alice.doc(path('normal')).update({ body: 'Suspended account' }));
+    await seedFirestore((db) => db.doc('users/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.doc(path('normal')).update({ body: 'Authorized again' }));
+  });
+
+  test('legacy root message read receipts cannot impersonate peers or replay stale lists', async () => {
+    const conversationId = 'dm_pu_alice_bob';
+    const message = 'messages/read-receipt';
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob', 'charlie', 'mallory']) {
+        await db.doc('users/' + uid).set({ status: 'active', schoolId: uid === 'mallory' ? 'other' : 'pu' });
+      }
+      await db.doc('conversations/' + conversationId).set({
+        type: 'group', schoolId: 'pu', memberIds: ['alice', 'bob', 'charlie'],
+      });
+      await db.doc(message).set({
+        conversationId, senderId: 'alice', text: 'Hello', readBy: ['alice'],
+      });
+      await db.doc('messages/after-revocation').set({
+        conversationId, senderId: 'alice', text: 'Unread', readBy: ['alice'],
+      });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+    const original = { conversationId, senderId: 'alice', text: 'New message' };
+
+    // Legacy clients may omit readBy or initialize exactly the sender.
+    await assertSucceeds(alice.doc('messages/normal-no-receipt').set(original));
+    await assertSucceeds(alice.doc('messages/normal-self-receipt').set({
+      ...original, readBy: ['alice'],
+    }));
+    await assertFails(alice.doc('messages/forged-create').set({
+      ...original, readBy: ['alice', 'bob'],
+    }));
+    await assertFails(alice.doc('messages/peer-create').set({ ...original, readBy: ['bob'] }));
+    await assertFails(alice.doc('messages/invalid-create').set({ ...original, readBy: 'alice' }));
+    await assertFails(bob.doc('messages/forged-sender').set(original));
+
+    // Own receipt append and idempotent retry remain valid for a real member.
+    await assertSucceeds(bob.doc(message).update({
+      readBy: ['alice', 'bob'], updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(bob.doc(message).update({ readBy: ['alice', 'bob'] }));
+    await assertFails(bob.doc(message).update({ readBy: ['bob'] }));
+    await assertFails(bob.doc(message).update({ readBy: ['alice', 'bob', 'charlie'] }));
+    await assertFails(bob.doc(message).update({ readBy: ['alice', 'bob', 'bob'] }));
+    await assertFails(alice.doc(message).update({ readBy: ['alice', 'bob', 'charlie'] }));
+    await assertFails(mallory.doc(message).update({ readBy: ['alice', 'bob', 'mallory'] }));
+    await assertFails(guest.doc(message).get());
+    await assertSucceeds(charlie.doc(message).update({ readBy: ['alice', 'bob', 'charlie'] }));
+    // A stale client cannot overwrite Charlie's acknowledgement after his write.
+    await assertFails(bob.doc(message).update({ readBy: ['alice', 'bob'] }));
+
+    const unread = bob.doc('messages/after-revocation');
+    await seedFirestore((db) => db.doc('users/bob').update({ status: 'suspended' }));
+    await assertFails(unread.update({ readBy: ['alice', 'bob'] }));
+    await seedFirestore((db) => db.doc('users/bob').update({ status: 'active' }));
+    await assertSucceeds(unread.update({ readBy: ['alice', 'bob'] }));
+    await seedFirestore((db) => db.doc('conversations/' + conversationId).update({
+      memberIds: ['alice', 'charlie'],
+    }));
+    await assertFails(bob.doc(message).get());
+    await assertFails(bob.doc('messages/normal-no-receipt').update({ readBy: ['alice', 'bob'] }));
+  });
+
+  test('storefront comment author and moderation fields cannot be forged or replayed', async () => {
+    const parent = 'schools/pu/cafeterias/cafe-1/posts/post-1';
+    const comments = parent + '/comments';
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active', schoolId: 'pu' });
+      await db.doc('users/bob').set({ status: 'active', schoolId: 'pu' });
+      await db.doc('users/mallory').set({ status: 'active', schoolId: 'another-campus' });
+      await db.doc(parent).set({ text: 'Today\'s menu', authorId: 'merchant' });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+    const own = alice.doc(comments + '/alice-comment');
+    const normal = { authorId: 'alice', text: 'A good meal' };
+
+    // Existing Web/Mobile create with a server timestamp stays compatible.
+    await assertSucceeds(own.set(normal));
+    await assertSucceeds(alice.doc(comments + '/timestamped').set({
+      ...normal, createdAt: serverTimestamp(),
+    }));
+    // Public cross-campus storefront comments remain readable by signed-in
+    // accounts. This change does not add an unplanned campus restriction.
+    await assertSucceeds(mallory.doc(comments + '/alice-comment').get());
+    await assertFails(guest.doc(comments + '/alice-comment').get());
+    await assertFails(bob.doc(comments + '/impersonation').set(normal));
+    await assertFails(alice.doc(comments + '/fake-role').set({ ...normal, isOfficial: true }));
+    await assertFails(alice.doc(comments + '/fake-pinned').set({ ...normal, pinnedBy: 'admin' }));
+    await assertFails(alice.doc(comments + '/backdated').set({
+      ...normal, createdAt: new Date('2020-01-01T00:00:00Z'),
+    }));
+    await assertFails(alice.doc(comments + '/blank').set({ ...normal, text: '' }));
+    await assertFails(alice.doc(comments + '/oversized').set({ ...normal, text: 'x'.repeat(2001) }));
+    await assertFails(alice.doc('schools/pu/cafeterias/cafe-1/posts/missing/comments/orphan').set(normal));
+
+    await assertSucceeds(own.update({ text: 'Edited by author', updatedAt: serverTimestamp() }));
+    await assertFails(own.update({ authorId: 'bob' }));
+    await assertFails(own.update({ createdAt: serverTimestamp() }));
+    await assertFails(own.update({ isOfficial: true }));
+    await assertFails(own.update({ text: '' }));
+    await assertFails(own.update({ text: 'x'.repeat(2001) }));
+    await assertFails(bob.doc(own.path).update({ text: 'Peer changed the comment' }));
+    await assertFails(bob.doc(own.path).delete());
+    await assertSucceeds(mallory.doc(comments + '/cross-campus').set({
+      authorId: 'mallory', text: 'Visible public restaurant comment',
+    }));
+
+    // The same SDK identity cannot write after account suspension; a
+    // previously built request is not an authorization grant.
+    await seedFirestore(async (db) => db.doc('users/alice').update({ status: 'suspended' }));
+    await assertFails(own.update({ text: 'Stale replay', updatedAt: serverTimestamp() }));
+    await assertFails(own.delete());
+    await seedFirestore(async (db) => db.doc('users/alice').update({ status: 'active' }));
+    await assertSucceeds(own.update({ text: 'Reactivated author', updatedAt: serverTimestamp() }));
+    await assertSucceeds(own.delete());
+  });
+
+  test('conversation presence and read markers cannot impersonate a peer or overwrite races', async () => {
+    const conversation = 'conversations/presence-pu';
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ schoolId: 'pu', status: 'active' });
+      await db.doc('users/bob').set({ schoolId: 'pu', status: 'active' });
+      await db.doc('users/mallory').set({ schoolId: 'ncku', status: 'active' });
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+      await db.doc('schools/ncku/members/mallory').set({ status: 'active' });
+      await db.doc(conversation).set({
+        type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'],
+        onlineUsers: { bob: 'bob-online' },
+        lastReadBy: { bob: 'bob-read' },
+        typingUsers: { bob: 'bob-typing' },
+        lastMessageText: 'hello',
+      });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const thread = alice.doc(conversation);
+
+    // Existing Mobile paths update the participant's map keys atomically.
+    await assertSucceeds(thread.update({
+      'onlineUsers.alice': 'alice-online', 'lastReadBy.alice': 'alice-read',
+    }));
+    await assertSucceeds(thread.update({ 'typingUsers.alice': 'alice-typing' }));
+    await assertSucceeds(thread.update({ 'typingUsers.alice': deleteField() }));
+    await assertSucceeds(thread.update({ lastMessageText: 'normal-message-preview' }));
+
+    for (const [index, typing] of [undefined, new Date(), null].entries()) {
+      await seedFirestore(db => db.doc(conversation).update({
+        typingUsers: typing === undefined ? { bob: 'bob-typing' } : { alice: typing, bob: 'bob-typing' },
+      }));
+      const message = alice.doc(`${conversation}/messages/mobile-${index}`);
+      const send = () => alice.runTransaction(async tx => {
+        const previous = await tx.get(message);
+        if (previous.exists) return;
+        const stamp = serverTimestamp();
+        const data = { conversationId: 'presence-pu', senderId: 'alice', content: '正常訊息',
+          type: 'text', readBy: ['alice'], createdAt: stamp };
+        tx.set(message, data);
+        tx.update(thread, {
+          lastMessage: { id: message.id, ...data }, lastMessageText: '正常訊息',
+          lastMessageAt: stamp, lastMessageSenderId: 'alice', updatedAt: stamp,
+          'typingUsers.alice': null,
+        });
+      });
+      await assertSucceeds(send());
+      await assertSucceeds(send());
+      assert.equal((await thread.get()).data().typingUsers.bob, 'bob-typing');
+      assert.equal((await message.get()).data().content, '正常訊息');
+    }
+
+    // A member cannot mark another user as read/online/typing or clear them.
+    await assertFails(thread.update({ 'onlineUsers.bob': 'forged' }));
+    await assertFails(thread.update({ 'lastReadBy.bob': 'forged' }));
+    await assertFails(thread.update({ 'typingUsers.bob': null }));
+    await assertFails(thread.update({ onlineUsers: { alice: 'alice-online' } }));
+    await assertFails(thread.update({ lastReadBy: { alice: 'alice-read' } }));
+    await assertSucceeds(thread.update({
+      'onlineUsers.alice': 'other-value', lastMessageText: 'normal combined update',
+    }));
+    await assertFails(thread.update({
+      'typingUsers.bob': null, lastMessageText: 'forged combined update',
+    }));
+    await assertFails(mallory.doc(conversation).update({ 'typingUsers.mallory': 'fake' }));
+
+    // A second user may publish an independent key without losing the first;
+    // retrying an old whole-map snapshot must not erase a newer peer update.
+    await assertSucceeds(bob.doc(conversation).update({ 'onlineUsers.bob': 'bob-newer' }));
+    await assertFails(thread.update({ onlineUsers: { alice: 'stale' } }));
+    await assertSucceeds(thread.update({ 'onlineUsers.alice': 'alice-newer' }));
+
+    // Creation cannot pre-mark a peer even before the first message.
+    const newPath = alice.doc('conversations/presence-new');
+    const fresh = { type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] };
+    await assertFails(newPath.set({ ...fresh, lastReadBy: { bob: 'forged' } }));
+    await assertFails(newPath.set({ ...fresh, onlineUsers: { bob: 'forged' } }));
+    await assertSucceeds(newPath.set({ ...fresh, lastReadBy: { alice: 'self' } }));
+
+    // Revocation takes effect using the same authenticated context.
+    await seedFirestore(db => db.doc(conversation).update({ memberIds: ['bob'] }));
+    await assertFails(thread.update({ 'onlineUsers.alice': 'replay' }));
+    await seedFirestore(async db => {
+      await db.doc(conversation).update({ memberIds: ['alice', 'bob'] });
+      await db.doc('users/alice').update({ status: 'suspended' });
+    });
+    await assertFails(thread.update({ 'lastReadBy.alice': 'replay' }));
+    await seedFirestore(db => db.doc('users/alice').update({ status: 'active' }));
+    await assertSucceeds(thread.update({ 'lastReadBy.alice': 'restored' }));
+  });
+
+  test('global postLikes cannot enumerate identities or cross a campus/group boundary', async () => {
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob']) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: 'pu' });
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+        await db.doc(`groups/pu-group/members/${uid}`).set({ status: 'active', role: 'member' });
+      }
+      await db.doc('users/mallory').set({ status: 'active', schoolId: 'ncku' });
+      await db.doc('schools/ncku/members/mallory').set({ status: 'active', role: 'student' });
+      await db.doc('groups/ncku-group/members/mallory').set({ status: 'active', role: 'member' });
+      await db.doc('groups/pu-group').set({ schoolId: 'pu' });
+      await db.doc('groups/ncku-group').set({ schoolId: 'ncku' });
+      await db.doc('groupPosts/pu-post').set({ groupId: 'pu-group', authorId: 'alice', published: true, status: 'published', deleted: false, deletedAt: null });
+      await db.doc('groupPosts/ncku-post').set({ groupId: 'ncku-group', authorId: 'mallory', published: true, status: 'published', deleted: false, deletedAt: null });
+      await db.doc('postLikes/pu-like').set({ postId: 'pu-post', userId: 'alice' });
+      await db.doc('postLikes/ncku-like').set({ postId: 'ncku-post', userId: 'mallory' });
+      // Legacy malformed votes must not authorize a read without a parent.
+      await db.doc('postLikes/no-parent').set({ userId: 'alice' });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+
+    await assertSucceeds(alice.doc('postLikes/pu-like').get());
+    await assertSucceeds(bob.doc('postLikes/pu-like').get());
+    await assertSucceeds(mallory.doc('postLikes/ncku-like').get());
+    await assertFails(alice.doc('postLikes/ncku-like').get());
+    await assertFails(mallory.doc('postLikes/pu-like').get());
+    await assertFails(guest.doc('postLikes/pu-like').get());
+    await assertFails(alice.doc('postLikes/no-parent').get());
+
+    // Even a filtered global query can enumerate unrelated groups if new
+    // records are added while the query is open. Only exact GET is public.
+    await assertFails(alice.collection('postLikes').get());
+    await assertFails(alice.collection('postLikes').where('postId', '==', 'pu-post').get());
+    await assertFails(mallory.collection('postLikes').get());
+
+    // Existing exact-vote lifecycle stays available to the member; a voter
+    // cannot delete someone else's vote or create one in another school.
+    await assertSucceeds(bob.doc('postLikes/bob-pu').set({ postId: 'pu-post', userId: 'bob' }));
+    await assertSucceeds(bob.doc('postLikes/bob-pu').get());
+    await assertSucceeds(alice.doc('postLikes/bob-pu').get());
+    await assertFails(bob.doc('postLikes/pu-like').delete());
+    await assertFails(alice.doc('postLikes/cross-school').set({ postId: 'ncku-post', userId: 'alice' }));
+
+    // Reuse the same signed-in context after group and school revocation:
+    // no cached token or known ID should replay an earlier vote operation.
+    await seedFirestore(async (db) => {
+      await db.doc('groups/pu-group/members/alice').update({ status: 'removed' });
+    });
+    await assertFails(alice.doc('postLikes/pu-like').get());
+    await assertFails(alice.doc('postLikes/pu-like').delete());
+    await seedFirestore(async (db) => {
+      await db.doc('groups/pu-group/members/alice').update({ status: 'active' });
+      await db.doc('schools/pu/members/alice').update({ status: 'inactive' });
+    });
+    await assertFails(alice.doc('postLikes/pu-like').get());
+    await assertFails(alice.doc('postLikes/pu-like').delete());
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').update({ status: 'active' });
+    });
+    await assertSucceeds(alice.doc('postLikes/pu-like').get());
+    await assertSucceeds(alice.doc('postLikes/pu-like').delete());
+    await assertSucceeds(bob.doc('postLikes/bob-pu').delete());
+  });
+
+  test('legacy root posts and scoped comments preserve member access and enforce revocation', async () => {
+    const publicFields = { published: true, status: 'published', deleted: false, deletedAt: null };
+    const nullableFields = ['status', 'published', 'deleted'];
+    const nullablePosts = nullableFields.map(field => 'root-null-' + field);
+    await seedFirestore(async (db) => {
+      await db.doc('groups/root-pu').set({ schoolId: 'pu' });
+      await db.doc('groups/root-ncku').set({ schoolId: 'ncku' });
+      for (const [uid, role] of [['alice', 'owner'], ['bob', 'member'], ['teacher', 'instructor']]) {
+        await db.doc('users/' + uid).set({ status: 'active', schoolId: 'pu' });
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+        await db.doc('groups/root-pu/members/' + uid).set({ status: 'active', role });
+      }
+      await db.doc('users/outsider').set({ status: 'active', schoolId: 'ncku' });
+      await db.doc('schools/ncku/members/outsider').set({ status: 'active' });
+      await db.doc('groups/root-ncku/members/outsider').set({ status: 'active', role: 'member' });
+      await db.doc('groupPosts/root-public').set({ groupId: 'root-pu', authorId: 'alice', ...publicFields });
+      await db.doc('groupPosts/root-draft').set({ groupId: 'root-pu', authorId: 'alice', published: false, status: 'draft' });
+      await db.doc('groupPosts/root-legacy').set({ groupId: 'root-pu', authorId: 'alice' });
+      await db.doc('groupPosts/root-active').set({ groupId: 'root-pu', authorId: 'alice', status: 'active' });
+      await db.doc('groupPosts/root-deleted').set({ groupId: 'root-pu', authorId: 'alice', ...publicFields, deleted: true });
+      await db.doc('groupPosts/root-archived').set({ groupId: 'root-pu', authorId: 'alice', ...publicFields, status: 'archived' });
+      await db.doc('groupPosts/root-unpublished').set({ groupId: 'root-pu', authorId: 'alice', ...publicFields, published: false });
+      for (const field of nullableFields) {
+        await db.doc('groupPosts/root-null-' + field).set({
+          groupId: 'root-pu', authorId: 'alice', ...publicFields, [field]: null,
+        });
+      }
+      await db.doc('groupPosts/root-cross').set({ groupId: 'root-ncku', authorId: 'outsider', ...publicFields });
+      for (const id of ['root-public', 'root-draft', 'root-legacy', 'root-active', 'root-deleted', 'root-archived', 'root-unpublished', ...nullablePosts]) {
+        await db.doc('comments/' + id + '-comment').set({
+          postId: id, body: 'Comment', createdAt: new Date('2026-11-01T00:00:00Z'),
+        });
+      }
+      await db.doc('postLikes/root-existing-like').set({ postId: 'root-public', userId: 'bob' });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const outsider = testEnv.authenticatedContext('outsider').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await assertSucceeds(bob.doc('comments/root-public-comment').get());
+    await assertSucceeds(bob.doc('postLikes/root-existing-like').get());
+    await assertSucceeds(alice.doc('postLikes/root-existing-like').get());
+    await assertFails(guest.doc('groupPosts/root-public').get());
+    await assertFails(outsider.doc('groupPosts/root-public').get());
+    await assertFails(bob.doc('groupPosts/root-cross').get());
+    await assertFails(bob.collection('groupPosts').get());
+    await assertFails(bob.collection('comments').get());
+    const commentsFor = (db, id) => db.collection('comments')
+      .where('postId', '==', id).orderBy('createdAt', 'asc').get({ source: 'server' });
+    for (const id of ['root-public', 'root-legacy', 'root-active', ...nullablePosts]) {
+      await assertSucceeds(bob.doc('groupPosts/' + id).get());
+      await assertSucceeds(bob.doc('comments/' + id + '-comment').get());
+      const comments = await assertSucceeds(commentsFor(bob, id));
+      assert.deepEqual(comments.docs.map(doc => doc.id), [id + '-comment']);
+      await assertFails(outsider.doc('groupPosts/' + id).get());
+      await assertFails(commentsFor(outsider, id));
+    }
+    for (const id of ['root-draft', 'root-deleted', 'root-archived', 'root-unpublished']) {
+      await assertSucceeds(bob.doc('groupPosts/' + id).get());
+      await assertSucceeds(bob.doc('comments/' + id + '-comment').get());
+      await assertSucceeds(commentsFor(bob, id));
+    }
+    await assertSucceeds(alice.doc('groupPosts/root-draft').get());
+    await assertSucceeds(teacher.doc('groupPosts/root-draft').get());
+
+    // A withdrawn staff role cannot keep privileged draft/comment preview.
+    // Reuse the original signed-in clients so cached auth cannot mask revocation.
+    await seedFirestore(db => db.doc('groups/root-pu/members/teacher').update({ status: 'revoked' }));
+    await assertFails(teacher.doc('groupPosts/root-draft').get());
+    await assertFails(teacher.doc('comments/root-draft-comment').get());
+    await seedFirestore(db => db.doc('groups/root-pu/members/teacher').update({ status: 'active' }));
+    await assertSucceeds(teacher.doc('groupPosts/root-draft').get());
+
+    // The active author retains preview access after changing login schools.
+    await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'ncku' }));
+    await assertSucceeds(alice.doc('groupPosts/root-draft').get());
+    await assertSucceeds(alice.doc('comments/root-draft-comment').get());
+    await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'pu' }));
+    await assertSucceeds(alice.doc('groupPosts/root-draft').get());
+
+    // Missing profile fields leave live school and group membership in effect.
+    await seedFirestore(db => db.doc('users/bob').delete());
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await assertSucceeds(bob.doc('postLikes/root-existing-like').get());
+    await seedFirestore(db => db.doc('users/bob').set({ status: 'active', schoolId: 'pu' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await assertSucceeds(alice.doc('postLikes/root-draft-vote').set({ postId: 'root-draft', userId: 'alice' }));
+    await assertSucceeds(teacher.doc('postLikes/root-draft-vote-staff').set({ postId: 'root-draft', userId: 'teacher' }));
+    await assertSucceeds(bob.doc('postLikes/root-new-like').set({ postId: 'root-public', userId: 'bob' }));
+    await assertSucceeds(bob.doc('postLikes/root-legacy-like').set({ postId: 'root-legacy', userId: 'bob' }));
+
+    for (const postId of nullablePosts) {
+      const like = bob.doc('postLikes/' + postId);
+      await assertSucceeds(like.set({ postId, userId: 'bob' }));
+      await assertSucceeds(like.get());
+    }
+
+    // Active school and group memberships permit interaction with visible posts.
+    await seedFirestore(db => db.doc('users/bob').update({ primarySchoolId: 'ncku' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await assertSucceeds(bob.doc('comments/root-public-comment').get());
+    await assertSucceeds(commentsFor(bob, 'root-public'));
+    await assertSucceeds(bob.doc('postLikes/root-existing-like').get());
+    await assertSucceeds(bob.doc('postLikes/conflicting-school-replay').set({ postId: 'root-public', userId: 'bob' }));
+    await seedFirestore(db => db.doc('users/bob').update({ primarySchoolId: 'pu' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+
+    await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'ncku' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await assertSucceeds(bob.doc('postLikes/reverse-school-replay').set({ postId: 'root-public', userId: 'bob' }));
+    await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'pu' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+
+    // Older profiles with just one server-owned school binding remain valid.
+    await seedFirestore(db => db.doc('users/bob').set({ status: 'active', primarySchoolId: 'pu' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await seedFirestore(db => db.doc('users/bob').set({ status: 'active', schoolId: 'pu', primarySchoolId: 'pu' }));
+
+    await seedFirestore(db => db.doc('groups/root-pu/members/bob').update({ status: 'revoked' }));
+    for (const id of ['root-public', 'root-legacy', 'root-active', ...nullablePosts]) {
+      await assertFails(bob.doc('groupPosts/' + id).get({ source: 'server' }));
+      await assertFails(bob.doc('comments/' + id + '-comment').get({ source: 'server' }));
+      await assertFails(commentsFor(bob, id));
+    }
+    await seedFirestore(db => db.doc('groups/root-pu/members/bob').update({ status: 'active' }));
+    await seedFirestore(db => db.doc('schools/pu/members/bob').update({ status: 'inactive' }));
+    await assertFails(bob.doc('groupPosts/root-public').get());
+    await seedFirestore(db => db.doc('schools/pu/members/bob').update({ status: 'active' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await seedFirestore(db => db.doc('groupPosts/root-public').update({ status: 'archived' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await assertSucceeds(bob.doc('postLikes/root-existing-like').get());
+    await assertSucceeds(bob.doc('postLikes/root-archived-new-like').set({ postId: 'root-public', userId: 'bob' }));
+    await assertFails(alice.doc('postLikes/root-new-like').delete());
+    await seedFirestore(db => db.doc('groups/root-pu/members/bob').update({ status: 'revoked' }));
+    await assertFails(bob.doc('postLikes/root-new-like').delete());
+    await seedFirestore(db => db.doc('groups/root-pu/members/bob').update({ status: 'active' }));
+    await seedFirestore(db => db.doc('users/bob').set(campusBoundProfile('ncku')));
+    await assertSucceeds(bob.doc('postLikes/root-new-like').delete());
+  });
+
   for (const accountState of [
     { accountDeletionInProgress: true },
     ...['deleted', 'disabled', 'suspended', 'inactive'].map((status) => ({ status })),
@@ -238,6 +1193,76 @@ describe('firestore security rules', () => {
         status: 'pending',
       }),
     );
+  });
+
+  test('storefront post likes only expose self receipts, never other voters or queries', async () => {
+    const likes = 'schools/pu/cafeterias/cafe-1/posts/post-1/likes';
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active', schoolId: 'pu' });
+      await db.doc('users/bob').set({ status: 'active', schoolId: 'pu' });
+      await db.doc('users/mallory').set({ status: 'active', schoolId: 'other' });
+      await db.doc(`${likes}/alice`).set({ createdAt: new Date('2026-11-15T00:00:00Z') });
+      await db.doc(`${likes}/mallory`).set({ createdAt: new Date('2026-11-15T00:00:00Z') });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+
+    // Web and Mobile inspect exactly their own vote, even on a public out-of-campus storefront.
+    await assertSucceeds(alice.doc(`${likes}/alice`).get());
+    await assertSucceeds(mallory.doc(`${likes}/mallory`).get());
+    await assertFails(bob.doc(`${likes}/alice`).get());
+    await assertFails(mallory.doc(`${likes}/alice`).get());
+    await assertFails(alice.doc(`${likes}/mallory`).get());
+    await assertFails(guest.doc(`${likes}/alice`).get());
+
+    // Filtering a collection query by UID does not turn it into an exact document GET.
+    await assertFails(alice.collection(likes).get());
+    await assertFails(alice.collection(likes).where('__name__', '==', 'alice').get());
+    await assertFails(mallory.collection(likes).get());
+    await assertFails(guest.collection(likes).get());
+
+    // Same-user like/unlike, and stale-session replay after account suspension.
+    await assertSucceeds(alice.doc(`${likes}/alice`).delete());
+    await assertSucceeds(alice.doc(`${likes}/alice`).set({ createdAt: new Date() }));
+    await assertFails(bob.doc(`${likes}/alice`).delete());
+    await assertFails(bob.doc(`${likes}/alice`).set({ createdAt: new Date() }));
+    await seedFirestore((db) => db.doc('users/alice').update({ status: 'suspended' }));
+    await assertFails(alice.doc(`${likes}/alice`).get());
+    await assertFails(alice.doc(`${likes}/alice`).delete());
+    await seedFirestore((db) => db.doc('users/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.doc(`${likes}/alice`).get());
+  });
+
+  test('storefront follower receipts cannot expose another user or enumerate customers', async () => {
+    const followers = 'schools/pu/cafeterias/cafe-1/followers';
+    await seedFirestore(async (db) => {
+      await db.doc(`${followers}/alice`).set({ createdAt: new Date('2026-11-14T12:00:00Z') });
+      await db.doc(`${followers}/mallory`).set({ createdAt: new Date('2026-11-14T12:00:00Z') });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+
+    // The Web/Mobile storefront toggle reads the exact current user's UID.
+    await assertSucceeds(alice.doc(`${followers}/alice`).get());
+    await assertSucceeds(mallory.doc(`${followers}/mallory`).get());
+    await assertFails(bob.doc(`${followers}/alice`).get());
+    await assertFails(mallory.doc(`${followers}/alice`).get());
+    await assertFails(alice.doc(`${followers}/mallory`).get());
+    await assertFails(guest.doc(`${followers}/alice`).get());
+    // Firestore list is forbidden even when a client supplies an ID filter.
+    await assertFails(alice.collection(followers).get());
+    await assertFails(alice.collection(followers).where('__name__', '==', 'alice').get());
+    await assertFails(mallory.collection(followers).get());
+
+    // Following and unfollowing one's own shop receipt remain operational.
+    await assertSucceeds(alice.doc(`${followers}/alice`).delete());
+    await assertSucceeds(alice.doc(`${followers}/alice`).set({ createdAt: new Date() }));
+    await assertFails(bob.doc(`${followers}/alice`).delete());
+    await assertFails(bob.doc(`${followers}/alice`).set({ createdAt: new Date() }));
   });
 
   test('orphaned, disabled or revoked cafeteria operators cannot read orders or edit storefronts', async () => {
@@ -964,8 +1989,79 @@ describe('firestore security rules', () => {
         }
       });
       const db = testEnv.authenticatedContext('alice').firestore();
-      await assertSucceeds(db.doc(postPath).set({ authorId: 'alice', kind: 'post', title: 'Lecture notes' }));
+      await assertSucceeds(db.doc(postPath).set({
+        authorId: 'alice', kind: 'post', title: 'Lecture notes',
+        published: true, status: 'published', deleted: false, deletedAt: null,
+      }));
       await assertSucceeds(db.doc(commentPath).set({ authorId: 'alice', body: 'Page two' }));
+    });
+
+
+    test('non-manager post GET and LIST exclude withdrawn parents while normal published feeds remain queryable', async () => {
+      const bob = testEnv.authenticatedContext('bob').firestore();
+      const alice = testEnv.authenticatedContext('alice').firestore();
+      const teacher = testEnv.authenticatedContext('teacher').firestore();
+      const posts = 'groups/course/posts';
+      await seedFirestore(async (admin) => {
+        await admin.doc('groups/course/members/bob').set({ status: 'active', role: 'member' });
+        await admin.doc('schools/pu/members/bob').set({ status: 'active' });
+        await admin.doc(posts + '/visible').set({
+          authorId: 'alice', kind: 'post', title: 'Published',
+          published: true, status: 'published', deleted: false, deletedAt: null,
+          createdAt: new Date('2026-11-16T00:00:00Z'),
+        });
+        await admin.doc(posts + '/hidden').set({
+          authorId: 'alice', kind: 'post', title: 'Moderated',
+          published: true, status: 'archived', deleted: false, deletedAt: null,
+          createdAt: new Date('2026-11-15T00:00:00Z'),
+        });
+      });
+      // Historical posts without visibility metadata remain readable by members.
+      await seedFirestore((admin) => admin.doc(postPath).set({
+        authorId: 'alice', kind: 'post', title: 'Legacy lecture notes',
+      }));
+      const visible = bob.collection(posts)
+        .where('published', '==', true)
+        .where('status', '==', 'published')
+        .where('deleted', '==', false)
+        .where('deletedAt', '==', null)
+        .orderBy('createdAt', 'desc').limit(50);
+      const page = await assertSucceeds(visible.get());
+      assert.deepEqual(page.docs.map((entry) => entry.id), ['visible']);
+      await assertFails(bob.collection(posts).get());
+      await assertFails(bob.collection(posts).where('published', '==', true).get());
+      await assertSucceeds(teacher.collection(posts).get());
+      await assertSucceeds(bob.doc(posts + '/visible').get({ source: 'server' }));
+      // Missing fields retain the historical member read path.
+      await assertSucceeds(bob.doc(postPath).get({ source: 'server' }));
+      await assertSucceeds(alice.doc(postPath).get({ source: 'server' }));
+      await assertSucceeds(teacher.doc(postPath).get({ source: 'server' }));
+
+      for (const changed of [
+        { published: false, status: 'published', deleted: false, deletedAt: null },
+        ...['draft', 'scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled', 'deleted']
+          .map((status) => ({ published: true, status, deleted: false, deletedAt: null })),
+        { published: true, status: 'published', deleted: true, deletedAt: null },
+        { published: true, status: 'published', deleted: false, deletedAt: new Date('2026-11-16T01:00:00Z') },
+      ]) {
+        await seedFirestore((admin) => admin.doc(posts + '/hidden').update(changed));
+        await assertFails(bob.doc(posts + '/hidden').get({ source: 'server' }));
+        await assertSucceeds(alice.doc(posts + '/hidden').get({ source: 'server' }));
+        await assertSucceeds(teacher.doc(posts + '/hidden').get({ source: 'server' }));
+        const safePage = await assertSucceeds(visible.get());
+        assert.deepEqual(safePage.docs.map((entry) => entry.id), ['visible']);
+      }
+      // Same SDK client/context cannot reuse cached membership after revocation.
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'removed' }));
+      await assertFails(visible.get());
+      await assertFails(bob.doc(posts + '/visible').get({ source: 'server' }));
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'active' }));
+      await seedFirestore((admin) => admin.doc('schools/pu/members/bob').update({ status: 'removed' }));
+      await assertFails(visible.get());
+      await seedFirestore((admin) => admin.doc('schools/pu/members/bob').update({ status: 'active' }));
+      await assertSucceeds(visible.get());
+      await seedFirestore((admin) => admin.doc('groups/course').update({ schoolId: 'other' }));
+      await assertFails(visible.get());
     });
 
     test('a member cannot promote their post to an announcement', async () => {
@@ -976,6 +2072,358 @@ describe('firestore security rules', () => {
       await assertSucceeds(teacher.update({ kind: 'announcement' }));
       await assertFails(post.update({ title: 'Class cancelled' }));
       await assertFails(post.delete());
+    });
+
+    test('manager-withdrawn group posts cannot be resurrected by authors through SDK', async () => {
+      const author = testEnv.authenticatedContext('alice').firestore().doc(postPath);
+      const teacher = testEnv.authenticatedContext('teacher').firestore().doc(postPath);
+      const crossSchool = testEnv.authenticatedContext('mallory').firestore().doc(postPath);
+      await seedFirestore(async (admin) => {
+        await admin.doc('groups/course/members/mallory').set({ status: 'active', role: 'member' });
+        await admin.doc('schools/other/members/mallory').set({ status: 'active' });
+      });
+      // A server/manager can withdraw an existing post. The author must not
+      // use a stale SDK session to clear deletion markers or rewrite it.
+      for (const withdrawn of [
+        { deleted: true, deletedAt: new Date('2026-11-06T12:00:00Z') },
+        { status: 'deleted' },
+        { status: 'cancelled' },
+        { status: 'canceled' },
+      ]) {
+        await seedFirestore((admin) => admin.doc(postPath).set({
+          authorId: 'alice', kind: 'post', title: 'Removed by moderator',
+          published: true, deleted: false, deletedAt: null, status: 'published',
+          ...withdrawn,
+        }));
+        await assertFails(author.update({ title: 'Quietly restored' }));
+        await assertFails(author.update({
+          deleted: false, deletedAt: null, status: 'published', title: 'Replayed restore',
+        }));
+        await assertFails(crossSchool.update({ title: 'Cross-school restore' }));
+        // An active instructor can explicitly review and restore the post.
+        await assertSucceeds(teacher.update({
+          deleted: false, deletedAt: null, status: 'published', title: 'Teacher restored',
+        }));
+        await assertSucceeds(author.update({ title: 'Ordinary author edit after restoration' }));
+      }
+      // Reusing the same authenticated context after a group revocation must fail.
+      await seedFirestore((admin) =>
+        admin.doc('groups/course/members/alice').update({ status: 'removed' }));
+      await assertFails(author.update({ title: 'Revoked author replay' }));
+    });
+
+    test('group post client writes cannot impersonate server AI provenance', async () => {
+      const postFor = (uid) =>
+        testEnv.authenticatedContext(uid).firestore().doc('groups/course/posts/ai-provenance');
+      const author = postFor('alice');
+      const teacher = postFor('teacher');
+      const outsider = postFor('mallory');
+      await seedFirestore(async (admin) => {
+        await admin.doc('groups/course/members/mallory').set({ status: 'active', role: 'member' });
+        await admin.doc('schools/other/members/mallory').set({ status: 'active' });
+      });
+      const ordinary = { authorId: 'alice', kind: 'question', title: 'Real student question' };
+      for (const forged of [
+        { ...ordinary, assistantReply: { status: 'done' } },
+        { ...ordinary, isAI: true },
+        { ...ordinary, isAI: 'true' },
+        { ...ordinary, generatedBy: 'server' },
+        { ...ordinary, authorName: '助理回覆' },
+      ]) {
+        await assertFails(author.set(forged));
+      }
+      await assertSucceeds(author.set({ ...ordinary, authorName: 'Alice', isAI: false }));
+      for (const forged of [
+        { isAI: true },
+        { isAI: 'true' },
+        { generatedBy: 'server' },
+        { authorName: '助理回覆' },
+        { assistantReply: { status: 'done' } },
+      ]) {
+        await assertFails(author.update(forged));
+      }
+      await assertFails(teacher.update({ generatedBy: 'server' }));
+      await assertFails(teacher.update({ authorName: '助理回覆' }));
+      await assertFails(outsider.update({ title: 'Cross-school' }));
+      await assertSucceeds(author.update({ title: 'Student edit' }));
+      await assertSucceeds(teacher.update({ title: 'Instructor moderation' }));
+      // Replaying old grants must not restore access after group revocation.
+      await seedFirestore((admin) =>
+        admin.doc('groups/course/members/alice').update({ status: 'removed' }));
+      await assertFails(author.update({ title: 'After revocation' }));
+    });
+
+    test('legacy ordinary authors may delete without visibility fields while managers retain draft deletion', async () => {
+      const base = 'groups/course/posts/';
+      await seedFirestore(async (admin) => {
+        await admin.doc('users/bob').set({ status: 'active' });
+        await admin.doc('schools/pu/members/bob').set({ status: 'active' });
+        await admin.doc('groups/course/members/bob').set({ status: 'active', role: 'member' });
+        await admin.doc(base + 'old').set({ authorId: 'alice', body: '歷史貼文' });
+        await admin.doc(base + 'news').set({ authorId: 'teacher', kind: 'announcement' });
+        await admin.doc(base + 'held').set({ authorId: 'alice', status: 'draft' });
+      });
+      const author = testEnv.authenticatedContext('alice').firestore();
+      const peer = testEnv.authenticatedContext('bob').firestore();
+      const manager = testEnv.authenticatedContext('teacher').firestore();
+      await assertFails(peer.doc(base + 'old').delete());
+      await assertFails(author.doc(base + 'news').delete());
+      await assertFails(peer.doc(base + 'news').delete());
+      await assertSucceeds(author.doc(base + 'old').delete());
+      await assertFails(author.doc(base + 'held').delete());
+      await assertSucceeds(manager.doc(base + 'held').delete());
+    });
+
+    test('legacy published authors may delete while publication and voting still require review', async () => {
+      const legacy = 'groups/course/posts/legacy-unclassified';
+      await seedFirestore(async (admin) => {
+        await admin.doc('users/bob').set({ status: 'active', schoolId: 'pu' });
+        await admin.doc('schools/pu/members/bob').set({ status: 'active' });
+        await admin.doc('groups/course/members/bob').set({ status: 'active', role: 'member' });
+        await admin.doc(legacy).set({
+          authorId: 'alice', kind: 'post', status: 'published', title: 'Legacy post',
+          likedBy: [], likes: 0,
+        });
+      });
+      const author = testEnv.authenticatedContext('alice').firestore().doc(legacy);
+      const member = testEnv.authenticatedContext('bob').firestore().doc(legacy);
+      const manager = testEnv.authenticatedContext('teacher').firestore().doc(legacy);
+      const crossSchool = testEnv.authenticatedContext('mallory').firestore().doc(legacy);
+      await assertSucceeds(author.get({ source: 'server' }));
+      await assertSucceeds(member.get({ source: 'server' }));
+      await assertFails(member.update({ likedBy: ['bob'], likes: 1 }));
+      await assertFails(crossSchool.update({ likedBy: ['mallory'], likes: 1 }));
+      // Previous default-value equality permitted this unauthorized
+      // publication of an unclassified legacy parent post.
+      await assertFails(author.update({ published: true, deleted: false, deletedAt: null }));
+      await assertFails(member.delete());
+      await assertSucceeds(author.delete());
+      await seedFirestore(admin => admin.doc(legacy).set({
+        authorId: 'alice', kind: 'post', status: 'published', title: 'Legacy post', likedBy: [], likes: 0,
+      }));
+      await assertSucceeds(author.update({ title: 'Legacy text correction' }));
+      // The actual manager may classify/restore the old post deliberately.
+      await assertSucceeds(manager.update({
+        published: true, status: 'published', deleted: false, deletedAt: null,
+      }));
+      await assertSucceeds(member.get({ source: 'server' }));
+      await assertSucceeds(member.update({ likedBy: ['bob'], likes: 1 }));
+      // Reusing a previously authorized SDK after moderation or membership
+      // revocation must not permit reaction replay or deletion.
+      await seedFirestore((admin) => admin.doc(legacy).update({ status: 'archived' }));
+      await assertFails(member.update({ likedBy: [], likes: 0 }));
+      await assertFails(author.delete());
+      await assertFails(author.update({ status: 'published' }));
+      await assertSucceeds(manager.update({ status: 'published' }));
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'removed' }));
+      await assertFails(member.get({ source: 'server' }));
+      await assertFails(member.update({ likedBy: [], likes: 0 }));
+    });
+
+    test('group post votes cannot forge other members and reject withdrawn or revoked users', async () => {
+      const postFor = (uid) => testEnv.authenticatedContext(uid).firestore().doc(postPath);
+      await seedFirestore(async (admin) => {
+        for (const uid of ['bob', 'charlie']) {
+          await admin.doc('groups/course/members/' + uid).set({ status: 'active', role: 'member' });
+          await admin.doc('schools/pu/members/' + uid).set({ status: 'active' });
+        }
+        // An active group receipt from another school cannot grant campus access.
+        await admin.doc('groups/course/members/mallory').set({ status: 'active', role: 'member' });
+        await admin.doc('schools/other/members/mallory').set({ status: 'active' });
+      });
+      const author = postFor('alice');
+      const teacher = postFor('teacher');
+      const member = postFor('bob');
+      const peer = postFor('charlie');
+      const outsider = postFor('mallory');
+
+      const fresh = (id) => testEnv.authenticatedContext(id).firestore().doc('groups/course/posts/forged');
+      await assertFails(fresh('alice').set({
+        authorId: 'alice', kind: 'post', title: 'Minted at creation', likedBy: ['bob'], likes: 300,
+      }));
+      await assertFails(fresh('teacher').set({
+        authorId: 'teacher', kind: 'announcement', title: 'Minted by manager',
+        likedBy: ['alice'], likes: 1,
+      }));
+      await assertSucceeds(fresh('alice').set({
+        authorId: 'alice', kind: 'post', title: 'Legitimate new post', likedBy: [], likes: 0,
+      }));
+
+      // Old rules permitted post authors/managers to set arbitrary likedBy/count
+      // while rejecting an ordinary member's legitimate vote.
+      await assertFails(author.update({ likedBy: ['charlie'], likes: 500 }));
+      await assertFails(teacher.update({ likedBy: ['bob'], likes: 1 }));
+      await assertFails(outsider.update({ likedBy: ['mallory'], likes: 1 }));
+      await assertSucceeds(member.update({ likedBy: ['bob'], likes: 1 }));
+      await assertFails(member.update({ likedBy: ['bob', 'charlie'], likes: 2 }));
+      await assertFails(peer.update({ likedBy: ['alice'], likes: 10 }));
+      await assertFails(member.update({ title: 'Peer rewrote the post' }));
+      await assertFails(member.update({ title: 'Vote hides an edit', likedBy: [], likes: 0 }));
+      await assertSucceeds(author.update({ title: 'Author content edit' }));
+      await assertSucceeds(teacher.update({ title: 'Moderator content edit' }));
+      await assertSucceeds(peer.update({ likedBy: ['bob', 'charlie'], likes: 2 }));
+      await assertFails(author.update({ title: 'Vote forged in content edit', likedBy: [], likes: 0 }));
+      await assertSucceeds(member.update({ likedBy: ['charlie'], likes: 1 }));
+
+      // No new reactions are accepted after withdrawal, even with a known ID.
+      await seedFirestore((admin) => admin.doc(postPath).update({ published: false, status: 'draft' }));
+      await assertFails(member.update({ likedBy: ['charlie', 'bob'], likes: 2 }));
+      await seedFirestore((admin) => admin.doc(postPath).update({ published: true, status: 'published' }));
+      await assertSucceeds(member.update({ likedBy: ['charlie', 'bob'], likes: 2 }));
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'removed' }));
+      await assertFails(member.update({ likedBy: ['charlie'], likes: 1 }));
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'active' }));
+      await seedFirestore((admin) => admin.doc('schools/pu/members/bob').update({ status: 'removed' }));
+      await assertFails(member.update({ likedBy: ['charlie'], likes: 1 }));
+    });
+
+    test('unpublished, withdrawn and deleted group posts do not expose nested comments', async () => {
+      const alice = testEnv.authenticatedContext('alice').firestore();
+      const teacher = testEnv.authenticatedContext('teacher').firestore();
+      const bob = testEnv.authenticatedContext('bob').firestore();
+      const commentCollection = 'groups/course/posts/first/comments';
+      await seedFirestore(async (admin) => {
+        await admin.doc('groups/course/members/bob').set({ status: 'active', role: 'member' });
+        await admin.doc('schools/pu/members/bob').set({ status: 'active' });
+      });
+
+      // Existing members retain GET and LIST access to historical comments.
+      await seedFirestore((admin) => admin.doc(postPath).set({
+        authorId: 'alice', kind: 'post', title: 'Legacy published post',
+      }));
+      await assertSucceeds(teacher.doc(commentPath).get({ source: 'server' }));
+      await assertSucceeds(teacher.collection(commentCollection).get());
+      await assertSucceeds(bob.doc(commentPath).get({ source: 'server' }));
+      await assertSucceeds(bob.collection(commentCollection).get());
+      await assertSucceeds(alice.doc(commentPath).get({ source: 'server' }));
+      // Explicit server-reviewed publication restores normal member access.
+      await seedFirestore((admin) => admin.doc(postPath).update({
+        published: true, status: 'published', deleted: false, deletedAt: null,
+      }));
+      await assertSucceeds(teacher.doc(commentPath).get({ source: 'server' }));
+      await assertSucceeds(teacher.collection(commentCollection).get());
+      const peerComment = bob.doc(commentCollection + '/bob-review');
+      await assertSucceeds(peerComment.set({ authorId: 'bob', body: 'Before withdrawal' }));
+      for (const state of [
+        { published: false, status: 'draft' },
+        ...['scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled', 'deleted']
+          .map((status) => ({ published: true, status })),
+        { published: true, status: 'published', deleted: true },
+        { published: true, status: 'published', deleted: false, deletedAt: new Date() },
+      ]) {
+        await seedFirestore((admin) => admin.doc(postPath).update({
+          published: true, status: 'published', deleted: false, deletedAt: null, ...state,
+        }));
+        await assertFails(teacher.doc(commentPath).get({ source: 'server' }));
+        await assertFails(teacher.collection(commentCollection).get());
+        await assertFails(bob.doc(commentPath).get({ source: 'server' }));
+        await assertFails(bob.doc(commentCollection + '/new').set({ authorId: 'bob', body: 'Must not reply' }));
+        // Writes do not inherit read restrictions: enforce withdrawal on each
+        // comment mutation, even when the actor knows a document path.
+        await assertFails(teacher.doc(commentPath).update({ body: 'Moderator cannot edit withdrawn replies' }));
+        await assertFails(teacher.doc(commentPath).delete());
+        await assertFails(peerComment.update({ body: 'Peer cannot edit withdrawn replies' }));
+        await assertFails(peerComment.delete());
+        await assertSucceeds(alice.doc(commentPath).get({ source: 'server' }));
+        await assertSucceeds(alice.doc(commentPath).update({ body: 'Author draft preview' }));
+      }
+      // Re-publication restores ordinary member access; a later withdrawal
+      // revokes it again at the Firestore rules boundary.
+      await seedFirestore((admin) => admin.doc(postPath).update({
+        published: true, status: 'published', deleted: false, deletedAt: null,
+      }));
+      await assertSucceeds(teacher.doc(commentPath).get({ source: 'server' }));
+      await assertSucceeds(bob.doc(commentCollection + '/new').set({ authorId: 'bob', body: 'Published' }));
+      await assertSucceeds(teacher.doc(commentPath).update({ body: 'Moderator after publication' }));
+      await assertSucceeds(peerComment.update({ body: 'Peer after publication' }));
+      await seedFirestore((admin) => admin.doc(postPath).update({ status: 'archived' }));
+      await assertFails(bob.doc(commentCollection + '/new').get({ source: 'server' }));
+      await assertFails(teacher.doc(commentPath).update({ body: 'Replay after withdrawal' }));
+      await assertFails(peerComment.delete());
+      await seedFirestore((admin) => admin.doc('schools/pu/members/alice').update({ status: 'removed' }));
+      await assertFails(alice.doc(commentPath).get({ source: 'server' }));
+      await assertFails(alice.doc(commentPath).update({ body: 'After school revocation' }));
+      // Deleting the parent should also fail closed for remaining comments.
+      await seedFirestore((admin) => admin.doc(postPath).delete());
+      await assertFails(teacher.doc(commentPath).update({ body: 'Orphaned reply' }));
+      await assertFails(peerComment.delete());
+    });
+
+    test('group comment clients cannot pre-mark answers, forge votes or store oversized bodies', async () => {
+      const alice = testEnv.authenticatedContext('alice').firestore();
+      const teacher = testEnv.authenticatedContext('teacher').firestore();
+      const path = 'groups/course/posts/first/comments/new-comment';
+      const comment = alice.doc(path);
+      const normal = { authorId: 'alice', body: 'Page three', likedBy: [], likeCount: 0 };
+
+      for (const invalid of [
+        { ...normal, body: '' },
+        { ...normal, body: 42 },
+        { ...normal, body: 'x'.repeat(5001) },
+        { ...normal, isAnswer: true },
+        { ...normal, likeCount: 10 },
+        { ...normal, likedBy: ['teacher'] },
+      ]) {
+        await assertFails(comment.set(invalid));
+      }
+      await assertSucceeds(comment.set(normal));
+      await assertFails(comment.update({ isAnswer: true }));
+      await assertFails(comment.update({ body: 'x'.repeat(5001) }));
+      await assertFails(comment.update({ body: 42 }));
+      await assertSucceeds(comment.update({ body: 'Edited ordinary reply' }));
+      await assertSucceeds(teacher.doc(path).update({ isAnswer: true }));
+      await assertSucceeds(comment.update({ body: 'Edited after instructor approval' }));
+
+      // An old signed-in user loses the same editing privileges on revocation.
+      await seedFirestore((admin) => admin.doc('groups/course/members/alice').update({ status: 'removed' }));
+      await assertFails(comment.update({ body: 'Replay after revocation' }));
+    });
+
+    test('comment ownership is independent of parent post ownership, including votes and revocation', async () => {
+      const owner = testEnv.authenticatedContext('alice').firestore();
+      const commenter = testEnv.authenticatedContext('bob').firestore();
+      const peer = testEnv.authenticatedContext('charlie').firestore();
+      const outsider = testEnv.authenticatedContext('mallory').firestore();
+      const moderator = testEnv.authenticatedContext('teacher').firestore();
+      const replyPath = postPath + '/comments/bobs-reply';
+      await seedFirestore(async (admin) => {
+        for (const uid of ['bob', 'charlie']) {
+          await admin.doc('schools/pu/members/' + uid).set({ status: 'active' });
+          await admin.doc('groups/course/members/' + uid).set({ status: 'active', role: 'member' });
+        }
+        // A cross-school account must not inherit access from a forged group membership.
+        await admin.doc('schools/other/members/mallory').set({ status: 'active' });
+        await admin.doc('groups/course/members/mallory').set({ status: 'active', role: 'member' });
+        await admin.doc(replyPath).set({ authorId: 'bob', body: 'Original reply', likedBy: [], likeCount: 0 });
+      });
+
+      // Alice owns the post, not Bob's reply: she may not rewrite or delete his words.
+      await assertFails(owner.doc(replyPath).update({ body: 'Forged as Bob' }));
+      await assertFails(owner.doc(replyPath).delete());
+      await assertFails(peer.doc(replyPath).update({ body: 'Peer impersonation' }));
+      await assertFails(peer.doc(replyPath).delete());
+      await assertFails(outsider.doc(replyPath).update({ body: 'Cross-school edit' }));
+      await assertFails(outsider.doc(replyPath).delete());
+
+      await assertSucceeds(commenter.doc(replyPath).update({ body: 'Bob edited his reply' }));
+      await assertFails(commenter.doc(commentPath).update({ body: 'Bob rewrote Alice' }));
+      // Reacting to another member's comment must not grant permission to edit it.
+      await assertSucceeds(commenter.doc(commentPath).update({ likedBy: ['bob'], likeCount: 1 }));
+      await assertFails(commenter.doc(commentPath).update({ likedBy: ['bob', 'charlie'], likeCount: 2 }));
+      await assertFails(commenter.doc(commentPath).update({ body: 'Disguised as a vote', likedBy: [], likeCount: 0 }));
+      await assertSucceeds(commenter.doc(commentPath).update({ likedBy: [], likeCount: 0 }));
+      await assertSucceeds(moderator.doc(replyPath).update({ body: 'Instructor moderation' }));
+
+      // A previously authorized client cannot replay changes after membership removal.
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'removed' }));
+      await assertFails(commenter.doc(replyPath).update({ body: 'Replay after removal' }));
+      await assertFails(commenter.doc(commentPath).update({ likedBy: ['bob'], likeCount: 1 }));
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'active' }));
+      // Revocation by withdrawing the parent also blocks deletion by the reply owner.
+      await seedFirestore((admin) => admin.doc(postPath).update({ status: 'archived' }));
+      await assertFails(commenter.doc(replyPath).delete());
+      await seedFirestore((admin) => admin.doc(postPath).update({ status: 'published', published: true }));
+      await assertSucceeds(commenter.doc(replyPath).delete());
     });
 
     test('editing cannot transfer authorship', async () => {
@@ -1215,6 +2663,150 @@ describe('firestore security rules', () => {
     await assertFails(db.collection('messages').doc('message-1').get());
   });
 
+  test('DM reactions cannot alter other members or survive revoked access', async () => {
+    const parent = 'conversations/dm_pu_reaction_boundary';
+    const path = parent + '/messages/first';
+    const second = parent + '/messages/second';
+    const original = {
+      senderId: 'alice', type: 'text', content: 'Hello',
+      reactions: { '❤️': ['alice'] }, readBy: ['alice'],
+    };
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob', 'charlie']) {
+        await db.doc('users/' + uid).set({ schoolId: 'pu', status: 'active' });
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+      }
+      await db.doc('users/mallory').set({ schoolId: 'ncku', status: 'active' });
+      await db.doc('schools/ncku/members/mallory').set({ status: 'active' });
+      await db.doc(parent).set({
+        type: 'group', schoolId: 'pu', memberIds: ['alice', 'bob', 'charlie'],
+      });
+      await db.doc(path).set(original);
+      await db.doc(second).set(original);
+      await db.doc(parent + '/messages/legacy').set({
+        senderId: 'alice', type: 'text', content: 'Old message',
+      });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const message = bob.doc(path);
+
+    // Preserve the actual on-device shape (emoji keys with UID arrays).
+    await assertSucceeds(message.update({
+      reactions: { '❤️': ['alice'], '👍': ['bob'] },
+      updatedAt: '2026-11-15T00:00:00.000Z',
+    }));
+    await assertSucceeds(message.update({ reactions: { '❤️': ['alice'], '👍': ['bob'] } }));
+    await assertSucceeds(message.update({ reactions: { '❤️': ['alice'], '😆': ['bob'] } }));
+    await assertFails(message.update({ reactions: { '😆': ['bob'] } })); // erase Alice
+    await assertFails(message.update({ reactions: { '❤️': ['bob'], '😆': ['bob'] } }));
+    await assertFails(message.update({ reactions: { '❤️': ['alice'], '😆': ['bob','charlie'] } }));
+    await assertFails(message.update({ reactions: { '❤️': ['alice'], '😆': ['bob','bob'] } }));
+    await assertFails(message.update({ reactions: { '❤️': ['alice'], '😆': '' } }));
+    await assertFails(message.update({ reactions: { '❤️': ['alice'], '😆': [100] } }));
+    await assertFails(message.update({ reactions: 'unexpected' }));
+    await assertFails(message.update({ reactions: { '❤️': ['alice'], '😆': ['bob'] }, content: 'forged' }));
+    await assertFails(mallory.doc(path).update({ reactions: { '❤️': ['alice'], '😆': ['mallory'] } }));
+    await assertSucceeds(message.update({ reactions: { '❤️': ['alice'] } }));
+
+    // A stale concurrent snapshot may not silently erase another member's vote.
+    await assertSucceeds(message.update({ reactions: { '❤️': ['alice'], '👍': ['bob'] } }));
+    await assertFails(charlie.doc(path).update({ reactions: { '❤️': ['alice'], '🎉': ['charlie'] } }));
+    await assertSucceeds(charlie.doc(path).update({
+      reactions: { '❤️': ['alice'], '👍': ['bob'], '🎉': ['charlie'] },
+    }));
+
+    // Creation can neither forge another UID nor pre-seed the sender's reaction.
+    await assertFails(alice.doc(parent + '/messages/forged-peer').set({
+      senderId: 'alice', content: 'Hello', reactions: { '👍': ['bob'] },
+    }));
+    await assertFails(alice.doc(parent + '/messages/forged-own').set({
+      senderId: 'alice', content: 'Hello', reactions: { '👍': ['alice'] },
+    }));
+    await assertSucceeds(alice.doc(parent + '/messages/empty').set({
+      senderId: 'alice', content: 'Hello', reactions: {},
+    }));
+    await assertSucceeds(alice.doc(parent + '/messages/absent').set({
+      senderId: 'alice', content: 'Hello',
+    }));
+    await assertSucceeds(bob.doc(parent + '/messages/legacy').update({
+      reactions: { '👍': ['bob'] },
+    }));
+    // Preserve the older UID -> emoji format without making peer fields writable.
+    const oldClient = bob.doc(parent + '/messages/legacy-uid-keyed');
+    await seedFirestore((db) => db.doc(parent + '/messages/legacy-uid-keyed').set({
+      senderId: 'alice', content: 'Old client', reactions: { alice: '❤️' },
+    }));
+    await assertSucceeds(oldClient.update({ reactions: { alice: '❤️', bob: '👍' } }));
+    await assertSucceeds(oldClient.update({ reactions: { alice: '❤️', bob: '😢' } }));
+    await assertFails(oldClient.update({ reactions: { bob: '😢' } }));
+    await assertFails(oldClient.update({ reactions: { alice: '🔥', bob: '😢' } }));
+    await assertFails(oldClient.update({ reactions: { alice: '❤️', bob: '😢', charlie: '🎉' } }));
+    await assertFails(oldClient.update({ reactions: { alice: '❤️', bob: 1 } }));
+    await assertSucceeds(oldClient.update({ reactions: { alice: '❤️' } }));
+
+    // Same authenticated context is rejected after membership or account revocation.
+    await seedFirestore((db) => db.doc(parent).update({ memberIds: ['alice', 'charlie'] }));
+    await assertFails(bob.doc(second).update({ reactions: { '❤️': ['alice'], '👍': ['bob'] } }));
+    await seedFirestore((db) => db.doc(parent).update({ memberIds: ['alice', 'bob', 'charlie'] }));
+    await seedFirestore((db) => db.doc('users/bob').update({ status: 'disabled' }));
+    await assertFails(bob.doc(second).update({ reactions: { '❤️': ['alice'], '👍': ['bob'] } }));
+    await seedFirestore((db) => db.doc('users/bob').update({ status: 'active' }));
+    await assertSucceeds(bob.doc(second).update({ reactions: { '❤️': ['alice'], '👍': ['bob'] } }));
+  });
+
+  test('DM read receipts cannot impersonate members or replay revoked access', async () => {
+    const path = 'conversations/dm_pu_read_receipts';
+    const messagePath = path + '/messages/first';
+    const nextPath = path + '/messages/next';
+    const original = { senderId: 'alice', content: 'Private', type: 'text', readBy: ['alice'] };
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob', 'charlie']) {
+        await db.doc('users/' + uid).set({ schoolId: 'pu', status: 'active' });
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+      }
+      await db.doc('users/mallory').set({ schoolId: 'ncku', status: 'active' });
+      await db.doc('schools/ncku/members/mallory').set({ status: 'active' });
+      await db.doc(path).set({ schoolId: 'pu', type: 'group', memberIds: ['alice', 'bob', 'charlie'] });
+      await db.doc(messagePath).set(original);
+      await db.doc(nextPath).set(original);
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const first = bob.doc(messagePath);
+    // Existing clients use arrayUnion(uid); it appends only the current reader.
+    await assertSucceeds(first.update({ readBy: ['alice', 'bob'] }));
+    await assertSucceeds(first.update({ readBy: ['alice', 'bob'] })); // idempotent retry
+    await assertFails(first.update({ readBy: ['bob'] })); // cannot erase sender's read
+    await assertFails(first.update({ readBy: ['alice', 'bob', 'mallory'] }));
+    await assertFails(first.update({ readBy: ['alice', 'bob', 'bob'] }));
+    await assertFails(first.update({ readBy: ['alice', 'bob'], content: 'forged' }));
+    await assertFails(alice.doc(messagePath).update({ readBy: ['alice', 'bob', 'charlie'] }));
+    await assertFails(mallory.doc(messagePath).update({ readBy: ['alice', 'bob', 'mallory'] }));
+    await assertSucceeds(charlie.doc(messagePath).update({ readBy: ['alice', 'bob', 'charlie'] }));
+    await assertFails(alice.doc(path + '/messages/forged-create').set({
+      senderId: 'alice', content: 'Pretend all read', readBy: ['alice', 'bob'],
+    }));
+    await assertSucceeds(alice.doc(path + '/messages/normal-create').set({
+      senderId: 'alice', content: 'Initial self receipt', readBy: ['alice'],
+    }));
+    await assertSucceeds(alice.doc(path + '/messages/legacy-create').set({
+      senderId: 'alice', content: 'Legacy client without readBy',
+    }));
+    // Same authenticated context must be denied immediately after membership revocation.
+    await seedFirestore(db => db.doc(path).update({ memberIds: ['alice', 'charlie'] }));
+    await assertFails(bob.doc(nextPath).update({ readBy: ['alice', 'bob'] }));
+    await seedFirestore(db => db.doc(path).update({ memberIds: ['alice', 'bob', 'charlie'] }));
+    await seedFirestore(db => db.doc('users/bob').update({ status: 'suspended' }));
+    await assertFails(bob.doc(nextPath).update({ readBy: ['alice', 'bob'] }));
+    await seedFirestore(db => db.doc('users/bob').update({ status: 'active' }));
+    await assertSucceeds(bob.doc(nextPath).update({ readBy: ['alice', 'bob'] }));
+  });
+
   test('only the server can attach story reply provenance to private messages', async () => {
     const path = 'conversations/dm_pu_alice_bob';
     const message = { senderId: 'alice', content: '哈囉', type: 'text' };
@@ -1238,7 +2830,7 @@ describe('firestore security rules', () => {
     await assertFails(alice.doc(path + '/messages/fake-photo').set({ ...message, ...forgedPhoto }));
     await assertFails(plain.update(forgedPhoto));
     const photoPath = path + '/messages/published-photo';
-    await seedFirestore(db => db.doc(photoPath).set({ ...message, ...forgedPhoto }));
+    await seedFirestore(db => db.doc(photoPath).set({ ...message, ...forgedPhoto, readBy: ['alice'] }));
     const published = alice.doc(photoPath);
     await assertFails(published.update({ recalledAt: null }));
     await assertSucceeds(published.update({ recalledAt: require('firebase/firestore').serverTimestamp() }));
@@ -1467,6 +3059,467 @@ describe('firestore security rules', () => {
     );
   });
 
+  test('gradebook preserves UID-path and explicit userId reads', async () => {
+    const group = 'groups/gradebook-owner-conflict-1';
+    const aliceId = `${group}/gradebook/alice`;
+    const bobId = `${group}/gradebook/bob`;
+    const opaque = `${group}/gradebook/opaque-row-1`;
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      for (const [uid, role] of [['alice', 'member'], ['bob', 'member'], ['teacher', 'instructor']]) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: 'pu' });
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+        await db.doc(`${group}/members/${uid}`).set({ status: 'active', role });
+      }
+      // Contradictory IDs can occur in legacy imports and correction flows.
+      await db.doc(bobId).set({ userId: 'alice', finalScore: 89 });
+      await db.doc(opaque).set({ userId: 'alice', finalScore: 91 });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const missing = await assertSucceeds(alice.doc(aliceId).get({ source: 'server' }));
+    assert.equal(missing.exists, false);
+    await assertFails(bob.doc(aliceId).get({ source: 'server' }));
+    await seedFirestore(db => db.doc(aliceId).set({ userId: 'alice', finalScore: 89 }));
+    const owned = await assertSucceeds(alice.doc(aliceId).get({ source: 'server' }));
+    assert.equal(owned.data().userId, 'alice');
+
+    await seedFirestore(db => db.doc(aliceId).set({ userId: 'bob', finalScore: 74 }));
+    await assertSucceeds(alice.doc(aliceId).get({ source: 'server' }));
+    await assertSucceeds(bob.doc(bobId).get({ source: 'server' }));
+    await assertSucceeds(bob.doc(aliceId).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(bobId).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(opaque).get({ source: 'server' }));
+    await assertFails(bob.doc(opaque).get({ source: 'server' }));
+    await assertSucceeds(teacher.doc(aliceId).get({ source: 'server' }));
+
+    // Null and missing owner fields retain the legacy UID-path fallback.
+    await seedFirestore(db => db.doc(aliceId).set({ userId: null, finalScore: 74 }));
+    await assertSucceeds(alice.doc(aliceId).get({ source: 'server' }));
+    await assertFails(bob.doc(aliceId).get({ source: 'server' }));
+    // Old rows without an explicit owner keep the documented ID fallback.
+    await seedFirestore(db => db.doc(aliceId).set({ finalScore: 74 }));
+    await assertSucceeds(alice.doc(aliceId).get({ source: 'server' }));
+    await assertFails(bob.doc(aliceId).get({ source: 'server' }));
+    await seedFirestore(db => db.doc(`${group}/members/alice`).update({ status: 'removed' }));
+    await assertSucceeds(alice.doc(aliceId).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(opaque).get({ source: 'server' }));
+    await seedFirestore(db => db.doc(`${group}/members/alice`).update({ status: 'active' }));
+    await assertSucceeds(alice.doc(aliceId).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(opaque).get({ source: 'server' }));
+  });
+
+
+  test('private staff reads require active target memberships', async () => {
+    const group = 'groups/staff-campus-replay-1';
+    const assignment = group + '/assignments/work-1';
+    const nested = assignment + '/submissions/bob';
+    const legacy = 'submissions/staff-campus-replay-legacy';
+    const review = assignment + '/peerReviews/alice';
+    const extraReview = assignment + '/peerReviews/extra';
+    const revision = nested + '/gradeRevisions/rev-1';
+
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      await db.doc(assignment).set({ type: 'assignment', published: true });
+      for (const [uid, role] of [
+        ['teacher', 'instructor'], ['bob', 'member'], ['alice', 'member'], ['carol', 'member'],
+      ]) {
+        await db.doc('users/' + uid).set(campusBoundProfile('pu'));
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+        await db.doc(group + '/members/' + uid).set({ status: 'active', role });
+      }
+      await db.doc(nested).set({ userId: 'bob', content: 'Private submitted answer' });
+      await db.doc(legacy).set({
+        groupId: 'staff-campus-replay-1', assignmentId: 'work-1',
+        userId: 'bob', content: 'Private legacy answer',
+      });
+      await db.doc(review).set({
+        reviewerId: 'alice', submissionOwnerId: 'bob', submittedAt: null,
+        comment: 'Not yet released', teacherNotes: 'Restricted teacher note',
+      });
+      await db.doc(revision).set({ changedBy: 'teacher', beforeScore: 60, afterScore: 80 });
+    });
+
+    const teacherDb = testEnv.authenticatedContext('teacher').firestore();
+    const carolDb = testEnv.authenticatedContext('carol').firestore();
+    const aliceDb = testEnv.authenticatedContext('alice').firestore();
+    const managerReadPaths = [nested, legacy, review, revision];
+    async function allowStaffReads() {
+      for (const p of managerReadPaths) {
+        await assertSucceeds(teacherDb.doc(p).get({ source: 'server' }));
+      }
+    }
+    async function denyStaleStaff() {
+      for (const p of managerReadPaths) {
+        await assertFails(teacherDb.doc(p).get({ source: 'server' }));
+      }
+      await assertFails(teacherDb.doc(extraReview).set({
+        reviewerId: 'extra', submissionOwnerId: 'bob',
+      }));
+      await assertFails(teacherDb.doc(extraReview).delete());
+    }
+
+    await allowStaffReads();
+    await assertSucceeds(teacherDb.doc(extraReview).set({
+      reviewerId: 'extra', submissionOwnerId: 'bob',
+    }));
+    await assertFails(carolDb.doc(nested).get({ source: 'server' }));
+    await assertFails(carolDb.doc(legacy).get({ source: 'server' }));
+    await assertFails(carolDb.doc(revision).get({ source: 'server' }));
+    // The assigned reviewer retains access to their historical receipt.
+    await assertSucceeds(aliceDb.doc(review).get({ source: 'server' }));
+
+    // Both target memberships stay active when either profile field changes.
+    await seedFirestore((db) => db.doc('users/teacher').update({ primarySchoolId: 'other' }));
+    await allowStaffReads();
+    await seedFirestore((db) => db.doc('users/teacher').update({ primarySchoolId: 'pu' }));
+    await allowStaffReads();
+
+    await seedFirestore((db) => db.doc('users/teacher').update({ schoolId: 'other' }));
+    await allowStaffReads();
+    await seedFirestore((db) => db.doc('users/teacher').update({ schoolId: 'pu' }));
+    await allowStaffReads();
+
+    await seedFirestore((db) => db.doc('schools/pu/members/teacher').update({ status: 'removed' }));
+    await denyStaleStaff();
+    await seedFirestore((db) => db.doc('schools/pu/members/teacher').update({ status: 'active' }));
+    await allowStaffReads();
+
+    await seedFirestore((db) => db.doc(group + '/members/teacher').update({ status: 'removed' }));
+    await denyStaleStaff();
+    await seedFirestore((db) => db.doc(group + '/members/teacher').update({ status: 'active' }));
+    await allowStaffReads();
+
+    await seedFirestore((db) => db.doc('users/teacher').delete());
+    await allowStaffReads();
+    await seedFirestore((db) => db.doc('users/teacher').set(campusBoundProfile('pu')));
+    await allowStaffReads();
+    await assertSucceeds(teacherDb.doc(extraReview).delete());
+  });
+
+  test('course assignment metadata writes revoke when target membership or account access is revoked', async () => {
+    const group = 'groups/assignment-campus-transfer-1';
+    const base = group + '/assignments/';
+    const draft = base + 'draft';
+    const published = base + 'published';
+    const fresh = base + 'new-assignment';
+    const unexpected = base + 'unexpected';
+    const restored = base + 'restored';
+
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      await db.doc('users/teacher').set(campusBoundProfile('pu'));
+      await db.doc('users/bob').set(campusBoundProfile('pu'));
+      for (const uid of ['teacher', 'bob']) {
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+        await db.doc(group + '/members/' + uid).set({
+          status: 'active', role: uid === 'teacher' ? 'instructor' : 'member',
+        });
+      }
+      await db.doc(draft).set({ type: 'resource', title: 'Instructor draft' });
+      await db.doc(published).set({
+        type: 'assignment', title: 'Published task', description: 'Work',
+        createdBy: 'teacher', published: true, status: 'published',
+        allowLateSubmission: false, dueAt: null, points: 100,
+      });
+    });
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const revised = (title) => ({
+      title, lastEditedBy: 'teacher', updatedAt: serverTimestamp(),
+    });
+    const cannotWrite = async () => {
+      await assertFails(teacher.doc(unexpected).set({ type: 'assignment', title: 'Unexpected' }));
+      await assertFails(teacher.doc(draft).update({ title: 'Unauthorized edit' }));
+      await assertFails(teacher.doc(draft).delete());
+      await assertFails(teacher.doc(published).update(revised('Unauthorized published edit')));
+    };
+
+    await assertSucceeds(teacher.doc(fresh).set({ type: 'assignment', title: 'Legitimate task' }));
+    await assertSucceeds(teacher.doc(draft).update({ title: 'Legitimate edit' }));
+    await assertSucceeds(teacher.doc(published).update(revised('Legitimate published edit')));
+    await assertFails(bob.doc(fresh).set({ type: 'assignment', title: 'Student escalation' }));
+
+    await seedFirestore(db => db.doc('users/teacher').set(campusBoundProfile('other')));
+    await assertSucceeds(teacher.doc(draft).update({ title: 'Cross-school edit' }));
+    await assertSucceeds(teacher.doc(published).update(revised('Cross-school published edit')));
+
+    await seedFirestore(db => db.doc(group + '/members/teacher').update({ status: 'removed' }));
+    await cannotWrite();
+    await seedFirestore(db => db.doc(group + '/members/teacher').update({ status: 'active' }));
+    await seedFirestore(db => db.doc('schools/pu/members/teacher').update({ status: 'removed' }));
+    await cannotWrite();
+    await seedFirestore(db => db.doc('schools/pu/members/teacher').update({ status: 'active' }));
+    await seedFirestore(db => db.doc('users/teacher').update({ status: 'suspended' }));
+    await cannotWrite();
+    await seedFirestore(db => db.doc('users/teacher').set(campusBoundProfile('pu')));
+
+    await assertSucceeds(teacher.doc(restored).set({ type: 'assignment', title: 'Restored task' }));
+    await assertSucceeds(teacher.doc(published).update(revised('Restored published edit')));
+    await assertSucceeds(teacher.doc(draft).delete());
+  });
+
+  test('teacherNotes preserve receipt access for authorized reviewers and recipients', async () => {
+    const group = 'groups/staff-only-peer-review-1';
+    const receipt = group + '/assignments/work-1/peerReviews/alice';
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      for (const [uid, role] of [
+        ['teacher', 'instructor'], ['alice', 'member'],
+        ['bob', 'member'], ['carol', 'member'],
+      ]) {
+        await db.doc('users/' + uid).set(campusBoundProfile('pu'));
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+        await db.doc(group + '/members/' + uid).set({ status: 'active', role });
+      }
+      await db.doc(receipt).set({
+        reviewerId: 'alice', submissionOwnerId: 'bob',
+        submittedAt: new Date('2026-11-01T00:00:00Z'),
+        comment: 'Constructive feedback', teacherNotes: 'Confidential staff assessment',
+      });
+    });
+    const teacher = testEnv.authenticatedContext('teacher').firestore().doc(receipt);
+    const reviewer = testEnv.authenticatedContext('alice').firestore().doc(receipt);
+    const owner = testEnv.authenticatedContext('bob').firestore().doc(receipt);
+    const unrelated = testEnv.authenticatedContext('carol').firestore().doc(receipt);
+
+    for (const teacherNotes of ['Legacy staff note', '', null, {}, deleteField()]) {
+      await seedFirestore(db => db.doc(receipt).update({ teacherNotes }));
+      await assertSucceeds(teacher.get({ source: 'server' }));
+      const review = await assertSucceeds(reviewer.get({ source: 'server' }));
+      const feedback = await assertSucceeds(owner.get({ source: 'server' }));
+      assert.equal(review.data().comment, 'Constructive feedback');
+      assert.equal(feedback.data().comment, 'Constructive feedback');
+      await assertFails(unrelated.get({ source: 'server' }));
+    }
+
+    await seedFirestore(async (db) => {
+      await db.doc(receipt).update({ submittedAt: null });
+      await db.doc(group + '/members/alice').update({ status: 'removed' });
+    });
+    await assertSucceeds(reviewer.get({ source: 'server' }));
+    await assertFails(owner.get({ source: 'server' }));
+    await seedFirestore(db => db.doc('users/teacher').update({ primarySchoolId: 'other' }));
+    await assertSucceeds(teacher.get({ source: 'server' }));
+    await seedFirestore(db => db.doc('users/teacher').update({ primarySchoolId: 'pu' }));
+    await assertSucceeds(teacher.get({ source: 'server' }));
+  });
+
+
+  test('peer review path retains access while reviewerId remains immutable', async () => {
+    const group = 'groups/review-owner-mismatch-1';
+    const receipt = group + '/assignments/work-1/peerReviews/alice';
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      for (const [uid, role] of [
+        ['alice', 'member'], ['bob', 'member'], ['carol', 'member'],
+        ['teacher', 'instructor'], ['outsider', 'member'],
+      ]) {
+        await db.doc('users/' + uid).set({
+          status: 'active', schoolId: 'pu', primarySchoolId: 'pu',
+        });
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+        await db.doc(group + '/members/' + uid).set({ status: 'active', role });
+      }
+      // A legacy import can mis-key the document path while explicitly
+      // assigning its contents to somebody else. No teacher-only fields.
+      await db.doc(receipt).set({
+        reviewerId: 'bob', submissionOwnerId: 'carol',
+        comment: 'Bob feedback', scores: {},
+        submittedAt: new Date('2026-11-01T00:00:00Z'),
+      });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore().doc(receipt);
+    const bob = testEnv.authenticatedContext('bob').firestore().doc(receipt);
+    const carol = testEnv.authenticatedContext('carol').firestore().doc(receipt);
+    const teacher = testEnv.authenticatedContext('teacher').firestore().doc(receipt);
+    const outsider = testEnv.authenticatedContext('outsider').firestore().doc(receipt);
+
+    // The path holder can edit feedback while preserving the embedded reviewerId.
+    await assertSucceeds(alice.get({ source: 'server' }));
+    await assertSucceeds(alice.update({ comment: 'Edited feedback' }));
+    await assertFails(alice.update({ reviewerId: 'alice' }));
+    await assertFails(bob.get({ source: 'server' }));
+    await assertFails(outsider.get({ source: 'server' }));
+    // A valid recipient and teacher still retain their legitimate reads.
+    await assertSucceeds(carol.get({ source: 'server' }));
+    await assertSucceeds(teacher.get({ source: 'server' }));
+
+    // Staff correction of the mismatched owner restores legitimate feedback.
+    await assertSucceeds(teacher.update({ reviewerId: 'alice' }));
+    await assertSucceeds(alice.get({ source: 'server' }));
+    await assertSucceeds(alice.update({ comment: 'Authorized feedback' }));
+    await assertSucceeds(carol.get({ source: 'server' }));
+    // Changing login school preserves an active review assignment.
+    await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'other' }));
+    await assertSucceeds(alice.get({ source: 'server' }));
+    await assertSucceeds(alice.update({ comment: 'Feedback from a cross-school member' }));
+    await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'pu' }));
+    await assertSucceeds(alice.get({ source: 'server' }));
+
+    await seedFirestore(db => db.doc(group + '/members/alice').update({ status: 'removed' }));
+    await assertSucceeds(alice.get({ source: 'server' }));
+    await assertSucceeds(alice.update({ comment: 'Edit after removal' }));
+    await seedFirestore(db => db.doc(group + '/members/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.get({ source: 'server' }));
+    // Restoring the conflicting reviewerId preserves path access.
+    await assertSucceeds(teacher.update({ reviewerId: 'bob' }));
+    await assertSucceeds(alice.get({ source: 'server' }));
+    await assertSucceeds(alice.update({ comment: 'Edit with conflicting reviewerId' }));
+
+    // Missing reviewerId is a distinct historical case: permit the same
+    // narrowly scoped legacy GET, but never a student UPDATE without owner.
+    await assertSucceeds(teacher.update({ reviewerId: deleteField() }));
+    await assertSucceeds(alice.get({ source: 'server' }));
+    await assertFails(alice.update({ comment: 'Unowned review edit' }));
+    await assertSucceeds(teacher.get({ source: 'server' }));
+  });
+
+  test('legacy review assignments follow the receipt path and submission owner', async () => {
+    const groupId = 'review-assignment-owner-1';
+    const group = 'groups/' + groupId;
+    const assignmentId = 'task-1';
+    const review = group + '/assignments/' + assignmentId + '/peerReviews/alice';
+    const nested = group + '/assignments/' + assignmentId + '/submissions/bob';
+    const legacy = 'submissions/review-assignment-owner-legacy';
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      await db.doc(group + '/assignments/' + assignmentId).set({ type: 'assignment' });
+      for (const [uid, role] of [
+        ['alice', 'member'], ['bob', 'member'], ['teacher', 'instructor'],
+      ]) {
+        await db.doc('users/' + uid).set({ status: 'active', schoolId: 'pu', primarySchoolId: 'pu' });
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active', role: 'student' });
+        await db.doc(group + '/members/' + uid).set({ status: 'active', role });
+      }
+      await db.doc(nested).set({ userId: 'bob', content: 'Private graded work' });
+      await db.doc(legacy).set({
+        groupId, assignmentId, userId: 'bob', content: 'Private legacy graded work',
+      });
+      // The receipt path and its embedded reviewerId can differ in imported data.
+      await db.doc(review).set({ reviewerId: 'teacher', submissionOwnerId: 'bob' });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const checkRevokedAlice = async () => {
+      await assertFails(alice.doc(nested).get({ source: 'server' }));
+      await assertSucceeds(alice.doc(legacy).get({ source: 'server' }));
+    };
+    const allowAlice = async () => {
+      await assertSucceeds(alice.doc(nested).get({ source: 'server' }));
+      await assertSucceeds(alice.doc(legacy).get({ source: 'server' }));
+    };
+
+    await allowAlice();
+    await assertSucceeds(bob.doc(nested).get({ source: 'server' }));
+    await assertSucceeds(bob.doc(legacy).get({ source: 'server' }));
+    await assertSucceeds(teacher.doc(nested).get({ source: 'server' }));
+    await assertSucceeds(teacher.doc(legacy).get({ source: 'server' }));
+
+    await seedFirestore(db => db.doc(review).update({ reviewerId: 'alice' }));
+    await allowAlice();
+    // Legacy owner fields can be null, empty or absent.
+    for (const reviewerId of [null, '']) {
+      await seedFirestore(db => db.doc(review).update({ reviewerId }));
+      await allowAlice();
+    }
+    // Truly old receipts lacking reviewerId retain the legacy read contract.
+    await seedFirestore(db => db.doc(review).set({ submissionOwnerId: 'bob' }));
+    await allowAlice();
+
+    // The same authenticated client retains access until target membership is revoked.
+    await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'other' }));
+    await allowAlice();
+    await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'pu' }));
+    await allowAlice();
+    await seedFirestore(db => db.doc(group + '/members/alice').update({ status: 'removed' }));
+    await checkRevokedAlice();
+    await seedFirestore(db => db.doc(group + '/members/alice').update({ status: 'active' }));
+    await allowAlice();
+    await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'revoked' }));
+    await checkRevokedAlice();
+    await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'active' }));
+    await allowAlice();
+    // The legacy assignment continues to follow the receipt path.
+    await seedFirestore(db => db.doc(review).update({ reviewerId: 'teacher' }));
+    await allowAlice();
+  });
+
+  test('gradebook owner retains history while staff grants follow current membership', async () => {
+    const group = 'groups/gradebook-revoke-1';
+    const row = `${group}/gradebook/bob`;
+    const extra = `${group}/gradebook/created-by-teacher`;
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      for (const uid of ['bob', 'alice', 'teacher', 'outsider']) {
+        const school = uid === 'outsider' ? 'other' : 'pu';
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: school });
+        await db.doc(`schools/${school}/members/${uid}`).set({
+          status: 'active', role: uid === 'teacher' ? 'teacher' : 'student',
+        });
+      }
+      for (const [uid, role] of [['bob', 'member'], ['alice', 'member'], ['teacher', 'instructor']]) {
+        await db.doc(`${group}/members/${uid}`).set({ status: 'active', role });
+      }
+      await db.doc(row).set({ userId: 'bob', finalScore: 92 });
+    });
+
+    const bobDb = testEnv.authenticatedContext('bob').firestore();
+    const aliceDb = testEnv.authenticatedContext('alice').firestore();
+    const teacherDb = testEnv.authenticatedContext('teacher').firestore();
+    const outsiderDb = testEnv.authenticatedContext('outsider').firestore();
+    const bobRow = bobDb.doc(row);
+    const teacherRow = teacherDb.doc(row);
+    const denyTeacher = async () => {
+      await assertFails(teacherRow.get({ source: 'server' }));
+      await assertFails(teacherRow.update({ finalScore: 30 }));
+      await assertFails(teacherDb.doc(extra).set({ userId: 'outsider', finalScore: 50 }));
+    };
+    await assertSucceeds(bobRow.get({ source: 'server' }));
+    await assertFails(aliceDb.doc(row).get({ source: 'server' }));
+    await assertFails(outsiderDb.doc(row).get({ source: 'server' }));
+    await assertSucceeds(teacherRow.get({ source: 'server' }));
+    await assertSucceeds(teacherRow.update({ finalScore: 91 }));
+    await assertSucceeds(teacherDb.doc(extra).set({ userId: 'outsider', finalScore: 50 }));
+    await assertSucceeds(teacherDb.doc(extra).delete());
+
+    // Reuse unchanged authenticated contexts to exercise live revocation and replay.
+    await seedFirestore(db => db.doc(`${group}/members/bob`).update({ status: 'removed' }));
+    await assertSucceeds(bobRow.get({ source: 'server' }));
+    await seedFirestore(async db => {
+      await db.doc(`${group}/members/bob`).update({ status: 'active' });
+      await db.doc('schools/pu/members/bob').update({ status: 'removed' });
+    });
+    await assertSucceeds(bobRow.get({ source: 'server' }));
+    await seedFirestore(async db => {
+      await db.doc('schools/pu/members/bob').update({ status: 'active' });
+      await db.doc('users/bob').update({ primarySchoolId: 'other' });
+    });
+    await assertSucceeds(bobRow.get({ source: 'server' }));
+    await seedFirestore(db => db.doc('users/bob').delete());
+    await assertSucceeds(bobRow.get({ source: 'server' }));
+    await seedFirestore(db => db.doc('users/bob').set({ status: 'active', primarySchoolId: 'pu' }));
+    await assertSucceeds(bobRow.get({ source: 'server' }));
+
+    await seedFirestore(db => db.doc(`${group}/members/teacher`).update({ status: 'removed' }));
+    await denyTeacher();
+    await seedFirestore(async db => {
+      await db.doc(`${group}/members/teacher`).update({ status: 'active' });
+      await db.doc('users/teacher').update({ schoolId: 'other' });
+    });
+    await assertSucceeds(teacherRow.get({ source: 'server' }));
+    await assertSucceeds(teacherRow.update({ finalScore: 93 }));
+    await seedFirestore(db => db.doc('schools/pu/members/teacher').update({ status: 'removed' }));
+    await denyTeacher();
+    await seedFirestore(db => db.doc('schools/pu/members/teacher').update({ status: 'active' }));
+    await assertSucceeds(teacherRow.get({ source: 'server' }));
+  });
+
   test("deny students from reading classmates' gradebook rows", async () => {
     await seedFirestore(async (db) => {
       await db.collection('groups').doc('group-1').set({
@@ -1491,6 +3544,56 @@ describe('firestore security rules', () => {
     await assertFails(
       db.collection('groups').doc('group-1').collection('gradebook').doc('bob').get(),
     );
+  });
+
+  test('nested submission reads retain both UID-path and explicit ownership access', async () => {
+    const group = 'groups/nested-submission-owner-conflict';
+    const base = `${group}/assignments/task/submissions`;
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      await db.doc(`${group}/assignments/task`).set({ title: 'Private task' });
+      for (const uid of ['alice', 'bob', 'charlie', 'dave', 'teacher', 'outsider']) {
+        await db.doc(`users/${uid}`).set({ schoolId: 'pu', status: 'active' });
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+      }
+      for (const uid of ['alice', 'bob', 'charlie', 'dave', 'teacher']) {
+        await db.doc(`${group}/members/${uid}`).set({
+          status: 'active', role: uid === 'teacher' ? 'instructor' : 'member',
+        });
+      }
+      await db.doc(`${base}/alice`).set({ userId: 'bob', content: 'Bob confidential answer' });
+      await db.doc(`${base}/bob`).set({ userId: 'alice', content: 'Alice confidential answer' });
+      await db.doc(`${base}/opaque`).set({ userId: 'alice', content: 'Alice opaque receipt' });
+      await db.doc(`${base}/charlie`).set({ content: 'Legacy owner by document ID' });
+      await db.doc(`${base}/dave`).set({ userId: null, content: 'Explicit null owner' });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const dave = testEnv.authenticatedContext('dave').firestore();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const outsider = testEnv.authenticatedContext('outsider').firestore();
+
+    await assertSucceeds(alice.doc(`${base}/alice`).get({ source: 'server' }));
+    await assertSucceeds(bob.doc(`${base}/bob`).get({ source: 'server' }));
+    await assertSucceeds(bob.doc(`${base}/alice`).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(`${base}/bob`).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(`${base}/opaque`).get({ source: 'server' }));
+    await assertSucceeds(charlie.doc(`${base}/charlie`).get({ source: 'server' }));
+    await assertSucceeds(dave.doc(`${base}/dave`).get({ source: 'server' }));
+    await assertFails(outsider.doc(`${base}/alice`).get({ source: 'server' }));
+    await assertSucceeds(teacher.doc(`${base}/alice`).get({ source: 'server' }));
+
+    // A live token cannot replay a receipt after group or school revocation.
+    await seedFirestore(db => db.doc(`${group}/members/alice`).update({ status: 'removed' }));
+    await assertFails(alice.doc(`${base}/bob`).get({ source: 'server' }));
+    await seedFirestore(db => db.doc(`${group}/members/alice`).update({ status: 'active' }));
+    await assertSucceeds(alice.doc(`${base}/bob`).get({ source: 'server' }));
+    await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'removed' }));
+    await assertFails(alice.doc(`${base}/bob`).get({ source: 'server' }));
+    await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.doc(`${base}/bob`).get({ source: 'server' }));
   });
 
   test("deny students from reading classmates' submissions", async () => {
@@ -1631,6 +3734,136 @@ describe('firestore security rules', () => {
     );
   });
 
+
+  test('student peer review updates preserve reviewer and submission owner identity', async () => {
+    const group = 'groups/review-fields-1';
+    const receipt = `${group}/assignments/task-1/peerReviews/alice`;
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      for (const [uid, role] of [['alice', 'member'], ['bob', 'member'], ['teacher', 'instructor']]) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: 'pu' });
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+        await db.doc(`${group}/members/${uid}`).set({ status: 'active', role });
+      }
+      await db.doc(receipt).set({
+        reviewerId: 'alice', submissionOwnerId: 'bob', comment: '',
+        scores: {}, submittedAt: null, teacherNotes: 'Only staff may change this',
+        gradePublished: false,
+      });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore().doc(receipt);
+    const teacher = testEnv.authenticatedContext('teacher').firestore().doc(receipt);
+    const bob = testEnv.authenticatedContext('bob').firestore().doc(receipt);
+
+    // Normal feedback and live timestamp updates must continue to work.
+    await assertSucceeds(alice.update({
+      comment: 'Clear reasoning', scores: { rubric1: 4 }, updatedAt: serverTimestamp(),
+    }));
+    await assertFails(bob.update({ comment: 'Impersonated reviewer' }));
+    await assertFails(alice.update({ reviewerId: 'bob' }));
+    await assertFails(alice.update({ submissionOwnerId: 'alice' }));
+    await assertSucceeds(alice.update({ comment: 'x'.repeat(4001) }));
+    await assertSucceeds(alice.update({ scores: Object.fromEntries(
+      Array.from({ length: 33 }, (_, i) => [`rubric${i}`, 5]),
+    ) }));
+    await assertSucceeds(alice.update({ updatedAt: new Date('2020-01-01T00:00:00Z') }));
+    await assertSucceeds(alice.update({ submittedAt: new Date('2020-01-01T00:00:00Z') }));
+    await assertSucceeds(alice.update({ submittedAt: serverTimestamp() }));
+    await assertSucceeds(alice.update({ submittedAt: null }));
+    await assertSucceeds(alice.update({ submittedAt: serverTimestamp() }));
+    await assertSucceeds(teacher.update({ teacherNotes: 'Reviewed by staff' }));
+
+    await seedFirestore((db) => db.doc(`${group}/members/alice`).update({ status: 'removed' }));
+    await assertSucceeds(alice.update({ comment: 'Edit after course removal' }));
+    await seedFirestore((db) => db.doc(`${group}/members/alice`).update({ status: 'active' }));
+    await assertSucceeds(alice.update({ comment: 'Reauthorized feedback' }));
+  });
+
+  test('peer-review receipts retain legacy access after campus revocation', async () => {
+    const base = 'groups/review-revoke-1';
+    const reviewPath = `${base}/assignments/assignment-1/peerReviews/alice`;
+    const nested = `${base}/assignments/assignment-1/submissions/bob`;
+    const legacy = 'submissions/review-revoke-legacy';
+    await seedFirestore(async (db) => {
+      await db.doc(base).set({ schoolId: 'pu', type: 'course' });
+      await db.doc(`${base}/assignments/assignment-1`).set({ type: 'assignment' });
+      for (const uid of ['alice', 'bob', 'outsider']) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: 'pu' });
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+      }
+      for (const uid of ['alice', 'bob']) {
+        await db.doc(`${base}/members/${uid}`).set({ status: 'active', role: 'member' });
+      }
+      await db.doc(reviewPath).set({
+        reviewerId: 'alice', submissionOwnerId: 'bob', comment: '', scores: {}, submittedAt: null,
+      });
+      await db.doc(`${base}/assignments/assignment-1/peerReviews/outsider`).set({
+        reviewerId: 'outsider', submissionOwnerId: 'bob', comment: '', scores: {}, submittedAt: null,
+      });
+      await db.doc(nested).set({ userId: 'bob', content: 'Private nested answer' });
+      await db.doc(legacy).set({
+        userId: 'bob', groupId: 'review-revoke-1', assignmentId: 'assignment-1',
+        content: 'Private legacy answer',
+      });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const outsider = testEnv.authenticatedContext('outsider').firestore();
+    const aliceLegacy = alice.doc(legacy);
+    const aliceNested = alice.doc(nested);
+    const aliceReview = alice.doc(reviewPath);
+    const checkRevokedAlice = async () => {
+      await assertSucceeds(aliceLegacy.get({ source: 'server' }));
+      await assertFails(aliceNested.get({ source: 'server' }));
+      await assertSucceeds(aliceReview.get({ source: 'server' }));
+      await assertSucceeds(aliceReview.update({ comment: 'Stale review replay' }));
+    };
+    // The review receipt grants legacy root access while nested access still requires membership.
+    await assertSucceeds(outsider.doc(legacy).get({ source: 'server' }));
+    await assertSucceeds(outsider.doc(`${base}/assignments/assignment-1/peerReviews/outsider`).get());
+    await assertSucceeds(outsider.doc(`${base}/assignments/assignment-1/peerReviews/outsider`).update({ comment: 'forged' }));
+    await assertSucceeds(aliceLegacy.get({ source: 'server' }));
+    await assertSucceeds(aliceNested.get({ source: 'server' }));
+    await assertSucceeds(aliceReview.get({ source: 'server' }));
+    await assertSucceeds(aliceReview.update({ comment: 'A valid review' }));
+
+    // Keep the same authenticated Firebase context while changing course membership and school binding.
+    await seedFirestore((db) => db.doc(`${base}/members/alice`).update({ status: 'removed' }));
+    await checkRevokedAlice();
+    await seedFirestore(async (db) => {
+      await db.doc(`${base}/members/alice`).update({ status: 'active' });
+      await db.doc('schools/pu/members/alice').update({ status: 'removed' });
+    });
+    await checkRevokedAlice();
+    await seedFirestore(db => db.doc(reviewPath).update({
+      submittedAt: new Date('2026-11-01T00:00:00Z'),
+      comment: 'My submitted review', scores: { rubric: 4 },
+    }));
+    const submitted = await assertSucceeds(aliceReview.get({ source: 'server' }));
+    assert.equal(submitted.data().comment, 'My submitted review');
+    assert.deepEqual(submitted.data().scores, { rubric: 4 });
+    await assertSucceeds(aliceLegacy.get({ source: 'server' }));
+    await assertFails(aliceNested.get({ source: 'server' }));
+    await assertSucceeds(aliceReview.update({ comment: 'Stale review replay' }));
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').update({ status: 'active' });
+      await db.doc('users/alice').update({ primarySchoolId: 'other' });
+    });
+    await assertSucceeds(aliceLegacy.get({ source: 'server' }));
+    await assertSucceeds(aliceNested.get({ source: 'server' }));
+    await assertSucceeds(aliceReview.update({ comment: 'Feedback after changing login school' }));
+    await seedFirestore((db) => db.doc('users/alice').delete());
+    await assertSucceeds(aliceLegacy.get({ source: 'server' }));
+    await assertSucceeds(aliceNested.get({ source: 'server' }));
+    await assertSucceeds(aliceReview.get({ source: 'server' }));
+    // Historical one-field profiles remain usable.
+    await seedFirestore((db) => db.doc('users/alice').set({ status: 'active', primarySchoolId: 'pu' }));
+    await assertSucceeds(aliceLegacy.get({ source: 'server' }));
+    await assertSucceeds(aliceNested.get({ source: 'server' }));
+    await assertSucceeds(aliceReview.get({ source: 'server' }));
+    await assertSucceeds(aliceReview.update({ comment: 'Reauthorized review' }));
+  });
+
   test('signed-in users can read pulse aggregates; guests and writers cannot', async () => {
     await seedFirestore(async (db) => {
       await db
@@ -1694,10 +3927,151 @@ describe('firestore security rules', () => {
     );
   });
 
+
+  for (const [label, profile] of [
+    ['transfer', { status: 'active', primarySchoolId: 'pu', schoolId: 'ncku' }],
+    ['primary-only legacy', { primarySchoolId: 'pu' }],
+    ['school-only legacy', { schoolId: 'pu' }],
+    ['null primary legacy', { primarySchoolId: null, schoolId: 'pu' }],
+    ['empty primary legacy', { primarySchoolId: '', schoolId: 'pu' }],
+    ['missing profile', null],
+    ['missing schools', {}],
+    ['empty schools', { primarySchoolId: '', schoolId: '' }],
+    ['null schools', { primarySchoolId: null, schoolId: null }],
+  ]) {
+    test(`lost-found preserves ${label} access with active membership`, async () => {
+      await seedFirestore(async (db) => {
+        if (profile) await db.doc('users/alice').set(profile);
+        for (const school of ['pu', 'ncku']) {
+          await db.doc(`schools/${school}/members/alice`).set({ status: 'active' });
+        }
+      });
+      const alice = testEnv.authenticatedContext('alice').firestore();
+      for (const collection of ['schools/pu/lostFound', 'lostFoundItems']) {
+        const ref = alice.doc(`${collection}/compat`);
+        await assertSucceeds(ref.set({ schoolId: 'pu', userId: 'alice', title: '筆記本' }));
+        await assertSucceeds(ref.get());
+        await assertSucceeds(alice.collection(collection).where('schoolId', '==', 'pu').get());
+        await assertSucceeds(ref.update({ title: '已尋獲筆記本' }));
+        for (const status of ['disabled', 'deleted', 'suspended', 'inactive']) {
+          await seedFirestore(db => db.doc('users/alice').set({ status }, { merge: true }));
+          await assertFails(ref.get());
+          await assertFails(ref.update({ title: '停權後修改' }));
+          await assertFails(ref.delete());
+        }
+        await seedFirestore(db => profile ? db.doc('users/alice').set(profile) : db.doc('users/alice').delete());
+        await seedFirestore(db => db.doc('users/alice').set({ accountDeletionInProgress: true }, { merge: true }));
+        await assertFails(ref.get());
+        await seedFirestore(db => profile ? db.doc('users/alice').set(profile) : db.doc('users/alice').delete());
+        await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'revoked' }));
+        await assertFails(ref.get());
+        await assertFails(ref.delete());
+        await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'active' }));
+        await assertSucceeds(ref.delete());
+      }
+      // Even an active old-school membership cannot authorize a transfer back.
+      const assertOtherSchool = profile && (profile.primarySchoolId || profile.schoolId) ? assertFails : assertSucceeds;
+      await assertOtherSchool(alice.doc('schools/ncku/lostFound/stale').set({ schoolId: 'ncku', userId: 'alice' }));
+      await assertOtherSchool(alice.doc('lostFoundItems/stale').set({ schoolId: 'ncku', userId: 'alice' }));
+      await seedFirestore(db => db.doc('users/alice').delete());
+      await assertSucceeds(alice.doc('schools/pu/lostFound/missing-user').set({ schoolId: 'pu', userId: 'alice' }));
+    });
+  }
+
+  test('lost-found contact reports reject cross-campus reads, forged owners and revoked access', async () => {
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob']) {
+        await db.doc('users/' + uid).set({ status: 'active', schoolId: 'pu' });
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active', role: 'student' });
+      }
+      await db.doc('users/mallory').set({ status: 'active', schoolId: 'ncku' });
+      await db.doc('schools/ncku/members/mallory').set({ status: 'active', role: 'student' });
+      // Simulate a stale old-school membership after campus transfer.
+      await db.doc('schools/pu/members/mallory').set({ status: 'active', role: 'student' });
+      await db.doc('schools/pu/lostFound/p1').set({
+        schoolId: 'pu', userId: 'alice', reporterId: 'alice', contactInfo: 'private-pu-phone',
+      });
+      await db.doc('schools/ncku/lostFound/n1').set({
+        schoolId: 'ncku', userId: 'mallory', contactInfo: 'private-ncku-phone',
+      });
+      await db.doc('lostFoundItems/old-pu').set({
+        schoolId: 'pu', userId: 'alice', contactInfo: 'legacy-pu-phone',
+      });
+      await db.doc('lostFoundItems/old-ncku').set({
+        schoolId: 'ncku', userId: 'mallory', contactInfo: 'legacy-ncku-phone',
+      });
+      await db.doc('lostFoundItems/no-school').set({
+        userId: 'alice', contactInfo: 'orphaned-contact',
+      });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+
+    await assertSucceeds(alice.doc('schools/pu/lostFound/p1').get());
+    await assertSucceeds(bob.doc('schools/pu/lostFound/p1').get());
+    await assertSucceeds(alice.collection('schools/pu/lostFound').get());
+    await assertSucceeds(alice.doc('lostFoundItems/old-pu').get());
+    await assertSucceeds(alice.collection('lostFoundItems').where('schoolId', '==', 'pu').get());
+    await assertSucceeds(mallory.collection('lostFoundItems').where('schoolId', '==', 'ncku').get());
+
+    await assertFails(mallory.doc('schools/pu/lostFound/p1').get());
+    await assertFails(mallory.collection('schools/pu/lostFound').get());
+    await assertFails(alice.doc('schools/ncku/lostFound/n1').get());
+    await assertFails(mallory.doc('lostFoundItems/old-pu').get());
+    await assertFails(alice.doc('lostFoundItems/old-ncku').get());
+    await assertFails(alice.doc('lostFoundItems/no-school').get());
+    await assertFails(alice.collection('lostFoundItems').get());
+    await assertFails(mallory.collection('lostFoundItems').where('schoolId', '==', 'pu').get());
+    await assertFails(guest.doc('schools/pu/lostFound/p1').get());
+
+    const report = { schoolId: 'pu', userId: 'alice', reporterId: 'alice', title: 'Notebook' };
+    await assertSucceeds(alice.doc('schools/pu/lostFound/new').set(report));
+    await assertSucceeds(alice.doc('lostFoundItems/new').set(report));
+    await assertFails(mallory.doc('schools/pu/lostFound/outside').set({
+      ...report, userId: 'mallory', reporterId: 'mallory',
+    }));
+    await assertFails(alice.doc('schools/ncku/lostFound/outside').set(report));
+    await assertFails(alice.doc('schools/pu/lostFound/impersonate').set({ ...report, userId: 'bob' }));
+    await assertFails(alice.doc('lostFoundItems/other-campus').set({ ...report, schoolId: 'ncku' }));
+    await assertFails(alice.doc('schools/pu/lostFound/new').update({ userId: 'bob' }));
+    await assertFails(alice.doc('schools/pu/lostFound/new').update({ reporterId: 'bob' }));
+    await assertFails(alice.doc('schools/pu/lostFound/new').update({ schoolId: 'ncku' }));
+    await assertFails(alice.doc('lostFoundItems/new').update({ userId: 'bob' }));
+    await assertFails(alice.doc('lostFoundItems/new').update({ schoolId: 'ncku' }));
+    await assertFails(bob.doc('schools/pu/lostFound/new').delete());
+    await assertSucceeds(alice.doc('schools/pu/lostFound/new').update({ title: 'Updated notebook' }));
+    await assertSucceeds(alice.doc('lostFoundItems/new').update({ title: 'Updated notebook' }));
+
+    // Same SDK token must stop working immediately when enrolment is revoked.
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').update({ status: 'revoked' });
+    });
+    await assertFails(alice.doc('schools/pu/lostFound/new').get());
+    await assertFails(alice.doc('lostFoundItems/new').get());
+    await assertFails(alice.doc('schools/pu/lostFound/new').delete());
+    await assertFails(alice.doc('lostFoundItems/new').update({ title: 'Replay' }));
+
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').update({ status: 'active' });
+      await db.doc('users/alice').update({ schoolId: 'ncku' });
+    });
+    await assertFails(alice.doc('schools/pu/lostFound/new').get());
+    await assertFails(alice.collection('lostFoundItems').where('schoolId', '==', 'pu').get());
+    await seedFirestore(async (db) => db.doc('users/alice').update({ schoolId: 'pu' }));
+    await assertSucceeds(alice.doc('schools/pu/lostFound/new').get());
+    await assertSucceeds(alice.doc('lostFoundItems/new').delete());
+    await assertSucceeds(alice.doc('schools/pu/lostFound/new').delete());
+  });
+
   test('guests can read campus announcements but not lost-and-found or reviews', async () => {
     await seedFirestore(async (db) => {
       const school = db.collection('schools').doc('pu');
       await school.set({ name: '靜宜大學' });
+      await db.doc('users/alice').set({ status: 'active', schoolId: 'pu' });
+      await school.collection('members').doc('alice').set({ status: 'active', role: 'student' });
       await school.collection('announcements').doc('notice-1').set({
         title: '停課通知',
         schoolId: 'pu',
@@ -1746,6 +4120,7 @@ describe('firestore security rules', () => {
       await db.collection('courses').doc('cs101').set({ name: '程式設計' });
       await db.collection('lostFoundItems').doc('item-2').set({
         userId: 'alice',
+        schoolId: 'pu',
         title: '雨傘',
       });
       await db.collection('menuRatings').doc('rate-1').set({
@@ -2422,6 +4797,70 @@ describe('storage security rules', () => {
     await assertFails(testEnv.unauthenticatedContext().firestore().doc(viewPath).get());
   });
 
+
+  test('story access accepts either profile binding while receipts require schoolId', async () => {
+    const now = Date.now();
+    const storyPath = 'campusStories/transfer-conflict';
+    const receiptPath = storyPath + '/schools/pu/authors/alice/views/bob';
+    const payload = {
+      schoolId: 'pu', authorUid: 'alice', kind: 'text',
+      text: 'Synthetic school-scoped story', expiresAt: now + 3_600_000,
+      viewCount: 0,
+    };
+    await seedFirestore(async (db) => {
+      await db.doc(storyPath).set(payload);
+      for (const uid of ['alice', 'bob']) {
+        await db.doc(`users/${uid}`).set(campusBoundProfile('pu'));
+        await db.doc(`schools/pu/members/${uid}`).set(campusBoundMembership('pu'));
+        // A new campus membership and an old one can coexist temporarily.
+        await db.doc(`schools/other/members/${uid}`).set(campusBoundMembership('other'));
+      }
+    });
+    // Deliberately retain the same issued auth contexts after server updates.
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const story = bob.doc(storyPath);
+    const receipt = bob.doc(receiptPath);
+    const list = bob.collection('campusStories').where('schoolId', '==', 'pu')
+      .where('expiresAt', '>', now + 120_000).limit(20);
+
+    await assertSucceeds(story.get());
+    await assertSucceeds(list.get());
+    await assertSucceeds(receipt.set({ viewerUid: 'bob', viewedAt: serverTimestamp() }));
+    await assertSucceeds(receipt.get());
+
+    await seedFirestore(async (db) => {
+      // Bob has old schoolId and new primarySchoolId; Alice has the reverse.
+      await db.doc('users/bob').update({ primarySchoolId: 'other' });
+      await db.doc('users/alice').update({ schoolId: 'other' });
+    });
+    await assertSucceeds(story.get());
+    await assertSucceeds(list.get());
+    await assertSucceeds(receipt.get());
+    await assertSucceeds(bob.doc('campusStories/replayed-transfer').set({
+      ...payload, authorUid: 'bob',
+    }));
+    await assertSucceeds(alice.doc(storyPath).get());
+    await assertSucceeds(alice.doc('campusStories/forged-transfer').set(payload));
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').update({ primarySchoolId: 'pu' });
+      await db.doc('users/alice').update({ schoolId: 'pu' });
+    });
+    await assertSucceeds(story.get());
+    await assertSucceeds(list.get());
+    await assertSucceeds(receipt.get());
+
+    // Preserve the existing single-field canonical story reader behavior.
+    await seedFirestore((db) => db.doc('users/bob').set({ status: 'active', schoolId: 'pu' }));
+    await assertSucceeds(story.get());
+    await assertSucceeds(receipt.get());
+    await seedFirestore((db) => db.doc('users/bob').set({ status: 'active', primarySchoolId: 'pu' }));
+    await assertSucceeds(story.get());
+    // Receipt reads still require explicit schoolId as they did before.
+    await assertFails(receipt.get());
+    await assertSucceeds(alice.doc(storyPath).delete());
+  });
 
   test('stale story tokens lose reads, writes and deletion after account or school revocation', async () => {
     const now = Date.now();
@@ -3293,7 +5732,12 @@ describe('course assignment submissions', () => {
     await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
   });
   test('unpublished, closed and overdue assignments reject submissions', async () => {
-    for (const overrides of [{ published: false }, { status: 'draft' }, { status: 'closed' }, { dueAt: Timestamp.fromMillis(0) }, { dueAt: '2000-01-01T00:00:00Z' }]) {
+    for (const overrides of [
+      { published: false },
+      ...["draft","closed","scheduled","pending","unpublished","archived","cancelled","canceled","deleted"].map((status) => ({ status })),
+      { dueAt: Timestamp.fromMillis(0) },
+      { dueAt: '2000-01-01T00:00:00Z' },
+    ]) {
       await seedAssignment(overrides);
       await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
     }
@@ -3302,14 +5746,38 @@ describe('course assignment submissions', () => {
     const quizAnswer = answer({ content: '', answers: { q1: 'b' } });
     for (const overrides of [
       { type: 'quiz', published: false },
-      { type: 'quiz', status: 'draft' },
-      { type: 'quiz', status: 'closed' },
+      ...["draft","closed","scheduled","pending","unpublished","archived","cancelled","canceled","deleted"].map((status) => ({ type: 'quiz', status })),
       { type: 'quiz', dueAt: Timestamp.fromMillis(0) },
       { type: 'quiz', dueAt: '2000-01-01T00:00:00Z' },
     ]) {
       await seedAssignment(overrides);
       await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(quizAnswer));
     }
+  });
+  test('late allowance cannot reopen withdrawn assignments or quizzes', async () => {
+    const student = testEnv.authenticatedContext('alice').firestore();
+    for (const type of ['assignment', 'quiz']) {
+      for (const status of ['scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled', 'deleted']) {
+        await seedAssignment({
+          type, status, published: true, dueAt: Timestamp.fromMillis(0), allowLateSubmission: true,
+        });
+        const payload = type === 'quiz' ? answer({ content: '', answers: { q1: 'b' } }) : answer();
+        await assertFails(pathTo(student).set(payload));
+      }
+    }
+  });
+  test('submission status and enrollment revocation apply to a reused auth context', async () => {
+    await seedAssignment({ status: 'published' });
+    const student = testEnv.authenticatedContext('alice').firestore();
+    const assignmentRef = 'groups/course-1/assignments/work-1';
+    await seedFirestore((db) => db.doc(assignmentRef).update({ status: 'archived' }));
+    await assertFails(pathTo(student).set(answer()));
+    await seedFirestore((db) => db.doc(assignmentRef).update({ status: 'published' }));
+    await seedFirestore((db) => db.doc('schools/school-1/members/alice').update({ status: 'removed' }));
+    await assertFails(pathTo(student).set(answer()));
+    await seedFirestore((db) => db.doc('schools/school-1/members/alice').update({ status: 'active' }));
+    await assertSucceeds(pathTo(student).set(answer()));
+    await assertFails(pathTo(student).set(answer({ content: 'Replay after submission' })));
   });
   test('explicit late allowance accepts an overdue submission', async () => {
     await seedAssignment({ dueAt: Timestamp.fromMillis(0), allowLateSubmission: true });
@@ -3354,6 +5822,49 @@ describe('course assignment submissions', () => {
     });
     return { batch, revision };
   }
+  test('cross-school teachers can grade until target membership is revoked', async () => {
+    await seedPublishedGrade();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const student = testEnv.authenticatedContext('alice').firestore();
+    const root = 'groups/course-1/assignments';
+    const initial = teacher.doc(root + '/initial-after-transfer/submissions/bob');
+    const legacy = teacher.doc(root + '/legacy-after-transfer/submissions/bob');
+    await seedFirestore(async (db) => {
+      for (const assignmentId of ['initial-after-transfer', 'legacy-after-transfer']) {
+        await db.doc(root + '/' + assignmentId).set({ type: 'assignment', points: 100 });
+        await db.doc(root + '/' + assignmentId + '/submissions/bob').set({
+          userId: 'bob', groupId: 'course-1', assignmentId,
+          content: 'Synthetic answer', status: 'submitted',
+          submittedAt: Timestamp.fromDate(new Date('2026-11-01T00:00:00Z')),
+        });
+      }
+    });
+    const publish = () => initial.update({
+      gradeScore: 80, gradeFeedback: 'Graded with rubric',
+      gradePublished: true, gradePublishedBy: 'teacher',
+      gradePublishedAt: serverTimestamp(),
+    });
+    const provisional = () => legacy.update({ grade: 70, feedback: 'Initial review' });
+    const revise = () => correctionBatch(teacher).batch.commit();
+    await assertFails(pathTo(student).update({ gradeScore: 90 }));
+
+    await seedFirestore(db => db.doc('users/teacher').set(campusBoundProfile('other-campus')));
+    await seedFirestore(db => db.doc('schools/school-1/members/teacher').update({ status: 'removed' }));
+    await assertFails(provisional());
+    await assertFails(revise());
+    await seedFirestore(db => db.doc('schools/school-1/members/teacher').update({ status: 'active' }));
+    await seedFirestore(db => db.doc('groups/course-1/members/teacher').update({ status: 'removed' }));
+    await assertFails(publish());
+    await assertFails(revise());
+
+    // Original permissions return only after both school and course are valid.
+    await seedFirestore(db => db.doc('groups/course-1/members/teacher').update({ status: 'active' }));
+    await assertSucceeds(publish());
+    await assertSucceeds(provisional());
+    await assertSucceeds(revise());
+    assert.equal((await pathTo(teacher).get()).data().gradeRevisionCount, 1);
+  });
+
   test('teacher grade changes require an atomic immutable audit trail', async () => {
     await seedPublishedGrade();
     const teacher = testEnv.authenticatedContext('teacher').firestore();
@@ -3469,6 +5980,68 @@ describe('protected attendance records', () => {
     await assertFails(group('removed').collection('liveSessionSecrets').doc('current').get());
   });
 
+  test('attendance staff reads follow active target-school and course membership', async () => {
+    await seedAttendance();
+    await seedFirestore((db) => db.doc('groups/attendance-class/attendanceSessions/current/attendanceCorrections/rev-1').set({
+      studentUid: 'alice', teacherUid: 'teacher', reason: 'Synthetic correction',
+    }));
+    const teacher = group('teacher');
+    const owner = group('owner');
+    const admin = group('admin');
+    const alice = group('alice');
+    const secret = teacher.collection('liveSessionSecrets').doc('current');
+    const roster = teacher.collection('attendanceSessions').doc('current').collection('attendanceRecords');
+    const correction = teacher.collection('attendanceSessions').doc('current').collection('attendanceCorrections').doc('rev-1');
+    async function expectStaffAllowed() {
+      await assertSucceeds(secret.get({ source: 'server' }));
+      await assertSucceeds(roster.doc('alice').get({ source: 'server' }));
+      await assertSucceeds(roster.get());
+      await assertSucceeds(correction.get({ source: 'server' }));
+    }
+    async function expectStaffDenied() {
+      await assertFails(secret.get({ source: 'server' }));
+      await assertFails(teacher.collection('liveSessionSecrets').get());
+      await assertFails(roster.doc('alice').get({ source: 'server' }));
+      await assertFails(roster.get());
+      await assertFails(correction.get({ source: 'server' }));
+    }
+
+    await expectStaffAllowed();
+    await assertSucceeds(owner.collection('liveSessionSecrets').doc('current').get());
+    await assertSucceeds(admin.collection('attendanceSessions').doc('current').collection('attendanceRecords').get());
+    await assertFails(admin.collection('liveSessionSecrets').doc('current').get());
+    await assertFails(alice.collection('liveSessionSecrets').doc('current').get());
+    await assertFails(alice.collection('attendanceSessions').doc('current').collection('attendanceCorrections').doc('rev-1').get());
+    await assertSucceeds(alice.collection('attendanceSessions').doc('current').collection('attendanceRecords').doc('alice').get());
+    await assertFails(alice.collection('attendanceSessions').doc('current').collection('attendanceRecords').doc('bob').get());
+
+    // Canonical profile changes are server-side, without replacing the old auth token.
+    await seedFirestore((db) => db.doc('users/teacher').set({ primarySchoolId: 'other-campus' }));
+    await expectStaffAllowed();
+    await seedFirestore((db) => db.doc('users/teacher').update({ primarySchoolId: 'tw-demo-uni' }));
+    await expectStaffAllowed();
+
+    await seedFirestore((db) => db.doc('users/teacher').update({ schoolId: 'other-campus' }));
+    await expectStaffAllowed();
+    await seedFirestore((db) => db.doc('users/teacher').update({ schoolId: 'tw-demo-uni' }));
+    await expectStaffAllowed();
+
+    await seedFirestore((db) => db.doc('schools/tw-demo-uni/members/teacher').update({ status: 'inactive' }));
+    await expectStaffDenied();
+    await seedFirestore((db) => db.doc('schools/tw-demo-uni/members/teacher').update({ status: 'active' }));
+    await expectStaffAllowed();
+
+    await seedFirestore((db) => db.doc('groups/attendance-class/members/teacher').update({ status: 'inactive' }));
+    await expectStaffDenied();
+    await seedFirestore((db) => db.doc('groups/attendance-class/members/teacher').update({ status: 'active' }));
+    await expectStaffAllowed();
+
+    await seedFirestore((db) => db.doc('users/teacher').delete());
+    await expectStaffAllowed();
+    await seedFirestore((db) => db.doc('users/teacher').set(campusBoundProfile('tw-demo-uni')));
+    await expectStaffAllowed();
+  });
+
   test('even instructors cannot create, rewrite or delete canonical attendance documents', async () => {
     await seedAttendance();
     for (const uid of ['alice', 'teacher', 'owner', 'admin']) {
@@ -3483,6 +6056,81 @@ describe('protected attendance records', () => {
       await assertFails(records.doc('alice').update({ checkedInAt: new Date(0) }));
       await assertFails(records.doc('alice').delete());
     }
+  });
+
+  test('legacy hidden session children reject direct reads and lists, including revocation and stale-session replay', async () => {
+    await seedAttendance();
+    await seedFirestore(async (db) => {
+      const root = db.doc('groups/attendance-class');
+      for (const sessionId of ['current', 'legacy']) {
+        const live = root.collection('liveSessions').doc(sessionId);
+        const attendance = root.collection('attendanceSessions').doc(sessionId);
+        await live.collection('questions').doc('q1').set({ authorId: 'alice', text: 'Synthetic question' });
+        await live.collection('polls').doc('p1').set({ title: 'Synthetic poll' });
+        await attendance.collection('attendanceRecords').doc('alice').set({ uid: 'alice', status: 'present' });
+        await attendance.collection('attendanceCorrections').doc('c1').set({
+          studentUid: 'alice', teacherUid: 'teacher', reason: 'Synthetic correction',
+        });
+      }
+      await root.collection('members').doc('outsider').set({ status: 'active', role: 'student' });
+      await db.doc('schools/other-campus/members/outsider').set({ status: 'active' });
+    });
+
+    const child = (uid, parent, sessionId, collection) =>
+      group(uid).collection(parent).doc(sessionId).collection(collection);
+    const liveQuestion = (uid, sessionId) => child(uid, 'liveSessions', sessionId, 'questions');
+    const livePoll = (uid, sessionId) => child(uid, 'liveSessions', sessionId, 'polls');
+    const roster = (uid, sessionId) => child(uid, 'attendanceSessions', sessionId, 'attendanceRecords');
+    const corrections = (uid, sessionId) => child(uid, 'attendanceSessions', sessionId, 'attendanceCorrections');
+
+    // A v2 parent remains compatible for students and active instructors.
+    await assertSucceeds(liveQuestion('alice', 'current').doc('q1').get());
+    await assertSucceeds(liveQuestion('alice', 'current').get());
+    await assertSucceeds(livePoll('alice', 'current').doc('p1').get());
+    await assertSucceeds(livePoll('alice', 'current').get());
+    await assertSucceeds(roster('alice', 'current').doc('alice').get());
+    await assertSucceeds(roster('teacher', 'current').get());
+    await assertSucceeds(corrections('teacher', 'current').doc('c1').get());
+    await assertSucceeds(corrections('teacher', 'current').get());
+
+    // V1 parent metadata is already hidden. Child paths must never bypass it.
+    for (const collection of [liveQuestion, livePoll]) {
+      await assertFails(collection('alice', 'legacy').doc(collection === liveQuestion ? 'q1' : 'p1').get());
+      await assertFails(collection('alice', 'legacy').get());
+      await assertFails(collection('teacher', 'legacy').get());
+    }
+    await assertFails(roster('alice', 'legacy').doc('alice').get());
+    await assertFails(roster('teacher', 'legacy').get());
+    await assertFails(corrections('teacher', 'legacy').doc('c1').get());
+    await assertFails(corrections('teacher', 'legacy').get());
+    await assertFails(liveQuestion('outsider', 'current').doc('q1').get());
+    await assertFails(roster('outsider', 'current').doc('alice').get());
+    await assertFails(liveQuestion('removed', 'current').doc('q1').get());
+
+    // Revoke an active school credential without re-authenticating. Replays fail.
+    await seedFirestore((db) => db.doc('schools/tw-demo-uni/members/alice').update({ status: 'removed' }));
+    await assertFails(liveQuestion('alice', 'current').doc('q1').get());
+    await assertFails(livePoll('alice', 'current').get());
+    await assertFails(roster('alice', 'current').doc('alice').get());
+    await seedFirestore((db) => db.doc('schools/tw-demo-uni/members/alice').update({ status: 'active' }));
+    await assertSucceeds(liveQuestion('alice', 'current').doc('q1').get());
+
+    // Admin downgrade races with a known subcollection URL: a stale client
+    // cannot continue using the child path after the schema version changes.
+    await seedFirestore(async (db) => {
+      await db.doc('groups/attendance-class/liveSessions/current').update({ schemaVersion: 1 });
+      await db.doc('groups/attendance-class/attendanceSessions/current').update({ schemaVersion: 1 });
+    });
+    await assertFails(liveQuestion('alice', 'current').doc('q1').get());
+    await assertFails(livePoll('alice', 'current').get());
+    await assertFails(roster('alice', 'current').doc('alice').get());
+    await assertFails(corrections('teacher', 'current').get());
+    await seedFirestore(async (db) => {
+      await db.doc('groups/attendance-class/liveSessions/current').update({ schemaVersion: 2 });
+      await db.doc('groups/attendance-class/attendanceSessions/current').update({ schemaVersion: 2 });
+    });
+    await assertSucceeds(liveQuestion('alice', 'current').doc('q1').get());
+    await assertSucceeds(roster('alice', 'current').doc('alice').get());
   });
 
   test('live questions and teacher polls remain available to existing clients', async () => {
@@ -3689,7 +6337,7 @@ test('owners cannot write during deletion or clear its guards, while active prof
 });
 
 describe('P1 authorization: users role authority fields', () => {
-  const { serverTimestamp, deleteField } = require('firebase/firestore');
+  const { serverTimestamp, deleteField, documentId } = require('firebase/firestore');
 
   test('deny create with polluted primaryRole / authority fields; allow student create', async () => {
     const newbie = testEnv.authenticatedContext('newbie').firestore();
@@ -3820,7 +6468,7 @@ describe('P1 authorization: users role authority fields', () => {
 });
 
 describe('P1 authorization: MapDiff affectedKeys allowlists', () => {
-  const { serverTimestamp, deleteField } = require('firebase/firestore');
+  const { serverTimestamp, deleteField, documentId } = require('firebase/firestore');
 
   test('campus post like/comment bump cannot delete or insert author content', async () => {
     await seedFirestore(async (db) => {
@@ -4431,6 +7079,24 @@ test('assistant replies can only be written by the server, never by a student', 
   await assertFails(own.update({ isAI: true }));
   await assertFails(own.update({ authorName: '助理回覆' }));
   await assertFails(own.update({ generatedBy: 'server' }));
+  // A valid comment's author or group manager cannot grant fake peer reactions,
+  // including a forged accepted-answer alias on a newly created comment.
+  await assertFails(alice.collection('groups/g1/posts/q1/comments').add({
+    body: '偽造採納答案', authorId: 'alice', isBestAnswer: true,
+  }));
+  await assertFails(own.update({ isBestAnswer: true }));
+  await assertFails(own.update({ likeCount: 500 }));
+  await assertFails(own.update({ likedBy: ['bob'], likeCount: 1 }));
+  await assertFails(tina.doc(own.path).update({ likedBy: ['bob'], likeCount: 1 }));
+  // Only the actor's own vote can move both fields by one, and ordinary text
+  // edits must keep the reaction state unchanged.
+  await assertSucceeds(own.update({ likedBy: ['alice'], likeCount: 1 }));
+  await assertFails(own.update({ likedBy: ['alice', 'bob'], likeCount: 2 }));
+  await assertSucceeds(own.update({ body: '我補充更多資訊' }));
+  await assertSucceeds(own.update({ likedBy: [], likeCount: 0 }));
+  await assertSucceeds(tina.doc(own.path).update({ isBestAnswer: true }));
+  await assertFails(own.update({ isBestAnswer: false }));
+  await assertSucceeds(own.update({ body: '修正說明' }));
   // 提問上的助理回覆狀態只有伺服器能寫
   await assertFails(alice.doc('groups/g1/posts/q1').update({ assistantReply: { status: 'unavailable' } }));
   await assertFails(tina.doc('groups/g1/posts/q1').update({ assistantReply: null }));
@@ -5462,3 +8128,386 @@ for (const current of ['users/alice/personalTimetable/current', 'users/alice/sch
     await assertFails(bob.doc(path).get());
   });
 }
+
+describe('legacy authorization matrix against the PR merge base', () => {
+  const { execFileSync, spawnSync } = require('node:child_process');
+  const repo = path.resolve(__dirname, '../..');
+  // Pin the review baseline so this comparison cannot drift after a merge.
+  const baseRules = '40cbb474d2d435a784f5356b08a0984059903d82:backend/firestore/firestore.rules';
+  const hasBaseRules = spawnSync('git', ['cat-file', '-e', baseRules], {
+    cwd: repo,
+    stdio: 'ignore',
+  }).status === 0;
+
+  const school = 'schools/matrix-school';
+  const group = 'groups/matrix-course';
+  const assignment = `${group}/assignments/work`;
+  const reviews = `${assignment}/peerReviews`;
+  const grades = `${group}/gradebook`;
+  const attendance = `${group}/attendanceSessions/meeting`;
+  const legacySubmission = 'submissions/matrix-legacy';
+  const visiblePost = 'groupPosts/matrix-legacy';
+  const hiddenPost = 'groupPosts/matrix-hidden';
+  const date = new Date('2026-11-01T00:00:00Z');
+
+  const postStates = [
+    ['visible', { status: 'published', published: true }],
+    ['archived', { status: 'archived' }],
+    ['deleted-status', { status: 'deleted' }],
+    ['deleted-flag', { deleted: true }],
+    ['deleted-at', { deletedAt: date }],
+    ['unpublished-status', { status: 'unpublished' }],
+    ['unpublished-flag', { published: false }],
+    ['draft', { status: 'draft' }],
+    ['scheduled', { status: 'scheduled' }],
+    ['pending', { status: 'pending' }],
+    ['cancelled', { status: 'cancelled' }],
+    ['canceled', { status: 'canceled' }],
+    ['empty-status', { status: '' }],
+    ['null-status', { status: null }],
+    ['missing-status', {}],
+    ['empty-publication-fields', { published: '', deleted: '', deletedAt: '' }],
+    ['null-publication-fields', { published: null, deleted: null, deletedAt: null }],
+  ];
+  const ownerShapes = [
+    ['missing', {}],
+    ['null', { userId: null }],
+    ['empty', { userId: '' }],
+    ['other', { userId: 'reviewee' }],
+    ['self', { userId: 'member' }],
+  ];
+  const reviewRoles = [
+    // Role label, authenticated UID, receipt ID, submitted allowed, draft allowed.
+    ['enrolled reviewer', 'member', 'member', true, true],
+    ['withdrawn reviewer', 'withdrawn', 'withdrawn', true, true],
+    ['reviewer with revoked school eligibility', 'former', 'former', true, true],
+    ['enrolled reviewee', 'reviewee', 'member', true, false],
+    ['withdrawn reviewee', 'former', 'withdrawn', true, false],
+    ['teacher', 'teacher', 'member', true, true],
+    ['withdrawn teacher', 'formerTeacher', 'member', false, false],
+    ['unrelated enrolled student', 'classmate', 'member', false, false],
+    ['outsider', 'outsider', 'member', false, false],
+  ];
+
+  async function seed(environment) {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      const batch = db.batch();
+      const put = (doc, data) => batch.set(db.doc(doc), data);
+
+      put(group, { schoolId: 'matrix-school', type: 'course' });
+      put(assignment, { type: 'assignment', points: 100 });
+      for (const uid of ['teacher', 'member', 'admin', 'healthStaff', 'former', 'withdrawn', 'outsider',
+        'reviewee', 'classmate', 'formerTeacher']) {
+        const staff = ['teacher', 'formerTeacher'].includes(uid);
+        put(`users/${uid}`, campusBoundProfile('new-school'));
+        put(`${school}/members/${uid}`, {
+          status: ['former', 'outsider'].includes(uid) ? 'removed' : 'active',
+          role: uid === 'admin' ? 'admin' : staff ? 'editor' : 'student',
+        });
+        put(`schools/new-school/members/${uid}`, { status: 'active', role: 'student' });
+        if (['teacher', 'member', 'former', 'withdrawn', 'reviewee', 'classmate', 'formerTeacher'].includes(uid)) {
+          put(`${group}/members/${uid}`, {
+            status: ['withdrawn', 'formerTeacher'].includes(uid) ? 'removed' : 'active',
+            role: staff ? 'instructor' : 'member',
+          });
+        }
+      }
+      put(`${school}/serviceRoles/healthStaff`, { status: 'active', health: true });
+      put(`${school}/healthRecords/private`, { userId: 'patient' });
+      put(`${school}/healthAppointments/private`, { userId: 'patient' });
+      put(`${group}/knowledgeBase/handout`, { type: 'reference', title: 'Handout' });
+      put(`${group}/modules/week-one/materials/lesson`, { title: 'Lesson' });
+      put(`${group}/quizzes/check`, { title: 'Quiz' });
+      put(`${group}/milestones/first`, { title: 'Milestone' });
+      put('groupMembers/matrix-member', { groupId: 'matrix-course', userId: 'member' });
+      put(`${reviews}/member`, { reviewerId: 'member', submissionOwnerId: 'reviewee', submittedAt: null });
+      put('submissions/matrix-reviewee', { userId: 'reviewee', groupId: 'matrix-course', assignmentId: 'work' });
+      put(`${assignment}/submissions/member/gradeRevisions/prior-revision`, { revision: 1 });
+      put(`${assignment}/submissions/member`, {
+        userId: 'member', submittedAt: date, content: 'Answer',
+      });
+      put(legacySubmission, { userId: 'member', groupId: 'matrix-course', assignmentId: 'work' });
+      put(`${grades}/historical`, { userId: 'former', finalScore: 90 });
+      put(`${grades}/former`, { finalScore: 85 });
+      put(`${grades}/withdrawn`, { userId: 'withdrawn', finalScore: 81 });
+      for (const uid of ['member', 'former', 'withdrawn']) {
+        put(`${reviews}/feedback-${uid}`, {
+          reviewerId: `feedback-${uid}`, submissionOwnerId: uid, submittedAt: date,
+        });
+      }
+      for (const uid of ['withdrawn', 'outsider', 'former', 'neverJoined', 'deletedMembership']) {
+        put(`${reviews}/${uid}`, {
+          reviewerId: uid === 'neverJoined' ? 'classmate' : uid,
+          submissionOwnerId: 'member',
+          submittedAt: null,
+        });
+      }
+      put(`${reviews}/unsubmitted`, { submissionOwnerId: 'former', submittedAt: null });
+
+      put(attendance, { schemaVersion: 2 });
+      put(`${attendance}/attendanceRecords/member`, { uid: 'member', status: 'present' });
+      put(`${attendance}/attendanceCorrections/change`, { studentUid: 'member' });
+      put(`${group}/liveSessionSecrets/meeting`, { teacherId: 'teacher' });
+      put(`${school}/aiKnowledge/school`, { visibility: 'school' });
+      put(`${school}/aiKnowledge/editor`, { visibility: 'restricted' });
+      put(`${group}/aiKnowledge/course`, { content: 'Course fragment' });
+      put(visiblePost, { groupId: 'matrix-course', authorId: 'teacher' });
+      put(hiddenPost, { groupId: 'matrix-course', authorId: 'teacher', published: false });
+      put('comments/matrix-legacy', { postId: 'matrix-legacy' });
+      put('postLikes/matrix-legacy-own', { userId: 'member', postId: 'matrix-legacy' });
+      put('postLikes/matrix-legacy-peer', { userId: 'teacher', postId: 'matrix-legacy' });
+      put('postLikes/matrix-hidden', { userId: 'member', postId: 'matrix-hidden' });
+      for (const [status, fields] of postStates) {
+        const id = `matrix-post-${status}`;
+        put(`groupPosts/${id}`, { groupId: 'matrix-course', authorId: 'teacher', ...fields });
+        put(`comments/${id}`, { postId: id, createdAt: date });
+        put(`postLikes/${id}`, { postId: id, userId: 'member' });
+      }
+      for (const [shape, fields] of ownerShapes) {
+        const scope = `${group}/assignments/owner-${shape}`;
+        put(`${scope}/submissions/member`, fields);
+        put(`${scope}/peerReviews/member`, {
+          ...(Object.hasOwn(fields, 'userId') ? { reviewerId: fields.userId } : {}),
+          submissionOwnerId: 'reviewee', submittedAt: date,
+        });
+        put(`${group}-${shape}/gradebook/member`, fields);
+        put(`${attendance}-${shape}`, { schemaVersion: 2 });
+        put(`${attendance}-${shape}/attendanceRecords/member`, { uid: 'member', ...fields });
+        put(`postLikes/matrix-owner-${shape}`, { postId: 'matrix-legacy', ...fields });
+        put(`${school}/cafeterias/matrix/posts/${shape}/likes/member`, fields);
+      }
+      put(`${group}/assignments/alias-conflict/submissions/member`, { userId: null, studentId: 'reviewee' });
+      put(`${group}/assignments/all-conflict/submissions/member`, { userId: 'reviewee', studentId: 'classmate' });
+      put(`${group}/assignments/alias-self/submissions/member`, { userId: null, uid: 'member' });
+      for (const [state, submittedAt] of [['submitted', date], ['draft', null]]) {
+        for (const [reviewerId, submissionOwnerId] of [['member', 'reviewee'], ['withdrawn', 'former'], ['former', 'member']]) {
+          put(`${assignment}-${state}/peerReviews/${reviewerId}`, {
+            reviewerId, submissionOwnerId, submittedAt, comment: 'My feedback', scores: { rubric: 4 },
+          });
+        }
+      }
+      put(`${group}/members/deletedMembership`, { status: 'active', role: 'member' });
+      put(`${school}/members/deletedMembership`, { status: 'active' });
+      await batch.commit();
+      const revoke = db.batch();
+      revoke.delete(db.doc(`${group}/members/deletedMembership`));
+      revoke.delete(db.doc(`${school}/members/deletedMembership`));
+      await revoke.commit();
+    });
+  }
+
+  const get = (doc) => (db) => db.doc(doc).get({ source: 'server' });
+  const set = (doc, data) => (db) => db.doc(doc).set(data);
+  const update = (doc, data) => (db) => db.doc(doc).update(data);
+  const remove = (doc) => (db) => db.doc(doc).delete();
+  const cases = [
+    ...ownerShapes.flatMap(([shape]) => {
+      const scope = `${group}/assignments/owner-${shape}`;
+      const like = `postLikes/matrix-owner-${shape}`;
+      return [
+        ...[
+          ['grade', `${group}-${shape}/gradebook/member`],
+          ['submission', `${scope}/submissions/member`],
+          ['peer review (reviewerId)', `${scope}/peerReviews/member`],
+        ].map(([kind, doc]) => [`${kind} UID-path get with ${shape} owner`, 'member',
+          get(doc)]),
+        [`attendance UID-path get with ${shape} userId`, 'member',
+          get(`${attendance}-${shape}/attendanceRecords/member`)],
+        [`like get with ${shape} userId`, 'member', get(like)],
+        [`storefront like UID-path get with ${shape} userId`, 'member',
+          get(`${school}/cafeterias/matrix/posts/${shape}/likes/member`)],
+        [`like delete with ${shape} userId`, 'member', remove(like), shape === 'self'],
+      ];
+    }),
+    ['nested submission ID fallback accepts a conflicting legacy studentId', 'member',
+      get(`${group}/assignments/alias-conflict/submissions/member`), true],
+    ['nested submission ID fallback accepts conflicting userId and studentId', 'member',
+      get(`${group}/assignments/all-conflict/submissions/member`)],
+    ['unrelated student cannot read the conflicting nested submission', 'classmate',
+      get(`${group}/assignments/all-conflict/submissions/member`), false],
+    ['submission fallback accepts the matching legacy uid', 'member',
+      get(`${group}/assignments/alias-self/submissions/member`)],
+    ...postStates.flatMap(([state]) => {
+      const id = `matrix-post-${state}`;
+      return [
+        ...['groupPosts', 'comments', 'postLikes'].map(collection =>
+          [`${collection} get for ${state} post`, 'member', get(`${collection}/${id}`)]),
+        [`scoped legacy comment list for ${state} post`, 'member',
+          db => db.collection('comments').where('postId', '==', id).orderBy('createdAt').get({ source: 'server' })],
+        [`scoped legacy likes list for ${state} post`, 'member',
+          db => db.collection('postLikes').where('postId', '==', id).get({ source: 'server' }), false],
+      ];
+    }),
+    ...['groupPosts', 'comments', 'postLikes'].map(collection =>
+      [`unfiltered ${collection} list`, 'member', db => db.collection(collection).get({ source: 'server' }), false]),
+    ['Mobile falls back to the archived root post and its ordered comments after an empty canonical get', 'teacher', async db => {
+      const id = 'matrix-post-archived';
+      const canonical = await get(`${group}/posts/${id}`)(db);
+      assert.equal(canonical.exists, false);
+      const post = await get(`groupPosts/${id}`)(db);
+      assert.equal(post.data().status, 'archived');
+      const comments = await db.collection('comments').where('postId', '==', id)
+        .orderBy('createdAt', 'asc').get({ source: 'server' });
+      assert.deepEqual(comments.docs.map(doc => doc.id), [id]);
+    }],
+    ['Mobile falls back to ordered root comments after a denied canonical list', 'member', async db => {
+      const id = 'matrix-post-archived';
+      await assertFails(db.collection(`${group}/posts/${id}/comments`)
+        .orderBy('createdAt', 'asc').get({ source: 'server' }));
+      const comments = await db.collection('comments').where('postId', '==', id)
+        .orderBy('createdAt', 'asc').get({ source: 'server' });
+      assert.deepEqual(comments.docs.map(doc => doc.id), [id]);
+    }],
+    ['root post list scoped by document ID', 'member',
+      db => db.collection('groupPosts').where(documentId(), '==', 'matrix-post-archived').get({ source: 'server' })],
+    ['root post list scoped by groupId', 'member',
+      db => db.collection('groupPosts').where('groupId', '==', 'matrix-course').get({ source: 'server' }), false],
+    ...reviewRoles.flatMap(([role, uid, id, submitted, draft]) =>
+      [['submitted', submitted], ['draft', draft]].map(([state, allowed]) =>
+        [`${role} reads ${state} peer review`, uid, get(`${assignment}-${state}/peerReviews/${id}`), allowed])),
+    ...['withdrawn', 'former'].flatMap(uid => ['draft', 'submitted'].map(state =>
+      [`${uid} edits their ${state} peer review`, uid,
+        update(`${assignment}-${state}/peerReviews/${uid}`, { comment: 'Edited' })])),
+    ['reviewer first submits with client time', 'member',
+      update(`${assignment}-draft/peerReviews/member`, { comment: 'First', submittedAt: date })],
+    ['reviewer resubmits with a fresh client time', 'member',
+      update(`${assignment}-submitted/peerReviews/member`, { submittedAt: new Date('2026-11-02T00:00:00Z') })],
+    ['reviewer updates comment and scores independently of submittedAt', 'member',
+      update(`${assignment}-submitted/peerReviews/member`, { comment: 'Edited', scores: { rubric: 5 } })],
+    ...['reviewerId', 'submissionOwnerId'].map(field => [
+      `reviewer cannot change ${field}`, 'member',
+      update(`${assignment}-submitted/peerReviews/member`, { [field]: 'classmate' }), false,
+    ]),
+    ['cross-school student with active target eligibility reads the course', 'member', get(group)],
+    ['cross-school teacher updates course metadata', 'teacher', update(group, { title: 'Course' })],
+    ['cross-school teacher updates group membership', 'teacher',
+      update(`${group}/members/member`, { displayName: 'Member' })],
+    ['cross-school teacher updates legacy group membership', 'teacher',
+      update('groupMembers/matrix-member', { displayName: 'Member' })],
+    ...['knowledgeBase/handout', 'modules/week-one/materials/lesson', 'quizzes/check', 'milestones/first']
+      .map(doc => [`cross-school teacher edits ${doc}`, 'teacher', update(`${group}/${doc}`, { title: 'Edit' })]),
+    ['cross-school teacher reads another member’s gradebook row', 'teacher', get(`${grades}/historical`)],
+    ['cross-school teacher writes the gradebook', 'teacher', set(`${grades}/new`, { userId: 'member' })],
+    ['cross-school teacher reads an audit revision', 'teacher',
+      get(`${assignment}/submissions/member/gradeRevisions/prior-revision`)],
+    ['cross-school teacher reads another member’s nested submission', 'teacher', get(`${assignment}/submissions/member`)],
+    ['cross-school teacher reads another member’s legacy submission', 'teacher', get(legacySubmission)],
+    ['cross-school reviewer reads an assigned legacy submission', 'member', get('submissions/matrix-reviewee')],
+    ['cross-school reviewer reads their assignment', 'member', get(`${reviews}/member`)],
+    ['cross-school reviewer edits their feedback', 'member', update(`${reviews}/member`, { comment: 'Feedback' })],
+    ['cross-school teacher assigns a reviewer', 'teacher',
+      set(`${reviews}/new`, { reviewerId: 'new', submissionOwnerId: 'member' })],
+    ...['admin', 'healthStaff'].flatMap(uid => ['healthRecords', 'healthAppointments'].map(collection =>
+      [`cross-school ${uid} reads ${collection}`, uid, get(`${school}/${collection}/private`)])),
+    ['other-school account without a target role cannot read a health record', 'outsider',
+      get(`${school}/healthRecords/private`), false],
+    ['active school member creates a group', 'member',
+      set('groups/matrix-created', { schoolId: 'matrix-school', createdBy: 'member' })],
+    ['teacher creates course content', 'teacher',
+      set(`${group}/modules/new`, { title: 'Module' })],
+    ['teacher creates an assignment', 'teacher',
+      set(`${group}/assignments/new`, { title: 'Assignment' })],
+    ['teacher publishes a grade', 'teacher',
+      update(`${assignment}/submissions/member`, {
+        gradeScore: 90, gradeFeedback: 'Good work', gradePublished: true,
+        gradePublishedBy: 'teacher', gradePublishedAt: serverTimestamp(),
+      })],
+    ['teacher lists attendance records', 'teacher',
+      (db) => db.collection(`${attendance}/attendanceRecords`).get({ source: 'server' })],
+    ['teacher reads attendance corrections', 'teacher',
+      get(`${attendance}/attendanceCorrections/change`)],
+    ['teacher reads their session secret record', 'teacher',
+      get(`${group}/liveSessionSecrets/meeting`)],
+    ['active member reads private school knowledge', 'member',
+      get(`${school}/aiKnowledge/school`)],
+    ['active editor reads private school knowledge', 'teacher',
+      get(`${school}/aiKnowledge/editor`)],
+    ['active member reads private course knowledge', 'member',
+      get(`${group}/aiKnowledge/course`)],
+    ['active member reads a legacy post', 'member', get(visiblePost)],
+    ['active member reads comments on the legacy post', 'member', get('comments/matrix-legacy')],
+    ['active member reads their existing legacy like', 'member', get('postLikes/matrix-legacy-own')],
+    ['active member reads a peer receipt on the legacy post', 'member', get('postLikes/matrix-legacy-peer')],
+    ['active member adds a legacy like', 'member',
+      set('postLikes/matrix-new', { userId: 'member', postId: 'matrix-legacy' })],
+    ['active member deletes their existing legacy like', 'member', remove('postLikes/matrix-legacy-own')],
+    ['transferred owner reads an opaque historical grade row', 'former', get(`${grades}/historical`)],
+    ['transferred owner reads a historical grade row without userId', 'former', get(`${grades}/former`)],
+    ['transferred owner queries historical grades by userId', 'former',
+      (db) => db.collection(grades).where('userId', '==', 'former').get({ source: 'server' })],
+    ['withdrawn owner reads a historical grade', 'withdrawn', get(`${grades}/withdrawn`)],
+    ['enrolled owner reads released feedback', 'member', get(`${reviews}/feedback-member`)],
+    ['transferred owner reads released feedback', 'former', get(`${reviews}/feedback-former`)],
+    ['transferred owner queries their released feedback', 'former',
+      (db) => db.collection(reviews).where('submissionOwnerId', '==', 'former')
+        .where('submittedAt', '>=', date).get({ source: 'server' })],
+    ['withdrawn owner reads released feedback', 'withdrawn', get(`${reviews}/feedback-withdrawn`)],
+    ['revoked reviewer can read another student’s legacy submission', 'withdrawn',
+      get(legacySubmission), true],
+    ['revoked reviewer can read the old review assignment', 'withdrawn',
+      get(`${reviews}/withdrawn`), true],
+    ['revoked reviewer can edit the old review assignment', 'withdrawn',
+      update(`${reviews}/withdrawn`, { comment: 'Feedback' }), true],
+    ['non-member assigned reviewer can read another student’s legacy submission', 'outsider',
+      get(legacySubmission), true],
+    ['non-member assigned reviewer can read the review assignment', 'outsider',
+      get(`${reviews}/outsider`), true],
+    ['non-member assigned reviewer can edit the review assignment', 'outsider',
+      update(`${reviews}/outsider`, { comment: 'Feedback' }), true],
+    ...['neverJoined', 'deletedMembership', 'former'].map(uid => [
+      `${uid} reads legacy submission using only the review receipt`, uid, get(legacySubmission),
+    ]),
+    ['account without target school eligibility cannot read the course', 'former', get(group), false],
+    ['member cannot create a legacy like owned by somebody else', 'member',
+      set('postLikes/matrix-forged', { userId: 'teacher', postId: 'matrix-legacy' }), false],
+    ['cross-school teacher reads the attendance roster', 'teacher', get(`${attendance}/attendanceRecords/member`)],
+    ['member adds their own like to an unpublished legacy post', 'member',
+      set('postLikes/matrix-hidden-new', { userId: 'member', postId: 'matrix-hidden' })],
+    ['active member deletes their own like on a hidden post', 'member', remove('postLikes/matrix-hidden')],
+    ['non-member cannot read a legacy post under either rule set', 'outsider', get(visiblePost), false],
+    ['owner cannot read unreleased feedback under either rule set', 'former', get(`${reviews}/unsubmitted`), false],
+  ];
+
+  for (const baseline of [true, false]) {
+    describe(baseline ? 'merge base' : 'proposed rules', {
+      // CI uses shallow checkouts. Always run the proposed rules cases there.
+      skip: baseline && !hasBaseRules ? 'Pinned merge-base object unavailable in this checkout' : false,
+    }, () => {
+      let environment;
+      const matrixProjectId = baseline ? 'demo-campus-matrix-base' : 'demo-campus-matrix-pr';
+      before(async () => {
+        environment = await initializeTestEnvironment({
+          projectId: matrixProjectId,
+          firestore: {
+            rules: baseline ? execFileSync('git', ['show', baseRules], { cwd: repo, encoding: 'utf8' })
+              : firestoreRules,
+          },
+        });
+        await environment.clearFirestore();
+        await seed(environment);
+      });
+      after(async () => {
+        if (environment) await environment.cleanup();
+      });
+
+      test('top-level submission ownership follows the merge-base UID fallback', async () => {
+        const doc = 'submissions/member';
+        const db = environment.authenticatedContext('member').firestore();
+        for (const [shape, fields] of ownerShapes) {
+          await environment.withSecurityRulesDisabled(context => context.firestore().doc(doc).set(fields));
+          const check = ['missing', 'self'].includes(shape) ? assertSucceeds : assertFails;
+          await check(get(doc)(db));
+        }
+      });
+
+      // Both rulesets run the same cases in order against identical fixtures.
+      for (const [name, uid, operation, allowed = true] of cases) {
+        test(name, async () => {
+          const db = environment.authenticatedContext(uid).firestore();
+          await (allowed ? assertSucceeds : assertFails)(operation(db));
+        });
+      }
+    });
+  }
+});

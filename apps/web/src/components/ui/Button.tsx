@@ -1,6 +1,7 @@
 'use client';
 
 import { forwardRef, ButtonHTMLAttributes, ReactNode } from 'react';
+import styles from './Button.module.css';
 
 type ButtonVariant = 'default' | 'primary' | 'success' | 'danger' | 'ghost' | 'outline';
 type ButtonSize = 'sm' | 'md' | 'lg';
@@ -32,97 +33,29 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref,
   ) => {
-    // Keep every size usable as a touch target.
-    const sizeStyles: Record<ButtonSize, React.CSSProperties> = {
-      sm: { padding: '0 14px', minHeight: '44px', fontSize: '14px' },
-      md: { padding: '0 18px', minHeight: '44px', fontSize: '15px' },
-      lg: { padding: '0 24px', minHeight: '52px', fontSize: '17px' },
-    };
-
-    const variantStyles: Record<ButtonVariant, React.CSSProperties> = {
-      // iOS Bordered / Gray Tint — 第二序按鈕
-      default: {
-        background: 'var(--surface)',
-        color: 'var(--text)',
-        borderColor: 'var(--border)',
-        boxShadow: 'none',
-      },
-      // iOS Filled — 主要動作
-      primary: {
-        background: 'var(--brand)',
-        color: 'var(--on-brand)',
-        borderColor: 'transparent',
-        boxShadow: 'none',
-      },
-      // iOS Tinted — 成功 / 安全動作
-      success: {
-        background: 'var(--success-soft)',
-        color: 'var(--success)',
-        borderColor: 'transparent',
-        boxShadow: 'none',
-      },
-      // iOS Tinted Destructive — 刪除類動作
-      danger: {
-        background: 'var(--danger-soft)',
-        color: 'var(--danger)',
-        borderColor: 'transparent',
-        boxShadow: 'none',
-      },
-      // iOS Plain — 純文字按鈕
-      ghost: {
-        background: 'transparent',
-        color: 'var(--brand)',
-        borderColor: 'transparent',
-        boxShadow: 'none',
-      },
-      // iOS Bordered Tinted — 次要動作（描邊）
-      outline: {
-        background: 'transparent',
-        color: 'var(--brand)',
-        borderColor: 'var(--brand)',
-        boxShadow: 'none',
-      },
-    };
-
-    const baseStyles: React.CSSProperties = {
-      display: 'inline-flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '6px',
-      borderRadius: 'var(--radius-sm)',
-      border: '1px solid',
-      cursor: disabled || loading ? 'not-allowed' : 'pointer',
-      fontWeight: 600,
-      letterSpacing: '-0.01em',
-      transition: 'opacity 0.15s ease, transform 0.1s ease, background 0.15s ease',
-      opacity: disabled || loading ? 0.4 : 1,
-      width: fullWidth ? '100%' : 'auto',
-      ...sizeStyles[size],
-      ...variantStyles[variant],
-      ...style,
-    };
-
     return (
       <button
-        ref={ref}
-        aria-busy={loading || undefined}
-        disabled={disabled || loading}
-        className={`btn${className ? ` ${className}` : ''}`}
-        style={baseStyles}
         {...props}
+        ref={ref}
+        aria-busy={loading || props['aria-busy']}
+        disabled={disabled || loading}
+        className={[
+          'btn',
+          styles.button,
+          styles[variant],
+          styles[size],
+          loading ? styles.loading : '',
+          fullWidth ? styles.fullWidth : '',
+          className,
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        style={style}
       >
-        {loading ? (
-          <>
-            <LoadingSpinner size={size === 'sm' ? 13 : size === 'lg' ? 18 : 15} />
-            {children && <span>{children}</span>}
-          </>
-        ) : (
-          <>
-            {icon && iconPosition === 'left' && icon}
-            {children}
-            {icon && iconPosition === 'right' && icon}
-          </>
-        )}
+        {icon && iconPosition === 'left' && icon}
+        {children}
+        {icon && iconPosition === 'right' && icon}
+        {loading && <span className={styles.activity} aria-hidden="true" />}
       </button>
     );
   },
@@ -137,9 +70,10 @@ function LoadingSpinner({ size = 15 }: { size?: number }) {
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      style={{ animation: 'spin 0.8s linear infinite' }}
+      className={styles.spinner}
+      aria-hidden="true"
+      focusable="false"
     >
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       <circle
         cx="12"
         cy="12"

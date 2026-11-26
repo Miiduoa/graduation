@@ -130,6 +130,47 @@ test('opens timetable import from the empty timetable state', async () => {
   expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalImport', { kind: 'timetable' });
 });
 
+test('keeps the assistant usable during the first course load without dropping the draft', async () => {
+  const first = deferred<ReturnType<typeof result>>();
+  jest.mocked(loadStudentHome).mockReturnValueOnce(first.promise);
+  const view = render(<StudentTodayScreen />);
+  expect(view.getByTestId('today-skeleton')).toBeTruthy();
+  const input = view.getByLabelText('說出或輸入想做的事');
+  fireEvent.changeText(input, '想找等一下的教室');
+  await act(async () => first.resolve(result()));
+  expect(view.queryByTestId('today-skeleton')).toBeNull();
+  expect(view.getByLabelText('說出或輸入想做的事')).toBe(input);
+  expect(view.getByDisplayValue('想找等一下的教室')).toBeTruthy();
+  expect(askCampusAssistant).not.toHaveBeenCalled();
+});
+
+test('keeps an in-flight question and draft while retrying coursework in the same scope', async () => {
+  const answer = deferred<Awaited<ReturnType<typeof askCampusAssistant>>>();
+  const retry = deferred<ReturnType<typeof result>>();
+  jest.mocked(askCampusAssistant).mockReturnValueOnce(answer.promise);
+  const view = render(<StudentTodayScreen />);
+  await view.findAllByText('繳交期末報告');
+  const input = view.getByLabelText('說出或輸入想做的事');
+  fireEvent.changeText(input, '我的下一堂課在哪裡？');
+  fireEvent.press(view.getByLabelText('詢問手機助理'));
+  const request = jest.mocked(askCampusAssistant).mock.lastCall![0];
+  jest.mocked(loadStudentHome).mockRejectedValueOnce(new Error('unavailable'));
+  fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
+  await view.findByText('無法讀取校務課程。請確認登入狀態與網路連線後重試。');
+  jest.mocked(loadStudentHome).mockReturnValueOnce(retry.promise);
+  fireEvent.press(view.getByText(TODAY_COPY.retry));
+  expect(view.getByTestId('today-skeleton')).toBeTruthy();
+  expect(view.getByLabelText('說出或輸入想做的事')).toBe(input);
+  expect(view.getByDisplayValue('我的下一堂課在哪裡？')).toBeTruthy();
+  expect(request.signal?.aborted).toBe(false);
+  await act(async () => answer.resolve({ content: '下一堂在主顧樓 302。', source: 'device', hasActions: false }));
+  expect(view.getByText('下一堂在主顧樓 302。')).toBeTruthy();
+  await act(async () => retry.resolve(result()));
+  expect(view.queryByTestId('today-skeleton')).toBeNull();
+  expect(view.getByText('下一堂在主顧樓 302。')).toBeTruthy();
+  expect(askCampusAssistant).toHaveBeenCalledTimes(1);
+});
+
 test.each(['assignment', 'quiz'] as const)('opens the course from a %s todo row', async (kind) => {
   const data = result();
   data.tasks[0].kind = kind;
@@ -137,6 +178,7 @@ test.each(['assignment', 'quiz'] as const)('opens the course from a %s todo row'
   const view = render(<StudentTodayScreen />);
   fireEvent.press(await view.findByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
@@ -149,7 +191,9 @@ test('a todo without a course ID carries the course name to Classroom search', a
   const view = render(<StudentTodayScreen />);
   fireEvent.press(await view.findByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
-    screen: 'Classroom', params: { q: '資料結構', from: 'timetable' },
+    initial: false,
+    screen: 'Classroom',
+    params: { q: '資料結構', from: 'timetable' },
   });
 });
 
@@ -312,6 +356,7 @@ test('reveals the remaining work inline and lets the student collapse the list',
   expect(rootNavigateNested).not.toHaveBeenCalled();
   fireEvent.press(view.getByLabelText('作業 3，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
@@ -347,6 +392,7 @@ test('a malformed deadline stays visible as undated instead of disappearing', as
   expect(view.getAllByText(/未設截止時間/).length).toBeGreaterThan(0);
   fireEvent.press(view.getByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
@@ -395,6 +441,7 @@ test('the explicit submit button opens the real assignment', async () => {
   fireEvent.press(submit);
   expect(mockNavigate).toHaveBeenCalledTimes(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'HomeworkSubmit',
     params: {
       courseId: 'course-a',
@@ -437,6 +484,7 @@ test('one-tap homework uses the real current inbox task instead of a guessed tar
   await view.findAllByText('繳交期末報告');
   fireEvent.press(view.getByLabelText('直接前往交作業'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'HomeworkSubmit',
     params: expect.objectContaining({ courseId: 'course-a', hwId: 'homework-a' }),
   });
@@ -447,6 +495,7 @@ test('a natural-language location query opens the registered campus map without 
   fireEvent.changeText(await view.findByLabelText('說出或輸入想做的事'), '圖書館怎麼走');
   fireEvent.press(view.getByLabelText('前往校園地圖'));
   expect(mockNavigate).toHaveBeenCalledWith('校園', {
+    initial: false,
     screen: 'MapV2',
     params: undefined,
   });
@@ -505,6 +554,7 @@ test('today class without linkedCourseId opens Classroom with timetable search p
   fireEvent.press(await view.findByRole('button', { name: /^下一堂課，資料結構，/ }));
   expect(view.getAllByText('資料結構')).toHaveLength(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'Classroom',
     params: { q: '資料結構', from: 'timetable', code: 'CS301' },
   });
@@ -522,6 +572,7 @@ test('today class with linkedCourseId still opens CourseHub', async () => {
   fireEvent.press(await view.findByRole('button', { name: /^下一堂課，資料結構，/ }));
   expect(view.getAllByText('資料結構')).toHaveLength(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: {
       courseSpaceId: 'cw_11111111-1111-4111-8111-111111111111',
@@ -543,6 +594,7 @@ test('today class with blank course name resolves via courseWorkNavForClass to C
   const view = render(<StudentTodayScreen />);
   fireEvent.press(await view.findByText('教室未填'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'Classroom',
     params: {},
   });
@@ -554,6 +606,7 @@ test('today class list press without linkedCourseId opens Classroom search', asy
   const view = render(<StudentTodayScreen />);
   fireEvent.press(await view.findByText('主顧 303'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'Classroom',
     params: { q: '資料結構', from: 'timetable', code: 'CS301' },
   });
@@ -571,6 +624,7 @@ test('today class list press with linkedCourseId opens CourseHub', async () => {
   const view = render(<StudentTodayScreen />);
   fireEvent.press(await view.findByText('主顧 303'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: {
       courseSpaceId: 'cw_11111111-1111-4111-8111-111111111111',
@@ -588,6 +642,7 @@ test.each([-48, 3, 72])('the single work row opens its course for a deadline off
   expect(await view.findAllByText('繳交期末報告')).toHaveLength(1);
   fireEvent.press(view.getByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
@@ -604,6 +659,7 @@ test('after classes end, the work row and its separate submit button retain thei
   await view.findByText('已結束');
   fireEvent.press(view.getByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
@@ -612,6 +668,7 @@ test('after classes end, the work row and its separate submit button retain thei
   fireEvent.press(submit);
   expect(mockNavigate).toHaveBeenCalledTimes(2);
   expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
+    initial: false,
     screen: 'HomeworkSubmit',
     params: expect.objectContaining({ courseId: 'course-a', hwId: 'homework-a', scrollToSubmit: true }),
   });
@@ -644,13 +701,16 @@ test.each([
   fireEvent.press(quiz);
   expect(mockNavigate).toHaveBeenCalledTimes(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'QuizTaking',
     params: { groupId: 'course-a', groupName: '資料結構', quizId: 'quiz-42', dueAt: dueAt.toISOString() },
   });
   fireEvent.press(course);
   expect(mockNavigate).toHaveBeenCalledTimes(2);
   expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
-    screen: 'CourseHub', params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
+    initial: false,
+    screen: 'CourseHub',
+    params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
 });
 
@@ -686,7 +746,7 @@ test('a class starting soon keeps the urgent quiz visible in the collapsed list 
   const headings = view.getAllByRole('header').map(node => node.props.children);
   expect(headings.indexOf('待處理')).toBeLessThan(headings.indexOf('今天課表'));
   fireEvent.press(view.getByRole('button', { name: '去作答，期中考' }));
-  expect(mockNavigate).toHaveBeenCalledWith('學習', { screen: 'QuizTaking',
+  expect(mockNavigate).toHaveBeenCalledWith('學習', { initial: false, screen: 'QuizTaking',
     params: { groupId: 'course-a', groupName: '資料結構', quizId: 'quiz-42', dueAt: dueAt.toISOString() } });
   expect(view.getByText(TODAY_COPY.moreTodos(11))).toBeVisible();
   expect(view.queryByLabelText('補交 2，資料結構')).toBeNull();
@@ -732,6 +792,7 @@ test.each(['pending', 'empty', 'error'])('opens the calendar from %s coursework'
   const calendar = await view.findByRole('button', { name: '查看行事曆' });
   fireEvent.press(calendar);
   expect(mockNavigate).toHaveBeenLastCalledWith('Today', {
+    initial: false,
     screen: 'SmartCalendarScreen',
     params: undefined,
   });

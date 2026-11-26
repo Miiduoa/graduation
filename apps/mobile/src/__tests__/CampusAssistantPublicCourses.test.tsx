@@ -157,6 +157,51 @@ test('a source failure offers a retry handoff and never shows an empty success o
   });
 });
 
+test.each([
+  { name: 'a negative length', contentLength: '-1' },
+  { name: 'a non-decimal length', contentLength: '5e2' },
+  { name: 'an excessive length', contentLength: String(512 * 1024 + 1) },
+  { name: 'a non-JSON content type', contentType: 'text/html; charset=utf-8' },
+  { name: 'a redirected off-campus URL', finalUrl: 'https://other.test/api/public-course-catalog?schoolId=nthu&q=database' },
+])('mobile assistant rejects $name before reading the body and aborts the transfer', async ({ contentLength, contentType, finalUrl }) => {
+  const original = response();
+  const readBody = jest.fn(original.text);
+  fetchSource.mockResolvedValue({
+    ...original,
+    ...(finalUrl ? { url: finalUrl } : {}),
+    headers: { get: (name: string) => {
+      if (name.toLowerCase() === 'content-length') return contentLength ?? null;
+      if (name.toLowerCase() === 'content-type') return contentType ?? null;
+      return null;
+    } },
+    text: readBody,
+  });
+  const view = render(<CampusAssistantScreen navigation={navigation()} />);
+  await ask(view);
+  expect(await view.findByText(/暫時無法取得國立清華大學公開開課資料/)).toBeTruthy();
+  expect(readBody).not.toHaveBeenCalled();
+  expect(fetchSource.mock.calls[0][1].signal.aborted).toBe(true);
+  expect(view.queryByText('資料庫系統')).toBeNull();
+});
+
+test('mobile assistant accepts a correctly typed JSON response with safe length', async () => {
+  const original = response();
+  const body = await original.text();
+  fetchSource.mockResolvedValue({
+    ...original,
+    headers: { get: (name: string) => {
+      if (name.toLowerCase() === 'content-length') return String(Buffer.byteLength(body, 'utf8'));
+      if (name.toLowerCase() === 'content-type') return 'application/json; charset=utf-8';
+      return null;
+    } },
+    text: async () => body,
+  });
+  const view = render(<CampusAssistantScreen navigation={navigation()} />);
+  await ask(view);
+  expect(await view.findByText('資料庫系統')).toBeTruthy();
+  expect(fetchSource.mock.calls[0][1].signal.aborted).toBe(false);
+});
+
 test('a verified empty lookup is displayed as empty and can still reopen the same query', async () => {
   fetchSource.mockResolvedValue(response([]));
   const view = render(<CampusAssistantScreen navigation={navigation()} />);
@@ -215,7 +260,7 @@ test.each(['school', 'public'])('the global overlay actually navigates the activ
   const params = { publicSchoolId: 'nthu', filter: { keyword: '資料庫' }, autoSearch: true };
   if (owner === 'school') {
     expect(mockRootDispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'NAVIGATE', payload: { name: '學習', params: { screen: 'CourseCatalog', params } },
+      type: 'NAVIGATE', payload: { name: '學習', params: { screen: 'CourseCatalog', params, initial: false } },
     }));
     expect(mockPublicDispatch).not.toHaveBeenCalled();
   } else {
@@ -292,7 +337,7 @@ test.each(['school', 'public'])('the %s overlay preserves all filters through th
   const params = { publicSchoolId: 'nthu', filter: { keyword: '資料庫', weekday: 1, credits: 3 }, autoSearch: true };
   if (owner === 'school') {
     expect(mockRootDispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'NAVIGATE', payload: { name: '學習', params: { screen: 'CourseCatalog', params } },
+      type: 'NAVIGATE', payload: { name: '學習', params: { screen: 'CourseCatalog', params, initial: false } },
     }));
     expect(mockPublicDispatch).not.toHaveBeenCalled();
   } else {

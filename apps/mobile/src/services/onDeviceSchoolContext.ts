@@ -1,5 +1,6 @@
 import { MAX_PERIOD_SLOTS } from '@campus/shared';
 import { parseCampusAssignmentSource } from './campusAssignmentSource';
+import { isRealTimestamp } from './campusTimestamp';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { readAssistantTimetable, type PlatformTimetableAccess } from './assistantTimetableSource';
 import { currentSavedClasses, nextSavedClasses, savedClassGaps, type SavedClassOccurrence } from './nextSavedClasses';
@@ -90,29 +91,6 @@ export async function collectOnDeviceSchoolContext(
   }
 }
 
-// Date.parse accepts impossible dates such as February 30 and silently rolls
-// them into March. A restored source timestamp must preserve the exact local
-// calendar fields even when the producer used an explicit UTC offset.
-function isRealTimestamp(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|([+-])(\d{2}):(\d{2}))$/.exec(value);
-  if (!match) return false;
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) return false;
-  const hours = Number(match[10] || 0);
-  const minutes = Number(match[11] || 0);
-  if (hours > 14 || minutes > 59 || (hours === 14 && minutes !== 0)) return false;
-  const offsetMinutes = match[8] === 'Z' ? 0 : (match[9] === '+' ? 1 : -1) * (hours * 60 + minutes);
-  const sourceClock = new Date(parsed + offsetMinutes * 60_000);
-  return sourceClock.getUTCFullYear() === Number(match[1]) &&
-    sourceClock.getUTCMonth() + 1 === Number(match[2]) &&
-    sourceClock.getUTCDate() === Number(match[3]) &&
-    sourceClock.getUTCHours() === Number(match[4]) &&
-    sourceClock.getUTCMinutes() === Number(match[5]) &&
-    sourceClock.getUTCSeconds() === Number(match[6]) &&
-    sourceClock.getUTCMilliseconds() === Number((match[7] || '').padEnd(3, '0') || 0);
-}
-
 // In-memory campus summaries normally come from a validated API parser, but a
 // JSON-restored or caller-supplied snapshot may bypass that parser. Re-check
 // every field the prompt serializes before exposing any personal evidence.
@@ -139,17 +117,109 @@ function safePromptEvidenceText(value: unknown, maxLength: number, optional = fa
   return true;
 }
 
+// Array#every skips empty slots. Caller-supplied snapshots may be sparse even
+// when their counts claim complete coverage. Inherited numeric entries do not
+// prove that a row exists in the actual student source either.
+function allOwnArrayItems<T>(items: readonly T[], isValid: (item: T) => boolean): boolean {
+  for (let index = 0; index < items.length; index += 1) {
+    // Do not execute a caller-supplied getter: it can return valid evidence
+    // during verification and different private/prompt text when serialized.
+    const own = Object.getOwnPropertyDescriptor(items, index);
+    if (!own || !Object.prototype.hasOwnProperty.call(own, 'value') || !isValid(own.value as T)) return false;
+  }
+  return true;
+}
+
+// A dense array can still contain accessor-backed records. Never invoke a
+// caller-supplied title/ID getter that could change between validation and
+// prompt serialization; live API and JSON-restored records use data fields.
+// Do not call a caller-supplied array's own slice()/Symbol.species during
+// serialization: such a method can replace already-validated student evidence.
+// Read only own data slots, as in the preceding source validation.
+function ownArrayPrefix<T>(items: readonly T[], limit: number): T[] {
+  const prefix: T[] = [];
+  for (let index = 0; index < items.length && index < limit; index += 1) {
+    const own = Object.getOwnPropertyDescriptor(items, index);
+    if (!own || !Object.prototype.hasOwnProperty.call(own, 'value')) return [];
+    prefix.push(own.value as T);
+  }
+  return prefix;
+}
+
+// The authorized reader can return more tasks than a small offline model can
+// display. Choose deadlines from the entire *validated, already-read* excerpt,
+// not merely the server's first five records. Never mutate source order,
+// execute caller-owned array methods, or imply that a partial page is complete.
+function dueOrderedAssignmentExcerpt(
+  items: CampusSenseSnapshot['assignments']['items'],
+  limit: number,
+  deviceNowMs: number,
+) {
+  const copied = ownArrayPrefix(items, items.length).map((row, index) => ({
+    index,
+    dueMs: row.dueAt === null ? null : Date.parse(row.dueAt),
+    title: row.title,
+    groupName: row.groupName,
+    dueAt: row.dueAt,
+    ...(row.source ? { source: parseCampusAssignmentSource(row.source) } : {}),
+  }));
+  copied.sort((a, b) => {
+    if (a.dueMs === null) return b.dueMs === null ? a.index - b.index : 1;
+    if (b.dueMs === null) return -1;
+    return a.dueMs - b.dueMs || a.index - b.index;
+  });
+  // An old backlog can fill all five earliest-deadline slots and hide the next
+  // actionable due date. Keep one nearest upcoming item when none of the five
+  // is upcoming, without reading more records or mutating authorized evidence.
+  const excerpt = copied.slice(0, limit);
+  const nearestUpcoming = copied.find(({ dueMs }) => dueMs !== null && dueMs >= deviceNowMs);
+  if (limit > 0 && excerpt.length === limit && nearestUpcoming &&
+      !excerpt.some(({ dueMs }) => dueMs !== null && dueMs >= deviceNowMs)) {
+    excerpt[limit - 1] = nearestUpcoming;
+  }
+  // Only a device-clock estimate, not proof of submission, official availability,
+  // or whether an expired assignment's original page still allows a response.
+  return excerpt.map(({ index, dueMs, ...evidence }) => ({
+    ...evidence,
+    deadlineHint: dueMs === null
+      ? '來源未提供截止時間'
+      : dueMs === deviceNowMs
+        ? '依裝置時間推估正好到截止點；是否仍可繳交請到原作業頁核對'
+        : dueMs < deviceNowMs
+          ? '依裝置時間推估已過截止點；是否仍可繳交請到原作業頁核對'
+          : '依裝置時間推估尚未到截止點',
+  }));
+}
+
+function hasOwnEvidenceFields(value: unknown, required: readonly string[], optional: readonly string[] = []): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  for (const key of required) {
+    const own = Object.getOwnPropertyDescriptor(value, key);
+    if (!own || !Object.prototype.hasOwnProperty.call(own, 'value')) return false;
+  }
+  for (const key of optional) {
+    const own = Object.getOwnPropertyDescriptor(value, key);
+    if (own && !Object.prototype.hasOwnProperty.call(own, 'value')) return false;
+  }
+  return true;
+}
+
 function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is CampusSenseSnapshot {
   // The scope/freshness check alone uses Date.parse and can normalize invalid
   // calendar dates. A restored campus timestamp must still be unambiguous.
-  if (!value || !isRealTimestamp(value.checkedAt)) return false;
+  if (!value || !hasOwnEvidenceFields(value, ['userId', 'schoolId', 'checkedAt', 'schedule', 'assignments', 'announcements']) ||
+      !isRealTimestamp(value.checkedAt)) return false;
   const schedule = value.schedule;
   const assignments = value?.assignments;
   const announcements = value?.announcements;
   const status = (candidate: unknown) => candidate === 'available' || candidate === 'unavailable';
   const count = (candidate: unknown) => candidate === null ||
     (typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate >= 0);
-  if (!schedule || !assignments || !announcements ||
+  // Restored envelopes may themselves be accessor-backed even when each row
+  // is a plain object. Validate the descriptors before reading totals or lists.
+  if (!hasOwnEvidenceFields(schedule, ['status', 'count']) ||
+      !hasOwnEvidenceFields(assignments, ['status', 'count', 'items'], ['coverage']) ||
+      !hasOwnEvidenceFields(announcements, ['status', 'items']) ||
       !status(schedule.status) || !status(assignments.status) || !status(announcements.status) ||
       !count(schedule.count) || !count(assignments.count) ||
       (schedule.status === 'available' && schedule.count === null) ||
@@ -169,7 +239,7 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
   // Coverage is produced by the paginated authorized reader. A damaged restored
   // flag must not turn a partial task list into evidence that all tasks were read.
   const coverage = assignments.coverage;
-  if (coverage !== undefined && (!coverage || typeof coverage !== 'object' ||
+  if (coverage !== undefined && (!hasOwnEvidenceFields(coverage, ['complete', 'reason', 'pages']) ||
       assignments.status !== 'available' ||
       typeof coverage.complete !== 'boolean' ||
       !['complete', 'legacy-partial', 'read-budget'].includes(coverage.reason) ||
@@ -195,11 +265,13 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
   // A JSON-restored snapshot can bypass that reader; two distinct titles with
   // the same original assignment ID are not two separate student tasks.
   const seenAssignmentSources = new Set<string>();
-  const assignmentsValid = assignments.items.every((item) => {
-    if (!item || !safePromptEvidenceText(item.title, 140) ||
+  const assignmentsValid = allOwnArrayItems(assignments.items, (item) => {
+    if (!hasOwnEvidenceFields(item, ['title', 'groupName', 'dueAt'], ['source']) ||
+        !safePromptEvidenceText(item.title, 140) ||
         !safePromptEvidenceText(item.groupName, 100, true) ||
         !(item.dueAt === null || (isRealTimestamp(item.dueAt) && item.dueAt.length <= 48))) return false;
     if (item.source !== undefined) {
+      if (!hasOwnEvidenceFields(item.source, ['kind', 'groupId', 'assignmentId'])) return false;
       const source = parseCampusAssignmentSource(item.source);
       if (!source) return false;
       const identity = JSON.stringify([source.groupId, source.assignmentId]);
@@ -208,7 +280,8 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
     }
     return true;
   });
-  return assignmentsValid && announcements.items.every((item) => !!item &&
+  return assignmentsValid && allOwnArrayItems(announcements.items, (item) =>
+    hasOwnEvidenceFields(item, ['title', 'publishedAt'], ['source']) &&
     safePromptEvidenceText(item.title, 140) &&
     (item.publishedAt === null || (isRealTimestamp(item.publishedAt) && item.publishedAt.length <= 48)));
 }
@@ -231,7 +304,14 @@ export function formatOnDeviceSchoolPrompt(
   senseSnapshot: CampusSenseSnapshot | null | undefined,
   expectedOwnerUid: string,
 ): string {
-  const context = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) ? snapshot : null;
+  // Capture a single device-clock instant for privacy freshness, Taipei time,
+  // and assignment priorities. A wall-clock adjustment during formatting must
+  // not make the same authorized row both at and past its deadline.
+  const deviceNowMs = Date.now();
+  // Reject caller-supplied scope/timetable getters before they are consulted.
+  // Legitimate cached JSON and the live collector always use own data fields.
+  const context = snapshot && hasOwnEvidenceFields(snapshot, ['checkedAt', 'schoolId', 'schoolName', 'timetable'], ['ownerUid'])
+    ? snapshot : null;
   // A missing or malformed campus ID cannot authorize the same account's
   // cached timetable or synchronized assignments from an unknown school.
   const schoolId = checkedSchoolLabel(context?.schoolId, 100);
@@ -245,7 +325,7 @@ export function formatOnDeviceSchoolPrompt(
   // A canonical timestamp may still be a replay from an older session or
   // far in the future after a device clock change. Recheck immediately before
   // composing the local model prompt; the collector can be run again offline.
-  const clockAgeMs = Date.now() - checkedAt.getTime();
+  const clockAgeMs = deviceNowMs - checkedAt.getTime();
   const verifiedClock = Number.isFinite(clockAgeMs) &&
     checkedAt.toISOString() === context?.checkedAt &&
     clockAgeMs >= -30_000 && clockAgeMs <= 5 * 60_000;
@@ -257,7 +337,7 @@ export function formatOnDeviceSchoolPrompt(
     weekday: 'long',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date()) : '無法核對（請重新整理裝置資料）';
+  }).format(new Date(deviceNowMs)) : '無法核對（請重新整理裝置資料）';
   // The rule-based timetable tool uses every saved course. Keep only a short
   // excerpt in the LLM prompt so a small local model cannot overflow context.
   // The prompt is a separate privacy boundary: a caller cannot pass a cached
@@ -266,7 +346,8 @@ export function formatOnDeviceSchoolPrompt(
   // Validate the complete small on-device excerpt before handing any private
   // evidence (including synchronized campus summaries) to the local model.
   const timetable = context?.timetable;
-  const validTimetable = !!timetable &&
+  const validTimetable = !!timetable && hasOwnEvidenceFields(timetable, ['source', 'updatedAt', 'courses'],
+    ['nextClasses', 'currentClasses', 'classGaps']) &&
     ['saved-device-copy', 'not-available', 'unreadable'].includes(timetable.source) &&
     // The saved timetable must predate the context that collected it. Comparing
     // to the current clock alone would accept a source written after checkedAt.
@@ -278,7 +359,8 @@ export function formatOnDeviceSchoolPrompt(
     // A restored contradiction must not authorize unrelated private summaries.
     (timetable.source === 'saved-device-copy' ||
       (timetable.updatedAt === null && timetable.courses.length === 0)) &&
-    timetable.courses.every((course) => !!course &&
+    allOwnArrayItems(timetable.courses, (course) =>
+      hasOwnEvidenceFields(course, ['name', 'day', 'start', 'end'], ['room']) &&
       // The offline copy may bypass the regular title parser. Newline or
       // line-separator controls in a course name can masquerade as model instructions.
       safePromptEvidenceText(course.name, 48) &&
@@ -293,7 +375,7 @@ export function formatOnDeviceSchoolPrompt(
   // An otherwise valid JSON-restored course can carry arbitrary extra fields.
 // Never serialize the caller's object verbatim into the local model prompt.
 const sampleCourses = owned && timetable
-  ? timetable.courses.slice(0, 8).map(({ name, day, start, end, room }) => ({
+  ? ownArrayPrefix(timetable.courses, 8).map(({ name, day, start, end, room }) => ({
       name, day, start, end, ...(room === undefined ? {} : { room }),
     }))
   : [];
@@ -309,10 +391,20 @@ const sampleCourses = owned && timetable
     : '目前沒有可確認的本機個人課表，因此無法回答正式課程安排。';
   // A matching campus alone is not permission to disclose another student's data.
   // Recheck ownership and freshness at prompt construction, after async model loading.
-  const candidateSense = owned
-    ? validCampusSenseSnapshot(senseSnapshot, { uid: expectedOwnerUid, schoolId })
+  // Scope checks must not invoke a restored root getter before row validation.
+  const candidateSense = owned && hasOwnEvidenceFields(senseSnapshot,
+    ['userId', 'schoolId', 'checkedAt', 'schedule', 'assignments', 'announcements'])
+    ? validCampusSenseSnapshot(senseSnapshot, { uid: expectedOwnerUid, schoolId }, deviceNowMs)
     : null;
   const verifiedSense = safeCampusSenseForPrompt(candidateSense) ? candidateSense : null;
+  // Derive both the small excerpt and its next deadline from one verified,
+  // already-authorized snapshot and one device-clock reading. A small local
+  // model should not have to guess priority from an overdue backlog.
+  const assignmentNowMs = deviceNowMs;
+  const assignmentExcerpt = verifiedSense
+    ? dueOrderedAssignmentExcerpt(verifiedSense.assignments.items, 5, assignmentNowMs) : [];
+  const nearestNotExpired = assignmentExcerpt.find((item) =>
+    item.dueAt !== null && Date.parse(item.dueAt) >= assignmentNowMs) ?? null;
   // Source text is untrusted content. It is evidence for the answer, not a new instruction.
   const sense = verifiedSense
     ? [
@@ -324,13 +416,14 @@ const sampleCourses = owned && timetable
           '；完整性：' + (verifiedSense.assignments.coverage?.complete === true
             ? '來源已完整讀取' : verifiedSense.assignments.coverage
               ? '僅讀取部分資料' : '未能核對是否完整') +
-          '；最多列出前 5 項：' + JSON.stringify(verifiedSense.assignments.items.slice(0, 5).map(({
-            title, groupName, dueAt, source,
-          }) => ({ title, groupName, dueAt, ...(source ? { source: parseCampusAssignmentSource(source) } : {}) }))),
+          '；依本次已取得的期限排序，最多列出 5 項（過期項目擠滿前五項且本次資料中仍有未到截止點的作業時，保留最近將到期 1 項）：' +
+            JSON.stringify(assignmentExcerpt),
+        '本次已取得資料中最近尚未過截止點的作業（僅優先核對原作業頁，不代表仍可繳交；無來源 ID 不可推定導頁）：' +
+          (nearestNotExpired ? JSON.stringify(nearestNotExpired) : '未能從本次資料確認') + '。',
         '校園公告：' + verifiedSense.announcements.status +
-          '；部分項目：' + JSON.stringify(verifiedSense.announcements.items.slice(0, 4).map(({ title, publishedAt }) => ({ title, publishedAt }))),
+          '；部分項目：' + JSON.stringify(ownArrayPrefix(verifiedSense.announcements.items, 4).map(({ title, publishedAt }) => ({ title, publishedAt }))),
         '上述來源總數與完整性，只涵蓋已授權課程中目前開放且未見已繳交時間的作業，不包括已提交、草稿、關閉或無權存取的作業；不能當成全部作業或歷史繳交清單。',
-        '即使來源完整，上面仍最多列出 5 項；未列出不代表沒有其他作業，沒有繳交回條也不能斷言未交。若要核對全部作業與繳交狀態，請到原課程作業頁核對；不可把同步資料說成最新結果，不得執行任何寫入。',
+        '期限排序僅比較本次已取得且有截止時間的作業，無期限項目排在後面；若過期作業占滿前五項且本次已取得的資料中仍有尚未到截止點的作業，會保留最近將到期的一筆；若沒有這類作業則照原排序列出，這不代表其餘過期作業已完成；期限提示只是依裝置時間與舊同步資料估算，不證明校方系統仍接受繳交、已繳交或尚未繳交；若來源僅部分讀取，不能認定這五項是全部作業中最早截止的五項。即使來源完整，上面仍最多列出 5 項；未列出不代表沒有其他作業，沒有繳交回條也不能斷言未交。若要核對全部作業與繳交狀態，請到原課程作業頁核對；不可把同步資料說成最新結果，不得執行任何寫入。',
       ].join('\n')
     : '此回合沒有主動同步且有效的校園資料，不可自行猜測個人作業、公告與申請狀態。';
   return [

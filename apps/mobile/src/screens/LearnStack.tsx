@@ -318,9 +318,21 @@ function LearnLanding(props: any) {
   if (auth.loading || auth.profileLoading || (auth.user && auth.profile?.uid !== auth.user.uid))
     return <RoleAwareTodayScreen {...props} />;
   const role = resolveDashboardRole(auth.user ? auth.profile : null);
-  if (role === 'teacher') return <TeacherTodayScreen />;
-  if (role === 'student') return <LearnAiFirstScreen />;
+  if (role === 'teacher' || role === 'ta') return <TeacherTodayScreen />;
+  if (role === 'student' || role === 'club_officer') return <LearnAiFirstScreen />;
   return <RoleWorkspaceScreen key={auth.user?.uid} {...props} role={role} />;
+}
+
+/** Opening a teaching task must not route a department/admin back to its own landing.
+ * TeacherToday reads only actual course memberships; a display role grants no course access.
+ */
+function TeachingLanding(props: any) {
+  const auth = useAuth();
+  if (auth.loading || auth.profileLoading || (auth.user && auth.profile?.uid !== auth.user.uid))
+    return <RoleAwareTodayScreen {...props} />;
+  const role = resolveDashboardRole(auth.user ? auth.profile : null);
+  if (['teacher', 'ta', 'department', 'admin'].includes(role)) return <TeacherTodayScreen />;
+  return <LearnLanding {...props} />;
 }
 
 export function LearnStack() {
@@ -361,7 +373,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="TeachingHub"
-        component={LearnLanding}
+        component={TeachingLanding}
         options={{ title: '課務', headerShown: false }}
       />
       <Stack.Screen
@@ -434,6 +446,11 @@ export function LearnStack() {
         name="CourseCatalog"
         component={CourseCatalogScreen}
         options={{ title: '課綱查詢', headerShown: false }}
+      />
+      <Stack.Screen
+        name="TronClassWorkspace"
+        getComponent={() => require('./TronClassWorkspaceScreen').TronClassWorkspaceScreen}
+        options={{ title: 'TronClass 課務' }}
       />
       <Stack.Screen
         name="QuizCenter"

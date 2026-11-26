@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { isSupportedUtf8JsonMediaType } from '@/app/map/jsonMediaType';
 import {
   parseProvidenceOsmFootprints,
   stripOsmRevisionsAfter,
@@ -19,6 +20,10 @@ const ERROR_COOLDOWN_MS = 10 * 60 * 1000;
 // Respect its Retry-After while bounding malformed or extreme upstream values.
 const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
 const MAX_RESPONSE_BYTES = 500_000;
+// A misbehaving upstream can emit unlimited empty/tiny ReadableStream chunks.
+// Cap the number of reads as well as bytes so microtasks cannot indefinitely
+// starve the 12-second deadline timer or monopolize the Node event loop.
+const MAX_RESPONSE_STREAM_CHUNKS = 8_192;
 // AbortSignal is advisory: intermediaries and stream mocks may never settle.
 // Bound the entire upstream operation so global pending requests can recover.
 const OVERPASS_REQUEST_DEADLINE_MS = 12_000;
@@ -59,6 +64,61 @@ class OverpassRateLimitError extends Error {
   }
 }
 
+// HTTP-date permits IMF-fixdate and two legacy wire formats (RFC 9110 §5.6.7).
+// Date.parse accepts additional non-HTTP strings such as ISO calendar dates;
+// allowing those as a proxy's Date/Retry-After can falsely lock the campus map
+// for 24 hours. Reconstruct each allowed wire representation from the parsed
+// UTC instant, rejecting normalized/impossible dates and arbitrary formats.
+const HTTP_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const HTTP_LONG_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const HTTP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function parseHttpDateMillis(value: string | null, now: number): number | null {
+  if (value === null) return null;
+  // Date.parse uses an implementation-specific pivot for RFC 850's two-digit
+  // year (e.g. "50" becomes 1950 even when the request is made in 2049).
+  // RFC 9110 requires resolving the year relative to the recipient's clock:
+  // a date appearing more than 50 years in the future belongs to the past.
+  const legacy = /^([A-Za-z]+), (\d{2})-([A-Za-z]{3})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) GMT$/.exec(value);
+  if (legacy) {
+    const monthIndex = HTTP_MONTHS.indexOf(legacy[3]);
+    if (monthIndex < 0) return null;
+    const referenceYear = new Date(now).getUTCFullYear();
+    let year = Math.floor(referenceYear / 100) * 100 + Number(legacy[4]);
+    // The RFC 9110 limit is a complete 50-year period, not only a
+    // difference between year numbers. At 2026-11-22, 2076-11-23 is
+    // already more than 50 years ahead and must be read as 1976.
+    const fiftyYearCutoff = new Date(now);
+    fiftyYearCutoff.setUTCFullYear(referenceYear + 50);
+    const candidate = Date.UTC(year, monthIndex, Number(legacy[2]),
+      Number(legacy[5]), Number(legacy[6]), Number(legacy[7]));
+    if (candidate > fiftyYearCutoff.getTime()) year -= 100;
+    else if (year < referenceYear - 50) year += 100;
+    const parsed = Date.UTC(year, monthIndex, Number(legacy[2]),
+      Number(legacy[5]), Number(legacy[6]), Number(legacy[7]));
+    const date = new Date(parsed);
+    const canonical = `${HTTP_LONG_WEEKDAYS[date.getUTCDay()]}, ${String(date.getUTCDate()).padStart(2, '0')}-${HTTP_MONTHS[date.getUTCMonth()]}-${String(year % 100).padStart(2, '0')} ${date.toUTCString().slice(17, 25)} GMT`;
+    // Reject invalid weekday, impossible dates and normalized time components.
+    return value === canonical ? parsed : null;
+  }
+  const isAsctime = /^[A-Za-z]{3} [A-Za-z]{3} (?: \d|\d{2}) \d{2}:\d{2}:\d{2} \d{4}$/.test(value);
+  // asctime omits the zone on the wire, but HTTP dates are always UTC.
+  const parsed = Date.parse(isAsctime ? `${value} GMT` : value);
+  if (!Number.isFinite(parsed)) return null;
+  const date = new Date(parsed);
+  if (date.toUTCString() === value) return parsed;
+  const day = String(date.getUTCDate());
+  const month = HTTP_MONTHS[date.getUTCMonth()];
+  const time = date.toUTCString().slice(17, 25);
+  const prefix = `${HTTP_WEEKDAYS[date.getUTCDay()]} ${month} `;
+  const suffix = ` ${time} ${date.getUTCFullYear()}`;
+  // RFC 9110 asctime space-pads a one-digit day ("Nov  8"); servers also emit
+  // a zero-padded two-digit day ("Nov 08"). Both denote the same instant, as
+  // the merge-base Date.parse path accepted. Weekday and date still must match.
+  return value === `${prefix}${day.padStart(2, ' ')}${suffix}` ||
+    value === `${prefix}${day.padStart(2, '0')}${suffix}` ? parsed : null;
+}
+
 function overpassRetryAfterMs(header: string | null, now: number, serverDate: string | null = null): number {
   if (!header) return ERROR_COOLDOWN_MS;
   const value = header.trim();
@@ -72,14 +132,13 @@ function overpassRetryAfterMs(header: string | null, now: number, serverDate: st
     requestedMs = digits.length > 5 || (digits.length === 5 && digits >= '86400')
       ? MAX_RETRY_AFTER_MS : Number(digits) * 1000;
   } else {
-    const dateMs = Date.parse(value);
-    // HTTP-date Retry-After and the upstream Date share the same server clock.
-    // If our host is ahead, local subtraction alone can shorten a one-hour
-    // pause to the ten-minute default and repeatedly overload public Overpass.
-    // Keep the more conservative of the local and server-relative durations.
-    const originMs = serverDate === null ? NaN : Date.parse(serverDate);
-    requestedMs = Number.isFinite(dateMs)
-      ? Math.max(dateMs - now, Number.isFinite(originMs) ? dateMs - originMs : -Infinity)
+    const dateMs = parseHttpDateMillis(value, now);
+    // Only a recognized HTTP-date is a trustworthy origin-clock reference.
+    // Invalid intermediary dates must never amplify a ten-minute fallback
+    // into a 24-hour cooldown or silently shorten a valid server pause.
+    const originMs = parseHttpDateMillis(serverDate, now);
+    requestedMs = dateMs !== null
+      ? Math.max(dateMs - now, originMs !== null ? dateMs - originMs : -Infinity)
       : NaN;
   }
   if (!Number.isFinite(requestedMs) || requestedMs <= 0) return ERROR_COOLDOWN_MS;
@@ -106,6 +165,15 @@ let cache: Snapshot | null = null;
 let pending: Promise<Snapshot> | null = null;
 let unavailableUntil = 0;
 
+// Rejected responses may still have an open body. A broken stream bridge can
+// throw synchronously from cancel(), or return a non-Promise. Cleanup must
+// never mask the HTTP status / Retry-After or delay the rejection.
+function cancelUnreadBody(response: Response): void {
+  try {
+    if (response.body) void Promise.resolve(response.body.cancel()).catch(() => {});
+  } catch { /* Best-effort cleanup; preserve the original rejection policy. */ }
+}
+
 // Overpass can omit Content-Length or serve compressed responses. Stop reading at the
 // decoded byte limit; checking .text().length afterwards would still buffer an
 // unbounded upstream response in the Node process.
@@ -128,7 +196,7 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   // Content-Length measures the decoded bytes. Do not silently classify an
   // ambiguous identity response as compressed and skip its length check.
   if (!['identity', 'gzip', 'br', 'deflate'].includes(coding)) {
-    if (response.body) void response.body.cancel().catch(() => {});
+    cancelUnreadBody(response);
     throw new Error('Unsupported OSM content encoding');
   }
   const identityEncoded = coding === 'identity';
@@ -143,7 +211,7 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
     // The response body may still be streaming even though the declared size
     // already violates our limit. Cancel without awaiting: an uncooperative
     // upstream must not hold the shared request open while cancellation stalls.
-    if (response.body) void response.body.cancel().catch(() => {});
+    cancelUnreadBody(response);
     throw new Error('OSM response too large');
   }
   // Any HTTP 200 Overpass JSON snapshot requires a non-empty body. A declared
@@ -151,7 +219,7 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   // data. Reject it before reading: even a stalled stream must not consume the
   // full 12-second deadline when its header already contradicts the payload.
   if (lengthHeader !== null && declared === 0) {
-    if (response.body) void response.body.cancel().catch(() => {});
+    cancelUnreadBody(response);
     throw new Error('OSM response declares an empty body');
   }
   if (!response.body) {
@@ -169,12 +237,22 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   // not guaranteed to cancel an already-exposed body reader (or a proxy mock).
   // Cancel the reader directly when the server-side deadline expires. Never
   // await cancellation: a broken stream may never acknowledge it.
-  const cancelOnAbort = () => { void reader.cancel().catch(() => {}); };
+  // A partially implemented fetch/stream bridge may throw synchronously
+  // instead of returning a rejected promise from cancel(). An abort fired by
+  // the deadline must never escape its event listener and crash the request.
+  let cancelRequested = false;
+  const cancelOnAbort = () => {
+    if (cancelRequested) return;
+    cancelRequested = true;
+    try { void Promise.resolve(reader.cancel()).catch(() => {}); }
+    catch { /* Best-effort cancellation: the independent deadline still settles. */ }
+  };
   if (signal.aborted) cancelOnAbort();
   else signal.addEventListener('abort', cancelOnAbort, { once: true });
   const decoder = new TextDecoder('utf-8', { fatal: true });
   const segments: string[] = [];
   let size = 0;
+  let chunks = 0;
   let completed = false;
   try {
     while (true) {
@@ -183,6 +261,11 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
       // truncated stream into an apparently complete Overpass snapshot.
       if (signal.aborted) throw new Error('OSM response aborted');
       if (done) { completed = true; break; }
+      // Count empty chunks too: the byte cap alone cannot stop a zero-byte
+      // stream from spinning through unbounded already-resolved reads.
+      if (++chunks > MAX_RESPONSE_STREAM_CHUNKS) {
+        throw new Error('OSM response exceeded chunk limit');
+      }
       size += value.byteLength;
       // On identity responses, the first byte beyond Content-Length already
       // proves truncation/overdelivery. Do not wait for EOF from an upstream
@@ -192,6 +275,13 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
       }
       if (size > MAX_RESPONSE_BYTES) throw new Error('OSM response too large');
       segments.push(decoder.decode(value, { stream: true }));
+      // A long sequence of already-resolved reads can starve timers even
+      // before reaching the absolute chunk cap. Give Node's event loop a
+      // chance to run the deadline and other requests every 128 chunks.
+      if (chunks % 128 === 0) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (signal.aborted) throw new Error('OSM response aborted');
+      }
     }
     if (verifyIdentityLength && size !== declared) {
       throw new Error('OSM response length mismatch');
@@ -204,9 +294,10 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
       // Cancellation is best-effort. A broken proxy/stream can accept a cancel
       // request but never settle its promise; waiting here turns an already
       // rejected oversized payload into a 12-second server timeout.
-      void reader.cancel().catch(() => {});
+      cancelOnAbort();
     }
-    reader.releaseLock();
+    try { reader.releaseLock(); }
+    catch { /* A broken upstream reader must not mask the original parse failure. */ }
   }
 }
 
@@ -233,7 +324,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     // indefinitely (including 406/429/503 responses from a congested proxy).
     // We only need status/Retry-After. Release the unused body immediately,
     // without awaiting cancellation from an uncooperative upstream.
-    if (response.body) void response.body.cancel().catch(() => {});
+    cancelUnreadBody(response);
     // A malformed fixed query (400) or blocked/forbidden client (403/406)
     // cannot recover by hammering public Overpass every ten minutes.
     // Allow a full-day cooldown; do not treat these as transient congestion.
@@ -256,14 +347,49 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   // A proxy must not promote a partial map export into a fresh campus snapshot,
   // even when the returned fragment happens to be syntactically valid JSON.
   if (response.headers.get('content-range') !== null) {
-    if (response.body) void response.body.cancel().catch(() => {});
+    cancelUnreadBody(response);
     // Even HTTP 200 is not a complete source when a proxy sends Content-Range.
     // Retain any upstream cooldown instead of retrying a partial response at 10m.
     throw new OverpassRateLimitError(overpassRetryAfterMs(
       response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));
   }
-  const raw = await readBoundedResponse(response, signal);
+  // RFC 9112 §6.3: Transfer-Encoding and Content-Length cannot both frame
+  // one HTTP response. A misconfigured intermediary can otherwise make a
+  // complete-looking JSON fragment appear to be a verified 24-hour OSM map.
+  // Reject the conflicting headers before reading even a stalled body.
+  if (response.headers.get('transfer-encoding') !== null &&
+      response.headers.get('content-length') !== null) {
+    cancelUnreadBody(response);
+    throw new OverpassRateLimitError(overpassRetryAfterMs(
+      response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
+    ));
+  }
+  // A captive portal or reverse proxy may return HTTP 200 with an explicit
+  // HTML/binary MIME while providing JSON-shaped data. Do not turn that into
+  // a 24-hour audited building snapshot. Cancel a stalled body immediately.
+  if (!isSupportedUtf8JsonMediaType(response.headers.get('content-type'))) {
+    cancelUnreadBody(response);
+    throw new OverpassRateLimitError(overpassRetryAfterMs(
+      response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
+    ));
+  }
+  let raw: string;
+  try {
+    raw = await readBoundedResponse(response, signal);
+  } catch (error) {
+    // Overpass or an intermediary can return HTTP 200 with unusable framing
+    // (empty/oversized/invalid stream) and still request a longer cooldown.
+    // Reject the geometry as before, but respect that explicit retry window
+    // rather than sending another request after our default ten minutes.
+    const retryAfter = response.headers.get('retry-after');
+    if (!signal.aborted && retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(
+        retryAfter, Date.now(), response.headers.get('date'),
+      ));
+    }
+    throw error;
+  }
   let payload: unknown;
   try {
     payload = JSON.parse(raw) as unknown;
@@ -283,17 +409,43 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
       response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));
   }
-  const osmBaseAt = verifyOverpassReplicationTime(payload, Date.now());
   const now = Date.now();
-  // A way's edit timestamp cannot be newer than the Overpass replication
-  // snapshot that contains it. Preserve checked geometry, but drop any
-  // contradictory revision label rather than advertising false provenance.
-  // Legacy replies without osm3s are bounded by their HTTP fetch time.
-  const buildings = stripOsmRevisionsAfter(
-    parseProvidenceOsmFootprints(payload),
-    osmBaseAt ? Date.parse(osmBaseAt) : now,
-  );
-  if (!buildings.length) throw new Error('No verified building outlines in response');
+  let osmBaseAt: string | null;
+  let buildings: ProvidenceFootprint[];
+  try {
+    osmBaseAt = verifyOverpassReplicationTime(payload, now);
+    // A way's edit timestamp cannot be newer than the Overpass replication
+    // snapshot that contains it. Preserve checked geometry, but drop any
+    // contradictory revision label rather than advertising false provenance.
+    // Legacy replies without osm3s are bounded by their HTTP fetch time.
+    buildings = stripOsmRevisionsAfter(
+      parseProvidenceOsmFootprints(payload),
+      osmBaseAt ? Date.parse(osmBaseAt) : now,
+    );
+  } catch (error) {
+    // Even syntactically valid JSON can carry invalid replication metadata or
+    // unusable geometry. Never cache that snapshot; also do not ignore an
+    // explicit upstream Retry-After and retry a known-bad source after 10m.
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(
+        retryAfter, Date.now(), response.headers.get('date'),
+      ));
+    }
+    throw error;
+  }
+  if (!buildings.length) {
+    // A valid JSON object can still contain no verified outlines during an
+    // upstream partial/outage response. Never cache it as a fresh map. If the
+    // origin explicitly asks us to pause, do not retry after only ten minutes.
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(
+        retryAfter, Date.now(), response.headers.get('date'),
+      ));
+    }
+    throw new Error('No verified building outlines in response');
+  }
   // The 48-hour replication-age check must remain true for the *entire* time
   // this snapshot is presented as fresh, not only when Overpass was fetched.
   // Otherwise a 47-hour-old OSM database could be marked fresh for another

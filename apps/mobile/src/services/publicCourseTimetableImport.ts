@@ -1,13 +1,36 @@
 import { parsePersonalImport } from '@campus/shared/src/imports/parser';
 import { ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
 import { nthuTimetableImportCsv } from '@campus/shared/src/nthuCourseSchedule';
-import type { PublicCatalogCourse, PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
+import { formatPublicCatalogFetchedAt, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
+import { resolvePublicCourseOperation } from '@campus/shared/src/publicCourseOperations';
 import type { PersonalImportRow, PersonalImportRecord } from '@campus/shared';
+
+/** Only a matching reviewed official feed can be cited in a personal record.
+ * Missing or mismatched evidence stays explicitly unknown, never "this term". */
+export type PublicCourseSourceEvidence = Pick<PublicCourseCatalogResponse, 'sourceUrl' | 'fetchedAt'>;
+
+export function publicCourseImportSource(
+  schoolId: PublicCourseCatalogResponse['schoolId'],
+  term: string,
+  evidence?: PublicCourseSourceEvidence,
+) {
+  const schoolName = schoolId === 'nthu' ? '國立清華大學' : '國立暨南國際大學';
+  const validSource = evidence?.sourceUrl === resolvePublicCourseOperation(schoolId)?.sourceUrl;
+  const sourceUrl = validSource ? evidence.sourceUrl : '未提供';
+  const fetchedAt = validSource && evidence.fetchedAt
+    ? formatPublicCatalogFetchedAt(evidence.fetchedAt) : null;
+  return {
+    type: 'paste' as const,
+    name: `${schoolName}｜${term.slice(0, -1)}學年度第${term.slice(-1)}學期公開開課資料｜來源：${sourceUrl}｜` +
+      `資料擷取：${fetchedAt ? `${fetchedAt}（台灣時間；非校方更新時間）` : '時間未提供'}`,
+  };
+}
 
 /** Public course data is a proposal for a personal record, never proof of enrollment. */
 export function preparePublicCourseTimetableImport(
   schoolId: PublicCourseCatalogResponse['schoolId'],
   course: PublicCatalogCourse,
+  evidence?: PublicCourseSourceEvidence,
 ) {
   if (schoolId !== 'nthu' && schoolId !== 'ncnu') return null;
   const csv = schoolId === 'nthu' ? nthuTimetableImportCsv(course) : ncnuTimetableImportCsv(course);
@@ -17,7 +40,7 @@ export function preparePublicCourseTimetableImport(
   const schoolName = schoolId === 'nthu' ? '國立清華大學' : '國立暨南國際大學';
   const parsed = parsePersonalImport(csv, {
     kind: 'timetable', schoolId, academicYear, semester,
-    source: { type: 'paste', name: `${schoolName}公開開課目錄 · ${course.code}` },
+    source: publicCourseImportSource(schoolId, course.semester, evidence),
   });
   // Only the semesters with verified clock tables can use this direct path.
   // Other terms retain the existing editable CSV/manual-import route.

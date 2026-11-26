@@ -21,6 +21,7 @@ on:
       - 'apps/web/src/lib/personalImports*'
       - 'apps/web/src/app/globals.css'
       - 'packages/shared/src/assistantExecution*'
+      - 'packages/shared/src/assistantRoleWorkflows*'
       - 'packages/shared/src/imports/**'
       - 'scripts/qa/assistant-plan-revision/**'
       - 'apps/web/tsconfig.json'

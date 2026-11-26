@@ -11,22 +11,47 @@ import {
   IDENTITY_RETRY_COPY,
   loadAccountIdentity,
   type AccountIdentity as Identity,
+  type IdentityPart,
+  type TeachingIdentity,
 } from '@/lib/accountIdentity';
 import styles from './NuniAccountPanel.module.css';
+import { AccountWorkspaces } from './AccountWorkspaces';
 
-export function AccountIdentity({ context, accountId }: { context: string; accountId: string }) {
+type Props = {
+  context: string;
+  accountId: string;
+  variant?: 'account' | 'home';
+  isPlatformOperator?: boolean;
+  includeTeaching?: boolean;
+  teaching?: IdentityPart<TeachingIdentity[]>;
+};
+
+export function AccountIdentity(props: Props) {
+  return <IdentityReader key={JSON.stringify([props.context, props.accountId])} {...props} />;
+}
+
+function IdentityReader({
+  context,
+  accountId,
+  variant = 'account',
+  isPlatformOperator = false,
+  includeTeaching = true,
+  teaching: confirmedTeaching,
+}: Props) {
   const [data, setData] = useState<Identity | null>(null);
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
   const generation = useRef(0);
+  const readTeaching = confirmedTeaching === undefined;
   const load = useCallback(async () => {
     const request = ++generation.current;
     setLoading(true);
-    setData(null);
+    if (variant !== 'home') setData(null);
     try {
       const next = await loadAccountIdentity(
         (path, input) => browserRequest(path, context, input),
         accountId,
+        { readTeaching },
       );
       if (request === generation.current) setData(next);
     } catch {
@@ -39,7 +64,7 @@ export function AccountIdentity({ context, accountId }: { context: string; accou
     } finally {
       if (request === generation.current) setLoading(false);
     }
-  }, [accountId, context]);
+  }, [accountId, context, variant, readTeaching]);
   useEffect(() => {
     void load();
     return () => {
@@ -58,6 +83,24 @@ export function AccountIdentity({ context, accountId }: { context: string; accou
     data.applications.status === 'ok' &&
     stores.length === 0 &&
     applications.length === 0;
+  if (variant === 'home')
+    return (
+      <AccountWorkspaces
+        data={
+          confirmedTeaching
+            ? {
+                ...(data ?? { stores: { status: 'pending' }, applications: { status: 'pending' } }),
+                teaching: confirmedTeaching,
+              }
+            : data
+        }
+        loading={loading && attempt > 0}
+        isPlatformOperator={isPlatformOperator}
+        includeTeaching={includeTeaching}
+        attempted={attempt > 0}
+        onRetry={() => setAttempt((value) => value + 1)}
+      />
+    );
   return (
     <section className={styles.memberships} aria-labelledby="my-identity-title">
       <div className={styles.membershipHeading}>
@@ -97,9 +140,9 @@ export function AccountIdentity({ context, accountId }: { context: string; accou
               </li>
             )}
             {stores.map((store) => (
-              <li key={`${store.name}:${store.campus}`}>
-                <Link href="/merchant/workspace">
-                  {store.name} · {store.campus} · {store.status}
+              <li key={`${store.tenantId}:${store.locationId}`}>
+                <Link href={store.href}>
+                  {store.name}／{store.locationName} · {store.campus} · {store.status}
                 </Link>
               </li>
             ))}

@@ -13,6 +13,37 @@ export const CREATOR_CARD_LIMITS = {
   linkUrl: 512,
 } as const;
 
+const requiredDocumentKeys = ['schoolId', 'ownerUid', 'headline', 'bio', 'linkUrl', 'updatedAt'];
+const allowedDocumentKeys = new Set([...requiredDocumentKeys, 'pinnedPostId']);
+
+/** Content checks from firestore.rules creatorCardValid, before client normalization. */
+export function creatorCardFieldPassesRules(field: keyof CreatorCard, value: unknown): boolean {
+  if (typeof value !== 'string' || Array.from(value).length > CREATOR_CARD_LIMITS[field]) return false;
+  if (field !== 'linkUrl' || value === '') return true;
+  // The control character check covers RE2's ASCII whitespace other than space.
+  return /^[Hh][Tt][Tt][Pp][Ss]:\/\/[^ ]+$/.test(value)
+    && !/^[Hh][Tt][Tt][Pp][Ss]:\/\/[^/]*@/.test(value)
+    // eslint-disable-next-line no-control-regex
+    && !/[\x00-\x1f\x7f-\x9f]/.test(value);
+}
+
+/** Checks the merged document against creatorCardValid using resolved request time. */
+export function creatorCardDocumentPassesRules(
+  data: Record<string, unknown>, schoolId: string, ownerUid: string, requestTime: unknown,
+): boolean {
+  const keys = Object.keys(data);
+  const pin = keys.includes('pinnedPostId') ? data.pinnedPostId : '';
+  return requiredDocumentKeys.every((key) => keys.includes(key))
+    && keys.every((key) => allowedDocumentKeys.has(key))
+    && data.schoolId === schoolId
+    && data.ownerUid === ownerUid
+    && typeof pin === 'string' && pin.length <= 128 && !/[^A-Za-z0-9_-]/.test(pin)
+    && creatorCardFieldPassesRules('headline', data.headline)
+    && creatorCardFieldPassesRules('bio', data.bio)
+    && creatorCardFieldPassesRules('linkUrl', data.linkUrl)
+    && data.updatedAt === requestTime;
+}
+
 /** Validation is shared by Web and native App; Firestore rules enforce the same limits. */
 export function validateCreatorCard(input: CreatorCard): CreatorCard {
   const headline = input.headline.trim();

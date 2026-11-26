@@ -5,6 +5,8 @@ import { NavigationContainer, createNavigationContainerRef } from '@react-naviga
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { UnifiedCalendarScreen } from '../screens/UnifiedCalendarScreen';
+import { PersonalImportSummary } from '../components/PersonalImportSummary';
+import type { RootTabParamList } from '../app/rootNavigation';
 
 jest.unmock('@react-navigation/native');
 jest.mock('../hooks/useDataSource', () => ({ useDataSource: () => mockSource }));
@@ -30,6 +32,8 @@ const mockSource = { listEvents: jest.fn(async () => []), listGroups: jest.fn(as
 const Tabs = createBottomTabNavigator();
 const Home = createNativeStackNavigator();
 const Learn = createNativeStackNavigator();
+const LearnHome = () => <Text>課務首頁</Text>;
+const CourseDestination = () => <Text>原本的公開查課內容</Text>;
 const PersonalDestination = () => <Text>個人行事曆內容</Text>;
 const TimetableDestination = () => <Text>我的課表內容</Text>;
 const ImportDestination = () => <Text>匯入行程內容</Text>;
@@ -43,22 +47,27 @@ function HomeRoutes() {
 }
 function LearnRoutes() {
   return (
-    <Learn.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
+    <Learn.Navigator
+      initialRouteName="LearnHome"
+      screenOptions={{ headerShown: false, animation: 'none' }}
+    >
+      <Learn.Screen name="LearnHome" component={LearnHome} />
+      <Learn.Screen name="CourseCatalog" component={CourseDestination} />
       <Learn.Screen name="PersonalCalendar" component={PersonalDestination} />
       <Learn.Screen name="PersonalTimetable" component={TimetableDestination} />
       <Learn.Screen name="PersonalImport" component={ImportDestination} />
     </Learn.Navigator>
   );
 }
-function renderCalendar() {
-  const ref = createNavigationContainerRef();
+function renderCalendar(HomeComponent = HomeRoutes) {
+  const ref = createNavigationContainerRef<RootTabParamList>();
   const view = render(
     <NavigationContainer ref={ref}>
       <Tabs.Navigator
         initialRouteName="Today"
         screenOptions={{ headerShown: false, animation: 'none' }}
       >
-        <Tabs.Screen name="Today" component={HomeRoutes} />
+        <Tabs.Screen name="Today" component={HomeComponent} />
         <Tabs.Screen name="學習" component={LearnRoutes} />
       </Tabs.Navigator>
     </NavigationContainer>,
@@ -93,25 +102,90 @@ test('頁首與既有匯入入口都在可捲動內容中，並標示目前資�
   expect(scroll.getByRole('button', { name: '從截圖或檔案匯入行程' })).toBeTruthy();
 });
 
-test.each([
+const personalDestinations = [
   ['個人行程', 'PersonalCalendar', '個人行事曆內容'],
   ['我的課表', 'PersonalTimetable', '我的課表內容'],
   ['開啟個人行事曆', 'PersonalCalendar', '個人行事曆內容'],
   ['從截圖或檔案匯入行程', 'PersonalImport', '匯入行程內容'],
-])('點一次%s開啟既有頁面，返回後月份與選日不變', async (label, route, content) => {
-  const view = renderCalendar();
-  await view.findByText('這天沒有校園活動或作業截止。');
-  fireEvent.press(view.getByRole('button', { name: '下一個月' }));
-  fireEvent.press(view.getByRole('button', { name: selectedDayLabel }));
-  expect(view.getByText(selectedDayHeading)).toBeTruthy();
+] as const;
+
+test.each(personalDestinations)(
+  '點一次%s開啟既有頁面，返回後月份與選日不變',
+  async (label, route, content) => {
+    const view = renderCalendar();
+    await view.findByText('這天沒有校園活動或作業截止。');
+    fireEvent.press(view.getByRole('button', { name: '下一個月' }));
+    fireEvent.press(view.getByRole('button', { name: selectedDayLabel }));
+    expect(view.getByText(selectedDayHeading)).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name: label }));
+    await waitFor(() => expect(view.ref.getCurrentRoute()?.name).toBe(route));
+    expect(view.getByText(content)).toBeTruthy();
+    const state = view.ref.getRootState();
+    expect(state.routes[state.index].name).toBe('學習');
+    act(() => view.ref.goBack());
+    await waitFor(() => expect(view.ref.getCurrentRoute()?.name).toBe('SmartCalendarScreen'));
+    expect(view.getByRole('button', { name: selectedDayLabel, selected: true })).toBeTruthy();
+    expect(view.getByText(selectedDayHeading)).toBeTruthy();
+    expect(mockSource.listEvents).toHaveBeenCalledTimes(1);
+  },
+);
+
+test.each(personalDestinations)(
+  '已開過課務時%s保留既有路由與參數，沿原返回路徑回校園日期',
+  async (label, route, content) => {
+    const view = renderCalendar();
+    await view.findByText('這天沒有校園活動或作業截止。');
+    fireEvent.press(view.getByRole('button', { name: '下一個月' }));
+    fireEvent.press(view.getByRole('button', { name: selectedDayLabel }));
+    const courseParams = { publicSchoolId: 'nthu', filter: { keyword: '資料庫', credits: 3 } };
+    act(() =>
+      view.ref.navigate('學習', {
+        screen: 'CourseCatalog',
+        params: courseParams,
+        initial: false,
+      }),
+    );
+    const previousRoutes = view.ref.getRootState().routes.find((item) => item.name === '學習')
+      ?.state?.routes;
+    expect(previousRoutes?.map((item) => item.name)).toEqual(['LearnHome', 'CourseCatalog']);
+    act(() => view.ref.navigate('Today'));
+    fireEvent.press(view.getByRole('button', { name: label }));
+    await waitFor(() => expect(view.ref.getCurrentRoute()?.name).toBe(route));
+    expect(view.getByText(content)).toBeTruthy();
+    const routes = view.ref.getRootState().routes.find((item) => item.name === '學習')
+      ?.state?.routes;
+    expect(routes?.slice(0, -1)).toEqual(previousRoutes);
+    act(() => view.ref.goBack());
+    expect(view.ref.getCurrentRoute()).toMatchObject({
+      name: 'CourseCatalog',
+      params: courseParams,
+    });
+    act(() => view.ref.goBack());
+    expect(view.ref.getCurrentRoute()?.name).toBe('LearnHome');
+    act(() => view.ref.goBack());
+    expect(view.ref.getCurrentRoute()?.name).toBe('SmartCalendarScreen');
+    expect(view.getByRole('button', { name: selectedDayLabel, selected: true })).toBeTruthy();
+    expect(view.getByText(selectedDayHeading)).toBeTruthy();
+    expect(mockSource.listEvents).toHaveBeenCalledTimes(1);
+  },
+);
+
+test.each([
+  ['開啟個人行事曆', 'PersonalCalendar'],
+  ['從截圖或檔案匯入行程', 'PersonalImport'],
+])('其他頁面使用匯入摘要的%s時仍保留課務首頁', async (label, route) => {
+  const SummaryEntry = () => <PersonalImportSummary kind="events" />;
+  const view = renderCalendar(SummaryEntry);
   fireEvent.press(view.getByRole('button', { name: label }));
   await waitFor(() => expect(view.ref.getCurrentRoute()?.name).toBe(route));
-  expect(view.getByText(content)).toBeTruthy();
+  expect(
+    view.ref
+      .getRootState()
+      .routes.find((item) => item.name === '學習')
+      ?.state?.routes.map((item) => item.name),
+  ).toEqual(['LearnHome', route]);
   act(() => view.ref.goBack());
-  await waitFor(() => expect(view.ref.getCurrentRoute()?.name).toBe('SmartCalendarScreen'));
-  expect(view.getByRole('button', { name: selectedDayLabel, selected: true })).toBeTruthy();
-  expect(view.getByText(selectedDayHeading)).toBeTruthy();
-  expect(mockSource.listEvents).toHaveBeenCalledTimes(1);
+  expect(view.ref.getCurrentRoute()?.name).toBe('LearnHome');
 });
 
 test('無法跳轉時有明確下一步，保留目前選日', async () => {

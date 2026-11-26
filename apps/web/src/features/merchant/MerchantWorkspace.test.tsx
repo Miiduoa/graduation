@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => mocks.auth,
+  useOptionalNuniSession: () => mocks.auth,
   browserRequest: mocks.request,
 }));
 vi.mock('@/components/SiteShell', () => ({
@@ -55,6 +56,7 @@ const application = {
   submittedAt: '2026-10-09T02:00:00.000Z',
 };
 function respond(path: string, _context?: string, input?: unknown) {
+  if (path === 'account-demo') return Promise.resolve({ demo: null });
   if (input) return Promise.resolve(application);
   if (path === 'merchant-onboarding-programs') return Promise.resolve({ programs });
   if (path === 'merchant-applications') return Promise.resolve({ applications: [] });
@@ -63,6 +65,7 @@ function respond(path: string, _context?: string, input?: unknown) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState(null, '', '/merchant/workspace');
   mocks.auth.session = { platformAccountId: 'account-a', context: 'context-a' };
   mocks.auth.loading = false;
   mocks.auth.pendingLogout = false;
@@ -166,7 +169,10 @@ it('submits only the applicant information and displays the confirmed receipt', 
   expect(submission?.[2]).not.toHaveProperty('role');
   expect(submission?.[2]).not.toHaveProperty('platformAccountId');
   expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
-  expect((screen.getByLabelText('對外品牌名稱') as HTMLInputElement).value).toBe('');
+  expect(screen.queryByLabelText('對外品牌名稱')).toBeNull();
+  expect(screen.getByRole('link', { name: '申請新門市' }).getAttribute('href')).toBe(
+    '/merchant/apply',
+  );
 });
 it('keeps exactly the same request and idempotency key after an uncertain response', async () => {
   let attempts = 0;
@@ -222,11 +228,36 @@ it('does not describe a partial load failure as no applications or no permission
   render(<MerchantWorkspace />);
   await screen.findByRole('alert');
   expect(screen.queryByText('你還沒有送出進駐申請。')).toBeNull();
+  expect(screen.queryByText(/這個帳號目前沒有已核准的門市/)).toBeNull();
   expect(screen.queryByRole('button', { name: '送出進駐申請' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '開始申請第一間門市' })).toBeNull();
   mocks.request.mockImplementation(respond);
   fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
   await screen.findByText('你還沒有送出進駐申請。');
 });
+it.each(['merchant-workspaces', 'merchant-applications'])(
+  'keeps both confirmed empty lists visible when %s returns 503 on reload',
+  async (endpoint) => {
+    render(<MerchantWorkspace view="workspace" />);
+    const noWorkspaces = /這個帳號目前沒有已核准的門市/;
+    const noApplications = '你還沒有送出進駐申請。';
+    await screen.findByText(noWorkspaces);
+    await screen.findByText(noApplications);
+    const reload = screen.getByRole<HTMLButtonElement>('button', { name: '重新載入' });
+    await waitFor(() => expect(reload.disabled).toBe(false));
+
+    mocks.request.mockImplementation((path, context, input) =>
+      path === endpoint
+        ? Promise.reject(new NuniError(503, 'UNAVAILABLE'))
+        : respond(path, context, input),
+    );
+    fireEvent.click(reload);
+    await screen.findByRole('alert');
+    expect(screen.getByText(noWorkspaces)).toBeTruthy();
+    expect(screen.getByText(noApplications)).toBeTruthy();
+  },
+);
+
 it('clears account drafts and ignores a prior account response after switching', async () => {
   let resolveOld!: (value: unknown) => void;
   mocks.request.mockImplementation((path, context, input) =>
@@ -252,7 +283,7 @@ it('hides private data and forms while the current session is being verified', a
   mocks.auth.loading = true;
   view.rerender(<MerchantWorkspace />);
   expect(screen.queryByLabelText('對外品牌名稱')).toBeNull();
-  expect(screen.getByRole('status').textContent).toContain('店家資料暫時隱藏');
+  expect(screen.getByRole('status').textContent).toContain('正在核對帳號資料');
   mocks.auth.pendingLogout = true;
   view.rerender(<MerchantWorkspace />);
   expect(screen.getByRole('link', { name: '登入或建立帳號' })).toBeTruthy();
@@ -297,11 +328,16 @@ it('shows review instructions and actual authorized location readiness', async (
   });
   render(<MerchantWorkspace />);
   await screen.findByText('審核說明：請補營業登記資料');
+  expect(screen.getByRole('region', { name: '1 筆申請需要補件' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '查看申請進度' }).getAttribute('href')).toBe(
+    '#merchant-applications-title',
+  );
+  expect(screen.queryByLabelText('申請場域')).toBeNull();
   const locations = screen.getByRole('region', { name: '已授權門市' });
   expect(within(locations).getByText('已核准，待完成營運設定')).toBeTruthy();
   expect(within(locations).getByText(/待完成：確認營運設定與條款、建立菜單/)).toBeTruthy();
   expect(within(locations).queryByText('營業中')).toBeNull();
-  fireEvent.click(within(locations).getByRole('button', { name: '管理門市：一樓' }));
+  fireEvent.click(within(locations).getByRole('link', { name: '管理門市：一樓' }));
   await waitFor(() =>
     expect(mocks.request).toHaveBeenCalledWith(
       'merchant-workspaces/campus-one/location-1',
@@ -401,7 +437,7 @@ it('retains an uncertain menu through a session network error, but clears it for
     return respond(path, context, input);
   });
   const view = render(<MerchantWorkspace />);
-  fireEvent.click(await screen.findByRole('button', { name: '管理門市：一樓' }));
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
   await screen.findByLabelText('品項 1 名稱');
   for (const [label, value] of [
     ['品項 1 名稱', '保留便當'],
@@ -420,7 +456,6 @@ it('retains an uncertain menu through a session network error, but clears it for
   mocks.auth.session = { platformAccountId: 'account-a', context: 'renewed-context' };
   mocks.auth.error = '';
   view.rerender(<MerchantWorkspace />);
-  fireEvent.click(await screen.findByRole('button', { name: '管理門市：一樓' }));
   await screen.findByLabelText('品項 1 名稱');
   expect((screen.getByLabelText('品項 1 名稱') as HTMLInputElement).value).toBe('保留便當');
   expect(
@@ -432,7 +467,6 @@ it('retains an uncertain menu through a session network error, but clears it for
   );
   mocks.auth.session = { platformAccountId: 'account-b', context: 'other-context' };
   view.rerender(<MerchantWorkspace />);
-  fireEvent.click(await screen.findByRole('button', { name: '管理門市：一樓' }));
   await screen.findByLabelText('品項 1 名稱');
   expect((screen.getByLabelText('品項 1 名稱') as HTMLInputElement).value).toBe('');
 });
@@ -468,10 +502,8 @@ it.each(['approved', 'under-review'])(
     render(<MerchantLocationsPage />);
     await screen.findByText('測試餐坊／學生餐廳');
     const applications = screen.getByRole('region', { name: '申請進度' });
-    expect(
-      within(applications).queryByRole('button', { name: '前往管理門市：第二門市' }),
-    ).toBeNull();
-    const link = within(applications).queryByRole('button', { name: '前往管理門市：第一門市' });
+    expect(within(applications).queryByRole('link', { name: '前往管理門市：第二門市' })).toBeNull();
+    const link = within(applications).queryByRole('link', { name: '前往管理門市：第一門市' });
     if (state !== 'approved') {
       expect(link).toBeNull();
       return;
@@ -496,11 +528,608 @@ it('explains how to continue when an approved application has no same-campus wor
   );
   render(<MerchantLocationsPage />);
   await screen.findByText('這個場域的門市尚未出現在清單，請重新載入；若仍未出現，請聯絡受理單位。');
-  expect(screen.queryByRole('button', { name: /前往管理門市/ })).toBeNull();
+  expect(screen.getByRole('heading', { name: '申請已核准，等待門市權限' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /前往管理門市/ })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
   await waitFor(() =>
     expect(
       mocks.request.mock.calls.filter(([path]) => path === 'merchant-workspaces'),
     ).toHaveLength(2),
   );
+});
+
+it.each([true, false])(
+  'waits for the workspace list before showing missing-workspace guidance (empty: %s)',
+  async (empty) => {
+    let finishStores!: (value: { workspaces: (typeof continuityStore)[] }) => void;
+    const stores = new Promise<{ workspaces: (typeof continuityStore)[] }>((resolve) => {
+      finishStores = resolve;
+    });
+    mocks.request.mockImplementation((path) => {
+      if (path === 'merchant-applications')
+        return Promise.resolve({ applications: [{ ...application, state: 'approved' }] });
+      if (path === 'merchant-workspaces') return stores;
+      return respond(path);
+    });
+    const noManageableStores = /目前還沒有可管理的門市/;
+    const campusMissing = /這個場域的門市尚未出現在清單/;
+
+    render(<MerchantLocationsPage />);
+    await screen.findByRole('heading', { name: '測試餐坊／學生餐廳' });
+    expect(screen.queryByText(noManageableStores)).toBeNull();
+    expect(screen.queryByText(campusMissing)).toBeNull();
+
+    await act(async () => finishStores({ workspaces: empty ? [] : [continuityStore] }));
+    if (empty) {
+      expect(screen.getByText(noManageableStores)).toBeTruthy();
+      expect(screen.getByText(campusMissing)).toBeTruthy();
+    } else {
+      expect(screen.getByRole('link', { name: '前往管理門市：第一門市' })).toBeTruthy();
+      expect(screen.queryByText(noManageableStores)).toBeNull();
+      expect(screen.queryByText(campusMissing)).toBeNull();
+    }
+  },
+);
+
+it.each(['submitted', 'under-review'])(
+  'keeps a returning %s applicant on progress instead of reopening the enrollment form',
+  async (state) => {
+    mocks.request.mockImplementation((path, context, input) =>
+      path === 'merchant-applications'
+        ? Promise.resolve({ applications: [{ ...application, state }] })
+        : respond(path, context, input),
+    );
+    render(<MerchantWorkspace />);
+    await screen.findByRole('heading', { name: '查看這次進駐申請' });
+    expect(screen.queryByRole('heading', { name: '店家如何進駐' })).toBeNull();
+    expect(screen.queryByLabelText('申請場域')).toBeNull();
+    expect(screen.getByRole('link', { name: '查看申請進度' }).getAttribute('href')).toBe(
+      '#merchant-applications-title',
+    );
+    expect(mocks.request.mock.calls.filter((call) => call[2])).toHaveLength(0);
+  },
+);
+
+it('keeps an in-progress application editable when refreshing reveals another application', async () => {
+  render(<MerchantWorkspace />);
+  await fillApplication();
+  mocks.request.mockImplementation((path, context, input) =>
+    path === 'merchant-applications'
+      ? Promise.resolve({ applications: [{ ...application, applicationId: 'other-application' }] })
+      : respond(path, context, input),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  await screen.findByRole('heading', { name: '查看這次進駐申請' });
+  expect((screen.getByLabelText('對外品牌名稱') as HTMLInputElement).value).toBe('測試餐坊');
+  expect(screen.getByRole('button', { name: '送出進駐申請' })).toBeTruthy();
+  expect(mocks.request.mock.calls.filter((call) => call[2])).toHaveLength(0);
+});
+
+it('prioritizes the actual authorized store for a returning operator and hides its entry after a failed refresh', async () => {
+  const workspace = {
+    tenantId: 'campus-one',
+    tenantName: '第一校園',
+    merchantName: '餐坊',
+    locationId: 'location-1',
+    locationName: '第一門市',
+    campusName: '主校區',
+    merchantStatus: 'active',
+    locationStatus: 'open',
+    activated: true,
+    publicAccess: true,
+    missingRequirements: [],
+  };
+  mocks.request.mockImplementation((path, context, input) =>
+    path === 'merchant-workspaces'
+      ? Promise.resolve({ workspaces: [workspace] })
+      : respond(path, context, input),
+  );
+  render(<MerchantWorkspace />);
+  await screen.findByRole('heading', { name: '開始今天的門市工作' });
+  expect(screen.getByRole('link', { name: '選擇門市' }).getAttribute('href')).toBe(
+    '#merchant-locations-title',
+  );
+  expect(screen.getByRole('link', { name: '管理門市：第一門市' })).toBeTruthy();
+  expect(screen.queryByLabelText('申請場域')).toBeNull();
+  mocks.request.mockRejectedValue(new Error('offline'));
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  await screen.findByRole('alert');
+  expect(screen.queryByRole('heading', { name: '開始今天的門市工作' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '管理門市：第一門市' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: '開始申請第一間門市' })).toBeNull();
+});
+
+const continuityStore = {
+  tenantId: 'campus-one',
+  tenantName: '第一校園',
+  merchantName: '餐坊',
+  locationId: 'location-1',
+  locationName: '第一門市',
+  campusName: '主校區',
+  merchantStatus: 'active',
+  locationStatus: 'open',
+  activated: true,
+  publicAccess: true,
+  missingRequirements: [],
+  applicationId: 'application-1',
+  merchantId: 'merchant-1',
+  campusId: 'main-campus',
+  serviceModes: ['pickup'],
+  paymentMode: 'counter-only',
+  onlinePaymentAvailable: false,
+  paymentCapabilityState: 'not-requested',
+  managerConfirmed: true,
+  termsVersion: 'merchant-terms-v1',
+  readinessVersion: 1,
+  publishedMenuItems: 1,
+  merchantMode: 'full',
+  merchantModeLabel: '接單服務',
+  sourceLabel: '',
+  sourceUpdatedAt: null,
+  sourceLine: null,
+};
+
+it.each([403, 404, 503])(
+  'lets an application draft submit after a known workspace detail returns %s',
+  async (status) => {
+    window.history.replaceState(null, '', '/merchant');
+    let showStore = false;
+    let failDetail = false;
+    mocks.request.mockImplementation((path, context, input) => {
+      if (path === 'merchant-workspaces' && showStore)
+        return Promise.resolve({ workspaces: [continuityStore] });
+      if (path === 'merchant-workspaces/campus-one/location-1')
+        return failDetail
+          ? Promise.reject(new NuniError(status, 'DETAIL_UNAVAILABLE'))
+          : Promise.resolve(continuityStore);
+      return respond(path, context, input);
+    });
+
+    render(<MerchantWorkspace />);
+    await fillApplication();
+    showStore = true;
+    fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：第一門市' }));
+    await screen.findByRole('heading', { name: '餐坊／第一門市', level: 2 });
+
+    failDetail = true;
+    fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+    const error = status === 503 ? /無法更新部分門市資料/ : /無法取得部分門市的管理權限/;
+    expect((await screen.findByText(error)).getAttribute('role')).toBe('status');
+    if (status !== 503)
+      expect(screen.queryByRole('link', { name: '管理門市：第一門市' })).toBeNull();
+
+    const submit = screen.getByRole<HTMLButtonElement>('button', { name: '送出進駐申請' });
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+    await screen.findByRole('heading', { name: '測試餐坊／學生餐廳' });
+    failDetail = false;
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+    expect(screen.queryByText(error)).toBeNull();
+  },
+);
+
+it.each([
+  { listOrder: 'before', includesApplication: false },
+  { listOrder: 'after', includesApplication: false },
+  { listOrder: 'before', includesApplication: true },
+  { listOrder: 'after', includesApplication: true },
+])(
+  'keeps the receipt when a list resolves $listOrder it (includes application: $includesApplication)',
+  async ({ listOrder, includesApplication }) => {
+    window.history.replaceState(null, '', '/merchant');
+    let showStore = false;
+    let finishApplication!: (value: typeof application) => void;
+    const receipt = new Promise<typeof application>((resolve) => { finishApplication = resolve; });
+    let finishList!: (value: { applications: (typeof application)[] }) => void;
+    const pendingList = new Promise<{ applications: (typeof application)[] }>((resolve) => {
+      finishList = resolve;
+    });
+    let finishOmittingList!: (value: { applications: [] }) => void;
+    const readApplications = vi.fn()
+      .mockResolvedValueOnce({ applications: [] })
+      .mockResolvedValueOnce({ applications: [] })
+      .mockReturnValueOnce(pendingList)
+      .mockResolvedValue({ applications: [] });
+    if (includesApplication) {
+      readApplications.mockReturnValueOnce(new Promise<{ applications: [] }>((resolve) => {
+        finishOmittingList = resolve;
+      }));
+    }
+    mocks.request.mockImplementation((path, context, input) => {
+      if (path === 'merchant-applications') return input ? receipt : readApplications();
+      if (path === 'merchant-workspaces' && showStore)
+        return Promise.resolve({ workspaces: [continuityStore] });
+      if (path === 'merchant-workspaces/campus-one/location-1')
+        return Promise.resolve(continuityStore);
+      return respond(path, context, input);
+    });
+
+    render(<MerchantWorkspace />);
+    await fillApplication();
+    showStore = true;
+    fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+    const storeLink = await screen.findByRole('link', { name: '管理門市：第一門市' });
+    fireEvent.click(screen.getByRole('button', { name: '送出進駐申請' }));
+    await screen.findByRole('button', { name: '正在確認收件…' });
+    fireEvent.click(storeLink);
+    await screen.findByRole('heading', { name: '餐坊／第一門市', level: 2 });
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readApplications).toHaveBeenCalledTimes(3));
+
+    if (includesApplication) {
+      await act(async () => window.history.forward());
+      await screen.findByRole('heading', { name: '餐坊／第一門市', level: 2 });
+      await act(async () => window.history.back());
+      await waitFor(() => expect(readApplications).toHaveBeenCalledTimes(4));
+    }
+
+    const resolveList = () => finishList({
+      applications: includesApplication
+        ? [{ ...application, state: 'under-review', reviewerNote: '已開始審核' }]
+        : [],
+    });
+    if (listOrder === 'before') await act(async () => resolveList());
+    await act(async () => finishApplication(application));
+    if (listOrder === 'after') await act(async () => resolveList());
+
+    if (includesApplication) {
+      expect(screen.getByText('審核說明：已開始審核')).toBeTruthy();
+      await act(async () => finishOmittingList({ applications: [] }));
+      expect(screen.getByText('審核說明：已開始審核')).toBeTruthy();
+    }
+
+    expect(screen.getByText(/申請已收件/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
+
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+    expect(screen.queryByText(/申請已收件/)).toBeNull();
+    expect(screen.getByText('你還沒有送出進駐申請。')).toBeTruthy();
+  },
+);
+
+it('keeps review progress for an application received inside a store until a list denial', async () => {
+  window.history.replaceState(null, '', '/merchant');
+  let showStore = false;
+  let listedApplications: (typeof application)[] = [];
+  let finishApplication!: (receipt: typeof application) => void;
+  const receipt = new Promise<typeof application>((resolve) => {
+    finishApplication = resolve;
+  });
+  let denyApplications = false;
+  mocks.request.mockImplementation((path, context, input) => {
+    if (path === 'merchant-applications') {
+      if (input) return receipt;
+      if (denyApplications) return Promise.reject(new NuniError(403, 'FORBIDDEN'));
+      return Promise.resolve({ applications: listedApplications });
+    }
+    if (path === 'merchant-workspaces' && showStore)
+      return Promise.resolve({ workspaces: [continuityStore] });
+    if (path === 'merchant-workspaces/campus-one/location-1')
+      return Promise.resolve(continuityStore);
+    return respond(path, context, input);
+  });
+
+  render(<MerchantWorkspace />);
+  await fillApplication();
+  showStore = true;
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  const storeLink = await screen.findByRole('link', { name: '管理門市：第一門市' });
+  fireEvent.click(screen.getByRole('button', { name: '送出進駐申請' }));
+  await screen.findByRole('button', { name: '正在確認收件…' });
+  fireEvent.click(storeLink);
+  await screen.findByRole('heading', { name: '餐坊／第一門市', level: 2 });
+  await act(async () => finishApplication(application));
+
+  listedApplications = [application];
+  fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+  await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
+  expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
+  const applications = screen.getByRole('region', { name: '申請進度' });
+  listedApplications = [{ ...application, state: 'under-review', reviewerNote: '已開始審核' }];
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+  expect(within(applications).getByText('審核說明：已開始審核')).toBeTruthy();
+
+  listedApplications = [application];
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+  expect(within(applications).getByText('審核說明：已開始審核')).toBeTruthy();
+
+  denyApplications = true;
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  await screen.findByRole('alert');
+  expect(screen.queryByText(/申請已收件/)).toBeNull();
+  expect(screen.queryByText('審核說明：已開始審核')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
+
+  denyApplications = false;
+  listedApplications = [];
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+  expect(screen.getByText('你還沒有送出進駐申請。')).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
+});
+
+it.each([
+  { scenario: 'no programs remain open', refreshedPrograms: [] },
+  { scenario: 'only another program remains open', refreshedPrograms: programs.slice(1) },
+  { scenario: 'the return read temporarily fails', refreshedPrograms: null },
+  { scenario: 'the programs endpoint returns 404', refreshedPrograms: null, programStatus: 404 },
+  { scenario: 'the programs endpoint returns 403', refreshedPrograms: null, programStatus: 403 },
+])('retries after a store visit when $scenario', async ({ refreshedPrograms, programStatus }) => {
+  window.history.replaceState(null, '', '/merchant');
+  let showStore = false;
+  let openPrograms: typeof programs | null = programs;
+  let submissionAttempts = 0;
+  mocks.request.mockImplementation((path, context, input) => {
+    if (path === 'merchant-applications' && input && ++submissionAttempts === 1) {
+      return Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
+    }
+    if (path === 'merchant-onboarding-programs')
+      return openPrograms
+        ? Promise.resolve({ programs: openPrograms })
+        : Promise.reject(new NuniError(programStatus ?? 0, 'UPSTREAM_ERROR'));
+    if (path === 'merchant-applications' && !input && showStore)
+      return Promise.resolve({ applications: [application] });
+    if (path === 'merchant-workspaces' && showStore)
+      return Promise.resolve({ workspaces: [continuityStore] });
+    if (path === 'merchant-workspaces/campus-one/location-1')
+      return Promise.resolve(continuityStore);
+    return respond(path, context, input);
+  });
+  render(<MerchantWorkspace />);
+  await fillApplication();
+  showStore = true;
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  const openStore = async () => {
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：第一門市' }));
+    expect(window.location.pathname + window.location.search).toBe(
+      '/merchant/workspace?tenant=campus-one&location=location-1',
+    );
+    await screen.findByRole('heading', { name: '餐坊／第一門市', level: 2 });
+    expect(screen.queryByLabelText('對外品牌名稱')).toBeNull();
+  };
+
+  await openStore();
+  await act(async () => window.history.back());
+  const brand = (await screen.findByLabelText('對外品牌名稱')) as HTMLInputElement;
+  expect(window.location.pathname).toBe('/merchant');
+  expect(brand.value).toBe('測試餐坊');
+  fireEvent.change(brand, { target: { value: '更新餐坊' } });
+  const submit = screen.getByRole('button', { name: '送出進駐申請' });
+  await waitFor(() => expect(submit.hasAttribute('disabled')).toBe(false));
+  fireEvent.click(submit);
+  await screen.findByText(/尚未確認是否收件/);
+
+  await openStore();
+  openPrograms = refreshedPrograms;
+  const programReads = () =>
+    mocks.request.mock.calls.filter(([path]) => path === 'merchant-onboarding-programs').length;
+  const readsBeforeReturn = programReads();
+  fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+  expect(window.location.pathname).toBe('/merchant');
+  await waitFor(() => expect(programReads()).toBe(readsBeforeReturn + 1));
+  if (!refreshedPrograms) await screen.findByText('目前無法確認店家資料，請重新載入。');
+  expect(screen.getByRole('link', { name: '管理門市：第一門市' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
+  await screen.findByText(/尚未確認是否收件/);
+  expect((screen.getByLabelText('對外品牌名稱') as HTMLInputElement).value).toBe('更新餐坊');
+  const retry = screen.getByRole('button', { name: '重試同一份申請' });
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+  fireEvent.click(retry);
+  await screen.findByText(/申請已收件/);
+  const writes = mocks.request.mock.calls.filter((call) => call[2]);
+  expect(writes).toHaveLength(2);
+  expect(writes[0][2]).toMatchObject({ brandName: '更新餐坊' });
+  expect(writes[1][2]).toEqual(writes[0][2]);
+});
+
+it.each([
+  { status: 403, code: 'FORBIDDEN', message: '目前無法確認店家資料，請重新載入。' },
+  { status: 404, code: 'NOT_FOUND', message: '目前無法確認店家資料，請重新載入。' },
+  { status: 401, code: 'UNAUTHORIZED', message: '登入或帳號已變更，這次店家資料與草稿已清除。' },
+  { status: 409, code: 'SESSION_CHANGED', message: '登入或帳號已變更，這次店家資料與草稿已清除。' },
+])(
+  'reports $code from workspaces without dropping a loaded application',
+  async ({ status, code, message }) => {
+    let reload = false;
+    mocks.request.mockImplementation((path) => {
+      if (reload && path === 'merchant-onboarding-programs')
+        return Promise.reject(new NuniError(404, 'NOT_FOUND'));
+      if (reload && path === 'merchant-workspaces')
+        return Promise.reject(new NuniError(status, code));
+      if (path === 'merchant-applications') return Promise.resolve({ applications: [application] });
+      return respond(path);
+    });
+    render(<MerchantWorkspace />);
+    await screen.findByRole('heading', { name: '測試餐坊／學生餐廳' });
+    reload = true;
+    fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+    await screen.findByText(message);
+    if (status === 401 || code === 'SESSION_CHANGED') {
+      expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
+      return;
+    }
+    expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
+  },
+);
+
+it.each([
+  { status: 503, code: 'UNAVAILABLE', previous: false },
+  { status: 503, code: 'UNAVAILABLE', previous: true },
+  { status: 403, code: 'FORBIDDEN', previous: true },
+  { status: 404, code: 'NOT_FOUND', previous: true },
+])(
+  'reports a $status application list failure and rechecks store access (prior list: $previous)',
+  async ({ status, code, previous }) => {
+    let unavailable = !previous;
+    const detailPath = 'merchant-workspaces/campus-one/location-1';
+    mocks.request.mockImplementation((path, context, input) => {
+      if (path === 'merchant-applications')
+        return unavailable
+          ? Promise.reject(new NuniError(status, code))
+          : Promise.resolve({ applications: [{ ...application, reviewerNote: '請補營業登記資料' }] });
+      if (path === 'merchant-workspaces') return Promise.resolve({ workspaces: [continuityStore] });
+      if (path === detailPath) return Promise.resolve(continuityStore);
+      return respond(path, context, input);
+    });
+    render(<MerchantWorkspace view="workspace" />);
+    if (previous) {
+      await screen.findByText('審核說明：請補營業登記資料');
+      unavailable = true;
+      fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+    }
+    await screen.findByRole('alert');
+    expect(screen.queryByText('你還沒有送出進駐申請。')).toBeNull();
+    const retainsApplication = previous && status === 503;
+    expect(!!screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBe(retainsApplication);
+    expect(!!screen.queryByText('審核說明：請補營業登記資料')).toBe(retainsApplication);
+    expect(mocks.request.mock.calls.filter(([path]) => path === detailPath)).toHaveLength(1);
+    expect(screen.getByRole('link', { name: '管理門市：第一門市' })).toBeTruthy();
+  },
+);
+
+it.each([
+  { source: 'merchant-applications', status: 401, code: 'UNAUTHORIZED', forward: false },
+  { source: 'merchant-onboarding-programs', status: 409, code: 'SESSION_CHANGED', forward: false },
+  { source: 'merchant-applications', status: 409, code: 'SESSION_CHANGED', forward: true },
+  { source: 'merchant-onboarding-programs', status: 401, code: 'UNAUTHORIZED', forward: true },
+])('expires the session immediately on $source $code (Forward first: $forward)', async ({
+  source,
+  status,
+  code,
+  forward,
+}) => {
+  let rejectExpired!: (error: NuniError) => void;
+  const expiredResponse = new Promise<never>((_, reject) => {
+    rejectExpired = reject;
+  });
+  let finishStores!: (value: { workspaces: typeof continuityStore[] }) => void;
+  const pendingStores = new Promise<{ workspaces: typeof continuityStore[] }>((resolve) => {
+    finishStores = resolve;
+  });
+  const readExpired = vi.fn(() => expiredResponse);
+  let returning = false;
+  mocks.request.mockImplementation((path) => {
+    if (returning && path === source) return readExpired();
+    if (path === 'merchant-applications')
+      return Promise.resolve({ applications: [{ ...application, reviewerNote: '請補營業登記資料' }] });
+    if (path === 'merchant-workspaces')
+      return returning ? pendingStores : Promise.resolve({ workspaces: [continuityStore] });
+    if (path === 'merchant-workspaces/campus-one/location-1') return Promise.resolve(continuityStore);
+    return respond(path);
+  });
+
+  window.history.replaceState(null, '', '/merchant');
+  render(<MerchantWorkspace />);
+  await screen.findByText('審核說明：請補營業登記資料');
+  fireEvent.click(screen.getByRole('link', { name: '管理門市：第一門市' }));
+  await screen.findByRole('heading', { name: '餐坊／第一門市' });
+  returning = true;
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readExpired).toHaveBeenCalledTimes(1));
+  expect(screen.getByText('審核說明：請補營業登記資料')).toBeTruthy();
+
+  if (forward) {
+    await act(async () => window.history.forward());
+    await screen.findByRole('heading', { name: '餐坊／第一門市' });
+  }
+  await act(async () => rejectExpired(new NuniError(status, code)));
+  await screen.findByText('登入或帳號已變更，這次店家資料與草稿已清除。');
+  expect(screen.queryByText('審核說明：請補營業登記資料')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: '餐坊／第一門市' })).toBeNull();
+  expect(mocks.auth.refresh).toHaveBeenCalledTimes(1);
+
+  if (!forward) {
+    await act(async () => window.history.forward());
+    await waitFor(() => expect(window.location.pathname).toBe('/merchant/workspace'));
+    expect(screen.getByText('登入或帳號已變更，這次店家資料與草稿已清除。')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '餐坊／第一門市' })).toBeNull();
+  }
+  await act(async () => finishStores({ workspaces: [continuityStore] }));
+  expect(screen.queryByRole('link', { name: '管理門市：第一門市' })).toBeNull();
+});
+
+it.each([
+  { status: 401, code: 'UNAUTHORIZED', forwardFirst: false },
+  { status: 409, code: 'SESSION_CHANGED', forwardFirst: true },
+])('expires on a retired detail response with $code (Forward first: $forwardFirst)', async ({
+  status,
+  code,
+  forwardFirst,
+}) => {
+  let rejectDetail!: (error: NuniError) => void;
+  const readRetiredDetail = vi.fn(
+    () =>
+      new Promise<never>((_, reject) => {
+        rejectDetail = reject;
+      }),
+  );
+  let returning = false;
+  mocks.request.mockImplementation((path) => {
+    if (path === 'merchant-workspaces' || path === 'merchant-applications') {
+      if (returning) return Promise.reject(new NuniError(503, 'UNAVAILABLE'));
+      return path === 'merchant-workspaces'
+        ? Promise.resolve({ workspaces: [continuityStore] })
+        : Promise.resolve({ applications: [{ ...application, reviewerNote: '請補營業登記資料' }] });
+    }
+    if (path === 'merchant-workspaces/campus-one/location-1')
+      return returning ? Promise.resolve(continuityStore) : readRetiredDetail();
+    return respond(path);
+  });
+
+  window.history.replaceState(null, '', '/merchant');
+  render(<MerchantWorkspace />);
+  await screen.findByText('審核說明：請補營業登記資料');
+  fireEvent.click(screen.getByRole('link', { name: '管理門市：第一門市' }));
+  await waitFor(() => expect(readRetiredDetail).toHaveBeenCalledTimes(1));
+  returning = true;
+  await act(async () => window.history.back());
+  await screen.findByText('目前無法確認店家資料，請重新載入。');
+  expect(screen.getByText('審核說明：請補營業登記資料')).toBeTruthy();
+
+  if (forwardFirst) {
+    await act(async () => window.history.forward());
+    await screen.findByRole('heading', { name: '餐坊／第一門市', level: 2 });
+  }
+  await act(async () => rejectDetail(new NuniError(status, code)));
+  await screen.findByText('登入或帳號已變更，這次店家資料與草稿已清除。');
+  expect(mocks.auth.refresh).toHaveBeenCalledTimes(1);
+
+  await act(async () => forwardFirst ? window.history.back() : window.history.forward());
+  await waitFor(() =>
+    expect(window.location.pathname).toBe(forwardFirst ? '/merchant' : '/merchant/workspace'),
+  );
+  expect(screen.queryByRole('heading', { name: '餐坊／第一門市', level: 2 })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新載入店家資料' }));
+  if (!forwardFirst) await act(async () => window.history.back());
+  await screen.findByText('目前無法確認店家資料，請重新載入。');
+  expect(screen.queryByText('審核說明：請補營業登記資料')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
+});
+
+it('removes a submitted application and its review note after a successful empty list', async () => {
+  window.history.replaceState(null, '', '/merchant');
+  let listedApplications: (typeof application)[] = [];
+  mocks.request.mockImplementation((path, context, input) =>
+    path === 'merchant-applications' && !input
+      ? Promise.resolve({ applications: listedApplications })
+      : respond(path, context, input),
+  );
+
+  render(<MerchantWorkspace />);
+  await fillApplication();
+  fireEvent.click(screen.getByRole('button', { name: '送出進駐申請' }));
+  await screen.findByText(/申請已收件/);
+  expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
+
+  listedApplications = [{ ...application, state: 'needs-information', reviewerNote: '請補營業登記資料' }];
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  await screen.findByText('審核說明：請補營業登記資料');
+
+  listedApplications = [];
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+  expect(screen.getByText('你還沒有送出進駐申請。')).toBeTruthy();
+  expect(screen.queryByText(/申請已收件/)).toBeNull();
+  expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
+  expect(screen.queryByText('審核說明：請補營業登記資料')).toBeNull();
 });

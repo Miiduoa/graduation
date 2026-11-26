@@ -15,6 +15,7 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
       Library: 'library',
       LibraryCatalog: 'library/catalog',
       Dormitory: 'dormitory',
+      Career: 'career',
       PlatformLostFound: 'platform-lost-found/:id?',
       SchoolInfo: 'school-info',
       StudentCard: 'student-card',
@@ -23,6 +24,7 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
       公告詳情: 'announcement/:id',
       NuniWorkspace: 'campus-one',
       SSOLogin: 'sso-login',
+      TronClassWorkspace: 'tronclass',
       OralExamDemo: 'demo/oral-exam',
       PersonalTimetable: 'personal-timetable',
       PersonalCalendar: {

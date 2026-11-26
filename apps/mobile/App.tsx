@@ -5,12 +5,7 @@ import { useNextClassWidget } from './src/widgets/useNextClassWidget';
 import { useSubmittedAssignmentReminders } from './src/app/useSubmittedAssignmentReminders';
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  NavigationContainer,
-  DefaultTheme,
-  getStateFromPath,
-  type LinkingOptions,
-} from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { AppActionIcon } from './src/ui/AppActionIcon';
 import {
@@ -109,13 +104,13 @@ import type { InboxTask } from './src/data/types';
 import { navigateToCourseScreen } from './src/utils/courseNavigation';
 import { initCrossModuleConnections } from './src/services/crossModuleConnector';
 import { registerCompanionCampusBusBridge } from './src/services/companionBusBridge';
-import { rewriteLegacyShopsPath } from './src/app/legacyShopsPath';
+import { schoolLinking } from './src/app/schoolLinking';
 import { resolveDeprecatedRouteRedirect } from './src/app/deprecatedRouteRedirect';
 import { tabsWithMessages } from './src/app/tabsWithMessages';
 
 /**
- * 主導覽：今天｜課務｜生活｜訊息｜我
- * 訊息 Tab 固定顯示；「我的」內另以「通知／私訊」對齊網頁用語。
+ * 主導覽：今天｜課務｜生活｜交流｜我的。
+ * 導覽名稱與網頁一致，既有 route key 保持相容。
  */
 const Tab = createBottomTabNavigator<RootTabParamList, undefined>();
 
@@ -138,122 +133,6 @@ function assignmentTaskFromDeepLink(parsed: {
     priority: 50,
   };
 }
-
-const linkingBase: LinkingOptions<RootTabParamList> = {
-  prefixes: [Linking.createURL('/'), 'campus://'],
-  config: {
-    screens: {
-      Today: {
-        screens: {
-          TodayHome: 'home',
-          公告總覽: 'announcements',
-          公告詳情: 'announcement/:id',
-          活動總覽: 'events',
-          活動詳情: 'event/:id',
-          CampusSocialScreen: 'community',
-          BoardDetail: 'board/:boardId',
-          PostCompose: 'post/new',
-          StoryCompose: 'story/new',
-          PostDetail: 'post/:postId',
-          CreatorProfile: 'community/member/:memberUid',
-          SmartCalendarScreen: 'calendar',
-          CampusGame: 'home/campus-game',
-        },
-      },
-      學習: {
-        screens: {
-          LearnHome: 'learn',
-          CoursesHome: 'courses',
-          TeachingHub: 'teaching',
-          AdminDashboard: 'admin',
-          CourseSchedule: 'schedule',
-          PersonalTimetable: 'personal-timetable',
-          AddCourse: 'course/new',
-          CourseHub: 'course-hub',
-          CourseCatalog: 'course-catalog',
-          CourseModules: 'course-modules',
-          QuizCenter: 'quiz-center',
-          Attendance: 'attendance',
-          Classroom: 'classroom/:sessionId',
-          AcademicOverview: 'academic-overview',
-          AcademicInsights: 'academic-insights',
-          LearningAnalytics: 'learning-analytics',
-          CourseGradebook: 'course-gradebook',
-          Grades: 'grades',
-          Calendar: 'learn/calendar',
-          PersonalCalendar: {
-            path: 'personal-calendar/:eventId?',
-            parse: {
-              eventId: (value: string | undefined) => (value && value.length ? value : undefined),
-            },
-          },
-          AICourseAdvisor: 'ai-advisor',
-          AdminCourseVerify: 'course-verify',
-        },
-      },
-      校園: {
-        screens: {
-          CampusHome: 'campus',
-          Map: 'map',
-          PoiDetail: 'poi/:id',
-          ARNavigation: 'ar-nav/:destinationId',
-          AccessibleRoute: 'accessible-route/:destination',
-          BusSchedule: 'bus',
-          餐廳總覽: 'cafeteria',
-          MenuDetail: 'menu/:id',
-          Ordering: 'ordering/:menuId',
-          MenuSubscription: 'menu-subscription',
-          Library: 'library',
-          Dormitory: 'dormitory',
-          SchoolInfo: 'school-info',
-          Health: 'health',
-          PrintService: 'print',
-          LostFound: 'lost-found',
-          PlatformLostFound: 'platform-lost-found/:id?',
-          LostFoundDetail: 'lost-found/:id',
-          LostFoundPost: 'lost-found/post',
-          Payment: 'payment',
-        },
-      },
-      訊息: {
-        screens: {
-          Inbox: 'inbox',
-          MessagesHome: 'messages',
-          Groups: 'groups',
-          GroupDetail: 'group/:groupId',
-          GroupPost: 'group/:groupId/post/:postId',
-          GroupAssignments: 'group/:groupId/assignments',
-          AssignmentDetail: 'group/:groupId/assignment/:assignmentId',
-          Dms: 'dms',
-          FriendSearch: 'friend-search',
-          FriendsManage: 'friends',
-          FollowingLists: 'following-lists',
-          Chat: 'chat/:peerId',
-          AdminCourseVerify: 'messages/course-verify',
-        },
-      },
-      我的: {
-        screens: {
-          MeHome: 'profile',
-          Settings: 'settings',
-          Notifications: 'notifications',
-          NotificationSettings: 'notification-settings',
-          ProfileEdit: 'profile/edit',
-          QRCode: 'qrcode',
-          StudentCard: 'student-card',
-          GlobalSearch: 'search',
-          Achievements: 'achievements',
-          CampusGarden: 'campus-garden',
-          DataExport: 'data-export',
-          AccountDeletion: 'account-deletion',
-          SSOLogin: 'sso-login',
-          NuniWorkspace: 'campus-one',
-        },
-      },
-    },
-  },
-  getStateFromPath: (path, options) => getStateFromPath(rewriteLegacyShopsPath(path), options),
-};
 
 const { usingFirebase: USING_FIREBASE } = initializeRuntimeDataSource();
 
@@ -604,9 +483,12 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       <Pressable
         key={route.key}
         testID={`tab-${String(route.name)}`}
-        accessibilityRole="button"
+        accessibilityRole="tab"
         accessibilityState={focused ? { selected: true } : {}}
-        accessibilityLabel={options.tabBarAccessibilityLabel}
+        accessibilityLabel={
+          options.tabBarAccessibilityLabel ??
+          `${config?.label ?? route.name}${showUnreadBadge ? `，${unreadDms} 則未讀訊息` : ''}`
+        }
         onPress={() => {
           const event = navigation.emit({
             type: 'tabPress',
@@ -690,7 +572,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       }}
       pointerEvents="box-none"
     >
-      {/* 底部入口：今天｜課務｜生活｜訊息｜我 */}
+      {/* 底部入口：今天｜課務｜生活｜交流｜我的 */}
       <View
         style={{
           position: 'absolute',
@@ -732,7 +614,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 }
 
 /**
- * 主導覽：今天｜課務｜生活｜訊息｜我（訊息固定可見，不刪堆疊）。
+ * 主導覽：今天｜課務｜生活｜交流｜我的（沿用訊息 route key）。
  */
 function AppTabNavigator() {
   return (
@@ -857,7 +739,7 @@ function SchoolNavigation() {
 
   const linkingConfig = useMemo(
     () => ({
-      ...linkingBase,
+      ...schoolLinking,
       async getInitialURL() {
         const url = await Linking.getInitialURL();
         if (parseStudentCardDeepLink(url)) return null;

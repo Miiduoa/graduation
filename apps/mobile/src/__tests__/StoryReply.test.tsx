@@ -142,6 +142,9 @@ test('a native video stays paused while composing and a stale completion cannot 
   await act(async () => finish({ ok: true, json: async () => ({ result: { conversationId: 'x', messageId: 'y' } }) }));
   expect(view.queryByText('已送出 · 查看私訊')).toBeNull();
   expect(view.queryByDisplayValue('只給小柏')).toBeNull();
+  // Switching accounts closes the previous student's story. A late reply must not reopen it.
+  expect(view.queryByText('私訊回覆')).toBeNull();
+  fireEvent.press(view.getByText('開啟bob'));
   fireEvent.press(view.getByText('私訊回覆'));
   expect(view.getByLabelText('私訊回覆內容').props.value).toBe('');
 });

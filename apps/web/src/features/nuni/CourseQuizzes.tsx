@@ -16,6 +16,7 @@ import {
   parseCourseWorkHash,
 } from '@/lib/courseWorkLanding';
 import { useLocationHash } from '@/lib/useLocationHash';
+import { preferredScrollBehavior } from '@/lib/scrollBehavior';
 import { MutationForm, useClasses, type MutationFormIntent } from './CourseUI';
 import { CourseUnitSelect } from './CourseUnitSelect';
 import { selectCourseUnit } from './courseOutline';
@@ -497,7 +498,7 @@ function Quiz({
     const node = receiptNodes.current.get(focusReceiptId);
     if (!node) return;
     if (typeof node.scrollIntoView === 'function') {
-      node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      node.scrollIntoView({ block: 'nearest', behavior: preferredScrollBehavior() });
     }
     const focusTarget =
       node.querySelector<HTMLElement>('textarea[name="feedback"]') ??

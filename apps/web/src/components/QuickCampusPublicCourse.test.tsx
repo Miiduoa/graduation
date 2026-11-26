@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { resolvePublicCourseOperation } from '@campus/shared/src/publicCourseOperations';
 import { QuickCampusEntry } from './QuickCampusEntry';
@@ -43,6 +43,7 @@ function result(title = '資料庫系統') {
         },
       ],
     }),
+    { headers: { 'content-type': 'application/json' } },
   );
 }
 const typeQuery = (value: string) =>
@@ -76,6 +77,28 @@ it('lets a guest query another school from the current page, with a real result 
   expect(screen.getByRole('link', { name: '校方資料來源' }).getAttribute('href')).toBe(
     resolvePublicCourseOperation('nthu')!.sourceUrl,
   );
+});
+
+it('keeps the public-course action next in the focused results without sending a request on Enter', async () => {
+  fetcher.mockResolvedValue(result());
+  render(<QuickCampusEntry />);
+  typeQuery('查清大資料庫課程');
+  const input = screen.getByRole('searchbox', { name: '想做什麼？' });
+  input.focus();
+  fireEvent.keyDown(input, { key: 'Enter' });
+  fireEvent.submit(screen.getByRole('search', { name: '快速尋找服務' }));
+
+  const results = screen.getByRole('region', { name: '服務搜尋結果' });
+  expect(document.activeElement).toBe(results);
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+  const query = within(results).getByRole('button', { name: '查詢公開課程' });
+  expect(results.querySelector('button, a[href]')).toBe(query);
+
+  fireEvent.click(query);
+  expect(await screen.findByText('資料庫系統')).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
 });
 
 it('uses a completed public voice request without sending it to a model', async () => {

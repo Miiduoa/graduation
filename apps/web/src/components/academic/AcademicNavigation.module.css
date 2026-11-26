@@ -12,15 +12,24 @@
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
   margin: 0;
-  padding: 0;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius-lg) + 2px);
+  background: var(--panel);
   list-style: none;
   overflow-x: auto;
   overscroll-behavior-x: contain;
+  scroll-behavior: auto;
+  scroll-padding-inline: 6px;
   scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
+}
+
+.sections > li {
+  flex: 0 0 auto;
 }
 
 .section,
@@ -32,12 +41,19 @@
   min-width: 44px;
   padding: 10px 14px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  font-size: 0.875rem;
-  font-weight: 500;
+  border-radius: var(--radius);
+  font-size: var(--font-body-sm-size);
+  font-weight: 600;
   line-height: 1.4;
   text-decoration: none;
   overflow-wrap: anywhere;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .section {
@@ -46,30 +62,26 @@
   color: var(--muted);
 }
 
-.section:hover {
-  color: var(--text);
-  background: var(--bg-soft);
-}
-
 .section[aria-current='page'] {
-  color: var(--text);
-  background: var(--accent-soft);
-  border-color: var(--border-strong);
+  color: var(--brand);
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
   font-weight: 650;
 }
 
 .importAction {
   gap: 8px;
   margin-inline-start: auto;
-  color: var(--on-brand);
-  background: var(--brand);
-  border-color: var(--brand);
+  color: var(--brand);
+  background: var(--surface);
+  border-color: var(--border);
   font-weight: 600;
+  white-space: nowrap;
 }
 
-.importAction:hover {
-  background: var(--brand2);
-  border-color: var(--brand2);
+.importAction > svg {
+  flex-shrink: 0;
 }
 
 .importAction[aria-current='page'] {
@@ -81,26 +93,61 @@
 .section:focus-visible,
 .importAction:focus-visible {
   outline: 2px solid var(--focus-ring);
-  outline-offset: 3px;
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .section:not([aria-current='page']):hover {
+    color: var(--text);
+    background: var(--surface-tint);
+  }
+
+  .importAction:hover {
+    color: var(--text);
+    background: var(--accent-soft);
+    border-color: var(--border-strong);
+  }
+}
+
+.navigation .section:active,
+.navigation .importAction:active {
+  background: var(--accent-soft);
+  color: var(--brand);
+  transform: translateY(1px);
 }
 
 @media (max-width: 600px) {
   .navigation {
-    flex-wrap: nowrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
     margin-bottom: 20px;
   }
 
   .sections {
-    flex: 1 1 auto;
+    width: 100%;
   }
 
   .importAction {
-    flex: 0 0 auto;
+    justify-self: end;
     margin-inline-start: 0;
   }
 
   .section {
     padding-inline: 10px;
+  }
+}
+
+:global([data-reduced-motion='true']) .navigation :is(.section, .importAction),
+:global([data-reduced-motion='true']) .navigation :is(.section, .importAction):active {
+  transition: none;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .navigation :is(.section, .importAction),
+  .navigation :is(.section, .importAction):active {
+    transition: none;
+    transform: none;
   }
 }

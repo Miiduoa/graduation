@@ -4,6 +4,7 @@
 // Fail closed for missing/malformed responses and newly introduced write tools.
 const hasId = (v) => typeof v === 'string' && v.trim().length > 0;
 const hasTime = (v) => hasId(v) && Number.isFinite(Date.parse(v));
+const hasClock = (v) => typeof v === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v);
 
 function confirmedAgentWrite(toolName, result, input = {}, scope = {}) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
@@ -13,7 +14,9 @@ function confirmedAgentWrite(toolName, result, input = {}, scope = {}) {
       return hasId(result.requestId) && result.status === 'pending';
     case 'reserveSeat':
       return hasId(result.reservationId) && hasId(result.seatId) &&
-        result.seatId === input.seatId && hasId(result.date) && result.date === input.date;
+        result.seatId === input.seatId && hasId(result.date) && result.date === input.date &&
+        hasClock(result.startTime) && hasClock(result.endTime) && result.startTime < result.endTime &&
+        result.startTime === input.startTime && result.endTime === input.endTime;
     case 'borrowBook':
       return hasId(result.loanId) && hasTime(result.dueAt);
     case 'returnBook':

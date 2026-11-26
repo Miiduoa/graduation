@@ -12,20 +12,25 @@ textarea::placeholder {
   color-scheme: light;
   --font-ui:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang TC', 'Noto Sans TC',
-    'Microsoft JhengHei', sans-serif;
+    'Noto Sans CJK TC', 'Microsoft JhengHei', sans-serif;
   --on-brand: #ffffff;
   --page-width: 1264px;
   --mobile-nav-height: 72px;
-  --mobile-nav-offset: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
+  --mobile-nav-offset: var(
+    --mobile-nav-measured-offset,
+    calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px))
+  );
   --page-padding-inline: 48px;
   --page-padding-block: 46px;
   --page-title-size: clamp(25px, 3vw, 38px);
-  --motion-fast: 160ms;
-  --motion-normal: 220ms;
-  --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --motion-fast: 140ms;
+  --motion-normal: 200ms;
+  --motion-enter: 220ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   /* ── Backgrounds ── */
-  --bg: #f8f7f3;
-  --bg-soft: #f1f2ed;
+  --bg: #f6f7f5;
+  --bg-soft: #eef1ed;
 
   /* ── Surfaces ── */
   --surface: #ffffff;
@@ -36,12 +41,12 @@ textarea::placeholder {
   --panel2: #e6ece5;
 
   /* ── Text ── */
-  --text: #243b35;
-  --muted: #5d6961;
-  --muted-light: #727b74;
+  --text: #202b26;
+  --muted: #59645d;
+  --muted-light: #68746b;
 
   /* ── Borders & Separators ── */
-  --border: #dddeda;
+  --border: #dfe4de;
   --border-strong: #b2bcb1;
 
   /* ── Brand ── */
@@ -101,9 +106,9 @@ textarea::placeholder {
 
   /* ── Border Radius ── */
   --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius: 8px;
-  --radius-lg: 12px;
+  --radius-sm: 10px;
+  --radius: 12px;
+  --radius-lg: 18px;
   --radius-pill: 999px;
 
   /* ── Spacing ── */
@@ -128,7 +133,7 @@ textarea::placeholder {
   --font-h3-line-height: 1.3;
   --font-h3-letter-spacing: -0.1px;
   --font-body-size: 0.9375rem;
-  --font-body-line-height: 1.4;
+  --font-body-line-height: 1.6;
   --font-body-sm-size: 0.8125rem;
   --font-body-sm-line-height: 1.4;
   --font-label-size: 0.8125rem;

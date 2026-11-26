@@ -6,6 +6,7 @@ import {
   studentAcademicSectionLabels,
   teacherAcademicSectionLabels,
 } from '@campus/shared/src/academicSections';
+import { resolveTabForRoute } from '../utils/routeRegistry';
 
 describe('shared academic / messaging nav vocabulary', () => {
   it('keeps student section labels aligned with Web order', () => {
@@ -46,5 +47,9 @@ describe('shared academic / messaging nav vocabulary', () => {
       '/messages',
       '/dms',
     ]);
+  });
+
+  it.each(MESSAGING_NAV_SECTIONS)('keeps $id on its registered mobile tab', (section) => {
+    expect(resolveTabForRoute(section.mobileScreen)).toBe(section.mobileTab);
   });
 });

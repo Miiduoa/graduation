@@ -19,6 +19,7 @@ import { hasPersonalImportDraft } from '../services/imports/personalImportDraft'
 
 import { PublicCourseImportAction } from '../components/PublicCourseImportAction';
 import { queuePublicCourseClipboardCopy } from '../services/publicCourseClipboardQueue';
+import { publicCourseImportSource, type PublicCourseSourceEvidence } from '../services/publicCourseTimetableImport';
 
 type Result = { filters: PublicCourseFilters } & (
   | { status: 'loading' | 'error'; query: string }
@@ -44,6 +45,11 @@ function publicCourseCardKey(course: PublicCatalogCourse, index: number): string
 
 type ClipboardFeedback = { csv: string; cardId: string; status: 'copied' | 'manual' };
 
+// Draft read/check/write spans multiple awaits. A per-card busy ref does not
+// protect another row (or a remounted list) from observing the same empty draft
+// and overwriting it. Lock the exact owner/school draft until the write settles.
+const activeCatalogDraftReviews = new Set<string>();
+
 type Props = {
   schoolId: PublicCourseCatalogResponse['schoolId'];
   initialQuery?: string;
@@ -54,12 +60,13 @@ type Props = {
   navigation?: Parameters<typeof safeNavigate>[0];
 };
 
-function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedback, onCopy }: Props & {
+function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedback, onCopy, sourceEvidence }: Props & {
   course: PublicCatalogCourse;
   cardId: string;
   rowNumber: number;
   copyFeedback: ClipboardFeedback | null;
   onCopy: (csv: string, cardId: string) => void;
+  sourceEvidence?: PublicCourseSourceEvidence;
 }) {
   const scope = usePersonalImportScope();
   const scopeRef = useRef(scope);
@@ -75,10 +82,15 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
       setNotice('請先確認目前帳號與所選校園，再帶入課表核對。');
       return;
     }
+    const key = `${personalImportStorageKey(scope)}:grid-draft:v1`;
+    if (activeCatalogDraftReviews.has(key)) {
+      setNotice('另一門課正在建立匯入草稿，請稍後再試。');
+      return;
+    }
     const current = () => mounted.current && scopeRef.current?.owner === scope.owner && scopeRef.current?.schoolId === scope.schoolId;
     busy.current = true;
+    activeCatalogDraftReviews.add(key);
     try {
-      const key = `${personalImportStorageKey(scope)}:grid-draft:v1`;
       const existing = await readImportReviewDraft(key);
       const aiDraft = await hasPersonalImportDraft(scope);
       if (!current()) return;
@@ -90,7 +102,7 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
       if (!text) return;
       const academicYear = course.semester.slice(0, -1);
       const semester = course.semester.slice(-1);
-      const source = { type: 'paste' as const, name: schoolId === 'nthu' ? '清華大學本學期開設課程' : '暨南大學本學期開設課程' };
+      const source = publicCourseImportSource(schoolId, course.semester, sourceEvidence);
       const { rows, issues } = parsePersonalImport(text, { kind: 'timetable', schoolId, academicYear, semester, source });
       if (!rows.length || issues.some(issue => issue.severity === 'error')) {
         setNotice('課表資料需要手動核對，請前往匯入我的資料。');
@@ -104,6 +116,7 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
     } catch {
       if (current()) setNotice('無法安全讀寫匯入草稿，請稍後重試。');
     } finally {
+      activeCatalogDraftReviews.delete(key);
       busy.current = false;
     }
   }
@@ -140,7 +153,7 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
     {csv && <View style={{ gap: 8, marginTop: 8 }}>
       <Button text="帶入課表核對" accessibilityLabel={`帶入課表核對：${spokenCourse}`} kind="primary" onPress={() => { void review(course); }} />
       {notice ? <Text accessibilityRole="alert" style={body}>{notice}</Text> : null}
-      <PublicCourseImportAction course={course} schoolId={schoolId} navigation={navigation} />
+      <PublicCourseImportAction course={course} schoolId={schoolId} navigation={navigation} evidence={sourceEvidence} />
       <Button text="複製課表匯入資料" accessibilityLabel={`複製課表匯入資料：${spokenCourse}`} kind="ghost" onPress={() => onCopy(csv, cardId)} />
       {copied && <Text accessibilityLiveRegion="polite" style={body}>已複製，請到匯入頁貼上並核對上課時間。</Text>}
       {manualCopy && <>
@@ -229,8 +242,17 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
       // Native fetch may already have followed a redirect. Validate the reported
       // final resource before accepting its body; this is not a transport guard.
       if (!current()) return;
-      if (!response.ok || (response.url && !isPublicCourseResponseUrl(response.url, { schoolId, query: term, filters })) ||
-          Number(response.headers.get('content-length')) > maxBytes) throw new Error();
+      const lengthHeader = response.headers.get('content-length');
+      const declaredBytes = lengthHeader === null ? 0 : Number(lengthHeader);
+      const contentType = response.headers.get('content-type');
+      if (!response.ok ||
+          (response.url && !isPublicCourseResponseUrl(response.url, { schoolId, query: term, filters })) ||
+          // A malformed/negative length is not evidence that the body is small.
+          (lengthHeader !== null && (!/^\d+$/.test(lengthHeader.trim()) ||
+            !Number.isSafeInteger(declaredBytes) || declaredBytes > maxBytes)) ||
+          // Native fetch may omit this header, but an explicitly non-JSON response
+          // must never be passed to the course catalog importer.
+          (contentType !== null && !/^application\/json(?:\s*;|\s*$)/i.test(contentType.trim()))) throw new Error();
       const text = await response.text();
       if (!current()) return;
       if (exceedsPublicCourseResponseByteLimit(text)) throw new Error();
@@ -238,7 +260,12 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
       if (!isPublicCourseCatalog(data, schoolId, filters)) throw new Error();
       if (current()) setResult({ status: 'ready', query: term, filters, data });
     } catch {
-      if (current()) setResult({ status: 'error', query: term, filters });
+      if (current()) {
+        // Fetch can resolve headers while the response body is still downloading.
+        // Stop rejected/oversized/invalid responses instead of leaving that body open.
+        controller.abort();
+        setResult({ status: 'error', query: term, filters });
+      }
     } finally {
       clearTimeout(timer);
       if (pending.current?.controller === controller) pending.current = null;
@@ -371,6 +398,7 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
           </Text>}
         </View>}
         renderItem={({ item, index }) => <CourseCard course={item} schoolId={schoolId} navigation={navigation}
+          sourceEvidence={result?.status === 'ready' ? result.data : undefined}
           cardId={publicCourseCardKey(item, index)} rowNumber={index + 1}
           copyFeedback={copyFeedback} onCopy={copyCourse} />}
       />

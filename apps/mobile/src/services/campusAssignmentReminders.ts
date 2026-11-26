@@ -12,7 +12,10 @@ import { getAuthInstance, isFirebaseMockMode } from '../firebase';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
 import type { CampusPlanStep } from './offlineCampusPlanner';
 
-import { campusAssignmentDisplayTitle as normalizeTitle, resolveCampusAssignmentTarget } from './campusAssignmentTarget';
+import {
+  campusAssignmentDisplayTitle as normalizeTitle, findUniqueCampusAssignment,
+  resolveCampusAssignmentTarget, type CampusAssignmentIdentity,
+} from './campusAssignmentTarget';
 import { parseCampusAssignmentSource } from './campusAssignmentSource';
 import {
   adoptSubmittedAssignmentReminder, linkedReminderIdentifiers,
@@ -20,7 +23,7 @@ import {
   cancelSubmittedAssignmentReminder, clearSubmittedAssignmentReminders, resumeSubmittedAssignmentReminders,
 } from './submittedAssignmentReminders';
 
-export type ReminderAssignment = Pick<CampusPlanStep, 'evidence' | 'route' | 'title' | 'groupName' | 'dueAt'>;
+export type ReminderAssignment = CampusAssignmentIdentity & Pick<CampusPlanStep, 'evidence' | 'route' | 'dueAt'>;
 export type CampusReminderLead = 60 | 1440;
 export type CampusReminderOutcome = 'scheduled' | 'already-scheduled' | 'submitted' | 'inactive';
 
@@ -86,10 +89,7 @@ function validateAssignment(
   if (!snapshot) throw new CampusReminderError('expired-source');
   if (snapshot.assignments.status !== 'available') throw new CampusReminderError('invalid-source');
 
-  const item = snapshot.assignments.items.find((assignment) =>
-    normalizeTitle(assignment.title) === req.step.title &&
-    assignment.dueAt === req.step.dueAt &&
-    (assignment.groupName || '') === (req.step.groupName || ''));
+  const item = findUniqueCampusAssignment(req.step, snapshot.assignments.items);
   if (!item || !item.dueAt) throw new CampusReminderError('invalid-source');
 
   const due = Date.parse(item.dueAt);
@@ -113,10 +113,8 @@ function knownReminderSource(input: {
   const snapshot = input.snapshot;
   if (!snapshot || snapshot.userId !== input.scope.uid || snapshot.schoolId !== input.scope.schoolId ||
       snapshot.assignments.status !== 'available') return null;
-  const matches = snapshot.assignments.items.filter((row) =>
-    normalizeTitle(row.title) === input.step.title && row.dueAt === input.step.dueAt &&
-    (row.groupName || '') === (input.step.groupName || ''));
-  return matches.length === 1 ? parseCampusAssignmentSource(matches[0].source) : null;
+  const row = findUniqueCampusAssignment(input.step, snapshot.assignments.items);
+  return row ? parseCampusAssignmentSource(row.source) : null;
 }
 
 function supportsLocalNotification() {
@@ -200,6 +198,8 @@ export async function scheduleCampusAssignmentReminder(
   try {
     const now = Date.now();
     const source = validateAssignment(input, now, epoch);
+    // Legacy alarm keys were issued only for the display title.
+    if (source.title !== input.step.title) throw new CampusReminderError('invalid-source');
     if (!supportsLocalNotification()) throw new CampusReminderError('unsupported');
     const key = await reminderKey(input.scope, {
       title: source.title, groupName: source.groupName, dueAt: source.dueAt,

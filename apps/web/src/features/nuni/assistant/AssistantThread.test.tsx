@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { AssistantThread } from './AssistantThread';
 import { assistantPermissionMessage } from './copy';
+import { resolvePublicCourseOperation } from '@campus/shared/src/publicCourseOperations';
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
@@ -27,6 +28,19 @@ const base = {
   onConfirm: vi.fn(),
   onCancel: vi.fn(),
 };
+
+it('shows a compound task result once and retains the answer if its task contract is invalid', () => {
+  const reply = { answer: '來源完整回覆：查到資料庫課程', dataRead: true, steps: [], cards: [],
+    taskPlan: { version: 1 as const, steps: [{ id: 'read-course', serviceId: 'timetable' as const,
+      label: '核對課表', dependsOn: [], status: 'completed' as const, summary: '查到資料庫課程' }] } };
+  const { rerender } = render(<AssistantThread {...base} turns={[{ question: '查課表和餐廳', reply }]} />);
+  expect(screen.getAllByText('查到資料庫課程')).toHaveLength(1);
+  expect(screen.queryByText('來源完整回覆：查到資料庫課程')).toBeNull();
+  rerender(<AssistantThread {...base} turns={[{ question: '查課表和餐廳', reply: {
+    ...reply, taskPlan: { ...reply.taskPlan, steps: [] },
+  } }]} />);
+  expect(screen.getByText('來源完整回覆：查到資料庫課程')).toBeTruthy();
+});
 
 it('shows empty state, suggestion chips and a labelled composer', () => {
   render(<AssistantThread {...base} />);
@@ -132,12 +146,74 @@ it('enables explicit public reads without model consent but blocks keyboard subm
   expect(onAsk).toHaveBeenCalledOnce();
 });
 
+it.each([
+  [false, false], [false, true], [true, false],
+])('keeps compound public/private requests behind ready=%s and consent=%s', (ready, consent) => {
+  const onAsk = vi.fn();
+  render(<AssistantThread {...base} ready={ready} consent={consent}
+    question="查清大資料庫課程，另外查我的行程" onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  expect(onAsk).not.toHaveBeenCalled();
+});
+
+it('renders reviewed public results from multiple campuses without changing the active private scope', () => {
+  const publicCourseResults = (['nthu', 'ncnu'] as const).map(schoolId => ({
+    search: { kind: 'search' as const, schoolId, query: '資料庫' },
+    data: { schoolId, sourceUrl: resolvePublicCourseOperation(schoolId)!.sourceUrl,
+      fetchedAt: '2026-11-14T08:00:00.000Z',
+      operation: { id: schoolId + '.courses.search', access: 'anonymous-public', version: 1, responseSchemaVersion: 1 },
+      courses: [{ code: 'CS1', title: '資料庫', section: '01', department: '資訊系', teacher: '王老師',
+        credits: '3', time: '三34', room: '資訊101', semester: '1151' }], truncated: false },
+  }));
+  const reply = { answer: '同時取得兩校公開課程與本校公車結果。', steps: [], cards: [], publicCourseResults };
+  const view = render(<AssistantThread {...base} consent turns={[{ question: '查兩校開課和公車', reply }]} />);
+  expect(screen.getByRole('region', { name: '國立清華大學公開開課查詢' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: '國立暨南國際大學公開開課查詢' })).toBeTruthy();
+  const links = screen.getAllByRole('link', { name: '查看課程與課表核對' });
+  expect(links.map(link => new URL(link.getAttribute('href')!, 'https://nuni.tw').searchParams.get('schoolId'))).toEqual(['nthu', 'ncnu']);
+  view.rerender(<AssistantThread {...base} consent turns={[{ question: '查兩校開課和公車', reply: {
+    ...reply, publicCourseResults: [publicCourseResults[0], { ...publicCourseResults[1],
+      data: { ...publicCourseResults[1].data, sourceUrl: 'https://untrusted.test' } }],
+  } }]} />);
+  expect(screen.queryByRole('link', { name: '校方資料來源' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '國立清華大學公開開課查詢' })).toBeNull();
+  expect(screen.getByText('公開課程結果尚未通過核對，請重新查詢。')).toBeTruthy();
+});
+
 it.each(['查詢我的行程', '列出未交作業'])('enables personal reads without cloud readiness or model consent: %s', (question) => {
   const onAsk = vi.fn();
   render(<AssistantThread {...base} ready={false} question={question} onAsk={onAsk} />);
   expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false);
   fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
   expect(onAsk).toHaveBeenCalledOnce();
+});
+
+it('enables only recognized pickup planning when its server capability is available, without model consent', () => {
+  const onAsk = vi.fn();
+  const question = '把我最近一筆訂單的取餐時間加入行事曆，預留15分鐘';
+  const view = render(<AssistantThread {...base} ready={false} foodPickupEnabled question={question} onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
+  expect(onAsk).toHaveBeenCalledOnce();
+  view.rerender(<AssistantThread {...base} foodPickupEnabled={false} consent question={question} onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  view.rerender(<AssistantThread {...base} ready={false} foodPickupEnabled question="請幫我寫社團介紹稿" onAsk={onAsk} />);
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  expect(onAsk).toHaveBeenCalledOnce();
+});
+
+it('offers pickup planning only when enabled and fills the draft without sending it', () => {
+  const onQuestion = vi.fn(), onAsk = vi.fn();
+  const phrase = '把最近訂單的取餐時間加入行事曆';
+  const view = render(<AssistantThread {...base} ready={false} foodPickupEnabled onQuestion={onQuestion} onAsk={onAsk} />);
+  fireEvent.click(screen.getByRole('button', { name: phrase }));
+  expect(onQuestion).toHaveBeenCalledWith(phrase);
+  expect(onAsk).not.toHaveBeenCalled();
+  view.rerender(<AssistantThread {...base} ready={false} onQuestion={onQuestion} onAsk={onAsk} />);
+  expect(screen.queryByRole('button', { name: phrase })).toBeNull();
 });
 
 it.each(['local', 'dataRead'])('renders %s source text literally instead of creating links or formatting', (source) => {

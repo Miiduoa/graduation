@@ -350,6 +350,75 @@
   flex-wrap: wrap;
   gap: 10px;
 }
+
+/* The native dialog is portaled outside .root, so its form owns these text and layout rules. */
+.recordEditor {
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--font-body-size, 0.9375rem);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.recordEditor .fields {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13em), 1fr));
+}
+.recordEditor .field {
+  font-size: var(--font-body-size, 0.9375rem);
+}
+.recordEditor .field :is(input:not([type='radio']):not([type='checkbox']), select, textarea) {
+  box-sizing: border-box;
+  min-height: 44px;
+  max-width: 100%;
+  font-size: max(1rem, var(--font-body-size, 1rem));
+}
+.recordEditor .field :is(input[type='radio'], input[type='checkbox']) {
+  width: 18px;
+  height: 18px;
+}
+.recordEditor :is(button, summary) {
+  min-height: 44px;
+  max-width: 100%;
+  font: inherit;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.recordEditor summary {
+  box-sizing: border-box;
+  padding-block: 10px;
+}
+.recordEditor .check {
+  min-height: 44px;
+}
+.recordEditor :is(.source, .issues) {
+  min-width: 0;
+  font-size: var(--font-body-sm-size, 0.8125rem);
+}
+.recordEditor pre {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.recordEditor :is(input, select, textarea, button, summary):focus-visible {
+  outline: 2px solid var(--focus-ring, var(--brand));
+  outline-offset: 3px;
+}
+.recordEditActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+.recordEditActions button {
+  flex: 1 1 8em;
+  min-width: 0;
+}
+.recordEditError {
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  padding: 12px;
+  color: var(--danger);
+  background: var(--danger-soft);
+}
 @media (max-width: 390px) {
   .fields {
     grid-template-columns: 1fr;

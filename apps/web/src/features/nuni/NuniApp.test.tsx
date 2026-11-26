@@ -6,10 +6,16 @@ import { renderToString } from 'react-dom/server';
 import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
+import {
+  SelectedSchoolProvider,
+  schoolPreferenceKey,
+} from '@/components/SelectedSchoolProvider';
 import { NuniApp } from './NuniApp';
+import { TronClassRequestError } from '@/lib/tronClassIntegrationClient';
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
+  tronClassStatus: vi.fn(),
   platformFetch: vi.fn(),
   refresh: vi.fn(),
   signedIn: true,
@@ -29,6 +35,11 @@ it('opens the independent device bookmark route inside the signed-in course shel
   expect(screen.getByRole('link', { name: '回我的課程' }).getAttribute('href')).toBe('/classroom');
   expect(screen.queryByText('找不到這個課程空間')).toBeNull();
 });
+
+vi.mock('@/lib/tronClassIntegrationClient', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tronClassIntegrationClient')>()),
+  createTronClassClient: () => ({ status: mocks.tronClassStatus }),
+}));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => mocks.pathname,
@@ -91,6 +102,7 @@ beforeEach(() => {
   mocks.context = 'a'.repeat(43);
   window.history.replaceState({}, '', mocks.pathname);
   mocks.refresh.mockReset();
+  mocks.tronClassStatus.mockReset().mockResolvedValue({ connected: false });
   mocks.platformFetch.mockReset().mockImplementation(async (path: string) => ({
     ok: true,
     status: 200,
@@ -132,6 +144,79 @@ it('offers the all-course gradebook from the classroom list', async () => {
     '/grades?tab=feedback',
   );
 });
+
+it.each([
+  { code: 'TRONCLASS_DISABLED', visible: false },
+  { code: 'TRONCLASS_STORE_UNAVAILABLE', visible: true },
+])('shows the TronClass entry according to status error $code', async ({ code, visible }) => {
+  mocks.pathname = '/classroom';
+  mocks.request.mockResolvedValue({ workspaces: [] });
+  mocks.tronClassStatus.mockRejectedValue(new TronClassRequestError(code, '', 503));
+  await act(async () => { render(<NuniApp />); });
+  expect(mocks.tronClassStatus).toHaveBeenCalled();
+  expect(Boolean(screen.queryByRole('link', { name: '連接 TronClass' }))).toBe(visible);
+});
+
+it.each(
+  [
+    { pathname: '/classroom', label: '課業成績與回饋', destination: '/grades', tab: 'feedback' },
+    { pathname: '/classroom/account', label: '前往我的課程', destination: '/classroom', tab: null },
+    {
+      pathname: '/classroom/course/invalid',
+      label: '回到我的課程',
+      destination: '/classroom',
+      tab: null,
+    },
+  ].flatMap((entry) => [
+    {
+      ...entry,
+      scope: 'campus=pu&schoolId=pu&school=PU',
+      expectedCampus: { schoolId: 'pu', campus: 'pu', school: 'PU' },
+    },
+    { ...entry, scope: 'campus=all&schoolId=pu&school=PU', expectedCampus: { campus: 'all' } },
+    { ...entry, scope: '', expectedCampus: { schoolId: 'nthu', campus: 'nthu', school: 'NTHU' } },
+  ]),
+)(
+  'preserves the resolved campus at $pathname with scope "$scope"',
+  async ({ pathname, label, destination, tab, scope, expectedCampus }) => {
+    const saved = JSON.stringify({ schoolId: 'nthu' });
+    localStorage.setItem(schoolPreferenceKey(principalId), saved);
+    mocks.pathname = pathname;
+    mocks.search = `${scope}${scope ? '&' : ''}q=private-course&token=private&returnUrl=%2Fadmin&courses=teaching&task=feedback&section=assistant`;
+    window.history.replaceState({}, '', `${pathname}?${mocks.search}#private-draft`);
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === 'class-workspaces') return { workspaces: [] };
+      if (path === 'memberships') return { memberships: [] };
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    render(
+      <SelectedSchoolProvider
+        ownerKey={principalId}
+        loading={false}
+        catalogStatus="ready"
+        schools={[
+          { id: 'pu', name: '靜宜大學', code: 'PU' },
+          { id: 'nthu', name: '國立清華大學', code: 'NTHU' },
+        ]}
+      >
+        <NuniApp />
+      </SelectedSchoolProvider>,
+    );
+    await waitFor(() => {
+      const target = new URL(
+        screen.getByRole('link', { name: label }).getAttribute('href')!,
+        window.location.origin,
+      );
+      expect(target.pathname).toBe(destination);
+      expect(Object.fromEntries(target.searchParams)).toEqual({
+        ...(tab ? { tab } : {}),
+        ...expectedCampus,
+      });
+      expect(target.hash).toBe('');
+    });
+    expect(localStorage.getItem(schoolPreferenceKey(principalId))).toBe(saved);
+  },
+);
 
 it('keeps the guest course query and linked assignment through Google sign-in', async () => {
   mocks.signedIn = false;

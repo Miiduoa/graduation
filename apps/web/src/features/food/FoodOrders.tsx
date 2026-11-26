@@ -30,20 +30,26 @@ import {
   type FoodDraftCache,
 } from './foodState';
 import { FoodOrderReceipt } from './FoodOrderReceipt';
+import { FoodPickupAgent } from './FoodPickupAgent';
 import styles from './Food.module.css';
 
 export function FoodOrders({
   client,
   cache,
   accountId,
+  context,
   tenantId,
   initialOrder,
+  orderHref,
 }: {
   client: FoodClient;
   cache: FoodDraftCache;
   accountId: string;
+  context?: string;
   tenantId: string;
   initialOrder: string;
+  /** A host page can keep its own URL while reusing the same order actions. */
+  orderHref?: (orderId?: string) => string;
 }) {
   const [state, setState] = useState('');
   const [pageCursors, setPageCursors] = useState<string[]>([]);
@@ -86,13 +92,18 @@ export function FoodOrders({
     window.history.replaceState(
       null,
       '',
-      `/food?tenant=${encodeURIComponent(tenantId)}&order=${encodeURIComponent(orderId)}`,
+      orderHref?.(orderId) ??
+        `/food?tenant=${encodeURIComponent(tenantId)}&order=${encodeURIComponent(orderId)}`,
     );
   }
 
   function closeOrder() {
     setSelected('');
-    window.history.replaceState(null, '', `/food?tenant=${encodeURIComponent(tenantId)}`);
+    window.history.replaceState(
+      null,
+      '',
+      orderHref?.() ?? `/food?tenant=${encodeURIComponent(tenantId)}`,
+    );
     queueMicrotask(() => {
       const target = returnFocusRef.current;
       returnFocusRef.current = null;
@@ -112,6 +123,7 @@ export function FoodOrders({
           client={client}
           cache={cache}
           accountId={accountId}
+          context={context}
           tenantId={tenantId}
           orderId={selected}
           onChange={orders.reload}
@@ -246,6 +258,7 @@ export function FoodOrderDetail({
   client,
   cache,
   accountId,
+  context,
   tenantId,
   orderId,
   onChange,
@@ -254,6 +267,7 @@ export function FoodOrderDetail({
   client: FoodClient;
   cache: FoodDraftCache;
   accountId: string;
+  context?: string;
   tenantId: string;
   orderId: string;
   onChange(): Promise<unknown>;
@@ -362,6 +376,9 @@ export function FoodOrderDetail({
               預計取餐 {foodTime(receipt.requestedPickupAt)} · 取餐號碼 {receipt.pickup.displayCode}
             </p>
           </div>
+          {context && <FoodPickupAgent context={context} accountId={accountId} tenantId={tenantId} orderId={receipt.id}
+            available={['paid', 'accepted', 'preparing', 'ready'].includes(receipt.state) &&
+              Date.parse(receipt.requestedPickupAt) > now} />}
           <p className={styles.amount}>訂單總額 {foodMoney(receipt.total)}</p>
           {receipt.state === 'payment-pending' &&
             !(

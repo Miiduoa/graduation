@@ -9,11 +9,14 @@ vi.mock('@/lib/nuni/assistantV2/adapter', () => ({ createAdapter: fixture.adapte
 vi.mock('@/lib/nuni/assistantV2/groq', async importOriginal => ({
   ...await importOriginal(), createProviderModel: () => input => fixture.provider(input),
 }));
-vi.mock('@/features/nuni/Session', () => ({
-  useNuniSession: () => ({ loading: false, error: '', pendingLogout: false,
+vi.mock('@/features/nuni/Session', () => {
+  // Required and optional consumers observe the same current synthetic identity,
+  // including account/session changes made by the cross-scope integration cases.
+  const session = () => ({ loading: false, error: '', pendingLogout: false,
     session: { context: fixture.context, platformAccountId: fixture.account }, refresh: async () => {}, logout: async () => {},
-  }),
-}));
+  });
+  return { useNuniSession: session, useOptionalNuniSession: session };
+});
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: null, loading: false, error: null, signOutUser: async () => {}, refreshUser: async () => {} }),
 }));

@@ -2,6 +2,8 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import {
   distanceMeters,
   formatDistance,
+  walkingDirectionsUrl,
+  appleWalkingDirectionsUrl,
   loadMapFavorites,
   loadMapLocations,
   MapSourceTimeoutError,
@@ -11,6 +13,9 @@ import {
   type MapLocation,
 } from './mapService';
 import { centerOfCoordinates } from '@campus/shared/src/campusGeo';
+import { resolveCampusClassroom } from '@campus/shared/src/campusClassroomLookup';
+import { parseCampusMapRecord } from '@campus/shared/src/campusMapRecords';
+import { PROVIDENCE_CAMPUS_PLACES } from '@campus/shared/src/providenceCampus';
 import { getDocsFromServer } from 'firebase/firestore';
 
 const state = vi.hoisted(() => ({
@@ -53,6 +58,25 @@ const snapshot = (...docs: ReturnType<typeof entry>[]) => ({ empty: docs.length 
 const respond = (value: ReturnType<typeof snapshot>) =>
   vi.mocked(getDocsFromServer).mockResolvedValueOnce(value as never);
 
+it('builds Google and Apple walking links from exact marker coordinates without inventing an entrance', () => {
+  const google = new URL(walkingDirectionsUrl(location));
+  const apple = new URL(appleWalkingDirectionsUrl(location));
+  expect(google.origin).toBe('https://www.google.com');
+  expect(google.searchParams.get('destination')).toBe('24.2275,120.5635');
+  expect(google.searchParams.get('travelmode')).toBe('walking');
+  expect(google.searchParams.has('origin')).toBe(false);
+  expect(apple.origin).toBe('https://maps.apple.com');
+  expect(apple.searchParams.get('daddr')).toBe('24.2275,120.5635');
+  expect(apple.searchParams.get('dirflg')).toBe('w');
+  expect(apple.searchParams.has('saddr')).toBe(false);
+
+  const start = { lat: 24.23, lng: 120.56 };
+  expect(new URL(appleWalkingDirectionsUrl(location, start)).searchParams.get('saddr'))
+    .toBe('24.23,120.56');
+  expect(new URL(walkingDirectionsUrl(location, start)).searchParams.get('origin'))
+    .toBe('24.23,120.56');
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   state.configured = true;
@@ -81,6 +105,62 @@ it('uses school-filtered legacy data only after a confirmed empty canonical sour
     ['schools/pu/pois'],
     [{ path: 'pois', constraints: [['schoolId', '==', 'pu']] }],
   ]);
+});
+
+const providenceHall = PROVIDENCE_CAMPUS_PLACES.find(({ id }) => id === 'pu-zhugu')!;
+const resolvePH303 = (locations: readonly MapLocation[]) =>
+  resolveCampusClassroom({ schoolId: 'pu', query: 'PH303', locations });
+
+it.each([
+  { transitStopIds: ['synthetic-stop'] },
+  { transitStopIds: 'synthetic-stop' },
+  { transitStopIds: [42] },
+  { transitStopIds: 0 },
+  { transitStopIds: false },
+  { transitStopIds: {} },
+])('excludes a synthetic teaching POI with transitStopIds=$transitStopIds after parsing and loading', async ({ transitStopIds }) => {
+  const id = 'synthetic-stop-poi';
+  // Reuse the catalog hall point as test input without assigning a location to a real stop.
+  const raw = { ...providenceHall, description: 'Synthetic POI', transitStopIds };
+  const parsed = parseCampusMapRecord(id, raw, 'pu')!;
+  expect(parsed.transitStopIds).toBe(transitStopIds);
+  expect(resolvePH303([parsed]).status).toBe('unmatched');
+
+  respond(snapshot(entry(id, raw), entry(providenceHall.id, providenceHall)));
+  const locations = await loadMapLocations('pu');
+  const synthetic = locations.find((place) => place.id === id)!;
+  expect(synthetic.transitStopIds).toBe(transitStopIds);
+  expect(resolvePH303([synthetic]).status).toBe('unmatched');
+  expect(resolvePH303(locations).matches.map((place) => place.id)).toEqual([providenceHall.id]);
+});
+
+it.each([
+  {},
+  { transitStopIds: '' },
+  { transitStopIds: '  ' },
+  { transitStopIds: [] },
+  { transitStopIds: null },
+])('still resolves the loaded hall with transit metadata %j', async (metadata) => {
+  respond(snapshot(entry(providenceHall.id, { ...providenceHall, ...metadata })));
+  const [hall] = await loadMapLocations('pu');
+  if ('transitStopIds' in metadata) {
+    expect(hall).toHaveProperty('transitStopIds', metadata.transitStopIds);
+  } else {
+    expect(hall).not.toHaveProperty('transitStopIds');
+  }
+  expect(resolvePH303([hall]).matches).toEqual([hall]);
+});
+
+it('omits inherited and non-enumerable transit metadata during parsing', () => {
+  const inherited = Object.assign(Object.create({ transitStopIds: ['synthetic-stop'] }), providenceHall);
+  const hidden = Object.defineProperty({ ...providenceHall }, 'transitStopIds', {
+    value: ['synthetic-stop'],
+  });
+  for (const raw of [inherited, hidden]) {
+    const parsed = parseCampusMapRecord(providenceHall.id, raw, 'pu')!;
+    expect(parsed).not.toHaveProperty('transitStopIds');
+    expect(resolvePH303([parsed]).matches).toEqual([parsed]);
+  }
 });
 
 it('propagates source failures instead of substituting fallback or sample data', async () => {

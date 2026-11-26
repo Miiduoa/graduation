@@ -15,6 +15,7 @@ export type CampusMapPlace = {
   building?: string;
   floor?: string;
   facilities: string[];
+  transitStopIds?: unknown;
 };
 
 /** 地點來源最多等這麼久；連線卡住時不能讓畫面永遠停在「正在載入」。 */
@@ -47,6 +48,12 @@ export function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> 
   });
 }
 
+
+function transitStopIdsFrom(place: object): { transitStopIds?: unknown } {
+  const descriptor = Object.getOwnPropertyDescriptor(place, 'transitStopIds');
+  return descriptor?.enumerable ? { transitStopIds: descriptor.value } : {};
+}
+
 export function toCampusMapPlaces(locations: readonly CampusMapPlaceLike[]): CampusMapPlace[] {
   return locations.map((place) => ({
     id: place.id,
@@ -58,6 +65,7 @@ export function toCampusMapPlaces(locations: readonly CampusMapPlaceLike[]): Cam
     building: place.building,
     floor: place.floor,
     facilities: place.facilities ? [...place.facilities] : [],
+    ...transitStopIdsFrom(place),
   }));
 }
 

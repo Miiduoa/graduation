@@ -1,6 +1,11 @@
 import { operationSignal } from './operation';
 import { cartArgs, foodCardArgs, priceCart } from './food';
 import { courseworkStudyGuard, verifyCourseworkStudyGuard } from './courseworkStudy';
+import { courseworkRecoveryGuard, courseworkRecoveryId, verifyCourseworkRecoveryCalendar,
+  type CourseworkRecoveryGuard } from './courseworkRecovery';
+import { parsePublicEventGuard, type PublicEventGuard } from './publicEvent';
+import { verifyPublicEventGuard } from './campusEventGuard';
+import { foodPickupGuard, verifyFoodPickupGuard } from './foodPickup';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { validatePersonalImportSyncRecords } from '@campus/shared/src/imports/sync';
 import { ASSISTANT_SERVICES, assistantServiceHref } from '@campus/shared/src/assistantServices';
@@ -23,13 +28,16 @@ import {
   type Card,
   type CourseworkStudyGuard,
   type EventArgs,
+  type FoodPickupGuard,
   type Ledger,
   type Obj,
 } from './contracts';
 // Each process boot is a new issuance epoch. A lost owner is never reassigned.
 const routeEpoch = randomUUID();
-export function issueRoute(binding: Binding, secret: string) {
-  const payload = { scope: hash({ session: binding.session, conversationId: binding.conversationId, schoolId: binding.schoolId }), binding: hash(binding), issuer: process.env.FLY_MACHINE_ID || 'local', epoch: routeEpoch };
+type RoutePurpose = 'chat' | 'event-preview';
+export function issueRoute(binding: Binding, secret: string, purpose: RoutePurpose = 'chat') {
+  const payload = { scope: hash({ session: binding.session, conversationId: binding.conversationId, schoolId: binding.schoolId }), binding: hash(binding), issuer: process.env.FLY_MACHINE_ID || 'local', epoch: routeEpoch,
+    ...(purpose === 'event-preview' ? { purpose } : {}) };
   const body = Buffer.from(canonical(payload)).toString('base64url');
   return body + '.' + mac(secret, 'route:' + body);
 }
@@ -44,18 +52,19 @@ function routePayload(token: unknown, secret: string) {
   catch { return fail('CONFIRMATION_REVOKED', 409); }
   return payload;
 }
-export function routeTarget(token: unknown, scope: Omit<Binding, 'account'>, secret: string) {
+export function routeTarget(token: unknown, scope: Omit<Binding, 'account'>, secret: string, purpose: RoutePurpose = 'chat') {
   const payload = routePayload(token, secret);
-  if (payload.scope !== hash(scope)) return fail('CONFIRMATION_REVOKED', 409);
+  if (payload.scope !== hash(scope) || (payload.purpose ?? 'chat') !== purpose)
+    return fail('CONFIRMATION_REVOKED', 409);
   const owner = machineId(payload.issuer);
   if (owner === (process.env.FLY_MACHINE_ID || 'local') && payload.epoch !== routeEpoch)
     return fail('CONFIRMATION_REVOKED', 409);
   return owner;
 }
-export function routeOwner(token: unknown, binding: Binding, secret: string) {
+export function routeOwner(token: unknown, binding: Binding, secret: string, purpose: RoutePurpose = 'chat') {
   const payload = routePayload(token, secret);
   if (payload.binding !== hash(binding)) return fail('CONFIRMATION_REVOKED', 409);
-  return routeTarget(token, { session: binding.session, conversationId: binding.conversationId, schoolId: binding.schoolId }, secret);
+  return routeTarget(token, { session: binding.session, conversationId: binding.conversationId, schoolId: binding.schoolId }, secret, purpose);
 }
 const proposals = new Map<string, {
   seq: string; expires: number; revoked: Set<string>;
@@ -132,15 +141,28 @@ export function signCard(
   proposalSeq: string = beginProposal(binding, now),
   previousEvent?: Card,
   studyGuard?: CourseworkStudyGuard,
+  sourceGuard?: PublicEventGuard | FoodPickupGuard,
+  recoveryGuard?: CourseworkRecoveryGuard,
+  pickupGuard?: FoodPickupGuard,
 ): Card {
   operationSignal()?.throwIfAborted();
+  const publicEventGuard = sourceGuard && 'target' in sourceGuard ? sourceGuard : undefined;
+  if (sourceGuard && !('target' in sourceGuard)) {
+    if (pickupGuard) return fail('CONFIRMATION_INVALID', 409);
+    pickupGuard = sourceGuard;
+  }
+  if (publicEventGuard && (tool !== 'propose_personal_event' || studyGuard)) return fail();
+  if (recoveryGuard && (tool !== 'propose_personal_event' || !studyGuard || publicEventGuard || previousEvent)) return fail();
+  if (pickupGuard && (tool !== 'propose_personal_event' || studyGuard || publicEventGuard || recoveryGuard))
+    return fail('CONFIRMATION_INVALID', 409);
   const args =
     tool === 'propose_food_order'
       ? foodCardArgs(raw)
       : tool === 'propose_personal_event'
         ? { ...eventArgs(raw) }
         : pageArgs(raw);
-  const mutationId = 'av2_' + randomUUID().replaceAll('-', '');
+  const mutationId = recoveryGuard ? courseworkRecoveryId(binding, courseworkRecoveryGuard(recoveryGuard).mutationId)
+    : 'av2_' + randomUUID().replaceAll('-', '');
   const payload = {
     v: 2,
     proposalSeq,
@@ -151,6 +173,9 @@ export function signCard(
     tool,
     argsHash: hash(args),
     ...(studyGuard ? { studyGuard: courseworkStudyGuard(studyGuard) } : {}),
+    ...(publicEventGuard ? { publicEventGuard: parsePublicEventGuard(publicEventGuard) } : {}),
+    ...(recoveryGuard ? { recoveryGuard: courseworkRecoveryGuard(recoveryGuard) } : {}),
+    ...(pickupGuard ? { pickupGuard: foodPickupGuard(pickupGuard) } : {}),
     ...(previousEvent && {
       previousEventHash: hash(
         eventRecord(eventArgs(previousEvent.args), binding.schoolId, previousEvent.mutationId, now),
@@ -168,6 +193,7 @@ export function signCard(
     token: body + '.' + mac(secret, body),
     mutationId,
     schoolId: binding.schoolId,
+    ...(pickupGuard ? { sourceBound: 'food-pickup' as const } : {}),
     destination:
       tool === 'propose_food_order'
         ? String(args.reason)
@@ -233,6 +259,16 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
   if (p.issuer !== undefined) machineId(p.issuer);
   const studyGuard = p.studyGuard === undefined ? undefined : courseworkStudyGuard(p.studyGuard);
   if (studyGuard && p.tool !== 'propose_personal_event') return fail('CONFIRMATION_INVALID', 409);
+  const publicEventGuard = p.publicEventGuard === undefined ? undefined : parsePublicEventGuard(p.publicEventGuard);
+  if (publicEventGuard && (p.tool !== 'propose_personal_event' || studyGuard ||
+      publicEventGuard.target.schoolId !== binding.schoolId)) return fail('CONFIRMATION_INVALID', 409);
+  const recoveryGuard = p.recoveryGuard === undefined ? undefined : courseworkRecoveryGuard(p.recoveryGuard);
+  if (recoveryGuard && (p.tool !== 'propose_personal_event' || !studyGuard || publicEventGuard ||
+      p.previousEventHash !== undefined ||
+      p.mutationId !== courseworkRecoveryId(binding, recoveryGuard.mutationId))) return fail('CONFIRMATION_INVALID', 409);
+  const pickupGuard = p.pickupGuard === undefined ? undefined : foodPickupGuard(p.pickupGuard);
+  if (pickupGuard && (p.tool !== 'propose_personal_event' || studyGuard || publicEventGuard || recoveryGuard))
+    return fail('CONFIRMATION_INVALID', 409);
   const args =
     p.tool === 'propose_food_order'
       ? foodCardArgs(v.args)
@@ -251,6 +287,9 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
       tool: p.tool as Card['tool'],
       args,
       ...(studyGuard ? { studyGuard } : {}),
+      ...(publicEventGuard ? { publicEventGuard } : {}),
+      ...(recoveryGuard ? { recoveryGuard } : {}),
+      ...(pickupGuard ? { pickupGuard } : {}),
       previousEventHash: p.previousEventHash as string | undefined,
       revision: Number(p.revision),
       mutationId: p.mutationId,
@@ -268,7 +307,7 @@ type VerifiedCard = AuthenticatedCard['card'];
  */
 export function authenticateCourseworkFollowup(binding: Binding, raw: unknown, secret: string, now: number) {
   const { card } = authenticatedCard(binding, raw, secret, now);
-  if (card.tool !== 'propose_personal_event') return fail('INVALID_INPUT', 422);
+  if (card.tool !== 'propose_personal_event' || card.pickupGuard) return fail('INVALID_INPUT', 422);
   return { mutationId: card.mutationId, iat: card.iat, event: eventArgs(card.args),
     studyGuard: card.studyGuard ? { ...card.studyGuard } : null };
 }
@@ -326,8 +365,10 @@ export function verifyRevokedCalendarPlan(
   const authenticated = raw.map(value => authenticatedCard(binding, value, secret, now));
   const current = liveAuthorization(binding, authenticated[0].payload, now, true);
   const cards = authenticated.map(value => value.card);
+  // A generic plan revision must not strip recovery provenance or allocate a new child ID.
+  if (cards.some(card => card.recoveryGuard)) return fail('INVALID_PLAN_REVISION', 409);
   if (cards.length !== current.issued.length ||
-      cards.some((card, index) => card.tool !== 'propose_personal_event' ||
+      cards.some((card, index) => card.tool !== 'propose_personal_event' || card.publicEventGuard ||
         card.mutationId !== current.issued[index]) ||
       new Set(cards.map(card => card.mutationId)).size !== cards.length)
     return fail('INVALID_PLAN_REVISION');
@@ -428,6 +469,7 @@ function calendarRetryable(p: VerifiedCard, ledger: Ledger, now: number) {
   const event = eventArgs(p.args), [start] = eventInterval(event);
   return ledger.revision === p.revision &&
     (!p.previousEventHash || ledger.records.some((row) => row.kind === 'events' && hash(row) === p.previousEventHash)) &&
+    (!p.publicEventGuard || start > now) &&
     (event.allDay || start < p.iat || start >= Math.floor(now / 60000) * 60000);
 }
 
@@ -586,14 +628,23 @@ export async function confirm(
       return fail('PERSONAL_IMPORT_REVISION_CONFLICT', 409);
     }
     const records = validatePersonalImportSyncRecords([...ledger.records, row], binding.schoolId);
+    if (p.recoveryGuard && p.studyGuard)
+      verifyCourseworkRecoveryCalendar(binding, p.recoveryGuard, p.studyGuard, ledger, currentTime());
     if (p.studyGuard)
       await verifyCourseworkStudyGuard(adapter, binding, p.studyGuard, event, ledger, currentTime());
+    if (p.publicEventGuard)
+      await verifyPublicEventGuard(adapter, binding, p.publicEventGuard, event, currentTime());
+    if (p.pickupGuard)
+      await verifyFoodPickupGuard(adapter, binding, p.pickupGuard, event, currentTime());
     await requireAssistantPermission(adapter, 'createPersonalEvent');
     const writeTime = currentTime();
     verifyCard(binding, raw, secret, writeTime);
     const [start] = eventInterval(event);
+    if (p.pickupGuard && start <= writeTime) return fail('FOOD_PICKUP_PASSED', 409);
     if (p.studyGuard?.policy === 'coursework-gap' && start <= writeTime)
       return fail('STUDY_SLOT_CHANGED', 409);
+    if (p.publicEventGuard && start <= writeTime)
+      return fail('CAMPUS_EVENT_START_PASSED', 409);
     // An explicitly backdated entry can still be recorded. Recheck a prospective
     // timed card after reading the ledger and before its first write.
     if (!event.allDay && start >= p.iat && start < Math.floor(writeTime / 60000) * 60000)

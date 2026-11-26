@@ -11,7 +11,20 @@ import {
 import { createTransitService } from '../../transit-server';
 import { apiOrigin, boundedJson, type PlatformSession } from '../server';
 import { readPlatformAssistantPermissions } from '../platformAssistantPermissionStore';
+import { executePublicCourseOperation } from '../../server/publicCourseOperations';
+import { resolvePublicCourseOperation } from '@campus/shared/src/publicCourseOperations';
+import { hasPublicCourseFilters } from '@campus/shared/src/publicCourseFilters';
+import { parsePublicCourseArguments, publicCourseArguments, PUBLIC_COURSE_TOOL_TIMEOUT_MS } from './publicCourses';
 import { bounded, id, object, V2Error, type Adapter, type Obj } from './contracts';
+import { readPublicCampus } from './publicCampusAdapter';
+import { readPublicEvent } from './publicEventAdapter';
+import { parsePublicEventTarget } from './publicEvent';
+import { readLostFound } from './lostFoundAdapter';
+import { parseCampusMapArguments } from './campusMap';
+import { readCampusMap } from './campusMapAdapter';
+import { readPublicSocial } from './publicSocialAdapter';
+import { readTeachingOverview } from './teacherWorkspaceAdapter';
+import { readMerchantOverview } from './merchantWorkspaceAdapter';
 function rows(raw: unknown, key: string, limit = 5): Obj[] {
   const v = object(raw);
   if (!Array.isArray(v[key])) throw new V2Error(502, 'INVALID_RESPONSE');
@@ -145,6 +158,176 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
     },
     simulation: false,
     remainingApiCalls: () => Math.max(0, 12 - apiCalls),
+    publicCourses: async (requested) => {
+      const search = parsePublicCourseArguments(publicCourseArguments(requested));
+      const active = AbortSignal.any([signal, ...(operationSignal() ? [operationSignal()!] : [])]);
+      active.throwIfAborted();
+      if (++apiCalls > 12) throw new V2Error(429, 'API_BUDGET_EXCEEDED');
+      const version = hasPublicCourseFilters(search.filters ?? {}) ? 2 : 1;
+      const operation = resolvePublicCourseOperation(search.schoolId, version)!;
+      // Only the public query enters this shared cache. Never pass the account,
+      // private campus, session, history, headers or a caller-controlled URL.
+      const result = await bounded(() => executePublicCourseOperation(operation.id,
+        { query: search.query, ...search.filters }, version), active, PUBLIC_COURSE_TOOL_TIMEOUT_MS);
+      active.throwIfAborted();
+      return result;
+    },
+    publicCampus: async (kind, limit) => {
+      const active = AbortSignal.any([signal, ...(operationSignal() ? [operationSignal()!] : [])]);
+      active.throwIfAborted();
+      if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+      if (!['announcements', 'events'].includes(kind) || !Number.isInteger(limit) || limit < 1 || limit > 5 ||
+          !/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
+        throw new V2Error(422, 'INVALID_INPUT');
+      return bounded(async (child) => {
+        const check = () => {
+          child.throwIfAborted();
+          active.throwIfAborted();
+          if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+        };
+        const { publicCampusFirestore } = await import('../../server/publicCampusFirestore');
+        check();
+        const db = publicCampusFirestore();
+        return readPublicCampus({ kind, schoolId, limit, guard: {
+          db,
+          beforeRead() {
+            check();
+            if (++apiCalls > 12) throw new V2Error(429, 'API_BUDGET_EXCEEDED');
+          },
+          afterRead: check,
+        } });
+      }, active, 4000);
+    },
+    campusMap: async (requested) => {
+      const args = parseCampusMapArguments(requested);
+      const active = AbortSignal.any([signal, ...(operationSignal() ? [operationSignal()!] : [])]);
+      active.throwIfAborted();
+      if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+      if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
+        throw new V2Error(422, 'INVALID_INPUT');
+      return bounded(async (child) => {
+        const check = () => {
+          child.throwIfAborted();
+          active.throwIfAborted();
+          if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+        };
+        const { publicCampusFirestore } = await import('../../server/publicCampusFirestore');
+        check();
+        let db: ReturnType<typeof publicCampusFirestore> | undefined;
+        try { db = publicCampusFirestore(); }
+        catch { check(); }
+        // The map's reviewed bundled snapshot stays useful when its anonymous
+        // source is not configured. Its reader keeps that coverage explicit.
+        return readCampusMap({ schoolId, args, guard: {
+          db,
+          beforeRead() {
+            check();
+            if (++apiCalls > 12) throw new V2Error(429, 'API_BUDGET_EXCEEDED');
+          },
+          afterRead: check,
+        } });
+      }, active, 4000);
+    },
+    publicEvent: async (requested) => {
+      const target = parsePublicEventTarget(requested);
+      if (target.schoolId !== schoolId) throw new V2Error(403, 'FORBIDDEN_SCOPE');
+      const active = AbortSignal.any([signal, ...(operationSignal() ? [operationSignal()!] : [])]);
+      active.throwIfAborted();
+      if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+      return bounded(async (child) => {
+        const check = () => {
+          child.throwIfAborted();
+          active.throwIfAborted();
+          if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+        };
+        const { publicCampusFirestore } = await import('../../server/publicCampusFirestore');
+        check();
+        return readPublicEvent({ target, guard: {
+          db: publicCampusFirestore(),
+          beforeRead() {
+            check();
+            if (++apiCalls > 12) throw new V2Error(429, 'API_BUDGET_EXCEEDED');
+          },
+          afterRead: check,
+        } });
+      }, active, 4000);
+    },
+    lostFound: async (args) => {
+      signal.throwIfAborted();
+      operationSignal()?.throwIfAborted();
+      if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+      const expectedAccount = verifiedPrincipal.platformAccountId;
+      const result = await readLostFound(schoolId, args, async (path, input) => {
+        try { return await request(path, input); }
+        catch (error) {
+          if ((error as { status?: number }).status !== 401) throw error;
+          // Older deployments route unknown platform paths to school auth.
+          // Probe this exact session once; never repeat the list operation or
+          // adopt a different account into the original task's binding.
+          let current: ReturnType<typeof parseNuniPrincipal>;
+          try { current = parseNuniPrincipal(await request('sessions/current')); }
+          catch (probeError) {
+            signal.throwIfAborted();
+            operationSignal()?.throwIfAborted();
+            const failure = probeError as { status?: number; code?: string };
+            if (failure.status === 401) {
+              verifiedPrincipal = undefined;
+              throw probeError;
+            }
+            if ([429, 499, 504].includes(failure.status || 0) ||
+                ['API_BUDGET_EXCEEDED', 'TOOL_TIMEOUT', 'DEADLINE_EXCEEDED', 'ABORTED'].includes(failure.code || ''))
+              throw probeError;
+            throw new V2Error(503, 'SERVICE_UNAVAILABLE');
+          }
+          if (current.platformAccountId !== expectedAccount) {
+            verifiedPrincipal = undefined;
+            throw new V2Error(401, 'SESSION_CHANGED');
+          }
+          throw new V2Error(503, 'LOST_FOUND_UNAVAILABLE');
+        }
+      });
+      signal.throwIfAborted();
+      operationSignal()?.throwIfAborted();
+      return result;
+    },
+    publicSocial: async (args) => {
+      signal.throwIfAborted();
+      operationSignal()?.throwIfAborted();
+      if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+      const expectedAccount = verifiedPrincipal.platformAccountId;
+      const result = await readPublicSocial(schoolId, args, (path, input, query) => request(path, input, query));
+      signal.throwIfAborted();
+      operationSignal()?.throwIfAborted();
+      if (verifiedPrincipal?.platformAccountId !== expectedAccount) throw new V2Error(401, 'SESSION_CHANGED');
+      return result;
+    },
+    teachingOverview: async (args) => {
+      const expectedAccount = verifiedPrincipal?.platformAccountId;
+      const check = () => {
+        signal.throwIfAborted();
+        operationSignal()?.throwIfAborted();
+        if (!expectedAccount || !verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+        if (verifiedPrincipal.platformAccountId !== expectedAccount) throw new V2Error(401, 'SESSION_CHANGED');
+      };
+      check();
+      const result = await readTeachingOverview({ schoolId, args, request, accountId: expectedAccount!,
+        guard: { beforeRead: check, afterRead: check }, remainingApiCalls: () => Math.max(0, 12 - apiCalls) });
+      check();
+      return result;
+    },
+    merchantOverview: async (args, expectedTarget) => {
+      const expectedAccount = verifiedPrincipal?.platformAccountId;
+      const guard = () => {
+        signal.throwIfAborted();
+        operationSignal()?.throwIfAborted();
+        if (!expectedAccount || !verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+        if (verifiedPrincipal.platformAccountId !== expectedAccount) throw new V2Error(401, 'SESSION_CHANGED');
+      };
+      guard();
+      const result = await readMerchantOverview({ schoolId, args, request, scopedRealm, guard, expectedTarget });
+      guard();
+      return result;
+    },
     ledger: async () =>
       parsePersonalImportSnapshot(await request('personal-imports/read', { schoolId }), schoolId),
     course: async (courseId) => {
@@ -308,6 +491,8 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
           };
         }),
         source: 'social/feed; untrusted content',
+        nextCursor: value(object(raw).nextCursor, 500) || undefined,
+        truncated: Array.isArray(object(raw).items) && (object(raw).items as unknown[]).length > 5,
       };
     },
     dining: async (locationId) => {
@@ -338,6 +523,8 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
             })
           : [],
         source: 'public cafeteria catalog; 價格/菜單可能缺漏',
+        truncated: !locationId && Array.isArray(object(raw).cafeterias) &&
+          (object(raw).cafeterias as unknown[]).length > 5,
       };
     },
     transit: async (args) => transit(args),
@@ -350,6 +537,8 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
   return {
     adapter,
     async principal() {
+      // A failed refresh must not leave a previously verified account usable.
+      verifiedPrincipal = undefined;
       verifiedPrincipal = parseNuniPrincipal(await request('sessions/current'));
       return verifiedPrincipal;
     },

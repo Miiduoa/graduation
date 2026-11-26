@@ -154,7 +154,7 @@ export default function TeacherTodayScreen() {
           <RefreshControl refreshing={loading} onRefresh={load} tintColor={theme.colors.accent} />
         }
       >
-        <Text style={s.brand}>CAMPUS ONE</Text>
+        <Text style={s.brand}>nuni</Text>
         <Text accessibilityRole="header" style={s.heading}>
           {TEACHER_TODAY_LABEL}
         </Text>
