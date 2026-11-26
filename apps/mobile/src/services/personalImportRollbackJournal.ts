@@ -526,7 +526,6 @@ export function verifyNativeCommitProof(
 ): { legacyBinding?: string } | undefined {
   const hash = sha256(raw);
   if (rejectedPrimaryHash === hash || (attempt && denials.includes(attempt))) return undefined;
-  const attemptHashes = attempt?.match(attemptPattern)?.slice(2);
   for (const proof of proofs) {
     const bound = proof.value?.match(attemptPattern);
     if (bound) {
@@ -536,7 +535,8 @@ export function verifyNativeCommitProof(
       }
       continue;
     }
-    if (requireAttempt || (attemptHashes && !attemptHashes.includes(hash))) continue;
+    // A legacy digest can repeat in a later operation with identical bytes.
+    if (requireAttempt || attempt) continue;
     if (!legacyBinding && proof.legacyPrimaryDigest && proof.value === hash) return {};
     const legacy = proof.value?.match(committedReceiptPattern);
     if (legacyBinding && proof.legacyBinding && legacyBinding !== proof.legacyBinding) continue;
@@ -664,7 +664,11 @@ export function capturePersonalImportRollback(key: string) {
   if (retired && !rejectionRecorded && stored !== undefined && !rearmed && !payloadAttempt) return undefined;
   // An attempt is established before the primary write. Keep its binding
   // independently of pending status and of the rollback copy's readability.
-  const preparedState = stored === undefined ? readOptionalFile(preparedAttemptFile(key)) : undefined;
+  const preparedFile = preparedAttemptFile(key);
+  const preparedBackup = preparedAttemptBackupFile(key);
+  const preparedState = stored === undefined
+    ? readOptionalFile(preparedFile) ?? readOptionalFile(preparedBackup)
+    : undefined;
   const prepared = preparedState?.startsWith(preparedAttemptPrefix)
     ? preparedState.slice(preparedAttemptPrefix.length) : undefined;
   const preparedAttempt = prepared?.match(attemptPattern);
@@ -703,6 +707,9 @@ export function capturePersonalImportRollback(key: string) {
     stored, rearmed, attempt: attempt?.[0], embeddedHash: binding?.[1], retirementProof: retirementProof ?? null,
   });
   const unreadableCopy = stored === undefined && payloadError !== undefined;
+  // Use the legacy format only when the current attempt is absent.
+  const requiresAttemptCommitProof = attempt !== undefined || (unreadableCopy &&
+    (probeJournalFile(preparedFile) !== false || probeJournalFile(preparedBackup) !== false));
   // An orphan's backup may describe an older rollback. Let the verifier compare
   // the proof against the current bytes and any exact denial before using it.
   const staleBackupMayBePresent = unreadableCopy && primaryRejection === undefined &&
@@ -729,8 +736,10 @@ export function capturePersonalImportRollback(key: string) {
       ? (raw: string | null) => sha256(raw ?? 'null') === originalHash
       : undefined,
     commitProofs: proofs,
+    requiresAttemptCommitProof,
     commitProofContext: canUseCommitProof ? {
       attempt: attempt?.[0],
+      requireAttempt: requiresAttemptCommitProof,
       rejectedPrimaryHash: targetedRejection?.[2],
     } : undefined,
     readBackupDenial: unreadableCopy ? () => readOptionalFile(rejectionBackup) : undefined,
@@ -803,6 +812,10 @@ function readRollbackResolution(state: string | undefined): string | undefined {
 
 function preparedAttemptFile(key: string): File {
   return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.attempt`);
+}
+
+function preparedAttemptBackupFile(key: string): File {
+  return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.attempt.bak`);
 }
 
 function retirementFile(key: string): File {
@@ -1025,11 +1038,23 @@ export function preparePersonalImportRollback(
   }
   if (attempt) {
     const prepared = preparedAttemptPrefix + attempt + sha256(encoded);
-    const file = preparedAttemptFile(key);
-    try {
+    const writeBinding = (file: File) => {
       file.write(prepared);
       if (readRollbackFile(file) !== prepared) {
         throw new Error('無法確認匯入資料的還原識別已寫入。');
+      }
+    };
+    try {
+      writeBinding(preparedAttemptFile(key));
+      // Keep a second copy of the write-ahead binding for recovery if the
+      // primary binding and rollback payload both become unreadable.
+      const backup = preparedAttemptBackupFile(key);
+      try {
+        writeBinding(backup);
+      } catch (error) {
+        // A failed refresh is recoverable if no older backup can be mistaken
+        // for this attempt after a restart.
+        if (!deleteMarker(backup) && probeJournalFile(backup) !== false) throw error;
       }
     } catch (error) {
       if (!rejected && !hadRejection) throw new NativeRollbackUnavailableError(error);
@@ -1057,7 +1082,7 @@ export function preparePersonalImportRollback(
   const settle = (hash: string) => {
     const proof = attempt + hash;
     settlement.write(proof);
-    return settlement.textSync() === proof;
+    return readRollbackFile(settlement) === proof;
   };
   const retire = (assertWritable = () => {}, primary?: string) => {
     // Commit synchronously so verification and commit cannot be separated by another JS event.
@@ -1085,7 +1110,10 @@ export function preparePersonalImportRollback(
       discardPayload(publicationBackup);
       clearNativeVerificationReceipt(key);
       discardPayload(payload);
-      if (probeJournalFile(payload) === false) discardPayload(preparedAttemptFile(key));
+      if (probeJournalFile(payload) === false) {
+        discardPayload(preparedAttemptFile(key));
+        discardPayload(preparedAttemptBackupFile(key));
+      }
       return true;
     }
     if (deletionBound && attempt && probeJournalFile(marker) === true) discardPayload(retirement);
@@ -1285,7 +1313,10 @@ export function clearPersonalImportRollback(key: string): void {
     discardPayload(settlementFile(key));
     clearNativeVerificationReceipt(key);
     discardPayload(payload);
-    if (probeJournalFile(payload) === false) discardPayload(preparedAttemptFile(key));
+    if (probeJournalFile(payload) === false) {
+      discardPayload(preparedAttemptFile(key));
+      discardPayload(preparedAttemptBackupFile(key));
+    }
   }
 }
 

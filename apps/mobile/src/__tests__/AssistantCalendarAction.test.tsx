@@ -4,7 +4,7 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AssistantCalendarAction } from '../screens/AssistantCalendarAction';
 import { createAssistantCalendarTask, type AssistantCalendarContext, type AssistantCalendarTask } from '../services/assistantCalendarExecution';
-import { personalImportStorageKey } from '../services/personalImports';
+import { loadPersonalImports, personalImportStorageKey } from '../services/personalImports';
 import type { ServiceScreenProps } from '../screens/UnavailableFeatureScreen';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -82,6 +82,76 @@ test('an unknown result offers only same-ID checking and can verify a committed 
   await act(async () => fireEvent.press(view.getByRole('button', { name: '重新核對行程' })));
   expect(view.getByText('已在這台手機保存並核對行程。')).toBeTruthy();
   expect(ledgerWrites()).toHaveLength(1);
+});
+
+test('a lost native response offers same-ID checking and leaves late unproven bytes unverified', async () => {
+  const task = createAssistantCalendarTask(event, context);
+  const changed = jest.fn();
+  const nav = navigation();
+  let lateValue: string | undefined;
+  jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
+    if (key === ledgerKey) {
+      lateValue = value;
+      throw new Error('lost native response');
+    }
+    await originalSet(key, value);
+  });
+  const view = render(<Harness initial={task} nav={nav} changed={changed} />);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '確認加入個人行事曆' })));
+  expect(view.queryByRole('button', { name: '確認加入個人行事曆' })).toBeNull();
+  expect(view.queryByRole('button', { name: '先不要' })).toBeNull();
+  expect(view.queryByText('已在這台手機保存並核對行程。')).toBeNull();
+  expect(lateValue).toEqual(expect.any(String));
+  await originalSet(ledgerKey, lateValue!);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '重新核對行程' })));
+  expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ proposal: task.proposal, state: 'unknown' }));
+  expect(view.getByRole('button', { name: '重新核對行程' })).toBeTruthy();
+  expect(view.queryByRole('button', { name: '查看已建立的行程' })).toBeNull();
+  expect(view.queryByText('已在這台手機保存並核對行程。')).toBeNull();
+  expect(nav.navigate).not.toHaveBeenCalled();
+  expect((await loadPersonalImports({ owner: 'firebase:A', schoolId: 'pu' })).records).toEqual([]);
+  expect(ledgerWrites()).toHaveLength(1);
+});
+
+test('same-ID checking remains available while a timed-out native write is still pending', async () => {
+  jest.useFakeTimers();
+  const task = createAssistantCalendarTask(event, context);
+  const changed = jest.fn();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let entered!: () => void;
+  const landed = new Promise<void>((resolve) => { entered = resolve; });
+  jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
+    await originalSet(key, value);
+    if (key === ledgerKey) {
+      entered();
+      await held;
+    }
+  });
+  try {
+    const view = render(<Harness initial={task} nav={navigation()} changed={changed} />);
+    await act(async () => {
+      fireEvent.press(view.getByRole('button', { name: '確認加入個人行事曆' }));
+      await landed;
+    });
+    expect(JSON.parse((await originalGet(ledgerKey))!).records[0].id).toBe(task.proposal.mutationId);
+    await act(async () => jest.advanceTimersByTimeAsync(20_001));
+    expect(view.queryByRole('button', { name: '確認加入個人行事曆' })).toBeNull();
+    await act(async () => {
+      fireEvent.press(view.getByRole('button', { name: '重新核對行程' }));
+      await jest.advanceTimersByTimeAsync(20_001);
+    });
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ proposal: task.proposal, state: 'unknown' }));
+    expect(view.queryByText('已在這台手機保存並核對行程。')).toBeNull();
+    await act(async () => release());
+    await act(async () => fireEvent.press(view.getByRole('button', { name: '重新核對行程' })));
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ proposal: task.proposal, state: 'unknown' }));
+    expect((await loadPersonalImports({ owner: 'firebase:A', schoolId: 'pu' })).records).toEqual([]);
+    expect(ledgerWrites()).toHaveLength(1);
+  } finally {
+    release();
+    jest.useRealTimers();
+  }
 });
 
 test('a device receipt never opens an unavailable native route or a website that lacks the local record', async () => {

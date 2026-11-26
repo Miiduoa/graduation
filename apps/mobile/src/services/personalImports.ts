@@ -191,7 +191,10 @@ async function readLedgerSnapshot(
   const primaryHash = primaryVerified && primary !== null && (rejectionMatches || nativeRejectionBinding) ? sha256(primary) : undefined;
   const explicitlyRejected = primaryHash !== undefined && journal?.rejectedPrimaryHash === primaryHash;
   const publishedRejectionHash = primaryHash === undefined || primary === null || explicitlyRejected ? undefined :
-    verifyNativeCommitProof(primary, proofs, { legacyBinding: rejectionHash ?? nativeRejectionBinding })?.legacyBinding;
+    verifyNativeCommitProof(primary, proofs, {
+      legacyBinding: rejectionHash ?? nativeRejectionBinding,
+      requireAttempt: journal?.requiresAttemptCommitProof,
+    })?.legacyBinding;
   const boundRestoredRejection = primaryHash !== undefined && rejectionHash !== undefined &&
     !explicitlyRejected && nativeRejectionBinding === rejectionHash
     ? rejectionHash

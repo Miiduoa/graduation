@@ -940,7 +940,9 @@ test.each([
       // A previous version could leave a raw primary verified only by the sidecar.
       const raw = JSON.stringify(expected);
       await nativeSet(key, raw);
-      new File(Paths.document, `personal-imports-${sha256(key)}.rollback.attempt`).delete();
+      for (const suffix of ['attempt', 'attempt.bak']) {
+        new File(Paths.document, `personal-imports-${sha256(key)}.rollback.${suffix}`).delete();
+      }
       new File(Paths.document, `personal-imports-${sha256(key)}.rollback.verified`).write(sha256(raw));
     }
     if (receiptReadFailsAfterSave) {
@@ -1119,6 +1121,7 @@ type RecoveryFaultCase = [
     preserveCandidate?: boolean;
     solePublication?: string;
     legacyPublication?: boolean;
+    settlementRetry?: boolean;
     orphanedSettlement?: boolean;
     batchPrimary?: boolean;
     missingProbe?: '.rollback.pending' | '.rollback.rejected';
@@ -1321,6 +1324,18 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
       ['documents', 'directory list', 'list', 'restart'],
     ], { solePublication, legacyPublication },
   ]),
+  [':verified-write survives an empty pending marker and two unreadable recovery files', [
+    ...isolatedProofCases.find(([location]) => location === ':verified-write')![1],
+    ['.rollback.pending', 'remove', 'delete', 'save'],
+    ['.rollback.json', 'restart read', 'textSync', 'restart'],
+    ['.rollback.attempt', 'restart read', 'textSync', 'restart'],
+  ], { solePublication: ':verified-write' }],
+  ['settlement can commit when the prepared attempt backup cannot be written', [
+    ['.rollback.attempt.bak', 'write', 'write', 'save'],
+  ], { functionGuard: true }],
+  ['settlement readback retries after pending deletion with all other publication paths unavailable', [
+    ['.rollback.settled', 'save read once', 'textSync', 'save'],
+  ], { functionGuard: true, settlementRetry: true }],
   ['settlement survives an unreadable attempt file with the committed marker still readable', [
     ['.rollback.pending', 'remove', 'delete', 'save'],
     ['.rollback.verified', 'write', 'write', 'save'],
@@ -1569,7 +1584,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   name, failures, { staleCopy = false, primaryOnly = false, revokeFallback = false, landedRetirement = false,
     thirdWriteLands = false, revokeJournal = false, restoredWithoutPending = false,
     optionalReadAttempt, rejectedPrimary, entryPoint, functionGuard = false, rejectedRetry = false, batchReceipt,
-    missingProbe, solePublication, legacyPublication, orphanedSettlement, batchPrimary, unavailableJournal = false, noCommitProof = false, preserveCandidate = false, lateInitialWrite = false } = {},
+    missingProbe, solePublication, legacyPublication, orphanedSettlement, batchPrimary, settlementRetry, unavailableJournal = false, noCommitProof = false, preserveCandidate = false, lateInitialWrite = false } = {},
 ) => {
   const scope = { owner: entryPoint === 'sync' ? 'nuni:pa_11111111-1111-4111-8111-111111111111'
     : 'nuni:recovery-matrix-' + name, schoolId: 'pu' };
@@ -1677,7 +1692,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   const publicationFileFault = faults.has('.rollback.published') || faults.has('.rollback.published.bak');
   const backupRetirementFault = faults.has('.rollback.committed');
   const forceBackupRetirement = backupRetirementFault && !faults.has('.rollback.pending');
-  const keepPending = !orphanedSettlement && !missingProbe && !saveMissingProbe && (late || backupRetirementFault || publicationFileFault || faults.has(':checkpoint') ||
+  const keepPending = !settlementRetry && !orphanedSettlement && !missingProbe && !saveMissingProbe && (late || backupRetirementFault || publicationFileFault || faults.has(':checkpoint') ||
     faults.has('.rollback.pending') || faults.has('.rollback.verified') || faults.has('.rollback.settled'));
   const failure = new Error('模擬儲存故障');
   const inject = (location: string, fault: RecoveryFault, api: RecoveryApi) => {
@@ -1718,6 +1733,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   set.mockImplementation(async (entry, value) => {
     const location = entry.slice(key.length);
     if (entry === key) primaryWrites.push(value);
+    if (settlementRetry && (location !== '' || primaryWrites.length > 1)) throw failure;
     if (entry === key && primaryWrites.length === 2 && inject(location, 'second primary response lost', 'setItem')) {
       await native.set(entry, value);
       landedStorageWrites.add(location);
@@ -1741,6 +1757,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
         (revokeOnCheckpoint && location === ':checkpoint' && value.startsWith('verified:'))) authorized = false;
   });
   setMany.mockImplementation(async (entries) => {
+    if (settlementRetry) throw failure;
     if (entries.some(([entry, value]) => {
       const location = entry.slice(key.length);
       return (value.startsWith('verified:') && inject(location, 'checkpoint proof write', 'multiSet')) ||
@@ -1773,6 +1790,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   });
   const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
     const location = fileLocation(this);
+    if (settlementRetry && location === '.rollback.committed') throw failure;
     if (inject(location, 'write', 'create') ||
         ((late || (publicationFileFault && !solePublication) || faults.has(':checkpoint')) && location === '.rollback.committed')) throw failure;
     if (inject(location, 'create no-op', 'create')) return;
@@ -1783,6 +1801,9 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     const location = fileLocation(this);
     const retireMarker = location === '.rollback.pending' && markerState(value) === 'committed';
     const bindPayload = location === '.rollback.json' && typeof value === 'string' && value.includes('\ncommitted:');
+    if (settlementRetry && (bindPayload || [
+      '.rollback.verified', '.rollback.published', '.rollback.published.bak', '.rollback.receipt', '.rollback.rejected',
+    ].includes(location))) throw failure;
     if (location === '.rollback.json' && !authorized && inject(location, 'reject payload no-op', 'write')) return;
     if ((bindPayload && inject(location, 'bind payload', 'write')) || (retireMarker && inject(location, 'retire marker', 'write')) || inject(location, 'write', 'write') ||
         (location === '.rollback.json' && typeof value === 'string' && value.includes('\nrejected:\n') &&
@@ -1793,6 +1814,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
       throw failure;
     }
     originalFile.write.call(this, value, options);
+    landedStorageWrites.add(location);
     if (retireMarker) committedMarkerWritten = true;
   });
   const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
@@ -1873,6 +1895,21 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
       expect(batchIndex).toBeGreaterThanOrEqual(0);
       expect(getMany.mock.invocationCallOrder[batchIndex]).toBeLessThan(notified.mock.invocationCallOrder[0]);
       await expect(getMany.mock.results[batchIndex].value).resolves.toContainEqual([key, primaryWrites[0]]);
+    }
+    if (settlementRetry) {
+      const settlementReads = read.mock.results.filter((_, index) =>
+        fileLocation(read.mock.contexts[index]) === '.rollback.settled' &&
+        read.mock.invocationCallOrder[index] < notified.mock.invocationCallOrder[0]);
+      expect(settlementReads.map(({ type }) => type)).toEqual(['throw', 'return']);
+      expect(primaryWrites).toHaveLength(1);
+      expect(landedPrimaryWrites).toEqual(primaryWrites);
+      for (const location of publicationLayers.filter((layer) => layer.startsWith(':'))) {
+        expect(await native.get(key + location)).toBeNull();
+      }
+    }
+    if (name.includes('an empty pending marker')) {
+      const marker = new File(Paths.document, documentPrefix + '.rollback.pending');
+      expect(originalFile.text.call(marker)).toBe('');
     }
     if ((functionGuard && !noCommitProof) || rejectedRetry || batchPrimary || orphanedSettlement) {
       const settlementFile = new File(Paths.document, documentPrefix + '.rollback.settled');
@@ -1999,7 +2036,13 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
           read.mock.invocationCallOrder[index] < beforeNotification)).toBe(true);
         // Reproduce the bytes emitted by the legacy writer for this same primary.
         soleProofOnRestart = legacyPublication ? sha256(payload) + '\n' + digest : fileProof;
-        if (legacyPublication) originalFile.write.call(publication, soleProofOnRestart);
+        if (legacyPublication) {
+          originalFile.write.call(publication, soleProofOnRestart);
+          // The historical format predates both write-ahead attempt sidecars.
+          for (const suffix of ['.rollback.attempt', '.rollback.attempt.bak']) {
+            originalFile.remove.call(new File(Paths.document, documentPrefix + suffix));
+          }
+        }
       }
       for (const location of publicationLayers.filter((location) => location.startsWith(':'))) {
         if (location !== solePublication) expect(await native.get(key + location)).toBeNull();
@@ -2209,12 +2252,13 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   }
 });
 
-test.each(['stale backup receipt', 'no backup receipt'] as const)(
+test.each(['stale backup receipt', 'no backup receipt', 'stale legacy publication'] as const)(
   'restart before retirement with an unreadable copy and %s',
   async (receiptKind) => {
     const scope = { owner: 'nuni:interrupted-first-write-' + receiptKind, schoolId: 'pu' };
     const key = personalImportStorageKey(scope);
     const backupKey = key + ':verified-write-backup';
+    const stalePublication = receiptKind === 'stale legacy publication';
     const prefix = 'personal-imports-' + sha256(key) + '.rollback.';
     const file = (suffix: string) => new File(Paths.document, prefix + suffix);
     const { ledger: original } = await appendPersonalImports(scope, [row('original')]);
@@ -2246,7 +2290,8 @@ test.each(['stale backup receipt', 'no backup receipt'] as const)(
       nativeWrite.call(this, value, options);
     });
     const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
-      if (savingA && this.uri === file('pending').uri) faultedFile();
+      if ((savingA && this.uri === file('pending').uri) ||
+          (stalePublication && !savingA && this.uri === file('published').uri)) faultedFile();
       nativeDelete.call(this);
     });
     const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
@@ -2275,6 +2320,8 @@ test.each(['stale backup receipt', 'no backup receipt'] as const)(
       expect(receiptA).toMatch(/^attempt:/);
       expect(receiptA.endsWith(sha256(rawA))).toBe(true);
       expect(notified).toHaveBeenCalledTimes(1);
+      const legacyProof = sha256(file('json').textSync()) + '\n' + sha256(rawA);
+      if (stalePublication) nativeWrite.call(file('published'), legacyProof);
       savingA = false;
       await save(ledgerB);
       const rawB = (await AsyncStorage.getItem(key))!;
@@ -2282,7 +2329,8 @@ test.each(['stale backup receipt', 'no backup receipt'] as const)(
       expect(await AsyncStorage.getItem(backupKey)).toBe(receiptA);
       expect(file('settled').textSync().endsWith(sha256(rawB))).toBe(true);
       expect(notified).toHaveBeenCalledTimes(2);
-      if (receiptKind === 'no backup receipt') await AsyncStorage.removeItem(backupKey);
+      if (receiptKind !== 'stale backup receipt') await AsyncStorage.removeItem(backupKey);
+      if (stalePublication) expect(file('published').textSync()).toBe(legacyProof);
       await nativeSet(key + ':checkpoint', rawB);
       notified.mockClear();
 
@@ -2307,7 +2355,7 @@ test.each(['stale backup receipt', 'no backup receipt'] as const)(
         expect(file('pending').textSync()).toBe('');
         expect(file('committed').info().exists).toBe(false);
         expect(file('settled').info().exists).toBe(false);
-        const attempt = file('json').textSync().split('\n')[0];
+        const attempt = file('json').textSync().match(/^attempt:.*$/m)![0];
         expect(attempt).toContain(sha256(rawA));
         expect(attempt).not.toBe(receiptA.split('\n')[0]);
         const prepared = 'prepared:\n' + attempt + '\n' + sha256(rawB);
@@ -2323,6 +2371,11 @@ test.each(['stale backup receipt', 'no backup receipt'] as const)(
           await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledgerB);
         });
         expect(rollbackRead).toHaveBeenCalledTimes(2);
+        if (stalePublication) {
+          expect(read.mock.results.slice(fileReadsBeforeRestart).some(({ type, value }, index) =>
+            type === 'return' && value === legacyProof &&
+            read.mock.contexts[fileReadsBeforeRestart + index].uri === file('published').uri)).toBe(true);
+        }
         expect(read.mock.results.slice(fileReadsBeforeRestart).some(({ type, value }) =>
           type === 'return' && value === prepared)).toBe(true);
         const backupReadIndex = get.mock.calls.findIndex(([entry], index) => index >= readsBeforeRestart && entry === backupKey);
