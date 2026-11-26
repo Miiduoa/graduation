@@ -306,7 +306,9 @@ function MapContent({
     const to = confirmedRoutePlace(locations, locations.find((location) => location.id === ids[1]) ?? null);
     return from && to ? [from, to] : null;
   }, [route, locations, placeState.source]);
-  const routeStart = confirmedRoutePlace(locations, routeDraft?.from ?? null);
+  // A resolved shared route is editable just like a manually planned route.
+  // Pending or invalid shared links must never supply an origin.
+  const routeStart = routeDraft === null ? deepLinkRoute?.[0] ?? null : confirmedRoutePlace(locations, routeDraft.from);
   const routeEnd = confirmedRoutePlace(locations, routeDraft?.to ?? null);
   const routeNeedsConfirmation = Boolean(
     (routeDraft?.from && !routeStart) || (routeDraft?.to && !routeEnd),
@@ -648,6 +650,15 @@ function MapContent({
                 aria-describedby={classroomNoteId} target="_blank" rel="noopener noreferrer">
                 使用 Apple 地圖前往{classroomPlace.name}
               </a>
+              {routeStart && !routeNeedsConfirmation && routeStart.id !== classroomPlace.id && (
+                <button className="btn" type="button" aria-describedby={classroomNoteId}
+                  onClick={() => {
+                    setRouteDraft({ from: { ...routeStart }, to: { ...classroomPlace } });
+                    setNotice('');
+                  }}>
+                  將{classroomPlace.name}設為終點
+                </button>
+              )}
               {selected?.id !== classroomPlace.id && (
                 <button className="btn" type="button" onClick={() => selectLocation(classroomPlace)}>
                   定位{classroomPlace.name}
