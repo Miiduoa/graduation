@@ -13,5 +13,5 @@
   "migration": "283_platform_assistant_permissions",
   "preservesLostFoundMigration": "282_platform_lost_found",
   "inputTree": "fffde885da74a84cfd9ae702f955db99507dc855",
-  "candidateTree": "841c117c46775fec3af27da9d88abaf0ae13b2f7"
+  "candidateTree": "601e52d928d1025cb4f53d19aa7f83fb14d36bc3"
 }
