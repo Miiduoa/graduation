@@ -17,7 +17,7 @@ tags: [smoke, cafeteria]
 - tapOn: '全部餐廳'
 - tapOn: '餐點或店名'
 - inputText: 'maestro-no-match'
-- hideKeyboard
+# Clear sits beside the field, above the keyboard. Tapping it is the real next action.
 - tapOn: '清除搜尋'
 - assertVisible: '全部餐廳'
 - takeScreenshot: cafeteria_filters_cleared

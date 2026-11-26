@@ -4,9 +4,11 @@ tags: [smoke, auth]
 ---
 - runFlow: ../helpers/open-emulator-login.yaml
 - inputText: 'incorrect-emulator-fixture-password'
-- hideKeyboard
+# Same overlay as the seeded sign-in: submit by tapping the visible control
+# instead of Maestro hideKeyboard, which iOS password keyboards do not expose.
 - tapOn:
     id: maestro-sign-in
+    enabled: true
 - extendedWaitUntil:
     visible:
       id: maestro-login-error

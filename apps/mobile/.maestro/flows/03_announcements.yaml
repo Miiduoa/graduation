@@ -18,7 +18,7 @@ tags: [smoke, announcements]
 - tapOn:
     id: announcement-search
 - inputText: 'Maestro'
-- hideKeyboard
+# Search already dismisses on Return; scrolling the results is the real next action.
 - scrollUntilVisible:
     element:
       text: 'Maestro 選課測試公告'

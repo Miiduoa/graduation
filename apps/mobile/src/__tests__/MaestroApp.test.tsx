@@ -1,5 +1,8 @@
 import React from 'react';
+import { Keyboard } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuthInstance } from '../firebase';
 
 jest.mock('expo-constants', () => ({
   expoConfig: {
@@ -27,7 +30,29 @@ jest.mock('../../App', () => {
 
 jest.mock('../firebase', () => ({ getAuthInstance: jest.fn() }));
 
+jest.mock('firebase/auth', () => ({
+  signInWithEmailAndPassword: jest.fn(),
+  signOut: jest.fn(),
+}));
+
 import { MaestroApp } from '../../e2e/MaestroApp';
+
+const emulatorAuth = {
+  app: { options: { projectId: 'demo-campus-one' } },
+  emulatorConfig: { host: '127.0.0.1', port: 19291 },
+};
+
+function openLogin() {
+  const view = render(<MaestroApp />);
+  fireEvent.press(view.getByTestId('maestro-open-emulator-login'));
+  return view;
+}
+
+beforeEach(() => {
+  jest.mocked(getAuthInstance).mockReturnValue(emulatorAuth as ReturnType<typeof getAuthInstance>);
+  jest.mocked(signInWithEmailAndPassword).mockReset();
+  jest.mocked(signOut).mockReset();
+});
 
 test('keeps the real app visible and offers an in-window emulator login control', () => {
   const view = render(<MaestroApp />);
@@ -52,4 +77,38 @@ test('does not open the overlay from a crafted campus URI', async () => {
   await act(async () => undefined);
   await waitFor(() => expect(view.getByTestId('app-shell')).toBeTruthy());
   expect(view.queryByTestId('maestro-emulator-login')).toBeNull();
+});
+
+test('password return key dismisses the keyboard and signs in the seeded fixture', async () => {
+  const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
+  const getIdToken = jest.fn().mockResolvedValue('token');
+  jest.mocked(signInWithEmailAndPassword).mockResolvedValue({
+    user: { uid: 'test-student-a', getIdToken },
+  } as never);
+
+  const view = openLogin();
+  fireEvent.changeText(view.getByTestId('maestro-email'), 's0000001@test.campus-one.local');
+  fireEvent.changeText(view.getByTestId('maestro-password'), 'campus-test-1234');
+  fireEvent(view.getByTestId('maestro-password'), 'submitEditing');
+
+  await waitFor(() => expect(signInWithEmailAndPassword).toHaveBeenCalledTimes(1));
+  expect(dismiss).toHaveBeenCalled();
+  expect(getIdToken).toHaveBeenCalledWith(true);
+  await waitFor(() => expect(view.queryByTestId('maestro-emulator-login')).toBeNull());
+  dismiss.mockRestore();
+});
+
+test('tapping sign-in while the password field is focused still submits', async () => {
+  const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
+  jest.mocked(signInWithEmailAndPassword).mockRejectedValue(new Error('wrong password'));
+
+  const view = openLogin();
+  fireEvent.changeText(view.getByTestId('maestro-email'), 's0000001@test.campus-one.local');
+  fireEvent.changeText(view.getByTestId('maestro-password'), 'incorrect-emulator-fixture-password');
+  fireEvent.press(view.getByTestId('maestro-sign-in'));
+
+  await waitFor(() => expect(view.getByTestId('maestro-login-error')).toBeTruthy());
+  expect(dismiss).toHaveBeenCalled();
+  expect(view.getByTestId('maestro-sign-in')).toBeTruthy();
+  dismiss.mockRestore();
 });

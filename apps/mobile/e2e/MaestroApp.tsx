@@ -1,5 +1,14 @@
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import {
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+} from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
@@ -37,6 +46,7 @@ export function MaestroApp() {
 
 function MaestroHarness() {
   const insets = useSafeAreaInsets();
+  const passwordRef = useRef<TextInput>(null);
   const [visible, setVisible] = useState(false);
   const [offerTrigger, setOfferTrigger] = useState(true);
   const [email, setEmail] = useState('');
@@ -56,6 +66,7 @@ function MaestroHarness() {
   };
 
   const login = async () => {
+    Keyboard.dismiss();
     if (busy) return;
     setBusy(true);
     setError('');
@@ -95,27 +106,65 @@ function MaestroHarness() {
       </Pressable>
     ) : null}
     {visible ? (
-      <View
+      <KeyboardAvoidingView
         testID="maestro-emulator-login"
         accessibilityViewIsModal
         collapsable={false}
         pointerEvents="auto"
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.overlay}
       >
-        <Text style={styles.title}>Firebase 模擬器測試登入</Text>
-        <Text style={styles.copy}>僅連線本機 demo-campus-one；登入與權限由 Firebase 驗證。</Text>
-        <TextInput testID="maestro-email" accessibilityLabel="測試帳號" value={email} onChangeText={setEmail}
-          autoCapitalize="none" autoCorrect={false} keyboardType="email-address"
-          style={styles.field} />
-        <TextInput testID="maestro-password" accessibilityLabel="測試密碼" value={password} onChangeText={setPassword}
-          secureTextEntry autoCapitalize="none" autoCorrect={false}
-          style={styles.field} />
-        <Pressable testID="maestro-sign-in" accessibilityRole="button" disabled={busy}
-          onPress={() => void login()} style={styles.submit}>
-          <Text style={styles.submitLabel}>{busy ? '登入中' : '登入測試學生'}</Text>
-        </Pressable>
-        {error ? <Text testID="maestro-login-error" accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-      </View>
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          contentContainerStyle={styles.form}
+        >
+          <Pressable onPress={Keyboard.dismiss} accessible={false}>
+            <Text style={styles.title}>Firebase 模擬器測試登入</Text>
+            <Text style={styles.copy}>僅連線本機 demo-campus-one；登入與權限由 Firebase 驗證。</Text>
+          </Pressable>
+          <TextInput
+            testID="maestro-email"
+            accessibilityLabel="測試帳號"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            returnKeyType="next"
+            blurOnSubmit={false}
+            onSubmitEditing={() => passwordRef.current?.focus()}
+            style={styles.field}
+          />
+          <TextInput
+            ref={passwordRef}
+            testID="maestro-password"
+            accessibilityLabel="測試密碼"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="go"
+            blurOnSubmit
+            enablesReturnKeyAutomatically
+            onSubmitEditing={() => void login()}
+            style={styles.field}
+          />
+          <Pressable
+            testID="maestro-sign-in"
+            accessibilityRole="button"
+            accessibilityLabel="登入測試學生"
+            disabled={busy}
+            onPress={() => void login()}
+            style={styles.submit}
+          >
+            <Text style={styles.submitLabel}>{busy ? '登入中' : '登入測試學生'}</Text>
+          </Pressable>
+          {error ? <Text testID="maestro-login-error" accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
     ) : null}
   </>;
 }
@@ -137,10 +186,13 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 9999,
     elevation: 9999,
+    backgroundColor: '#fff',
+  },
+  form: {
+    flexGrow: 1,
     padding: 24,
     paddingTop: 80,
     gap: 20,
-    backgroundColor: '#fff',
   },
   title: { color: '#111', fontSize: 22 },
   copy: { color: '#333' },

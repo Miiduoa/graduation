@@ -344,7 +344,10 @@ function ContentSearch({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`清除${kind}搜尋`}
-            onPress={() => onChange('')}
+            onPress={() => {
+              Keyboard.dismiss();
+              onChange('');
+            }}
             style={{
               minHeight: 44,
               minWidth: 44,

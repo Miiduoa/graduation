@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   Modal,
   Pressable,
   StyleSheet,
@@ -226,6 +227,7 @@ function DiningContent({
       title="校園餐廳"
       subtitle="選店、看菜單，再決定吃什麼。"
       onBack={navigation?.goBack}
+      keyboardShouldPersistTaps="handled"
       rightAction={
         scope.userId && navigation?.navigate ? (
           <AIButton
@@ -327,13 +329,18 @@ function DiningContent({
             placeholderTextColor={aiTokens.muted}
             returnKeyType="search"
             autoCorrect={false}
+            blurOnSubmit
+            onSubmitEditing={Keyboard.dismiss}
             style={styles.searchInput}
           />
           {keyword ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="清除搜尋"
-              onPress={() => setKeyword('')}
+              onPress={() => {
+                Keyboard.dismiss();
+                setKeyword('');
+              }}
               style={styles.clearButton}
             >
               <Ionicons name="close-circle" size={20} color={aiTokens.muted} />
