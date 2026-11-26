@@ -565,6 +565,45 @@ describe('trusted OSM walking segment audit bridge', () => {
     )).not.toBeNull();
   });
 
+  it('does not promote conditional openings or legacy access schedules from fresh or cached OSM', () => {
+    const cases: [Record<string, string>, boolean][] = [
+      [{ open: 'yes', 'open:conditional': 'no @ (winter)' }, true],
+      [{ open: 'no', 'open:conditional': 'yes @ (Mo-Fr 07:00-09:00)' }, true],
+      [{ 'open:conditional': '' }, true],
+      [{ date_on: 'May 1' }, true],
+      [{ date_off: 'Oct 31' }, true],
+      [{ day_on: 'Mo' }, true],
+      [{ day_off: 'Fr' }, true],
+      [{ hour_on: '07:00' }, true],
+      [{ hour_off: '17:00' }, true],
+      [{ open: 'no', locked: 'no' }, false],
+      [{ open: 'full' }, false],
+      [{ open: 'partial' }, false],
+      [{ 'bicycle:conditional': 'no @ (Mo-Fr)' }, false],
+    ];
+    for (const [tags, restricted] of cases) {
+      for (const location of ['way', 'from', 'to']) {
+        const data = parseCampusWalkingOsmCandidates({
+          osm3s: { timestamp_osm_base: '2026-11-24T08:00:00Z' },
+          elements: [
+            { ...points[0], tags: location === 'from' ? tags : {} },
+            { ...points[1], tags: location === 'to' ? tags : {} },
+            { type: 'way', id: 101, nodes: [1, 2],
+              tags: { highway: 'footway', ...(location === 'way' ? tags : {}) }, ...revision },
+          ],
+        }, 'fixture', bounds, now)!;
+        expect(data.graph.edges[0].access).toBe(restricted ? 'restricted' : 'unknown');
+        // An outdated serialized graph might not retain the restriction bit.
+        data.graph.edges[0].access = 'unknown';
+        const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+        expect(graph.edges[0].access).toBe(restricted ? 'restricted' : 'reviewed-open');
+        expect(!!findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBe(!restricted);
+        expect(!!findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1, now)).toBe(!restricted);
+        expect(!!findCampusWalkingRoute(graph, 'fixture', bounds, 1, 1, now)).toBe(!restricted);
+      }
+    }
+  });
+
   it('leaves an ambiguously restricted endpoint closed in both directions', () => {
     const data = parseCampusWalkingOsmCandidates({
       osm3s: { timestamp_osm_base: '2026-11-24T08:00:00Z' },
