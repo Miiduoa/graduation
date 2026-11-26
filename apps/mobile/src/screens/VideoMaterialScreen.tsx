@@ -5,10 +5,11 @@
  * 用 expo-av Video（已隨 Expo SDK 包含）；若不可用 fallback webview。
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { View, Text, ActivityIndicator, Pressable, ScrollView } from 'react-native';
+import { View, Text, ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 import { CourseChipEmpty, CourseChipHeader, courseChipScrollContentStyle } from '../ui/courseChipShell';
 import {
   TRONCLASS_DATA_DISABLED_MESSAGE,
@@ -40,6 +41,7 @@ try {
 }
 
 export default function VideoMaterialScreen(props: RouteProps) {
+  useThemeVersion();
   const navigation = useNavigation<any>();
   const url = props.route?.params?.url ?? '';
   const title = props.route?.params?.title ?? '影片教材';
@@ -89,13 +91,13 @@ export default function VideoMaterialScreen(props: RouteProps) {
   if (!url) {
     return (
       <ScrollView
-        style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
+        style={{ flex: 1, backgroundColor: theme.colors.bg }}
         contentContainerStyle={[
           courseChipScrollContentStyle(),
           { flexGrow: 1, paddingTop: theme.space.xl },
         ]}
       >
-        <CourseChipHeader emoji="🎬" eyebrow="影片教材" title="尚無有效播放網址" meta={courseName} />
+        <CourseChipHeader emoji="" eyebrow="影片教材" title="尚無有效播放網址" meta={courseName} />
         <CourseChipEmpty
           title="無法解析影片連結"
           body="若從通知或外部連結進入，請回到課程教材清單重新開啟。教師端請確認教材是否已發布。"
@@ -109,13 +111,13 @@ export default function VideoMaterialScreen(props: RouteProps) {
   if (isTronClassPuHostedUrl(url) && !isTronClassDataFetchEnabled()) {
     return (
       <ScrollView
-        style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
+        style={{ flex: 1, backgroundColor: theme.colors.bg }}
         contentContainerStyle={[
           courseChipScrollContentStyle(),
           { flexGrow: 1, paddingTop: theme.space.xl },
         ]}
       >
-        <CourseChipHeader emoji="🔗" eyebrow="LMS" title="連線已關閉" meta={courseName} />
+        <CourseChipHeader emoji="" eyebrow="LMS" title="連線已關閉" meta={courseName} />
         <CourseChipEmpty
           title={TRONCLASS_DATA_DISABLED_MESSAGE}
           body="已停用對 TronClass 站台的連線；無法由此播放託管於玩課雲的影片。請使用本機／demo 教材，或於建置設定重新啟用 EXPO_PUBLIC_TRONCLASS_DATA_ENABLED。"
@@ -128,15 +130,25 @@ export default function VideoMaterialScreen(props: RouteProps) {
 
   if (!Video) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <Ionicons name="videocam-off-outline" size={48} color="#8E8E93" />
-        <Text style={{ marginTop: 12, color: '#3C3C43', textAlign: 'center' }}>
+      <View
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+          backgroundColor: theme.colors.bg,
+        }}
+      >
+        <Ionicons name="videocam-off-outline" size={48} color={theme.colors.muted} />
+        <Text style={{ marginTop: 12, color: theme.colors.text, fontSize: 15, fontWeight: '600', textAlign: 'center' }}>
           本機尚未安裝 expo-av。
         </Text>
-        <Text style={{ marginTop: 8, color: '#8E8E93', fontSize: 12, textAlign: 'center' }}>
+        <Text style={{ marginTop: 8, color: theme.colors.muted, fontSize: 12, textAlign: 'center', lineHeight: 18 }}>
           開發者：請 `npx expo install expo-av` 後重新打包。
         </Text>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="用一般檢視器開啟"
           onPress={() =>
             navigation.replace('CourseMaterialViewer', {
               url,
@@ -145,9 +157,20 @@ export default function VideoMaterialScreen(props: RouteProps) {
               courseName,
             })
           }
-          style={{ marginTop: 16, padding: 12, backgroundColor: '#003F8A', borderRadius: 8 }}
+          style={({ pressed }) => ({
+            marginTop: 16,
+            minHeight: 44,
+            paddingHorizontal: 18,
+            paddingVertical: 11,
+            backgroundColor: theme.colors.accent,
+            borderRadius: theme.radius.md,
+            justifyContent: 'center',
+            opacity: pressed ? 0.85 : 1,
+          })}
         >
-          <Text style={{ color: '#fff' }}>用一般檢視器開啟</Text>
+          <Text style={{ color: theme.colors.onAccent, fontSize: 14, fontWeight: '600' }}>
+            用一般檢視器開啟
+          </Text>
         </Pressable>
       </View>
     );
@@ -156,9 +179,9 @@ export default function VideoMaterialScreen(props: RouteProps) {
   const progressPct = duration > 0 ? Math.min(100, (position / duration) * 100) : 0;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#000' }}>
-      {/* 影片區 */}
-      <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000' }}>
+    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+      {/* 影片區：維持純黑高對比媒體畫布 */}
+      <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000000' }}>
         <Video
           ref={playerRef}
           source={{ uri: url }}
@@ -185,26 +208,42 @@ export default function VideoMaterialScreen(props: RouteProps) {
               left: 0,
               right: 0,
               bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.45)',
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color="#FFFFFF" />
           </View>
         )}
       </View>
 
       {/* 進度與資訊 */}
-      <View style={{ padding: 16, backgroundColor: '#003F8A' }}>
-        <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>{title}</Text>
+      <View
+        style={{
+          paddingHorizontal: theme.layout.screenHorizontalPadding,
+          paddingVertical: theme.space.md,
+          backgroundColor: theme.colors.surface,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.separator,
+        }}
+      >
+        <Text
+          accessibilityRole="header"
+          style={{ color: theme.colors.text, fontSize: 17, fontWeight: '700', lineHeight: 23 }}
+        >
+          {title}
+        </Text>
         {courseName ? (
-          <Text style={{ color: '#E5F2FF', fontSize: 12, marginTop: 2 }}>{courseName}</Text>
+          <Text style={{ color: theme.colors.textSecondary, fontSize: 13, marginTop: 3 }}>
+            {courseName}
+          </Text>
         ) : null}
         <View
           style={{
             marginTop: 12,
             height: 6,
-            backgroundColor: '#1e3a5f',
+            backgroundColor: theme.colors.surface2,
             borderRadius: 3,
             overflow: 'hidden',
           }}
@@ -213,15 +252,24 @@ export default function VideoMaterialScreen(props: RouteProps) {
             style={{
               height: 6,
               width: `${progressPct}%`,
-              backgroundColor: '#fbbf24',
+              backgroundColor: completedReported ? theme.colors.success : theme.colors.accent,
               borderRadius: 3,
             }}
           />
         </View>
-        <Text style={{ color: '#E5E5EA', fontSize: 11, marginTop: 4 }}>
-          進度 {Math.round(progressPct)}%
-          {completedReported ? ' ・ ✅ 已記錄完成' : ''}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
+          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+            進度 {Math.round(progressPct)}%
+          </Text>
+          {completedReported ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="checkmark-circle" size={14} color={theme.colors.success} />
+              <Text style={{ color: theme.colors.success, fontSize: 12, fontWeight: '600' }}>
+                已記錄完成
+              </Text>
+            </View>
+          ) : null}
+        </View>
       </View>
     </View>
   );

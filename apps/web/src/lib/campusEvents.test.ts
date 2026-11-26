@@ -205,5 +205,8 @@ it('rejects ambiguous source clocks for guarded actions while retaining ordinary
   const ambiguous = eventDocument('e1', 'schools/pu/events', { startsAt: '2026-10-08', endsAt: '2026-10-08T11:00:00' });
   vi.mocked(getDocFromServer).mockResolvedValue(ambiguous as never);
   await expect(loadCampusEvent('pu', 'e1', 'school-events', guard)).resolves.toMatchObject({ startsAt: '', endsAt: undefined });
-  await expect(loadCampusEvent('pu', 'e1', 'school-events')).resolves.toMatchObject({ startsAt: '2026-10-08T00:00:00.000Z' });
+  await expect(loadCampusEvent('pu', 'e1', 'school-events')).resolves.toMatchObject({
+    startsAt: '2026-10-08T00:00:00.000Z',
+    calendarTime: { startsAt: '', endsAt: '' },
+  });
 });

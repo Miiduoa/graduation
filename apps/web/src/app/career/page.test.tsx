@@ -56,14 +56,14 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-it('uses one page title and one campus-preserving route back to life', async () => {
+it('uses one page title and one campus-preserving route back to explore', async () => {
   render(<CareerPage />);
   await screen.findByText('目前沒有可確認日期的近期截止日或活動。');
   expect(screen.getAllByRole('heading', { name: '職涯', level: 1 })).toHaveLength(1);
-  const links = screen.getAllByRole('link', { name: '生活' });
+  const links = screen.getAllByRole('link', { name: '探索' });
   expect(links).toHaveLength(1);
   const target = new URL(links[0].getAttribute('href')!, 'https://nuni.tw');
-  expect(target.pathname).toBe('/life');
+  expect(target.pathname).toBe('/explore');
   expect([...target.searchParams.entries()]).toEqual([
     ['schoolId', 'pu'],
     ['campus', 'pu'],

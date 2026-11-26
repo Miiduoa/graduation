@@ -9,10 +9,10 @@ export const metadata: Metadata = {
 
 export default function SupportPage() {
   return (
-    <SiteShell title="支援" subtitle="這裡只寫目前做得到的事。">
+    <SiteShell title="支援">
       <article className={styles.document}>
         <section>
-          <h2>怎麼找得到人</h2>
+          <h2>聯絡 nuni</h2>
           <p>
             帳號、隱私或刪除資料，請來信{' '}
             <a href="mailto:demohan513@gmail.com">demohan513@gmail.com</a>

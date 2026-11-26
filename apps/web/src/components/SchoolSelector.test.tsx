@@ -45,6 +45,41 @@ describe('school selector usability', () => {
     expect(selection.selectSchool).toHaveBeenCalledWith('nccu');
   });
 
+  it('lets visitors find a campus by its English name and then choose it explicitly', () => {
+    render(<SchoolSelector />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'National Chengchi' } });
+    expect(screen.getByRole('status').textContent).toBe('找到 1 所校園');
+    expect(selection.selectSchool).not.toHaveBeenCalled();
+    const result = screen.getByRole('button', { name: /國立政治大學/ });
+    expect(result.textContent).toContain('National Chengchi University');
+    fireEvent.click(result);
+    expect(selection.selectSchool).toHaveBeenCalledWith('nccu');
+  });
+
+  it('distinguishes nearby English matches without adding English labels to Chinese and code searches', () => {
+    const existing = selection.schools;
+    selection.schools = [
+      { id: 'ntust', name: '國立臺灣科技大學', code: 'NTUST', shortName: '臺科大', status: 'not-open' },
+      ...existing,
+    ];
+    try {
+      render(<SchoolSelector />);
+      const search = screen.getByRole('searchbox');
+      fireEvent.change(search, { target: { value: 'National Taiwan University' } });
+      const [university, technology] = screen.getAllByRole('button', { name: /國立臺灣/ });
+      expect(university.textContent).toContain('National Taiwan University');
+      expect(university.textContent).not.toContain('Technology');
+      expect(technology.textContent).toContain('National Taiwan University of Science and Technology');
+      for (const value of ['台大', 'NTU']) {
+        fireEvent.change(search, { target: { value } });
+        expect(screen.getByRole('button', { name: /國立臺灣大學/ }).textContent).not.toContain('National');
+      }
+      expect(selection.selectSchool).not.toHaveBeenCalled();
+    } finally {
+      selection.schools = existing;
+    }
+  });
+
   it('marks the current result and keeps all-campus browsing available during search', () => {
     render(<SchoolSelector />);
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: '大學' } });

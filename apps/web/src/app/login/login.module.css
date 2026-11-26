@@ -1,7 +1,7 @@
 .flow {
   width: 100%;
-  max-width: 720px;
-  margin-inline: auto;
+  max-width: 42rem;
+  margin-inline-end: auto;
 }
 
 .continuation {
@@ -17,7 +17,7 @@
 }
 
 .flow .methods > section {
-  padding: clamp(20px, 4vw, 32px);
+  padding: clamp(18px, 3vw, 28px) 0;
 }
 
 .flow .methods > section > form {

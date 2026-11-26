@@ -12,6 +12,7 @@ import { applyNotificationDestination } from '../utils/applyNotificationDestinat
 import { resolveNotificationDestination } from '../utils/notificationDestination';
 import { personalReminderCategory } from '../services/personalReminderPayload';
 import { isDormLaundryReminderIdentifier } from '../services/dormLaundryReminder';
+import { isDormAnnouncementData } from '../utils/dormAnnouncementPush';
 import type { UserRole } from '../data/types';
 
 type NavigationLike = {
@@ -20,12 +21,12 @@ type NavigationLike = {
   } | null;
 };
 
-type NotificationResponseLike = {
+export type NotificationResponseLike = {
   notification?: { request?: { identifier?: string; content?: { data?: unknown } } };
   actionIdentifier?: string;
 };
 
-function getNotificationResponseKey(response: NotificationResponseLike) {
+export function getNotificationResponseKey(response: NotificationResponseLike) {
   const identifier = response.notification?.request?.identifier;
   const actionIdentifier = response.actionIdentifier ?? 'default';
   const data = response.notification?.request?.content?.data;
@@ -39,6 +40,10 @@ export function navigateFromNotificationData(
   schoolId?: string | null,
   uid?: string,
 ) {
+  if (isDormAnnouncementData(rawData)) {
+    rootNavigateNested('訊息', 'Notifications');
+    return false;
+  }
   const destination = resolveNotificationDestination(
     { data: rawData },
     { role: profileRole, schoolId, ...(typeof rawData === 'object' && rawData !== null &&
@@ -59,6 +64,7 @@ export function usePushNotifications(
   uid: string | undefined,
   profileRole?: UserRole | null,
   schoolId?: string | null,
+  onDormTap?: (response: NotificationResponseLike | null) => void,
 ) {
   const roleRef = useRef<UserRole | null | undefined>(profileRole);
   const schoolRef = useRef<string | null | undefined>(schoolId);
@@ -88,7 +94,7 @@ export function usePushNotifications(
   }, [uid]);
 
   useEffect(() => {
-    if (Platform.OS === 'web' || !uid) return;
+    if (Platform.OS === 'web' || (!uid && !onDormTap)) return;
     let cancelled = false;
     let liveTapCount = 0;
     let pending: NotificationResponseLike | null = null;
@@ -122,7 +128,15 @@ export function usePushNotifications(
       });
     };
 
-    const queue = (response: NotificationResponseLike) => {
+    const queue = (response: NotificationResponseLike, live = false) => {
+      const data = response.notification?.request?.content?.data;
+      if (onDormTap && isDormAnnouncementData(data)) {
+        pending = null;
+        onDormTap(response);
+        return;
+      }
+      if (live) onDormTap?.(null);
+      if (!uid) return;
       // A live tap owned by the other handler still supersedes our previous destination.
       pending = personalReminderCategory(response.notification?.request?.content?.data) ? null : response;
       flush();
@@ -131,7 +145,7 @@ export function usePushNotifications(
     const sub = addNotificationResponseReceivedListener((response) => {
       if (cancelled) return;
       liveTapCount++;
-      queue(response);
+      queue(response, true);
     });
     const unsubscribe = subscribeSchoolNavigationReady(flush);
     if (!liveTapCount) {
@@ -147,5 +161,5 @@ export function usePushNotifications(
       unsubscribe();
       sub.remove();
     };
-  }, [uid, schoolId]);
+  }, [uid, schoolId, onDormTap]);
 }

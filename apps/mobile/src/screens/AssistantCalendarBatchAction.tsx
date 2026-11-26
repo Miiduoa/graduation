@@ -10,6 +10,7 @@ import { AIButton, aiTokens } from '../ui/aiFirst';
 import { safeNavigate } from '../utils/safeNavigate';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
 import type { NuniPlanAssignmentNavigation } from './NuniPlanAssignmentOpenButton';
+import { useAssistantContinuation } from '../services/assistantContinuation';
 
 const timeLabel = (value: string) => new Date(value).toLocaleString('zh-TW', {
   timeZone: 'Asia/Taipei', hour12: false,
@@ -42,6 +43,7 @@ export function AssistantCalendarBatchAction({ batch, context, navigation, disab
   }, [navigation]);
   const current = () => mounted.current && context.isCurrent() &&
     assistantCalendarOwner(context) === batch.plan.owner && context.schoolId === batch.plan.schoolId;
+  const openWithContinuation = useAssistantContinuation(navigation, current);
   const coursework = batch.plan.kind === 'coursework-study';
   const sourceReady = !coursework || !!sourceChecks;
   const unread = batch.stop?.reason === 'unavailable' || batch.stop?.reason === 'timeout';
@@ -85,7 +87,7 @@ export function AssistantCalendarBatchAction({ batch, context, navigation, disab
     if (disabled || lock.current || !current()) return;
     const target = mobileAssistantServiceDestination('calendar', context.platformTimetable ? 'platform' : 'campus', navigation);
     if (target?.kind !== 'native' || target.route !== 'PersonalCalendar' ||
-        !safeNavigate(navigation, 'PersonalCalendar', { eventId }, { fallbackMessage: null })) {
+        !openWithContinuation(() => safeNavigate(navigation, 'PersonalCalendar', { eventId }, { fallbackMessage: null }))) {
       setError('目前無法從此頁開啟行事曆。已核對的行程可從個人行事曆查看。');
     }
   };

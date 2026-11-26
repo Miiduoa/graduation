@@ -55,6 +55,12 @@ it('filters by type, status, mine, and search query', () => {
   ).toEqual(['1']);
 });
 
+it('limits results to the requested item category and names it in the visible scope', () => {
+  const filters = { query: '', type: 'all', status: 'all', mine: false, category: 'cards' } as const;
+  expect(filterLostFoundItems(items, filters, 'alice').map(item => item.id)).toEqual(['2']);
+  expect(describeLostFoundFilterScope(filters, '靜宜大學')).toContain('證件／卡片');
+});
+
 it('describes the visible filter scope in Traditional Chinese', () => {
   expect(
     describeLostFoundFilterScope(

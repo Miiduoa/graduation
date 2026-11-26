@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { afterEach, expect, it } from 'vitest';
+import { deleteApp, initializeApp } from 'firebase-admin/app';
 import {
   firebaseAdminInitAttemptsForTests,
   getFirebaseAdmin,
@@ -13,6 +14,17 @@ const dummyAccount = (projectId: string, privateKey = 'not-a-pem') =>
     client_email: 'demo@example.local',
     private_key: privateKey,
   });
+
+it('refuses to use another project as the production push and database runtime', async () => {
+  const foreignApp = initializeApp({ projectId: 'demo-another-school' });
+  try {
+    await expect(getFirebaseAdmin({
+      ...process.env, FIREBASE_SERVICE_ACCOUNT_JSON: dummyAccount('campus-one-tw'),
+    })).resolves.toBeNull();
+  } finally {
+    await deleteApp(foreignApp);
+  }
+});
 
 afterEach(() => {
   resetFirebaseAdminForTests();

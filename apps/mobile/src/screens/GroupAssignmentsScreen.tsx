@@ -1,10 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen, Card, LoadingState, ErrorState, SectionTitle } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { isProvidenceSchoolId } from '@campus/shared/src/schoolIds';
 import { useSchool } from '../state/school';
 import { SchoolLearningLinks } from '../components/SchoolLearningLinks';
@@ -43,31 +44,32 @@ function formatDate(iso: string | null): string {
   }
 }
 
-// ── 作業卡片 ────────────────────────────────────
-function HomeworkCard(props: { hw: TCHomework; isCurrent: () => boolean }) {
-  const { hw } = props;
+// ── 作業列 ──────────────────────────────────────
+function HomeworkRow(props: { hw: TCHomework; isCurrent: () => boolean; first: boolean }) {
+  const { hw, first } = props;
+  const s = useThemeStyleSheet(createStyles);
   const now = new Date();
   const endTime = hw.end_time ? new Date(hw.end_time) : null;
   const isOverdue = endTime ? endTime < now : false;
   const hasSubmission = (hw.homework_submissions?.length ?? 0) > 0;
 
-  let statusColor = theme.colors.accent;
+  let statusColor: string = theme.colors.textSecondary;
   let statusText = '進行中';
   let statusIcon: keyof typeof Ionicons.glyphMap = 'time-outline';
 
   if (hasSubmission) {
-    statusColor = '#34C759';
+    statusColor = theme.colors.success;
     statusText = '已繳交';
-    statusIcon = 'checkmark-circle';
+    statusIcon = 'checkmark-circle-outline';
   } else if (hw.is_closed || isOverdue) {
-    statusColor = '#D70015';
+    statusColor = theme.colors.danger;
     statusText = '已截止';
     statusIcon = 'close-circle-outline';
   } else if (endTime) {
     // 檢查是否快到截止時間（24小時內）
     const hoursLeft = (endTime.getTime() - now.getTime()) / (1000 * 60 * 60);
     if (hoursLeft <= 24 && hoursLeft > 0) {
-      statusColor = '#FF9500';
+      statusColor = theme.colors.warning;
       statusText = `剩 ${Math.floor(hoursLeft)} 小時`;
       statusIcon = 'alarm-outline';
     }
@@ -79,57 +81,29 @@ function HomeworkCard(props: { hw: TCHomework; isCurrent: () => boolean }) {
     void webBrowserOpenWithPuTronClassGate(url);
   };
 
+  const deadline = hw.end_time ? `截止 ${formatDate(hw.end_time)}` : '';
+
   return (
     <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={`${hw.title}，${hw.courseName}，${statusText}${deadline ? `，${deadline}` : ''}`}
       onPress={onPress}
-      style={({ pressed }) => ({
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        padding: 14,
-        borderRadius: 14,
-        backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
-        borderWidth: 1,
-        borderColor: hasSubmission
-          ? '#34C75930'
-          : hw.is_closed || isOverdue
-            ? '#D7001520'
-            : theme.colors.border,
-        opacity: pressed ? 0.8 : 1,
-      })}
+      style={({ pressed }) => [s.row, !first && s.rowDivider, pressed && s.rowPressed]}
     >
-      <View
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: 12,
-          backgroundColor: `${statusColor}14`,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Ionicons name={statusIcon} size={20} color={statusColor} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text
-          style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}
-          numberOfLines={2}
-        >
+      <View style={s.rowBody}>
+        <Text style={s.rowTitle} numberOfLines={2}>
           {hw.title}
         </Text>
-        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+        <Text style={s.rowMeta} numberOfLines={1}>
           {hw.courseName}
+          {deadline ? ` · ${deadline}` : ''}
         </Text>
-        {hw.end_time ? (
-          <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
-            截止：{formatDate(hw.end_time)}
-          </Text>
-        ) : null}
       </View>
-      <View style={{ alignItems: 'flex-end', gap: 4 }}>
-        <Text style={{ color: statusColor, fontWeight: '700', fontSize: 13 }}>{statusText}</Text>
-        <Ionicons name="open-outline" size={12} color={theme.colors.muted} />
+      <View style={s.rowStatus}>
+        <Ionicons name={statusIcon} size={16} color={statusColor} />
+        <Text style={[s.rowStatusText, { color: statusColor }]}>{statusText}</Text>
       </View>
+      <Ionicons name="open-outline" size={14} color={theme.colors.muted} />
     </Pressable>
   );
 }
@@ -159,6 +133,7 @@ export function GroupAssignmentsScreen() {
 }
 
 function ProvidenceAssignments() {
+  const s = useThemeStyleSheet(createStyles);
   const active = useRef(false);
   useLayoutEffect(() => {
     active.current = true;
@@ -282,87 +257,126 @@ function ProvidenceAssignments() {
   return (
     <Screen noPadding>
       <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{
-          gap: 14,
-          padding: 16,
-          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
-        }}
+        style={s.scroll}
+        contentContainerStyle={[s.content, { paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }]}
       >
         {/* 統計概覽 */}
-        <View style={{ flexDirection: 'row', gap: 10 }}>
-          <View
-            style={{
-              flex: 1,
-              alignItems: 'center',
-              paddingVertical: 14,
-              borderRadius: 14,
-              backgroundColor: theme.colors.surface,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-            }}
-          >
-            <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 24 }}>
-              {homeworks.length}
-            </Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 11 }}>全部作業</Text>
+        <View style={s.summary} accessibilityRole="summary">
+          <View style={s.summaryCell}>
+            <Text style={s.summaryValue}>{homeworks.length}</Text>
+            <Text style={s.summaryLabel}>全部作業</Text>
           </View>
-          <View
-            style={{
-              flex: 1,
-              alignItems: 'center',
-              paddingVertical: 14,
-              borderRadius: 14,
-              backgroundColor: theme.colors.surface,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-            }}
-          >
+          <View style={[s.summaryCell, s.summaryDivider]}>
             <Text
-              style={{
-                color: pendingCount > 0 ? '#FF9500' : theme.colors.muted,
-                fontWeight: '700',
-                fontSize: 24,
-              }}
+              style={[
+                s.summaryValue,
+                { color: pendingCount > 0 ? theme.colors.warning : theme.colors.muted },
+              ]}
             >
               {pendingCount}
             </Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 11 }}>待繳交</Text>
+            <Text style={s.summaryLabel}>待繳交</Text>
           </View>
-          <View
-            style={{
-              flex: 1,
-              alignItems: 'center',
-              paddingVertical: 14,
-              borderRadius: 14,
-              backgroundColor: theme.colors.surface,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-            }}
-          >
-            <Text style={{ color: '#34C759', fontWeight: '700', fontSize: 24 }}>
-              {submittedCount}
-            </Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 11 }}>已繳交</Text>
+          <View style={[s.summaryCell, s.summaryDivider]}>
+            <Text style={[s.summaryValue, { color: theme.colors.success }]}>{submittedCount}</Text>
+            <Text style={s.summaryLabel}>已繳交</Text>
           </View>
         </View>
 
         {/* 作業列表 */}
         {homeworks.length > 0 ? (
-          <View style={{ gap: 8 }}>
+          <View style={s.section}>
             <SectionTitle text={`共 ${homeworks.length} 份作業`} />
-            {homeworks.map((hw) => (
-              <HomeworkCard key={`hw-${hw.courseId}-${hw.id}`} hw={hw} isCurrent={() => active.current} />
-            ))}
+            <View style={s.group}>
+              {homeworks.map((hw, index) => (
+                <HomeworkRow
+                  key={`hw-${hw.courseId}-${hw.id}`}
+                  hw={hw}
+                  first={index === 0}
+                  isCurrent={() => active.current}
+                />
+              ))}
+            </View>
           </View>
         ) : (
           <Card title="目前沒有作業" subtitle="所有課程都沒有指派作業">
-            <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-              當老師在 TronClass 上指派作業時，會顯示在這裡。
-            </Text>
+            <Text style={s.emptyText}>當老師在 TronClass 上指派作業時，會顯示在這裡。</Text>
           </Card>
         )}
       </ScrollView>
     </Screen>
   );
 }
+
+const createStyles = () =>
+  StyleSheet.create({
+    scroll: { flex: 1 },
+    content: {
+      gap: theme.layout.sectionGap,
+      padding: theme.layout.screenPadding,
+    },
+    summary: {
+      flexDirection: 'row',
+      borderRadius: theme.radius.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+    },
+    summaryCell: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: theme.space.md,
+    },
+    summaryDivider: {
+      borderLeftWidth: StyleSheet.hairlineWidth,
+      borderLeftColor: theme.colors.separator,
+    },
+    summaryValue: {
+      color: theme.colors.text,
+      fontWeight: '700',
+      fontSize: 22,
+      lineHeight: 28,
+    },
+    summaryLabel: {
+      color: theme.colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 16,
+    },
+    section: { gap: theme.space.sm },
+    group: {
+      borderRadius: theme.radius.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+      overflow: 'hidden',
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.space.sm + 4,
+      minHeight: 56,
+      paddingVertical: theme.layout.listItemVertical,
+      paddingHorizontal: theme.space.md,
+    },
+    rowDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.separator,
+    },
+    rowPressed: { backgroundColor: theme.colors.surfaceInteractive },
+    rowBody: { flex: 1 },
+    rowTitle: {
+      color: theme.colors.text,
+      fontWeight: '600',
+      fontSize: 15,
+      lineHeight: 21,
+    },
+    rowMeta: {
+      color: theme.colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 17,
+      marginTop: 2,
+    },
+    rowStatus: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    rowStatusText: { fontWeight: '600', fontSize: 13 },
+    emptyText: { color: theme.colors.textSecondary, lineHeight: 22 },
+  });

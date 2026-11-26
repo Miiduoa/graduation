@@ -1,3 +1,4 @@
+import { pageTitleFont } from '../ui/styles';
 import React, { useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { DormStaffHome } from './DormStaffHome';
@@ -13,6 +14,8 @@ import { isSchoolLoginEntryAvailable } from '../services/schoolLoginAvailability
 import { roleWorkspaceFlow, ROLE_DAILY_ACTIONS, type RoleWorkspaceAction } from '../services/roleWorkspaceFlow';
 import { safeNavigate } from '../utils/safeNavigate';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+import { WorkspaceStart } from '../components/WorkspaceStart';
+import { workspaceContextForRole } from '../services/workspaceEntry';
 export { resolveDashboardRole, type ResolvedDashboardRole } from '../services/dashboardRole';
 
 function RoleWorkflow({ role, navigation, children }: ServiceScreenProps & {
@@ -20,6 +23,7 @@ function RoleWorkflow({ role, navigation, children }: ServiceScreenProps & {
   children?: React.ReactNode;
 }) {
   const s = useThemeStyleSheet(createStyles);
+  const auth = useAuth();
   const [dailyOpen, setDailyOpen] = useState(false);
   const flow = roleWorkspaceFlow(role);
   const open = (action: RoleWorkspaceAction) => safeNavigate(navigation, action.route);
@@ -39,15 +43,20 @@ function RoleWorkflow({ role, navigation, children }: ServiceScreenProps & {
   return (
     <AIScreen>
       <View style={s.heading}>
-        <Text style={s.eyebrow}>nuni · 今日工作</Text>
         <Text accessibilityRole="header" style={s.title}>{flow.title}</Text>
         <Text style={s.description}>{flow.description}</Text>
       </View>
+      <View style={s.start}>
+        <WorkspaceStart navigation={navigation}
+          scope={JSON.stringify([auth.user?.uid, auth.profile?.schoolId, role])}
+          workContext={workspaceContextForRole(role)} />
+      </View>
       {children}
-      <AICard title="從這裡開始">
+      <View style={s.section}>
+        <Text accessibilityRole="header" style={s.sectionTitle}>從這裡開始</Text>
         <Text style={s.primaryDescription}>{flow.primary.description}</Text>
         <AIButton label={flow.primary.label} onPress={() => open(flow.primary)} />
-      </AICard>
+      </View>
       <View style={s.section}>
         <Text accessibilityRole="header" style={s.sectionTitle}>接著處理</Text>
         <View style={s.rows}>{flow.next.map(row)}</View>
@@ -112,16 +121,23 @@ export default function RoleAwareTodayScreen(props: ServiceScreenProps) {
 }
 
 const createStyles = () => StyleSheet.create({
+  start: { paddingHorizontal: 22 },
   heading: { paddingHorizontal: 22, paddingTop: 24, paddingBottom: 8, gap: 8 },
-  eyebrow: { color: theme.colors.muted, fontSize: 12, fontWeight: '600' },
-  title: { color: theme.colors.text, fontSize: 28, lineHeight: 36, fontWeight: '700' },
-  description: { color: theme.colors.muted, fontSize: 14, lineHeight: 21 },
-  primaryDescription: { color: theme.colors.text, fontSize: 15, lineHeight: 23, marginBottom: 16 },
-  section: { marginHorizontal: 16, marginTop: 18, gap: 10 },
+  title: { fontFamily: pageTitleFont, color: theme.colors.text, fontSize: 28, lineHeight: 36, fontWeight: '700' },
+  description: { color: theme.colors.textSecondary, fontSize: 14, lineHeight: 21 },
+  primaryDescription: { color: theme.colors.text, fontSize: 15, lineHeight: 23, marginBottom: 6 },
+  section: {
+    marginHorizontal: 22,
+    marginTop: 20,
+    paddingTop: 16,
+    gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+  },
   sectionTitle: { color: theme.colors.text, fontSize: 16, fontWeight: '600' },
-  rows: { borderColor: theme.colors.border, borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, overflow: 'hidden', backgroundColor: theme.colors.surface },
-  row: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.colors.border },
-  rowText: { flex: 1, gap: 5 },
+  rows: {},
+  row: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.colors.border },
+  rowText: { flex: 1, gap: 4 },
   rowTitle: { color: theme.colors.text, fontSize: 16, fontWeight: '600' },
   arrow: { color: theme.colors.muted, fontSize: 20 },
   disclosure: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },

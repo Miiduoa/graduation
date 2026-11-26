@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useSelectedSchool, type BrowseSchool } from './SelectedSchoolProvider';
 import { CampusIcon } from './CampusIcon';
 import { filterSchools, normalizeSchoolQuery, schoolSearchEntry } from './SchoolSelector.search';
+import { matchingSchoolEnglishName } from '@campus/shared/src/schools';
 import { Button } from './ui/Button';
 import { Input, Select } from './ui/Input';
 import styles from './SchoolSelector.module.css';
@@ -12,10 +13,12 @@ const INITIAL_MATCHES = 5;
 
 function SchoolResultList({
   schools,
+  query,
   selectedId,
   onChoose,
 }: {
   schools: readonly BrowseSchool[];
+  query: string;
   selectedId: string | null;
   onChoose: (id: string) => void;
 }) {
@@ -23,6 +26,7 @@ function SchoolResultList({
     <ul className={styles.resultList} aria-label="符合的校園">
       {schools.map((school) => {
         const current = school.id === selectedId;
+        const englishName = matchingSchoolEnglishName(school, query);
         const detail = [school.code, school.status === 'not-open' && '校務尚未開通']
           .filter(Boolean)
           .join(' · ');
@@ -36,6 +40,7 @@ function SchoolResultList({
             >
               <span className={styles.schoolText}>
                 <strong>{school.name}</strong>
+                {englishName && <small lang="en">{englishName}</small>}
                 {detail && <small>{detail}</small>}
               </span>
               {current ? (
@@ -187,6 +192,7 @@ export function SchoolSelector({
             <div ref={matches} className={styles.matches}>
               <SchoolResultList
                 schools={results.slice(0, INITIAL_MATCHES)}
+                query={query}
                 selectedId={selection.selectedSchoolId}
                 onChoose={chooseSchool}
               />
@@ -195,6 +201,7 @@ export function SchoolSelector({
                   <summary>其餘 {results.length - INITIAL_MATCHES} 所校園</summary>
                   <SchoolResultList
                     schools={results.slice(INITIAL_MATCHES)}
+                    query={query}
                     selectedId={selection.selectedSchoolId}
                     onChoose={chooseSchool}
                   />

@@ -1,16 +1,16 @@
 import { BottomTabNavigationOptions } from '@react-navigation/bottom-tabs';
 import { NativeStackNavigationOptions } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Platform } from 'react-native';
+import { StyleSheet } from 'react-native';
 
-import { theme, shadowStyle } from './theme';
+import { theme } from './theme';
 
 // ── 所有與 tab bar 底部留白相關的計算 100% inline ──────────────
 // 之前從 theme.ts 命名匯入 tabBarExtraScrollPadding 在 runtime 因 circular-import 取得 undefined，
 // 整個函式 + 常數都搬進這個檔案，徹底斷開外部相依。
 
-/** 浮動 Tab Bar 所需的 ScrollView 底部留白基準（單位 dp）。 */
-export const TAB_BAR_SCROLL_BOTTOM_PADDING = 118;
+/** 貼底導覽列所需的 ScrollView 底部留白基準（單位 dp）。 */
+export const TAB_BAR_SCROLL_BOTTOM_PADDING = 96;
 
 /** 與舊 API 對齊：等同於 TAB_BAR_SCROLL_BOTTOM_PADDING */
 export const TAB_BAR_CONTENT_BOTTOM_PADDING = TAB_BAR_SCROLL_BOTTOM_PADDING;
@@ -52,33 +52,18 @@ export function createTabScreenOptions(_routeName: string): BottomTabNavigationO
     headerShown: false,
     tabBarStyle: {
       position: 'absolute',
-      left: 18,
-      right: 18,
-      bottom: Platform.OS === 'ios' ? 24 : 16,
-      backgroundColor: theme.colors.chromeTabBar,
-      borderTopColor: 'transparent',
-      borderTopWidth: 0,
-      borderRadius: theme.radius.xl,
-      height: 64,
-      paddingTop: 6,
-      paddingBottom: 6,
-      paddingHorizontal: 6,
-      borderWidth: 1,
-      borderColor: theme.colors.chromeTabBorder,
-      ...shadowStyle(theme.shadows.sm),
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: theme.colors.surface,
+      borderTopColor: theme.colors.border,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      minHeight: 56,
     },
-    tabBarLabelStyle: {
-      fontSize: 10,
-      fontWeight: '600',
-      letterSpacing: 0,
-      marginTop: 1,
-    },
+    tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
     tabBarActiveTintColor: theme.colors.accent,
-    tabBarInactiveTintColor: theme.colors.muted,
-    tabBarItemStyle: {
-      borderRadius: theme.radius.md,
-      paddingVertical: 4,
-    },
+    tabBarInactiveTintColor: theme.colors.textSecondary,
+    tabBarItemStyle: { minHeight: 44 },
     sceneStyle: { backgroundColor: theme.colors.bg },
   };
 }

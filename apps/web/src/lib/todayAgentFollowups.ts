@@ -11,6 +11,7 @@ export type TodayAgentFollowupEntry = {
   verifiedAt: string;
 };
 const PREFIX = 'campus.today-agent-followups.v1:';
+const CHANGED_EVENT = 'campus:today-agent-followups-changed';
 const LIMIT = 24;
 const MAX_BYTES = 128 * 1024;
 const CAPACITY_MESSAGE = '這部裝置已保留 24 筆安排追蹤。請先更新安排狀態；已繳交或關閉、且原行程結束超過 7 天的紀錄才會自動整理。';
@@ -110,7 +111,7 @@ async function withScopeLock<T>(target: TodayAgentFollowupScope, active: () => b
   return result;
 }
 function write(store: Storage, key: string, target: TodayAgentFollowupScope, previous: string | null,
-  entries: TodayAgentFollowupEntry[], active: () => boolean) {
+  entries: TodayAgentFollowupEntry[], active: () => boolean, source?: symbol) {
   requireActive(active);
   if (readRaw(store, key) !== previous) throw new Error('另一個分頁已更新安排紀錄，請重新核對。');
   const encoded = entries.length ? JSON.stringify({ version: 1, ...target, entries }) : null;
@@ -121,6 +122,20 @@ function write(store: Storage, key: string, target: TodayAgentFollowupScope, pre
   } catch { throw new Error('行程已核對，但這部裝置尚未保留追蹤紀錄；請重新核對結果，避免重複安排。'); }
   requireActive(active);
   if (readRaw(store, key) !== encoded) throw new Error('安排追蹤紀錄尚未確認保存，請重新核對。');
+  // Native storage events reach other documents only. Announce no proof or
+  // source content here: listeners must read and re-authenticate their scope.
+  if (encoded !== previous) window.dispatchEvent(new CustomEvent(CHANGED_EVENT, { detail: { key, source } }));
+}
+/** Invalidate same-document readers after a verified storage mutation. A writer
+ * can suppress its own notification while it already refreshes that result. */
+export function subscribeTodayAgentFollowups(raw: TodayAgentFollowupScope, changed: () => void, source?: symbol): () => void {
+  const key = todayAgentFollowupStorageKey(raw);
+  const receive = (event: Event) => {
+    const detail = (event as CustomEvent<{ key?: unknown; source?: unknown }>).detail;
+    if (detail?.key === key && (source === undefined || detail.source !== source)) changed();
+  };
+  window.addEventListener(CHANGED_EVENT, receive);
+  return () => window.removeEventListener(CHANGED_EVENT, receive);
 }
 /** Persisted proofs are read hints only. Every source association is authenticated again by the server. */
 export function readTodayAgentFollowups(raw: TodayAgentFollowupScope): TodayAgentFollowupEntry[] {
@@ -141,7 +156,7 @@ export function assertTodayAgentFollowupCapacity(raw: TodayAgentFollowupScope, m
 }
 /** Only a verified receipt can graduate an operation out of its recovery journal. */
 export async function saveTodayAgentFollowup(raw: TodayAgentFollowupScope,
-  input: Omit<TodayAgentFollowupEntry, 'verifiedAt'>, receipt: AssistantCalendarReceipt, active: () => boolean): Promise<void> {
+  input: Omit<TodayAgentFollowupEntry, 'verifiedAt'>, receipt: AssistantCalendarReceipt, active: () => boolean, source?: symbol): Promise<void> {
   const target = scope(raw);
   requireActive(active);
   const verified = parseAssistantCalendarReceipt(receipt, { schoolId: target.schoolId,
@@ -157,15 +172,15 @@ export async function saveTodayAgentFollowup(raw: TodayAgentFollowupScope,
       return;
     }
     if (previous.entries.length >= LIMIT) throw new Error(CAPACITY_MESSAGE);
-    write(store, key, target, previous.raw, [...previous.entries, entry], active);
+    write(store, key, target, previous.raw, [...previous.entries, entry], active, source);
   });
 }
 /** Remove only after fresh server evidence identifies a non-coursework or completed source. Never on read failure. */
-export async function removeTodayAgentFollowup(raw: TodayAgentFollowupScope, mutationId: string, active: () => boolean): Promise<void> {
+export async function removeTodayAgentFollowup(raw: TodayAgentFollowupScope, mutationId: string, active: () => boolean, source?: symbol): Promise<void> {
   const target = scope(raw), checkedId = id(mutationId, 8);
   await withScopeLock(target, active, () => {
     const store = storage(), key = todayAgentFollowupStorageKey(target), previous = read(store, key, target);
     const entries = previous.entries.filter(item => item.card.mutationId !== checkedId);
-    if (entries.length !== previous.entries.length) write(store, key, target, previous.raw, entries, active);
+    if (entries.length !== previous.entries.length) write(store, key, target, previous.raw, entries, active, source);
   });
 }

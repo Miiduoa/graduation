@@ -12,14 +12,14 @@ export type ServiceJourney = 'life' | 'connect';
 /** Only grouping lives here; names, access requirements and feature flags use the service catalog. */
 export const SERVICE_JOURNEY_GROUPS = {
   life: [
-    { id: 'travel', label: '出門與交通', description: '先找到地方，再安排怎麼過去。' },
-    { id: 'daily', label: '吃飯與住宿', description: '餐點、取餐與宿舍日常。' },
-    { id: 'resources', label: '校園資源', description: '查館藏、找活動與職涯資訊。' },
+    { id: 'travel', label: '出門與交通' },
+    { id: 'daily', label: '吃飯與住宿' },
+    { id: 'resources', label: '校園資源' },
   ],
   connect: [
-    { id: 'topics', label: '看話題', description: '校內動態與跨校公開交流。' },
-    { id: 'people', label: '找人與聊天', description: '找到同學，接著聊。' },
-    { id: 'updates', label: '公告與通知', description: '公開消息與寄給你的服務提醒。' },
+    { id: 'topics', label: '看話題' },
+    { id: 'people', label: '找人與聊天' },
+    { id: 'updates', label: '公告與通知' },
   ],
 } as const;
 

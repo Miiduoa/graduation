@@ -1,9 +1,4 @@
 .ticket {
-  --ticket-paper: #f8f3e6;
-  --ticket-stub: #e7ebdc;
-  --ticket-ink: #293a32;
-  --ticket-muted: #586559;
-  --ticket-print: #315a49;
   container-type: inline-size;
   min-width: 0;
   width: 100%;
@@ -15,22 +10,15 @@
 .paper {
   display: grid;
   min-width: 0;
-  color-scheme: light;
-  color: var(--ticket-ink);
-  background: var(--ticket-paper);
-  border: 1px solid #b5b7a5;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
   border-radius: 2px;
-  box-shadow: 0 2px 3px rgb(26 36 28 / 8%), 0 12px 22px -14px rgb(26 36 28 / 35%);
 }
 
 .main {
   min-width: 0;
   padding: 1.25rem;
-  background-image: repeating-linear-gradient(
-    0deg,
-    transparent 0 3px,
-    rgb(82 75 49 / 2%) 3px 4px
-  );
 }
 
 .heading {
@@ -44,7 +32,7 @@
 
 .ticket .label {
   margin: 0;
-  color: var(--ticket-print);
+  color: var(--brand);
   font-size: 0.875rem;
   font-weight: 700;
   letter-spacing: 0.15em;
@@ -52,26 +40,26 @@
 
 .stamp {
   padding: 0.25rem 0.5rem;
-  border: 2px solid currentColor;
-  color: var(--ticket-print);
+  color: var(--brand);
   font-size: 0.8125rem;
   font-weight: 700;
   line-height: 1.5;
-  letter-spacing: 0.1em;
-  transform: rotate(-4deg);
+  letter-spacing: normal;
+  border-inline-start: 2px solid currentColor;
 }
 
 .ticket .title {
   margin: 0;
-  color: var(--ticket-ink);
+  color: var(--text);
   font-size: 1.375rem;
   line-height: 1.5;
   font-weight: 700;
+  font-family: var(--font-heading);
 }
 
 .ticket .source {
   margin: 0.375rem 0 1.25rem;
-  color: var(--ticket-muted);
+  color: var(--muted);
   font-size: 0.8125rem;
   line-height: 1.6;
 }
@@ -81,7 +69,7 @@
   gap: 0.875rem;
   margin: 0;
   padding-top: 1rem;
-  border-top: 1px solid #c6c7b6;
+  border-top: 1px solid var(--border-strong);
 }
 
 .metadata > div {
@@ -91,7 +79,7 @@
 }
 
 .metadata dt {
-  color: var(--ticket-muted);
+  color: var(--muted);
   font-size: 0.75rem;
   line-height: 1.6;
 }
@@ -99,14 +87,14 @@
 .metadata dd {
   min-width: 0;
   margin: 0;
-  color: var(--ticket-ink);
+  color: var(--text);
   font-size: 0.9375rem;
   line-height: 1.65;
 }
 
 .ticket .note {
   margin: 1.25rem 0 0;
-  color: var(--ticket-muted);
+  color: var(--muted);
   font-size: 0.75rem;
   line-height: 1.7;
 }
@@ -119,29 +107,9 @@
   gap: 0.75rem;
   min-width: 0;
   padding: 1.25rem;
-  border-top: 2px dashed #929d86;
-  background: var(--ticket-stub);
+  border-top: 2px dashed var(--border-strong);
+  background: var(--accent-soft);
   text-align: center;
-}
-
-.stub::before,
-.stub::after {
-  content: '';
-  position: absolute;
-  top: -0.625rem;
-  width: 1.25rem;
-  height: 1.25rem;
-  border-radius: 50%;
-  background: var(--surface);
-  pointer-events: none;
-}
-
-.stub::before {
-  left: -0.625rem;
-}
-
-.stub::after {
-  right: -0.625rem;
 }
 
 .ticket .stubLabel,
@@ -149,7 +117,7 @@
 .ticket .weekday,
 .ticket .unscheduled {
   margin: 0;
-  color: var(--ticket-print);
+  color: var(--brand);
   font-size: 0.8125rem;
   line-height: 1.6;
 }
@@ -165,8 +133,8 @@
 
 .ticket .day {
   margin: 0.25rem 0;
-  color: var(--ticket-print);
-  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  color: var(--brand);
+  font-family: var(--font-heading);
   font-size: 3.5rem;
   font-weight: 700;
   line-height: 1.1;
@@ -175,7 +143,7 @@
 
 .ticket .brand {
   margin: 0.5rem 0 0;
-  color: var(--ticket-print);
+  color: var(--brand);
   font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
   font-size: 1rem;
   letter-spacing: 0.15em;
@@ -196,22 +164,7 @@
 
   .stub {
     border-top: 0;
-    border-left: 2px dashed #929d86;
-  }
-
-  .stub::before,
-  .stub::after {
-    left: -0.625rem;
-    right: auto;
-  }
-
-  .stub::before {
-    top: -0.625rem;
-  }
-
-  .stub::after {
-    top: auto;
-    bottom: -0.625rem;
+    border-left: 2px dashed var(--border-strong);
   }
 }
 
@@ -223,10 +176,5 @@
 
   .stub {
     border-color: CanvasText;
-  }
-
-  .stub::before,
-  .stub::after {
-    display: none;
   }
 }

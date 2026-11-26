@@ -68,7 +68,7 @@ function RecordContent<K extends AcademicKind>({
   state: AcademicRecordState<K> | null;
   refresh: () => Promise<void>;
 }) {
-  const options = useSignInOptions();
+  const options = useSignInOptions(undefined, true, 'school');
   if (!state || state.status === 'loading') {
     return (
       <div className={styles.status} role="status">

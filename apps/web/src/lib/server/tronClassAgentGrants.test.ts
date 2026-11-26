@@ -62,6 +62,22 @@ describe('TronClass Agent grants', () => {
     expect(JSON.stringify(result)).not.toMatch(/cookie|410123456|private-password|測試同學/);
   });
 
+  it('rejects stale status, scopes and writes when the replacement has its own active grant', async () => {
+    const { grants, bindings, revision } = await setup();
+    const replacement = await bindings.connect(OWNER, {
+      schoolId: 'pu', account: '410123457', password: 'synthetic-password', expectedRevision: revision,
+    });
+    const current = await grants.set(OWNER, { revision: replacement.revision!, expectedVersion: null, permissions: ALL });
+    for (const read of [
+      () => grants.get(OWNER, revision),
+      () => grants.require(OWNER, 'readCourseData', revision),
+      () => grants.set(OWNER, { revision, expectedVersion: null, permissions: NONE }),
+    ]) {
+      await expect(read()).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    }
+    expect(await grants.get(OWNER)).toEqual(current);
+  });
+
   it('preserves encrypted login and expiry while saving exactly the allowed capabilities', async () => {
     const { grants, rows, revision } = await setup();
     const before = structuredClone(rows.get(bindingPath()));

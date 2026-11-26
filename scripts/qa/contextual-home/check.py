@@ -71,7 +71,7 @@ async def scenario(browser, origin, width, theme, reports):
 
     try:
         await page.goto(origin + '?theme=' + theme)
-        await expect(page.get_by_role('heading', name='讓首頁更適合你')).to_be_visible()
+        await expect(page.get_by_role('heading', name='首頁偏好')).to_be_visible()
         await layout('entry')
         # Native select options are descendants of the wrapping label. The label
         # text engine includes those options; the combobox accessible name does not.
@@ -99,7 +99,7 @@ async def scenario(browser, origin, width, theme, reports):
         await expect(page.get_by_role('heading', name='期末準備', exact=True)).to_be_visible()
         report['checks'].append('Preferences survive page reload')
         await page.get_by_role('button', name='測試切換帳號').click()
-        await expect(page.get_by_role('heading', name='讓首頁更適合你')).to_be_visible()
+        await expect(page.get_by_role('heading', name='首頁偏好')).to_be_visible()
         await expect(stage).to_have_value('unspecified')
         await expect(page.get_by_role('heading', name='期末準備', exact=True)).to_have_count(0)
         await page.get_by_role('button', name='測試切換帳號').click()

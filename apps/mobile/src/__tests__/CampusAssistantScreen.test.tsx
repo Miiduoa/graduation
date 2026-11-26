@@ -2330,3 +2330,146 @@ test('switching work context cannot drop an in-flight answer or an unconfirmed p
   expect(view.queryByRole('button', { name: '確認加入個人行事曆' })).toBeNull();
   expect(request).toHaveBeenCalledTimes(1);
 });
+
+test('an exploration entry opens the selected platform context with a draft and never sends automatically', async () => {
+  setPlatformFixture('member');
+  const route = { name: 'NuniTimetableAssistant', params: {
+    prompt: '安排明天下午一小時備課', taskProfile: 'teacher', draftEntryId: 'entry-teacher',
+  } };
+  const view = render(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe(route.params.prompt);
+  expect(view.getByText('工作助理')).toBeTruthy();
+  expect(request).not.toHaveBeenCalled();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  fireEvent.press(view.getByRole('button', { name: '送出問題' }));
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  expect(request.mock.calls[0][0]).toMatchObject({ taskProfile: 'teacher', platformTimetable: { accountId: 'member' } });
+});
+
+test('returning from exploration replaces the intended draft in an existing conversation without a send', async () => {
+  setPlatformFixture('member');
+  const route = { name: 'NuniTimetableAssistant', params: {
+    prompt: '下一堂課在哪裡', taskProfile: 'student', draftEntryId: 'entry-one',
+  } };
+  const view = render(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '尚未送出的舊草稿');
+  view.rerender(<CampusAssistantScreen route={{ ...route, params: {
+    prompt: '開啟店家工作區', taskProfile: 'merchant', draftEntryId: 'entry-two',
+  } }} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('開啟店家工作區');
+  expect(view.getByText('工作助理')).toBeTruthy();
+  expect(request).not.toHaveBeenCalled();
+});
+
+test.each(['account', 'session', 'school'] as const)('a new exploration handoff is accepted after a %s change in the same mounted screen', async (change) => {
+  setPlatformFixture('member');
+  const route = { name: 'NuniTimetableAssistant', params: {
+    prompt: '安排明天下午半小時盤點', taskProfile: 'merchant', draftEntryId: 'entry-original',
+  } };
+  const view = render(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  if (change === 'school') mockSchool = 'nthu';
+  else setPlatformFixture(change === 'account' ? 'other' : 'member', 'another-session');
+  view.rerender(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+
+  const next = { ...route, params: {
+    prompt: '安排明天下午一小時備課', taskProfile: 'teacher', draftEntryId: 'entry-fresh',
+  } };
+  view.rerender(<CampusAssistantScreen route={next} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe(next.params.prompt);
+  expect(view.getByText('工作助理')).toBeTruthy();
+  expect(request).not.toHaveBeenCalled();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(request.mock.calls[0][0]).toMatchObject({
+    taskProfile: 'teacher', platformTimetable: { accountId: change === 'account' ? 'other' : 'member' },
+    scope: { schoolId: change === 'school' ? 'nthu' : 'pu' },
+    messages: [{ role: 'user', content: next.params.prompt }],
+  });
+});
+
+test.each(['account', 'session', 'school'] as const)('a stale exploration entry cannot replay after a %s change or a newer handoff', async (change) => {
+  setPlatformFixture('member');
+  const route = { name: 'NuniTimetableAssistant', params: {
+    prompt: '安排明天下午半小時盤點', taskProfile: 'merchant', draftEntryId: 'entry-merchant',
+  } };
+  const view = render(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe(route.params.prompt);
+  if (change === 'school') mockSchool = 'nthu';
+  else setPlatformFixture(change === 'account' ? 'other' : 'member', 'another-session');
+  view.rerender(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  expect(view.queryByText('工作助理')).toBeNull();
+  expect(request).not.toHaveBeenCalled();
+
+  view.rerender(<CampusAssistantScreen route={{ ...route, params: {
+    prompt: '安排明天下午一小時備課', taskProfile: 'teacher', draftEntryId: 'entry-fresh',
+  } }} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('安排明天下午一小時備課');
+  view.rerender(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  expect(view.queryByText('工作助理')).toBeNull();
+
+  // Returning to the original account/campus must not revive its old entry ID.
+  mockSchool = 'pu';
+  setPlatformFixture('member');
+  view.rerender(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  expect(view.queryByText('工作助理')).toBeNull();
+  expect(request).not.toHaveBeenCalled();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+test.each(['session-loading', 'school-loading'] as const)('an exploration handoff waits for %s when its receiving identity stays the same', async (pending) => {
+  setPlatformFixture('member');
+  if (pending === 'session-loading') mockPlatform!.loading = true;
+  else mockSelectionReady = false;
+  const route = { name: 'NuniTimetableAssistant', params: {
+    prompt: '安排明天下午一小時備課', taskProfile: 'teacher', draftEntryId: 'entry-pending',
+  } };
+  const view = render(<CampusAssistantScreen route={route} />);
+  expect(request).not.toHaveBeenCalled();
+  mockPlatform!.loading = false;
+  mockSelectionReady = true;
+  view.rerender(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe(route.params.prompt);
+  expect(view.getByText('工作助理')).toBeTruthy();
+  expect(view.queryByText('請重新帶入問題')).toBeNull();
+  expect(request).not.toHaveBeenCalled();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+test.each(['account', 'school'] as const)('a pending exploration handoff is discarded after a real %s change and offers recovery', async (change) => {
+  setPlatformFixture('member');
+  mockPlatform!.loading = true;
+  const route = { name: 'NuniTimetableAssistant', params: {
+    prompt: '安排明天下午一小時備課', taskProfile: 'teacher', draftEntryId: 'entry-pending',
+  } };
+  const navigation = { navigate: jest.fn(), getState: () => ({ routeNames: ['Explore'] }) };
+  const view = render(<CampusAssistantScreen route={route} navigation={navigation} />);
+  if (change === 'school') mockSchool = 'nthu';
+  else setPlatformFixture('other', 'another-session');
+  mockPlatform!.loading = false;
+  view.rerender(<CampusAssistantScreen route={route} navigation={navigation} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  expect(view.queryByText('工作助理')).toBeNull();
+  expect(view.getByText('請重新帶入問題')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '重新探索用法' }));
+  expect(navigation.navigate).toHaveBeenCalledWith('Explore', undefined);
+  expect(request).not.toHaveBeenCalled();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+});

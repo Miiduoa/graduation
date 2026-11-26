@@ -17,6 +17,10 @@ function memoryDb(seed = {}) {
   let txChain = Promise.resolve();
   const api = {
     docs,
+    async getAll(...refsAndOptions) {
+      const refs = refsAndOptions.slice(0, -1);
+      return Promise.all(refs.map((ref) => ref.get()));
+    },
     collection(name) {
       return {
         doc(id) {
@@ -284,9 +288,13 @@ describe('assignment published notify', () => {
     };
 
     await expect(handler(event)).rejects.toThrow(/push unavailable/);
+    const readPath = `users/stu2/notifications/${hashEventKey('assignment_published__c1__a2')}`;
+    const original = { ...db.docs.get(readPath), read: true, createdAt: new Date('2026-11-24') };
+    db.docs.set(readPath, original);
     attempt = 1;
     // stu1 已送達應保留 completed；stu2／stu3 應可補送
     expect(await handler(event)).toMatchObject({ status: 'sent', recipients: 2 });
+    expect(db.docs.get(readPath)).toEqual(original);
     expect(pushes.map((row) => row.uid).sort()).toEqual(['stu1', 'stu2', 'stu3']);
     expect(await handler(event)).toMatchObject({ status: 'duplicate' });
   });
@@ -781,8 +789,76 @@ describe('submission notify', () => {
 });
 
 describe('school announcement notify', () => {
+  const studentAudience = ['clubOfficer', 'localStudent', 'student', 'studentTa'];
+  const staffAudience = ['admin', 'departmentHead', 'editor', 'localTeacher', 'staff'];
+  const wholeSchool = [...studentAudience, ...staffAudience, 'otherProfile', 'ta'].sort();
+  test.each([
+    [{}, wholeSchool],
+    [{ audience: 'student' }, studentAudience],
+    [{ audience: 'staff', studentFeed: false }, staffAudience],
+    [{ audience: 'all', studentFeed: false }, staffAudience],
+    [{ title: '系統操作說明(for教師)' }, staffAudience],
+    [{ title: '訓練(for學系)', audience: 'student' }, []],
+    [{ title: '  ' }, []],
+    [{ schoolId: 'other' }, []],
+    [{ visible: false }, []],
+    [{ audience: 'student', studentFeed: false }, []],
+    [{ audience: 'unknown' }, []],
+  ])('delivers %j only to its eligible school inboxes and push recipients', async (flags, expected) => {
+    const db = memoryDb({
+      'schools/pu/members/editor': { status: 'active', role: 'editor' },
+      'schools/pu/members/student': { status: 'active', role: 'student' },
+      'schools/pu/members/admin': { status: 'active', role: 'admin' },
+      'schools/pu/members/staff': { status: 'active', role: 'member' },
+      'schools/pu/members/departmentHead': { status: 'active', role: 'member' },
+      'schools/pu/members/clubOfficer': { status: 'active', role: 'member' },
+      'schools/pu/members/studentTa': { status: 'active', role: 'member' },
+      'schools/pu/members/ta': { status: 'active', role: 'ta' },
+      'schools/pu/members/vendor': { status: 'active', role: 'member' },
+      'schools/pu/members/suspended': { status: 'active', role: 'staff' },
+      'schools/pu/members/deleting': { status: 'active', role: 'student' },
+      'schools/pu/members/localStudent': { status: 'active', role: 'member' },
+      'schools/pu/members/localTeacher': { status: 'active', role: 'member' },
+      'schools/pu/members/noProfile': { status: 'active', role: 'member' },
+      'schools/pu/members/otherProfile': { status: 'active', role: 'member' },
+      'schools/pu/members/author': { status: 'active', role: 'admin' },
+      'schools/pu/members/former': { status: 'inactive', role: 'staff' },
+      'schools/other/members/outsider': { status: 'active', role: 'student' },
+      'users/admin': { role: 'admin', schoolId: 'pu' },
+      'users/editor': { role: 'staff', schoolId: 'pu' },
+      'users/student': { role: 'student', schoolId: 'pu' },
+      'users/clubOfficer': { role: 'club_officer', schoolId: 'pu' },
+      'users/studentTa': { role: 'student', teachingRoles: ['ta'], schoolId: 'pu' },
+      'users/ta': { role: 'ta', schoolId: 'pu' },
+      'users/departmentHead': { role: 'department_head', schoolId: 'pu' },
+      'users/staff': { role: 'employee', schoolId: 'pu' },
+      'users/vendor': { role: 'vendor', schoolId: 'pu' },
+      'users/suspended': { role: 'staff', status: 'suspended', schoolId: 'pu' },
+      'users/deleting': { role: 'student', accountDeletionInProgress: true, schoolId: 'pu' },
+      'users/localStudent': { role: 'student', schoolId: 'pu' },
+      'users/localTeacher': { role: 'teacher', primarySchoolId: 'pu' },
+      'users/otherProfile': { role: 'teacher', schoolId: 'other', primarySchoolId: 'other' },
+    });
+    const pushes = [];
+    const handler = createSchoolAnnouncementNotifyHandler({
+      db,
+      sendPushToUser: async (uid) => pushes.push(uid),
+    });
+    await handler({
+      params: { schoolId: 'pu', announcementId: 'ann' },
+      data: { data: () => ({ title: '校方公告', createdBy: 'author', ...flags }) },
+    });
+    const inboxUsers = [...db.docs.keys()]
+      .filter((path) => path.includes('/notifications/'))
+      .map((path) => path.split('/')[1]);
+    expect(pushes.sort()).toEqual(expected);
+    expect(inboxUsers.sort()).toEqual(expected);
+  });
+
   test('notifies school audience with announcementId deep link', async () => {
     const db = memoryDb({
+      'users/stu1': { schoolId: 'pu' },
+      'users/teach': { schoolId: 'pu' },
       'schools/pu/members/stu1': { status: 'active', role: 'student' },
       'schools/pu/members/teach': { status: 'active', role: 'teacher' },
       'schools/pu/members/admin1': { status: 'active', role: 'admin' },
@@ -816,6 +892,7 @@ describe('school announcement notify', () => {
 
   test('empty role is excluded from campus audience allowlist', async () => {
     const db = memoryDb({
+      'users/stu1': { schoolId: 'pu' },
       'schools/pu/members/stu1': { status: 'active', role: 'student' },
       'schools/pu/members/norole': { status: 'active', role: '' },
       'schools/pu/members/missing': { status: 'active' },
@@ -849,7 +926,9 @@ describe('school announcement notify', () => {
     };
     const totalStudents = FANOUT_BATCH_SIZE + 25;
     for (let i = 0; i < totalStudents; i += 1) {
-      seed[`schools/pu/members/stu${String(i).padStart(4, '0')}`] = {
+      const uid = `stu${String(i).padStart(4, '0')}`;
+      seed[`users/${uid}`] = { schoolId: 'pu' };
+      seed[`schools/pu/members/${uid}`] = {
         status: 'active',
         role: 'student',
       };
@@ -885,6 +964,9 @@ describe('school announcement notify', () => {
 
   test('partial fanout failure then retry only delivers remaining recipients', async () => {
     const db = memoryDb({
+      'users/stu1': { schoolId: 'pu' },
+      'users/stu2': { schoolId: 'pu' },
+      'users/stu3': { schoolId: 'pu' },
       'schools/pu/members/stu1': { status: 'active', role: 'student' },
       'schools/pu/members/stu2': { status: 'active', role: 'student' },
       'schools/pu/members/stu3': { status: 'active', role: 'teacher' },

@@ -1,6 +1,7 @@
 'use strict';
 
 const { FieldValue } = require('firebase-admin/firestore');
+const { isClosedAccount } = require('../campusStoryAccessBinding');
 
 const EXPO_ENDPOINT = 'https://exp.host/--/api/v2/push';
 const EXPO_TOKEN = /^(?:Exponent|Expo)PushToken\[[A-Za-z0-9_-]+\]$/;
@@ -67,6 +68,16 @@ function normalizePreferences(raw) {
   return result;
 }
 
+/**
+ * @param {object} [options]
+ * @param {import('firebase-admin/firestore').Firestore} [options.db]
+ * @param {typeof import('firebase-admin')} [options.admin]
+ * @param {Pick<import('firebase-admin/messaging').Messaging, 'sendEachForMulticast'>} [options.messaging]
+ * @param {typeof globalThis.fetch} [options.fetch]
+ * @param {() => Date} [options.now]
+ * @param {string} [options.expoAccessToken]
+ * @param {Pick<Console, 'warn'>} [options.logger]
+ */
 function createNotificationService({
   db,
   admin,
@@ -160,7 +171,7 @@ function createNotificationService({
       throw new Error('Notification payload is too large');
     }
     const profile = await user(uid).get();
-    if (!profile.exists || profile.data().notificationDeliveryDisabled === true) {
+    if (!profile.exists || isClosedAccount(profile.data()) || profile.data().notificationDeliveryDisabled === true) {
       return { status: 'skipped', accepted: 0, failed: 0, reason: 'account_unavailable' };
     }
     const prefs = await getPreferences(uid);
@@ -237,7 +248,7 @@ function createNotificationService({
                 await database().runTransaction(async (tx) => {
                   const currentUser = await tx.get(user(uid));
                   if (
-                    !currentUser.exists ||
+                    !currentUser.exists || isClosedAccount(currentUser.data()) ||
                     currentUser.data().notificationDeliveryDisabled === true
                   )
                     return;
@@ -357,7 +368,7 @@ function createNotificationService({
           (!record.tokenUpdatedAt || currentToken.updateTime?.isEqual(record.tokenUpdatedAt))
         )
           tx.delete(tokenRef);
-        if (profile.exists && profile.data().notificationDeliveryDisabled !== true) {
+        if (profile.exists && !isClosedAccount(profile.data()) && profile.data().notificationDeliveryDisabled !== true) {
           tx.set(database().collection('pushReceiptResults').doc(doc.id), {
             uid: record.uid,
             status,

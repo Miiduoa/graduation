@@ -3,7 +3,7 @@
 import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvider';
 
 import Link from 'next/link';
-import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import {
   forgetDirectorySearch,
@@ -50,10 +50,13 @@ export function QuickCampusEntry({
   onAsk,
   onNavigate,
   compact = false,
+  inlineDraft,
 }: {
   onAsk?: ((phrase: string) => void) | null;
   onNavigate?: (href: string) => void;
   compact?: boolean;
+  /** An in-memory workspace draft; never persisted as directory search history. */
+  inlineDraft?: { text: string; setText: Dispatch<SetStateAction<string>> };
 } = {}) {
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
@@ -86,7 +89,7 @@ export function QuickCampusEntry({
     Boolean(selection && !selection.loading && selection.catalogStatus === 'ready'),
   );
   const [draft, setDraft] = useState({ scope: draftScope, query: '', edited: false });
-  const query = draft.scope === draftScope ? draft.query : '';
+  const query = inlineDraft?.text ?? (draft.scope === draftScope ? draft.query : '');
   if (draft.scope !== draftScope) setDraft({ scope: draftScope, query: '', edited: false });
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const sequence = useRef(0);
@@ -104,7 +107,7 @@ export function QuickCampusEntry({
     };
   }, [scope]);
   useLayoutEffect(() => {
-    if (!canRemember || restoredScope.current === storageScope) return;
+    if (inlineDraft || !canRemember || restoredScope.current === storageScope) return;
     restoredScope.current = storageScope;
     // A deferred history restore must not replace text entered while campus resolution was pending.
     const snapshot = restoreDirectorySearch('quick', window.location.pathname || '/', storageScope);
@@ -112,7 +115,7 @@ export function QuickCampusEntry({
     // Restore the typed request after history navigation back to this page.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft({ scope: draftScope, query: snapshot.query.slice(0, 160), edited: false });
-  }, [canRemember, draftScope, storageScope, draft.edited]);
+  }, [canRemember, draftScope, storageScope, draft.edited, inlineDraft]);
   useEffect(
     () => () => {
       sequence.current += 1;
@@ -173,7 +176,8 @@ export function QuickCampusEntry({
     sequence.current += 1;
     controller.current?.abort();
     setAnalysis(null);
-    setDraft({ scope: draftScope, query: value.slice(0, 320), edited: true });
+    if (inlineDraft) inlineDraft.setText(value.slice(0, 1000));
+    else setDraft({ scope: draftScope, query: value.slice(0, 320), edited: true });
   }
 
   function startOver() {
@@ -183,7 +187,7 @@ export function QuickCampusEntry({
   }
 
   function rememberQuick(href: string) {
-    if (!canRemember) return;
+    if (inlineDraft || !canRemember) return;
     rememberDirectorySearch('quick', {
       path: window.location.pathname || '/',
       destination: href,
@@ -373,7 +377,7 @@ export function QuickCampusEntry({
             type="search"
             autoComplete="off"
             enterKeyHint="search"
-            maxLength={320}
+            maxLength={inlineDraft ? 1000 : 320}
             value={query}
             onChange={(event) => updateQuery(event.target.value)}
             onCompositionStart={() => {

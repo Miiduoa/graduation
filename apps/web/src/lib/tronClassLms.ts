@@ -3,6 +3,8 @@ import { AcademicConnectionError } from './academicClient';
 import { LMS_CONNECTING_CODE } from './schoolLoginTimeouts';
 import { withSchoolDataDeadline } from './schoolDataRequest';
 import { selectDeadlineAxis } from '@campus/shared/src/puLmsReadonly';
+import { decodeLmsSubmissions } from './tronClassLmsSnapshot';
+import { LMS_SNAPSHOT_VERSION } from './tronClassLmsTypes';
 import type {
   LmsAnnouncementItem,
   LmsCourseError,
@@ -29,22 +31,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function positiveId(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
-}
-
-function readHomework(value: unknown): LmsHomeworkItem {
-  const row = asRecord(value);
-  const id = positiveId(row?.id);
-  const courseId = positiveId(row?.courseId);
-  if (!row || !id || !courseId || typeof row.courseName !== 'string' || typeof row.title !== 'string' ||
-    !(row.deadline === null || typeof row.deadline === 'string') || typeof row.deadlineLabel !== 'string' ||
-    row.submitted !== true && row.submitted !== false || typeof row.description !== 'string' ||
-    typeof row.href !== 'string' || !row.href.startsWith('https://tronclass.pu.edu.tw/')) {
-    throw new Error('Invalid homework');
-  }
-  return {
-    id, courseId, courseName: row.courseName, title: row.title, deadline: row.deadline,
-    deadlineLabel: row.deadlineLabel, submitted: row.submitted, description: row.description, href: row.href,
-  };
 }
 
 function readAnnouncement(value: unknown): LmsAnnouncementItem {
@@ -162,7 +148,8 @@ export async function loadTronClassLms(
       }
       const row = asRecord(envelope.result);
       const cache = asRecord(row?.cache);
-      if (!row || row.success !== true || row.ownerUid !== uid || row.schoolId !== expectedSchool ||
+      if (!row || (row.schemaVersion !== undefined && row.schemaVersion !== LMS_SNAPSHOT_VERSION) ||
+        row.success !== true || row.ownerUid !== uid || row.schoolId !== expectedSchool ||
         row.source !== 'pu-tronclass' || typeof row.fetchedAt !== 'string' ||
         !Number.isFinite(Date.parse(row.fetchedAt)) || !cache || cache.hit !== true && cache.hit !== false ||
         typeof cache.expiresAt !== 'string' ||         !Array.isArray(row.courses) || row.courses.length > 1000 ||
@@ -173,7 +160,9 @@ export async function loadTronClassLms(
         !Array.isArray(row.courseErrors) || row.courseErrors.length > 500) {
         throw new Error('School LMS response does not match the active account');
       }
+      const submissions = decodeLmsSubmissions(row, row.schemaVersion === undefined);
       return {
+        schemaVersion: LMS_SNAPSHOT_VERSION,
         success: true,
         ownerUid: uid,
         schoolId: 'pu',
@@ -186,10 +175,10 @@ export async function loadTronClassLms(
           if (!id) throw new Error('Invalid course');
           return id;
         }),
-        homework: row.homework.map(readHomework),
+        homework: submissions.homework,
         announcements: row.announcements.map(readAnnouncement),
         materials: row.materials.map(readMaterial),
-        courseErrors: row.courseErrors.map(readCourseError),
+        courseErrors: submissions.courseErrors.map(readCourseError),
         siteAnnouncementError: row.siteAnnouncementError === null ? null
           : asRecord(row.siteAnnouncementError) && (asRecord(row.siteAnnouncementError)!.status === null ||
             typeof asRecord(row.siteAnnouncementError)!.status === 'number')

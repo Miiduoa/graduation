@@ -63,3 +63,19 @@ c6b0c412503fb27e13ee31ec72b25291d6fa6d9d:apps/mobile/src/screens/TodayScreen.tsx
 593330cf36c5e7ab4d87e91eed6e563d230bff4d:apps/mobile/src/screens/ProfileScreen.tsx:generic-api-key:21
 593330cf36c5e7ab4d87e91eed6e563d230bff4d:apps/mobile/src/screens/TodayScreen.tsx:generic-api-key:320
 d8628868502fe68b12e47bd26207042701ad29d0:docs/API.md:generic-api-key:115
+
+# Reviewed malformed-input test markers in #577 and #687. The tests assert the
+# marker never reaches the CLI output. Only these two merge findings are exempt.
+2a9bad18dd88a6873b08063df8b308e5df2cf9e0:scripts/audit-group-post-visibility.test.cjs:generic-api-key:51
+66a88348a216bbeee31e332968ca8cc39e4eea70:scripts/qa/course-study/compare.test.mjs:generic-api-key:494
+
+# Published CocoaPods spec SHA-1s. The verifier checks the original lockfile
+# blob, both exact lines, and new-commit detection at the same positions.
+a818d9e02eb57cadd7fe0a0041a1fedba452e8a4:apps/mobile/ios/Podfile.lock:generic-api-key:2526
+a818d9e02eb57cadd7fe0a0041a1fedba452e8a4:apps/mobile/ios/Podfile.lock:generic-api-key:2573
+08d3aa3e283b506e8e462f7aa6e1b771112e59a2:apps/mobile/ios/Podfile.lock:generic-api-key:2526
+08d3aa3e283b506e8e462f7aa6e1b771112e59a2:apps/mobile/ios/Podfile.lock:generic-api-key:2573
+
+# #616 main squash of the byte-identical, loopback-only public emulator helper.
+# The verifier pins both complete file blobs; new same-position markers remain rejected.
+149cfbe2f806ee15da1985854b34dfe72a7e07d9:scripts/test-env/verify-tronclass.cjs:generic-api-key:53

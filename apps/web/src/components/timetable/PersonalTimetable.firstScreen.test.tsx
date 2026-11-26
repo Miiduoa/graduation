@@ -104,6 +104,10 @@ it('offers importing as the first clear action when there are no courses', async
   const empty = await screen.findByRole('region', { name: '還沒有課表' });
   expect(within(empty).getByRole('link', { name: '匯入我的課表' }).getAttribute('href')).toBe('/import?kind=timetable&campus=pu');
   expect(within(empty).getByRole('button', { name: '手動新增課程' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '新增課程' })).toBeNull();
+  expect(screen.queryByRole('group', { name: '課表顯示方式' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '匯入截圖或檔案' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '匯入課表' })).toBeNull();
   expect(screen.queryByRole('region', { name: '一週課程' })).toBeNull();
 });
 

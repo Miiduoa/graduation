@@ -4,9 +4,12 @@ import { ClassExceptions } from '../components/ClassExceptions';
 import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
+  Platform,
   Pressable,
   ScrollView,
   Share,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -14,6 +17,7 @@ import {
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import {
   validClassDate,
+  isPersonalImportTime,
   periodProfileForSchool,
   periodTimes,
   periodSlots,
@@ -33,6 +37,8 @@ import {
   type PersonalCourse, shareCopiedCopy } from '@campus/shared';
 import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
+import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { toPublicSchoolId } from '../data/schoolIds';
@@ -60,7 +66,19 @@ import {
 import { listAcceptedFriends, opponentUidFromFriendship } from '../services/friends';
 import { resolveTimetableClassroomNav } from '../hooks/timetableClassroomNav';
 
-export default function PersonalTimetableScreen() {
+/** The guest and account stacks already provide the title, back button and top inset. */
+export function StackTitledPersonalTimetable() {
+  return <PersonalTimetableScreen stackTitled />;
+}
+
+export function PublicPersonalTimetable() {
+  return <PersonalTimetableScreen stackTitled publicEntry />;
+}
+
+export default function PersonalTimetableScreen({ stackTitled = false, publicEntry = false }: {
+  stackTitled?: boolean;
+  publicEntry?: boolean;
+} = {}) {
   const auth = useAuth();
   const { school } = useSchool();
   const scope = usePersonalImportScope();
@@ -76,13 +94,17 @@ export default function PersonalTimetableScreen() {
   const startAt = date ? params?.startAt : undefined;
   return <PersonalTimetableWorkspace
     key={JSON.stringify([auth.user?.uid, schoolId, scope?.owner, term, courseId, date, startAt])}
+    title={stackTitled ? undefined : '我的課表'}
+    courseworkAvailable={!publicEntry}
     initialDate={date} initialCourseId={courseId} initialTerm={term} initialStartAt={startAt}
   />;
 }
 
-function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate, initialStartAt }: {
-  initialTerm?: string; initialCourseId?: string; initialDate?: string; initialStartAt?: number;
+function PersonalTimetableWorkspace({ title, courseworkAvailable, initialTerm, initialCourseId, initialDate, initialStartAt }: {
+  title?: string; courseworkAvailable: boolean; initialTerm?: string; initialCourseId?: string; initialDate?: string; initialStartAt?: number;
 }) {
+  useThemeVersion();
+  const bottomPadding = useTabBarContentBottomPadding();
   const navigation = useNavigation();
   const auth = useAuth();
   const { school } = useSchool();
@@ -100,6 +122,22 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
     return today === 0 ? 7 : today;
   });
   const [editing, setEditing] = useState<PersonalCourse | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const editorOffset = useRef(0);
+  const revealEditor = useRef(false);
+  const editorHeading = useRef<View>(null);
+  const showEditor = () => {
+    scrollRef.current?.scrollTo({ y: editorOffset.current, animated: false });
+    const heading = editorHeading.current;
+    if (!heading) return;
+    if (Platform.OS === 'web') heading.focus();
+    else AccessibilityInfo.sendAccessibilityEvent(heading, 'focus');
+  };
+  const startEditing = (course: PersonalCourse) => {
+    if (editing) showEditor();
+    revealEditor.current = !editing;
+    setEditing(course);
+  };
   const importScope = usePersonalImportScope();
   const localOwner = importScope?.owner.startsWith('nuni:') ? importScope.owner : undefined;
   const uid = localOwner ? null : auth.user?.uid || null;
@@ -154,7 +192,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
     safeNavigate(navigation, destination.screen, destination.params);
   };
   const openCourse = (course: PersonalCourse) => course.id.startsWith('import:')
-    || !profile ? safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' }) : setEditing(course);
+    || !profile ? safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' }) : startEditing(course);
   const listedImports = importedRecords.filter((row) => row.kind === 'timetable' && row.schoolId === schoolId &&
     `${row.academicYear}|${row.semester}` === (selectedView === 'legacy' ? manualTerm : activeTerm) &&
     !placedImportIds.has(`import:${row.id}`));
@@ -228,8 +266,11 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
 
   if (!timetable) {
     return (
-      <Screen title="我的課表">
-        <Text style={{ color: theme.colors.muted, padding: 16 }}>{loadError ? '課表暫時讀不到，請重新讀取。' : !importScope ? '正在確認帳號，暫時不顯示個人課表。' : '正在讀取課表…'}</Text>
+      <Screen title={title}>
+        <Text
+          accessibilityRole={loadError ? 'alert' : undefined}
+          style={{ color: theme.colors.muted, fontSize: 15, lineHeight: 22, paddingVertical: 16 }}
+        >{loadError ? '課表暫時讀不到，請重新讀取。' : !importScope ? '正在確認帳號，暫時不顯示個人課表。' : '正在讀取課表…'}</Text>
         {loadError ? <Button text="重試課表" onPress={() => void load()} /> : null}
       </Screen>
     );
@@ -247,9 +288,6 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
     }
   };
 
-  const visible = displayCourses
-    .filter((course) => (view === 'day' ? course.day === day : course.day >= 1))
-    .sort((a, b) => a.day - b.day || a.start - b.start);
   const windows = friendId && profile && !loadError && importStatus === 'ready' && !listedImports.length ? meetupWindows(weekdayCourses, friendCourses, profile) : [];
   const nameOf = (id: string) => friends.find((friend) => friend.uid === id)?.name || '同學';
 
@@ -289,7 +327,6 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
     setInvites(uid ? await listIncomingMeetups(schoolId, uid).catch(() => []) : []);
   };
 
-
   let occurrenceSummary: string | undefined;
   if (initialDate) {
     if (loadError || importStatus === 'error') occurrenceSummary = '課表暫時讀不到，請重新讀取後核對上課時間。';
@@ -300,64 +337,166 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
     else occurrenceSummary = '這個時段目前沒有排這堂課，請查看調整紀錄。';
   }
 
+  const entries = buildTimetableEntries({
+    courses: displayCourses,
+    originals: listedImports,
+    profile,
+    times,
+    selectedCourseId: selectedCourse?.id,
+  });
+  const shownEntries = view === 'day' ? entries.filter((entry) => entry.day === day) : entries;
+  const groups = view === 'day'
+    ? [{ day, entries: shownEntries }]
+    : TIMETABLE_GROUP_ORDER
+      .map((groupDay) => ({ day: groupDay, entries: entries.filter((entry) => entry.day === groupDay) }))
+      .filter((group) => group.entries.length > 0);
+  const gridOriginals = groups
+    .map((group) => ({ ...group, entries: group.entries.filter((entry) => entry.original) }))
+    .filter((group) => group.entries.length > 0);
+  const termKey = selectedView === 'legacy' ? manualTerm : activeTerm;
+  const exportRecords = personalTimetableRecords(timetable, importedRecords);
+  const colors = theme.colors;
+
+  const exceptionsPanel = (
+    <ClassExceptions key={`exceptions:${importScopeKey}`} records={exportRecords}
+      exceptions={timetable.classExceptions} schoolId={schoolId} initialDate={matchesTerm ? initialDate : undefined}
+      termKey={termKey}
+      disabled={loadError || importStatus !== 'ready'}
+      onSave={(classExceptions) => persist({ ...timetable, classExceptions }, '這次安排已儲存。', true)} />
+  );
+
+  const renderEntry = (entry: TimetableEntry) => {
+    const verified = entry.sort !== undefined;
+    const dayLabel = TIMETABLE_DAY_LABELS[entry.day - 1] || '未排定星期';
+    const course = entry.course;
+    const original = entry.original;
+    const openEntry = () => {
+      if (course) openCourse(course);
+      else safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' });
+    };
+    return (
+      <View
+        key={entry.key}
+        testID="timetable-row"
+        style={{
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.separator,
+          ...(entry.selected && { borderLeftWidth: 3, borderLeftColor: colors.accent, paddingLeft: 8 }),
+          paddingVertical: 6,
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          columnGap: 8,
+        }}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: entry.selected }}
+          accessibilityLabel={`${entry.title}，${dayLabel}，${entry.time}，${entry.detail}${original ? '，原始匯入，未放入節次' : ''}`}
+          accessibilityHint={original || !profile || course?.id.startsWith('import:') ? '開啟匯入紀錄' : '查看或編輯課程'}
+          onPress={openEntry}
+          style={({ pressed }) => ({ minHeight: 44, flexBasis: 172, flexGrow: 1, flexShrink: 1, justifyContent: 'center', paddingVertical: 5, gap: 2, opacity: pressed ? 0.65 : 1 })}
+        >
+          <Text
+            style={verified
+              ? { color: colors.textSecondary, fontSize: 14, lineHeight: 21, fontWeight: '500', fontVariant: ['tabular-nums'] }
+              : { color: colors.muted, fontSize: 14, lineHeight: 21 }}
+          >
+            {entry.time}
+          </Text>
+          <Text style={{ color: colors.text, fontSize: 18, lineHeight: 25, fontWeight: '600' }}>{entry.title}</Text>
+          <Text style={{ color: colors.muted, fontSize: 14, lineHeight: 20 }}>{entry.detail}</Text>
+          {original ? (
+            <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 18 }}>原始匯入，未放入節次</Text>
+          ) : null}
+        </Pressable>
+        {course && courseworkAvailable ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`作業與教材：${entry.title}`}
+            onPress={() => openCourseWork(course)}
+            style={({ pressed }) => ({ minHeight: 44, minWidth: 44, justifyContent: 'center', paddingHorizontal: 4, opacity: pressed ? 0.65 : 1 })}
+          >
+            <Text style={{ color: colors.accent, fontSize: 14, fontWeight: '500' }}>作業與教材</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  };
+
+  const renderGroup = (group: { day: number; entries: TimetableEntry[] }, emptyText?: string) => (
+    <View key={group.day} style={{ gap: 0 }}>
+      <Text accessibilityRole="header" style={{ color: colors.text, fontSize: 18, lineHeight: 26, fontWeight: '700', paddingBottom: 6 }}>
+        {TIMETABLE_DAY_LABELS[group.day - 1] || '未排定星期'}
+      </Text>
+      {group.entries.length
+        ? group.entries.map(renderEntry)
+        : <Text style={{ color: colors.muted, fontSize: 15, lineHeight: 22, paddingVertical: 8 }}>{emptyText}</Text>}
+    </View>
+  );
+
+  const emptyMessage = importStatus === 'loading' ? '正在讀取匯入課表…'
+    : importStatus === 'error' || loadError ? '課表尚未完整讀取。'
+    : view !== 'day' ? '這份課表目前沒有可列出的課程。可匯入或新增自己的資料。'
+    : entries.some((entry) => !entry.day) ? '這天沒有已排定的課程，另有課程的星期待確認。'
+    : '這天沒有排課。';
+  const sectionTitle = {
+    color: colors.text,
+    fontSize: theme.typography.h3.fontSize,
+    lineHeight: theme.typography.h3.lineHeight,
+    fontWeight: '700' as const,
+  };
+
   return (
-    <Screen title="我的課表" subtitle="查看上課時間與空堂">
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
-        {initialCourseId ? <View style={{ padding: 16, gap: 6 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{datedCourse?.row.title || selectedCourse?.name || (initialDate ? '上課時間' : '這堂課已變更，請核對目前課表')}</Text>
-          {occurrenceSummary ? <Text style={{ color: theme.colors.muted }}>{occurrenceSummary}</Text> : selectedCourse ? <Text style={{ color: theme.colors.muted }}>{selectedCourse.room || '教室未填'}</Text> : null}
+    <Screen title={title} noPadding>
+      {notice ? (
+        <View
+          accessibilityLiveRegion="polite"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            paddingVertical: 4,
+            paddingHorizontal: theme.layout.screenHorizontalPadding,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: colors.separator,
+          }}
+        >
+          <Text style={{ flex: 1, color: colors.text, fontSize: 15, lineHeight: 22 }}>{notice}</Text>
+          <Button text="關閉" kind="ghost" size="small" accessibilityLabel="關閉提示" onPress={() => setNotice('')} />
+        </View>
+      ) : null}
+      <ScrollView ref={scrollRef} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 16, paddingTop: 8, paddingHorizontal: theme.layout.screenHorizontalPadding, paddingBottom: bottomPadding }}>
+        {initialCourseId ? <View
+          style={{ borderLeftWidth: 3, borderLeftColor: colors.accent, paddingLeft: 10, paddingVertical: 4, gap: 4 }}
+        >
+          <Text accessibilityRole="header" style={{ color: colors.text, fontSize: 17, lineHeight: 24, fontWeight: '700' }}>{datedCourse?.row.title || selectedCourse?.name || (initialDate ? '上課時間' : '這堂課已變更，請核對目前課表')}</Text>
+          {occurrenceSummary ? <Text style={{ color: colors.muted, fontSize: 15, lineHeight: 22 }}>{occurrenceSummary}</Text> : selectedCourse ? <Text style={{ color: colors.muted, fontSize: 15, lineHeight: 22 }}>{selectedCourse.room || '教室未填'}</Text> : null}
           {initialDate && (loadError || importStatus === 'error') && <Button text="重新核對這堂課" onPress={() => void load()} />}
         </View> : null}
-        {importScope && importScope.owner !== 'guest:device' && <ClassReminderToggle key={importScopeKey} scope={importScopeKey} />}
-        <PersonalCalendarExport key={`calendar:${importScopeKey}:${selectedView === 'legacy' ? manualTerm : activeTerm}`} records={personalTimetableRecords(timetable, importedRecords)} schoolId={schoolId}
-          termKey={selectedView === 'legacy' ? manualTerm : activeTerm}
-          disabled={loadError || importStatus !== 'ready'} />
-        <ClassExceptions key={`exceptions:${importScopeKey}`} records={personalTimetableRecords(timetable, importedRecords)}
-          exceptions={timetable.classExceptions} schoolId={schoolId} initialDate={matchesTerm ? initialDate : undefined}
-          termKey={selectedView === 'legacy' ? manualTerm : activeTerm}
-          disabled={loadError || importStatus !== 'ready'}
-          onSave={(classExceptions) => persist({ ...timetable, classExceptions }, '這次安排已儲存。', true)} />
-        {uid && !localOwner ? <Button text="重新讀取雲端課表" onPress={() => void load()} /> : null}
-        {uid && !localOwner ? <Button text="檢視這台裝置未同步草稿" onPress={() => {
-          const requestScope = importScopeKey;
-          const run = loadGeneration.current;
-          void loadPersonalTimetableDraft(uid, schoolId).then((draft) => {
-            if (scopeRef.current !== requestScope || loadGeneration.current !== run) return;
-            if (!draft) { setNotice('這台裝置沒有未同步草稿。'); return; }
-            setTimetable(restorePersonalTimetableDraft(timetable, draft));
-            if (draft.pendingBase !== false) setImportTerm('legacy');
-            setNotice('目前預覽未同步課表；請核對每週基準與單次安排，分別儲存。重新讀取可回到雲端版本。');
-          }).catch(() => setNotice('草稿暫時讀不到，原始資料仍保留。'));
-        }} /> : null}
-        <Button text="儲存每週基準課表" disabled={loadError} onPress={() => void persist(timetable, '每週基準課表已儲存。')} />
-        <Text style={{ color: theme.colors.muted }}>每週基準課表；指定日期的安排請查看上方。</Text>
-        <PersonalImportSummary kind="timetable" />
+        {initialDate ? exceptionsPanel : null}
         {importStatus === 'error' ? (
-          <View>
-            <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
+          <View style={{ gap: 6 }}>
+            <Text accessibilityRole="alert" style={{ color: colors.danger, fontSize: 15, lineHeight: 22 }}>
               匯入課表暫時讀不到，目前不能確認空堂，請重新讀取。
             </Text>
             <Button text="重試匯入課表" onPress={() => void load()} />
           </View>
         ) : null}
         {loadError ? (
-          <View>
-            <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
+          <View style={{ gap: 6 }}>
+            <Text accessibilityRole="alert" style={{ color: colors.danger, fontSize: 15, lineHeight: 22 }}>
               手動課表暫時讀不到，先保留上次讀取的內容；目前不能確認空堂。
             </Text>
             <Button text="重試課表" onPress={() => void load()} />
           </View>
         ) : null}
-        {importTerms.length ? <View style={{ gap: 8 }}>
-          <Text style={{ color: theme.colors.muted }}>正在查看：{selectedView === 'legacy' ? `原有課表（${timetable.meta.year && timetable.meta.semester ? `${timetable.meta.year}／${timetable.meta.semester}` : '學期未填'}）` : selectedView}。匯入課程只存在這台裝置，不會透過好友課表分享。</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}><Button text="自行編輯的課表" kind={selectedView === 'legacy' ? 'primary' : 'outline'} onPress={() => setImportTerm('legacy')} />{allTerms.map((term) => <Button key={term.key} text={`${term.academicYear}／${term.semester}`} kind={term.key === activeTerm && importTerm !== 'legacy' ? 'primary' : 'outline'} onPress={() => setImportTerm(term.key)} />)}</View>
-        </View> : null}
         {invites.length > 0 ? (
           <View accessibilityLabel="有人約你" style={{ gap: 8 }}>
-            <Text style={{ fontWeight: '700', color: theme.colors.text }}>有人約你</Text>
+            <Text accessibilityRole="header" style={sectionTitle}>有人約你</Text>
             {invites.map((item) => (
               <View key={item.id} style={{ gap: 6 }}>
-                <Text style={{ color: theme.colors.text }}>
+                <Text style={{ color: colors.text }}>
                   {nameOf(item.creatorUid)} 約你：{meetupLabel(item)}
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -368,158 +507,82 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
             ))}
           </View>
         ) : null}
-        {notice ? <Text style={{ color: theme.colors.text }}>{notice}</Text> : null}
-        {uid ? (
-          <Pressable
-            onPress={() =>
-              void persist(
-                { ...timetable, shareWithFriends: timetable.shareWithFriends === false },
-                timetable.shareWithFriends === false
-                  ? '好友加完後看得到這份課表。'
-                  : '已關掉好友課表。對方現在看不到。',
-              )
-            }
-          >
-            <Text style={{ color: theme.colors.text }}>
-              {timetable.shareWithFriends === false ? '目前好友看不到這份課表（點一下開放）' : '已接受的好友可以看到這份課表（點一下關閉）'}
-            </Text>
-          </Pressable>
-        ) : null}
-        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-          <Button text="一週" onPress={() => setView('week')} />
-          <Button text="單日" onPress={() => setView('day')} />
-          <Button text="格子" disabled={!profile} onPress={() => setView('grid')} />
-          <Button text="新增" disabled={!profile} onPress={() => { setImportTerm('legacy'); setEditing(cleanCourse({ day, start: 1, end: 1 }, { periodCount: periods.length })); }} />
-        </View>
-        {!profile ? <Text style={{ color: theme.colors.muted }}>這所學校尚未提供節次時間表。可在匯入紀錄填寫實際時間；不套用其他學校的節次。</Text> : null}
-        {listedImports.map((row) => <Pressable key={row.id} onPress={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })} style={{ gap: 6, paddingVertical: 12 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: '600' }}>{row.title}</Text>
-          <Text style={{ color: theme.colors.muted }}>週{['', '一', '二', '三', '四', '五', '六', '日'][row.dayOfWeek || 0] || '未填'} · {row.startTime && row.endTime ? `${row.startTime}–${row.endTime}` : row.periodLabel?.trim() ? `校方節次 ${row.periodLabel}` : '時間未確認'} · {row.location || '教室未填'} · 個人匯入</Text>
-        </Pressable>)}
-        {view === 'day' ? (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {TIMETABLE_DAY_LABELS.map((label, index) => (
-              <Pressable key={label} onPress={() => setDay(index + 1)}>
-                <Text style={{ color: day === index + 1 ? theme.colors.accent : theme.colors.muted }}>{label}</Text>
-              </Pressable>
-            ))}
+
+        {importTerms.length > 0 && (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 4 }}>
+            <Text style={{ color: colors.muted, fontSize: 13, marginRight: 4 }}>學期</Text>
+            <Choice label="自行編輯的課表" selected={importTerm === 'legacy'} onPress={() => setImportTerm('legacy')} />
+            {allTerms.map((term) => <Choice key={term.key} label={`${term.academicYear}／${term.semester}`} selected={term.key === activeTerm && importTerm !== 'legacy'} onPress={() => setImportTerm(term.key)} />)}
           </View>
-        ) : null}
-        {view === 'grid' ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator accessibilityLabel="一週課表，可橫向捲動查看週末">
-          <View style={{ minWidth: 44 + 7 * 52 }}>
-            <View style={{ flexDirection: 'row' }}>
-              <Text style={{ width: 44, color: theme.colors.muted, fontSize: 11 }}>節</Text>
-              {WEEKDAYS_SHORT.map((label) => (
-                <Text key={label} style={{ flex: 1, minWidth: 52, color: theme.colors.muted, fontSize: 11, textAlign: 'center' }}>
-                  {label}
-                </Text>
+        )}
+        <View style={{ gap: 6 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', padding: 3, gap: 2, borderRadius: 12, backgroundColor: colors.surface2, maxWidth: '100%' }}>
+              <Choice segment label="一週" selected={view === 'week'} onPress={() => setView('week')} />
+              <Choice segment label="單日" selected={view === 'day'} onPress={() => setView('day')} />
+              <Choice segment label="格子" selected={view === 'grid'} disabled={!profile} onPress={() => setView('grid')} />
+            </View>
+            <Button text="新增" kind="ghost" icon="add" disabled={!profile} onPress={() => {
+              setImportTerm('legacy');
+              startEditing(cleanCourse({ day, start: 1, end: 1 }, { periodCount: periods.length }));
+            }} />
+          </View>
+          {view === 'day' && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: 2 }}>
+              {TIMETABLE_DAY_LABELS.map((label, index) => (
+                <Choice key={label} label={WEEKDAYS_SHORT[index]} accessibilityLabel={label} selected={day === index + 1} onPress={() => setDay(index + 1)} />
               ))}
             </View>
-            {times.map((time, index) => {
-              const period = index + 1;
-              return (
-                <View key={period} style={{ flexDirection: 'row', minHeight: 36, alignItems: 'stretch' }}>
-                  <Text style={{ width: 44, color: theme.colors.muted, fontSize: 10 }}>
-                    {periods[index].label}
-                    {'\n'}
-                    {time[0]}
-                  </Text>
-                  {TIMETABLE_DAY_LABELS.map((_, dayIndex) => {
-                    const hit = displayCourses.find(
-                      (course) => course.day === dayIndex + 1 && period >= course.start && period <= course.end,
-                    );
-                    return (
-                      <Pressable
-                        key={`${period}-${dayIndex}`}
-                        onPress={() => hit && openCourse(hit)}
-                        style={{
-                          flex: 1,
-                          minWidth: 52,
-                          borderWidth: 0.5,
-                          borderColor: theme.colors.separator,
-                          backgroundColor: hit ? theme.colors.card : 'transparent',
-                          padding: 2,
-                        }}
-                      >
-                        {hit && period === hit.start ? (
-                          <Text numberOfLines={2} style={{ color: theme.colors.text, fontSize: 10, fontWeight: '700' }}>
-                            {hit.name}
-                          </Text>
-                        ) : null}
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              );
-            })}
-          </View>
-          </ScrollView>
-        ) : visible.length === 0 ? (
-          <Text style={{ color: theme.colors.muted }}>{listedImports.length ? '以上課程保留原始時間，未放入節次格子。' : '這份課表目前沒有可列出的課程。可匯入或新增自己的資料。'}</Text>
-        ) : (
-          visible.map((course) => (
-            <View
-              key={course.id}
-              style={{
-                borderWidth: 1,
-                borderColor: theme.colors.separator,
-                borderRadius: 12,
-                padding: 12,
-                backgroundColor: theme.colors.card,
-                gap: 8,
-              }}
-            >
-              <Pressable onPress={() => openCourse(course)} accessibilityRole="button">
-                <Text style={{ color: theme.colors.muted }}>
-                  {TIMETABLE_DAY_LABELS[course.day - 1] || '未排定'} · {profile ? periodRangeLabel(course.start, course.end, profile) : '節次時間未確認'}
-                </Text>
-                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>{course.name}</Text>
-                <Text style={{ color: theme.colors.muted }}>
-                  {course.teacher || '教師未填'} · {course.room || '教室未填'}{course.id.startsWith('import:') ? ' · 個人匯入' : ''}
-                </Text>
-              </Pressable>
-              <Button
-                text="作業與教材"
-                kind="outline"
-                onPress={() => openCourseWork(course)}
-              />
-            </View>
-          ))
-        )}
+          )}
+        </View>
+        {!profile ? <Text style={{ color: colors.muted, fontSize: 14, lineHeight: 20 }}>這所學校尚未提供節次時間表。可在匯入紀錄填寫實際時間；不套用其他學校的節次。</Text> : null}
 
         {editing ? (
-          <View style={{ gap: 8 }}>
-            <Text style={{ fontWeight: '700', color: theme.colors.text }}>編輯課程</Text>
+          <View style={{ gap: 8 }} onLayout={({ nativeEvent }) => {
+            editorOffset.current = nativeEvent.layout.y;
+            if (revealEditor.current) {
+              revealEditor.current = false;
+              showEditor();
+            }
+          }}>
+            <View ref={editorHeading} accessible accessibilityRole="header" accessibilityLabel="編輯課程" tabIndex={-1}>
+              <Text style={sectionTitle}>編輯課程</Text>
+            </View>
             <TextInput
               value={editing.name}
               onChangeText={(name) => setEditing({ ...editing, name })}
               placeholder="課名"
-              style={inputStyle}
+              accessibilityLabel="課名"
+              placeholderTextColor={colors.muted}
+              style={inputStyle()}
             />
             <TextInput
               value={String(editing.day)}
               onChangeText={(value) => setEditing({ ...editing, day: Number(value) || 0 })}
               placeholder="星期 1-5，0 代表未排定"
+              accessibilityLabel="星期"
+              placeholderTextColor={colors.muted}
               keyboardType="number-pad"
-              style={inputStyle}
+              style={inputStyle()}
             />
-            <Text style={{ color: theme.colors.text }}>開始節次</Text>
+            <Text style={{ color: colors.text }}>開始節次</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
               {periods.map((slot) => <Button key={slot.index} text={`開始 ${slot.label}`} kind={editing.start === slot.index ? 'primary' : 'outline'} onPress={() => setEditing({ ...editing, start: slot.index, end: Math.max(slot.index, editing.end) })} />)}
             </View>
-            <Text style={{ color: theme.colors.text }}>結束節次</Text>
+            <Text style={{ color: colors.text }}>結束節次</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
               {periods.map((slot) => <Button key={slot.index} text={`結束 ${slot.label}`} disabled={slot.index < editing.start} kind={editing.end === slot.index ? 'primary' : 'outline'} onPress={() => setEditing({ ...editing, end: slot.index })} />)}
             </View>
-            <Text style={{ color: theme.colors.muted }}>{profile ? periodRangeLabel(editing.start, editing.end, profile) : '節次時間未確認'}</Text>
+            <Text style={{ color: colors.muted }}>{profile ? periodRangeLabel(editing.start, editing.end, profile) : '節次時間未確認'}</Text>
             <TextInput
               value={editing.room}
               onChangeText={(room) => setEditing({ ...editing, room })}
               placeholder="教室"
-              style={inputStyle}
+              accessibilityLabel="教室"
+              placeholderTextColor={colors.muted}
+              style={inputStyle()}
             />
-            {editing.name.trim() ? (
+            {editing.name.trim() && courseworkAvailable ? (
               <Button text="作業與教材" kind="outline" onPress={() => openCourseWork(editing)} />
             ) : null}
             <Button
@@ -537,7 +600,121 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
           </View>
         ) : null}
 
-        <Text style={{ fontWeight: '700', color: theme.colors.text }}>幫我安排</Text>
+        <View testID="timetable-body">
+        {view === 'grid' ? (
+          <View style={{ gap: 16 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator accessibilityLabel="一週課表，可橫向捲動查看週末">
+              <View style={{ minWidth: 52 + 7 * 64 }}>
+                <View style={{ flexDirection: 'row' }}>
+                  <Text style={{ width: 52, color: colors.muted, fontSize: 12 }}>節</Text>
+                  {WEEKDAYS_SHORT.map((label) => (
+                    <Text key={label} style={{ flex: 1, minWidth: 64, color: colors.muted, fontSize: 13, textAlign: 'center' }}>
+                      {label}
+                    </Text>
+                  ))}
+                </View>
+                {times.map((time, index) => {
+                  const period = index + 1;
+                  return (
+                    <View key={period} style={{ flexDirection: 'row', minHeight: 48, alignItems: 'stretch' }}>
+                      <Text style={{ width: 52, color: colors.muted, fontSize: 12 }}>
+                        {periods[index].label}
+                        {'\n'}
+                        {time[0]}
+                      </Text>
+                      {TIMETABLE_DAY_LABELS.map((dayLabel, dayIndex) => {
+                        const hit = displayCourses.find(
+                          (course) => course.day === dayIndex + 1 && period >= course.start && period <= course.end,
+                        );
+                        return (
+                          <Pressable
+                            key={`${period}-${dayIndex}`}
+                            disabled={!hit}
+                            accessible={!!hit}
+                            accessibilityRole={hit ? 'button' : undefined}
+                            accessibilityLabel={hit ? `${hit.name}，${dayLabel}，${profile ? periodRangeLabel(hit.start, hit.end, profile) : '節次時間未確認'}` : undefined}
+                            onPress={() => hit && openCourse(hit)}
+                            style={{
+                              flex: 1,
+                              minWidth: 64,
+                              borderWidth: StyleSheet.hairlineWidth,
+                              borderColor: colors.separator,
+                              backgroundColor: hit ? colors.card : 'transparent',
+                              padding: 3,
+                            }}
+                          >
+                            {hit && period === hit.start ? (
+                              <Text numberOfLines={3} style={{ color: colors.text, fontSize: 12, lineHeight: 16, fontWeight: '700' }}>
+                                {hit.name}
+                              </Text>
+                            ) : null}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
+            {gridOriginals.length ? (
+              <View style={{ gap: 12 }}>
+                <Text style={{ color: colors.muted, fontSize: 14, lineHeight: 20 }}>以下原始匯入保留原始時間，未放入節次格子。</Text>
+                {gridOriginals.map((group) => renderGroup(group))}
+              </View>
+            ) : null}
+          </View>
+        ) : view === 'day' ? (
+          <View>
+            {renderGroup(groups[0], emptyMessage)}
+          </View>
+        ) : groups.length === 0 ? (
+          <Text style={{ color: colors.muted, fontSize: 15, lineHeight: 22 }}>{emptyMessage}</Text>
+        ) : (
+          <View style={{ gap: 16 }}>{groups.map((group) => renderGroup(group))}</View>
+        )}
+        </View>
+
+        {importScope && importScope.owner !== 'guest:device' && <ClassReminderToggle key={importScopeKey} scope={importScopeKey} />}
+        <PersonalCalendarExport key={`calendar:${importScopeKey}:${termKey}`} records={exportRecords} schoolId={schoolId}
+          termKey={termKey}
+          disabled={loadError || importStatus !== 'ready'} />
+        {initialDate ? null : exceptionsPanel}
+        <PersonalImportSummary kind="timetable" />
+        <Button text="儲存每週基準課表" disabled={loadError} onPress={() => void persist(timetable, '每週基準課表已儲存。')} />
+        {importTerms.length > 0 && <Text style={{ color: colors.muted }}>匯入課程只存在這台裝置，不會透過好友課表分享。</Text>}
+        {uid && !localOwner ? <Button text="重新讀取雲端課表" onPress={() => void load()} /> : null}
+        {uid && !localOwner ? <Button text="檢視這台裝置未同步草稿" onPress={() => {
+          const requestScope = importScopeKey;
+          const run = loadGeneration.current;
+          void loadPersonalTimetableDraft(uid, schoolId).then((draft) => {
+            if (scopeRef.current !== requestScope || loadGeneration.current !== run) return;
+            if (!draft) { setNotice('這台裝置沒有未同步草稿。'); return; }
+            setTimetable(restorePersonalTimetableDraft(timetable, draft));
+            if (draft.pendingBase !== false) setImportTerm('legacy');
+            setNotice('目前預覽未同步課表；請核對每週基準與單次安排，分別儲存。重新讀取可回到雲端版本。');
+          }).catch(() => setNotice('草稿暫時讀不到，原始資料仍保留。'));
+        }} /> : null}
+        {uid ? (
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityState={{ checked: timetable.shareWithFriends !== false }}
+            onPress={() =>
+              void persist(
+                { ...timetable, shareWithFriends: timetable.shareWithFriends === false },
+                timetable.shareWithFriends === false
+                  ? '好友加完後看得到這份課表。'
+                  : '已關掉好友課表。對方現在看不到。',
+              )
+            }
+            style={{ minHeight: 44, justifyContent: 'center' }}
+          >
+            <Text style={{ color: colors.text, fontSize: 15, lineHeight: 22 }}>
+              {timetable.shareWithFriends === false ? '目前好友看不到這份課表（點一下開放）' : '已接受的好友可以看到這份課表（點一下關閉）'}
+            </Text>
+          </Pressable>
+        ) : null}
+
+        <Text accessibilityRole="header" style={sectionTitle}>幫我安排</Text>
         {!planner ? <Text style={{ color: theme.colors.muted }}>{loadError || importStatus !== 'ready' ? '課表尚未完整讀取，暫不推算空堂。' : '部分課程無法對應節次，暫不推算空堂。請先核對上課時間。'}</Text> : null}
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Button text="下一堂" disabled={!planner} onPress={() => setAnswer([planner?.ask('下一堂') || '課表上還沒有排課。'])} />
@@ -589,7 +766,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
           </Text>
         ))}
 
-        <Text style={{ fontWeight: '700', color: theme.colors.text }}>分享</Text>
+        <Text accessibilityRole="header" style={sectionTitle}>分享</Text>
         <Button
           text="分享課表"
           onPress={async () => {
@@ -614,7 +791,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
           }}
         />
 
-        <Text style={{ fontWeight: '700', color: theme.colors.text }}>共同空堂</Text>
+        <Text accessibilityRole="header" style={sectionTitle}>共同空堂</Text>
         {!uid ? (
           <Text style={{ color: theme.colors.muted }}>登入並加好友後才能看對方課表。</Text>
         ) : friends.length === 0 ? (
@@ -700,12 +877,104 @@ function MeetupWindowRow({
 
 const TIMETABLE_DAY_LABELS = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
 const WEEKDAYS_SHORT = ['一', '二', '三', '四', '五', '六', '日'];
+/** Weekdays first; day 0 holds courses and imports that have no usable weekday. */
+const TIMETABLE_GROUP_ORDER = [1, 2, 3, 4, 5, 6, 7, 0];
 
-const inputStyle = {
+type TimetableEntry = {
+  key: string;
+  day: number;
+  /** Valid 24-hour clock values sort chronologically as HH:mm strings. */
+  sort?: string;
+  order: number;
+  time: string;
+  title: string;
+  detail: string;
+  selected: boolean;
+  course?: PersonalCourse;
+  original?: PersonalImportRecord;
+};
+
+function weekdayGroup(day?: number) {
+  return Number.isInteger(day) && day! >= 1 && day! <= 7 ? day! : 0;
+}
+
+function buildTimetableEntries({ courses, originals, profile, times, selectedCourseId }: {
+  courses: PersonalCourse[];
+  originals: PersonalImportRecord[];
+  profile: ReturnType<typeof periodProfileForSchool>;
+  times: ReadonlyArray<readonly [string, string]>;
+  selectedCourseId?: string;
+}): TimetableEntry[] {
+  const placed = courses.map((course): TimetableEntry => ({
+    key: `course:${course.id}`,
+    day: weekdayGroup(course.day),
+    sort: profile && times[course.end - 1] ? times[course.start - 1]?.[0] : undefined,
+    order: course.start,
+    time: profile ? periodRangeLabel(course.start, course.end, profile) : '節次時間未確認',
+    title: course.name,
+    detail: [course.room || '教室未填', course.teacher, course.id.startsWith('import:') ? '個人匯入' : '']
+      .filter(Boolean).join(' · '),
+    selected: course.id === selectedCourseId,
+    course,
+  }));
+  const unresolved = originals.map((row): TimetableEntry => ({
+    key: `original:${row.id}`,
+    day: weekdayGroup(row.dayOfWeek),
+    sort: row.startTime && row.endTime && isPersonalImportTime(row.startTime) && isPersonalImportTime(row.endTime) ? row.startTime : undefined,
+    order: Number.MAX_SAFE_INTEGER,
+    time: row.startTime && row.endTime
+      ? `${row.startTime}–${row.endTime}`
+      : row.periodLabel?.trim() ? `校方節次 ${row.periodLabel}` : '時間未確認',
+    title: row.title,
+    detail: [row.location || '教室未填', row.teacher].filter(Boolean).join(' · '),
+    selected: false,
+    original: row,
+  }));
+  return [...placed, ...unresolved].sort((a, b) =>
+    (a.sort ?? '99:99').localeCompare(b.sort ?? '99:99') || a.order - b.order || a.title.localeCompare(b.title));
+}
+
+/** Local choice control: selected state and a 44pt target without changing shared buttons. */
+function Choice({ label, selected, disabled, accessibilityLabel, onPress, segment = false }: {
+  segment?: boolean;
+  label: string;
+  selected: boolean;
+  disabled?: boolean;
+  accessibilityLabel?: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ selected, disabled: !!disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        minHeight: 44, minWidth: 44, maxWidth: '100%', justifyContent: 'center', alignItems: 'center',
+        paddingHorizontal: segment ? 14 : 8, paddingVertical: 5, borderRadius: segment ? 9 : 0,
+        backgroundColor: segment && selected ? theme.colors.surface : 'transparent',
+        borderBottomWidth: !segment && selected ? 2 : 0,
+        borderColor: theme.colors.accent, opacity: pressed ? 0.65 : 1,
+      })}
+    >
+      <Text
+        style={{
+          color: disabled ? theme.colors.disabledText : selected ? theme.colors.text : theme.colors.textSecondary,
+          fontSize: 15, lineHeight: 21, fontWeight: selected ? '700' : '500', textAlign: 'center',
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+const inputStyle = () => ({
   borderWidth: 1,
   borderColor: theme.colors.separator,
   borderRadius: 10,
   padding: 12,
   minHeight: 44,
   color: theme.colors.text,
-};
+});

@@ -14,7 +14,7 @@ export type TronClassControlledSubmissionDependencies = {
   db: TronClassSubmissionFirestore;
   bindings: TronClassSubmissionBindings;
   /** Source-confirmed authorization, never browser-supplied permissions. */
-  authorize(ownerKey: string, scope: TronClassHomeworkScope, signal?: AbortSignal): Promise<TronClassCandidateAuthorization>;
+  authorize(ownerKey: string, scope: TronClassHomeworkScope, signal?: AbortSignal, expected?: string | TronClassSubmissionBinding): Promise<TronClassCandidateAuthorization>;
   readHistory(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, signal: AbortSignal): Promise<unknown>;
   /** Required only for attachment writes; text still needs the verified authorizer. */
   resolveStorageTarget?: TronClassAttachmentCandidateDependencies['resolveStorageTarget'];
@@ -75,8 +75,8 @@ export function createTronClassControlledSubmission(dependencies: TronClassContr
       }
       return final.dispatch(ownerKey, input, signal);
     },
-    reconcile(ownerKey: string, operationId: string, signal?: AbortSignal) {
-      return final.reconcile(ownerKey, operationId, signal);
+    reconcile(ownerKey: string, operationId: string, signal?: AbortSignal, snapshot?: TronClassSubmissionBinding) {
+      return final.reconcile(ownerKey, operationId, signal, snapshot);
     },
   });
 }

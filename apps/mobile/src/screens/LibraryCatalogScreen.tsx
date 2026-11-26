@@ -3,7 +3,7 @@
  * other universities use their verified official catalog entry points.
  */
 import React, { useLayoutEffect, useRef, useState } from 'react';
-import { Linking, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
   buildOfficialLibraryCatalogUrl,
   getOfficialLibrary,
@@ -80,51 +80,84 @@ function ScopedCatalog({
     return (
       <ScrollView
         contentContainerStyle={{
-          padding: theme.layout.screenHorizontalPadding,
+          paddingHorizontal: theme.layout.screenHorizontalPadding,
+          paddingTop: 8,
           paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
-          gap: 16,
         }}
       >
-        <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
+        <Text
+          style={{
+            color: theme.colors.muted,
+            fontSize: 13,
+            fontWeight: '600',
+            letterSpacing: 0.4,
+          }}
+        >
+          學校官方館藏
+        </Text>
+        <Text
+          accessibilityRole="header"
+          style={{
+            color: theme.colors.text,
+            fontSize: 20,
+            lineHeight: 28,
+            fontWeight: '700',
+            marginTop: 8,
+          }}
+        >
           {library?.name ?? '此校圖書館尚未接通'}
         </Text>
         {library ? (
-          <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+          <Text style={{ color: theme.colors.textSecondary, lineHeight: 22, marginTop: 8 }}>
             到{library.name}的官方館藏網站查詢書目與借閱狀態。
           </Text>
         ) : (
-          <LibraryWebsiteFallback schoolId={schoolId} schoolName={schoolName} />
+          <View style={{ marginTop: 8 }}>
+            <LibraryWebsiteFallback schoolId={schoolId} schoolName={schoolName} />
+          </View>
         )}
         {library ? (
-          <Pressable
-            accessibilityRole="link"
-            accessibilityLabel={`開啟${library.name}官方館藏`}
-            onPress={() => {
-              if (!active.current) return;
-              setFailed(false);
-              const searchUrl =
-                buildOfficialLibraryCatalogUrl(schoolId, initialQ, 'FullText', schoolName) ??
-                library.catalogUrl;
-              void Linking.openURL(searchUrl).catch(() => {
-                if (active.current) setFailed(true);
-              });
-            }}
+          <View
             style={{
-              minHeight: 48,
-              justifyContent: 'center',
-              alignItems: 'center',
-              borderRadius: 12,
-              backgroundColor: theme.colors.accent,
-              paddingHorizontal: 16,
+              marginTop: 20,
+              paddingTop: 20,
+              borderTopWidth: StyleSheet.hairlineWidth,
+              borderTopColor: theme.colors.separator,
             }}
           >
-            <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>
-              {verifiedSearch && initialQ.trim() ? '搜尋本校館藏' : '開啟學校官方館藏'}
-            </Text>
-          </Pressable>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel={`開啟${library.name}官方館藏`}
+              onPress={() => {
+                if (!active.current) return;
+                setFailed(false);
+                const searchUrl =
+                  buildOfficialLibraryCatalogUrl(schoolId, initialQ, 'FullText', schoolName) ??
+                  library.catalogUrl;
+                void Linking.openURL(searchUrl).catch(() => {
+                  if (active.current) setFailed(true);
+                });
+              }}
+              style={({ pressed }) => ({
+                minHeight: 48,
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderRadius: theme.radius.sm,
+                backgroundColor: pressed ? theme.colors.accentHover : theme.colors.accent,
+                paddingHorizontal: 16,
+              })}
+            >
+              <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>
+                {verifiedSearch && initialQ.trim() ? '搜尋本校館藏' : '開啟學校官方館藏'}
+              </Text>
+            </Pressable>
+          </View>
         ) : null}
         {failed ? (
-          <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
+          <Text
+            accessibilityRole="alert"
+            style={{ color: theme.colors.danger, lineHeight: 22, marginTop: 12 }}
+          >
             無法開啟館藏網站，請確認網路連線後再試。
           </Text>
         ) : null}

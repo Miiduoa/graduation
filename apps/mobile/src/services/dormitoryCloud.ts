@@ -21,15 +21,16 @@ export function subscribeDormCloud(
   schoolId: string,
   uid: string,
   onChange: (state: DormCloudState) => void,
+  sourceSchoolId?: string,
 ): () => void {
   const db = getDb();
-  const canonicalSchoolId = toPublicSchoolId(schoolId) ?? schoolId;
+  const documentSchoolId = sourceSchoolId ?? toPublicSchoolId(schoolId) ?? schoolId;
   return watchDormCloud(
     {
       watch: (name, field, rows, error) => {
         const legacy = (onRows: typeof rows, onError: typeof error) =>
           onSnapshot(
-            query(collection(db, 'schools', canonicalSchoolId, name), where(field, '==', uid)),
+            query(collection(db, 'schools', documentSchoolId, name), where(field, '==', uid)),
             (snap) => onRows(snap.docs.map((d) => ({ id: d.id, data: d.data() }))),
             onError,
           );
@@ -55,7 +56,7 @@ export function subscribeDormCloud(
                   >(
                     getFunctionsInstance(),
                     'dormWorkflow',
-                  )({ schoolId: canonicalSchoolId, action: 'parcels' })
+                  )({ schoolId: documentSchoolId, action: 'parcels' })
                 ).data,
               rows,
               error,

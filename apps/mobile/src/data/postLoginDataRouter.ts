@@ -5,9 +5,11 @@ import {
   PrimaryRole,
   ResolvedRoles,
 } from './postLoginTypes';
-import { puCacheGet, puCacheSet } from './puDataCache';
+import { puCacheDelete, puCacheGet, puCacheSet } from './puDataCache';
 
 // ─── 對外 API ────────────────────────────────────────────────────────────────
+
+let pendingContextWrite = Promise.resolve();
 
 /**
  * 登入後呼叫這個函式，傳入從 Firebase/E校園/TronClass 抓到的原始資料。
@@ -15,6 +17,7 @@ import { puCacheGet, puCacheSet } from './puDataCache';
  * 並回傳 PostLoginContext 給前端使用。
  */
 export async function buildPostLoginContext(params: {
+  assertCurrent?: () => void;
   origin?: PostLoginContext['origin'];
   uid: string;
   schoolId: string;
@@ -90,7 +93,19 @@ export async function buildPostLoginContext(params: {
   }
 
   // 6. 寫進 puDataCache
-  await puCacheSet(`${params.schoolId}:postLoginContext`, ctx, 'computed');
+  const key = `${params.schoolId}:postLoginContext` as const;
+  const save = pendingContextWrite.then(async () => {
+    params.assertCurrent?.();
+    await puCacheSet(key, ctx, 'computed');
+    try {
+      params.assertCurrent?.();
+    } catch (error) {
+      await puCacheDelete(key);
+      throw error;
+    }
+  });
+  pendingContextWrite = save.catch(() => undefined);
+  await save;
 
   return ctx;
 }

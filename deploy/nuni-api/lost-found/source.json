@@ -1,9 +1,9 @@
 {
   "schema": "campus.platform-lost-found-source/v1",
-  "inputTree": "83381c1b04e3a603389f562ada17ef11b9d5facf",
+  "inputTree": "4a157f31adafa910d2dda2260b1b307958cd83cf",
   "inputAppSha256": "ebab4626e20f64204db95528e2cd2819c6270c0d2f0efa6f440aaac9f71a5636",
   "baseManifestSha256": "8e0877e879c00830611cd2bfd7eb86986f02448c384b799dba7c6c1996471004",
-  "composedManifestSha256": "ec988e40163fcc194d2555b7ad79bc16a54bfc87b5858b8cb012ebb9ad9c97c1",
+  "composedManifestSha256": "abfc0a4f033f24cea87e95454a9ed6f588911caaa5ba36ef884c72da9df87381",
   "adapterSha256": "b61078916cd57d0161493060376103a2277fcaf79b12d760e2f579ba2fb20ab6",
   "sourceFiles": {
     "apps/api/src/lost-found/contracts.ts": {
@@ -28,7 +28,7 @@
     },
     "apps/api/src/lost-found/taipeiTime.ts": {
       "source": "packages/shared/src/taipeiTime.ts",
-      "sha256": "ca42a0d67f7a0d4e8db7ee5632055df9b50e3ae2f0d8b3a61ff7abca6d2fee76"
+      "sha256": "40625bbfacecb32d2c7b3fcd95e9c2d6b59cbcb02bb7b25ef27bbd3a08372569"
     },
     "apps/api/src/migrations/282_platform_lost_found.sql": {
       "source": "deploy/nuni-api/lost-found/282_platform_lost_found.sql",

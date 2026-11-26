@@ -245,8 +245,8 @@ export default function PushLogsPage() {
 
   return (
     <RequireAdmin>
-      <h1 style={{ marginTop: 0 }}>推播發送紀錄與 DLQ（商用對齊）</h1>
-      <p style={{ color: '#3C3C43', fontSize: 14, lineHeight: 1.6 }}>
+      <h2>推播發送紀錄與 DLQ（商用對齊）</h2>
+      <p style={{ color: 'var(--muted)', fontSize: 14, lineHeight: 1.6 }}>
         由 Edge <code>dispatch-notification-push</code> 寫入紀錄；未成功派發之通知仍留在 <code>notifications</code>（
         <code>push_dispatched_at</code>
         {` `}為 null）。環境變數 <code>PUSH_DISPATCH_MAX_ATTEMPTS</code> 決定自動重試上限，逾限後標記{' '}
@@ -257,9 +257,9 @@ export default function PushLogsPage() {
         style={{
           marginTop: 16,
           padding: 16,
-          background: '#fff',
+          background: 'var(--surface)',
           borderRadius: 12,
-          border: '1px solid #E5E5EA',
+          border: '1px solid var(--border)',
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
           gap: 12,
@@ -279,18 +279,18 @@ export default function PushLogsPage() {
         style={{
           marginTop: 16,
           padding: 16,
-          background: '#fff',
+          background: 'var(--surface)',
           borderRadius: 12,
-          border: '1px solid #E5E5EA',
+          border: '1px solid var(--border)',
         }}>
         <h2 style={{ marginTop: 0, fontSize: 16 }}>近 48 小時派發重試曲線</h2>
         {curve.length === 0 ? (
-          <p style={{ color: '#8E8E93', fontSize: 13 }}>尚無資料（或 migration 未到帳）。</p>
+          <p style={{ color: 'var(--muted)', fontSize: 13 }}>尚無資料（或 migration 未到帳）。</p>
         ) : (
           <div style={{ width: '100%', height: 240 }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={curve}>
-                <CartesianGrid strokeDasharray="4 8" stroke="#E5E5EA" />
+                <CartesianGrid strokeDasharray="4 8" stroke="var(--border)" />
                 <XAxis dataKey="hour" tick={{ fontSize: 10 }} />
                 <YAxis allowDecimals={false} width={40} />
                 <Tooltip />
@@ -304,7 +304,7 @@ export default function PushLogsPage() {
         )}
       </section>
 
-      <section style={{ marginTop: 24, padding: 16, background: '#fff', borderRadius: 12, border: '1px solid #fecaca' }}>
+      <section style={{ marginTop: 24, padding: 16, background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--danger)' }}>
         <h2 style={{ marginTop: 0, fontSize: 18 }}>DLQ／卡住區塊</h2>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
           <label style={{ fontSize: 14, fontWeight: 600 }}>
@@ -321,7 +321,7 @@ export default function PushLogsPage() {
                 width: 120,
                 padding: '8px 10px',
                 borderRadius: 8,
-                border: '1px solid #d1d5db',
+                border: '1px solid var(--border-strong)',
               }}
             />
           </label>
@@ -386,7 +386,7 @@ export default function PushLogsPage() {
         />
       </section>
 
-      <hr style={{ margin: '28px 0', borderColor: '#E5E5EA' }} />
+      <hr style={{ margin: '28px 0', borderColor: 'var(--border)' }} />
 
       <h2 style={{ fontSize: 18 }}>推播發送紀錄</h2>
       <label style={{ display: 'block', marginTop: 12, fontSize: 14, fontWeight: 600 }}>
@@ -402,41 +402,41 @@ export default function PushLogsPage() {
             maxWidth: 420,
             padding: '8px 10px',
             borderRadius: 8,
-            border: '1px solid #d1d5db',
+            border: '1px solid var(--border-strong)',
             fontFamily: 'ui-monospace, monospace',
             fontSize: 13,
           }}
         />
       </label>
-      <p style={{ color: '#8E8E93', fontSize: 13 }}>目前顯示 {summaryView.count} 筆（最多 120）。</p>
+      <p style={{ color: 'var(--muted)', fontSize: 13 }}>目前顯示 {summaryView.count} 筆（最多 120）。</p>
       {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
       <div style={{ overflowX: 'auto', marginTop: 16 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ background: '#F2F2F7', textAlign: 'left' }}>
-              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>時間</th>
-              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>notification</th>
-              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>狀態</th>
-              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>HTTP</th>
-              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>錯誤摘要</th>
-              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>Expo ticket 樣本</th>
+            <tr style={{ background: 'var(--bg-soft)', textAlign: 'left' }}>
+              <th style={{ padding: 8, border: '1px solid var(--border)' }}>時間</th>
+              <th style={{ padding: 8, border: '1px solid var(--border)' }}>notification</th>
+              <th style={{ padding: 8, border: '1px solid var(--border)' }}>狀態</th>
+              <th style={{ padding: 8, border: '1px solid var(--border)' }}>HTTP</th>
+              <th style={{ padding: 8, border: '1px solid var(--border)' }}>錯誤摘要</th>
+              <th style={{ padding: 8, border: '1px solid var(--border)' }}>Expo ticket 樣本</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
-                <td style={{ padding: 8, border: '1px solid #eee', whiteSpace: 'nowrap' }}>
+                <td style={{ padding: 8, border: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
                   {new Date(r.created_at).toLocaleString()}
                 </td>
-                <td style={{ padding: 8, border: '1px solid #eee', wordBreak: 'break-all', fontFamily: 'monospace', fontSize: 11 }}>
+                <td style={{ padding: 8, border: '1px solid var(--border)', wordBreak: 'break-all', fontFamily: 'monospace', fontSize: 11 }}>
                   {r.notification_id}
                 </td>
-                <td style={{ padding: 8, border: '1px solid #eee' }}>{r.status}</td>
-                <td style={{ padding: 8, border: '1px solid #eee' }}>{r.http_status ?? '—'}</td>
-                <td style={{ padding: 8, border: '1px solid #eee', maxWidth: 260, wordBreak: 'break-word' }}>
+                <td style={{ padding: 8, border: '1px solid var(--border)' }}>{r.status}</td>
+                <td style={{ padding: 8, border: '1px solid var(--border)' }}>{r.http_status ?? '—'}</td>
+                <td style={{ padding: 8, border: '1px solid var(--border)', maxWidth: 260, wordBreak: 'break-word' }}>
                   {r.error_detail ?? '—'}
                 </td>
-                <td style={{ padding: 8, border: '1px solid #eee', maxWidth: 320, wordBreak: 'break-word', fontFamily: 'monospace', fontSize: 11 }}>
+                <td style={{ padding: 8, border: '1px solid var(--border)', maxWidth: 320, wordBreak: 'break-word', fontFamily: 'monospace', fontSize: 11 }}>
                   {JSON.stringify(r.expo_ticket_sample ?? null)}
                 </td>
               </tr>
@@ -445,7 +445,7 @@ export default function PushLogsPage() {
         </table>
       </div>
       {!error && rows.length === 0 ? (
-        <p style={{ color: '#8E8E93' }}>尚無紀錄（或請確認 migration 已套用）。</p>
+        <p style={{ color: 'var(--muted)' }}>尚無紀錄（或請確認 migration 已套用）。</p>
       ) : null}
     </RequireAdmin>
   );
@@ -456,8 +456,8 @@ const dangerBtnStyle: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 700,
   borderRadius: 8,
-  border: '1px solid #fca5a5',
-  background: '#fff',
+  border: '1px solid var(--danger)',
+  background: 'var(--surface)',
   cursor: 'pointer',
 };
 
@@ -466,12 +466,12 @@ function SummaryCell({ label, value, highlight }: { label: string; value?: numbe
     <div
       style={{
         padding: 12,
-        background: highlight ? '#fef2f2' : '#F2F2F7',
+        background: highlight ? 'var(--danger-soft)' : 'var(--bg-soft)',
         borderRadius: 10,
-        border: highlight ? '1px solid #fecaca' : '1px solid #E5E5EA',
+        border: highlight ? '1px solid var(--danger)' : '1px solid var(--border)',
       }}>
-      <div style={{ fontSize: 12, color: '#8E8E93' }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: highlight ? 'var(--danger)' : '#1C1C1E' }}>
+      <div style={{ fontSize: 12, color: 'var(--muted)' }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: highlight ? 'var(--danger)' : 'var(--text)' }}>
         {value == null ? '—' : value}
       </div>
     </div>
@@ -494,7 +494,7 @@ function BulkActions({
   if (ids.length === 0) return null;
   return (
     <div style={{ margin: '8px 0', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-      <span style={{ fontSize: 13, color: '#1f2937' }}>已選 {ids.length} 筆 ▸</span>
+      <span style={{ fontSize: 13, color: 'var(--text)' }}>已選 {ids.length} 筆 ▸</span>
       <button type="button" disabled={disabled} onClick={() => onRetry(ids)} style={dangerBtnStyle}>
         批次清除重試鎖
       </button>
@@ -528,7 +528,7 @@ function DlqMiniTable({
 }) {
   if (rows.length === 0) {
     return (
-      <p style={{ color: '#8E8E93', fontSize: 13 }}>
+      <p style={{ color: 'var(--muted)', fontSize: 13 }}>
         {variant === 'pending' ? '目前沒有待處理的「卡住」通知。' : '目前沒有窮舉記錄。'}
       </p>
     );
@@ -542,49 +542,49 @@ function DlqMiniTable({
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
-          <tr style={{ background: '#fef2f2', textAlign: 'left' }}>
-            <th style={{ padding: 8, border: '1px solid #fecaca' }}>選</th>
-            <th style={{ padding: 8, border: '1px solid #fecaca' }}>建立時間</th>
-            <th style={{ padding: 8, border: '1px solid #fecaca' }}>id</th>
-            <th style={{ padding: 8, border: '1px solid #fecaca' }}>收件人 profile</th>
-            <th style={{ padding: 8, border: '1px solid #fecaca' }}>標題／摘要</th>
-            <th style={{ padding: 8, border: '1px solid #fecaca' }}>#重試</th>
-            <th style={{ padding: 8, border: '1px solid #fecaca' }}>錯誤</th>
+          <tr style={{ background: 'var(--danger-soft)', textAlign: 'left' }}>
+            <th style={{ padding: 8, border: '1px solid var(--danger)' }}>選</th>
+            <th style={{ padding: 8, border: '1px solid var(--danger)' }}>建立時間</th>
+            <th style={{ padding: 8, border: '1px solid var(--danger)' }}>id</th>
+            <th style={{ padding: 8, border: '1px solid var(--danger)' }}>收件人 profile</th>
+            <th style={{ padding: 8, border: '1px solid var(--danger)' }}>標題／摘要</th>
+            <th style={{ padding: 8, border: '1px solid var(--danger)' }}>#重試</th>
+            <th style={{ padding: 8, border: '1px solid var(--danger)' }}>錯誤</th>
             {variant === 'exhausted' ? (
-              <th style={{ padding: 8, border: '1px solid #fecaca' }}>放棄於</th>
+              <th style={{ padding: 8, border: '1px solid var(--danger)' }}>放棄於</th>
             ) : null}
-            <th style={{ padding: 8, border: '1px solid #fecaca' }}>營運</th>
+            <th style={{ padding: 8, border: '1px solid var(--danger)' }}>營運</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
             <tr key={r.id}>
-              <td style={{ padding: 8, border: '1px solid #fde8e8' }}>
+              <td style={{ padding: 8, border: '1px solid var(--danger-soft)' }}>
                 <input
                   type="checkbox"
                   checked={selected.has(r.id)}
                   onChange={() => onToggle(r.id)}
                 />
               </td>
-              <td style={{ padding: 8, border: '1px solid #fde8e8', whiteSpace: 'nowrap' }}>
+              <td style={{ padding: 8, border: '1px solid var(--danger-soft)', whiteSpace: 'nowrap' }}>
                 {new Date(r.created_at).toLocaleString()}
               </td>
-              <td style={{ padding: 8, border: '1px solid #fde8e8', fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{r.id}</td>
-              <td style={{ padding: 8, border: '1px solid #fde8e8', fontFamily: 'monospace', fontSize: 11 }}>{r.user_id}</td>
-              <td style={{ padding: 8, border: '1px solid #fde8e8', maxWidth: 220 }}>
+              <td style={{ padding: 8, border: '1px solid var(--danger-soft)', fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{r.id}</td>
+              <td style={{ padding: 8, border: '1px solid var(--danger-soft)', fontFamily: 'monospace', fontSize: 11 }}>{r.user_id}</td>
+              <td style={{ padding: 8, border: '1px solid var(--danger-soft)', maxWidth: 220 }}>
                 <strong>{r.title}</strong>
-                <div style={{ fontSize: 12, color: '#3C3C43' }}>{(r.body ?? '').slice(0, 120)}{(r.body?.length ?? 0) > 120 ? '…' : ''}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{(r.body ?? '').slice(0, 120)}{(r.body?.length ?? 0) > 120 ? '…' : ''}</div>
               </td>
-              <td style={{ padding: 8, border: '1px solid #fde8e8' }}>{r.push_dispatch_attempts ?? 0}</td>
-              <td style={{ padding: 8, border: '1px solid #fde8e8', maxWidth: 280, wordBreak: 'break-word', fontSize: 12 }}>
+              <td style={{ padding: 8, border: '1px solid var(--danger-soft)' }}>{r.push_dispatch_attempts ?? 0}</td>
+              <td style={{ padding: 8, border: '1px solid var(--danger-soft)', maxWidth: 280, wordBreak: 'break-word', fontSize: 12 }}>
                 {r.push_dispatch_error ?? '—'}
               </td>
               {variant === 'exhausted' ? (
-                <td style={{ padding: 8, border: '1px solid #fde8e8', whiteSpace: 'nowrap', fontSize: 12 }}>
+                <td style={{ padding: 8, border: '1px solid var(--danger-soft)', whiteSpace: 'nowrap', fontSize: 12 }}>
                   {r.push_dispatch_abandoned_at ? new Date(r.push_dispatch_abandoned_at).toLocaleString() : '—'}
                 </td>
               ) : null}
-              <td style={{ padding: 8, border: '1px solid #fde8e8' }}>
+              <td style={{ padding: 8, border: '1px solid var(--danger-soft)' }}>
                 <button
                   type="button"
                   disabled={busyId === r.id}
@@ -594,8 +594,8 @@ function DlqMiniTable({
                     fontSize: 12,
                     fontWeight: 700,
                     borderRadius: 8,
-                    border: '1px solid #fca5a5',
-                    background: '#fff',
+                    border: '1px solid var(--danger)',
+                    background: 'var(--surface)',
                     cursor: busyId === r.id ? 'wait' : 'pointer',
                   }}>
                   {busyId === r.id ? '…' : '復原重試計數'}
@@ -613,7 +613,7 @@ const selBtnStyle: React.CSSProperties = {
   padding: '4px 10px',
   fontSize: 12,
   borderRadius: 6,
-  border: '1px solid #E5E5EA',
-  background: '#fff',
+  border: '1px solid var(--border)',
+  background: 'var(--surface)',
   cursor: 'pointer',
 };

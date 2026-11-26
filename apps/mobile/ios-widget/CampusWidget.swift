@@ -82,7 +82,12 @@ struct ClassProvider: TimelineProvider {
 struct ClassView: View {
     let entry: ClassEntry
     @Environment(\.widgetFamily) var family
-    private let ink = Color(red: 0.16, green: 0.34, blue: 0.28)
+    @Environment(\.colorScheme) private var colorScheme
+    private var accent: Color {
+        colorScheme == .dark
+            ? Color(red: 0.71, green: 0.82, blue: 0.73)
+            : Color(red: 0.13, green: 0.30, blue: 0.24)
+    }
     var body: some View {
         Group {
             switch family {
@@ -104,29 +109,27 @@ struct ClassView: View {
                 }
             default:
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("nuni / 課間").font(.caption2).tracking(2)
-                        Spacer()
-                        Image(systemName: "arrow.up.right")
-                    }.foregroundStyle(ink)
-                    Text(entry.heading).font(.caption).foregroundStyle(.secondary)
+                    Text(entry.heading)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(accent)
+                    Divider()
                     if let course = entry.course {
-                        Text(course.title).font(.system(.title3, design: .rounded, weight: .semibold)).lineLimit(family == .systemSmall ? 1 : 2)
+                        Text(course.title).font(.system(.title3, design: .serif, weight: .semibold)).lineLimit(family == .systemSmall ? 1 : 2)
                         HStack(spacing: 3) {
                             Text(course.start, style: .time)
                             Text("–")
                             Text(course.end, style: .time)
                         }.font(.subheadline).monospacedDigit()
-                        Text(course.location).font(.subheadline).foregroundStyle(ink).lineLimit(1)
+                        Text(course.location).font(.subheadline).foregroundStyle(accent).lineLimit(1)
                         if course.start > entry.date {
                             HStack(spacing: 4) {
                                 Text("距上課")
                                 Text(course.start, style: .timer).monospacedDigit()
-                            }.font(.caption2).foregroundStyle(ink)
+                            }.font(.caption2).foregroundStyle(accent)
                         }
                         if course.conflict { Text("時段重疊，請核對課表").font(.caption2) }
                     } else {
-                        Text(entry.stale ? "開啟 App，確認最近的安排。" : "把空下來的時間，留給自己。")
+                        Text(entry.stale ? "開啟課表以更新資料。" : "查看一週課表")
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
@@ -135,9 +138,9 @@ struct ClassView: View {
                             Text("週課表 ·")
                             Text(Date(timeIntervalSince1970: snapshot.updatedAt / 1000), style: .relative)
                             Text("前確認")
-                        }.font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                        }.font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
-                }.padding(12)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .environment(\.timeZone, TimeZone(identifier: "Asia/Taipei")!)
@@ -147,9 +150,16 @@ struct ClassView: View {
     }
 }
 struct WidgetPaper: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.widgetFamily) private var family
+
     func body(content: Content) -> some View {
         if #available(iOS 17.0, *) {
-            content.containerBackground(for: .widget) { Color(red: 0.96, green: 0.95, blue: 0.91) }
+            content.containerBackground(for: .widget) {
+                colorScheme == .dark ? Color.black : Color(red: 0.98, green: 0.97, blue: 0.95)
+            }
+        } else if family == .systemSmall || family == .systemMedium {
+            content.padding(12)
         } else { content }
     }
 }
@@ -171,8 +181,8 @@ struct NextClassLiveWidget: Widget {
                     .widgetURL(URL(string: "campus://personal-timetable"))
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("下一堂課 · nuni").font(.caption)
-                    Text(context.state.title).font(.headline).lineLimit(2)
+                    Text("下一堂課").font(.subheadline.weight(.semibold))
+                    Text(context.state.title).font(.system(.title3, design: .serif, weight: .semibold)).lineLimit(2)
                     HStack {
                         Text(context.state.location).lineLimit(1)
                         Spacer()

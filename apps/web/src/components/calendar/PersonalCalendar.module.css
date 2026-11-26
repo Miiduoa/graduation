@@ -126,7 +126,8 @@
   align-items: center;
   gap: 0.75rem 1.25rem;
   margin-block: 1.5rem 1rem;
-  scroll-margin-block: 6rem 2rem;
+  scroll-margin-top: var(--calendar-sticky-header-height, 6rem);
+  scroll-margin-bottom: var(--calendar-sticky-footer-height, 2rem);
 }
 
 .daySummary h3 {
@@ -150,7 +151,8 @@
   background: var(--bg);
   border: 1px solid var(--border-strong, var(--border));
   border-radius: 1rem;
-  scroll-margin-block: 6rem 2rem;
+  scroll-margin-top: var(--calendar-sticky-header-height, 6rem);
+  scroll-margin-bottom: var(--calendar-sticky-footer-height, 2rem);
 }
 
 .editor h3 {
@@ -190,7 +192,8 @@
 }
 
 .editor input {
-  scroll-margin-block: 6rem 2rem;
+  scroll-margin-top: var(--calendar-sticky-header-height, 6rem);
+  scroll-margin-bottom: var(--calendar-sticky-footer-height, 2rem);
 }
 
 .editor p,

@@ -29,6 +29,7 @@ import RoleAwareTodayScreen from './RoleAwareTodayScreen';
 import AnnouncementDetailAiFirstScreen from './AnnouncementDetailAiFirstScreen';
 import AnnouncementsListAiFirstScreen from './AnnouncementsListAiFirstScreen';
 import EventDetailAiFirstScreen from './EventDetailAiFirstScreen';
+import { CampusEventCalendarDraftScreen } from './PersonalCalendarScreen';
 import EventsListAiFirstScreen from './EventsListAiFirstScreen';
 import { CampusAssistantScreen } from './CampusAssistantScreen';
 import { CommunityScreen } from './CommunityScreen';
@@ -108,6 +109,11 @@ export function HomeStack() {
         name="活動詳情"
         component={EventDetailAiFirstScreen}
         options={{ title: '活動詳情', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CampusEventCalendarDraft"
+        component={CampusEventCalendarDraftScreen}
+        options={{ title: '個人行事曆' }}
       />
       <Stack.Screen
         name="CampusSocialScreen"

@@ -9,6 +9,7 @@ import {
 } from '../services/assistantServiceNavigation';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
+import { useAssistantContinuation } from '../services/assistantContinuation';
 
 const categories: Array<{ id: AssistantService['category']; label: string }> = [
   { id: 'study', label: '學習' },
@@ -18,9 +19,10 @@ const categories: Array<{ id: AssistantService['category']; label: string }> = [
   { id: 'account', label: '帳號' },
 ];
 
-export function AssistantServiceReply({ selection, audience, navigation, disabled, isCurrent }: {
+export function AssistantServiceReply({ selection, audience, schoolId, navigation, disabled, isCurrent }: {
   selection: AssistantServiceSelection;
   audience: MobileAssistantAudience;
+  schoolId?: string | null;
   navigation: ServiceScreenProps['navigation'];
   disabled: boolean;
   isCurrent: () => boolean;
@@ -29,20 +31,21 @@ export function AssistantServiceReply({ selection, audience, navigation, disable
   const [error, setError] = useState('');
   const opening = useRef(false);
   const [busy, setBusy] = useState(false);
+  const openWithContinuation = useAssistantContinuation(navigation, isCurrent);
   const services = selection.serviceIds
     .map((id) => getAssistantService(id))
     .filter((service): service is AssistantService => !!service);
   const shown = selection.kind === 'catalog'
     ? services.filter((service) => service.category === category) : services;
   const rows = shown.map((service) => ({ service,
-    destination: mobileAssistantServiceDestination(service.id, audience, navigation, selection.importKind) }));
+    destination: mobileAssistantServiceDestination(service.id, audience, navigation, selection.importKind, schoolId) }));
   const open = async (service: AssistantService) => {
     if (disabled || opening.current || !isCurrent()) return;
     setError('');
-    const destination = mobileAssistantServiceDestination(service.id, audience, navigation, selection.importKind);
+    const destination = mobileAssistantServiceDestination(service.id, audience, navigation, selection.importKind, schoolId);
     if (!destination) return;
     if (destination.kind === 'native') {
-      if (!navigateMobileAssistantService(service.id, audience, navigation, selection.importKind) && isCurrent()) {
+      if (!openWithContinuation(() => navigateMobileAssistantService(service.id, audience, navigation, selection.importKind, schoolId)) && isCurrent()) {
         setError('目前無法開啟這項服務，請回到對話後再試一次。');
       }
       return;

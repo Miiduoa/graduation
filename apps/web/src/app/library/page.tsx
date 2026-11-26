@@ -217,43 +217,47 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
             </CatalogSearchPanel>
           )}
         </section>
-        <section className="card">
-          <h2>借閱紀錄與續借</h2>
-          <p style={{ color: 'var(--muted)', lineHeight: 1.8 }}>
-            請使用這所學校圖書館的帳號入口登入，查看到期日與續借資格。實際借閱及續借結果以館方系統為準。
-          </p>
-          {library.accountUrl ? (
-            <a className="btn" href={library.accountUrl} target="_blank" rel="noopener noreferrer">
-              前往我的借閱紀錄 ↗
-            </a>
-          ) : (
-            <a className="btn" href={library.websiteUrl} target="_blank" rel="noopener noreferrer">
-              從本校圖書館官網登入 ↗
-            </a>
-          )}
+        <section className={styles.entry} aria-labelledby="library-account-title">
+          <h2 id="library-account-title">借閱紀錄與續借</h2>
+          <div className={styles.entryBody}>
+            <p className={styles.meta}>
+              請使用這所學校圖書館的帳號入口登入，查看到期日與續借資格。實際借閱及續借結果以館方系統為準。
+            </p>
+            {library.accountUrl ? (
+              <a className="btn" href={library.accountUrl} target="_blank" rel="noopener noreferrer">
+                前往我的借閱紀錄 ↗
+              </a>
+            ) : (
+              <a className="btn" href={library.websiteUrl} target="_blank" rel="noopener noreferrer">
+                從本校圖書館官網登入 ↗
+              </a>
+            )}
+          </div>
         </section>
-        <section className="card">
-          <h2>到館前先看看</h2>
-          <p style={{ color: 'var(--muted)' }}>開放時間與空間使用規定可能因假日或館方公告調整。</p>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {library.hoursUrl && (
-              <a className="btn" href={library.hoursUrl} target="_blank" rel="noopener noreferrer">
-                開館時間 ↗
+        <section className={styles.entry} aria-labelledby="library-visit-title">
+          <h2 id="library-visit-title">到館前先看看</h2>
+          <div className={styles.entryBody}>
+            <p className={styles.meta}>開放時間與空間使用規定可能因假日或館方公告調整。</p>
+            <div className={styles.entryLinks}>
+              {library.hoursUrl && (
+                <a className="btn" href={library.hoursUrl} target="_blank" rel="noopener noreferrer">
+                  開館時間 ↗
+                </a>
+              )}
+              {library.spacesUrl && (
+                <a className="btn" href={library.spacesUrl} target="_blank" rel="noopener noreferrer">
+                  空間與設備預約 ↗
+                </a>
+              )}
+              {library.electronicResourcesUrl && (
+                <a className="btn" href={library.electronicResourcesUrl} target="_blank" rel="noopener noreferrer">
+                  電子資源 ↗
+                </a>
+              )}
+              <a className="btn" href={library.websiteUrl} target="_blank" rel="noopener noreferrer">
+                {library.hoursUrl ? '圖書館官網 ↗' : '開館時間與服務資訊 ↗'}
               </a>
-            )}
-            {library.spacesUrl && (
-              <a className="btn" href={library.spacesUrl} target="_blank" rel="noopener noreferrer">
-                空間與設備預約 ↗
-              </a>
-            )}
-            {library.electronicResourcesUrl && (
-              <a className="btn" href={library.electronicResourcesUrl} target="_blank" rel="noopener noreferrer">
-                電子資源 ↗
-              </a>
-            )}
-            <a className="btn" href={library.websiteUrl} target="_blank" rel="noopener noreferrer">
-              {library.hoursUrl ? '圖書館官網 ↗' : '開館時間與服務資訊 ↗'}
-            </a>
+            </div>
           </div>
         </section>
       </div>

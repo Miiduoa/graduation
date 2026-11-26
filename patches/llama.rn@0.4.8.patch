@@ -1,0 +1,135 @@
+diff --git a/android/build.gradle b/android/build.gradle
+--- a/android/build.gradle
++++ b/android/build.gradle
+@@ -50,6 +50,7 @@ android {
+     buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
+     externalNativeBuild {
+       cmake {
++        arguments "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+         abiFilters (*reactNativeArchitectures())
+       }
+     }
+diff --git a/android/src/main/CMakeLists.txt b/android/src/main/CMakeLists.txt
+--- a/android/src/main/CMakeLists.txt
++++ b/android/src/main/CMakeLists.txt
+@@ -86,13 +86,14 @@
+ build_library("rnllama" "")
+-
++
+ if (${ANDROID_ABI} STREQUAL "arm64-v8a")
+-    # ARM64 targets
+-    build_library("rnllama_v8_4_fp16_dotprod_sve" "-march=armv8.4-a+fp16+dotprod+sve")
+-    build_library("rnllama_v8_4_fp16_dotprod_i8mm_sve" "-march=armv8.4-a+fp16+dotprod+i8mm+sve")
+-    build_library("rnllama_v8_4_fp16_dotprod_i8mm" "-march=armv8.4-a+fp16+dotprod+i8mm")
+-    build_library("rnllama_v8_4_fp16_dotprod" "-march=armv8.4-a+fp16+dotprod")
+-    build_library("rnllama_v8_2_fp16_dotprod" "-march=armv8.2-a+fp16+dotprod")
+-    build_library("rnllama_v8_2_fp16" "-march=armv8.2-a+fp16")
++    # Keep the legacy library names. Each target requires only the extensions
++    # checked by Arm64LibrarySelector on top of the arm64-v8a baseline.
++    build_library("rnllama_v8_4_fp16_dotprod_sve" "-march=armv8-a+fp16+fp16fml+dotprod+sve")
++    build_library("rnllama_v8_4_fp16_dotprod_i8mm_sve" "-march=armv8-a+fp16+fp16fml+dotprod+i8mm+sve")
++    build_library("rnllama_v8_4_fp16_dotprod_i8mm" "-march=armv8-a+fp16+fp16fml+dotprod+i8mm")
++    build_library("rnllama_v8_4_fp16_dotprod" "-march=armv8-a+fp16+fp16fml+dotprod")
++    build_library("rnllama_v8_2_fp16_dotprod" "-march=armv8-a+fp16+dotprod")
++    build_library("rnllama_v8_2_fp16" "-march=armv8-a+fp16")
+     build_library("rnllama_v8" "-march=armv8-a")
+-
++
+     # https://github.com/ggerganov/llama.cpp/blob/master/docs/android.md#cross-compile-using-android-ndk
+diff --git a/android/src/main/java/com/rnllama/LlamaContext.java b/android/src/main/java/com/rnllama/LlamaContext.java
+--- a/android/src/main/java/com/rnllama/LlamaContext.java
++++ b/android/src/main/java/com/rnllama/LlamaContext.java
+@@ -326,47 +326,10 @@
+   static {
+     Log.d(NAME, "Primary ABI: " + Build.SUPPORTED_ABIS[0]);
+-
++
+-    String cpuFeatures = LlamaContext.getCpuFeatures();
+-    Log.d(NAME, "CPU features: " + cpuFeatures);
+-    boolean hasFp16 = cpuFeatures.contains("fp16") || cpuFeatures.contains("fphp");
+-    boolean hasDotProd = cpuFeatures.contains("dotprod") || cpuFeatures.contains("asimddp");
+-    boolean hasSve = cpuFeatures.contains("sve");
+-    boolean hasI8mm = cpuFeatures.contains("i8mm");
+-    boolean isAtLeastArmV82 = cpuFeatures.contains("asimd") && cpuFeatures.contains("crc32") && cpuFeatures.contains("aes");
+-    boolean isAtLeastArmV84 = cpuFeatures.contains("dcpop") && cpuFeatures.contains("uscat");
+-    Log.d(NAME, "- hasFp16: " + hasFp16);
+-    Log.d(NAME, "- hasDotProd: " + hasDotProd);
+-    Log.d(NAME, "- hasSve: " + hasSve);
+-    Log.d(NAME, "- hasI8mm: " + hasI8mm);
+-    Log.d(NAME, "- isAtLeastArmV82: " + isAtLeastArmV82);
+-    Log.d(NAME, "- isAtLeastArmV84: " + isAtLeastArmV84);
+-
+-    // TODO: Add runtime check for cpu features
+     if (LlamaContext.isArm64V8a()) {
+-      if (isAtLeastArmV84 && hasSve && hasI8mm && hasFp16 && hasDotProd) {
+-        Log.d(NAME, "Loading librnllama_v8_4_fp16_dotprod_i8mm_sve.so");
+-        System.loadLibrary("rnllama_v8_4_fp16_dotprod_i8mm_sve");
+-      } else if (isAtLeastArmV84 && hasSve && hasFp16 && hasDotProd) {
+-        Log.d(NAME, "Loading librnllama_v8_4_fp16_dotprod_sve.so");
+-        System.loadLibrary("rnllama_v8_4_fp16_dotprod_sve");
+-      } else if (isAtLeastArmV84 && hasI8mm && hasFp16 && hasDotProd) {
+-        Log.d(NAME, "Loading librnllama_v8_4_fp16_dotprod_i8mm.so");
+-        System.loadLibrary("rnllama_v8_4_fp16_dotprod_i8mm");
+-      } else if (isAtLeastArmV84 && hasFp16 && hasDotProd) {
+-        Log.d(NAME, "Loading librnllama_v8_4_fp16_dotprod.so");
+-        System.loadLibrary("rnllama_v8_4_fp16_dotprod");
+-      } else if (isAtLeastArmV82 && hasFp16 && hasDotProd) {
+-        Log.d(NAME, "Loading librnllama_v8_2_fp16_dotprod.so");
+-        System.loadLibrary("rnllama_v8_2_fp16_dotprod");
+-      } else if (isAtLeastArmV82 && hasFp16) {
+-        Log.d(NAME, "Loading librnllama_v8_2_fp16.so");
+-        System.loadLibrary("rnllama_v8_2_fp16");
+-      } else {
+-        Log.d(NAME, "Loading librnllama_v8.so");
+-        System.loadLibrary("rnllama_v8");
+-      }
+-      //  Log.d(NAME, "Loading librnllama_v8_7.so with runtime feature detection");
+-      //  System.loadLibrary("rnllama_v8_7");
++      String library = Arm64LibrarySelector.select(LlamaContext.getCpuFeatures());
++      Log.d(NAME, "Loading lib" + library + ".so");
++      System.loadLibrary(library);
+     } else if (LlamaContext.isX86_64()) {
+         Log.d(NAME, "Loading librnllama_x86_64.so");
+         System.loadLibrary("rnllama_x86_64");
+diff --git a/android/src/main/java/com/rnllama/Arm64LibrarySelector.java b/android/src/main/java/com/rnllama/Arm64LibrarySelector.java
+new file mode 100644
+--- /dev/null
++++ b/android/src/main/java/com/rnllama/Arm64LibrarySelector.java
+@@ -0,0 +1,37 @@
++package com.rnllama;
++
++import java.util.Arrays;
++import java.util.HashSet;
++import java.util.Set;
++
++final class Arm64LibrarySelector {
++  private Arm64LibrarySelector() {}
++
++  static String select(String cpuInfoFeaturesLine) {
++    // Linux reports scalar and SIMD half-precision arithmetic separately.
++    Set<String> features = new HashSet<>(Arrays.asList(cpuInfoFeaturesLine.trim().split("\\s+")));
++    if (!features.contains("fphp") || !features.contains("asimdhp")) {
++      return "rnllama_v8";
++    }
++    if (!features.contains("asimddp")) {
++      return "rnllama_v8_2_fp16";
++    }
++    if (!features.contains("asimdfhm")) {
++      return "rnllama_v8_2_fp16_dotprod";
++    }
++
++    boolean sve = features.contains("sve");
++    boolean i8mm = features.contains("i8mm");
++    // Combining +sve and +i8mm lets Clang emit SVE matrix multiply too.
++    if (sve && i8mm && features.contains("svei8mm")) {
++      return "rnllama_v8_4_fp16_dotprod_i8mm_sve";
++    }
++    if (sve) {
++      return "rnllama_v8_4_fp16_dotprod_sve";
++    }
++    if (i8mm) {
++      return "rnllama_v8_4_fp16_dotprod_i8mm";
++    }
++    return "rnllama_v8_4_fp16_dotprod";
++  }
++}

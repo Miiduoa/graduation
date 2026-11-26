@@ -514,6 +514,40 @@ it('notification destinations only use supported local tasks and never arbitrary
   });
 });
 
+it.each([
+  ['assignment', { groupId: 'cs101', assignmentId: 'hw-1' }, '/course/cs101', '#assignment-hw-1', ''],
+  ['quiz', { courseId: 'cs101', quizId: 'q1' }, '/course/cs101', '#quiz-q1', ''],
+  ['material', { courseId: 'cs101', materialId: 'm1' }, '/course/cs101', '#material-m1', ''],
+  ['feedback', { courseId: 'cs101' }, '/course/cs101', '', ''],
+  ['grade', {}, '/grades', '', 'tab=feedback'],
+  ['live_session', { groupId: 'cs101', sessionId: 's1' }, '/course/cs101/attendance', '', 'sessionId=s1'],
+  ['assignment_submission', { groupId: 'cs101', assignmentId: 'hw-1' }, '/teacher/course/cs101', '', 'assignmentId=hw-1'],
+  ['message', { conversationId: 'conversation-1' }, '/dms/conversation-1', '', ''],
+  ['assignment', { href: '/course/cs101?campus=other&schoolId=other&school=OTHER#assignment-hw-1' }, '/course/cs101', '#assignment-hw-1', ''],
+] as const)('opens a %s notification in its verified school and keeps the specific task', (type, data, path, hash, taskQuery) => {
+  const target = notificationDestination({ ...notice, type, data: { ...data, schoolId: 'ntu' } });
+  const url = new URL(target!.href, 'https://campus.local');
+  expect(url.pathname).toBe(path);
+  expect(url.hash).toBe(hash);
+  expect(Object.fromEntries(url.searchParams)).toEqual({
+    ...Object.fromEntries(new URLSearchParams(taskQuery)), campus: 'ntu', schoolId: 'ntu',
+  });
+});
+
+it.each([
+  ['dorm-123', '/dormitory/announcements/tw-pu?campus=pu&schoolId=pu&dormAnnouncementId=dorm-123'],
+  [undefined, '/dormitory/announcements/tw-pu?campus=pu&schoolId=pu'],
+] as const)('opens a dorm notice from its original school and uses the resident list for legacy payloads', (id, href) => {
+  expect(notificationDestination({ ...notice, type: 'announcement', data: {
+    channel: 'dormitory', schoolId: 'tw-pu', dormAnnouncementId: id, announcementId: 'not-a-campus-announcement',
+  } })).toEqual({ href, label: '查看本棟公告' });
+});
+it('keeps an invalid dorm notice out of campus announcements', () => {
+  expect(notificationDestination({ ...notice, type: 'announcement', data: {
+    channel: 'dormitory', schoolId: 'pu', dormAnnouncementId: '../bad', announcementId: 'campus-1',
+  } })).toBeNull();
+});
+
 it.each(['leaveRequestId', 'requestId'])('opens an owned leave lookup from the %s notification field', (field) => {
   expect(notificationDestination({
     ...notice, type: 'leave', data: { [field]: 'leave-2026-good-id', schoolId: 'pu' },
@@ -667,13 +701,51 @@ it('refuses reactions on messages outside the current school and on recalled mes
   expect(tx.update).not.toHaveBeenCalled();
 });
 
- it('retains the verified campus in presentation data even when stored at the top level', () => {
-  expect(parseNotification('n-1', notification(), 'user', session)).toEqual(
-    expect.objectContaining({ data: expect.objectContaining({ schoolId: session.schoolId }) }),
-  );
-  expect(parseNotification('n-1', notification({ data: { schoolId: 'wrong-campus' } }), 'user', session)).toEqual(
-    expect.objectContaining({ data: expect.objectContaining({ schoolId: session.schoolId }) }),
-  );
+it.each([
+  ['pu', undefined, 'pu'],
+  ['tw-pu', undefined, 'tw-pu'],
+  [undefined, 'tw-pu', 'tw-pu'],
+  ['tw-pu', 'pu', 'pu'],
+  ['pu', 'tw-pu', 'tw-pu'],
+])('keeps the exact destination school when matching aliases (%s, %s)', (outer, inner, expected) => {
+  const parsed = parseNotification('n-1', notification({
+    schoolId: outer, type: 'announcement', data: { schoolId: inner, announcementId: 'a1' },
+  }), 'user', session);
+  expect(parsed).toMatchObject({ data: { schoolId: expected } });
+  const link = notificationDestination(parsed as AccountNotification);
+  const url = new URL(link!.href, 'https://campus.local');
+  expect(url.searchParams.get('schoolId')).toBe(expected);
+  expect(url.searchParams.get('source')).toBe('school-announcement');
+});
+
+it.each(['user', 'global'] as const)('omits conflicting campus metadata and refuses a %s read update', async (source) => {
+  const conflicting = notification({ data: { schoolId: 'other-campus' } });
+  expect(parseNotification('n-1', conflicting, source, session)).toBeNull();
+  const getOriginal = tx.get.getMockImplementation()!;
+  tx.get.mockImplementation(async (ref) => ref.path.endsWith('/n-1')
+    ? document('n-1', conflicting) : getOriginal(ref));
+  await expect(markAccountNotificationRead(session, { ...notice, source })).rejects.toThrow('permission');
+  expect(tx.update).not.toHaveBeenCalled();
+});
+
+it.each([true, false])('checks membership on the original school path before marking an alias notification (active: %s)', async (active) => {
+  const aliasSession = { uid: 'alice', schoolId: 'tw-pu' };
+  tx.get.mockImplementation(async ({ path }: { path: string }) => {
+    if (path === 'users/alice') return document(path, { schoolId: 'tw-pu' });
+    if (path === 'schools/tw-pu/members/alice') return document(path, { status: active ? 'active' : 'inactive' });
+    if (path === 'notifications/n-1') return document(path, notification({ schoolId: 'pu' }));
+    throw new Error('Unexpected document: ' + path);
+  });
+  const update = markAccountNotificationRead(aliasSession, notice);
+  if (active) {
+    await update;
+    expect(tx.update).toHaveBeenCalledWith(expect.objectContaining({ path: 'notifications/n-1' }), expect.objectContaining({ isRead: true }));
+  } else {
+    await expect(update).rejects.toThrow('permission');
+    expect(tx.update).not.toHaveBeenCalled();
+  }
+  expect(tx.get).toHaveBeenCalledWith(expect.objectContaining({ path: 'schools/tw-pu/members/alice' }));
+  expect(tx.get).not.toHaveBeenCalledWith(expect.objectContaining({ path: 'schools/pu/members/alice' }));
 });
 
 it('recognizes a story reply only when its author is the other member of the DM', () => {

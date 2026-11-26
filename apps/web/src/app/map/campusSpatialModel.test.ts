@@ -41,19 +41,32 @@ describe('campus spatial coordinates', () => {
     expect(library).toEqual({ ...place('library', 24.226282, 120.581377), facilities: ['列印'] });
   });
 
-  it('rejects invalid coordinates and duplicate ids while preserving a later valid record', () => {
+  it('rejects invalid coordinates and every ambiguous ID while preserving unrelated valid records', () => {
     const good = place('good', 24, 120);
     const model = buildCampusSpatialModel([
       place('bad-lat', 91, 120), place('bad-lng', 24, -181),
       place('nonfinite', NaN, 120), place('infinite', 24, Infinity),
       place('', 24, 120), { ...place('unnamed', 24, 120), name: ' ' },
-      place('good', NaN, 120), good, place('good', 24.001, 120.001),
+      place('duplicate', NaN, 120), place('duplicate', 24, 120), place('duplicate', 24.001, 120.001), good,
     ]);
-    expect(model.excludedCount).toBe(8);
+    expect(model.excludedCount).toBe(9);
     expect(model.points).toHaveLength(1);
     expect(model.points[0].location).toBe(good);
     expect(model.points[0].x).toBe(0);
     expect(model.points[0].z).toBe(0);
+  });
+
+  it('excludes conflicting IDs regardless of source order, including invalid duplicates', () => {
+    const unique = place('unique', 24, 120);
+    for (const duplicate of [place('same', 24.001, 120), place('same', 91, 120), place('same', 24, 120)]) {
+      const original = place('same', 24, 120);
+      for (const records of [[original, duplicate], [duplicate, original]]) {
+        const model = buildCampusSpatialModel([...records, unique]);
+        expect(model.points.map(point => point.id)).toEqual(['unique']);
+        expect(model.excludedCount).toBe(2);
+        expect(buildCampusSpatialModel(records).unavailableReason).toBe('no-locations');
+      }
+    }
   });
 
   it('ignores a zero-origin placeholder without hiding real campus places', () => {

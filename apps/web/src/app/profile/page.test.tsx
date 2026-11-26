@@ -142,6 +142,7 @@ it('preserves the browsing campus on school records, student card, library and s
   const destinations: Array<[string | RegExp, string, Record<string, string>]> = [
     [/數位學生證/, '/student-card', {}],
     [/我的課表/, '/timetable', {}],
+    [/收藏的活動/, '/events', { saved: '1' }],
     [/我的社群頁/, '/community/me', {}],
     [/成績紀錄/, '/grades', { tab: 'semester' }],
     [/學分規劃/, '/credit-planner', {}],
@@ -158,9 +159,12 @@ it('preserves the browsing campus on school records, student card, library and s
     expect(target.pathname).toBe(pathname);
     expect(Object.fromEntries(target.searchParams)).toEqual({ ...extra, schoolId: 'pu', campus: 'pu', school: 'PU' });
   }
-  const googleLogin = linkUrl('連線 Google 帳號');
-  expect(googleLogin.searchParams.get('schoolId')).toBe('pu');
-  expect(googleLogin.searchParams.get('returnUrl')).toBe('/profile?schoolId=pu&campus=pu&school=PU');
+  expect(screen.getByText(/兩個帳號目前分別管理/)).toBeTruthy();
+  const googleLogin = linkUrl('用 Google 登入平台服務');
+  expect(googleLogin.pathname).toBe('/login');
+  expect(Object.fromEntries(googleLogin.searchParams)).toEqual({
+    returnUrl: '/profile?schoolId=pu&campus=pu&school=PU', schoolId: 'pu', campus: 'pu', school: 'PU',
+  });
 });
 
 it('preserves the selected campus for Google-only feedback, imports and public conversation', async () => {
@@ -287,6 +291,7 @@ it('keeps mixed account records separate from course membership', async () => {
   await screen.findByText('私人資料 A');
   expect(screen.getByText('Google 帳號已登入')).toBeTruthy();
   expect(screen.getByText('學校帳號個人資料')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '用 Google 登入平台服務' })).toBeNull();
   expect(screen.getByText(/老師、協同教師或學生身分依各課程的成員資格決定/)).toBeTruthy();
   expect(state.read).toHaveBeenCalledWith('users/a');
 });

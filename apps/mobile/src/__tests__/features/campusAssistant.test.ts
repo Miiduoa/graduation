@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { resumeOpenedCoursework } from '../../features/nuniCourseworkSnapshot';
 import type { CourseworkRead, CourseworkChoice } from '../../features/nuniCourseworkFollowUp';
 import type { NuniClassCoursework } from '../../services/nuniClassCoursework';
@@ -1570,4 +1571,32 @@ test('offline school contacts use only the selected directory without model, tim
   expect(collectOnDeviceSchoolContext).not.toHaveBeenCalled();
   expect(localLLM.generate).not.toHaveBeenCalled();
   expect(mockCallable).not.toHaveBeenCalled();
+});
+
+test('answers a school account from its saved calendar in campus mode and omits the private turn from later model history', async () => {
+  const { personalImportStorageKey } = require('../../services/personalImports');
+  const query = { role: 'user' as const, content: '今天的課表和行程有衝突嗎？' };
+  const key = personalImportStorageKey({ owner: 'firebase:A', schoolId: 'nchu' });
+  const school = { uid: 'A', schoolId: 'nchu' };
+  const base = { schoolId: 'nchu', academicYear: '115', semester: '1', importedAt: '2026-11-24T00:00:00Z',
+    batchId: 'saved', source: { type: 'paste', rawText: '', line: 1 } };
+  jest.useFakeTimers({ now: new Date('2026-11-24T08:30:00+08:00') });
+  try {
+    await AsyncStorage.setItem(key, JSON.stringify({ version: 1, batches: [], records: [
+      { ...base, kind: 'timetable', id: 'class', title: '資料庫', dayOfWeek: 2, startTime: '09:00', endTime: '11:00' },
+      { ...base, kind: 'events', id: 'exact-id', title: '私人討論', date: '2026-11-24', startTime: '10:00', endTime: '12:00' },
+    ] }));
+    const reply = await askCampusAssistant({ ...input(), scope: school, messages: [query] });
+    expect(reply.content).toContain('10:00–11:00');
+    expect(reply).toMatchObject({ tool: 'class-calendar', source: 'device', hasActions: false,
+      classCalendarEvent: { owner: 'firebase:A', schoolId: 'nchu', eventId: 'exact-id', title: '私人討論' } });
+    expect(mockCallable).not.toHaveBeenCalled();
+    expect(localLLM.generate).not.toHaveBeenCalled();
+    const next = { role: 'user' as const, content: '學校的公告在哪裡查' };
+    await askCampusAssistant({ ...input(), scope: school, messages: [query, { ...reply, role: 'assistant' }, next] });
+    expect(mockCallable.mock.calls[0][0].messages).toEqual([next]);
+  } finally {
+    await AsyncStorage.removeItem(key);
+    jest.useRealTimers();
+  }
 });

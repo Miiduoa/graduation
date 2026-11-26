@@ -1,9 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import Link from 'next/link';
 import { NuniError } from '@campus/shared/src/nuni';
-import { merchantWorkspaceStateLabel } from '@campus/shared/src/nuniMerchant';
+import { merchantWorkspaceStateLabel, type NuniMerchantWorkspace } from '@campus/shared/src/nuniMerchant';
 import { isMerchantWorkspaceOperational } from '@campus/shared/src/merchantJourney';
 import {
   createMerchantOperations,
@@ -21,6 +30,15 @@ import {
   type MerchantWorkspaceSection,
   type MerchantWorkspaceQueue,
 } from '@/lib/merchantWorkspaceNavigation';
+
+import {
+  createMerchantConfirmations,
+  readFailureKind,
+  workspaceKey,
+  type DetailConfirmation,
+  type DetailReadConfirmation,
+  type MerchantConfirmations,
+} from './merchantConfirmation';
 
 type Detail = NuniMerchantWorkspaceDetail;
 type SettingDraft = Omit<NuniMerchantSettingsInput, 'termsVersion' | 'expectedVersion'> & {
@@ -72,57 +90,153 @@ const isUnknown = (failure: unknown) =>
   failure.status === 408 ||
   failure.status >= 500;
 
+const detailReadError = '無法確認門市目前的資料。草稿已保留，請重新讀取。';
+
+const initialAccess = {
+  entryVerified: false,
+  orderEntryRevision: 0,
+  loading: true,
+  readUnavailable: false,
+  entryConfirmation: null as DetailReadConfirmation | null,
+};
+
+type AccessAction =
+  | { type: 'entry-reset'; orderEntryRevision?: number }
+  | { type: 'read-started' | 'read-finished' | 'locked' }
+  | { type: 'verified'; read: DetailReadConfirmation }
+  | { type: 'read-failed'; hideDetail: boolean };
+
+type DetailReadMode = 'regular' | 'after-write' | 'after-confirmed-write';
+
+function accessReducer(state: typeof initialAccess, action: AccessAction): typeof initialAccess {
+  switch (action.type) {
+    case 'entry-reset':
+      return {
+        ...state,
+        entryVerified: false,
+        readUnavailable: false,
+        entryConfirmation: null,
+        orderEntryRevision: action.orderEntryRevision ?? state.orderEntryRevision,
+      };
+    case 'read-started':
+      return { ...state, readUnavailable: false, loading: true, entryConfirmation: null };
+    case 'read-finished':
+      return { ...state, loading: false };
+    case 'verified':
+      return { ...state, entryVerified: true, entryConfirmation: action.read, readUnavailable: false };
+    case 'locked':
+      return { ...state, entryConfirmation: null };
+    case 'read-failed':
+      return {
+        ...state,
+        entryVerified: !action.hideDetail && state.entryVerified,
+        entryConfirmation: null,
+        readUnavailable: true,
+      };
+  }
+}
+
 export function MerchantOperations({
   context,
   tenantId,
   locationId,
   suspended,
+  visible = true,
   drafts,
   foodDrafts,
   navigation,
   onBack,
   onExpired,
+  captureSession,
+  confirmedDetail,
+  confirmations,
+  confirmedListRow,
+  receiptFloorFor,
+  accessRevocation = 0,
   onChanged,
+  onRevoked,
+  onMenuConfirmed,
 }: {
   context: string;
   tenantId: string;
   locationId: string;
   suspended: boolean;
+  visible?: boolean;
   drafts: MerchantOperationDrafts;
   foodDrafts?: FoodDraftCache;
   navigation?: {
     section: MerchantWorkspaceSection;
     queue: MerchantWorkspaceQueue;
+    backHref: string;
     onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   };
   onBack?(): void;
   onExpired(): void;
-  onChanged(detail: Detail): void;
+  captureSession?(): () => boolean;
+  confirmedDetail?: Detail | null;
+  confirmations?: MerchantConfirmations;
+  confirmedListRow?: NuniMerchantWorkspace;
+  receiptFloorFor?(readinessVersion?: number): number;
+  accessRevocation?: number;
+  onChanged(detail: Detail, verifiedAccess: boolean, revision: number): DetailConfirmation | null | void;
+  onMenuConfirmed?(detail: Detail, revision: number, createdItems: number): boolean;
+  onRevoked?(showInList?: boolean): void;
 }) {
-  const draftKey = JSON.stringify([tenantId, locationId]);
+  const draftKey = workspaceKey({ tenantId, locationId });
   const saved = drafts.get(draftKey);
   const operations = useMemo(
     () =>
-      createMerchantOperations((path, input, method) =>
-        browserRequest(path, context, input, method),
+      createMerchantOperations(
+        (path, input, method) => browserRequest(path, context, input, method),
+        { allowOmittedReadRequirements: true },
       ),
     [context],
   );
-  const [detail, setDetail] = useState<Detail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [fresh, setFresh] = useState(false);
+  const [loadedDetail, setDetail] = useState<Detail | null>(null);
+  const [{ entryVerified, loading, readUnavailable, entryConfirmation, orderEntryRevision }, updateAccess] =
+    useReducer(accessReducer, initialAccess);
+  const detail = entryVerified ? (confirmedDetail === undefined ? loadedDetail : confirmedDetail) : null;
   const [busy, setBusy] = useState<Action | null>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState<{
+    value: string;
+    revision: number;
+    readinessVersion?: number;
+    statusChange?: true;
+  } | null>(null);
   const [uncertain, setUncertain] = useState<Action | null>(saved?.uncertain ?? null);
   const [settings, setSettings] = useState<SettingDraft | null>(saved?.settings ?? null);
   const [menu, setMenu] = useState<MenuDraft[]>(saved?.menu ?? [newItem()]);
   const [menuConfirmed, setMenuConfirmed] = useState(false);
-  const [menuReceipt, setMenuReceipt] = useState<number | null>(saved?.menuReceipt ?? null);
+  const [localConfirmations] = useState(() => createMerchantConfirmations(drafts));
+  const observations = confirmations ?? localConfirmations;
+  const menuReceiptSnapshot = useCallback(
+    () => observations.menuReceiptFor(draftKey),
+    [draftKey, observations],
+  );
+  const menuReceipt = useSyncExternalStore(
+    observations.subscribeMenuReceiptChanges,
+    menuReceiptSnapshot,
+    () => null,
+  );
+  const nextRevision = observations.beginRequest;
+  const statusReceiptVersion = notice?.statusChange ? notice.readinessVersion : undefined;
+  const noticeFloor = receiptFloorFor
+    ? receiptFloorFor(statusReceiptVersion)
+    : localConfirmations.workspaceReceiptFloor(draftKey, statusReceiptVersion);
+  const visibleNotice =
+    detail &&
+    notice &&
+    notice.revision > noticeFloor &&
+    (notice.readinessVersion === undefined || notice.readinessVersion === detail.readinessVersion)
+      ? notice.value
+      : null;
   const [menuBlocked, setMenuBlocked] = useState(saved?.menuBlocked ?? false);
   const [activationConfirmed, setActivationConfirmed] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
   const ordersOpen = navigation ? navigation.section === 'orders' : showOrders;
+  const [ordersVisited, setOrdersVisited] = useState(false);
+  if (ordersOpen && !ordersVisited) setOrdersVisited(true);
   const workspaceHeading = useRef<HTMLHeadingElement>(null);
   const hasDetail = !!detail;
   useEffect(() => {
@@ -132,6 +246,41 @@ export function MerchantOperations({
   const active = useRef(false);
   const lock = useRef(false);
   const run = useRef(0);
+  const accessRevision = useRef(0);
+  const accessSnapshot = useCallback(() => {
+    const confirmed = observations.detailReadConfirmation(draftKey);
+    if (entryConfirmation && confirmed && confirmed.version === detail?.readinessVersion) {
+      return 'confirmed';
+    }
+    return observations.canRecoverFromOrderRead(draftKey) ? 'orders-unavailable' : 'unconfirmed';
+  }, [detail?.readinessVersion, draftKey, entryConfirmation, observations]);
+  const access = useSyncExternalStore(
+    observations.subscribeReadChanges,
+    accessSnapshot,
+    () => 'unconfirmed',
+  );
+  const entryReadRevision = useRef(0);
+  const pendingAccessRead = useRef(0);
+  const observedRevocation = useRef(accessRevocation);
+  useLayoutEffect(() => {
+    observedRevocation.current = accessRevocation;
+  }, [accessRevocation]);
+  const sessionRun = useRef(0);
+  const opened = useRef(false);
+  const visibleRef = useRef(visible);
+  const entryRun = useRef(0);
+  const needsOrderData = useCallback(
+    () => observations.needsOrderData(draftKey, orderEntryRevision),
+    [draftKey, observations, orderEntryRevision],
+  );
+  const orderDataPending = useSyncExternalStore(observations.subscribeReadChanges, needsOrderData, () => false);
+  const hasPendingOrderRead = useCallback(
+    () => observations.hasPendingOrderRead(draftKey),
+    [draftKey, observations],
+  );
+  const orderReadPending = useSyncExternalStore(observations.subscribeReadChanges, hasPendingOrderRead, () => false);
+  const readAfterWrite = useRef(false);
+  const deferredWrite = useRef<{ revision: number; entry: number } | null>(null);
   const mutationRun = useRef(0);
   const changed = useRef(onChanged);
   const expire = useRef(onExpired);
@@ -140,140 +289,422 @@ export function MerchantOperations({
     expire.current = onExpired;
   }, [onChanged, onExpired]);
   const invalidate = useCallback(() => {
+    ++sessionRun.current;
     ++run.current;
     ++mutationRun.current;
+    deferredWrite.current = null;
+    pendingAccessRead.current = 0;
+    entryReadRevision.current = 0;
   }, []);
   useLayoutEffect(() => {
     drafts.set(draftKey, {
       settings,
       menu,
-      menuReceipt,
+      menuReceipt: drafts.get(draftKey)?.menuReceipt ?? null,
       menuBlocked,
       uncertain: busy ?? uncertain,
     });
-  }, [drafts, draftKey, settings, menu, menuReceipt, menuBlocked, busy, uncertain]);
+  }, [drafts, draftKey, settings, menu, menuBlocked, busy, uncertain]);
   useLayoutEffect(() => {
     active.current = !suspended;
     return () => {
       active.current = false;
       invalidate();
     };
-  }, [suspended, invalidate]);
+  }, [context, suspended, invalidate]);
 
-  const accept = useCallback((next: Detail) => {
-    setDetail(next);
-    setFresh(true);
-    setActivationConfirmed(false);
-    changed.current(next);
-  }, []);
+  const captureReadSession = useCallback(() => {
+    const session = sessionRun.current;
+    const isSameSession = captureSession?.();
+    return () => active.current && session === sessionRun.current && (isSameSession?.() ?? true);
+  }, [captureSession]);
 
-  const read = useCallback(async () => {
-    const version = ++run.current;
-    setLoading(true);
-    setFresh(false);
-    try {
-      const next = await operations.get(tenantId, locationId);
-      if (!active.current || version !== run.current) return;
-      accept(next);
-      // A count of zero cannot prove a non-idempotent menu request failed:
-      // an existing menu may have no remaining sellable stock.
-      setUncertain((current) =>
-        current === 'menu' && next.publishedMenuItems === 0 ? current : null,
-      );
-      setError('');
-    } catch (failure) {
-      if (!active.current || version !== run.current) return;
-      if (
-        failure instanceof NuniError &&
-        (failure.status === 401 || failure.code === 'SESSION_CHANGED')
-      ) {
+  const confirmDetail = useCallback(
+    (next: Detail, verifiedAccess: boolean, revision: number) =>
+      changed.current(next, verifiedAccess, revision) ??
+      (confirmations ? null : localConfirmations.confirmDetail(next, revision, verifiedAccess)),
+    [confirmations, localConfirmations],
+  );
+
+  const showDetail = useCallback(
+    (merged: Detail) => {
+      if (!confirmations) setDetail(merged);
+      setMenuConfirmed(false);
+      setActivationConfirmed(false);
+    },
+    [confirmations, setDetail, setMenuConfirmed, setActivationConfirmed],
+  );
+
+  const accept = (next: Detail, revision: number) => {
+    const confirmation = confirmDetail(next, false, revision);
+    // Receipts update the detail and notices. Only a GET can establish entry freshness.
+    if (!confirmation?.won) return null;
+    showDetail(confirmation.detail);
+    return confirmation.detail;
+  };
+
+  const showRevocation = useCallback(
+    (revoked: number, updateView: boolean, showInList = false) => {
+      onRevoked?.(showInList);
+      if (!confirmations) {
         setDetail(null);
-        expire.current();
-      } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-        setDetail(null);
+        setNotice((current) => current && current.revision > revoked ? current : null);
+      }
+      if (updateView) {
+        accessRevision.current = Math.max(accessRevision.current, revoked);
+        updateAccess({ type: 'locked' });
         setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
-      } else setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
-    } finally {
-      if (active.current && version === run.current) setLoading(false);
+      }
+    },
+    [confirmations, onRevoked, setDetail, setNotice, setError, updateAccess],
+  );
+
+  const clearExpiredSession = useCallback(
+    () => {
+      localConfirmations.clearSession();
+      setNotice(null);
+      setDetail(null);
+      updateAccess({ type: 'locked' });
+      expire.current();
+    },
+    [localConfirmations, setNotice, setDetail, updateAccess],
+  );
+
+  const confirmEntry = useCallback(
+    (detail: Detail, read: DetailReadConfirmation, reveal: boolean) => {
+      const { revision } = read;
+      if (
+        revision < accessRevision.current ||
+        !observations.canUseAccess(draftKey, read)
+      ) return;
+      accessRevision.current = revision;
+      showDetail(detail);
+      if (reveal) {
+        entryReadRevision.current = revision;
+        updateAccess({ type: 'verified', read });
+        setError((current) => current === detailReadError ? '' : current);
+      }
+    },
+    [draftKey, observations, showDetail, setError, updateAccess],
+  );
+
+  const rejectWorkspaceRead = useCallback(
+    (
+      isSameSession: () => boolean,
+      failure: unknown,
+      revision: number,
+      updateView: boolean,
+      source: 'detail' | 'orders' = 'detail',
+    ) => {
+      const result = observations.rejectRead(
+        isSameSession, failure, revision, clearExpiredSession, { key: draftKey, source },
+      );
+      if ('revoked' in result && result.revoked !== undefined) {
+        showRevocation(result.revoked, updateView);
+        return true;
+      }
+      return result.kind === 'expired' || result.kind === 'retired';
+    },
+    [clearExpiredSession, draftKey, observations, showRevocation],
+  );
+
+  const checkAccess = useCallback(
+    async (current: () => boolean, verifiesEntry = false) => {
+      const isSameSession = captureReadSession();
+      const revision = nextRevision();
+      if (verifiesEntry) {
+        accessRevision.current = Math.max(accessRevision.current, observedRevocation.current);
+      }
+      await operations.get(tenantId, locationId).then((next) => {
+        if (!isSameSession()) return;
+        const merged = confirmDetail(next, true, revision)?.detail ?? null;
+        if (merged && verifiesEntry && current()) {
+          // Keep the confirmed revision for a stale refresh fallback, while
+          // the write or its pending refresh still controls entry access.
+          confirmEntry(
+            merged,
+            { revision, version: next.readinessVersion },
+            !readAfterWrite.current && !pendingAccessRead.current,
+          );
+        }
+      }).catch((failure: unknown) => {
+        rejectWorkspaceRead(isSameSession, failure, revision, current() && revision >= accessRevision.current);
+      });
+    },
+    [captureReadSession, confirmDetail, confirmEntry, nextRevision, locationId, operations, rejectWorkspaceRead, tenantId],
+  );
+
+  const rememberWrite = useCallback((revision: number) => {
+    if (revision > (deferredWrite.current?.revision ?? 0)) {
+      observations.recordWrite(draftKey, revision);
+      deferredWrite.current = { revision, entry: entryRun.current };
     }
-  }, [operations, tenantId, locationId, accept]);
-  useEffect(() => {
+    return deferredWrite.current;
+  }, [draftKey, observations]);
+
+  const read = useCallback(
+    async (reconcile = true, mode: DetailReadMode = 'regular', writeRevision = 0) => {
+      // A confirmed receipt may remain visible with the previously verified detail
+      // during an outage. Only a successful read can restore the controls.
+      // Hidden refreshes can confirm shared detail for the next visible entry
+      // without consuming that entry's post-write reconciliation.
+      const visible = visibleRef.current;
+      const entry = entryRun.current;
+      const reconciliation = rememberWrite(writeRevision);
+      // The receipt's entry can refresh immediately, but only a later visible
+      // entry can consume the deferred reconciliation.
+      const deferred = visible && reconciliation !== null && entry > reconciliation.entry;
+      const readMode = mode === 'regular' && deferred ? 'after-write' : mode;
+      const hideDetail = readMode === 'after-write';
+      readAfterWrite.current = false;
+      const isSameSession = captureReadSession();
+      const version = ++run.current;
+      const current = () => isSameSession() && version === run.current;
+      const revision = nextRevision();
+      // A pending read may reconcile an intervening denial. Only an accepted
+      // response can advance access past the revocation already being handled.
+      pendingAccessRead.current = revision;
+      accessRevision.current = Math.max(accessRevision.current, observedRevocation.current);
+      updateAccess({ type: 'read-started' });
+      await operations.get(tenantId, locationId).then((next) => {
+        if (!isSameSession()) return;
+        const merged = confirmDetail(next, true, revision)?.detail ?? null;
+        if (!current()) return;
+        const confirmation = { revision, version: next.readinessVersion };
+        if (!merged || !observations.canUseAccess(draftKey, confirmation)) {
+          // The deferred marker controls presentation. The shared confirmation
+          // remains usable across entries until a newer write, version, or failure supersedes it.
+          const retainedRevision = mode !== 'regular' && !deferred ? entryReadRevision.current : 0;
+          const sharedRead = visible
+            ? observations.reusableDetailRead(draftKey, retainedRevision)
+            : undefined;
+          const detail = sharedRead && observations.detailFor(draftKey);
+          if (sharedRead && detail && sharedRead.revision >= accessRevision.current) {
+            confirmEntry(detail, sharedRead, true);
+            return;
+          }
+          updateAccess({ type: 'read-failed', hideDetail });
+          setError(detailReadError);
+          return;
+        }
+        confirmEntry(merged, confirmation, !readAfterWrite.current);
+        // A count of zero cannot prove a non-idempotent menu request failed:
+        // an existing menu may have no remaining sellable stock.
+        if (reconcile) {
+          setUncertain((current) =>
+            current === 'menu' && merged.publishedMenuItems === 0 ? current : null,
+          );
+        }
+        if (reconcile || !drafts.get(draftKey)?.uncertain) setError('');
+      }).catch((failure: unknown) => {
+        // Navigation retires view updates while the request still belongs to this session.
+        if (rejectWorkspaceRead(isSameSession, failure, revision, current())) return;
+        if (current()) {
+          updateAccess({ type: 'read-failed', hideDetail });
+          setError(detailReadError);
+        }
+      }).finally(() => {
+        if (pendingAccessRead.current === revision) pendingAccessRead.current = 0;
+        if (current()) {
+          if (
+            deferred && visibleRef.current &&
+            entry === entryRun.current &&
+            deferredWrite.current === reconciliation
+          ) {
+            deferredWrite.current = null;
+          }
+          updateAccess({ type: 'read-finished' });
+        }
+      });
+    },
+    [
+      captureReadSession, operations, tenantId, locationId, confirmDetail, confirmEntry, drafts, draftKey,
+      rejectWorkspaceRead, nextRevision, observations,
+      rememberWrite, setError, setUncertain, updateAccess,
+    ],
+  );
+  useLayoutEffect(() => {
     if (!suspended) {
       setUncertain(drafts.get(draftKey)?.uncertain ?? null);
       setBusy(null);
       lock.current = false;
-      void read();
+      opened.current = false;
     }
-  }, [read, suspended, drafts, draftKey]);
+  }, [suspended, drafts, draftKey]);
+  const verifyEntry = useCallback((orderEntryRevision?: number) => {
+    entryReadRevision.current = 0;
+    updateAccess({ type: 'entry-reset', orderEntryRevision });
+    let checkingAccess = true;
+    if (lock.current) {
+      // Verify access now, and refresh controls again after the write settles.
+      readAfterWrite.current = true;
+      void checkAccess(() => checkingAccess && active.current, true);
+    } else {
+      // Returning through history does not acknowledge an unknown write.
+      void read(!opened.current);
+      opened.current = true;
+    }
+    return () => {
+      checkingAccess = false;
+    };
+  }, [checkAccess, read, updateAccess]);
 
-  async function mutate(action: Action, task: (current: () => boolean) => Promise<void>) {
-    if (!active.current || lock.current || loading || uncertain || !fresh) return;
+  useLayoutEffect(() => {
+    visibleRef.current = visible;
+    if (!visible || suspended) {
+      updateAccess({ type: 'entry-reset' });
+      return;
+    }
+    ++entryRun.current;
+    const retire = verifyEntry(nextRevision());
+    return () => {
+      retire();
+      readAfterWrite.current = false;
+      if (!lock.current) ++run.current;
+    };
+  }, [nextRevision, suspended, visible, verifyEntry]);
+
+  // A retired read or the list can revoke data after the visible entry started verifying.
+  // The entry's own denial already displays an error and allows a manual retry.
+  useLayoutEffect(() => {
+    if (
+      visible && !suspended &&
+      accessRevocation > Math.max(accessRevision.current, pendingAccessRead.current)
+    ) {
+      return verifyEntry();
+    }
+  }, [accessRevocation, loading, readUnavailable, suspended, visible, verifyEntry]);
+
+  const orderReadFlight = useCallback(() => observations.orderReadScope(draftKey), [draftKey, observations]);
+  const beginOrderRead = useCallback(() => {
+    const isSameSession = captureSession?.() ?? captureReadSession();
+    if (!isSameSession()) return null;
+    const read = observations.beginOrderRead(draftKey, orderEntryRevision);
+    return {
+      settle: read.settle,
+      confirm() {
+        if (isSameSession()) read.confirm();
+      },
+      reject(failure: unknown) {
+        rejectWorkspaceRead(isSameSession, failure, read.revision, active.current && visibleRef.current, 'orders');
+      },
+    };
+  }, [captureReadSession, captureSession, draftKey, observations, orderEntryRevision, rejectWorkspaceRead]);
+
+  function hasCurrentAccess() {
+    return captureReadSession()() && visibleRef.current &&
+      accessSnapshot() === 'confirmed' && !needsOrderData() && !hasPendingOrderRead();
+  }
+
+  async function mutate(
+    action: Action,
+    task: (current: () => boolean, revision: number) => Promise<void>,
+  ) {
+    // A background GET can fail before React commits the updated controls.
+    if (
+      !active.current || lock.current || loading || uncertain || !detail ||
+      !hasCurrentAccess()
+    ) return;
+    const isSameSession = captureReadSession();
+    if (!isSameSession()) return;
     lock.current = true;
     const mutation = ++mutationRun.current;
     const version = ++run.current;
-    const current = () => active.current && version === run.current;
+    const current = () => isSameSession() && version === run.current;
     // Record the intent before issuing the request. Returning to the list or
     // renewing this account's session must not turn an unknown write into a retry.
     drafts.set(draftKey, {
       settings,
       menu,
-      menuReceipt,
+      menuReceipt: drafts.get(draftKey)?.menuReceipt ?? null,
       menuBlocked: action === 'menu' || menuBlocked,
       uncertain: action,
     });
     if (action === 'menu') setMenuBlocked(true);
     setBusy(action);
     setError('');
-    setNotice('');
-    try {
-      await task(current);
-    } catch (failure) {
+    setNotice(null);
+    const revision = nextRevision();
+    await task(current, revision).then(async () => {
+      if (current()) {
+        rememberWrite(revision);
+        if (!visibleRef.current) await checkAccess(current);
+        // A version-changing receipt invalidates the previous entry confirmation.
+        else if (!readAfterWrite.current &&
+          observations.detailFor(draftKey)?.readinessVersion !== entryConfirmation?.version &&
+          !observations.detailReadConfirmation(draftKey)) {
+          await read(false, 'after-confirmed-write', revision);
+        }
+      }
+    }).catch(async (failure: unknown) => {
+      if (!isSameSession()) return;
+      if (readFailureKind(failure) === 'expired') {
+        clearExpiredSession();
+        return;
+      }
       if (!current()) return;
-      if (
-        failure instanceof NuniError &&
-        (failure.status === 401 || failure.code === 'SESSION_CHANGED')
-      ) {
-        setDetail(null);
-        setFresh(false);
-        expire.current();
-      } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-        setDetail(null);
-        setFresh(false);
-        setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
+      if (readFailureKind(failure) === 'denied') {
+        const revoked = observations.revokePendingAction(draftKey, revision);
+        if (revoked !== undefined) showRevocation(revoked, true, !visibleRef.current);
       } else if (failure instanceof NuniError && failure.status === 409) {
         if (action === 'menu') setMenuBlocked(true);
-        await read();
-        if (active.current)
-          setError('門市資料已變更。請確認重新讀取的狀態，再決定下一步；草稿仍保留。');
+        // A conflict always requires post-write reconciliation, even on the same entry.
+        await read(true, 'after-write', revision);
+        if (isSameSession())
+          setError((current) =>
+            current || '門市資料已變更。請確認重新讀取的狀態，再決定下一步；草稿仍保留。',
+          );
       } else if (isUnknown(failure)) {
         setUncertain(action);
         if (action === 'menu') setMenuBlocked(true);
         setError('尚未確認這次操作的結果。請先重新讀取門市狀態，不要重複送出。');
+        await checkAccess(current);
       } else {
         if (action === 'menu') setMenuBlocked(false);
         setError('這次操作未被接受。請確認資料與門市的營運條件後再試。');
       }
-    } finally {
+    }).finally(() => {
       if (mutation === mutationRun.current) {
         lock.current = false;
-        if (active.current) setBusy(null);
+        if (isSameSession()) {
+          setBusy(null);
+          if (readAfterWrite.current) void read(false, 'after-write', revision);
+        }
       }
-    }
+    });
   }
 
+  if (!visible) return null;
   if (suspended) return <p role="status">正在重新確認帳號，門市資料暫時隱藏。</p>;
+  const summary = detail ?? (!loading && (entryVerified || readUnavailable) ? confirmedListRow : null);
+  const missingRequirements = summary?.missingRequirements
+    ?.map((item) => requirements[item] ?? '請向場域管理者確認')
+    .join('、');
   const draft = settings ?? (detail ? settingsOf(detail) : null);
   const settingsChanged =
     !!settings && !!detail && settings.baseVersion !== detail.readinessVersion;
-  const locked = !!busy || loading || !!uncertain || !fresh;
+  const blocked = !!busy || loading || !!uncertain || !detail;
+  const locked = blocked || access !== 'confirmed';
+  const displayedError = error || (!loading && entryVerified && access !== 'confirmed' ? detailReadError : '');
   const menuExists = menuReceipt !== null || !!detail?.publishedMenuItems;
   const operational = !!detail && isMerchantWorkspaceOperational(detail);
+  const canReadOrders = !blocked &&
+    (access === 'confirmed' || (access === 'orders-unavailable' && !!entryConfirmation));
+  const ordersSuspended = !ordersOpen || !operational || !canReadOrders;
+  const readOrdersInOverview = !ordersOpen && orderDataPending && !blocked && access === 'confirmed';
+  const writesLocked = locked || orderDataPending || orderReadPending;
+  // A same-version list can report an activation blocker while a legacy detail
+  // still needs its own stock count to determine whether to show the menu form.
+  const activationRequirements = detail?.missingRequirements ??
+    (detail && confirmedListRow?.readinessVersion === detail.readinessVersion
+      ? confirmedListRow.missingRequirements
+      : undefined);
   const canActivate =
     detail &&
     !detail.activated &&
     detail.managerConfirmed &&
     detail.publishedMenuItems > 0 &&
-    detail.missingRequirements.length === 0 &&
+    (activationRequirements?.length ?? 0) === 0 &&
     detail.merchantStatus === 'suspended' &&
     detail.locationStatus === 'suspended' &&
     !detail.publicAccess;
@@ -296,7 +727,7 @@ export function MerchantOperations({
         {navigation ? (
           <Link
             className="btn"
-            href="/merchant/workspace"
+            href={navigation.backHref}
             aria-disabled={!!busy || undefined}
             onClick={(event) => {
               if (busy) event.preventDefault();
@@ -314,9 +745,21 @@ export function MerchantOperations({
           重新讀取門市狀態
         </Button>
       </div>
-      {loading && <p role="status">正在確認門市資料…</p>}
-      {error && <p role="alert">{error}</p>}
-      {notice && <p role="status">{notice}</p>}
+      {(loading || (!entryVerified && busy)) && <p role="status">正在確認門市資料…</p>}
+      {readOrdersInOverview && (
+        <p role="status">正在核對訂單與班別，完成後即可操作門市。</p>
+      )}
+      {displayedError && <p role="alert">{displayedError}</p>}
+      {!detail && summary && (
+        <div role="status">
+          <p>{merchantWorkspaceStateLabel(summary)}</p>
+          {missingRequirements && <p>待完成：{missingRequirements}</p>}
+        </div>
+      )}
+      {menuReceipt !== null && (
+        <p role="status">已建立 {menuReceipt} 項首次菜單。啟用前請再確認門市資料。</p>
+      )}
+      {visibleNotice && <p role="status">{visibleNotice}</p>}
       {detail && draft && (
         <>
           <section className={styles.intro} aria-label="門市現況">
@@ -327,14 +770,7 @@ export function MerchantOperations({
               {detail.tenantName} · {detail.campusName}
             </p>
             <p>{merchantWorkspaceStateLabel(detail)}</p>
-            {detail.missingRequirements.length > 0 && (
-              <p>
-                待完成：
-                {detail.missingRequirements
-                  .map((item) => requirements[item] ?? '請向場域管理者確認')
-                  .join('、')}
-              </p>
-            )}
+            {missingRequirements && <p>待完成：{missingRequirements}</p>}
           </section>
 
           {navigation && (
@@ -346,13 +782,19 @@ export function MerchantOperations({
               >
                 門市概況
               </Link>
-              <Link
-                href={sectionHref('orders')}
-                aria-current={ordersOpen ? 'page' : undefined}
-                onClick={navigation.onNavigate}
-              >
-                訂單與收銀
-              </Link>
+              {locked ? (
+                <span aria-disabled="true" aria-current={ordersOpen ? 'page' : undefined}>
+                  訂單與收銀
+                </span>
+              ) : (
+                <Link
+                  href={sectionHref('orders')}
+                  aria-current={ordersOpen ? 'page' : undefined}
+                  onClick={navigation.onNavigate}
+                >
+                  訂單與收銀
+                </Link>
+              )}
             </nav>
           )}
 
@@ -360,7 +802,7 @@ export function MerchantOperations({
             <section className={styles.panel} aria-labelledby="merchant-daily-work-title">
               <h3 id="merchant-daily-work-title">門市工作台</h3>
               <p>開班、確認收款、準備餐點與核對取餐憑證。暫停新訂單時，仍可處理已收到的訂單。</p>
-              {navigation ? (
+              {navigation && !locked ? (
                 <Link
                   className="btn primary"
                   href={sectionHref('orders')}
@@ -379,38 +821,18 @@ export function MerchantOperations({
                   {showOrders ? '收起訂單工作台' : '處理訂單與收銀'}
                 </Button>
               )}
-              <div id="merchant-order-workspace">
-                {!navigation && showOrders && !locked && (
-                  <MerchantOrderDesk
-                    key={`${context}:${tenantId}:${locationId}`}
-                    context={context}
-                    tenantId={tenantId}
-                    locationId={locationId}
-                    cache={foodDrafts ?? localFoodDrafts}
-                  />
-                )}
-              </div>
             </section>
           )}
 
           {navigation &&
             ordersOpen &&
             (operational ? (
-              locked ? (
-                <p role="status">正在重新確認門市，確認後會接回訂單工作台。</p>
-              ) : (
-                <MerchantOrderDesk
-                  key={`${context}:${tenantId}:${locationId}`}
-                  context={context}
-                  tenantId={tenantId}
-                  locationId={locationId}
-                  cache={foodDrafts ?? localFoodDrafts}
-                  queue={navigation.queue}
-                  queueHref={(queue) =>
-                    merchantWorkspaceHref({ tenantId, locationId, section: 'orders', queue })
-                  }
-                  onQueueChange={(event) => navigation.onNavigate(event)}
-                />
+              locked && (
+                <p role="status">
+                  {loading || busy
+                    ? '正在重新確認門市，確認後會接回訂單工作台。'
+                    : '請重新讀取門市狀態，再開啟訂單工作台。'}
+                </p>
               )
             ) : (
               <section className={styles.panel} aria-labelledby="merchant-orders-unavailable-title">
@@ -438,17 +860,20 @@ export function MerchantOperations({
                 onSubmit={(event) => {
                   event.preventDefault();
                   if (!draft.agreed || !draft.serviceModes.length || settingsChanged) return;
-                  void mutate('settings', async (current) => {
+                  void mutate('settings', async (current, revision) => {
                     const next = await operations.updateSettings(tenantId, locationId, {
                       serviceModes: draft.serviceModes,
                       paymentMode: draft.paymentMode,
                       termsVersion: 'merchant-terms-v1',
                       expectedVersion: draft.baseVersion,
                     });
-                    if (!current()) return;
-                    accept(next);
+                    if (!current() || !accept(next, revision)) return;
                     setSettings(null);
-                    setNotice('營運設定已儲存。');
+                    setNotice({
+                      value: '營運設定已儲存。',
+                      revision,
+                      readinessVersion: next.readinessVersion,
+                    });
                   });
                 }}
               >
@@ -456,12 +881,12 @@ export function MerchantOperations({
                   <div role="alert">
                     <p>營運設定已有新版。你的草稿尚未儲存，請先選擇使用哪一份。</p>
                     <div className={styles.checks}>
-                      <Button type="button" disabled={locked} onClick={() => setSettings(null)}>
+                      <Button type="button" disabled={writesLocked} onClick={() => setSettings(null)}>
                         改用目前設定
                       </Button>
                       <Button
                         type="button"
-                        disabled={locked}
+                        disabled={writesLocked}
                         onClick={() =>
                           setSettings({ ...draft, baseVersion: detail.readinessVersion })
                         }
@@ -471,7 +896,7 @@ export function MerchantOperations({
                     </div>
                   </div>
                 )}
-                <fieldset disabled={locked}>
+                <fieldset disabled={writesLocked}>
                   <legend>提供哪些服務</legend>
                   <div className={styles.checks}>
                     {modes.map(([mode, label]) => (
@@ -526,7 +951,7 @@ export function MerchantOperations({
                   type="submit"
                   variant="primary"
                   disabled={
-                    locked || settingsChanged || !draft.agreed || !draft.serviceModes.length
+                    writesLocked || settingsChanged || !draft.agreed || !draft.serviceModes.length
                   }
                 >
                   儲存營運設定
@@ -542,18 +967,21 @@ export function MerchantOperations({
                 這間門市先前啟用了線上付款，目前尚未提供該服務。可保留原服務方式，改為現場櫃檯付款。
               </p>
               <Button
-                disabled={locked}
+                disabled={writesLocked}
                 onClick={() =>
-                  void mutate('settings', async (current) => {
+                  void mutate('settings', async (current, revision) => {
                     const next = await operations.updateSettings(tenantId, locationId, {
                       serviceModes: detail.serviceModes,
                       paymentMode: 'counter-only',
                       termsVersion: 'merchant-terms-v1',
                       expectedVersion: detail.readinessVersion,
                     });
-                    if (!current()) return;
-                    accept(next);
-                    setNotice('已改為現場櫃檯付款。');
+                    if (!current() || !accept(next, revision)) return;
+                    setNotice({
+                      value: '已改為現場櫃檯付款。',
+                      revision,
+                      readinessVersion: next.readinessVersion,
+                    });
                   })
                 }
               >
@@ -582,7 +1010,7 @@ export function MerchantOperations({
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (!menuConfirmed || menuBlocked) return;
-                      void mutate('menu', async (current) => {
+                      void mutate('menu', async (current, revision) => {
                         const receipt = await operations.createInitialMenu(tenantId, locationId, {
                           items: menu.map((item) => ({
                             name: item.name.trim(),
@@ -596,16 +1024,21 @@ export function MerchantOperations({
                           })),
                         });
                         if (!current()) return;
-                        setMenuReceipt(receipt.createdItems);
+                        const accepted = onMenuConfirmed
+                          ? onMenuConfirmed(detail, revision, receipt.createdItems)
+                          : localConfirmations.confirmMenu(
+                              draftKey, revision, receipt.createdItems, detail.readinessVersion,
+                            );
                         setMenuConfirmed(false);
-                        setNotice(
-                          `已建立 ${receipt.createdItems} 項首次菜單。啟用前請再確認門市資料。`,
-                        );
-                        await read();
+                        const visible = visibleRef.current;
+                        // Re-entered views refresh when the mutation settles.
+                        if (!readAfterWrite.current && (visible || accepted)) {
+                          await read(true, accepted ? 'after-confirmed-write' : 'after-write', revision);
+                        }
                       });
                     }}
                   >
-                    <fieldset disabled={locked || menuBlocked}>
+                    <fieldset disabled={writesLocked || menuBlocked}>
                       {menu.map((item, index) => {
                         const change = (field: keyof MenuDraft, value: string) => {
                           setMenu((items) =>
@@ -695,7 +1128,7 @@ export function MerchantOperations({
                     <Button
                       type="submit"
                       variant="primary"
-                      disabled={locked || menuBlocked || !menuConfirmed}
+                      disabled={writesLocked || menuBlocked || !menuConfirmed}
                     >
                       確認建立並上架菜單
                     </Button>
@@ -737,21 +1170,27 @@ export function MerchantOperations({
                   <label className={styles.confirmation}>
                     <input
                       type="checkbox"
-                      disabled={locked || !canActivate || !!settings}
+                      disabled={writesLocked || !canActivate || !!settings}
                       checked={activationConfirmed}
                       onChange={(event) => setActivationConfirmed(event.target.checked)}
                     />
                     我已確認門市、營運方式及菜單，現在開放接單
                   </label>
                   <Button
-                    disabled={locked || !canActivate || !!settings || !activationConfirmed}
+                    disabled={writesLocked || !canActivate || !!settings || !activationConfirmed}
                     variant="primary"
                     onClick={() =>
-                      void mutate('activate', async (current) => {
+                      void mutate('activate', async (current, revision) => {
                         const next = await operations.activate(tenantId, locationId);
                         if (!current()) return;
-                        accept(next);
-                        setNotice(`門市狀態已更新：${merchantWorkspaceStateLabel(next)}。`);
+                        const confirmed = accept(next, revision);
+                        if (confirmed)
+                          setNotice({
+                            value: `門市狀態已更新：${merchantWorkspaceStateLabel(confirmed)}。`,
+                            revision,
+                            readinessVersion: confirmed.readinessVersion,
+                            statusChange: true,
+                          });
                       })
                     }
                   >
@@ -766,17 +1205,23 @@ export function MerchantOperations({
                       : '目前暫停接單。恢復前會重新確認菜單與付款設定。'}
                   </p>
                   <Button
-                    disabled={locked}
+                    disabled={writesLocked}
                     onClick={() =>
-                      void mutate('availability', async (current) => {
+                      void mutate('availability', async (current, revision) => {
                         const next = await operations.setAvailability(
                           tenantId,
                           locationId,
                           detail.locationStatus === 'closed',
                         );
                         if (!current()) return;
-                        accept(next);
-                        setNotice(`門市狀態已更新：${merchantWorkspaceStateLabel(next)}。`);
+                        const confirmed = accept(next, revision);
+                        if (confirmed)
+                          setNotice({
+                            value: `門市狀態已更新：${merchantWorkspaceStateLabel(confirmed)}。`,
+                            revision,
+                            readinessVersion: confirmed.readinessVersion,
+                            statusChange: true,
+                          });
                       })
                     }
                   >
@@ -790,6 +1235,31 @@ export function MerchantOperations({
           )}
         </>
       )}
+      {/* The workspace owns pending receipts across its sections and access refreshes. */}
+      <div id="merchant-order-workspace" hidden={ordersSuspended}>
+        {(ordersVisited || readOrdersInOverview) && (
+          <MerchantOrderDesk
+            key={`${context}:${tenantId}:${locationId}`}
+            context={context}
+            tenantId={tenantId}
+            locationId={locationId}
+            cache={foodDrafts ?? localFoodDrafts}
+            canSend={hasCurrentAccess}
+            captureSession={captureSession}
+            accessConfirmed={!writesLocked}
+            suspended={ordersSuspended}
+            readWhileSuspended={readOrdersInOverview}
+            beginRead={beginOrderRead}
+            readFlight={orderReadFlight}
+            queue={navigation?.queue}
+            queueHref={
+              navigation && ((queue) =>
+                merchantWorkspaceHref({ tenantId, locationId, section: 'orders', queue }))
+            }
+            onQueueChange={navigation?.onNavigate}
+          />
+        )}
+      </div>
     </div>
   );
 }
