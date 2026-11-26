@@ -14,6 +14,8 @@ import {
   type CourseAssignment,
   type CourseWork,
 } from '@/lib/courseWork';
+import { useSearchParams } from 'next/navigation';
+import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigationLinks';
 import { LoginLink } from '@/components/LoginLink';
 import {
   COURSE_WORK_MISSING_ASSIGNMENT,
@@ -150,8 +152,8 @@ function Assignment({
       </div>
       <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.description || '教師尚未填寫作業說明。'}</p>
       {submitted ? (
-        <div role="status">
-          <p>
+        <div>
+          <p role="status">
             {assignment.grade
               ? '已繳交 · 教師已發布評分'
               : '已繳交 · 等待老師評分'}
@@ -162,8 +164,8 @@ function Assignment({
           {!assignment.grade ?
             <p>作業已收到；老師公布評分後，會顯示在這裡。</p> : null}
           <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.submittedText ?? savedText}</p>
-          {(assignment.attachments?.length ? assignment.attachments : savedAttachments).map((path) => (
-            <PrivateAttachment key={path} path={path} />
+          {(assignment.attachments?.length ? assignment.attachments : savedAttachments).map((path, index) => (
+            <PrivateAttachment key={path} path={path} ordinal={index + 1} />
           ))}
           {assignment.grade ? (
             <div
@@ -260,7 +262,8 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
   const school = useOptionalSelectedSchool();
   const hash = useLocationHash();
   const scopeLoading = !hydrated || authLoading || school?.loading;
-  const returnPath = coursePageReturnPath(courseId, hash);
+  const campusSearch = buildCampusNavigationSearch(useSearchParams());
+  const returnPath = campusServiceHref(coursePageReturnPath(courseId, hash), campusSearch);
 
   if (scopeLoading || !user) {
     return (
@@ -274,7 +277,10 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
             <LoginLink
               className={styles.primary}
               returnPath={returnPath}
-              liveReturnPath={() => coursePageReturnPath(courseId, window.location.hash)}
+              liveReturnPath={() => campusServiceHref(
+                coursePageReturnPath(courseId, window.location.hash),
+                buildCampusNavigationSearch(new URLSearchParams(window.location.search)),
+              )}
             >
               登入帳號
             </LoginLink>

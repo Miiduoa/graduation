@@ -27,6 +27,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import { useTabBarContentBottomPadding } from './navigationTheme';
+import { pageTitleFont } from './styles';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 
 function useSafeInsetsOrDefault() {
@@ -49,20 +50,85 @@ export { SegmentedControl } from './interactive/SegmentedControl';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+type SpinnerSize = number | 'small' | 'large';
+
+/** Native ActivityIndicator pixel boxes, so the reduced-motion glyph keeps the same footprint. */
+const SPINNER_PIXELS = { small: 20, large: 36 } as const;
+
+/** Props that remove purely decorative visuals from every screen-reader traversal. */
+const DECORATIVE_A11Y = {
+  accessible: false,
+  accessibilityElementsHidden: true,
+  importantForAccessibility: 'no-hide-descendants',
+} as const;
+
+/** Native spinner, or a same-size static clock glyph while reduced motion is requested. */
+function ActivityGlyph({ size, color }: { size: SpinnerSize; color: string }) {
+  const reducedMotion = useReducedMotion();
+  const pixels = typeof size === 'number' ? size : SPINNER_PIXELS[size];
+  return (
+    <View
+      {...DECORATIVE_A11Y}
+      pointerEvents="none"
+      style={{ width: pixels, height: pixels, alignItems: 'center', justifyContent: 'center' }}
+    >
+      {reducedMotion ? (
+        <Ionicons name="time-outline" size={pixels} color={color} />
+      ) : (
+        <ActivityIndicator size={size} color={color} />
+      )}
+    </View>
+  );
+}
+
+/** One named, busy progress element; callers place only their own loading content inside. */
+function BusyStatus(props: {
+  title: string;
+  detail?: string;
+  hint?: string;
+  style?: StyleProp<ViewStyle>;
+  children: React.ReactNode;
+}) {
+  return (
+    <View
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={props.title}
+      accessibilityValue={props.detail ? { text: props.detail } : undefined}
+      accessibilityHint={props.hint}
+      accessibilityState={{ busy: true }}
+      style={props.style}
+    >
+      {props.children}
+    </View>
+  );
+}
+
+/** Standalone waiting indicator with its own progress semantics. */
 export function Spinner({
   size = 24,
   color = theme.colors.accent,
+  accessibilityLabel = '載入中',
 }: {
-  size?: number;
+  size?: SpinnerSize;
   color?: string;
+  accessibilityLabel?: string;
 }) {
   useVisualTheme();
-  return <ActivityIndicator size={size} color={color} />;
+  return (
+    <BusyStatus
+      title={accessibilityLabel}
+      style={{ alignItems: 'center', justifyContent: 'center' }}
+    >
+      <ActivityGlyph size={size} color={color} />
+    </BusyStatus>
+  );
 }
 
 /** 全螢幕載入（App 根層、導覽 fallback 等共用，維持品牌色與字型階梯一致） */
 export function FullScreenLoader(props: { message?: string }) {
   useVisualTheme();
+  const message = props.message ?? '載入中';
   return (
     <View
       style={{
@@ -72,24 +138,23 @@ export function FullScreenLoader(props: { message?: string }) {
         backgroundColor: theme.colors.bg,
         paddingHorizontal: theme.layout.screenHorizontalPadding,
       }}
-      accessibilityRole="progressbar"
-      accessibilityLabel={props.message ?? '載入中'}
     >
-      <ActivityIndicator size="large" color={theme.colors.accent} />
-      {props.message ? (
+      <BusyStatus
+        title={message}
+        style={{ maxWidth: '100%', alignItems: 'center', gap: theme.space.md }}
+      >
+        <ActivityGlyph size="large" color={theme.colors.accent} />
         <Text
           style={{
-            marginTop: theme.space.md,
-            fontSize: theme.typography.bodySmall.fontSize,
-            lineHeight: theme.typography.bodySmall.lineHeight,
-            letterSpacing: theme.typography.bodySmall.letterSpacing,
+            ...theme.typography.bodySmall,
+            flexShrink: 1,
             color: theme.colors.muted,
             textAlign: 'center',
           }}
         >
-          {props.message}
+          {message}
         </Text>
-      ) : null}
+      </BusyStatus>
     </View>
   );
 }
@@ -113,9 +178,9 @@ export function Screen(props: {
             alignItems: 'center',
             justifyContent: 'space-between',
             paddingHorizontal: theme.layout.screenHorizontalPadding,
-            paddingTop: Math.max(insets.top, 8) + theme.space.md,
+            paddingTop: Math.max(insets.top, 8) + theme.space.sm,
             paddingBottom: theme.space.md,
-            borderBottomWidth: 1,
+            borderBottomWidth: StyleSheet.hairlineWidth,
             borderBottomColor: theme.colors.separator,
             backgroundColor: theme.colors.bg,
           }}
@@ -123,8 +188,11 @@ export function Screen(props: {
           <View style={{ flex: 1 }}>
             {props.title && (
               <Text
+                accessibilityRole="header"
                 style={{
+                  fontFamily: pageTitleFont,
                   fontSize: theme.typography.display.fontSize,
+                  lineHeight: theme.typography.display.lineHeight,
                   fontWeight: theme.typography.display.fontWeight ?? '700',
                   letterSpacing: theme.typography.display.letterSpacing,
                   color: theme.colors.text,
@@ -137,8 +205,9 @@ export function Screen(props: {
               <Text
                 style={{
                   fontSize: theme.typography.bodySmall.fontSize,
+                  lineHeight: theme.typography.bodySmall.lineHeight,
                   color: theme.colors.textSecondary,
-                  marginTop: theme.space.xs,
+                  marginTop: theme.space.xxs,
                 }}
               >
                 {props.subtitle}
@@ -181,40 +250,42 @@ export function Card(props: {
       shell: {},
       surface: {
         backgroundColor: theme.colors.surface,
-        borderWidth: 1,
+        borderWidth: StyleSheet.hairlineWidth,
         borderColor: theme.colors.border,
       },
     },
     elevated: {
-      shell: shadowStyle(theme.shadows.md),
+      shell: {},
       surface: {
-        backgroundColor: theme.colors.surfaceElevated,
-        borderWidth: 0,
-        borderColor: 'transparent',
+        backgroundColor: theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
       },
     },
     outlined: {
       shell: {},
       surface: {
         backgroundColor: 'transparent',
-        borderWidth: 1.5,
+        borderWidth: 1,
         borderColor: theme.colors.border,
       },
     },
     filled: {
       shell: {},
       surface: {
-        backgroundColor: theme.colors.surface2,
-        borderWidth: 0,
-        borderColor: 'transparent',
+        backgroundColor: theme.colors.surfaceMuted,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.border,
       },
     },
     accent: {
-      shell: shadowStyle(theme.shadows.md),
+      shell: {},
       surface: {
-        backgroundColor: theme.colors.accentSoft,
-        borderWidth: 1,
-        borderColor: theme.colors.accent + '20',
+        backgroundColor: theme.colors.surface,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.border,
+        borderLeftWidth: 3,
+        borderLeftColor: theme.colors.accent,
       },
     },
   };
@@ -241,22 +312,11 @@ export function Card(props: {
         {props.title || props.icon ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.sm }}>
             {props.icon && (
-              <View
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: theme.radius.sm,
-                  backgroundColor: (props.iconColor ?? theme.colors.accent) + '14',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Ionicons
-                  name={props.icon as any}
-                  size={16}
-                  color={props.iconColor ?? theme.colors.accent}
-                />
-              </View>
+              <Ionicons
+                name={props.icon as any}
+                size={17}
+                color={props.iconColor ?? theme.colors.accent}
+              />
             )}
             {props.title ? (
               <Text
@@ -296,8 +356,7 @@ export function Card(props: {
       <Pressable
         onPress={props.onPress}
         style={({ pressed }) => ({
-          opacity: pressed ? 0.92 : 1,
-          transform: [{ scale: pressed && !reducedMotion ? 0.98 : 1 }],
+          opacity: pressed ? 0.78 : 1,
         })}
       >
         {content}
@@ -323,17 +382,41 @@ export function Pill(props: {
   const contentText = props.text ?? props.label ?? '';
 
   const kindStyles = {
-    default: { bg: theme.colors.surface2, color: theme.colors.textSecondary },
-    accent: { bg: theme.colors.accentSoft, color: theme.colors.accent },
-    success: { bg: theme.colors.successSoft, color: theme.colors.success },
-    muted: { bg: theme.colors.surface2, color: theme.colors.muted },
-    danger: { bg: theme.colors.dangerSoft, color: theme.colors.danger },
-    warning: { bg: theme.colors.warningSoft, color: theme.colors.warning },
+    default: {
+      bg: theme.colors.surfaceMuted,
+      color: theme.colors.textSecondary,
+      borderColor: theme.colors.border,
+    },
+    accent: {
+      bg: theme.colors.accentSoft,
+      color: theme.colors.accent,
+      borderColor: 'transparent',
+    },
+    success: {
+      bg: theme.colors.successSoft,
+      color: theme.colors.success,
+      borderColor: 'transparent',
+    },
+    muted: {
+      bg: 'transparent',
+      color: theme.colors.muted,
+      borderColor: theme.colors.border,
+    },
+    danger: {
+      bg: theme.colors.dangerSoft,
+      color: theme.colors.danger,
+      borderColor: 'transparent',
+    },
+    warning: {
+      bg: theme.colors.warningSoft,
+      color: theme.colors.warning,
+      borderColor: 'transparent',
+    },
   };
 
   const sizeStyles = {
-    sm: { px: 8, py: 3, fontSize: 11 },
-    md: { px: 12, py: 5, fontSize: 12 },
+    sm: { px: 7, py: 2, fontSize: 11 },
+    md: { px: 10, py: 4, fontSize: 12 },
   };
 
   const kStyle = kindStyles[kind] || kindStyles.default;
@@ -347,10 +430,12 @@ export function Pill(props: {
           flexDirection: 'row',
           alignItems: 'center',
           gap: theme.space.xs,
-          paddingHorizontal: sStyle.px + 2,
-          paddingVertical: sStyle.py + 1,
+          paddingHorizontal: sStyle.px,
+          paddingVertical: sStyle.py,
           borderRadius: theme.radius.sm,
           backgroundColor: kStyle.bg,
+          borderWidth: kStyle.borderColor === 'transparent' ? 0 : StyleSheet.hairlineWidth,
+          borderColor: kStyle.borderColor,
         },
         props.style,
       ]}
@@ -395,7 +480,7 @@ export function Button(props: {
 
   const bgColors: Record<string, string> = {
     primary: theme.colors.accent,
-    secondary: theme.colors.surface2,
+    secondary: theme.colors.surface,
     danger: theme.colors.danger,
     ghost: 'transparent',
     'accent-ghost': theme.colors.accentSoft,
@@ -478,7 +563,7 @@ export function Button(props: {
           minWidth: 44,
           maxWidth: '100%',
           flexShrink: 1,
-          transform: [{ scale: pressed && !disabled && !reducedMotion ? 0.97 : 1 }],
+          opacity: pressed && !disabled && kind === 'danger' ? 0.85 : 1,
         },
         props.style,
       ]}
@@ -543,6 +628,35 @@ function ButtonActivity({ color, reducedMotion }: { color: string; reducedMotion
   );
 }
 
+/** Static list-shaped hint: avatar block plus two text lines, no motion and no contrast spike. */
+const LOADING_ROW_LINES = [
+  { title: '68%', detail: '44%' },
+  { title: '54%', detail: '72%' },
+  { title: '76%', detail: '38%' },
+] as const;
+
+function LoadingRowPlaceholder({ index }: { index: number }) {
+  const lines = LOADING_ROW_LINES[index % LOADING_ROW_LINES.length];
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.space.md,
+        paddingVertical: 13,
+        borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth,
+        borderTopColor: theme.colors.separator,
+      }}
+    >
+      <Skeleton width={32} height={32} borderRadius={theme.radius.sm} />
+      <View style={{ flex: 1, minWidth: 0, gap: theme.space.sm }}>
+        <Skeleton width={lines.title} height={13} borderRadius={theme.radius.xs} />
+        <Skeleton width={lines.detail} height={10} borderRadius={theme.radius.xs} />
+      </View>
+    </View>
+  );
+}
+
 export function LoadingState(props: {
   title?: string;
   subtitle?: string;
@@ -550,22 +664,34 @@ export function LoadingState(props: {
   rows?: number;
 }) {
   useVisualTheme();
-  const rows = props.rows ?? 3;
+  const requestedRows = props.rows ?? 3;
+  const rows = Number.isFinite(requestedRows) ? Math.max(0, Math.floor(requestedRows)) : 3;
+  const title = props.title ?? '載入中';
+  const subtitle = props.subtitle ?? '正在取得資料...';
   return (
-    <View style={{ gap: theme.space.md, paddingVertical: theme.space.xl }}>
-      <View style={{ alignItems: 'center', gap: theme.space.md, paddingVertical: theme.space.lg }}>
-        <Spinner size={32} />
-        <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '600' }}>
-          {props.title ?? '載入中'}
-        </Text>
-        <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
-          {props.subtitle ?? '正在取得資料...'}
-        </Text>
+    <BusyStatus
+      title={title}
+      detail={subtitle}
+      hint={props.hint}
+      style={{ gap: theme.space.lg, paddingVertical: theme.space.xl }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
+        <ActivityGlyph size={28} color={theme.colors.accent} />
+        <View style={{ flex: 1, minWidth: 0, gap: theme.space.xs }}>
+          <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>{title}</Text>
+          <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
+            {subtitle}
+          </Text>
+        </View>
       </View>
-      {Array.from({ length: rows }).map((_, i) => (
-        <Skeleton key={i} height={72} borderRadius={theme.radius.lg} />
-      ))}
-    </View>
+      {rows > 0 ? (
+        <View {...DECORATIVE_A11Y} pointerEvents="none" style={{ gap: theme.space.sm }}>
+          {Array.from({ length: rows }, (_, i) => (
+            <LoadingRowPlaceholder key={i} index={i} />
+          ))}
+        </View>
+      ) : null}
+    </BusyStatus>
   );
 }
 
@@ -628,27 +754,18 @@ export function EmptyState(props: {
           }}
         />
       ) : (
-        <View
-          style={{
-            width: 88,
-            height: 88,
-            borderRadius: 44,
-            backgroundColor: `${color}10`,
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: theme.space.md,
-          }}
-        >
-          <Ionicons name={icon as any} size={36} color={color} />
+        <View style={{ marginBottom: theme.space.xs }}>
+          <Ionicons name={icon as any} size={30} color={color} />
         </View>
       )}
       <Text
         style={{
           color: theme.colors.text,
-          fontSize: 18,
-          fontWeight: '700',
+          fontSize: theme.typography.h2.fontSize,
+          lineHeight: theme.typography.h2.lineHeight,
+          fontWeight: '600',
           textAlign: 'center',
-          letterSpacing: 0,
+          letterSpacing: theme.typography.h2.letterSpacing,
         }}
       >
         {props.title ?? '目前沒有資料'}
@@ -762,50 +879,65 @@ export function ErrorState(props: {
     >
       <View
         style={{
-          padding: theme.space.lg,
+          padding: theme.space.md,
           borderRadius: theme.radius.lg,
-          backgroundColor: theme.colors.dangerSoft,
-          gap: theme.space.md,
+          backgroundColor: theme.colors.surface,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          borderLeftWidth: 3,
+          borderLeftColor: theme.colors.danger,
+          gap: theme.space.sm,
         }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
-          <View
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 24,
-              backgroundColor: `${theme.colors.danger}15`,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Ionicons name={config.icon as any} size={24} color={theme.colors.danger} />
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+          <View style={{ width: 22, paddingTop: 2, alignItems: 'center' }}>
+            <Ionicons name={config.icon as any} size={18} color={theme.colors.danger} />
           </View>
           <View style={{ flex: 1 }}>
             <Text
               style={{
-                fontSize: 16,
-                fontWeight: '700',
+                fontSize: theme.typography.h3.fontSize,
+                lineHeight: theme.typography.h3.lineHeight,
+                fontWeight: '600',
                 color: theme.colors.text,
-                letterSpacing: 0,
               }}
             >
               {title}
             </Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: theme.space.xs }}>
+            <Text
+              style={{
+                color: theme.colors.textSecondary,
+                fontSize: theme.typography.bodySmall.fontSize,
+                lineHeight: theme.typography.bodySmall.lineHeight,
+                marginTop: 2,
+              }}
+            >
               {subtitle}
             </Text>
           </View>
         </View>
 
-        <Text style={{ color: theme.colors.muted, lineHeight: 20, fontSize: 14 }}>{hint}</Text>
+        <Text
+          style={{
+            color: theme.colors.muted,
+            lineHeight: theme.typography.bodySmall.lineHeight,
+            fontSize: theme.typography.bodySmall.fontSize,
+            paddingLeft: 32,
+          }}
+        >
+          {hint}
+        </Text>
 
         {props.showDetails && props.errorCode && (
           <View
             style={{
-              padding: theme.space.sm,
+              marginLeft: 32,
+              paddingVertical: 6,
+              paddingHorizontal: 10,
               borderRadius: theme.radius.sm,
-              backgroundColor: theme.colors.surface2,
+              backgroundColor: theme.colors.surfaceMuted,
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: theme.colors.border,
             }}
           >
             <Text
@@ -821,8 +953,8 @@ export function ErrorState(props: {
         )}
 
         {props.onAction && (
-          <View style={{ marginTop: theme.space.sm }}>
-            <Button text={actionText} onPress={props.onAction} kind="primary" />
+          <View style={{ marginTop: theme.space.xs, paddingLeft: 32 }}>
+            <Button text={actionText} onPress={props.onAction} kind="primary" size="small" />
           </View>
         )}
       </View>
@@ -835,11 +967,11 @@ export function SectionTitle(props: { text: string }) {
   return (
     <Text
       style={{
-        color: theme.colors.text,
-        fontWeight: '700',
-        fontSize: theme.typography.label.fontSize,
-        letterSpacing: 0,
-        textTransform: 'uppercase',
+        color: theme.colors.muted,
+        fontWeight: '600',
+        fontSize: theme.typography.labelSmall.fontSize,
+        lineHeight: theme.typography.labelSmall.lineHeight,
+        letterSpacing: 0.4,
       }}
     >
       {props.text}
@@ -867,22 +999,23 @@ export function SearchBar(props: {
   return (
     <View
       style={{
-        borderRadius: theme.radius.xl,
-        backgroundColor: theme.colors.surface2,
-        paddingHorizontal: theme.space.md,
+        borderRadius: theme.radius.md,
+        backgroundColor: props.disabled ? theme.colors.surfaceMuted : theme.colors.surface,
+        paddingLeft: theme.space.md,
+        paddingRight: theme.space.xs,
         paddingVertical: 2,
         minHeight: 48,
         flexDirection: 'row',
         alignItems: 'center',
         gap: theme.space.sm,
-        borderWidth: 1.5,
-        borderColor: isFocused && !props.disabled ? theme.colors.accent : 'transparent',
+        borderWidth: 1,
+        borderColor: isFocused && !props.disabled ? theme.colors.accent : theme.colors.border,
       }}
     >
       <Ionicons
         name="search"
         accessible={false}
-        size={18}
+        size={17}
         color={isFocused && !props.disabled ? theme.colors.accent : theme.colors.muted}
       />
       <TextInput
@@ -926,9 +1059,8 @@ export function SearchBar(props: {
           style={({ pressed }) => ({
             width: 44,
             height: 44,
-            borderRadius: 12,
-            backgroundColor:
-              pressed && !props.disabled ? theme.colors.border : theme.colors.surface2,
+            borderRadius: theme.radius.sm,
+            backgroundColor: pressed && !props.disabled ? theme.colors.surface2 : 'transparent',
             alignItems: 'center',
             justifyContent: 'center',
           })}
@@ -936,7 +1068,7 @@ export function SearchBar(props: {
           accessibilityLabel="清除搜尋"
           accessibilityState={{ disabled: !!props.disabled }}
         >
-          <Ionicons name="close" accessible={false} size={14} color={theme.colors.muted} />
+          <Ionicons name="close" accessible={false} size={15} color={theme.colors.muted} />
         </Pressable>
       ) : null}
     </View>
@@ -998,15 +1130,18 @@ export function CountdownTimer(props: { targetDate: Date; label?: string; onExpi
               paddingVertical: theme.space.sm,
               paddingHorizontal: theme.space.xs,
               borderRadius: theme.radius.md,
-              backgroundColor: theme.colors.accentSoft,
+              backgroundColor: theme.colors.surface,
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: theme.colors.border,
             }}
           >
             <Text
               style={{
-                color: theme.colors.accent,
+                color: theme.colors.text,
                 fontWeight: '700',
-                fontSize: 22,
+                fontSize: 20,
                 letterSpacing: 0,
+                fontVariant: ['tabular-nums'],
               }}
             >
               {String(unit.value).padStart(2, '0')}
@@ -1014,8 +1149,8 @@ export function CountdownTimer(props: { targetDate: Date; label?: string; onExpi
             <Text
               style={{
                 color: theme.colors.muted,
-                fontSize: 10,
-                marginTop: theme.space.xs,
+                fontSize: 11,
+                marginTop: theme.space.xxs,
                 fontWeight: '500',
               }}
             >
@@ -1229,21 +1364,32 @@ export function AnimatedCard(props: {
         padding: theme.layout.cardPadding,
         borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.surface,
-        gap: theme.space.md,
-        borderWidth: 1,
+        gap: theme.space.sm,
+        borderWidth: StyleSheet.hairlineWidth,
         borderColor: theme.colors.border,
-        ...softShadowStyle(theme.shadows.soft),
       }}
     >
       {props.title ? (
         <Text
-          style={{ fontSize: 17, fontWeight: '700', color: theme.colors.text, letterSpacing: 0 }}
+          style={{
+            fontSize: theme.typography.h3.fontSize,
+            lineHeight: theme.typography.h3.lineHeight,
+            fontWeight: '600',
+            color: theme.colors.text,
+            letterSpacing: theme.typography.h3.letterSpacing,
+          }}
         >
           {props.title}
         </Text>
       ) : null}
       {props.subtitle ? (
-        <Text style={{ color: theme.colors.muted, lineHeight: 20, fontSize: 14 }}>
+        <Text
+          style={{
+            color: theme.colors.textSecondary,
+            lineHeight: theme.typography.bodySmall.lineHeight,
+            fontSize: theme.typography.bodySmall.fontSize,
+          }}
+        >
           {props.subtitle}
         </Text>
       ) : null}
@@ -1275,33 +1421,23 @@ export function QuickAction(props: {
       style={({ pressed }) => ({
         alignItems: 'center',
         justifyContent: 'center',
-        padding: theme.space.md,
-        borderRadius: theme.radius.xl,
-        backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface,
+        paddingVertical: 14,
+        paddingHorizontal: 12,
+        borderRadius: theme.radius.lg,
+        backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.border,
         minWidth: 80,
         minHeight: 80,
+        gap: 8,
         position: 'relative',
-        opacity: props.disabled ? 0.4 : 1,
-        ...softShadowStyle(theme.shadows.soft),
-        transform: [{ scale: pressed ? 0.94 : 1 }],
+        opacity: props.disabled ? 0.45 : 1,
       })}
     >
-      <View
-        style={{
-          width: 42,
-          height: 42,
-          borderRadius: theme.radius.md,
-          backgroundColor: `${color}14`,
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: theme.space.sm,
-        }}
-      >
-        <Ionicons name={props.icon as any} size={20} color={color} />
-      </View>
+      <Ionicons name={props.icon as any} size={22} color={color} />
       <Text
         style={{
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: '600',
           color: theme.colors.text,
           textAlign: 'center',
@@ -1399,17 +1535,27 @@ export function Divider(props: { text?: string; spacing?: number }) {
           marginVertical: spacing,
         }}
       >
-        <View style={{ flex: 1, height: 1, backgroundColor: theme.colors.border }} />
+        <View
+          style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.colors.separator }}
+        />
         <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: '500' }}>
           {props.text}
         </Text>
-        <View style={{ flex: 1, height: 1, backgroundColor: theme.colors.border }} />
+        <View
+          style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.colors.separator }}
+        />
       </View>
     );
   }
 
   return (
-    <View style={{ height: 1, backgroundColor: theme.colors.border, marginVertical: spacing }} />
+    <View
+      style={{
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: theme.colors.separator,
+        marginVertical: spacing,
+      }}
+    />
   );
 }
 
@@ -1423,23 +1569,28 @@ export function FeatureHighlight(props: {
   const color = props.color ?? theme.colors.accent;
 
   return (
-    <View style={{ gap: theme.space.sm, alignItems: 'flex-start' }}>
-      <View
+    <View style={{ gap: 4, alignItems: 'flex-start' }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Ionicons name={props.icon as any} size={17} color={color} />
+        <Text
+          style={{
+            fontSize: theme.typography.h3.fontSize,
+            lineHeight: theme.typography.h3.lineHeight,
+            fontWeight: '600',
+            color: theme.colors.text,
+          }}
+        >
+          {props.title}
+        </Text>
+      </View>
+      <Text
         style={{
-          width: 40,
-          height: 40,
-          borderRadius: 12,
-          backgroundColor: `${color}15`,
-          alignItems: 'center',
-          justifyContent: 'center',
+          fontSize: theme.typography.bodySmall.fontSize,
+          color: theme.colors.textSecondary,
+          lineHeight: theme.typography.bodySmall.lineHeight,
+          paddingLeft: 25,
         }}
       >
-        <Ionicons name={props.icon as any} size={20} color={color} />
-      </View>
-      <Text style={{ fontSize: 15, fontWeight: '700', color: theme.colors.text, letterSpacing: 0 }}>
-        {props.title}
-      </Text>
-      <Text style={{ fontSize: 13, color: theme.colors.muted, lineHeight: 20 }}>
         {props.description}
       </Text>
     </View>
@@ -1503,10 +1654,13 @@ export function FilterChip(props: { label: string; selected?: boolean; onPress?:
         paddingHorizontal: theme.space.md,
         paddingVertical: theme.space.sm,
         borderRadius: theme.radius.full,
-        backgroundColor: props.selected ? theme.colors.accent : theme.colors.surface2,
+        backgroundColor: props.selected
+          ? theme.colors.accent
+          : pressed
+            ? theme.colors.surface2
+            : theme.colors.surface,
         borderWidth: 1,
         borderColor: props.selected ? theme.colors.accent : theme.colors.border,
-        opacity: pressed ? 0.85 : 1,
       })}
     >
       <Text
@@ -1641,61 +1795,50 @@ export function StatCard(props: {
   const content = (
     <View
       style={{
-        padding: theme.space.lg,
-        borderRadius: theme.radius.xl,
+        padding: theme.space.md,
+        borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.surface,
-        gap: theme.space.md,
-        ...softShadowStyle(theme.shadows.soft),
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.border,
+        gap: theme.space.sm,
       }}
     >
       <View
-        style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}
+        style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}
       >
-        {props.icon && (
-          <View
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+          {props.icon && <Ionicons name={props.icon as any} size={15} color={color} />}
+          <Text
             style={{
-              width: 40,
-              height: 40,
-              borderRadius: theme.radius.md,
-              backgroundColor: `${color}14`,
-              alignItems: 'center',
-              justifyContent: 'center',
+              fontSize: theme.typography.labelSmall.fontSize,
+              color: theme.colors.muted,
+              fontWeight: '600',
             }}
+            numberOfLines={1}
           >
-            <Ionicons name={props.icon as any} size={20} color={color} />
-          </View>
-        )}
+            {props.label}
+          </Text>
+        </View>
         {props.trend && props.trendValue && (
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: theme.space.xs,
-              paddingHorizontal: 8,
-              paddingVertical: 3,
-              borderRadius: theme.radius.full,
-              backgroundColor: `${trendColor}12`,
-            }}
-          >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
             <Ionicons name={trendIcon as any} size={12} color={trendColor} />
-            <Text style={{ fontSize: 11, fontWeight: '700', color: trendColor }}>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: trendColor }}>
               {props.trendValue}
             </Text>
           </View>
         )}
       </View>
-      <View style={{ gap: theme.space.xxs }}>
-        <Text
-          style={{ fontSize: 12, color: theme.colors.muted, fontWeight: '500', letterSpacing: 0 }}
-        >
-          {props.label}
-        </Text>
-        <Text
-          style={{ fontSize: 24, fontWeight: '700', color: theme.colors.text, letterSpacing: 0 }}
-        >
-          {valueStr}
-        </Text>
-      </View>
+      <Text
+        style={{
+          fontSize: 22,
+          fontWeight: '700',
+          color: theme.colors.text,
+          letterSpacing: -0.3,
+          fontVariant: ['tabular-nums'],
+        }}
+      >
+        {valueStr}
+      </Text>
     </View>
   );
 
@@ -1704,8 +1847,7 @@ export function StatCard(props: {
       <Pressable
         onPress={props.onPress}
         style={({ pressed }) => ({
-          opacity: pressed ? 0.85 : 1,
-          transform: [{ scale: pressed ? 0.98 : 1 }],
+          opacity: pressed ? 0.78 : 1,
         })}
       >
         {content}
@@ -1851,8 +1993,7 @@ export function ListItem(props: {
     : props.disabled
       ? theme.colors.muted
       : theme.colors.text;
-  const iconColor = props.iconColor ?? (props.danger ? theme.colors.danger : theme.colors.accent);
-  const iconBg = props.iconBg ?? `${iconColor}10`;
+  const iconColor = props.iconColor ?? (props.danger ? theme.colors.danger : theme.colors.textSecondary);
 
   const accessibilityLabel = props.subtitle
     ? `${props.title}, ${props.subtitle}${props.rightText ? `, ${props.rightText}` : ''}`
@@ -1863,20 +2004,16 @@ export function ListItem(props: {
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: theme.layout.listItemVertical,
-        paddingHorizontal: theme.space.sm,
-        gap: theme.space.md,
-        opacity: props.disabled ? 0.4 : 1,
-        minHeight: 52,
+        paddingHorizontal: theme.space.xs,
+        gap: 12,
+        opacity: props.disabled ? 0.45 : 1,
+        minHeight: 50,
       }}
     >
       {props.icon && (
         <View
           style={{
-            width: 38,
-            height: 38,
-            borderRadius: 11,
-            backgroundColor: iconBg,
+            width: 24,
             alignItems: 'center',
             justifyContent: 'center',
           }}
@@ -1886,32 +2023,58 @@ export function ListItem(props: {
           <Ionicons name={props.icon as any} size={18} color={iconColor} />
         </View>
       )}
-      <View style={{ flex: 1 }}>
-        <Text style={{ color: textColor, fontWeight: '500', fontSize: 15, letterSpacing: 0 }}>
-          {props.title}
-        </Text>
-        {props.subtitle && (
-          <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: theme.space.xs }}>
-            {props.subtitle}
+      <View
+        style={{
+          flex: 1,
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingVertical: theme.layout.listItemVertical,
+          gap: theme.space.sm,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.separator,
+        }}
+      >
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            style={{
+              color: textColor,
+              fontWeight: '500',
+              fontSize: theme.typography.body.fontSize,
+              lineHeight: theme.typography.body.lineHeight,
+            }}
+          >
+            {props.title}
+          </Text>
+          {props.subtitle && (
+            <Text
+              style={{
+                color: theme.colors.muted,
+                fontSize: theme.typography.bodySmall.fontSize,
+                lineHeight: theme.typography.bodySmall.lineHeight,
+                marginTop: 2,
+              }}
+            >
+              {props.subtitle}
+            </Text>
+          )}
+        </View>
+        {props.rightText && (
+          <Text style={{ color: theme.colors.muted, fontSize: 13 }} accessibilityElementsHidden>
+            {props.rightText}
           </Text>
         )}
+        {props.rightIcon && (
+          <Ionicons name={props.rightIcon as any} size={17} color={theme.colors.muted} />
+        )}
+        {props.onPress && !props.rightIcon && (
+          <Ionicons
+            name="chevron-forward"
+            size={15}
+            color={theme.colors.muted}
+            accessibilityElementsHidden
+          />
+        )}
       </View>
-      {props.rightText && (
-        <Text style={{ color: theme.colors.muted, fontSize: 13 }} accessibilityElementsHidden>
-          {props.rightText}
-        </Text>
-      )}
-      {props.rightIcon && (
-        <Ionicons name={props.rightIcon as any} size={18} color={theme.colors.muted} />
-      )}
-      {props.onPress && !props.rightIcon && (
-        <Ionicons
-          name="chevron-forward"
-          size={16}
-          color={theme.colors.muted}
-          accessibilityElementsHidden
-        />
-      )}
     </View>
   );
 
@@ -1924,9 +2087,7 @@ export function ListItem(props: {
         accessibilityHint={props.accessibilityHint}
         accessibilityState={{ disabled: props.disabled }}
         style={({ pressed }) => ({
-          backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
-          marginHorizontal: -4,
-          paddingHorizontal: theme.space.xs,
+          backgroundColor: pressed ? theme.colors.surfaceMuted : 'transparent',
           borderRadius: theme.radius.sm,
         })}
       >
@@ -1945,15 +2106,16 @@ export function SectionHeader(props: { title: string; action?: string; onAction?
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: theme.space.lg,
+        marginBottom: theme.space.sm,
       }}
     >
       <Text
         style={{
-          fontSize: theme.typography.label.fontSize,
-          fontWeight: '700',
-          color: theme.colors.text,
-          textTransform: 'uppercase',
+          fontSize: theme.typography.labelSmall.fontSize,
+          lineHeight: theme.typography.labelSmall.lineHeight,
+          fontWeight: '600',
+          color: theme.colors.muted,
+          letterSpacing: 0.4,
         }}
       >
         {props.title}
@@ -1961,6 +2123,7 @@ export function SectionHeader(props: { title: string; action?: string; onAction?
       {props.action && props.onAction && (
         <Pressable
           onPress={props.onAction}
+          hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel={props.action}
         >
@@ -1989,36 +2152,37 @@ export function EmptyListPlaceholder(props: {
         alignItems: 'center',
         paddingVertical: theme.space.xxxl,
         paddingHorizontal: theme.space.xl,
-        gap: theme.space.md,
+        gap: theme.space.sm,
       }}
     >
       {props.icon && (
-        <View
-          style={{
-            width: 60,
-            height: 60,
-            borderRadius: 30,
-            backgroundColor: theme.colors.surface2,
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: theme.space.md,
-          }}
-        >
+        <View style={{ marginBottom: theme.space.xs }}>
           <Ionicons name={props.icon as any} size={28} color={theme.colors.muted} />
         </View>
       )}
       <Text
-        style={{ fontSize: 16, fontWeight: '700', color: theme.colors.text, textAlign: 'center' }}
+        style={{
+          fontSize: theme.typography.h3.fontSize,
+          lineHeight: theme.typography.h3.lineHeight,
+          fontWeight: '600',
+          color: theme.colors.text,
+          textAlign: 'center',
+        }}
       >
         {props.title ?? '沒有內容'}
       </Text>
       <Text
-        style={{ fontSize: 13, color: theme.colors.muted, textAlign: 'center', lineHeight: 20 }}
+        style={{
+          fontSize: theme.typography.bodySmall.fontSize,
+          color: theme.colors.muted,
+          textAlign: 'center',
+          lineHeight: theme.typography.bodySmall.lineHeight,
+        }}
       >
         {desc}
       </Text>
       {props.actionLabel && props.onAction && (
-        <View style={{ marginTop: theme.space.md }}>
+        <View style={{ marginTop: theme.space.sm }}>
           <Button text={props.actionLabel} onPress={props.onAction} kind="primary" />
         </View>
       )}
@@ -2107,7 +2271,7 @@ export function ConfirmDialog(props: {
     <View
       style={{
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.5)',
+        backgroundColor: theme.colors.overlay,
         alignItems: 'center',
         justifyContent: 'center',
         padding: theme.space.lg,
@@ -2117,6 +2281,8 @@ export function ConfirmDialog(props: {
         style={{
           backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.xl,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
           padding: theme.space.lg,
           gap: theme.space.md,
           width: '100%',

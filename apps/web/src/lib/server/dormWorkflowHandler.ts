@@ -1,4 +1,6 @@
 import { getStorage } from 'firebase-admin/storage';
+import { createNotificationService } from '../../../../../backend/functions/lib/notificationService.js';
+import type { FnRuntime } from './fnDispatch';
 import {
   createDormWorkflowHandler,
   HttpsError as FunctionsHttpsError,
@@ -12,13 +14,14 @@ type WorkflowBucket = ReturnType<
 >;
 
 /** Use the original handler and authz; no hosted permission model. */
-export async function invokeDormWorkflow(db: unknown, request: CallableRequest): Promise<unknown> {
+export async function invokeDormWorkflow(db: import('firebase-admin/firestore').Firestore, request: CallableRequest, messaging?: FnRuntime['messaging']): Promise<unknown> {
+  // Only the production Admin runtime has a push transport. Emulators stay local.
+  const sendPushToUser = messaging
+    ? createNotificationService({ db, messaging }).sendPushToUser
+    : async () => ({ status: 'skipped', accepted: 0 });
   const handler = createDormWorkflowHandler({
     db,
-    // Web has no push sender. Records remain authoritative when push is unavailable.
-    sendPushToUser: async () => {
-      throw new HttpsError('unavailable', '推播服務暫不可用');
-    },
+    sendPushToUser,
     getBucket: () => {
       try {
         return getStorage().bucket(

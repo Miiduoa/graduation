@@ -7,6 +7,7 @@ import { PWAInstallBanner } from './PWAInstallBanner';
 import { UpdateBanner } from './UpdateBanner';
 import styles from '@/app/home.module.css';
 import notices from './SystemNotice.module.css';
+import workspace from './AppFrame.module.css';
 
 /** Shared application structure, including the home screen's custom header. */
 export function AppFrame({
@@ -23,7 +24,10 @@ export function AppFrame({
   mainClassName?: string;
 }) {
   return (
-    <div className={[styles.page, pageClassName].filter(Boolean).join(' ')}>
+    <div
+      className={[styles.page, workspace.workspace, pageClassName].filter(Boolean).join(' ')}
+      data-workspace-shell="true"
+    >
       <a className={styles.skip} href={`#${contentId}`}>
         跳到主要內容
       </a>

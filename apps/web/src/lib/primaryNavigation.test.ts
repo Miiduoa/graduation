@@ -5,6 +5,8 @@ it.each([
   ['/', 'today'],
   ['/today', 'today'],
   ['/today-v2', 'today'],
+  ['/explore', 'life'],
+  ['/explore/study', 'life'],
   ['/timetable', 'study'],
   ['/school-courses', 'study'],
   ['/school-lms', 'study'],
@@ -56,6 +58,7 @@ it.each([
 
 it.each([
   '/lost-found-old',
+  '/explore-old',
   '/classroom-old',
   '/grades-old',
   '/school-courses-old',

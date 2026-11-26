@@ -5,7 +5,7 @@ import { PRIMARY_DESTINATIONS as SHARED_DESTINATIONS } from '@campus/shared/src/
 const icons = {
   today: 'calendar',
   study: 'library',
-  life: 'map',
+  life: 'services',
   connect: 'community',
   me: 'profile',
 } as const;
@@ -30,7 +30,7 @@ export function primaryNavigationSection(
   if (!pathname) return null;
   // Legacy home aliases redirect to /; keep their active destination consistent.
   if (['/', '/today', '/today-v2', '/hub'].includes(pathname)) return 'today';
-  if (pathname === '/life') return 'life';
+  if (pathname === '/life' || includesRoute(pathname, '/explore')) return 'life';
   if (pathname === '/connect') return 'connect';
   if (
     includesRoute(pathname, '/orders') ||

@@ -1,3 +1,4 @@
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import type { InboxTask, UserRole } from '../data/types';
 import type { RootTabName } from '../app/rootNavigation';
 import {
@@ -103,6 +104,7 @@ export function resolveNotificationDestination(
   input: {
     type?: unknown;
     data?: unknown;
+    schoolId?: unknown;
     title?: string;
     body?: string;
     id?: string;
@@ -133,6 +135,50 @@ export function resolveNotificationDestination(
       summary: '開啟作業' };
   }
 
+  let noticeSchoolId: string | undefined;
+  for (const source of [input.schoolId, data.schoolId]) {
+    if (source == null || source === '') continue;
+    const school = requireId(source, '學校編號');
+    if (school.ok === false) return school.destination;
+    if (toPublicSchoolId(school.id) !== toPublicSchoolId(context.schoolId)) {
+      return {
+        ok: false,
+        code: 'school_mismatch',
+        reason: '這則通知屬於其他學校，請切換到對應學校後再開啟。未讀狀態已保留。',
+      };
+    }
+    noticeSchoolId = school.id;
+  }
+
+  if (data.channel === 'dormitory' && ['announcement', 'package', 'repair'].includes(type)) {
+    if (!noticeSchoolId) return {
+      ok: false, code: 'missing_ids', reason: '這則宿舍通知缺少學校編號，請從宿舍查看最新紀錄。',
+    };
+    let notificationView: string;
+    let summary: string;
+    if (type === 'package') {
+      notificationView = 'parcels';
+      summary = '查看宿舍包裹';
+    } else if (type === 'announcement') {
+      notificationView = 'announcements';
+      summary = '查看本棟公告';
+    } else if (data.dormSection === 'leave') {
+      notificationView = 'leave';
+      summary = '查看外宿卡';
+    } else {
+      notificationView = 'repairs';
+      summary = '查看宿舍處理進度';
+    }
+    const announcement = type === 'announcement' && data.dormAnnouncementId != null
+      ? requireId(data.dormAnnouncementId, '宿舍公告編號') : undefined;
+    if (announcement?.ok === false) return announcement.destination;
+    return {
+      ok: true, mode: 'nested', tab: '校園', screen: 'Dormitory',
+      params: { notificationView, sourceSchoolId: noticeSchoolId, ...(announcement?.ok ? { dormAnnouncementId: announcement.id } : {}) },
+      summary,
+    };
+  }
+
   switch (type) {
     case 'ai_proactive':
       return {
@@ -145,10 +191,6 @@ export function resolveNotificationDestination(
     case 'announcement': {
       const id = requireId(data.announcementId, '公告編號');
       if (id.ok === false) return id.destination;
-      const school = data.schoolId == null || data.schoolId === ''
-        ? null
-        : requireId(data.schoolId, '學校編號');
-      if (school && school.ok === false) return school.destination;
       return {
         ok: true,
         mode: 'nested',
@@ -156,8 +198,8 @@ export function resolveNotificationDestination(
         screen: '公告詳情',
         params: {
           id: id.id,
-          ...(school && school.ok
-            ? { schoolId: school.id, sourceKind: 'school-announcement' }
+          ...(noticeSchoolId
+            ? { schoolId: noticeSchoolId, sourceKind: 'school-announcement' }
             : {}),
         },
         summary: '開啟公告',
@@ -232,15 +274,8 @@ export function resolveNotificationDestination(
       // 後端 sendPushToUser payload：{ type:'grade', gradeId, schoolId, channel:'grades' }
       const gradeId = requireId(data.gradeId, '成績編號');
       if (gradeId.ok === false) return gradeId.destination;
-      const noticeSchool = requireId(data.schoolId, '學校編號');
+      const noticeSchool = requireId(noticeSchoolId, '學校編號');
       if (noticeSchool.ok === false) return noticeSchool.destination;
-      if (!context.schoolId || context.schoolId !== noticeSchool.id) {
-        return {
-          ok: false,
-          code: 'school_mismatch',
-          reason: '這則成績通知屬於其他學校帳號範圍，已保留未讀。請切換到對應學校後再開啟。',
-        };
-      }
       // LearnStack「我的成績」：僅已登入學校身分可讀自己的成績清單，不導向作業繳交。
       if (!context.role || context.role === 'vendor' || context.role === 'guest') {
         return {
@@ -261,10 +296,6 @@ export function resolveNotificationDestination(
     case 'order': {
       const orderId = requireId(data.orderId, '訂單編號');
       if (orderId.ok === false) return orderId.destination;
-      const school = data.schoolId == null || data.schoolId === ''
-        ? null
-        : requireId(data.schoolId, '學校編號');
-      if (school && school.ok === false) return school.destination;
       return {
         ok: true,
         mode: 'nested',
@@ -272,7 +303,7 @@ export function resolveNotificationDestination(
         screen: 'StudentOrders',
         params: {
           orderId: orderId.id,
-          ...(school && school.ok ? { schoolId: school.id } : {}),
+          ...(noticeSchoolId ? { schoolId: noticeSchoolId } : {}),
         },
         summary: '開啟訂單／取餐',
       };
@@ -358,6 +389,7 @@ export function resolveNotificationRow(
     {
       id: n.id,
       type: n.type,
+      schoolId: n.schoolId,
       data: n.data,
       title: n.title,
       body: n.body,

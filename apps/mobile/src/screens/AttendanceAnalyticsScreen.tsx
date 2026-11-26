@@ -6,15 +6,14 @@
  * - 學生：個人出席率圓環 → 各課程出席比較 → 星期模式 → 連續天數
  * - 教師：班級出席率 → 出席趨勢折線 → 風險學生列表
  *
- * 使用真實 TronClass 資料 + 簡潔 iOS 風格視覺
+ * 使用真實 TronClass 資料；色彩全部取自即時 theme（含深淺色切換）
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, ScrollView, RefreshControl, Dimensions, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '../ui/theme';
-import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+import { useThemeStyleSheet, useThemeVersion } from '../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { usePermissions } from '../hooks/usePermissions';
 import {
@@ -22,10 +21,25 @@ import {
   type TeacherAnalytics,
   getStudentAnalytics,
   getTeacherAnalytics,
-  getRiskColor,
 } from '../services/smartAttendanceEngine';
 
 const { width: SCREEN_W } = Dimensions.get('window');
+
+function rateColor(rate: number, good = 80, fair = 60): string {
+  return rate >= good
+    ? theme.colors.success
+    : rate >= fair
+      ? theme.colors.warning
+      : theme.colors.danger;
+}
+
+function riskTone(level: 'safe' | 'warning' | 'danger'): string {
+  return level === 'safe'
+    ? theme.colors.success
+    : level === 'warning'
+      ? theme.colors.warning
+      : theme.colors.danger;
+}
 
 // ============================================================================
 // Sub-components
@@ -33,7 +47,8 @@ const { width: SCREEN_W } = Dimensions.get('window');
 
 /** 出席率圓環 */
 function RateGauge({ rate, size = 140, label }: { rate: number; size?: number; label: string }) {
-  const color = rate >= 80 ? '#34C759' : rate >= 60 ? '#FF9500' : '#FF3B30';
+  useThemeVersion();
+  const color = rateColor(rate);
   const strokeWidth = 10;
 
   return (
@@ -48,7 +63,6 @@ function RateGauge({ rate, size = 140, label }: { rate: number; size?: number; l
             borderRadius: size / 2,
             borderWidth: strokeWidth,
             borderColor: theme.colors.border,
-            opacity: 0.3,
           }}
         />
         {/* Foreground ring (simplified as colored border) */}
@@ -87,6 +101,7 @@ function BarChart({
   data: { label: string; value: number }[];
   height?: number;
 }) {
+  useThemeVersion();
   const maxVal = Math.max(...data.map((d) => d.value), 1);
   const barWidth = Math.min(36, (SCREEN_W - 80) / data.length - 8);
 
@@ -103,7 +118,7 @@ function BarChart({
       >
         {data.map((item, i) => {
           const barH = Math.max(4, (item.value / maxVal) * height * 0.8);
-          const color = item.value >= 80 ? '#34C759' : item.value >= 60 ? '#FF9500' : '#FF3B30';
+          const color = rateColor(item.value);
           return (
             <View key={i} style={{ alignItems: 'center', width: barWidth }}>
               <Text style={{ color: theme.colors.muted, fontSize: 9, marginBottom: 2 }}>
@@ -192,21 +207,16 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
       {/* Header */}
-      <LinearGradient
-        colors={theme.gradients.drawerHeader}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={s.header}
-      >
+      <View style={s.header}>
         <View style={s.headerContent}>
-          <Text style={s.headerTitle}>出席分析</Text>
+          <Text accessibilityRole="header" style={s.headerTitle}>出席分析</Text>
           <Text style={s.headerSubtitle}>{isTeacher ? '班級出席狀況一覽' : '個人出席追蹤'}</Text>
         </View>
-      </LinearGradient>
+      </View>
 
       <ScrollView
         style={s.scroll}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent} />}
         contentContainerStyle={{
           paddingBottom: insets.bottom + TAB_BAR_CONTENT_BOTTOM_PADDING + 20,
         }}
@@ -217,7 +227,7 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
         {isTeacher && teacherData ? (
           <>
             {/* Overall rate */}
-            <Card style={{ alignItems: 'center', paddingVertical: 24 }}>
+            <Card style={{ alignItems: 'center' }}>
               <RateGauge rate={teacherData.averageAttendanceRate} label="平均出席率" />
               <View style={s.summaryRow}>
                 <View style={s.summaryItem}>
@@ -253,10 +263,10 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                     <View
                       style={[
                         s.riskAvatar,
-                        { backgroundColor: getRiskColor(stu.rate < 60 ? 'danger' : 'warning') },
+                        { backgroundColor: stu.rate < 60 ? theme.colors.dangerSoft : theme.colors.warningSoft },
                       ]}
                     >
-                      <Text style={s.riskAvatarText}>{stu.studentName[0]}</Text>
+                      <Text style={[s.riskAvatarText, { color: stu.rate < 60 ? theme.colors.danger : theme.colors.warning }]}>{stu.studentName[0]}</Text>
                     </View>
                     <View style={s.riskInfo}>
                       <Text style={s.riskName}>{stu.studentName}</Text>
@@ -264,18 +274,11 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                         缺席 {stu.absences} 次 · 出席率 {stu.rate}%
                       </Text>
                     </View>
-                    <View
-                      style={[
-                        s.riskBadge,
-                        { backgroundColor: stu.rate < 60 ? '#FEE2E2' : '#FEF3C7' },
-                      ]}
+                    <Text
+                      style={[s.riskBadgeText, { color: stu.rate < 60 ? theme.colors.danger : theme.colors.warning }]}
                     >
-                      <Text
-                        style={[s.riskBadgeText, { color: stu.rate < 60 ? '#FF3B30' : '#FF9500' }]}
-                      >
-                        {stu.rate < 60 ? '高風險' : '注意'}
-                      </Text>
-                    </View>
+                      {stu.rate < 60 ? '高風險' : '注意'}
+                    </Text>
                   </View>
                 ))}
               </Card>
@@ -289,11 +292,11 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
         {!isTeacher && studentData ? (
           <>
             {/* Overall rate */}
-            <Card style={{ alignItems: 'center', paddingVertical: 24 }}>
+            <Card style={{ alignItems: 'center' }}>
               <RateGauge rate={studentData.overallRate} label="整體出席率" />
               <View style={s.summaryRow}>
                 <View style={s.summaryItem}>
-                  <Ionicons name={'flame' as any} size={16} color="#FF9500" />
+                  <Ionicons name={'flame' as any} size={16} color={theme.colors.warning} />
                   <Text style={s.summaryNum}>{studentData.streak.current}</Text>
                   <Text style={s.summaryLabel}>連續天數</Text>
                 </View>
@@ -306,9 +309,9 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                   <Ionicons
                     name={'shield-checkmark' as any}
                     size={16}
-                    color={getRiskColor(studentData.riskLevel)}
+                    color={riskTone(studentData.riskLevel)}
                   />
-                  <Text style={[s.summaryNum, { color: getRiskColor(studentData.riskLevel) }]}>
+                  <Text style={[s.summaryNum, { color: riskTone(studentData.riskLevel) }]}>
                     {studentData.riskLevel === 'safe'
                       ? '安全'
                       : studentData.riskLevel === 'warning'
@@ -339,7 +342,7 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                 <Text style={s.cardTitle}>星期出席模式</Text>
                 <View style={s.weekdayRow}>
                   {studentData.weekdayPattern.map((d) => {
-                    const color = d.rate >= 85 ? '#34C759' : d.rate >= 70 ? '#FF9500' : '#FF3B30';
+                    const color = rateColor(d.rate, 85, 70);
                     return (
                       <View key={d.day} style={s.weekdayItem}>
                         <View
@@ -372,7 +375,7 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                     <Text
                       style={[
                         s.courseDetailRateText,
-                        { color: c.rate >= 80 ? '#34C759' : c.rate >= 60 ? '#FF9500' : '#FF3B30' },
+                        { color: rateColor(c.rate) },
                       ]}
                     >
                       {c.rate}%
@@ -393,7 +396,7 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
 // ============================================================================
 
 const createStyles = () => StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
+  container: { flex: 1, backgroundColor: theme.colors.bg },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { fontSize: 16, color: theme.colors.muted, marginTop: 12 },
 
@@ -401,12 +404,13 @@ const createStyles = () => StyleSheet.create({
   header: {
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 20,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
+    paddingBottom: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.separator,
+    backgroundColor: theme.colors.bg,
   },
   headerContent: {},
-  headerTitle: { fontSize: 24, fontWeight: '700', color: theme.colors.text },
+  headerTitle: { fontSize: 22, fontWeight: '700', color: theme.colors.text },
   headerSubtitle: { fontSize: 13, color: theme.colors.textSecondary, marginTop: 4 },
 
   scroll: { flex: 1 },
@@ -414,10 +418,9 @@ const createStyles = () => StyleSheet.create({
   // Card
   card: {
     marginHorizontal: 16,
-    marginTop: 16,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 16,
-    padding: 16,
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.separator,
   },
   cardTitle: { fontSize: 15, fontWeight: '700', color: theme.colors.text, marginBottom: 12 },
 
@@ -432,8 +435,8 @@ const createStyles = () => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.separator,
   },
   riskAvatar: {
     width: 36,
@@ -442,11 +445,10 @@ const createStyles = () => StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  riskAvatarText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
+  riskAvatarText: { fontWeight: '700', fontSize: 14 },
   riskInfo: { flex: 1, marginLeft: 12 },
   riskName: { fontSize: 14, fontWeight: '600', color: theme.colors.text },
   riskDetail: { fontSize: 12, color: theme.colors.muted, marginTop: 2 },
-  riskBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   riskBadgeText: { fontSize: 11, fontWeight: '700' },
 
   // Weekday pattern (student)
@@ -467,8 +469,8 @@ const createStyles = () => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.separator,
   },
   courseDetailName: { fontSize: 14, fontWeight: '600', color: theme.colors.text },
   courseDetailSub: { fontSize: 11, color: theme.colors.muted, marginTop: 2 },

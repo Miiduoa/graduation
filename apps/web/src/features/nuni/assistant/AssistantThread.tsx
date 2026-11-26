@@ -1,4 +1,5 @@
 import { AssistantReplyLink } from '@/components/AssistantReplyLink';
+import { useAssistantWorkspaceHandoff } from '@/components/AssistantWorkspaceContext';
 import type { ReactNode } from 'react';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
@@ -23,10 +24,11 @@ import { isAssistantTaskRetryQuestion, type AssistantTaskRetry } from '@campus/s
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { accountDemoAssistantIntent, type AccountDemoAssistantScope } from '@/lib/accountDemoAssistant';
 import { AccountDemoAssistantCard } from './AccountDemoAssistantCard';
-import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
+import { AssistantServiceLinks, LocalAssistantLinks } from '@/components/AssistantServiceLinks';
+import { TODAY_CONFLICT_QUESTION } from '@campus/shared/src/classCalendarOverlapQuestion';
 import { parseLocalScheduleIntent } from '@/lib/assistantLocalSchedule';
 import { personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
-import { canAnswerTronClassQuestion } from '@/lib/tronClassAgentIntent';
+import { canAnswerTronClassQuestion, tronClassExplicitNavigationQuestion } from '@/lib/tronClassAgentIntent';
 import { courseworkStudyFollowup, parseAssistantCourseworkTargets, type AssistantCourseworkTarget } from '@/lib/assistantCoursework';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { assistantPermissionSettingsHref, stepFamily, stepStatus } from './copy';
@@ -37,6 +39,7 @@ import draftStyles from './AssistantDraft.module.css';
 import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, restoreComposerDraft, sendComposerDraft } from './composerDraft';
 import type { V2ActionStates, V2Card, V2Turn } from './types';
 
+const PRIORITY_SUGGESTION = '今天先做什麼？';
 const PICKUP_SUGGESTION = '把最近訂單的取餐時間加入行事曆';
 
 /** Classify before any reader runs; the composer and execution must use the same source boundary. */
@@ -45,7 +48,7 @@ export function assistantQuestionReadRoute(taskProfile: AssistantRoleProfileId, 
   const personal = personalAssistantReadIntent(query);
   const schedule = parseLocalScheduleIntent(query);
   const academic = parseImportedAcademicIntent(query);
-  const restricted = taskProfile !== 'student' && (personal?.kind === 'coursework' || academic !== null || canAnswerTronClassQuestion(query));
+  const restricted = taskProfile !== 'student' && (personal?.kind === 'coursework' || personal?.kind === 'today-priority' || academic !== null || canAnswerTronClassQuestion(query));
   const personalTime = schedule !== null || personal?.kind === 'schedule' || personal?.kind === 'calendar';
   // A complete read intent is more precise than work-related keywords. Restricted
   // sources receive fixed guidance even when their parser accepts unusual spacing.
@@ -182,10 +185,22 @@ export function AssistantThread({
     onTaskProfile?.(next);
   }
   function chooseWorkContext(next: AssistantWorkContext) {
+    // The inline workspace has one context control. Keep its displayed context
+    // aligned with the current operation while signed actions are unresolved.
+    if (inline && taskProfileLocked) return;
     manuallySelectedContext.current = true;
     setWorkContext(next);
     if (!taskProfileLocked) onTaskProfile?.(assistantTaskProfileForWorkContext(next));
   }
+  useAssistantWorkspaceHandoff(inline, (entry) => {
+    if (taskProfileLocked || pending || onStop) return {
+      ok: false,
+      message: '先完成、取消或核對目前的安排，再帶入新的問題與工作情境。原草稿尚未變更。',
+    };
+    if (entry.workContext) chooseWorkContext(entry.workContext);
+    onQuestion(entry.prompt);
+    return { ok: true };
+  });
   const workflow = getAssistantRoleWorkflow(workContext);
   useEffect(() => {
     const root = shell.current;
@@ -247,6 +262,7 @@ export function AssistantThread({
     node.style.height = Math.min(node.scrollHeight, 132) + 'px';
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
+  const navigation = taskProfile === 'student' && !!tronClassExplicitNavigationQuestion(question);
   const tronClass = taskProfile === 'student' && canAnswerTronClassQuestion(question);
   const publicCompound = !tronClass && publicCourseCompoundRequest(question, schoolId);
   const publicCourseIntent = !tronClass && !publicCompound && resolvePublicCourseAssistantIntent(question, schoolId);
@@ -254,11 +270,14 @@ export function AssistantThread({
   const foodPickup = !tronClass && taskProfile === 'student' && parseAssistantFoodPickupIntent(question) !== null;
   const readRoute = assistantQuestionReadRoute(taskProfile, question);
   const useProfileExamples = taskProfile !== 'student' && workContext === assistantWorkContextForTaskProfile(taskProfile);
+  const studentWork = taskProfile === 'student' && workContext === 'student';
   const suggestions = useProfileExamples ? profile.examples.map(example => example.prompt)
-    : foodPickupEnabled && taskProfile === 'student' ? [...workflow.suggestions, PICKUP_SUGGESTION] : workflow.suggestions;
+    : [...(studentWork ? [PRIORITY_SUGGESTION] : []), ...workflow.suggestions,
+      ...(studentWork ? [TODAY_CONFLICT_QUESTION] : []),
+      ...(foodPickupEnabled && taskProfile === 'student' ? [PICKUP_SUGGESTION] : [])];
   const canSubmit = !pending && !onStop && !!question.trim() &&
     ((!!demoScope && !!accountDemoAssistantIntent(question)) || readRoute.roleGuide || (foodPickup ? foodPickupEnabled
-      : tronClass || parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) ||
+      : tronClass || navigation || parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) ||
         (onTaskRetry && isAssistantTaskRetryQuestion(question)) ||
         (!publicCompound && (!!publicCourseIntent || readRoute.local || readRoute.personal ||
           (onStudyTarget && taskProfile === 'student' && courseworkStudyFollowup(question) !== null))) || (consent && ready)));
@@ -283,14 +302,28 @@ export function AssistantThread({
     if (next.question !== question) onQuestion(next.question);
     field.current?.focus();
   }
+  const consentDescription = <>
+    同意在本次對話將問題、對話紀錄及必要課表、作業、匯入紀錄摘要（成績欄位會遮罩）、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
+    Groq
+    {fallback ? '；若主要模型無法連線，可能改送到 Cloudflare Workers AI' : ''}
+  </>;
   const consentControl = (
     <label className={styles.consent}>
       <input type="checkbox" checked={consent} onChange={(e) => onConsent(e.target.checked)} />
-      同意在本次對話將問題、對話紀錄及必要課表、作業、匯入紀錄摘要（成績欄位會遮罩）、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
-      Groq
-      {fallback ? '；若主要模型無法連線，可能改送到 Cloudflare Workers AI' : ''}
+      {consentDescription}
     </label>
   );
+  const workContextControl = <AssistantRoleTasks context={workContext} onContext={chooseWorkContext} schoolId={schoolId}
+    linkedServiceIds={turns.flatMap(turn => turn.reply.roleGuide ? turn.reply.serviceIds ?? [] : [])}
+    disabled={inline && taskProfileLocked} compact={inline || turns.length > 0} />;
+  const availabilityNotice = !ready ? (
+    <p className={styles.notice} role={inline ? undefined : 'status'}>
+      {taskProfile === 'student'
+        ? '雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也能使用已授權的 TronClass、查校園地點、核對下一堂課教室，從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。'
+        : '雲端回答暫時無法使用，仍可核對保存的個人行程，或從下方建議接續目前的工作。'}
+      {foodPickupEnabled && taskProfile === 'student' ? '也能把最近訂單的取餐時間排入個人行事曆，確認後才會儲存。' : ''}
+    </p>
+  ) : null;
   return (
     <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2"
       onFocusCapture={event => {
@@ -304,7 +337,7 @@ export function AssistantThread({
         const next = event.relatedTarget;
         if (next instanceof Node && !event.currentTarget.contains(next)) revisionFocus.current = false;
       }}>
-      {onTaskProfile && <AssistantRoleContext value={taskProfile} disabled={taskProfileLocked} onChange={chooseTaskProfile} />}
+      {!inline && onTaskProfile && <AssistantRoleContext value={taskProfile} disabled={taskProfileLocked} onChange={chooseTaskProfile} />}
       {!inline && (
         <>
           <p className={styles.intro}>{taskProfile === 'student'
@@ -317,23 +350,9 @@ export function AssistantThread({
           </nav>
         </>
       )}
-      <AssistantRoleTasks context={workContext} onContext={chooseWorkContext} schoolId={schoolId}
-        linkedServiceIds={turns.flatMap(turn => turn.reply.roleGuide ? turn.reply.serviceIds ?? [] : [])}
-        compact={inline || turns.length > 0} />
-      {!ready ? (
-        <p className={styles.notice} role="status">
-          {taskProfile === 'student'
-            ? '雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也能使用已授權的 TronClass、查校園地點、核對下一堂課教室，從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。'
-            : '雲端回答暫時無法使用，仍可核對保存的個人行程，或從下方建議接續目前的工作。'}
-          {foodPickupEnabled && taskProfile === 'student' ? '也能把最近訂單的取餐時間排入個人行事曆，確認後才會儲存。' : ''}
-        </p>
-      ) : null}
-      {inline && turns.length > 0 && consent ? (
-        <details className={styles.consentSettings}>
-          <summary>本次對話的資料使用設定</summary>
-          {consentControl}
-        </details>
-      ) : consentControl}
+      {!inline && workContextControl}
+      {!inline && availabilityNotice}
+      {!inline && consentControl}
       <div ref={log} className={styles.log} role="log" aria-label="對話紀錄"
         tabIndex={inline ? 0 : undefined} aria-busy={pending || undefined}>
         {!inline && turns.length === 0 && !pending ? (
@@ -385,10 +404,10 @@ export function AssistantThread({
                   pending={pending || !!onStop} blockedReason={eventBlockedReason}
                   sourceOnly={turn.reply.campusEventPreview === true}
                   onSelect={onEventTarget ? target => onEventTarget(turn, target) : undefined} />
-                {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
+                {turn.reply.local && <LocalAssistantLinks result={turn.reply.local} schoolId={schoolId} audience="platform" />}
                 {turn.reply.demo ? <p className={styles.sim}>本人帳號展示資料</p> : null}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
-                <AssistantTaskPlan plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states}
+                <AssistantTaskPlan schoolId={schoolId} plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states}
                   retry={taskRetryForTurn ? taskRetryForTurn(turn) : turn.reply.taskRetry}
                   pending={pending || !!onStop}
                   onRetry={onTaskRetry ? stepIds => onTaskRetry(turn, stepIds) : undefined} />
@@ -433,7 +452,7 @@ export function AssistantThread({
               <span aria-hidden="true" />
               <span className={styles.muted}>{pendingLabel ?? (asking ? '正在整理回覆' : '正在核對操作結果')}</span>
               {asking ? (
-                <button type="button" className={styles.stopReply} onClick={onStopAsk}>
+                <button type="button" className={styles.stopReply} onClick={onStopAsk} data-assistant-stop-read="true">
                   停止這次回答
                 </button>
               ) : null}
@@ -561,9 +580,9 @@ export function AssistantThread({
         <p id={`${fieldId}-hint`} className={styles.composerHint}>
           {pending ? '正在處理上一個問題，可以先輸入下一句。' : 'Enter 送出 · Shift + Enter 換行'}
         </p>
-        {inline && (ready || foodPickupEnabled) && !turns.length && !question && !pending && (
+        {inline && (studentWork || ready || foodPickupEnabled) && !turns.length && !question && !pending && (
           <div className={styles.chips} aria-label="試著問">
-            {(taskProfile === 'student' && workContext === 'student' ? ['下一堂課在哪裡？', '這週有哪些作業要交？', ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
+            {(studentWork ? [PRIORITY_SUGGESTION, '下一堂課在哪裡？', '這週有哪些作業要交？', TODAY_CONFLICT_QUESTION, ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
               <button type="button" key={phrase} className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>
@@ -572,6 +591,26 @@ export function AssistantThread({
         )}
         {publicCourseIntent && <p className={styles.muted}>直接查詢校方公開資料；到查課頁核對後再匯入課表。</p>}
       </div>
+      {inline && (
+        <div className={styles.workspacePreferences}>
+          {workContextControl}
+          {taskProfileLocked && <p className={styles.workspaceHint}>先完成或取消目前的安排，再切換工作情境。</p>}
+          {!ready && <p className={styles.workspaceHint} role="status">雲端回答暫時無法使用，仍可查已接通的資料與校園服務。</p>}
+          <div className={styles.inlineSettings}>
+            <label className={styles.inlineConsent}>
+              <input type="checkbox" checked={consent} aria-describedby={`${fieldId}-data-use`}
+                onChange={(event) => onConsent(event.target.checked)} />
+              同意在本次對話使用 Groq 雲端回答
+            </label>
+            <details className={styles.consentSettings}>
+              <summary>本次對話的資料使用設定</summary>
+              <p id={`${fieldId}-data-use`} className={styles.workspaceHint}>{consentDescription}</p>
+              <p className={styles.workspaceHint}>工作情境只調整任務建議；資料查詢和操作仍依你原有的權限開放。可隨時取消上方同意。</p>
+              {availabilityNotice}
+            </details>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

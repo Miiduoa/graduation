@@ -1,8 +1,11 @@
 import React from 'react';
+import { Modal } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
 import { fetchSchoolDirectory } from '../services/schoolDirectory';
 
+let mockReducedMotion = false;
+jest.mock('../hooks/useReducedMotion', () => ({ useReducedMotion: () => mockReducedMotion }));
 const mockSetSelection = jest.fn();
 let mockSchool = { id: 'puli', name: '埔里學院' };
 jest.mock('../state/school', () => ({
@@ -20,6 +23,7 @@ const directory = [
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockReducedMotion = false;
   mockSchool = { id: 'puli', name: '埔里學院' };
   jest.mocked(fetchSchoolDirectory).mockResolvedValue(directory);
 });
@@ -42,7 +46,12 @@ test('搜尋正規化代號、中文名與簡稱，完全相符優先且不自�
   expect(view.getByLabelText('選擇國立臺灣大學')).toBeTruthy();
   fireEvent.changeText(input, 'missing');
   expect(view.getByText('找不到符合的學校，請換個關鍵字。')).toBeTruthy();
-  fireEvent.changeText(input, 'pu');
+  fireEvent.changeText(input, 'Providence');
+  expect(view.getByText('Providence University')).toBeTruthy();
+  expect(view.getByText('Providence University')).toBeTruthy();
+  expect(view.getByLabelText('選擇靜宜大學').props.accessibilityHint).toBe('Providence University');
+  expect(view.getByText('1 所學校 · 點選後切換公開資訊')).toBeTruthy();
+  expect(mockSetSelection).not.toHaveBeenCalled();
   fireEvent.press(view.getByLabelText('選擇靜宜大學'));
   expect(mockSetSelection).toHaveBeenCalledWith(expect.objectContaining({ schoolId: 'pu' }));
   expect(directory[1].integrationStatus?.enabled).toBe(false);
@@ -58,4 +67,61 @@ test('first-time picker does not preselect a campus; tapping a search match is a
   expect(mockSetSelection).not.toHaveBeenCalled();
   fireEvent.press(view.getByTestId('school-picker-option-ntu'));
   expect(mockSetSelection).toHaveBeenCalledWith(expect.objectContaining({ schoolId: 'ntu', code: 'NTU' }));
+});
+
+test('the inline service picker searches immediately and cancels without selecting a school', async () => {
+  mockSchool = { id: '', name: '尚未選校' };
+  const onCancel = jest.fn();
+  const view = render(<SchoolBrowsingControl destination={{ title: '圖書館', onChoose: jest.fn(), onCancel }} />);
+  expect(await view.findByLabelText('選擇靜宜大學')).toBeTruthy();
+  expect(view.queryByTestId('school-picker-open')).toBeNull();
+  expect(view.getByText('選擇校園 · 圖書館')).toBeTruthy();
+  fireEvent.changeText(view.getByTestId('school-picker-search'), 'missing');
+  expect(view.getByText('找不到符合的學校，請換個關鍵字。')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('取消開啟圖書館'));
+  expect(onCancel).toHaveBeenCalledTimes(1);
+  expect(mockSetSelection).not.toHaveBeenCalled();
+});
+
+test('choosing a campus in a service route commits it without invoking cancellation', async () => {
+  mockSchool = { id: '', name: '尚未選校' };
+  const onCancel = jest.fn();
+  const onChoose = jest.fn();
+  const view = render(<SchoolBrowsingControl destination={{ title: '公車查詢', onChoose, onCancel }} />);
+  fireEvent.press(await view.findByTestId('school-picker-option-pu'));
+  fireEvent.press(view.getByTestId('school-picker-option-ntu'));
+  fireEvent.press(view.getByLabelText('取消開啟公車查詢'));
+  expect(onChoose.mock.calls).toEqual([['pu']]);
+  expect(mockSetSelection).toHaveBeenCalledTimes(1);
+  expect(mockSetSelection).toHaveBeenCalledWith(expect.objectContaining({ schoolId: 'pu' }));
+  expect(onCancel).not.toHaveBeenCalled();
+});
+
+test('the school-switch sheet respects a live change in motion preferences', async () => {
+  const view = render(<SchoolBrowsingControl />);
+  fireEvent.press(view.getByTestId('school-picker-open'));
+  await view.findByTestId('school-picker-option-pu');
+  expect(view.UNSAFE_getByType(Modal).props.animationType).toBe('slide');
+  mockReducedMotion = true;
+  view.rerender(<SchoolBrowsingControl />);
+  expect(view.UNSAFE_getByType(Modal).props.animationType).toBe('none');
+  expect(view.getByTestId('school-picker-option-pu')).toBeTruthy();
+});
+
+test('large text leaves room for a bilingual result and cancel control while typing', async () => {
+  const dimensions = jest.spyOn(require('react-native'), 'useWindowDimensions');
+  dimensions.mockReturnValue({ width: 390, height: 844, scale: 3, fontScale: 2.4 });
+  try {
+    const onCancel = jest.fn();
+    const view = render(<SchoolBrowsingControl destination={{ title: '圖書館', onChoose: jest.fn(), onCancel }} />);
+    await view.findByTestId('school-picker-option-pu');
+    const search = view.getByTestId('school-picker-search');
+    fireEvent(search, 'focus');
+    fireEvent.changeText(search, 'Providence');
+    expect(view.queryByText('選擇校園 · 圖書館')).toBeNull();
+    expect(view.getByText('1 所學校')).toBeTruthy();
+    expect(view.getByText('Providence University')).toBeTruthy();
+    fireEvent.press(view.getByLabelText('取消開啟圖書館'));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  } finally { dimensions.mockRestore(); }
 });

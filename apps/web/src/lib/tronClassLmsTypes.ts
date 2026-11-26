@@ -1,3 +1,6 @@
+// The unversioned snapshot collapsed missing school submission flags into false.
+export const LMS_SNAPSHOT_VERSION = 2;
+
 export type LmsHomeworkItem = {
   id: number;
   courseId: number;
@@ -5,7 +8,7 @@ export type LmsHomeworkItem = {
   title: string;
   deadline: string | null;
   deadlineLabel: string;
-  submitted: boolean;
+  submitted: boolean | null;
   description: string;
   href: string;
 };
@@ -50,6 +53,7 @@ export type LmsCourseSummary = {
 };
 
 export type LmsReadonlySnapshot = {
+  schemaVersion: typeof LMS_SNAPSHOT_VERSION;
   success: true;
   ownerUid: string;
   schoolId: 'pu';

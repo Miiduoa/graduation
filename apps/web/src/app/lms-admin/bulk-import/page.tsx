@@ -57,8 +57,8 @@ export default function BulkImportMembersPage() {
 
   return (
     <RequireAdmin>
-      <h1 style={{ marginTop: 0 }}>批量匯入課程成員</h1>
-      <p style={{ color: '#3C3C43', fontSize: 14 }}>
+      <h2>批量匯入課程成員</h2>
+      <p style={{ color: 'var(--muted)', fontSize: 14 }}>
         依 email 對應既有 Supabase 使用者寫入 course_members。使用者須已註冊（可先跑 Edge Function{' '}
         <code>sync-external-directory</code>
         發邀請）。
@@ -67,7 +67,7 @@ export default function BulkImportMembersPage() {
       <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 16 }}>
         <span>課程 UUID</span>
         <input
-          style={{ padding: 10, borderRadius: 8, border: '1px solid #d1d5db' }}
+          style={{ padding: 10, borderRadius: 8, border: '1px solid var(--border-strong)' }}
           value={courseId}
           onChange={(e) => setCourseId(e.target.value)}
           autoCapitalize="none"
@@ -77,7 +77,7 @@ export default function BulkImportMembersPage() {
       <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
         <span>CSV（每行：email,role）</span>
         <textarea
-          style={{ padding: 10, borderRadius: 8, border: '1px solid #d1d5db', minHeight: 180, fontFamily: 'monospace' }}
+          style={{ padding: 10, borderRadius: 8, border: '1px solid var(--border-strong)', minHeight: 180, fontFamily: 'monospace' }}
           value={raw}
           onChange={(e) => setRaw(e.target.value)}
           placeholder={`alice@school.edu.tw,student\nbob@school.edu.tw,assistant`}
@@ -93,7 +93,7 @@ export default function BulkImportMembersPage() {
           borderRadius: 10,
           border: 'none',
           background: 'var(--brand)',
-          color: '#fff',
+          color: 'var(--on-brand)',
           fontWeight: 700,
           cursor: busy ? 'wait' : 'pointer',
         }}
@@ -102,7 +102,7 @@ export default function BulkImportMembersPage() {
       </button>
 
       {result ? (
-        <pre style={{ marginTop: 16, padding: 12, background: '#F2F2F7', borderRadius: 8, overflow: 'auto' }}>{result}</pre>
+        <pre style={{ marginTop: 16, padding: 12, background: 'var(--bg-soft)', borderRadius: 8, overflow: 'auto' }}>{result}</pre>
       ) : null}
     </RequireAdmin>
   );

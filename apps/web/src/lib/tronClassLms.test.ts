@@ -11,7 +11,7 @@ vi.mock('./firebase', () => ({ getAuth: () => auth, isFirebaseConfigured: () => 
 
 function snapshot(change: Record<string, unknown> = {}) {
   return {
-    success: true, ownerUid: 'student-a', schoolId: 'pu', source: 'pu-tronclass',
+    schemaVersion: 2, unconfirmedHomework: [], success: true, ownerUid: 'student-a', schoolId: 'pu', source: 'pu-tronclass',
     fetchedAt: '2026-05-29T04:00:00.000Z', cache: { hit: false, expiresAt: '2026-05-29T04:10:00.000Z' },
     courses: [{ id: 10001, name: '資料庫系統' }], contentsLoadedFor: [],
     homework: [{
@@ -39,6 +39,44 @@ it('reads the hosted LMS snapshot and keeps official homework links', async () =
     body: JSON.stringify({ data: {} }), cache: 'no-store',
   }));
   expect(result.homework[0].href).toBe('https://tronclass.pu.edu.tw/course/10001/content#/activity/20001');
+});
+
+it('restores unconfirmed homework in school order and keeps real partial-course errors', async () => {
+  const row = snapshot().homework[0];
+  const confirmed = { ...row, id: 70000, submitted: true };
+  const warning = { courseId: row.courseId, courseName: row.courseName, area: 'homework', status: null };
+  const realWarning = { ...warning, courseId: 10002, status: 503 };
+  fetchMock.mockResolvedValueOnce(Response.json({ result: snapshot({
+    homework: [row, confirmed],
+    unconfirmedHomework: [
+      { index: 3, item: { ...row, id: 80003, submitted: null } },
+      { index: 0, item: { ...row, id: 80000, submitted: null } },
+    ],
+    courseErrors: [realWarning, { ...warning, unconfirmedSubmission: true }],
+  }) }));
+  const result = await loadTronClassLms('student-a');
+  expect(result.homework.map((item) => [item.id, item.submitted])).toEqual([
+    [80000, null], [row.id, false], [70000, true], [80003, null],
+  ]);
+  expect(result.courseErrors).toEqual([realWarning]);
+});
+
+it('treats false from a legacy server as unknown while preserving true', async () => {
+  const row = snapshot().homework[0];
+  fetchMock.mockResolvedValueOnce(Response.json({ result: snapshot({
+    schemaVersion: undefined, unconfirmedHomework: undefined,
+    homework: [row, { ...row, id: 70000, submitted: true }],
+  }) }));
+  const result = await loadTronClassLms('student-a');
+  expect(result.homework.map((item) => item.submitted)).toEqual([null, true]);
+});
+
+it.each([[0, 0], [0, 3], [-1, 0]])('rejects invalid unconfirmed positions (%i, %i)', async (first, second) => {
+  const row = snapshot().homework[0];
+  fetchMock.mockResolvedValueOnce(Response.json({ result: snapshot({
+    unconfirmedHomework: [first, second].map((index) => ({ index, item: { ...row, submitted: null } })),
+  }) }));
+  await expect(loadTronClassLms('student-a')).rejects.toMatchObject({ reason: 'unavailable' });
 });
 
 it('sends refresh when the user asks to bypass cache', async () => {

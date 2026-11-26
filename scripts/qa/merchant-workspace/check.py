@@ -189,7 +189,7 @@ async def verify_navigation(page, report):
 
     opener_url = page.url
     async with page.context.expect_page() as popup_info:
-        await nav.get_by_role("link", name="門市概況", exact=True).click(modifiers=["Control"])
+        await nav.get_by_role("link", name="門市概況", exact=True).click(modifiers=["ControlOrMeta"])
     popup = await popup_info.value
     try:
         await wait_store(popup)

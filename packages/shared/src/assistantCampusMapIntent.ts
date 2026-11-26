@@ -3,7 +3,7 @@
 export type CampusMapCommand = { kind: 'place'; query: string } | { kind: 'next-class' };
 export type CampusMapClause = CampusMapCommand |
   { kind: 'next-class'; dayPhrase: string } | { kind: 'previous-next-class' } |
-  { kind: 'previous-event'; index: number };
+  { kind: 'previous-event'; index: number } | { kind: 'previous-library' };
 
 const prefix = '(?:(?:幫我|替我|請問|請|麻煩|我想知道|我想查|我想看|告訴我|查詢|查看|查一下|看一下|查|找|看)\\s*)*';
 const nextClass = '(?:下(?:一)?(?:堂|節)課|接下來(?:的)?(?:一堂|一節)?課)';
@@ -12,6 +12,7 @@ const where = '(?:(?:教室|上課地點|地點|位置)?(?:在哪裡|在哪裏|�
 const nextLocation = new RegExp('^' + prefix + day + '(?:我的?)?' + nextClass + '的?' + where + '(?:嗎|呢)?$');
 const nextSchedule = new RegExp('^' + prefix + '(?:我的?)?' + nextClass + '(?:是什麼|是什麼課|有什麼)?(?:嗎|呢)?$');
 const previousLocation = new RegExp('^' + prefix + '(?:(?:那堂課|這堂課|那個|這個|它)的?)?(?:教室|上課地點|地點)(?:在哪裡|在哪裏|在哪|的?位置)(?:嗎|呢)?$');
+const libraryLocation = new RegExp('^' + prefix + '(?:這間|這座|該|那間|那座)圖書館的?(?:位置|地點|在哪裡|在哪裏|在哪)(?:嗎|呢)?$');
 const eventLocation = new RegExp('^' + prefix + '第([一二兩三四五1-5])(?:個|筆|場|項)活動的?(?:(?:地點)?(?:在哪裡|在哪裏|在哪)|位置|地點)(?:嗎|呢)?$');
 const badRequest = /不要|不用|不必|不需要|無須|先別|別幫|不是要|翻譯|這句話|假設|如果|例如|範例|之前|曾經|昨天|前天|剛才|剛剛|每天|每日|每週|每月|自動|持續|新增|建立|儲存|保存|移除|刪除|修改|更改|規劃|提醒|送出|繳交|提交|分享|傳訊|傳給|發送|寄出|寄信|寄給|發布|發文|預約|訂位|申請|請假|報名|取消|變更|更新|付款|購買|開啟|打開|前往|進入|導航|路線|怎麼走|如何走|怎麼去|如何去|步行|走路|開車|騎車/;
 const badQuery = /今天|今日|明天|明日|後天|後日|本週|下週|禮拜|星期|幾點|幾樓|哪一樓|哪個|營業|開放|時間|最近|目前|現在|附近|最近的|距離|公尺|分鐘|(?:然後|接著|順便|並且|另外|以及|同時)|(?:樓|館|教室|中心|校門|宿舍|球場|操場|停車場|餐廳|廣場)(?:和|與)/;
@@ -33,6 +34,7 @@ export function parseCampusMapClause(question: string): CampusMapClause | null {
   const next = text.match(nextLocation);
   if (next) return next[1] ? { kind: 'next-class', dayPhrase: next[1] } : { kind: 'next-class' };
   if (previousLocation.test(text)) return { kind: 'previous-next-class' };
+  if (libraryLocation.test(text)) return { kind: 'previous-library' };
   const event = text.match(eventLocation);
   if (event) return { kind: 'previous-event', index: ({ 一: 1, 二: 2, 兩: 2, 三: 3, 四: 4, 五: 5 } as Record<string, number>)[event[1]] || Number(event[1]) };
 

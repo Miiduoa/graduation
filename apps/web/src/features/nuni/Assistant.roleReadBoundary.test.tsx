@@ -6,6 +6,7 @@ import { browserRequest } from './Session';
 import { answerAssistantLocally } from '@/lib/assistantLocalActions';
 import { answerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
 import { personalImportsStorageKey } from '@/lib/personalImports';
+import type { PersonalImportRecord } from '@campus/shared/src/imports/types';
 
 vi.mock('./Session', () => ({
   browserRequest: vi.fn(),
@@ -90,7 +91,7 @@ it.each(profiles)('%s can submit and answer its own timetable without model cons
   noRemoteRead();
 });
 
-it.each(profiles.flatMap(profile => ['查我的待辦', '查我要繳的', '查我的\n成績', '查我的\t學分紀錄',
+it.each(profiles.flatMap(profile => ['今天先做什麼？', '查我的待辦', '查我要繳的', '查我的\n成績', '查我的\t學分紀錄',
   '查詢 TronClass 課程', '下載 TronClass 教材', '幫我準備 TronClass 作業']
   .map(question => [profile, question] as const)))(
   '%s routes %j to work guidance before any local or student reader', async (profile, question) => {
@@ -180,5 +181,40 @@ it('keeps unrelated model questions disabled without consent instead of swallowi
   fireEvent.click(button);
   expect(answerAssistantLocally).not.toHaveBeenCalled();
   expect(answerAssistantPersonalQuestion).not.toHaveBeenCalled();
+  noRemoteRead();
+});
+
+it('answers the signed-in platform account timetable and calendar conflict from this device without remote reads', async () => {
+  // beforeEach has frozen Date at Wednesday 2026-11-18 10:30 in Taipei.
+  const base = { schoolId: 'pu', academicYear: '115', semester: '1', batchId: 'conflict-batch',
+    importedAt: '2026-11-10T01:00:00.000Z', source: { type: 'paste' as const, line: 1, rawText: '不得外送的匯入原文' } };
+  const eventId = '行程/#' + 'a'.repeat(296);
+  const records: PersonalImportRecord[] = [
+    { ...base, id: 'conflict-class', kind: 'timetable', title: '資料庫管理', dayOfWeek: 3,
+      startTime: '14:10', endTime: '16:00', location: '私人教室 B203' },
+    { ...base, id: eventId, kind: 'events', title: '專題小組討論', academicYear: '', semester: '',
+      date: '2026-11-18', allDay: false, startTime: '15:00', endTime: '16:30' },
+    { ...base, id: 'quiet-event', kind: 'events', title: '晚間聚餐', academicYear: '', semester: '',
+      date: '2026-11-18', allDay: false, startTime: '18:00', endTime: '19:00' },
+  ];
+  localStorage.setItem(personalImportsStorageKey(scope), JSON.stringify({ version: 1, records }));
+  localStorage.setItem(personalImportsStorageKey({ ...scope, owner: 'platform:bob' }), JSON.stringify({ version: 1, records: [
+    { ...records[0], id: 'bob-class', title: '另一個帳號的課' },
+    { ...records[1], id: 'bob-event', title: '另一個帳號的行程' }] }));
+  localStorage.setItem(personalImportsStorageKey({ ...scope, schoolId: 'ntpu' }), JSON.stringify({ version: 1, records: [
+    { ...records[0], id: 'ntpu-class', schoolId: 'ntpu', title: '其他學校的課' },
+    { ...records[1], id: 'ntpu-event', schoolId: 'ntpu', title: '其他學校的行程' }] }));
+
+  await open('student');
+  send('今天的行程跟上課有撞期嗎？');
+  await screen.findAllByText(/專題小組討論/);
+  const text = document.body.textContent ?? '';
+  expect(text).toContain('資料庫管理');
+  expect(text).toMatch(/15:00[^\d]{1,6}16:00/);
+  const href = screen.getByRole('link', { name: /查看行程.*專題小組討論/ }).getAttribute('href');
+  expect(href).toBe('/calendar?' + new URLSearchParams({ schoolId: 'pu', eventId }));
+  expect(document.querySelector('a[href*="eventId=quiet-event"]')).toBeNull();
+  for (const hidden of ['晚間聚餐', '另一個帳號', '其他學校', '不得外送的匯入原文'])
+    expect(text).not.toContain(hidden);
   noRemoteRead();
 });

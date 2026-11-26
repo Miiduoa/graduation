@@ -13,6 +13,7 @@ import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navig
 
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 import {
+  isPuEcampusDataFetchEnabled,
   PU_ECAMPUS_DATA_PAUSED_CODE,
   PU_ECAMPUS_DATA_PAUSED_MESSAGE,
 } from '@campus/shared/src/puEcampusDataPolicy';
@@ -26,13 +27,15 @@ import { useSchool } from '../state/school';
 import { finishLoginReturn } from '../utils/loginReturn';
 import { safeNavigate } from '../utils/safeNavigate';
 import { signInWithStudentId, type LoginProgress } from '../services/studentIdAuth';
+import { isTronClassDataFetchEnabled } from '../services/tronClassDataEnabled';
 import type { SchoolSyncSummary } from '../services/schoolSyncSummary';
 import {
   SCHOOL_LOGIN_BIND_HINT,
+  getSchoolLoginAvailabilityState,
   isSchoolLoginEntryAvailable,
   loadSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
-import { Screen, Button, AnimatedCard } from '../ui/components';
+import { Screen, Button } from '../ui/components';
 import { SchoolPortalImportEntry } from '../components/SchoolPortalImport';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -57,6 +60,29 @@ type SSOLoginScreenProps = {
 
 type LoginAttempt = { provider: 'school' | 'platform' };
 
+function LoginSection({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children?: React.ReactNode;
+}) {
+  const styles = useThemeStyleSheet(createStyles);
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text accessibilityRole="header" style={styles.sectionTitle}>
+          {title}
+        </Text>
+        {subtitle ? <Text style={styles.note}>{subtitle}</Text> : null}
+      </View>
+      {children}
+    </View>
+  );
+}
+
 export function SSOLoginScreen(props: SSOLoginScreenProps) {
   const { school } = useSchool();
   return <SchoolLoginContent key={school.id} school={school} {...props} />;
@@ -73,9 +99,12 @@ function SchoolLoginContent(
   const nav = props?.navigation ?? routeNavigation;
   const auth = useAuth();
 
-  const [schoolLoginAvailable, setSchoolLoginAvailable] = useState(
-    isSchoolLoginEntryAvailable(school.id),
+  const [schoolLoginState, setSchoolLoginState] = useState(
+    getSchoolLoginAvailabilityState(school.id),
   );
+  const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
+  const schoolLoginAvailable = schoolLoginState === 'available' && isSchoolLoginEntryAvailable(school.id);
+  const checkingSchoolLogin = schoolLoginState === 'unknown' || schoolLoginState === 'loading';
 
   const [studentIdInput, setStudentIdInput] = useState('');
   const [studentPwInput, setStudentPwInput] = useState('');
@@ -91,9 +120,6 @@ function SchoolLoginContent(
 
   useEffect(() => {
     mounted.current = true;
-    void loadSchoolLoginProviderKinds().then(() => {
-      if (mounted.current) setSchoolLoginAvailable(isSchoolLoginEntryAvailable(school.id));
-    });
     return () => {
       mounted.current = false;
       // Authentication may still finish; only this screen's callbacks are invalidated.
@@ -101,6 +127,16 @@ function SchoolLoginContent(
       if (successTimer.current !== null) clearTimeout(successTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const pending = loadSchoolLoginProviderKinds(school.id);
+    setSchoolLoginState(getSchoolLoginAvailabilityState(school.id));
+    void pending.then(() => {
+      if (active) setSchoolLoginState(getSchoolLoginAvailabilityState(school.id));
+    });
+    return () => { active = false; };
+  }, [school.id, availabilityAttempt]);
 
   function beginAttempt(provider: LoginAttempt['provider']) {
     if (!mounted.current || activeAttempt.current) return null;
@@ -264,7 +300,7 @@ function SchoolLoginContent(
         keyboardDismissMode="on-drag"
       >
         <View style={styles.intro}>
-          <Text style={styles.eyebrow}>nuni · {schoolName}</Text>
+          <Text style={styles.schoolName}>{schoolName}</Text>
           <Text accessibilityRole="header" style={styles.heading}>
             從你的課程開始。
           </Text>
@@ -272,7 +308,7 @@ function SchoolLoginContent(
         </View>
 
         {schoolLoginAvailable ? (
-          <AnimatedCard title="學校帳號登入" subtitle="使用靜宜 E 校園帳號與密碼">
+          <LoginSection title="學校帳號登入" subtitle="使用靜宜 E 校園帳號與密碼">
             <View style={styles.fields}>
               <View style={styles.field}>
                 <Text nativeID="student-id-label" style={styles.label}>
@@ -326,16 +362,40 @@ function SchoolLoginContent(
                 disabled={formLocked || !studentIdInput.trim() || !studentPwInput.trim()}
               />
               <View style={styles.sourceGuide}>
-                <Text style={styles.sourceTitle}>一次連線，分別讀取你的資料</Text>
-                <Text style={styles.note}>E 校園：課表、歷年成績與學分紀錄</Text>
-                <Text style={styles.note}>玩課雲：課程、教材與作業；使用相同帳密</Text>
+                <Text style={styles.sourceTitle}>本次可讀取的資料</Text>
+                <Text style={styles.note}>
+                  {isPuEcampusDataFetchEnabled()
+                    ? 'E 校園提供課表、歷年成績與學分紀錄，讀取結果會逐項顯示。'
+                    : 'E 校園目前暫停讀取課表、歷年成績與學分紀錄。'}
+                </Text>
+                <Text style={styles.note}>
+                  {isTronClassDataFetchEnabled()
+                    ? '玩課雲連線成功後會顯示課程清單的讀取結果。作業與教材需要另外讀取。'
+                    : '此版本尚未開啟玩課雲課程連線。'}
+                </Text>
               </View>
             </View>
-          </AnimatedCard>
+          </LoginSection>
         ) : (
-          <AnimatedCard title="學校連線尚未開放">
-            <Text style={styles.body}>{SCHOOL_LOGIN_BIND_HINT}</Text>
-          </AnimatedCard>
+          <LoginSection title={schoolLoginState === 'error'
+            ? '無法確認學校登入方式'
+            : checkingSchoolLogin ? '確認學校登入方式' : '學校連線尚未開放'}>
+            <Text style={styles.body}>
+              {schoolLoginState === 'error'
+                ? '目前無法取得登入設定，請確認網路後重試。'
+                : checkingSchoolLogin
+                  ? '正在確認所選學校的登入方式，請稍候。'
+                  : SCHOOL_LOGIN_BIND_HINT}
+            </Text>
+            {schoolLoginState === 'error' ? (
+              <Button
+                text="重新確認學校登入"
+                kind="secondary"
+                onPress={() => setAvailabilityAttempt((attempt) => attempt + 1)}
+                disabled={formLocked}
+              />
+            ) : null}
+          </LoginSection>
         )}
 
         {isBusy ? (
@@ -410,7 +470,7 @@ function SchoolLoginContent(
           onOpenRecords={(kind) => safeNavigate(nav, 'PersonalImport', { kind })}
         />
 
-        <AnimatedCard
+        <LoginSection
           title="不用學校帳號，也能匯入"
           subtitle="讀取你自己下載的校務資料"
         >
@@ -423,9 +483,9 @@ function SchoolLoginContent(
             onPress={() => nav.navigate?.('PersonalImport')}
             disabled={formLocked}
           />
-        </AnimatedCard>
+        </LoginSection>
 
-        <AnimatedCard title="Google 帳號" subtitle="和網頁版使用同一個帳號">
+        <LoginSection title="Google 帳號" subtitle="和網頁版使用同一個帳號">
           <Button
             text="用 Google 帳號登入"
             kind="secondary"
@@ -435,7 +495,7 @@ function SchoolLoginContent(
           <Text style={styles.note}>
             用於加入課程、繳交作業與校園社群。學校課表與成績仍需連線學校帳號。
           </Text>
-        </AnimatedCard>
+        </LoginSection>
         <Text style={styles.note}>已同步的資料可離線查看，更新內容時仍需網路連線。</Text>
       </ScrollView>
     </Screen>
@@ -454,7 +514,15 @@ const createStyles = () =>
       gap: theme.layout.sectionGap,
     },
     intro: { gap: theme.space.sm, paddingVertical: theme.space.md },
-    eyebrow: { ...theme.typography.labelSmall, color: theme.colors.textSecondary },
+    schoolName: { ...theme.typography.label, color: theme.colors.textSecondary },
+    section: {
+      gap: theme.space.md,
+      paddingTop: theme.space.lg,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+    },
+    sectionHeader: { gap: theme.space.xs },
+    sectionTitle: { ...theme.typography.h3, color: theme.colors.text },
     heading: { ...theme.typography.h1, color: theme.colors.text },
     body: { ...theme.typography.body, color: theme.colors.textSecondary },
     fields: { gap: theme.space.md },
@@ -462,10 +530,10 @@ const createStyles = () =>
     sourceTitle: { ...theme.typography.labelSmall, color: theme.colors.textSecondary },
     resultPanel: {
       gap: theme.space.md,
-      padding: theme.space.md,
-      borderWidth: 1,
+      paddingVertical: theme.space.md,
+      borderTopWidth: 1,
+      borderBottomWidth: 1,
       borderColor: theme.colors.border,
-      borderRadius: theme.radius.md,
     },
     resultHeading: { flexDirection: 'row', alignItems: 'center', gap: theme.space.sm },
     resultRow: {
@@ -483,7 +551,7 @@ const createStyles = () =>
       paddingHorizontal: theme.space.md,
       paddingVertical: theme.space.sm,
       borderWidth: 1,
-      borderColor: theme.colors.border,
+      borderColor: theme.colors.muted,
       borderRadius: theme.radius.md,
       backgroundColor: theme.colors.bg,
       color: theme.colors.text,
@@ -494,19 +562,19 @@ const createStyles = () =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: theme.space.md,
-      padding: theme.space.md,
-      borderRadius: theme.radius.md,
-      backgroundColor: theme.colors.accentSoft,
+      paddingVertical: theme.space.md,
+      borderTopWidth: 1,
+      borderBottomWidth: 1,
+      borderColor: theme.colors.border,
     },
     statusContent: { flex: 1, minWidth: 0, gap: theme.space.xs },
     statusTitle: { ...theme.typography.label, color: theme.colors.text },
     errorPanel: {
       gap: theme.space.md,
-      padding: theme.space.md,
-      borderRadius: theme.radius.md,
-      borderWidth: 1,
+      paddingVertical: theme.space.md,
+      borderTopWidth: 1,
+      borderBottomWidth: 1,
       borderColor: theme.colors.danger,
-      backgroundColor: theme.colors.dangerSoft,
     },
     error: { ...theme.typography.bodySmall, color: theme.colors.danger },
   });

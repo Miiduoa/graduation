@@ -188,6 +188,52 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it('prepares a home task in place without sending an example or the initial draft', async () => {
+  const ask = vi.fn(() => reply('不應自動詢問'));
+  mockNuniAsk(ask);
+  render(
+    <AssistantEnabledProvider enabled>
+      <TodayAssistantDisclosure ref={createRef<TodayAssistantHandle>()} onOpenChange={vi.fn()} />
+    </AssistantEnabledProvider>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '下一堂課在哪，幾點' }));
+  const launcher = screen.getByRole<HTMLTextAreaElement>('textbox', { name: '今天想完成的事' });
+  expect(launcher.value).toBe('下一堂課在哪，幾點');
+  expect(document.activeElement).toBe(launcher);
+  expect(ask).not.toHaveBeenCalled();
+  fireEvent.submit(screen.getByRole('form', { name: '開始一個任務' }));
+  expect((await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '問題' })).value).toBe(
+    '下一堂課在哪，幾點',
+  );
+  expect(ask).not.toHaveBeenCalled();
+  expect(window.location.pathname).toBe('/');
+  expect(screen.getByRole('link', { name: '探索用法' }).getAttribute('href')).toContain(
+    'campus=pu',
+  );
+});
+
+it.each(['account', 'school', 'logout'])(
+  'clears a prepared home task when its %s boundary changes',
+  (boundary) => {
+    const component = () => (
+      <AssistantEnabledProvider enabled>
+        <TodayAssistantDisclosure ref={createRef<TodayAssistantHandle>()} onOpenChange={vi.fn()} />
+      </AssistantEnabledProvider>
+    );
+    const view = render(component());
+    fireEvent.change(screen.getByRole('textbox', { name: '今天想完成的事' }), {
+      target: { value: '上一個身分的安排' },
+    });
+    if (boundary === 'account') state.accountId = 'another-account';
+    else if (boundary === 'school') state.school = 'ncku';
+    else state.pendingLogout = true;
+    view.rerender(component());
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: '今天想完成的事' }).value).toBe(
+      '',
+    );
+  },
+);
+
 it('pins the default PU lesson UI fixture to a valid Thursday without faking async timers', () => {
   expect(saveTodayLesson()).toBe('今天有哪些課？');
   expect(new Date().toISOString()).toBe('2026-11-12T02:30:00.000Z');

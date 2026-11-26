@@ -362,11 +362,11 @@ export function CampusPersonalization({
       <div className={styles.heading}>
         <div>
           <h2 id={`${id}-title`}>
-            {editing || !preferences.configured ? '讓首頁更適合你' : '接下來可以做'}
+            {editing || !preferences.configured ? '首頁偏好' : '依偏好推薦的服務'}
           </h2>
           <p className={styles.intro}>
             {editing || !preferences.configured
-              ? '選擇年級與最近的重點，讓首頁接上你的日常。'
+              ? '依年級及近期要做的事，選擇首頁顯示的服務。'
               : summary}
           </p>
         </div>

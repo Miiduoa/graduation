@@ -4,6 +4,7 @@ import hashlib
 import http.server
 import json
 import threading
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
@@ -49,6 +50,123 @@ async def choose_date(page, date):
 
 def day_heading(page, date):
     return page.get_by_role('heading').filter(has_text=date)
+
+
+async def assert_keyboard_day_focus(page, key):
+    month_grid = page.get_by_role('region', name='2028-01 月格，週日起始')
+    date_button = month_grid.get_by_role('button', name='2028-01-01', exact=True)
+    await month_grid.focus()
+    await page.keyboard.press('Tab')
+    await expect(date_button).to_be_focused()
+    await page.keyboard.press(key)
+    await expect(date_button).to_have_attribute('aria-pressed', 'true')
+    heading = day_heading(page, '2028-01-01')
+    await expect(heading).to_be_in_viewport()
+    await expect(heading).to_be_focused()
+    await expect(date_button).not_to_be_in_viewport()
+    await page.keyboard.press('Tab')
+    day_list_button = page.get_by_role('button', name='查看整月列表', exact=True)
+    await expect(day_list_button).to_be_focused()
+    await expect(day_list_button).to_be_in_viewport()
+    await expect(date_button).not_to_be_in_viewport()
+
+
+async def assert_multiweek_titles(page, config, report):
+    title = '跨週行程標題用於驗收' * 20
+    narrow = config['width'] <= 540
+    if not narrow:
+        await page.set_viewport_size({'width': 541, 'height': config['height']})
+
+    await set_month(page, '2028-04')
+    grid = page.get_by_role('region', name='2028-04 月格，週日起始', exact=True)
+    long_events = grid.get_by_role('button', name=title, exact=True)
+    await expect(long_events).to_have_count(15)
+
+    async def title_lines(buttons):
+        return await buttons.evaluate_all("""buttons => buttons.map(button => {
+          const title = button.firstElementChild;
+          const lineHeight = parseFloat(getComputedStyle(title).lineHeight);
+          return {visible: title.clientHeight / lineHeight, full: title.scrollHeight / lineHeight};
+        })""")
+
+    lines = await title_lines(long_events)
+    if not narrow:
+        assert all(row['visible'] > 4 and row['visible'] == row['full'] for row in lines), lines
+        await page.set_viewport_size({'width': config['width'], 'height': config['height']})
+        report['checks'].append('At 541px, every multiweek event title wraps in full')
+        return
+
+    assert all(3.9 <= row['visible'] <= 4.1 and row['full'] > 4 for row in lines), lines
+    day = grid.get_by_role('button', name='2028-04-09', exact=True)
+    cell = day.locator('..')
+    long_event = cell.get_by_role('button', name=title, exact=True)
+    await cell.get_by_role('button', name='還有 1 筆', exact=True).click()
+    expanded, = await title_lines(long_event)
+    assert expanded['visible'] > 4 and expanded['visible'] == expanded['full'], expanded
+    await cell.get_by_role('button', name='傍晚討論', exact=True).click()
+    await expect(page.get_by_label('標題', exact=True)).to_have_value('傍晚討論')
+    await page.get_by_role('button', name='取消', exact=True).click()
+    await cell.get_by_role('button', name='收合', exact=True).click()
+    await long_event.click()
+    await expect(page.get_by_label('標題', exact=True)).to_have_value(title)
+    await page.get_by_role('button', name='取消', exact=True).click()
+
+    next_week = grid.get_by_role('button', name='2028-04-16', exact=True).locator('..')
+    for expanded_cell in (cell, next_week):
+        await expanded_cell.get_by_role('button', name='還有 1 筆', exact=True).click()
+        expanded, = await title_lines(expanded_cell.get_by_role('button', name=title, exact=True))
+        assert expanded['visible'] > 4 and expanded['visible'] == expanded['full'], expanded
+
+    await set_month(page, '2028-05')
+    await expect(page.get_by_role('region', name='2028-05 月格，週日起始', exact=True)).to_be_visible()
+    await set_month(page, '2028-04')
+    await expect(long_events).to_have_count(15)
+    for expanded_cell in (cell, next_week):
+        await expect(expanded_cell.get_by_role('button', name='還有 1 筆', exact=True)).to_have_attribute(
+            'aria-expanded', 'false')
+    lines = await title_lines(long_events)
+    assert all(3.9 <= row['visible'] <= 4.1 and row['full'] > 4 for row in lines), lines
+    report['checks'].append('Returning to a month restores all unselected titles to four-line previews')
+
+    await day.click()
+    await expect(day).to_have_attribute('aria-pressed', 'true')
+    heading = page.get_by_role('heading', name='2028-04-09 的行程', exact=True)
+    await expect(heading).to_be_in_viewport(ratio=1)
+    agenda_title = page.get_by_role('heading', name=title, exact=True)
+    await expect(agenda_title).to_be_in_viewport(ratio=0.1)
+    agenda = await agenda_title.evaluate("""title => ({
+      height: title.clientHeight, fullHeight: title.scrollHeight,
+      clamp: getComputedStyle(title).webkitLineClamp
+    })""")
+    assert agenda['height'] == agenda['fullHeight'] and agenda['clamp'] == 'none', agenda
+    selected, = await title_lines(long_event)
+    assert selected['visible'] > 4 and selected['visible'] == selected['full'], selected
+    remaining = await title_lines(long_events)
+    assert sum(row['visible'] > 4.1 for row in remaining) == 1, remaining
+    await day.click()
+    await expect(heading).to_be_in_viewport(ratio=1)
+    report['checks'].append('Narrow multiweek titles have bounded previews, expand in full, open directly and reveal the full day agenda on selection and reselection')
+
+    await long_event.click()
+    editor = page.get_by_role('region', name='編輯行程', exact=True)
+    draft = editor.get_by_label('標題', exact=True)
+    await draft.fill('保留尚未儲存的行程草稿')
+
+    other_day = grid.get_by_role('button', name='2028-04-17', exact=True)
+    other_heading = page.get_by_role('heading', name='2028-04-17 的行程', exact=True)
+    other_agenda_title = page.get_by_role(
+        'heading', name='跨校專題小組進度討論與期末成果展示準備', exact=True)
+    for _ in range(2):
+        await other_day.click()
+        await expect(other_day).to_have_attribute('aria-pressed', 'true')
+        await expect(other_heading).to_be_in_viewport(ratio=1)
+        await expect(other_agenda_title).to_be_in_viewport(ratio=1)
+        await expect(draft).to_have_value('保留尚未儲存的行程草稿')
+
+    page.once('dialog', lambda dialog: dialog.accept())
+    await editor.get_by_role('button', name='取消', exact=True).click()
+    await expect(editor).to_have_count(0)
+    report['checks'].append('Selecting another day and reselecting it reveal the full agenda title with a dirty editor still open')
 
 
 async def assert_complete_field_value(page, label, value, text, report):
@@ -104,23 +222,50 @@ async def assert_complete_field_value(page, label, value, text, report):
                 f'{label} text is clipped by an ancestor vertically: {state}')
 
 
-async def assert_selected_day_revealed(page, date, previous_scroll_y, report):
+async def assert_weekday_columns(page, date, report):
     button = page.get_by_role('button', name=date, exact=True)
     state = await button.evaluate('''button => {
       const viewport = button.closest('[role="region"]');
-      const outer = viewport.getBoundingClientRect();
-      const rect = button.getBoundingClientRect();
-      return {date: button.getAttribute('aria-label'),
-        left: rect.left, right: rect.right, width: rect.width,
-        visibleLeft: outer.left + viewport.clientLeft,
-        visibleRight: outer.left + viewport.clientLeft + viewport.clientWidth,
+      const grid = button.parentElement.parentElement;
+      const date = button.getAttribute('aria-label');
+      const column = new Date(date + 'T00:00:00Z').getUTCDay();
+      const sunday = grid.children[0].getBoundingClientRect();
+      const selected = grid.children[column].getBoundingClientRect();
+      const visibleLeft = viewport.getBoundingClientRect().left + viewport.clientLeft;
+      return {date, column, sundayLeft: sunday.left, sundayRight: sunday.right,
+        selectedLeft: selected.left, selectedRight: selected.right,
+        visibleLeft, visibleRight: visibleLeft + viewport.clientWidth,
         scrollLeft: viewport.scrollLeft, clientWidth: viewport.clientWidth,
-        scrollWidth: viewport.scrollWidth, windowScrollY: window.scrollY};
+        windowScrollY: window.scrollY};
     }''')
     report.setdefault('selectedDayVisibility', []).append(state)
-    assert state['width'] > 0, f'Selected day is not rendered: {state}'
-    assert state['left'] >= state['visibleLeft'] - 1 and state['right'] <= state['visibleRight'] + 1, (
-        f'Selected day is only partly visible after returning to month view: {state}')
+    assert state['sundayRight'] > state['sundayLeft']
+    assert state['sundayLeft'] >= state['visibleLeft'] - 1
+    assert state['sundayRight'] <= state['visibleRight'] + 1, f'Sunday column is clipped: {state}'
+    if state['selectedRight'] - state['sundayLeft'] <= state['clientWidth']:
+        assert state['selectedLeft'] >= state['visibleLeft'] - 1
+        assert state['selectedRight'] <= state['visibleRight'] + 1, (
+            f'The selected column fits with Sunday but is clipped: {state}')
+    else:
+        assert abs(state['visibleLeft'] - state['sundayLeft']) <= 1, (
+            f'The overflowing week should start at Sunday: {state}')
+    return state
+
+
+async def assert_date_horizontally_visible(button):
+    state = await button.evaluate('''button => {
+      const grid = button.closest('[role="region"]');
+      const gridLeft = grid.getBoundingClientRect().left + grid.clientLeft;
+      const {offsetLeft, width} = window.visualViewport;
+      const {left, right} = button.getBoundingClientRect();
+      return {left, right, visibleLeft: Math.max(gridLeft, offsetLeft),
+        visibleRight: Math.min(gridLeft + grid.clientWidth, offsetLeft + width)};
+    }''')
+    assert state['visibleLeft'] <= state['left'] < state['right'] <= state['visibleRight'], state
+
+
+async def assert_selected_day_revealed(page, date, previous_scroll_y, report):
+    state = await assert_weekday_columns(page, date, report)
     assert abs(state['windowScrollY'] - previous_scroll_y) <= 1, (
         f'Revealing the selected day unexpectedly scrolled the whole page: {previous_scroll_y} -> {state}')
     await expect(page.get_by_role('button', name='月格', exact=True)).to_be_focused()
@@ -227,8 +372,26 @@ async def run_scenario(browser, server_url, config):
 
     try:
         query = urlencode({key: config[key] for key in ('theme', 'text', 'motion') if key in config})
+        await page.clock.set_fixed_time(datetime.fromisoformat('2028-01-01T12:00:00+08:00'))
         await page.goto(server_url + '/?' + query)
         await expect(page.get_by_role('button', name='新增行程', exact=True)).to_be_enabled()
+        await set_month(page, '2027-12')
+        previous_grid = page.get_by_role('region', name='2027-12 月格，週日起始')
+        await previous_grid.evaluate('viewport => { viewport.scrollLeft = viewport.scrollWidth; }')
+        await page.get_by_role('button', name='回今天', exact=True).click()
+        today = page.get_by_role('button', name='2028-01-01', exact=True)
+        await expect(today).to_have_attribute('aria-current', 'date')
+        await expect(today).to_have_attribute('aria-pressed', 'true')
+        today_columns = await assert_weekday_columns(page, '2028-01-01', report)
+        assert today_columns['column'] == 6
+        if config.get('text') == '200':
+            today_grid = page.get_by_role('region', name='2028-01 月格，週日起始')
+            await today_grid.evaluate('viewport => { viewport.scrollLeft = viewport.scrollWidth; }')
+            await page.get_by_role('button', name='回今天', exact=True).click()
+            await assert_weekday_columns(page, '2028-01-01', report)
+        report['checks'].append('Returning from another month to Saturday preserves Sunday and shows the selected column as far as the viewport permits')
+
+        await assert_multiweek_titles(page, config, report)
         await set_month(page, '2028-01')
         await assert_month_controls_fit(page, report)
         await capture('month')
@@ -238,24 +401,43 @@ async def run_scenario(browser, server_url, config):
         await page.get_by_role('button', name='取消', exact=True).click()
         report['checks'].append('Creating without a selected day in another month defaults to that month, not today')
 
+        if config.get('text') == '200':
+            await assert_keyboard_day_focus(page, 'Enter')
+            await page.get_by_role('button', name='新增行程', exact=True).click()
+            title_input = page.get_by_label('標題', exact=True)
+            await title_input.fill('選日後保留的草稿')
+            await assert_keyboard_day_focus(page, 'Space')
+            await expect(title_input).to_have_value('選日後保留的草稿')
+            await choose_date(page, '2028-01-02')
+            await expect(day_heading(page, '2028-01-02')).to_be_in_viewport()
+            await expect(title_input).to_have_value('選日後保留的草稿')
+            accepted = await confirm_once(True)
+            await page.get_by_role('button', name='取消', exact=True).click()
+            await expect(title_input).to_have_count(0)
+            assert len(accepted) == 1
+            report['checks'].append('At 320px and 200% text, Enter and Space move focus into the visible day agenda and Tab stays there; keyboard and pointer selection preserve the open draft')
+
         await choose_date(page, '2028-01-18')
         await expect(day_heading(page, '2028-01-18')).to_be_visible()
         await expect(page.get_by_role('heading', name='小組討論與專題進度整理', exact=True)).to_be_visible()
         await expect(page.get_by_role('heading', name='實作報告繳交', exact=True)).to_be_visible()
         await page.get_by_role('button', name='列表', exact=True).click()
-        await expect(day_heading(page, '2028-01-18')).to_be_visible()
-        await expect(page.get_by_role('heading', name='月底整理', exact=True)).to_have_count(0)
+        await expect(page.get_by_role('list', name='個人行程列表', exact=True)).to_be_visible()
+        await expect(page.get_by_role('heading', name='小組討論與專題進度整理', exact=True)).to_be_visible()
+        await expect(page.get_by_role('heading', name='實作報告繳交', exact=True)).to_be_visible()
+        # Toolbar list clears the single-day filter, so other events in the month appear.
+        await expect(page.get_by_role('heading', name='月底整理', exact=True)).to_be_visible()
         month_control = page.get_by_role('button', name='月格', exact=True)
         await month_control.scroll_into_view_if_needed()
         await month_control.focus()
-        scroll_before_month = await page.evaluate('window.scrollY')
         await month_control.click()
+        await expect(page.get_by_role('button', name='2028-01-18', exact=True)).to_be_visible()
+        await expect(page.get_by_role('button', name='2028-01-18', exact=True)).not_to_have_attribute('aria-pressed', 'true')
+        report['checks'].append('Toolbar list clears the day filter, keeps the same month, and still shows that day\'s events plus the rest of the month')
+        # Re-select the day so later create checks still use 2028-01-18.
+        await choose_date(page, '2028-01-18')
         await expect(page.get_by_role('button', name='2028-01-18', exact=True)).to_have_attribute('aria-pressed', 'true')
-        report['checks'].append('Switching month/list preserves the chosen day and its personal events plus course deadlines')
-        # Do not click or focus the selected date first: that would let the
-        # browser repair the product's horizontal position and hide a regression.
-        await assert_selected_day_revealed(page, '2028-01-18', scroll_before_month, report)
-        report['checks'].append('Returning to month view fully reveals the selected day inside the horizontal viewport without taking focus from the view control')
+        report['checks'].append('Choosing the same day again after a cleared list filter restores the day agenda')
         await capture('day')
 
         await page.get_by_role('button', name='新增行程', exact=True).click()
@@ -345,6 +527,69 @@ async def run_scenario(browser, server_url, config):
         await expect(page.get_by_role('button', name='2028-02-29', exact=True)).to_have_attribute('aria-pressed', 'false')
         await page.keyboard.press('Enter')
         await expect(page.get_by_role('button', name='2028-02-29', exact=True)).to_have_attribute('aria-pressed', 'true')
+        await set_month(page, '2028-09')
+        await page.get_by_role('button', name='2028-09-28', exact=True).focus()
+        await page.keyboard.press('PageDown')
+        await expect(page.get_by_label('查看月份', exact=True)).to_have_value('2028-10')
+        saturday = page.get_by_role('button', name='2028-10-28', exact=True)
+        await expect(saturday).to_be_focused()
+        await assert_date_horizontally_visible(saturday)
+        await page.keyboard.press('Enter')
+        await expect(saturday).to_have_attribute('aria-pressed', 'true')
+        report['checks'].append('PageDown reveals and focuses the computed Saturday, and Enter selects it')
+        if config['name'] == 'desktop-light':
+            wednesday = page.get_by_role('button', name='2028-10-25', exact=True)
+            await wednesday.focus()
+            await wednesday.evaluate('button => button.scrollIntoView({block: "start"})')
+            cdp = await context.new_cdp_session(page)
+            try:
+                await cdp.send('Emulation.setPageScaleFactor', {'pageScaleFactor': 1.5})
+                await assert_date_horizontally_visible(wednesday)
+                assert await saturday.evaluate('''button => {
+                  const grid = button.closest('[role="region"]');
+                  const {offsetLeft, width} = window.visualViewport;
+                  return grid.scrollWidth === grid.clientWidth &&
+                    button.getBoundingClientRect().right > offsetLeft + width;
+                }'''), 'Pinch zoom must clip Saturday even though the month grid fits'
+                await page.keyboard.press('End')
+                await expect(saturday).to_be_focused()
+                await assert_date_horizontally_visible(saturday)
+                report['checks'].append('End pans the pinch-zoomed viewport before focusing Saturday')
+                heading = day_heading(page, '2028-10-28')
+                assert await heading.evaluate('''element =>
+                  element.getBoundingClientRect().left < window.visualViewport.offsetLeft
+                '''), 'The selected day heading must start outside the panned viewport'
+                await page.keyboard.press('Enter')
+                await expect(heading).to_be_focused()
+                assert await heading.evaluate('''element => {
+                  const {left, right, top, bottom} = element.getBoundingClientRect();
+                  const {offsetLeft, width, offsetTop, height} = window.visualViewport;
+                  return left >= offsetLeft && right <= offsetLeft + width &&
+                    top >= offsetTop && bottom <= offsetTop + height;
+                }'''), 'Focus must land on the visible day heading'
+                report['checks'].append('Selecting Saturday pans to the day heading before focusing it')
+
+                await saturday.evaluate('''button => button.scrollIntoView({
+                  block: "center", inline: "end", behavior: "instant"
+                })''')
+                assert await page.evaluate('window.visualViewport.offsetLeft > 0'), 'The viewport must be panned before opening the editor'
+                # Preserve the current pan while opening the editor.
+                await page.get_by_role('button', name='新增行程', exact=True).evaluate('button => button.click()')
+                title = page.get_by_label('標題', exact=True)
+                await expect(title).to_be_focused()
+                await page.wait_for_function('''() => {
+                  const {left, top, bottom} = document.activeElement.getBoundingClientRect();
+                  const viewport = window.visualViewport;
+                  return left >= viewport.offsetLeft && left < viewport.offsetLeft + viewport.width &&
+                    top >= viewport.offsetTop && bottom <= viewport.offsetTop + viewport.height;
+                }''')
+                report['checks'].append('Opening the editor from a panned viewport reveals the focused title')
+                await page.get_by_role('button', name='取消', exact=True).evaluate('button => button.click()')
+            finally:
+                await cdp.send('Emulation.setPageScaleFactor', {'pageScaleFactor': 1})
+                await cdp.detach()
+        await set_month(page, '2028-02')
+        await page.get_by_role('button', name='2028-02-29', exact=True).focus()
         await page.keyboard.press('ArrowRight')
         await expect(page.get_by_label('查看月份', exact=True)).to_have_value('2028-03')
         await expect(page.get_by_role('button', name='2028-03-01', exact=True)).to_be_focused()

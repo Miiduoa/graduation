@@ -27,6 +27,8 @@ import { isDemoUid } from '../../services/demoSession';
 import { useCampusSocialStackNav } from './CampusSocialNavContext';
 import { StoryAudiencePanel } from './StoryAudiencePanel';
 import { StoryReplyPanel } from './StoryReplyPanel';
+import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 
 const STORY_DURATION = 7000;
 
@@ -184,6 +186,7 @@ function StorySlide({
   nextAuthorId,
   selectStory,
 }: SlideProps) {
+  const styles = useThemeStyleSheet(createStyles);
   const [panelFor, setPanelFor] = useState<string | null>(null);
   const navigation = useCampusSocialStackNav();
   const [receipt, setReceipt] = useState<{ scope: string; conversationId: string } | null>(null);
@@ -426,7 +429,7 @@ function StorySlide({
             style={styles.audienceButton}
             onPress={() => setPanelFor(scope)}
           >
-            <Ionicons name="eye-outline" color="#b8e7d4" size={18} />
+            <Ionicons name="eye-outline" color="white" size={18} />
             <Text style={styles.stepText}>誰看過</Text>
           </Pressable>
         ) : (
@@ -457,7 +460,7 @@ function StorySlide({
                 style={styles.replyButton}
                 onPress={() => setPanelFor(scope)}
               >
-                <Ionicons name="chatbubble-outline" color="#b8e7d4" size={16} />
+                <Ionicons name="chatbubble-outline" color="white" size={16} />
                 <Text accessibilityLiveRegion="polite" style={styles.stepText}>
                   {receipt?.scope === scope ? '再回覆' : '私訊回覆'}
                 </Text>
@@ -502,7 +505,7 @@ function StorySlide({
       )}
       {inspecting && (
         <View
-          style={[styles.shell, safeArea]}
+          style={[styles.audienceShell, safeArea]}
           accessibilityViewIsModal
           onAccessibilityEscape={back}
         >
@@ -526,6 +529,7 @@ function StoryClip({
   onEnd: () => void;
   onPause: () => void;
 }) {
+  const styles = useThemeStyleSheet(createStyles);
   const [muted, setMuted] = useState(true);
   const [failed, setFailed] = useState(false);
   const [durationSeconds, setDurationSeconds] = useState(0);
@@ -620,91 +624,97 @@ function StoryClip({
   );
 }
 
-const styles = StyleSheet.create({
-  shell: { flex: 1, paddingHorizontal: 12, backgroundColor: '#0b0d0d' },
-  progress: { flexDirection: 'row', gap: 4 },
-  segment: { height: 3, flex: 1, borderRadius: 3, backgroundColor: '#4a4e4d' },
-  seen: { backgroundColor: '#fff' },
-  current: { backgroundColor: '#929b98' },
-  fill: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#fff',
-    transformOrigin: 'left center',
-  },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6 },
-  identity: { flex: 1, paddingLeft: 4 },
-  author: { color: '#fff', fontWeight: '700', fontSize: 17 },
-  counter: { color: '#c2cbc8', fontSize: 13 },
-  iconButton: { width: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  canvas: { flex: 1, overflow: 'hidden', borderRadius: 16, backgroundColor: '#000' },
-  clipTools: {
-    position: 'absolute',
-    bottom: 8,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#242928',
-    borderRadius: 22,
-    paddingLeft: 12,
-  },
-  clipTime: { color: '#fff', fontSize: 13, fontVariant: ['tabular-nums'] },
-  sound: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  clipStatus: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  photo: { width: '100%', height: '100%' },
-  photoRetry: { alignSelf: 'center', marginTop: 16 },
-  captionRead: { alignSelf: 'flex-start', marginBottom: 4 },
-  centerText: { flexGrow: 1, justifyContent: 'center', padding: 24 },
-  storyText: {
-    color: 'white',
-    fontWeight: '700',
-    textAlign: 'center',
-    fontSize: 22,
-    lineHeight: 32,
-  },
-  tapZone: { position: 'absolute', top: 0, bottom: 0, width: '24%' },
-  details: { flexGrow: 0, maxHeight: '30%' },
-  detailContent: { gap: 4, paddingHorizontal: 4, paddingTop: 8 },
-  caption: { color: '#fff', fontSize: 16, lineHeight: 23 },
-  controls: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 8, gap: 8 },
-  step: {
-    minHeight: 44,
-    paddingHorizontal: 12,
-    borderRadius: 22,
-    backgroundColor: '#242928',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  hidden: { display: 'none' },
-  replyActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 8,
-  },
-  replyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    minHeight: 44,
-    paddingHorizontal: 14,
-    backgroundColor: '#20342d',
-    borderRadius: 22,
-  },
-  audienceNotice: { color: '#c2cbc8', fontSize: 13 },
-  audienceButton: {
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 8,
-    borderRadius: 12,
-    backgroundColor: '#20342d',
-  },
-  disabled: { opacity: 0.4 },
-  stepText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-});
+// The shell, canvas, and playback overlays are the media stage: black with white controls
+// in every theme so they stay legible over any photo or video. Only the audience sheet
+// below the stage follows the project theme.
+const createStyles = () =>
+  StyleSheet.create({
+    shell: { flex: 1, paddingHorizontal: 12, backgroundColor: '#000' },
+    audienceShell: { flex: 1, paddingHorizontal: 12, backgroundColor: theme.colors.bg },
+    progress: { flexDirection: 'row', gap: 4 },
+    segment: { height: 3, flex: 1, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.28)' },
+    seen: { backgroundColor: '#fff' },
+    current: { backgroundColor: 'rgba(255,255,255,0.5)' },
+    fill: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: '#fff',
+      transformOrigin: 'left center',
+    },
+    header: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6 },
+    identity: { flex: 1, paddingLeft: 4 },
+    author: { color: '#fff', fontWeight: '700', fontSize: 17 },
+    counter: { color: 'rgba(255,255,255,0.78)', fontSize: 13 },
+    iconButton: { width: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+    canvas: { flex: 1, overflow: 'hidden', borderRadius: 16, backgroundColor: '#000' },
+    clipTools: {
+      position: 'absolute',
+      bottom: 8,
+      alignSelf: 'center',
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'rgba(0,0,0,0.64)',
+      borderRadius: 22,
+      paddingLeft: 12,
+    },
+    clipTime: { color: '#fff', fontSize: 13, fontVariant: ['tabular-nums'] },
+    sound: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+    clipStatus: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+    photo: { width: '100%', height: '100%' },
+    photoRetry: { alignSelf: 'center', marginTop: 16 },
+    captionRead: { alignSelf: 'flex-start', marginBottom: 4 },
+    centerText: { flexGrow: 1, justifyContent: 'center', padding: 24 },
+    storyText: {
+      color: 'white',
+      fontWeight: '700',
+      textAlign: 'center',
+      fontSize: 22,
+      lineHeight: 32,
+    },
+    tapZone: { position: 'absolute', top: 0, bottom: 0, width: '24%' },
+    details: { flexGrow: 0, maxHeight: '30%' },
+    detailContent: { gap: 4, paddingHorizontal: 4, paddingTop: 8 },
+    caption: { color: '#fff', fontSize: 16, lineHeight: 23 },
+    controls: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginTop: 8,
+      gap: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: 'rgba(255,255,255,0.24)',
+    },
+    step: {
+      minHeight: 44,
+      paddingHorizontal: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    hidden: { display: 'none' },
+    replyActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: 6,
+      marginTop: 8,
+    },
+    replyButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      minHeight: 44,
+      paddingHorizontal: 8,
+    },
+    audienceNotice: { color: 'rgba(255,255,255,0.78)', fontSize: 13 },
+    audienceButton: {
+      minHeight: 44,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      marginTop: 8,
+    },
+    disabled: { opacity: 0.4 },
+    stepText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  });

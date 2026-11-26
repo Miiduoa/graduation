@@ -1,5 +1,20 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import { useColorScheme } from 'react-native';
+import {
+  readAppearanceMode,
+  writeAppearanceMode,
+  type AppearanceMode,
+} from './appearancePreference';
 import {
   applyTheme,
   applySchoolTheme,
@@ -15,59 +30,49 @@ import {
 type ThemeContextValue = {
   mode: ThemeMode;
   theme: Theme;
-  setMode: (m: ThemeMode) => void;
+  appearanceMode: AppearanceMode;
+  setMode: (m: AppearanceMode) => void;
   toggleMode: () => void;
   setSchoolTheme: (schoolId: string, fallbackAccent?: string) => void;
   clearSchool: () => void;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
-const STORAGE_KEY = 'campus.themeMode.v2';
 
 export function ThemeProvider(props: { children: React.ReactNode }) {
-  const [loaded, setLoaded] = useState(false);
-  const [currentTheme, setCurrentTheme] = useState<Theme>(getCurrentTheme);
+  const systemMode = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>('system');
+  const currentTheme = useSyncExternalStore(subscribeToTheme, getCurrentTheme, getCurrentTheme);
+  const userSelected = useRef(false);
+  const resolved = appearanceMode === 'system' ? systemMode : appearanceMode;
+
+  useLayoutEffect(() => {
+    applyTheme(resolved);
+  }, [resolved]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (cancelled) return;
-
-        const savedMode = raw === 'dark' || raw === 'light' ? raw : 'light';
-        applyTheme(savedMode);
-        setCurrentTheme(getCurrentTheme());
-      } catch (e) {
-        console.warn('[theme] Failed to load theme preference:', e);
-        applyTheme('light');
-        setCurrentTheme(getCurrentTheme());
-      } finally {
-        if (!cancelled) setLoaded(true);
-      }
-    })();
-
+    let active = true;
+    readAppearanceMode()
+      .then((saved) => {
+        if (active && !userSelected.current) setAppearanceMode(saved);
+      })
+      .catch((error) => console.warn('[theme] Failed to load theme preference:', error));
     return () => {
-      cancelled = true;
+      active = false;
     };
   }, []);
 
-  useEffect(() => {
-    const unsubscribe = subscribeToTheme((theme) => {
-      setCurrentTheme(theme);
-    });
-    return unsubscribe;
-  }, []);
-
-  const setMode = useCallback((m: ThemeMode) => {
-    applyTheme(m);
+  const setMode = useCallback((next: AppearanceMode) => {
+    userSelected.current = true;
+    setAppearanceMode(next);
+    writeAppearanceMode(next).catch((error) =>
+      console.warn('[theme] Failed to save theme preference:', error),
+    );
   }, []);
 
   const toggleMode = useCallback(() => {
-    const newMode = currentTheme.mode === 'dark' ? 'light' : 'dark';
-    applyTheme(newMode);
-  }, [currentTheme.mode]);
+    setMode(currentTheme.mode === 'dark' ? 'light' : 'dark');
+  }, [currentTheme.mode, setMode]);
 
   const setSchoolTheme = useCallback((schoolId: string, fallbackAccent?: string) => {
     applySchoolTheme(schoolId, fallbackAccent);
@@ -77,26 +82,24 @@ export function ThemeProvider(props: { children: React.ReactNode }) {
     clearSchoolTheme();
   }, []);
 
-  useEffect(() => {
-    if (!loaded) return;
-    AsyncStorage.setItem(STORAGE_KEY, currentTheme.mode).catch((e) => {
-      console.warn('[theme] Failed to save theme preference:', e);
-    });
-  }, [loaded, currentTheme.mode]);
-
   const value = useMemo<ThemeContextValue>(
     () => ({
       mode: currentTheme.mode,
+      appearanceMode,
       theme: currentTheme,
       setMode,
       toggleMode,
       setSchoolTheme,
       clearSchool,
     }),
-    [currentTheme, setMode, toggleMode, setSchoolTheme, clearSchool],
+    [currentTheme, appearanceMode, setMode, toggleMode, setSchoolTheme, clearSchool],
   );
 
   return <ThemeContext.Provider value={value}>{props.children}</ThemeContext.Provider>;
+}
+
+export function useOptionalThemeMode() {
+  return useContext(ThemeContext);
 }
 
 export function useThemeMode() {

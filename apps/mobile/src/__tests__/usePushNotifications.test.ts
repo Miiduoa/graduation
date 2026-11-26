@@ -153,6 +153,20 @@ test('hook handleResponse passes the live schoolId from SchoolNavigation args', 
 });
 
 test.each([
+  { type: 'assignment_submission', groupId: 'course', assignmentId: 'work' },
+  { type: 'feedback', groupId: 'course', assignmentId: 'work' },
+  { type: 'order', orderId: 'order' },
+  { type: 'announcement', announcementId: 'a' },
+  { type: 'package', channel: 'dormitory' },
+])('an out-of-school $type tap only opens the inbox', (data) => {
+  const real = jest.requireActual('../utils/notificationDestination') as typeof import('../utils/notificationDestination');
+  mockResolve.mockImplementation(real.resolveNotificationDestination);
+  expect(navigateFromNotificationData({ ...data, schoolId: 'nthu' }, 'student', 'pu')).toBe(false);
+  expect(mockRootNavigateNested).toHaveBeenCalledWith('訊息', 'Notifications');
+  expect(mockApply).not.toHaveBeenCalled();
+});
+
+test.each([
   { type: 'personal_event_reminder_v1', v: 1, t: 'tok', g: 1 },
   { category: 'personal_class_occurrence', courseId: 'manual:c1' },
 ])('personal local reminder payloads are ignored before dedup navigation and clear', async (data) => {

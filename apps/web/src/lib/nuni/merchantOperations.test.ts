@@ -90,6 +90,19 @@ it('keeps minimal legacy merchant lists compatible while requiring complete oper
   expect(parseMerchantWorkspaceDetail(detail, identity)).toEqual(detail);
 });
 
+it.each([null, 0, '1'])(
+  'ignores an invalid list readiness version %s without dropping other stores',
+  (readinessVersion) => {
+    const valid = { ...legacy, locationId: 'other-location', readinessVersion: 2 };
+    expect(
+      parseMerchantWorkspaces({ workspaces: [{ ...legacy, readinessVersion }, valid] }),
+    ).toEqual([legacy, valid]);
+    expect(() => parseMerchantWorkspaceDetail({ ...detail, readinessVersion })).toThrowError(
+      NuniError,
+    );
+  },
+);
+
 it.each(Object.keys(detail))('rejects an incomplete detail missing %s', (key) => {
   const incomplete = { ...detail } as Record<string, unknown>;
   delete incomplete[key];

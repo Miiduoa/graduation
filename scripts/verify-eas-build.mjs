@@ -1,3 +1,4 @@
+/* global console, process, URL */
 import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
@@ -12,6 +13,14 @@ export function verifyReleaseRequest(env) {
     throw new Error('BUILD_PROFILE must be preview, production or production-device');
   if (!['ios', 'android', 'all'].includes(env.BUILD_PLATFORM))
     throw new Error('BUILD_PLATFORM must be ios, android or all');
+  if (env.BUILD_ONLY_SHA) {
+    if (!/^[0-9a-f]{40}$/.test(env.BUILD_ONLY_SHA) || env.BUILD_ONLY_SHA !== env.GITHUB_SHA)
+      throw new Error(
+        'Build-only request does not match the exact source commit selected by GitHub.',
+      );
+    if (env.BUILD_PROFILE !== 'production' || env.SUBMIT_TO_STORE !== 'false')
+      throw new Error('Build-only requests require production with store submission disabled.');
+  }
   if (env.BUILD_PROFILE === 'production-device') {
     if (env.BUILD_PLATFORM !== 'android')
       throw new Error('production-device is only available for Android APK acceptance.');

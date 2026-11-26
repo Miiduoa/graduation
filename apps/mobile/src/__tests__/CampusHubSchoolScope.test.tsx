@@ -1,5 +1,6 @@
 import React from 'react';
-import { fireEvent, render } from '@testing-library/react-native';
+import { Dimensions } from 'react-native';
+import { act, fireEvent, render } from '@testing-library/react-native';
 import { CampusHubScreen } from '../screens/CampusHubScreen';
 import { safeNavigate } from '../utils/safeNavigate';
 
@@ -20,7 +21,6 @@ jest.mock('../state/theme', () => ({ useTheme: () => require('../ui/theme').them
 jest.mock('../components/HeaderAvatarButton', () => ({ HeaderAvatarButton: () => null }));
 jest.mock('../components/OpenOrderCard', () => ({ OpenOrderCard: () => null }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
-jest.mock('../ui/AppActionIcon', () => ({ AppActionIcon: () => null }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 
 beforeEach(() => {
@@ -116,6 +116,29 @@ test('frequent services open their actual routes without duplicate map entries',
     undefined,
     expect.any(Object),
   );
+});
+
+test('常用捷徑隨字級改用含說明的列表，保留朗讀名稱與導覽', () => {
+  const previous = { window: Dimensions.get('window'), screen: Dimensions.get('screen') };
+  const resize = (width: number, fontScale: number) => {
+    const window = { ...previous.window, width, fontScale };
+    act(() => Dimensions.set({ window, screen: window }));
+  };
+  try {
+    resize(390, 1);
+    const navigation = { navigate: jest.fn() };
+    const view = render(<CampusHubScreen navigation={navigation} />);
+    const name = '校園地圖，找大樓與教室';
+    expect(view.getByRole('button', { name })).toBeTruthy();
+    expect(view.queryByText('找大樓與教室')).toBeNull();
+
+    resize(320, 2);
+    expect(view.getByText('找大樓與教室')).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name }));
+    expect(safeNavigate).toHaveBeenCalledWith(navigation, 'MapV2', undefined, expect.any(Object));
+  } finally {
+    act(() => Dimensions.set(previous));
+  }
 });
 
 test.each(['社團', '入社', '幹部', '社課'])(

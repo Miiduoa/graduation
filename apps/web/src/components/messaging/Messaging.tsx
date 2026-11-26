@@ -17,6 +17,9 @@ import {
   type ReactNode,
 } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
+import { schoolLoginHref } from '@/lib/navigation';
 import { findSchoolById } from '@campus/shared/src/schools';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
@@ -150,6 +153,7 @@ export function MessagingShell({
   children: (session: MessagingSession) => ReactNode;
 }) {
   const { user, loading } = useAuth();
+  const campusSearch = useCampusNavigationSearch(useSearchParams());
   const uid = !loading ? (user?.uid ?? '') : '';
   const subscribe = useCallback(
     (receive: (session: MessagingSession) => void, fail: (reason: MessagingFailure) => void) => {
@@ -172,10 +176,10 @@ export function MessagingShell({
     >
       <div className={styles.stack}>
         <nav className={styles.tabs} aria-label="訊息導覽">
-          <Link href="/dms" aria-current={section === 'conversations' ? 'page' : undefined}>
+          <Link href={campusServiceHref('/dms', campusSearch)} aria-current={section === 'conversations' ? 'page' : undefined}>
             訊息
           </Link>
-          <Link href="/messages" aria-current={section === 'notifications' ? 'page' : undefined}>
+          <Link href={campusServiceHref('/messages', campusSearch)} aria-current={section === 'notifications' ? 'page' : undefined}>
             通知
           </Link>
         </nav>
@@ -187,7 +191,9 @@ export function MessagingShell({
             <p>校內訊息只提供已確認學校身分、且具備對話或通知存取資格的成員。Google 平台登入不會自動連結校內帳號或讀取私人對話。</p>
             <Link
               className={styles.primary}
-              href={`/login?reconnect=school&returnUrl=${encodeURIComponent(returnUrl ?? (section === 'notifications' ? '/messages' : '/dms'))}`}
+              href={schoolLoginHref(campusServiceHref(
+                returnUrl ?? (section === 'notifications' ? '/messages' : '/dms'), campusSearch,
+              ))}
             >
               連結學校帳號
             </Link>

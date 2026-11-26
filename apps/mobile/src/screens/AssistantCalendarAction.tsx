@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import {
-  assistantCalendarOwner, confirmAssistantCalendarTask, recheckAssistantCalendarTask,
+  assistantCalendarOwner, confirmAssistantCalendarTask, hasAssistantCalendarAvailabilityCheck, recheckAssistantCalendarTask,
   type AssistantCalendarContext, type AssistantCalendarTask,
 } from '../services/assistantCalendarExecution';
 import { mobileAssistantServiceDestination } from '../services/assistantServiceNavigation';
 import { safeNavigate } from '../utils/safeNavigate';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
+import { useAssistantContinuation } from '../services/assistantContinuation';
 
 /** The conversation owns the state, including the receipt after the next turn. */
 export function AssistantCalendarAction({ task, context, navigation, disabled, onChange }: {
@@ -23,6 +24,7 @@ export function AssistantCalendarAction({ task, context, navigation, disabled, o
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const current = () => active.current && context.isCurrent() &&
     assistantCalendarOwner(context) === task.proposal.owner && context.schoolId === task.proposal.schoolId;
+  const openWithContinuation = useAssistantContinuation(navigation, current);
   const execute = async (action: 'confirm' | 'check') => {
     if (disabled || lock.current || !current() ||
         (action === 'confirm' ? task.state !== 'review' : task.state !== 'unknown' && task.state !== 'verified')) return;
@@ -51,7 +53,7 @@ export function AssistantCalendarAction({ task, context, navigation, disabled, o
     // that the same event exists there; only the registered local screen is used.
     const target = mobileAssistantServiceDestination('calendar', context.platformTimetable ? 'platform' : 'campus', navigation);
     if (target?.kind !== 'native' || target.route !== 'PersonalCalendar' ||
-        !safeNavigate(navigation, 'PersonalCalendar', { eventId: task.receipt.record.id }, { fallbackMessage: null })) {
+        !openWithContinuation(() => safeNavigate(navigation, 'PersonalCalendar', { eventId: task.receipt.record.id }, { fallbackMessage: null }))) {
       setError('目前無法從此頁開啟行事曆。行程已保存，可從個人行事曆查看。');
     }
   };
@@ -65,7 +67,9 @@ export function AssistantCalendarAction({ task, context, navigation, disabled, o
     {event.location ? <Text style={{ color: aiTokens.textSecondary }}>地點：{event.location}</Text> : null}
     {task.state === 'review' ? <>
       <Text style={{ color: aiTokens.textSecondary, lineHeight: 23 }}>
-        確認後會加入目前帳號與學校的個人行事曆，並檢查這台手機的個人行程是否重疊。課表與校方排程仍請另外核對。
+        {hasAssistantCalendarAvailabilityCheck(task.proposal)
+          ? '確認時會重新核對權限、這台手機已儲存的課表與個人行程。時段仍可用才會存入你的個人行事曆。'
+          : '確認後會加入目前帳號與學校的個人行事曆，並檢查這台手機的個人行程是否重疊。課表與校方排程仍請另外核對。'}
       </Text>
       <AIButton label="確認加入個人行事曆" disabled={disabled} onPress={() => void execute('confirm')} />
       <AIButton label="先不要" variant="ghost" disabled={disabled} onPress={() => {

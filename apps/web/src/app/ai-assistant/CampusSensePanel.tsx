@@ -62,8 +62,7 @@ export function CampusSensePanel({ userId, schoolId, revision, onAsk }: Props) {
     <section className={styles.sense} aria-label="個人校園情境">
       <div className={styles.senseHeader}>
         <div>
-          <span className={styles.eyebrow}>校園情境</span>
-          <h2>先看今天值得注意的事</h2>
+          <h2>今日課務與公告</h2>
           <p>僅整理已授權、實際讀取到的資料；沒有連線的服務會另外標示。</p>
         </div>
         <button

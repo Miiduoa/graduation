@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { usePrivateMedia } from '@/lib/usePrivateMedia';
 import { openModalSession } from '@/components/ui/modalSession';
@@ -38,12 +38,13 @@ export function StoryViewer({
   const story = viewer.group.stories[viewer.index]!;
   const scope = JSON.stringify([viewer.viewerUid, story.schoolId, story.authorUid, story.id]);
   const readingFocused = readingScope === scope;
-  const onMediaFailure = useCallback(() => setFailedScope(scope), [scope]);
-  const mediaUrl = usePrivateMedia(story.mediaUrl, onMediaFailure);
+  const { url: mediaUrl, loading: loadingMedia } = usePrivateMedia(story.mediaUrl, scope);
+  const mediaVersion = JSON.stringify([scope, mediaUrl]);
   const photo = story.kind === 'image' && !!story.mediaUrl;
   const video = story.kind === 'video';
   const media = photo || video;
-  const failedVideo = video && (!mediaUrl || failedScope === scope);
+  const mediaFailed = failedScope === mediaVersion || (!loadingMedia && !mediaUrl);
+  const videoUnavailable = video && (!mediaUrl || mediaFailed);
   const canReply =
     story.allowReplies !== false &&
     !!viewer.viewerUid &&
@@ -58,7 +59,7 @@ export function StoryViewer({
     !hidden &&
     !readingFocused &&
     !video &&
-    (!photo || loadedScope === scope || failedScope === scope);
+    (!photo || loadedScope === mediaVersion || mediaFailed);
   const onNext = useRef(viewer.next);
   useEffect(() => {
     onNext.current = viewer.next;
@@ -111,7 +112,7 @@ export function StoryViewer({
       live = false;
       document.removeEventListener('visibilitychange', sync);
     };
-  }, [auto, panelOpen, readingFocused, failedVideo, scope]);
+  }, [auto, panelOpen, readingFocused, videoUnavailable, scope]);
 
   useEffect(() => {
     remaining.current = DWELL_MS;
@@ -266,7 +267,11 @@ export function StoryViewer({
             }
           }}
         >
-          {video && mediaUrl && failedScope !== scope ? (
+          {media && loadingMedia ? (
+            <p role="status" className={styles.unavailable}>
+              {video ? '正在載入影片…' : '正在載入照片…'}
+            </p>
+          ) : video && mediaUrl && !mediaFailed ? (
             <video
               key={scope}
               ref={videoElement}
@@ -288,7 +293,7 @@ export function StoryViewer({
                 if (auto && !panelOpen && !readingFocused && !document.hidden) viewer.next();
               }}
               onError={() => {
-                setFailedScope(scope);
+                setFailedScope(mediaVersion);
                 setAuto(false);
               }}
             />
@@ -296,7 +301,7 @@ export function StoryViewer({
             <p role="status" className={styles.unavailable}>
               這段影片暫時無法播放。
             </p>
-          ) : photo && failedScope !== scope ? (
+          ) : photo && mediaUrl && !mediaFailed ? (
             <Image
               unoptimized
               loading="eager"
@@ -304,13 +309,13 @@ export function StoryViewer({
               height={1600}
               key={scope}
               className={styles.photo}
-              src={mediaUrl!}
+              src={mediaUrl}
               alt="限時動態照片"
-              onLoad={() => setLoadedScope(scope)}
-              onError={() => setFailedScope(scope)}
+              onLoad={() => setLoadedScope(mediaVersion)}
+              onError={() => setFailedScope(mediaVersion)}
             />
           ) : photo ? (
-            <p className={styles.unavailable}>照片暫時無法顯示</p>
+            <p role="status" className={styles.unavailable}>照片暫時無法顯示</p>
           ) : null}
           {!!story.text && (
             <p
@@ -352,7 +357,7 @@ export function StoryViewer({
           )}
           {!viewer.isOwner && <small className={styles.receiptNotice}>作者可查看誰看過</small>}
           {story.poiName && <span className={styles.location}>{story.poiName}</span>}
-          {video && !failedVideo && autoPlaybackErrorScope === scope && (
+          {video && !videoUnavailable && autoPlaybackErrorScope === scope && (
             <p role="status" className={styles.playbackNotice}>
               影片無法自動播放，請使用影片控制項手動播放。
             </p>
@@ -364,7 +369,7 @@ export function StoryViewer({
             <button
               type="button"
               aria-pressed={auto}
-              disabled={failedVideo}
+              disabled={videoUnavailable && !auto}
               onClick={() => {
                 // Keep the student's latest playback choice, but defer playing until reading ends.
                 setAutoPlaybackErrorScope(null);

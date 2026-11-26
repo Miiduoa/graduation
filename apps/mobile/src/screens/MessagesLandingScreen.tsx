@@ -1,19 +1,26 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MESSAGING_NAV_SECTIONS } from '@campus/shared/src/academicSections';
 import { DmsScreen } from './DmsScreen';
 import { theme } from '../ui/theme';
+import { pageTitleFont } from '../ui/styles';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { safeNavigate } from '../utils/safeNavigate';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
 
 const NOTIFY_SECTION = MESSAGING_NAV_SECTIONS[0];
 
+/** Above this text scale (or on short screens) the header gives room back to the inbox. */
+const COMPACT_FONT_SCALE = 1.25;
+const COMPACT_HEIGHT = 640;
+
 export function MessagesLandingScreen({ navigation }: ServiceScreenProps) {
   const s = useThemeStyleSheet(createStyles);
   const insets = useSafeAreaInsets();
+  const { fontScale, height } = useWindowDimensions();
+  const compact = fontScale > COMPACT_FONT_SCALE || height < COMPACT_HEIGHT;
   const actions = [
     {
       label: '校園社群',
@@ -43,31 +50,53 @@ export function MessagesLandingScreen({ navigation }: ServiceScreenProps) {
 
   return (
     <View style={s.page}>
-      <View style={[s.header, { paddingTop: Math.max(insets.top, 8) + 10 }]}>
-        <Text accessibilityRole="header" style={s.title}>
+      <View
+        style={[
+          s.header,
+          { paddingTop: Math.max(insets.top, 8) + (compact ? 4 : 10) },
+        ]}
+      >
+        <Text
+          accessibilityRole="header"
+          maxFontSizeMultiplier={1.4}
+          style={[s.title, compact && s.titleCompact]}
+        >
           交流
         </Text>
-        <Text style={s.subtitle}>聊近況、找同學，接續你的對話。</Text>
-        <View style={s.actions}>
-          {actions.map((action) => (
-            <Pressable
-              key={action.label}
-              accessibilityRole="button"
-              accessibilityLabel={action.accessibilityLabel}
-              onPress={action.onPress}
-              style={({ pressed }) => [s.action, pressed && s.pressed]}
-            >
-              <Ionicons name={action.icon} size={20} color={theme.colors.accent} />
-              <Text style={s.actionLabel}>{action.label}</Text>
-              <Ionicons name="chevron-forward" size={14} color={theme.colors.muted} />
-            </Pressable>
-          ))}
-        </View>
+      </View>
+      {/* The directory is one scrolling row, so its height never grows with text size. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={s.directory}
+        contentContainerStyle={s.directoryContent}
+        accessibilityLabel="交流入口"
+      >
+        {actions.map((action) => (
+          <Pressable
+            key={action.label}
+            accessibilityRole="button"
+            accessibilityLabel={action.accessibilityLabel}
+            onPress={action.onPress}
+            style={({ pressed }) => [s.action, pressed && s.pressed]}
+          >
+            {compact ? null : (
+              <Ionicons name={action.icon} size={18} color={theme.colors.accent} />
+            )}
+            <Text style={s.actionLabel} numberOfLines={1}>
+              {action.label}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+      {compact ? null : (
         <Text accessibilityRole="header" style={s.inboxHeading}>
           私訊
         </Text>
+      )}
+      <View style={s.inbox}>
+        <DmsScreen navigation={navigation} />
       </View>
-      <DmsScreen navigation={navigation} />
     </View>
   );
 }
@@ -75,32 +104,44 @@ export function MessagesLandingScreen({ navigation }: ServiceScreenProps) {
 const createStyles = () =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: theme.colors.bg },
-    header: { paddingHorizontal: 18, paddingBottom: 8 },
-    title: { fontSize: 28, fontWeight: '700', letterSpacing: -0.6, color: theme.colors.text },
-    subtitle: { color: theme.colors.textSecondary, marginTop: 6, lineHeight: 20, fontSize: 13 },
-    actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 },
+    header: { paddingHorizontal: 18, paddingBottom: 4 },
+    title: {
+      fontFamily: pageTitleFont,
+      fontSize: 30,
+      lineHeight: 38,
+      fontWeight: '800',
+      letterSpacing: 0,
+      color: theme.colors.text,
+    },
+    titleCompact: { fontSize: 24, lineHeight: 30 },
+    directory: {
+      flexGrow: 0,
+      flexShrink: 0,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
+    },
+    directoryContent: { paddingHorizontal: 10, gap: 4, alignItems: 'center' },
     action: {
-      flexBasis: '45%',
-      flexGrow: 1,
-      minWidth: 130,
-      minHeight: 52,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
+      minHeight: 44,
+      paddingHorizontal: 10,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.surface,
+      gap: 6,
     },
     actionLabel: {
-      flex: 1,
       color: theme.colors.text,
       fontWeight: '600',
       fontSize: 14,
       lineHeight: 20,
     },
-    inboxHeading: { color: theme.colors.text, fontWeight: '600', fontSize: 17, marginTop: 18 },
+    inboxHeading: {
+      color: theme.colors.textSecondary,
+      fontWeight: '700',
+      fontSize: 13,
+      lineHeight: 18,
+      paddingHorizontal: 18,
+      paddingTop: 12,
+    },
+    inbox: { flex: 1, minHeight: 0 },
     pressed: { backgroundColor: theme.colors.surfaceInteractive },
   });

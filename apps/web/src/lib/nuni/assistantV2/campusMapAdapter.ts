@@ -1,9 +1,11 @@
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { collection, getDocsFromServer, limit, query, where } from 'firebase/firestore';
 import { getOfficialCampusMapUrl } from '@campus/shared/src/campusMapLookup';
 import { parseCampusMapRecord } from '@campus/shared/src/campusMapRecords';
 import {
   hasBundledCampusPlaces,
   isProvidencePendingVerification,
+  locationMatchesSearch,
   providencePlaceSourceUrl,
   withProvidenceCampusPlaces,
   type CampusMapPlaceLike,
@@ -11,9 +13,9 @@ import {
 import { guardedPublicCampusRead, type PublicCampusReadGuard } from '../../publicCampusReadGuard';
 import { V2Error } from './contracts';
 import {
-  boundedTransitStopMarker, campusMapHref, campusMapMatch, campusMapResolution, campusMapSourcePath,
+  boundedTransitStopMarker, campusMapHref, campusMapMatchDetails, campusMapResolution, campusMapSourcePath,
   parseCampusMapArguments, parseCampusMapResult, validCampusMapSchool, type CampusMapArguments,
-  type CampusMapItem, type CampusMapRead, type CampusMapSource,
+  type CampusMapMatchDetails, type CampusMapItem, type CampusMapRead, type CampusMapSource,
 } from './campusMap';
 
 /** One bounded query plus an optional legacy query. Every query is accounted
@@ -111,28 +113,41 @@ export async function readCampusMap(input: {
   const unique = published.filter(place => ids.get(place.id) === 1);
   if (unique.length !== published.length) incomplete = true;
   const publishedIds = new Set(unique.map(place => place.id));
-  const places = withProvidenceCampusPlaces(schoolId, unique);
-  if (!unique.length && hasBundledCampusPlaces(schoolId)) source = 'bundled-providence';
-  const candidates: CampusMapItem[] = [];
-  for (const rawPlace of places) {
+  const publicSchoolId = toPublicSchoolId(schoolId)!;
+  const places = withProvidenceCampusPlaces(publicSchoolId, unique).flatMap(rawPlace => {
     const place = safePlace(rawPlace);
-    if (!place) { incomplete = true; continue; }
-    const match = campusMapMatch(schoolId, args.query, place);
-    if (!match) continue;
+    if (place) return [place];
+    incomplete = true;
+    return [];
+  });
+  if (!unique.length && hasBundledCampusPlaces(publicSchoolId)) source = 'bundled-providence';
+  const matches: { item: CampusMapItem; matchKind: CampusMapMatchDetails['matchKind'] }[] = [];
+  for (const place of places) {
+    const details = campusMapMatchDetails(schoolId, args.query, place, places);
+    if (!details) continue;
+    const { match, matchKind } = details;
     const itemSource = publishedIds.has(place.id) ? source : 'bundled-providence';
-    const sourceUrl = providencePlaceSourceUrl(schoolId, place);
-    candidates.push({ ...place, schoolId, facilities: place.facilities ?? [],
+    const sourceUrl = providencePlaceSourceUrl(publicSchoolId, place);
+    const item: CampusMapItem = { ...place, schoolId, facilities: place.facilities ?? [],
       source: itemSource, sourcePath: campusMapSourcePath(schoolId, itemSource),
       href: campusMapHref(schoolId, args.query, place.id), match,
-      verification: sourceUrl ? isProvidencePendingVerification(schoolId, place) ? 'single-source' : 'cross-checked' : 'published',
-      ...(sourceUrl ? { sourceUrl } : {}) });
+      verification: sourceUrl ? isProvidencePendingVerification(publicSchoolId, place) ? 'single-source' : 'cross-checked' : 'published',
+      ...(sourceUrl ? { sourceUrl } : {}) };
+    matches.push({ item, matchKind });
   }
+  const hasPrimary = matches.some(({ matchKind }) => matchKind === 'primary');
+  const hasCatalog = matches.some(({ matchKind }) => matchKind === 'catalog');
+  const candidates = matches.flatMap(({ item, matchKind }): CampusMapItem[] => {
+    const yields = matchKind === 'catalog' ? hasPrimary : matchKind === 'alias' && (hasPrimary || hasCatalog);
+    if (!yields) return [item];
+    return locationMatchesSearch(item, args.query) ? [{ ...item, match: 'search' }] : [];
+  });
   const rank = { place: 0, building: 1, search: 2 };
   candidates.sort((a, b) => rank[a.match] - rank[b.match] || a.name.localeCompare(b.name, 'zh-Hant') || a.id.localeCompare(b.id));
   const items = candidates.slice(0, args.limit);
   const partial = incomplete || candidates.length > args.limit;
   const available = places.length > 0;
-  const officialMapUrl = getOfficialCampusMapUrl(schoolId);
+  const officialMapUrl = getOfficialCampusMapUrl(publicSchoolId);
   const result: CampusMapRead = { version: 1, kind: 'map', schoolId, query: args.query, limit: args.limit,
     checkedAt: new Date(now).toISOString(), source, sourcePath: campusMapSourcePath(schoolId, source),
     status: available ? 'ready' : 'unavailable', items, partial,

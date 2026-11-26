@@ -17,6 +17,7 @@ import {
   LMS_CONNECTING_RETRY_LIMIT,
   lmsConnectingRetryDelayMs,
 } from '@/lib/lmsConnectingRetry';
+import { homeworkSubmissionLabel } from '@campus/shared/src/puLmsReadonly';
 import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
 import styles from '@/components/academic/academic.module.css';
 import lmsStyles from '../../../schoolLms.module.css';
@@ -67,7 +68,7 @@ export default function HomeworkDetailPage() {
 function HomeworkDetail({ uid, courseId, homeworkId, returnUrl, listUrl }: {
   uid: string; courseId: number; homeworkId: number; returnUrl: string; listUrl: string;
 }) {
-  const options = useSignInOptions();
+  const options = useSignInOptions(undefined, true, 'school');
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [reason, setReason] = useState<string>('unavailable');
   const [autoTries, setAutoTries] = useState(0);
@@ -141,7 +142,7 @@ function HomeworkDetail({ uid, courseId, homeworkId, returnUrl, listUrl }: {
     </section>
   ) : (
     <article className={lmsStyles.detail}>
-      <p className={lmsStyles.meta}>{item.courseName} · {item.submitted ? '已交' : '未交'} · {item.deadlineLabel || '截止時間未提供'}</p>
+      <p className={lmsStyles.meta}>{item.courseName} · {homeworkSubmissionLabel(item.submitted)} · {item.deadlineLabel || '截止時間未提供'}</p>
       <h2>{item.title}</h2>
       <p>{item.description || '學校這次沒有回傳作業說明文字。'}</p>
       <div className={lmsStyles.actions}>

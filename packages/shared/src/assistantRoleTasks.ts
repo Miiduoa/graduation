@@ -3,6 +3,7 @@ import { parseCampusMapClause, parseCampusMapCommand } from './assistantCampusMa
 import { parseAssistantCalendarIntent } from './assistantCalendarIntent';
 import { parseAssistantWorkSessionIntent } from './assistantWorkSessionIntent';
 import { parsePublicCampusRead, parsePublicSocialRead, parseSchoolInfoRead } from './assistantPublicReadIntent';
+import { parseLibraryCatalogRead } from './assistantLibraryCatalog';
 import { assistantRoleToolAllowed, getAssistantRoleProfile, type AssistantRoleProfileId } from './assistantRoleProfiles';
 import { resolveAssistantServiceIntent, type AssistantServiceId } from './assistantServices';
 
@@ -33,6 +34,11 @@ const explanation: Record<Exclude<AssistantRoleProfileId, 'student'>, string> = 
   school: '校務工作先選學校與待處理案件，再核對資格、課程與核閱內容。學校資格與課務管理目前在對應服務頁完成。',
   platform: '平台工作先確認處理範圍，再查看管理工作台的帳號、資格與待處理項目。權限與帳號異動目前在管理頁完成。',
 };
+
+/** Fixed work destinations for clients whose professional reader is not connected. */
+export function assistantRoleWorkServices(profileId: AssistantRoleProfileId): readonly AssistantServiceId[] {
+  return profileId === 'student' ? [] : [...destinations[profileId]];
+}
 
 /** Existing whole public reads/entries are equally usable on their own or as
  * an independent clause. Filters and extra operations remain unconsumed. */
@@ -84,6 +90,8 @@ export function assistantRoleTaskGuide(
     // The real graph binds an ordinal to its latest preceding events read;
     // a role context cannot supply an event source or a guessed location.
     if (parsePublicCampusRead(clauses[index])?.kind === 'events') hasEventSource = true;
+    if (index > 0 && parseLibraryCatalogRead(clauses[index - 1]) &&
+        parseCampusMapClause(clauses[index])?.kind === 'previous-library') mapChainClauses.add(index);
     if (hasEventSource && parseCampusMapClause(clauses[index])?.kind === 'previous-event')
       mapChainClauses.add(index);
     if (index + 1 >= clauses.length ||
@@ -102,7 +110,7 @@ export function assistantRoleTaskGuide(
   };
   const supportedRead = (clause: string) => {
     const value = taskClause(clause);
-    const read = parsePublicCampusRead(value) ?? parsePublicSocialRead(value) ?? parseSchoolInfoRead(value);
+    const read = parsePublicCampusRead(value) ?? parsePublicSocialRead(value) ?? parseSchoolInfoRead(value) ?? parseLibraryCatalogRead(value);
     const map = parseCampusMapClause(value);
     return read ? assistantRoleToolAllowed(profile.id, read.tool)
       : ((map?.kind === 'place' || map?.kind === 'next-class') && assistantRoleToolAllowed(profile.id, 'get_campus_map')) ||
@@ -125,6 +133,6 @@ export function assistantRoleTaskGuide(
   return {
     profileId: profile.id,
     answer: explanation[profile.id] + '\n也可以給我明確日期、起訖時間與名稱，先預覽你的個人行程，再由你確認儲存。若要找空檔，也可以提供日期、時段與所需時間，我會先核對本人課表與個人行程。',
-    serviceIds: destinations[profile.id],
+    serviceIds: assistantRoleWorkServices(profile.id),
   };
 }

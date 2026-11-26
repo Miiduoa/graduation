@@ -37,6 +37,8 @@ node scripts/firebase-release-preflight.cjs --project campus-one-tw \
 
 手動執行 GitHub `Release` workflow，選擇平台及 `preview`／`production` profile。`submit` 預設關閉；開啟才將驗證通過的正式產物交給商店服務。Android 維持 internal track、draft、changesNotSentForReview；iOS 上傳並不自動完成 App Store 審查。
 
+在與 GitHub `main` 同一提交的乾淨工作目錄執行 `pnpm release:production`，會透過已登入的 `gh` 啟動同一個 Release 工作流程，僅建置 iOS 與 Android。建置前會再次核對提交。指令會顯示該次執行連結，等候完成並傳回結果。該次 Actions 執行會保存兩個平台的 EAS 建置收據。
+
 對應 GitHub environment 必須提供：
 
 | 類別     | 名稱                                      | 用途                                                      |
@@ -61,7 +63,7 @@ Firebase、學校、法律頁與功能開關等 build profile 所需設定仍須
 
 根目錄的手動 `submit:ios`／`submit:android` 指令必須明確設定 `EAS_BUILD_ID`；它們只供已另行核對產物與提交設定的操作使用。建議使用上述有完整比對的 Release workflow。
 
-目前追蹤的 iOS native project 仍使用 `.dev` 識別碼，Expo 的 `APP_ENV=production` 不會自動改寫它。iOS 目標尚未設定時 preparation 立即失敗；未來填入已核對的正式識別碼後，只要追蹤的 native project 仍不相符，同樣會在 EAS build 前失敗且不改寫檔案。原生設定、Apple 商店識別碼與簽署資產仍待核對，不能直接送審。
+iOS 開發與模擬器使用 `com.campus.app.dev`。正式 Release 工作在獨立 checkout 執行 `prepare-native-release.cjs --ci-write .`，將 App 設為 `com.nuni.app`、Widget 設為 `com.nuni.app.widget`，兩者共用 `group.com.nuni.app`。建置前與 EAS worker 都核對實際 target 的 Info.plist、App Group 和主 App 的 `aps-environment=production`。實機驗收另須核對 Apple 簽署後的 App、provisioning profile 與 APNs 送達結果。
 
 ## 本機驗證
 

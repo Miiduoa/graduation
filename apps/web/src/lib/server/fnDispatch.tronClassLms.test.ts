@@ -789,6 +789,46 @@ it('serves a fresh cache within TTL and bypasses it on refresh', async () => {
   expect(source.fetchHomeworkPage).toHaveBeenCalled();
 });
 
+it('refetches unversioned flags and provides boolean rows and a partial warning to legacy readers, including on rollback', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const oldSnapshot = store.docs.get(CACHE)!.snapshot as Record<string, unknown>;
+  delete oldSnapshot.schemaVersion;
+  const { submitted, ...missingStatus } = LMS_FIXTURE_HOMEWORK_OPEN;
+  expect(submitted).toBe(false);
+  vi.mocked(source.fetchHomeworkPage).mockClear().mockResolvedValue({
+    ok: true,
+    value: {
+      homework_activities: [
+        missingStatus,
+        LMS_FIXTURE_HOMEWORK_DONE,
+        { ...missingStatus, id: 20009, submitted: 'false' },
+        { ...missingStatus, id: 20010, submitted: false },
+      ],
+      total: 4,
+    },
+  });
+
+  for (const hit of [false, true]) {
+    const result = (await (await request()).json()).result;
+    expect(result.cache.hit).toBe(hit);
+    expect(result.schemaVersion).toBe(2);
+    // bff32be0's readHomework rejects the entire response on a single non-boolean.
+    // Its server also serves the original snapshot.homework / courseErrors fields on a cache hit.
+    for (const snapshot of [result, store.docs.get(CACHE)!.snapshot]) {
+      expect(snapshot.homework.map((row: { submitted: unknown }) => row.submitted)).toEqual([true, false]);
+      expect(snapshot.courseErrors).toEqual([expect.objectContaining({
+        courseId: LMS_FIXTURE_COURSE.id, area: 'homework', status: null,
+      })]);
+      expect(snapshot.unconfirmedHomework).toEqual([
+        { index: 0, item: expect.objectContaining({ id: missingStatus.id, submitted: null }) },
+        { index: 2, item: expect.objectContaining({ id: 20009, submitted: null }) },
+      ]);
+    }
+  }
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+});
+
 it('does not reuse an expired cache document and overwrites it', async () => {
   const { request, source, store } = setup();
   store.docs.set(CACHE, {

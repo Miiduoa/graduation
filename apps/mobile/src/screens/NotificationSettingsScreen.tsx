@@ -5,6 +5,11 @@ import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import {
+  prepareNotificationPreferencesForSave,
+  quietHoursTimeKeys,
+  type QuietHoursTimeKey,
+} from '@campus/shared/src/notifications';
+import {
   type NotificationPreferences,
   type NotificationPreferenceState,
   type PushRegistrationResult,
@@ -12,7 +17,6 @@ import {
   saveNotificationPreferences,
   enablePushNotificationsForUser,
   openNotificationSettings,
-  isNotificationTime,
 } from '../services/notifications';
 
 type BooleanKey = Exclude<keyof NotificationPreferences, 'quietHoursStart' | 'quietHoursEnd'>;
@@ -30,6 +34,22 @@ const pushMessages: Record<PushRegistrationResult['status'], string> = {
   unsupported: '此裝置目前不支援推播註冊，請使用手機上的正式版本。',
   unconfigured: '此版本尚未完成推播服務設定，請待更新後重試。',
   unavailable: '暫時無法完成推播註冊，請確認網路後重試。',
+};
+
+const quietHoursFields: Record<
+  QuietHoursTimeKey,
+  { label: string; accessibility: string; error: string }
+> = {
+  quietHoursStart: {
+    label: '開始',
+    accessibility: '免打擾開始時間',
+    error: '請輸入完整的開始時間（24 小時制），例如 22:30。',
+  },
+  quietHoursEnd: {
+    label: '結束',
+    accessibility: '免打擾結束時間',
+    error: '請輸入完整的結束時間（24 小時制），例如 08:00。',
+  },
 };
 
 type Props = { navigation?: { goBack?: () => void } };
@@ -77,6 +97,13 @@ function NotificationEditor({
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState<'server' | 'local' | null>(null);
   const [push, setPush] = useState<PushRegistrationResult['status'] | null>(null);
+  const [invalidTimes, setInvalidTimes] = useState<QuietHoursTimeKey[]>([]);
+  const timeInputs = useRef<Record<QuietHoursTimeKey, TextInput | null>>({
+    quietHoursStart: null,
+    quietHoursEnd: null,
+  });
+  // The last loaded or acknowledged preferences; unfinished hidden times fall back to these.
+  const baseline = useRef<NotificationPreferences | null>(null);
   const lock = useRef(false);
   const mounted = useRef(true);
   const current = () => mounted.current && isScopeCurrent();
@@ -89,9 +116,11 @@ function NotificationEditor({
     try {
       const result = await loadNotificationPreferencesState(uid, scope);
       if (current()) {
+        baseline.current = result.preferences;
         setState(result);
         setDirty(false);
         setSaved(null);
+        setInvalidTimes([]);
       }
     } catch {
       if (current()) setError('無法讀取通知設定，請確認網路後重試。');
@@ -118,25 +147,29 @@ function NotificationEditor({
     setDirty(true);
     setSaved(null);
     setError('');
+    if (key === 'quietHoursStart' || key === 'quietHoursEnd')
+      setInvalidTimes((fields) => fields.filter((field) => field !== key));
+    else if (key === 'enabled' || key === 'quietHoursEnabled') setInvalidTimes([]);
   };
   const save = async () => {
     if (lock.current || !current() || !state || state.source === 'unavailable') return;
-    if (
-      !isNotificationTime(state.preferences.quietHoursStart) ||
-      !isNotificationTime(state.preferences.quietHoursEnd)
-    ) {
-      setError('免打擾時間請使用 24 小時制，例如 22:30。');
+    const prepared = prepareNotificationPreferencesForSave(state.preferences, baseline.current);
+    if (prepared.ok === false) {
+      setInvalidTimes(prepared.invalidTimes);
+      timeInputs.current[prepared.invalidTimes[0]]?.focus();
       return;
     }
     lock.current = true;
     setBusy('save');
     setError('');
     setSaved(null);
+    setInvalidTimes([]);
     try {
-      const result = await saveNotificationPreferences(uid, state.preferences, scope);
+      const result = await saveNotificationPreferences(uid, prepared.preferences, scope);
       if (current()) {
+        baseline.current = prepared.preferences;
         setSaved(result.status);
-        setState({ ...state, source: result.status });
+        setState({ preferences: prepared.preferences, source: result.status });
         setDirty(false);
       }
     } catch {
@@ -230,29 +263,47 @@ function NotificationEditor({
           <AICard title="免打擾">
             <View style={{ gap: 12 }}>
               {toggle('quietHoursEnabled', '啟用免打擾', true)}
-              <Text style={{ color: aiTokens.muted }}>使用 24 小時制設定時段。</Text>
-              {(['quietHoursStart', 'quietHoursEnd'] as const).map((key, index) => (
-                <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                  <Text style={{ color: aiTokens.text }}>{index === 0 ? '開始' : '結束'}</Text>
-                  <TextInput
-                    accessibilityLabel={index === 0 ? '免打擾開始時間' : '免打擾結束時間'}
-                    value={prefs[key]}
-                    editable={!disabled && prefs.enabled && prefs.quietHoursEnabled}
-                    onChangeText={(value) => update(key, value)}
-                    placeholder="22:30"
-                    placeholderTextColor={aiTokens.muted}
-                    maxLength={5}
-                    style={{
-                      color: aiTokens.text,
-                      borderColor: aiTokens.border,
-                      borderWidth: 1,
-                      borderRadius: 12,
-                      padding: 12,
-                      minWidth: 100,
-                    }}
-                  />
-                </View>
-              ))}
+              <Text style={{ color: aiTokens.muted }}>
+                使用台北時間（UTC+8），以 24 小時制設定。
+              </Text>
+              {quietHoursTimeKeys.map((key) => {
+                const fieldError = invalidTimes.includes(key)
+                  ? quietHoursFields[key].error
+                  : undefined;
+                return (
+                  <View key={key} style={{ gap: 4 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                      <Text style={{ color: aiTokens.text }}>{quietHoursFields[key].label}</Text>
+                      <TextInput
+                        ref={(node) => {
+                          timeInputs.current[key] = node;
+                        }}
+                        accessibilityLabel={quietHoursFields[key].accessibility}
+                        accessibilityHint={fieldError}
+                        value={prefs[key]}
+                        editable={!disabled && prefs.enabled && prefs.quietHoursEnabled}
+                        onChangeText={(value) => update(key, value)}
+                        placeholder="22:30"
+                        placeholderTextColor={aiTokens.muted}
+                        maxLength={5}
+                        style={{
+                          color: aiTokens.text,
+                          borderColor: fieldError ? aiTokens.danger : aiTokens.border,
+                          borderWidth: 1,
+                          borderRadius: 12,
+                          padding: 12,
+                          minWidth: 100,
+                        }}
+                      />
+                    </View>
+                    {fieldError ? (
+                      <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
+                        {fieldError}
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              })}
             </View>
           </AICard>
           <View style={{ marginHorizontal: aiTokens.space.md, marginBottom: aiTokens.space.md }}>

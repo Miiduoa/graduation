@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, TextInput } from 'react-native';
 import { applyTheme } from '../ui/theme';
 import { aiTokens } from '../ui/aiFirst';
 import { act, fireEvent, render } from '@testing-library/react-native';
@@ -19,7 +19,6 @@ jest.mock('../services/notifications', () => ({
   saveNotificationPreferences: jest.fn(),
   enablePushNotificationsForUser: jest.fn(),
   openNotificationSettings: jest.fn(),
-  isNotificationTime: (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value),
 }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -160,6 +159,85 @@ test('invalid quiet-hour time blocks save and a valid minute value is preserved'
   fireEvent.changeText(view.getByLabelText('免打擾開始時間'), '22:30');
   await act(async () => fireEvent.press(view.getByText('儲存設定')));
   expect(save.mock.calls[0][1].quietHoursStart).toBe('22:30');
+});
+
+// The jest TextInput mock shares one `focus` function; its call contexts identify the inputs.
+const focusedInputs = () =>
+  (TextInput.prototype.focus as unknown as jest.Mock).mock.contexts.map(
+    (input: { props: { accessibilityLabel: string } }) => input.props.accessibilityLabel,
+  );
+
+test('active invalid quiet hours block save, focus the first invalid field, and clear each error on edit', async () => {
+  const view = await screen();
+  fireEvent(view.getByLabelText('啟用免打擾'), 'valueChange', true);
+  fireEvent.changeText(view.getByLabelText('免打擾結束時間'), '');
+  fireEvent.changeText(view.getByLabelText('免打擾開始時間'), '2:3');
+  await act(async () => fireEvent.press(view.getByText('儲存設定')));
+  expect(save).not.toHaveBeenCalled();
+  expect(focusedInputs()).toEqual(['免打擾開始時間']);
+  expect(view.getByText(/完整的開始時間/)).toBeTruthy();
+  expect(view.getByText(/完整的結束時間/)).toBeTruthy();
+
+  fireEvent.changeText(view.getByLabelText('免打擾開始時間'), '22:30');
+  expect(view.queryByText(/完整的開始時間/)).toBeNull();
+  expect(view.getByText(/完整的結束時間/)).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('儲存設定')));
+  expect(save).not.toHaveBeenCalled();
+  expect(focusedInputs()).toEqual(['免打擾開始時間', '免打擾結束時間']);
+
+  fireEvent.changeText(view.getByLabelText('免打擾結束時間'), '07:15');
+  expect(view.queryByText(/完整的結束時間/)).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('儲存設定')));
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(save.mock.calls[0][1]).toMatchObject({
+    quietHoursEnabled: true,
+    quietHoursStart: '22:30',
+    quietHoursEnd: '07:15',
+  });
+});
+
+test.each(['啟用免打擾', '通知總開關'])(
+  'saving after switching off %s keeps the loaded custom times and valid edits',
+  async (label) => {
+    load.mockResolvedValueOnce({
+      preferences: {
+        ...defaultNotificationPreferences,
+        quietHoursEnabled: true,
+        quietHoursStart: '21:15',
+        quietHoursEnd: '06:45',
+      },
+      source: 'server',
+    });
+    const view = await screen();
+    fireEvent.changeText(view.getByLabelText('免打擾開始時間'), '');
+    fireEvent.changeText(view.getByLabelText('免打擾結束時間'), '07:30');
+    fireEvent(view.getByLabelText(label), 'valueChange', false);
+    await act(async () => fireEvent.press(view.getByText('儲存設定')));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][1]).toMatchObject({
+      enabled: label !== '通知總開關',
+      quietHoursEnabled: label !== '啟用免打擾',
+      quietHoursStart: '21:15',
+      quietHoursEnd: '07:30',
+    });
+    expect(focusedInputs()).toEqual([]);
+    expect(view.getByText('設定已儲存至帳號。')).toBeTruthy();
+    expect(view.getByLabelText('免打擾開始時間').props.value).toBe('21:15');
+    expect(view.getByLabelText('免打擾結束時間').props.value).toBe('07:30');
+  },
+);
+
+test('an unfinished time draft stays editable when quiet hours are re-enabled before saving', async () => {
+  const view = await screen();
+  fireEvent(view.getByLabelText('啟用免打擾'), 'valueChange', true);
+  fireEvent.changeText(view.getByLabelText('免打擾開始時間'), '');
+  fireEvent(view.getByLabelText('啟用免打擾'), 'valueChange', false);
+  expect(view.getByLabelText('免打擾開始時間').props.editable).toBe(false);
+  fireEvent(view.getByLabelText('啟用免打擾'), 'valueChange', true);
+  expect(view.getByLabelText('免打擾開始時間').props.editable).toBe(true);
+  expect(view.getByLabelText('免打擾開始時間').props.value).toBe('');
+  await act(async () => fireEvent.press(view.getByText('儲存設定')));
+  expect(save).not.toHaveBeenCalled();
 });
 
 test('notification settings has a detail back action and updates inline colors while mounted', async () => {

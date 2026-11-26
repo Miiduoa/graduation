@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useAnimatedValue } from '../../hooks/useAnimatedValue';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
-import { softShadowStyle, theme } from '../theme';
+import { theme } from '../theme';
 import { useThemeVersion } from '../useThemeStyleSheet';
 
 type SegmentId = string | number;
@@ -43,8 +43,10 @@ export function SegmentedControl<const Id extends SegmentId>(props: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         padding: 3,
-        borderRadius: theme.radius.xl,
+        borderRadius: theme.radius.md,
         backgroundColor: theme.colors.surface2,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.border,
         gap: 2,
       }}
     >
@@ -70,18 +72,18 @@ export function SegmentedControl<const Id extends SegmentId>(props: {
               minHeight: 44,
               paddingVertical: theme.space.sm,
               paddingHorizontal: theme.space.sm,
-              borderRadius: theme.radius.lg,
-              backgroundColor: pressed ? theme.colors.border : 'transparent',
+              borderRadius: theme.radius.sm,
+              backgroundColor: pressed && !isSelected ? theme.colors.surfaceInteractiveStrong : 'transparent',
               alignItems: 'center',
               justifyContent: 'center',
-              opacity: disabled ? 0.5 : pressed ? 0.84 : 1,
+              opacity: disabled ? 0.5 : 1,
             })}
           >
             <SegmentHighlight selected={isSelected} reducedMotion={reducedMotion} />
             <Text
               style={{
                 fontSize: 13,
-                fontWeight: isSelected ? '700' : '500',
+                fontWeight: isSelected ? '600' : '500',
                 color: isSelected ? theme.colors.accent : theme.colors.muted,
                 textAlign: 'center',
               }}
@@ -129,10 +131,11 @@ function SegmentHighlight({
       style={[
         StyleSheet.absoluteFill,
         {
-          borderRadius: theme.radius.lg,
+          borderRadius: theme.radius.sm,
           backgroundColor: theme.colors.surface,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
           opacity,
-          ...softShadowStyle(theme.shadows.inset),
         },
       ]}
     />

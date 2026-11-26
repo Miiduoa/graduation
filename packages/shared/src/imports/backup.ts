@@ -1,6 +1,7 @@
 import { periodProfileForSchool } from '../timetable/periods';
 import { createPersonalImportId, personalImportKey } from './records';
 import {
+  PERSONAL_IMPORT_MAX_ID_LENGTH,
   PERSONAL_IMPORT_MAX_TEXT_LENGTH,
   type PersonalImportKind,
   type PersonalImportRecord,
@@ -153,7 +154,7 @@ function validatedRecord(
   const record = objectWithFields(value, RECORD_FIELDS, allowExtraFields);
   const rowError = () => invalid(`第 ${index + 1} 筆備份資料格式不正確，沒有還原任何資料。`);
   if (
-    !boundedString(record.id, 300, true) ||
+    !boundedString(record.id, PERSONAL_IMPORT_MAX_ID_LENGTH, true) ||
     !boundedString(record.batchId, 300, true) ||
     !validTimestamp(record.importedAt) ||
     record.schoolId !== schoolId ||

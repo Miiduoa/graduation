@@ -458,6 +458,10 @@ function PersonalRecordEditor({
       control?.focus();
       return;
     }
+    // Unchanged imported records must not be rewritten: Enter (and the same
+    // submit path) would otherwise assign a new batch ID and importedAt, and a
+    // later batch undo would miss this row.
+    if (!dirty) return;
     // The form keeps the specific error visible; ConfirmModal handles rejected removals.
     void commit(row).catch(() => {});
   }
@@ -1655,8 +1659,7 @@ function ImportWorkspace({
     <div className={styles.root}>
       <section className={styles.intro}>
         <div>
-          <p className={styles.eyebrow}>你的校園資料，一次整理</p>
-          <h2>把課表與紀錄帶進來</h2>
+          <h2>選擇要匯入的資料</h2>
           <p>
             貼上學校表格、選擇檔案，或用 AI
             整理截圖裡的文字。核對後，就能加入你的課表、成績與行事曆。

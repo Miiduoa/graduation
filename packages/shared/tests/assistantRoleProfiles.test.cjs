@@ -84,10 +84,9 @@ test('student context preserves every existing tool while unavailable sources st
   assert.ok(student.capabilities.some((item) => item.id === 'student-services' && item.serviceIds.includes('school-lms')));
   assert.equal(student.capabilities.some((item) => item.level === 'query' && item.serviceIds.includes('school-lms')), false);
   assert.equal(student.capabilities.some((item) => item.level === 'query' && item.serviceIds.includes('grades')), false);
-  for (const id of ['library']) {
-    assert.equal(student.capabilities.some((item) => item.level === 'query' && item.serviceIds.includes(id)), false,
-      `${id} currently has an entry projection, not a content reader`);
-  }
+  assert.ok(student.capabilities.some(item => item.level === 'query' &&
+    item.serviceIds.includes('library') && item.toolNames.includes('get_library_catalog')));
+  assert.equal(student.toolNames.some(tool => /borrow|patron|loan|renew/.test(tool)), false);
 });
 
 test('professional contexts cannot substitute student work or buyer orders for teaching and business sources', () => {
@@ -175,11 +174,11 @@ test('shared profiles, examples, capability lists and tool vocabulary cannot be 
 
 
 test('all six contexts expose the same connected public readers without adding private role sources', () => {
-  const common = ['get_campus_announcements', 'get_campus_events', 'get_school_info', 'get_public_social'];
+  const common = ['get_campus_announcements', 'get_campus_events', 'get_school_info', 'get_public_social', 'get_library_catalog'];
   for (const profile of ASSISTANT_ROLE_PROFILES) {
     const capability = profile.capabilities.find(item => item.id === 'public-campus-reading');
     assert.equal(capability.level, 'query');
-    assert.deepEqual([...capability.serviceIds], ['announcements', 'events', 'public-social', 'school-info']);
+    assert.deepEqual([...capability.serviceIds], ['announcements', 'events', 'public-social', 'school-info', 'library']);
     for (const name of common) assert.equal(assistantRoleToolAllowed(profile.id, name), true, `${profile.id}: ${name}`);
   }
   for (const id of ['club', 'school', 'platform']) {

@@ -1904,7 +1904,10 @@ service cloud.firestore {
       }
 
       match /notifications/{notificationId} {
-        allow read, update, delete: if isSelf(uid);
+        allow read, delete: if isSelf(uid);
+        // The OS tap must match the server-issued receipt for this account.
+        allow update: if isSelf(uid) && (!notificationId.matches('dorm_[0-9a-f]{64}')
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']));
         allow create: if false;
       }
 

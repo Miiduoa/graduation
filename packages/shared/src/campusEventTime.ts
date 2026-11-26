@@ -3,6 +3,26 @@ export type CampusEventTime = {
   endsAt?: string | null;
 };
 
+const OFFSET_DATE_TIME =
+  /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,9})?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/i;
+
+/** Only source times with an explicit instant can seed a timed calendar action. */
+export function campusEventInstant(value: unknown): string {
+  if (typeof value === 'string') {
+    if (!OFFSET_DATE_TIME.test(value)) return '';
+    const day = value.slice(0, 10);
+    const probe = new Date(`${day}T00:00:00Z`);
+    if (!Number.isFinite(probe.getTime()) || probe.toISOString().slice(0, 10) !== day) return '';
+    const time = Date.parse(value);
+    return Number.isFinite(time) ? new Date(time).toISOString() : '';
+  }
+  const instant =
+    value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function'
+      ? value.toDate()
+      : value;
+  return instant instanceof Date && Number.isFinite(instant.getTime()) ? instant.toISOString() : '';
+}
+
 export type CampusEventPhase = 'upcoming' | 'ongoing' | 'ended' | 'started' | 'unscheduled';
 
 export function campusEventPhase(event: CampusEventTime, now: number): CampusEventPhase {

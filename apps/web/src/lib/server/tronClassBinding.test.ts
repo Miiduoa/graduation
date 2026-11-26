@@ -418,6 +418,24 @@ describe('independent TronClass binding', () => {
     expect(login).toHaveBeenCalledTimes(5);
   });
 
+  it('checks the source revision before unsealing a connected replacement session', async () => {
+    const { service, docs } = setup();
+    const original = await service.connect(OWNER, input());
+    const replacement = await service.connect(OWNER, input(original.revision));
+    expect(await service.getStatus(OWNER)).toMatchObject({ connected: true, revision: replacement.revision });
+    await expect(service.requireBinding(OWNER, original.revision!)).rejects.toMatchObject({
+      code: 'TRONCLASS_BINDING_CHANGED',
+    });
+    const row = docs.get(bindingPath())!;
+    docs.set(bindingPath(), { ...row, sealedCookies: 'unreadable-fixture' });
+    await expect(service.requireBinding(OWNER, original.revision!)).rejects.toMatchObject({
+      code: 'TRONCLASS_BINDING_CHANGED',
+    });
+    await expect(service.requireBinding(OWNER, replacement.revision!)).rejects.toMatchObject({
+      code: 'TRONCLASS_RECONNECT_REQUIRED',
+    });
+  });
+
   it('requires reconnection for a legacy cookie jar while preserving its revision', async () => {
     const { service, docs } = setup();
     const connected = await service.connect(OWNER, input());

@@ -83,6 +83,11 @@ function parseCallableError(e: unknown): { code: string; message: string } {
  */
 export async function tryCallFinalizePostLogin(
   semester?: string,
+  options: {
+    useTronClassSession?: boolean;
+    includeCourseRosters?: boolean;
+    assertCurrent?: () => void;
+  } = {},
 ): Promise<FinalizePostLoginResponse | null> {
   if (!isPuEcampusDataFetchEnabled()) {
     return {
@@ -93,29 +98,40 @@ export async function tryCallFinalizePostLogin(
   }
   if (!hasUsableFirebaseConfig() || isFirebaseMockMode()) return null;
 
-  const mock = await loadMockAuthSession().catch(() => null);
-  if (mock && isTestAccount(mock.uid)) return null;
-
   const authUser = getAuthInstance().currentUser;
   if (!authUser) return null;
-
-  const puSessionId = getPUSession()?.backendSessionId?.trim();
+  const schoolSession = getPUSession();
+  const puSessionId = schoolSession?.backendSessionId?.trim();
   if (!puSessionId) {
     return { success: false, errorCode: 'missing_pu_session', errorMessage: 'No PU backend session' };
   }
 
-  const tronSessionId = (await getTCBackendSessionId())?.trim() || undefined;
-
+  const assertCurrent = () => {
+    options.assertCurrent?.();
+    if (getAuthInstance().currentUser !== authUser || getPUSession() !== schoolSession) {
+      throw Object.assign(new Error('學校帳號已變更，請重新連線。'), { code: 'school_session_changed' });
+    }
+  };
   try {
+    assertCurrent();
+    const mock = await loadMockAuthSession().catch(() => null);
+    assertCurrent();
+    if (mock && isTestAccount(mock.uid)) return null;
+    const tronSessionId = options.useTronClassSession === false
+      ? undefined : (await getTCBackendSessionId())?.trim() || undefined;
+    assertCurrent();
+    // Older deployments have only the roster-reading callable. Personal sign-in must fail closed there.
+    const callable = options.includeCourseRosters === false ? 'finalizePersonalSchoolLogin' : 'finalizePostLogin';
     const fn = httpsCallable<
       { puSessionId: string; tronSessionId?: string; semester?: string },
       FinalizePostLoginResponse
-    >(getFunctionsInstance(), 'finalizePostLogin');
+    >(getFunctionsInstance(), callable);
     const res = await fn({
       puSessionId,
       ...(tronSessionId ? { tronSessionId } : {}),
       ...(semester?.trim() ? { semester: semester.trim() } : {}),
     });
+    assertCurrent();
     const data = res.data as FinalizePostLoginResponse | undefined;
     return data ?? { success: false, errorCode: 'empty_response', errorMessage: 'No data from finalizePostLogin' };
   } catch (e) {

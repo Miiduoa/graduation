@@ -1,24 +1,67 @@
+/* Teacher appeals desk — ruled review queue & sticky controls */
+
 .toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 16px;
-  margin: 24px 0;
+  gap: 12px 16px;
+  margin: 20px 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 2px solid var(--border-strong);
+  background: var(--bg);
 }
 
 .toolbar button,
 .decisions button {
   min-height: 44px;
+  border-radius: 2px;
+}
+
+.toolbar button:focus-visible,
+.decisions button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+li.row {
+  gap: 16px 24px;
+  padding: 18px 4px;
+  transition: background-color var(--motion-fast) ease;
+}
+
+li.row:hover {
+  background: var(--bg-soft);
+}
+
+.row > div:first-child {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
 }
 
 .decisions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 8px 10px;
+  flex-shrink: 0;
 }
 
-@media (max-width: 600px) {
+:global(:root[data-density='compact']) .toolbar {
+  margin: 14px 0;
+  padding: 8px 0;
+}
+
+:global(:root[data-density='compact']) li.row {
+  padding-block: 14px;
+}
+
+@media (max-width: 640px) {
   li.row {
     flex-direction: column;
   }
@@ -27,7 +70,17 @@
     width: 100%;
   }
 
+  .decisions {
+    width: 100%;
+  }
+
   .decisions button {
-    flex: 1;
+    flex: 1 1 120px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  li.row {
+    transition: none;
   }
 }

@@ -9,6 +9,8 @@ export type V2Card = {
   destination: string;
   /** Display policy only; the server's signed token retains source authority. */
   sourceBound?: 'food-pickup';
+  /** A read hint; only the server can authenticate the original coursework. */
+  coursework?: boolean;
   /** Kept with recovery cards; never derived from model-generated arguments. */
   conversationId?: string;
 };
@@ -57,11 +59,12 @@ export type V2Turn = {
   tronClass?: {
     result?: import('@/lib/tronClassAgentTypes').TronClassAgentReply;
     accessRequired?: boolean;
+    sourceRevision?: string;
     unconnected?: boolean;
     inactive?: boolean;
     /** A TronClass supplement appended after the planner answered a multi-clause
      * request. It never replaces the planner turn as follow-up context. */
-    compound?: true;
+    compoundQuestion?: string;
   };
 };
 

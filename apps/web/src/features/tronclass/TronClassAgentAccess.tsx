@@ -15,11 +15,12 @@ const OPTIONS: { scope: TronClassAgentScope; label: string; detail: string }[] =
   { scope: 'prepareHomework', label: '代為整理作業要求與準備繳交預覽', detail: '可在對話中整理內容與附件；正式繳交尚未開放。' },
 ];
 
-export function TronClassAgentAccess({ client, revision, expectedVersion, compact = false, onSaved, onConnectionChanged }: {
+export function TronClassAgentAccess({ client, revision, expectedVersion, compact = false, onRead, onSaved, onConnectionChanged }: {
   client: TronClassAgentClient;
   revision?: string;
   expectedVersion?: string | null;
   compact?: boolean;
+  onRead?: (grant: TronClassAgentGrant) => void;
   onSaved?: (grant: TronClassAgentGrant) => void;
   onConnectionChanged?: (reason?: unknown) => void;
 }) {
@@ -34,22 +35,28 @@ export function TronClassAgentAccess({ client, revision, expectedVersion, compac
   const [unconnected, setUnconnected] = useState(false);
   const lifetime = useRef<AbortController | null>(null);
   const lock = useRef(false);
+  const verifiedRevision = useRef<string | undefined>(undefined);
   const connectionChanged = useRef(onConnectionChanged);
+  const grantRead = useRef(onRead);
   useEffect(() => { connectionChanged.current = onConnectionChanged; }, [onConnectionChanged]);
+  useEffect(() => { grantRead.current = onRead; }, [onRead]);
 
   useEffect(() => {
     const controller = new AbortController();
     lifetime.current = controller;
-    void client.grant(controller.signal).then(value => {
+    const sourceRevision = revision ?? verifiedRevision.current;
+    void client.grant(controller.signal, sourceRevision).then(value => {
       if (controller.signal.aborted) return;
-      if (revision && value.revision !== revision) {
+      if (sourceRevision && value.revision !== sourceRevision) {
         setError('TronClass 連接已變更，請重新確認帳號。');
         setGrant(null);
-        connectionChanged.current?.();
+        connectionChanged.current?.(new TronClassRequestError('TRONCLASS_BINDING_CHANGED', 'TronClass 連接已變更，請重新確認帳號。', 409));
       } else {
+        verifiedRevision.current = value.revision;
         setGrant(value);
         setDraft(value.permissions);
         setUnconnected(false);
+        grantRead.current?.(value);
         if (expectedVersion !== undefined && value.version !== expectedVersion) connectionChanged.current?.();
       }
       setLoading(false);

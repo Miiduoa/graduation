@@ -31,6 +31,7 @@ import {
   type PersonalImportRecord,
   type TimetableMeta,
 } from '@campus/shared';
+import { withScopedClassExceptions } from '@campus/shared/src/timetable/scopedClassExceptions';
 import { getDb, getFunctionsInstance } from '../firebase';
 import { isProvidenceSchoolId, toPublicSchoolId } from '../data/schoolIds';
 
@@ -349,8 +350,8 @@ export async function savePersonalTimetable(uid: string | null, timetable: Store
 }
 
 /** Projection only: the user's saved courses remain in their original storage. */
-export function personalTimetableRecords(timetable: StoredTimetable, imported: PersonalImportRecord[] = []): PersonalImportRecord[] {
-  const manual: PersonalImportRecord[] = timetable.courses.map((course) => ({
+function manualTimetableRecords(timetable: StoredTimetable): PersonalImportRecord[] {
+  return timetable.courses.map((course) => ({
     id: `manual:${course.id}`, batchId: 'manual-timetable', importedAt: timetable.updatedAt,
     kind: 'timetable', schoolId: timetable.schoolId,
     academicYear: timetable.meta.year || '未填', semester: timetable.meta.semester || '未填',
@@ -358,7 +359,19 @@ export function personalTimetableRecords(timetable: StoredTimetable, imported: P
     dayOfWeek: course.day, startPeriod: course.start, endPeriod: course.end,
     source: { type: 'paste', line: 1, rawText: '' },
   }));
-  return withClassExceptions([...manual, ...imported], timetable.classExceptions);
+}
+
+export function personalTimetableRecords(timetable: StoredTimetable, imported: PersonalImportRecord[] = []): PersonalImportRecord[] {
+  return withClassExceptions([...manualTimetableRecords(timetable), ...imported], timetable.classExceptions);
+}
+
+/** Keep persisted keys intact while matching a meeting across year, semester and campus aliases. */
+export function scopedPersonalTimetableRecords(
+  timetable: StoredTimetable | null, imported: PersonalImportRecord[], schoolId: string,
+): PersonalImportRecord[] {
+  const saved = timetable && sameSchool(timetable.schoolId, schoolId) ? timetable : null;
+  const rows = saved ? [...manualTimetableRecords(saved), ...imported] : imported;
+  return withScopedClassExceptions(rows, saved ? saved.classExceptions ?? [] : undefined, schoolId, sameSchool);
 }
 
 export async function loadFriendTimetable(friendUid: string, schoolId: string) {

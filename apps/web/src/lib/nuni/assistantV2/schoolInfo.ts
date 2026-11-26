@@ -6,6 +6,7 @@ import {
   PUBLIC_SCHOOL_INFO_SOURCE_URL,
 } from '@campus/shared/src/publicSchoolInfo';
 import { V2Error } from './contracts';
+import { directorySchoolScope, ownFields } from './directoryFields';
 
 export type SchoolInfoField = 'overview' | 'address' | 'phone' | 'website';
 export type SchoolInfoArguments = { field?: SchoolInfoField };
@@ -38,27 +39,8 @@ const RESULT_KEYS = ['version', 'source', 'schoolId', 'query', 'checkedAt', 'sna
   'href', 'status', 'info', 'unavailable'];
 const invalid = (): never => { throw new V2Error(422, 'INVALID_INPUT'); };
 
-/** Reject accessors and unexpected fields before reading any caller values. */
-function record(raw: unknown, keys: readonly string[]): Record<string, unknown> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw) ||
-      ![null, Object.prototype].includes(Object.getPrototypeOf(raw))) return invalid();
-  const out: Record<string, unknown> = Object.create(null);
-  for (const key of Reflect.ownKeys(raw)) {
-    if (typeof key !== 'string' || !keys.includes(key)) return invalid();
-    const descriptor = Object.getOwnPropertyDescriptor(raw, key)!;
-    if (!descriptor.enumerable || !('value' in descriptor) || descriptor.value === undefined) return invalid();
-    out[key] = descriptor.value;
-  }
-  return out;
-}
-
-function schoolScope(raw: unknown): string {
-  if (typeof raw !== 'string' || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(raw)) return invalid();
-  return raw;
-}
-
 export function parseSchoolInfoArguments(raw: unknown): SchoolInfoQuery {
-  const value = record(raw, ['field']);
+  const value = ownFields(raw, ['field']);
   if (value.field !== undefined && !FIELDS.includes(value.field as SchoolInfoField)) return invalid();
   return { field: (value.field as SchoolInfoField | undefined) ?? 'overview' };
 }
@@ -90,7 +72,7 @@ function contact(schoolId: string): SchoolInfoContact | null {
 /** Read a versioned local public source. checkedAt is when this snapshot was
  * read, not a claim that the university's contacts were checked live. */
 export function readSchoolInfo(schoolId: string, args: unknown = {}, now = Date.now()): SchoolInfoRead {
-  const school = schoolScope(schoolId);
+  const school = directorySchoolScope(schoolId);
   const query = parseSchoolInfoArguments(args);
   if (!Number.isFinite(now) || !Number.isFinite(new Date(now).getTime())) return invalid();
   const info = contact(school);
@@ -113,9 +95,9 @@ export function readSchoolInfo(schoolId: string, args: unknown = {}, now = Date.
  * at the tool/answer boundary. URLs and contact details never come from a model. */
 export function parseSchoolInfoResult(raw: unknown, schoolId: string, args: unknown = {}): SchoolInfoRead {
   try {
-    const school = schoolScope(schoolId);
+    const school = directorySchoolScope(schoolId);
     const query = parseSchoolInfoArguments(args);
-    const value = record(raw, RESULT_KEYS);
+    const value = ownFields(raw, RESULT_KEYS);
     const returnedQuery = parseSchoolInfoArguments(value.query);
     if (value.version !== 1 || value.source !== 'bundled-moe-school-info' || value.schoolId !== school ||
         returnedQuery.field !== query.field || value.snapshotDate !== PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE ||
@@ -125,7 +107,7 @@ export function parseSchoolInfoResult(raw: unknown, schoolId: string, args: unkn
     const expected = contact(school);
     if (expected) {
       if (value.status !== 'ready' || value.unavailable !== undefined) return invalid();
-      const info = record(value.info, CONTACT_KEYS);
+      const info = ownFields(value.info, CONTACT_KEYS);
       if (CONTACT_KEYS.some(key => info[key] !== expected[key])) return invalid();
     } else if (value.status !== 'unavailable' || value.info !== null || value.unavailable !== 'NOT_LISTED') return invalid();
     return {

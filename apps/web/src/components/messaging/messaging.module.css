@@ -23,6 +23,9 @@
   padding: 12px 0;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
 }
 .tabs a[aria-current='page'] {
   color: var(--text);
@@ -111,11 +114,9 @@
 .notification,
 .conversation,
 .composer {
-  padding: 22px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 16px 10px;
   min-width: 0;
+  border-bottom: 1px solid var(--border);
 }
 .notice h2,
 .notification h2,
@@ -124,6 +125,7 @@
   margin: 0;
   color: var(--text);
   overflow-wrap: anywhere;
+  font-family: inherit;
 }
 .notice p,
 .muted {
@@ -133,7 +135,8 @@
 }
 .list {
   display: grid;
-  gap: 12px;
+  gap: 0;
+  border-top: 1px solid var(--border-strong);
 }
 .conversation {
   display: flex;
@@ -199,7 +202,7 @@
 }
 .messages li {
   max-width: 80%;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-sm);
   padding: 13px 16px;
   min-width: 0;
 }
@@ -231,6 +234,7 @@
 .composer {
   display: grid;
   gap: 12px;
+  padding: 14px 0;
 }
 .notification p {
   color: var(--text);
@@ -302,8 +306,9 @@
 .inboxHeading h2, .chatHeader h2 {
   margin: 0;
   font-size: clamp(22px, 3vw, 30px);
-  letter-spacing: -0.025em;
+  letter-spacing: normal;
   color: var(--text);
+  font-family: var(--font-heading);
 }
 .inboxHeading .muted, .chatHeader .muted { margin: 8px 0 0; }
 .inboxActions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -312,10 +317,8 @@
   align-items: flex-end;
   flex-wrap: wrap;
   gap: 12px;
-  padding: 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
 }
 .inboxToolbar .field {
   flex: 1 1 240px;
@@ -323,11 +326,9 @@
 }
 .filterRow {
   display: flex;
-  gap: 4px;
-  border-radius: var(--radius);
-  padding: 4px;
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
+  gap: 0 8px;
+  padding: 0;
+  flex-wrap: wrap;
 }
 .filterButton {
   display: inline-flex;
@@ -335,23 +336,23 @@
   gap: 8px;
   padding: 10px 12px;
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border: 0;
+  border-radius: 0;
   color: var(--muted);
   font: inherit;
   font-size: 13px;
   font-weight: 650;
   cursor: pointer;
-  min-height: 40px;
+  min-height: 44px;
+  border-bottom: 2px solid transparent;
 }
 .filterButton span {
   font-variant-numeric: tabular-nums;
   font-size: 12px;
 }
 .filterButton[aria-pressed='true'] {
-  color: var(--text);
-  background: var(--surface);
-  border-color: var(--border-strong);
+  color: var(--brand);
+  border-color: currentColor;
 }
 .resultCount { margin: 0; color: var(--muted); font-size: 13px; }
 .conversation[data-unread='true'] {
@@ -363,24 +364,19 @@
   font-size: 13px;
   font-weight: 600;
   color: var(--success);
-  background: var(--success-soft);
-  border-radius: var(--radius-pill);
-  padding: 7px 12px;
+  padding: 4px 0;
 }
 .stack .messages {
-  padding: 18px;
+  padding: 16px 8px;
   max-height: min(65dvh, 690px);
   min-height: 220px;
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
   scroll-behavior: smooth;
+  border-block: 1px solid var(--border);
 }
 .messages li { max-width: min(78%, 560px); }
 .messages .mine { background: var(--accent-soft); border-bottom-right-radius: 4px; }
 .messages .theirs { background: var(--surface); border-bottom-left-radius: 4px; }
 .messages .empty { max-width: 100%; }
-.composer { border-radius: var(--radius-lg); }
 .filterButton:focus-visible,
 .inboxToolbar button:focus-visible,
 .inboxActions a:focus-visible {
@@ -389,7 +385,7 @@
 }
 @media (max-width: 640px) {
   .inboxHeading, .chatHeader { align-items: flex-start; flex-direction: column; }
-  .inboxToolbar { padding: 12px; }
+  .inboxToolbar { padding: 10px 0; }
   .inboxToolbar .field { flex-basis: 100%; }
   .inboxToolbar .field input,
   .inboxToolbar .field select { font-size: 16px; }
@@ -412,15 +408,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 36px;
-  min-height: 28px;
+  min-width: 44px;
+  min-height: 44px;
   padding: 3px 9px;
   font: inherit;
   font-size: 12px;
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .reactionButton[aria-pressed='true'] {

@@ -1,0 +1,29 @@
+.workspace {
+  --workspace-navigation-width: 216px;
+}
+
+@media screen and (min-width: 1140px) {
+  .workspace:has(> [data-campus-navigation='true']) {
+    padding-inline-start: var(--workspace-navigation-width);
+  }
+
+  .workspace:has(> [data-campus-navigation='true'])::before {
+    content: '';
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: var(--workspace-navigation-width);
+    background: var(--surface2);
+    border-inline-end: 1px solid var(--border);
+    pointer-events: none;
+  }
+}
+
+@media print {
+  .workspace:has(> [data-campus-navigation='true']) {
+    padding-inline-start: 0;
+  }
+
+  .workspace::before {
+    display: none;
+  }
+}
