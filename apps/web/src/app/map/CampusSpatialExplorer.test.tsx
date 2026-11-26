@@ -976,9 +976,11 @@ it('offers an accessible way to recover a suspended scene when mobile visibility
     act(() => intersection?.(entries, {} as IntersectionObserver));
   };
 
+  // Wait for React to commit the focusable host, not just the scene factory.
+  await waitFor(() => expect(host.tabIndex).toBe(0));
   // Keyboard focus was on the active 3D host when it suspended.
   // Only then should the recovery control receive focus.
-  host.focus();
+  act(() => host.focus());
   expect(document.activeElement).toBe(host);
   notify(false, 200);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
