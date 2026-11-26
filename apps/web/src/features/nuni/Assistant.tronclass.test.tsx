@@ -615,7 +615,7 @@ it.each(['denied', 'updated'] as const)('invalidates an old pending file when a 
   await waitFor(() => expect(finishDownload).toBeTypeOf('function'));
   await ask('查 TronClass 課程');
   await screen.findByText(observed === 'denied' ? '授權已在其他地方關閉。' : '已依更新後的權限查詢課程。');
-  expect(pendingSignal?.aborted).toBe(true);
+  await waitFor(() => expect(pendingSignal?.aborted).toBe(true));
   await act(async () => finishDownload(downloadedFile()));
   expect(create).not.toHaveBeenCalled();
   expect(click).not.toHaveBeenCalled();
