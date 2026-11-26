@@ -7,13 +7,13 @@ import {
   type NuniMerchantWorkspace,
 } from '@campus/shared/src/nuniMerchant';
 import { merchantOverviewNextStep } from '@campus/shared/src/merchantJourney';
+import { merchantWorkspaceHref } from './merchantWorkspaceNavigation';
 
 export const IDENTITY_LOOKUP_FAILED_COPY = '暫時查不到你的老師或店家身分';
 export const IDENTITY_LOOKUP_FAILED_HINT = '不影響一般功能，請稍後再試一次';
 export const IDENTITY_RETRY_COPY = '再試一次';
 export const IDENTITY_NO_TEACHING_COPY = '這個帳號目前沒有授課課程';
 export const IDENTITY_NO_MERCHANT_COPY = '目前沒有店家申請或已核准門市';
-export const STORE_NOT_OPEN_COPY = '目前還不能開店';
 
 export type TeachingIdentity = {
   id: string;
@@ -23,10 +23,14 @@ export type TeachingIdentity = {
 };
 
 export type StoreIdentity = {
+  tenantId: string;
+  locationId: string;
+  locationName: string;
   name: string;
   campus: string;
   status: string;
   open: boolean;
+  href: string;
 };
 
 export type ApplicationIdentity = {
@@ -59,10 +63,17 @@ export function merchantLocationOpen(workspace: NuniMerchantWorkspace): boolean 
 function storeLine(workspace: NuniMerchantWorkspace): StoreIdentity {
   const open = merchantLocationOpen(workspace);
   return {
+    tenantId: workspace.tenantId,
+    locationId: workspace.locationId,
+    locationName: workspace.locationName,
     name: workspace.merchantName,
     campus: workspace.campusName,
-    status: open ? merchantWorkspaceStateLabel(workspace) : STORE_NOT_OPEN_COPY,
+    status: merchantWorkspaceStateLabel(workspace),
     open,
+    href: merchantWorkspaceHref({
+      tenantId: workspace.tenantId,
+      locationId: workspace.locationId,
+    }),
   };
 }
 

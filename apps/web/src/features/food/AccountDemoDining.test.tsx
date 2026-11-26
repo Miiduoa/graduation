@@ -8,6 +8,7 @@ import {
   type AccountDemoMutation,
   type AccountDemoSnapshot,
 } from '@campus/shared/src/accountDemo';
+import { AccountIdentity } from '@/components/AccountIdentity';
 import { FoodWorkspace } from '@/features/food/FoodWorkspace';
 import { MerchantWorkspace } from '@/features/merchant/MerchantWorkspace';
 import { AccountDemoDining } from './AccountDemoDining';
@@ -62,6 +63,7 @@ function fixture(): AccountDemoSnapshot {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState(null, '', '/merchant/workspace');
   vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
   sessionStorage.clear();
   HTMLDialogElement.prototype.showModal = function () {
@@ -144,6 +146,61 @@ describe('account-owned dining inside the original feature pages', () => {
       { expectedRevision: 3, action: 'createOrder' },
       { expectedRevision: 4, action: 'readyOrder' },
     ]);
+  });
+
+  it('opens real application progress from the home link for an account with campus demo data', async () => {
+    const demo = fixture();
+    harness.request.mockImplementation(async (path) => {
+      if (path === 'account-demo') return { demo };
+      if (path === 'merchant-workspaces') return { workspaces: [] };
+      if (path === 'merchant-applications') {
+        return {
+          applications: [
+            {
+              tenantId: 'campus-one',
+              applicationId: 'application-1',
+              brandName: '真實餐坊',
+              locationName: '學生餐廳',
+              state: 'needs-information',
+              reviewerNote: '請補上營業地址',
+              submittedAt: '2026-10-09T02:00:00.000Z',
+            },
+          ],
+        };
+      }
+      throw new Error(`Unexpected ${path}`);
+    });
+
+    const workspace = render(<MerchantWorkspace view="workspace" />);
+    await screen.findByText('目前沒有展示訂單');
+    workspace.unmount();
+
+    window.history.replaceState(null, '', '/');
+    const followLink = (event: React.MouseEvent) => {
+      const link = (event.target as HTMLElement).closest('a')!;
+      event.preventDefault();
+      window.history.pushState(null, '', link.href);
+    };
+    const home = render(
+      <div onClickCapture={followLink}>
+        <AccountIdentity
+          variant="home"
+          accountId={demo.accountId}
+          context={harness.auth.session.context}
+          includeTeaching={false}
+        />
+      </div>,
+    );
+    fireEvent.click(await screen.findByRole('link', { name: '查看申請進度（1）' }));
+    home.rerender(<MerchantWorkspace view="workspace" />);
+
+    const progress = await screen.findByRole('region', { name: '申請進度' });
+    expect(within(progress).getByRole('heading', { name: '真實餐坊／學生餐廳' })).toBeTruthy();
+    expect(within(progress).getByText(/待補件/)).toBeTruthy();
+    expect(within(progress).getByText(/請補上營業地址/)).toBeTruthy();
+    expect(document.activeElement).toBe(
+      within(progress).getByRole('heading', { name: '申請進度' }),
+    );
   });
 
   it('keeps the original merchant overview linked to the existing workspace', async () => {

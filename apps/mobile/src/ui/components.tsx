@@ -813,6 +813,7 @@ export function SearchBar(props: {
 }) {
   useVisualTheme();
   const [isFocused, setIsFocused] = useState(false);
+  const input = useRef<TextInput>(null);
   const handleChange = (value: string) => {
     if (!props.disabled) (props.onChangeText ?? props.onChange)?.(value);
   };
@@ -839,6 +840,7 @@ export function SearchBar(props: {
         color={isFocused && !props.disabled ? theme.colors.accent : theme.colors.muted}
       />
       <TextInput
+        ref={input}
         value={props.value}
         onChangeText={handleChange}
         editable={!props.disabled}
@@ -857,6 +859,8 @@ export function SearchBar(props: {
           if (!props.disabled) props.onSubmit?.();
         }}
         returnKeyType="search"
+        autoCorrect={false}
+        autoCapitalize="none"
         style={{
           flex: 1,
           color: theme.colors.text,
@@ -867,16 +871,21 @@ export function SearchBar(props: {
       />
       {props.value.length > 0 ? (
         <Pressable
-          onPress={() => handleChange('')}
+          onPress={() => {
+            if (props.disabled) return;
+            handleChange('');
+            input.current?.focus();
+          }}
           disabled={props.disabled}
-          style={{
+          style={({ pressed }) => ({
             width: 44,
             height: 44,
             borderRadius: 12,
-            backgroundColor: theme.colors.surface2,
+            backgroundColor:
+              pressed && !props.disabled ? theme.colors.border : theme.colors.surface2,
             alignItems: 'center',
             justifyContent: 'center',
-          }}
+          })}
           accessibilityRole="button"
           accessibilityLabel="清除搜尋"
           accessibilityState={{ disabled: !!props.disabled }}
