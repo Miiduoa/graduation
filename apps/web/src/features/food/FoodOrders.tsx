@@ -417,6 +417,7 @@ export function FoodOrderDetail({
               context={context}
               accountId={accountId}
               tenantId={tenantId}
+              schoolId={schoolId}
               orderId={receipt.id}
               available={['paid', 'accepted', 'preparing', 'ready'].includes(receipt.state) &&
                 Date.parse(receipt.requestedPickupAt) > now}

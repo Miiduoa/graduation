@@ -67,6 +67,7 @@ export function PlatformOrders({
           cache={cache}
           accountId={accountId}
           tenantId={realm.tenantId}
+          schoolId={schoolId}
           initialOrder={orderId ?? ''}
           orderHref={(selectedOrder) => {
             const search = new URLSearchParams({ campus: schoolId, tenant: realm.tenantId });

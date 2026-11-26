@@ -16,8 +16,9 @@ vi.mock('@/lib/useCampusBrowseContext', () => ({
 }));
 vi.mock('@/components/AssistantEnabledProvider', () => ({ useAssistantEnabled: () => environment.enabled }));
 const context = 'a'.repeat(43);
-const props = { context, accountId: 'alice', tenantId: 'campus-a', orderId: 'order-1', available: true, suggestion: '這筆訂單下午取餐，可以預覽行程。' };
-const scope = { owner: 'platform:alice', schoolId: 'pu' };
+const props = { context, accountId: 'alice', tenantId: 'campus-a', schoolId: 'campus-a', orderId: 'order-1', available: true, suggestion: '這筆訂單下午取餐，可以預覽行程。' };
+const tenantSchoolId = props.schoolId;
+const scope = { owner: 'platform:alice', schoolId: tenantSchoolId };
 const journalScope = { ...scope, context };
 const target = { tenantId: props.tenantId, orderId: props.orderId, durationMinutes: 15 };
 const NOW = Date.parse('2026-11-18T11:00:00+08:00');
@@ -28,7 +29,7 @@ function cardFor(orderId = props.orderId, tenantId = props.tenantId, mutationId 
   const body = btoa(JSON.stringify({ v: 2, stage: 'execute', tool: 'propose_personal_event', mutationId,
     pickupGuard: { tenantId, orderId, durationMinutes: 15, fingerprint: 'f'.repeat(64) } })).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
   return { tool: 'propose_personal_event', token: body + '.test-signature', sourceBound: 'food-pickup', mutationId,
-    schoolId: 'pu', destination: '個人行事曆（無推播提醒）',
+    schoolId: tenantSchoolId, destination: '個人行事曆（無推播提醒）',
     args: { title: '取餐：蔬食餐廳', date: '2026-11-18', allDay: false, startTime: '12:00', endTime: '12:15' } };
 }
 function replyFor(card = cardFor()) {
@@ -94,7 +95,7 @@ it('previews the exact selected source without model consent, customer details o
   await preview();
   expect(actions()).toEqual(['capability', 'pickup-plan', 'pickup-plan']);
   for (const call of calls.filter(call => call.action === 'pickup-plan')) {
-    expect(call.body).toMatchObject({ schoolId: 'pu', target });
+    expect(call.body).toMatchObject({ schoolId: tenantSchoolId, target });
     expect(Object.keys(call.body)).not.toEqual(expect.arrayContaining(['question', 'history', 'consent', 'title', 'requestedPickupAt', 'location']));
   }
   expect(calls[2].body).toMatchObject({ conversationId: 'pickup-conversation', routeToken: 'pickup-route' });
@@ -207,7 +208,7 @@ it.each([
   expect(actions()).toEqual(['capability']);
 });
 
-it.each(['account', 'session', 'school', 'order', 'tenant'] as const)('aborts late selected-plan results after changing %s', async changed => {
+it.each(['account', 'session', 'order', 'tenant'] as const)('aborts late selected-plan results after changing %s', async changed => {
   const pending = deferred<Response>();
   const { calls } = api(call => call.action === 'pickup-plan' && call.body.routeToken ? pending.promise : undefined);
   const view = render(<FoodPickupAgent {...props} />);
@@ -215,14 +216,55 @@ it.each(['account', 'session', 'school', 'order', 'tenant'] as const)('aborts la
   await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(button);
   await waitFor(() => expect(calls).toHaveLength(3));
-  if (changed === 'school') environment.schoolId = 'nthu';
   view.rerender(<FoodPickupAgent {...props}
     {...(changed === 'account' ? { accountId: 'bob' } : changed === 'session' ? { context: 'b'.repeat(43) }
-      : changed === 'order' ? { orderId: 'order-two' } : changed === 'tenant' ? { tenantId: 'campus-two' } : {})} />);
+      : changed === 'order' ? { orderId: 'order-two' } : { tenantId: 'campus-two' })} />);
   expect(calls[2].signal?.aborted).toBe(true);
   await act(async () => pending.resolve(json(replyFor())));
   expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
   expect(readPersonalImports(scope)).toEqual([]);
+});
+
+it('plans against the order tenant school even when the browsing campus differs', async () => {
+  environment.schoolId = 'nthu';
+  const { calls } = api();
+  render(<FoodPickupAgent {...props} />);
+  await preview();
+  for (const call of calls.filter(call => call.action === 'pickup-plan')) {
+    expect(call.body).toMatchObject({ schoolId: tenantSchoolId, target });
+  }
+  expect(calls.some(call => call.body.schoolId === 'nthu')).toBe(false);
+});
+
+it('does not treat a food tenant id as the calendar school', async () => {
+  environment.schoolId = 'nthu';
+  const selected = { tenantId: 'selected-realm', orderId: 'selected-order', durationMinutes: 15 };
+  const { calls } = api();
+  render(<FoodPickupAgent {...props} tenantId="selected-realm" schoolId="fixture-school" orderId="selected-order" />);
+  const button = await screen.findByRole('button', { name: '預覽這筆取餐安排' });
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(button);
+  await waitFor(() => expect(calls.some(call => call.action === 'pickup-plan')).toBe(true));
+  for (const call of calls.filter(call => call.action === 'pickup-plan')) {
+    expect(call.body.schoolId).toBe('fixture-school');
+    expect(call.body.target).toMatchObject(selected);
+  }
+  expect(calls.some(call => call.body.schoolId === 'selected-realm' || call.body.schoolId === 'nthu')).toBe(false);
+});
+
+it('keeps a late selected-plan result when only the browsing campus changes', async () => {
+  const pending = deferred<Response>();
+  const { calls } = api(call => call.action === 'pickup-plan' && call.body.routeToken ? pending.promise : undefined);
+  const view = render(<FoodPickupAgent {...props} />);
+  const button = await screen.findByRole('button', { name: '預覽這筆取餐安排' });
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(button);
+  await waitFor(() => expect(calls).toHaveLength(3));
+  environment.schoolId = 'nthu';
+  view.rerender(<FoodPickupAgent {...props} />);
+  expect(calls[2].signal?.aborted).toBe(false);
+  await act(async () => pending.resolve(json(replyFor())));
+  expect(await screen.findByRole('button', { name: '確認' })).toBeTruthy();
 });
 
 it('rejects mismatched target, unsigned-looking source and model-driven replies before confirmation', () => {
@@ -235,9 +277,9 @@ it('rejects mismatched target, unsigned-looking source and model-driven replies 
     { ...raw, cards: [{ ...cardFor(), token: 'opaque.token' }] },
     { ...raw, cards: [cardFor('other')] },
     { ...raw, cards: [{ ...cardFor(), sourceBound: undefined }] },
-  ]) expect(() => parseFoodPickupReply(value, 'pu', 'conversation', target)).toThrow();
+  ]) expect(() => parseFoodPickupReply(value, tenantSchoolId, 'conversation', target)).toThrow();
   expect(matchesFoodPickupTarget(cardFor('other'), target)).toBe(false);
-  expect(parseFoodPickupReply(raw, 'pu', 'conversation', target).cards[0].conversationId).toBe('conversation');
+  expect(parseFoodPickupReply(raw, tenantSchoolId, 'conversation', target).cards[0].conversationId).toBe('conversation');
 });
 
 it('preserves unknown results when a receipt does not match the reviewed event', async () => {
@@ -337,7 +379,7 @@ it('uses the actual selected order detail as the cross-feature entry point', asy
   const client = { getOrder: vi.fn().mockResolvedValue(order) } as unknown as FoodClient;
   const { calls } = api();
   render(<FoodOrderDetail client={client} cache={new Map()} accountId={props.accountId} context={context}
-    tenantId={props.tenantId} orderId={props.orderId} onChange={async () => {}} onBack={() => {}} />);
+    tenantId={props.tenantId} schoolId={props.schoolId} orderId={props.orderId} onChange={async () => {}} onBack={() => {}} />);
   const suggestion = await screen.findByRole('region', { name: 'nuni 建議' });
   expect(suggestion.textContent).toContain(order.locationName);
   expect(suggestion.textContent).toContain('20:00');
@@ -356,7 +398,7 @@ it('uses the ready order suggestion to show its valid credential locally in a si
   const client = { getOrder: vi.fn().mockResolvedValue(order) } as unknown as FoodClient;
   const { actions } = api();
   render(<FoodOrderDetail client={client} cache={new Map()} accountId={props.accountId} context={context}
-    tenantId={props.tenantId} orderId={order.id} onChange={async () => {}} onBack={() => {}} />);
+    tenantId={props.tenantId} schoolId={props.schoolId} orderId={order.id} onChange={async () => {}} onBack={() => {}} />);
 
   const suggestion = await screen.findByRole('region', { name: 'nuni 建議' });
   expect(suggestion.textContent).toContain(order.locationName);
@@ -375,7 +417,7 @@ it('refreshes the same ready order in place when its credential has expired', as
   const client = { getOrder } as unknown as FoodClient;
   api();
   render(<FoodOrderDetail client={client} cache={new Map()} accountId={props.accountId} context={context}
-    tenantId={props.tenantId} orderId={order.id} onChange={async () => {}} onBack={() => {}} />);
+    tenantId={props.tenantId} schoolId={props.schoolId} orderId={order.id} onChange={async () => {}} onBack={() => {}} />);
 
   const suggestion = await screen.findByRole('region', { name: 'nuni 建議' });
   expect(screen.queryByRole('button', { name: '出示取餐憑證' })).toBeNull();
@@ -393,7 +435,7 @@ it.each(['past', 'fulfilled', 'disabled'] as const)('omits the schedule suggesti
   const client = { getOrder: vi.fn().mockResolvedValue(order) } as unknown as FoodClient;
   api();
   render(<FoodOrderDetail client={client} cache={new Map()} accountId={props.accountId} context={context}
-    tenantId={props.tenantId} orderId={order.id} onChange={async () => {}} onBack={() => {}} />);
+    tenantId={props.tenantId} schoolId={props.schoolId} orderId={order.id} onChange={async () => {}} onBack={() => {}} />);
 
   await screen.findByRole('heading', { name: /米飯店 ·/ });
   expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
@@ -406,7 +448,7 @@ it('replaces the planning suggestion with pickup when the selected order becomes
   const client = { getOrder } as unknown as FoodClient;
   const { actions } = api();
   render(<FoodOrderDetail client={client} cache={new Map()} accountId={props.accountId} context={context}
-    tenantId={props.tenantId} orderId={initial.id} onChange={async () => {}} onBack={() => {}} />);
+    tenantId={props.tenantId} schoolId={props.schoolId} orderId={initial.id} onChange={async () => {}} onBack={() => {}} />);
   const first = await screen.findByRole('region', { name: 'nuni 建議' });
   expect(within(first).getByRole('button', { name: '預覽這筆取餐安排' })).toBeTruthy();
 

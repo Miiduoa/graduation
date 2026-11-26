@@ -5,8 +5,10 @@ import {
   buildCampusEventLoginHref,
   campusEventKey,
   campusEventMatchesSearch,
+  campusEventNextStep,
   campusEventRegistrationCountLabel,
   campusEventSourceLabel,
+  EVENT_ARRIVAL_WINDOW_MS,
   formatCampusEventDateTime,
   isCampusEventSource,
   readCampusEventFilters,
@@ -39,6 +41,48 @@ it('does not classify an active multi-day event as past', () => {
   expect(campusEventMatchesView(event, 'ongoing', now)).toBe(true);
   expect(campusEventMatchesView(event, 'past', now)).toBe(false);
   expect(campusEventMatchesView({ ...event, endsAt: undefined }, 'past', now)).toBe(true);
+});
+
+it('offers a venue map for a started event that has no end time', () => {
+  const now = Date.parse('2026-11-24T16:10:00Z');
+  const event = {
+    id: 'stargazing',
+    schoolId: 'nthu',
+    title: '夜間觀星',
+    description: '',
+    startsAt: '2026-11-24T15:30:00Z',
+    location: '天文台',
+    source: 'school-events' as const,
+    appRegistrationConfigured: false,
+  };
+  const step = campusEventNextStep(event, now);
+  expect(step).toMatchObject({
+    label: '在校園地圖查地點',
+    reason: '「夜間觀星」已開始，活動地點是「天文台」。',
+  });
+  expect(step?.href).toBe(`/map?${new URLSearchParams({ schoolId: 'nthu', query: '天文台' })}`);
+  expect(campusEventNextStep({ ...event, location: '線上' }, now)).toBeNull();
+  expect(campusEventNextStep(event, now + 365 * 24 * 60 * 60_000)?.label).toBe('在校園地圖查地點');
+});
+
+it('uses calendarTime for next-step phase so a display-only start does not open a map', () => {
+  const now = Date.parse('2026-11-24T16:10:00Z');
+  const event = {
+    id: 'legacy',
+    schoolId: 'nthu',
+    title: '舊活動',
+    description: '',
+    startsAt: new Date(now - 60_000).toISOString(),
+    location: '禮堂',
+    source: 'legacy-events' as const,
+    appRegistrationConfigured: false,
+    calendarTime: { startsAt: '', endsAt: '' },
+  };
+  expect(campusEventNextStep(event, now)).toBeNull();
+  expect(campusEventNextStep({
+    ...event,
+    calendarTime: { startsAt: new Date(now + EVENT_ARRIVAL_WINDOW_MS / 2).toISOString(), endsAt: '' },
+  }, now)?.label).toBe('在校園地圖查地點');
 });
 
 it('preserves school context and source on detail and login URLs', () => {

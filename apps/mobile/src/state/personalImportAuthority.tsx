@@ -27,7 +27,8 @@ export function PersonalImportAuthorityProvider({ children }: { children: React.
     verifiedNuniOwner !== previous.current.nuniOwner ||
     verifiedGeneration !== previous.current.signInGeneration
   );
-  const revokedOwner = firebaseUid || freshNuniSession
+  // A returning Firebase uid is not a Nuni login and must not revive a revoked Nuni draft.
+  const revokedOwner = freshNuniSession
     ? null
     : firebaseJustSignedOut
       ? previous.current.nuniOwner ?? nuniOwner

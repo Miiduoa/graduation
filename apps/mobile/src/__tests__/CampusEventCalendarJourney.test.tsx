@@ -35,16 +35,18 @@ jest.mock('../state/personalImportScope', () => ({
 }));
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
-    pendingLogout: false,
+    pendingLogout: mockPendingLogout,
     loading: mockVerifying,
     session: mockPlatformSession,
     signInGeneration: mockSignInGeneration,
+    error: mockSessionError,
   }),
   useOptionalNuniSession: () => ({
-    pendingLogout: false,
+    pendingLogout: mockPendingLogout,
     loading: mockVerifying,
     session: mockPlatformSession,
     signInGeneration: mockSignInGeneration,
+    error: mockSessionError,
   }),
 }));
 jest.mock('../services/publicCampusContent', () => ({
@@ -78,6 +80,8 @@ let mockSignInGeneration: number;
 let mockUseLiveScope: boolean;
 let mockPlatformSession: { platformAccountId: string } | null;
 let mockAuth: { user: { uid: string } | null; loading: boolean };
+let mockSessionError: string;
+let mockPendingLogout: boolean;
 const mockAuthContext = React.createContext<typeof mockAuth | null>(null);
 const mockScopeContext = React.createContext<PersonalImportScope | null>(null);
 
@@ -120,6 +124,8 @@ beforeEach(async () => {
   mockUseLiveScope = false;
   mockPlatformSession = { platformAccountId: 'account-a' };
   mockAuth = { user: { uid: 'student' }, loading: false };
+  mockSessionError = '';
+  mockPendingLogout = false;
   await AsyncStorage.clear();
   jest
     .mocked(loadCampusEventPage)
@@ -282,6 +288,50 @@ test('Firebase 先登出時，活動詳情與新掛載的舊路由都無法開�
   await view.findByText('請回到目前校園的活動頁重新開啟草稿。');
   expect(view.queryByRole('button', { name: '儲存行程' })).toBeNull();
   expect((await loadPersonalImports(mockScope)).records).toEqual([]);
+});
+
+test('Firebase 帳號重新出現時不會恢復已撤銷的 Nuni 活動草稿', async () => {
+  mockUseLiveScope = true;
+  const view = await openDraft();
+  fireEvent.changeText(view.getByLabelText('標題'), '登出後不該回來的觀星');
+  mockAuth = { user: null, loading: false };
+  view.rerender(<Journey />);
+  await view.findByText('請回到目前校園的活動頁重新開啟草稿。');
+
+  mockAuth = { user: { uid: 'student' }, loading: false };
+  view.rerender(<Journey openOldDraft />);
+  await view.findByText('請回到目前校園的活動頁重新開啟草稿。');
+  expect(view.queryByLabelText('標題')).toBeNull();
+  expect(view.queryByRole('button', { name: '儲存行程' })).toBeNull();
+});
+
+test('活動草稿工作區在登入被拒時撤銷寫入，不把未完成的儲存送出', async () => {
+  const original = mockScope;
+  const view = await openDraft();
+  const key = personalImportStorageKey(original);
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  const nativeSetItem = setItem.getMockImplementation()!;
+  let finishWrite!: () => void;
+  const pendingWrite = new Promise<void>((resolve) => { finishWrite = resolve; });
+  setItem.mockImplementationOnce(async (storageKey, value) => {
+    await pendingWrite;
+    await nativeSetItem(storageKey, value);
+  });
+  setItem.mockClear();
+  fireEvent.press(await view.findByRole('button', { name: '儲存行程', disabled: false }));
+  await waitFor(() => expect(setItem).toHaveBeenCalledWith(key, expect.any(String)));
+
+  mockPlatformSession = null;
+  mockSessionError = '無法確認登入狀態，請重新連線後再試。';
+  mockAuth = { ...mockAuth };
+  view.rerender(<Journey />);
+  await act(async () => {
+    finishWrite();
+    expect((await loadPersonalImports(original)).records).toEqual([]);
+  });
+  await view.findByText('請回到目前校園的活動頁重新開啟草稿。');
+  expect(view.queryByLabelText('標題')).toBeNull();
+  expect(await AsyncStorage.getItem(key)).toBeNull();
 });
 
 test('清除檢查點時 Firebase 已切換，還原舊帳本且不發出變更通知', async () => {
