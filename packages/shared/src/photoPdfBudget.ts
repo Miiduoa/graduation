@@ -14,6 +14,10 @@ export function checkPhotoCancellation(signal?: AbortSignal) {
 export function checkPhotoPixels(width: number, height: number, previous = 0) {
   const pixels = width * height;
   if (
+    !Number.isSafeInteger(width) ||
+    !Number.isSafeInteger(height) ||
+    !Number.isSafeInteger(previous) ||
+    previous < 0 ||
     !Number.isSafeInteger(pixels) ||
     width <= 0 ||
     height <= 0 ||
@@ -49,8 +53,9 @@ export function photoDimensions(bytes: Uint8Array): { width: number; height: num
     while (offset + 4 <= bytes.length) {
       if (bytes[offset++] !== 255) break;
       while (bytes[offset] === 255) offset++;
+      if (offset >= bytes.length) break;
       const marker = bytes[offset++];
-      if (marker === 218 || marker === 217) break;
+      if (marker === 218 || marker === 217 || offset + 2 > bytes.length) break;
       const length = view.getUint16(offset);
       if (length < 2 || offset + length > bytes.length) break;
       if ([192, 193, 194].includes(marker) && length >= 8)
@@ -64,5 +69,9 @@ export function photoDimensions(bytes: Uint8Array): { width: number; height: num
 export function photoRenderSize(width: number, height: number) {
   checkPhotoPixels(width, height);
   const scale = Math.min(1, Math.sqrt(MAX_RENDERED_PHOTO_PIXELS / (width * height)));
-  return { width: Math.floor(width * scale), height: Math.floor(height * scale) };
+  // A one-pixel edge must survive rounding without exceeding the pixel budget.
+  return {
+    width: Math.min(MAX_RENDERED_PHOTO_PIXELS, Math.max(1, Math.floor(width * scale))),
+    height: Math.min(MAX_RENDERED_PHOTO_PIXELS, Math.max(1, Math.floor(height * scale))),
+  };
 }
