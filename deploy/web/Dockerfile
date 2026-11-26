@@ -21,6 +21,7 @@ COPY scripts/build-functions-shared.cjs ./scripts/build-functions-shared.cjs
 RUN node scripts/build-functions-shared.cjs
 COPY scripts/import-ai/ ./scripts/import-ai/
 COPY backend/functions/puScraper.js backend/functions/tronClassScraper.js ./backend/functions/
+COPY backend/functions/tronClassAccountLifecycle.js ./backend/functions/
 COPY backend/functions/dormWorkflow.js backend/functions/authz.js backend/functions/dormName.js backend/functions/dormSsoIdentity.js ./backend/functions/
 RUN ln -s ../../apps/web/node_modules backend/functions/node_modules
 COPY backend/functions/campusStoryAccessBinding.js ./backend/functions/
