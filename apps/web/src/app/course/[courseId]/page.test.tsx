@@ -72,6 +72,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.spyOn(privateFileService, 'claimPrivateFile').mockResolvedValue(undefined);
   window.localStorage.clear();
+  window.history.replaceState(null, '', '/course/course');
   auth.user = { uid: 'alice' };
   auth.loading = false;
   school.selectedSchoolId = 'school-a';
@@ -445,6 +446,95 @@ it('offers scoped course counts and accessible shortcuts without inventing a wor
   expect(within(navigation).getByRole('link', { name: '本週待辦' }).getAttribute('href')).toBe('#week');
   expect(within(navigation).getByRole('link', { name: '教材櫃' }).getAttribute('href')).toBe('#course-materials-title');
   expect(within(navigation).getByRole('link', { name: '作業與評量' }).getAttribute('href')).toBe('#assignments');
+});
+
+it.each([
+  ['assignment', 'assignment'],
+  ['quiz', 'quiz'],
+  ['exam', 'quiz'],
+] as const)('opens the actual %s card from this week and moves keyboard focus to it', async (type, kind) => {
+  vi.mocked(loadCourseWork).mockResolvedValue(coursework({
+    assignments: [assignment('work-1', { type, dueAt: new Date().toISOString() })],
+  }));
+  await mount();
+  const week = screen.getByRole('region', { name: '本週' });
+  const link = within(week).getByRole('link', { name: /作業 work-1/ });
+  const card = screen.getByRole('region', { name: '作業 work-1' });
+  expect(link.getAttribute('href')).toBe(`#${kind}-work-1`);
+  fireEvent.click(link);
+  await waitFor(() => expect(window.location.hash).toBe(`#${kind}-work-1`));
+  await waitFor(() => expect(document.activeElement).toBe(card));
+  expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true');
+  expect(loadCourseWork).toHaveBeenCalledOnce();
+  expect(submitCourseText).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['教材櫃', 'course-materials-title'],
+  ['作業與評量', 'assignments'],
+] as const)('focuses the %s shortcut and returns to the same weekly task', async (name, id) => {
+  vi.mocked(loadCourseWork).mockResolvedValue(coursework({
+    assignments: [assignment('A', { dueAt: new Date().toISOString(), allowLateSubmission: true })],
+  }));
+  window.history.replaceState(null, '', '/course/course#assignment-A');
+  await mount();
+  const card = screen.getByRole('region', { name: '作業 A' });
+  await waitFor(() => expect(document.activeElement).toBe(card));
+  write('A', '切換內容後仍保留這份草稿');
+  const navigation = screen.getByRole('navigation', { name: '課程內容捷徑' });
+  fireEvent.click(within(navigation).getByRole('link', { name }));
+  const heading = document.getElementById(id);
+  await waitFor(() => expect(document.activeElement).toBe(heading));
+  expect(card.hasAttribute(COURSE_WORK_LANDING_ATTR)).toBe(false);
+  fireEvent.click(within(screen.getByRole('region', { name: '本週' })).getByRole('link', { name: /作業 A/ }));
+  await waitFor(() => expect(document.activeElement).toBe(card));
+  expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true');
+  expect(answer('A').value).toBe('切換內容後仍保留這份草稿');
+  expect(loadCourseWork).toHaveBeenCalledOnce();
+});
+
+it('revisits the current task without requiring another hashchange, while modified clicks keep focus', async () => {
+  vi.mocked(loadCourseWork).mockResolvedValue(coursework({
+    assignments: [assignment('A', { dueAt: new Date().toISOString(), allowLateSubmission: true })],
+  }));
+  window.history.replaceState(null, '', '/course/course#assignment-A');
+  await mount();
+  const card = screen.getByRole('region', { name: '作業 A' });
+  await waitFor(() => expect(document.activeElement).toBe(card));
+  const link = within(screen.getByRole('region', { name: '本週' })).getByRole('link', { name: /作業 A/ });
+  const field = answer('A');
+  field.focus();
+  fireEvent.click(link, { ctrlKey: true });
+  expect(document.activeElement).toBe(field);
+  fireEvent.click(link, { metaKey: true });
+  expect(document.activeElement).toBe(field);
+  fireEvent.click(link);
+  expect(document.activeElement).toBe(card);
+  expect(window.location.hash).toBe('#assignment-A');
+  expect(loadCourseWork).toHaveBeenCalledOnce();
+});
+
+it('can return to the same card after a missing task link without a background refresh stealing focus', async () => {
+  window.history.replaceState(null, '', '/course/course#assignment-A');
+  await mount();
+  const card = screen.getByRole('region', { name: '作業 A' });
+  await waitFor(() => expect(document.activeElement).toBe(card));
+  await act(async () => {
+    window.history.replaceState(null, '', '/course/course#assignment-gone');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  const refresh = screen.getByRole('button', { name: '重新整理' });
+  refresh.focus();
+  await act(async () => {
+    window.history.replaceState(null, '', '/course/course#assignment-A');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await waitFor(() => expect(document.activeElement).toBe(card));
+  const field = answer('A');
+  field.focus();
+  fireEvent.click(refresh);
+  await waitFor(() => expect(loadCourseWork).toHaveBeenCalledTimes(2));
+  expect(document.activeElement).toBe(field);
 });
 
 it('uploads Supabase assignment attachments and submits their paths without requiring text', async () => {

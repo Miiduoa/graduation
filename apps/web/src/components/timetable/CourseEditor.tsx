@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   WEEKDAY_LABELS,
   courseTimeLabel,
@@ -13,6 +14,7 @@ import {
 } from '@campus/shared';
 import { ConfirmModal, Modal } from '@/components/ui/Modal';
 import { TIMETABLE_COURSE_WORK_LABEL } from '@/lib/todayScreen';
+import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
 import { draftConflicts, hasCourseChanges, validateCourseDraft, type CourseIssues } from './courseEditorModel';
 import styles from './timetable.module.css';
 
@@ -30,6 +32,10 @@ type CourseEditorProps = {
   courseWorkHref?: string;
 };
 
+type CourseConfirmation =
+  | { kind: 'delete' | 'discard' }
+  | { kind: 'course-work'; href: string };
+
 export function CourseEditor({
   course,
   courses,
@@ -43,9 +49,10 @@ export function CourseEditor({
   periodProfile = 'pu',
   courseWorkHref,
 }: CourseEditorProps) {
+  const router = useRouter();
   const [initial] = useState(() => courses.find((item) => item.id === course.id) || course);
   const [submitted, setSubmitted] = useState(false);
-  const [confirmation, setConfirmation] = useState<'delete' | 'discard' | null>(null);
+  const [confirmation, setConfirmation] = useState<CourseConfirmation | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const id = useId();
@@ -67,7 +74,7 @@ export function CourseEditor({
 
   function requestClose() {
     if (busy) return;
-    if (dirty) setConfirmation('discard');
+    if (dirty) setConfirmation({ kind: 'discard' });
     else onCancel();
   }
 
@@ -106,7 +113,23 @@ export function CourseEditor({
                 role="group"
                 aria-label={`${course.name || '這門課'}的作業與教材`}
               >
-                <Link className="btn" href={courseWorkHref}>
+                <Link
+                  className="btn"
+                  href={courseWorkHref}
+                  aria-disabled={busy || undefined}
+                  onClick={(event) => {
+                    // New tabs keep this editor mounted and do not discard its draft.
+                    if (!isCurrentTabNavigationClick(event, event.currentTarget)) return;
+                    if (busy || confirmation) {
+                      event.preventDefault();
+                      return;
+                    }
+                    if (!dirty) return;
+                    event.preventDefault();
+                    event.currentTarget.focus({ preventScroll: true });
+                    setConfirmation({ kind: 'course-work', href: courseWorkHref });
+                  }}
+                >
                   {TIMETABLE_COURSE_WORK_LABEL}
                 </Link>
                 <p className={styles.hint}>除了編輯格位，也可開啟這門課的作業與教材。</p>
@@ -160,7 +183,7 @@ export function CourseEditor({
             {feedback && <p role="status" className={styles.feedback}>{feedback}</p>}
             {busy && <p className={styles.hint} aria-live="polite">正在儲存，請勿重複送出。</p>}
             <div className={styles.editorActions}>
-              {existing && <button type="button" className={styles.deleteButton} disabled={busy} onClick={() => setConfirmation('delete')}>刪除</button>}
+              {existing && <button type="button" className={styles.deleteButton} disabled={busy} onClick={() => setConfirmation({ kind: 'delete' })}>刪除</button>}
               <div className={styles.saveActions}>
                 <button type="button" className="btn" disabled={busy} onClick={requestClose}>取消</button>
                 <button type="submit" className="btn primary" disabled={busy}>儲存</button>
@@ -171,17 +194,21 @@ export function CourseEditor({
       </Modal>
       <ConfirmModal
         isOpen={confirmation !== null}
-        title={confirmation === 'delete' ? '刪除這門課？' : '放棄這次修改？'}
-        message={confirmation === 'delete' ? `「${initial.name}」會從個人課表移除，不會辦理學校退選。` : '尚未儲存的內容會被捨棄，原有課表不變。'}
-        confirmText={confirmation === 'delete' ? '確認刪除' : '放棄修改'}
-        cancelText={confirmation === 'delete' ? '保留課程' : '繼續編輯'}
+        title={confirmation?.kind === 'delete' ? '刪除這門課？' : confirmation?.kind === 'course-work' ? '放棄修改並開啟課業？' : '放棄這次修改？'}
+        message={confirmation?.kind === 'delete' ? `「${initial.name}」會從個人課表移除，不會辦理學校退選。` : confirmation?.kind === 'course-work' ? '尚未儲存的課程修改會被捨棄，接著開啟作業與教材。原有課表不變。' : '尚未儲存的內容會被捨棄，原有課表不變。'}
+        confirmText={confirmation?.kind === 'delete' ? '確認刪除' : confirmation?.kind === 'course-work' ? '放棄修改並開啟' : '放棄修改'}
+        cancelText={confirmation?.kind === 'delete' ? '保留課程' : '繼續編輯'}
         variant="danger"
         loading={busy}
         onClose={() => { if (!busy) setConfirmation(null); }}
         onConfirm={() => {
           if (busy) return;
-          if (confirmation === 'delete') { setConfirmation(null); onRemove(); }
-          else if (confirmation === 'discard') onCancel();
+          if (confirmation?.kind === 'delete') { setConfirmation(null); onRemove(); }
+          else if (confirmation?.kind === 'discard') onCancel();
+          else if (confirmation?.kind === 'course-work') {
+            router.push(confirmation.href);
+            onCancel();
+          }
         }}
       />
     </>

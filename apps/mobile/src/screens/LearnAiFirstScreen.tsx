@@ -168,6 +168,9 @@ export default function LearnAiFirstScreen() {
           </Pressable>
         ))}
       </ScrollView>
+      <AISection title="TronClass">
+        <AIRow title="TronClass 課程與作業" subtitle="獨立連接校方帳號，查看課務、準備與核對作業" onPress={() => safeNavigate(navigation, 'TronClassWorkspace')} />
+      </AISection>
       {workspace ? (
         <View style={{ flexDirection: 'row', marginHorizontal: 16, marginTop: 14, gap: 8 }} accessibilityLabel="課務進度摘要">
           {[
