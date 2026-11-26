@@ -124,6 +124,13 @@ const restrictsWalking = (tags: Tags) =>
   // https://wiki.openstreetmap.org/wiki/Key:locked
   (tags.locked !== undefined && !['no', 'false', '0'].includes(tags.locked)) ||
   tags['locked:conditional'] !== undefined ||
+  // A conditional door/gate opening schedule or legacy access-time tags
+  // cannot establish an all-hours route. open=no alone only describes the
+  // default physical state (a door may be unlocked and manually operable).
+  // https://wiki.openstreetmap.org/wiki/Key:open
+  // https://wiki.openstreetmap.org/wiki/Key:access
+  tags['open:conditional'] !== undefined ||
+  ['date_on', 'date_off', 'day_on', 'day_off', 'hour_on', 'hour_off'].some(key => tags[key] !== undefined) ||
   tags['access:conditional'] !== undefined || tags['foot:conditional'] !== undefined ||
   tags.opening_hours !== undefined;
 
