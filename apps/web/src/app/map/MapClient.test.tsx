@@ -789,7 +789,10 @@ it('lets visitors choose a campus starting point and destination without locatio
   const apple = new URL(screen.getByRole('link', { name: '使用 Apple 地圖規劃路線' }).getAttribute('href')!);
   expect(apple.searchParams.get('saddr')).toBe(url.searchParams.get('origin'));
   expect(apple.searchParams.get('daddr')).toBe(url.searchParams.get('destination'));
-  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  const clear = screen.getByRole('button', { name: '清除路線' });
+  clear.focus();
+  fireEvent.click(clear);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
   expect(screen.queryByRole('link', { name: '開啟步行導航' })).toBeNull();
   expect(screen.queryByRole('link', { name: '使用 Apple 地圖規劃路線' })).toBeNull();
 });
@@ -825,7 +828,10 @@ it.each(['origin', 'destination', 'origin-building', 'destination-floor', 'uncha
     expect(returned.searchParams.get('route')).toBeNull();
     expect(screen.getByText(/原先選擇的地點已變更或無法確認/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: '設為終點' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '清除待確認路線' }));
+    const clear = screen.getByRole('button', { name: '清除待確認路線' });
+    clear.focus();
+    fireEvent.click(clear);
+    expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
     expect(screen.queryByText(/原先選擇的地點已變更或無法確認/)).toBeNull();
   }
 });
@@ -839,7 +845,10 @@ it('does not resolve a shared route with duplicate endpoint IDs', async () => {
   expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
   expect(JSON.parse(markers.textContent!).route).toBeNull();
   expect(screen.getByText(/這個連結的起點或終點已不在目前地點資料中/)).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  const clear = screen.getByRole('button', { name: '清除路線' });
+  clear.focus();
+  fireEvent.click(clear);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
   expect(screen.queryByText(/這個連結的起點或終點已不在目前地點資料中/)).toBeNull();
   expect(JSON.parse(markers.textContent!).route).toBeNull();
 });
@@ -875,7 +884,10 @@ it('keeps both login returns in sync with manually changed and cleared routes', 
   expect(returnRoutes()).toEqual([null, null]);
   fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
   expect(returnRoutes()).toEqual([null, null]);
-  fireEvent.click(screen.getByRole('button', { name: '取消起點' }));
+  const cancel = screen.getByRole('button', { name: '取消起點' });
+  cancel.focus();
+  fireEvent.click(cancel);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
   expect(screen.queryByText(/已設定「蓋夏圖書館」為起點/)).toBeNull();
   expect(returnRoutes()).toEqual([null, null]);
   fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
@@ -916,7 +928,10 @@ it('preserves a pending untouched route link but drops it when the source cannot
   expect(returnRoute()).toBeNull();
   expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
   expect(screen.getByText(/這個連結的起點或終點已不在目前地點資料中/)).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  const clear = screen.getByRole('button', { name: '清除路線' });
+  clear.focus();
+  fireEvent.click(clear);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
   expect(screen.queryByText(/這個連結的起點或終點已不在目前地點資料中/)).toBeNull();
   expect(returnRoute()).toBeNull();
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route).toBeNull();
