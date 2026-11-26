@@ -141,6 +141,22 @@ async function bodyBytes(body: BodyInit | null | undefined): Promise<Uint8Array>
   return new Uint8Array(await copy.arrayBuffer());
 }
 
+/**
+ * Log only the shape of a path. Numeric IDs, attachment keys and file identifiers
+ * (any segment with 8+ characters containing a digit, any 16+ character segment,
+ * and the segment after /uploads/) must not be correlatable through logs.
+ */
+function redactRelayLogPath(path: string): string {
+  const parts = path.split('/');
+  return parts.map((segment, index) => {
+    if (!segment) return segment;
+    if (/^\d+$/.test(segment)) return ':id';
+    if (/^(?=.*\d)[^/]{8,}$/.test(segment) || segment.length >= 16) return ':id';
+    if (parts[index - 1]?.toLowerCase() === 'uploads') return ':id';
+    return segment;
+  }).join('/');
+}
+
 function logClientRelay(fields: {
   host: string;
   path: string;
@@ -153,7 +169,7 @@ function logClientRelay(fields: {
     JSON.stringify({
       msg: 'pu_edge_relay_client',
       host: fields.host,
-      path: fields.path,
+      path: redactRelayLogPath(fields.path),
       status: fields.status,
       ms: fields.ms,
       ...(fields.colo ? { colo: fields.colo } : {}),
