@@ -21,6 +21,7 @@ type Props = {
   context: string;
   accountId: string;
   tenantId: string;
+  schoolId: string;
   orderId: string;
   available: boolean;
   suggestion: string | null;
@@ -310,7 +311,10 @@ function ScopedFoodPickupAgent({ scope, ...props }: Props & { scope: Scope }) {
 
 export function FoodPickupAgent(props: Props) {
   const enabled = useAssistantEnabled();
-  const schoolId = toPublicSchoolId(props.tenantId);
+  const incomingSchoolId = toPublicSchoolId(props.schoolId);
+  const lockedSchoolId = useRef<string | null>(null);
+  if (incomingSchoolId && !lockedSchoolId.current) lockedSchoolId.current = incomingSchoolId;
+  const schoolId = lockedSchoolId.current;
   if (!enabled || !schoolId ||
       !/^[A-Za-z0-9_-]{43}$/.test(props.context) || !/^[A-Za-z0-9_-]{1,128}$/.test(props.accountId)) return null;
   let target: AssistantFoodPickupTarget;
