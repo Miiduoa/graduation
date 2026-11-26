@@ -63,18 +63,28 @@ export async function loadMapLocations(
   { timeoutMs = MAP_SOURCE_TIMEOUT_MS }: { timeoutMs?: number } = {},
 ): Promise<MapLocation[]> {
   if (!isFirebaseConfigured() || !validId(schoolId)) throw new Error('Map source unavailable');
-  return withTimeout(readMapLocations(schoolId), timeoutMs);
+  // Firestore's one-shot read cannot be aborted. Stop the rest of this
+  // request after its deadline instead of starting a second read or parsing
+  // a late response that the caller can no longer use.
+  let active = true;
+  try {
+    return await withTimeout(readMapLocations(schoolId, () => active), timeoutMs);
+  } finally {
+    active = false;
+  }
 }
 
-async function readMapLocations(schoolId: string): Promise<MapLocation[]> {
+async function readMapLocations(schoolId: string, isActive: () => boolean): Promise<MapLocation[]> {
   const db = getDb();
   let snapshot = await getDocsFromServer(collection(db, 'schools', schoolId, 'pois'));
+  if (!isActive()) throw new MapSourceTimeoutError();
   // Only use the migration source after the canonical source confirms it is empty.
   if (snapshot.empty) {
     snapshot = await getDocsFromServer(
       query(collection(db, 'pois'), where('schoolId', '==', schoolId)),
     );
   }
+  if (!isActive()) throw new MapSourceTimeoutError();
   return snapshot.docs
     .flatMap((entry) => {
       const place = parseCampusMapRecord(entry.id, entry.data(), schoolId);

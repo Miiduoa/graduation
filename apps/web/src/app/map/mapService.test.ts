@@ -378,6 +378,54 @@ it('fails a stuck map source after the timeout instead of loading forever', asyn
   }
 });
 
+it('does not start a legacy POI read when the canonical response arrives after the deadline', async () => {
+  vi.useFakeTimers();
+  try {
+    let complete!: (value: ReturnType<typeof snapshot>) => void;
+    vi.mocked(getDocsFromServer).mockReturnValueOnce(new Promise((resolve) => {
+      complete = resolve;
+    }) as never);
+    // Supply a response to detect an unexpected extra read without an unhandled error.
+    respond(snapshot());
+    const result = loadMapLocations('pu', { timeoutMs: 50 });
+    const rejected = expect(result).rejects.toBeInstanceOf(MapSourceTimeoutError);
+    await vi.advanceTimersByTimeAsync(50);
+    await rejected;
+    complete(snapshot());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+    // Consume the queued response with a fresh request, not the expired one.
+    respond(snapshot(entry('library', { ...location, schoolId: 'pu' })));
+    await expect(loadMapLocations('pu')).resolves.toEqual([location]);
+    expect(getDocsFromServer).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.resetAllMocks();
+    vi.useRealTimers();
+  }
+});
+
+it('does not parse a legacy POI response that arrives after the shared deadline', async () => {
+  vi.useFakeTimers();
+  try {
+    respond(snapshot());
+    let complete!: (value: ReturnType<typeof snapshot>) => void;
+    vi.mocked(getDocsFromServer).mockReturnValueOnce(new Promise((resolve) => {
+      complete = resolve;
+    }) as never);
+    const readData = vi.fn(() => ({ ...location, schoolId: 'pu' }));
+    const result = loadMapLocations('pu', { timeoutMs: 50 });
+    const rejected = expect(result).rejects.toBeInstanceOf(MapSourceTimeoutError);
+    await vi.advanceTimersByTimeAsync(50);
+    await rejected;
+    expect(getDocsFromServer).toHaveBeenCalledTimes(2);
+    complete({ empty: false, docs: [{ id: 'library', data: readData }] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readData).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it('passes through a source answer that arrives before the timeout', async () => {
   await expect(withTimeout(Promise.resolve(['ok']), 1000)).resolves.toEqual(['ok']);
   await expect(withTimeout(Promise.reject(new Error('denied')), 1000)).rejects.toThrow('denied');
