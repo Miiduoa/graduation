@@ -149,6 +149,21 @@ it.each(['coordinates', 'building', 'floor', 'unchanged'] as const)('revalidates
   expect(new URL(apple()!.getAttribute('href')!).searchParams.get('daddr')).toBe(replacement.lat + ',' + replacement.lng);
 });
 
+it('keeps a confirmed selected marker visible across filters until the detail is closed', async () => {
+  render(<MapClient school="other-school" focus={gate.id} />);
+  await screen.findByRole('button', { name: '查看' + gate.name });
+  const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  const ids = () => mapState().locations.map((place: MapLocation) => place.id);
+  expect(mapState().selected.id).toBe(gate.id);
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋地點' }), { target: { value: library.name } });
+  expect(screen.queryByRole('button', { name: '查看' + gate.name })).toBeNull();
+  expect(ids()).toEqual([library.id, gate.id]);
+  expect(mapState().selected).toEqual(gate);
+  fireEvent.click(screen.getByRole('button', { name: '關閉地點詳情' }));
+  expect(mapState().selected).toBeNull();
+  expect(ids()).toEqual([library.id]);
+});
+
 it('resolves classroom deep links to a unique real building while retaining the original room wording', async () => {
   vi.mocked(loadMapLocations).mockResolvedValue([]);
   render(<MapClient school="pu" query="主顧303" />);

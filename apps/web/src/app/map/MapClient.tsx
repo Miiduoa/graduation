@@ -340,10 +340,16 @@ function MapContent({
   const walkFromGate = Boolean(walkFrom && !myLocation);
   const mapLocations = useMemo(() => {
     const visible = new Map(filtered.map((location) => [location.id, location]));
-    for (const location of [...(routeLocations ?? []), ...(routeStart ? [routeStart] : []), ...(selected ? [selected] : [])])
+    for (const location of [...(routeLocations ?? []), ...(routeStart ? [routeStart] : [])])
       visible.set(location.id, location);
+    // The ID comes from the unique, validated selection above. Read the marker
+    // from the current source rather than depending on the aliased selection object.
+    if (selectedId !== undefined) {
+      const place = locations.find((location) => location.id === selectedId);
+      if (place) visible.set(selectedId, place);
+    }
     return [...visible.values()];
-  }, [filtered, selected, routeLocations, routeStart]);
+  }, [filtered, locations, selectedId, routeLocations, routeStart]);
 
   function locate() {
     const request = ++positionGeneration.current;
