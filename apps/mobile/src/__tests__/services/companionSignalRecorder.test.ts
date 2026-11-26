@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { setDoc } from 'firebase/firestore';
+import { getFirebaseApp } from '../../firebase';
 import {
   flushCompanionEvents,
   getCompanionQueueSize,
@@ -23,6 +24,7 @@ jest.mock('firebase/firestore', () => ({
 const getItem = AsyncStorage.getItem as jest.Mock;
 const setItem = AsyncStorage.setItem as jest.Mock;
 const writeEvent = setDoc as jest.Mock;
+const firebaseApp = getFirebaseApp as jest.Mock;
 let stored: string | null;
 
 function queuedIds(): string[] {
@@ -36,13 +38,17 @@ function record(assignmentId: string, uid: string | null = 'student') {
 }
 
 beforeEach(async () => {
-  jest.resetAllMocks();
+  getItem.mockReset();
+  setItem.mockReset();
+  writeEvent.mockReset();
+  firebaseApp.mockReset();
   stored = null;
   getItem.mockImplementation(async () => stored);
   setItem.mockImplementation(async (_key: string, value: string) => {
     stored = value;
   });
   writeEvent.mockResolvedValue(undefined);
+  firebaseApp.mockReturnValue({});
   await primeCompanionRecorder();
 });
 
@@ -81,6 +87,39 @@ it('does not overwrite stored events after a transient storage read failure', as
   expect(queuedIds()).toEqual(['old']);
   await record('recovered');
   expect(queuedIds()).toEqual(['old', 'recovered']);
+});
+
+it('does not treat a malformed queue snapshot as empty storage', async () => {
+  await record('old');
+  stored = '{not-json';
+  await expect(record('during-parse-failure')).resolves.toBeUndefined();
+  expect(stored).toBe('{not-json');
+  stored = JSON.stringify([{
+    kind: 'assignment_submitted',
+    at: '2026-11-26T00:00:00.000Z',
+    eventId: 'kept',
+    payload: { assignmentId: 'old' },
+    uid: 'student',
+  }]);
+  await record('recovered');
+  expect(queuedIds()).toEqual(['old', 'recovered']);
+});
+
+it('does not treat a non-array queue snapshot as empty storage', async () => {
+  await record('old');
+  stored = '{"payload":{"assignmentId":"corrupt"}}';
+  await expect(record('during-shape-failure')).resolves.toBeUndefined();
+  expect(JSON.parse(stored)).toEqual({ payload: { assignmentId: 'corrupt' } });
+});
+
+it('resolves when Firebase initialization fails and leaves the queue intact', async () => {
+  await record('kept');
+  firebaseApp.mockImplementation(() => {
+    throw new Error('firebase unavailable');
+  });
+  await expect(flushCompanionEvents()).resolves.toEqual({ flushed: 0, remaining: 1 });
+  expect(queuedIds()).toEqual(['kept']);
+  expect(writeEvent).not.toHaveBeenCalled();
 });
 
 it('retains failed writes and events without a uid while removing only successful writes', async () => {

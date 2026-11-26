@@ -42,15 +42,19 @@ function genEventId(kind: CompanionEventKind): string {
 }
 
 async function loadQueue(): Promise<QueuedEvent[]> {
-  // A storage read failure is not an empty queue; never overwrite unread data.
+  // A storage read or parse failure is not an empty queue; never overwrite unread data.
   const raw = await AsyncStorage.getItem(QUEUE_KEY);
   if (!raw) return [];
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    parsed = JSON.parse(raw);
   } catch {
-    return [];
+    throw new Error('companion queue is unreadable');
   }
+  if (!Array.isArray(parsed)) {
+    throw new Error('companion queue is unreadable');
+  }
+  return parsed as QueuedEvent[];
 }
 
 async function saveQueue(q: QueuedEvent[]): Promise<void> {
