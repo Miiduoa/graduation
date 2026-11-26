@@ -6,9 +6,14 @@ import {
   DORM_LEAVE_LABELS,
   dormTicketOverdue,
   formatDormWorkflowTime,
+  deliverDormAnnouncementBatches,
+  dormAnnouncementDraftError,
+  dormAnnouncementPublishedTime,
+  dormAnnouncementReceipt,
   dormRequestKey,
   parseDormResidentsCsv,
   dormWorkflowSummary,
+  type DormAnnouncementReceipt,
   type DormWorkflowConfig,
   type DormWorkflowRows,
   type DormTicket,
@@ -21,14 +26,9 @@ import { getAuthInstance } from '../../firebase';
 import { postNuniWebFn } from '../../services/nuniWebFn';
 import { aiTokens } from '../../ui/aiFirst';
 type FocusTarget = TextInput;
-const invoke = async <T,>(data: Record<string, unknown>): Promise<T> => {
-  const user = getAuthInstance().currentUser;
-  if (!user) throw new Error('請先登入。');
-  return postNuniWebFn('dormWorkflow', {
-    ...data,
-    schoolId: typeof data.schoolId === 'string'
-      ? (toPublicSchoolId(data.schoolId) ?? data.schoolId) : data.schoolId,
-  }, user.uid);
+const invoke = async <T,>(data: Record<string, unknown>, uid: string | null | undefined): Promise<T> => {
+  if (!uid) throw new Error('請先登入。');
+  return postNuniWebFn('dormWorkflow', data, uid);
 };
 function Box({ children }: { children: React.ReactNode }) {
   return (
@@ -50,13 +50,16 @@ function Label({
   children,
   strong,
   accent,
+  live,
 }: {
   children: React.ReactNode;
   strong?: boolean;
   accent?: boolean;
+  live?: boolean;
 }) {
   return (
     <Text
+      accessibilityLiveRegion={live ? 'polite' : undefined}
       style={{ color: accent ? aiTokens.ai : aiTokens.text, fontWeight: strong ? '700' : '400' }}
     >
       {children}
@@ -142,12 +145,12 @@ function Photo({ url, label }: { url: string; label: string }) {
     </Pressable>
   );
 }
-function TicketPhoto({ schoolId, id, index }: { schoolId: string; id: string; index: number }) {
+function TicketPhoto({ schoolId, uid, id, index }: { schoolId: string; uid: string; id: string; index: number }) {
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
   const open = async () => {
     try {
-      setUrl((await invoke<{ url: string }>({ schoolId, action: 'repairPhoto', id, index })).url);
+      setUrl((await invoke<{ url: string }>({ schoolId, action: 'repairPhoto', id, index }, uid)).url);
     } catch {
       setError('無法讀取照片，請重新整理確認權限');
     }
@@ -165,7 +168,7 @@ function TicketPhoto({ schoolId, id, index }: { schoolId: string; id: string; in
 async function exportSummary(text: string) {
   await Share.share({ title: '宿舍統計 CSV', message: text });
 }
-async function pickPhotos(schoolId: string, remaining: number): Promise<string[]> {
+async function pickPhotos(schoolId: string, uid: string, remaining: number): Promise<string[]> {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
     allowsMultipleSelection: true,
@@ -190,33 +193,40 @@ async function pickPhotos(schoolId: string, remaining: number): Promise<string[]
           action: 'uploadPhoto',
           base64,
           contentType: asset.mimeType || 'image/jpeg',
-        })
+        }, uid)
       ).path;
     }),
   );
 }
 export function DormWorkflow({
   schoolId,
+  sourceSchoolId,
   uid,
   building = '',
   room = '',
   draft,
   submitOnly = false,
   initialStaff = false,
+  residentSection,
+  notificationParams,
   onTonightLeaveChange,
   onOwnRepairsChange,
 }: {
   schoolId: string;
+  sourceSchoolId?: string;
   uid?: string | null;
   submitOnly?: boolean;
   initialStaff?: boolean;
+  residentSection?: 'announcements' | 'leave';
+  notificationParams?: { notificationView?: unknown; dormAnnouncementId?: unknown };
   onOwnRepairsChange?: (repairs: DormCloudRepair[]) => void;
   onTonightLeaveChange?: (approved: boolean) => void;
   building?: string;
   room?: string;
   draft?: { title: string; description: string; category: string; location: string };
 }) {
-  const capabilityKey = JSON.stringify([uid, schoolId]);
+  const documentSchoolId = sourceSchoolId ?? toPublicSchoolId(schoolId) ?? schoolId;
+  const capabilityKey = JSON.stringify([uid, schoolId, documentSchoolId]);
   const [capability, setCapability] = useState<{ key: string; config: DormWorkflowConfig } | null>(
     null,
   );
@@ -245,6 +255,7 @@ export function DormWorkflow({
   const [configError, setConfigError] = useState(false);
   const [rowsError, setRowsError] = useState(false);
   const [rowsLoaded, setRowsLoaded] = useState(false);
+  const [loadedNotification, setLoadedNotification] = useState<typeof notificationParams>();
   const summaryReady = rowsLoaded && !Object.values(rows.nextCursors || {}).some(Boolean);
   const [ownLeaves, setOwnLeaves] = useState<DormLeave[]>([]);
   const [staffMode, setStaffMode] = useState(false);
@@ -259,6 +270,8 @@ export function DormWorkflow({
   const [includeHistory, setIncludeHistory] = useState(false);
   const [images, setImages] = useState<string[]>([]);
   const [requestKey, setRequestKey] = useState(dormRequestKey);
+  const [announcementKey, setAnnouncementKey] = useState(dormRequestKey);
+  const [pendingAnnouncementKey, setPendingAnnouncementKey] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
   const generation = useRef(0);
   const rowGeneration = useRef(0);
@@ -266,13 +279,14 @@ export function DormWorkflow({
   const selectedStudentId = useRef('');
   const inputRef = useRef<FocusTarget | null>(null);
   const set = (key: string, value: string) => {
+    if (key.startsWith('announce')) setAnnouncementKey(dormRequestKey());
     setValues((old) => ({ ...old, [key]: value }));
     setPreview(false);
   };
   const call = useCallback(
     async <T,>(data: Record<string, unknown>): Promise<T> =>
-      invoke<T>({ ...data, schoolId: toPublicSchoolId(schoolId) ?? schoolId }),
-    [schoolId],
+      invoke<T>({ ...data, schoolId: documentSchoolId }, uid),
+    [documentSchoolId, uid],
   );
   const refresh = useCallback(
     async (staff = staffMode) => {
@@ -293,6 +307,7 @@ export function DormWorkflow({
         if (token === generation.current && rowToken === rowGeneration.current) {
           setRows({ repairs: [], leaves: [], packages: [], residents: [], ...result });
           setRowsLoaded(true);
+          setLoadedNotification(notificationParams);
           setRowsError(false);
           setOwnLeaves((mine ?? result).leaves ?? []);
         }
@@ -302,7 +317,7 @@ export function DormWorkflow({
         throw error;
       }
     },
-    [call, staffMode, includeHistory],
+    [call, staffMode, includeHistory, notificationParams],
   );
   const loadMore = async () => {
     paginationStarted.current = true;
@@ -346,6 +361,9 @@ export function DormWorkflow({
     setResidentSearch(null);
     setImages([]);
     setRequestKey(dormRequestKey());
+    setAnnouncementKey(dormRequestKey());
+    setPreview(false);
+    setBusy(false);
     setStaffMode(false);
     if (!uid) return;
     void call<DormWorkflowConfig>({ action: 'config' })
@@ -406,22 +424,30 @@ export function DormWorkflow({
     setBusy(true);
     setNotice('');
     const token = generation.current;
+    let publicationConfirmed = false;
     try {
-      const result = await call<{
-        delivered?: number;
-        recipients?: number;
+      const send = () => call<DormAnnouncementReceipt & {
         updated?: number;
         skipped?: number;
       }>(data);
+      const result = data.action === 'announce'
+        ? await deliverDormAnnouncementBatches(
+            send,
+            () => token === generation.current && getAuthInstance().currentUser?.uid === uid,
+            (receipt) => {
+              publicationConfirmed = true;
+              setPendingAnnouncementKey(String(data.key));
+              setNotice(dormAnnouncementReceipt(receipt));
+            },
+          )
+        : await send();
       if (token !== generation.current) return;
-      done?.();
+      if (!result.pendingRecipients) done?.();
       setNotice(
         result.updated !== undefined
           ? `${result.updated ? `已更新 ${result.updated} 件包裹` : '未核銷任何包裹'}，跳過 ${result.skipped ?? 0} 件。`
-          : result.recipients !== undefined
-            ? result.delivered
-              ? `公告已發布，推播 ${result.delivered}/${result.recipients} 人。`
-              : '公告已發布，推播尚未送出。'
+          : data.action === 'announce'
+            ? dormAnnouncementReceipt(result)
             : data.action === 'registerPackage'
               ? isDormPostalParcel(data)
                 ? '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'
@@ -431,9 +457,10 @@ export function DormWorkflow({
       await refresh();
     } catch (error) {
       if (token === generation.current)
-        setNotice(error instanceof Error ? error.message : '操作失敗，請重試。');
+        setNotice(publicationConfirmed ? '公告已發布，暫時無法繼續傳送推播。請稍後重試。'
+          : error instanceof Error ? error.message : '操作失敗，請重試。');
     } finally {
-      setBusy(false);
+      if (token === generation.current) setBusy(false);
     }
   }
   if (!uid) return null;
@@ -455,6 +482,9 @@ export function DormWorkflow({
     />
   );
   const get = (key: string, fallback = '') => values[key] ?? fallback;
+  const announcementError = preview
+    ? dormAnnouncementDraftError(get('announceBuilding'), get('announceTitle'), get('announceBody'))
+    : null;
   const button = (title: string, data: Record<string, unknown>, done?: () => void) => (
     <Btn
       label={title}
@@ -488,7 +518,7 @@ export function DormWorkflow({
       {!!r.vendor && staff && <Label>廠商：{r.vendor}</Label>}
       {!!r.expectedDate && <Label>預計日期：{r.expectedDate}</Label>}
       {r.images?.map((url, i) => (
-        <TicketPhoto key={url} schoolId={schoolId} id={r.id} index={i} />
+        <TicketPhoto key={url} schoolId={documentSchoolId} uid={uid} id={r.id} index={i} />
       ))}
       {staff ? (
         <>
@@ -555,12 +585,45 @@ export function DormWorkflow({
       )}
     </Box>
   );
+  const targetAnnouncementId = residentSection === 'announcements' ? notificationParams?.dormAnnouncementId : undefined;
+  const announcements = rows.announcements?.filter((a) => targetAnnouncementId === undefined || a.id === targetAnnouncementId).map((a) => (
+    <Box key={a.id}>
+      <Label strong>{a.title} · {a.building}</Label>
+      <Label>{dormAnnouncementPublishedTime(a.publishedAt)}</Label>
+      <Label>{a.body}</Label>
+    </Box>
+  ));
+  if (residentSection) {
+    const showAnnouncements = residentSection === 'announcements';
+    const records = showAnnouncements ? announcements : rows.leaves.map((r) => leave(r, false));
+    let content: React.ReactNode;
+    if (rowsError) {
+      content = <>
+        <Label>無法讀取宿舍紀錄，請稍後再試。</Label>
+        <Btn label="重新讀取" onPress={() => void refresh().catch(() => {})} />
+      </>;
+    } else if (!rowsLoaded || notificationParams !== loadedNotification) {
+      content = <Label>正在讀取宿舍紀錄…</Label>;
+    } else if (records?.length) {
+      content = records;
+    } else if (targetAnnouncementId !== undefined) {
+      content = <Label>目前查不到這則宿舍公告，可能已移除或不屬於目前住宿棟別。</Label>;
+    } else {
+      content = <Label>{showAnnouncements ? '目前沒有可查看的本棟公告。' : '目前沒有可查看的外宿卡。'}</Label>;
+    }
+    return (
+      <Box>
+        <Label strong>{showAnnouncements ? '本棟公告' : '我的外宿卡'}</Label>
+        {content}
+      </Box>
+    );
+  }
   if (!config.enabled && !rows.repairs.length && !rows.leaves.length && !notice) return null;
   if (!config.enabled)
     return (
       <Box>
         <Label strong>宿舍歷史紀錄（唯讀）</Label>
-        <Label>{notice}</Label>
+        <Label live>{notice}</Label>
         {rows.repairs.map((r) => ticket(r, false))}
         {rows.leaves.map((r) => leave(r, false))}
       </Box>
@@ -568,7 +631,7 @@ export function DormWorkflow({
   return (
     <Box>
       <Label strong>{staffMode ? '輔導員工作台' : '宿舍輔導員服務'}</Label>
-      <Label>{notice}</Label>
+      <Label live>{notice}</Label>
       {!submitOnly && (
         <Btn
           label="重新整理"
@@ -576,7 +639,7 @@ export function DormWorkflow({
           onPress={() => void refresh().catch(() => setNotice('讀取失敗，請重試。'))}
         />
       )}
-      {!submitOnly && (config.repairs || config.packages) && (
+      {!submitOnly && !notificationParams && (config.repairs || config.packages) && (
         <Btn
           label={staffMode ? '回學生服務' : '開啟輔導員工作台'}
           disabled={busy}
@@ -621,7 +684,7 @@ export function DormWorkflow({
                 onPress={() => {
                   const photoGeneration = generation.current;
                   setBusy(true);
-                  void pickPhotos(schoolId, 3 - images.length)
+                  void pickPhotos(documentSchoolId, uid, 3 - images.length)
                     .then((photos) => {
                       if (photoGeneration === generation.current)
                         setImages((old) => [...old, ...photos].slice(0, 3));
@@ -652,14 +715,7 @@ export function DormWorkflow({
           {!submitOnly && (
             <>
               <Label strong>本棟公告</Label>
-              {rows.announcements?.map((a) => (
-                <Box key={a.id}>
-                  <Label strong>
-                    {a.title} · {a.building}
-                  </Label>
-                  <Label>{a.body}</Label>
-                </Box>
-              ))}
+              {announcements}
               <Label strong>報修處理進度</Label>
               {rowsError ? (
                 <Box>
@@ -889,20 +945,30 @@ export function DormWorkflow({
               {f('announceTitle', '公告標題')}
               {f('announceBody', '公告內容', '', true)}
               <Btn label="預覽公告" disabled={busy} onPress={() => setPreview(true)} />
-              {preview && (
+              {announcementError && <Text accessibilityRole="alert" style={{ color: aiTokens.text }}>{announcementError}</Text>}
+              {preview && !announcementError && (
                 <Box>
                   <Label strong>{get('announceTitle')}</Label>
                   <Label>{get('announceBody')}</Label>
                   <Label>只通知 {get('announceBuilding')} 住宿生名冊內的人。</Label>
                   {button(
-                    '確認發布本棟公告',
+                    pendingAnnouncementKey === announcementKey ? '繼續傳送待處理的推播' : '確認發布本棟公告',
                     {
                       action: 'announce',
+                      key: announcementKey,
                       building: get('announceBuilding'),
                       title: get('announceTitle'),
                       body: get('announceBody'),
                     },
-                    () => setPreview(false),
+                    () => {
+                      setPendingAnnouncementKey(null);
+                      setValues((old) => (
+                        old.announceTitle === get('announceTitle') && old.announceBody === get('announceBody')
+                          && old.announceBuilding === get('announceBuilding')
+                          ? { ...old, announceTitle: '', announceBody: '' } : old
+                      ));
+                      setPreview(false);
+                    },
                   )}
                 </Box>
               )}

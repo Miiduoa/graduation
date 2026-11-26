@@ -28,7 +28,7 @@ export function SiteShell(props: {
         <ServiceBreadcrumbs title={props.title} />
       </Suspense>
       {props.title && (
-        <div
+        <header
           className={
             props.compactHeading ? `${styles.heading} ${styles.headingMap}` : styles.heading
           }
@@ -36,9 +36,9 @@ export function SiteShell(props: {
           <div>
             {props.schoolName && <p className={styles.eyebrow}>{props.schoolName}</p>}
             <h1>{props.title}</h1>
-            {props.subtitle && <p className={styles.intro}>{props.subtitle}</p>}
           </div>
-        </div>
+          {props.subtitle && <p className={styles.intro}>{props.subtitle}</p>}
+        </header>
       )}
       {props.schoolName && <SchoolDataScope schoolName={props.schoolName} />}
       <Suspense fallback={null}>

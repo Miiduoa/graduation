@@ -99,7 +99,7 @@ export function syncPersonalImports(
     try {
       const result = await withPersonalImportSyncLock(
         scope,
-        async (state, checkpoint) => {
+        async (state, checkpoint, assertSnapshot) => {
           const result = await performPersonalImportSync(
             scope.schoolId,
             state,
@@ -107,6 +107,7 @@ export function syncPersonalImports(
             current,
             resolution,
             checkpoint,
+            assertSnapshot,
           );
           return { state: result.state, result };
         },

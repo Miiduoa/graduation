@@ -147,6 +147,7 @@ export function signCard(
 ): Card {
   operationSignal()?.throwIfAborted();
   const publicEventGuard = sourceGuard && 'target' in sourceGuard ? sourceGuard : undefined;
+  if (studyGuard && tool !== 'propose_personal_event') return fail();
   if (sourceGuard && !('target' in sourceGuard)) {
     if (pickupGuard) return fail('CONFIRMATION_INVALID', 409);
     pickupGuard = sourceGuard;
@@ -194,6 +195,7 @@ export function signCard(
     mutationId,
     schoolId: binding.schoolId,
     ...(pickupGuard ? { sourceBound: 'food-pickup' as const } : {}),
+    ...(tool === 'propose_personal_event' ? { coursework: Boolean(studyGuard) } : {}),
     destination:
       tool === 'propose_food_order'
         ? String(args.reason)

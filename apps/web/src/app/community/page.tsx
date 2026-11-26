@@ -30,7 +30,6 @@ export default function CommunityPage() {
   return (
     <SiteShell
       title="校園交流"
-      subtitle="問題有人回答，興趣有人分享，找人一起完成更多事。"
       schoolName={ready ? schoolName : undefined}
     >
       {ready ? (
@@ -57,7 +56,6 @@ function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; scho
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeTab = activeTabFor(searchParams?.get('tab'));
-  const selected = TABS.find((tab) => tab.key === activeTab)!;
   const newPostHref = `/community/post/new?schoolId=${encodeURIComponent(schoolId)}`;
   const boardsParams = new URLSearchParams(schoolSearch.startsWith('?') ? schoolSearch.slice(1) : schoolSearch);
   boardsParams.set('tab', 'boards');
@@ -71,22 +69,37 @@ function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; scho
 
   return (
     <div className={styles.content}>
-      <section className={styles.intro} aria-labelledby="community-intro-title">
-        <div className={styles.introCopy}>
-          <p className={styles.eyebrow}>校園交流</p>
-          <h2 id="community-intro-title">從一個問題，找到同路人。</h2>
-          <p>分享課堂與生活的大小事，或看看同學們正在討論什麼。</p>
-        </div>
-        <div className={styles.introActions}>
-          <Link href={newPostHref} className={styles.primaryLink}>
-            發表貼文
-          </Link>
-          <Link href={boardsHref} className={styles.secondaryLink}>
-            逛逛看板
-          </Link>
-          <Link href={`/community/me?schoolId=${encodeURIComponent(schoolId)}`} className={styles.secondaryLink}>
-            我的頁面
-          </Link>
+      <nav className={styles.introActions} aria-label="校園交流操作">
+        <Link href={newPostHref} className={styles.primaryLink}>
+          發表貼文
+        </Link>
+        <Link href={boardsHref} className={styles.secondaryLink}>
+          逛逛看板
+        </Link>
+        <Link href={`/community/me?schoolId=${encodeURIComponent(schoolId)}`} className={styles.secondaryLink}>
+          我的頁面
+        </Link>
+      </nav>
+
+      <section className={styles.communitySection} aria-label="校內社群內容">
+        <nav className={styles.tabs} aria-label="校園交流分類">
+          {TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              aria-pressed={activeTab === tab.key}
+              onClick={() => switchTab(tab.key)}
+              title={tab.desc}
+            >
+              <strong>{tab.label}</strong>
+            </button>
+          ))}
+        </nav>
+        <div className={styles.tabContent}>
+          {activeTab === 'feed' && <FeedTab schoolId={schoolId} schoolSearch={schoolSearch} />}
+          {activeTab === 'boards' && <BoardsTab schoolId={schoolId} schoolSearch={schoolSearch} />}
+          {activeTab === 'realtime' && <RealtimeTab schoolId={schoolId} />}
+          {activeTab === 'buddy' && <StudyBuddyTab schoolId={schoolId} />}
         </div>
       </section>
 
@@ -108,37 +121,6 @@ function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; scho
           <span>探索其他校園話題</span>
         </Link>
       </nav>
-
-      <section className={styles.communitySection} aria-label="校內社群內容">
-        <div className={styles.sectionHeading}>
-          <div>
-            <p className={styles.eyebrow}>探索內容</p>
-            <h2>{selected.label}</h2>
-            <p>{selected.desc}</p>
-          </div>
-          <span className={styles.scopeNote}>內容依目前選擇的學校顯示</span>
-        </div>
-        <nav className={styles.tabs} aria-label="校園交流分類">
-          {TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              aria-pressed={activeTab === tab.key}
-              onClick={() => switchTab(tab.key)}
-              title={tab.desc}
-            >
-              <strong>{tab.label}</strong>
-              <small>{tab.desc}</small>
-            </button>
-          ))}
-        </nav>
-        <div className={styles.tabContent}>
-          {activeTab === 'feed' && <FeedTab schoolId={schoolId} schoolSearch={schoolSearch} />}
-          {activeTab === 'boards' && <BoardsTab schoolId={schoolId} schoolSearch={schoolSearch} />}
-          {activeTab === 'realtime' && <RealtimeTab schoolId={schoolId} />}
-          {activeTab === 'buddy' && <StudyBuddyTab schoolId={schoolId} />}
-        </div>
-      </section>
     </div>
   );
 }

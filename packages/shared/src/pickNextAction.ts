@@ -40,6 +40,7 @@ export type TodayTodo = {
   id: string;
   title: string;
   courseName: string;
+  schoolId?: string;
   courseId?: string;
   dueAt: number | null;
   href?: string;

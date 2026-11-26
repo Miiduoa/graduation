@@ -1,11 +1,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, expect, it, vi, type Mock } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi, type Mock } from 'vitest';
 import {
   emptyPersonalEventDraft,
   personalImportSavedNotice,
   type PersonalImportRecord,
 } from '@campus/shared';
 import { PersonalCalendar } from './PersonalCalendar';
+import * as personalImports from '@/lib/personalImports';
+import * as personalImportHooks from '@/lib/usePersonalImports';
 import {
   changePersonalImport,
   personalImportsStorageKey,
@@ -102,6 +104,8 @@ vi.mock('@/lib/usePersonalImports', async (actual) => ({
   }),
 }));
 
+const originalBounds = Element.prototype.getBoundingClientRect;
+
 beforeEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
@@ -120,6 +124,15 @@ beforeEach(() => {
   URL.createObjectURL = vi.fn(() => 'blob:calendar');
   URL.revokeObjectURL = vi.fn();
   window.confirm = vi.fn(() => true);
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    // JSDOM does not lay out the linked agenda row.
+    if (this.matches('li[aria-current="true"]')) return new DOMRect(20, 100, 150, 60);
+    return originalBounds.call(this);
+  });
+});
+
+afterEach(() => {
+  Reflect.deleteProperty(window, 'visualViewport');
 });
 
 async function createTimedEvent(title = '期中考') {
@@ -175,6 +188,54 @@ it('creates, edits and deletes personal events through the storage contract', as
   await screen.findByText('已刪除這筆個人行程。');
   expect(readPersonalImports(scope)).toEqual([]);
   view.unmount();
+});
+
+it('開啟時間無效的既有行程時立即顯示原因，修正後才可儲存', async () => {
+  const record: PersonalImportRecord = {
+    id: 'legacy-event',
+    kind: 'events',
+    title: '舊行程',
+    schoolId: 'pu',
+    academicYear: '',
+    semester: '',
+    date: '2026-10-20',
+    startTime: '18:00',
+    endTime: '17:00',
+    batchId: 'legacy-batch',
+    importedAt: '2026-10-01T00:00:00Z',
+    source: { type: 'paste', line: 1, rawText: '舊行程' },
+  };
+  // Current storage validation rejects this record, so supply it at the editor's data boundary.
+  vi.spyOn(personalImportHooks, 'usePersonalImports').mockReturnValue({
+    records: [record],
+    ready: true,
+    loading: false,
+    error: '',
+    syncEnabled: false,
+    retry: vi.fn(),
+  });
+  const change = vi.spyOn(personalImports, 'changePersonalImport').mockResolvedValue(undefined);
+  renderCalendar();
+  fireEvent.click(await screen.findByRole('button', { name: '編輯' }));
+
+  const reason = /結束時間必須晚於開始時間/;
+  expect(screen.getByText(reason)).toBeTruthy();
+  const save = screen.getByRole<HTMLButtonElement>('button', { name: '儲存修改' });
+  expect(save.disabled).toBe(true);
+  fireEvent.click(save);
+  expect(change).not.toHaveBeenCalled();
+
+  fireEvent.change(screen.getByLabelText('結束時間'), { target: { value: '19:00' } });
+  expect(screen.queryByText(reason)).toBeNull();
+  expect(save.disabled).toBe(false);
+  fireEvent.click(save);
+  await screen.findByText('個人行程已更新。');
+  expect(change).toHaveBeenCalledExactlyOnceWith(
+    { owner: context.owner, schoolId: context.schoolId },
+    record,
+    expect.objectContaining({ id: record.id, endTime: '19:00' }),
+    expect.any(Function),
+  );
 });
 
 it('keeps the draft when validation or persistence fails and does not overwrite on load errors', async () => {
@@ -616,6 +677,14 @@ it('does not describe an acknowledged server event as device-only when device sy
   expect(screen.queryByText(/目前只存在這台裝置，換裝置或清除資料就會不見/)).toBeNull();
 });
 
+it('locates a restored event with a 300-character identifier', async () => {
+  const id = 'e'.repeat(300);
+  seedFocusedEvents([focusEvent(id)]);
+  context.search = new URLSearchParams({ eventId: id }).toString();
+  render(<PersonalCalendar />);
+  expect(await screen.findByText('已定位到「已核對的複習安排」。')).toBeTruthy();
+});
+
 it('locates only a stored event by ID, selects its actual date and month, and focuses its list row without opening an edit form', async () => {
   const target = focusEvent();
   seedFocusedEvents([target, focusEvent('other-day', { title: '另一日', date: '2027-03-15' })]);
@@ -633,6 +702,281 @@ it('locates only a stored event by ID, selects its actual date and month, and fo
   expect(screen.queryByText('URL假資料')).toBeNull();
   expect(screen.queryByRole('heading', { name: '另一日' })).toBeNull();
   expect(localStorage.getItem(personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId }))).toBe(before);
+});
+
+it.each(['可視視窗平移', '頁面捲動'])('行程深連結等待%s，確認行程列在雙軸皆可見才聚焦', async (source) => {
+  const target = focusEvent();
+  seedFocusedEvents([target, focusEvent('same-title', { date: target.date })]);
+  context.search = `eventId=${target.id}`;
+  const viewport = Object.assign(new EventTarget(), {
+    offsetLeft: 260, offsetTop: 80, width: 180, height: 240,
+  });
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+
+  let rowLeft = 40;
+  let rowTop = 420;
+  vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+    if (this.matches('li[aria-current="true"]')) return new DOMRect(rowLeft, rowTop, 140, 60);
+    return originalBounds.call(this);
+  });
+  const scroll = vi.spyOn(window, 'scrollBy');
+  scroll.mockImplementation(() => {});
+
+  render(<PersonalCalendar />);
+  const list = await screen.findByRole('list', { name: '個人行程列表' });
+  expect(within(list).getAllByRole('heading', { name: target.title })).toHaveLength(2);
+  const row = list.querySelector('li[aria-current="true"]')!;
+  expect(row).toBeTruthy();
+  const scrollIntoView = vi.fn();
+  Object.defineProperty(row, 'scrollIntoView', { value: scrollIntoView });
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ left: -220, top: 160, behavior: 'instant' });
+  expect(document.activeElement).toBe(document.body);
+
+  const scrollView = source === '頁面捲動'
+    ? () => fireEvent.scroll(document)
+    : () => viewport.dispatchEvent(new Event('scroll'));
+  if (source === '頁面捲動') {
+    rowLeft = 260;
+    rowTop = 260;
+    scrollView();
+    expect(row?.getBoundingClientRect()).toMatchObject({ left: 260, right: 400, top: 260, bottom: 320 });
+  } else {
+    viewport.offsetTop = 420;
+    scrollView();
+    expect(document.activeElement).toBe(document.body);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    viewport.offsetLeft = 40;
+    viewport.offsetTop = 80;
+    scrollView();
+    expect(document.activeElement).toBe(document.body);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    viewport.offsetTop = 420;
+    scrollView();
+  }
+  expect(document.activeElement).toBe(row);
+  expect(scroll).toHaveBeenCalledTimes(1);
+  expect(scrollIntoView).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['頁面本體', '保留焦點'],
+  ['頁面本體', '移到其他控制項'],
+  ['頁面本體', '移到其他控制項後離開'],
+  ['月份欄位', '因工作區隱藏而失焦'],
+  ['月份欄位', '隱藏後移到其他控制項'],
+  ['月份欄位', '隱藏後移到其他控制項又回到頁面本體'],
+  ['月份欄位', '隱藏前主動離開'],
+  ['日列表編輯按鈕', '因工作區卸載而失焦'],
+  ['日列表編輯按鈕', '隱藏前主動離開'],
+  ['月份欄位', '因工作區隱藏而失焦', 'offsetLeft'],
+  ['月份欄位', '保留焦點', 'offsetLeft'],
+  ['月份欄位', '暫停期間主動離開', 'offsetLeft'],
+  ['月份欄位', '暫停期間點擊工作區外空白處'],
+  ['月份欄位', '暫停期間點擊工作區外空白處', 'offsetLeft'],
+  ['月份欄位', '恢復後主動離開', 'offsetLeft'],
+  ['月份欄位', '因工作區隱藏而失焦，恢復後點擊工作區外空白處', 'offsetLeft'],
+  ['日列表編輯按鈕', '因工作區卸載而失焦', 'offsetTop'],
+] as const)('深連結從%s等待揭露時，重新驗證前後%s（恢復時裁切軸：%s）', async (origin, action, clippedAxis?) => {
+  const target = focusEvent();
+  const previous = focusEvent('previous-event', { title: '同日的另一筆行程' });
+  const startsInDayList = origin === '日列表編輯按鈕';
+  seedFocusedEvents(startsInDayList ? [previous, target] : [target]);
+  const viewport = Object.assign(new EventTarget(), {
+    offsetLeft: 260, offsetTop: 80, width: 180, height: 240,
+  });
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+  const scroll = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  const scrollIntoView = vi.fn();
+  vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+    if (this.matches('li[aria-current="true"]')) {
+      Object.defineProperty(this, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+      return new DOMRect(40, 100, 140, 60);
+    }
+    return originalBounds.call(this);
+  });
+
+  function Page() {
+    return (
+      <>
+        <button type="button">其他控制項</button>
+        <div data-testid="outside-blank" />
+        <PersonalCalendar />
+      </>
+    );
+  }
+  const search = `eventId=${target.id}`;
+  if (origin === '頁面本體') context.search = search;
+  if (startsInDayList) context.search = `eventId=${previous.id}`;
+  const view = render(<Page />);
+  const monthControl = await screen.findByLabelText('查看月份');
+  let originControl: HTMLElement = document.body;
+  if (startsInDayList) {
+    const previousRow = await screen.findByRole('listitem', { current: true });
+    originControl = within(previousRow).getByRole('button', { name: '編輯' });
+    scroll.mockClear();
+  } else if (origin === '月份欄位') {
+    originControl = monthControl;
+  }
+  if (originControl !== document.body) {
+    originControl.focus();
+    context.search = search;
+    view.rerender(<Page />);
+  }
+  await screen.findByText(`已定位到「${target.title}」。`);
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ left: -220, top: 0, behavior: 'instant' });
+  expect(document.activeElement).toBe(originControl);
+
+  if (action === '因工作區卸載而失焦') {
+    const list = screen.getByRole('list', { name: '個人行程列表' });
+    const parent = list.parentNode!;
+    const removeChild = parent.removeChild.bind(parent);
+    vi.spyOn(parent, 'removeChild').mockImplementation((child) => {
+      // Chromium emits focusout while the removed control is still connected.
+      if (child === list && document.activeElement === originControl) originControl.blur();
+      return removeChild(child);
+    });
+  }
+  if (action === '隱藏前主動離開') {
+    originControl.blur();
+    expect(document.activeElement).toBe(document.body);
+    expect(originControl.isConnected).toBe(true);
+  }
+  context.loading = true;
+  view.rerender(<Page />);
+  expect(screen.queryByRole('heading', { name: target.title })).toBeNull();
+  const outside = screen.getByRole('button', { name: '其他控制項' });
+  expect(originControl.isConnected).toBe(!startsInDayList);
+  expect(monthControl.closest('[hidden]')).toBeTruthy();
+  const blursAfterResume = action === '恢復後主動離開';
+  const blursDuringPause = action === '暫停期間主動離開';
+  if (blursDuringPause) {
+    expect(document.activeElement).toBe(monthControl);
+    monthControl.blur();
+    expect(document.activeElement).toBe(document.body);
+  } else if (action === '暫停期間點擊工作區外空白處') {
+    expect(document.activeElement).toBe(monthControl);
+    const blank = screen.getByTestId('outside-blank');
+    fireEvent.pointerDown(blank);
+    fireEvent.mouseDown(blank);
+    // JSDOM does not perform the native focus change on mousedown.
+    HTMLElement.prototype.blur.call(monthControl);
+    fireEvent.pointerUp(blank);
+    fireEvent.mouseUp(blank);
+    fireEvent.click(blank);
+    expect(document.activeElement).toBe(document.body);
+  } else if (action.startsWith('因工作區隱藏') || action.startsWith('隱藏後')) {
+    expect(document.activeElement).toBe(monthControl);
+    // JSDOM does not run the browser's focus fixup after the hidden commit.
+    HTMLElement.prototype.blur.call(monthControl);
+    expect(document.activeElement).toBe(document.body);
+  }
+  if (action.includes('移到其他控制項')) outside.focus();
+  if (action === '移到其他控制項後離開' || action === '隱藏後移到其他控制項又回到頁面本體') {
+    outside.blur();
+  }
+  const focusDuringPause = document.activeElement;
+  viewport.offsetLeft = clippedAxis === 'offsetLeft' ? 80 : 0;
+  if (clippedAxis === 'offsetTop' || blursDuringPause) viewport.offsetTop = 120;
+  scroll.mockClear();
+  scrollIntoView.mockClear();
+  viewport.dispatchEvent(new Event(clippedAxis ? 'scroll' : 'resize'));
+  expect(document.activeElement).toBe(focusDuringPause);
+
+  context.loading = false;
+  view.rerender(<Page />);
+  const row = await screen.findByRole('listitem', { current: true });
+  expect(screen.getByLabelText('查看月份')).toBe(monthControl);
+  const shouldHandoff =
+    action === '保留焦點' || action === '因工作區隱藏而失焦' || action === '因工作區卸載而失焦';
+  expect(scroll).not.toHaveBeenCalled();
+  expect(scrollIntoView).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(shouldHandoff && !clippedAxis ? row : focusDuringPause);
+  if (clippedAxis) {
+    fireEvent.resize(window);
+    expect(document.activeElement).toBe(focusDuringPause);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    viewport.height = 200;
+    viewport.dispatchEvent(new Event('resize'));
+    expect(document.activeElement).toBe(focusDuringPause);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    if (blursAfterResume) {
+      expect(monthControl.closest('[hidden]')).toBeNull();
+      monthControl.blur();
+      expect(document.activeElement).toBe(document.body);
+    }
+    if (action.includes('恢復後點擊工作區外空白處')) {
+      expect(monthControl.closest('[hidden]')).toBeNull();
+      expect(document.activeElement).toBe(document.body);
+      const blank = screen.getByTestId('outside-blank');
+      fireEvent.pointerDown(blank);
+      fireEvent.pointerUp(blank);
+      fireEvent.click(blank);
+      expect(document.activeElement).toBe(document.body);
+    }
+    viewport[clippedAxis] = 0;
+    viewport.dispatchEvent(new Event(clippedAxis === 'offsetLeft' ? 'scroll' : 'resize'));
+    if (blursDuringPause) {
+      expect(document.activeElement).toBe(document.body);
+      viewport.offsetTop = 80;
+      viewport.dispatchEvent(new Event('scroll'));
+    }
+    expect(document.activeElement).toBe(shouldHandoff ? row : document.body);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  }
+});
+
+it.each(['切月後回今天', '切換檢視'])('指標操作%s時，結束仍在等待的深連結聚焦', async (navigation) => {
+  const date = emptyPersonalEventDraft().date;
+  const target = focusEvent('today-target', { date });
+  const previous = focusEvent('today-origin', { date, title: '同日的另一筆行程' });
+  seedFocusedEvents([previous, target]);
+  const viewport = Object.assign(new EventTarget(), {
+    offsetLeft: 260, offsetTop: 80, width: 180, height: 240,
+  });
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+  const scroll = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  context.search = `eventId=${previous.id}`;
+  const view = render(<PersonalCalendar />);
+  await screen.findByText(`已定位到「${previous.title}」。`);
+  const list = screen.getByRole('list', { name: '個人行程列表' });
+  const origin = within(list.querySelector('li[aria-current="true"]')!).getByRole('button', { name: '編輯' });
+  origin.focus();
+  scroll.mockClear();
+  context.search = `eventId=${target.id}`;
+  view.rerender(<PersonalCalendar />);
+  await screen.findByText(`已定位到「${target.title}」。`);
+  expect(scroll).toHaveBeenCalled();
+  expect(document.activeElement).toBe(origin);
+  scroll.mockClear();
+
+  // A pointer click can activate navigation without moving focus to its button.
+  if (navigation === '切月後回今天') {
+    fireEvent.click(screen.getByRole('button', { name: '下一月' }));
+    expect(origin.isConnected).toBe(false);
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.click(screen.getByRole('button', { name: '回今天' }));
+    expect(document.activeElement).toBe(document.body);
+  } else {
+    fireEvent.click(screen.getByRole('button', { name: '月格' }));
+    expect(document.activeElement).toBe(origin);
+    fireEvent.click(screen.getByRole('button', { name: '回今天' }));
+  }
+  expect(screen.getByRole('heading', { name: target.title })).toBeTruthy();
+  const focusAfterNavigation = document.activeElement;
+  viewport.offsetLeft = 0;
+  viewport.dispatchEvent(new Event('scroll'));
+  viewport.dispatchEvent(new Event('resize'));
+  expect(scroll).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(focusAfterNavigation);
 });
 
 it.each([
@@ -701,3 +1045,70 @@ it('responds to a new eventId without changing either event or entering edit mod
   expect(screen.queryByLabelText('標題')).toBeNull();
   expect(readPersonalImports({ owner: context.owner, schoolId: context.schoolId })).toHaveLength(2);
 });
+
+it('opens the scoped day from a campus event and lets the user keep browsing without creating a record', async () => {
+  const first = focusEvent();
+  const other = focusEvent('other', { title: '隔天行程', date: '2027-03-15' });
+  seedFocusedEvents([first, other]);
+  context.search = 'schoolId=pu&date=2027-03-14';
+  const view = render(<PersonalCalendar />);
+  await screen.findByRole('heading', { name: '2027-03-14 的行程' });
+  expect(screen.getByRole('heading', { name: first.title })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: other.title })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '下一月' }));
+  await act(async () => { window.dispatchEvent(new Event('campus-personal-imports-change')); });
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2027-04');
+  context.search = 'schoolId=pu&date=2027-03-15';
+  view.rerender(<PersonalCalendar />);
+  await screen.findByRole('heading', { name: other.title });
+  expect(screen.queryByRole('heading', { name: first.title })).toBeNull();
+  expect(screen.queryByLabelText('標題')).toBeNull();
+  expect(readPersonalImports({ owner: context.owner, schoolId: context.schoolId })).toHaveLength(2);
+});
+
+it.each(['schoolId=other&date=2027-03-14', 'schoolId=pu&date=2027-02-31'])(
+  'ignores an out-of-scope or invalid day request %s', (search) => {
+    context.search = search;
+    render(<PersonalCalendar />);
+    expect(screen.queryByRole('heading', { name: / 的行程$/ })).toBeNull();
+    expect(screen.getByRole('button', { name: '月格' }).getAttribute('aria-pressed')).toBe('true');
+  },
+);
+
+it.each(['移動焦點', '開始編輯'])(
+  '深連結首次揭露失敗後，使用者%s會取消定位重試',
+  async (action) => {
+    const target = focusEvent();
+    seedFocusedEvents([target]);
+    context.search = `eventId=${target.id}`;
+    const viewport = Object.assign(new EventTarget(), {
+      offsetLeft: 260, offsetTop: 80, width: 180, height: 240,
+    });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+    vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+      if (this.matches('li[aria-current="true"]')) return new DOMRect(40, 100, 140, 60);
+      return originalBounds.call(this);
+    });
+
+    render(<PersonalCalendar />);
+    const row = (await screen.findByRole('heading', { name: target.title })).closest('li');
+    expect(row?.getAttribute('aria-current')).toBe('true');
+    expect(window.scrollBy).toHaveBeenCalledWith({ left: -220, top: 0, behavior: 'instant' });
+    expect(document.activeElement).toBe(document.body);
+
+    const outside = screen.getByRole('button', { name: '回今天' });
+    if (action === '開始編輯') {
+      // A click can open the editor without moving focus to the edit button first.
+      fireEvent.click(within(row!).getByRole('button', { name: /編輯/ }));
+    } else {
+      outside.focus();
+      outside.blur();
+    }
+    const expected = action === '開始編輯' ? screen.getByRole('textbox', { name: '標題' }) : document.body;
+    expect(document.activeElement).toBe(expected);
+    viewport.offsetLeft = 0;
+    viewport.dispatchEvent(new Event('resize'));
+    expect(document.activeElement).toBe(expected);
+  },
+);

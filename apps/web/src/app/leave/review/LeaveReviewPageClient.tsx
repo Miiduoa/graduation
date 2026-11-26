@@ -144,9 +144,7 @@ function ReviewWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
       <div className={styles.workspace}>
         <section className={styles.intro}>
           <div>
-            <p className={styles.kicker}>REVIEW DESK</p>
-            <h2>只處理自己負責的課。</h2>
-            <p>學生跨多門課提出的申請，會拆成各門課的獨立核閱。你只能查看被指派課程的內容；所有操作都會留下時間與處理人紀錄。</p>
+            <p>一份請假申請可包含多門課。請逐門核閱你被指派的課程。系統會記錄處理人及時間。</p>
           </div>
           <div className={styles.official}>
             <span>操作範圍</span>
@@ -173,7 +171,6 @@ function ReviewWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
             <section className={styles.reviewPanel} aria-labelledby="review-queue-title">
               <div className={styles.sectionHead}>
                 <div>
-                  <p className={styles.kicker}>COURSE REQUESTS</p>
                   <h2 id="review-queue-title">待辦與核閱紀錄</h2>
                 </div>
                 <button className={styles.refresh} type="button" disabled={Boolean(busyKey)} onClick={() => void load()}>更新清單</button>

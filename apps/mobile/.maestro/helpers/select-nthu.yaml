@@ -28,6 +28,20 @@ appId: ${APP_ID}
     timeout: 20000
 - tapOn:
     id: school-picker-option-nthu
+# The school change can return the landing scroll view to its top. The
+# failed iOS artifact shows NTHU in the hero with the picker below the viewport.
+# First require the modal to close, then find the actual selected-campus control.
 - extendedWaitUntil:
-    visible: '目前瀏覽國立清華大學，選擇其他學校'
+    notVisible:
+      id: school-picker-search
     timeout: 15000
+- scrollUntilVisible:
+    element:
+      id: school-picker-open
+      text: '目前瀏覽國立清華大學，選擇其他學校'
+    direction: DOWN
+    centerElement: false
+    timeout: 20000
+- assertVisible:
+    id: school-picker-open
+    text: '目前瀏覽國立清華大學，選擇其他學校'

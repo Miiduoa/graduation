@@ -45,7 +45,7 @@ vi.mock('@/lib/academicClient', () => ({
 
 function snapshot(): LmsReadonlySnapshot {
   return {
-    success: true, ownerUid: context.uid ?? 'one', schoolId: 'pu', source: 'pu-tronclass',
+    schemaVersion: 2, success: true, ownerUid: context.uid ?? 'one', schoolId: 'pu', source: 'pu-tronclass',
     fetchedAt: '2026-05-29T04:00:00.000Z',
     cache: { hit: false, expiresAt: '2026-05-29T04:10:00.000Z' },
     courses: [{ id: 10001, name: '資料庫系統' }], contentsLoadedFor: [10001],
@@ -105,6 +105,18 @@ it('shows submitted work in the full list and never as a todo', async () => {
   fireEvent.click(screen.getByRole('tab', { name: '全部作業' }));
   expect(screen.getByRole('heading', { name: '週次練習' })).toBeTruthy();
   expect(screen.getByText('已交')).toBeTruthy();
+});
+
+it('keeps unconfirmed submissions off the todo axis and labels them in the full list', async () => {
+  const data = snapshot();
+  data.homework[0].submitted = null;
+  vi.mocked(loadTronClassLms).mockResolvedValueOnce(data);
+  render(<SchoolLmsPage />);
+  await screen.findByText(/有 1 筆作業的繳交狀態待確認/);
+  expect(screen.queryByRole('heading', { name: '期末專題提案' })).toBeNull();
+  fireEvent.click(screen.getByRole('tab', { name: '全部作業' }));
+  const row = screen.getByRole('heading', { name: '期末專題提案' }).closest('li')!;
+  expect(within(row).getByText('繳交狀態待確認')).toBeTruthy();
 });
 
 it('does not load course materials until the user opens a course', async () => {

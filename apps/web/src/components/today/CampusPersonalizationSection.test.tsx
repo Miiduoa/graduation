@@ -108,7 +108,7 @@ it('hides old-account data immediately even if its caller briefly retains the pr
   rerender(section());
   expect(container.textContent).toBe('');
   rerender(section({ scope: { ...scope, owner: 'platform:bob' }, events: [] }));
-  expect(screen.getByRole('heading', { name: '讓首頁更適合你' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '首頁偏好' })).toBeTruthy();
   expect(screen.queryByText(/資料庫期中考/)).toBeNull();
   expect(screen.queryByRole('form', { name: '首頁安排偏好' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '設定首頁安排' }));

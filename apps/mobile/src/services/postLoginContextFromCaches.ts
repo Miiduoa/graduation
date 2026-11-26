@@ -19,14 +19,19 @@ import {
  * 寫入 @pu_cache_v1: 與記憶體。不觸發舊版 routePostLoginData 的 EventBus。
  */
 export async function syncPostLoginContextFromCaches(params: {
+  assertCurrent?: () => void;
   assertVerifiedSession?: () => void;
   uid: string;
   schoolId: string;
   role: UserRole;
   email?: string | null;
 }): Promise<PostLoginContext | null> {
+  const assertCurrent = () => {
+    params.assertCurrent?.();
+    if (params.assertVerifiedSession !== params.assertCurrent) params.assertVerifiedSession?.();
+  };
   try {
-    params.assertVerifiedSession?.();
+    assertCurrent();
     const [puResult, tcList, todos, puAnnouncements] = await Promise.all([
       getAnyCachedCourses(),
       getAnyCachedTCCourses(),
@@ -57,8 +62,9 @@ export async function syncPostLoginContextFromCaches(params: {
       publishedAt: a.date?.trim() ? a.date : new Date().toISOString(),
     }));
 
-    params.assertVerifiedSession?.();
+    assertCurrent();
     const ctx = await buildPostLoginContext({
+      assertCurrent,
       ...(params.assertVerifiedSession && { origin: 'verified-school-login' as const }),
       uid: params.uid,
       schoolId: params.schoolId,
@@ -74,7 +80,7 @@ export async function syncPostLoginContextFromCaches(params: {
       puAnnouncements: announcements.length ? announcements : null,
     });
 
-    params.assertVerifiedSession?.();
+    assertCurrent();
     setInMemoryPostLoginContext(ctx);
     return ctx;
   } catch (e) {

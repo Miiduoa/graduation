@@ -41,8 +41,8 @@ function setup() {
       if (owner !== OWNER) throw new NuniError(401, 'TRONCLASS_NOT_CONNECTED');
       return structuredClone(binding);
     }),
-    assertCurrent: vi.fn(async (owner: string, revision: string) => {
-      if (owner !== OWNER || revision !== binding.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+    assertCurrent: vi.fn(async (owner: string, revision: string, studentId?: number) => {
+      if (owner !== OWNER || revision !== binding.revision || studentId !== binding.userId || Date.parse(binding.expiresAt) <= NOW) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
     }),
   };
   const source: LmsReadonlySource = {
@@ -323,6 +323,22 @@ describe('PU source-backed first individual submission authorization', () => {
       expect(s.source.fetchStudentSubmissionList).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('rejects a mismatched requested revision before any school read', async () => {
+    const s = setup();
+    await expect(s.reader(OWNER, SCOPE, undefined, 'b'.repeat(32)))
+      .rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    expect(s.source.fetchCourses).not.toHaveBeenCalled();
+  });
+
+  it('keeps the supplied session across both authorization checks', async () => {
+    const s = setup();
+    const binding = await s.bindings.requireBinding(OWNER);
+    s.bindings.requireBinding.mockClear().mockResolvedValue({ ...binding, revision: 'b'.repeat(32), cookies: {} });
+    await expect(s.reader(OWNER, SCOPE, undefined, binding)).resolves.toMatchObject({ binding });
+    expect(s.bindings.requireBinding).not.toHaveBeenCalled();
+    for (const [cookies] of vi.mocked(s.source.fetchCourses).mock.calls) expect(cookies).toEqual(binding.cookies);
+  });
 
   it('rechecks the binding again after the final history snapshot', async () => {
     const s = setup();

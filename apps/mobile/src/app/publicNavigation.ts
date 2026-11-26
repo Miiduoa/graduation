@@ -57,3 +57,9 @@ export function publicNavigateNuniWorkspace(params: NonNullable<PreAuthStackPara
   publicNavigationRef.dispatch(CommonActions.navigate({ name: 'NuniWorkspace', params }));
   return true;
 }
+
+export function publicNavigateSchoolLogin() {
+  if (!isPublicNavigationReady()) return false;
+  publicNavigationRef.navigate('SSOLogin');
+  return true;
+}

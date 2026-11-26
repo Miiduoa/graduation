@@ -10,6 +10,12 @@ import React, {
   ReactNode,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  PREFERENCES_STORAGE_KEY as STORAGE_KEY,
+  isAppearanceMode,
+  type AppearanceMode,
+} from './appearancePreference';
+import { useOptionalThemeMode } from './theme';
 import type { AccessibilitySettings, NotificationPreferences } from '../data/types';
 
 // ===== Types =====
@@ -18,7 +24,7 @@ export type Language = 'zh-TW' | 'zh-CN' | 'en' | 'ja' | 'ko';
 
 export type FontSize = 'small' | 'medium' | 'large' | 'xlarge';
 
-export type AppearanceMode = 'light' | 'dark' | 'system';
+export type { AppearanceMode } from './appearancePreference';
 
 export type MapStyle = 'standard' | 'satellite' | 'hybrid';
 
@@ -110,8 +116,6 @@ type PreferencesContextType = {
 
 // ===== Constants =====
 
-const STORAGE_KEY = '@user_preferences';
-
 const DEFAULT_PREFERENCES: UserPreferences = {
   language: 'zh-TW',
   fontSize: 'medium',
@@ -194,7 +198,15 @@ type PreferencesProviderProps = {
 };
 
 export function PreferencesProvider({ children }: PreferencesProviderProps) {
-  const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
+  const [storedPreferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
+  const activeTheme = useOptionalThemeMode();
+  const selectedMode = activeTheme?.appearanceMode;
+  const setThemeMode = activeTheme?.setMode;
+  const preferences = useMemo(
+    () =>
+      selectedMode ? { ...storedPreferences, appearanceMode: selectedMode } : storedPreferences,
+    [storedPreferences, selectedMode],
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -333,9 +345,10 @@ export function PreferencesProvider({ children }: PreferencesProviderProps) {
 
   const setAppearanceMode = useCallback(
     async (appearanceMode: AppearanceMode) => {
+      setThemeMode?.(appearanceMode);
       await updateAndSave((prev) => ({ ...prev, appearanceMode }));
     },
-    [updateAndSave],
+    [setThemeMode, updateAndSave],
   );
 
   const setHighContrast = useCallback(
@@ -437,14 +450,16 @@ export function PreferencesProvider({ children }: PreferencesProviderProps) {
 
   const updatePreferences = useCallback(
     async (updates: Partial<UserPreferences>) => {
+      if (isAppearanceMode(updates.appearanceMode)) setThemeMode?.(updates.appearanceMode);
       await updateAndSave((prev) => ({ ...prev, ...updates }));
     },
-    [updateAndSave],
+    [setThemeMode, updateAndSave],
   );
 
   const resetToDefaults = useCallback(async () => {
+    setThemeMode?.('system');
     await updateAndSave(() => DEFAULT_PREFERENCES);
-  }, [updateAndSave]);
+  }, [setThemeMode, updateAndSave]);
 
   const exportPreferences = useCallback(async (): Promise<string> => {
     return JSON.stringify(preferences, null, 2);
@@ -458,7 +473,11 @@ export function PreferencesProvider({ children }: PreferencesProviderProps) {
         if (typeof parsed !== 'object' || parsed === null) {
           throw new Error('Invalid format');
         }
-        await updateAndSave(() => ({ ...DEFAULT_PREFERENCES, ...parsed }));
+        const appearanceMode = isAppearanceMode(parsed.appearanceMode)
+          ? parsed.appearanceMode
+          : 'system';
+        setThemeMode?.(appearanceMode);
+        await updateAndSave(() => ({ ...DEFAULT_PREFERENCES, ...parsed, appearanceMode }));
       } catch (e) {
         if (e instanceof SyntaxError) {
           throw new Error('無效的 JSON 格式');
@@ -466,7 +485,7 @@ export function PreferencesProvider({ children }: PreferencesProviderProps) {
         throw new Error('無效的設定格式');
       }
     },
-    [updateAndSave],
+    [setThemeMode, updateAndSave],
   );
 
   // 使用 useMemo 確保 context value 穩定

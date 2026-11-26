@@ -80,6 +80,33 @@ describe('timetable movement controls', () => {
     fireEvent.dragOver(target, { dataTransfer }); fireEvent.drop(target, { dataTransfer });
     expect(edit).toHaveBeenCalledExactlyOnceWith({ ...course, day: 2, start: 6, end: 8 });
   });
+  it.each([false, true])('keeps the preceding status stable during native dragging (existing status: %s)', (existingStatus) => {
+    const edit = vi.fn();
+    const namedCourse = { ...course, name: '跨校資料庫系統與資訊整合專題研究：長課名仍需完整呈現' };
+    render(<TimetableGrid courses={[namedCourse]} disabled={false} onEdit={edit} />);
+    if (existingStatus) {
+      fireEvent.click(screen.getByRole('button', { name: '移動課程' }));
+      fireEvent.click(screen.getByRole('button', { name: '取消移動' }));
+    }
+    const precedingStatus = screen.queryByRole('status');
+    const source = screen.getByRole('button', { name: /編輯 跨校資料庫.*第 4 節，續堂/ });
+    const dataTransfer = transfer();
+    fireEvent.dragStart(source, { dataTransfer });
+    expect(dataTransfer.setData).toHaveBeenCalledWith('text/plain', course.id);
+    expect(screen.getByRole('status').textContent).toContain(`正在移動「${namedCourse.name}」`);
+    expect(precedingStatus?.textContent ?? null).toBe(existingStatus ? '已取消移動，課表沒有變更。' : null);
+    if (precedingStatus) expect(precedingStatus.getAttribute('aria-hidden')).toBe('true');
+
+    fireEvent.dragOver(document.querySelector(`[data-day="2"][data-period="${PERIOD_TIMES.length}"]`)!, { dataTransfer });
+    expect(screen.getByRole('status').textContent).toContain('放不下');
+    expect(precedingStatus?.textContent ?? null).toBe(existingStatus ? '已取消移動，課表沒有變更。' : null);
+    fireEvent.dragEnd(source);
+    expect(screen.queryByText(/正在移動/)).toBeNull();
+    expect(screen.queryByText(/放不下/)).toBeNull();
+    expect(screen.queryByRole('status')).toBe(precedingStatus);
+    if (precedingStatus) expect(precedingStatus.hasAttribute('aria-hidden')).toBe(false);
+    expect(edit).not.toHaveBeenCalled();
+  });
   it('does not accept externally supplied drag data', () => {
     const edit = vi.fn(); render(<TimetableGrid courses={[course]} disabled={false} onEdit={edit} />);
     fireEvent.drop(document.querySelector('[data-day="2"][data-period="7"]')!, { dataTransfer: transfer() });
@@ -117,11 +144,29 @@ describe('workspace safety', () => {
     fireEvent.click(editor.getByRole('button', { name: '儲存' }));
     await waitFor(() => expect(mocks.save).toHaveBeenCalledOnce());
     expect(mocks.save.mock.calls[0][1].courses).toEqual([{ ...course, day: 2, start: 6, end: 8 }]);
+    await waitFor(() => expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: `編輯 資料庫，${WEEKDAY_LABELS[1]}第 6 節` }),
+    ));
+  });
+  it('focuses the first course after the empty-state action disappears', async () => {
+    mocks.load.mockResolvedValue(stored([]));
+    render(<PersonalTimetable />);
+    const opener = await screen.findByRole('button', { name: '手動新增課程' });
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.change(screen.getByLabelText('課名'), { target: { value: '第一門課' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(opener.isConnected).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /編輯 第一門課/ }));
   });
   it.each(['empty', 'partial'])('blocks planning and invitations for a %s own timetable', async (mode) => {
     mocks.load.mockResolvedValue(stored(mode === 'empty' ? [] : [course, { ...course, id: 'pending', day: 0 }]));
     mocks.friends.mockResolvedValue([{ uid: 'bob', name: '小林' }]); mocks.friend.mockResolvedValue(stored());
-    render(<PersonalTimetable />); await screen.findByRole('button', { name: '新增課程' });
+    render(<PersonalTimetable />);
+    if (mode === 'empty') await screen.findByRole('region', { name: '還沒有課表' });
+    else await screen.findByRole('button', { name: '新增課程' });
     expect((screen.getByRole('button', { name: '今天空堂' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: '排讀書時間' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(await screen.findByRole('combobox', { name: '朋友' }), { target: { value: 'bob' } });

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CampusDraftProvider, scopeStorageKey } from '@/components/CampusDraftProvider';
 import { personalImportsStorageKey } from '@/lib/personalImports';
+import type { PersonalImportRecord } from '@campus/shared/src/imports/types';
 import AssistantPage from './LegacyAssistant';
 import { callCampusAssistant, executeCampusAgentWrite, getCampusAssistantSnapshot, type CampusAssistantEnvelope } from '@/lib/campusAssistantClient';
 
@@ -78,8 +79,40 @@ beforeEach(() => {
 });
 afterEach(() => {
   sessionStorage.clear();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+
+// Wednesday 10:30 in Taipei. Only Date is faked so React and testing-library timers stay real.
+function freezeTaipeiWednesday() {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-18T10:30:00+08:00'));
+}
+type ConflictFixture = { classId: string; classTitle: string; eventId: string; eventTitle: string };
+function saveConflictFixture(owner: string, schoolId: string, fixture: ConflictFixture, extra: PersonalImportRecord[] = []) {
+  const base = {
+    schoolId, academicYear: '115', semester: '1', batchId: 'fixture-batch',
+    importedAt: '2026-11-10T01:00:00.000Z', source: { type: 'paste' as const, line: 1, rawText: '不得外送的匯入原文' },
+  };
+  const records: PersonalImportRecord[] = [
+    { ...base, id: fixture.classId, kind: 'timetable', title: fixture.classTitle, dayOfWeek: 3,
+      startTime: '14:10', endTime: '16:00', location: '私人教室 B203' },
+    { ...base, id: fixture.eventId, kind: 'events', title: fixture.eventTitle, academicYear: '', semester: '',
+      date: '2026-11-18', allDay: false, startTime: '15:00', endTime: '16:30' },
+    ...extra,
+  ];
+  localStorage.setItem(personalImportsStorageKey({ owner, schoolId }), JSON.stringify({ version: 1, records }));
+}
+const aliceFixture: ConflictFixture = {
+  classId: 'alice-class', classTitle: '資料庫管理', eventId: 'alice-event', eventTitle: '專題小組討論',
+};
+const bobFixture: ConflictFixture = {
+  classId: 'bob-class', classTitle: '作業系統', eventId: 'bob-event', eventTitle: '實驗室會議',
+};
+const eventLink = (schoolId: string, eventId: string) => `/calendar?schoolId=${schoolId}&eventId=${eventId}`;
+const logText = () => screen.getByRole('log').textContent ?? '';
+const logLink = (href: string) => Array.from(screen.getByRole('log').querySelectorAll('a'))
+  .find(link => link.getAttribute('href') === href);
 function ask(content = '私人課表') {
   fireEvent.change(screen.getByLabelText('你的問題'), { target: { value: content } });
   fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
@@ -125,7 +158,9 @@ it('requires sign-in and does not send a query from a shared link automatically'
   expect(screen.getByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
   expect(screen.getByText('校園資訊可先從地圖、公車和公開公告查。')).toBeTruthy();
   expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
-  expect(screen.queryByRole('textbox')).toBeNull();
+  expect((screen.getByRole('textbox', { name: '保留的問題' }) as HTMLTextAreaElement).value).toBe('問題');
+  expect((screen.getByRole('textbox', { name: '保留的問題' }) as HTMLTextAreaElement).readOnly).toBe(true);
+  expect(screen.queryByRole('form', { name: '傳送問題' })).toBeNull();
   state.uid = 'alice';
   view.rerender(<AssistantPage />);
   expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('問題');
@@ -624,4 +659,76 @@ it('never offers execution for an action not bound to its server run', async () 
   await screen.findByText('草稿');
   expect(screen.queryByRole('button', { name: '檢視草稿' })).toBeNull();
   expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+it('answers a school-account timetable and calendar conflict from this device only, then keeps it out of cloud history', async () => {
+  freezeTaipeiWednesday();
+  const quietEvent: PersonalImportRecord = {
+    id: 'quiet-event', kind: 'events', title: '晚間聚餐', schoolId: 'pu', academicYear: '', semester: '',
+    date: '2026-11-18', allDay: false, startTime: '18:00', endTime: '19:00',
+    batchId: 'fixture-batch', importedAt: '2026-11-10T01:00:00.000Z',
+    source: { type: 'paste', line: 3, rawText: '不得外送的匯入原文' },
+  };
+  saveConflictFixture('school:alice', 'pu', aliceFixture, [quietEvent]);
+  // Same person at another school, another account, and the unselected platform namespace must stay unread.
+  saveConflictFixture('school:alice', 'ntpu',
+    { classId: 'other-school-class', classTitle: '其他學校課程', eventId: 'other-school-event', eventTitle: '其他學校行程' });
+  saveConflictFixture('school:bob', 'pu', bobFixture);
+  saveConflictFixture('platform:alice', 'pu',
+    { classId: 'platform-class', classTitle: '平台帳號課程', eventId: 'platform-event', eventTitle: '平台帳號行程' });
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '雲端一般回覆' });
+  render(<AssistantPage />);
+
+  ask('今天的課表和行程有衝突嗎？');
+  await waitFor(() => expect(logText()).toContain(aliceFixture.eventTitle));
+  expect(logText()).toContain(aliceFixture.classTitle);
+  expect(logText()).toMatch(/15:00[^\d]{1,6}16:00/);
+  expect(logLink(eventLink('pu', aliceFixture.eventId))).toBeDefined();
+  expect(logLink(eventLink('pu', quietEvent.id))).toBeUndefined();
+  for (const hidden of ['晚間聚餐', '其他學校', '實驗室會議', '作業系統', '平台帳號', '不得外送的匯入原文'])
+    expect(logText()).not.toContain(hidden);
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
+
+  ask('我這週的作業有哪些');
+  await screen.findByText('雲端一般回覆');
+  expect(callCampusAssistant).toHaveBeenCalledTimes(1);
+  const request = vi.mocked(callCampusAssistant).mock.calls[0][0];
+  expect(request).toMatchObject({ schoolId: 'pu', messages: [{ role: 'user', content: '我這週的作業有哪些' }] });
+  const serialized = JSON.stringify(request);
+  for (const secret of [aliceFixture.classTitle, aliceFixture.eventTitle, aliceFixture.eventId,
+    aliceFixture.classId, '私人教室 B203', '衝突', '15:00', '不得外送的匯入原文'])
+    expect(serialized).not.toContain(secret);
+});
+
+it('drops an earlier calendar conflict answer when the school account or school changes and reads only the new scope', async () => {
+  freezeTaipeiWednesday();
+  saveConflictFixture('school:alice', 'pu', aliceFixture);
+  saveConflictFixture('school:bob', 'pu', bobFixture);
+  const view = render(<AssistantPage />);
+
+  ask('今天的行程跟上課有撞期嗎？');
+  await waitFor(() => expect(logLink(eventLink('pu', aliceFixture.eventId))).toBeDefined());
+  expect(logText()).toContain(aliceFixture.eventTitle);
+
+  state.uid = 'bob';
+  view.rerender(<AssistantPage />);
+  expect(logText()).toBe('');
+  expect(screen.queryByText(new RegExp(aliceFixture.eventTitle))).toBeNull();
+  expect(logLink(eventLink('pu', aliceFixture.eventId))).toBeUndefined();
+
+  ask('今天的行程跟上課有撞期嗎？');
+  await waitFor(() => expect(logLink(eventLink('pu', bobFixture.eventId))).toBeDefined());
+  expect(logText()).toContain(bobFixture.eventTitle);
+  expect(logText()).toContain(bobFixture.classTitle);
+  expect(logText()).not.toContain(aliceFixture.eventTitle);
+  expect(logText()).not.toContain(aliceFixture.classTitle);
+
+  state.query = 'campus=nthu&schoolId=pu';
+  view.rerender(<AssistantPage />);
+  expect(logText()).toBe('');
+  expect(screen.queryByText(new RegExp(bobFixture.eventTitle))).toBeNull();
+  expect(logLink(eventLink('pu', bobFixture.eventId))).toBeUndefined();
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
+  expect(callCampusAssistant).not.toHaveBeenCalled();
 });

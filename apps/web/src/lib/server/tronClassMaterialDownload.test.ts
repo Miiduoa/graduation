@@ -199,6 +199,14 @@ describe('authorized material download', () => {
     expect(f.bindings.requireBinding).not.toHaveBeenCalled();
   });
 
+  it('rejects a replacement session before fetching course metadata or file bytes', async () => {
+    const f = fixture();
+    f.bindings.requireBinding.mockResolvedValue({ ...binding, revision: 'b'.repeat(32), cookies: { session: 'replacement-fixture' } });
+    await expect(f.download(owner, input)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    expect(f.source.fetchCourses).not.toHaveBeenCalled();
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+
   it('cancels and discards the binary response if the binding changes while fetching', async () => {
     const f = fixture();
     const cancel = vi.fn();

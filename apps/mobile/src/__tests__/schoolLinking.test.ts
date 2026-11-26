@@ -57,14 +57,14 @@ test.each([
   expect(stack?.routes[stack.index ?? 0].name).toBe(screen);
 });
 
-test('同一個職涯連結在學校容器返回生活，在訪客容器返回公開入口', () => {
+test('同一個職涯連結在學校容器返回探索，在訪客容器返回公開入口', () => {
   const path = 'career?schoolId=ncku';
   const school = schoolLinking.getStateFromPath?.(path, schoolLinking.config);
   expect(school?.routes[0]).toMatchObject({
     name: '校園',
     state: {
       index: 1,
-      routes: [{ name: 'CampusHome' }, { name: 'Career', params: { schoolId: 'ncku' } }],
+      routes: [{ name: 'Explore' }, { name: 'Career', params: { schoolId: 'ncku' } }],
     },
   });
   expect(getPathFromState(school!, schoolLinking.config)).toBe(`/${path}`);
@@ -100,11 +100,11 @@ test('TronClass 連結在學校與平台登入容器保留入口與返回路徑'
 test.each([
   ['clubs', 'Clubs', undefined],
   ['clubs/photo', 'ClubDetail', { groupId: 'photo' }],
-] as const)('社團連結 %s 保留生活首頁，訪客不會取得學校社團入口', (path, screen, params) => {
+] as const)('社團連結 %s 可返回探索，訪客不會取得學校社團入口', (path, screen, params) => {
   const state = schoolLinking.getStateFromPath?.(path, schoolLinking.config);
   expect(state?.routes[0]).toMatchObject({
     name: '校園',
-    state: { index: 1, routes: [{ name: 'CampusHome' }, { name: screen }] },
+    state: { index: 1, routes: [{ name: 'Explore' }, { name: screen }] },
   });
   expect(state?.routes[0].state?.routes[1].params).toEqual(params);
   expect(getPathFromState(state!, schoolLinking.config)).toBe(`/${path}`);
@@ -124,4 +124,16 @@ test('抽出配置後，舊店家入口仍只保留校園提示並轉平台餐�
     params: { tab: 'food', schoolId: 'pu' },
   });
   expect(stack?.routes[stack.index ?? 0].params).toEqual({ tab: 'food', schoolId: 'pu' });
+});
+
+test('探索使用相同公開路徑，舊campus生活頁與地圖路徑仍可開啟', () => {
+  const school = schoolLinking.getStateFromPath?.('explore', schoolLinking.config);
+  expect(school?.routes[0]).toMatchObject({ name: '校園', state: { routes: [{ name: 'Explore' }] } });
+  expect(getPathFromState(school!, schoolLinking.config)).toBe('/explore');
+  const guest = preAuthLinking.getStateFromPath?.('explore', preAuthLinking.config);
+  expect(guest).toMatchObject({ index: 1, routes: [{ name: 'LoginLanding' }, { name: 'Explore' }] });
+  expect(getPathFromState(guest!, preAuthLinking.config)).toBe('/explore');
+  const legacy = schoolLinking.getStateFromPath?.('campus', schoolLinking.config);
+  expect(legacy?.routes[0].state?.routes.at(-1)?.name).toBe('CampusHome');
+  expect(getPathFromState(legacy!, schoolLinking.config)).toBe('/campus');
 });

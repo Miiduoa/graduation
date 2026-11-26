@@ -27,6 +27,7 @@ type Props = {
   school: string;
   locations: MapLocation[];
   selected: MapLocation | null;
+  mapRoute?: readonly [MapLocation, MapLocation] | null;
   onSelect: (location: MapLocation) => void;
 };
 
@@ -407,6 +408,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   // An observer pause caused by scrolling must not steal focus from directions or POI controls.
   const restoreFocusAfterPause = useRef(false);
   const sceneWasSuspended = useRef(false);
+  // Remember a stale visual-viewport signature only for an explicit restart or
+  // overlay touch. Effect remounts (for example when outlines arrive) must not
+  // re-arm it after focus or keyboard intersection already cleared it.
+  const ignoredViewportRef = useRef<string | null>(null);
   const view = useMemo(() => ({
     selectedId,
     overhead,
@@ -606,6 +611,53 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         return null;
       }
     };
+    // The on-screen canvas is the host rectangle clipped to the dialog
+    // scrollport. Both the visual-viewport and virtualKeyboard signals use
+    // this same visible area; overflow hidden by the modal must not count.
+    const visibleCanvasRect = (): { left: number; top: number; right: number; bottom: number } | null => {
+      try {
+        const rect = host.getBoundingClientRect();
+        if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height].every(Number.isFinite) ||
+            rect.width <= 0 || rect.height <= 0 ||
+            rect.right <= rect.left || rect.bottom <= rect.top) return null;
+        let left = rect.left;
+        let top = rect.top;
+        let right = rect.right;
+        let bottom = rect.bottom;
+        if (scrollDialog) {
+          const dialogRect = scrollDialog.getBoundingClientRect();
+          const { clientLeft, clientTop, clientWidth, clientHeight } = scrollDialog;
+          const contentLeft = dialogRect.left + clientLeft;
+          const contentTop = dialogRect.top + clientTop;
+          const contentRight = contentLeft + clientWidth;
+          const contentBottom = contentTop + clientHeight;
+          if (clientWidth > 0 && clientHeight > 0 &&
+              [contentLeft, contentTop, contentRight, contentBottom].every(Number.isFinite)) {
+            left = Math.max(left, contentLeft);
+            top = Math.max(top, contentTop);
+            right = Math.min(right, contentRight);
+            bottom = Math.min(bottom, contentBottom);
+          }
+        }
+        if (!(right > left && bottom > top)) return null;
+        return { left, top, right, bottom };
+      } catch {
+        return null;
+      }
+    };
+    const intersectsVisibleCanvas = (
+      viewLeft: number, viewTop: number, viewRight: number, viewBottom: number,
+    ): boolean | null => {
+      const canvas = visibleCanvasRect();
+      if (!canvas ||
+          ![viewLeft, viewTop, viewRight, viewBottom].every(Number.isFinite) ||
+          viewRight <= viewLeft || viewBottom <= viewTop) return null;
+      const left = Math.max(canvas.left, viewLeft);
+      const top = Math.max(canvas.top, viewTop);
+      const right = Math.min(canvas.right, viewRight);
+      const bottom = Math.min(canvas.bottom, viewBottom);
+      return right > left && bottom > top;
+    };
     const viewportSignature = (viewport: VisualViewport): string =>
       [viewport.offsetLeft, viewport.offsetTop, viewport.width, viewport.height,
         viewport.scale].join(':');
@@ -620,25 +672,15 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         if (!bounds || ![bounds.left, bounds.top, bounds.right, bounds.bottom,
           bounds.width, bounds.height].every(Number.isFinite) ||
           !(bounds.width > 0 && bounds.height > 0)) return false;
-        // Only the dialog-clipped, on-screen part of the canvas counts as visible.
-        // Overflow hidden by the modal must not pause 3D by itself.
-        // A reported rectangle that actually overlaps is enough; do not require
-        // overlaysContent, which some WebViews omit even for overlay keyboards.
-        return measureVisibilityAgainst(bounds.left, bounds.top, bounds.right, bounds.bottom) === true;
+        // A reported rectangle that actually overlaps the visible canvas is
+        // enough; do not require overlaysContent, which some WebViews omit.
+        return intersectsVisibleCanvas(bounds.left, bounds.top, bounds.right, bounds.bottom) === true;
       } catch {
         return false;
       }
     };
     const isPinchZoomed = (viewport: VisualViewport) =>
       Number.isFinite(viewport.scale) && viewport.scale > 1.01;
-    // Manual restart always wins over a visual viewport that may be stale.
-    let ignoredViewport: string | null = null;
-    if (manualStart > 0) {
-      try {
-        const viewport = window.visualViewport;
-        if (viewport) ignoredViewport = viewportSignature(viewport);
-      } catch { /* Partial WebViews: nothing to ignore. */ }
-    }
     const isTextEntryTarget = (element: Element | null): boolean => {
       if (!element) return false;
       const tag = element.tagName;
@@ -658,19 +700,26 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         const viewport = window.visualViewport;
         if (!viewport) return keyboardOverlayIntersectsCanvas() ? false : null;
         const { offsetLeft: left, offsetTop: top, width, height } = viewport;
+        // Keyboard overlap must be evaluated even if a manual restart asked
+        // us to ignore this exact viewport size. Clear that cache as soon as
+        // an intersection begins so later focus/viewport checks stay honest.
+        if (keyboardOverlayIntersectsCanvas()) {
+          ignoredViewportRef.current = null;
+          keyboardOccludedCanvas = true;
+          if (!clipToDialog) return false;
+        }
         // The visitor explicitly restarted 3D while the viewport read this
-        // way. Ignore that exact (possibly stale) geometry as an occlusion
-        // signal until it changes. It can still prove the canvas is visible
-        // inside both the viewport and dialog after a stale hidden observation.
-        if (ignoredViewport !== null) {
-          if (viewportSignature(viewport) !== ignoredViewport) ignoredViewport = null;
+        // way. Ignore it as an occlusion signal until it changes, an editable
+        // gains focus, or a keyboard overlaps. Positive geometry can still
+        // recover a hidden observation inside both the viewport and dialog.
+        if (ignoredViewportRef.current !== null) {
+          if (viewportSignature(viewport) !== ignoredViewportRef.current) ignoredViewportRef.current = null;
           else if (!clipToDialog) return null;
         }
-        const visible = measureVisibilityAgainst(left, top, left + width, top + height, clipToDialog);
+        const visible = intersectsVisibleCanvas(left, top, left + width, top + height);
         if (clipToDialog) return visible;
         // Structural signals only: a shrunken visual viewport is not itself
         // proof that the keyboard still covers the canvas.
-        if (keyboardOverlayIntersectsCanvas()) return false;
         if (isPinchZoomed(viewport)) return visible;
         const textEntryFocused = isTextEntryTarget(host.ownerDocument.activeElement);
         // No input/textarea/contenteditable focus and no keyboard overlap:
@@ -678,8 +727,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         if (!textEntryFocused) return null;
         // While an editable is focused, never auto-resume from a closed
         // keyboard rectangle, a grace timer, or leftover shrunken bounds.
-        // Only a visual viewport that once again includes the canvas may resume.
-        if (visible === false) return false;
+        // Only a visual viewport that once again includes the visible canvas
+        // (dialog-clipped, same rect as the virtualKeyboard path) may resume.
+        if (visible === false) {
+          keyboardOccludedCanvas = true;
+          return false;
+        }
         return null;
       } catch {
         return keyboardOverlayIntersectsCanvas() ? false : null;
@@ -693,6 +746,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
 
     let intersection: IntersectionObserver | null = null;
+    // Entries stamped before this instant were queued prior to an explicit
+    // overlay resume and must not re-pause the recovered scene.
+    let ignoreObserverBefore = 0;
     const disconnectObserver = () => {
       const previous = intersection;
       intersection = null;
@@ -714,7 +770,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           const hostEntries = entries.filter((entry) => {
             try {
               const target = entry.target;
-              return !target || target === host;
+              if (target && target !== host) return false;
+              // A report queued before the most recent overlay tap must not
+              // undo the recovery, even when delivered alongside fresh entries.
+              if (ignoreObserverBefore > 0) {
+                const observedAt = entry.time;
+                if (Number.isFinite(observedAt) && observedAt < ignoreObserverBefore) return false;
+              }
+              return true;
             } catch {
               return false;
             }
@@ -790,6 +853,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       catch { /* Observer and page events still report visibility. */ }
     }
     // Keyboard transitions can move the host without a window event.
+    // Only a keyboard that actually occluded the canvas may unstick a hidden
+    // observer. A later focus move to the restart control is not keyboard close.
+    let keyboardOccludedCanvas = false;
+    const keyboardStillCovering = () =>
+      isTextEntryTarget(host.ownerDocument.activeElement) || keyboardOverlayIntersectsCanvas();
+    const releaseStaleHiddenObserverOnKeyboardClose = () => {
+      if (keyboardStillCovering()) return;
+      if (visibility === 'hidden' && keyboardOccludedCanvas) visibility = 'unknown';
+      keyboardOccludedCanvas = false;
+    };
     const onVisualViewportChange = () => {
       if (visibility === 'hidden' && measureVisualViewportVisibility(true) === true) {
         // Recover from a stale hidden observer entry after the keyboard moves.
@@ -797,6 +870,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // has returned, even if this WebView emits no new observer callback.
         visibility = 'unknown';
       }
+      releaseStaleHiddenObserverOnKeyboardClose();
       // Also run when the observer last said "visible": a shrinking mobile
       // viewport can cover the canvas while its layout intersection stays true.
       // Invalid/missing visual geometry is not proof that the host is hidden.
@@ -809,11 +883,20 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // the keyboard animation may have settled. Timers never override the
     // structural signals (editable focus or virtualKeyboard overlap).
     const focusTimers = new Set<number>();
-    const onFocusChange = () => {
+    const onFocusChange = (event: FocusEvent) => {
+      // A later focus on an input must re-evaluate a shrunken viewport that
+      // was ignored only for the visitor's explicit restart.
+      if (event.type === 'focusin' && event.target instanceof Element &&
+          isTextEntryTarget(event.target)) {
+        ignoredViewportRef.current = null;
+      }
       for (const delay of [0, 350]) {
         const id = window.setTimeout(() => {
           focusTimers.delete(id);
-          if (active) syncVisibility();
+          if (active) {
+            releaseStaleHiddenObserverOnKeyboardClose();
+            syncVisibility();
+          }
         }, delay);
         focusTimers.add(id);
       }
@@ -822,22 +905,37 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       document.addEventListener('focusin', onFocusChange, true);
       document.addEventListener('focusout', onFocusChange, true);
     } catch { /* Window events still recheck layout in partial WebViews. */ }
-    // The overlay receives input while the canvas host is inert. A touch in
-    // the scene can disprove stale viewport bounds after keyboard dismissal.
+    // The overlay receives input while the canvas host is inert. A tap there
+    // can disprove stale viewport bounds after keyboard dismissal. Ordinary
+    // canvas touch or scroll must never write that cache.
     const onSceneTouched = (event: Event) => {
       const target = event.target;
       const restart = restartButton.current;
       if (!(target instanceof Node)) return;
       // Keep the button mounted through its click so manual restart can run.
       if (restart?.contains(target)) return;
-      if (!restart && !host.contains(target)) return;
+      const overlay = restart?.closest('[role="status"]');
+      if (!overlay?.contains(target)) return;
       try {
         const viewport = window.visualViewport;
         if (viewport) {
           if (isPinchZoomed(viewport) || keyboardOverlayIntersectsCanvas()) return;
-          ignoredViewport = viewportSignature(viewport);
+          ignoredViewportRef.current = viewportSignature(viewport);
         }
       } catch { /* Partial WebViews: nothing to ignore. */ }
+      // An explicit overlay tap must not stay blocked by a stale hidden
+      // observer entry after the keyboard has already been dismissed.
+      if (visibility === 'hidden') visibility = 'unknown';
+      try { ignoreObserverBefore = performance.now(); }
+      catch { ignoreObserverBefore = 0; }
+      // The visitor explicitly resumed. A later blur must not treat a fresh
+      // post-resume hidden observer entry as leftover keyboard occlusion.
+      keyboardOccludedCanvas = false;
+      // Drop queued reports and request a fresh intersection measurement.
+      try {
+        intersection?.unobserve(host);
+        intersection?.observe(host);
+      } catch { /* Partial WebViews may omit unobserve. */ }
       syncVisibility();
     };
     const container = sceneContainer.current;
@@ -852,7 +950,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       visualViewport?.addEventListener('resize', onVisualViewportChange);
       visualViewport?.addEventListener('scroll', onVisualViewportChange);
     } catch { /* Window events still recheck layout in partial WebViews. */ }
-    try { virtualKeyboard?.addEventListener('geometrychange', syncVisibility); }
+    const onKeyboardGeometryChange = () => {
+      releaseStaleHiddenObserverOnKeyboardClose();
+      syncVisibility();
+    };
+    try { virtualKeyboard?.addEventListener('geometrychange', onKeyboardGeometryChange); }
     catch { /* Visual viewport and observer events still report visibility. */ }
     syncVisibility();
     return () => {
@@ -882,7 +984,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         visualViewport?.removeEventListener('resize', onVisualViewportChange);
         visualViewport?.removeEventListener('scroll', onVisualViewportChange);
       } catch { /* Complete scene cleanup even in partial WebViews. */ }
-      try { virtualKeyboard?.removeEventListener('geometrychange', syncVisibility); }
+      try { virtualKeyboard?.removeEventListener('geometrychange', onKeyboardGeometryChange); }
       catch { /* Complete scene cleanup even in partial WebViews. */ }
       pendingCreate = null;
       scene?.dispose();
@@ -901,6 +1003,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     catch { /* Legacy WebViews may not implement scrolling. */ }
     // Keep focus inside the map when its start control disappears.
     try { host?.focus(); } catch { /* Focus is advisory. */ }
+    // Record the current (possibly stale) geometry before the scene remounts.
+    try {
+      const viewport = window.visualViewport;
+      if (viewport) {
+        ignoredViewportRef.current = [
+          viewport.offsetLeft, viewport.offsetTop, viewport.width, viewport.height,
+          viewport.scale,
+        ].join(':');
+      }
+    } catch { /* Partial WebViews: nothing to ignore. */ }
     onManualStart();
   };
   const paused = status === 'ready' && renderSuspended;
@@ -1009,6 +1121,24 @@ function spatialDestinationIdentity(place: MapLocation): string {
   ]);
 }
 
+// Reuse the explicit flat-map route only for its exact current destination.
+// A changed, duplicate or missing marker must not silently supply an origin.
+function spatialRouteOrigin(
+  locations: readonly MapLocation[],
+  route: Props['mapRoute'],
+  destination: MapLocation | undefined,
+): MapLocation | undefined {
+  if (!route || !destination || route[0].id === route[1].id ||
+      spatialDestinationIdentity(route[1]) !== spatialDestinationIdentity(destination)) return undefined;
+  const confirmed = (endpoint: MapLocation) => {
+    const matches = locations.filter((location) => location.id === endpoint.id);
+    return matches.length === 1 && Number.isFinite(endpoint.lat) && Math.abs(endpoint.lat) <= 90 &&
+      Number.isFinite(endpoint.lng) && Math.abs(endpoint.lng) <= 180 &&
+      spatialDestinationIdentity(matches[0]) === spatialDestinationIdentity(endpoint);
+  };
+  return confirmed(route[0]) && confirmed(route[1]) ? route[0] : undefined;
+}
+
 // Existing map-record context is easier to recognize than raw coordinates,
 // but is not a verified room, entrance or indoor route.
 function spatialPlaceContext(place: MapLocation): string {
@@ -1023,7 +1153,7 @@ function normalizeSpatialSearch(value: string): string {
   return value.normalize('NFKC').toLowerCase().trim();
 }
 
-function SpatialDialog({ school, locations, selected, onSelect, onClose, manualStart, onManualStart }: Props & {
+function SpatialDialog({ school, locations, selected, mapRoute, onSelect, onClose, manualStart, onManualStart }: Props & {
   onClose: () => void;
   manualStart: number;
   onManualStart: () => void;
@@ -1072,7 +1202,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
     selected ? { id: selected.id, identity: spatialDestinationIdentity(selected), inherited: true } : null);
   const [overview, setOverview] = useState(!selected);
   const [overhead, setOverhead] = useState(false);
-  const [buildingPlanId, setBuildingPlanId] = useState<string | null>(null);
+  const [buildingPlanChoice, setBuildingPlanChoice] = useState<{ id: string; identity: string } | 'revoked' | null>(null);
   const [footprints, setFootprints] = useState<ProvidenceFootprint[]>([]);
   const [footprintAttempt, setFootprintAttempt] = useState(0);
   const [footprintStatus, setFootprintStatus] = useState<'loading' | 'ready' | 'unavailable' | 'deferred'>(
@@ -1109,18 +1239,38 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
   const chosen = typeof selection === 'object' ? selection : null;
   const selectedPoint = model.points.find((point) =>
     point.id === chosen?.id && spatialDestinationIdentity(point.location) === chosen.identity);
-  // The preview owns an editing session scoped to the building ID.
-  const buildingPlanPlace = model.points.find((point) => point.id === buildingPlanId)?.location ??
-    locations.find((location) => location.id === buildingPlanId);
-  if (buildingPlanId !== null && !buildingPlanPlace) setBuildingPlanId(null);
+  // A plan editor must never carry its local draft to a replacement POI
+  // that merely reuses the same ID. Preserve the session during projection
+  // failure only when the full marker identity is still uniquely present.
+  const buildingPlanMatches = typeof buildingPlanChoice === 'object' && buildingPlanChoice !== null
+    ? locations.filter((location) => location.id === buildingPlanChoice.id)
+    : [];
+  const buildingPlanPlace = typeof buildingPlanChoice === 'object' && buildingPlanChoice !== null &&
+    buildingPlanMatches.length === 1 &&
+    spatialDestinationIdentity(buildingPlanMatches[0]) === buildingPlanChoice.identity
+    ? buildingPlanMatches[0] : undefined;
+  if (typeof buildingPlanChoice === 'object' && buildingPlanChoice !== null && !buildingPlanPlace)
+    setBuildingPlanChoice('revoked');
+  // A temporarily unloadable model (empty points from an oversized area)
+  // is not a destination change. Keep the choice pending and restore
+  // details plus walking navigation when the same place is projectable again.
+  // Only a real removal or a changed identity revokes the destination.
+  const destinationStillInMap = !!(chosen && locations.some((location) =>
+    location.id === chosen.id && spatialDestinationIdentity(location) === chosen.identity));
   if (chosen && (!selectedPoint ||
       (chosen.inherited && inheritedIdentity !== chosen.identity))) {
-    setSelection('revoked');
-    setOverview(true);
-    setCamera((previous) => ({ ...previous, zoom: 1 }));
+    const inheritedChanged = !!(chosen.inherited && inheritedIdentity !== chosen.identity);
+    if (!inheritedChanged && model.unavailableReason === 'area-too-large' && destinationStillInMap) {
+      // Leave the selection pending while the model cannot be built.
+    } else {
+      setSelection('revoked');
+      setOverview(true);
+      setCamera((previous) => ({ ...previous, zoom: 1 }));
+    }
   }
   const showOverview = overview || !selectedPoint;
   const place = selectedPoint?.location;
+  const routeOrigin = spatialRouteOrigin(locations, mapRoute, place);
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);
   const previousPoint = model.points[index - 1];
   const nextPoint = model.points[index + 1];
@@ -1637,7 +1787,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
       schoolId={school}
       buildingId={buildingPlanPlace.id}
       buildingName={buildingPlanPlace.name}
-      onClose={() => setBuildingPlanId(null)}
+      onClose={() => setBuildingPlanChoice(null)}
     />;
   }
 
@@ -1649,6 +1799,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
       description="用地點的相對位置認識校園。圖釘是位置標記，不代表建築外觀或室內動線。"
       size="full"
     >
+      {buildingPlanChoice === 'revoked' && <p className={styles.note} role="status">
+        原圖面地點已變更或無法唯一確認，已關閉圖面編輯；未下載的編輯內容不會轉移到其他地點。請重新選擇建築。
+      </p>}
       {model.unavailableReason ? (
         <div className={styles.unavailable} role="status">
           <p>{model.unavailableReason === 'area-too-large'
@@ -1872,10 +2025,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
                 <button className="btn primary" type="button" onClick={() => { onSelect(place); onClose(); }}>
                   在平面地圖查看
                 </button>
-                <a className="btn" href={walkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟步行導航</a>
-                <a className="btn" href={appleWalkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟 Apple 地圖步行導航</a>
-                <p id={directionsNoteId} className={styles.note}>導航僅以目前地點標記為目的地，並非已核實的校舍入口、可通行道路或無障礙動線；請依現場指標確認。</p>
-                <button className="btn" type="button" onClick={() => setBuildingPlanId(place.id)}>平面圖建模預覽</button>
+                <a className="btn" href={walkingDirectionsUrl(place, routeOrigin)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟步行導航</a>
+                <a className="btn" href={appleWalkingDirectionsUrl(place, routeOrigin)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟 Apple 地圖步行導航</a>
+                <p id={directionsNoteId} className={styles.note}>
+                  {routeOrigin && <>沿用平面地圖設定的起點「{routeOrigin.name}」；起點也是地點標記，並非已核實的入口。{' '}</>}
+                  導航僅以目前地點標記為目的地，並非已核實的校舍入口、可通行道路或無障礙動線；請依現場指標確認。
+                </p>
+                <button className="btn" type="button" onClick={() => setBuildingPlanChoice({ id: place.id, identity: spatialDestinationIdentity(place) })}>平面圖建模預覽</button>
                 {source && <a className={styles.source} href={source} target="_blank" rel="noopener noreferrer">查看地點資料來源 ↗</a>}
               </div>
               </> : <p className={styles.note} role="status" aria-live="polite" aria-atomic="true">

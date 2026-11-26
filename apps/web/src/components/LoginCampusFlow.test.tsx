@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
+import * as puDataPolicy from '@campus/shared/src/puEcampusDataPolicy';
 import { AppHeader } from './AppHeader';
 import { SelectedSchoolProvider, schoolPreferenceKey } from './SelectedSchoolProvider';
 import LoginPage from '@/app/login/page';
@@ -89,6 +90,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   window.history.replaceState({}, '', '/');
 });
@@ -96,6 +98,7 @@ afterEach(() => {
 it.each(['nthu', null])(
   'keeps a PU deep-link task through header login despite saved campus %s',
   async (savedSchoolId) => {
+    vi.spyOn(puDataPolicy, 'isPuEcampusDataFetchEnabled').mockReturnValue(true);
     localStorage.setItem(schoolPreferenceKey(null), JSON.stringify({ schoolId: savedSchoolId }));
     const destination = '/groups/photography/club/overview?school=PU&schoolId=pu&campus=pu&token=private#announcements';
     visit(destination);
@@ -127,6 +130,7 @@ it.each(['nthu', null])(
 );
 
 it('uses the same campus-preserving login helper from the club overview action', async () => {
+  vi.spyOn(puDataPolicy, 'isPuEcampusDataFetchEnabled').mockReturnValue(true);
   localStorage.setItem(schoolPreferenceKey(null), JSON.stringify({ schoolId: 'nthu' }));
   visit('/groups/photography/club/overview?schoolId=pu&campus=pu');
   const view = render(<Flow />);
@@ -161,7 +165,9 @@ it.each(['all', 'personal'])('does not restore a saved school when %s was explic
   expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(null))!)).toEqual({ schoolId: 'pu' });
 });
 
-it.each(['nthu', null])('school-required tasks keep their explicit PU campus despite preference %s', async (savedSchoolId) => {
+it.each(['nthu', null])('teacher tasks keep their explicit PU campus during the student pause despite preference %s', async (savedSchoolId) => {
+  vi.spyOn(puDataPolicy, 'isPuEcampusDataFetchEnabled').mockReturnValue(false);
+  signIn.mockResolvedValue({ uid: 'pu-teacher' });
   localStorage.setItem(schoolPreferenceKey(null), JSON.stringify({ schoolId: savedSchoolId }));
   visit('/teacher?campus=pu&schoolId=pu');
   const view = render(<Flow task="school" />);
@@ -174,14 +180,15 @@ it.each(['nthu', null])('school-required tasks keep their explicit PU campus des
   });
   visit(link.getAttribute('href')!);
   view.rerender(<Flow login />);
-  await screen.findByLabelText('學號');
+  const teacherAccount = await screen.findByLabelText('教師帳號');
   expect(options).toHaveBeenLastCalledWith('pu', true);
+  expect(screen.queryByLabelText('學號')).toBeNull();
   expect(screen.queryByText('Google 登入')).toBeNull();
-  fireEvent.change(screen.getByLabelText('學號'), { target: { value: 's123' } });
+  fireEvent.change(teacherAccount, { target: { value: 'teacher.yang' } });
   fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'password' } });
-  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  fireEvent.submit(teacherAccount.closest('form')!);
   await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
-  expect(signIn).toHaveBeenCalledWith('S123', 'password', expect.any(AbortSignal), 'pu');
+  expect(signIn).toHaveBeenCalledWith('TEACHER.YANG', 'password', expect.any(AbortSignal), 'pu');
   expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(null))!)).toEqual({ schoolId: savedSchoolId });
 });
 
@@ -251,6 +258,7 @@ it.each([
 );
 
 it.each(['notifications', 'account'])('returns school connection to the %s settings task', async (section) => {
+  vi.spyOn(puDataPolicy, 'isPuEcampusDataFetchEnabled').mockReturnValue(true);
   localStorage.setItem(schoolPreferenceKey(null), JSON.stringify({ schoolId: 'nthu' }));
   visit(`/settings?section=${section}&campus=pu&schoolId=pu#preferences`);
   const view = render(<Flow task="settings" />);

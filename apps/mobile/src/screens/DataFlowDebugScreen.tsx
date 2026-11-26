@@ -15,8 +15,13 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  Platform,
+  StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+
+import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 
 import {
   tcFetchCourses,
@@ -76,6 +81,7 @@ interface Result {
 }
 
 export default function DataFlowDebugScreen() {
+  useThemeVersion();
   const [courseId, setCourseId] = useState('');
   const [results, setResults] = useState<Record<string, Result>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -119,133 +125,218 @@ export default function DataFlowDebugScreen() {
     setRunningAll(false);
   };
 
+  const monoFont = Platform.select({ ios: 'Menlo', default: 'monospace' });
+
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#0f172a' }} contentContainerStyle={{ padding: 16, paddingBottom: 64 }}>
-      <Text style={{ color: '#fbbf24', fontSize: 24, fontWeight: '700' }}>🔍 資料流診斷</Text>
-      <Text style={{ color: '#E5E5EA', fontSize: 12, marginTop: 4 }}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: theme.colors.bg }}
+      contentContainerStyle={{
+        paddingHorizontal: theme.layout.screenHorizontalPadding,
+        paddingTop: theme.space.md,
+        paddingBottom: 64,
+      }}
+    >
+      <Text
+        accessibilityRole="header"
+        style={{ color: theme.colors.text, fontSize: 24, fontWeight: '700', lineHeight: 30 }}
+      >
+        資料流診斷
+      </Text>
+      <Text style={{ color: theme.colors.textSecondary, fontSize: 13, marginTop: 4, lineHeight: 19 }}>
         逐一打 TronClass endpoint，看哪些回資料、哪些回空、哪些失敗
       </Text>
 
       <View style={{ marginTop: 16 }}>
-        <Text style={{ color: '#E5E5EA', fontSize: 13, marginBottom: 4 }}>Course ID</Text>
+        <Text style={{ color: theme.colors.textSecondary, fontSize: 13, fontWeight: '600', marginBottom: 6 }}>
+          Course ID
+        </Text>
         <TextInput
           value={courseId}
           onChangeText={setCourseId}
           placeholder="例如 71240"
-          placeholderTextColor="#64748b"
+          placeholderTextColor={theme.colors.muted}
+          accessibilityLabel="Course ID"
           keyboardType="number-pad"
           style={{
-            backgroundColor: '#1e293b',
-            color: '#fff',
-            padding: 10,
-            borderRadius: 8,
+            backgroundColor: theme.colors.surface,
+            color: theme.colors.text,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            borderRadius: theme.radius.md,
             fontSize: 16,
+            minHeight: 44,
           }}
         />
       </View>
 
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="一鍵跑全部"
+        accessibilityState={{ disabled: runningAll, busy: runningAll }}
         onPress={runAll}
         disabled={runningAll}
-        style={{
+        style={({ pressed }) => ({
           marginTop: 12,
-          padding: 12,
-          borderRadius: 8,
-          backgroundColor: runningAll ? '#475569' : '#fbbf24',
+          minHeight: 48,
+          paddingVertical: 12,
+          paddingHorizontal: theme.space.md,
+          borderRadius: theme.radius.md,
+          backgroundColor: runningAll ? theme.colors.disabledBg : theme.colors.accent,
           alignItems: 'center',
-        }}
+          justifyContent: 'center',
+          opacity: pressed && !runningAll ? 0.85 : 1,
+        })}
       >
         {runningAll ? (
-          <ActivityIndicator color="#0f172a" />
+          <ActivityIndicator color={theme.colors.muted} />
         ) : (
-          <Text style={{ color: '#0f172a', fontWeight: '700' }}>一鍵跑全部</Text>
+          <Text style={{ color: theme.colors.onAccent, fontSize: 15, fontWeight: '700' }}>
+            一鍵跑全部
+          </Text>
         )}
       </Pressable>
 
-      {ENDPOINTS.map((e) => {
-        const r = results[e.key] ?? { loading: false };
-        const expand = expanded === e.key;
-        return (
-          <View
-            key={e.key}
-            style={{
-              marginTop: 10,
-              backgroundColor: '#1e293b',
-              borderRadius: 10,
-              padding: 12,
-              borderLeftWidth: 4,
-              borderLeftColor: r.ok === true ? '#22c55e' : r.ok === false ? '#D70015' : '#64748b',
-            }}
-          >
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>{e.label}</Text>
-                <Text style={{ color: '#64748b', fontSize: 11 }}>{e.key}</Text>
-              </View>
-              <Pressable
-                onPress={() => runOne(e)}
-                style={{
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  borderRadius: 6,
-                  backgroundColor: '#334155',
-                }}
-              >
-                {r.loading ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={{ color: '#fff', fontSize: 12 }}>呼叫</Text>
-                )}
-              </Pressable>
-            </View>
+      <View
+        style={{
+          marginTop: 16,
+          backgroundColor: theme.colors.surface,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.lg,
+          overflow: 'hidden',
+        }}
+      >
+        {ENDPOINTS.map((e, idx) => {
+          const r = results[e.key] ?? { loading: false };
+          const expand = expanded === e.key;
+          const statusColor =
+            r.ok === true
+              ? theme.colors.success
+              : r.ok === false
+                ? theme.colors.danger
+                : theme.colors.muted;
 
-            {r.ok !== undefined && (
-              <View style={{ marginTop: 8, flexDirection: 'row', gap: 12 }}>
-                <Text style={{ color: r.ok ? '#22c55e' : '#D70015', fontSize: 12 }}>
-                  {r.ok ? '✓' : '✗'} {r.ms}ms
-                </Text>
-                {r.count !== undefined && (
-                  <Text style={{ color: '#E5E5EA', fontSize: 12 }}>
-                    📊 {r.count} 筆
-                  </Text>
-                )}
-                {r.raw && (
-                  <Pressable onPress={() => setExpanded(expand ? null : e.key)}>
-                    <Text style={{ color: '#fbbf24', fontSize: 12 }}>
-                      {expand ? '收起' : '看 raw JSON'} ▾
+          return (
+            <View
+              key={e.key}
+              style={{
+                paddingHorizontal: theme.space.md,
+                paddingVertical: 12,
+                borderTopWidth: idx === 0 ? 0 : StyleSheet.hairlineWidth,
+                borderTopColor: theme.colors.separator,
+              }}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                  <View
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 4,
+                      backgroundColor: statusColor,
+                    }}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '600' }}>
+                      {e.label}
                     </Text>
-                  </Pressable>
-                )}
-              </View>
-            )}
-
-            {r.error && (
-              <Text style={{ color: '#fca5a5', fontSize: 11, marginTop: 6 }}>{r.error}</Text>
-            )}
-
-            {expand && r.raw && (
-              <ScrollView
-                horizontal
-                style={{
-                  marginTop: 8,
-                  padding: 8,
-                  backgroundColor: '#0f172a',
-                  borderRadius: 6,
-                  maxHeight: 250,
-                }}
-              >
-                <Text
-                  selectable
-                  style={{ color: '#86efac', fontFamily: 'Menlo', fontSize: 10 }}
+                    <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 1 }}>
+                      {e.key}
+                    </Text>
+                  </View>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`呼叫 ${e.label}`}
+                  onPress={() => runOne(e)}
+                  style={({ pressed }) => ({
+                    minHeight: 36,
+                    minWidth: 56,
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: theme.radius.sm,
+                    backgroundColor: theme.colors.surface2,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: pressed ? 0.75 : 1,
+                  })}
                 >
-                  {JSON.stringify(r.raw, null, 2).slice(0, 3000)}
-                  {JSON.stringify(r.raw).length > 3000 ? '\n…(truncated)' : ''}
+                  {r.loading ? (
+                    <ActivityIndicator size="small" color={theme.colors.accent} />
+                  ) : (
+                    <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: '600' }}>
+                      呼叫
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
+
+              {r.ok !== undefined && (
+                <View style={{ marginTop: 8, paddingLeft: 18, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+                  <Text style={{ color: statusColor, fontSize: 12, fontWeight: '600' }}>
+                    {r.ok ? '成功' : '失敗'} · {r.ms}ms
+                  </Text>
+                  {r.count !== undefined && (
+                    <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
+                      {r.count} 筆
+                    </Text>
+                  )}
+                  {r.raw !== undefined && (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={expand ? `收起 ${e.label} JSON` : `檢視 ${e.label} raw JSON`}
+                      onPress={() => setExpanded(expand ? null : e.key)}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}
+                    >
+                      <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}>
+                        {expand ? '收起' : '看 raw JSON'}
+                      </Text>
+                      <Ionicons
+                        name={expand ? 'chevron-up' : 'chevron-down'}
+                        size={13}
+                        color={theme.colors.accent}
+                      />
+                    </Pressable>
+                  )}
+                </View>
+              )}
+
+              {r.error && (
+                <Text style={{ color: theme.colors.danger, fontSize: 12, marginTop: 6, paddingLeft: 18 }}>
+                  {r.error}
                 </Text>
-              </ScrollView>
-            )}
-          </View>
-        );
-      })}
+              )}
+
+              {expand && r.raw !== undefined && (
+                <ScrollView
+                  horizontal
+                  style={{
+                    marginTop: 8,
+                    padding: 10,
+                    backgroundColor: theme.colors.surfaceMuted,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                    borderRadius: theme.radius.sm,
+                    maxHeight: 250,
+                  }}
+                >
+                  <Text
+                    selectable
+                    style={{ color: theme.colors.text, fontFamily: monoFont, fontSize: 11, lineHeight: 16 }}
+                  >
+                    {JSON.stringify(r.raw, null, 2).slice(0, 3000)}
+                    {JSON.stringify(r.raw).length > 3000 ? '\n…(truncated)' : ''}
+                  </Text>
+                </ScrollView>
+              )}
+            </View>
+          );
+        })}
+      </View>
     </ScrollView>
   );
 }

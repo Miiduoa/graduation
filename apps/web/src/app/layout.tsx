@@ -50,7 +50,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f6f7f5' },
+    { media: '(prefers-color-scheme: light)', color: '#faf8f2' },
     { media: '(prefers-color-scheme: dark)', color: '#000000' },
   ],
   width: 'device-width',
@@ -72,7 +72,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="nuni" />
         <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="msapplication-TileColor" content="#f6f7f5" />
+        <meta name="msapplication-TileColor" content="#faf8f2" />
         <meta name="msapplication-tap-highlight" content="no" />
       </head>
       <body>

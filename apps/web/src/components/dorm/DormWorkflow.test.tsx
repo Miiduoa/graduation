@@ -8,6 +8,7 @@ import {
 } from '@campus/shared/src/dormWorkflow';
 const api = vi.hoisted(() => ({
   call: vi.fn(),
+  uid: 'fixture',
   config: { enabled: true, repairs: false, packages: false, admin: false },
   rows: {
     repairs: [] as unknown[],
@@ -23,10 +24,15 @@ const api = vi.hoisted(() => ({
   },
 }));
 vi.mock('@/lib/firebase', () => ({
-  getAuth: () => ({ currentUser: { uid: 'fixture', getIdToken: async () => 'fixture-id-token' } }),
+  getAuth: () => ({ currentUser: { uid: api.uid, getIdToken: async () => 'fixture-id-token' } }),
   getCloudFunctionUrl: () => '/api/fn/dormWorkflow',
 }));
+function signInAs(uid: string) {
+  api.uid = uid;
+  return uid;
+}
 beforeEach(() => {
+  api.uid = 'fixture';
   vi.stubGlobal('fetch', vi.fn(async (url, init) => {
     expect(url).toBe('/api/fn/dormWorkflow');
     expect(init.headers.Authorization).toBe('Bearer fixture-id-token');
@@ -49,7 +55,7 @@ afterEach(() => {
 });
 it('disabled school and guests have no submission or staff controls', async () => {
   api.config.enabled = false;
-  const view = render(<DormWorkflow schoolId="pu" uid="alice" />);
+  const view = render(<DormWorkflow schoolId="pu" uid={signInAs('alice')} />);
   await waitFor(() => expect(api.call).toHaveBeenCalled());
   expect(screen.queryByText('外宿卡')).toBeNull();
   view.rerender(<DormWorkflow schoolId="pu" />);
@@ -59,7 +65,7 @@ it('sends the actual draft to the canonical school and submits leave with date/r
   render(
     <DormWorkflow
       schoolId="tw-pu"
-      uid="alice"
+      uid={signInAs('alice')}
       building="A"
       room="101"
       draft={{ title: '燈不亮', category: 'electric', description: '無法開啟', location: '浴室' }}
@@ -107,7 +113,7 @@ it('shows formal timeline, school reference and reopens the same ticket', async 
       ],
     },
   ];
-  render(<DormWorkflow schoolId="pu" uid="alice" />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('alice')} />);
   expect(await screen.findByText('學校單號 A123（輔導員填）')).toBeTruthy();
   fireEvent.click(screen.getByText('還沒修好'));
   await waitFor(() =>
@@ -128,7 +134,7 @@ it('staff sees grouped tickets and stores receipt plus repair metadata', async (
       history: [{ status: 'sent', at: 1 }],
     },
   ];
-  render(<DormWorkflow schoolId="pu" uid="staff" />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('staff')} />);
   fireEvent.click(await screen.findByText('開啟輔導員工作台'));
   await screen.findByText('學校單號（選填）');
   fireEvent.change(screen.getByLabelText('學校單號（選填）'), { target: { value: 'A123' } });
@@ -184,7 +190,7 @@ it('keeps history read-only after school disables the workflow', async () => {
     },
   ];
   const onRepairs = vi.fn();
-  render(<DormWorkflow schoolId="pu" uid="alice" onOwnRepairsChange={onRepairs} />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('alice')} onOwnRepairsChange={onRepairs} />);
   await waitFor(() =>
     expect(onRepairs).toHaveBeenCalledWith([
       expect.objectContaining({ id: 'r', official: true, status: 'fixed' }),
@@ -200,7 +206,7 @@ it('requires a fresh resident selection after changing parcel search', async () 
   api.rows.residents = [
     { id: 'dw_roster', studentId: '***123', name: '小明', building: 'A', room: '101' },
   ];
-  render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('staff')} initialStaff />);
   const search = await screen.findByLabelText('學號末三碼或姓名（本棟住宿生）');
   fireEvent.change(search, { target: { value: '123' } });
   fireEvent.click(await screen.findByText('***123 小明 A 101'));
@@ -213,7 +219,7 @@ it('requires a fresh resident selection after changing parcel search', async () 
 
 it('re-evaluates capabilities on account and school changes and ignores old responses', async () => {
   let resolveOld!: (value: unknown) => void;
-  const view = render(<DormWorkflow schoolId="pu" uid="alice" />);
+  const view = render(<DormWorkflow schoolId="pu" uid={signInAs('alice')} />);
   await screen.findByText('宿舍輔導員服務');
   api.call.mockImplementation(async (data) => {
     if (data.action !== 'config') return api.rows;
@@ -223,14 +229,14 @@ it('re-evaluates capabilities on account and school changes and ignores old resp
       });
     return api.config;
   });
-  view.rerender(<DormWorkflow schoolId="pu" uid="bob" />);
+  view.rerender(<DormWorkflow schoolId="pu" uid={signInAs('bob')} />);
   expect(screen.queryByText('送給輔導員核可')).toBeNull();
   await waitFor(() => expect(resolveOld).toBeTypeOf('function'));
-  view.rerender(<DormWorkflow schoolId="ntnu" uid="bob" />);
+  view.rerender(<DormWorkflow schoolId="ntnu" uid={signInAs('bob')} />);
   await waitFor(() => expect(api.call).toHaveBeenCalledWith({ action: 'mine', schoolId: 'ntnu' }));
   resolveOld({ enabled: false });
   await waitFor(() => expect(screen.getByText('宿舍輔導員服務')).toBeTruthy());
-  view.rerender(<DormWorkflow schoolId="ntnu" uid="carol" />);
+  view.rerender(<DormWorkflow schoolId="ntnu" uid={signInAs('carol')} />);
   await waitFor(() =>
     expect(api.call.mock.calls.filter(([d]) => d.action === 'config')).toHaveLength(4),
   );
@@ -266,7 +272,7 @@ it.each([false, true])(
             },
     );
     const onTonight = vi.fn();
-    render(<DormWorkflow schoolId="pu" uid="staff" onTonightLeaveChange={onTonight} />);
+    render(<DormWorkflow schoolId="pu" uid={signInAs('staff')} onTonightLeaveChange={onTonight} />);
     await waitFor(() => expect(onTonight).toHaveBeenLastCalledWith(approved));
     fireEvent.click(await screen.findByText('開啟輔導員工作台'));
     await waitFor(() =>
@@ -295,7 +301,7 @@ it('authorized leave reviewers see applicant name and only masked student ID', a
       maskedStudentId: '***456',
     },
   ];
-  render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('staff')} initialStaff />);
   expect(await screen.findByText('申請人：王同學 · 學號 ***456')).toBeTruthy();
   expect(screen.queryByText('123456')).toBeNull();
 });
@@ -310,7 +316,7 @@ it('loads the next workspace page with server cursors', async () => {
           nextCursors: data.cursors ? { leaves: null } : cursors,
         },
   );
-  render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('staff')} initialStaff />);
   fireEvent.click(await screen.findByText('載入更多紀錄'));
   await waitFor(() =>
     expect(api.call).toHaveBeenCalledWith(
@@ -348,7 +354,7 @@ it('blocks partial statistics until all 51 records have loaded', async () => {
             nextCursors: { parcels: data.cursors ? null : '49' },
           },
   );
-  render(<DormWorkflow schoolId="pu" uid="admin" initialStaff />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('admin')} initialStaff />);
   const button = await screen.findByRole('button', { name: '匯出宿舍統計' });
   expect((button as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByText('輔導員帳號 UID')).toBeNull();
@@ -387,7 +393,7 @@ it.each([
       room: '101',
     },
   ];
-  render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('staff')} initialStaff />);
   fireEvent.change(await screen.findByLabelText('學號末三碼或姓名（本棟住宿生）'), {
     target: { value: '456' },
   });
@@ -418,7 +424,7 @@ it('resolves ticket photos through the authorized backend only on request', asyn
   api.call.mockImplementation(async (data) =>
     data.action === 'repairPhoto' ? { url: 'https://signed.invalid/random' } : original(data),
   );
-  render(<DormWorkflow schoolId="pu" uid="student" />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('student')} />);
   const button = await screen.findByText('查看報修照片 1');
   expect(screen.queryByRole('img')).toBeNull();
   fireEvent.click(button);
@@ -452,7 +458,7 @@ it('完整學號查詢可選取遮罩住宿生，並顯示零筆核銷結果', a
             ? api.rows
             : { success: true },
   );
-  render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('staff')} initialStaff />);
   fireEvent.change(await screen.findByLabelText('學號末三碼或姓名（本棟住宿生）'), {
     target: { value: 'SYNTHETIC123456' },
   });
@@ -496,7 +502,7 @@ it('updates the overdue parcel list when a waiting parcel reaches three days', a
         },
   );
   try {
-    const view = render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+    const view = render(<DormWorkflow schoolId="pu" uid={signInAs('staff')} initialStaff />);
     await screen.findByText('逾期清單（每日 21:00 值班檢查）');
     expect(screen.queryByRole('button', { name: '標記退件' })).toBeNull();
     now += 60000;
@@ -515,35 +521,54 @@ it('updates the overdue parcel list when a waiting parcel reaches three days', a
 
 it.each([false, true])('failed config hides all official forms (submitOnly=%s)', async (submitOnly) => {
   api.call.mockRejectedValue(new Error('unavailable'));
-  render(<DormWorkflow schoolId="pu" uid="alice" submitOnly={submitOnly} />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('alice')} submitOnly={submitOnly} />);
   expect(await screen.findByText('宿舍服務暫時無法使用，請稍後再試。')).toBeTruthy();
   expect(screen.queryByText('送給宿舍輔導員')).toBeNull();
   expect(screen.queryByText('送給輔導員核可')).toBeNull();
   expect(screen.queryByLabelText('外宿原因')).toBeNull();
 });
 
-it.each([0, 1])('reports announcement push delivery honestly (%i delivered)', async (delivered) => {
+it.each([undefined, 0, 1])('reports only confirmed provider acceptance (%s accepted)', async (acceptedRecipients) => {
+    let pending = acceptedRecipients === 1;
   api.config.packages = true;
   api.call.mockImplementation(async (data) =>
     data.action === 'config'
       ? api.config
       : ['mine', 'workspace'].includes(data.action)
         ? api.rows
-        : { success: true, delivered, recipients: 1 },
+        : pending ? { acceptedRecipients: 0, recipients: 1, pendingRecipients: 1 }
+          : { success: true, delivered: 1, acceptedRecipients, recipients: 1 },
   );
-  render(<DormWorkflow schoolId="pu" uid="staff" />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('staff')} />);
   fireEvent.click(await screen.findByText('開啟輔導員工作台'));
   fireEvent.click(await screen.findByText('住宿生'));
   fireEvent.click(await screen.findByText('預覽公告'));
+  expect(screen.getByRole('alert').textContent).toBe('請填寫要發布公告的棟別。');
+  expect(screen.queryByText('確認發布本棟公告')).toBeNull();
+  fireEvent.change(screen.getByLabelText('公告棟別'), { target: { value: 'A' } });
+  fireEvent.change(screen.getByLabelText('公告標題'), { target: { value: '停水' } });
+  fireEvent.change(screen.getByLabelText('公告內容'), { target: { value: '週三上午施工' } });
+  fireEvent.click(screen.getByText('預覽公告'));
   fireEvent.click(screen.getByText('確認發布本棟公告'));
+  if (pending) {
+    await screen.findByText('公告已發布。名冊共 1 人，推播服務已受理 0 人。還有 1 人待處理。');
+    await waitFor(() => expect((screen.getByText('繼續傳送待處理的推播') as HTMLButtonElement).disabled).toBe(false));
+    pending = false;
+    fireEvent.click(screen.getByText('繼續傳送待處理的推播'));
+    await waitFor(() => expect(api.call.mock.calls.filter(([row]) => row.action === 'announce')).toHaveLength(3));
+    const [first, continued, retry] = api.call.mock.calls.filter(([row]) => row.action === 'announce');
+    expect(continued[0].key).toBe(first[0].key);
+      expect(retry[0].key).toBe(first[0].key);
+  }
   expect(
-    await screen.findByText(delivered ? '公告已發布，推播 1/1 人。' : '公告已發布，推播尚未送出。'),
+    await screen.findByText(acceptedRecipients === undefined ? '公告已發布，可在宿舍頁查看。推播結果尚未確認。'
+        : acceptedRecipients ? '公告已發布。名冊共 1 人，推播服務已受理其中 1 人的通知。' : '公告已發布，目前沒有推播受理紀錄。'),
   ).toBeTruthy();
 });
 
 it.each([false, true])('設定查詢失敗可重試並重新開啟服務（submitOnly=%s）', async (submitOnly) => {
   api.call.mockRejectedValueOnce(new Error('offline'));
-  render(<DormWorkflow schoolId="pu" uid="student" submitOnly={submitOnly} draft={{ title: '燈壞了', description: '不亮', category: 'electric', location: '浴室' }} />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('student')} submitOnly={submitOnly} draft={{ title: '燈壞了', description: '不亮', category: 'electric', location: '浴室' }} />);
   await screen.findByText('宿舍服務暫時無法使用，請稍後再試。');
   fireEvent.click(screen.getByText('重試'));
   expect(await screen.findByText('送給宿舍輔導員')).toBeTruthy();
@@ -555,7 +580,7 @@ it('工單區分載入、失敗、重試與空白結果', async () => {
   api.call.mockImplementation(async (data) => data.action === 'config'
     ? { enabled: true, repairs: false, packages: false }
     : new Promise((_, reject) => { rejectRows = reject; }));
-  render(<DormWorkflow schoolId="pu" uid="student" />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('student')} />);
   expect(await screen.findByText('正在讀取工單…')).toBeTruthy();
   expect(screen.queryByText('目前沒有送給輔導員的工單。')).toBeNull();
   await waitFor(() =>
@@ -572,7 +597,7 @@ it('工單區分載入、失敗、重試與空白結果', async () => {
 });
 
 it('外宿卡說明使用校方名冊且不送出本機棟別與房間', async () => {
-  render(<DormWorkflow schoolId="pu" uid="student" building="本機棟別" room="999" />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('student')} building="本機棟別" room="999" />);
   expect(await screen.findByText('棟別與寢室依校方住宿名冊帶入')).toBeTruthy();
   expect(screen.queryByText('外宿棟別')).toBeNull();
   expect(screen.queryByText('外宿房間')).toBeNull();
@@ -587,7 +612,7 @@ it('外宿卡說明使用校方名冊且不送出本機棟別與房間', async (
 
 it.each([false, true])('非輔導員開啟工作台有說明（enabled=%s）', async (enabled) => {
   api.config.enabled = enabled;
-  render(<DormWorkflow schoolId="pu" uid="student" initialStaff />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('student')} initialStaff />);
   expect(await screen.findByText('此頁供宿舍輔導員使用；你的帳號目前沒有輔導員工作台；需要服務請到宿舍頁。')).toBeTruthy();
   expect(screen.queryByText('開啟輔導員工作台')).toBeNull();
 });
@@ -609,7 +634,7 @@ it.each([
       leaves: [],
     });
     try {
-      render(<DormWorkflow schoolId="pu" uid="student" />);
+      render(<DormWorkflow schoolId="pu" uid={signInAs('student')} />);
       await screen.findByText('目前沒有送給輔導員的工單。');
       api.call.mockImplementation(() => new Promise((resolve, reject) => {
         pending.push({ resolve, reject });
@@ -669,9 +694,97 @@ it.each([
     id: 'l-time', building: 'A', room: '101', date: '2026-11-18',
     reason: '外宿歷程時間測試', status: 'approved', history: [{ status: 'approved', at }],
   }];
-  render(<DormWorkflow schoolId="pu" uid="alice" />);
+  render(<DormWorkflow schoolId="pu" uid={signInAs('alice')} />);
   expect(await screen.findByText(`已修好，請確認 · ${expected}`)).toBeTruthy();
   expect(screen.getByText(`已核可 · ${expected}`)).toBeTruthy();
   expect(screen.getByText('2026-11-18 · A 101 · 已核可')).toBeTruthy();
   expect(screen.getByText('預計日期：2026-11-19')).toBeTruthy();
+});
+
+it('keeps staff tools closed until the Firebase account matches the screen', async () => {
+  api.config.repairs = true;
+  api.uid = 'other-user';
+  render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  expect(screen.getByText('登入帳號已變更，請重新確認宿舍服務。')).toBeTruthy();
+  expect(screen.queryByText('輔導員工作台')).toBeNull();
+  expect(fetch).not.toHaveBeenCalled();
+  api.uid = 'staff';
+  fireEvent.click(screen.getByRole('button', { name: '重試' }));
+  expect(await screen.findByText('輔導員工作台')).toBeTruthy();
+});
+
+it('does not submit a displayed resident’s leave under a different Firebase account', async () => {
+  render(<DormWorkflow schoolId="pu" uid={signInAs('alice')} />);
+  fireEvent.change(await screen.findByLabelText('外宿日期 YYYY-MM-DD'), { target: { value: '2099-01-01' } });
+  fireEvent.change(screen.getByLabelText('外宿原因'), { target: { value: '返家' } });
+  const submit = screen.getByText('送給輔導員核可');
+  api.uid = 'bob';
+  fireEvent.click(submit);
+  expect(await screen.findByText('登入帳號已變更，請重新確認宿舍服務。')).toBeTruthy();
+  expect(api.call.mock.calls.some(([data]) => data.action === 'requestLeave')).toBe(false);
+});
+
+it('discards a repair photo URL when Firebase changes while reading the photo', async () => {
+  api.rows.repairs = [{ id: 'photo', title: '照片工單', dormitory: 'A', room: '101', dormStatus: 'sent', history: [], images: ['0'] }];
+  let finish!: (value: unknown) => void;
+  const original = api.call.getMockImplementation()!;
+  api.call.mockImplementation((data) => data.action === 'repairPhoto'
+    ? new Promise((resolve) => { finish = resolve; }) : original(data));
+  render(<DormWorkflow schoolId="pu" uid={signInAs('alice')} />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看報修照片 1' }));
+  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  api.uid = 'bob';
+  await act(async () => finish({ url: 'https://signed.invalid/private' }));
+  expect(screen.queryByRole('img')).toBeNull();
+  expect(screen.getByText('無法讀取照片，請重新整理確認權限')).toBeTruthy();
+});
+
+it.each(['account', 'school'])('drops a selection made after the file picker’s %s changed', async (scope) => {
+  const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
+  const read = vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader) {
+    Object.defineProperty(this, 'result', { value: 'data:image/jpeg;base64,dGVzdA==' });
+    this.dispatchEvent(new Event('load'));
+  });
+  try {
+    const draft = { title: '維修', description: '門鎖損壞', category: '其他', location: '宿舍' };
+    const view = render(<DormWorkflow schoolId="pu" uid={signInAs('alice')} draft={draft} />);
+    fireEvent.click(await screen.findByRole('button', { name: '新增照片（0/3）' }));
+    expect(click).toHaveBeenCalledOnce();
+    const picker = click.mock.contexts[0];
+    if (!(picker instanceof HTMLInputElement)) throw new Error('Expected the photo picker to be an input');
+    expect(picker.type).toBe('file');
+    if (scope === 'account') api.uid = 'bob';
+    else view.rerender(<DormWorkflow schoolId="ntnu" uid="alice" draft={draft} />);
+    Object.defineProperty(picker, 'files', { value: [new File(['test'], 'door.jpg', { type: 'image/jpeg' })] });
+    await act(async () => { fireEvent.change(picker); });
+    expect(read).toHaveBeenCalledOnce();
+    if (scope === 'account') await screen.findByText('登入帳號已變更，請重新確認宿舍服務。');
+    else await screen.findByRole('button', { name: '新增照片（0/3）' });
+    expect(api.call.mock.calls.some(([data]) => data.action === 'uploadPhoto')).toBe(false);
+    expect(screen.queryByText('照片 1 已上傳')).toBeNull();
+  } finally {
+    read.mockRestore();
+    click.mockRestore();
+  }
+});
+
+it('drops late staff publication receipts and stops the remaining sends after an account change', async () => {
+  api.config.packages = true;
+  let finish!: (value: unknown) => void;
+  const original = api.call.getMockImplementation()!;
+  api.call.mockImplementation((data) => data.action === 'announce'
+    ? new Promise((resolve) => { finish = resolve; }) : original(data));
+  render(<DormWorkflow schoolId="pu" uid={signInAs('staff')} initialStaff />);
+  fireEvent.click(await screen.findByRole('button', { name: '住宿生' }));
+  fireEvent.change(screen.getByLabelText('公告棟別'), { target: { value: 'A' } });
+  fireEvent.change(screen.getByLabelText('公告標題'), { target: { value: '供水' } });
+  fireEvent.change(screen.getByLabelText('公告內容'), { target: { value: '住宿公告' } });
+  fireEvent.click(screen.getByText('預覽公告'));
+  fireEvent.click(screen.getByText('確認發布本棟公告'));
+  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  api.uid = 'bob';
+  await act(async () => finish({ recipients: 2, acceptedRecipients: 1, pendingRecipients: 1 }));
+  expect(screen.getByText('登入帳號已變更，請重新確認宿舍服務。')).toBeTruthy();
+  expect(screen.queryByText(/公告已發布/)).toBeNull();
+  expect(api.call.mock.calls.filter(([row]) => row.action === 'announce')).toHaveLength(1);
 });

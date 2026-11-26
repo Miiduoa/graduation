@@ -1,26 +1,118 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { buildPersonalToday, type PersonalImportRecord } from '@campus/shared';
+import {
+  buildPersonalToday,
+  classDate,
+  type PersonalImportRecord,
+  type PersonalTodayEntry,
+} from '@campus/shared';
+import { currentTimetableTermKey } from '@campus/shared/src/todayPriority';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { loadPersonalImports } from '../services/personalImports';
-import { loadPersonalTimetable, personalTimetableRecords } from '../services/personalTimetable';
+import { loadPersonalTimetable, scopedPersonalTimetableRecords } from '../services/personalTimetable';
+import {
+  currentSavedClasses,
+  nextSavedClasses,
+  type SavedClassOccurrence,
+} from '../services/nextSavedClasses';
 import { theme } from '../ui/theme';
+import { TodayClassCalendarOverlap } from './TodayClassCalendarOverlap';
+import { subscribeTodayTimetableSources } from '../hooks/subscribeTodayTimetableSources';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 
 type Props = {
   onOpenImport(): void;
   onOpenTimetable(termKey?: string): void;
+  eventAction?: {
+    accountId: string;
+    expiresAt: number;
+    open(eventId: string, eventScope: string): void;
+  };
   refreshKey?: number;
+  /**
+   * Signed-in platform landing only. Receives a generic prompt for the assistant's
+   * existing current/next coursework intents; it never carries a course title.
+   */
+  onAskCoursework?(prompt: string): void;
+  /** The verified platform account that `onAskCoursework` will open the assistant for. */
+  assistantAccountId?: string;
 };
 type Snapshot = {
   scope: string;
   status: 'loading' | 'ready' | 'error';
   records: PersonalImportRecord[];
+  assistantSchoolId?: string;
 };
+type CourseworkAsk = { kind: 'current' | 'next'; key: string };
+
+// The assistant's existing deterministic intents (classCourseworkQuestion → current / next).
+const COURSEWORK_PROMPT = { current: '現在這堂課有什麼作業？', next: '查下一堂課的作業' } as const;
+const COURSEWORK_LABEL = { current: '問 nuni 這堂課的作業', next: '問 nuni 下一堂課的作業' } as const;
+const SOON_MS = 30 * 60_000;
+
+const termOf = (row: PersonalImportRecord) => `${row.academicYear}|${row.semester}`;
+const askKey = (kind: CourseworkAsk['kind'], entry: PersonalTodayEntry) =>
+  JSON.stringify([
+    kind,
+    entry.row.id,
+    termOf(entry.row),
+    classDate(new Date(entry.startAt)),
+    entry.startTime,
+    entry.endTime,
+  ]);
+const sameOccurrence = (entry: PersonalTodayEntry, found: SavedClassOccurrence) =>
+  found.courseId === entry.row.id &&
+  found.term === termOf(entry.row) &&
+  found.date === classDate(new Date(entry.startAt)) &&
+  found.startTime === entry.startTime &&
+  found.endTime === entry.endTime;
+
+/**
+ * A card may offer the assistant lookup only when the assistant's own current/next
+ * resolver, run on the same records at the same instant, names exactly this meeting.
+ * Overlaps, other terms, undated rows, or a moved clock all resolve differently and
+ * therefore yield no action.
+ */
+function courseworkAsks(
+  today: readonly PersonalTodayEntry[],
+  records: PersonalImportRecord[],
+  schoolId: string,
+  now: Date,
+): CourseworkAsk[] {
+  const canonical = toPublicSchoolId(schoolId) || schoolId;
+  const asks: CourseworkAsk[] = [];
+  try {
+    const ongoing = today.filter((entry) => entry.status === 'ongoing');
+    if (ongoing.length === 1 && !ongoing[0].conflict) {
+      const found = currentSavedClasses(records, canonical, now);
+      if (found?.length === 1 && sameOccurrence(ongoing[0], found[0])) {
+        asks.push({ kind: 'current', key: askKey('current', ongoing[0]) });
+      }
+    }
+    const upcoming = today.find((entry) => entry.status === 'upcoming');
+    if (upcoming && !upcoming.conflict && upcoming.startAt - now.getTime() <= SOON_MS) {
+      const found = nextSavedClasses(records, canonical, now, undefined, SOON_MS);
+      if (found?.length === 1 && sameOccurrence(upcoming, found[0])) {
+        asks.push({ kind: 'next', key: askKey('next', upcoming) });
+      }
+    }
+  } catch {
+    return [];
+  }
+  return asks;
+}
 
 /** An imported weekly plan is useful without granting school-account access. */
-export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey = 0 }: Props) {
+export function TodayTimetablePanel({
+  onOpenImport,
+  onOpenTimetable,
+  eventAction,
+  refreshKey = 0,
+  onAskCoursework,
+  assistantAccountId,
+}: Props) {
   const s = useThemeStyleSheet(createStyles);
   const scope = usePersonalImportScope();
   const scopeKey = scope ? JSON.stringify(scope) : '';
@@ -31,10 +123,12 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
   const [selection, setSelection] = useState({ scope: '', term: '' });
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date(Date.now()));
+  const [askNotice, setAskNotice] = useState('');
   const visible = scopeKey && snapshot?.scope === scopeKey ? snapshot : null;
   const load = useCallback(async () => {
     const run = ++generation.current;
     setNow(new Date(Date.now()));
+    setAskNotice('');
     if (!scopeKey) return;
     setSnapshot({ scope: scopeKey, status: 'loading', records: [] });
     try {
@@ -47,12 +141,15 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
           current.owner.startsWith('nuni:') ? current.owner : undefined,
         ),
       ]);
-      if (run === generation.current && currentScope.current === scopeKey)
+      if (run === generation.current && currentScope.current === scopeKey) {
+        const canonical = toPublicSchoolId(current.schoolId) || current.schoolId;
         setSnapshot({
           scope: scopeKey,
           status: 'ready',
-          records: personalTimetableRecords(timetable, ledger.records),
+          records: scopedPersonalTimetableRecords(timetable, ledger.records, current.schoolId),
+          assistantSchoolId: toPublicSchoolId(timetable.schoolId) === canonical ? canonical : undefined,
         });
+      }
     } catch {
       if (run === generation.current && currentScope.current === scopeKey)
         setSnapshot({ scope: scopeKey, status: 'error', records: [] });
@@ -61,6 +158,7 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
   useFocusEffect(
     useCallback(() => {
       void load();
+      const unsubscribe = scopeKey ? subscribeTodayTimetableSources(JSON.parse(scopeKey), load) : undefined;
       const timer = setInterval(() => setNow(new Date(Date.now())), 30_000);
       const subscription = AppState.addEventListener('change', (state) => {
         if (state === 'active') void load();
@@ -68,19 +166,51 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
       return () => {
         generation.current += 1;
         clearInterval(timer);
+        unsubscribe?.();
         subscription.remove();
       };
-    }, [load, refreshKey]),
+    }, [load, refreshKey, scopeKey]),
   );
-  const plan = useMemo(
-    () =>
+  const selectedTermKey = selection.scope === scopeKey ? selection.term : undefined;
+  const planAt = useCallback(
+    (at: Date) =>
       buildPersonalToday(visible?.status === 'ready' ? visible.records : [], {
         schoolId: scope?.schoolId || '',
-        termKey: selection.scope === scopeKey ? selection.term : undefined,
-        now,
+        termKey: selectedTermKey || currentTimetableTermKey(visible?.records ?? [], scope?.schoolId || '', at),
+        now: at,
       }),
-    [visible, scope?.schoolId, scopeKey, selection, now],
+    [visible, scope?.schoolId, selectedTermKey],
   );
+  const plan = useMemo(() => planAt(now), [planAt, now]);
+  // Only the verified platform account that the assistant will open for may be offered the lookup.
+  const askAllowed =
+    !!onAskCoursework &&
+    !!assistantAccountId &&
+    scope?.owner === `nuni:${assistantAccountId}` &&
+    visible?.status === 'ready';
+  const assistantRecords = useMemo(() => {
+    if (!askAllowed || !visible?.assistantSchoolId) return null;
+    const canonical = visible.assistantSchoolId;
+    return visible.records.map(row => row.schoolId === canonical ? row : { ...row, schoolId: canonical });
+  }, [askAllowed, visible]);
+  const schoolId = scope?.schoolId || '';
+  const asks = useMemo(
+    () => (askAllowed && assistantRecords ? courseworkAsks(plan.today, assistantRecords, schoolId, now) : []),
+    [askAllowed, assistantRecords, schoolId, plan, now],
+  );
+  const askCoursework = (ask: CourseworkAsk) => {
+    if (!askAllowed || !onAskCoursework || !assistantRecords || currentScope.current !== scopeKey) return;
+    // The minute may have turned since this card was rendered; decide on the real clock.
+    const at = new Date(Date.now());
+    setNow(at);
+    const fresh = planAt(at);
+    if (!courseworkAsks(fresh.today, assistantRecords, schoolId, at).some((item) => item.kind === ask.kind && item.key === ask.key)) {
+      setAskNotice('課堂時間已更新，這個詢問已不適用。請依下方最新課表再選一次。');
+      return;
+    }
+    setAskNotice('');
+    onAskCoursework(COURSEWORK_PROMPT[ask.kind]);
+  };
   const openButton = (label: string, onPress: () => void, primary = false) => (
     <Pressable
       accessibilityRole="button"
@@ -130,16 +260,28 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
         {item.row.id.startsWith('manual:') ? '來源：自行編輯' : '來源：個人匯入'}
       </Text>
       {item.conflict ? <Text style={s.warning}>上課時間重疊，請核對課表。</Text> : null}
+      {item.status !== 'ended'
+        ? asks
+            .filter((ask) => ask.key === askKey(ask.kind, item))
+            .map((ask) => (
+              <Pressable
+                key={ask.kind}
+                accessibilityRole="button"
+                accessibilityHint="開啟 nuni 助理並填好問題，送出時會重新核對當時的課表"
+                onPress={() => askCoursework(ask)}
+                style={({ pressed }) => [s.askButton, pressed && s.pressed]}
+              >
+                <Text style={s.buttonText}>{COURSEWORK_LABEL[ask.kind]}</Text>
+              </Pressable>
+            ))
+        : null}
     </View>
   );
   return (
     <View style={s.panel} testID="today-timetable">
-      <View style={s.headingRow}>
-        <View style={s.headingAccent} accessibilityElementsHidden />
-        <Text accessibilityRole="header" style={s.heading}>
-          今天的課表
-        </Text>
-      </View>
+      <Text accessibilityRole="header" style={s.heading}>
+        今天的課表
+      </Text>
       {!scopeKey ? (
         <Text style={s.detail}>正在確認帳號，暫時不顯示個人課表。</Text>
       ) : !visible || visible.status === 'loading' ? (
@@ -155,6 +297,15 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
         </>
       ) : plan.terms.length ? (
         <>
+          {eventAction && scope?.owner === `nuni:${eventAction.accountId}` && eventAction.expiresAt > now.getTime() && (
+            <TodayClassCalendarOverlap
+              records={visible.records}
+              schoolId={scope.schoolId}
+              selectedTerm={selection.scope === scopeKey && selection.term === plan.termKey ? selection.term : undefined}
+              now={now}
+              onOpenEvent={(eventId) => eventAction.open(eventId, scopeKey)}
+            />
+          )}
           <Text style={s.detail}>
             目前課表：{selectedTerm?.academicYear}／{selectedTerm?.semester} · 個人課表
           </Text>
@@ -166,7 +317,10 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
                   accessibilityRole="button"
                   accessibilityLabel={`查看 ${term.academicYear}／${term.semester} 課表`}
                   accessibilityState={{ selected: plan.termKey === term.key }}
-                  onPress={() => setSelection({ scope: scopeKey, term: term.key })}
+                  onPress={() => {
+                    setAskNotice('');
+                    setSelection({ scope: scopeKey, term: term.key });
+                  }}
                   style={({ pressed }) => [
                     s.term,
                     plan.termKey === term.key && s.selectedTerm,
@@ -179,6 +333,12 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
                 </Pressable>
               ))}
             </View>
+          ) : null}
+          {asks.length > 0 && <Text style={s.note}>送出問題時，nuni 會重新核對當時的課表。</Text>}
+          {askNotice ? (
+            <Text accessibilityRole="alert" style={s.warning}>
+              {askNotice}
+            </Text>
           ) : null}
           {plan.today.length ? (
             <>
@@ -247,30 +407,26 @@ const createStyles = () =>
   StyleSheet.create({
     panel: {
       gap: 10,
-      padding: 18,
-      marginVertical: 14,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: 14,
-      backgroundColor: theme.colors.surface,
+      paddingTop: 18,
+      paddingBottom: 8,
+      marginVertical: 10,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
     },
-    headingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 3 },
-    headingAccent: { width: 3, height: 19, backgroundColor: theme.colors.accent, borderRadius: 2 },
-    heading: { color: theme.colors.text, fontSize: 19, lineHeight: 27, fontWeight: '600', flex: 1 },
+    heading: { color: theme.colors.text, fontSize: 20, lineHeight: 28, fontWeight: '600' },
     detail: { color: theme.colors.textSecondary, fontSize: 14, lineHeight: 22 },
     note: { color: theme.colors.muted, fontSize: 12, lineHeight: 19 },
     course: {
       paddingVertical: 14,
-      paddingHorizontal: 14,
-      gap: 6,
-      borderLeftWidth: 2,
+      paddingLeft: 14,
+      gap: 4,
+      borderLeftWidth: StyleSheet.hairlineWidth,
       borderLeftColor: theme.colors.border,
     },
     currentCourse: {
-      backgroundColor: theme.colors.focusSurface,
+      borderLeftWidth: 2,
+      paddingLeft: 12,
       borderLeftColor: theme.colors.accent,
-      borderTopRightRadius: 8,
-      borderBottomRightRadius: 8,
     },
     time: {
       color: theme.colors.accent,
@@ -311,6 +467,12 @@ const createStyles = () =>
       paddingHorizontal: 12,
       paddingVertical: 10,
       borderRadius: 7,
+      alignSelf: 'flex-start',
+    },
+    askButton: {
+      minHeight: 48,
+      justifyContent: 'center',
+      paddingHorizontal: 4,
       alignSelf: 'flex-start',
     },
     buttonText: { color: theme.colors.accent, fontSize: 14, lineHeight: 21, fontWeight: '600' },

@@ -74,7 +74,7 @@ function followup(overrides: Partial<AssistantCourseworkFollowup> = {}): Assista
   };
 }
 
-function verified(): V2ActionState {
+function verified(): Extract<V2ActionState, { status: 'verified' }> {
   return {
     status: 'verified',
     local: 'ready',
@@ -89,6 +89,79 @@ function verified(): V2ActionState {
     }),
   };
 }
+
+function arrangementProgress() {
+  return within(screen.getByRole('list', { name: '代辦步驟' })).getAllByRole('listitem');
+}
+
+it('finishes the arrangement steps only after the matching receipt is ready on this device', () => {
+  const input = props({ reply, states: { [card.mutationId]: verified() } });
+  render(<TodayAgentPanel {...input} />);
+  expect(arrangementProgress().map(step => step.getAttribute('data-state')))
+    .toEqual(['done', 'done', 'done']);
+  expect(arrangementProgress().some(step => step.hasAttribute('aria-current'))).toBe(false);
+  expect(screen.getByRole('link', { name: '開啟這筆行程' }).getAttribute('href'))
+    .toBe('/calendar?schoolId=pu&eventId=planned-event-1');
+  expect((screen.getByRole('button', { name: '替「作業 one」找 30 分鐘準備時間' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(input.onConfirm).not.toHaveBeenCalled();
+});
+
+it.each(['device unavailable', 'verification warning'] as const)(
+  'keeps the final step current and reconciles the original receipt while %s', mode => {
+    const state = { ...verified(), ...(mode === 'device unavailable'
+      ? { local: 'unavailable' as const, localMessage: '裝置暫存尚未核對' }
+      : { verificationWarning: '這次查核未完成，以下保留上次已核對的結果與時間。' }) };
+    const input = props({ tasks: [task('one'), task('two')], reply, followups: [followup()],
+      states: { [card.mutationId]: state } });
+    const view = render(<TodayAgentPanel {...input} />);
+    expect(arrangementProgress().map(step => step.getAttribute('data-state')))
+      .toEqual(['done', 'done', 'current']);
+    expect(arrangementProgress()[2].getAttribute('aria-current')).toBe('step');
+    expect(screen.queryByText(/已儲存並核對的 1 筆安排/)).toBeNull();
+    expect((screen.getByRole('button', { name: '替「作業 two」找 30 分鐘準備時間' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', {
+      name: mode === 'device unavailable' ? '重新核對並更新此裝置' : '重新核對結果',
+    }));
+    expect(input.onReconcile).toHaveBeenCalledExactlyOnceWith(card);
+    expect(input.onConfirm).not.toHaveBeenCalled();
+    expect(input.onPlan).not.toHaveBeenCalled();
+
+    view.rerender(<TodayAgentPanel {...input} states={{ [card.mutationId]: verified() }} />);
+    expect(arrangementProgress().map(step => step.getAttribute('data-state')))
+      .toEqual(['done', 'done', 'done']);
+    expect(arrangementProgress().some(step => step.hasAttribute('aria-current'))).toBe(false);
+    expect(screen.getByText(/已儲存並核對的 1 筆安排/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: '替「作業 two」找 30 分鐘準備時間' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(input.onConfirm).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['school', 'mutation', 'event'] as const)(
+  'does not finish or compact a receipt for a different %s', mismatch => {
+    const ready = verified();
+    const schoolId = mismatch === 'school' ? 'another-campus' : card.schoolId;
+    const mutationId = mismatch === 'mutation' ? 'another-event-1' : card.mutationId;
+    const event = { ...card.args, ...(mismatch === 'event' ? { title: '另一份作業的準備時間' } : {}) };
+    const receipt = createAssistantCalendarReceipt({
+      schoolId, mutationId, event, storage: 'synced', revision: 3,
+      verifiedAt: ready.receipt.verifiedAt,
+      record: { ...ready.receipt.record, ...event, schoolId, id: mutationId, batchId: mutationId },
+    });
+    const input = props({ tasks: [task('one'), task('two')], reply, followups: [followup()],
+      states: { [card.mutationId]: { ...ready, receipt } } });
+    render(<TodayAgentPanel {...input} />);
+    expect(arrangementProgress().map(step => step.getAttribute('data-state')))
+      .toEqual(['done', 'done', 'current']);
+    expect(screen.queryByText(/已儲存並核對的 1 筆安排/)).toBeNull();
+    expect(screen.queryByText('已核對並加入個人行事曆')).toBeNull();
+    expect(screen.queryByRole('link', { name: '開啟這筆行程' })).toBeNull();
+    expect((screen.getByRole('button', { name: '替「作業 two」找 30 分鐘準備時間' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '重新核對結果' }));
+    expect(input.onReconcile).toHaveBeenCalledExactlyOnceWith(card);
+    expect(input.onConfirm).not.toHaveBeenCalled();
+    expect(input.onPlan).not.toHaveBeenCalled();
+  },
+);
 
 it('keeps the homepage picker closed until requested and plans only the selected source task', () => {
   const input = props({ compact: true });

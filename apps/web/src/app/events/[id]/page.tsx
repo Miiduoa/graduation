@@ -16,6 +16,7 @@ export default function CampusEventDetailPage(props: {
     q?: string;
     view?: string;
     page?: string;
+    saved?: string;
   }>;
 }) {
   const { id } = use(props.params);

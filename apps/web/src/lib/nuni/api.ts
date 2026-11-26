@@ -62,20 +62,23 @@ import { isSchoolLoginOffered } from '@/lib/server/schoolLoginConfig';
 
 const SIGN_IN_OPTIONS_SCHOOL_ID = /^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$/;
 
-function signInOptionsSchoolId(request: NextRequest): string | null {
+function signInOptionsQuery(request: NextRequest): { schoolId: string | null; schoolOnly: boolean } {
   const keys = Array.from(request.nextUrl.searchParams.keys());
-  if (keys.some((key) => key !== 'schoolId') || request.nextUrl.searchParams.getAll('schoolId').length > 1) {
+  if (keys.some((key) => key !== 'schoolId' && key !== 'scope') ||
+      request.nextUrl.searchParams.getAll('schoolId').length > 1 ||
+      request.nextUrl.searchParams.getAll('scope').length > 1) {
     throw new NuniError(400, 'INVALID_INPUT');
   }
+  const scope = request.nextUrl.searchParams.get('scope');
+  if (scope !== null && scope !== 'school') throw new NuniError(400, 'INVALID_INPUT');
   const schoolId = request.nextUrl.searchParams.get('schoolId');
-  if (schoolId === null) return null;
-  if (!SIGN_IN_OPTIONS_SCHOOL_ID.test(schoolId)) throw new NuniError(400, 'INVALID_INPUT');
-  return schoolId;
+  if (schoolId !== null && !SIGN_IN_OPTIONS_SCHOOL_ID.test(schoolId))
+    throw new NuniError(400, 'INVALID_INPUT');
+  return { schoolId, schoolOnly: scope === 'school' };
 }
 
-function studentIdSignInOption(request: NextRequest): boolean {
+function studentIdSignInOption(schoolId: string | null): boolean {
   if (!isSchoolStudentIdLoginEnabled()) return false;
-  const schoolId = signInOptionsSchoolId(request);
   return isSchoolLoginOffered(schoolId ?? 'pu');
 }
 
@@ -138,10 +141,17 @@ function dueDate(input: Record<string, unknown>): string | null {
 export async function handleNuni(request: NextRequest, segments: string[]): Promise<NextResponse> {
   try {
     const path = segments.join('/');
+    const signInQuery = request.method === 'GET' && path === 'sign-in-options'
+      ? signInOptionsQuery(request) : null;
+    // School capability comes from the local school policy, independently of
+    // Google configuration or a waking/unavailable platform providers API.
+    if (signInQuery?.schoolOnly) {
+      return jsonResponse({ studentId: studentIdSignInOption(signInQuery.schoolId) });
+    }
     if (!nuniEnabled() && path !== 'session' && path !== 'logout') {
       // Existing sessions still need verification and revocation when courses are disabled.
-      if (request.method === 'GET' && path === 'sign-in-options') {
-        return jsonResponse({ google: false, studentId: studentIdSignInOption(request) });
+      if (signInQuery) {
+        return jsonResponse({ google: false, studentId: studentIdSignInOption(signInQuery.schoolId) });
       }
       throw new NuniError(404, 'NOT_FOUND');
     }
@@ -218,7 +228,7 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
         throw new NuniError(502, 'INVALID_RESPONSE');
       return jsonResponse({
         google: googleReady && result.kinds.includes('google-consumer'),
-        studentId: studentIdSignInOption(request),
+        studentId: studentIdSignInOption(signInQuery?.schoolId ?? null),
       });
     }
     if (method === 'GET' && path === 'session') {
@@ -306,7 +316,9 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       if (method === 'GET') {
         const result = await platformRequest(path, session);
         if (path === 'merchant-workspaces')
-          return jsonResponse({ workspaces: parseMerchantWorkspaces(result) });
+          return jsonResponse({
+            workspaces: parseMerchantWorkspaces(result, { preserveMissingReadiness: true }),
+          });
         if (path === 'merchant-onboarding-programs')
           return jsonResponse({
             programs: parseMerchantOverview({ ...nuniRecord(result), applications: [] }).programs,

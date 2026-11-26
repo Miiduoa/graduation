@@ -5,6 +5,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   View,
 } from 'react-native';
@@ -68,8 +69,9 @@ export function AssistantConversationLayout({
         style={{
           flexDirection: 'row',
           paddingHorizontal: 16,
-          backgroundColor: aiTokens.surface,
-          borderBottomWidth: 1,
+          gap: 24,
+          backgroundColor: aiTokens.bg,
+          borderBottomWidth: StyleSheet.hairlineWidth,
           borderColor: aiTokens.border,
         }}
       >
@@ -87,17 +89,17 @@ export function AssistantConversationLayout({
                 onSelect(id);
               }}
               style={{
-                flex: 1,
                 minHeight: 44,
+                minWidth: 64,
                 alignItems: 'center',
                 justifyContent: 'center',
-                borderBottomWidth: 3,
-                borderColor: selected ? aiTokens.ai : 'transparent',
+                borderBottomWidth: 2,
+                borderColor: selected ? aiTokens.text : 'transparent',
               }}
             >
               <Text
                 style={{
-                  color: selected ? aiTokens.ai : aiTokens.textSecondary,
+                  color: selected ? aiTokens.text : aiTokens.textSecondary,
                   fontSize: 15,
                   fontWeight: selected ? '700' : '500',
                 }}
@@ -126,11 +128,11 @@ export function AssistantConversationLayout({
             onChatScrollPosition(distance <= 96);
           }}
           style={{ flex: 1 }}
-          contentContainerStyle={{ paddingVertical: 12 }}
+          contentContainerStyle={{ paddingTop: 8, paddingBottom: 16, gap: 4 }}
         >
           {children}
         </ScrollView>
-        <View style={{ paddingBottom: bottomSpace, backgroundColor: aiTokens.surface }}>
+        <View style={{ paddingBottom: bottomSpace, backgroundColor: aiTokens.bg }}>
           {composer}
         </View>
       </View>
@@ -139,7 +141,7 @@ export function AssistantConversationLayout({
         importantForAccessibility={panel === 'tools' ? 'auto' : 'no-hide-descendants'}
         keyboardShouldPersistTaps="handled"
         style={{ flex: 1, display: panel === 'tools' ? 'flex' : 'none' }}
-        contentContainerStyle={{ paddingTop: 8, paddingBottom: bottomSpace + 12 }}
+        contentContainerStyle={{ paddingTop: 8, paddingBottom: bottomSpace + 12, gap: 4 }}
       >
         {tools}
       </ScrollView> : null}

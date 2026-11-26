@@ -123,7 +123,7 @@ export function createTronClassMaterialDownloader(dependencies: {
       if (controller.signal.aborted) fail(504, 'TRONCLASS_DOWNLOAD_TIMEOUT');
     };
     const operation = async () => {
-      const binding = await bindings.requireBinding(ownerKey);
+      const binding = await bindings.requireBinding(ownerKey, input.revision);
       if (binding.revision !== input.revision) fail(409, 'TRONCLASS_BINDING_CHANGED');
       await check();
       const authorizedFile = async () => {

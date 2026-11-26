@@ -282,9 +282,9 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
     if (!expiredAllowed && expires <= current) fail(409, 'TRONCLASS_ACCEPTANCE_PLAN_EXPIRED');
     return { ...body, signature: value.signature };
   };
-  const current = async (scope: Identity, allowReconnect = false, signal?: AbortSignal) => {
+  const current = async (scope: Identity, signal?: AbortSignal, snapshot?: TronClassSubmissionBinding) => {
     checkSignal(signal);
-    const binding = await bindings.requireBinding(scope.ownerKey);
+    const binding = snapshot ?? await bindings.requireBinding(scope.ownerKey, scope.revision);
     checkSignal(signal);
     if (
       !binding ||
@@ -297,20 +297,21 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
     if (
       typeof binding.revision !== 'string' ||
       !REVISION.test(binding.revision) ||
-      (!allowReconnect && binding.revision !== scope.revision)
+      binding.revision !== scope.revision
     )
       fail(409, 'TRONCLASS_BINDING_CHANGED');
     await bindings.assertCurrent(scope.ownerKey, binding.revision);
     checkSignal(signal);
     return binding;
   };
-  const authorizeText = async (scope: Identity, signal?: AbortSignal) => {
-    await current(scope, false, signal);
+  const authorizeText = async (scope: Identity, signal: AbortSignal | undefined, binding: TronClassSubmissionBinding) => {
+    await current(scope, signal, binding);
     const granted = structuredClone(
       await authorize(
         scope.ownerKey,
         Object.freeze({ courseId: scope.courseId, homeworkId: scope.homeworkId }),
         signal,
+        binding,
       ),
     );
     checkSignal(signal);
@@ -335,7 +336,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
     )
       fail(409, 'TRONCLASS_SUBMISSION_BLOCKED');
     tronClassCandidateHeaders(granted.binding);
-    await current(scope, false, signal);
+    await current(scope, signal, binding);
     return granted;
   };
   const scopeMatchesAttempt = (
@@ -355,7 +356,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
     )
       conflict();
   };
-  const controlled = (scope: Identity, enabled: () => boolean) =>
+  const controlled = (scope: Identity, enabled: () => boolean, binding: TronClassSubmissionBinding) =>
     createTronClassControlledSubmission({
       db,
       bindings,
@@ -369,7 +370,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
           target.homeworkId !== scope.homeworkId
         )
           conflict();
-        return authorizeText(scope, signal);
+        return authorizeText(scope, signal, binding);
       },
       readHistory: (binding, target, signal) =>
         readHistory(scope.ownerKey, binding, target, signal),
@@ -379,28 +380,29 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
     plan: TronClassAcceptancePlan,
     signal?: AbortSignal,
   ): Promise<TronClassAcceptanceResult> => {
-    await current(plan, true, signal);
-    const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId);
+    const binding = await current(plan, signal);
+    const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId, plan.revision);
     checkSignal(signal);
     if (!attempt) return unknown(plan.operationId);
     scopeMatchesAttempt(plan, attempt);
     try {
-      const result = await controlled(plan, () => false).reconcile(
+      const result = await controlled(plan, () => false, binding).reconcile(
         plan.ownerKey,
         plan.operationId,
         signal,
+        binding,
       );
-      await current(plan, true, signal);
+      await current(plan, signal, binding);
       if (result.state !== 'verified-new-version') return unknown(plan.operationId);
-      const latest = await journal.readAttempt(plan.ownerKey, plan.operationId);
+      const latest = await journal.readAttempt(plan.ownerKey, plan.operationId, plan.revision);
       if (!latest) return unknown(plan.operationId);
       scopeMatchesAttempt(plan, latest);
-      await current(plan, true, signal);
+      await current(plan, signal, binding);
       return mapTronClassSubmissionConfirmation(plan.ownerKey, latest, result);
     } catch (error) {
       // The original operation/lock remain authoritative. Neither failure nor a
       // missing ack grants a fresh dispatch, and reconcile never calls authorize.
-      await current(plan, true, signal);
+      await current(plan, signal, binding);
       if (
         error instanceof NuniError &&
         [
@@ -419,7 +421,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
     async preflight(value: unknown, signal?: AbortSignal): Promise<TronClassAcceptancePlan> {
       return safe(async () => {
         const input = parseTronClassAcceptanceInput(value);
-        await current(input, false, signal);
+        const binding = await current(input, signal);
         // Existence is only a conservative refusal. Absence is NOT a reservation;
         // concurrent processes still compete for the core's durable final claim.
         const operation = await db
@@ -435,7 +437,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
           .get();
         checkSignal(signal);
         if (operation.exists || lock.exists) fail(409, 'TRONCLASS_ACCEPTANCE_RECONCILE_ONLY');
-        const granted = await authorizeText(input, signal);
+        const granted = await authorizeText(input, signal, binding);
         const issued = at();
         const expires = Math.min(
           issued + PLAN_TTL_MS,
@@ -503,8 +505,8 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
         ) {
           fail(409, 'TRONCLASS_ACCEPTANCE_INPUT_CHANGED');
         }
-        await current(plan, false, signal);
-        const existing = await journal.readAttempt(plan.ownerKey, plan.operationId);
+        const binding = await current(plan, signal);
+        const existing = await journal.readAttempt(plan.ownerKey, plan.operationId, plan.revision);
         checkSignal(signal);
         if (existing) {
           scopeMatchesAttempt(plan, existing);
@@ -519,7 +521,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
           return unknown(plan.operationId);
         }
         try {
-          const result = await controlled(plan, () => at() < Date.parse(plan.expiresAt)).dispatch(
+          const result = await controlled(plan, () => at() < Date.parse(plan.expiresAt), binding).dispatch(
             plan.ownerKey,
             {
               courseId: plan.courseId,
@@ -531,12 +533,12 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
             },
             signal,
           );
-          await current(plan, false, signal);
+          await current(plan, signal, binding);
           if (result.state !== 'verified-new-version') return unknown(plan.operationId);
-          const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId);
+          const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId, plan.revision);
           if (!attempt) return unknown(plan.operationId);
           scopeMatchesAttempt(plan, attempt);
-          await current(plan, false, signal);
+          await current(plan, signal, binding);
           return mapTronClassSubmissionConfirmation(plan.ownerKey, attempt, result);
         } catch {
           // Once the candidate has started, a thrown/late response or unavailable
@@ -545,7 +547,7 @@ export function createTronClassAcceptanceService(dependencies: Dependencies) {
           // Another process may have won this same operation with a separately
           // reviewed body. Preserve that conflict instead of attributing its
           // unknown result to the losing plan. A journal failure is not a match.
-          const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId);
+          const attempt = await journal.readAttempt(plan.ownerKey, plan.operationId, plan.revision);
           if (attempt) scopeMatchesAttempt(plan, attempt);
           return unknown(plan.operationId);
         }

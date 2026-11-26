@@ -26,7 +26,7 @@ import { SSOLoginScreen } from './SSOLoginScreen';
 import { NuniWorkspaceScreen } from './NuniWorkspaceScreen';
 import { NuniTimetableAssistantScreen } from './NuniTimetableAssistantScreen';
 import PersonalImportScreen from './PersonalImportScreen';
-import PersonalTimetableScreen from './PersonalTimetableScreen';
+import { StackTitledPersonalTimetable } from './PersonalTimetableScreen';
 import { DataExportScreen } from './DataExportScreen';
 import { AccountDeletionScreen } from './AccountDeletionScreen';
 import { AccessibilitySettingsScreen } from './AccessibilitySettingsScreen';
@@ -189,7 +189,7 @@ export function MeStack() {
         options={{ title: '課表助理', headerShown: false }}
       />
       <Stack.Screen name="PersonalImport" component={PersonalImportScreen} options={{ title: '匯入我的資料' }} />
-      <Stack.Screen name="PersonalTimetable" component={PersonalTimetableScreen} options={{ title: '我的課表' }} />
+      <Stack.Screen name="PersonalTimetable" component={StackTitledPersonalTimetable} options={{ title: '我的課表' }} />
       <Stack.Screen
         name="NuniWorkspace"
         component={NuniWorkspaceScreen}

@@ -70,6 +70,9 @@ test('an isolated release has matching bundle, Google callback, channel and a di
   assert.ok(info.includes('<key>NFCReaderUsageDescription</key>'));
   assert.ok(info.includes('<string>F04E554E490101</string>'));
   const entitlements = readFileSync(join(path, files[4]), 'utf8');
+  const plist = require('@expo/plist').default;
+  assert.equal(plist.parse(entitlements)['aps-environment'], 'production');
+  assert.equal(plist.parse(readFileSync(join(appRoot, files[4]), 'utf8'))['aps-environment'], 'development');
   assert.ok(entitlements.includes('<key>com.apple.developer.nfc.readersession.formats</key>'));
   assert.ok(entitlements.includes('<string>TAG</string>'));
   for (const file of files.slice(4)) {
@@ -168,4 +171,49 @@ test('release synchronization repairs both extension version fields', (t) => {
   assert.equal(extension.CFBundleShortVersionString, '3.2.1');
   assert.equal(extension.CFBundleVersion, '42');
   assert.equal(buildPlan(path).length, 0);
+});
+
+test('the release guard reads the selected host and widget signing files and rejects drift', async (t) => {
+  const path = fixture(t);
+  copyFileSync(join(appRoot, 'package.json'), join(path, 'package.json'));
+  symlinkSync(resolve(appRoot, '../../node_modules'), join(path, 'node_modules'), 'dir');
+  const { verifyNativeIdentity } = await import('../../../scripts/prepare-eas-build.mjs');
+  const verify = () => verifyNativeIdentity(path, {
+    platform: 'ios', profile: 'production', appIdentifier: production.identifier,
+  }, { buildConfiguration: 'Release' }, true);
+  main(['--write', path]);
+  await verify();
+  const plist = require('@expo/plist').default;
+  for (const [file, key, value, error] of [
+    ['ios/mobile/mobile.entitlements', 'aps-environment', 'development', /APNs/],
+    ['ios/mobile/Info.plist', 'NextClassAppGroup', 'group.com.campus.app.dev', /App Group/],
+    ['ios/CampusWidgetExtension/Info.plist', 'NextClassAppGroup', null, /App Group/],
+    ['ios/CampusWidgetExtension/CampusWidgetExtension.entitlements', 'com.apple.security.application-groups', ['group.com.campus.app.dev'], /App Group/],
+    ['ios/CampusWidgetExtension/CampusWidgetExtension.entitlements', 'aps-environment', 'production', /widget entitlements/],
+  ]) {
+    const filename = join(path, file);
+    const original = readFileSync(filename, 'utf8');
+    const fields = plist.parse(original);
+    if (value === null) delete fields[key];
+    else fields[key] = value;
+    writeFileSync(filename, plist.build(fields));
+    await assert.rejects(verify, error);
+    writeFileSync(filename, original);
+  }
+  const project = join(path, 'ios/mobile.xcodeproj/project.pbxproj');
+  const original = readFileSync(project, 'utf8');
+  writeFileSync(project, original.replaceAll('com.nuni.app.widget;', 'com.nuni.app.other;'));
+  await assert.rejects(verify, /widget bundle identifier/);
+  writeFileSync(project, original.replaceAll('CODE_SIGN_ENTITLEMENTS = mobile/mobile.entitlements;',
+    'CODE_SIGN_ENTITLEMENTS = CampusWidgetExtension/CampusWidgetExtension.entitlements;'));
+  await assert.rejects(verify, /APNs/);
+});
+
+test('a missing widget entitlement file stops preparation before rewriting the native project', (t) => {
+  const path = fixture(t);
+  const projectFile = join(path, 'ios/mobile.xcodeproj/project.pbxproj');
+  const original = readFileSync(projectFile, 'utf8');
+  rmSync(join(path, 'ios/CampusWidgetExtension/CampusWidgetExtension.entitlements'));
+  assert.throws(() => main(['--write', path]), /CampusWidgetExtension.entitlements/);
+  assert.equal(readFileSync(projectFile, 'utf8'), original);
 });

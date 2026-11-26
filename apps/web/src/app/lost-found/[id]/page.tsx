@@ -14,6 +14,7 @@ import {
 } from '@/components/lost-found/LostFoundForm';
 import { LostFoundGallery } from '@/components/lost-found/LostFoundPhotos';
 import { LostFoundItemTag } from '@/components/lost-found/LostFoundItemTag';
+import { LostFoundNextStep } from '@/components/lost-found/LostFoundNextStep';
 import styles from '@/components/lost-found/LostFound.module.css';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
@@ -436,6 +437,9 @@ function LostFoundDetailPageContent({
         ) : (
           <article className={styles.stack} aria-label="物品詳情">
             <LostFoundItemTag item={item}>
+              {canManage && !editing && !pending && !confirmResolve && !storageBlocked && !busy && (
+                <LostFoundNextStep item={item} source="school" />
+              )}
               {item.photos?.length ? (
                 <LostFoundGallery key={item.id} photos={item.photos} title={item.title} />
               ) : null}

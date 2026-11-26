@@ -13,14 +13,6 @@
   margin-bottom: 18px;
 }
 
-.kicker {
-  display: block;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.11em;
-}
-
 .heading h2 {
   margin: 6px 0 8px;
   font-size: clamp(24px, 3.6vw, 34px);

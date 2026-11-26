@@ -86,7 +86,7 @@ export type TronClassSourceUpload = TronClassSourceFile & TronClassHomeworkScope
  */
 export type TronClassSubmissionSource = {
   contractVerified: boolean;
-  getAssignment(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, context?: TronClassPreparationRead): Promise<TronClassAssignment>;
+  getAssignment(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, context?: TronClassPreparationRead, assertBinding?: () => Promise<void>): Promise<TronClassAssignment>;
   uploadFile(binding: TronClassSubmissionBinding, assignment: TronClassAssignment, input: TronClassUploadInput): Promise<TronClassSourceUpload>;
   submit(binding: TronClassSubmissionBinding, assignment: TronClassAssignment, input: {
     operationId: string;
@@ -95,7 +95,7 @@ export type TronClassSubmissionSource = {
   }): Promise<void>;
   listSubmissions(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope): Promise<TronClassSourceReceipt[]>;
   /** Read-only historical display; never used to reconcile a new write. */
-  readSubmissionHistory?(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, context?: TronClassPreparationRead): Promise<TronClassSubmissionHistory>;
+  readSubmissionHistory?(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, context?: TronClassPreparationRead, assertBinding?: () => Promise<void>): Promise<TronClassSubmissionHistory>;
 };
 
 function unavailable(): never { throw new NuniError(503, 'TRONCLASS_SUBMISSION_UNAVAILABLE'); }
@@ -133,9 +133,10 @@ async function schoolRead<T>(run: (options?: LmsReadOptions) => Promise<T>, cont
 export function createTronClassSubmissionSource(readonlySource?: LmsReadonlySource): TronClassSubmissionSource {
   const adapter: TronClassSubmissionSource = {
     contractVerified: false,
-    async getAssignment(binding, scope, context) {
+    async getAssignment(binding, scope, context, assertBinding) {
       context?.check();
       const source = readonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
+      await assertBinding?.();
       context?.check();
       const lists = await Promise.all(['ongoing', 'upcoming'].map((status) =>
         schoolRead(options => source.fetchCourses(binding.cookies,
@@ -193,12 +194,13 @@ export function createTronClassSubmissionSource(readonlySource?: LmsReadonlySour
     async uploadFile() { return unavailable(); },
     async submit() { return unavailable(); },
     async listSubmissions() { return unavailable(); },
-    async readSubmissionHistory(binding, scope, context) {
+    async readSubmissionHistory(binding, scope, context, assertBinding) {
       context?.check();
       // Recheck ownership/visibility before the student-specific history URL.
-      await adapter.getAssignment(binding, scope, context);
+      await adapter.getAssignment(binding, scope, context, assertBinding);
       context?.check();
       const source = readonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
+      await assertBinding?.();
       context?.check();
       return readTronClassSubmissionHistory(source, binding, scope, Date.now(), context);
     },

@@ -46,8 +46,6 @@ import {
   tcFetchHomeworkDetail,
   tcFetchHomeworkSubmissions,
   tcFetchSyllabus,
-  autoRefreshTCSession,
-  hasTCSession,
   getTCBackendSessionId,
   type TCCourse,
   type TCActivity,
@@ -420,40 +418,12 @@ function normalizeStudentInfo(
 async function ensureTronClassSession(): Promise<void> {
   if (!isTronClassDataFetchEnabled()) return;
 
-  if (Platform.OS === 'web' && !(await hasTCSession())) {
-    throw new Error('Web 版需要後端 TronClass session，略過直接連線以避免 CORS 錯誤');
+  // 有後端 session 時，資料端點會驗證持有人與效期。原生 cookie 模式另查個人資料。
+  if (await getTCBackendSessionId()) return;
+  if (Platform.OS === 'web') {
+    throw new Error('Web 版需要後端 TronClass session，請重新連線學校帳號。');
   }
-
-  // 先嘗試一個輕量的 session 檢查
-  // tcFetchProfile 內部的 fetchTronClassBackend 遇到 401 會自動嘗試
-  // auto-refresh 一次，所以如果成功就代表 session 有效或已刷新。
-  try {
-    const profile = await tcFetchProfile();
-    if (profile?.id) return; // session 有效（或已自動刷新）
-  } catch (profileError) {
-    // fetchTronClassBackend 內部 auto-refresh 也失敗了
-    // → 這裡再獨立嘗試一次完整的 auto-refresh
-    console.warn('[puDataCache] tcFetchProfile threw:', profileError);
-  }
-
-  // 第二道防線：手動呼叫 autoRefreshTCSession（可能用不同的 login 策略）
-  console.log('[puDataCache] TronClass session expired, trying manual auto-refresh…');
-  const refreshed = await autoRefreshTCSession();
-  if (refreshed) {
-    console.log('[puDataCache] TronClass manual auto-refresh succeeded');
-    return;
-  }
-
-  // 最後一道防線：檢查是否有 session 但 profile 端點本身不可用
-  // （靜宜 TronClass 的 /api/users/{id} 會回 403，/api/profile 可能也不穩定）
-  const hasSession = await hasTCSession();
-  if (hasSession) {
-    console.log(
-      '[puDataCache] TronClass has session but profile endpoint failed — proceeding anyway',
-    );
-    return;
-  }
-
+  if ((await tcFetchProfile())?.id) return;
   throw new Error('TronClass session 已失效，請重新登入');
 }
 
@@ -834,7 +804,7 @@ export async function refreshTCCourses(): Promise<TCCourse[] | null> {
   console.log('[puDataCache] refreshing TronClass courses…');
   const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCCourses);
   if (skipped !== undefined) return skipped;
-  // 本人課程端點自行驗證 session，後端模式不先觸發含帳密的 profile refresh。
+  // 本人課程端點自行驗證 session，後端模式不需要先查個人資料。
   if (!(await getTCBackendSessionId())) await ensureTronClassSession();
   const courses = await tcFetchCourses('ongoing');
   await writeCache(KEYS.tcCourses, courses, generation);
@@ -1091,6 +1061,8 @@ export type SyncAllOptions = {
   tcCourses?: TCCourse[] | null;
   includeEssential?: boolean;
   fetchTronClass?: boolean;
+  /** 登入只讀本人課程清單。詳細資料由對應學習功能另行取得。 */
+  includeTronClassDetails?: boolean;
   /** Hosted 登入只預抓已具本人端點的課表、成績與課程清單。 */
   includeExtended?: boolean;
 };
@@ -1112,6 +1084,7 @@ export async function syncAllData(
   const includeEssential = options.includeEssential === true;
   const fetchTronClass = isTronClassDataFetchEnabled() && options.fetchTronClass !== false;
   const includeExtended = options.includeExtended !== false;
+  const includeLmsDetails = includeExtended && fetchTronClass && options.includeTronClassDetails !== false;
 
   let courses: PUCourseResult | null = null;
   let grades: PUGradeResult | null = null;
@@ -1193,7 +1166,7 @@ export async function syncAllData(
   const courseIds = tcCourses?.map((c) => c.id) ?? [];
 
   // 第一波：核心資料（作業、模組、出席、待辦、公告）
-  if (courseIds.length > 0 && includeExtended) {
+  if (courseIds.length > 0 && includeLmsDetails) {
     [tcActivities, tcModules, tcAttendance, tcTodos, tcAnnouncements] = await Promise.all([
       refreshTCActivitiesForCourses(courseIds).catch((e) => {
         console.warn('[puDataCache] TC activities sync error:', e);
@@ -1248,7 +1221,7 @@ export async function syncAllData(
     }).catch(() => {
       console.warn('[puDataCache] 第二波詳細資料部分同步失敗');
     });
-  } else if (fetchTronClass && includeExtended) {
+  } else if (includeLmsDetails) {
     [tcAttendance, tcTodos, tcAnnouncements] = await Promise.all([
       refreshTCAttendance().catch((e) => {
         console.warn('[puDataCache] TC attendance sync error:', e);

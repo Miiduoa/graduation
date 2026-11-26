@@ -211,7 +211,7 @@ async def account_scenario(browser, origin, width, theme, reports, empty=False):
             await expect(merchant.get_by_role('link').filter(has_text='山城餐坊／東區營運門市')).to_have_attribute(
                 'href', '/merchant/workspace?tenant=qa-campus&location=qa-operating')
             await expect(merchant.get_by_role('link', name='查看申請進度（1）', exact=True)).to_have_attribute(
-                'href', '/merchant/workspace#merchant-applications-title')
+                'href', '/merchant/workspace?view=applications#merchant-applications-title')
             await expect(page.get_by_role('link', name='進入平台工作台 →', exact=True)).to_have_attribute('href', '/admin')
             scenario.checked('Teaching/merchant/platform destinations match confirmed synthetic roles and retain exact course IDs')
         await scenario.layout('recovered')

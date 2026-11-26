@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#f6f7f5" />
+    <meta name="theme-color" content="#faf8f2" />
     <title>離線 · nuni</title>
     <script>
       try {
@@ -18,7 +18,7 @@
         var dark =
           selectedTheme === 'dark' ||
           (selectedTheme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
-        document.querySelector('meta[name="theme-color"]').content = dark ? '#000000' : '#f6f7f5';
+        document.querySelector('meta[name="theme-color"]').content = dark ? '#000000' : '#faf8f2';
         if (selectedTheme === 'light' || selectedTheme === 'dark') {
           document.documentElement.setAttribute('data-theme', selectedTheme);
         }
@@ -29,12 +29,11 @@
     <style>
       :root {
         color-scheme: light;
-        --bg: #f6f7f5;
-        --surface: #ffffff;
-        --text: #243b35;
-        --muted: #626e67;
-        --border: #dddeda;
-        --brand: #314d40;
+        --bg: #faf8f2;
+        --text: #24251f;
+        --muted: #5e6057;
+        --border: #dedbd0;
+        --brand: #214c3d;
         --on-brand: #ffffff;
         --focus-ring: #bd581f;
       }
@@ -42,11 +41,10 @@
         :root:not([data-theme='light']) {
           color-scheme: dark;
           --bg: #000000;
-          --surface: #111111;
-          --text: #f2f3f1;
-          --muted: #a5aaa7;
-          --border: #2b2b2b;
-          --brand: #a9c6a3;
+          --text: #f2f0e8;
+          --muted: #b0b2a8;
+          --border: #34362f;
+          --brand: #b6d0b9;
           --on-brand: #0b140e;
           --focus-ring: #d6b16a;
         }
@@ -54,25 +52,24 @@
       :root[data-theme='dark'] {
         color-scheme: dark;
         --bg: #000000;
-        --surface: #111111;
-        --text: #f2f3f1;
-        --muted: #a5aaa7;
-        --border: #2b2b2b;
-        --brand: #a9c6a3;
+        --text: #f2f0e8;
+        --muted: #b0b2a8;
+        --border: #34362f;
+        --brand: #b6d0b9;
         --on-brand: #0b140e;
         --focus-ring: #d6b16a;
       }
       :root {
         --body-size: 0.9375rem;
-        --title-size: 1.5rem;
+        --title-size: 2rem;
       }
       :root[data-font='small'] {
         --body-size: 0.875rem;
-        --title-size: 1.375rem;
+        --title-size: 1.75rem;
       }
       :root[data-font='large'] {
         --body-size: 1.0625rem;
-        --title-size: 1.625rem;
+        --title-size: 2.25rem;
       }
       * {
         box-sizing: border-box;
@@ -95,27 +92,17 @@
         min-width: 0;
       }
       .brand {
-        margin: 0 0 12px 4px;
+        margin: 0 0 20px;
         font-weight: 700;
         letter-spacing: -0.03em;
       }
       section {
-        padding: clamp(20px, 5vw, 36px);
-        border: 1px solid var(--border);
-        border-radius: 18px;
-        background: var(--surface);
+        padding-block: clamp(22px, 5vw, 36px);
+        border-top: 2px solid var(--brand);
         overflow-wrap: anywhere;
       }
-      .symbol {
-        width: 44px;
-        height: 44px;
-        padding: 10px;
-        margin-bottom: 16px;
-        border-radius: 14px;
-        background: var(--bg);
-        color: var(--brand);
-      }
       h1 {
+        font-family: "Songti TC", "Noto Serif TC", PMingLiU, serif;
         font-size: var(--title-size);
         font-weight: 650;
         line-height: 1.4;
@@ -139,7 +126,7 @@
         margin-top: 20px;
         padding: 10px 20px;
         border: 1px solid transparent;
-        border-radius: 10px;
+        border-radius: 6px;
         background: var(--brand);
         color: var(--on-brand);
         font: inherit;
@@ -170,20 +157,6 @@
     <main>
       <div class="brand">nuni</div>
       <section aria-labelledby="offline-title">
-        <svg
-          class="symbol"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.7"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path
-            d="M7.5 18H7a5 5 0 0 1-.8-9.94A7 7 0 0 1 19.5 9.4 4.4 4.4 0 0 1 18 18h-1.5M12 12v3m0 3h.01"
-          />
-        </svg>
         <h1 id="offline-title">暫時無法開啟頁面</h1>
         <p id="connection" role="status">請檢查網路連線後再試一次。</p>
         <p id="submission-note" hidden>如果剛才送出了作業，請先查看繳交紀錄，再決定是否重送。</p>

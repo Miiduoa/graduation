@@ -10,7 +10,8 @@ vi.mock('firebase/firestore', () => ({
   getDoc: vi.fn(),
   getDocs: vi.fn(),
 }));
-const entry = (id: string, data: Record<string, unknown>) => ({ id, data: () => data });
+const confirmed = { fromCache: false, hasPendingWrites: false };
+const entry = (id: string, data: Record<string, unknown>) => ({ id, data: () => data, metadata: confirmed });
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isFirebaseConfigured).mockReturnValue(true);
@@ -39,22 +40,26 @@ it('returns an empty account without sample courses', async () => {
 it('uses only active course memberships and excludes submitted work and drafts', async () => {
   vi.mocked(getDocs)
     .mockResolvedValueOnce({
+      metadata: confirmed,
       docs: [
-        entry('c1', { type: 'course', status: 'active', name: 'Course', unreadCount: 2 }),
+        entry('c1', { type: 'course', status: 'active', name: 'Course', schoolId: 'pu', unreadCount: 2 }),
         entry('c2', { type: 'course', status: 'removed' }),
         entry('club', { type: 'club', status: 'active' }),
       ],
     } as never)
     .mockResolvedValueOnce({
+      metadata: confirmed,
       docs: [
-        entry('a1', { title: 'Pending', dueAt: '2026-10-10T12:00:00Z', allowLateSubmission: true }),
+        entry('a1', { title: 'Pending', schoolId: 'another-campus', dueAt: '2026-10-10T12:00:00Z', allowLateSubmission: true }),
         entry('a2', { title: 'Submitted' }),
         entry('a3', { title: 'Draft', published: false }),
+        entry('a4', { title: 'Closed', status: 'closed', dueAt: '2099-10-10T12:00:00Z' }),
       ],
     } as never);
   vi.mocked(getDoc).mockImplementation(
     async (path) =>
       ({
+        metadata: confirmed,
         exists: () => String(path).includes('/a2/'),
         data: () => ({ submittedAt: '2026-10-07T10:00:00Z' }),
       }) as never,
@@ -67,6 +72,7 @@ it('uses only active course memberships and excludes submitted work and drafts',
       kind: 'assignment',
       id: 'a1',
       courseId: 'c1',
+      schoolId: 'pu',
       courseName: 'Course',
       title: 'Pending',
       dueAt: '2026-10-10T12:00:00.000Z',
@@ -78,13 +84,34 @@ it('uses only active course memberships and excludes submitted work and drafts',
   expect(home.unreadCount).toBe(2);
   expect(getDoc).toHaveBeenCalledWith('groups/c1/assignments/a1/submissions/alice');
 });
+it.each(['memberships', 'membership', 'assignments', 'assignment', 'submission'])(
+  'keeps the offline list without a school reminder for cached or unsynced %s', async source => {
+    for (const unconfirmed of [{ fromCache: true, hasPendingWrites: false }, { fromCache: false, hasPendingWrites: true }, undefined]) {
+      const metadata = (read: string) => read === source ? unconfirmed : confirmed;
+      vi.mocked(getDocs)
+        .mockResolvedValueOnce({ metadata: metadata('memberships'), docs: [
+          { ...entry('c1', { type: 'course', status: 'active', schoolId: 'pu' }), metadata: metadata('membership') },
+        ] } as never)
+        .mockResolvedValueOnce({ metadata: metadata('assignments'), docs: [
+          { ...entry('a1', { title: '練習' }), metadata: metadata('assignment') },
+        ] } as never);
+      vi.mocked(getDoc).mockResolvedValueOnce({ metadata: metadata('submission'), exists: () => false } as never);
+      const { tasks } = await loadHomeData('alice');
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]).toMatchObject({ id: 'a1', title: '練習', href: '/course/c1#assignment-a1' });
+      expect(tasks[0].schoolId).toBeUndefined();
+    }
+    expect(getDocs).toHaveBeenCalledTimes(6);
+    expect(getDoc).toHaveBeenCalledTimes(3);
+  },
+);
 it('surfaces published grades as recent feedback with deep links', async () => {
   vi.mocked(getDocs)
     .mockResolvedValueOnce({
       docs: [entry('c1', { type: 'course', status: 'active', name: 'Course', unreadCount: 0 })],
     } as never)
     .mockResolvedValueOnce({
-      docs: [entry('hw1', { title: '報告', type: 'assignment' })],
+      docs: [entry('hw1', { title: '報告', type: 'assignment', status: 'closed' })],
     } as never);
   vi.mocked(getDoc).mockResolvedValue({
     exists: () => true,

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import DmsListPage from '@/app/dms/page';
+import DmChatPage from '@/app/dms/[conversationId]/page';
 import MessagesPage from '@/app/messages/page';
 import { MessagingShell, PrivateConversationView } from './Messaging';
 import { confirmDmPhoto, readDmPhoto, uploadDmPhoto } from '@/lib/dmPhotos';
@@ -28,6 +29,10 @@ import {
 const account = vi.hoisted(() => ({
   user: { uid: 'alice' } as { uid: string } | null,
   loading: false,
+}));
+vi.mock('next/navigation', async (original) => ({
+  ...await original<typeof import('next/navigation')>(),
+  useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => account }));
 vi.mock('@/lib/firebase', () => ({ getAuth: () => ({ currentUser: account.user }) }));
@@ -1034,5 +1039,22 @@ it.each([undefined, true, false])('routes UI text sends through the member flow 
       { uid: 'alice', schoolId: 'pu' }, 'dm_pu_alice_bob', 'request-id', '繼續對話',
     );
     expect(sendPreparedPrivateMessage).not.toHaveBeenCalled();
+  }
+});
+
+it('reconnects the school account to the same notified conversation and campus', async () => {
+  account.user = null;
+  window.history.replaceState(null, '', '/dms/thread-7?campus=ntu&schoolId=ntu&unrelated=old');
+  try {
+    await act(async () => {
+      render(<DmChatPage params={Promise.resolve({ conversationId: 'thread-7' })} />);
+    });
+    const login = new URL(screen.getByRole('link', { name: '連結學校帳號' }).getAttribute('href')!, window.location.origin);
+    expect(login.searchParams.get('reconnect')).toBe('school');
+    expect(login.searchParams.get('campus')).toBe('ntu');
+    expect(login.searchParams.get('returnUrl')).toBe('/dms/thread-7?schoolId=ntu&campus=ntu');
+    expect(watchConversationContents).not.toHaveBeenCalled();
+  } finally {
+    window.history.replaceState(null, '', '/');
   }
 });

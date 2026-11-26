@@ -5,7 +5,7 @@
 .destinations {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
-  gap: 8px;
+  gap: 0 16px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -21,13 +21,12 @@
   gap: 4px;
   min-height: 44px;
   height: 100%;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  padding: 12px 4px;
   color: var(--text);
   line-height: 1.5;
   text-decoration: none;
   overflow-wrap: anywhere;
+  border-bottom: 2px solid var(--border);
 }
 
 a.destination:hover {
@@ -39,8 +38,8 @@ a.destination:active {
 }
 
 .destination[aria-current='page'] {
-  background: var(--accent-soft);
-  border-color: var(--border-strong);
+  border-color: currentColor;
+  color: var(--brand);
 }
 
 a.destination:focus-visible {

@@ -12,10 +12,13 @@ import {
   Pressable,
   ActivityIndicator,
   RefreshControl,
+  StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { safeNavigate } from '../utils/safeNavigate';
+import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 
 import {
   tcFetchCourses,
@@ -34,6 +37,7 @@ interface ExamRow {
 }
 
 export default function MyQuizScoresScreen() {
+  useThemeVersion();
   const navigation = useNavigation<any>();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -92,20 +96,34 @@ export default function MyQuizScoresScreen() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 8, color: '#8E8E93' }}>正在從所有課程拉測驗成績⋯⋯</Text>
+      <View
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: theme.colors.bg,
+        }}
+      >
+        <ActivityIndicator color={theme.colors.accent} />
+        <Text style={{ marginTop: 8, color: theme.colors.muted, fontSize: 13 }}>
+          正在從所有課程拉測驗成績⋯⋯
+        </Text>
       </View>
     );
   }
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 64 }}
+      style={{ flex: 1, backgroundColor: theme.colors.bg }}
+      contentContainerStyle={{
+        paddingHorizontal: theme.layout.screenHorizontalPadding,
+        paddingTop: 16,
+        paddingBottom: 64,
+      }}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
+          tintColor={theme.colors.accent}
           onRefresh={() => {
             setRefreshing(true);
             load();
@@ -113,151 +131,244 @@ export default function MyQuizScoresScreen() {
         />
       }
     >
-      {/* 統計卡 */}
+      {/* 成績總覽 */}
       <View
         style={{
-          backgroundColor: '#003F8A',
-          borderRadius: 12,
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.lg,
           padding: 16,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
         }}
       >
-        <Text style={{ color: '#E5F2FF', fontSize: 12 }}>📊 我的測驗成績總覽</Text>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+        <Text
+          accessibilityRole="header"
+          style={{
+            color: theme.colors.textSecondary,
+            fontSize: 12,
+            fontWeight: '600',
+            letterSpacing: 0.4,
+          }}
+        >
+          我的測驗成績總覽
+        </Text>
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'flex-end',
+            marginTop: 10,
+          }}
+        >
           <View>
-            <Text style={{ color: '#fff', fontSize: 28, fontWeight: '700' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>
               {stats.avg ?? '—'}
-              {stats.avg !== null && <Text style={{ fontSize: 14 }}>分</Text>}
+              {stats.avg !== null && (
+                <Text style={{ fontSize: 14, color: theme.colors.textSecondary }}> 分</Text>
+              )}
             </Text>
-            <Text style={{ color: '#E5E5EA', fontSize: 11 }}>平均（百分比）</Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+              平均（百分比）
+            </Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>
               {stats.gradedCount} / {stats.count}
             </Text>
-            <Text style={{ color: '#E5E5EA', fontSize: 11 }}>已批改 / 總數</Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+              已批改 / 總數
+            </Text>
           </View>
         </View>
       </View>
 
-      {/* filter tabs */}
+      {/* 類型篩選 */}
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 16 }}>
-        {(['all', 'quiz', 'exam'] as const).map((f) => (
-          <Pressable
-            key={f}
-            onPress={() => setFilter(f)}
-            style={{
-              flex: 1,
-              padding: 10,
-              borderRadius: 8,
-              backgroundColor: filter === f ? '#003F8A' : '#fff',
-              borderWidth: 1,
-              borderColor: filter === f ? '#003F8A' : '#E5E5EA',
-              alignItems: 'center',
-            }}
-          >
-            <Text
-              style={{
-                color: filter === f ? '#fff' : '#1C1C1E',
-                fontWeight: '600',
-                fontSize: 13,
-              }}
+        {(['all', 'quiz', 'exam'] as const).map((f) => {
+          const active = filter === f;
+          return (
+            <Pressable
+              key={f}
+              onPress={() => setFilter(f)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              style={({ pressed }) => ({
+                flex: 1,
+                minHeight: 44,
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderRadius: theme.radius.md,
+                backgroundColor: active ? theme.colors.accent : theme.colors.surface,
+                borderWidth: 1,
+                borderColor: active ? theme.colors.accent : theme.colors.border,
+                opacity: pressed ? 0.85 : 1,
+              })}
             >
-              {f === 'all' ? '全部' : f === 'quiz' ? '小考' : '考試'}
-            </Text>
-          </Pressable>
-        ))}
+              <Text
+                style={{
+                  color: active ? theme.colors.onAccent : theme.colors.text,
+                  fontWeight: active ? '700' : '600',
+                  fontSize: 13,
+                }}
+              >
+                {f === 'all' ? '全部' : f === 'quiz' ? '小考' : '考試'}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
 
-      {/* 列表 */}
+      {/* 測驗紀錄列表 */}
+      <Text
+        accessibilityRole="header"
+        style={{
+          marginTop: 20,
+          marginBottom: 8,
+          color: theme.colors.textSecondary,
+          fontSize: 12,
+          fontWeight: '600',
+          letterSpacing: 0.4,
+        }}
+      >
+        測驗紀錄（{filtered.length}）
+      </Text>
+
       {filtered.length === 0 ? (
-        <View style={{ alignItems: 'center', padding: 32, gap: 8 }}>
-          <Text style={{ fontSize: 48 }}>📝</Text>
-          <Text style={{ color: '#8E8E93', fontSize: 14, textAlign: 'center' }}>
+        <View
+          style={{
+            alignItems: 'center',
+            paddingVertical: 32,
+            paddingHorizontal: 16,
+            gap: 8,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: theme.colors.separator,
+          }}
+        >
+          <Ionicons name="document-text-outline" size={32} color={theme.colors.muted} />
+          <Text
+            style={{
+              color: theme.colors.textSecondary,
+              fontSize: 14,
+              textAlign: 'center',
+              lineHeight: 21,
+            }}
+          >
             還沒有任何測驗成績。{'\n'}有的話會自動出現在這裡。
           </Text>
         </View>
       ) : (
-        filtered.map((r, i) => {
-          const pass = (r.percentage ?? 0) >= 60;
-          const tone =
-            r.percentage === null ? '#8E8E93' : pass ? '#34C759' : '#D70015';
-          return (
-            <Pressable
-              key={`${r.courseId}-${r.exam.id}`}
-              onPress={() =>
-                safeNavigate(navigation, 'CourseModules', {
-                  groupId: String(r.courseId),
-                  groupName: r.courseName,
-                }, { fallbackMessage: '即將跳到課程教材' })
-              }
-              style={{
-                marginTop: 10,
-                backgroundColor: '#fff',
-                borderRadius: 12,
-                padding: 14,
-                borderWidth: 1,
-                borderColor: '#E5E5EA',
-                borderLeftWidth: 4,
-                borderLeftColor: tone,
-              }}
-            >
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E' }} numberOfLines={1}>
-                    {r.exam.title}
-                  </Text>
-                  <Text style={{ fontSize: 12, color: '#8E8E93', marginTop: 2 }}>
-                    {r.courseName} ・ {r.exam.type === 'exam' ? '考試' : '小考'}
-                  </Text>
-                  {r.exam.end_time && (
-                    <Text style={{ fontSize: 11, color: '#AEAEB2', marginTop: 2 }}>
-                      截止 {new Date(r.exam.end_time).toLocaleString('zh-TW')}
-                    </Text>
-                  )}
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  {r.score !== null ? (
-                    <>
-                      <Text style={{ fontSize: 24, fontWeight: '700', color: tone }}>
-                        {r.score}
-                        {r.total ? <Text style={{ fontSize: 12 }}> / {r.total}</Text> : null}
-                      </Text>
-                      {r.percentage !== null && (
-                        <Text style={{ fontSize: 11, color: tone }}>
-                          {Math.round(r.percentage)}%
-                        </Text>
-                      )}
-                    </>
-                  ) : (
-                    <Text style={{ fontSize: 12, color: '#AEAEB2' }}>
-                      {r.exam.is_closed ? '未繳' : '待批改'}
-                    </Text>
-                  )}
-                </View>
-              </View>
-              {/* 進度條 */}
-              {r.percentage !== null && (
+        <View
+          style={{
+            backgroundColor: theme.colors.surface,
+            borderRadius: theme.radius.lg,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            overflow: 'hidden',
+          }}
+        >
+          {filtered.map((r, i) => {
+            const pass = (r.percentage ?? 0) >= 60;
+            const tone =
+              r.percentage === null
+                ? theme.colors.muted
+                : pass
+                  ? theme.colors.success
+                  : theme.colors.danger;
+            return (
+              <Pressable
+                key={`${r.courseId}-${r.exam.id}`}
+                onPress={() =>
+                  safeNavigate(
+                    navigation,
+                    'CourseModules',
+                    {
+                      groupId: String(r.courseId),
+                      groupName: r.courseName,
+                    },
+                    { fallbackMessage: '即將跳到課程教材' },
+                  )
+                }
+                accessibilityRole="button"
+                style={({ pressed }) => ({
+                  padding: 14,
+                  backgroundColor: pressed ? theme.colors.surfaceInteractive : theme.colors.surface,
+                  borderTopWidth: i === 0 ? 0 : StyleSheet.hairlineWidth,
+                  borderTopColor: theme.colors.separator,
+                })}
+              >
                 <View
                   style={{
-                    marginTop: 8,
-                    height: 4,
-                    backgroundColor: '#E5E5EA',
-                    borderRadius: 2,
-                    overflow: 'hidden',
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    gap: 12,
                   }}
                 >
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}
+                      numberOfLines={1}
+                    >
+                      {r.exam.title}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: theme.colors.textSecondary, marginTop: 2 }}>
+                      {r.courseName} · {r.exam.type === 'exam' ? '考試' : '小考'}
+                    </Text>
+                    {r.exam.end_time && (
+                      <Text style={{ fontSize: 11, color: theme.colors.muted, marginTop: 2 }}>
+                        截止 {new Date(r.exam.end_time).toLocaleString('zh-TW')}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    {r.score !== null ? (
+                      <>
+                        <Text style={{ fontSize: 20, fontWeight: '700', color: tone }}>
+                          {r.score}
+                          {r.total ? (
+                            <Text style={{ fontSize: 12, color: theme.colors.muted }}>
+                              {' '}
+                              / {r.total}
+                            </Text>
+                          ) : null}
+                        </Text>
+                        {r.percentage !== null && (
+                          <Text style={{ fontSize: 11, color: tone, fontWeight: '600' }}>
+                            {Math.round(r.percentage)}%
+                          </Text>
+                        )}
+                      </>
+                    ) : (
+                      <Text style={{ fontSize: 12, color: theme.colors.muted }}>
+                        {r.exam.is_closed ? '未繳' : '待批改'}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+                {/* 進度條 */}
+                {r.percentage !== null && (
                   <View
                     style={{
-                      width: `${Math.min(100, r.percentage)}%`,
+                      marginTop: 10,
                       height: 4,
-                      backgroundColor: tone,
+                      backgroundColor: theme.colors.surface3,
+                      borderRadius: 2,
+                      overflow: 'hidden',
                     }}
-                  />
-                </View>
-              )}
-            </Pressable>
-          );
-        })
+                  >
+                    <View
+                      style={{
+                        width: `${Math.min(100, r.percentage)}%`,
+                        height: 4,
+                        backgroundColor: tone,
+                      }}
+                    />
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
       )}
     </ScrollView>
   );

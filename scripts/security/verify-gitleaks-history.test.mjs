@@ -39,10 +39,6 @@ test('requires identical complete file blobs', async () => {
   assert.equal(evidence[0].identicalFileBlob, 'c'.repeat(40));
   await assert.rejects(verifyAliases(manifest().aliases, async (commit) => commit));
 });
-test('fails closed on missing blobs or lookup failures', async () => {
-  await assert.rejects(verifyAliases(manifest().aliases, async () => undefined));
-  await assert.rejects(verifyAliases(manifest().aliases, async () => { throw new Error('unavailable'); }));
-});
 const privacyFixtures = JSON.parse(readFileSync(new URL('./gitleaks-history-aliases.json', import.meta.url), 'utf8')).reviewedTestFixtures;
 test('accepts only the two reviewed CLI privacy fixture squashes', async () => {
   assert.equal(privacyFixtures.length, 2);
@@ -76,6 +72,55 @@ test('fixture inventory rejects duplicates, malformed entries and undeclared ign
     assert.throws(() => validateAliases({ ...manifest(), reviewedTestFixtures: value }, baseline, candidate));
   }
   assert.throws(() => validateAliases({ ...manifest(), reviewedTestFixtures: privacyFixtures }, baseline, candidate), /Candidate must preserve/);
+});
+test('fails closed on missing blobs or lookup failures', async () => {
+  await assert.rejects(verifyAliases(manifest().aliases, async () => undefined));
+  await assert.rejects(verifyAliases(manifest().aliases, async () => { throw new Error('unavailable'); }));
+});
+test('allows only the reviewed TronClass main squash and requires its complete source blob', async () => {
+  const fixture = {
+    reviewed: '220cb2e2d74f0847a7d0241878413097dd183d6b:scripts/test-env/verify-tronclass.cjs:generic-api-key:53',
+    observed: '149cfbe2f806ee15da1985854b34dfe72a7e07d9:scripts/test-env/verify-tronclass.cjs:generic-api-key:53',
+    reviewedBlob: 'd85bd50fa1d4f0b86a36247b316822831f0d375a',
+  };
+  const m = { ...manifest(), reviewedTronclassEmulatorFixture: fixture };
+  const ignore = candidate + fixture.observed + '\n';
+  const pairs = validateAliases(m, baseline, ignore);
+  const resolve = async (_commit, path) => path === 'scripts/test-env/verify-tronclass.cjs' ? fixture.reviewedBlob : 'c'.repeat(40);
+  assert.equal((await verifyAliases(pairs, resolve)).length, 2);
+  await assert.rejects(verifyAliases(pairs, async () => 'c'.repeat(40)), /pinned review/);
+  await assert.rejects(verifyAliases(pairs, async (commit, path) => commit.startsWith('149cf') ? 'd'.repeat(40) : resolve(commit, path)), /differs from the reviewed blob/);
+  assert.throws(() => validateAliases(m, baseline, ignore + fixture.reviewed + '\n'));
+  for (const change of [
+    { reviewed: fixture.reviewed.replace(/^.{40}/, oldCommit) },
+    { observed: fixture.observed.replace(/^.{40}/, newCommit) },
+    { reviewed: fixture.reviewed.replace('verify-tronclass.cjs', 'another.cjs'), observed: fixture.observed.replace('verify-tronclass.cjs', 'another.cjs') },
+    { reviewed: fixture.reviewed.replace(':53', ':54'), observed: fixture.observed.replace(':53', ':54') },
+    { reviewed: fixture.reviewed.replace(':generic-api-key:', ':gcp-api-key:'), observed: fixture.observed.replace(':generic-api-key:', ':gcp-api-key:') },
+    { reviewedBlob: undefined },
+    { reviewedBlob: 'c'.repeat(40) },
+  ]) {
+    const altered = { ...fixture, ...change };
+    assert.throws(() => validateAliases({ ...m, reviewedTronclassEmulatorFixture: altered }, baseline, candidate + altered.observed + '\n'), /Only the reviewed TronClass/);
+  }
+  for (const invalid of [null, [], 'invalid']) {
+    assert.throws(() => validateAliases({ ...m, reviewedTronclassEmulatorFixture: invalid }, baseline, ignore), /Invalid reviewed emulator/);
+  }
+  assert.throws(() => validateAliases({ ...manifest(), reviewedTestFixtures: [fixture] }, baseline, ignore), /Unknown reviewed test fixture/);
+});
+test('the dedicated emulator record does not increase the two test-script fixture limit', () => {
+  const fixtures = [1, 2, 3].map((line) => ({
+    reviewed: `${oldCommit}:scripts/example.test.mjs:generic-api-key:${line}`,
+    observed: `${newCommit}:scripts/example.test.mjs:generic-api-key:${line}`,
+    reviewedBlob: 'c'.repeat(40),
+  }));
+  assert.throws(() => validateAliases({ ...manifest(), reviewedTestFixtures: fixtures }, baseline, candidate + fixtures.map((f) => f.observed).join('\n')), /Invalid reviewed fixture count/);
+});
+test('requires the reviewed full lockfile before allowing its podspec checksum fingerprints', () => {
+  const finding = 'a818d9e02eb57cadd7fe0a0041a1fedba452e8a4:apps/mobile/ios/Podfile.lock:generic-api-key:2526';
+  const changed = candidate + finding + '\n';
+  assert.throws(() => validateAliases(manifest(), baseline, changed));
+  assert.throws(() => validateAliases(manifest(), baseline, changed, () => 'SPEC CHECKSUMS:\n'), /Historical lockfile differs/);
 });
 test('deduplicates blob reads without weakening per-finding verification', async () => {
   let calls = 0;

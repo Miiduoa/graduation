@@ -3,9 +3,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { StoryViewer } from './StoryViewer';
 import type { CampusStoryDoc } from '@/lib/community/firestore';
 
+const { resolveMedia } = vi.hoisted(() => ({ resolveMedia: vi.fn(async (): Promise<Blob | null> => null) }));
+
 vi.mock('@/lib/privateFiles', async () => ({
   isPrivateFileObjectPath: (await import('@campus/shared/src/privateFileMedia')).isPrivateFileObjectPath,
-  resolvePrivateMedia: async () => null,
+  resolvePrivateMedia: resolveMedia,
 }));
 
 vi.mock('@/components/ui/modalSession', () => ({
@@ -499,4 +501,53 @@ it('releases a previous story caption focus when navigating to an uncaptioned vi
   expect(screen.queryByRole('region', { name: '限時動態說明文字' })).toBeNull();
   fireEvent.ended(screen.getByLabelText('限時動態影片'));
   expect(next).toHaveBeenCalledOnce();
+});
+
+it.each(['image', 'video'] as const)('waits for the private %s before offering playback or declaring a failure', async (kind) => {
+  let finish!: (value: Blob | null) => void;
+  resolveMedia.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:story');
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  const story = { id: 's', schoolId: 'pu', authorUid: 'one', kind, mediaUrl: 'schools/pu/stories/s/image' };
+  const viewer = {
+    group: { authorUid: 'one', latestAt: 0, stories: [story] }, viewerUid: 'reader',
+    isOwner: false, index: 0, hasPrevious: false, hasNext: true, next: vi.fn(),
+    previous: vi.fn(), close: vi.fn(), switchAuthor: vi.fn(),
+  };
+  render(<StoryViewer author="同學" viewer={viewer} />);
+  expect(screen.getByRole('status').textContent).toContain(kind === 'video' ? '正在載入影片' : '正在載入照片');
+  expect(screen.queryByText(/暫時無法/)).toBeNull();
+  expect(screen.queryByAltText('限時動態照片')).toBeNull();
+  await act(async () => { finish(new Blob(['story'])); });
+  const media = kind === 'video' ? screen.getByLabelText('限時動態影片') : screen.getByAltText('限時動態照片');
+  expect(media.getAttribute('src')).toBe('blob:story');
+  fireEvent.error(media);
+  expect(screen.getByRole('status').textContent).toContain('暫時無法');
+});
+
+it('lets the reader stop continuous playback while the next private video is loading', async () => {
+  const initial = { id: 'one', schoolId: 'pu', authorUid: 'one', kind: 'video' as const, mediaUrl: '/first.mp4' };
+  const next = { ...initial, id: 'two', mediaUrl: 'schools/pu/stories/two/video.mp4' };
+  const viewer = {
+    group: { authorUid: 'one', latestAt: 0, stories: [initial, next] }, viewerUid: 'reader',
+    isOwner: false, index: 0, hasPrevious: false, hasNext: true, next: vi.fn(),
+    previous: vi.fn(), close: vi.fn(), switchAuthor: vi.fn(),
+  };
+  const view = render(<StoryViewer author="同學" viewer={viewer} />);
+  fireEvent.click(screen.getByRole('button', { name: '連續播放' }));
+  expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce();
+  let finish!: (value: Blob) => void;
+  resolveMedia.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:next-video');
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  view.rerender(<StoryViewer author="同學" viewer={{ ...viewer, index: 1 }} />);
+  expect(screen.getByRole('status').textContent).toContain('正在載入影片');
+  const stop = screen.getByRole('button', { name: '停止連播' });
+  expect(stop).toHaveProperty('disabled', false);
+  fireEvent.click(stop);
+
+  await act(async () => { finish(new Blob(['next video'])); });
+  expect(screen.getByLabelText('限時動態影片').getAttribute('src')).toBe('blob:next-video');
+  expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: '連續播放' }).getAttribute('aria-pressed')).toBe('false');
 });

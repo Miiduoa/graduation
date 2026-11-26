@@ -35,7 +35,7 @@ function ConnectDirectory() {
 
 export default function ConnectPage() {
   return (
-    <SiteShell title="交流" subtitle="看話題、找同學，接續你的對話與校園消息。">
+    <SiteShell title="交流">
       <Suspense fallback={<p role="status">正在載入交流服務…</p>}>
         <ConnectDirectory />
       </Suspense>
