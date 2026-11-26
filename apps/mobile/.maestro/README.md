@@ -53,7 +53,7 @@ maestro --device "$SIMULATOR_UDID" test .maestro/flows/02_authentication.yaml \
 ```
 
 正常 App build 沒有測試入口，也不會因 `campus://maestro/sign-in` 開啟模擬器登入。
-Authenticated flow 以 Maestro `launchApp` 參數顯示 `maestro-open-emulator-login`，
+Authenticated flow 只在 `index.maestro.ts` 顯示 `maestro-open-emulator-login`，
 缺少該入口時會明確失敗，不會以訪客替代登入。測完可將
 `.test-env/maestro-emulators/emulators.pid` 中的程序送出 TERM；CI 會自動清理。
 

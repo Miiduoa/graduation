@@ -5,8 +5,6 @@ appId: ${APP_ID}
 - launchApp:
     clearState: true
     stopApp: true
-    arguments:
-      maestroEmulatorLogin: '1'
 - extendedWaitUntil:
     visible:
       id: login-landing

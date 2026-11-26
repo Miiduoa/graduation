@@ -9,7 +9,6 @@ import {
   MAESTRO_STUDENT_EMAIL,
   MAESTRO_STUDENT_UID,
 } from './emulatorConfig';
-import { isMaestroEmulatorLoginLaunch } from './maestroLaunchFlag';
 
 const extra = Constants.expoConfig?.extra ?? {};
 assertMaestroEmulatorConfig({
@@ -44,7 +43,10 @@ function MaestroHarness() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const harnessEnabled = isMaestroEmulatorLoginLaunch();
+  // This component is registered only by index.maestro.ts. iOS launch
+  // arguments never reach JS SettingsManager on the CI simulator, so the
+  // in-window control is always armed here. Production index.ts never
+  // imports this file, and campus://maestro/sign-in cannot open it.
 
   const openHarness = () => {
     setError('');
@@ -81,7 +83,7 @@ function MaestroHarness() {
 
   return <>
     <App />
-    {harnessEnabled && offerTrigger && !visible ? (
+    {offerTrigger && !visible ? (
       <Pressable
         testID="maestro-open-emulator-login"
         accessibilityRole="button"
