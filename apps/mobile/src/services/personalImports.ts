@@ -369,7 +369,7 @@ async function retireNativeCheckpoint(
 
 async function verifyNativeLedgerWrite(key: string, raw: string | null, retryRead = true) {
   // Android can store a SQLite row that CursorWindow cannot read back.
-  if (await (retryRead ? readNativeStorage(key) : AsyncStorage.getItem(key)) !== raw) {
+  if (await (retryRead ? readNativeStorageWithBatchFallback(key) : AsyncStorage.getItem(key)) !== raw) {
     throw new Error('無法確認匯入資料已儲存，請稍後再試。');
   }
 }
@@ -700,12 +700,9 @@ export function mutatePersonalImportLedger<T>(
                 throw initialWriteFailure ? initialWriteFailure.error : error;
               }
               assertWritable();
-              // Keep the rollback copy through cleanup and the final authority check.
+              // Preserve rollback evidence if publication or final cleanup fails.
               cleaningRecovery = true;
-              const checkpointRetired = adoptedCheckpoint === undefined ||
-                await retireNativeCheckpoint(key, adoptedCheckpoint, assertWritable);
-              assertWritable();
-              if (journal && !journal.retire(assertWritable, checkpointRetired, firstRaw)) {
+              if (journal && !journal.retire(assertWritable, firstRaw)) {
                 assertWritable();
                 let verifiedRaw: string | undefined = firstRaw;
                 try {
@@ -800,18 +797,24 @@ export function mutatePersonalImportLedger<T>(
                   }
                 }
                 assertWritable();
-                if (!writingCheckpointPublication && journal) {
+                if (!writingCheckpointPublication && journal && adoptedCheckpoint === undefined) {
                   try {
                     await publishCheckpoint(newReceipt);
                   } catch {
                     // The attempt already has a verified receipt.
                   }
                 }
-                assertWritable();
+              }
+              // Keep the adopted recovery bytes available until a proof is durable.
+              // A checkpoint that now holds the proof must remain on disk.
+              if (adoptedCheckpoint !== undefined && !writingCheckpointPublication) {
+                await retireNativeCheckpoint(key, adoptedCheckpoint, assertWritable);
+              }
+              assertWritable();
+              if (newReceipt !== undefined) {
                 if (!writingFileReceipt) currentReceipt = newReceipt;
                 if (writingBackupReceipt && !publishingRollbackResolution) currentBackupReceipt = newReceipt;
               }
-              assertWritable();
               pendingRestorations.delete(key);
             } catch (error) {
               if (writingCheckpointPublication) {

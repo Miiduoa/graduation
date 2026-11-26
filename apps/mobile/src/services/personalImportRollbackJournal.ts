@@ -589,8 +589,8 @@ export function capturePersonalImportRollback(key: string) {
   const { payload, marker, markerPresent, marked, orphan } = journalFiles(key, 'capture');
   const rejection = rejectionFile(key);
   const rejectionExists = probeJournalFile(rejection);
-  const rejectionValue = rejectionExists === false ? resolvedRejection : readOptionalFile(rejection) ??
-    (!marked ? readOptionalFile(rejectionBackupFile(key)) : undefined);
+  const primaryRejection = rejectionExists === false ? resolvedRejection : readOptionalFile(rejection);
+  const rejectionValue = primaryRejection ?? (!marked ? readOptionalFile(rejectionBackupFile(key)) : undefined);
   const verifiedReceipt = readRollbackResolution(rejectionValue);
   const rejectionRecorded = rejectionValue !== resolvedRejection && verifiedReceipt === undefined;
   const targetedRejection = rejectionValue?.match(targetedRejectionPattern);
@@ -693,9 +693,12 @@ export function capturePersonalImportRollback(key: string) {
   const proofs = readNativeFileCommitProofs(key, {
     stored, rearmed, attempt: attempt?.[0], embeddedHash: binding?.[1], retirementProof: retirementProof ?? null,
   });
-  const canUseCommitProof = (!rejected || rejectionUnreadable) &&
-    (rejectedRaw === undefined || attempt !== undefined);
   const unreadableCopy = stored === undefined && payloadError !== undefined;
+  // An orphan's backup may describe an older rollback. Let the verifier compare
+  // the proof against the current bytes and any exact denial before using it.
+  const canUseCommitProof = (!rejected || rejectionUnreadable ||
+    (unreadableCopy && markerPresent === false && primaryRejection === undefined && rejectionHash !== undefined)) &&
+    (rejectedRaw === undefined || attempt !== undefined);
   return {
     // An unreadable marker cannot establish retirement. Keep the payload
     // available so the caller can check it against the primary and publication evidence.
@@ -1030,10 +1033,10 @@ export function preparePersonalImportRollback(
     settlement.write(proof);
     return settlement.textSync() === proof;
   };
-  const retire = (assertWritable = () => {}, canDeleteMarker = true, primary?: string) => {
+  const retire = (assertWritable = () => {}, primary?: string) => {
     // Commit synchronously so verification and commit cannot be separated by another JS event.
     let deletionBound = !attempt;
-    if (canDeleteMarker && attempt) {
+    if (attempt) {
       // Preserve the old digest independently of pending until settlement is readable.
       const recoveryBinding = committedMarkerPrefix + attempt + sha256(encoded);
       try {
@@ -1043,7 +1046,7 @@ export function preparePersonalImportRollback(
         // Keep pending in place if the deletion window cannot be recovered.
       }
     }
-    if (canDeleteMarker && deletionBound && deleteMarker(marker)) {
+    if (deletionBound && deleteMarker(marker)) {
       // Keep the bound rollback copy if publication fails after marker removal.
       try {
         if (primary !== undefined && !settle(sha256(primary))) return false;

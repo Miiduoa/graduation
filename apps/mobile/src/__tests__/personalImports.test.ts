@@ -209,6 +209,16 @@ test.each([false, true])('native keeps an adopted checkpoint after an unreadable
     }
     return raw;
   });
+  const multiGet = jest.mocked(AsyncStorage.multiGet);
+  const nativeMultiGet = multiGet.getMockImplementation()!;
+  multiGet.mockImplementation(async (entries, callback) => {
+    const rows = await nativeMultiGet(entries, callback);
+    if (rows.some(([entry, raw]) => entry === key && raw && raw.length > original.length)) {
+      readbackFailed = true;
+      throw rowLimitError;
+    }
+    return rows;
+  });
   try {
     await expect(appendPersonalImports(scope, [row('c', '行程 C')])).rejects.toBe(rowLimitError);
     expect(await AsyncStorage.getItem(checkpoint)).toBe(original);
@@ -216,6 +226,7 @@ test.each([false, true])('native keeps an adopted checkpoint after an unreadable
     await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
   } finally {
     getItem.mockImplementation(nativeGet);
+    multiGet.mockImplementation(nativeMultiGet);
   }
 
   await appendPersonalImports(scope, [row('c', '行程 C')]);
@@ -223,7 +234,7 @@ test.each([false, true])('native keeps an adopted checkpoint after an unreadable
     .toEqual(['行程 A', '行程 C']);
 });
 
-test.each([false, true])('native checkpoint cleanup preserves the rollback copy through the final authority check (revoked: %s)', async (revoked) => {
+test.each([false, true])('native checkpoint cleanup follows durable publication and rechecks authority (revoked: %s)', async (revoked) => {
   const key = personalImportStorageKey(scope);
   const checkpoint = key + ':checkpoint';
   await appendPersonalImports(scope, [row('a', '行程 A')]);
@@ -241,7 +252,9 @@ test.each([false, true])('native checkpoint cleanup preserves the rollback copy 
   const nativeMultiSet = multiSet.getMockImplementation()!;
   let active = true;
   let restartedLedger: Awaited<ReturnType<typeof loadPersonalImports>> | undefined;
-  let journalDuringCleanup: string | undefined;
+  let checkpointDuringCleanup: string | null | undefined;
+  let proofDuringCleanup: string | undefined;
+  let primaryDuringCleanup: string | null | undefined;
   get.mockImplementation(async (entry) => {
     const raw = await nativeGet(entry);
     if (entry === key && !active && raw === original) throw rollbackReadError;
@@ -252,9 +265,11 @@ test.each([false, true])('native checkpoint cleanup preserves the rollback copy 
     return nativeMultiSet(entries, callback);
   });
   remove.mockImplementationOnce(async (entries) => {
+    checkpointDuringCleanup = await nativeGet(checkpoint);
+    primaryDuringCleanup = await nativeGet(key);
+    proofDuringCleanup = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.settled`).textSync();
     await nativeRemove(entries);
     if (revoked) active = false;
-    journalDuringCleanup = readPersonalImportRollback(key);
     // Reload the service without the original process's locks or pending rollback state.
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
@@ -273,9 +288,10 @@ test.each([false, true])('native checkpoint cleanup preserves the rollback copy 
       expect(readPersonalImportRollback(key)).toBeUndefined();
     }
     expect(remove).toHaveBeenCalledWith([checkpoint]);
-    expect(journalDuringCleanup).toBe(original);
-    // The pending copy remains authoritative during the cleanup authority check.
-    expect(restartedLedger?.records.map(({ title }) => title)).toEqual(['行程 A']);
+    expect(checkpointDuringCleanup).toBe(original);
+    expect(proofDuringCleanup).toMatch(/^attempt:/);
+    expect(proofDuringCleanup?.endsWith(sha256(primaryDuringCleanup!))).toBe(true);
+    expect(restartedLedger?.records.map(({ title }) => title)).toEqual(['行程 A', '行程 C']);
     expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
     expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
       .toEqual(revoked ? ['行程 A'] : ['行程 A', '行程 C']);
@@ -316,7 +332,8 @@ test.each(['read', 'remove'] as const)('native preserves and publishes a verifie
     expect(JSON.parse((await AsyncStorage.getItem(key))!)).toEqual(ledger);
     expect(await AsyncStorage.getItem(checkpoint)).toBe(original);
     expect(readPersonalImportRollback(key)).toBeUndefined();
-    expect(new File(Paths.document, `personal-imports-${sha256(key)}.rollback.pending`).info().exists).toBe(true);
+    const settlement = new File(Paths.document, `personal-imports-${sha256(key)}.rollback.settled`);
+    expect(settlement.textSync().endsWith(sha256((await AsyncStorage.getItem(key))!))).toBe(true);
     await jest.isolateModulesAsync(async () => {
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
@@ -1101,6 +1118,8 @@ type RecoveryFaultCase = [
     preserveCandidate?: boolean;
     solePublication?: string;
     legacyPublication?: boolean;
+    orphanedSettlement?: boolean;
+    batchPrimary?: boolean;
     missingProbe?: '.rollback.pending' | '.rollback.rejected';
   }?,
 ];
@@ -1240,7 +1259,12 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
     ['', 'setItem', 'setItem', 'save'],
   ], { lateInitialWrite: true }],
   ['primary readback differs', [['', 'save readback']]],
-  ['primary readback stays unavailable', [['', 'save read']]],
+  ['primary readback stays unavailable', [
+    ['', 'save read', 'getItem', 'save'], ['', 'save read', 'multiGet', 'save'],
+  ]],
+  ['first landed primary uses a batch read after two single reads fail', [
+    ['', 'save read', 'getItem', 'save'],
+  ], { batchPrimary: true }],
   ['backup retirement creation', [['.rollback.committed', 'write']]],
   ['pending deletion', [['.rollback.pending', 'remove']]],
   ['payload deletion', [['.rollback.json', 'remove']]],
@@ -1296,6 +1320,13 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
       ['documents', 'directory list', 'list', 'restart'],
     ], { solePublication, legacyPublication },
   ]),
+  ['settlement survives an old rejection backup after pending deletion', [
+    ['.rollback.json', 'remove', 'delete', 'save'],
+    ['.rollback.json', 'restart read', 'textSync', 'restart'],
+    ['.rollback.rejected', 'existence check', 'info', 'restart'],
+    ['.rollback.rejected', 'exists check', 'exists', 'restart'],
+    ['documents', 'directory list', 'list', 'restart'],
+  ], { solePublication: '.rollback.settled', orphanedSettlement: true }],
   ...(['bound copy', 'checkpoint'] as const).map((recoverySource): RecoveryFaultCase => [
     'primary-only save reloads from ' + recoverySource + ' when neither proof nor primary repair survives', [
       ...blockPublicationLayers(publicationLayers),
@@ -1518,7 +1549,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   name, failures, { staleCopy = false, primaryOnly = false, revokeFallback = false, landedRetirement = false,
     thirdWriteLands = false, revokeJournal = false, restoredWithoutPending = false,
     optionalReadAttempt, rejectedPrimary, entryPoint, functionGuard = false, rejectedRetry = false, batchReceipt,
-    missingProbe, solePublication, legacyPublication, unavailableJournal = false, noCommitProof = false, preserveCandidate = false, lateInitialWrite = false } = {},
+    missingProbe, solePublication, legacyPublication, orphanedSettlement, batchPrimary, unavailableJournal = false, noCommitProof = false, preserveCandidate = false, lateInitialWrite = false } = {},
 ) => {
   const scope = { owner: entryPoint === 'sync' ? 'nuni:pa_11111111-1111-4111-8111-111111111111'
     : 'nuni:recovery-matrix-' + name, schoolId: 'pu' };
@@ -1605,13 +1636,14 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     backupFile.write(`attempt:ordinary-prior-attempt:${hash}:${hash}:${hash}\n`);
   }
   const previousRaw = (await native.get(key))!;
+  if (orphanedSettlement) backupFile.write(sha256(previousRaw));
   if (functionGuard) {
     expect(previousRaw).toBe(JSON.stringify(previous));
     expect(new File(Paths.document, documentPrefix + '.rollback.pending').info().exists).toBe(false);
   }
   const primaryFault = faults.get('');
   const rejects = noCommitProof || lateInitialWrite || restoredWithoutPending || revokeJournal || revokeOnPrimary || revokeOnCheckpoint || revokeFallback ||
-    primaryFault === 'write' || primaryFault === 'save readback' || primaryFault === 'save read';
+    primaryFault === 'write' || primaryFault === 'save readback' || (primaryFault === 'save read' && !batchPrimary);
   let authorized = true;
   let phase: RecoveryPhase = 'save';
   const saveMissingProbe = functionGuard && failures.some(([, fault]) => fault === 'exists check');
@@ -1810,13 +1842,28 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
       expect(notified).toHaveBeenCalledTimes(1);
       await expect(notified.mock.results[0].value).resolves.toEqual(expected);
     }
-    if ((functionGuard && !noCommitProof) || rejectedRetry) {
+    if (batchPrimary) {
+      expect(primaryWrites).toHaveLength(1);
+      expect(landedPrimaryWrites).toEqual(primaryWrites);
+      expect(injected.filter(([location]) => location === ''))
+        .toEqual(Array(2).fill(['', 'save read', 'save', 'getItem']));
+      const batchIndex = getMany.mock.calls.findIndex(([keys], index) => keys.includes(key) &&
+        getMany.mock.invocationCallOrder[index] > set.mock.invocationCallOrder[set.mock.calls.findIndex(([entry, value]) =>
+          entry === key && value === primaryWrites[0])]);
+      expect(batchIndex).toBeGreaterThanOrEqual(0);
+      expect(getMany.mock.invocationCallOrder[batchIndex]).toBeLessThan(notified.mock.invocationCallOrder[0]);
+      await expect(getMany.mock.results[batchIndex].value).resolves.toContainEqual([key, primaryWrites[0]]);
+    }
+    if ((functionGuard && !noCommitProof) || rejectedRetry || batchPrimary || orphanedSettlement) {
       const settlementFile = new File(Paths.document, documentPrefix + '.rollback.settled');
       const proof = originalFile.text.call(settlementFile);
       expect(settlementReadbacks).toContain(proof);
       expect(proof).toMatch(/^attempt:/);
       expect(proof.endsWith(sha256((await native.get(key))!))).toBe(true);
       expect(originalFile.exists.call(new File(Paths.document, documentPrefix + '.rollback.pending'))).toBe(false);
+      if (orphanedSettlement) {
+        expect(originalFile.text.call(backupFile)).toBe(sha256(previousRaw));
+      }
       if (rejectedRetry) {
         const payload = originalFile.text.call(new File(Paths.document, documentPrefix + '.rollback.json'));
         expect(payload).toContain('\nrejected:\n' + JSON.stringify(previous));
@@ -2137,7 +2184,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
 
 test.each([
   ['committed', 'bound'], ['committed', 'unrelated'],
-  ['deleted', 'bound'], ['deleted', 'unrelated'],
+  ['deleted', 'bound'], ['deleted', 'unrelated'], ['deleted', 'adopted'],
 ] as const)(
   'restart before settlement with pending %s, an unreadable rollback copy and a %s checkpoint',
   async (pendingState, checkpointKind) => {
@@ -2145,8 +2192,9 @@ test.each([
     const key = personalImportStorageKey(scope);
     const { ledger: original } = await appendPersonalImports(scope, [row('original')]);
     const previousRaw = (await AsyncStorage.getItem(key))!;
-    await AsyncStorage.setItem(key + ':checkpoint', checkpointKind === 'bound'
+    await AsyncStorage.setItem(key + ':checkpoint', checkpointKind !== 'unrelated'
       ? previousRaw : JSON.stringify({ ...original, records: [] }));
+    if (checkpointKind === 'adopted') await AsyncStorage.removeItem(key);
     const prefix = 'personal-imports-' + sha256(key) + '.rollback.';
     const pending = new File(Paths.document, prefix + 'pending');
     const payload = new File(Paths.document, prefix + 'json');
@@ -2215,6 +2263,9 @@ test.each([
         get.mock.invocationCallOrder[index] > primaryWrite.mock.invocationCallOrder[0] &&
         get.mock.invocationCallOrder[index] < blockedSettlement.mock.invocationCallOrder[0])).toBe(true);
       expect(await AsyncStorage.getItem(key)).toBe(candidate);
+      if (checkpointKind === 'adopted') {
+        expect(await AsyncStorage.getItem(key + ':checkpoint')).toBe(previousRaw);
+      }
       const deletion = remove.mock.contexts.findIndex((file) => file.uri === pending.uri);
       expect(deletion).toBeGreaterThanOrEqual(0);
       expect(remove.mock.invocationCallOrder[deletion]).toBeLessThan(blockedSettlement.mock.invocationCallOrder[0]);
@@ -2232,7 +2283,7 @@ test.each([
       await jest.isolateModulesAsync(async () => {
         const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
         const load = restarted.loadPersonalImports(scope);
-        if (checkpointKind === 'bound') {
+        if (checkpointKind !== 'unrelated') {
           await expect(load).resolves.toEqual(original);
         } else {
           await expect(load).rejects.toThrow('無法確認匯入資料已還原');
