@@ -1100,6 +1100,7 @@ type RecoveryFaultCase = [
     noCommitProof?: boolean;
     preserveCandidate?: boolean;
     solePublication?: string;
+    legacyPublication?: boolean;
     missingProbe?: '.rollback.pending' | '.rollback.rejected';
   }?,
 ];
@@ -1145,6 +1146,25 @@ const rejectedAttemptWriteFailures: RecoveryFaultCase[1] = [
 const rejectedAttemptReadFailures: RecoveryFaultCase[1] = [
   [rejectedAttempt, 'restart read', 'getItem', 'restart'],
   [rejectedAttempt, 'restart read', 'multiGet', 'restart'],
+];
+const isolatedProofCases: Array<[string, RecoveryFaultCase[1], boolean?]> = [
+  ...publicationLayers.map((location, index): [string, RecoveryFaultCase[1]] => [
+    location, [...blockedAuxiliaryPublication, ...blockPublicationLayers(publicationLayers.slice(0, index)), [':checkpoint', 'write']],
+  ]),
+  ...(['.rollback.published', '.rollback.published.bak'] as const).flatMap((location) => {
+    const faults = blockedAuxiliaryPublication.filter(([file]) => file !== location && file !== '.rollback.settled');
+    return [[location, faults], [location, faults, true]] satisfies typeof isolatedProofCases;
+  }),
+  ['.rollback.settled', [['.rollback.verified', 'write', 'write', 'save']]],
+  ['.rollback.committed', [['.rollback.pending', 'retire marker', 'write', 'save']]],
+  ['.rollback.verified', blockedAuxiliaryPublication.filter(([file]) =>
+    ['.rollback.pending', '.rollback.committed', '.rollback.json'].includes(file),
+  )],
+  [':checkpoint', [
+    ...blockedAuxiliaryPublication,
+    ...blockPublicationLayers(publicationLayers),
+    ['.rollback.json', 'remove', 'delete', 'save'],
+  ]],
 ];
 const nativeRecoveryCases: RecoveryFaultCase[] = [
   ...[...rollbackFiles, ...publicationLayers].flatMap((location) =>
@@ -1265,24 +1285,16 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
     ['.rollback.committed', 'exists check', 'exists', 'restart'],
     ['documents', 'directory list', 'list', 'restart'],
   ], { staleCopy: true }],
-  ['verified-write receipt survives unreadable rollback copy and unknown rejection metadata on restart', [
-    ...blockedAuxiliaryPublication,
-    ['.rollback.pending', 'remove', 'delete', 'save'],
-    [':checkpoint', 'write'],
-    ['.rollback.json', 'restart read', 'textSync', 'restart'],
-    ['.rollback.rejected', 'existence check', 'info', 'restart'],
-    ['.rollback.rejected', 'exists check', 'exists', 'restart'],
-    ['documents', 'directory list', 'list', 'restart'],
-  ], { staleCopy: true }],
-  ...(['.rollback.published', '.rollback.published.bak'] as const).map((solePublication): RecoveryFaultCase => [
-    solePublication + ' survives unreadable rollback copy and unknown rejection metadata on restart', [
-      ...blockedAuxiliaryPublication.filter(([location]) => location !== solePublication && location !== '.rollback.settled'),
+  ...isolatedProofCases.map(([solePublication, saveFaults, legacyPublication]): RecoveryFaultCase => [
+    solePublication + (legacyPublication ? ' (legacy format)' : '') +
+      ' survives unreadable rollback copy and unknown rejection metadata on restart', [
+      ...saveFaults,
       ['.rollback.pending', 'remove', 'delete', 'save'],
       ['.rollback.json', 'restart read', 'textSync', 'restart'],
       ['.rollback.rejected', 'existence check', 'info', 'restart'],
       ['.rollback.rejected', 'exists check', 'exists', 'restart'],
       ['documents', 'directory list', 'list', 'restart'],
-    ], { solePublication },
+    ], { solePublication, legacyPublication },
   ]),
   ...(['bound copy', 'checkpoint'] as const).map((recoverySource): RecoveryFaultCase => [
     'primary-only save reloads from ' + recoverySource + ' when neither proof nor primary repair survives', [
@@ -1506,7 +1518,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   name, failures, { staleCopy = false, primaryOnly = false, revokeFallback = false, landedRetirement = false,
     thirdWriteLands = false, revokeJournal = false, restoredWithoutPending = false,
     optionalReadAttempt, rejectedPrimary, entryPoint, functionGuard = false, rejectedRetry = false, batchReceipt,
-    missingProbe, solePublication, unavailableJournal = false, noCommitProof = false, preserveCandidate = false, lateInitialWrite = false } = {},
+    missingProbe, solePublication, legacyPublication, unavailableJournal = false, noCommitProof = false, preserveCandidate = false, lateInitialWrite = false } = {},
 ) => {
   const scope = { owner: entryPoint === 'sync' ? 'nuni:pa_11111111-1111-4111-8111-111111111111'
     : 'nuni:recovery-matrix-' + name, schoolId: 'pu' };
@@ -1578,7 +1590,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     get: async (entry: string) => (await originalStorage.getMany([entry]))[0][1],
     remove: (entry: string) => originalStorage.removeMany([entry]),
   };
-  const unreadableCopy = solePublication || name.startsWith('verified-write receipt survives unreadable rollback copy');
+  const unreadableCopy = solePublication !== undefined;
   const secondResponseLost = failures.some(([, fault]) => fault === 'second primary response lost');
   if (!unavailableJournal && !unreadableCopy && !revokeJournal && (primaryOnly || failures.some(([location]) => location === '.rollback.rejected' &&
       (staleCopy || failures.some(([entry, fault]) => entry === location && fault === 'remove')) &&
@@ -1888,26 +1900,48 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
       expect(landedStorageWrites.has(':verified-write')).toBe(false);
     }
     if (unreadableCopy) {
-      expect(originalFile.exists.call(new File(Paths.document, documentPrefix + '.rollback.rejected'))).toBe(false);
-      if (!solePublication) expect((await native.get(key))!).toMatch(/^\{"records":/);
+      expect(originalFile.exists.call(new File(Paths.document, documentPrefix + '.rollback.rejected')))
+        .toBe(solePublication === '.rollback.rejected');
     }
+    let soleProofOnRestart: string | undefined;
     if (solePublication) {
-      const publication = new File(Paths.document, documentPrefix + solePublication);
       const payload = originalFile.text.call(new File(Paths.document, documentPrefix + '.rollback.json'));
-      const proof = payload.split('\n')[0] + '\n' + sha256((await native.get(key))!);
-      expect(originalFile.text.call(publication)).toBe(proof);
-      expect(read.mock.results.some(({ type, value }, index) =>
-        type === 'return' && value === proof &&
-        read.mock.contexts[index].uri === publication.uri &&
-        read.mock.invocationCallOrder[index] < notified.mock.invocationCallOrder[0])).toBe(true);
-      for (const location of publicationLayers.filter((location) => location.startsWith(':'))) {
-        expect(await native.get(key + location)).toBeNull();
+      const attempt = payload.match(/^attempt:.*$/m)![0];
+      const digest = sha256((await native.get(key))!);
+      const proof = attempt + '\n' + digest;
+      const beforeNotification = notified.mock.invocationCallOrder[0];
+      if (solePublication.startsWith(':')) {
+        const storageProof = await native.get(key + solePublication);
+        const expectedReadback = solePublication === ':checkpoint'
+          ? 'verified:' + proof.replace(/\n/g, ' ') + '\n' + JSON.stringify({ ...previous, records: [] })
+          : proof;
+        expect(storageProof).toBe(expectedReadback);
+        soleProofOnRestart = expectedReadback;
+        const readbacks = await Promise.all(get.mock.results.flatMap(({ type, value }, index) =>
+          type === 'return' && get.mock.calls[index][0] === key + solePublication &&
+          get.mock.invocationCallOrder[index] < beforeNotification
+            ? [Promise.resolve(value).catch(() => undefined)] : []));
+        expect(readbacks).toContain(expectedReadback);
+      } else {
+        const publication = new File(Paths.document, documentPrefix + solePublication);
+        const fileProof = solePublication === '.rollback.rejected' ? 'verified:\n' + proof : proof;
+        expect(originalFile.text.call(publication)).toBe(fileProof);
+        expect(read.mock.results.some(({ type, value }, index) =>
+          type === 'return' && value === fileProof &&
+          read.mock.contexts[index].uri === publication.uri &&
+          read.mock.invocationCallOrder[index] < beforeNotification)).toBe(true);
+        // Reproduce the bytes emitted by the legacy writer for this same primary.
+        soleProofOnRestart = legacyPublication ? sha256(payload) + '\n' + digest : fileProof;
+        if (legacyPublication) originalFile.write.call(publication, soleProofOnRestart);
       }
-      for (const location of [...rollbackFiles, '.rollback.committed', '.rollback.receipt']) {
+      for (const location of publicationLayers.filter((location) => location.startsWith(':'))) {
+        if (location !== solePublication) expect(await native.get(key + location)).toBeNull();
+      }
+      for (const location of [...rollbackFiles, '.rollback.committed', '.rollback.receipt', '.rollback.rejected']) {
         if (location === solePublication || location === '.rollback.json' || location === '.rollback.pending') continue;
         expect(originalFile.exists.call(new File(Paths.document, documentPrefix + location))).toBe(false);
       }
-      expect(await native.get(key + ':checkpoint')).not.toMatch(/^verified:/);
+      if (solePublication !== ':checkpoint') expect(await native.get(key + ':checkpoint')).not.toMatch(/^verified:/);
     }
     if (name.startsWith('verified-write receipt survives') || (secondResponseLost && !rejects)) {
       const receipt = await native.get(key + ':verified-write');
@@ -1975,6 +2009,18 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
       const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
       await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(expected);
     });
+    if (solePublication?.startsWith(':')) {
+      const results = get.mock.results.slice(readsBeforeRestart);
+      const readbacks = await Promise.all(results.flatMap(({ type, value }, index) =>
+        type === 'return' && get.mock.calls[readsBeforeRestart + index][0] === key + solePublication
+          ? [Promise.resolve(value).catch(() => undefined)] : []));
+      expect(readbacks).toContain(soleProofOnRestart);
+    } else if (solePublication) {
+      const proofRead = read.mock.results.slice(fileReadsBeforeRestart).some(({ type, value }, index) =>
+        type === 'return' && value === soleProofOnRestart &&
+        fileLocation(read.mock.contexts[fileReadsBeforeRestart + index]) === solePublication);
+      expect(proofRead).toBe(true);
+    }
     if (unreadableCopy) {
       expect(injected.filter(([location, , stage]) => location === '.rollback.json' && stage === 'restart'))
         .toEqual(Array(2).fill(['.rollback.json', 'restart read', 'restart', 'textSync']));
@@ -2089,10 +2135,13 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   }
 });
 
-test.each(['bound', 'unrelated'] as const)(
-  'restart before settlement with an unreadable rollback copy and a %s checkpoint',
-  async (checkpointKind) => {
-    const scope = { owner: 'nuni:interrupted-retirement-' + checkpointKind, schoolId: 'pu' };
+test.each([
+  ['committed', 'bound'], ['committed', 'unrelated'],
+  ['deleted', 'bound'], ['deleted', 'unrelated'],
+] as const)(
+  'restart before settlement with pending %s, an unreadable rollback copy and a %s checkpoint',
+  async (pendingState, checkpointKind) => {
+    const scope = { owner: 'nuni:interrupted-retirement-' + pendingState + '-' + checkpointKind, schoolId: 'pu' };
     const key = personalImportStorageKey(scope);
     const { ledger: original } = await appendPersonalImports(scope, [row('original')]);
     const previousRaw = (await AsyncStorage.getItem(key))!;
@@ -2141,7 +2190,7 @@ test.each(['bound', 'unrelated'] as const)(
       nativeCreate.call(this, options);
     });
     const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
-      if (this.uri === pending.uri) blockedDelete();
+      if (this.uri === pending.uri && pendingState === 'committed') blockedDelete();
       nativeDelete.call(this);
     });
     const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
@@ -2156,7 +2205,9 @@ test.each(['bound', 'unrelated'] as const)(
       await Promise.race([interrupted, save]);
       expect(primaryWrite).toHaveBeenCalledTimes(1);
       const candidate = primaryWrite.mock.calls[0][1];
-      const [state, attempt, originalHash] = nativeText.call(pending).split('\n');
+      expect(pending.info().exists).toBe(pendingState === 'committed');
+      const recoveryBinding = pendingState === 'committed' ? pending : new File(Paths.document, prefix + 'committed');
+      const [state, attempt, originalHash] = nativeText.call(recoveryBinding).split('\n');
       expect(state).toBe('committed');
       expect(attempt).toContain(sha256(candidate));
       expect(originalHash).toBe(sha256(previousRaw));
@@ -2164,11 +2215,15 @@ test.each(['bound', 'unrelated'] as const)(
         get.mock.invocationCallOrder[index] > primaryWrite.mock.invocationCallOrder[0] &&
         get.mock.invocationCallOrder[index] < blockedSettlement.mock.invocationCallOrder[0])).toBe(true);
       expect(await AsyncStorage.getItem(key)).toBe(candidate);
-      expect(blockedDelete).toHaveBeenCalledTimes(1);
+      const deletion = remove.mock.contexts.findIndex((file) => file.uri === pending.uri);
+      expect(deletion).toBeGreaterThanOrEqual(0);
+      expect(remove.mock.invocationCallOrder[deletion]).toBeLessThan(blockedSettlement.mock.invocationCallOrder[0]);
+      expect(blockedDelete).toHaveBeenCalledTimes(pendingState === 'committed' ? 1 : 0);
       expect(blockedSettlement).toHaveBeenCalledTimes(1);
-      expect(blockedRetirement).toHaveBeenCalledTimes(1);
+      expect(blockedRetirement).toHaveBeenCalledTimes(pendingState === 'committed' ? 1 : 0);
       for (const suffix of ['settled', 'rejected', 'committed', 'verified', 'published', 'published.bak', 'receipt']) {
-        expect(new File(Paths.document, prefix + suffix).info().exists).toBe(false);
+        expect(new File(Paths.document, prefix + suffix).info().exists)
+          .toBe(suffix === 'committed' && pendingState === 'deleted');
       }
       for (const suffix of [':verified-write', ':verified-write-backup', ':rollback-resolution']) {
         expect(await AsyncStorage.getItem(key + suffix)).toBeNull();

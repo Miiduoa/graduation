@@ -20,8 +20,10 @@ import {
   NativeRollbackUnavailableError,
   preparePersonalImportRollback,
   publishNativeRollbackResolution,
+  readNativeFileCommitProofs,
   readNativeVerificationReceipt,
   recordFailedPersonalImportRestoration,
+  verifyNativeCommitProof,
   withPersonalImportWriteLock,
   writeNativeVerificationReceipt,
 } from './personalImportRollbackJournal';
@@ -147,21 +149,23 @@ async function readLedgerSnapshot(
   const nativeRejectionBinding = primary?.match(nativeRestoredRejectionPattern)?.[1];
   const needsReceipt = !deniedAttempt && primaryVerified && (candidatePrimary || journal?.payloadError || rejectionMatches !== undefined || nativeRejectionBinding !== undefined || primaryAttempt !== undefined);
   const receipt = needsReceipt ? await readNativeReceipt(nativeReceiptKey(key)) : null;
-  const fileReceipt = needsReceipt ? readNativeVerificationReceipt(key) : undefined;
   const backupReceipt = needsReceipt ? await readNativeReceipt(nativeBackupReceiptKey(key)) : null;
   const rollbackResolution = needsReceipt ? await readNativeReceipt(nativeRollbackResolutionKey(key)) : null;
   const checkpointPublication = needsReceipt
     ? await readNativeReceipt(personalImportCheckpointKey(key))
     : null;
   const checkpointReceipt = checkpointPublication?.match(checkpointPublicationPattern)?.[1].replace(/ /g, '\n');
-  const receipts = [receipt, fileReceipt, backupReceipt, journal?.verifiedReceipt, rollbackResolution, checkpointReceipt];
+  const proofs = [
+    ...(journal?.commitProofs ?? (needsReceipt ? readNativeFileCommitProofs(key) : [])),
+    ...[receipt, backupReceipt, journal?.verifiedReceipt, rollbackResolution, checkpointReceipt].map((value) => ({ value })),
+  ];
   if (primary !== null && primaryAttempt) {
     const [, originalHash, attemptId] = primaryAttempt;
     const primaryDigest = sha256(primary);
     const proof = originalHash + '\n' + primaryDigest;
     const denied = journal?.rejectedPrimaryHash === primaryDigest ||
       await readNativeReceipt(nativeRejectionAttemptKey(key)) === proof;
-    if (!denied && receipts.includes(proof)) {
+    if (!denied && verifyNativeCommitProof(primary, proofs, { legacyBinding: originalHash })) {
       return {
         primary, primaryVerified, browserRecovery, recovery: null,
         preserveAttemptRejection: false, restoredRejectionHash: nativeRejectionBinding, receipt, backupReceipt,
@@ -186,24 +190,24 @@ async function readLedgerSnapshot(
   const rejectionHash = journal?.rejectionHash;
   const primaryHash = primaryVerified && primary !== null && (rejectionMatches || nativeRejectionBinding) ? sha256(primary) : undefined;
   const explicitlyRejected = primaryHash !== undefined && journal?.rejectedPrimaryHash === primaryHash;
-  const publishedRejectionHash = primaryHash === undefined || explicitlyRejected ? undefined : receipts
-    .map((proof) => proof?.match(/^([a-f0-9]{64})\n([a-f0-9]{64})$/))
-    .find((proof) => proof && (proof[1] === (rejectionHash ?? nativeRejectionBinding)) &&
-      proof[2] === primaryHash)?.[1];
+  const publishedRejectionHash = primaryHash === undefined || primary === null || explicitlyRejected ? undefined :
+    verifyNativeCommitProof(primary, proofs, { legacyBinding: rejectionHash ?? nativeRejectionBinding })?.legacyBinding;
   const boundRestoredRejection = primaryHash !== undefined && rejectionHash !== undefined &&
     !explicitlyRejected && nativeRejectionBinding === rejectionHash
     ? rejectionHash
     : undefined;
   const restoredRejectionHash = publishedRejectionHash ?? boundRestoredRejection ??
     ((primaryVerified || restoredEmpty) && rejectionMatches?.(primary) ? rejectionHash : undefined);
-  const verifiedByJournal = primary !== null && (
-    publishedRejectionHash !== undefined ||
-    journal?.matchesVerifiedPrimary?.(primary) === true ||
-    receipts.some((proof) => typeof proof === 'string' && journal?.matchesVerifiedReceipt?.(primary, proof)) ||
-    await journal?.verifyWithoutPayload?.(primary, receipts, () => readNativeReceipt(nativeRejectionAttemptKey(key))) === true
+  const commitContext = journal?.commitProofContext;
+  const deniedBindings = journal?.readBackupDenial && commitContext && primaryVerified && !deniedAttempt
+    ? [journal.readBackupDenial(), denial ?? await readNativeReceipt(nativeRejectionAttemptKey(key))]
+    : [denial];
+  const verifiedByJournal = publishedRejectionHash !== undefined || (
+    primaryVerified && primary !== null && !deniedAttempt && commitContext !== undefined &&
+    verifyNativeCommitProof(primary, proofs, { ...commitContext, denials: deniedBindings }) !== undefined
   );
-  const uncommittedPrimary = !verifiedByJournal && (candidatePrimary ||
-    (journal?.unreadableCommittedCopy === true && !journal.matchesAttemptedPrimary));
+  const uncommittedPrimary = !verifiedByJournal && !restoredRejectionHash &&
+    (candidatePrimary || journal?.unreadableCopy === true);
   const checkpointRejection = restoredRejectionHash || verifiedByJournal
     ? undefined
     : rejectionMatches ?? (uncommittedPrimary ? journal?.matchesCommittedCheckpoint : undefined);
@@ -212,7 +216,7 @@ async function readLedgerSnapshot(
     (nativeRejectionBinding !== undefined && rejectionMatches === undefined) ||
     (journal.payloadError && hasNativeCommitEncoding(primary))
   );
-  if (!primaryVerified || rejectedPrimary) {
+  if (!primaryVerified || (rejectedPrimary && !checkpointRejection)) {
     if (journal?.markerError && !deniedAttempt) throw journal.markerError;
     if (journal?.payloadError) throw journal.payloadError;
   }
