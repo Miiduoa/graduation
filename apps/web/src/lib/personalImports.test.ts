@@ -6,6 +6,7 @@ import {
   undoPersonalImports,
   changePersonalImport,
   personalImportsStorageKey,
+  PERSONAL_IMPORT_CHANGE,
 } from './personalImports';
 const scope = { owner: 'platform:one', schoolId: 'pu' };
 const rows = (text = '課程名稱,學分,成績\n資料庫,3,85') =>
@@ -65,6 +66,41 @@ it('does not lose old data on failed persistence or conflicting grades', async (
   ).rejects.toThrow('沒有存成');
   expect(localStorage.getItem(personalImportsStorageKey(scope))).toBe(original);
 });
+it('reports success and notifies when the primary readback throws after setItem', async () => {
+  const key = personalImportsStorageKey(scope);
+  const storageMethods = Object.hasOwn(localStorage, 'setItem')
+    ? localStorage
+    : Object.getPrototypeOf(localStorage);
+  const getItem = localStorage.getItem.bind(localStorage);
+  const setItem = localStorage.setItem.bind(localStorage);
+  let failReadback = false;
+  const readFault = vi.fn(() => { throw new Error('主鍵暫時無法讀回'); });
+  vi.spyOn(storageMethods, 'getItem').mockImplementation((...args: unknown[]) => {
+    const entry = args[0] as string;
+    if (entry === key && failReadback) {
+      failReadback = false;
+      readFault();
+    }
+    return getItem(entry);
+  });
+  vi.spyOn(storageMethods, 'setItem').mockImplementation((...args: unknown[]) => {
+    const [entry, value] = args as [string, string];
+    setItem(entry, value);
+    if (entry === key) failReadback = true;
+  });
+  const reread = vi.fn(() => readPersonalImports(scope));
+  window.addEventListener(PERSONAL_IMPORT_CHANGE, reread);
+  try {
+    await expect(savePersonalImportBatch(scope, rows())).resolves.toMatchObject({ added: 1 });
+    expect(readFault).toHaveBeenCalledTimes(1);
+    expect(reread).toHaveBeenCalledTimes(1);
+    expect(reread.mock.results[0].value).toEqual([expect.objectContaining({ title: '資料庫' })]);
+    expect(readPersonalImports(scope)).toEqual(reread.mock.results[0].value);
+  } finally {
+    window.removeEventListener(PERSONAL_IMPORT_CHANGE, reread);
+  }
+});
+
 it('undo preserves records imported later and records edited after the batch', async () => {
   const first = await savePersonalImportBatch(scope, rows());
   const original = readPersonalImports(scope)[0];
@@ -149,4 +185,128 @@ it('leaves the complete envelope untouched when sync storage fails or the accoun
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
   await expect(withPersonalImportSyncLock(scope, async (state) => ({ state: { ...state, records: [] }, result: undefined }))).rejects.toThrow('裝置空間不足');
   expect(localStorage.getItem(personalImportsStorageKey(scope))).toBe(before);
+});
+
+it.each([false, true])('uses the only available checkpoint before saving (wrapped: %s)', async (wrapped) => {
+  const key = personalImportsStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  await savePersonalImportBatch(scope, rows());
+  const original = localStorage.getItem(key)!;
+  localStorage.setItem(checkpoint, wrapped ? JSON.stringify(original) : original);
+  localStorage.removeItem(key);
+
+  expect(readPersonalImports(scope).map(({ title }) => title)).toEqual(['資料庫']);
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n英文,2,90'));
+  expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({
+    version: 1,
+    records: [expect.objectContaining({ title: '資料庫' }), expect.objectContaining({ title: '英文' })],
+  });
+  expect(localStorage.getItem(checkpoint)).toBeNull();
+});
+
+it('preserves a recovery copy that was not used as the basis for a save', async () => {
+  const key = personalImportsStorageKey(scope);
+  await savePersonalImportBatch(scope, rows());
+  const checkpoint = localStorage.getItem(key)!;
+  localStorage.removeItem(key);
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n英文,2,90'));
+  localStorage.setItem(key + ':checkpoint', checkpoint);
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n微積分,2,90'));
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n演算法,2,90'));
+  expect(localStorage.getItem(key + ':checkpoint')).toBe(checkpoint);
+});
+
+it.each([false, true])('keeps readable primary records when sync is damaged (legacy commit: %s)', async (legacyCommit) => {
+  const key = personalImportsStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  await savePersonalImportBatch(scope, rows());
+  const older = localStorage.getItem(key)!;
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n英文,2,90'));
+  const { records } = JSON.parse(localStorage.getItem(key)!);
+  const primary = JSON.stringify({
+    [legacyCommit ? '$commit' : 'version']: 1,
+    records,
+    sync: { enabled: 'damaged' },
+  });
+  localStorage.setItem(key, primary);
+  localStorage.setItem(checkpoint, older);
+
+  expect(readPersonalImports(scope).map(({ title }) => title)).toEqual(['資料庫', '英文']);
+  await expect(savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n微積分,2,90'))).rejects.toThrow();
+  expect(localStorage.getItem(key)).toBe(primary);
+  expect(localStorage.getItem(checkpoint)).toBe(older);
+});
+
+it('saves a legacy Expo Web commit as version 1 without adopting a stale checkpoint', async () => {
+  const key = personalImportsStorageKey(scope);
+  await savePersonalImportBatch(scope, rows());
+  const older = localStorage.getItem(key)!;
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n英文,2,90'));
+  const { version, ...ledger } = JSON.parse(localStorage.getItem(key)!);
+  localStorage.setItem(key, JSON.stringify({ $commit: version, ...ledger }));
+  localStorage.setItem(key + ':checkpoint', older);
+
+  await savePersonalImportBatch(scope, rows('課程名稱,學分,成績\n微積分,2,90'));
+  expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ version: 1 });
+  expect(readPersonalImports(scope).map(({ title }) => title)).toEqual(['資料庫', '英文', '微積分']);
+  expect(localStorage.getItem(key + ':checkpoint')).toBe(older);
+});
+
+it('keeps a checkpoint replaced during sync and refuses to publish from the earlier snapshot', async () => {
+  const { withPersonalImportSyncLock } = await import('./personalImports');
+  const key = personalImportsStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  await savePersonalImportBatch(scope, rows());
+  const original = localStorage.getItem(key)!;
+  localStorage.setItem(checkpoint, original);
+  localStorage.removeItem(key);
+  const replacement = JSON.stringify(original);
+  await expect(withPersonalImportSyncLock(scope, async (state) => {
+    expect(state.records.map(({ title }) => title)).toEqual(['資料庫']);
+    localStorage.setItem(checkpoint, replacement);
+    return { state: { ...state, sync: { enabled: true, base: state.sync?.base ?? null } }, result: undefined };
+  })).rejects.toThrow();
+  expect(localStorage.getItem(key)).toBeNull();
+  expect(localStorage.getItem(checkpoint)).toBe(replacement);
+});
+
+it.each(['{"version":1,', '"{\"version\":1,"', '{"version":1,"records":{}}'])(
+  'saves and syncs with only a damaged checkpoint (%s)',
+  async (damaged) => {
+    const { withPersonalImportSyncLock, readPersonalImportSyncState } = await import('./personalImports');
+    const key = personalImportsStorageKey(scope);
+    const checkpoint = key + ':checkpoint';
+    localStorage.setItem(checkpoint, damaged);
+
+    expect(readPersonalImports(scope)).toEqual([]);
+    await expect(savePersonalImportBatch(scope, rows())).resolves.toMatchObject({ added: 1 });
+    expect(readPersonalImports(scope).map(({ title }) => title)).toEqual(['資料庫']);
+    expect(localStorage.getItem(checkpoint)).toBe(damaged);
+
+    localStorage.removeItem(key);
+    await withPersonalImportSyncLock(scope, async (state, persist) => {
+      expect(state).toEqual({ records: [], sync: { enabled: false, base: null } });
+      const next = { ...state, sync: { enabled: true, base: null } };
+      await persist(next);
+      return { state: next, result: undefined };
+    });
+    expect(readPersonalImportSyncState(scope)).toEqual({ enabled: true, base: null });
+    expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ version: 1, records: [] });
+    expect(localStorage.getItem(checkpoint)).toBe(damaged);
+  },
+);
+
+it('checks the damaged checkpoint snapshot before publishing sync', async () => {
+  const { withPersonalImportSyncLock } = await import('./personalImports');
+  const key = personalImportsStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  localStorage.setItem(checkpoint, '{"version":1,');
+  const replacement = '{"version":1,"records":[]}';
+  await expect(withPersonalImportSyncLock(scope, async (state) => {
+    expect(state.records).toEqual([]);
+    localStorage.setItem(checkpoint, replacement);
+    return { state: { ...state, sync: { enabled: true, base: null } }, result: undefined };
+  })).rejects.toThrow();
+  expect(localStorage.getItem(key)).toBeNull();
+  expect(localStorage.getItem(checkpoint)).toBe(replacement);
 });

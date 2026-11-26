@@ -78,8 +78,11 @@ jest.mock('expo-constants', () => ({
 }));
 
 // Mock expo-file-system
+const mockDocumentPath = 'file:///mock/documents';
+const mockDocumentFiles = new Map();
+beforeEach(() => mockDocumentFiles.clear());
 jest.mock('expo-file-system', () => ({
-  documentDirectory: 'file:///mock/documents/',
+  documentDirectory: mockDocumentPath + '/',
   cacheDirectory: 'file:///mock/cache/',
   EncodingType: { Base64: 'base64' },
   writeAsStringAsync: jest.fn(() => Promise.resolve()),
@@ -87,17 +90,50 @@ jest.mock('expo-file-system', () => ({
   deleteAsync: jest.fn(() => Promise.resolve()),
   getInfoAsync: jest.fn(() => Promise.resolve({ exists: false })),
   makeDirectoryAsync: jest.fn(() => Promise.resolve()),
+  Paths: { document: mockDocumentPath },
+  Directory: class {
+    constructor(...segments) {
+      this.uri = segments.join('/');
+    }
+    list() {
+      return [...mockDocumentFiles.keys()]
+        .filter((uri) => uri.startsWith(this.uri + '/'))
+        .map((uri) => ({ uri }));
+    }
+  },
   File: class {
-    constructor(uri) {
-      this.uri = uri;
-      this.exists = true;
+    constructor(...segments) {
+      this.uri = segments.join('/');
       this.size = 12;
+    }
+    get exists() {
+      return !this.uri.startsWith(mockDocumentPath + '/') || mockDocumentFiles.has(this.uri);
     }
     async base64() {
       return '';
     }
     async arrayBuffer() {
       return new Uint8Array([1, 2, 3]).buffer;
+    }
+    info() {
+      return { exists: this.exists };
+    }
+    create() {
+      if (mockDocumentFiles.has(this.uri)) throw new Error('file already exists');
+      mockDocumentFiles.set(this.uri, '');
+    }
+    write(content) {
+      mockDocumentFiles.set(this.uri, content);
+    }
+    async text() {
+      return this.textSync();
+    }
+    textSync() {
+      if (!mockDocumentFiles.has(this.uri)) throw new Error('file does not exist');
+      return mockDocumentFiles.get(this.uri);
+    }
+    delete() {
+      if (!mockDocumentFiles.delete(this.uri)) throw new Error('file does not exist');
     }
   },
 }));

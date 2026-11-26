@@ -4,10 +4,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { parseAssistantCalendarExecutionResult } from '@campus/shared/src/assistantExecution';
 import { parseAssistantFoodPickupTarget, type AssistantFoodPickupTarget } from '@campus/shared/src/assistantFoodPickupTarget';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
+import { NuniNextStep } from '@/components/NuniNextStep';
 import { useAssistantEnabled } from '@/components/AssistantEnabledProvider';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Input';
-import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal, removeAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
 import { AssistantCard } from '@/features/nuni/assistant/AssistantCards';
@@ -16,7 +17,15 @@ import type { V2ActionState, V2ActionStates, V2Card, V2Reply } from '@/features/
 import { foodPickupRecovery, parseFoodPickupReply } from './foodPickupEvidence';
 import styles from './FoodPickupAgent.module.css';
 
-type Props = { context: string; accountId: string; tenantId: string; orderId: string; available: boolean };
+type Props = {
+  context: string;
+  accountId: string;
+  tenantId: string;
+  schoolId: string;
+  orderId: string;
+  available: boolean;
+  suggestion: string | null;
+};
 type Scope = { context: string; accountId: string; schoolId: string };
 type Run = { controller: AbortController; busy: boolean };
 type Pending = 'pickup-plan' | 'confirm' | 'cancel' | 'reconcile' | null;
@@ -248,9 +257,12 @@ function ScopedFoodPickupAgent({ scope, ...props }: Props & { scope: Scope }) {
   }
   const open = state.reply?.cards.some(card => !settled(state.states[card.mutationId]));
   if (!props.available && !state.reply && !state.error && !state.otherPending) return null;
-  return <section className={styles.panel} aria-label="取餐行程安排">
-    <div><h3>把這次取餐排進行事曆</h3><p className={styles.note}>依這筆訂單的取餐時間，比對課表與個人行程，確認後儲存。</p></div>
-    {props.available && !open && !state.reply?.cards.some(card => state.states[card.mutationId]?.status === 'verified') && <div className={styles.controls}>
+  if (!state.ready && !state.reply && !state.error && !state.otherPending) {
+    return props.suggestion ? <p role="status">正在確認取餐安排是否可用…</p> : null;
+  }
+  const showPreview = props.available && !open && !state.reply?.cards.some(card => state.states[card.mutationId]?.status === 'verified');
+  const contents = <>
+    {showPreview && <div className={styles.controls}>
       <Select label="取餐預留時間" value={minutes} disabled={!!state.pending || !!open}
         options={[5, 10, 15, 20, 30, 60].map(value => ({ value: String(value), label: `${value} 分鐘` }))}
         onChange={event => setMinutes(event.target.value)} />
@@ -281,16 +293,29 @@ function ScopedFoodPickupAgent({ scope, ...props }: Props & { scope: Scope }) {
           <Button disabled={!!state.pending} onClick={() => void cancel(state.reply!.cards[index])}>停止這份未完成安排</Button>}
       </div>)}
     </>}
+  </>;
+  if (showPreview && props.suggestion && state.planning && state.writes && !state.otherPending) {
+    return <NuniNextStep reason={props.suggestion}>{contents}</NuniNextStep>;
+  }
+  if (showPreview && !props.suggestion && !state.reply && !state.error && !state.otherPending) {
+    return <details className={styles.panel}>
+      <summary>安排稍後取餐的時間</summary>
+      {contents}
+    </details>;
+  }
+  return <section className={styles.panel} aria-label="取餐行程安排">
+    <h3>這筆訂單的取餐行程</h3>
+    {contents}
   </section>;
 }
 
 export function FoodPickupAgent(props: Props) {
   const enabled = useAssistantEnabled();
-  const campus = useCampusBrowseContext();
-  if (!enabled || campus.status !== 'ready' || !campus.schoolId ||
+  const schoolId = toPublicSchoolId(props.schoolId);
+  if (!enabled || !schoolId ||
       !/^[A-Za-z0-9_-]{43}$/.test(props.context) || !/^[A-Za-z0-9_-]{1,128}$/.test(props.accountId)) return null;
   let target: AssistantFoodPickupTarget;
   try { target = parseAssistantFoodPickupTarget({ tenantId: props.tenantId, orderId: props.orderId }); } catch { return null; }
-  const scope = { context: props.context, accountId: props.accountId, schoolId: campus.schoolId };
+  const scope = { context: props.context, accountId: props.accountId, schoolId };
   return <ScopedFoodPickupAgent key={JSON.stringify([scope, target.tenantId, target.orderId])} scope={scope} {...props} />;
 }

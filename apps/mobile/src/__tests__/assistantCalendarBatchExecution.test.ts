@@ -92,10 +92,16 @@ test('one explicit confirmation writes in order, holds the UI lock between steps
 test('an unknown second write stops the third; late commit is rechecked and only a new confirmation writes the remainder', async () => {
   const prepared = await prepareAssistantCalendarBatch(events, context());
   let dispatches = 0;
-  let lateLedger = '';
+  let readsAfterSecondWrite = 0;
   jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
-    if (key === ledgerKey && ++dispatches === 2) { lateLedger = value; throw new Error('native result unknown'); }
     await originalSet(key, value);
+    if (key === ledgerKey) dispatches++;
+  });
+  jest.mocked(AsyncStorage.getItem).mockImplementation(async (key) => {
+    if (key === ledgerKey && dispatches === 2 && ++readsAfterSecondWrite > 1) {
+      throw new Error('temporarily unavailable after commit');
+    }
+    return originalGet(key);
   });
   const paused = await confirmAssistantCalendarBatch(prepared.plan, context());
   expect(paused).toMatchObject({ state: 'paused', progress: { verified: 1, notStarted: 1 },
@@ -104,7 +110,7 @@ test('an unknown second write stops the third; late commit is rechecked and only
   expect(originalIds).toHaveLength(2);
   expect((await confirmAssistantCalendarBatch(prepared.plan, context())).state).toBe('paused');
   expect(dispatches).toBe(2);
-  await originalSet(ledgerKey, lateLedger);
+  jest.mocked(AsyncStorage.getItem).mockImplementation(originalGet);
   const checked = await recheckAssistantCalendarBatch(prepared.plan, context());
   expect(checked).toMatchObject({ state: 'review', progress: { verified: 2, notStarted: 1 } });
   expect(dispatches).toBe(2);
@@ -112,6 +118,33 @@ test('an unknown second write stops the third; late commit is rechecked and only
   expect(completed.state).toBe('completed');
   expect(dispatches).toBe(3);
   expect((await readAssistantCalendarJournal(scope, () => true)).slice(0, 2).map((entry) => entry.proposal.mutationId)).toEqual(originalIds);
+});
+
+test('a lost second native response leaves late unproven bytes out of reconciliation and stops the third step', async () => {
+  const prepared = await prepareAssistantCalendarBatch(events, context());
+  let dispatches = 0;
+  let lateLedger: string | undefined;
+  jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
+    if (key === ledgerKey && ++dispatches === 2) {
+      lateLedger = value;
+      throw new Error('native result unknown');
+    }
+    await originalSet(key, value);
+  });
+  const paused = await confirmAssistantCalendarBatch(prepared.plan, context());
+  expect(paused).toMatchObject({ state: 'paused', progress: { verified: 1, notStarted: 1 },
+    steps: [{ state: 'recorded', task: { state: 'verified' } }, { state: 'recorded', task: { state: 'unknown' } }, { state: 'not-started' }] });
+  const ids = (await readAssistantCalendarJournal(scope, () => true)).map((entry) => entry.proposal.mutationId);
+  expect(ids).toHaveLength(2);
+  expect(lateLedger).toEqual(expect.any(String));
+  await originalSet(ledgerKey, lateLedger!);
+  expect(await recheckAssistantCalendarBatch(prepared.plan, context())).toMatchObject({
+    state: 'paused', progress: { verified: 1, notStarted: 1 },
+  });
+  expect((await loadPersonalImports(scope)).records.map(({ id }) => id)).toEqual([ids[0]]);
+  expect((await confirmAssistantCalendarBatch(prepared.plan, context())).state).toBe('paused');
+  expect((await readAssistantCalendarJournal(scope, () => true)).map((entry) => entry.proposal.mutationId)).toEqual(ids);
+  expect(ledgerWrites().filter(([, value]) => value === lateLedger)).toHaveLength(1);
 });
 
 test('a saved-then-rejected native response can continue only after the original single executor verifies it', async () => {
@@ -203,53 +236,78 @@ test('a cancelled partial plan retains completed receipts and cannot be resumed 
   expect(ledgerWrites()).toHaveLength(0);
 });
 
-test('abort fences pending work, rejects a concurrent run, and never publishes a late native response', async () => {
-  const prepared = await prepareAssistantCalendarBatch(events, context());
+function holdLedgerOperation(stage: 'before commit' | 'after commit') {
   const gate = deferred<void>();
   const entered = deferred<void>();
-  const updates: AssistantCalendarBatchView[] = [];
+  let saved = false;
+  let readsAfterWrite = 0;
   jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
     await originalSet(key, value);
-    if (key === ledgerKey) { entered.resolve(); await gate.promise; }
+    if (key !== ledgerKey) return;
+    saved = true;
+    if (stage === 'before commit') {
+      entered.resolve();
+      await gate.promise;
+    }
   });
-  const controller = new AbortController();
-  const run = confirmAssistantCalendarBatch(prepared.plan, context(), { signal: controller.signal, onUpdate: (view) => updates.push(view) });
-  await entered.promise;
-  await expect(confirmAssistantCalendarBatch(prepared.plan, context())).rejects.toMatchObject({ code: 'batch-busy' });
-  controller.abort();
-  const stopped = await run;
-  expect(stopped).toMatchObject({ state: 'paused', stop: { reason: 'aborted' }, progress: { notStarted: 2 },
-    steps: [{ state: 'recorded', task: { state: 'unknown' } }, { state: 'not-started' }, { state: 'not-started' }] });
-  const published = updates.length;
-  gate.resolve();
-  await flush();
-  expect(updates).toHaveLength(published);
-  expect(ledgerWrites()).toHaveLength(1);
-  expect((await readAssistantCalendarBatchPlans(scope, () => true))[0].cancelledAt).toBeUndefined();
-  const checked = await recheckAssistantCalendarBatch(prepared.plan, context());
-  expect(checked).toMatchObject({ state: 'review', progress: { verified: 1, notStarted: 2 } });
-  expect(ledgerWrites()).toHaveLength(1);
-});
+  jest.mocked(AsyncStorage.getItem).mockImplementation(async (key) => {
+    if (stage === 'after commit' && key === ledgerKey && saved && ++readsAfterWrite > 1) {
+      entered.resolve();
+      await gate.promise;
+    }
+    return originalGet(key);
+  });
+  return { gate, entered };
+}
 
-test('persisting cancellation fences the active run before waiting for its current native write', async () => {
-  const prepared = await prepareAssistantCalendarBatch(events, context());
-  const gate = deferred<void>();
-  const entered = deferred<void>();
-  jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
-    await originalSet(key, value);
-    if (key === ledgerKey) { entered.resolve(); await gate.promise; }
-  });
-  const run = confirmAssistantCalendarBatch(prepared.plan, context());
-  await entered.promise;
-  const cancellation = cancelRemainingAssistantCalendarBatch(prepared.plan, context());
-  await flush();
-  expect(JSON.parse((await originalGet(batchKey))!).plans[0].cancelledAt).toEqual(expect.any(String));
-  gate.resolve();
-  const [stopped, cancelled] = await Promise.all([run, cancellation]);
-  expect(stopped.state).toBe('paused');
-  expect(cancelled).toMatchObject({ state: 'cancelled', progress: { verified: 1, notStarted: 2 } });
-  expect(ledgerWrites()).toHaveLength(1);
-});
+test.each(['before commit', 'after commit'] as const)(
+  'abort %s fences pending work, rejects a concurrent run, and never publishes a late native response',
+  async (stage) => {
+    const prepared = await prepareAssistantCalendarBatch(events, context());
+    const { gate, entered } = holdLedgerOperation(stage);
+    const updates: AssistantCalendarBatchView[] = [];
+    const controller = new AbortController();
+    const run = confirmAssistantCalendarBatch(prepared.plan, context(), { signal: controller.signal, onUpdate: (view) => updates.push(view) });
+    await entered.promise;
+    await expect(confirmAssistantCalendarBatch(prepared.plan, context())).rejects.toMatchObject({ code: 'batch-busy' });
+    controller.abort();
+    const stopped = await run;
+    expect(stopped).toMatchObject({ state: 'paused', stop: { reason: 'aborted' }, progress: { notStarted: 2 },
+      steps: [{ state: 'recorded', task: { state: 'unknown' } }, { state: 'not-started' }, { state: 'not-started' }] });
+    const published = updates.length;
+    gate.resolve();
+    await flush();
+    expect(updates).toHaveLength(published);
+    expect(ledgerWrites()).toHaveLength(1);
+    expect((await readAssistantCalendarBatchPlans(scope, () => true))[0].cancelledAt).toBeUndefined();
+    const checked = await recheckAssistantCalendarBatch(prepared.plan, context());
+    expect(checked).toMatchObject(stage === 'before commit'
+      ? { state: 'paused', progress: { verified: 0, notStarted: 2 } }
+      : { state: 'review', progress: { verified: 1, notStarted: 2 } });
+    expect((await loadPersonalImports(scope)).records).toHaveLength(stage === 'before commit' ? 0 : 1);
+    expect(ledgerWrites()).toHaveLength(1);
+  },
+);
+
+test.each(['before commit', 'after commit'] as const)(
+  'persisting cancellation %s fences the active run before waiting for storage',
+  async (stage) => {
+    const prepared = await prepareAssistantCalendarBatch(events, context());
+    const { gate, entered } = holdLedgerOperation(stage);
+    const run = confirmAssistantCalendarBatch(prepared.plan, context());
+    await entered.promise;
+    const cancellation = cancelRemainingAssistantCalendarBatch(prepared.plan, context());
+    await flush();
+    expect(JSON.parse((await originalGet(batchKey))!).plans[0].cancelledAt).toEqual(expect.any(String));
+    gate.resolve();
+    const [stopped, cancelled] = await Promise.all([run, cancellation]);
+    expect(stopped.state).toBe('paused');
+    const verified = stage === 'before commit' ? 0 : 1;
+    expect(cancelled).toMatchObject({ state: 'cancelled', progress: { verified, notStarted: 2 } });
+    expect((await loadPersonalImports(scope)).records).toHaveLength(verified);
+    expect(ledgerWrites()).toHaveLength(1);
+  },
+);
 
 test('an owner change after dispatch cannot publish an old result or start another step', async () => {
   const prepared = await prepareAssistantCalendarBatch(events, context());

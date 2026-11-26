@@ -84,6 +84,48 @@ beforeEach(() => {
 });
 
 describe('browser personal import synchronization', () => {
+  it.each([true, false])('replays pending sync only from a current recovery snapshot (replaced: %s)', async (replaced) => {
+    await savePersonalImportBatch(scope, rows());
+    const key = personalImportsStorageKey(scope);
+    const checkpoint = key + ':checkpoint';
+    const records = readPersonalImports(scope);
+    const pending = { mutationId: 'recovered-pending', expectedRevision: 0, records };
+    const recovery = JSON.stringify({
+      version: 1, records, batches: [], sync: { enabled: true, base: null, pending },
+    });
+    const replacement = JSON.stringify({ version: 1, records: [], batches: [] });
+    localStorage.setItem(checkpoint, recovery);
+    localStorage.removeItem(key);
+    const getItem = Storage.prototype.getItem;
+    const getSpy = replaced
+      ? vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, storageKey) {
+          const raw = getItem.call(this, storageKey);
+          if (this === localStorage && storageKey === checkpoint && raw === recovery) {
+            localStorage.setItem(checkpoint, replacement);
+          }
+          return raw;
+        })
+      : undefined;
+    try {
+      await syncPersonalImports(scope, identity, () => true);
+      if (replaced) {
+        expect(browserRequest).not.toHaveBeenCalled();
+        expect(remote.revision).toBe(0);
+        expect(getPersonalImportSyncStatus(scope)?.phase).toBe('error');
+        expect(localStorage.getItem(key)).toBeNull();
+        expect(localStorage.getItem(checkpoint)).toBe(replacement);
+      } else {
+        expect(browserRequest).toHaveBeenCalledExactlyOnceWith(
+          'personal-imports/write', identity.context, { schoolId: scope.schoolId, ...pending },
+        );
+        expect(remote.records).toEqual(records);
+        expect(localStorage.getItem(checkpoint)).toBeNull();
+      }
+    } finally {
+      getSpy?.mockRestore();
+    }
+  });
+
   it('requires per-account and per-school consent before any network request', async () => {
     await savePersonalImportBatch(scope, rows());
     await syncPersonalImports(scope, identity, () => true);
