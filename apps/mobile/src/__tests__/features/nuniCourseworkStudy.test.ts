@@ -222,12 +222,16 @@ test('a generic action winning the ledger race cannot turn into borrowed source 
 });
 
 test('an unknown native result is rechecked using only the original operation ID, without another source read or append', async () => {
-  const draft = prepare(); const key = personalImportStorageKey(scope()); let written = false;
+  const draft = prepare();
+  const key = personalImportStorageKey(scope());
+  let written = false;
+  let readsAfterWrite = 0;
   jest.mocked(AsyncStorage.setItem).mockImplementation(async (storageKey, value) => {
-    await originalSet(storageKey, value); if (storageKey === key) { written = true; throw new Error('lost native reply'); }
+    await originalSet(storageKey, value);
+    if (storageKey === key) written = true;
   });
   jest.mocked(AsyncStorage.getItem).mockImplementation(async (storageKey) => {
-    if (storageKey === key && written) throw new Error('temporarily unreadable');
+    if (storageKey === key && written && ++readsAfterWrite > 1) throw new Error('temporarily unreadable');
     return originalGet(storageKey);
   });
   const initial = await confirmCourseworkStudyDraft(draft, context(), transport);

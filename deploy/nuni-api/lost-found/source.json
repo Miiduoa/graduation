@@ -28,7 +28,7 @@
     },
     "apps/api/src/lost-found/taipeiTime.ts": {
       "source": "packages/shared/src/taipeiTime.ts",
-      "sha256": "ca42a0d67f7a0d4e8db7ee5632055df9b50e3ae2f0d8b3a61ff7abca6d2fee76"
+      "sha256": "40625bbfacecb32d2c7b3fcd95e9c2d6b59cbcb02bb7b25ef27bbd3a08372569"
     },
     "apps/api/src/migrations/282_platform_lost_found.sql": {
       "source": "deploy/nuni-api/lost-found/282_platform_lost_found.sql",

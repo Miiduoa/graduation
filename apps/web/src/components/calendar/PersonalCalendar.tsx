@@ -30,6 +30,7 @@ import {
   personalEventsOnDate,
   shiftCalendarMonth,
   isCalendarMonth,
+  isPersonalImportDate,
   draftFromPersonalEvent,
   emptyPersonalEventDraft,
   filterPersonalEvents,
@@ -318,6 +319,7 @@ export function PersonalCalendar() {
             paused={paused}
             workspaceBoundary={workspaceBoundary}
             requestedEventId={params?.get('eventId') ?? null}
+            requestedDate={explicitSchool === visible.scope.schoolId ? params?.get('date') ?? null : null}
           />
         </div>
       )}
@@ -342,11 +344,13 @@ function PersonalCalendarWorkspace({
   paused,
   workspaceBoundary,
   requestedEventId,
+  requestedDate,
 }: {
   context: ReturnType<typeof usePersonalImportScope>;
   paused: boolean;
   workspaceBoundary: RefObject<HTMLDivElement | null>;
   requestedEventId: string | null;
+  requestedDate: string | null;
 }) {
   const { user, loading: authLoading } = useAuth();
   const nuni = useOptionalNuniSession();
@@ -482,6 +486,10 @@ function PersonalCalendarWorkspace({
         )
       : undefined;
   const linkedEventDate = linkedEvent?.date;
+  const dayToShow = requestedEventId ? linkedEventDate
+    : requestedDate && isPersonalImportDate(requestedDate) ? requestedDate : null;
+  const calendarRequest = requestedEventId ? `event:${requestedEventId}`
+    : dayToShow ? `date:${dayToShow}` : null;
 
   const cancelLinkedFocus = useCallback(() => {
     settledFocusRequest.current = requestedEventId;
@@ -514,6 +522,9 @@ function PersonalCalendarWorkspace({
 
   useEffect(() => {
     locatedRequest.current = null;
+  }, [calendarRequest]);
+
+  useEffect(() => {
     settledFocusRequest.current = null;
     linkedFocusOrigin.current = null;
     if (!requestedEventId) return;
@@ -555,15 +566,15 @@ function PersonalCalendarWorkspace({
   }, [requestedEventId, cancelLinkedFocus, workspaceBoundary]);
 
   useEffect(() => {
-    if (paused || !ledger.ready || !requestedEventId || !linkedEventDate) return;
-    if (locatedRequest.current === requestedEventId) return;
-    locatedRequest.current = requestedEventId;
+    if (paused || !ledger.ready || !calendarRequest || !dayToShow) return;
+    if (locatedRequest.current === calendarRequest) return;
+    locatedRequest.current = calendarRequest;
     navigate({
-      month: linkedEventDate.slice(0, 7),
-      selectedDate: linkedEventDate,
+      month: dayToShow.slice(0, 7),
+      selectedDate: dayToShow,
       calendarView: 'list',
     });
-  }, [paused, ledger.ready, requestedEventId, linkedEventDate, navigate]);
+  }, [paused, ledger.ready, calendarRequest, dayToShow, navigate]);
 
   useEffect(() => {
     if (

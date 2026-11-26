@@ -7,6 +7,7 @@ import type { NuniLostFoundItem } from '@campus/shared/src/nuniLostFound';
 import { lostFoundFormFields } from '@campus/shared/src/lostFoundFields';
 import { Button } from '@/components/ui/Button';
 import { LostFoundItemTag } from '@/components/lost-found/LostFoundItemTag';
+import { LostFoundNextStep } from '@/components/lost-found/LostFoundNextStep';
 import { PlatformLostFoundEditor } from './PlatformLostFoundEditor';
 import type { PlatformLostFoundPending } from './platformLostFoundPending';
 import {
@@ -120,6 +121,9 @@ export function PlatformLostFoundDetail({
       {item && (
         <>
           <LostFoundItemTag item={item}>
+            {item.isOwner && !locked && !editing && !confirm && (
+              <LostFoundNextStep item={item} source="platform" />
+            )}
             <p style={{ whiteSpace: 'pre-wrap' }}>{item.description}</p>
             <h3>聯絡方式</h3>
             <p style={{ whiteSpace: 'pre-wrap' }}>

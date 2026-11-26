@@ -425,12 +425,13 @@ test('an unknown native result is recovered only by the original ID without anot
   const draft = (await suggestions()).drafts[0];
   const key = personalImportStorageKey(scope());
   let written = false;
+  let readsAfterWrite = 0;
   jest.mocked(AsyncStorage.setItem).mockImplementation(async (storageKey, value) => {
     await originalSet(storageKey, value);
-    if (storageKey === key) { written = true; throw new Error('lost native save reply'); }
+    if (storageKey === key) written = true;
   });
   jest.mocked(AsyncStorage.getItem).mockImplementation(async (storageKey) => {
-    if (storageKey === key && written) throw new Error('readback temporarily unavailable');
+    if (storageKey === key && written && ++readsAfterWrite > 1) throw new Error('readback temporarily unavailable');
     return originalGet(storageKey);
   });
   const initial = await confirmCourseworkStudyDraft(draft, context(), transport);

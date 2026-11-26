@@ -6,13 +6,14 @@ import {
   type NuniLostFoundRemoval,
 } from '@campus/shared/src/nuniLostFound';
 import type { ServiceListSearchParams } from '@/lib/serviceListNavigation';
+import { lostFoundListCategory } from '@/lib/lostFoundListNavigation';
 import {
   PlatformLostFoundStorageError,
   type PlatformLostFoundPending,
 } from './platformLostFoundPending';
 
 export type Mode = 'list' | 'create' | 'detail';
-export type Filters = Pick<NuniLostFoundListInput, 'q' | 'type' | 'status' | 'mine'>;
+export type Filters = Pick<NuniLostFoundListInput, 'q' | 'type' | 'category' | 'status' | 'mine'>;
 export type Client = ReturnType<typeof createNuniLostFound>;
 export type Receipt = NuniLostFoundItem | NuniLostFoundRemoval;
 export type Write = (
@@ -26,6 +27,7 @@ function queryValue(search: ServiceListSearchParams | undefined, key: string) {
 }
 export function filtersFrom(search?: ServiceListSearchParams): Filters {
   const type = queryValue(search, 'type');
+  const category = lostFoundListCategory(queryValue(search, 'category'));
   const status = queryValue(search, 'status');
   const mine = queryValue(search, 'mine') === '1';
   return {
@@ -33,6 +35,7 @@ export function filtersFrom(search?: ServiceListSearchParams): Filters {
       .replace(/[\u0000-\u001f\u007f]/g, '')
       .slice(0, 100),
     ...(type === 'lost' || type === 'found' ? { type } : {}),
+    ...(category && { category }),
     status:
       status === 'open' || status === 'resolved' || status === 'all'
         ? status
@@ -52,6 +55,7 @@ export function platformLostFoundHref(
   const query = new URLSearchParams({ schoolId });
   if (filters.q) query.set('q', filters.q);
   if (filters.type) query.set('type', filters.type);
+  if (filters.category) query.set('category', filters.category);
   if (filters.status) query.set('status', filters.status);
   if (filters.mine) query.set('mine', '1');
   const suffix =

@@ -63,18 +63,28 @@ export async function loadMapLocations(
   { timeoutMs = MAP_SOURCE_TIMEOUT_MS }: { timeoutMs?: number } = {},
 ): Promise<MapLocation[]> {
   if (!isFirebaseConfigured() || !validId(schoolId)) throw new Error('Map source unavailable');
-  return withTimeout(readMapLocations(schoolId), timeoutMs);
+  // Firestore's one-shot read cannot be aborted. Stop the rest of this
+  // request after its deadline instead of starting a second read or parsing
+  // a late response that the caller can no longer use.
+  let active = true;
+  try {
+    return await withTimeout(readMapLocations(schoolId, () => active), timeoutMs);
+  } finally {
+    active = false;
+  }
 }
 
-async function readMapLocations(schoolId: string): Promise<MapLocation[]> {
+async function readMapLocations(schoolId: string, isActive: () => boolean): Promise<MapLocation[]> {
   const db = getDb();
   let snapshot = await getDocsFromServer(collection(db, 'schools', schoolId, 'pois'));
+  if (!isActive()) throw new MapSourceTimeoutError();
   // Only use the migration source after the canonical source confirms it is empty.
   if (snapshot.empty) {
     snapshot = await getDocsFromServer(
       query(collection(db, 'pois'), where('schoolId', '==', schoolId)),
     );
   }
+  if (!isActive()) throw new MapSourceTimeoutError();
   return snapshot.docs
     .flatMap((entry) => {
       const place = parseCampusMapRecord(entry.id, entry.data(), schoolId);
@@ -160,13 +170,23 @@ export async function setMapFavorite(
   assertCurrent(uid, current);
 }
 
+/** Finite WGS-84 point that is not the (0, 0) missing-fix sentinel. */
+export function isUsableMapCoordinate(
+  place: MapCoordinate | null | undefined,
+): place is MapCoordinate {
+  return place != null &&
+    Number.isFinite(place.lat) && Math.abs(place.lat) <= 90 &&
+    Number.isFinite(place.lng) && Math.abs(place.lng) <= 180 &&
+    !(place.lat === 0 && place.lng === 0);
+}
+
 export function walkingDirectionsUrl(destination: MapCoordinate, origin?: MapCoordinate): string {
   const parameters = new URLSearchParams({
     api: '1',
     destination: `${destination.lat},${destination.lng}`,
     travelmode: 'walking',
   });
-  if (origin) parameters.set('origin', `${origin.lat},${origin.lng}`);
+  if (isUsableMapCoordinate(origin)) parameters.set('origin', `${origin.lat},${origin.lng}`);
   return `https://www.google.com/maps/dir/?${parameters.toString()}`;
 }
 
@@ -178,6 +198,6 @@ export function appleWalkingDirectionsUrl(destination: MapCoordinate, origin?: M
     daddr: `${destination.lat},${destination.lng}`,
     dirflg: 'w',
   });
-  if (origin) parameters.set('saddr', `${origin.lat},${origin.lng}`);
+  if (isUsableMapCoordinate(origin)) parameters.set('saddr', `${origin.lat},${origin.lng}`);
   return `https://maps.apple.com/?${parameters.toString()}`;
 }
