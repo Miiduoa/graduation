@@ -210,6 +210,21 @@ describe('read-only personal submission windows', () => {
     expect(returned.ordinary.kind).toBe('repeat');
   });
 
+  it.each([
+    { row: { is_draft: true, marked_submitted: true }, used: 1 },
+    { row: { is_draft: true, marked_submitted: undefined }, used: 0 },
+    { row: { is_draft: undefined, marked_submitted: false }, used: 0 },
+    { row: { is_draft: true, is_redo: true, marked_submitted: false }, used: 0 },
+  ])('does not infer an open ordinary window or select a draft from ambiguous history: %j', ({ row, used }) => {
+    const result = project({
+      activity: { user_submit_count: used },
+      history: { list: [{ ...SUBMISSION, ...row }] },
+    });
+    expect(result.ordinary).toEqual({ state: 'unknown', kind: 'unknown', remainingAttempts: null });
+    expect(result.draft).toEqual({ state: 'unknown', count: null, submissionId: null });
+    expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
+  });
+
   it('does not select a draft arbitrarily when there are several or flags are incomplete', () => {
     const draft = { ...SUBMISSION, is_draft: true, marked_submitted: false, is_latest_version: false };
     expect(project({ history: { list: [draft, { ...draft, id: 402 }] } }).draft)
