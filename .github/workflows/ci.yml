@@ -93,6 +93,8 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
           node --test scripts/dependency-security-gate.test.cjs scripts/dependency-security-compatibility.test.mjs packages/shared/tests/postLoginRoles.test.cjs scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
           node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-materials-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/nuni-merchant-source.test.mjs scripts/nuni-merchant-native-transport.test.mjs scripts/seed-cafeterias.test.cjs scripts/demo/seed-oral-exam.test.mjs
+          node --test scripts/test-env/tronclass-launcher.test.mjs scripts/test-env/seed.test.cjs
+          bash scripts/qa/browser/install-playwright.test.sh
           node --test scripts/demo/seed-account-demo.test.mjs
           python3 deploy/nuni-api/food-ordering/build_test.py
           python3 scripts/platform-lost-found/prepare_test.py
@@ -202,6 +204,9 @@ jobs:
 
       - name: Test platform public Agent admission contracts
         run: node scripts/test-platform-public-agent.mjs
+
+      - name: Test TronClass contract privacy, retention and controlled acceptance
+        run: node --test scripts/tronclass/analyze-har.test.mjs scripts/tronclass/prepare-ttl-profile.test.cjs scripts/tronclass/acceptance.test.mjs
 
   test-mobile:
     name: Mobile Tests
@@ -495,7 +500,9 @@ jobs:
 
   build-web:
     name: Build Web
-    runs-on: ubuntu-latest
+    # Match the OS supported by the pinned Chromium tooling used by browser checks.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     needs: [security-gates, lint-and-typecheck]
     steps:
       - name: Checkout
@@ -561,6 +568,46 @@ jobs:
           test -s /tmp/campus-service-directory.html
           test "$(docker exec campus-one-web-ci id -u)" != "0"
           test -z "$(docker exec campus-one-web-ci find /app -name '.env' -o -name '.env.*' -o -name '*serviceAccount*.json' -o -name '*.pem' -o -name '*.key')"
+
+      - name: Setup Python for TronClass browser checks
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-1.57.0
+          restore-keys: |
+            ${{ runner.os }}-admin-playwright-1.57.0
+            ${{ runner.os }}-playwright-
+      - name: Install TronClass browser test tools
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          python -m pip install playwright==1.57.0
+          if sudo apt-get -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 -o Acquire::Retries=5 update &&
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 -o Acquire::Retries=5 install -y fonts-noto-cjk; then
+            echo 'Pre-installed Noto CJK fonts.'
+          else
+            echo 'Font pre-install failed; continuing with the existing Playwright installer.'
+          fi
+          bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk
+
+      - name: Verify built TronClass workspace in Chromium
+        env:
+          TRONCLASS_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python scripts/tronclass/check-browser.py
+
+      - name: Preserve TronClass browser screenshots and results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tronclass-browser
+          path: artifacts/tronclass-browser
+          if-no-files-found: ignore
+          retention-days: 7
 
   deploy-functions:
     name: Deploy Firebase backend

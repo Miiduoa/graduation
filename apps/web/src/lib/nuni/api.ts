@@ -316,7 +316,9 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       if (method === 'GET') {
         const result = await platformRequest(path, session);
         if (path === 'merchant-workspaces')
-          return jsonResponse({ workspaces: parseMerchantWorkspaces(result) });
+          return jsonResponse({
+            workspaces: parseMerchantWorkspaces(result, { preserveMissingReadiness: true }),
+          });
         if (path === 'merchant-onboarding-programs')
           return jsonResponse({
             programs: parseMerchantOverview({ ...nuniRecord(result), applications: [] }).programs,

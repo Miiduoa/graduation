@@ -11,9 +11,11 @@ import {
   schoolPreferenceKey,
 } from '@/components/SelectedSchoolProvider';
 import { NuniApp } from './NuniApp';
+import { TronClassRequestError } from '@/lib/tronClassIntegrationClient';
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
+  tronClassStatus: vi.fn(),
   platformFetch: vi.fn(),
   refresh: vi.fn(),
   signedIn: true,
@@ -33,6 +35,11 @@ it('opens the independent device bookmark route inside the signed-in course shel
   expect(screen.getByRole('link', { name: '回我的課程' }).getAttribute('href')).toBe('/classroom');
   expect(screen.queryByText('找不到這個課程空間')).toBeNull();
 });
+
+vi.mock('@/lib/tronClassIntegrationClient', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tronClassIntegrationClient')>()),
+  createTronClassClient: () => ({ status: mocks.tronClassStatus }),
+}));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => mocks.pathname,
@@ -95,6 +102,7 @@ beforeEach(() => {
   mocks.context = 'a'.repeat(43);
   window.history.replaceState({}, '', mocks.pathname);
   mocks.refresh.mockReset();
+  mocks.tronClassStatus.mockReset().mockResolvedValue({ connected: false });
   mocks.platformFetch.mockReset().mockImplementation(async (path: string) => ({
     ok: true,
     status: 200,
@@ -135,6 +143,18 @@ it('offers the all-course gradebook from the classroom list', async () => {
   expect((await screen.findByRole('link', { name: '課業成績與回饋' })).getAttribute('href')).toBe(
     '/grades?tab=feedback',
   );
+});
+
+it.each([
+  { code: 'TRONCLASS_DISABLED', visible: false },
+  { code: 'TRONCLASS_STORE_UNAVAILABLE', visible: true },
+])('shows the TronClass entry according to status error $code', async ({ code, visible }) => {
+  mocks.pathname = '/classroom';
+  mocks.request.mockResolvedValue({ workspaces: [] });
+  mocks.tronClassStatus.mockRejectedValue(new TronClassRequestError(code, '', 503));
+  await act(async () => { render(<NuniApp />); });
+  expect(mocks.tronClassStatus).toHaveBeenCalled();
+  expect(Boolean(screen.queryByRole('link', { name: '連接 TronClass' }))).toBe(visible);
 });
 
 it.each(

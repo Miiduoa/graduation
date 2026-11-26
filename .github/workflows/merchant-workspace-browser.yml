@@ -1,0 +1,84 @@
+name: Merchant Workspace Browser
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'apps/web/src/features/merchant/**'
+      - 'apps/web/src/features/food/**'
+      - 'apps/web/src/app/merchant/**'
+      - 'apps/web/src/lib/merchantWorkspaceNavigation*'
+      - 'apps/web/src/lib/useMerchantWorkspaceRoute*'
+      - 'apps/web/src/lib/currentTabNavigation*'
+      - 'apps/web/src/lib/accountIdentity*'
+      - 'apps/web/src/components/AccountIdentity*'
+      - 'apps/web/src/components/AccountWorkspaces*'
+      - 'apps/web/src/components/SiteShell*'
+      - 'apps/web/src/components/AppHeader*'
+      - 'apps/web/src/components/NuniSignIn*'
+      - 'apps/web/src/components/ui/**'
+      - 'apps/web/src/app/globals.css'
+      - 'apps/web/src/app/home.module.css'
+      - 'packages/shared/src/nuniMerchant*'
+      - 'packages/shared/src/merchantJourney*'
+      - 'packages/shared/src/nuniFood*'
+      - 'scripts/qa/merchant-workspace/**'
+      - 'scripts/qa/browser/**'
+      - 'apps/web/package.json'
+      - 'apps/web/tsconfig.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/merchant-workspace-browser.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merchant-workspace-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: Merchant continuity, access recovery and responsive layout
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Taipei
+      NEXT_TELEMETRY_DISABLED: '1'
+      MERCHANT_QA_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '10.28.2'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.5'
+          cache: pnpm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium and Chinese fonts
+        run: |
+          python -m pip install playwright==1.57.0
+          bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk
+      - name: Bundle real merchant components with synthetic API boundaries
+        run: node scripts/qa/merchant-workspace/build.mjs
+      - name: Verify merchant navigation and authorization recovery
+        # The check starts the local read-only fixture server itself. These are
+        # synthetic browser flows, not a real-account or deployment acceptance.
+        run: python scripts/qa/merchant-workspace/check.py
+      - name: Upload rendered evidence, assertions and source hashes
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: merchant-workspace-browser
+          path: artifacts/merchant-workspace
+          retention-days: 7

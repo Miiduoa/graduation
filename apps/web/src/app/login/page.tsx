@@ -14,7 +14,7 @@ import {
 import { isPuEcampusDataFetchEnabled } from '@campus/shared/src/puEcampusDataPolicy';
 import { isPuTeacherAccount } from '@/lib/server/puIdentity';
 import { useAuth } from '@/components/AuthGuard';
-import { isFirebaseConfigured, signInWithPuStudentId } from '@/features/auth/client';
+import { isEmulatorTestEnv, isFirebaseConfigured, signInWithPuStudentId } from '@/features/auth/client';
 import {
   collapseInternalPathHash,
   navigateAfterLogin,
@@ -98,6 +98,7 @@ function LoginForm({
   const puStudentPaused = schoolAvailable && (!selectedSchoolId || selectedSchoolId === 'pu') &&
     !isPuEcampusDataFetchEnabled();
   const acceptsAccount = !puStudentPaused || isPuTeacherAccount(studentId.trim());
+  const localEmulator = process.env.NODE_ENV === 'development' && isEmulatorTestEnv();
   const schoolRequired = schoolTask && schoolAvailable;
   const hasSchoolIdentity = Boolean(
     user?.uid.startsWith('pu-') && (!selectedSchoolId || selectedSchoolId === 'pu'),
@@ -186,7 +187,11 @@ function LoginForm({
   }, [hasSchoolIdentity, schoolLoading, destination, reconnect, schoolRequired]);
   async function login(event: FormEvent) {
     event.preventDefault();
-    if (busyRef.current || returning.current || schoolLoading || !schoolAvailable || !acceptsAccount) return;
+    if (!acceptsAccount) return;
+    await runSchoolLogin(studentId.trim().toUpperCase(), password);
+  }
+  async function runSchoolLogin(account: string, secret: string, targetSchoolId = selectedSchoolId) {
+    if (busyRef.current || returning.current || schoolLoading || !schoolAvailable) return;
     setError('');
     if (!isFirebaseConfigured()) {
       setError('登入服務尚未連線，請稍後再試。');
@@ -197,14 +202,14 @@ function LoginForm({
     request.current = controller;
     setBusy(true);
     try {
-      const authenticated = selectedSchoolId
+      const authenticated = targetSchoolId
         ? await signInWithPuStudentId(
-            studentId.trim().toUpperCase(),
-            password,
+            account,
+            secret,
             controller.signal,
-            selectedSchoolId,
+            targetSchoolId,
           )
-        : await signInWithPuStudentId(studentId.trim().toUpperCase(), password, controller.signal);
+        : await signInWithPuStudentId(account, secret, controller.signal);
       if (controller.signal.aborted) return;
       if (!authenticated) throw new Error('登入服務尚未連線。');
       setPassword('');
@@ -368,7 +373,7 @@ function LoginForm({
                 {puStudentPaused ? '正在驗證教師帳號…' : '正在驗證帳號與建立校務資料連線…'}
               </p>
             )}
-            {error && (
+            {error && !localEmulator && (
               <p role="alert" className={styles.errorNotice}>
                 {error}
               </p>
@@ -454,6 +459,20 @@ function LoginForm({
       }
     >
       <div className={loginStyles.flow}>
+        {localEmulator && <section className={styles.stateCard} aria-label="本機測試登入">
+          <h2>本機測試環境</h2>
+          <p>使用隔離的測試學生帳號登入 nuni。下一頁連接 TronClass 時，再另外輸入你本人的學校帳密。</p>
+          <Button type="button" variant="primary" loading={busy}
+            disabled={busy || platformBusy || schoolLoading || !schoolAvailable || options.loading || options.error}
+            onClick={() => {
+              if (!localEmulator) return;
+              // gitleaks:allow Public Auth emulator fixture; never a school credential.
+              void runSchoolLogin('S0000001', 'campus-test-1234', 'pu');
+            }}>
+            使用本機測試學生甲
+          </Button>
+          {error && <p role="alert" className={styles.errorNotice}>{error}</p>}
+        </section>}
         {!schoolTask && destination !== '/' && (
           <p className={loginStyles.continuation}>登入後會回到你原本的頁面，接著完成剛才的事。</p>
         )}

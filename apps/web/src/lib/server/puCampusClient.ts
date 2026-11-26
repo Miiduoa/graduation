@@ -34,6 +34,7 @@ export type CampusErrorDetails = {
   route?: CampusLoginRoute;
   stage?: CampusLoginStage;
   code?: string;
+  loginNotDelivered?: boolean;
 };
 
 export class PuCampusError extends Error {
@@ -41,6 +42,7 @@ export class PuCampusError extends Error {
   readonly route?: CampusLoginRoute;
   readonly stage?: CampusLoginStage;
   readonly code?: string;
+  readonly loginNotDelivered: boolean;
 
   constructor(kind: CampusErrorKind, message: string, details: CampusErrorDetails = {}) {
     super(message);
@@ -49,6 +51,7 @@ export class PuCampusError extends Error {
     this.route = details.route;
     this.stage = details.stage;
     this.code = details.code;
+    this.loginNotDelivered = details.loginNotDelivered === true;
   }
 }
 
@@ -90,6 +93,8 @@ export type TronClassLoginOptions = {
   route?: CampusLoginRoute;
   /** Candidate native-login path: no HTML/login-body fallback, no implicit student role. */
   requireStudentIdentityEvidence?: boolean;
+  /** Stop every native/CAS/profile hop when the originating login is abandoned. */
+  signal?: AbortSignal;
 };
 
 export type StudentLoginOptions = {
@@ -317,6 +322,11 @@ const TIMEOUT_CODES = new Set([
   'UND_ERR_CONNECT_TIMEOUT',
   'UND_ERR_HEADERS_TIMEOUT',
   'UND_ERR_BODY_TIMEOUT',
+]);
+
+// These failures occur before a connection can carry the request.
+const PRE_CONNECTION_CODES = new Set([
+  'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT',
 ]);
 
 const TRANSIENT_NETWORK_CODES = new Set([
@@ -597,6 +607,7 @@ export function classifyCampusFailure(error: unknown, details: CampusErrorDetail
       route: error.route || details.route,
       stage: error.stage || details.stage,
       code: error.code || details.code || readErrorCode(error),
+      loginNotDelivered: error.loginNotDelivered || details.loginNotDelivered,
     });
   }
   const name = error instanceof Error ? error.name : '';
@@ -630,13 +641,17 @@ export function createPuCampusGateway(
     init: RequestInit & {
       cookies?: CookieJar;
       timeoutMs?: number;
+      deadline?: number;
       context?: CampusErrorDetails;
       confineOrigin?: string;
       confineOrigins?: readonly string[];
       strictCookies?: StrictTronClassCookies;
+      cookiesByOrigin?: Map<string, CookieJar>;
+      initialTronClassLogin?: boolean;
     } = {},
   ): Promise<SentPage> {
-    const hostname = normalizeRelayHostname(new URL(url).hostname);
+    const target = new URL(url);
+    const hostname = normalizeRelayHostname(target.hostname);
     const portalHostname = normalizeRelayHostname(new URL(portalOrigin).hostname);
     if (!isPuEcampusDataFetchEnabled() &&
       (hostname === portalHostname || isPuEcampusDataHost(hostname))) {
@@ -645,33 +660,50 @@ export function createPuCampusGateway(
         code: PU_ECAMPUS_DATA_PAUSED_CODE,
       });
     }
-    const waitMs = init.timeoutMs ?? timeoutMs;
-    const controller = new AbortController();
     const context = init.context || {};
-    const deadline = Date.now() + waitMs;
+    const cancelled = () => new PuCampusError('unavailable', '學校登入已取消', { ...context, code: 'CANCELLED' });
     const deadlineError = () => new PuCampusError('timeout', '學校系統無回應', {
       ...context, code: 'DEADLINE',
     });
+    const waitMs = Math.min(init.timeoutMs ?? timeoutMs,
+      init.deadline === undefined ? Infinity : init.deadline - Date.now());
+    const hopDeadline = Date.now() + waitMs;
+    const controller = new AbortController();
+    const assertDeadline = () => {
+      if (init.signal?.aborted) throw cancelled();
+      if ((init.deadline !== undefined && Date.now() >= init.deadline) ||
+          (init.strictCookies && (controller.signal.aborted || Date.now() >= hopDeadline))) {
+        throw deadlineError();
+      }
+    };
+    assertDeadline();
     let rejectDeadline: ((error: PuCampusError) => void) | undefined;
     const expired = init.strictCookies ? new Promise<never>((_resolve, reject) => {
       rejectDeadline = reject;
     }) : null;
     const timer = setTimeout(() => {
-      // Settle independently of transport cooperation, including an unresponsive body reader.
+      // Strict identity evidence must settle even when the transport/body ignores abort.
       rejectDeadline?.(deadlineError());
       controller.abort();
     }, waitMs);
-    const assertDeadline = () => {
-      if (init.strictCookies && (controller.signal.aborted || Date.now() >= deadline)) throw deadlineError();
-    };
+    let rejectCancellation: ((reason: PuCampusError) => void) | undefined;
+    const cancellation = init.signal ? new Promise<never>((_, reject) => { rejectCancellation = reject; }) : null;
+    // Keep cancellation effective even if a relay or response body ignores its
+    // transport signal. Neither a late reply nor a fallback may revive login.
+    const cancel = () => { controller.abort(); rejectCancellation?.(cancelled()); };
+    const wait = <T>(promise: Promise<T>): Promise<T> => Promise.race([
+      promise, ...(expired ? [expired] : []), ...(cancellation ? [cancellation] : []),
+    ]);
+    init.signal?.addEventListener('abort', cancel, { once: true });
+    let receivedResponse = false;
     try {
+      assertDeadline();
       const headers = new Headers(init.headers);
       headers.set('User-Agent', USER_AGENT);
       headers.set('Accept-Language', 'zh-TW,zh;q=0.9');
-      const cookies = init.strictCookies ? strictCookieValues(init.strictCookies, url) : init.cookies;
-      if (cookies && Object.keys(cookies).length > 0) {
-        headers.set('Cookie', cookieHeader(cookies));
-      }
+      const jar = init.strictCookies ? strictCookieValues(init.strictCookies, url)
+        : (init.cookiesByOrigin ? init.cookiesByOrigin.get(target.origin) : init.cookies) ?? {};
+      if (Object.keys(jar).length > 0) headers.set('Cookie', cookieHeader(jar));
       const read = async () => {
         assertDeadline();
         const response = await request(url, {
@@ -681,6 +713,7 @@ export function createPuCampusGateway(
           redirect: 'manual',
           signal: controller.signal,
         });
+        receivedResponse = true;
         const receivedAt = Date.now();
         try { assertDeadline(); } catch (error) {
           void response.body?.cancel().catch(() => {});
@@ -690,7 +723,7 @@ export function createPuCampusGateway(
         assertDeadline();
         return { response, html, receivedAt };
       };
-      const { response, html, receivedAt } = expired ? await Promise.race([read(), expired]) : await read();
+      const { response, html, receivedAt } = await wait(read());
       assertDeadline();
       const locationHeader = response.headers.get('location');
       const allowedOrigins = init.confineOrigins || (init.confineOrigin ? [init.confineOrigin] : null);
@@ -701,6 +734,10 @@ export function createPuCampusGateway(
             new URL(locationHeader, url).toString()
           : null;
       if (init.strictCookies) mergeStrictTronClassCookies(init.strictCookies, response.headers, url, receivedAt, context);
+      const cookies = init.strictCookies
+        ? strictCookieValues(init.strictCookies, TRONCLASS_PROFILE_URL)
+        : mergeCookies(jar, response.headers);
+      init.cookiesByOrigin?.set(target.origin, cookies);
       let json: unknown = null;
       try { json = JSON.parse(html) as unknown; } catch { /* HTML responses remain valid in compatibility mode. */ }
       assertDeadline();
@@ -708,17 +745,21 @@ export function createPuCampusGateway(
         status: response.status,
         contentType: response.headers.get('content-type'),
         html,
-        cookies: init.strictCookies
-          ? strictCookieValues(init.strictCookies, TRONCLASS_PROFILE_URL)
-          : mergeCookies(init.cookies || {}, response.headers),
+        cookies,
         location,
         url,
         json,
       };
     } catch (error) {
-      throw classifyCampusFailure(error, context);
+      if (init.signal?.aborted) throw cancelled();
+      const code = readErrorCode(error);
+      throw classifyCampusFailure(error, {
+        ...context,
+        loginNotDelivered: init.initialTronClassLogin && !receivedResponse && !!code && PRE_CONNECTION_CODES.has(code),
+      });
     } finally {
       clearTimeout(timer);
+      init.signal?.removeEventListener('abort', cancel);
     }
   }
 
@@ -744,17 +785,18 @@ export function createPuCampusGateway(
   async function followLms(
     url: string,
     init: {
-      cookies?: CookieJar;
+      cookiesByOrigin: Map<string, CookieJar>;
       method?: string;
       body?: string;
       headers?: HeadersInit;
       hops?: number;
       timeoutMs?: number;
+      deadline?: number;
       context?: CampusErrorDetails;
-    } = {},
+      signal?: AbortSignal;
+    },
   ): Promise<SentPage> {
     let current = url;
-    let jar = init.cookies || {};
     let method = init.method;
     let body = init.body;
     let hops = init.hops ?? 8;
@@ -762,14 +804,15 @@ export function createPuCampusGateway(
       method,
       body,
       headers: init.headers,
-      cookies: jar,
+      cookiesByOrigin: init.cookiesByOrigin,
       timeoutMs: init.timeoutMs,
+      deadline: init.deadline,
+      signal: init.signal,
       context: init.context,
       confineOrigins: lmsAllowedOrigins,
     });
     while ([301, 302, 303, 307, 308].includes(page.status) && page.location && hops > 0) {
       current = page.location;
-      jar = page.cookies;
       if (page.status !== 307 && page.status !== 308) {
         method = 'GET';
         body = undefined;
@@ -778,8 +821,10 @@ export function createPuCampusGateway(
         method,
         body,
         headers: init.headers,
-        cookies: jar,
+        cookiesByOrigin: init.cookiesByOrigin,
         timeoutMs: init.timeoutMs,
+        deadline: init.deadline,
+        signal: init.signal,
         context: init.context,
         confineOrigins: lmsAllowedOrigins,
       });
@@ -791,12 +836,14 @@ export function createPuCampusGateway(
   async function postCasCredentials(
     action: string,
     init: {
-      cookies?: CookieJar;
+      cookiesByOrigin: Map<string, CookieJar>;
       body: string;
       headers?: HeadersInit;
       hops?: number;
       timeoutMs?: number;
+      deadline?: number;
       context?: CampusErrorDetails;
+      signal?: AbortSignal;
     },
   ): Promise<SentPage> {
     if (!isCasPasswordPostUrl(action)) {
@@ -810,15 +857,16 @@ export function createPuCampusGateway(
       });
     }
     let current = action;
-    let jar = init.cookies || {};
     let hops = init.hops ?? 8;
     let carryingPassword = true;
     let page = await send(current, {
       method: 'POST',
       body: init.body,
       headers: init.headers,
-      cookies: jar,
+      cookiesByOrigin: init.cookiesByOrigin,
       timeoutMs: init.timeoutMs,
+      deadline: init.deadline,
+      signal: init.signal,
       context: init.context,
       confineOrigins: lmsAllowedOrigins,
     });
@@ -837,13 +885,14 @@ export function createPuCampusGateway(
           });
         }
         current = page.location;
-        jar = page.cookies;
         page = await send(current, {
           method: 'POST',
           body: init.body,
           headers: init.headers,
-          cookies: jar,
+          cookiesByOrigin: init.cookiesByOrigin,
           timeoutMs: init.timeoutMs,
+          deadline: init.deadline,
+          signal: init.signal,
           context: init.context,
           confineOrigins: lmsAllowedOrigins,
         });
@@ -853,12 +902,13 @@ export function createPuCampusGateway(
       if (!page.location) break;
       carryingPassword = false;
       current = page.location;
-      jar = page.cookies;
       page = await send(current, {
         method: 'GET',
         headers: init.headers,
-        cookies: jar,
+        cookiesByOrigin: init.cookiesByOrigin,
         timeoutMs: init.timeoutMs,
+        deadline: init.deadline,
+        signal: init.signal,
         context: init.context,
         confineOrigins: lmsAllowedOrigins,
       });
@@ -874,6 +924,8 @@ export function createPuCampusGateway(
     route: CampusLoginRoute,
     timeoutMsRemaining: number,
     unauthorized: 'credentials' | 'missing' = 'missing',
+    deadline?: number,
+    signal?: AbortSignal,
     requireStudentIdentityEvidence = false,
     strictCookies?: StrictTronClassCookies,
   ): Promise<TronClassSession | null> {
@@ -885,6 +937,8 @@ export function createPuCampusGateway(
         Referer: `${lmsOrigin}/user/index`,
       },
       timeoutMs: timeoutMsRemaining,
+      deadline,
+      signal,
       context: { route, stage: 'verify' },
       strictCookies,
     });
@@ -915,7 +969,9 @@ export function createPuCampusGateway(
     }
     if (profileData && identityBelongsToAccount(account, profileData)) {
       return {
-        cookies,
+        // The authenticated profile response may rotate the session or issue
+        // the XSRF token needed by later LMS requests. Keep that latest jar.
+        cookies: profilePage.cookies,
         userId: userIdFrom(profileData) ?? userIdFrom(loginData),
         userName: displayNameFrom(profileData, account),
         role: roleFrom(profileData),
@@ -1090,10 +1146,20 @@ export function createPuCampusGateway(
       const strict = options.requireStudentIdentityEvidence === true;
       const strictCookies: StrictTronClassCookies | undefined = strict ? new Map() : undefined;
       const budget = strict ? options.timeoutMs ?? DEFAULT_TIMEOUT_MS : options.timeoutMs;
+      const deadline = budget === undefined ? undefined : started + budget;
       const hopCap = options.hopTimeoutMs ?? timeoutMs;
       const leftover = () => (budget == null ? hopCap : budget - (Date.now() - started));
-      const remaining = () => Math.max(1, Math.min(hopCap, leftover()));
       const route = options.route || 'teacher';
+      const remaining = (stage: CampusLoginStage) => {
+        if (options.signal?.aborted) {
+          throw new PuCampusError('unavailable', '學校登入已取消', { route, stage, code: 'CANCELLED' });
+        }
+        const available = leftover();
+        if (available <= 0) {
+          throw new PuCampusError('timeout', '學校系統無回應', { route, stage, code: 'DEADLINE' });
+        }
+        return Math.min(hopCap, available);
+      };
       try {
         if (strict && (lmsOrigin !== TRONCLASS_ORIGIN || identityOrigin !== IDENTITY_ORIGIN ||
             route !== 'student' || typeof account !== 'string' || account.length > 128 ||
@@ -1106,9 +1172,12 @@ export function createPuCampusGateway(
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ user_name: account, password }),
-          timeoutMs: remaining(),
+          timeoutMs: remaining('submit'),
+          deadline,
+          signal: options.signal,
           context: { route, stage: 'submit' },
           strictCookies,
+          initialTronClassLogin: true,
         });
         if (posted.status === 200 && isCredentialPage(posted.html)) {
           throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'submit' });
@@ -1123,21 +1192,20 @@ export function createPuCampusGateway(
             account,
             loginData,
             route,
-            remaining(),
+            remaining('verify'),
             'credentials',
+            deadline,
+            options.signal,
             strict,
             strictCookies,
           );
-          if (strict && leftover() <= 0) throw new PuCampusError('timeout', '學校系統無回應', {
-            route, stage: 'verify', code: 'DEADLINE',
-          });
-          if (session) return session;
+          if (session) { remaining('verify'); return session; }
           throw new PuCampusError('unverified', strict ? '目前無法驗證校園帳號' : '暫時無法驗證老師身分', {
             route, stage: 'verify', ...(strict ? { code: 'IDENTITY_EVIDENCE_UNAVAILABLE' } : {}),
           });
         }
-        // The existing CAS compatibility flow is intentionally not an account proof.
-        // Integrate the separately reviewed origin-isolated CAS flow from #616 before extending this mode.
+        // Origin-isolated CAS compatibility is still not identity evidence for
+        // the explicit student candidate mode, which only accepts a native profile.
         if (strict) throw new PuCampusError('unverified', '目前無法驗證校園帳號', {
           route, stage: 'verify', code: 'IDENTITY_EVIDENCE_UNAVAILABLE',
         });
@@ -1151,10 +1219,14 @@ export function createPuCampusGateway(
           throw nativeFallback;
         }
 
+        const cookiesByOrigin = new Map<string, CookieJar>();
         const loginPage = await followLms(`${lmsOrigin}/login?next=/user/index`, {
+          cookiesByOrigin,
           headers: { Accept: 'text/html' },
           hops: 5,
-          timeoutMs: remaining(),
+          timeoutMs: remaining('redirect'),
+          deadline,
+          signal: options.signal,
           context: { route, stage: 'redirect' },
         });
         if (loginPage.status !== 200) {
@@ -1179,14 +1251,16 @@ export function createPuCampusGateway(
         }).toString();
         const postedCas = await postCasCredentials(form.action, {
           body: formData,
-          cookies: loginPage.cookies,
+          cookiesByOrigin,
           headers: {
             Accept: 'text/html',
             'Content-Type': 'application/x-www-form-urlencoded',
             Referer: `${identityOrigin}/`,
           },
           hops: 8,
-          timeoutMs: remaining(),
+          timeoutMs: remaining('submit'),
+          deadline,
+          signal: options.signal,
           context: { route, stage: 'submit' },
         });
         if (isCredentialPage(postedCas.html)) {
@@ -1196,10 +1270,12 @@ export function createPuCampusGateway(
           postedCas.status === 200 && isTronClassUserIndexUrl(postedCas.url)
             ? postedCas
             : await followLms(`${lmsOrigin}/user/index`, {
-                cookies: postedCas.cookies,
+                cookiesByOrigin,
                 headers: { Accept: 'text/html' },
                 hops: 3,
-                timeoutMs: remaining(),
+                timeoutMs: remaining('verify'),
+                deadline,
+                signal: options.signal,
                 context: { route, stage: 'verify' },
               });
         if (isCredentialPage(indexPage.html)) {
@@ -1208,10 +1284,11 @@ export function createPuCampusGateway(
         if (isCasLoginBounce(indexPage.html)) {
           throw new PuCampusError('unavailable', '學校系統無回應', { route, stage: 'verify' });
         }
+        const lmsCookies = cookiesByOrigin.get(new URL(lmsOrigin).origin) ?? {};
         const casSession =
-          sessionCookieValue(indexPage.cookies) || isTronClassUserIndexUrl(indexPage.url)
+          isTronClassUserIndexUrl(indexPage.url) && Object.keys(lmsCookies).length > 0
             ? {
-                cookies: indexPage.cookies,
+                cookies: lmsCookies,
                 userId: parseTronClassUserIdFromHtml(indexPage.html),
                 userName: parseTronClassUserNameFromHtml(indexPage.html, account),
                 role: route === 'student' ? 'student' : '',
@@ -1221,19 +1298,25 @@ export function createPuCampusGateway(
         if (profileWait >= LMS_PROFILE_MIN_REMAINING_MS) {
           try {
             const verified = await readTronClassProfile(
-              indexPage.cookies,
+              lmsCookies,
               account,
               {},
               route,
               Math.min(LMS_PROFILE_TIMEOUT_MS, profileWait),
+              'missing',
+              deadline,
+              options.signal,
             );
-            if (verified) return verified;
+            if (verified) { remaining('verify'); return verified; }
           } catch (error) {
             const timedOut = error instanceof PuCampusError && error.kind === 'timeout';
             if (!timedOut || !casSession) throw error;
           }
         }
-        if (casSession) return casSession;
+        if (casSession) {
+          remaining('verify');
+          return casSession;
+        }
         throw new PuCampusError('unverified', '暫時無法驗證老師身分', { route, stage: 'verify' });
       } catch (error) {
         throw classifyCampusFailure(error, { route });
