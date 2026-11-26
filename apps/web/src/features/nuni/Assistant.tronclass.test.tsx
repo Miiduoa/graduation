@@ -526,7 +526,7 @@ it('aborts an earlier turn’s pending download after permissions are revoked in
   fireEvent.click(await screen.findByRole('checkbox', { name: /讀取課程、作業/ }));
   fireEvent.click(screen.getByRole('button', { name: '儲存助理權限' }));
   await screen.findByText('已關閉助理的 TronClass 存取權限。');
-  expect(downloadSignal?.aborted).toBe(true);
+  await waitFor(() => expect(downloadSignal?.aborted).toBe(true));
   await act(async () => finishDownload(new Response('%PDF ignored', { headers: {
     'Content-Type': 'application/pdf', 'Content-Disposition': "attachment; filename*=UTF-8''lecture.pdf",
   } })));
