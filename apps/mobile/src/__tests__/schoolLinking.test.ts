@@ -77,6 +77,26 @@ test('同一個職涯連結在學校容器返回生活，在訪客容器返回�
   expect(getPathFromState(guest!, preAuthLinking.config)).toBe(`/${path}`);
 });
 
+test('TronClass 連結在學校與平台登入容器保留入口與返回路徑', () => {
+  const path = 'tronclass?schoolId=pu';
+  const school = schoolLinking.getStateFromPath?.(path, schoolLinking.config);
+  expect(school?.routes[0]).toMatchObject({
+    name: '學習',
+    state: {
+      index: 1,
+      routes: [{ name: 'LearnHome' }, { name: 'TronClassWorkspace', params: { schoolId: 'pu' } }],
+    },
+  });
+  expect(getPathFromState(school!, schoolLinking.config)).toBe(`/${path}`);
+
+  const platform = preAuthLinking.getStateFromPath?.(path, preAuthLinking.config);
+  expect(platform).toMatchObject({
+    index: 1,
+    routes: [{ name: 'LoginLanding' }, { name: 'TronClassWorkspace', params: { schoolId: 'pu' } }],
+  });
+  expect(getPathFromState(platform!, preAuthLinking.config)).toBe(`/${path}`);
+});
+
 test.each([
   ['clubs', 'Clubs', undefined],
   ['clubs/photo', 'ClubDetail', { groupId: 'photo' }],
