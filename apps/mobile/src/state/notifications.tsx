@@ -424,8 +424,12 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
   );
 }
 
+export function useOptionalNotifications() {
+  return useContext(NotificationsContext);
+}
+
 export function useNotifications() {
-  const ctx = useContext(NotificationsContext);
+  const ctx = useOptionalNotifications();
   if (!ctx) throw new Error('useNotifications must be used within NotificationsProvider');
   return ctx;
 }

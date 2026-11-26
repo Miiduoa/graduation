@@ -14,7 +14,7 @@ export { DemoProvider, useDemo, type DemoMode } from './demo';
 export { FavoritesProvider, useFavorites } from './favorites';
 
 // 通知
-export { NotificationsProvider, useNotifications } from './notifications';
+export { NotificationsProvider, useNotifications, useOptionalNotifications } from './notifications';
 
 // 搜尋歷史
 export { SearchHistoryProvider, useSearchHistory } from './searchHistory';

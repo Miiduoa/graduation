@@ -14,7 +14,10 @@ jest.mock('../state/auth', () => ({ useAuth: () => ({
 jest.mock('../state/nuniSession', () => ({ useOptionalNuniSession: () => ({ session: mockAccount }) }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchoolId }, selectionReady: true }) }));
 jest.mock('../components/SchoolBrowsingControl', () => ({ SchoolBrowsingControl: () => null }));
-jest.mock('../state/notifications', () => ({ useNotifications: () => ({ unreadCount: 0 }) }));
+jest.mock('../state/notifications', () => ({
+  useNotifications: () => ({ unreadCount: 0 }),
+  useOptionalNotifications: () => ({ unreadCount: 0 }),
+}));
 jest.mock('../components/HeaderDrawer', () => ({ headerDrawer: { open: jest.fn() } }));
 jest.mock('../ui/aiFirst', () => ({ AIScreen: ({ children }: { children: React.ReactNode }) => children }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
