@@ -138,7 +138,7 @@ export function normalizeTronClassSubmissionAvailability(
   const attemptsKnown = countAgrees && duplicateSettingsAgree && (unlimited || limited);
   const remainingAttempts = attemptsKnown && limited ? Math.max(0, limit! - used!) : null;
   const knownHistory = history.entries.every(entry => entry.state !== 'unknown');
-  const kind = !knownHistory || !countAgrees || used === null ? 'unknown'
+  const kind = !knownHistory || !countAgrees || !duplicateSettingsAgree || used === null ? 'unknown'
     : used > 0 || history.entries.some(entry => entry.state !== 'draft') ? 'repeat' : 'first';
   let ordinary: TronClassSubmissionAvailability['ordinary']['state'] = 'unknown';
   if (activity.is_closed === true) ordinary = 'closed';

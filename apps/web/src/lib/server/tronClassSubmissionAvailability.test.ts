@@ -153,6 +153,16 @@ describe('read-only personal submission windows', () => {
     expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
   });
 
+  it.each([
+    { activity: { data: { non_submit_times: true } } },
+    { activity: { data: { submit_times: 9 } } },
+    { activity: { user_submit_count: 1, data: { non_submit_times: true } }, history: { list: [SUBMISSION] } },
+  ])('does not label a first or repeat attempt when attempt settings disagree: %j', change => {
+    const result = project(change);
+    expect(result.ordinary).toEqual({ state: 'unknown', kind: 'unknown', remainingAttempts: null });
+    expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
+  });
+
   it.each([null, MAKE_UP])('does not treat a mixed make-up error envelope as absent or open: %j', row => {
     expect(project({ makeUp: { make_up_record: row, error: 'synthetic-error' } }).makeUp)
       .toEqual({ state: 'unknown', updatedAt: null });
