@@ -1,4 +1,5 @@
 import React from 'react';
+import { Text } from 'react-native';
 import { render, fireEvent } from '@testing-library/react-native';
 import {
   Screen,
@@ -53,6 +54,17 @@ describe('UI Components', () => {
     it('should have accessible label when title provided', () => {
       const { getByLabelText } = render(<Card title="Accessible Card" subtitle="With subtitle" />);
       expect(getByLabelText('Accessible Card, With subtitle')).toBeTruthy();
+    });
+
+    it('keeps interactive children reachable when the card has a title', () => {
+      const { getByText, queryByLabelText } = render(
+        <Card title="加入群組" subtitle="輸入加入碼（8 碼英數）。">
+          <Text>加入碼</Text>
+        </Card>,
+      );
+      expect(getByText('加入碼')).toBeTruthy();
+      expect(getByText('加入群組')).toBeTruthy();
+      expect(queryByLabelText('加入群組, 輸入加入碼（8 碼英數）。')).toBeNull();
     });
   });
 

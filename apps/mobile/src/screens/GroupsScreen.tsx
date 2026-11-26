@@ -449,7 +449,7 @@ function GroupsContent(props: any) {
                     alignItems: 'center',
                   }}
                 >
-                  <Text style={{ color: theme.colors.muted }}>加入碼</Text>
+                  <Text accessibilityLabel="加入碼" style={{ color: theme.colors.muted }}>加入碼</Text>
                   <Text
                     style={{
                       color: joinCode.length === 8 ? theme.colors.success : theme.colors.muted,

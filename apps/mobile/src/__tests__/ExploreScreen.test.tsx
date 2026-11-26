@@ -14,6 +14,8 @@ jest.mock('../state/auth', () => ({ useAuth: () => ({
 jest.mock('../state/nuniSession', () => ({ useOptionalNuniSession: () => ({ session: mockAccount }) }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchoolId }, selectionReady: true }) }));
 jest.mock('../components/SchoolBrowsingControl', () => ({ SchoolBrowsingControl: () => null }));
+jest.mock('../state/notifications', () => ({ useNotifications: () => ({ unreadCount: 0 }) }));
+jest.mock('../components/HeaderDrawer', () => ({ headerDrawer: { open: jest.fn() } }));
 jest.mock('../ui/aiFirst', () => ({ AIScreen: ({ children }: { children: React.ReactNode }) => children }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 const navigation = {
@@ -25,6 +27,7 @@ beforeEach(() => { jest.clearAllMocks(); mockSchoolId = 'pu'; mockAccount = null
 test('campus users can still reach the full existing services directory', () => {
   mockCampusUser = true;
   const view = render(<ExploreScreen navigation={navigation} />);
+  expect(view.getByTestId('header-avatar-button')).toBeTruthy();
   fireEvent.press(view.getByText('查看全部校園服務'));
   expect(navigation.navigate).toHaveBeenCalledWith('CampusHome', undefined);
 });
