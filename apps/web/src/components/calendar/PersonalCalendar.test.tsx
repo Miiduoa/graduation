@@ -212,6 +212,7 @@ it('開啟時間無效的既有行程時立即顯示原因，修正後才可儲�
     loading: false,
     error: '',
     syncEnabled: false,
+    retry: vi.fn(),
   });
   const change = vi.spyOn(personalImports, 'changePersonalImport').mockResolvedValue(undefined);
   renderCalendar();
