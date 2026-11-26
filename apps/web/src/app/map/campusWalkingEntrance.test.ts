@@ -51,7 +51,8 @@ describe('reviewed outdoor entrance route handoff', () => {
     const result = routeToCampusEntrance(data, 'fixture', bounds, 1, selected, [review], [segment], now);
     expect(result.status).toBe('ready');
     const current = (place = destination, school = 'fixture', start = 1, snapshot = data.osmBaseAt,
-      time = now) => isCampusEntranceRouteCurrent(result, school, start, place, snapshot, time);
+      time = now) => isCampusEntranceRouteCurrent(result, { ...data, osmBaseAt: snapshot },
+      school, bounds, start, place, [review], [segment], time);
     expect(current()).toBe(true);
     for (const changed of [
       { ...destination, id: 'other' }, { ...destination, name: 'Other' },
@@ -66,8 +67,27 @@ describe('reviewed outdoor entrance route handoff', () => {
     selected.floor = '3';
     expect(current(selected)).toBe(false);
     expect(current()).toBe(true);
-    expect(isCampusEntranceRouteCurrent(plan([]), 'fixture', 1, destination, data.osmBaseAt, now)).toBe(false);
-    expect(isCampusEntranceRouteCurrent(plan([review], []), 'fixture', 1, destination, data.osmBaseAt, now)).toBe(false);
+    expect(isCampusEntranceRouteCurrent(plan([]), data, 'fixture', bounds, 1, destination, [review], [segment], now)).toBe(false);
+    expect(isCampusEntranceRouteCurrent(plan([review], []), data, 'fixture', bounds, 1, destination, [review], [segment], now)).toBe(false);
+  });
+
+  it('invalidates previously ready routes when trusted reviews change without an OSM update', () => {
+    const data = candidates();
+    const result = plan();
+    expect(result.status).toBe('ready');
+    const current = (reviews = [review], audits = [segment], source = data) =>
+      isCampusEntranceRouteCurrent(result, source, 'fixture', bounds, 1, destination, reviews, audits, now);
+    expect(current()).toBe(true);
+    expect(current([{ ...review }], [{ ...segment }])).toBe(true);
+    expect(current([])).toBe(false);
+    expect(current([review], [])).toBe(false);
+    expect(current([review, review])).toBe(false);
+    expect(current([review], [segment, segment])).toBe(false);
+    expect(current([{ ...review, evidenceUrl: 'https://example.invalid/replaced' }])).toBe(false);
+    expect(current([{ ...review, validUntil: '2026-11-24T09:00:00Z' }])).toBe(false);
+    expect(current([review], [{ ...segment, validUntil: '2026-11-24T09:00:00Z' }])).toBe(false);
+    expect(current([review], [{ ...segment, direction: 'reverse' }])).toBe(false);
+    expect(current([review], [segment], candidates({ entrance: 'main', locked: 'yes' }))).toBe(false);
   });
 
   it('distinguishes an unverified entrance from an unavailable network', () => {

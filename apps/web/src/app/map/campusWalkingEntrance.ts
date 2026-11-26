@@ -23,23 +23,37 @@ function sameDestination(a: Destination, b: Destination): boolean {
     a.lat === b.lat && a.lng === b.lng && a.building === b.building && a.floor === b.floor;
 }
 
-/** Before displaying a previously planned entrance route, verify that the
- * current school, exact origin, destination and OSM snapshot still match.
- * Only for results from the trusted planner; replan on audit/catalogue changes.
+/** Revalidate a previously planned route against the current trusted catalogue
+ * and OSM data before display or resume. A matching snapshot timestamp alone
+ * cannot detect withdrawn entrance or segment reviews. Call at context changes
+ * rather than on every animation frame. If false, discard the old route and replan.
  */
 export function isCampusEntranceRouteCurrent(
   result: EntranceRouteResult,
-  schoolId: string,
-  originNodeId: number,
-  destination: Destination,
-  osmBaseAt: string,
-  now: number,
+  ...args: Parameters<typeof routeToCampusEntrance>
 ): boolean {
-  return result.status === 'ready' &&
-    result.route.nodes[0]?.id === originNodeId &&
-    result.route.osmBaseAt === osmBaseAt &&
-    sameDestination(result.destination, destination) &&
-    isCampusWalkingRouteCurrent(result.route, schoolId, now);
+  const [candidates, schoolId, , originNodeId, destination, , , now] = args;
+  if (result.status !== 'ready' ||
+      result.route.nodes[0]?.id !== originNodeId ||
+      result.route.osmBaseAt !== candidates.osmBaseAt ||
+      !sameDestination(result.destination, destination) ||
+      !isCampusWalkingRouteCurrent(result.route, schoolId, now)) return false;
+
+  const refreshed = routeToCampusEntrance(...args);
+  if (refreshed.status !== 'ready') return false;
+  const previous = result.route;
+  const next = refreshed.route;
+  return result.entranceEvidenceUrl === refreshed.entranceEvidenceUrl &&
+    previous.reviewExpiresAtMs === next.reviewExpiresAtMs &&
+    previous.distanceMeters === next.distanceMeters &&
+    previous.attribution === next.attribution &&
+    previous.nodes.length === next.nodes.length &&
+    previous.nodes.every((node, index) => {
+      const current = next.nodes[index];
+      return node.id === current.id && node.lat === current.lat && node.lng === current.lng;
+    }) &&
+    previous.osmWayIds.length === next.osmWayIds.length &&
+    previous.osmWayIds.every((id, index) => id === next.osmWayIds[index]);
 }
 
 const MAX_REVIEW_MS = 30 * 86400000;
