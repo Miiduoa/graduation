@@ -12,7 +12,7 @@
     ".github/workflows/campus-spatial-benchmark.yml": "81d2cc42e770c1d64398424f8323922a40ff1387",
     ".github/workflows/campus-spatial-browser.yml": "6f04ba0b69d5fc28a7967af46bba71d57b8cab32",
     ".github/workflows/chroma-local-compat.yml": "ab73d208ca7d1d973f496f566399dec8a0a1620b",
-    ".github/workflows/ci.yml": "52acf61b4587d64df84d54a7cd860c7f5d13dddc",
+    ".github/workflows/ci.yml": "69653135fabf1fee1df076718683079e46b1421c",
     ".github/workflows/codeql.yml": "b4ef1b9b6dc09d4038e12a926e0de01266da6d37",
     ".github/workflows/competition-official-documents.yml": "2f20ba50c55c7878318b0f7b92f34b455ae58103",
     ".github/workflows/course-access-review.yml": "11d270b1acd222b158b2a182e46d7ccb3c3aa099",
@@ -22,7 +22,8 @@
     ".github/workflows/eas-build.yml": "9443708408ebbe0ba33a5dafa70931ca2ffa1b25",
     ".github/workflows/firestore-rules.yml": "f13ee753bc9d1448764092f3e0828ca3e66cc359",
     ".github/workflows/interface-design-browser.yml": "e71fc16befe28b876f8ca85c17e57cd61a7488e7",
-    ".github/workflows/maestro-e2e.yml": "50b923f819303d168bffd71ca4fa3e84c3892914",
+    ".github/workflows/maestro-e2e.yml": "52da6ccaf330e1d1a54577556b784758c7977229",
+    ".github/workflows/merchant-workspace-browser.yml": "39e43045a35f30f2ab801d1e2ce31bfe4913b000",
     ".github/workflows/mlx-arm64-compat.yml": "8dd5edf35e9185e10ab70d9f66b0cfda2e339644",
     ".github/workflows/mobile-agent-regression.yml": "78f4241c851ecb1c8d9d4a0c251c54fa892675e2",
     ".github/workflows/neon-migration-tools.yml": "b4d525eaf10035a4e792b31e6b667c53264ccd22",
@@ -63,7 +64,7 @@
     "packages/shared/src/wakeAwareRequest.ts"
   ],
   "evidenceScriptBlobs": {
-    "scripts/merge-gate/pr-scope.mjs": "7eda2d8bde124351422db08b43b2e625c8b85937",
+    "scripts/merge-gate/pr-scope.mjs": "dcdf89d439d5a2fa9278bd97664c9afb3e4330dc",
     "scripts/merge-gate/maestro-reports.py": "c56d00c76b3a2b92a8b5ad3ad26fa531b8531d39"
   },
   "publicationEnabled": false

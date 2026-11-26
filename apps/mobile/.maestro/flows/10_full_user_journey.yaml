@@ -1,90 +1,31 @@
-# 10_full_user_journey.yaml
-# Deep link 迴歸路徑（避免依賴儀表捲動與載入時間）
-
 appId: ${APP_ID}
-name: Full User Journey
-tags:
-  - regression
-  - journey
-
+name: Authenticated deep-link journey
+tags: [regression, journey]
 ---
-- launchApp
-
+- runFlow: ../helpers/sign-in-student.yaml
+- openLink: campus://announcements
 - extendedWaitUntil:
-    visible:
-      id: 'tab-Today'
-    timeout: 45000
-
-- waitForAnimationToEnd:
-    timeout: 2500
-
-- openLink: campus://home/announcements
-
-- extendedWaitUntil:
-    visible:
-      id: 'e2e-announcements-screen'
+    visible: '公開處室公告的摘要與原文連結。一般帳號即可查看。'
     timeout: 20000
-
-- takeScreenshot: journey_01_announcements
-
-- back
-
-- openLink: campus://home/events
-
+- takeScreenshot: journey_announcements
+- openLink: campus://events
 - extendedWaitUntil:
-    visible: '活動'
+    visible: '查看時間、地點與主辦單位資訊。'
     timeout: 20000
-    optional: true
-
-- takeScreenshot: journey_03_events
-
-- back
-
-- openLink: campus://campus/map
-
+- takeScreenshot: journey_events
+- openLink: campus://map
 - extendedWaitUntil:
-    visible: '校園地圖'
+    visible: '找到校園地點，再安排怎麼過去。'
     timeout: 20000
-    optional: true
-
-- takeScreenshot: journey_05_map
-
-- back
-
-- openLink: campus://campus/cafeteria
-
+- takeScreenshot: journey_map
+- openLink: campus://cafeteria
 - extendedWaitUntil:
-    visible: '餐廳'
+    visible: '選店、看菜單，再決定吃什麼。'
     timeout: 20000
-    optional: true
-
-- takeScreenshot: journey_07_cafeteria
-
-- back
-
+- takeScreenshot: journey_cafeteria
+- openLink: campus://settings
 - extendedWaitUntil:
-    visible:
-      id: 'header-avatar-button'
-    timeout: 120000
-
-- tapOn:
-    id: 'header-avatar-button'
-
-- extendedWaitUntil:
-    visible: '個人'
-    timeout: 8000
-
-- scrollUntilVisible:
-    element:
-      text: '一般設定'
-    direction: DOWN
+    visible: '目前登入帳號'
     timeout: 20000
-    optional: true
-
-- tapOn:
-    text: '一般設定'
-    optional: true
-
-- takeScreenshot: journey_14_settings_optional
-
-- back
+- assertVisible: '測試學生甲'
+- takeScreenshot: journey_settings

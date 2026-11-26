@@ -23,6 +23,9 @@ const spatialFile = /^(?:apps\/web\/src\/components\/ui\/(?:Modal|modalSession|B
 const mobileAgentFile = /^backend\/functions\/agent\/(?:assignmentSummary|assignmentPaging)[^/]*$/s;
 const pathRules = {
   maestro: path => path.startsWith('apps/mobile/') ||
+    path.startsWith('scripts/maestro/') ||
+    path === 'scripts/test-env/seed.cjs' || path === 'scripts/test-env/env.sh' ||
+    path === 'firebase.test.json' ||
     path === 'packages/shared/src/wakeAwareRequest.ts' ||
     path === '.github/workflows/maestro-e2e.yml' ||
     path === 'scripts/merge-gate/maestro-reports.py' || path === 'scripts/merge-gate/maestro-reports.test.py',

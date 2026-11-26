@@ -387,7 +387,8 @@ export default function HomePage() {
         {blocked && assistant}
         {!sessionLoading && uid && !context ? (
           <p className={styles.notice}>
-            E 校園與 TronClass 的學校來源已停用。<Link href="/classroom">前往 nuni 課程</Link>
+            E 校園資料擷取暫停。可獨立連接靜宜 TronClass，查看課程、作業、公告與教材。{' '}
+            <Link href="/tronclass">連接 TronClass</Link> · <Link href="/classroom">前往 nuni 課程</Link>
           </p>
         ) : null}
         {isTeacherRole(role) && (

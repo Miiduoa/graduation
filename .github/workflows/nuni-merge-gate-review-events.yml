@@ -1,0 +1,15 @@
+name: nuni gate review evidence changed
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+permissions: {}
+jobs:
+  signal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      # This PR-context relay has no checkout, artifacts, credentials or data outputs.
+      # The trusted workflow_run consumer independently reads GitHub's current evidence.
+      - run: 'true'

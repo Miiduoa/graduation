@@ -1,78 +1,46 @@
-# 底部導覽：今天｜課務｜生活｜訊息｜我、頭像抽屜、中央助理球
-# 需在已通過 Onboarding 的情境下執行（或接在 01 之後）。
-
 appId: ${APP_ID}
-name: Navigation Shell
-tags:
-  - smoke
-  - navigation
-  - ai
-
+name: Authenticated navigation shell and drawer
+tags: [smoke, navigation]
 ---
-
-# Development client 需 Metro（`pnpm dev`）；勿搭配會 reinstall 的 clearState，否則失去 bundle URL。
-- launchApp
-
-- extendedWaitUntil:
-    visible:
-      id: 'tab-Today'
-    timeout: 45000
-
-- waitForAnimationToEnd:
-    timeout: 3000
-
-- extendedWaitUntil:
-    visible:
-      id: 'tab-學習'
-    timeout: 20000
-
-- extendedWaitUntil:
-    visible:
-      id: 'tab-校園'
-    timeout: 20000
-
-- extendedWaitUntil:
-    visible:
-      id: 'tab-訊息'
-    timeout: 20000
-
-- extendedWaitUntil:
-    visible:
-      id: 'header-avatar-button'
-    timeout: 120000
-
-- waitForAnimationToEnd:
-    timeout: 2500
-
+- runFlow: ../helpers/sign-in-student.yaml
+- assertVisible:
+    id: tab-學習
+- assertVisible:
+    id: tab-校園
+- assertVisible:
+    id: tab-訊息
+- assertVisible:
+    id: tab-我的
 - takeScreenshot: navigation_tabs
-
-- waitForAnimationToEnd:
-    timeout: 2500
-
 - tapOn:
-    id: 'header-avatar-button'
-
+    id: tab-校園
+- extendedWaitUntil:
+    visible:
+      id: header-avatar-button
+    timeout: 20000
+- tapOn:
+    id: header-avatar-button
 - extendedWaitUntil:
     visible: '個人'
-    timeout: 8000
-
+    timeout: 10000
+- assertVisible: '測試學生甲'
+- assertVisible: '個人資料'
 - takeScreenshot: header_drawer_open
-
+- tapOn: '關閉抽屜'
 - tapOn:
-    text: '關閉抽屜'
-    optional: true
-
+    id: tab-學習
+- assertVisible:
+    id: tab-Today
 - tapOn:
-    id: 'ai-floating-ball'
-    optional: true
-
-- waitForAnimationToEnd:
-    timeout: 2000
-    optional: true
-
-- extendedWaitUntil:
-    visible: 'AI 校園助理'
-    timeout: 8000
-    optional: true
-
-- takeScreenshot: ai_overlay_optional
+    id: tab-校園
+- assertVisible:
+    id: tab-Today
+- tapOn:
+    id: tab-訊息
+- assertVisible:
+    id: tab-Today
+- tapOn:
+    id: tab-我的
+- assertVisible:
+    id: tab-Today
+- takeScreenshot: navigation_profile_tab

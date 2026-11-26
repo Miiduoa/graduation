@@ -90,6 +90,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Setup Java 21 for Firebase emulators
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Verify isolated authentication configuration
+        run: node --experimental-strip-types --test scripts/maestro/emulator-config.test.mjs
+
+      - name: Start and verify Firebase test identity
+        run: bash scripts/maestro/start-emulators.sh
+
       - name: Install Maestro
         run: |
           set -euo pipefail
@@ -149,6 +161,7 @@ jobs:
             -configuration Release \
             -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath "$RUNNER_TEMP/campus-ios-build" \
+            ENTRY_FILE="$PWD/index.maestro.ts" \
             CODE_SIGNING_ALLOWED=NO \
             build
           APP_PATH="$RUNNER_TEMP/campus-ios-build/Build/Products/Release-iphonesimulator/mobile.app"
@@ -188,20 +201,28 @@ jobs:
           # Discard any pre-existing reports so every file below belongs to this run.
           rm -f .maestro/results/*-results.xml
           # Run all test flows
+          suite_status=0
           for flow in .maestro/flows/*.yaml; do
             flow_name=$(basename "$flow" .yaml)
             echo "Running: $flow_name"
             
-            maestro --device "$SIMULATOR_UDID" test "$flow" \
+            if maestro --device "$SIMULATOR_UDID" test "$flow" \
               --test-output-dir ".maestro/screenshots/$flow_name" \
               --debug-output ".maestro/results/debug/$flow_name" \
               --format junit \
               --output ".maestro/results/${flow_name}-results.xml" \
-              --env APP_ID="$APP_ID"
+              --env APP_ID="$APP_ID"; then
+              echo "Passed: $flow_name"
+            else
+              echo "Failed: $flow_name" >&2
+              suite_status=1
+            fi
             
             # Small delay between tests
             sleep 5
           done
+          # Collect every isolated flow's evidence without accepting any failure.
+          exit "$suite_status"
 
       - name: Verify full Maestro reports
         if: github.event_name == 'pull_request' && github.base_ref == 'main'
@@ -237,6 +258,19 @@ jobs:
           if [ -n "$SIMULATOR_UDID" ]; then
             xcrun simctl shutdown "$SIMULATOR_UDID" || true
           fi
+          if [ -f "$RUNNER_TEMP/maestro-emulators/emulators.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/maestro-emulators/emulators.pid")" 2>/dev/null || true
+          fi
+
+      - name: Preserve emulator diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: maestro-emulator-logs-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/maestro-emulators/emulators.log
+            firestore-debug.log
+          retention-days: 7
 
       - name: Upload Test Results
         uses: actions/upload-artifact@v7

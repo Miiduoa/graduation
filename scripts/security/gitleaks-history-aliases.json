@@ -98,5 +98,17 @@
       "reviewed": "980eea437bc5ee9ae4cee50c3d27122459ea7cbd:docs/API.md:generic-api-key:115",
       "observed": "d8628868502fe68b12e47bd26207042701ad29d0:docs/API.md:generic-api-key:115"
     }
+  ],
+  "reviewedTestFixtures": [
+    {
+      "reviewed": "86922724ef4de26b36b8e25ce96a751a9d5c7e9c:scripts/audit-group-post-visibility.test.cjs:generic-api-key:51",
+      "observed": "2a9bad18dd88a6873b08063df8b308e5df2cf9e0:scripts/audit-group-post-visibility.test.cjs:generic-api-key:51",
+      "reviewedBlob": "95536dff7ce30ef1e27d43182c816019977caf71"
+    },
+    {
+      "reviewed": "7a26c85c0fc3a68943ce1887fde8c371e76977f8:scripts/qa/course-study/compare.test.mjs:generic-api-key:494",
+      "observed": "66a88348a216bbeee31e332968ca8cc39e4eea70:scripts/qa/course-study/compare.test.mjs:generic-api-key:494",
+      "reviewedBlob": "03dcd5a143da8c61ac4400ff9b3525b0b87ad0c2"
+    }
   ]
 }

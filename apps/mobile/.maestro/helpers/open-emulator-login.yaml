@@ -1,0 +1,21 @@
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: login-landing
+    timeout: 90000
+- assertNotVisible:
+    id: tab-Today
+- runFlow: select-pu.yaml
+- openLink: campus://maestro/sign-in
+- extendedWaitUntil:
+    visible:
+      id: maestro-emulator-login
+    timeout: 20000
+- tapOn:
+    id: maestro-email
+- inputText: 's0000001@test.campus-one.local'
+- tapOn:
+    id: maestro-password

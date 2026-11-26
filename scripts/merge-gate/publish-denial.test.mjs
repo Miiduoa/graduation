@@ -58,7 +58,7 @@ function installFixture(scenario) {
 
   const metadata = JSON.parse(readFile(new URL('./policy.json', import.meta.url), 'utf8'));
   const workflowFiles = Object.entries(metadata.workflowBlobs).map(([path, sha]) => ({path, sha}));
-  for (const name of ['nuni-merge-gate', 'nuni-merge-gate-tests']) workflowFiles.push({ path: '.github/workflows/' + name + '.yml' });
+  for (const name of ['nuni-merge-gate', 'nuni-merge-gate-tests', 'nuni-merge-gate-revalidate', 'nuni-merge-gate-review-events']) workflowFiles.push({ path: '.github/workflows/' + name + '.yml' });
   const pr = { number, state: 'open', draft: false, mergeable: true, changed_files: 1,
     head: {sha: head, repo}, base: {sha: base, ref: 'main', repo} };
   const review = { id: reviewId, user: owner, author_association: 'OWNER', submitted_at: date,

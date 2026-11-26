@@ -86,16 +86,18 @@ const REQUIRED_JOBS = {
   '.github/workflows/course-access-review.yml': ['policy-and-postgres'],
   '.github/workflows/campus-spatial-browser.yml': ['Spatial explorer browser checks'],
 };
-const SELF = ['.github/workflows/nuni-merge-gate.yml','.github/workflows/nuni-merge-gate-tests.yml'];
-function liveComment(comment, event, number) {
+export const SELF = ['.github/workflows/nuni-merge-gate.yml','.github/workflows/nuni-merge-gate-tests.yml',
+  '.github/workflows/nuni-merge-gate-revalidate.yml','.github/workflows/nuni-merge-gate-review-events.yml'];
+function liveComment(comment, event, number, observedAt = Date.now()) {
   must(comment.id === event.comment.id && comment.user?.id === OWNER_ID &&
     comment.author_association === 'OWNER' && comment.body === event.comment.body &&
     comment.created_at === event.comment.created_at && comment.updated_at === comment.created_at &&
     comment.issue_url === 'https://api.github.com' + PREFIX + '/issues/' + number &&
-    Date.now() - Date.parse(comment.created_at) >= 0 &&
-    Date.now() - Date.parse(comment.created_at) <= 60*60*1000, 'Command expired, edited or unauthorized');
+    Number.isFinite(observedAt) && observedAt <= Date.now() &&
+    observedAt - Date.parse(comment.created_at) >= 0 &&
+    observedAt - Date.parse(comment.created_at) <= 60*60*1000, 'Command expired, edited or unauthorized');
 }
-async function verify(token, event, cmd, number) {
+async function verify(token, event, cmd, number, publishedAt) {
   const get = p => api(token, PREFIX + p);
   const [pr, main, comment, reviews, rule, files, compare, workflows, scripts] = await Promise.all([
     get('/pulls/' + number), get('/branches/main'), get('/issues/comments/' + event.comment.id),
@@ -106,7 +108,7 @@ async function verify(token, event, cmd, number) {
   validatePr(pr, main, cmd, number);
   must(compare.merge_base_commit?.sha === cmd.base && compare.behind_by === 0 &&
     compare.ahead_by > 0, 'Head does not contain the current main');
-  liveComment(comment, event, number);
+  liveComment(comment, event, number, publishedAt);
   must(Array.isArray(reviews) && reviews.length < 100, 'Review pagination requires manual gate');
   const review = reviews.find(r=>r.id===cmd.reviewId);
   must(review, 'Referenced review missing');
@@ -229,8 +231,7 @@ async function verifiedPublication(readToken, event, cmd, number) {
   const decision = existingGateDecision(complete(history, 'check_runs'), cmd, number, event.comment.id, details);
   return { ...proof, decision, details };
 }
-async function publish(readToken, event, cmd, number) {
-  requirePublicationEnabled();
+async function withAppToken(operation) {
   const key = process.env.NUNI_GATE_PRIVATE_KEY;
   delete process.env.NUNI_GATE_PRIVATE_KEY;
   must(key, 'Protected environment App key is not configured');
@@ -250,6 +251,17 @@ async function publish(readToken, event, cmd, number) {
       (p==='checks'&&v==='write')||(p==='metadata'&&v==='read'))&&
       (!grant.repositories||grant.repositories.length===1&&grant.repositories[0].id===REPO_ID),
       'App token has unexpected scope');
+    return await operation(token);
+  } finally {
+    try { await api(token,'/installation/token','DELETE'); }
+    catch { console.warn('Short-lived token revocation failed; token expires automatically.'); }
+  }
+}
+export { api, complete, verify, withAppToken };
+
+async function publish(readToken, event, cmd, number) {
+  requirePublicationEnabled();
+  return withAppToken(async token => {
     // Fresh complete verification after acquiring the token, immediately before publication.
     const proof = await verifiedPublication(readToken, event, cmd, number);
     const externalId = gateExternalId(number, cmd, event.comment.id);
@@ -274,10 +286,7 @@ async function publish(readToken, event, cmd, number) {
     });
     verifyPublishedCheck(result,cmd,externalId,details);
     console.log('Genuine App check published: '+result.id);
-  } finally {
-    try { await api(token,'/installation/token','DELETE'); }
-    catch { console.warn('Short-lived token revocation failed; token expires automatically.'); }
-  }
+  });
 }
 async function main() {
   const stage=process.argv[2];

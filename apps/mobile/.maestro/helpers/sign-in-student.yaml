@@ -1,0 +1,22 @@
+appId: ${APP_ID}
+---
+# Real Firebase Auth emulator password authentication. No local mock session or
+# role switch is installed. The existing scripts/test-env/seed.cjs owns this
+# public, non-production fixture password; the test entrypoint pins loopback.
+- runFlow: open-emulator-login.yaml
+- inputText: 'campus-test-1234' # gitleaks:allow public loopback emulator fixture
+- hideKeyboard
+- tapOn:
+    id: maestro-sign-in
+- extendedWaitUntil:
+    visible:
+      id: tab-Today
+    timeout: 90000
+- assertNotVisible:
+    id: login-landing
+- assertNotVisible:
+    id: maestro-emulator-login
+- extendedWaitUntil:
+    visible:
+      id: student-today
+    timeout: 30000

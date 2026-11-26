@@ -4,7 +4,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/merge-gate/**'
-      - '.github/workflows/nuni-merge-gate*.yml'
+      - '.github/workflows/**'
       - 'docs/security/nuni-merge-gate.md'
       - '.github/workflows/maestro-e2e.yml'
       - '.github/workflows/mobile-agent-regression.yml'
@@ -13,7 +13,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/merge-gate/**'
-      - '.github/workflows/nuni-merge-gate*.yml'
+      - '.github/workflows/**'
       - 'docs/security/nuni-merge-gate.md'
       - '.github/workflows/maestro-e2e.yml'
       - '.github/workflows/mobile-agent-regression.yml'
