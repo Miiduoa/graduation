@@ -3,6 +3,7 @@ export {
   getAuth,
   getCurrentUser,
   isFirebaseConfigured,
+  isEmulatorTestEnv,
   resetPassword,
   signIn,
   signInWithPuStudentId,

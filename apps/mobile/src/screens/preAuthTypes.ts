@@ -17,6 +17,7 @@ export type PreAuthStackParamList = {
   PlatformLostFound: { id?: string; schoolId?: string } | undefined;
   Career: undefined;
   SSOLogin: undefined;
+  TronClassWorkspace: undefined;
   /** `prompt` only pre-fills the composer; the student still chooses to send it. */
   NuniTimetableAssistant: { prompt?: string } | undefined;
   PersonalImport: { kind?: 'timetable' | 'grades' | 'events' } | undefined;

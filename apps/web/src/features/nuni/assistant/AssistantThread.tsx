@@ -26,6 +26,7 @@ import { AccountDemoAssistantCard } from './AccountDemoAssistantCard';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { parseLocalScheduleIntent } from '@/lib/assistantLocalSchedule';
 import { personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
+import { canAnswerTronClassQuestion, tronClassExplicitNavigationQuestion } from '@/lib/tronClassAgentIntent';
 import { courseworkStudyFollowup, parseAssistantCourseworkTargets, type AssistantCourseworkTarget } from '@/lib/assistantCoursework';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { assistantPermissionSettingsHref, stepFamily, stepStatus } from './copy';
@@ -45,7 +46,7 @@ export function assistantQuestionReadRoute(taskProfile: AssistantRoleProfileId, 
   const personal = personalAssistantReadIntent(query);
   const schedule = parseLocalScheduleIntent(query);
   const academic = parseImportedAcademicIntent(query);
-  const restricted = taskProfile !== 'student' && (personal?.kind === 'coursework' || personal?.kind === 'today-priority' || academic !== null);
+  const restricted = taskProfile !== 'student' && (personal?.kind === 'coursework' || personal?.kind === 'today-priority' || academic !== null || canAnswerTronClassQuestion(query));
   const personalTime = schedule !== null || personal?.kind === 'schedule' || personal?.kind === 'calendar';
   // A complete read intent is more precise than work-related keywords. Restricted
   // sources receive fixed guidance even when their parser accepts unusual spacing.
@@ -109,6 +110,7 @@ export function AssistantThread({
   demoScope,
   renderPlanRevision,
   renderPlanComparison,
+  renderTronClass,
   allowBatchConfirmation,
   preferredWorkContext,
 }: {
@@ -146,6 +148,7 @@ export function AssistantThread({
   demoScope?: AccountDemoAssistantScope;
   renderPlanRevision?: (turn: V2Turn) => ReactNode;
   renderPlanComparison?: (turn: V2Turn) => ReactNode;
+  renderTronClass?: (turn: V2Turn) => ReactNode;
   allowBatchConfirmation?: (turn: V2Turn) => boolean;
   /** Display preference from an already-loaded workspace, never authorization. */
   preferredWorkContext?: AssistantWorkContext;
@@ -245,10 +248,12 @@ export function AssistantThread({
     node.style.height = Math.min(node.scrollHeight, 132) + 'px';
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
-  const publicCompound = publicCourseCompoundRequest(question, schoolId);
-  const publicCourseIntent = !publicCompound && resolvePublicCourseAssistantIntent(question, schoolId);
+  const navigation = taskProfile === 'student' && !!tronClassExplicitNavigationQuestion(question);
+  const tronClass = taskProfile === 'student' && canAnswerTronClassQuestion(question);
+  const publicCompound = !tronClass && publicCourseCompoundRequest(question, schoolId);
+  const publicCourseIntent = !tronClass && !publicCompound && resolvePublicCourseAssistantIntent(question, schoolId);
   const profile = getAssistantRoleProfile(taskProfile)!;
-  const foodPickup = taskProfile === 'student' && parseAssistantFoodPickupIntent(question) !== null;
+  const foodPickup = !tronClass && taskProfile === 'student' && parseAssistantFoodPickupIntent(question) !== null;
   const readRoute = assistantQuestionReadRoute(taskProfile, question);
   const useProfileExamples = taskProfile !== 'student' && workContext === assistantWorkContextForTaskProfile(taskProfile);
   const studentWork = taskProfile === 'student' && workContext === 'student';
@@ -257,7 +262,7 @@ export function AssistantThread({
       ...(foodPickupEnabled && taskProfile === 'student' ? [PICKUP_SUGGESTION] : [])];
   const canSubmit = !pending && !onStop && !!question.trim() &&
     ((!!demoScope && !!accountDemoAssistantIntent(question)) || readRoute.roleGuide || (foodPickup ? foodPickupEnabled
-      : parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) ||
+      : tronClass || navigation || parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) ||
         (onTaskRetry && isAssistantTaskRetryQuestion(question)) ||
         (!publicCompound && (!!publicCourseIntent || readRoute.local || readRoute.personal ||
           (onStudyTarget && taskProfile === 'student' && courseworkStudyFollowup(question) !== null))) || (consent && ready)));
@@ -307,7 +312,7 @@ export function AssistantThread({
       {!inline && (
         <>
           <p className={styles.intro}>{taskProfile === 'student'
-            ? '直接查課程、時間、教室與未交作業，也可查個人行程；雲端查詢涵蓋已同步資料。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。'
+            ? '直接查課程、時間、教室與未交作業，也可查個人行程。連接並授權後，可請助理查詢 TronClass、下載教材與準備作業。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。'
             : '查詢自己的行程與公開校園資訊，或接續目前的工作。個人時間安排會先預覽，確認後才儲存。'}</p>
           <nav className={styles.services} aria-label="校園服務入口">
             <AssistantReplyLink href={'/map' + schoolQuery}>校園地圖</AssistantReplyLink>
@@ -322,7 +327,7 @@ export function AssistantThread({
       {!ready ? (
         <p className={styles.notice} role="status">
           {taskProfile === 'student'
-            ? '雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也可查校園地點、核對下一堂課教室，從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。'
+            ? '雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也能使用已授權的 TronClass、查校園地點、核對下一堂課教室，從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。'
             : '雲端回答暫時無法使用，仍可核對保存的個人行程，或從下方建議接續目前的工作。'}
           {foodPickupEnabled && taskProfile === 'student' ? '也能把最近訂單的取餐時間排入個人行事曆，確認後才會儲存。' : ''}
         </p>
@@ -362,6 +367,7 @@ export function AssistantThread({
                     <ReplyBody reply={turn.reply} />
                   </SpokenReply>
                 ) : <ReplyBody reply={turn.reply} />}
+                {renderTronClass?.(turn)}
                 {turn.reply.roleGuide && turn.reply.serviceIds && <AssistantServiceLinks serviceIds={turn.reply.serviceIds} schoolId={schoolId} audience="platform" />}
                 {onStudyTarget && taskProfile === 'student' && parseAssistantCourseworkTargets(turn.reply.courseworkTargets).length > 0 ? (
                   <div className={styles.courseworkChoices} role="group" aria-label="安排作業準備時間">
