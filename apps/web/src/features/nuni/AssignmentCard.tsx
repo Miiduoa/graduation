@@ -3,6 +3,7 @@
 import { startAssignmentLive, assignmentReader, assignmentSyncLabel, type AssignmentSync } from '@campus/shared/src/assignmentLive';
 import { assignmentLifecycle } from './assignmentLifecycle';
 import { useEffect, useRef, useState } from 'react';
+import { preferredScrollBehavior } from '@/lib/scrollBehavior';
 import {
   NuniError,
   nuniErrorMessage,
@@ -209,7 +210,7 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
     const node = receiptNodes.current.get(focusReceiptId);
     if (!node) return;
     if (typeof node.scrollIntoView === 'function') {
-      node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      node.scrollIntoView({ block: 'nearest', behavior: preferredScrollBehavior() });
     }
     const focusTarget =
       node.querySelector<HTMLElement>('textarea[name="feedback"]') ??

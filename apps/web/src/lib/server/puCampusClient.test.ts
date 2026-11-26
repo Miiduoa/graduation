@@ -424,6 +424,47 @@ it('accepts TronClass login only after profile returns this account', async () =
   });
 });
 
+it('keeps profile-rotated session and XSRF cookies for the next course request', async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/api/login')) {
+      const response = jsonResponse(200, { id: 44 }, {
+        'set-cookie': 'session=login-session; Path=/; HttpOnly',
+      });
+      response.headers.append('set-cookie', 'XSRF-TOKEN=login-xsrf; Path=/');
+      response.headers.append('set-cookie', 'route=school-node; Path=/');
+      return response;
+    }
+    if (url.endsWith('/api/profile')) {
+      expect(new Headers(init?.headers).get('Cookie')).toContain('session=login-session');
+      const response = jsonResponse(200, {
+        id: 44, login_name: 'changyi', name: '王老師', role: 'teacher',
+      }, { 'set-cookie': 'session=profile-session; Path=/; HttpOnly' });
+      response.headers.append('set-cookie', 'XSRF-TOKEN=profile-xsrf; Path=/');
+      return response;
+    }
+    if (url.endsWith('/api/my-courses')) {
+      const cookie = new Headers(init?.headers).get('Cookie') ?? '';
+      if (!cookie.includes('session=profile-session') || !cookie.includes('XSRF-TOKEN=profile-xsrf')) {
+        return jsonResponse(401, { error: 'expired session' });
+      }
+      expect(cookie).toContain('route=school-node');
+      expect(cookie).not.toContain('login-session');
+      expect(cookie).not.toContain('login-xsrf');
+      return jsonResponse(200, { courses: [{ name: '資料庫', role: 'teacher' }] });
+    }
+    throw new Error(`unexpected ${url}`);
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  const session = await gateway.loginTronClass('changyi', SECRET);
+  expect(session.cookies).toEqual({
+    session: 'profile-session', 'XSRF-TOKEN': 'profile-xsrf', route: 'school-node',
+  });
+  await expect(gateway.fetchTronClassCourses(session)).resolves.toEqual([
+    { name: '資料庫', role: 'teacher', teachers: [] },
+  ]);
+  expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/api/login'))).toHaveLength(1);
+});
+
 it('reads student info even if the portal HTML still has a maintenance comment', async () => {
   const gateway = createPuCampusGateway({
     fetch: async () =>
@@ -536,6 +577,32 @@ it('does not treat TronClass HTTP 400 as a credential error', async () => {
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/login?next='))).toBe(true);
 });
 
+it.each([
+  ['ENOTFOUND', true],
+  ['UND_ERR_CONNECT_TIMEOUT', true],
+  ['UND_ERR_HEADERS_TIMEOUT', false],
+  ['ECONNRESET', false],
+])('distinguishes pre-connection failures from uncertain login delivery (%s)', async (code, loginNotDelivered) => {
+  const fetch = vi.fn(async () => {
+    throw new TypeError('request failed', { cause: { code } });
+  });
+  const gateway = createPuCampusGateway({ fetch });
+  await expect(gateway.loginTronClass('changyi', 'fixture')).rejects.toMatchObject({ code, loginNotDelivered });
+  expect(fetch).toHaveBeenCalledOnce();
+});
+
+it('keeps delivery charged if a connection fails after native login has already reached the LMS', async () => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url.endsWith('/api/login')) return jsonResponse(403, { error: 'native login rejected' });
+    throw new TypeError('request failed', { cause: { code: 'ENOTFOUND' } });
+  });
+  const gateway = createPuCampusGateway({ fetch });
+  await expect(gateway.loginTronClass('changyi', 'fixture')).rejects.toMatchObject({
+    code: 'ENOTFOUND', loginNotDelivered: false,
+  });
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
 it('falls back to identity CAS when native TronClass login returns 400', async () => {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const href = String(url);
@@ -549,13 +616,16 @@ it('falls back to identity CAS when native TronClass login returns 400', async (
         headers: {
           Location:
             'https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login?service=https://tronclass.pu.edu.tw/login',
+          'set-cookie': 'route=lms-node; Path=/',
         },
       });
     }
     if (href.startsWith('https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login')) {
-      return htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML);
+      expect(new Headers(init?.headers).get('Cookie')).toBeNull();
+      return htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML, { 'set-cookie': 'route=identity-node; Path=/' });
     }
     if (href.includes('/login-actions/authenticate') && method === 'POST') {
+      expect(new Headers(init?.headers).get('Cookie')).toBe('route=identity-node');
       expect(href).toContain('session_code=fixtureSessionCode');
       expect(String(init?.body || '')).toContain(`username=${encodeURIComponent('changyi')}`);
       expect(String(init?.body || '')).toContain(`password=${encodeURIComponent(SECRET)}`);
@@ -568,11 +638,13 @@ it('falls back to identity CAS when native TronClass login returns 400', async (
       });
     }
     if (href.startsWith('https://tronclass.pu.edu.tw/user/index')) {
+      expect(new Headers(init?.headers).get('Cookie')).toBe('route=lms-node');
       return htmlResponse(200, '<html><body>ok</body></html>', {
         'set-cookie': 'session=tc-cas; Path=/',
       });
     }
     if (href.endsWith('/api/profile')) {
+      expect(new Headers(init?.headers).get('Cookie')).not.toContain('KEYCLOAK');
       return jsonResponse(200, {
         id: 44,
         name: '王老師',
@@ -587,7 +659,7 @@ it('falls back to identity CAS when native TronClass login returns 400', async (
     userId: 44,
     userName: '王老師',
     role: 'teacher',
-    cookies: expect.objectContaining({ session: 'tc-cas' }),
+    cookies: { route: 'lms-node', session: 'tc-cas' },
   });
   expect(
     fetchMock.mock.calls.filter(([url]) => {
@@ -1085,6 +1157,233 @@ it('aborts a student TronClass sidecar within the supplied timeout', async () =>
     code: 'AbortError',
   });
   expect(Date.now() - started).toBeLessThan(1000);
+});
+
+function delayedCampusResponse(response: Response, delay: number, signal?: AbortSignal | null) {
+  return new Promise<Response>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve(response);
+    }, delay);
+    const abort = () => {
+      clearTimeout(timer);
+      reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
+it('does not send school credentials when the TronClass caller is already canceled', async () => {
+  const controller = new AbortController();
+  controller.abort(new Error(SECRET));
+  const fetchMock = vi.fn();
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginTronClass(STUDENT, SECRET, { route: 'student', signal: controller.signal }))
+    .rejects.toMatchObject({ kind: 'unavailable', code: 'CANCELLED', message: '學校登入已取消' });
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it.each([
+  [1, 'submit'], [2, 'redirect'], [3, 'redirect'], [4, 'submit'],
+  [5, 'submit'], [6, 'submit'], [7, 'verify'],
+])('cancels TronClass hop %s and ignores a late relay result without continuing the CAS flow', async (hop, stage) => {
+  const controller = new AbortController();
+  const add = vi.spyOn(controller.signal, 'addEventListener');
+  const remove = vi.spyOn(controller.signal, 'removeEventListener');
+  const responses = [
+    jsonResponse(400, { error: 'native login disabled' }),
+    new Response('', { status: 302, headers: { Location: 'https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login' } }),
+    htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML),
+    new Response('', { status: 307, headers: { Location: 'https://identity.pu.edu.tw/auth/realms/pu/login-actions/authenticate?step=2' } }),
+    new Response('', { status: 302, headers: { Location: 'https://tronclass.pu.edu.tw/user/index?ticket=ST-fixture' } }),
+    htmlResponse(200, '<html><body><input id="userId" value="57"></body></html>', { 'set-cookie': 'session=fixture; Path=/' }),
+    jsonResponse(200, { id: 57, login_name: STUDENT, role: 'student' }),
+  ];
+  let finish!: () => void;
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit): Promise<Response> => {
+    void _url;
+    void _init;
+    const current = fetchMock.mock.calls.length;
+    const response = responses[current - 1]!;
+    if (current !== hop) return response;
+    // Deliberately ignore RequestInit.signal to exercise the boundary rather
+    // than assuming every school relay respects fetch cancellation.
+    return new Promise(resolve => { finish = () => resolve(response); });
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  const pending = gateway.loginTronClass(STUDENT, SECRET, {
+    timeoutMs: 25_000, hopTimeoutMs: 10_000, route: 'student', signal: controller.signal,
+  });
+  const rejected = expect(pending).rejects.toMatchObject({ kind: 'unavailable', code: 'CANCELLED', route: 'student', stage });
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  controller.abort(new Error(SECRET));
+  await rejected;
+  expect(fetchMock.mock.calls.at(-1)?.[1]?.signal?.aborted).toBe(true);
+  finish();
+  await Promise.resolve();
+  expect(fetchMock).toHaveBeenCalledTimes(Number(hop));
+  expect(remove.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(add.mock.calls.length);
+});
+
+it('cancels an authenticated profile body that ignores abort and cannot accept its late session', async () => {
+  const controller = new AbortController();
+  let finish!: (value: string) => void;
+  const profile = jsonResponse(200, {});
+  const read = vi.spyOn(profile, 'text').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+    ? jsonResponse(200, { id: 57 }, { 'set-cookie': 'session=fixture; Path=/' }) : profile);
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  const pending = gateway.loginTronClass(STUDENT, SECRET, { route: 'student', signal: controller.signal });
+  const rejected = expect(pending).rejects.toMatchObject({ code: 'CANCELLED', stage: 'verify' });
+  await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+  controller.abort();
+  await rejected;
+  finish(JSON.stringify({ id: 57, login_name: STUDENT }));
+  await Promise.resolve();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('cleans up caller cancellation after a successful TronClass profile verification', async () => {
+  const controller = new AbortController();
+  const add = vi.spyOn(controller.signal, 'addEventListener');
+  const remove = vi.spyOn(controller.signal, 'removeEventListener');
+  const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+    void _init;
+    return url.endsWith('/api/login')
+      ? jsonResponse(200, { id: 57 }, { 'set-cookie': 'session=fixture; Path=/' })
+      : jsonResponse(200, { id: 57, login_name: STUDENT }, { 'set-cookie': 'session=rotated-fixture; Path=/' });
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginTronClass(STUDENT, SECRET, { route: 'student', signal: controller.signal }))
+    .resolves.toMatchObject({ userId: 57, cookies: { session: 'rotated-fixture' } });
+  expect(remove.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(add.mock.calls.length);
+  controller.abort();
+  expect(fetchMock.mock.calls.every(([, init]) => init?.signal?.aborted === false)).toBe(true);
+});
+
+it('shares the TronClass deadline across slow CAS login redirects before sending credentials', async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/api/login')) return jsonResponse(400, { error: 'native login disabled' });
+    return delayedCampusResponse(new Response('', { status: 302, headers: {
+      Location: `https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login?hop=${fetchMock.mock.calls.length}`,
+    } }), 400, init?.signal);
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  const pending = expect(gateway.loginTronClass(STUDENT, SECRET, {
+    timeoutMs: 1_000, hopTimeoutMs: 1_000, route: 'student',
+  })).rejects.toMatchObject({ kind: 'timeout', route: 'student', stage: 'redirect' });
+  await vi.advanceTimersByTimeAsync(1_000);
+  await pending;
+  expect(fetchMock).toHaveBeenCalledTimes(4);
+  expect(fetchMock.mock.calls.slice(1).every(([, init]) => !init?.body)).toBe(true);
+  expect(fetchMock.mock.calls.at(-1)?.[1]?.signal?.aborted).toBe(true);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(fetchMock).toHaveBeenCalledTimes(4);
+});
+
+it('bounds credential-preserving CAS redirects and the ticket read by the same deadline', async () => {
+  vi.useFakeTimers();
+  let passwordPosts = 0;
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/api/login')) return jsonResponse(400, { error: 'native login disabled' });
+    if (url.startsWith('https://tronclass.pu.edu.tw/login')) return htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML);
+    if (String(init?.method).toUpperCase() === 'POST') {
+      passwordPosts++;
+      return delayedCampusResponse(new Response('', { status: passwordPosts === 1 ? 307 : 302, headers: {
+        Location: passwordPosts === 1
+          ? `${url}&step=2`
+          : 'https://tronclass.pu.edu.tw/user/index?ticket=ST-fixture',
+      } }), 500, init?.signal);
+    }
+    return delayedCampusResponse(htmlResponse(200,
+      '<html><body><input id="userId" value="57"><span class="user-name">陳同學</span></body></html>',
+      { 'set-cookie': 'session=fixture; Path=/' }), 500, init?.signal);
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  const pending = expect(gateway.loginTronClass(STUDENT, SECRET, {
+    timeoutMs: 1_200, hopTimeoutMs: 1_000, route: 'student',
+  })).rejects.toMatchObject({ kind: 'timeout', route: 'student', stage: 'submit' });
+  await vi.advanceTimersByTimeAsync(1_200);
+  await pending;
+  expect(passwordPosts).toBe(2);
+  expect(fetchMock.mock.calls.at(-1)?.[0]).toContain('/user/index?ticket=');
+  expect(fetchMock.mock.calls.at(-1)?.[1]?.signal?.aborted).toBe(true);
+  expect(fetchMock.mock.calls.some(([url]) => url.endsWith('/api/profile'))).toBe(false);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(fetchMock).toHaveBeenCalledTimes(5);
+});
+
+it('keeps a successful multi-hop TronClass session and rotated cookies within its total budget', async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    let response: Response;
+    if (url.endsWith('/api/login')) response = jsonResponse(400, { error: 'native login disabled' });
+    else if (url.startsWith('https://tronclass.pu.edu.tw/login')) response = new Response('', { status: 302, headers: {
+      Location: 'https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login',
+    } });
+    else if (url.includes('/protocol/cas/login')) response = htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML);
+    else if (url.includes('/login-actions/authenticate')) response = new Response('', { status: 302, headers: {
+      Location: 'https://tronclass.pu.edu.tw/user/index?ticket=ST-fixture',
+    } });
+    else if (url.endsWith('/api/profile')) response = jsonResponse(200, {
+      id: 57, name: '陳同學', login_name: STUDENT, role: 'student',
+    }, { 'set-cookie': 'session=rotated-fixture; Path=/' });
+    else response = htmlResponse(200, '<html><body><input id="userId" value="57"></body></html>',
+      { 'set-cookie': 'session=initial-fixture; Path=/' });
+    return delayedCampusResponse(response, 100, init?.signal);
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  const pending = gateway.loginTronClass(STUDENT, SECRET, {
+    timeoutMs: 2_000, hopTimeoutMs: 1_000, route: 'student',
+  });
+  await vi.advanceTimersByTimeAsync(600);
+  await expect(pending).resolves.toMatchObject({
+    userId: 57, userName: '陳同學', role: 'student', cookies: { session: 'rotated-fixture' },
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(6);
+  expect(fetchMock.mock.calls.every(([, init]) => init?.signal?.aborted === false)).toBe(true);
+});
+
+it('rejects a late native-login response without following redirects after its abort', async () => {
+  vi.useFakeTimers();
+  // Some relay transports may resolve despite cancellation; never accept that
+  // result or start the CAS fallback after the user's login budget expires.
+  const fetchMock = vi.fn(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    return jsonResponse(400, { error: 'native login disabled' });
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  const pending = expect(gateway.loginTronClass(STUDENT, SECRET, {
+    timeoutMs: 1_000, route: 'student',
+  })).rejects.toMatchObject({ kind: 'timeout', route: 'student', stage: 'submit', code: 'DEADLINE' });
+  await vi.advanceTimersByTimeAsync(1_100);
+  await pending;
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('does not recover a CAS session when optional profile reading exhausts the total login budget', async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/api/login')) return jsonResponse(400, { error: 'native login disabled' });
+    if (url.startsWith('https://tronclass.pu.edu.tw/login')) return htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML);
+    if (url.includes('/login-actions/authenticate')) return new Response('', { status: 302, headers: {
+      Location: 'https://tronclass.pu.edu.tw/user/index?ticket=ST-fixture',
+    } });
+    if (url.endsWith('/api/profile')) return delayedCampusResponse(jsonResponse(200, {
+      id: 57, login_name: STUDENT,
+    }), 1_500, init?.signal);
+    return htmlResponse(200, '<html><body><input id="userId" value="57"></body></html>',
+      { 'set-cookie': 'session=fixture; Path=/' });
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  const pending = expect(gateway.loginTronClass(STUDENT, SECRET, {
+    timeoutMs: 1_000, hopTimeoutMs: 2_000, route: 'student',
+  })).rejects.toMatchObject({ kind: 'timeout', route: 'student', stage: 'verify', code: 'DEADLINE' });
+  await vi.advanceTimersByTimeAsync(1_000);
+  await pending;
+  expect(fetchMock.mock.calls.at(-1)?.[0]).toContain('/api/profile');
+  expect(fetchMock.mock.calls.at(-1)?.[1]?.signal?.aborted).toBe(true);
 });
 
 it('keeps DNS, TCP and TLS codes on teacher LMS failures', async () => {

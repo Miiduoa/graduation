@@ -18,6 +18,7 @@ const { getAuth } = require('firebase-admin/auth');
 initializeApp({ projectId });
 const db = getFirestore();
 const auth = getAuth();
+const missingOnly = process.argv.includes('--missing-only');
 
 const PASSWORD = 'campus-test-1234'; // gitleaks:allow 只在本機模擬器用的公開測試密碼
 const SCHOOL_ID = 'pu';
@@ -29,17 +30,28 @@ const users = [
   { uid: 'test-merchant', login: 'M0000001', name: '測試店家', username: 'test_shop', role: 'vendor' },
 ];
 
+async function seedDocument(reference, data) {
+  if (!missingOnly) return reference.set(data, { merge: true });
+  try {
+    await reference.create(data);
+  } catch (error) {
+    // A pre-existing fixture is retained, including any user changes to it.
+    if (error?.code !== 6 && error?.code !== 'already-exists') throw error;
+  }
+}
+
 async function main() {
-  await db.doc(`schools/${SCHOOL_ID}`).set({ name: '靜宜大學', code: SCHOOL_ID, shortName: '靜宜' }, { merge: true });
+  await seedDocument(db.doc(`schools/${SCHOOL_ID}`), { name: '靜宜大學', code: SCHOOL_ID, shortName: '靜宜' });
   for (const user of users) {
     const email = `${user.login.toLowerCase()}@test.campus-one.local`;
     try {
       await auth.getUser(user.uid);
-      await auth.updateUser(user.uid, { email, password: PASSWORD, displayName: user.name });
-    } catch {
+      if (!missingOnly) await auth.updateUser(user.uid, { email, password: PASSWORD, displayName: user.name });
+    } catch (error) {
+      if (error?.code !== 'auth/user-not-found') throw error;
       await auth.createUser({ uid: user.uid, email, password: PASSWORD, displayName: user.name });
     }
-    await db.doc(`users/${user.uid}`).set(
+    await seedDocument(db.doc(`users/${user.uid}`),
       {
         displayName: user.name,
         username: user.username,
@@ -48,16 +60,17 @@ async function main() {
         schoolId: SCHOOL_ID,
         primarySchoolId: SCHOOL_ID,
       },
-      { merge: true },
     );
-    await db
-      .doc(`schools/${SCHOOL_ID}/members/${user.uid}`)
-      .set({ status: 'active', role: user.role, displayName: user.name }, { merge: true });
+    await seedDocument(db.doc(`schools/${SCHOOL_ID}/members/${user.uid}`),
+      { status: 'active', role: user.role, displayName: user.name });
   }
   // T0000001 教王老師開的「資料庫」（開課代號：課名｜老師）：老師工作台只看得到這門課的申訴
-  await db
-    .doc(`schools/${SCHOOL_ID}/courseTeachers/資料庫｜王老師`)
-    .set({ courseName: '資料庫', teacherName: '王老師', teacherUids: ['test-teacher'] }, { merge: true });
+  await seedDocument(db.doc(`schools/${SCHOOL_ID}/courseTeachers/資料庫｜王老師`),
+    { courseName: '資料庫', teacherName: '王老師', teacherUids: ['test-teacher'] });
+  if (missingOnly) {
+    console.log('Public emulator fixtures are ready; existing records were left unchanged.');
+    return;
+  }
   console.log('測試帳號（密碼都是 %s）：', PASSWORD);
   for (const user of users) console.log(`  ${user.login}  ${user.name}（${user.role}）`);
   console.log('課程對應：T0000001 教「資料庫｜王老師」（課表裡老師寫王老師的資料庫）');

@@ -74,6 +74,11 @@ describe('compound task intent and source scope', () => {
     expect(crossServiceRequest('查課表，查公車', NaN)).toBeNull();
   });
 
+  it.each(['玩課雲', '玩課雲作業'])('keeps %s as a school LMS handoff in compound requests', (target) => {
+    expect(crossServiceRequest(`${target}，查公車`, now)?.operations[0])
+      .toMatchObject({ kind: 'handoff', serviceId: 'school-lms' });
+  });
+
   it('runs a single lost-found query as a bounded reader and preserves filters beside other services', () => {
     expect(crossServiceRequest('查失物招領', now, binding.schoolId)?.operations).toEqual([
       { id: 'task-1', kind: 'read', serviceId: 'lost-found', label: '查平台失物招領', tool: 'get_lost_found', args: {}, dependsOn: [] },

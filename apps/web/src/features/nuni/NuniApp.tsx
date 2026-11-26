@@ -28,6 +28,7 @@ import { AccountMemberships } from '@/components/AccountMemberships';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { SiteShell } from '@/components/SiteShell';
 import { useClientHydrated } from '@/lib/useClientHydrated';
+import { createTronClassClient, TronClassRequestError } from '@/lib/tronClassIntegrationClient';
 import { useClientNow } from '@/lib/useMaterialClientState';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
@@ -603,6 +604,32 @@ function AccountMembershipEntry({
   ) : null;
 }
 
+function TronClassEntry({ context }: { context: string }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    void createTronClassClient({ kind: 'platform', context }).status(controller.signal).then(
+      () => { if (!controller.signal.aborted) setVisible(true); },
+      (reason: unknown) => {
+        if (controller.signal.aborted) return;
+        setVisible(!(reason instanceof TronClassRequestError && reason.status === 503 && reason.code === 'TRONCLASS_DISABLED'));
+      },
+    );
+    return () => controller.abort();
+  }, [context]);
+
+  if (!visible) return null;
+  return (
+    <section className={styles.panel}>
+      <h2>連接學校的 TronClass 課程</h2>
+      <p className={styles.muted}>同步學校作業、公告與教材，並在 nuni 整理要繳交的內容。</p>
+      <Link className={styles.button} href="/tronclass">
+        連接 TronClass
+      </Link>
+    </section>
+  );
+}
+
 function NuniContent() {
   const pathname = usePathname() || '/';
   const campusSearch = useCampusNavigationSearch(useSearchParams());
@@ -631,7 +658,13 @@ function NuniContent() {
         )}
       </section>
     );
-  else if (pathname === '/classroom') content = <WorkspaceList key={session.context} />;
+  else if (pathname === '/classroom')
+    content = (
+      <>
+        <TronClassEntry key={session.context} context={session.context} />
+        <WorkspaceList key={session.context} />
+      </>
+    );
   else if (pathname === '/classroom/material-bookmarks') content = <MaterialBookmarks />;
   else if (/^\/classroom\/course\/cw_[0-9a-f-]{36}$/.test(pathname))
     content = <Workspace key={`${session.context}:${pathname}`} id={pathname.split('/')[3]} />;

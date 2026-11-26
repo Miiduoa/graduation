@@ -5,7 +5,6 @@ import {
   IDENTITY_NO_MERCHANT_COPY,
   IDENTITY_NO_TEACHING_COPY,
   IDENTITY_RETRY_COPY,
-  STORE_NOT_OPEN_COPY,
   loadAccountIdentity,
   merchantLocationOpen,
 } from './accountIdentity';
@@ -84,11 +83,62 @@ it('lists only non-student course roles and keeps merchant lines separate', asyn
   });
   expect(identity.merchantNextStep?.section).toBe('locations');
   expect(identity.stores.status === 'ok' && identity.stores.items[0]).toMatchObject({
+    tenantId: 'school-one',
+    locationId: 'loc-1',
+    locationName: '第一門市',
     name: '測試餐坊',
     campus: '主校區',
-    status: STORE_NOT_OPEN_COPY,
+    status: '已核准，待完成營運設定',
     open: false,
+    href: '/merchant/workspace?tenant=school-one&location=loc-1',
   });
+});
+
+it('keeps distinct store destinations and the actual paused or suspended state', async () => {
+  const transport = vi.fn(async (path: string) => {
+    if (path === 'class-workspaces') return { workspaces: [] };
+    if (path === 'merchant-applications') return { applications: [] };
+    if (path === 'merchant-workspaces')
+      return {
+        workspaces: [
+          { ...store, locationStatus: 'closed', publicAccess: false },
+          {
+            ...store,
+            locationId: 'loc-2',
+            locationName: '第二門市',
+            merchantStatus: 'suspended',
+          },
+        ],
+      };
+    throw new Error(path);
+  });
+  const identity = await loadAccountIdentity(transport, 'pa_33333333-3333-4333-8333-333333333333');
+  expect(identity.stores.status).toBe('ok');
+  if (identity.stores.status !== 'ok') throw new Error('Expected authorized store identities');
+  expect(
+    identity.stores.items.map(({ locationId, locationName, status, open, href }) => ({
+      locationId,
+      locationName,
+      status,
+      open,
+      href,
+    })),
+  ).toEqual([
+    {
+      locationId: 'loc-1',
+      locationName: '第一門市',
+      status: '暫停接單',
+      open: false,
+      href: '/merchant/workspace?tenant=school-one&location=loc-1',
+    },
+    {
+      locationId: 'loc-2',
+      locationName: '第二門市',
+      status: '已停權，請聯絡場域管理者',
+      open: false,
+      href: '/merchant/workspace?tenant=school-one&location=loc-2',
+    },
+  ]);
 });
 
 it('does not treat a failed lookup as an empty identity', async () => {

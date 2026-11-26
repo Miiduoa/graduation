@@ -103,6 +103,9 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
   document.body.style.removeProperty('overflow');
 });
+afterEach(() => {
+  document.documentElement.removeAttribute('data-reduced-motion');
+});
 async function openSubmissions() {
   fireEvent.click(screen.getByRole('button', { name: '查看繳交內容' }));
   await screen.findByRole('article', { name: '林同學的繳交' });
@@ -976,7 +979,7 @@ it('hides the file picker after the teacher stops accepting work', () => {
   expect(screen.getByText('已停止收件')).toBeTruthy();
 });
 
-it('saves feedback and opens the next awaiting receipt only after server success', async () => {
+it.each([false, true])('saves feedback and opens the next awaiting receipt only after server success (reduced motion: %s)', async (reduced) => {
   const peer = {
     ...submission,
     platformAccountId: 'pa_33333333-3333-4333-8333-333333333333',
@@ -990,6 +993,12 @@ it('saves feedback and opens the next awaiting receipt only after server success
   render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} />);
   const feedback = await openSubmissions();
   const firstReceipt = screen.getByRole('article', { name: '林同學的繳交' });
+  const scroll = vi.fn();
+  document.getElementById(
+    assignmentReceiptDomId(workspace.id, assignment.id, peer.platformAccountId),
+  )!.scrollIntoView = scroll;
+  // Read the current setting after the component mounted, when the action runs.
+  document.documentElement.dataset.reducedMotion = String(reduced);
   expect(within(firstReceipt).getByText('待回饋第 1／2 份')).toBeTruthy();
   fireEvent.change(feedback, { target: { value: '給林同學的回饋內容' } });
   fireEvent.click(within(firstReceipt).getByRole('button', { name: '儲存回饋並查看下一份' }));
@@ -999,6 +1008,8 @@ it('saves feedback and opens the next awaiting receipt only after server success
   expect(within(peerReceipt).getByText(/目前批改這一份/)).toBeTruthy();
   expect(within(peerReceipt).getByLabelText('給陳同學的回饋')).toBeTruthy();
   expect(within(peerReceipt).getByRole('button', { name: '儲存回饋' })).toBeTruthy();
+  expect(scroll).toHaveBeenLastCalledWith({ block: 'nearest', behavior: reduced ? 'instant' : 'smooth' });
+  expect(document.activeElement).toBe(within(peerReceipt).getByLabelText('給陳同學的回饋'));
 });
 
 it('keeps the draft and selected receipt when save-and-next fails', async () => {

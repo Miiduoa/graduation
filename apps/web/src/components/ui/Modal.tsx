@@ -122,6 +122,7 @@ interface ConfirmModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: () => unknown;
+  onCancelPending?: () => void;
   title: string;
   message: string;
   confirmText?: string;
@@ -131,7 +132,7 @@ interface ConfirmModalProps {
 }
 
 function ConfirmDialog({
-  onClose, onConfirm, title, message, confirmText = '確認', cancelText = '取消',
+  onClose, onConfirm, onCancelPending, title, message, confirmText = '確認', cancelText = '取消',
   variant = 'info', loading = false,
 }: ConfirmModalProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -193,6 +194,7 @@ function ConfirmDialog({
     >
       <p id={messageId} className={styles.message}>{message}</p>
       {busy && <p role="status" className={styles.notice}>正在處理，請勿重複送出。</p>}
+      {busy && onCancelPending && <Button type="button" variant="ghost" onClick={onCancelPending}>取消等待</Button>}
       {error && <p role="alert" className={styles.error}>{error}</p>}
     </ModalSurface>
   );

@@ -196,7 +196,11 @@ it('keeps Firebase tasks and published feedback available alongside the nuni ent
   expect(screen.getByRole('link', { name: /分析完整/ }).getAttribute('href')).toBe(
     '/course/firebase#assignment-reviewed',
   );
-  expect(await screen.findByText(/E 校園與 TronClass 的學校來源已停用/)).toBeTruthy();
+  expect(await screen.findByText(/E 校園資料擷取暫停。可獨立連接靜宜 TronClass/)).toBeTruthy();
+  expect(screen.queryByText(/E 校園與 TronClass 的學校來源已停用/)).toBeNull();
+  expect(screen.getByRole('link', { name: '連接 TronClass' }).getAttribute('href')).toBe(
+    '/tronclass',
+  );
   expect(loadHomeData).toHaveBeenCalledWith('alice');
   expect(screen.getByRole('link', { name: '前往 nuni 課程' }).getAttribute('href')).toBe(
     '/classroom',

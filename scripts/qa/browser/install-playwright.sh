@@ -10,6 +10,65 @@ if [[ $# -gt 1 || ( $# -eq 1 && "$1" != "--fonts-noto-cjk" ) ]]; then
   exit 2
 fi
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../process-identity.sh"
+
+# sudo creates the record directory under the system sticky directory.
+# Keep it private to the elevated attempts and never use the caller's TMPDIR.
+attempt_dir=''
+proc_identity "$$"
+installer_group="$proc_group"
+
+private_attempt_dir() {
+  local dir="$1"
+  [[ ! -L /tmp && "$(stat -c '%u:%a' -- /tmp)" == 0:1777 &&
+    "$dir" =~ ^/tmp/playwright-install\.[a-zA-Z0-9]{10}$ && ! -L "$dir" && -d "$dir" &&
+    "$(stat -c '%u:%a' -- "$dir")" == "$EUID:700" ]]
+}
+
+cleanup_attempt_dir() {
+  [[ -n "$attempt_dir" ]] || return 0
+  sudo bash -c "$(declare -f private_attempt_dir)
+    private_attempt_dir \"\$1\" && rm -f -- \"\$1/process-group\" && rmdir -- \"\$1\"" clean-attempt-dir "$attempt_dir"
+}
+trap cleanup_attempt_dir EXIT
+
+record_attempt() {
+  cleanup_attempt_dir || return 1
+  attempt_dir="$(sudo mktemp -d /tmp/playwright-install.XXXXXXXXXX)" || return 1
+  [[ "$attempt_dir" =~ ^/tmp/playwright-install\.[a-zA-Z0-9]{10}$ ]] || { attempt_dir=''; return 1; }
+  IFS= read -r attempt_id < /proc/sys/kernel/random/uuid || return 1
+  record_group=(bash -c "$(declare -f proc_identity private_attempt_dir)
+    private_attempt_dir \"\${1%/*}\" || exit 1
+    proc_identity \$\$ || exit 1
+    group=\$proc_group
+    proc_identity \$group && [[ \$group == \$proc_group ]] || exit 1
+    umask 077
+    (set -o noclobber; printf '%s %s %s %s\\n' \"\$group\" \"\$proc_start\" \"\$2\" \"\$proc_group\" > \"\$1\") || exit 1
+    shift 2
+    exec \"\$@\"" record-process-group "$attempt_dir/process-group" "$attempt_id")
+}
+
+read_attempt_record() {
+  local file="$1" nonce="$2" installer_group="$3" pid start recorded_nonce group extra
+  private_attempt_dir "${file%/*}" || return 1
+  # The recorder must create this file before executing the package command.
+  [[ -e "$file" || -L "$file" ]] || return 0
+  # In a private directory the unprivileged caller cannot swap the checked file.
+  [[ ! -L "$file" && -f "$file" && "$(stat -c '%u:%a:%h' -- "$file")" == "$EUID:600:1" ]] || return 1
+  read -r pid start recorded_nonce group extra < "$file" || return 1
+  [[ "$pid" == "$group" && "$group" =~ ^([2-9]|[1-9][0-9]+)$ && "$start" =~ ^[0-9]+$ &&
+    "$group" != "$installer_group" && "$recorded_nonce" == "$nonce" && -z "$extra" ]] || return 1
+  proc_signal_marked_group "$pid" "$start" "$group" "PLAYWRIGHT_INSTALL_ATTEMPT=$nonce" KILL
+}
+
+kill_timed_out_group() {
+  "$@" bash -c "$(declare -f proc_identity proc_group_leader_matches proc_send_signal proc_group_members proc_signal_marked_group private_attempt_dir read_attempt_record)
+    read_attempt_record \"\$@\"" signal-process-group "$attempt_dir/process-group" "$attempt_id" "$installer_group" || {
+    echo 'Playwright package process group cleanup failed.' >&2
+    return 1
+  }
+}
+
 retry_install() {
   local label="$1"
   local deadline="$2"
@@ -19,22 +78,56 @@ retry_install() {
     elevation=(sudo)
     shift
   fi
-  local attempt
+  local attempt_id record_group=()
+  local attempt install_status recovery_attempt recovery_deadline recovery_status remaining recovered
   for attempt in 1 2 3; do
     # sudo can start a separate session. Run timeout *after* elevation so it
     # owns and can signal the entire privileged apt process group on expiry.
-    if "${elevation[@]}" timeout --kill-after=5s "$deadline" "$@"; then
+    local -a probe=() environment=()
+    if (( ${#elevation[@]} )); then
+      record_attempt || return 1
+      probe=("${record_group[@]}")
+      environment=(env "PLAYWRIGHT_INSTALL_ATTEMPT=$attempt_id")
+    fi
+    if "${elevation[@]}" "${environment[@]}" timeout --kill-after=5s "$deadline" "${probe[@]}" "$@"; then
       return 0
+    else
+      install_status=$?
+    fi
+    if (( ${#elevation[@]} )) && [[ "$install_status" == 124 || "$install_status" == 137 ]]; then
+      kill_timed_out_group "${elevation[@]}" || return 2
     fi
     if (( attempt == 3 )); then
       echo "${label} failed after 3 attempts." >&2
       return 1
     fi
     if (( ${#elevation[@]} )); then
-      # Killing apt during unpack/configure releases its lock but can leave
-      # dpkg unfinished. Complete pending configuration before apt retries;
-      # otherwise every later attempt fails with "dpkg was interrupted".
-      if ! "${elevation[@]}" timeout --kill-after=5s 180s dpkg --configure -a; then
+      # SIGKILL may end timeout before its command has released the package
+      # lock. Allow two short recovery retries after a timeout, within one
+      # 180-second budget; never retry apt until dpkg actually succeeds.
+      recovered=0
+      recovery_deadline=$((SECONDS + 180))
+      for recovery_attempt in 1 2 3; do
+        remaining=$((recovery_deadline - SECONDS))
+        if (( remaining <= 0 )); then break; fi
+        # The recovery command is bounded the same way as an install attempt:
+        # record its process group so a timeout implementation that kills only
+        # the direct child cannot leave dpkg helpers holding the package lock.
+        record_attempt || return 1
+        if "${elevation[@]}" env "PLAYWRIGHT_INSTALL_ATTEMPT=$attempt_id" timeout --kill-after=5s "${remaining}s" "${record_group[@]}" dpkg --configure -a; then
+          recovered=1
+          break
+        else
+          recovery_status=$?
+        fi
+        if [[ "$recovery_status" == 124 || "$recovery_status" == 137 ]]; then
+          kill_timed_out_group "${elevation[@]}" || return 2
+        fi
+        if [[ "$install_status" != 124 && "$install_status" != 137 ]] ||
+          (( recovery_attempt == 3 || SECONDS + recovery_attempt >= recovery_deadline )); then break; fi
+        sleep "$recovery_attempt"
+      done
+      if (( ! recovered )); then
         echo "${label}: could not recover interrupted package configuration." >&2
         return 1
       fi
@@ -56,7 +149,10 @@ if [[ "${1:-}" == '--fonts-noto-cjk' ]]; then
     -o Acquire::Retries=3 install -y fonts-noto-cjk
 else
   retry_install 'Playwright Chromium' 180s python -m playwright install chromium
-  if ! retry_install 'Playwright system dependencies' 90s sudo "$(command -v python)" -m playwright install-deps chromium; then
+  status=0
+  retry_install 'Playwright system dependencies' 90s sudo "$(command -v python)" -m playwright install-deps chromium || status=$?
+  if (( status == 2 )); then exit "$status"; fi
+  if (( status != 0 )); then
     echo 'Skipping extra system packages after bounded retries; continuing with actual browser checks (Ubuntu mirror may be unreachable).' >&2
   fi
 fi

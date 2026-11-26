@@ -37,6 +37,13 @@ beforeEach(async () => {
       ['alice', 'member'],
     ]) {
       await db.doc(`${school}/members/${uid}`).set({ status: 'active', role });
+      // Health-service and administrative reads now also require a live,
+      // server-bound campus profile; keep all original role restrictions.
+      if (uid === 'admin' || uid === 'editor') {
+        await db.doc(`users/${uid}`).set({
+          status: 'active', schoolId: 'pu', primarySchoolId: 'pu',
+        });
+      }
     }
     await db.doc('schools/other/members/other-admin').set({ status: 'active', role: 'admin' });
     for (const domain of ['repairs', 'packages', 'printing', 'health']) {
@@ -48,6 +55,11 @@ beforeEach(async () => {
       ]) {
         const uid = `${domain}-${suffix}`;
         await db.doc(`${school}/members/${uid}`).set({ status: memberStatus, role: 'member' });
+        if (domain === 'health' && suffix === 'staff') {
+          await db.doc(`users/${uid}`).set({
+            status: 'active', schoolId: 'pu', primarySchoolId: 'pu',
+          });
+        }
         await db
           .doc(`${school}/serviceRoles/${uid}`)
           .set({ status: serviceStatus, [domain]: true });

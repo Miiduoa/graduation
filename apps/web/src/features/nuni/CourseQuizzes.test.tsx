@@ -143,7 +143,10 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/');
   vi.spyOn(Date, 'now').mockReturnValue(Date.parse(timestamp));
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  document.documentElement.removeAttribute('data-reduced-motion');
+});
 
 it('keeps loading, failure and an empty quiz list distinct and offers a real retry', async () => {
   const pending = deferred<unknown>();
@@ -871,7 +874,7 @@ it('lets students open reference links from quiz prompts and feedback', async ()
   ).toBe('https://example.edu/feedback');
 });
 
-it('saves quiz feedback and advances only after authoritative text matches', async () => {
+it.each([false, true])('saves quiz feedback and advances only after authoritative text matches (reduced motion: %s)', async (reduced) => {
   session(teacherId);
   const peer = answer({
     platformAccountId: otherId,
@@ -892,12 +895,18 @@ it('saves quiz feedback and advances only after authoritative text matches', asy
     expect(node).toBeTruthy();
     return node!;
   });
+  const peerRow = document.getElementById(quizReceiptDomId(workspaceId, quizId, otherId))!;
+  const scroll = vi.fn();
+  peerRow.scrollIntoView = scroll;
+  document.documentElement.dataset.reducedMotion = String(reduced);
   fireEvent.click(within(firstRow).getByText('填寫回饋'));
   const first = within(firstRow).getByLabelText('給 林同學 的回饋');
   fireEvent.change(first, { target: { value: '給林同學的回饋' } });
   fireEvent.click(within(firstRow).getByRole('button', { name: '儲存回饋並查看下一份' }));
   await screen.findByText('回饋已儲存。已移到 陳同學 的作答。');
   expect(screen.getByText(/目前批改這一份/)).toBeTruthy();
+  expect(scroll).toHaveBeenLastCalledWith({ block: 'nearest', behavior: reduced ? 'instant' : 'smooth' });
+  expect(document.activeElement).toBe(within(peerRow).getByLabelText('給 陳同學 的回饋'));
 });
 
 it('keeps the quiz receipt visible and does not advance when replay returns different feedback', async () => {
