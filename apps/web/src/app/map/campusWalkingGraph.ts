@@ -139,27 +139,70 @@ export function findCampusWalkingRoute(
   // A discovered but isolated, restricted or expired node is not a verified arrival.
   if (start === end && !Number.isFinite(sameNodeReviewExpiry)) return null;
 
-  // Bounded Dijkstra; only positive, sourced graph edges can be traversed.
+  // Bounded Dijkstra with a binary min-heap. Keep the distance, expiry and
+  // node-ID ordering identical to the linear scan without revisiting settled
+  // nodes on every iteration. Stale entries are discarded on removal.
   const distance = new Map<number, number>([[start, 0]]);
+  const pathExpiry = new Map<number, number>([[start, Infinity]]);
   const previous = new Map<number, { from: number; way: number; expiresAt: number }>();
   const settled = new Set<number>();
-  while (true) {
-    let current: number | undefined;
-    let best = Infinity;
-    for (const [id, cost] of distance) {
-      if (!settled.has(id) && (cost < best || (cost === best && current !== undefined && id < current))) {
-        current = id;
-        best = cost;
-      }
+  type QueueEntry = { id: number; cost: number; expiry: number };
+  const queue: QueueEntry[] = [];
+  const precedes = (a: QueueEntry, b: QueueEntry) =>
+    a.cost < b.cost || (a.cost === b.cost &&
+      (a.expiry > b.expiry || (a.expiry === b.expiry && a.id < b.id)));
+  const enqueue = (entry: QueueEntry) => {
+    let index = queue.length;
+    queue.push(entry);
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (!precedes(entry, queue[parent])) break;
+      queue[index] = queue[parent];
+      index = parent;
     }
-    if (current === undefined) return null;
+    queue[index] = entry;
+  };
+  const dequeue = (): QueueEntry | undefined => {
+    const first = queue[0];
+    const last = queue.pop();
+    if (last === undefined || queue.length === 0) return first;
+    let index = 0;
+    while (2 * index + 1 < queue.length) {
+      let child = 2 * index + 1;
+      const right = child + 1;
+      if (right < queue.length && precedes(queue[right], queue[child])) child = right;
+      if (!precedes(queue[child], last)) break;
+      queue[index] = queue[child];
+      index = child;
+    }
+    queue[index] = last;
+    return first;
+  };
+  enqueue({ id: start, cost: 0, expiry: Infinity });
+  while (true) {
+    const entry = dequeue();
+    if (!entry) return null;
+    const { id: current, cost: best, expiry: bestExpiry } = entry;
+    if (settled.has(current) || distance.get(current) !== best ||
+        pathExpiry.get(current) !== bestExpiry) continue;
     if (current === end) break;
     settled.add(current);
     for (const arc of adjacency.get(current) ?? []) {
       const cost = best + arc.meters;
-      if (cost < (distance.get(arc.to) ?? Infinity)) {
+      const expiry = Math.min(bestExpiry, arc.expiresAt);
+      const oldCost = distance.get(arc.to) ?? Infinity;
+      const oldExpiry = pathExpiry.get(arc.to) ?? -Infinity;
+      const oldStep = previous.get(arc.to);
+      // Stable provenance for parallel ways with identical distance and expiry.
+      const preferredWay = oldStep?.from === current && arc.way < oldStep.way;
+      if (!settled.has(arc.to) && (cost < oldCost || (cost === oldCost &&
+          (expiry > oldExpiry || (expiry === oldExpiry && preferredWay))))) {
         distance.set(arc.to, cost);
+        pathExpiry.set(arc.to, expiry);
         previous.set(arc.to, { from: current, way: arc.way, expiresAt: arc.expiresAt });
+        if (cost !== oldCost || expiry !== oldExpiry) {
+          enqueue({ id: arc.to, cost, expiry });
+        }
       }
     }
   }
