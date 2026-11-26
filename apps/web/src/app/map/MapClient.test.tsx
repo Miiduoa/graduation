@@ -314,19 +314,24 @@ it.each([true, false])('plans a classroom destination using an existing origin (
   const card = within(screen.getByRole('region', { name: '教室定位結果' }));
   const action = () => card.queryByRole('button', { name: '將主顧樓設為終點' });
   expect(action()).toBeNull();
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' });
+  search.focus();
   // A non-empty live catalogue replaces the bundled places; include the real
   // destination explicitly instead of expecting a silent fallback to bundled data.
   const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
   await act(async () => source.resolve([library, gate, classroom]));
+  expect(document.activeElement).toBe(search);
   if (!shared) {
     expect(action()).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
   }
   const classroomButton = card.getByRole('button', { name: '將主顧樓設為終點' });
+  classroomButton.focus();
   expect(document.getElementById(classroomButton.getAttribute('aria-describedby')!)?.textContent)
     .toContain('並非已核實的入口或室內教室');
   fireEvent.click(classroomButton);
   const routeCard = within(screen.getByRole('region', { name: '步行導航' }));
+  expect(document.activeElement).toBe(routeCard.getByRole('heading', { name: '正門 → 主顧樓' }));
   const google = new URL(routeCard.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
   const apple = new URL(routeCard.getByRole('link', { name: '使用 Apple 地圖規劃路線' }).getAttribute('href')!);
   const map = JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
@@ -337,6 +342,7 @@ it.each([true, false])('plans a classroom destination using an existing origin (
   expect(apple.searchParams.get('daddr')).toBe(google.searchParams.get('destination'));
   fireEvent.click(routeCard.getByRole('button', { name: '清除路線' }));
   expect(action()).toBeNull();
+  expect(document.activeElement).toBe(search);
 });
 
 it('does not restore an origin from an invalid shared route for classroom planning', async () => {
