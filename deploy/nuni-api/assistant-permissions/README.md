@@ -27,7 +27,7 @@ python3 deploy/nuni-api/build.py --assistant-permissions-candidate \
 
 輸出目錄必須不存在。提供的 archive 僅作為讀取來源；省略 `--assistant-permissions-source` 時會嘗試從既有固定 GitHub repository clone。驗證完成的 context 可再以 `prepare.py --verify-only --checkout /tmp/new-assistant-permissions-context` 核對。一般 prepare 必須具備完整 Git objects 與工作樹，不能把局部來源當成可建置的 API。
 
-候選 input tree 為 `fffde885da74a84cfd9ae702f955db99507dc855`；新增 283 後為 `841c117c46775fec3af27da9d88abaf0ae13b2f7`。兩者的唯一差異路徑是 `apps/api/src/migrations/283_platform_assistant_permissions.sql`。API 既有 build script 將 `src/migrations/*.sql` 複製到 `dist/migrations/`，原 migration runner 因此會納入 283 的 ID/checksum；不另外建立 BFF migration runner。
+匯入備份來源更新後，重新組裝的 input tree 為 `739f7ada1d4a9528af2e02e48ea02b75f75d8a83`；新增 283 後為 `35e569cff5f786ebd68fab38c0268b831d82d767`。兩者的唯一差異路徑是 `apps/api/src/migrations/283_platform_assistant_permissions.sql`。API 既有 build script 將 `src/migrations/*.sql` 複製到 `dist/migrations/`，原 migration runner 因此會納入 283 的 ID/checksum；不另外建立 BFF migration runner。
 
 沒有 `--prepare-only` 時，builder 只建置本機 `nuni-api:assistant-permissions-candidate` Docker image，標示已核驗 tree，不推送、不部署、不跑資料庫。其他候選選項與它互斥，既有 default/imports/lost-found 來源 manifest 不變。
 
