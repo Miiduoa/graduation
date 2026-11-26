@@ -49,10 +49,8 @@
 .document,
 .stateCard {
   min-width: 0;
-  padding: 28px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 24px 0;
+  border-top: 1px solid var(--border);
 }
 
 .loginForm {
@@ -125,9 +123,9 @@
 
 .documentLayout {
   display: grid;
-  grid-template-columns: 200px minmax(0, 760px);
+  grid-template-columns: minmax(10rem, 14rem) minmax(0, 43rem);
   align-items: start;
-  gap: 40px;
+  gap: clamp(32px, 7vw, 96px);
 }
 
 .contents {
@@ -168,6 +166,11 @@
   text-underline-offset: 4px;
 }
 
+.document h2 {
+  font-family: var(--font-heading);
+  font-size: clamp(1.25rem, 2vw, 1.5rem);
+}
+
 .document section {
   scroll-margin-top: 24px;
 }
@@ -181,6 +184,7 @@
 .document p {
   margin: 0;
   line-height: 1.9;
+  font-size: 1rem;
   overflow-wrap: anywhere;
 }
 
@@ -191,7 +195,7 @@
 
 .stateCard {
   max-width: 680px;
-  border-top: 3px solid var(--brand);
+  border-top: 2px solid var(--brand);
 }
 
 .stateCode {
@@ -211,11 +215,9 @@
 
 .loading {
   margin: 0;
-  padding: 28px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding-block: 24px;
+  border-top: 1px solid var(--border);
   color: var(--muted);
-  background: var(--surface);
   max-width: 520px;
 }
 
@@ -229,7 +231,7 @@
   .loginForm,
   .document,
   .stateCard {
-    padding: 22px;
+    padding: 18px 0;
   }
 
   .loginHelp {
@@ -259,60 +261,31 @@
 }
 
 /* School account connection */
-.connectionIntro {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  padding: clamp(22px, 4vw, 36px);
-  margin-bottom: 24px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: linear-gradient(115deg, var(--surface) 0%, var(--accent-soft) 150%);
-}
-
-.connectionIntro > div:first-child { max-width: 650px; }
-.connectionKicker, .methodEyebrow {
-  display: block;
-  margin: 0 0 8px;
-  color: var(--brand);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-}
-.connectionIntro h2 {
-  margin: 0 0 10px;
-  font-size: clamp(22px, 3vw, 30px);
-  line-height: 1.3;
-  letter-spacing: -0.03em;
-}
-.connectionIntro p:not(.connectionKicker) {
-  margin: 0;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.75;
-}
-.connectionFacts { display: flex; flex-wrap: wrap; gap: 8px; }
-.connectionFacts span, .methodStatus {
-  padding: 7px 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 600;
-}
 .loginLayout > .loginHelp {
   min-width: 0;
-  padding: 24px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
+  padding-block: 24px;
+  border-top: 1px solid var(--border);
 }
 .methodHeading { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .methodHeading h2 { margin-bottom: 0; }
-.methodStatus { white-space: nowrap; background: var(--success-soft); color: var(--success); border-color: transparent; }
+.methodStatus { color: var(--muted); font-size: .8125rem; text-align: end; }
+.schoolConnection > summary {
+  cursor: pointer;
+  min-height: 44px;
+  list-style-position: outside;
+}
+.schoolConnection > summary .methodHeading {
+  display: inline-flex;
+  width: calc(100% - 12px);
+  margin: 0;
+  vertical-align: middle;
+}
+.schoolConnection[open] > summary { margin-bottom: 18px; }
+.schoolConnection > summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 5px;
+  border-radius: var(--radius-sm);
+}
 .schoolPicker { display: grid; gap: 8px; margin-block: 16px; font-size: 13px; font-weight: 600; }
 .schoolPicker select {
   width: 100%;
@@ -350,10 +323,8 @@
 .connectionDetails p + p { margin-top: 8px; }
 .importRoute {
   margin-top: 24px;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-soft);
+  padding-block: 20px;
+  border-block: 1px solid var(--border);
 }
 .importRoute h3 { margin: 0 0 8px; font-size: 16px; line-height: 1.4; }
 .importRoute p { margin-bottom: 14px; }
@@ -366,9 +337,7 @@
   border-bottom: 0;
 }
 @media (max-width: 760px) {
-  .loginLayout > .loginHelp { padding: 20px; }
-  .connectionIntro { align-items: flex-start; }
-  .connectionFacts { width: 100%; }
+  .loginLayout > .loginHelp { padding-block: 18px; }
   .guestAccess { gap: 16px; }
   .guestAccess > a { width: 100%; justify-content: center; }
 }

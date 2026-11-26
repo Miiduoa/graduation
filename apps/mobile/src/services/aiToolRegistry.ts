@@ -25,6 +25,7 @@ import { isProvidenceSchoolId, toPublicSchoolId } from '@campus/shared/src/schoo
 import { planStudy, homeworkToPlannerTask, examToPlannerTask, type PlannerTask } from '@campus/shared/src/lms/studyPlanner';
 import { simulateWhatIf, type WhatIfOverride } from '@campus/shared/src/lms/gradePredictor';
 import { planNotifications } from '@campus/shared/src/lms/notificationPlanner';
+import { DORM_REPAIR_COPY } from '@campus/shared/src/dormitory';
 import {
   getPuDiningCafeterias,
   getPuDiningMenuItems,
@@ -211,11 +212,6 @@ function makeMissingInfo(
     missingInfo: fields,
   };
 }
-
-const ACADEMIC_SNAPSHOT_TOOLS = new Set([
-  'grade_predict_what_if', 'study_plan_today', 'urgent_notifications',
-  'ai_full_context', 'ai_data_inventory',
-]);
 
 function isExplicitAcademicDemo(ctx: ToolExecutionContext): boolean {
   if (!isDevelopmentDemoSession(ctx.userId)) return false;
@@ -1077,7 +1073,7 @@ async function createRepairRequestHandler(
   ctx: ToolExecutionContext,
 ): Promise<StandardToolResult> {
   if (!hasDataSource()) {
-    return makeFailure('create_repair_request', 'offline', '目前無法連到報修系統。', {
+    return makeFailure('create_repair_request', 'offline', '目前無法存成報修備忘。', {
       isWrite: true,
     });
   }
@@ -1085,7 +1081,7 @@ async function createRepairRequestHandler(
     const ds = getDataSource();
     const type = asString(args.type) || 'other';
     const room = asString(args.room);
-    const description = asString(args.description) || asString(ctx.lastUserMessage) || 'AI 代理建立的報修申請';
+    const description = asString(args.description) || asString(ctx.lastUserMessage) || DORM_REPAIR_COPY.defaultMemoDescription;
     const title =
       asString(args.title) || `${type === 'ac' ? '冷氣' : type === 'plumbing' ? '水電' : '宿舍'}報修`;
 
@@ -1103,11 +1099,9 @@ async function createRepairRequestHandler(
       success: true,
       toolName: 'create_repair_request',
       summary: [
-        `已為你提交報修工單。`,
-        `工單編號：${repair.id}`,
+        DORM_REPAIR_COPY.assistantSavedMemo,
         `房號：${repair.room}`,
         `問題：${title}`,
-        `狀態：${repair.status}`,
       ].join('\n'),
       data: repair,
       isWrite: true,
@@ -1543,7 +1537,7 @@ const TOOL_SPECS: readonly ToolSpec[] = [
   // ── 報修
   {
     name: 'create_repair_request',
-    description: '建立宿舍/校園維修工單。',
+    description: '把宿舍或校園設備問題存成個人報修備忘，不會送到學校。',
     kind: 'cross_role_write',
     allowedRoles: ['student', 'staff', 'department_head', 'admin'],
     fields: [
@@ -1559,7 +1553,7 @@ const TOOL_SPECS: readonly ToolSpec[] = [
         description: '房號/地點',
         type: 'string',
         required: true,
-        promptIfMissing: '請告訴我房號或地點，沒有房號我不能直接送出工單。',
+        promptIfMissing: '請告訴我房號或地點，我才能幫你存成報修備忘。',
       },
       {
         name: 'description',
@@ -2584,9 +2578,7 @@ export async function executeToolStandard(
     typeof ctx.userId === 'string' &&
     ctx.userId.startsWith('demo_') &&
     (roleName === 'alumni' || roleName === 'guest');
-  const demoAcademicRoleOverride = ACADEMIC_SNAPSHOT_TOOLS.has(spec.name) &&
-    roleName === 'guest' && isExplicitAcademicDemo(ctx);
-  if (!spec.allowedRoles.includes(role) && !demoDiningRoleOverride && !demoAcademicRoleOverride) {
+  if (!spec.allowedRoles.includes(role) && !demoDiningRoleOverride) {
     return makeFailure(
       spec.name,
       'role_denied',

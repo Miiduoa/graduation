@@ -84,7 +84,7 @@ it.each(['question', 'history', 'context', 'tool'])('masks secrets, student ids 
   const logs: unknown[] = [];
   let calls = 0;
   f.adapter.courses = async () => ({ courses: [{ id: 'course', title: marker }], partial: false });
-  await run({ question: source === 'question' ? marker : source === 'context' ? '今天課表' : '教材',
+  await run({ question: source === 'question' ? marker : source === 'context' ? '今天有空嗎' : '教材',
     history: source === 'history' ? [{ role: 'user', content: marker }] : [], binding, adapter: f.adapter,
     secret, now, writes: true, signal: new AbortController().signal, log: (r) => logs.push(r),
     model: async (input) => {

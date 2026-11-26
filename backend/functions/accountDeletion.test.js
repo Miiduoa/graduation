@@ -1,4 +1,24 @@
+const { FieldValue } = require('firebase-admin/firestore');
+const { createHash } = require('node:crypto');
 const { createDeleteUserAccountHandler, RETAINED_CATEGORIES } = require('./accountDeletion');
+const { closeTronClassOwner } = require('./tronClassAccountLifecycle');
+
+const bindingPath = (owner) => `_tronClassBindings/${createHash('sha256').update(owner).digest('hex')}`;
+
+function isDeleteSentinel(value) {
+  return Boolean(
+    value && typeof value.isEqual === 'function' && value.isEqual(FieldValue.delete()),
+  );
+}
+
+function applyWrite(current, data, replace) {
+  const next = replace ? {} : { ...(current || {}) };
+  for (const [key, value] of Object.entries(data)) {
+    if (isDeleteSentinel(value)) delete next[key];
+    else next[key] = value;
+  }
+  return next;
+}
 
 const NOW = Date.parse('2030-01-01T12:00:00Z');
 const request = (data = {}, uid = 'alice', authTime = NOW / 1000) => ({
@@ -12,6 +32,7 @@ function store(seed = []) {
   const docs = new Map(seed);
   const operations = [];
   let failure;
+  let afterQuery;
   function check(operation, path) {
     operations.push([operation, path]);
     if (failure?.[0] === operation && failure[1] === path) {
@@ -41,7 +62,7 @@ function store(seed = []) {
       },
       set: async (data, options) => {
         check('set', path);
-        docs.set(path, options?.merge ? { ...docs.get(path), ...data } : data);
+        docs.set(path, applyWrite(docs.get(path), data, !options?.merge));
       },
       delete: async () => {
         check('delete', path);
@@ -75,7 +96,9 @@ function store(seed = []) {
       startAfter: (cursor) => query(path, { ...options, cursor: cursor.ref.path }),
       get: async () => {
         check('query', path);
-        return results(value);
+        const result = results(value);
+        if (afterQuery) afterQuery(path, result);
+        return result;
       },
       listDocuments: async () => {
         check('listDocuments', path);
@@ -126,12 +149,15 @@ function store(seed = []) {
         get: async (q) => results(q, base),
         delete: (reference) => writes.push(['delete', reference]),
         update: (reference, data) => writes.push(['update', reference, data]),
+        set: (reference, data, options) => writes.push(['set', reference, data, options]),
       };
       const result = await callback(transaction);
       check('commit', writes[0]?.[1].path || 'empty');
-      for (const [kind, reference, data] of writes) {
+      for (const [kind, reference, data, options] of writes) {
         if (kind === 'delete') docs.delete(reference.path);
-        else docs.set(reference.path, { ...docs.get(reference.path), ...data });
+        else if (kind === 'set')
+          docs.set(reference.path, applyWrite(docs.get(reference.path), data, !options?.merge));
+        else docs.set(reference.path, applyWrite(docs.get(reference.path), data, false));
       }
       return result;
     },
@@ -149,9 +175,134 @@ function store(seed = []) {
     fail: (operation, path) => {
       failure = [operation, path];
     },
+    afterQuery: (visit) => { afterQuery = visit; },
     handler: createDeleteUserAccountHandler({ db, auth, now: () => NOW }),
   };
 }
+
+test('cleans only owned canonical career and club records while preserving shared history', async () => {
+  const removed = [
+    ['schools/pu/careerApplications/application', { uid: 'alice' }],
+    ['schools/pu/careerApplications/application/private/contact', { email: 'private' }],
+    ['schools/other/internshipRecords/record', { uid: 'alice', teacherUid: 'bob' }],
+    ['schools/other/internshipRecords/record/reports/private', { text: 'private' }],
+    ['groups/club/clubMemberRecords/alice', { duesPaid: true, updatedBy: 'bob' }],
+    ['groups/club/clubMemberRecords/alice/history/private', { duesPaid: false }],
+  ];
+  const retained = [
+    ['schools/pu/careerApplications/bob', { uid: 'bob' }],
+    ['schools/pu/careerApplications/alice', { contact: 'legacy without uid' }],
+    ['schools/pu/internshipRecords/alice', { teacherUid: 'alice' }],
+    ['schools/pu/internshipRecords/bob', { uid: 'bob', teacherUid: 'alice' }],
+    ['schools/pu/internshipRecords/bob/reports/report', { text: 'keep' }],
+    ['schools/pu/careerOpportunities/job', { uid: 'alice' }],
+    ['schools/pu/internshipRules/rule', { uid: 'alice' }],
+    ['schools/pu/adminLogs/log', { uid: 'alice' }],
+    ['schools/pu/clubs/club', { confirmedBy: 'alice', status: 'approved' }],
+    ['schools/pu/clubs/club/officers/bob', { role: 'secretary', confirmedBy: 'alice' }],
+    ['groups/club/clubMemberRecords/bob', { duesPaid: true, updatedBy: 'alice' }],
+    ['groups/club/clubEvents/event', { createdBy: 'alice' }],
+    ['schools/pu/clubEvents/event', { createdBy: 'alice' }],
+    ['groups/club/posts/post', { authorId: 'alice' }],
+    ['groups/club/assignments/work/submissions/alice', { uid: 'alice' }],
+    ['groups/club/transactions/payment', { uid: 'alice' }],
+  ];
+  for (const collection of [
+    'careerApplications',
+    'internshipRecords',
+    'clubMemberRecords',
+    'officers',
+  ]) {
+    retained.push([`misc/x/${collection}/alice`, { uid: 'alice' }]);
+    retained.push([`schools/pu/archive/x/${collection}/alice`, { uid: 'alice' }]);
+  }
+  retained.push(['groups/club/officers/alice', { role: 'keep' }]);
+  const officerPath = 'schools/pu/clubs/club/officers/alice';
+  const state = store([
+    ...removed,
+    ...retained,
+    [
+      officerPath,
+      {
+        role: 'president',
+        confirmedAt: 123,
+        confirmedBy: 'bob',
+        uid: 'alice',
+        name: 'Private',
+        email: 'private@example.com',
+      },
+    ],
+    ['schools/other/clubs/club/officers/alice', { name: 'Legacy private name' }],
+  ]);
+  await state.handler(request());
+  for (const [path] of removed) expect(state.docs.has(path)).toBe(false);
+  for (const [path, data] of retained) expect(state.docs.get(path)).toEqual(data);
+  expect(state.docs.get(officerPath)).toEqual({
+    role: 'president',
+    confirmedAt: 123,
+    accountClosed: true,
+  });
+  expect(state.docs.get('schools/other/clubs/club/officers/alice')).toEqual({ accountClosed: true });
+  expect(state.operations.at(-1)).toEqual(['deleteAuth', 'alice']);
+});
+
+test('deleting a teacher preserves student internships and teacher attribution', async () => {
+  const path = 'schools/pu/internshipRecords/student';
+  const data = { uid: 'alice', teacherUid: 'teacher', hours: 40 };
+  const state = store([[path, data]]);
+  await state.handler(request({}, 'teacher'));
+  expect(state.docs.get(path)).toEqual(data);
+});
+
+test('career and club cleanup scans every page even after deleting the previous cursor', async () => {
+  const seed = [];
+  for (let i = 0; i < 405; i++) {
+    const id = String(i).padStart(3, '0');
+    seed.push([`schools/s${id}/careerApplications/own`, { uid: 'alice' }]);
+    seed.push([`schools/s${id}/internshipRecords/own`, { uid: 'alice' }]);
+    seed.push([`groups/g${id}/clubMemberRecords/alice`, { duesPaid: true }]);
+    seed.push([`schools/s${id}/clubs/club/officers/alice`, { role: 'officer', name: 'Private' }]);
+  }
+  const state = store(seed);
+  await state.handler(request());
+  for (const [path] of seed) {
+    if (path.includes('/officers/'))
+      expect(state.docs.get(path)).toEqual({ role: 'officer', accountClosed: true });
+    else expect(state.docs.has(path)).toBe(false);
+  }
+});
+
+test.each([
+  ['recursiveDelete', 'schools/pu/careerApplications/own'],
+  ['recursiveDelete', 'schools/pu/internshipRecords/own'],
+  ['recursiveDelete', 'groups/club/clubMemberRecords/alice'],
+  ['set', 'schools/pu/clubs/club/officers/alice'],
+])('career/club failure at %s %s retains Auth and retries idempotently', async (operation, path) => {
+  const seed = [
+    ['schools/pu/careerApplications/own', { uid: 'alice' }],
+    ['schools/pu/internshipRecords/own', { uid: 'alice' }],
+    ['groups/club/clubMemberRecords/alice', { duesPaid: true }],
+    [
+      'schools/pu/clubs/club/officers/alice',
+      { role: 'president', confirmedAt: 123, name: 'Private' },
+    ],
+    ['groups/club', { memberCount: 2 }],
+    ['groups/club/members/alice', { status: 'active', role: 'member' }],
+  ];
+  const state = store(seed);
+  state.fail(operation, path);
+  await expect(state.handler(request())).rejects.toThrow('unavailable');
+  expect(state.auth.deleteUser).not.toHaveBeenCalled();
+  await expect(state.handler(request())).resolves.toMatchObject({ success: true });
+  await expect(state.handler(request())).resolves.toMatchObject({ success: true });
+  for (const [removedPath] of seed.slice(0, 3)) expect(state.docs.has(removedPath)).toBe(false);
+  expect(state.docs.get('schools/pu/clubs/club/officers/alice')).toEqual({
+    role: 'president',
+    confirmedAt: 123,
+    accountClosed: true,
+  });
+  expect(state.docs.get('groups/club')).toEqual({ memberCount: 1 });
+});
 
 test.each([NaN, Infinity, undefined, '1893499200', NOW / 1000 + 1, NOW / 1000 - 601, 0])(
   'rejects invalid or stale recent login %s before changing data',
@@ -213,6 +364,7 @@ test('drains more than 200 personal records, sessions and nested orphaned data w
   expect([...state.docs.keys()].sort()).toEqual([
     '_puSessions/bob',
     '_studentCardPresentations/bob',
+    bindingPath('firebase:alice'),
     'notifications/bob',
     'users/alice',
     'users/bob/private/one',
@@ -224,6 +376,73 @@ test('drains more than 200 personal records, sessions and nested orphaned data w
     deletedAt: expect.anything(),
   });
   expect(state.operations.at(-1)).toEqual(['deleteAuth', 'alice']);
+});
+
+test('closes the independent LMS barrier, erases paginated private operations and retains only opaque blocking slots', async () => {
+  const ownerKey = 'firebase:alice';
+  const seed = [
+    ['users/alice', { name: 'Private name' }],
+    [bindingPath(ownerKey), { ownerKey, revision: 'a'.repeat(32), state: 'connected', sealedCookies: 'secret-cookies', purgeAt: new Date(NOW + 1000) }],
+    [bindingPath('firebase:bob'), { ownerKey: 'firebase:bob', state: 'connected', sealedCookies: 'bob-secret' }],
+    ['_tronClassLoginAttempts/alice', { ownerKey, scope: 'owner', timestamps: [NOW] }],
+    ['_tronClassLoginAttempts/shared', { scope: 'account', timestamps: [NOW], purgeAt: new Date(NOW + 900000) }],
+    ['_tronClassLoginAttempts/bob', { ownerKey: 'firebase:bob', scope: 'owner', timestamps: [NOW] }],
+    ['_tronClassSubmissionOperations/bob', { ownerKey: 'firebase:bob', receipt: { content: 'keep' } }],
+    ['_tronClassSubmissionLocks/unsent', { ownerKey, state: 'not-sent', studentId: 1 }],
+    ['_tronClassSubmissionLocks/bob', { ownerKey: 'firebase:bob', state: 'unknown', studentId: 2 }],
+  ];
+  for (const kind of ['submitting', 'unknown', 'submitted']) {
+    seed.push([`_tronClassSubmissionLocks/${kind}`, { ownerKey, state: kind, studentId: 1, courseId: 2, operationId: 'private-operation' }]);
+  }
+  for (let index = 0; index < 205; index++) {
+    seed.push([`_tronClassSubmissionOperations/${index}`, { ownerKey, state: 'unknown', files: [{ name: 'private.pdf' }], receipt: { content: 'private-work' } }]);
+  }
+  const state = store(seed);
+  await state.handler(request());
+  const barrier = state.docs.get(bindingPath(ownerKey));
+  expect(barrier).toEqual({ schoolId: 'pu', state: 'closed', ownerHash: createHash('sha256').update(ownerKey).digest('hex'),
+    revision: expect.stringMatching(/^[a-f0-9]{32}$/), updatedAt: NOW });
+  expect([...state.docs].filter(([path]) => path.startsWith('_tronClassSubmissionOperations/')))
+    .toEqual([['_tronClassSubmissionOperations/bob', { ownerKey: 'firebase:bob', receipt: { content: 'keep' } }]]);
+  expect(state.docs.has('_tronClassLoginAttempts/alice')).toBe(false);
+  expect(state.docs.get('_tronClassLoginAttempts/shared').timestamps).toEqual([NOW]);
+  expect(state.docs.has('_tronClassLoginAttempts/bob')).toBe(true);
+  expect(state.docs.has('_tronClassSubmissionLocks/unsent')).toBe(false);
+  for (const kind of ['submitting', 'unknown', 'submitted']) {
+    expect(state.docs.get(`_tronClassSubmissionLocks/${kind}`)).toEqual({ version: 1, state: 'owner-deleted', updatedAt: NOW });
+  }
+  expect(state.docs.get('_tronClassSubmissionLocks/bob').ownerKey).toBe('firebase:bob');
+  expect(state.docs.get(bindingPath('firebase:bob')).sealedCookies).toBe('bob-secret');
+  await state.handler(request());
+  expect(state.docs.get(bindingPath(ownerKey))).toEqual(barrier);
+});
+
+test('does not release a shared slot acquired by another owner after the cleanup query', async () => {
+  const ownerKey = 'platform:pa_alice';
+  const path = '_tronClassSubmissionLocks/shared';
+  const state = store([[path, { ownerKey, state: 'not-sent' }]]);
+  state.afterQuery((collection) => {
+    if (collection === '_tronClassSubmissionLocks') {
+      state.docs.set(path, { ownerKey: 'platform:pa_bob', state: 'submitting', operationId: 'bobs-request' });
+    }
+  });
+  await closeTronClassOwner({ db: state.db, ownerKey, now: () => NOW });
+  expect(state.docs.get(path)).toEqual({ ownerKey: 'platform:pa_bob', state: 'submitting', operationId: 'bobs-request' });
+  expect(state.docs.get(bindingPath(ownerKey)).state).toBe('closed');
+});
+
+test('keeps a credential-free closure barrier after a cleanup failure and finishes on retry', async () => {
+  const state = store([
+    ['users/alice', { name: 'Private name' }],
+    ['_tronClassSubmissionOperations/one', { ownerKey: 'firebase:alice', receipt: { content: 'private-work' } }],
+  ]);
+  state.fail('query', '_tronClassSubmissionOperations');
+  await expect(state.handler(request())).rejects.toThrow('unavailable');
+  expect(state.auth.deleteUser).not.toHaveBeenCalled();
+  expect(state.docs.get(bindingPath('firebase:alice')).state).toBe('closed');
+  await state.handler(request());
+  expect(state.docs.has('_tronClassSubmissionOperations/one')).toBe(false);
+  expect(state.auth.deleteUser).toHaveBeenCalledTimes(1);
 });
 
 test('scans full-path membership pages, maintains counters and ignores noncanonical same-ID documents', async () => {
@@ -252,6 +471,76 @@ test('scans full-path membership pages, maintains counters and ignores noncanoni
   expect(state.docs.has('schools/pu/serviceRoles/alice')).toBe(false);
   expect(state.docs.has('schools/pu/cafeterias/c/operators/alice')).toBe(false);
   expect([...state.docs.keys()].filter((key) => key.endsWith('/members/bob'))).toHaveLength(221);
+});
+
+test('deletes creator profiles across schools while preserving other users and noncanonical paths', async () => {
+  const profile = { displayName: 'Alice', bio: 'Public biography' };
+  const otherProfile = { displayName: 'Bob', uid: 'alice' };
+  const preserved = [
+    ['schools/pu/creatorProfiles/bob', otherProfile],
+    ['archives/shared/creatorProfiles/alice', profile],
+    ['schools/pu/archives/shared/creatorProfiles/alice', profile],
+    ['schools/pu/otherProfiles/alice', profile],
+  ];
+  const state = store([
+    ['schools/pu/creatorProfiles/alice', profile],
+    ['schools/other/creatorProfiles/alice', profile],
+    ...preserved,
+  ]);
+
+  expect((await state.handler(request())).success).toBe(true);
+  expect(state.docs.has('schools/pu/creatorProfiles/alice')).toBe(false);
+  expect(state.docs.has('schools/other/creatorProfiles/alice')).toBe(false);
+  for (const [path, data] of preserved) expect(state.docs.get(path)).toEqual(data);
+  expect(state.auth.deleteUser).toHaveBeenCalledWith('alice');
+});
+
+test('deletes creator highlights across schools while preserving other users and noncanonical paths', async () => {
+  const highlight = { postId: 'post-1' };
+  const other = { postId: 'post-2', uid: 'alice' };
+  const preserved = [
+    ['schools/pu/creatorHighlights/bob', other],
+    ['archives/shared/creatorHighlights/alice', highlight],
+    ['schools/pu/archives/shared/creatorHighlights/alice', highlight],
+    ['schools/pu/otherHighlights/alice', highlight],
+  ];
+  const state = store([
+    ['schools/pu/creatorHighlights/alice', highlight],
+    ['schools/other/creatorHighlights/alice', highlight],
+    ...preserved,
+  ]);
+
+  expect((await state.handler(request())).success).toBe(true);
+  expect(state.docs.has('schools/pu/creatorHighlights/alice')).toBe(false);
+  expect(state.docs.has('schools/other/creatorHighlights/alice')).toBe(false);
+  for (const [path, data] of preserved) expect(state.docs.get(path)).toEqual(data);
+  expect(state.auth.deleteUser).toHaveBeenCalledWith('alice');
+});
+
+test('creator highlight deletion failures keep Auth available for retry', async () => {
+  const path = 'schools/pu/creatorHighlights/alice';
+  const state = store([[path, { postId: 'post-1' }]]);
+  state.fail('delete', path);
+
+  await expect(state.handler(request())).rejects.toThrow('unavailable');
+  expect(state.docs.has(path)).toBe(true);
+  expect(state.auth.deleteUser).not.toHaveBeenCalled();
+  expect((await state.handler(request())).success).toBe(true);
+  expect(state.docs.has(path)).toBe(false);
+  expect(state.auth.deleteUser).toHaveBeenCalledTimes(1);
+});
+
+test('creator profile deletion failures keep Auth available for retry', async () => {
+  const path = 'schools/pu/creatorProfiles/alice';
+  const state = store([[path, { bio: 'Public biography' }]]);
+  state.fail('delete', path);
+
+  await expect(state.handler(request())).rejects.toThrow('unavailable');
+  expect(state.docs.has(path)).toBe(true);
+  expect(state.auth.deleteUser).not.toHaveBeenCalled();
+  expect((await state.handler(request())).success).toBe(true);
+  expect(state.docs.has(path)).toBe(false);
+  expect(state.auth.deleteUser).toHaveBeenCalledTimes(1);
 });
 
 test.each([
@@ -436,6 +725,21 @@ test.each([
   },
 );
 
+test('school membership stamps are cleared in the same commit that marks deletion in progress', async () => {
+  const state = store([
+    ['users/alice', { email: 'private@example.com' }],
+    [
+      'schools/pu/members/alice',
+      { status: 'active', profileBoundSchoolId: 'pu', profileBoundGeneration: 'gen-1' },
+    ],
+  ]);
+  state.fail('recursiveDelete', 'schools/pu/members/alice');
+  await expect(state.handler(request())).rejects.toThrow('unavailable');
+  expect(state.auth.deleteUser).not.toHaveBeenCalled();
+  expect(state.docs.get('users/alice').accountDeletionInProgress).toBe(true);
+  expect(state.docs.get('schools/pu/members/alice')).toEqual({ status: 'inactive' });
+});
+
 test('Auth deletion errors stay failures and only missing Auth is idempotent success', async () => {
   const state = store([['users/alice', { email: 'private@example.com' }]]);
   state.auth.deleteUser.mockRejectedValueOnce(
@@ -448,3 +752,50 @@ test('Auth deletion errors stay failures and only missing Auth is idempotent suc
   );
   expect((await state.handler(request())).success).toBe(true);
 });
+
+test('account deletion drains dorm identities, authority, private records and parcel mirrors across schools', async () => {
+  const seed = [['users/alice', {}]];
+  for (const school of ['pu', 'other']) {
+    for (const collection of ['dormStaffRoles', 'dormSsoIdentities']) {
+      seed.push([`schools/${school}/${collection}/alice`, { studentId: '123', status: 'active' }]);
+      seed.push([`schools/${school}/${collection}/bob`, { studentId: '456' }]);
+      seed.push([`groups/g/${collection}/alice`, { keep: true }]);
+    }
+    for (let i = 0; i < 205; i++) {
+      for (const collection of [
+        'dormResidents',
+        'dormLeaves',
+        'dormRepairs',
+        'dormPackages',
+        'dormPhotoUploads',
+      ]) {
+        const ownerField = collection === 'dormPackages' ? 'recipientId' : 'userId';
+        seed.push([
+          `schools/${school}/${collection}/${i}`,
+          { [ownerField]: 'alice', studentId: '123', name: '私人姓名' },
+        ]);
+        seed.push([`schools/${school}/${collection}/bob`, { [ownerField]: 'bob' }]);
+      }
+      seed.push([`schools/${school}/packages/${i}`, { recipientId: 'alice' }]);
+    }
+    seed.push([`schools/${school}/packages/bob`, { recipientId: 'bob' }]);
+  }
+  const state = store(seed);
+  await state.handler(request());
+  expect(
+    [...state.docs.keys()]
+      .filter((path) => path.startsWith('schools/'))
+      .every((path) => path.endsWith('/bob')),
+  ).toBe(true);
+  expect(state.docs.has('groups/g/dormStaffRoles/alice')).toBe(true);
+  expect(state.docs.has('groups/g/dormSsoIdentities/alice')).toBe(true);
+  await state.handler(request()); // Retrying cleanup remains safe.
+});
+
+test.each(['alice smith', 'alice\tsmith', 'alice\u0000smith', 'alice\u001fsmith', 'alice\u007fsmith'])(
+  'deletes an account with a UID outside the TronClass owner format without creating a binding barrier (%j)', async (uid) => {
+    const state = store([[`users/${uid}`, { name: 'Private name' }]]);
+    await expect(state.handler(request({}, uid))).resolves.toBeDefined();
+    expect([...state.docs.keys()].some((path) => path.startsWith('_tronClassBindings/'))).toBe(false);
+  },
+);

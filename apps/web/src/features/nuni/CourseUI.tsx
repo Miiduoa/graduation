@@ -61,6 +61,7 @@ export function MutationForm({
   children,
   submit,
   success,
+  submitDisabled,
 }: {
   label: string;
   /** Optional continuous-review action; only offered when not retrying an uncertain submit. */
@@ -68,6 +69,7 @@ export function MutationForm({
   children: ReactNode;
   submit: (data: FormData, key: string, intent: MutationFormIntent) => Promise<void>;
   success?: string;
+  submitDisabled?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -84,7 +86,7 @@ export function MutationForm({
   }, []);
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (running.current) return;
+    if (running.current || submitDisabled) return;
     const form = event.currentTarget;
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const intent: MutationFormIntent =
@@ -132,13 +134,13 @@ export function MutationForm({
         </p>
       )}
       <div className={styles.actions}>
-        <button className={styles.button} disabled={busy} type="submit" value="primary">
+        <button className={styles.button} disabled={busy || submitDisabled} type="submit" value="primary">
           {busy ? '處理中…' : uncertain ? '確認送出結果' : label}
         </button>
         {secondaryLabel && !uncertain ? (
           <button
             className={`${styles.button} ${styles.secondary}`}
-            disabled={busy}
+            disabled={busy || submitDisabled}
             type="submit"
             value="secondary"
           >

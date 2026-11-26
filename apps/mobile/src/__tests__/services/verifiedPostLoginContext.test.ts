@@ -68,3 +68,36 @@ test('active context rejects another owner, another school, or missing identity'
   expect(await resolveActivePostLoginContext({ schoolId: 'pu' })).toBeNull();
   expect(await resolveActivePostLoginContext()).toBeNull();
 });
+
+test('a delayed context save from the previous login cannot erase the latest context for the school', async () => {
+  let entered!: () => void;
+  let finish!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const release = new Promise<void>((resolve) => { finish = resolve; });
+  const store = AsyncStorage.setItem.bind(AsyncStorage);
+  const delayed = jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(async (key, value) => {
+    entered();
+    await release;
+    return store(key, value);
+  });
+  let active = true;
+  try {
+    const stale = syncPostLoginContextFromCaches({
+      ...identity,
+      assertCurrent() { if (!active) throw new Error('previous login'); },
+    });
+    await started;
+    active = false;
+    const next = syncPostLoginContextFromCaches({ ...identity, uid: 'next-owner' });
+    finish();
+    await expect(stale).resolves.toBeNull();
+    const current = await next;
+    expect(await getPostLoginContext('pu', 'next-owner')).toEqual(current);
+    expect(await getPostLoginContext('pu', identity.uid)).toBeNull();
+    expect(setInMemoryPostLoginContext).toHaveBeenCalledTimes(1);
+    expect(setInMemoryPostLoginContext).toHaveBeenCalledWith(current);
+  } finally {
+    finish();
+    delayed.mockRestore();
+  }
+});

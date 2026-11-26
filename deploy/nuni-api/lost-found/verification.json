@@ -1,0 +1,95 @@
+{
+  "schema": "campus.platform-lost-found-verification/v1",
+  "verifiedAt": "2026-11-07T15:37:47.989937+00:00",
+  "baseRepository": "Miiduoa/nuni-prod",
+  "baseCommit": "9de47b4b3492325e430562c37bcad552867162db",
+  "inputComposedTree": "6a84f3f845e21c79cc4c51927c524f1486e6099a",
+  "candidateTree": "d012bfcc67de304765e23e46c104df3db0ffeb28",
+  "sourceManifestSha256": "8808866338345b288696c530049c4284bfe1aeda5e8ae9739f42bee190b658c8",
+  "runtimeLockfileSha256": "72f883e6cedd2b64c821ce388ecdfb40bdeda8c0a94fa2390a7d87eb874d11d8",
+  "runtimeSource": "Exact pinned API/contracts/source-test-utils and supporting source; unrelated repository subtrees remain represented by their original sparse-index trees.",
+  "dependencyInstall": {
+    "packageManager": "pnpm@10.28.2",
+    "node": "22.23.4",
+    "frozenLockfile": true,
+    "lifecycleScriptsExecuted": false
+  },
+  "postgres": {
+    "serverVersion": "16.15",
+    "binaryPackage": "@embedded-postgres/linux-x64@16.15.0-beta.19",
+    "npmIntegrity": "sha512-TXULIde/Cmev3x+mtPjO3PY57M4/Q96Df6dVf0npGVhw5hKAFdhcVFwUXcRxOn+p8JcfpSTWoD4UwLiFHuJX+Q==",
+    "isolation": "Owned temporary loopback cluster; random schemas; no product URLs or data",
+    "lifecycleScriptsExecuted": false,
+    "libraryAliases": "14 reviewed relative aliases restored only inside the temporary binary package",
+    "finalClusterStopped": true
+  },
+  "checks": {
+    "sharedSqlAndIsolatedHttp": {
+      "passed": 81,
+      "failed": 0,
+      "skipped": 0,
+      "command": "node scripts/test-platform-lost-found.mjs with explicit LOST_FOUND_TEST_DATABASE_URL",
+      "includesRealConcurrentClosureAndLogoutRaces": true
+    },
+    "fullRuntimeHttp": {
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "command": "node scripts/test-platform-lost-found-runtime.mjs --checkout VERIFIED_CANDIDATE --postgres",
+      "completePinnedMigrationManifestApplied": true,
+      "compiledCreateAppAndGlobalHooks": true,
+      "actualPlatformLoginLogoutCloseServices": true,
+      "localJwksAndLocallySignedIdentityTokens": true,
+      "realGoogleProviderVerified": false
+    },
+    "apiBundle": {
+      "passed": true,
+      "scope": "All entries in the pinned API tsup.config.ts plus schema and migration assets",
+      "packageBuildCommand": "pnpm --filter @campus/api build",
+      "finalCandidateRebuiltByHttpRunner": true
+    },
+    "focusedRuntimeTypes": {
+      "passed": true,
+      "compiler": "typescript@7.0.2",
+      "scope": "Lost-found/shared modules integrated with actual CampusDatabase, PlatformAccountService and Fastify types",
+      "configuration": "Unchanged runtime tsconfig.base.json strictness, including exactOptionalPropertyTypes and noUncheckedIndexedAccess",
+      "fullApiTypecheck": false
+    },
+    "fullApiTypes": {
+      "status": "incomplete",
+      "exitCode": 137,
+      "typescriptDiagnostics": 0,
+      "reason": "Process terminated by the execution environment with SIGKILL"
+    },
+    "packaging": {
+      "passed": 11,
+      "failed": 0,
+      "command": "python3 -m unittest discover -s scripts/platform-lost-found -p '*_test.py' -v"
+    },
+    "existingBuilder": {
+      "passed": 13,
+      "failed": 0,
+      "command": "python3 deploy/nuni-api/food-ordering/build_test.py"
+    }
+  },
+  "logSha256": {
+    "postgresContractsAndHttp": "72087fddec44f77270b52a869a4b1d3bb12ed00d69b8170896fe89dbed642a19",
+    "fullRuntimeHttp": "171c75a72f65e42f76842ae9e0c2222674614b316df3fc6a898a2d69f4a39a3e",
+    "focusedRuntimeTypes": "db12ad97221988bf346c55d06788e21a01bb6a683d69266bf732ed4d6d9763c8",
+    "packaging": "89f9fa3fb63905d87e94e985d1f26af1ed14775498c6c95bdcfd1007433ef6e7",
+    "existingBuilder": "818c33660beb3c668b33e3df9d75eba5f0f7b65e367fa427a9d85bbfb36136c6"
+  },
+  "releaseState": {
+    "deployed": false,
+    "productionMigrationsApplied": false,
+    "productionFlagEnabled": false,
+    "productionGrantsChanged": false,
+    "immutableImageBuilt": false,
+    "remainingGates": [
+      "Full API typecheck in a sufficiently resourced environment",
+      "Immutable candidate and compatible-rollback image acceptance",
+      "Production migration/runtime grants and account-cleanup permissions",
+      "Real Google OAuth and staged rollout verification"
+    ]
+  }
+}

@@ -1,6 +1,8 @@
 import type { AgendaScheduledClass } from './campusStudyAgenda';
 import { savedPlanTimestamp } from './savedCampusPlanValidation';
 
+/** The same dated clock evidence used by the nuni planner; no account data is retained here. */
+export type CampusClockClass = AgendaScheduledClass;
 /** Half-open clock intervals; derived results use ISO timestamps with an explicit Z offset. */
 export type CampusClockInterval = { startAt: string; endAt: string };
 type InvalidReason = 'unavailable' | 'invalid-date' | 'invalid-course' | 'out-of-day' | 'too-many-courses';
@@ -48,7 +50,7 @@ function appendUnion(result: Interval[], value: Interval): void {
  * Only gaps bounded by saved meetings are returned; a blank or single-meeting day establishes none.
  */
 export function inspectCampusClockAvailability(
-  courses: readonly AgendaScheduledClass[] | null | undefined,
+  courses: readonly CampusClockClass[] | null | undefined,
   date: string,
 ): CampusClockAvailability {
   if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return invalid('invalid-date');

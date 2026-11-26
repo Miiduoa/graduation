@@ -1,14 +1,7 @@
+import { preferredScrollBehavior } from './scrollBehavior';
+
 const VIEW_MARGIN_PX = 24;
 const STICKY_GAP_PX = 8;
-
-function prefersReducedMotion(): boolean {
-  return document.documentElement.dataset.reducedMotion === 'true' ||
-    (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-}
-
-function scrollBehavior(): ScrollBehavior {
-  return prefersReducedMotion() ? 'auto' : 'smooth';
-}
 
 function stickyCoverTop(): number {
   if (typeof document === 'undefined' || typeof window.getComputedStyle !== 'function') {
@@ -47,9 +40,9 @@ export function revealStopResult(node: HTMLElement | null) {
   if (Math.abs(delta) >= 1) {
     const top = Math.max(0, currentScrollY() + delta);
     if (typeof window.scrollTo === 'function') {
-      window.scrollTo({ top, left: 0, behavior: scrollBehavior() });
+      window.scrollTo({ top, left: 0, behavior: preferredScrollBehavior() });
     } else if (typeof window.scrollBy === 'function') {
-      window.scrollBy({ top: delta, left: 0, behavior: scrollBehavior() });
+      window.scrollBy({ top: delta, left: 0, behavior: preferredScrollBehavior() });
     }
   }
   if (typeof node.focus === 'function') {

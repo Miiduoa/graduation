@@ -18,6 +18,8 @@ const createDormRepairRequest = require('./createDormRepairRequest');
 const listMyDormRepairs = require('./listMyDormRepairs');
 const getDormRepairStatus = require('./getDormRepairStatus');
 const reserveWashingMachine = require('./reserveWashingMachine');
+const cancelWashingReservation = require('./cancelWashingReservation');
+const getMyWashingReservations = require('./getMyWashingReservations');
 const createOrder = require('./createOrder');
 const cancelOrder = require('./cancelOrder');
 const findCampusPoi = require('./findCampusPoi');
@@ -50,6 +52,8 @@ const tools = [
   listMyDormRepairs,
   getDormRepairStatus,
   reserveWashingMachine,
+  cancelWashingReservation,
+  getMyWashingReservations,
   createOrder,
   cancelOrder,
   findCampusPoi,

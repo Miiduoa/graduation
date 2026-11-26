@@ -18,6 +18,7 @@
  *   campusReports/{autoId}
  *   users/{uid}/campusBoardAliases/{boardId}
  */
+import { isReadAccessDeniedError } from '@campus/shared/src/signedInSocialReads';
 import {
   addDoc,
   arrayRemove,
@@ -28,6 +29,7 @@ import {
   getDoc,
   getDocFromServer,
   getDocs,
+  getDocsFromServer,
   increment,
   limit,
   orderBy,
@@ -41,6 +43,7 @@ import {
   type Firestore,
   type Timestamp,
 } from 'firebase/firestore';
+import { storyViewerCollectionPath } from '@campus/shared/src/storyViewerPage';
 import { getDb } from '@/lib/firebase';
 
 // ═══════════════════════════════════════════════════════════════
@@ -105,7 +108,7 @@ export function rankFeedPosts(posts: CampusPostDoc[], topN = 40): CampusPostDoc[
 export async function toggleCampusPostLike(schoolId: string, postId: string, userId: string) {
   const db = getDb();
   const postRef = doc(db, 'schools', schoolId, 'campusPosts', postId);
-  await runTransaction(db, async (tx) => {
+  return runTransaction(db, async (tx) => {
     const snap = await tx.get(postRef);
     if (!snap.exists()) throw new Error('貼文不存在');
     const d = snap.data() as Record<string, unknown>;
@@ -124,6 +127,7 @@ export async function toggleCampusPostLike(schoolId: string, postId: string, use
         updatedAt: serverTimestamp(),
       });
     }
+    return !liked;
   });
 }
 
@@ -207,9 +211,11 @@ export async function deleteCampusPost(schoolId: string, postId: string) {
 export async function getCampusPostById(
   schoolId: string,
   postId: string,
+  source: 'default' | 'server' = 'default',
 ): Promise<CampusPostDoc | null> {
   const db = getDb();
-  const snap = await getDoc(doc(db, 'schools', schoolId, 'campusPosts', postId));
+  const read = source === 'server' ? getDocFromServer : getDoc;
+  const snap = await read(doc(db, 'schools', schoolId, 'campusPosts', postId));
   if (!snap.exists()) return null;
   return { id: snap.id, ...(snap.data() as Omit<CampusPostDoc, 'id'>) };
 }
@@ -265,14 +271,16 @@ export async function addCampusReply(
 export async function listCampusReplies(
   schoolId: string,
   postId: string,
+  source: 'default' | 'server' = 'default',
 ): Promise<CampusReply[]> {
   const db = getDb();
   const replies = collection(db, 'schools', schoolId, 'campusPosts', postId, 'replies');
+  const read = source === 'server' ? getDocsFromServer : getDocs;
   try {
-    const snap = await getDocs(query(replies, orderBy('createdAt', 'asc'), limit(120)));
+    const snap = await read(query(replies, orderBy('createdAt', 'asc'), limit(120)));
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CampusReply, 'id'>) }));
   } catch {
-    const snap = await getDocs(query(replies, limit(120)));
+    const snap = await read(query(replies, limit(120)));
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CampusReply, 'id'>) }));
   }
 }
@@ -457,6 +465,7 @@ export type CampusStoryDoc = {
   schoolId: string;
   authorUid: string;
   kind: StoryKind;
+  allowReplies?: boolean;
   text?: string;
   mediaUrl?: string | null;
   bgColor?: string;
@@ -480,6 +489,7 @@ export async function publishStory(payload: {
   schoolId: string;
   authorUid: string;
   kind: StoryKind;
+  allowReplies: boolean;
   text?: string;
   mediaUrl?: string | null;
   bgColor?: string;
@@ -493,6 +503,7 @@ export async function publishStory(payload: {
     schoolId: payload.schoolId,
     authorUid: payload.authorUid,
     kind: payload.kind,
+    allowReplies: payload.allowReplies,
     text: payload.text ?? '',
     mediaUrl: payload.mediaUrl ?? null,
     bgColor: payload.bgColor ?? '#0f172a',
@@ -527,32 +538,48 @@ export async function listActiveStoriesForSchool(
   lim = 80,
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
-  const now = Date.now();
+  // Keep near-expiry stories visible while allowing a small request-latency buffer.
+  let expiresAfter = Date.now() + 3_000;
+  let permissionRetried = false;
+  const readStories = async (sorted: boolean) => {
+    const read = () => getDocs(query(
+      storiesCol(db),
+      where('schoolId', '==', schoolId),
+      where('expiresAt', '>', expiresAfter),
+      ...(sorted ? [orderBy('expiresAt', 'desc')] : []),
+      limit(lim),
+    ));
+    try {
+      return await read();
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code !== 'permission-denied' || permissionRetried) {
+        throw error;
+      }
+      permissionRetried = true;
+      expiresAfter = Date.now() + 15_000;
+      return read();
+    }
+  };
+  const toActiveStories = (docs: Array<{ id: string; data: () => unknown }>) =>
+    docs
+      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
+      .filter((s) => typeof s.expiresAt === 'number' && s.expiresAt > Date.now());
   try {
-    const snap = await getDocs(
-      query(
-        storiesCol(db),
-        where('schoolId', '==', schoolId),
-        orderBy('createdAt', 'desc'),
-        limit(lim),
-      ),
-    );
-    return snap.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-  } catch {
-    const snap = await getDocs(
-      query(storiesCol(db), where('schoolId', '==', schoolId), limit(lim)),
-    );
-    return snap.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
+    const snap = await readStories(true);
+    return toActiveStories(snap.docs);
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === 'permission-denied') throw error;
+    const snap = await readStories(false);
+    return toActiveStories(snap.docs);
   }
 }
 
-export async function markStoryViewed(storyId: string, viewerUid: string) {
-  const db = getDb();
-  const viewRef = doc(db, 'campusStories', storyId, 'storyViews', viewerUid);
+export async function markStoryViewed(
+  story: Pick<CampusStoryDoc, 'id' | 'schoolId' | 'authorUid'>,
+  viewerUid: string,
+) {
+  if (story.authorUid === viewerUid) return;
+  const viewRef = doc(getDb(), ...storyViewerCollectionPath(story), viewerUid);
   const exists = await getDoc(viewRef);
   if (exists.exists()) return;
   await setDoc(viewRef, { viewerUid, viewedAt: serverTimestamp() });
@@ -831,7 +858,8 @@ export async function listCourseReviews(
       query(reviewsCol(db, schoolId), ...filters, orderBy('createdAt', 'desc'), limit(max)),
     );
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CourseReviewDoc, 'id'>) }));
-  } catch {
+  } catch (error) {
+    if (isReadAccessDeniedError(error)) throw error;
     const snap = await getDocs(query(reviewsCol(db, schoolId), limit(Math.min(max, 50))));
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CourseReviewDoc, 'id'>) }));
   }
@@ -899,16 +927,18 @@ export function aggregateReviews(rows: CourseReviewDoc[]): CourseReviewAggregate
 export async function toggleReviewHelpful(schoolId: string, reviewId: string, uid: string) {
   const db = getDb();
   const ref = doc(db, 'schools', schoolId, 'courseReviews', reviewId);
-  await runTransaction(db, async (tx) => {
+  return runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists()) throw new Error('評價不存在');
     const data = snap.data() as Record<string, unknown>;
     const arr = Array.isArray(data.helpfulBy) ? (data.helpfulBy as string[]) : [];
-    if (arr.includes(uid)) {
+    const helped = arr.includes(uid);
+    if (helped) {
       tx.update(ref, { helpfulBy: arrayRemove(uid), helpful: increment(-1) });
     } else {
       tx.update(ref, { helpfulBy: arrayUnion(uid), helpful: increment(1) });
     }
+    return !helped;
   });
 }
 

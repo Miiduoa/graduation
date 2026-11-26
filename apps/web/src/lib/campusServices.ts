@@ -32,7 +32,7 @@ export const CAMPUS_SERVICES = [
     href: '/student-card',
     access: 'account',
     keywords: '學生證 數位證件 證件 學號 student id card',
-    category: 'campus',
+    category: 'account',
   },
   {
     name: academicLabel('/calendar'),
@@ -200,6 +200,14 @@ export const CAMPUS_SERVICES = [
     category: 'connect',
   },
   {
+    name: '跨校公開交流',
+    text: '使用 Google 帳號閱讀公開貼文，參與開放看板',
+    href: '/social',
+    access: 'platform',
+    keywords: 'Google 公開 跨校 貼文 社群 看板 social community',
+    category: 'connect',
+  },
+  {
     name: '校園交流',
     text: '閱讀與分享校園話題',
     href: '/community',
@@ -228,7 +236,7 @@ export const CAMPUS_SERVICES = [
     text: '查詢路線與站牌',
     href: '/bus',
     access: 'public',
-    keywords: '交通 bus',
+    keywords: '交通 搭車 車站 車班 時刻表 巴士 transit bus',
     category: 'campus',
   },
   {
@@ -259,7 +267,7 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '宿舍',
-    text: '自主管理宿舍備忘、報修紀錄、入住退宿清單與洗衣計時',
+    text: '自主管理宿舍備忘、設備問題、入住退宿清單與洗衣計時',
     href: '/dormitory',
     access: 'device',
     keywords: '宿舍 住宿 寢室 房間 床位 報修 維修 入住 退宿 洗衣 dormitory laundry',
@@ -267,10 +275,10 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '失物招領',
-    text: '查看本校遺失與拾獲刊登',
+    text: '用 Google 帳號查看、刊登與管理失物',
     href: '/lost-found',
-    access: 'school',
-    keywords: '失物 招領 遺失 拾獲 lost found',
+    access: 'platform',
+    keywords: '失物 招領 遺失 拾獲 Google lost found',
     category: 'campus',
   },
   {
@@ -286,7 +294,15 @@ export const CAMPUS_SERVICES = [
     text: '搜尋館藏，前往本人借閱帳號',
     href: '/library',
     access: 'public',
-    keywords: '書籍 借書 續借 library',
+    keywords: '書籍 借書 續借 還書 找書 閱讀 book library',
+    category: 'campus',
+  },
+  {
+    name: '職涯',
+    text: '查看職涯資訊、工讀申請與實習學分進度',
+    href: '/career',
+    access: 'public',
+    keywords: '職涯 校內工讀 實習 學分 校園徵才 就業 工作 career internship',
     category: 'campus',
   },
   {
@@ -294,15 +310,15 @@ export const CAMPUS_SERVICES = [
     text: '查看官方聯絡電話、網站與名錄地址',
     href: '/school-info',
     access: 'public',
-    keywords: '總機 官網 地址 名錄 聯絡 職涯 實習 徵才 就業 school info contact career',
+    keywords: '總機 官網 地址 名錄 聯絡 school info contact',
     category: 'campus',
   },
   {
     name: '校園助理',
-    text: '查詢課務與校園服務；排課請用課表裡的幫我安排',
+    text: '查詢課務與校園服務，接續待辦並確認安排',
     href: '/ai-assistant',
-    access: 'school',
-    keywords: '問答 安排 課表 assistant',
+    access: 'account',
+    keywords: 'AI agent 問答 助理 代辦 待辦 安排 課表 assistant',
     category: 'account',
   },
   {
@@ -365,6 +381,27 @@ export const CAMPUS_SERVICES = [
 
 export type CampusService = (typeof CAMPUS_SERVICES)[number];
 
+/** Stable everyday entry points, shared by the compact menu and full directory. */
+export const EVERYDAY_SERVICE_HREFS: Record<ServiceCategory, readonly string[]> = {
+  study: ['/timetable', '/classroom', '/calendar', '/import'],
+  campus: ['/map', '/bus', '/food', '/dormitory'],
+  connect: ['/announcements', '/messages', '/dms', '/social'],
+  account: ['/profile', '/settings', '/ai-assistant', '/support'],
+};
+
+/** Keep every service reachable while showing a small, consistent first level. */
+export function groupCampusServiceEntries<T extends CampusService>(
+  services: readonly T[],
+  category: ServiceCategory,
+  compact = true,
+) {
+  if (!compact) return { primary: [...services], more: [] as T[] };
+  const preferred = EVERYDAY_SERVICE_HREFS[category];
+  const primary = preferred.flatMap((href) => services.filter((service) => service.href === href));
+  const more = services.filter((service) => !preferred.includes(service.href));
+  return { primary, more };
+}
+
 function isSecondary(service: CampusService) {
   return typeof service.parentHref === 'string' && service.parentHref.length > 0;
 }
@@ -401,6 +438,16 @@ export function secondaryCampusServices(parentHref: string, schoolLmsEnabled = f
   return flattenCampusServices(schoolLmsEnabled)
     .filter((service) => isSecondary(service) && service.parentHref === parentHref)
     .map(presentCampusService);
+}
+
+export function readCampusServiceFilters(params: URLSearchParams) {
+  const category = params.get('category');
+  return {
+    query: (params.get('q') ?? '').slice(0, 100),
+    category: SERVICE_CATEGORIES.some((item) => item.id === category)
+      ? (category as ServiceCategory)
+      : ('all' as const),
+  };
 }
 
 export function writeCampusServiceFilters(

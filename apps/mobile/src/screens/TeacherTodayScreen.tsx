@@ -21,7 +21,9 @@ import { TEACHER_ACADEMIC_SECTIONS } from '@campus/shared/src/academicSections';
 import { safeNavigate } from '../utils/safeNavigate';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { pageTitleFont } from '../ui/styles';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+import { WorkspaceStart } from '../components/WorkspaceStart';
 
 const TEACHER_TODAY_LABEL = TEACHER_ACADEMIC_SECTIONS[0].label;
 const TEACHER_COURSES_LABEL = TEACHER_ACADEMIC_SECTIONS[1].label;
@@ -149,17 +151,26 @@ export default function TeacherTodayScreen() {
   return (
     <SafeAreaView style={s.page} edges={['top']}>
       <ScrollView
-        contentContainerStyle={{ padding: 22, paddingBottom: bottom + 24 }}
+        contentContainerStyle={{
+          paddingHorizontal: theme.layout.screenHorizontalPadding,
+          paddingTop: 20,
+          paddingBottom: bottom + 24,
+        }}
         refreshControl={
           <RefreshControl refreshing={loading} onRefresh={load} tintColor={theme.colors.accent} />
         }
       >
-        <Text style={s.brand}>CAMPUS ONE</Text>
         <Text accessibilityRole="header" style={s.heading}>
           {TEACHER_TODAY_LABEL}
         </Text>
-        <Text style={s.caption}>查看課程動態、學生繳交與課堂點名。</Text>
-
+        {data ? (
+          <Text style={s.meta}>
+            {data.courses.length
+              ? `${data.courses.length} 門課程 · ${teachingTodos.length} 項教學待辦 · ${gradingTasks.length} 項待批改`
+              : '尚未加入授課課程'}
+          </Text>
+        ) : null}
+        <WorkspaceStart navigation={navigation} scope={scope} workContext="teacher" />
         {loading ? <ActivityIndicator color={theme.colors.accent} style={s.spinner} /> : null}
         {current?.status === 'error' ? (
           <View accessibilityRole="alert" style={s.error}>
@@ -177,17 +188,9 @@ export default function TeacherTodayScreen() {
 
         {data ? (
           <>
-            <View style={s.focus}>
-              <Text style={s.label}>{TEACHER_TODAY_LABEL}</Text>
-              <Text style={s.focusTitle}>
-                {data.courses.length ? `${data.courses.length} 門課程` : '尚未加入授課課程'}
-              </Text>
-              <Text style={s.body}>
-                {data.courses.length
-                  ? '先查看需要處理的課務，或選擇一門課開啟課堂。'
-                  : '課程管理員加入你的授課帳號後，課程會顯示在這裡。'}
-              </Text>
-            </View>
+            {data.courses.length ? null : (
+              <Text style={s.empty}>課程管理員加入你的授課帳號後，課程會顯示在這裡。</Text>
+            )}
 
             {data.courses.length ? (
               <>
@@ -204,6 +207,19 @@ export default function TeacherTodayScreen() {
                     <View key={course.groupId} style={s.course}>
                       <Text style={s.courseTitle}>{course.name}</Text>
                       <View style={s.actions}>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${course.name}，開啟課程工作台`}
+                          onPress={() =>
+                            safeNavigate(navigation, 'CourseHub', {
+                              groupId: course.groupId,
+                              groupName: course.name,
+                            })
+                          }
+                          style={s.secondary}
+                        >
+                          <Text style={s.link}>課程工作台</Text>
+                        </Pressable>
                         <Pressable
                           accessibilityRole="button"
                           accessibilityLabel={`${course.name}，${activeSession?.sessionId ? '進入課堂' : '開始點名'}`}
@@ -251,15 +267,19 @@ export default function TeacherTodayScreen() {
                       style={s.task}
                       onPress={() => openTask(task)}
                     >
-                      <View style={{ flex: 1 }}>
+                      <View style={s.taskCopy}>
                         <Text style={s.taskTitle}>{task.title}</Text>
                         <Text style={s.meta}>{task.groupName}</Text>
                         <Text style={s.taskAction}>
                           {task.kind === 'live' ? '進入課堂' : '查看課程動態'}
                         </Text>
                       </View>
-                      <Text accessibilityElementsHidden style={s.arrow}>
-                        ↗
+                      <Text
+                        accessibilityElementsHidden
+                        importantForAccessibility="no-hide-descendants"
+                        style={s.arrow}
+                      >
+                        ›
                       </Text>
                     </Pressable>
                   ))
@@ -277,13 +297,17 @@ export default function TeacherTodayScreen() {
                       style={s.task}
                       onPress={() => openTask(task)}
                     >
-                      <View style={{ flex: 1 }}>
+                      <View style={s.taskCopy}>
                         <Text style={s.taskTitle}>{task.title}</Text>
                         <Text style={s.meta}>{task.groupName}</Text>
                         <Text style={s.taskAction}>查看成績簿</Text>
                       </View>
-                      <Text accessibilityElementsHidden style={s.arrow}>
-                        ↗
+                      <Text
+                        accessibilityElementsHidden
+                        importantForAccessibility="no-hide-descendants"
+                        style={s.arrow}
+                      >
+                        ›
                       </Text>
                     </Pressable>
                   ))
@@ -302,79 +326,84 @@ export default function TeacherTodayScreen() {
 const createStyles = () =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: theme.colors.bg },
-    brand: {
-      fontSize: 12,
-      fontWeight: '700',
-      letterSpacing: 2,
-      color: theme.colors.textSecondary,
-      marginBottom: 28,
-    },
-    heading: { color: theme.colors.text, fontSize: 28, fontWeight: '600', letterSpacing: -1 },
-    caption: {
-      color: theme.colors.muted,
-      fontSize: 13,
-      lineHeight: 22,
-      marginTop: 10,
-      marginBottom: 26,
+    heading: {
+      fontFamily: pageTitleFont,
+      color: theme.colors.text,
+      fontSize: 30,
+      lineHeight: 38,
+      fontWeight: '800',
+      letterSpacing: 0,
     },
     spinner: { marginVertical: 36 },
-    focus: {
-      backgroundColor: theme.colors.focusSurface,
-      borderColor: theme.colors.border,
-      borderWidth: 1,
-      borderRadius: 8,
-      padding: 24,
-    },
-    label: { color: theme.colors.textSecondary, fontSize: 11, letterSpacing: 1 },
-    focusTitle: { color: theme.colors.text, fontSize: 25, fontWeight: '600', marginVertical: 14 },
-    body: { color: theme.colors.textSecondary, fontSize: 13, lineHeight: 22 },
     sectionTitle: {
       color: theme.colors.text,
-      fontSize: 18,
-      fontWeight: '600',
-      marginTop: 32,
-      marginBottom: 12,
+      fontSize: 19,
+      lineHeight: 26,
+      fontWeight: '800',
+      marginTop: 30,
+      paddingBottom: 8,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
     },
     task: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
-      paddingVertical: 18,
-      borderBottomWidth: 1,
+      minHeight: 64,
+      paddingVertical: 14,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: theme.colors.border,
     },
-    taskTitle: { fontSize: 14, fontWeight: '600', color: theme.colors.text, lineHeight: 22 },
-    meta: { fontSize: 12, color: theme.colors.muted, marginTop: 5 },
-    taskAction: { fontSize: 12, color: theme.colors.accent, marginTop: 10 },
-    arrow: { color: theme.colors.muted, fontSize: 19 },
-    empty: { color: theme.colors.muted, fontSize: 13, lineHeight: 23, paddingVertical: 16 },
-    course: {
-      backgroundColor: theme.colors.surface,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: 6,
-      padding: 20,
-      marginBottom: 10,
+    taskCopy: { flex: 1, minWidth: 0 },
+    taskTitle: { fontSize: 15, fontWeight: '700', color: theme.colors.text, lineHeight: 22 },
+    meta: { fontSize: 13, lineHeight: 19, color: theme.colors.textSecondary, marginTop: 6 },
+    taskAction: {
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '600',
+      color: theme.colors.accent,
+      marginTop: 6,
     },
-    courseTitle: { color: theme.colors.text, fontWeight: '600', fontSize: 17, lineHeight: 24 },
-    actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 18 },
+    arrow: { color: theme.colors.muted, fontSize: 22, lineHeight: 26 },
+    empty: {
+      color: theme.colors.textSecondary,
+      fontSize: 14,
+      lineHeight: 22,
+      paddingVertical: 14,
+    },
+    course: {
+      paddingVertical: 16,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
+    },
+    courseTitle: { color: theme.colors.text, fontWeight: '700', fontSize: 17, lineHeight: 24 },
+    actions: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      columnGap: 4,
+      rowGap: 4,
+      marginTop: 12,
+    },
     primary: {
       backgroundColor: theme.colors.accent,
-      borderRadius: 4,
+      borderRadius: theme.radius.sm,
       paddingHorizontal: 18,
-      paddingVertical: 13,
       minHeight: 44,
+      justifyContent: 'center',
+      marginRight: 8,
     },
-    primaryText: { color: theme.colors.onAccent, fontSize: 13, fontWeight: '600' },
+    primaryText: { color: theme.colors.onAccent, fontSize: 14, lineHeight: 20, fontWeight: '700' },
     disabled: { opacity: 0.55 },
-    secondary: { justifyContent: 'center', paddingHorizontal: 14, minHeight: 44 },
+    secondary: { justifyContent: 'center', paddingHorizontal: 12, minHeight: 44 },
     error: {
-      padding: 16,
+      padding: 14,
       backgroundColor: theme.colors.dangerSoft,
-      marginBottom: 18,
-      borderRadius: 4,
+      borderLeftWidth: 3,
+      borderLeftColor: theme.colors.danger,
+      marginTop: 16,
     },
-    errorText: { color: theme.colors.text, fontSize: 13, lineHeight: 22 },
-    retry: { paddingVertical: 13, alignSelf: 'flex-start', minHeight: 44 },
-    link: { color: theme.colors.accent, fontSize: 13, fontWeight: '600' },
+    errorText: { color: theme.colors.text, fontSize: 14, lineHeight: 22 },
+    retry: { paddingVertical: 10, alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center' },
+    link: { color: theme.colors.accent, fontSize: 14, lineHeight: 20, fontWeight: '700' },
   });

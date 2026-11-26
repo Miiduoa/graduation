@@ -49,8 +49,8 @@ export const defaultWebPreferences: StoredWebPreferences = {
   },
 };
 
-/** rem 等價於既有 px 階梯（以 16px root 換算），保留 small／medium／large 相對關係與預設渲染尺寸。 */
-const fontScaleMap: Record<
+/** Default body/secondary text is 16/14px at a 16px root; retain the saved size steps. */
+export const fontScaleMap: Record<
   FontSizePreference,
   {
     body: string;
@@ -63,30 +63,30 @@ const fontScaleMap: Record<
   }
 > = {
   small: {
-    body: '0.875rem', // 14px
-    bodySm: '0.75rem', // 12px
+    body: '0.9375rem', // 15px
+    bodySm: '0.8125rem', // 13px
     h1: '1.375rem', // 22px
     h2: '1.125rem', // 18px
     h3: '1rem', // 16px
-    label: '0.75rem', // 12px
+    label: '0.8125rem', // 13px
     labelSm: '0.625rem', // 10px
   },
   medium: {
-    body: '0.9375rem', // 15px
-    bodySm: '0.8125rem', // 13px
+    body: '1rem', // 16px
+    bodySm: '0.875rem', // 14px
     h1: '1.5rem', // 24px
     h2: '1.25rem', // 20px
     h3: '1.0625rem', // 17px
-    label: '0.8125rem', // 13px
+    label: '0.875rem', // 14px
     labelSm: '0.6875rem', // 11px
   },
   large: {
-    body: '1.0625rem', // 17px
-    bodySm: '0.9375rem', // 15px
+    body: '1.125rem', // 18px
+    bodySm: '1rem', // 16px
     h1: '1.625rem', // 26px
     h2: '1.375rem', // 22px
     h3: '1.1875rem', // 19px
-    label: '0.875rem', // 14px
+    label: '0.9375rem', // 15px
     labelSm: '0.75rem', // 12px
   },
 };
@@ -284,7 +284,7 @@ export function applyWebAppearancePreferences(
   root.style.setProperty('--font-label-size', fontScale.label);
   root.style.setProperty('--font-label-sm-size', fontScale.labelSm);
   doc.querySelectorAll?.('meta[name="theme-color"]').forEach((meta) => {
-    meta.setAttribute('content', dark ? '#000000' : '#f8f7f3');
+    meta.setAttribute('content', dark ? '#000000' : '#faf8f2');
     meta.removeAttribute('media');
   });
 }

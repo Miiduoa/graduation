@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { cleanMeta, cleanCourse, type PersonalImportRecord } from '@campus/shared';
+import { classMeetingKey, manualClassRecords } from '@campus/shared/src/timetable/classExceptions';
 import { NextClassCard, TodayTimetable } from './TodayTimetable';
 import { loadPersonalTimetable, type StoredTimetable } from '@/lib/timetable/store';
 
@@ -13,6 +14,7 @@ const state = vi.hoisted(() => ({
   uid: null as string | null,
   records: [] as PersonalImportRecord[],
   importError: '',
+  retryImports: vi.fn(),
 }));
 vi.mock('@/lib/usePersonalImports', () => ({
   usePersonalImportScope: () => ({
@@ -21,7 +23,15 @@ vi.mock('@/lib/usePersonalImports', () => ({
     loading: state.loading,
     schoolName: state.schoolId,
   }),
-  usePersonalImports: () => ({ records: state.records, error: state.importError, loading: false }),
+  usePersonalImports: () =>
+    ({
+      records: state.records,
+      error: state.importError,
+      loading: false,
+      syncEnabled: false,
+      ready: !state.importError,
+      retry: state.retryImports,
+    }) satisfies ReturnType<typeof import('@/lib/usePersonalImports').usePersonalImports>,
 }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: state.uid ? { uid: state.uid } : null }),
@@ -71,6 +81,63 @@ it('shows hand-entered classes with actual time and room, including after focus 
   fireEvent.focus(window);
   expect(await screen.findByText('已修改課程')).toBeTruthy();
   expect(screen.queryByText('資料庫')).toBeNull();
+});
+
+it('links every known room using the actual timetable scope and excludes another school record', async () => {
+  const timetable = saved('資料庫');
+  timetable.courses.push(
+    cleanCourse({ id: 'online', name: '尚未填教室的課', day: 1, start: 5, end: 6, room: '' }),
+  );
+  state.records = [
+    {
+      id: 'other-school',
+      kind: 'timetable',
+      title: '別校課程',
+      schoolId: 'pu',
+      academicYear: '115',
+      semester: '1',
+      dayOfWeek: 1,
+      startPeriod: 2,
+      endPeriod: 3,
+      location: '主顧303',
+      batchId: 'other',
+      importedAt: now.toISOString(),
+      source: { type: 'paste', line: 1, rawText: '' },
+    },
+  ];
+  vi.mocked(loadPersonalTimetable).mockResolvedValue(timetable);
+  render(<TodayTimetable now={now} />);
+  const link = await screen.findByRole('link', { name: '找教室：資工101' });
+  const url = new URL(link.getAttribute('href')!, 'https://campus.example');
+  expect(url.pathname).toBe('/map');
+  expect(url.searchParams.get('schoolId')).toBe('ncku');
+  expect(url.searchParams.get('query')).toBe('資工101');
+  expect(screen.getAllByRole('link', { name: /找教室/ })).toHaveLength(1);
+  expect(screen.queryByText('別校課程')).toBeNull();
+  expect(link.parentElement?.closest('a, button')).toBeNull();
+});
+
+it('uses the dated room change instead of the weekly baseline in its map request', async () => {
+  const timetable = saved('資料庫');
+  const original = manualClassRecords(timetable)[0];
+  timetable.classExceptions = [
+    {
+      id: 'room-change',
+      courseKey: classMeetingKey(original),
+      originalDate: '2026-10-19',
+      kind: 'room',
+      location: '新館 207',
+      original,
+      createdAt: now.toISOString(),
+    },
+  ];
+  vi.mocked(loadPersonalTimetable).mockResolvedValue(timetable);
+  render(<TodayTimetable now={now} />);
+  const link = await screen.findByRole('link', { name: '找教室：新館 207' });
+  expect(
+    new URL(link.getAttribute('href')!, 'https://campus.example').searchParams.get('query'),
+  ).toBe('新館 207');
+  expect(screen.queryByRole('link', { name: '找教室：資工101' })).toBeNull();
 });
 it('clears old account immediately and ignores its delayed read after switching', async () => {
   let old!: (value: StoredTimetable) => void;
@@ -133,21 +200,38 @@ it('does not call a failed read an empty schedule and recovers via retry', async
   fireEvent.click(screen.getByRole('button', { name: '重新讀取課表' }));
   expect(await screen.findByRole('link', { name: '匯入我的課表' })).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
+  expect(state.retryImports).toHaveBeenCalledOnce();
+  expect(loadPersonalTimetable).toHaveBeenCalledTimes(2);
 });
 
 it('takes the selected term into the full timetable instead of whichever term was imported last', async () => {
   const imported = (academicYear: string): PersonalImportRecord => ({
-    id: academicYear, academicYear, semester: '1', kind: 'timetable', schoolId: 'ncku',
-    title: `${academicYear}的課程`, dayOfWeek: 1, startPeriod: 2, endPeriod: 3,
-    batchId: 'batch', importedAt: now.toISOString(), source: { type: 'paste', line: 1, rawText: '' },
+    id: academicYear,
+    academicYear,
+    semester: '1',
+    kind: 'timetable',
+    schoolId: 'ncku',
+    title: `${academicYear}的課程`,
+    dayOfWeek: 1,
+    startPeriod: 2,
+    endPeriod: 3,
+    batchId: 'batch',
+    importedAt: now.toISOString(),
+    source: { type: 'paste', line: 1, rawText: '' },
   });
   state.records = [imported('115'), imported('114')];
   render(<TodayTimetable now={now} />);
   await screen.findByText('115的課程');
-  expect(screen.getByRole('link', { name: '完整課表' }).getAttribute('href')).toBe('/timetable?campus=ncku&term=115%7C1');
-  fireEvent.change(screen.getByRole('combobox', { name: '查看學期' }), { target: { value: '114|1' } });
+  expect(screen.getByRole('link', { name: '完整課表' }).getAttribute('href')).toBe(
+    '/timetable?campus=ncku&term=115%7C1',
+  );
+  fireEvent.change(screen.getByRole('combobox', { name: '查看學期' }), {
+    target: { value: '114|1' },
+  });
   expect(screen.getByText('114的課程')).toBeTruthy();
-  expect(screen.getByRole('link', { name: '完整課表' }).getAttribute('href')).toBe('/timetable?campus=ncku&term=114%7C1');
+  expect(screen.getByRole('link', { name: '完整課表' }).getAttribute('href')).toBe(
+    '/timetable?campus=ncku&term=114%7C1',
+  );
 });
 
 it('shows the next class and room only after the timetable read succeeds', async () => {

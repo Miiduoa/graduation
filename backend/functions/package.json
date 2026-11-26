@@ -19,11 +19,11 @@
     "test": "pnpm run build:shared && node parse5-runtime-smoke.cjs && ONLINE_ORDERING_ENABLED=true jest"
   },
   "dependencies": {
-    "firebase-admin": "14.5.0",
+    "firebase-admin": "14.5.1",
     "firebase-functions": "^7.4.0",
-    "jose": "^6.2.13",
+    "jose": "^6.2.18",
     "node-fetch": "^3.3.2",
-    "parse5": "8.0.1",
+    "parse5": "8.1.1",
     "saml2-js": "^4.0.2",
     "xml2js": "^0.6.2",
     "zod": "^4.6.7",
@@ -31,8 +31,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.13.0",
-    "globals": "^17.13.0",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0",
     "jest": "^30.5.2"
   },
   "overrides": {

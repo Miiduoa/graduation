@@ -50,7 +50,7 @@ export function resolveDormRepairRoute(
         label: '致電海大宿網客服', detail: '宿網由中華電信受理，請撥 0800-080-412。', url: 'tel:0800080412',
       } : {
         label: '開啟海大教學務系統', detail: '登入後選「學生宿舍修繕系統」。可填寫寢室或公共區的位置、狀況並附照片。', url: ntouPortal,
-        trackingLabel: '查海大修繕處理狀況', trackingUrl: ntouPortal,
+        trackingLabel: '到海大教務系統網站查修繕紀錄', trackingUrl: ntouPortal,
       };
     // 中山宿服組 housing-osa.nsysu.edu.tw/p/412-1092-3593.php
     case 'tw-nsysu':
@@ -60,7 +60,7 @@ export function resolveDormRepairRoute(
         url: 'https://dormnet-lis.nsysu.edu.tw/p/406-1052-242095,r4161.php?Lang=zh-tw',
       } : {
         label: '開啟中山宿舍修繕', detail: '以個人帳號登入學生綜合資訊平台，選「宿舍修繕」。', url: nsysuPortal,
-        trackingLabel: '查中山宿舍修繕進度', trackingUrl: nsysuPortal,
+        trackingLabel: '到中山宿舍網站查修繕紀錄', trackingUrl: nsysuPortal,
       };
     // 清大住宿組 sthousing.site.nthu.edu.tw/p/412-1254-15568.php
     case 'tw-nthu':
@@ -69,8 +69,8 @@ export function resolveDormRepairRoute(
         label: '查看清大宿網報修分機', detail: '宿網和網路孔由計通中心受理。校本部分機 31000，南大校區分機 76405。',
         url: 'https://sthousing.site.nthu.edu.tw/p/412-1254-15568.php?Lang=zh-tw',
       } : {
-        label: '填寫清大宿舍修繕單', detail: '選擇齋別和維修項目。補充說明限 100 字，請省略個資。頁面下方可用修繕編號查進度。',
-        url: nthuForm, trackingLabel: '到清大查修繕編號', trackingUrl: nthuForm,
+        label: '填寫清大宿舍修繕單', detail: '選擇齋別和維修項目。補充說明限 100 字，請省略個資。學校網站頁面下方可用修繕編號查看紀錄。',
+        url: nthuForm, trackingLabel: '到清大宿舍網站查修繕紀錄', trackingUrl: nthuForm,
       };
     // 成大住宿 e 網 dorm.osa.ncku.edu.tw/index_app.php · 計網中心 cc.ncku.edu.tw/p/412-1213-3316.php
     case 'tw-ncku':
@@ -98,7 +98,7 @@ export function resolveDormRepairRoute(
       };
       if (/太子|修齊會館|(?:長興|水源)(?:舍區|學舍|宿舍|[ABC]棟)/i.test(location)) return {
         label: '開啟臺大太子學舍修繕報修', detail: '登入太子學舍會員服務，登記寢室或公共設備故障。可在同頁查看最近報修紀錄。',
-        url: 'https://ntudorm.prince.com.tw/Member_Repair.aspx', trackingLabel: '查太子學舍報修紀錄', trackingUrl: 'https://ntudorm.prince.com.tw/Member_Repair.aspx',
+        url: 'https://ntudorm.prince.com.tw/Member_Repair.aspx', trackingLabel: '到太子學舍網站查報修紀錄', trackingUrl: 'https://ntudorm.prince.com.tw/Member_Repair.aspx',
       };
       return {
         label: '開啟臺大宿舍修繕系統', detail: '自建宿舍請登入住宿管理系統。太子學舍請在位置填入「太子學舍」以開啟該舍報修。',
@@ -111,7 +111,7 @@ export function resolveDormRepairRoute(
         url: 'https://repair.ncu.edu.tw/RepairSystem/',
       } : {
         label: '開啟中央宿舍修繕通報', detail: '用 Portal 帳號登入，寢室內設備需註明床位。洗烘衣機請依機身廠商電話通報。',
-        url: 'https://repair.ncu.edu.tw/RepairSystem/', trackingLabel: '查中央尚未完成的報修', trackingUrl: 'https://repair.ncu.edu.tw/RepairSystem/report',
+        url: 'https://repair.ncu.edu.tw/RepairSystem/', trackingLabel: '到中央宿舍網站查修繕紀錄', trackingUrl: 'https://repair.ncu.edu.tw/RepairSystem/report',
       };
     case 'tw-nchu':
     case 'nchu':
@@ -133,7 +133,7 @@ export function resolveDormRepairRoute(
         url: 'https://support.video.nccu.edu.tw/media/623',
       } : {
         label: '開啟政大宿舍請修', detail: '登入 iNCCU 後，在學生資訊系統依序選「住宿服務」、「宿舍請修」。',
-        url: 'https://i.nccu.edu.tw/', trackingLabel: '到政大查請修紀錄', trackingUrl: 'https://i.nccu.edu.tw/',
+        url: 'https://i.nccu.edu.tw/', trackingLabel: '到政大網站查請修紀錄', trackingUrl: 'https://i.nccu.edu.tw/',
       };
     default: {
       const housing = resolveSchoolPublicServices(id)?.services.dormitory;

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 import { createNuniClasses, parseNuniWorkspace } from '@campus/shared/src/nuni';
+import { WAKE_REQUEST_TIMEOUT_MS } from '@campus/shared/src/wakeAwareRequest';
 import { handleNuni } from './api';
 import { finishGoogle, startGoogle } from './oauth';
 import {
@@ -56,9 +57,38 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetcher.mockReset());
 });
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
+
+function useFakeRequestTimeouts() {
+  vi.useFakeTimers();
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+    const controller = new AbortController();
+    setTimeout(
+      () => controller.abort(new DOMException('Upstream timed out.', 'TimeoutError')),
+      milliseconds,
+    );
+    return controller.signal;
+  });
+}
+
+function responseWithPendingBody(signal: AbortSignal, status = 200) {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        signal.addEventListener(
+          'abort',
+          () => controller.error(new DOMException('Body read aborted.', 'AbortError')),
+          { once: true },
+        );
+      },
+    }),
+    { status, headers: { 'Content-Type': 'application/json' } },
+  );
+}
 
 it('waits at least ten seconds and retries a waking API once', async () => {
   fetcher
@@ -75,6 +105,70 @@ it('does not retry a 4xx API failure', async () => {
   await expect(fetchJson('https://api.nuni.tw/v1/public/schools/pu/cafeterias', {})).rejects.toMatchObject({
     status: 401,
   });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it('retries a GET when headers arrived but its first response body timed out', async () => {
+  useFakeRequestTimeouts();
+  fetcher
+    .mockImplementationOnce((_url: string, init: RequestInit) =>
+      responseWithPendingBody(init.signal!),
+    )
+    .mockResolvedValueOnce(response({ workspaces: [workspace] }));
+  const outcome = fetchJson('https://api.nuni.tw/v1/auth/platform/class-workspaces', {}).then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error }),
+  );
+  await vi.advanceTimersByTimeAsync(WAKE_REQUEST_TIMEOUT_MS - 1);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  await expect(outcome).resolves.toEqual({ value: { workspaces: [workspace] } });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it.each(['POST', 'PUT'])(
+  'does not add a %s retry when its response body is aborted',
+  async (method) => {
+    useFakeRequestTimeouts();
+    fetcher.mockImplementation((_url: string, init: RequestInit) =>
+      responseWithPendingBody(init.signal!),
+    );
+    const outcome = fetchJson('https://api.nuni.tw/v1/auth/platform/class-workspaces', {
+      method,
+      body: '{}',
+    }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(WAKE_REQUEST_TIMEOUT_MS);
+    await expect(outcome).resolves.toMatchObject({ status: 502, code: 'INVALID_RESPONSE' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([401, 403])(
+  'does not retry HTTP %s when reading its error body times out',
+  async (status) => {
+    useFakeRequestTimeouts();
+    fetcher.mockImplementation((_url: string, init: RequestInit) =>
+      responseWithPendingBody(init.signal!, status),
+    );
+    const outcome = fetchJson('https://api.nuni.tw/v1/auth/platform/class-workspaces', {}).catch(
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(WAKE_REQUEST_TIMEOUT_MS);
+    await expect(outcome).resolves.toMatchObject({ status });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([
+  ['malformed JSON', '{broken', 1024, 502, 'INVALID_RESPONSE'],
+  ['oversized body', '123456789', 4, 413, 'BODY_TOO_LARGE'],
+] as const)('does not retry a GET with %s', async (_kind, body, limit, status, code) => {
+  fetcher.mockResolvedValueOnce(
+    new Response(body, { headers: { 'Content-Type': 'application/json' } }),
+  );
+  await expect(
+    fetchJson('https://api.nuni.tw/v1/auth/platform/class-workspaces', {}, limit),
+  ).rejects.toMatchObject({ status, code });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
@@ -164,6 +258,104 @@ describe('Nuni additive classroom configuration', () => {
       'https://nuni.tw/classroom/login?issue=unavailable',
     );
     expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe('independent school sign-in capability', () => {
+  it.each(['pending', 'rejected'] as const)(
+    'answers locally without waiting for a %s platform providers request',
+    async (transport) => {
+      vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', 'true');
+      if (transport === 'pending') fetcher.mockImplementation(() => new Promise(() => {}));
+      else fetcher.mockRejectedValue(new TypeError('Platform providers unavailable'));
+
+      const result = await handleNuni(
+        request('api/nuni/sign-in-options?scope=school&schoolId=pu'),
+        ['sign-in-options'],
+      );
+      expect(result.status).toBe(200);
+      expect(await result.json()).toEqual({ studentId: true });
+      expect(result.headers.get('cache-control')).toContain('no-store');
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['true', 'false'])(
+    'does not require platform or OAuth configuration with classroom enabled=%s',
+    async (classroomEnabled) => {
+      vi.stubEnv('NUNI_CLASSROOM_ENABLED', classroomEnabled);
+      vi.stubEnv('CAMPUS_BACKEND', 'firebase');
+      vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', 'true');
+      vi.stubEnv('WEB_PUBLIC_ORIGIN', '');
+      vi.stubEnv('NUNI_API_BASE_URL', '');
+      vi.stubEnv('PLATFORM_GOOGLE_LOGIN_ENABLED', '');
+      vi.stubEnv('PLATFORM_GOOGLE_CLIENT_SECRET', '');
+      vi.stubEnv('BFF_SESSION_SECRET', '');
+
+      for (const query of ['scope=school', 'schoolId=pu&scope=school']) {
+        const result = await handleNuni(request(`api/nuni/sign-in-options?${query}`), ['sign-in-options']);
+        expect(result.status).toBe(200);
+        expect(await result.json()).toEqual({ studentId: true });
+      }
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { schoolFlag: '', schoolId: 'pu' },
+    { schoolFlag: 'false', schoolId: 'pu' },
+    { schoolFlag: 'true', schoolId: 'ntu' },
+    { schoolFlag: 'true', schoolId: 'unknown-campus' },
+  ])('keeps school access closed for $schoolId with school flag "$schoolFlag"', async ({ schoolFlag, schoolId }) => {
+    vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', schoolFlag);
+    const result = await handleNuni(
+      request(`api/nuni/sign-in-options?scope=school&schoolId=${schoolId}`),
+      ['sign-in-options'],
+    );
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual({ studentId: false });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { classroom: 'true', school: 'true' },
+    { classroom: 'true', school: 'false' },
+    { classroom: 'false', school: 'true' },
+    { classroom: 'false', school: 'false' },
+  ])('rejects invalid query before any provider lookup (classroom=$classroom, school=$school)', async ({ classroom, school }) => {
+    vi.stubEnv('NUNI_CLASSROOM_ENABLED', classroom);
+    vi.stubEnv('CAMPUS_BACKEND', 'firebase');
+    vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', school);
+    for (const query of [
+      'scope=',
+      'scope=all',
+      'scope=School',
+      'scope=school&scope=school',
+      'scope=school&scope=platform',
+      'scope=school&schoolId=pu&schoolId=pu',
+      'scope=school&schoolId=pu&schoolId=ntu',
+      'scope=school&schoolId=',
+      'scope=school&schoolId=PU',
+      'scope=school&schoolId=pu%2Fadmin',
+      'scope=school&unexpected=true',
+      'schoolId=pu&schoolId=pu',
+      'schoolId=',
+      'unexpected=true',
+    ]) {
+      const result = await handleNuni(request(`api/nuni/sign-in-options?${query}`), ['sign-in-options']);
+      expect(result.status, query).toBe(400);
+      expect(await result.json(), query).toEqual({ error: 'INVALID_INPUT' });
+    }
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('keeps the unscoped provider failure distinct from a closed Google integration', async () => {
+    vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', 'true');
+    fetcher.mockImplementation(() => response({ error: { code: 'PROVIDERS_UNAVAILABLE' } }, 503));
+    const result = await handleNuni(request('api/nuni/sign-in-options?schoolId=pu'), ['sign-in-options']);
+    expect(result.status).toBe(503);
+    expect(await result.json()).toEqual({ error: 'PROVIDERS_UNAVAILABLE' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -445,11 +637,28 @@ describe('Nuni Google authorization code flow', () => {
   });
   it.each([
     '/social?campus=tw-pu',
+    '/orders?campus=pu',
+    '/student-card?campus=pu',
+    '/ai-assistant?campus=pu',
     '/merchant',
     '/merchant/apply',
     '/merchant/workspace',
     '/auth/platform/class-workspace/join',
     '/auth/platform/class-workspace/new',
+    '/timetable?schoolId=ntu#today',
+    '/calendar?campus=nthu#week',
+    '/import?schoolId=pu',
+    '/dormitory?schoolId=ntu',
+    '/food?tenant=pu&order=order-1',
+    '/food?school=PU&schoolId=pu&campus=nthu',
+    '/shops/?campus=all',
+    '/shops?schoolId=pu&campus=nthu',
+    '/lost-found?schoolId=pu',
+    '/lost-found/platform?schoolId=nthu&mine=1',
+    '/lost-found/platform/post?schoolId=pu',
+    '/lost-found/platform/plf_11111111-1111-4111-8111-111111111111?schoolId=pu#contact',
+    '/grades',
+    '/classroom/material-bookmarks?campus=pu',
     '/map?school=pu&focus=library#route',
     '/bus?school=pu',
     '/announcements/news-123?schoolId=tw-pu',
@@ -513,7 +722,11 @@ describe('Nuni Google authorization code flow', () => {
       expect(fetcher).not.toHaveBeenCalled();
     },
   );
-  it.each(['https://attacker.example', '//attacker.example', '/auth/platform/start', '/grades'])(
+  it.each([
+    'https://attacker.example', '//attacker.example', '/auth/platform/start', '/grades?tab=semester',
+    '/lost-found?source=school&schoolId=pu', '/lost-found/post', '/lost-found/legacy-item',
+    '/lost-found/platform/legacy-item', '/lost-found/platform/post/extra',
+  ])(
     'does not carry an external or school-only destination into the login transaction: %s',
     async (target) => {
       fetcher.mockResolvedValue(response(tx()));

@@ -11,6 +11,7 @@ export type FileInfo = {
   name: string;
   type: string;
   size: number;
+  durationMs?: number;
 };
 
 export type UploadProgress = {
@@ -32,6 +33,7 @@ export type ImagePickerOptions = {
   maxWidth?: number;
   maxHeight?: number;
   mediaTypes?: 'images' | 'videos' | 'all';
+  videoExportPreset?: ImagePicker.VideoExportPreset;
 };
 
 export type DocumentPickerOptions = {
@@ -185,6 +187,7 @@ class StorageService {
             : ImagePicker.MediaTypeOptions.Images,
       allowsEditing: options.allowsEditing ?? false,
       aspect: options.aspect,
+      ...(options.videoExportPreset != null && { videoExportPreset: options.videoExportPreset }),
       quality: options.quality ?? 0.8,
     });
 
@@ -193,10 +196,13 @@ class StorageService {
     }
 
     const asset = result.assets[0];
+    const video = asset.type === 'video' || options.mediaTypes === 'videos';
+    const name = asset.fileName || (video ? asset.uri.split('/').pop() || 'video' : `image_${Date.now()}.jpg`);
     return {
       uri: asset.uri,
-      name: asset.fileName || `image_${Date.now()}.jpg`,
-      type: asset.mimeType || 'image/jpeg',
+      name,
+      type: asset.mimeType || (video ? this.getMimeType(name) : 'image/jpeg'),
+      ...(video && asset.duration != null && { durationMs: asset.duration }),
       size: asset.fileSize || 0,
     };
   }

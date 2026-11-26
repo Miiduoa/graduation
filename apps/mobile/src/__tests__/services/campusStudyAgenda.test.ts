@@ -123,6 +123,57 @@ test('assignments outside the period remain accounted for and are not silently d
   expect(result.outsideWindow.map((task) => task.reason)).toEqual(['before-window', 'after-window', 'undated']);
 });
 
+test('mixed deadlines keep their activity type and voice summaries distinguish quiz reference times', () => {
+  const result = buildCampusStudyAgenda({ window: resolveStudyWindow('今天', now)!, now, courses: [],
+    assignments: [{ title: '資料庫報告', groupName: '資料庫', dueAt: '2026-10-27T09:00:00Z' }],
+    quizzes: [
+      { title: '單元小考', groupName: '資料庫', dueAt: '2026-10-27T08:00:00Z' },
+      { title: '測驗待定', groupName: '資料庫', dueAt: null },
+    ],
+  });
+  expect(result).toMatchObject({ assignmentsAvailable: true, quizzesAvailable: true });
+  expect(result.days[0].deadlines.map((item) => [item.title, item.kind ?? 'assignment']))
+    .toEqual([['單元小考', 'quiz'], ['資料庫報告', 'assignment']]);
+  expect(result.outsideWindow).toEqual([{ kind: 'quiz', title: '測驗待定', groupName: '資料庫', dueAt: null, reason: 'undated' }]);
+  const line = formatCampusStudyAgenda(result)[0];
+  expect(line).toContain('測驗 單元小考，參考期限 16:00');
+  expect(line).toContain('作業 資料庫報告 17:00 截止');
+  expect(line.indexOf('單元小考')).toBeLessThan(line.indexOf('資料庫報告'));
+  expect(line).not.toMatch(/已開放|可作答|已完成/);
+});
+
+test.each(['assignment', 'quiz'] as const)('a failed %s source does not hide deadlines from the other source', (failed) => {
+  const result = buildCampusStudyAgenda({ window: resolveStudyWindow('今天', now)!, now, courses: [],
+    assignments: failed === 'assignment' ? null : [{ title: '已讀作業', groupName: '', dueAt: '2026-10-27T08:00:00Z' }],
+    quizzes: failed === 'quiz' ? null : [{ title: '已讀測驗', groupName: '', dueAt: '2026-10-27T09:00:00Z' }],
+  });
+  const line = formatCampusStudyAgenda(result)[0];
+  expect(result.days[0].deadlines).toHaveLength(1);
+  expect(line).toContain(failed === 'assignment' ? '測驗 已讀測驗，參考期限 17:00' : '作業 已讀作業 16:00 截止');
+  expect(line).toContain(failed === 'assignment' ? '作業來源不可用' : '測驗來源不可用');
+  expect(line).not.toMatch(/全部完成|沒有待辦|所有.*完成/);
+});
+
+test('empty quiz evidence and a legacy plan without quiz support remain distinct', () => {
+  const input = { window: resolveStudyWindow('今天', now)!, now, courses: [], assignments: [] };
+  const legacy = buildCampusStudyAgenda(input);
+  const current = buildCampusStudyAgenda({ ...input, quizzes: [] });
+  expect(legacy.quizzesAvailable).toBeUndefined();
+  expect(formatCampusStudyAgenda(legacy)[0]).not.toContain('測驗');
+  expect(current.quizzesAvailable).toBe(true);
+  expect(formatCampusStudyAgenda(current)[0]).toContain('已同步摘要未列出當日測驗參考期限');
+  expect(formatCampusStudyAgenda(current)[0]).not.toMatch(/全部完成|所有.*完成/);
+});
+
+test('an elapsed quiz reference time asks for verification without asserting an exam was missed', () => {
+  const result = buildCampusStudyAgenda({ window: resolveStudyWindow('今天', now)!, now, courses: [], assignments: [],
+    quizzes: [{ title: '上午小考', groupName: '', dueAt: '2026-10-27T01:00:00Z' }],
+  });
+  expect(result.days[0].deadlines[0]).toMatchObject({ kind: 'quiz', overdue: true });
+  expect(formatCampusStudyAgenda(result)[0]).toContain('測驗 上午小考，參考期限 09:00（參考期限已過，需核對）');
+  expect(formatCampusStudyAgenda(result)[0]).not.toMatch(/已缺考|已完成|不可作答/);
+});
+
 test('today keeps elapsed deadlines labeled as needing verification, not as pending executable work', () => {
   const result = buildCampusStudyAgenda({ window: resolveStudyWindow('今天', now)!, now, courses: [], assignments: [
     { title: '上午截止', groupName: '', dueAt: '2026-10-27T01:00:00Z' },

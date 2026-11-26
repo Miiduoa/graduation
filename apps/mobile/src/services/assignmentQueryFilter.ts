@@ -7,14 +7,14 @@ function normalize(value: string) {
 }
 
 // These words describe the request. To find a saved title such as 「作業」, quote it.
-const GENERIC = /^(?:的|還|要|作業|功課|課程|待辦|截止|待交作業|全部|所有|各科|各門課|各科目|哪些|什麼|未交|待交|已逾期|逾期)$/;
+const GENERIC = /^(?:的|還|要|作業|功課|課程|待辦|截止|待交作業|全部|所有|各科|各門課|各科目|哪些|什麼|未交|待交|繳交|提交|交|繳|已逾期|逾期)$/;
 const DEADLINE = /(?:什麼時候|何時|幾點|哪天|哪一天|何日)(?:[要得需]?繳?交|到期|截止)?/;
 
 function courseName(prefix: string) {
   const name = prefix.trim();
-  // 「還沒交的作業」 has a status qualifier, not a course named 還沒交.
+  // 「還沒交的作業」 and 「已交的作業」 qualify receipt status, not course names.
   if (name && !GENERIC.test(name) &&
-      !/(?:\d+[年月日天]|\d+[/.-]\d+|期限|時間|截止|逾期|過期|未交|待交|待繳|要交|要繳|繳交|還沒|沒有|哪些|多少|幾份|什麼|所有|全部|最近|近期|目前|未完成|沒交)/.test(name)) return name;
+      !/(?:\d+[年月日天]|\d+[/.-]\d+|期限|時間|截止|逾期|過期|未交|已(?:經)?(?:交|繳)|待交|待繳|要交|要繳|繳交|還沒|沒有|哪些|多少|幾份|什麼|所有|全部|最近|近期|目前|未完成|沒交)/.test(name)) return name;
 }
 
 function nameAt(text: string, name: string, offset: number) {

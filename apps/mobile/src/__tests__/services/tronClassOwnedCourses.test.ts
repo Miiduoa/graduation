@@ -1,9 +1,8 @@
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  clearTCSavedCredentials,
   clearTCSession,
   setTCBackendSession,
-  setTCSavedCredentials,
   tcFetchCourses,
 } from '../../services/tronClassClient';
 
@@ -53,7 +52,7 @@ const hosted = (patch: Record<string, unknown> = {}) =>
 
 beforeEach(async () => {
   await clearTCSession();
-  await clearTCSavedCredentials();
+  await AsyncStorage.clear();
   await setTCBackendSession('legacy-lms-session', 42);
   mockCurrentUser = mockRequester;
   mockRequester.getIdToken.mockReset().mockResolvedValue('firebase-token');
@@ -149,7 +148,7 @@ test('a successful hosted empty list remains an empty success', async () => {
 test.each([401, 403, 429, 503])(
   'HTTP %i never triggers a hosted request, saved-password refresh or native request',
   async (status) => {
-    await setTCSavedCredentials('412345678', 'test-password');
+    await AsyncStorage.setItem('@pu_tc_cred_fb', JSON.stringify({ studentId: 'previous', password: 'fixture' }));
     mockFetch.mockResolvedValue(reply(status, { error: '尚未開放' }));
     await expect(tcFetchCourses()).rejects.toThrow();
     expect(mockFetch).toHaveBeenCalledTimes(1);

@@ -1,6 +1,8 @@
+import { postNuniWebFn } from '../services/nuniWebFn';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  StyleSheet,
   FlatList,
   Keyboard,
   Pressable,
@@ -8,6 +10,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
@@ -239,6 +242,8 @@ function SearchWorkspace({
   activeScope: React.MutableRefObject<string>;
 }) {
   const theme = useTheme();
+  const { fontScale, height: windowHeight } = useWindowDimensions();
+  const compact = fontScale > 1.25 || windowHeight < 640;
   const bottomPadding = useTabBarContentBottomPadding();
   const { school } = useSchool();
   const auth = useAuth();
@@ -317,13 +322,9 @@ function SearchWorkspace({
         const pages = await Promise.all(
           groupIds.map(async (groupId) => {
             const [posts, assignments] = await Promise.allSettled([
-              getDocs(
-                query(
-                  collection(db, 'groups', groupId, 'posts'),
-                  orderBy('createdAt', 'desc'),
-                  limit(31),
-                ),
-              ),
+              postNuniWebFn<{ groupId: string; pageSize: number }, { posts: GroupContent[] }>(
+                'listGroupDiscussionPage', { groupId, pageSize: 31 }, uid!,
+              ).then((page) => ({ docs: page.posts.map((post) => ({ id: post.id, data: () => post })) })),
               getDocs(
                 query(
                   collection(db, 'groups', groupId, 'assignments'),
@@ -638,32 +639,27 @@ function SearchWorkspace({
       style={({ pressed }) => ({
         flexDirection: 'row',
         alignItems: 'flex-start',
-        gap: 12,
-        paddingVertical: 16,
-        borderBottomWidth: 1,
+        gap: 10,
+        minHeight: 64,
+        paddingVertical: 14,
+        borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: theme.colors.border,
         backgroundColor: pressed ? theme.colors.surface2 : theme.colors.bg,
       })}
     >
-      <View
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: theme.radius.md,
-          backgroundColor: theme.colors.surface2,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Ionicons name={TYPE_ICON[item.type]} size={20} color={theme.colors.accent} />
-      </View>
-      <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-        <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
-          {TYPE_LABEL[item.type]}
-        </Text>
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+          <Ionicons name={TYPE_ICON[item.type]} size={14} color={theme.colors.textSecondary} />
+          <Text
+            maxFontSizeMultiplier={1.4}
+            style={{ ...theme.typography.caption, fontWeight: '700', color: theme.colors.textSecondary }}
+          >
+            {TYPE_LABEL[item.type]}
+          </Text>
+        </View>
         <Text
           numberOfLines={2}
-          style={{ ...theme.typography.body, fontWeight: '600', color: theme.colors.text }}
+          style={{ ...theme.typography.body, fontWeight: '800', color: theme.colors.text }}
         >
           {item.title}
         </Text>
@@ -678,7 +674,7 @@ function SearchWorkspace({
         {item.excerpt ? (
           <Text
             numberOfLines={2}
-            style={{ ...theme.typography.caption, color: theme.colors.muted }}
+            style={{ ...theme.typography.caption, color: theme.colors.textSecondary }}
           >
             {item.excerpt}
           </Text>
@@ -687,8 +683,8 @@ function SearchWorkspace({
       <Ionicons
         name="chevron-forward"
         size={16}
-        color={theme.colors.muted}
-        style={{ marginTop: 12 }}
+        color={theme.colors.textSecondary}
+        style={{ marginTop: 4 }}
       />
     </Pressable>
   );
@@ -700,17 +696,29 @@ function SearchWorkspace({
       style={({ pressed }) => ({
         minHeight: 44,
         justifyContent: 'center',
-        paddingHorizontal: 14,
-        paddingVertical: 10,
-        borderRadius: theme.radius.full,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface,
+        paddingHorizontal: 2,
+        backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
       })}
     >
-      <Text style={{ ...theme.typography.bodySmall, color: theme.colors.text }}>{label}</Text>
+      <Text
+        style={{
+          ...theme.typography.bodySmall,
+          fontWeight: '600',
+          color: theme.colors.text,
+          textDecorationLine: 'underline',
+          textDecorationColor: theme.colors.border,
+        }}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
+  const linkRow = { flexDirection: 'row', flexWrap: 'wrap', columnGap: 18 } as const;
+  const sectionTitle = {
+    ...theme.typography.h3,
+    fontWeight: '800',
+    color: theme.colors.text,
+  } as const;
 
   return (
     <Screen noPadding>
@@ -722,7 +730,16 @@ function SearchWorkspace({
           gap: 12,
         }}
       >
-        <Text numberOfLines={1} style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+        {compact ? null : (
+          <Text
+            accessibilityRole="header"
+            maxFontSizeMultiplier={1.3}
+            style={{ fontSize: 28, lineHeight: 34, fontWeight: '800', color: theme.colors.text }}
+          >
+            搜尋校園
+          </Text>
+        )}
+        <Text numberOfLines={1} style={{ ...theme.typography.caption, color: theme.colors.textSecondary }}>
           {school.name} · 校園搜尋
         </Text>
         <View
@@ -730,22 +747,23 @@ function SearchWorkspace({
             flexDirection: 'row',
             alignItems: 'center',
             gap: 8,
-            minHeight: 52,
-            borderWidth: 1,
-            borderColor: focused ? theme.colors.accent : theme.colors.border,
-            borderRadius: theme.radius.lg,
-            paddingLeft: 14,
-            backgroundColor: theme.colors.surface,
+            minHeight: 48,
+            borderBottomWidth: focused ? 2 : 1,
+            borderBottomColor: focused ? theme.colors.accent : theme.colors.border,
           }}
         >
-          <Ionicons name="search-outline" size={20} color={theme.colors.muted} />
+          <Ionicons
+            name="search-outline"
+            size={20}
+            color={focused ? theme.colors.accent : theme.colors.textSecondary}
+          />
           <TextInput
             ref={input}
             accessibilityLabel="搜尋校園內容"
             value={text}
             onChangeText={changeText}
             placeholder="例如：我想交作業，或搜尋課號"
-            placeholderTextColor={theme.colors.muted}
+            placeholderTextColor={theme.colors.textSecondary}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             onSubmitEditing={() => {
@@ -758,8 +776,8 @@ function SearchWorkspace({
             autoCorrect={false}
             style={{
               flex: 1,
-              minHeight: 50,
-              paddingVertical: 12,
+              minHeight: 48,
+              paddingVertical: 10,
               color: theme.colors.text,
               ...theme.typography.body,
             }}
@@ -779,11 +797,9 @@ function SearchWorkspace({
                 justifyContent: 'center',
               }}
             >
-              <Ionicons name="close-circle" size={20} color={theme.colors.muted} />
+              <Ionicons name="close-circle" size={20} color={theme.colors.textSecondary} />
             </Pressable>
-          ) : (
-            <View style={{ width: 12 }} />
-          )}
+          ) : null}
         </View>
         {searching && privateReady && (
           <Pressable
@@ -797,57 +813,63 @@ function SearchWorkspace({
             }}
             style={{
               minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center',
-              borderRadius: 11, backgroundColor: theme.colors.accent,
               opacity: activeUnderstanding?.status === 'loading' ? 0.6 : 1,
-              paddingHorizontal: 15,
             }}
           >
-            <Text style={{ ...theme.typography.bodySmall, fontWeight: '700', color: theme.colors.onAccent }}>
+            <Text
+              style={{
+                ...theme.typography.bodySmall,
+                fontWeight: '700',
+                color: theme.colors.accent,
+                textDecorationLine: 'underline',
+                textDecorationColor: theme.colors.accent,
+              }}
+            >
               {activeUnderstanding?.status === 'loading' ? 'AI 正在理解…' : '用 AI 理解校園需求'}
             </Text>
           </Pressable>
         )}
-        <View>
+        <View
+          style={{ borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.colors.border }}
+        >
           <ScrollView
             horizontal
+            accessibilityRole="tablist"
             showsHorizontalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ gap: 8, paddingBottom: 2 }}
+            contentContainerStyle={{ columnGap: 20 }}
           >
-            {CATEGORIES.map((item) => (
-              <Pressable
-                key={item.key}
-                accessibilityRole="tab"
-                accessibilityLabel={`搜尋分類：${item.label}`}
-                accessibilityState={{ selected: category === item.key }}
-                onPress={() => chooseCategory(item.key)}
-                style={({ pressed }) => ({
-                  minHeight: 44,
-                  justifyContent: 'center',
-                  paddingHorizontal: 15,
-                  paddingVertical: 9,
-                  borderRadius: theme.radius.full,
-                  borderWidth: 1,
-                  borderColor: category === item.key ? theme.colors.accent : theme.colors.border,
-                  backgroundColor:
-                    category === item.key
-                      ? theme.colors.accentSoft
-                      : pressed
-                        ? theme.colors.surface2
-                        : theme.colors.bg,
-                })}
-              >
-                <Text
-                  style={{
-                    ...theme.typography.bodySmall,
-                    color: category === item.key ? theme.colors.accent : theme.colors.textSecondary,
-                    fontWeight: category === item.key ? '600' : '400',
-                  }}
+            {CATEGORIES.map((item) => {
+              const selected = category === item.key;
+              return (
+                <Pressable
+                  key={item.key}
+                  accessibilityRole="tab"
+                  accessibilityLabel={`搜尋分類：${item.label}`}
+                  accessibilityState={{ selected }}
+                  onPress={() => chooseCategory(item.key)}
+                  style={({ pressed }) => ({
+                    minHeight: 44,
+                    justifyContent: 'center',
+                    paddingHorizontal: 2,
+                    backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
+                  })}
                 >
-                  {item.label}
-                </Text>
-              </Pressable>
-            ))}
+                  <Text
+                    maxFontSizeMultiplier={1.4}
+                    style={{
+                      ...theme.typography.bodySmall,
+                      color: selected ? theme.colors.accent : theme.colors.textSecondary,
+                      fontWeight: selected ? '800' : '600',
+                      textDecorationLine: selected ? 'underline' : 'none',
+                      textDecorationColor: theme.colors.accent,
+                    }}
+                  >
+                    {item.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </ScrollView>
         </View>
 
@@ -861,7 +883,7 @@ function SearchWorkspace({
             keyboardDismissMode="on-drag"
             contentContainerStyle={{ paddingBottom: bottomPadding, flexGrow: 1 }}
             ListHeaderComponent={
-              <View style={{ gap: 12, paddingVertical: 6 }}>
+              <View style={{ gap: 10, paddingVertical: 6 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   {pending ? (
                     <ActivityIndicator
@@ -872,7 +894,7 @@ function SearchWorkspace({
                   ) : null}
                   <Text
                     accessibilityLiveRegion="polite"
-                    style={{ ...theme.typography.caption, color: theme.colors.textSecondary }}
+                    style={{ ...theme.typography.caption, color: theme.colors.textSecondary, flexShrink: 1 }}
                   >
                     {pending
                       ? `已找到 ${results.length} 筆 · 繼續讀取中`
@@ -881,40 +903,39 @@ function SearchWorkspace({
                 </View>
                 {semantic?.source === 'model' && (
                   <View style={{
-                    padding: 14, gap: 7,
-                    backgroundColor: theme.colors.surface2,
-                    borderRadius: 12,
+                    paddingVertical: 12, gap: 6,
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                    borderBottomWidth: StyleSheet.hairlineWidth,
+                    borderColor: theme.colors.border,
                   }}>
-                    <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>
+                    <Text style={sectionTitle}>
                       {semantic.status === 'clarify' ? '需要再確認' : 'AI 理解的需求'}
                     </Text>
                     <Text style={{ ...theme.typography.bodySmall, color: theme.colors.text }}>
                       {semantic.summary}
                     </Text>
                     {semantic.clarifyingQuestion && (
-                      <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
+                      <Text style={{ ...theme.typography.bodySmall, color: theme.colors.textSecondary }}>
                         {semantic.clarifyingQuestion}
                       </Text>
                     )}
                   </View>
                 )}
                 {(activeUnderstanding?.status === 'error' || semantic?.status === 'unavailable') && (
-                  <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+                  <Text style={{ ...theme.typography.caption, color: theme.colors.textSecondary }}>
                     AI 暫時無法理解。下方僅顯示基本關鍵字捷徑。
                   </Text>
                 )}
                 {quickActions.length > 0 ? (
                   <View
                     style={{
-                      gap: 9,
-                      padding: 14,
-                      backgroundColor: theme.colors.surface,
-                      borderRadius: 12,
-                      borderWidth: 1,
+                      gap: 2,
+                      paddingTop: 10,
+                      borderTopWidth: StyleSheet.hairlineWidth,
                       borderColor: theme.colors.border,
                     }}
                   >
-                    <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>
+                    <Text style={sectionTitle}>
                       {semantic?.status === 'understood' ? 'AI 建議直接開啟' : '直接開啟'}
                     </Text>
                     {quickActions.map((action) => (
@@ -932,25 +953,26 @@ function SearchWorkspace({
                           minHeight: 52,
                           flexDirection: 'row',
                           alignItems: 'center',
-                          paddingHorizontal: 12,
+                          paddingVertical: 8,
                           gap: 10,
-                          borderRadius: 10,
-                          backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
+                          borderBottomWidth: StyleSheet.hairlineWidth,
+                          borderBottomColor: theme.colors.border,
+                          backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
                         })}
                       >
                         <View style={{ flex: 1, gap: 2 }}>
-                          <Text style={{ ...theme.typography.body, fontWeight: '600', color: theme.colors.text }}>
+                          <Text style={{ ...theme.typography.body, fontWeight: '700', color: theme.colors.text }}>
                             {action.label}
                           </Text>
-                          <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+                          <Text style={{ ...theme.typography.caption, color: theme.colors.textSecondary }}>
                             {action.description}
                           </Text>
                           {semantic?.previews?.filter((preview) => preview.destination === action.destination).map((preview) => (
                             <View key={preview.destination} style={{
                               marginTop: 7, paddingTop: 8,
-                              borderTopWidth: 1, borderTopColor: theme.colors.border, gap: 3,
+                              borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border, gap: 3,
                             }}>
-                              <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+                              <Text style={{ ...theme.typography.caption, color: theme.colors.textSecondary }}>
                                 {preview.source === 'campus-platform' ? 'nuni 資料' : '接通狀態'}：{preview.message}
                               </Text>
                               {preview.items.map((item, index) => (
@@ -964,7 +986,7 @@ function SearchWorkspace({
                         <Ionicons name="arrow-forward" size={18} color={theme.colors.accent} />
                       </Pressable>
                     ))}
-                    <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+                    <Text style={{ ...theme.typography.caption, color: theme.colors.textSecondary, paddingTop: 6 }}>
                       只會開啟服務，正式操作仍需自行確認。
                     </Text>
                   </View>
@@ -973,10 +995,11 @@ function SearchWorkspace({
                   <View
                     accessibilityRole="alert"
                     style={{
-                      padding: 14,
-                      gap: 8,
-                      borderRadius: theme.radius.md,
-                      backgroundColor: theme.colors.surface2,
+                      paddingVertical: 10,
+                      gap: 2,
+                      borderTopWidth: StyleSheet.hairlineWidth,
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderColor: theme.colors.border,
                     }}
                   >
                     <Text style={{ ...theme.typography.bodySmall, color: theme.colors.text }}>
@@ -997,7 +1020,8 @@ function SearchWorkspace({
                         style={{
                           ...theme.typography.bodySmall,
                           color: theme.colors.accent,
-                          fontWeight: '600',
+                          fontWeight: '700',
+                          textDecorationLine: 'underline',
                         }}
                       >
                         重試未載入內容
@@ -1006,16 +1030,23 @@ function SearchWorkspace({
                   </View>
                 ) : null}
                 {limitedGroups ? (
-                  <View style={{ gap: 4 }}>
-                    <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+                  <View style={{ gap: 2 }}>
+                    <Text style={{ ...theme.typography.caption, color: theme.colors.textSecondary }}>
                       群組搜尋只包含最近的貼文與作業；較早內容請到所屬群組查看。
                     </Text>
                     <Pressable
                       accessibilityRole="button"
                       onPress={() => safeNavigate(navigation, 'Groups')}
-                      style={{ minHeight: 44, justifyContent: 'center' }}
+                      style={{ minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' }}
                     >
-                      <Text style={{ ...theme.typography.bodySmall, color: theme.colors.accent }}>
+                      <Text
+                        style={{
+                          ...theme.typography.bodySmall,
+                          color: theme.colors.accent,
+                          fontWeight: '700',
+                          textDecorationLine: 'underline',
+                        }}
+                      >
                         前往我的群組
                       </Text>
                     </Pressable>
@@ -1024,8 +1055,8 @@ function SearchWorkspace({
               </View>
             }
             ListEmptyComponent={
-              <View style={{ paddingVertical: 36, gap: 10 }}>
-                <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>
+              <View style={{ paddingVertical: 28, gap: 8 }}>
+                <Text accessibilityRole="header" style={{ ...sectionTitle, fontSize: 20, lineHeight: 26 }}>
                   {groupLoginNeeded
                     ? '登入後搜尋自己的群組'
                     : pending
@@ -1036,7 +1067,7 @@ function SearchWorkspace({
                           ? '可使用上方推薦的服務'
                           : '沒有符合的結果'}
                 </Text>
-                <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
+                <Text style={{ ...theme.typography.bodySmall, color: theme.colors.textSecondary }}>
                   {groupLoginNeeded
                     ? '公開公告、活動與工具仍可使用。'
                     : pending
@@ -1047,18 +1078,20 @@ function SearchWorkspace({
                           ? '依需求選擇上方入口，或改用較短的關鍵字搜尋校園內容。'
                           : `試試較短的關鍵字${category === 'all' ? '，或改用課號、教師姓名。' : '，或查看全部分類。'}`}
                 </Text>
-                {groupLoginNeeded
-                  ? pill('前往登入', () => safeNavigate(navigation, 'SSOLogin'))
-                  : null}
-                {!pending && category !== 'all'
-                  ? pill('查看全部分類', () => chooseCategory('all'))
-                  : null}
-                {privateReady && category === 'all' && !pending
-                  ? pill('改問校園助理', () => {
-                      Keyboard.dismiss();
-                      safeNavigate(navigation, 'AIChat', { prompt: text.trim() });
-                    })
-                  : null}
+                <View style={linkRow}>
+                  {groupLoginNeeded
+                    ? pill('前往登入', () => safeNavigate(navigation, 'SSOLogin'))
+                    : null}
+                  {!pending && category !== 'all'
+                    ? pill('查看全部分類', () => chooseCategory('all'))
+                    : null}
+                  {privateReady && category === 'all' && !pending
+                    ? pill('改問校園助理', () => {
+                        Keyboard.dismiss();
+                        safeNavigate(navigation, 'AIChat', { prompt: text.trim() });
+                      })
+                    : null}
+                </View>
               </View>
             }
             ListFooterComponent={
@@ -1066,21 +1099,19 @@ function SearchWorkspace({
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => setVisibleCount((count) => count + PAGE_SIZE)}
-                  style={{
+                  style={({ pressed }) => ({
                     minHeight: 52,
-                    marginTop: 12,
                     alignItems: 'center',
                     justifyContent: 'center',
-                    borderWidth: 1,
-                    borderColor: theme.colors.border,
-                    borderRadius: theme.radius.md,
-                  }}
+                    backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
+                  })}
                 >
                   <Text
                     style={{
                       ...theme.typography.bodySmall,
-                      fontWeight: '600',
+                      fontWeight: '800',
                       color: theme.colors.accent,
+                      textDecorationLine: 'underline',
                     }}
                   >
                     顯示更多（還有 {results.length - visibleCount} 筆）
@@ -1093,18 +1124,18 @@ function SearchWorkspace({
           <ScrollView
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
-            contentContainerStyle={{ paddingBottom: bottomPadding, gap: 24 }}
+            contentContainerStyle={{ paddingBottom: bottomPadding, gap: 20 }}
           >
-            <View style={{ gap: 8 }}>
-              <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>直接開啟</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <View style={{ gap: 2 }}>
+              <Text accessibilityRole="header" style={sectionTitle}>直接開啟</Text>
+              <View style={linkRow}>
                 {TOOLS.filter((tool) =>
                   ['timetable', 'dining', 'library', 'bus'].includes(tool.id),
                 ).map((tool) => pill(tool.title, () => open(tool)))}
               </View>
             </View>
             {recent.length ? (
-              <View style={{ gap: 10 }}>
+              <View style={{ gap: 2 }}>
                 <View
                   style={{
                     flexDirection: 'row',
@@ -1112,19 +1143,19 @@ function SearchWorkspace({
                     justifyContent: 'space-between',
                   }}
                 >
-                  <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>最近搜尋</Text>
+                  <Text accessibilityRole="header" style={sectionTitle}>最近搜尋</Text>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="清除搜尋紀錄"
                     onPress={history.clearHistory}
                     style={{ minHeight: 44, justifyContent: 'center', paddingLeft: 16 }}
                   >
-                    <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
+                    <Text style={{ ...theme.typography.bodySmall, color: theme.colors.textSecondary }}>
                       清除
                     </Text>
                   </Pressable>
                 </View>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                <View style={linkRow}>
                   {recent.map((item) =>
                     pill(item.query, () => {
                       changeText(item.query);
@@ -1134,9 +1165,9 @@ function SearchWorkspace({
                 </View>
               </View>
             ) : null}
-            <View style={{ gap: 10 }}>
-              <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>試著搜尋</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <View style={{ gap: 2 }}>
+              <Text accessibilityRole="header" style={sectionTitle}>試著搜尋</Text>
+              <View style={linkRow}>
                 {POPULAR_SEARCHES.all.map((term) =>
                   pill(term, () => {
                     changeText(term);
@@ -1145,7 +1176,7 @@ function SearchWorkspace({
                 )}
               </View>
             </View>
-            <Text style={{ ...theme.typography.caption, color: theme.colors.muted }}>
+            <Text style={{ ...theme.typography.caption, color: theme.colors.textSecondary }}>
               搜尋目前學校已載入的公開內容；登入後也可查看自己的群組與作業。
             </Text>
           </ScrollView>

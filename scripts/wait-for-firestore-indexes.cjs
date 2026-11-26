@@ -78,7 +78,8 @@ function fieldRequirements(overrides) {
       field.collectionGroup === '-' ||
       !validPathPart(field.fieldPath) ||
       !Array.isArray(field.indexes) ||
-      Object.keys(field).some((key) => !['collectionGroup', 'fieldPath', 'indexes'].includes(key))
+      (Object.prototype.hasOwnProperty.call(field, 'ttl') && typeof field.ttl !== 'boolean') ||
+      Object.keys(field).some((key) => !['collectionGroup', 'fieldPath', 'indexes', 'ttl'].includes(key))
     ) {
       throw new Error('Invalid or unsupported Firestore field override.');
     }
@@ -116,6 +117,26 @@ function fieldRequirements(overrides) {
     if (new Set(keys).size !== keys.length) throw new Error('Duplicate Firestore field index.');
     return { ...field, keys, label: `${field.collectionGroup}.${field.fieldPath}` };
   });
+}
+
+function fieldTtlStates({ expected, fields, project, database }) {
+  if (!Object.prototype.hasOwnProperty.call(expected, 'ttl')) return [];
+  const name = `projects/${project}/databases/${database}/collectionGroups/${expected.collectionGroup}/fields/${expected.fieldPath}`;
+  // Index inheritance has already fetched the original field. TTL belongs to
+  // that exact field and must never be inferred from an ancestor's index state.
+  const field = fields.get(name);
+  if (!field) throw new Error('Missing Firestore TTL field metadata.');
+  const config = field.ttlConfig;
+  if (config === undefined) return expected.ttl ? [`TTL_MISSING: ${expected.label}`] : [];
+  if (!config || typeof config !== 'object' || Array.isArray(config) ||
+    !['ACTIVE', 'CREATING', 'NEEDS_REPAIR'].includes(config.state) ||
+    (config.expirationOffset !== undefined &&
+      (typeof config.expirationOffset !== 'string' || !/^0(?:\.0{1,9})?s$/.test(config.expirationOffset)))) {
+    throw new Error(`Invalid or unsupported Firestore TTL configuration: ${expected.label}.`);
+  }
+  if (config.state === 'NEEDS_REPAIR') throw new Error(`Required Firestore TTL policy is NEEDS_REPAIR: ${expected.label}.`);
+  if (!expected.ttl) return [`TTL_ENABLED: ${expected.label} (must be disabled)`];
+  return config.state === 'ACTIVE' ? [] : [`TTL_CREATING: ${expected.label}`];
 }
 
 function parseFieldName(name, parent) {
@@ -405,8 +426,10 @@ async function waitForIndexes({
         }
         pending.push(`${state}: ${expected.label}`);
       }
-      for (const expected of requiredFields)
+      for (const expected of requiredFields) {
         pending.push(...(await fieldIndexStates({ ...request, expected, fields })));
+        pending.push(...fieldTtlStates({ ...request, expected, fields }));
+      }
       if (signal.aborted) throw new Error('Index readiness deadline exceeded.');
       if (!pending.length) {
         log(

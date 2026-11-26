@@ -1,3 +1,10 @@
+import { privateFileNonce } from '../services/privateFileNonce';
+import { PRIVATE_IMAGE_TYPES, safePrivateFileName } from '@campus/shared/src/privateFileAccess';
+import { PRIVATE_FILE_UPLOADS_PER_MINUTE } from '@campus/shared/src/privateFileUploads';
+import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
+import * as DocumentPicker from 'expo-document-picker';
+import { isSupabaseFileStorageEnabled, privateGroupAssignmentPath, uploadPrivateFile, claimPrivateFile } from '../services/privateFiles';
+import { PrivateAttachment } from '../ui/PrivateAttachment';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   ActivityIndicator,
@@ -17,7 +24,7 @@ import { useSchool } from '../state/school';
 import { formatTaipeiDateTime, parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { getThemeVersion, subscribeToTheme, theme } from '../ui/theme';
 import { useDataSource } from '../hooks/useDataSource';
-import type { Assignment, Submission } from '../data/types';
+import type { Assignment, Submission, Attachment } from '../data/types';
 import { getDataSourceEvidence } from '../data/source';
 import {
   publishedAssignmentGrade,
@@ -51,6 +58,52 @@ type AssignmentRecord = Assignment & {
   status?: string;
   allowLateSubmission?: boolean;
 };
+
+type SelectedFile =
+  | { localId: string; asset: DocumentPicker.DocumentPickerAsset; saved?: never }
+  | { localId: string; saved: Attachment; asset?: never };
+
+function readAttachments(value: unknown, requireValid: boolean): Attachment[] {
+  if (value == null) return [];
+  const invalid = '草稿中的附件資料無法辨識，請重新讀取後確認。';
+  if (!Array.isArray(value)) {
+    if (requireValid) throw new Error(invalid);
+    return [];
+  }
+  return value.flatMap((entry: unknown) => {
+    const [url] = privateAttachmentPaths([entry]);
+    if (!url) {
+      if (requireValid) throw new Error(invalid);
+      return [];
+    }
+    const metadata = entry && typeof entry === 'object' ? entry as Partial<Attachment> : {};
+    return [{
+      id: asText(metadata.id) || url,
+      url,
+      name: asText(metadata.name).trim() || url.split(/[?#]/)[0].split('/').pop() || '附件',
+      type: metadata.type ?? 'document',
+      ...(typeof metadata.size === 'number' ? { size: metadata.size } : {}),
+      ...(typeof metadata.mimeType === 'string' ? { mimeType: metadata.mimeType } : {}),
+    }];
+  });
+}
+
+// A refresh may reorder draft entries. Keep the identity of each occurrence, even for legacy duplicates.
+function draftSelections(attachments: Attachment[]) {
+  const occurrences = new Map<string, number>();
+  return attachments.map((saved) => {
+    const count = occurrences.get(saved.url) ?? 0;
+    occurrences.set(saved.url, count + 1);
+    return { localId: JSON.stringify([saved.url, count]), saved };
+  });
+}
+
+const MAX_ATTACHMENTS = PRIVATE_FILE_UPLOADS_PER_MINUTE;
+const TOUCH_TARGET = 44;
+
+function excessWithNewFiles(files: SelectedFile[]): number {
+  return files.some((file) => file.asset) ? Math.max(0, files.length - MAX_ATTACHMENTS) : 0;
+}
 
 function asText(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
@@ -124,6 +177,22 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
   const [closed, setClosed] = useState(false);
   const [unpublished, setUnpublished] = useState(false);
   const [quizLike, setQuizLike] = useState(false);
+  const [files, setFiles] = useState<SelectedFile[]>([]);
+  const filesRef = useRef<SelectedFile[]>([]);
+  const nextFileId = useRef(0);
+  const reviewedDraft = useRef<Array<Attachment | string>>([]);
+  const removedDraftFiles = useRef(new Set<string>());
+  const commitFiles = useCallback((next: SelectedFile[]) => {
+    filesRef.current = next;
+    setFiles(next);
+  }, []);
+
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  // Completed uploads keyed by the stable local selection id, so retries survive reordering/removal.
+  const uploadedFiles = useRef(new Map<string, Attachment>());
+  const [picking, setPicking] = useState(false);
+  const pickingRef = useRef(false);
+  const pickSession = useRef(0);
   const [answer, setAnswer] = useState('');
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -181,6 +250,14 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
       setGrade(already ? publishedAssignmentGrade(submission as unknown as Record<string, unknown>) : null);
       setSubmittedAt(already);
       const serverDraft = asText(submission?.status) === 'draft' && submission?.submittedAt == null;
+      const savedAttachments = readAttachments(submission?.attachments, serverDraft);
+      setAttachments(savedAttachments);
+      const draftFiles = serverDraft ? draftSelections(savedAttachments) : [];
+      reviewedDraft.current = serverDraft ? submission?.attachments ?? [] : [];
+      commitFiles([
+        ...draftFiles.filter((file) => !removedDraftFiles.current.has(file.localId)),
+        ...filesRef.current.filter((file) => file.asset),
+      ]);
       setReceiptUnconfirmed(Boolean(submission && !already && !serverDraft));
       // Keep local edits, including an intentionally empty answer, when refreshing a draft.
       if (already || (serverDraft && !answerEdited.current)) setAnswer(asText(submission?.content));
@@ -195,7 +272,16 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
     } finally {
       if (current()) setLoading(false);
     }
-  }, [courseId, ds, hwId, isCurrent, matchesReceipt, navigation, params.fromReminder, uid]);
+  }, [commitFiles, courseId, ds, hwId, isCurrent, matchesReceipt, navigation, params.fromReminder, uid]);
+
+
+  // Invalidates any in-flight picker (blur, refocus or unmount) and releases its lock.
+  const invalidatePicker = useCallback(() => {
+    pickSession.current += 1;
+    if (!pickingRef.current) return;
+    pickingRef.current = false;
+    setPicking(false);
+  }, []);
 
   const fileSubmit =
     process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true';
@@ -205,20 +291,22 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
   useFocusEffect(
     useCallback(() => {
       focused.current = true;
+      if (!pendingSubmit.current) setSubmitting(false);
       if (classWorkspaceFileSubmit) {
         safeNavigate(navigation, 'NuniWorkspace', {
           tab: 'courses',
           workspaceId: courseId,
           assignmentId: hwId,
         });
-        return () => { focused.current = false; generation.current += 1; };
+        return () => { focused.current = false; generation.current += 1; invalidatePicker(); };
       }
       void load();
       return () => {
         focused.current = false;
         generation.current += 1;
+        invalidatePicker();
       };
-    }, [classWorkspaceFileSubmit, courseId, hwId, load, navigation]),
+    }, [classWorkspaceFileSubmit, courseId, hwId, invalidatePicker, load, navigation]),
   );
 
   const dueText = useMemo(() => {
@@ -258,14 +346,16 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
   }, [dueAt]);
 
   const handleSubmit = useCallback(async () => {
-    if (!isCurrent() || pendingSubmit.current || loading || blocked) return;
+    if (!isCurrent() || pendingSubmit.current || pickingRef.current || loading || blocked) return;
     if (usesDemoData()) { setError(DEMO_SUBMISSION_MESSAGE); return; }
     if (dueAt && Date.parse(dueAt) < Date.now() && !allowLate) {
       Alert.alert('作業已截止', '如需補交，請聯絡授課教師。');
       return;
     }
     const text = answer.trim();
-    if (!text || text.length > 20000) {
+    const reviewedFiles = filesRef.current;
+    if (excessWithNewFiles(reviewedFiles)) return;
+    if ((!text && !reviewedFiles.length) || text.length > 20000) {
       Alert.alert('請先寫作業內容', '請輸入 1 至 20,000 字，再送出。');
       return;
     }
@@ -273,13 +363,62 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
     const request = ++generation.current;
     const current = () => isCurrent() && request === generation.current;
     setSubmitting(true);
+    let submissionStarted = false;
     try {
+      const submitAttachments: Attachment[] = [];
+      const uploadEnabled = isSupabaseFileStorageEnabled();
+      const batch = Date.now();
+      const claimScope = `groups/${courseId}/assignments/${hwId}/submissions/${uid}`;
+      const uploaded = uploadedFiles.current;
+      for (const [index, file] of reviewedFiles.entries()) {
+        if (!current()) return;
+        if (file.saved) {
+          submitAttachments.push(file.saved);
+          continue;
+        }
+        if (!uploadEnabled) throw new Error('目前無法上傳附件，請重新開啟作業後再試。');
+        const { localId, asset } = file;
+        const completed = uploaded.get(localId);
+        if (completed) {
+          try {
+            await claimPrivateFile(completed.url, claimScope);
+            submitAttachments.push(completed);
+            continue;
+          } catch (error) {
+            if ((error as { statusCode?: number }).statusCode !== 410) throw error;
+            uploaded.delete(localId);
+          }
+          if (!current()) return;
+        }
+        const filename = safePrivateFileName(`${batch}-${index}-${privateFileNonce()}`, asset.name);
+        const path = privateGroupAssignmentPath(courseId, hwId, uid, filename);
+        if (!path) throw new Error('附件路徑無效');
+        const blob = await (await fetch(asset.uri)).blob();
+        if (!current()) return;
+        await uploadPrivateFile({ path, body: blob, originalFilename: asset.name, contentType: asset.mimeType || blob.type });
+        const attachment: Attachment = {
+          id: path, name: asset.name, url: path,
+          type: asset.mimeType?.startsWith('image/') ? 'image' : 'document', size: blob.size,
+        };
+        uploaded.set(localId, attachment);
+        if (!current()) return;
+        try {
+          await claimPrivateFile(path, claimScope);
+        } catch (error) {
+          if ((error as { statusCode?: number }).statusCode === 410) uploaded.delete(localId);
+          throw error;
+        }
+        submitAttachments.push(attachment);
+      }
+      if (!current()) return;
+      submissionStarted = true;
       const receipt = await ds.submitAssignment({
         assignmentId: hwId,
         userId: uid,
         groupId: courseId,
         content: text,
-      });
+        ...(uploadEnabled || reviewedDraft.current.length ? { attachments: submitAttachments } : {}),
+      }, reviewedDraft.current);
       if (!current()) return;
       if (usesDemoData()) throw new Error(DEMO_SUBMISSION_MESSAGE);
       const confirmedAt = receiptInstant(receipt?.submittedAt);
@@ -288,6 +427,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
         throw new Error('伺服器尚未回傳可核對的繳交紀錄。內容已保留，請重新核對後再操作。');
       }
       setSubmittedAt(confirmedAt);
+      setAttachments(readAttachments(receipt.attachments, false));
       setAnswer(receipt.content);
       setGrade(publishedAssignmentGrade(receipt as unknown as Record<string, unknown>));
       onAssignmentSubmitted({ uid, assignmentId: hwId });
@@ -299,7 +439,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
       ]);
     } catch (e) {
       if (current()) {
-        setReceiptUnconfirmed(true);
+        setReceiptUnconfirmed(submissionStarted);
         Alert.alert('繳交尚未確認', String((e as Error)?.message ?? e));
       }
     } finally {
@@ -310,6 +450,61 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
       }
     }
   }, [allowLate, answer, blocked, courseId, ds, dueAt, hwId, isCurrent, loading, matchesReceipt, navigation, uid]);
+
+  const uploadEnabled = isSupabaseFileStorageEnabled();
+  const attachmentControlsLocked = blocked || submitting || picking;
+  const addDisabled = attachmentControlsLocked || files.length >= MAX_ATTACHMENTS;
+  const excessFiles = excessWithNewFiles(files);
+  const submitDisabled = attachmentControlsLocked || excessFiles > 0 || (!answer.trim() && !files.length);
+
+  const pickFiles = useCallback(async () => {
+    if (!isCurrent() || blocked || pendingSubmit.current || pickingRef.current) return;
+    if (filesRef.current.length >= MAX_ATTACHMENTS) {
+      Alert.alert(`最多只能附上 ${MAX_ATTACHMENTS} 個附件`, '請先移除不需要的附件。');
+      return;
+    }
+    pickingRef.current = true;
+    const session = ++pickSession.current;
+    const pickIsCurrent = () => isCurrent() && session === pickSession.current;
+    setPicking(true);
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: [
+          ...PRIVATE_IMAGE_TYPES, 'application/pdf', 'text/plain', 'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        ],
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+      if (picked.canceled || !pickIsCurrent() || !picked.assets.length) return;
+      const reviewed = filesRef.current;
+      if (reviewed.length + picked.assets.length > MAX_ATTACHMENTS) {
+        Alert.alert(
+          `最多只能附上 ${MAX_ATTACHMENTS} 個附件`,
+          `目前已選 ${reviewed.length} 個，這次選了 ${picked.assets.length} 個，超過上限。已保留原本的附件，請減少選取數量。`,
+        );
+        return;
+      }
+      const added = picked.assets.map((asset) => ({ localId: `file-${++nextFileId.current}`, asset }));
+      commitFiles([...reviewed, ...added]);
+    } catch {
+      if (pickIsCurrent()) Alert.alert('無法選取附件');
+    } finally {
+      if (pickIsCurrent()) {
+        pickingRef.current = false;
+        setPicking(false);
+      }
+    }
+  }, [blocked, commitFiles, isCurrent]);
+
+  const removeFile = useCallback((localId: string) => {
+    if (!isCurrent() || blocked || pendingSubmit.current || pickingRef.current) return;
+    if (filesRef.current.some((file) => file.localId === localId && file.saved)) {
+      removedDraftFiles.current.add(localId);
+    }
+    uploadedFiles.current.delete(localId);
+    commitFiles(filesRef.current.filter((file) => file.localId !== localId));
+  }, [blocked, commitFiles, isCurrent]);
 
   return (
     <KeyboardAvoidingView
@@ -399,8 +594,9 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
             >
               <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>繳交方式</Text>
               <Text style={{ marginTop: 6, fontSize: 13, color: theme.colors.textSecondary, lineHeight: 20 }}>
-                目前只支援文字繳交，與網站寫入同一份作業紀錄。作業檔案還沒接到上傳流程，無法從
-                App 傳檔。
+                {uploadEnabled ? '可繳交文字與圖片或文件附件。'
+                  : reviewedDraft.current.length ? '可保留或移除草稿附件，目前無法新增附件。'
+                  : '目前只支援文字繳交，無法從 App 傳檔。檔案上傳尚未開放。'}
               </Text>
             </View>
             {quizLike ? (
@@ -431,6 +627,9 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
                 >
                   {answer || '（無文字內容）'}
                 </Text>
+                {attachments.map((file, index) => (
+                  <PrivateAttachment key={`${index}-${file.url}`} path={file.url} label={file.name} />
+                ))}
                 {grade ? (
                   <View
                     accessibilityLabel="作業評分"
@@ -530,12 +729,16 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
                   <TextInput
                     placeholderTextColor={theme.colors.muted}
                     value={answer}
-                    onChangeText={(text) => { answerEdited.current = true; setAnswer(text); }}
+                    onChangeText={(text) => {
+                      if (!isCurrent() || pendingSubmit.current || pickingRef.current) return;
+                      answerEdited.current = true;
+                      setAnswer(text);
+                    }}
                     placeholder="在這裡寫下作業內容"
                     multiline
                     numberOfLines={8}
                     maxLength={20000}
-                    editable={!blocked && !submitting}
+                    editable={!attachmentControlsLocked}
                     accessibilityLabel="文字作業內容"
                     style={{
                       backgroundColor: theme.colors.surface,
@@ -550,18 +753,81 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
                     }}
                   />
                 </View>
+                {(uploadEnabled || files.length > 0) && (
+                  <View style={{ marginTop: 16 }}>
+                    {uploadEnabled ? (
+                      <Pressable
+                        onPress={pickFiles}
+                        disabled={addDisabled}
+                        accessibilityRole="button"
+                        accessibilityLabel={`新增作業附件，已選 ${files.length} 個，最多 ${MAX_ATTACHMENTS} 個`}
+                        accessibilityState={{
+                          disabled: addDisabled,
+                          busy: picking,
+                        }}
+                        style={{
+                          minHeight: TOUCH_TARGET,
+                          minWidth: TOUCH_TARGET,
+                          justifyContent: 'center',
+                          paddingHorizontal: 12,
+                          borderRadius: 12,
+                          borderWidth: 1,
+                          borderColor: theme.colors.border,
+                          opacity: addDisabled ? 0.6 : 1,
+                        }}
+                      >
+                        <Text style={{ color: theme.colors.accent, fontWeight: '600' }}>
+                          {picking ? '選取中…' : `新增附件（${files.length}／${MAX_ATTACHMENTS}）`}
+                        </Text>
+                      </Pressable>
+                    ) : <Text style={{ color: theme.colors.text, fontWeight: '600' }}>草稿附件</Text>}
+                    {excessFiles > 0 && (
+                      <Text accessibilityRole="alert" style={{ color: theme.colors.danger, marginTop: 8 }}>
+                        草稿更新後共有 {files.length} 個附件。若要一併繳交新選的檔案，請移除 {excessFiles} 個附件。
+                        {reviewedDraft.current.length > MAX_ATTACHMENTS ? '也可以移除所有新選的檔案，只繳交草稿附件。' : ''}
+                      </Text>
+                    )}
+                    {files.map(({ localId, asset, saved }, index) => (
+                      <View
+                        key={localId}
+                        style={{ flexDirection: 'row', alignItems: 'center', minHeight: TOUCH_TARGET, marginTop: 8 }}
+                      >
+                        <Text style={{ flex: 1, color: theme.colors.text, fontSize: 14 }}>
+                          {(saved ?? asset).name}
+                        </Text>
+                        <Pressable
+                          onPress={() => removeFile(localId)}
+                          disabled={attachmentControlsLocked}
+                          accessibilityRole="button"
+                          accessibilityLabel={`移除第 ${index + 1} 個附件 ${(saved ?? asset).name}`}
+                          accessibilityState={{ disabled: attachmentControlsLocked }}
+                          style={{
+                            minHeight: TOUCH_TARGET,
+                            minWidth: TOUCH_TARGET,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            opacity: attachmentControlsLocked ? 0.6 : 1,
+                          }}
+                        >
+                          <Text style={{ color: theme.colors.danger, fontWeight: '600' }}>移除</Text>
+                        </Pressable>
+                      </View>
+                    ))}
+                  </View>
+                )}
                 <Pressable
                   onPress={handleSubmit}
-                  disabled={blocked || submitting || !answer.trim()}
+                  disabled={submitDisabled}
                   accessibilityRole="button"
                   accessibilityLabel="繳交作業"
+                  accessibilityState={{ disabled: submitDisabled, busy: submitting }}
                   style={{
                     marginTop: 24,
                     padding: 14,
                     borderRadius: 12,
                     backgroundColor: theme.colors.accent,
                     alignItems: 'center',
-                    opacity: submitting || !answer.trim() ? 0.6 : 1,
+                    opacity: submitDisabled ? 0.6 : 1,
                   }}
                 >
                   {submitting ? (

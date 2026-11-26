@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Screen, Button, AnimatedCard, SegmentedControl, Spinner } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { useTabPanelScroll } from '../hooks/useTabPanelScroll';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
@@ -65,13 +66,21 @@ const TIMES: {
 // Cafeterias are loaded from DataSource only
 const DEFAULT_CAFETERIAS: CafeteriaSub[] = [];
 
+const SUBSCRIPTION_TABS = [
+  { id: 'subscriptions', label: '我的訂閱' },
+  { id: 'add', label: '新增訂閱' },
+  { id: 'settings', label: '設定' },
+] as const;
+
 export function MenuSubscriptionScreen(props: any) {
   const nav = props?.navigation;
   const auth = useAuth();
   const { school } = useSchool();
   const ds = useDataSource();
 
-  const [selectedTab, setSelectedTab] = useState(0);
+  const [selectedTab, setSelectedTab] =
+    useState<(typeof SUBSCRIPTION_TABS)[number]['id']>('subscriptions');
+  const panelScroll = useTabPanelScroll(selectedTab);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [notifyTime, setNotifyTime] = useState(30);
   const [pushEnabled, setPushEnabled] = useState(true);
@@ -79,8 +88,6 @@ export function MenuSubscriptionScreen(props: any) {
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [cafeterias, setCafeterias] = useState<CafeteriaSub[]>(DEFAULT_CAFETERIAS);
-
-  const TABS = ['我的訂閱', '新增訂閱', '設定'];
 
   const [newSubCafeteria, setNewSubCafeteria] = useState<string>('');
   const [newSubDays, setNewSubDays] = useState<SubscriptionDay[]>([]);
@@ -361,7 +368,7 @@ export function MenuSubscriptionScreen(props: any) {
       setNewSubCafeteria('');
       setNewSubDays([]);
       setNewSubTimes([]);
-      setSelectedTab(0);
+      setSelectedTab('subscriptions');
 
       analytics.logEvent('create_menu_subscription', {
         cafeteria_id: newSubCafeteria,
@@ -492,9 +499,14 @@ export function MenuSubscriptionScreen(props: any) {
   return (
     <Screen>
       <View style={{ flex: 1 }}>
-        <SegmentedControl options={TABS} selected={selectedTab} onChange={setSelectedTab} />
+        <SegmentedControl
+          options={SUBSCRIPTION_TABS}
+          selected={selectedTab}
+          onChange={setSelectedTab}
+        />
 
         <ScrollView
+          ref={panelScroll}
           style={{ flex: 1, marginTop: 12 }}
           showsVerticalScrollIndicator={false}
           refreshControl={
@@ -505,7 +517,7 @@ export function MenuSubscriptionScreen(props: any) {
             />
           }
         >
-          {selectedTab === 0 && (
+          {selectedTab === 'subscriptions' && (
             <View style={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
               {subscriptions.length === 0 ? (
                 <AnimatedCard>
@@ -530,7 +542,7 @@ export function MenuSubscriptionScreen(props: any) {
                     </Text>
                     <Button
                       text="新增訂閱"
-                      onPress={() => setSelectedTab(1)}
+                      onPress={() => setSelectedTab('add')}
                       style={{ marginTop: 20 }}
                     />
                   </View>
@@ -643,12 +655,12 @@ export function MenuSubscriptionScreen(props: any) {
               )}
 
               {subscriptions.length > 0 && (
-                <Button text="新增訂閱" onPress={() => setSelectedTab(1)} />
+                <Button text="新增訂閱" onPress={() => setSelectedTab('add')} />
               )}
             </View>
           )}
 
-          {selectedTab === 1 && (
+          {selectedTab === 'add' && (
             <View style={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
               <AnimatedCard title="選擇餐廳">
                 {cafeterias.length === 0 ? (
@@ -856,7 +868,7 @@ export function MenuSubscriptionScreen(props: any) {
             </View>
           )}
 
-          {selectedTab === 2 && (
+          {selectedTab === 'settings' && (
             <View style={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
               <AnimatedCard title="通知設定">
                 <View style={{ gap: 16 }}>

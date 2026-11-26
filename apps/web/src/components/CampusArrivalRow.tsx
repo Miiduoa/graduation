@@ -54,6 +54,7 @@ export function CampusArrivalRow(props: {
   row: CampusNextRow;
   now: number;
   animateUpdates?: boolean;
+  unverified?: boolean;
   active?: boolean;
   onSelect?: () => void;
 }) {
@@ -62,14 +63,18 @@ export function CampusArrivalRow(props: {
   useEffect(() => {
     if (open) revealStopResult(block.current);
   }, [open]);
-  const view = campusEtaView(props.row.arrival, props.now);
+  const view = props.unverified
+    ? { kind: 'empty' as const, text: '資料待更新' }
+    : campusEtaView(props.row.arrival, props.now);
   const heading = campusHeadingText(props.row);
   const destination = campusDestinationFull(props.row);
-  const nextClock = nextScheduledClock(props.row.arrival, props.now);
+  const nextClock = props.unverified ? null : nextScheduledClock(props.row.arrival, props.now);
   const ended = view.kind === 'ended';
   const stopName = props.row.arrival?.stopName ?? '';
   const wait = stopName ? waitingPlaceLine(stopName) : '';
-  const label = campusArrivalA11yLabel(props.row, props.now);
+  const label = props.unverified
+    ? [props.row.route, heading || (destination ? `往 ${destination}` : ''), '資料待更新'].filter(Boolean).join(' ')
+    : campusArrivalA11yLabel(props.row, props.now);
   return (
     <div ref={block} className={`${css.arrivalBlock} ${css.physicalArrival}`} data-testid="campus-arrival-block">
       <button

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   use,
   useCallback,
@@ -16,13 +17,17 @@ import { doc, getDocFromServer } from 'firebase/firestore';
 import { useAuth } from '@/components/AuthGuard';
 import {
   defaultNotificationPreferences,
-  normalizeNotificationPreferences,
+  confirmsNotificationPreferences,
+  pickNotificationPreferences,
+  quietHoursTimeKeys,
+  prepareNotificationPreferencesForSave,
   ASSISTANT_PERMISSIONS_DOC_ID,
   ASSISTANT_WRITE_PERMISSION_DEFINITIONS,
   createDefaultAssistantWritePermissions,
   normalizeAssistantWritePermissions,
   type AssistantWritePermissionKey,
   type AssistantWritePermissions,
+  type QuietHoursTimeKey,
 } from '@campus/shared/src';
 import {
   AGENT_DELETE_MODEL_ACTION,
@@ -32,12 +37,17 @@ import {
 } from '@campus/shared/src/todaySenseAgent';
 import { deleteTodaySenseModelCache } from '@/lib/todaySenseAgentRuntime';
 
+import { AccountDemoSettings } from '@/components/AccountDemoSettings';
+import { PWAInstallSettings } from '@/components/PWAInstallSettings';
 import { SiteShell } from '@/components/SiteShell';
 import { NuniAccountPanel } from '@/components/NuniAccountPanel';
-import { useAssistantEnabled } from '@/components/AssistantEnabledProvider';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useToast } from '@/components/ui';
 import { useSignInOptions } from '@/lib/signInOptions';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
+import { loginHref, schoolLoginHref } from '@/lib/navigation';
+import { useLocationHash } from '@/lib/useLocationHash';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
   getAuth,
@@ -59,6 +69,8 @@ import {
   type StoredWebPreferences,
   type ThemePreference,
 } from '@/lib/webPreferences';
+import { PlatformServiceControls } from './PlatformServiceControls';
+import { PlatformAssistantPermissions } from './PlatformAssistantPermissions';
 import styles from './settings.module.css';
 import {
   currentSettingsSection,
@@ -76,6 +88,11 @@ type NotificationToggleKey =
   | 'grades'
   | 'messages';
 
+const QUIET_HOURS_FIELDS: Record<QuietHoursTimeKey, { label: string; error: string }> = {
+  quietHoursStart: { label: '開始時間', error: '請輸入完整的勿擾開始時間，例如 22:30。' },
+  quietHoursEnd: { label: '結束時間', error: '請輸入完整的勿擾結束時間，例如 08:00。' },
+};
+
 type ProfileFormState = {
   displayName: string;
   studentId: string;
@@ -90,6 +107,7 @@ const SECTIONS: { id: Section; label: string; description: string }[] = [
   { id: 'account', label: '帳號', description: '個人資料與登入' },
   { id: 'notifications', label: '通知', description: '接收類型與勿擾時段' },
   { id: 'assistant', label: '助理權限', description: '助理可執行的寫入動作' },
+  { id: 'platform', label: '平台權限', description: 'Google 帳號的服務使用範圍' },
   { id: 'appearance', label: '外觀', description: '色彩、字級與閱讀方式' },
   { id: 'privacy', label: '隱私', description: '個人資料與存取範圍' },
 ];
@@ -218,8 +236,14 @@ function SettingsContent({
 }) {
   const { signOutUser } = useAuth();
   const nuni = useNuniSession();
-  const assistantEnabled = useAssistantEnabled();
-  const schoolLoginReady = useSignInOptions().studentId;
+  const selection = useOptionalSelectedSchool();
+  const params = useSearchParams();
+  const campusSearch = useCampusNavigationSearch(params ?? new URLSearchParams(schoolSearch));
+  const hash = useLocationHash();
+  const schoolReady = !selection || (
+    !selection.loading && selection.catalogStatus === 'ready' && Boolean(selection.selectedSchoolId)
+  );
+  const schoolLoginReady = useSignInOptions(selection?.selectedSchoolId ?? null, schoolReady, 'school').studentId;
   const mounted = useRef(true);
   const profileLock = useRef(false);
   const notificationLock = useRef(false);
@@ -242,6 +266,10 @@ function SettingsContent({
     currentSettingsSection,
     () => initialSection,
   );
+  const settingsReturn = campusServiceHref(
+    activeSection === 'general' ? '/settings' : `/settings?section=${activeSection}`,
+    campusSearch,
+  ) + hash;
   const sectionContent = useRef<HTMLDivElement>(null);
   const focusSection = useRef(false);
   useEffect(() => {
@@ -267,6 +295,12 @@ function SettingsContent({
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(
     defaultNotificationPreferences,
   );
+  const notificationBaseline = useRef<NotificationPreferences>(defaultNotificationPreferences);
+  const quietHoursInputs = useRef<Record<QuietHoursTimeKey, HTMLInputElement | null>>({
+    quietHoursStart: null,
+    quietHoursEnd: null,
+  });
+  const [invalidTimes, setInvalidTimes] = useState<QuietHoursTimeKey[]>([]);
   const [assistantWritePrefs, setAssistantWritePrefs] = useState<AssistantWritePermissions>(
     createDefaultAssistantWritePermissions(),
   );
@@ -350,6 +384,8 @@ function SettingsContent({
         }
 
         setProfileForm(emptyProfileForm(null));
+        notificationBaseline.current = defaultNotificationPreferences;
+        setInvalidTimes([]);
         setNotificationPrefs(defaultNotificationPreferences);
         setAssistantWritePrefs(createDefaultAssistantWritePermissions());
         setLoadingProfile(false);
@@ -371,11 +407,12 @@ function SettingsContent({
         if (!active || !isCurrent()) return;
         if (!profileDoc.exists()) throw new Error('Account profile is missing');
         setProfileForm(emptyProfileForm(user, profileDoc.data() as UserProfile));
-        setNotificationPrefs(
-          normalizeNotificationPreferences(
-            prefsDoc.exists() ? prefsDoc.data() : defaultNotificationPreferences,
-          ),
+        const loadedPrefs = pickNotificationPreferences(
+          prefsDoc.exists() ? prefsDoc.data() : defaultNotificationPreferences,
         );
+        notificationBaseline.current = loadedPrefs;
+        setInvalidTimes([]);
+        setNotificationPrefs(loadedPrefs);
         setAssistantWritePrefs(
           normalizeAssistantWritePermissions(assistantDoc.exists() ? assistantDoc.data() : null),
         );
@@ -387,6 +424,8 @@ function SettingsContent({
         console.error('Failed to load settings data:', loadError);
         setProfileLoadError('暫時無法讀取帳號設定。重新讀取成功後才能儲存變更。');
         setProfileForm(emptyProfileForm(user));
+        notificationBaseline.current = defaultNotificationPreferences;
+        setInvalidTimes([]);
         setNotificationPrefs(defaultNotificationPreferences);
         setAssistantWritePrefs(createDefaultAssistantWritePermissions());
       } finally {
@@ -440,8 +479,18 @@ function SettingsContent({
       signOutLock.current
     )
       return;
+    const prepared = prepareNotificationPreferencesForSave(
+      notificationPrefs,
+      notificationBaseline.current,
+    );
+    if (!prepared.ok) {
+      setInvalidTimes(prepared.invalidTimes);
+      quietHoursInputs.current[prepared.invalidTimes[0]]?.focus();
+      return;
+    }
     notificationLock.current = true;
-    const expected = notificationPrefs;
+    const expected = prepared.preferences;
+    setInvalidTimes([]);
     setSavingNotifications(true);
 
     try {
@@ -451,12 +500,11 @@ function SettingsContent({
         doc(getDb(), 'users', user.uid, 'settings', 'notifications'),
       );
       if (!isCurrent()) return;
-      const actual = saved.exists() ? normalizeNotificationPreferences(saved.data()) : null;
-      if (
-        !actual ||
-        JSON.stringify(actual) !== JSON.stringify(normalizeNotificationPreferences(expected))
-      )
+      const receipt = saved.exists() ? saved.data() : null;
+      if (!confirmsNotificationPreferences(receipt, expected))
         throw new Error('Notification settings were not confirmed');
+      notificationBaseline.current = expected;
+      setNotificationPrefs(expected);
       success('通知設定已同步');
     } catch (saveError) {
       console.error('Failed to save notification settings:', saveError);
@@ -624,6 +672,7 @@ function SettingsContent({
             </button>
           </SettingRow>
         </section>
+        <PWAInstallSettings />
         <section aria-labelledby="service-information">
           <h3 className={styles.groupHeading} id="service-information">
             服務資訊
@@ -667,7 +716,7 @@ function SettingsContent({
             <section className={styles.notice}>
               <h3>登入後查看通知</h3>
               <p>課程更新與學校通知使用各自的帳號。外觀設定不需要登入。</p>
-              <Link href="/classroom/login" className="btn primary">
+              <Link href={loginHref(settingsReturn)} className="btn primary">
                 登入課程空間
               </Link>
             </section>
@@ -676,7 +725,7 @@ function SettingsContent({
             <section className={styles.notice}>
               <h3>學校通知</h3>
               <p>連線學校帳號後，可以調整學校公告、成績與校園訊息的通知偏好。</p>
-              <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
+              <Link href={schoolLoginHref(settingsReturn)} className="btn">
                 連線學校帳號
               </Link>
             </section>
@@ -724,7 +773,10 @@ function SettingsContent({
               label="推播通知"
               disabled={!cloudEnabled || savingNotifications}
               value={notificationPrefs.enabled}
-              onChange={(enabled) => setNotificationPrefs((prev) => ({ ...prev, enabled }))}
+              onChange={(enabled) => {
+                setInvalidTimes([]);
+                setNotificationPrefs((prev) => ({ ...prev, enabled }));
+              }}
             />
           </SettingRow>
         </div>
@@ -755,46 +807,53 @@ function SettingsContent({
                   label="勿擾時段"
                   disabled={!cloudEnabled || savingNotifications}
                   value={notificationPrefs.quietHoursEnabled}
-                  onChange={(quietHoursEnabled) =>
-                    setNotificationPrefs((prev) => ({ ...prev, quietHoursEnabled }))
-                  }
+                  onChange={(quietHoursEnabled) => {
+                    setInvalidTimes([]);
+                    setNotificationPrefs((prev) => ({ ...prev, quietHoursEnabled }));
+                  }}
                 />
               </SettingRow>
               <div className={styles.timeFields}>
-                <label className={styles.field}>
-                  <span>開始時間</span>
-                  <input
-                    className="input"
-                    type="time"
-                    value={notificationPrefs.quietHoursStart}
-                    disabled={
-                      !cloudEnabled || savingNotifications || !notificationPrefs.quietHoursEnabled
-                    }
-                    onChange={(event) =>
-                      setNotificationPrefs((prev) => ({
-                        ...prev,
-                        quietHoursStart: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <label className={styles.field}>
-                  <span>結束時間</span>
-                  <input
-                    className="input"
-                    type="time"
-                    value={notificationPrefs.quietHoursEnd}
-                    disabled={
-                      !cloudEnabled || savingNotifications || !notificationPrefs.quietHoursEnabled
-                    }
-                    onChange={(event) =>
-                      setNotificationPrefs((prev) => ({
-                        ...prev,
-                        quietHoursEnd: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
+                {quietHoursTimeKeys.map((key) => {
+                  const fieldError = invalidTimes.includes(key)
+                    ? QUIET_HOURS_FIELDS[key].error
+                    : undefined;
+                  return (
+                    <label key={key} className={styles.field}>
+                      <span>{QUIET_HOURS_FIELDS[key].label}</span>
+                      <input
+                        ref={(node) => {
+                          quietHoursInputs.current[key] = node;
+                        }}
+                        className="input"
+                        type="time"
+                        aria-label={QUIET_HOURS_FIELDS[key].label}
+                        value={notificationPrefs[key]}
+                        aria-invalid={fieldError ? true : undefined}
+                        aria-describedby={fieldError ? `quiet-hours-error-${key}` : undefined}
+                        disabled={
+                          !cloudEnabled ||
+                          savingNotifications ||
+                          !notificationPrefs.quietHoursEnabled
+                        }
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setInvalidTimes((fields) => fields.filter((field) => field !== key));
+                          setNotificationPrefs((prev) => ({ ...prev, [key]: value }));
+                        }}
+                      />
+                      {fieldError && (
+                        <span
+                          id={`quiet-hours-error-${key}`}
+                          role="alert"
+                          style={{ color: 'var(--danger)' }}
+                        >
+                          {fieldError}
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
               </div>
               <p className={styles.groupNote}>依通知服務使用的台北時間（UTC+8）計算。</p>
             </section>
@@ -816,24 +875,17 @@ function SettingsContent({
   }
 
   function renderAssistant() {
+    const showPlatform = !user || !!nuni.session || nuni.loading || !!nuni.error || nuni.pendingLogout;
     const updateAssistantPermission = (key: AssistantWritePermissionKey, value: boolean) => {
       setAssistantWritePrefs((prev) => ({ ...prev, [key]: value }));
     };
     return (
       <div className={styles.stack}>
         <SectionHeading title="助理權限">
-          控制助理可以代你執行哪些寫入動作。預設全部關閉；開啟後仍需每次確認才會生效。涵蓋需確認的服務寫入、助理餐廳草稿下單，以及拆待辦／設提醒等個人待辦佇列。
+          設定助理可以代你完成哪些事。每項動作獨立授權，開啟後仍需每次確認。
         </SectionHeading>
-        {assistantEnabled && nuni.session && <p role="note">nuni 校園助理目前僅提供公開資訊，尚未支援代辦寫入；下方設定不會開啟 nuni 助理寫入功能。</p>}
-        {!user && (
-          <div className={styles.notice}>
-            <h3>登入後設定助理權限</h3>
-            <p>權限會跟著帳號保留，網頁與手機共用同一份設定。</p>
-            <Link href={`/login${schoolSearch}`} className="btn primary">
-              前往登入
-            </Link>
-          </div>
-        )}
+        {showPlatform && <PlatformAssistantPermissions returnUrl={settingsReturn} />}
+        {user && <>
         {user && !isFirebaseConfigured() && (
           <div className={styles.notice} role="status">
             <h3>目前無法連線帳號服務</h3>
@@ -848,7 +900,7 @@ function SettingsContent({
         </div>
         <section aria-labelledby="assistant-write-permissions">
           <h3 className={styles.groupHeading} id="assistant-write-permissions">
-            寫入動作
+            校內助理寫入動作
           </h3>
           <div className={styles.group}>
             {ASSISTANT_WRITE_PERMISSION_DEFINITIONS.map((row) => (
@@ -874,6 +926,7 @@ function SettingsContent({
             {savingAssistantPermissions ? '儲存中…' : '儲存助理權限'}
           </button>
         </div>
+        </>}
       </div>
     );
   }
@@ -1101,7 +1154,7 @@ function SettingsContent({
             <section className={styles.notice}>
               <h3>登入課程空間</h3>
               <p>登入後可開啟已加入的課程、作業與課堂回饋。你也可以先調整外觀。</p>
-              <Link href="/classroom/login" className="btn primary">
+              <Link href={loginHref(settingsReturn)} className="btn primary">
                 登入課程空間
               </Link>
             </section>
@@ -1112,7 +1165,7 @@ function SettingsContent({
               <p>
                 學校帳號尚未連線。連線後可查看與編輯校園個人資料；填寫學號或系所不會取得學校權限。
               </p>
-              <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
+              <Link href={schoolLoginHref(settingsReturn)} className="btn">
                 連線學校帳號
               </Link>
             </section>
@@ -1259,13 +1312,14 @@ function SettingsContent({
     general: renderGeneral,
     notifications: renderNotifications,
     assistant: renderAssistant,
+    platform: () => <PlatformServiceControls onManageAssistant={() => openSection('assistant')} />,
     appearance: renderAppearance,
     privacy: renderPrivacy,
     account: renderAccount,
   };
 
   return (
-    <SiteShell title="設定" subtitle="讓校園生活，照你的習慣安排。">
+    <SiteShell title="設定">
       <div className={styles.layout}>
         <aside className={styles.sidebar}>
           <nav
@@ -1311,7 +1365,10 @@ function SettingsContent({
               </button>
             ))}
           </nav>
-          <Link className={styles.profileLink} href="/profile">
+          <Link
+            className={styles.profileLink}
+            href={campusServiceHref('/profile', campusSearch)}
+          >
             返回個人資料 <span aria-hidden="true">↗</span>
           </Link>
         </aside>
@@ -1337,6 +1394,7 @@ function SettingsContent({
             </section>
           )}
           {contentMap[activeSection]()}
+          {activeSection === 'platform' ? <AccountDemoSettings /> : null}
         </div>
       </div>
     </SiteShell>

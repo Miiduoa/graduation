@@ -109,9 +109,9 @@ async def _create_dorm_repair_request(
         )
 
     if not ctx.uid:
-        raise ToolExecutionError("missing_uid", "尚未登入，無法提交報修。")
+        raise ToolExecutionError("missing_uid", "尚未登入，無法存成報修備忘。")
     if not ctx.school_id:
-        raise ToolExecutionError("missing_school", "缺少學校資訊，無法提交報修。")
+        raise ToolExecutionError("missing_school", "缺少學校資訊，無法存成報修備忘。")
 
     clean = _validate_repair_input(args)
 
@@ -444,10 +444,11 @@ def register_default_tools() -> None:
     register_tool(
         name="createDormRepairRequest",
         description=(
-            "幫使用者提交宿舍報修。需要 location（宿舍棟+房號的整段描述，例如「靜園 311B」）、"
+            "幫使用者把宿舍報修存成個人備忘，不會送到學校。需要 location（宿舍棟+房號的整段描述，例如「靜園 311B」）、"
             "category（water/electric/plumbing/furniture/internet/air_conditioning/lock/"
             "door_window/other）、description（壞掉的狀況）。urgency 可選 low/normal/high。"
-            "成功時回 success=True 與 repairId；任何輸入錯誤或寫入失敗都會 success=False。"
+            "成功時仍會回 success=True 與內部識別 repairId；那不是校方單號，請勿向使用者說成單號、工單或已送到學校。"
+            "任何輸入錯誤或寫入失敗都會 success=False。"
         ),
         parameters={
             "type": "object",
@@ -481,7 +482,8 @@ def register_default_tools() -> None:
     register_tool(
         name="listMyDormRepairs",
         description=(
-            "列出目前使用者最近的宿舍報修紀錄（含 repairId、location、status、createdAt）。"
+            "列出目前使用者最近的宿舍報修備忘（含內部識別 repairId、location、status、createdAt）。"
+            "repairId 不是校方單號，請勿向使用者說成單號或工單。"
             "可指定 limit（預設 10，最多 50）。永遠 success=True，items 可能為空陣列。"
         ),
         parameters={

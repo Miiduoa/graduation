@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { NuniError } from '@campus/shared/src/nuni';
 import { merchantWorkspaceStateLabel } from '@campus/shared/src/nuniMerchant';
+import { isMerchantWorkspaceOperational } from '@campus/shared/src/merchantJourney';
 import {
   createMerchantOperations,
   NUNI_MERCHANT_TERMS_VERSION,
@@ -405,7 +406,7 @@ export function NuniMerchantWorkspace({
       contentContainerStyle={{ padding: 20, paddingBottom: 48, gap: 16 }}
     >
       <Action onPress={onBack}>返回我的門市</Action>
-      <Copy title>門市開店準備</Copy>
+      <Copy title>{workspace?.activated ? '門市工作台' : '門市開店準備'}</Copy>
       {message ? <Copy alert>{message}</Copy> : null}
       {loading ? <Copy>正在核對門市狀態…</Copy> : null}
       {loadError ? <Copy alert>{loadError}</Copy> : null}
@@ -423,7 +424,7 @@ export function NuniMerchantWorkspace({
             {workspace.tenantName} · {workspace.campusName}
           </Copy>
           <Copy>{merchantWorkspaceStateLabel(workspace)}</Copy>
-          {workspace.activated ? (
+          {isMerchantWorkspaceOperational(workspace) ? (
             <Action disabled={unavailable} onPress={() => setShowOrders(true)}>
               處理訂單與收銀
             </Action>
@@ -633,13 +634,13 @@ export function NuniMerchantWorkspace({
                   ) : null}
                 </>
               ) : null}
-              {workspace.missingRequirements.length ? (
+              {workspace.missingRequirements?.length ? (
                 <Copy>請先完成營運設定、有庫存的菜單與收款資格。</Copy>
               ) : null}
               {!activationReview ? (
                 <Action
                   disabled={
-                    unavailable || !!settingsDraft || workspace.missingRequirements.length > 0
+                    unavailable || !!settingsDraft || (workspace.missingRequirements?.length ?? 0) > 0
                   }
                   onPress={() => setActivationReview(true)}
                 >

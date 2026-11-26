@@ -2,14 +2,20 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { NuniNextStep } from '@/components/NuniNextStep';
 import { loadCampusEvent, type CampusEvent, type CampusEventSource } from '@/lib/campusEvents';
 import { buildCampusEventCalendar, canExportCampusEvent } from '@/lib/campusEventCalendar';
 import { campusEventPhase, campusEventPhaseLabel } from '@campus/shared/src/campusEventTime';
+import { campusEventDetailPath } from '@campus/shared/src/campusEventLinks';
+import { useCampusEventShortlist, toSavedCampusEvent } from '@/lib/campusEventShortlist';
 import { useEventClock } from './useEventClock';
+import { CampusEventSaveButton, CampusEventShortlistFeedback } from './CampusEventSaveButton';
 import { EventRegistrationPanel } from './EventRegistrationPanel';
 import {
   buildCampusEventDetailHref,
   buildCampusEventListHref,
+  campusEventNextStep,
+  EVENT_ARRIVAL_WINDOW_MS,
   campusEventSourceLabel,
   formatCampusEventDateTime,
   isCampusEventSource,
@@ -68,11 +74,15 @@ export function EventDetail({
   const [noticeState, setNoticeState] = useState({ scope: noticeScope, message: '' });
   const notice = noticeState.scope === noticeScope ? noticeState.message : '';
   const setNotice = (message: string) => setNoticeState({ scope: noticeScope, message });
-  const now = useEventClock();
   const generation = useRef(0);
   const mounted = useRef(false);
   const view = detailForRequest(state, schoolId, eventId, source);
+  const loadedEvent = view.status === 'ready' ? view.event : null;
+  const now = useEventClock(loadedEvent?.calendarTime ?? loadedEvent ?? undefined, EVENT_ARRIVAL_WINDOW_MS);
   const listHref = buildCampusEventListHref(schoolSearch, listFilters);
+  const listLabel = listFilters?.saved ? '回到收藏活動' : '回到活動列表';
+  const shortlist = useCampusEventShortlist(schoolId);
+  const backLink = useRef<HTMLAnchorElement>(null);
   const returnPath = source
     ? buildCampusEventDetailHref(eventId, source, schoolSearch, listFilters)
     : listHref;
@@ -118,7 +128,7 @@ export function EventDetail({
     if (!source) return;
     const request = generation.current;
     const url = new URL(
-      buildCampusEventDetailHref(eventId, source, schoolSearch),
+      campusEventDetailPath({ id: eventId, schoolId, source }),
       window.location.origin,
     );
     setNotice('');
@@ -138,7 +148,7 @@ export function EventDetail({
     let url: string | undefined;
     const anchor = document.createElement('a');
     try {
-      const detailUrl = new URL(buildCampusEventDetailHref(eventId, source, schoolSearch), window.location.origin);
+      const detailUrl = new URL(campusEventDetailPath(view.event), window.location.origin);
       const calendar = buildCampusEventCalendar(view.event, detailUrl.href);
       url = URL.createObjectURL(new Blob([calendar.content], { type: 'text/calendar;charset=utf-8' }));
       anchor.href = url;
@@ -165,7 +175,7 @@ export function EventDetail({
         <h2>無法開啟此活動</h2>
         <p>請返回活動列表，重新選擇活動。</p>
         <Link className="btn" href={listHref}>
-          回到活動列表
+          {listLabel}
         </Link>
       </section>
     );
@@ -188,30 +198,49 @@ export function EventDetail({
           重新讀取
         </button>
         <Link className="btn" href={listHref}>
-          回到活動列表
+          {listLabel}
         </Link>
       </section>
     );
   }
 
   if (!view.event) {
+    const stored = shortlist.items.find((item) => item.id === eventId && item.source === source);
+    const savedCopy = stored ? toSavedCampusEvent(stored) : null;
     return (
       <section className={styles.status}>
         <h2>找不到這場活動</h2>
         <p>活動可能已移除，或不屬於目前查看的學校與來源。</p>
-        <Link className="btn" href={listHref}>
-          回到活動列表
+        {savedCopy ? (
+          <>
+            <p>此活動仍在這個裝置的收藏中，可先移除。</p>
+            <button type="button" className="btn" aria-disabled={shortlist.isBusy(savedCopy) ? 'true' : undefined}
+              onClick={() => {
+                if (shortlist.isBusy(savedCopy)) return;
+                void shortlist.toggle(savedCopy, false).then((result) => {
+                  if (result === 'done') backLink.current?.focus();
+                });
+              }}>
+              取消收藏<span className={styles.srOnly}>「{savedCopy.title}」</span>
+            </button>
+          </>
+        ) : null}
+        <CampusEventShortlistFeedback shortlist={shortlist} />
+        <Link ref={backLink} className="btn" href={listHref}>
+          {listLabel}
         </Link>
       </section>
     );
   }
 
   const event = view.event;
+  const nextStep = campusEventNextStep(event, now);
+  const phase = campusEventPhase(event, now);
   return (
     <article className={styles.detail}>
       <div className={styles.meta}>
-        <span className={styles.phase} data-phase={campusEventPhase(event, now)}>
-          {campusEventPhaseLabel(campusEventPhase(event, now))}
+        <span className={styles.phase} data-phase={phase}>
+          {campusEventPhaseLabel(phase)}
         </span>
         <span>{campusEventSourceLabel(event.source)}</span>
         <time dateTime={event.startsAt || undefined}>
@@ -224,11 +253,17 @@ export function EventDetail({
         {event.organizer ? <span>{event.organizer}</span> : null}
       </div>
       <h2>{event.title}</h2>
+      {nextStep && (
+        <NuniNextStep reason={nextStep.reason}>
+          <Link className="btn" href={nextStep.href}>{nextStep.label}</Link>
+        </NuniNextStep>
+      )}
       {event.description ? <p className={styles.body}>{event.description}</p> : null}
       <div className={styles.detailActions}>
         <Link className="btn" href={listHref}>
-          回到活動列表
+          {listLabel}
         </Link>
+        <CampusEventSaveButton event={event} shortlist={shortlist} showHint />
         <button type="button" className="btn" onClick={() => void copyLink()}>
           複製連結
         </button>
@@ -240,6 +275,7 @@ export function EventDetail({
           重新讀取
         </button>
       </div>
+      <CampusEventShortlistFeedback shortlist={shortlist} />
       <p id="event-calendar-note" className={styles.notice}>
         {canExportCampusEvent(event)
           ? '下載活動行事曆檔案後，可加入你慣用的行事曆。時間異動請回到此頁確認。'

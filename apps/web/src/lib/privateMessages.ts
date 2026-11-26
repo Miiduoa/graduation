@@ -4,18 +4,27 @@ import {
   doc,
   FieldPath,
   getDocFromServer,
+  getDocsFromServer,
+  endAt,
   limit,
   onSnapshot,
   orderBy,
   query,
   runTransaction,
   serverTimestamp,
+  startAt,
   where,
   type DocumentData,
   type SnapshotMetadata,
   type Transaction,
 } from 'firebase/firestore';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
+import { callWithHostedFallback } from './callableFallback';
+import { parseDmPhotoPath } from './dmPhotos';
+import { deriveDmConversationId } from './conversationAccess';
 import { getAuth, getDb, isFirebaseConfigured } from './firebase';
+import { teacherSubmissionListHref } from '@/components/teaching/assignmentDeepLink';
+import { dormAnnouncementHref } from './dormAnnouncementLink';
 import { leaveRequestHref, parseLeaveRequestId } from './leaveRequestLink';
 import {
   courseHrefFromData,
@@ -49,11 +58,25 @@ export type PrivateMessage = {
   type: string;
   createdAt: string | null;
   recalled: boolean;
+  isStoryReply?: boolean;
+  attachmentPath?: string;
   reactions?: Record<string, string[]>;
 };
 export type ConversationContents = {
   conversation: PrivateConversation;
   messages: PrivateMessage[];
+  exists?: boolean;
+};
+export type PrivateMessageRecipient = {
+  uid: string;
+  displayName: string;
+  department: string | null;
+};
+export type PreparedPrivateConversation = {
+  conversationId: string;
+  peerUid: string;
+  peerName: string | null;
+  exists: boolean;
 };
 export type AccountNotification = {
   id: string;
@@ -69,7 +92,9 @@ export type NotificationFeed = { notifications: AccountNotification[]; unscopedC
 type Fail = (reason: MessagingFailure) => void;
 function reason(error: unknown): MessagingFailure {
   if (error instanceof MessagingError) return error.reason;
-  return (error as { code?: string })?.code === 'permission-denied' ? 'permission' : 'unavailable';
+  return ['permission-denied', 'functions/permission-denied', 'functions/unauthenticated'].includes(
+    (error as { code?: string })?.code ?? '',
+  ) ? 'permission' : 'unavailable';
 }
 function key(value: string) {
   if (!value || value.includes('/')) throw new MessagingError('permission');
@@ -122,7 +147,8 @@ export function parseConversation(
     memberIds: members,
     peerUid: members.find((uid) => uid !== session.uid)!,
     peerName: null,
-    preview: text(row.lastMessageText) || text(row.lastMessage?.content),
+    preview: row.lastMessage?.type === 'image' || row.lastMessageType === 'image'
+      ? '照片' : text(row.lastMessageText) || text(row.lastMessage?.content),
     lastMessageAt: messageTime(row.lastMessageAt ?? row.updatedAt),
     lastSenderId: text(row.lastMessageSenderId) || text(row.lastMessage?.senderId) || null,
     lastReadAt: messageTime(object(row.lastReadBy)[session.uid]),
@@ -149,14 +175,23 @@ function parseMessage(
     (row.conversationId && row.conversationId !== conversation.id)
   )
     throw new MessagingError('permission');
-  if (typeof row.content !== 'string') throw new MessagingError('unavailable');
+  const storyRef = object(row.storyReplyTo);
+  if (row.type !== 'image' && typeof row.content !== 'string') throw new MessagingError('unavailable');
   return {
     id,
     senderId: row.senderId,
-    content: row.content,
+    content: row.type === 'image' ? '照片' : row.content,
+    attachmentPath: row.type === 'image' && !row.recalledAt && parseDmPhotoPath(row.attachmentPath, conversation.id)
+      ? row.attachmentPath : undefined,
     type: text(row.type) || 'text',
     createdAt: messageTime(row.createdAt),
     recalled: !!row.recalledAt,
+    isStoryReply:
+      row.type === 'text' &&
+      typeof storyRef.storyId === 'string' &&
+      !!storyRef.storyId &&
+      conversation.memberIds.includes(text(storyRef.authorUid)) &&
+      storyRef.authorUid !== row.senderId,
     reactions: parseReactions(row.reactions),
   };
 }
@@ -232,6 +267,164 @@ async function peerName(session: MessagingSession, uid: string): Promise<string 
   } catch {
     return null;
   }
+}
+
+export async function findPrivateMessageRecipients(
+  session: MessagingSession,
+  name: string,
+  signal: AbortSignal,
+): Promise<PrivateMessageRecipient[]> {
+  assertUser(session.uid);
+  const prefix = name.trim();
+  if (signal.aborted) throw new MessagingError('stale');
+  if (!prefix || prefix.length > 80) return [];
+  const snapshot = await getDocsFromServer(query(
+    collection(getDb(), 'schools', key(session.schoolId), 'directory'),
+    where('isDiscoverable', '==', true),
+    orderBy('displayName'),
+    startAt(prefix),
+    endAt(prefix + '\uf8ff'),
+    limit(20),
+  ));
+  assertUser(session.uid);
+  if (signal.aborted || !confirmed(snapshot.metadata)) throw new MessagingError('stale');
+  return snapshot.docs.flatMap((entry) => {
+    const row = entry.data();
+    const displayName = text(row.displayName).trim();
+    return entry.id !== session.uid && row.isDiscoverable === true && displayName ? [{
+      uid: entry.id,
+      displayName,
+      department: text(row.department) || null,
+    }] : [];
+  });
+}
+
+export async function preparePrivateConversation(
+  session: MessagingSession,
+  peerUid: string,
+  signal: AbortSignal,
+): Promise<PreparedPrivateConversation> {
+  assertUser(session.uid);
+  if (signal.aborted) throw new MessagingError('stale');
+  if (key(peerUid) === session.uid) throw new MessagingError('permission');
+  const conversationId = deriveDmConversationId(key(session.schoolId), session.uid, peerUid);
+  try {
+    const { data } = await callWithHostedFallback<
+      { viewerUid: string; schoolId: string; peerUid: string },
+      { conversationId: string; peerUid: string; exists: boolean }
+    >('prepareDmConversation', { viewerUid: session.uid, schoolId: session.schoolId, peerUid }, session.uid, signal).catch(async (error: unknown) => {
+      assertUser(session.uid);
+      if (signal.aborted) throw new MessagingError('stale');
+      // New-DM school eligibility does not revoke access to an existing member DM.
+      const snapshot = await getDocFromServer(doc(getDb(), 'conversations', conversationId));
+      assertUser(session.uid);
+      if (signal.aborted) throw new MessagingError('stale');
+      if (!confirmed(snapshot.metadata) || !snapshot.exists()) throw error;
+      const existing = parseConversation(conversationId, snapshot.data(), session);
+      if (existing.peerUid !== peerUid) throw new MessagingError('permission');
+      return { data: { conversationId, peerUid, exists: true } };
+    });
+    assertUser(session.uid);
+    if (signal.aborted) throw new MessagingError('stale');
+    if (data?.conversationId !== conversationId || data.peerUid !== peerUid || typeof data.exists !== 'boolean') {
+      throw new MessagingError('permission');
+    }
+    const name = await peerName(session, peerUid);
+    assertUser(session.uid);
+    if (signal.aborted) throw new MessagingError('stale');
+    return { conversationId, peerUid, exists: data.exists, peerName: name };
+  } catch (error) {
+    if (signal.aborted) throw new MessagingError('stale');
+    throw new MessagingError(reason(error));
+  }
+}
+
+export async function sendPreparedPrivateMessage(
+  session: MessagingSession,
+  prepared: PreparedPrivateConversation,
+  messageId: string,
+  content: string,
+  signal: AbortSignal,
+) {
+  assertUser(session.uid);
+  if (signal.aborted) throw new MessagingError('stale');
+  const body = content.trim();
+  if (!body || body.length > 4000 || !/^[A-Za-z0-9_-]{20,64}$/.test(messageId)) {
+    throw new MessagingError('unavailable');
+  }
+  if (prepared.peerUid === session.uid || prepared.conversationId !== deriveDmConversationId(session.schoolId, session.uid, prepared.peerUid)) {
+    throw new MessagingError('permission');
+  }
+  try {
+    const { data } = await callWithHostedFallback<
+      { viewerUid: string; schoolId: string; peerUid: string; conversationId: string; messageId: string; content: string },
+      { conversationId: string; messageId: string }
+    >('sendDmText', {
+      viewerUid: session.uid,
+      schoolId: session.schoolId,
+      peerUid: prepared.peerUid,
+      conversationId: prepared.conversationId,
+      messageId,
+      content: body,
+    }, session.uid, signal);
+    assertUser(session.uid);
+    if (signal.aborted) throw new MessagingError('stale');
+    if (data?.conversationId !== prepared.conversationId || data.messageId !== messageId) {
+      throw new MessagingError('unavailable');
+    }
+  } catch (error) {
+    if (signal.aborted) throw new MessagingError('stale');
+    throw new MessagingError(reason(error));
+  }
+}
+
+export function watchNewPrivateConversation(
+  session: MessagingSession,
+  prepared: PreparedPrivateConversation,
+  receive: (contents: ConversationContents) => void,
+  fail: Fail,
+) {
+  assertUser(session.uid);
+  if (prepared.conversationId !== deriveDmConversationId(session.schoolId, session.uid, prepared.peerUid)) {
+    throw new MessagingError('permission');
+  }
+  if (prepared.exists) return watchConversationContents(session, prepared.conversationId, receive, fail);
+  let active = true;
+  let stopContents: (() => void) | undefined;
+  let stopInbox: (() => void) | undefined;
+  stopInbox = watchPrivateConversations(session, (rows) => {
+    if (!active || stopContents) return;
+    const existing = rows.find((row) => row.id === prepared.conversationId);
+    if (existing) {
+      if (existing.peerUid !== prepared.peerUid) {
+        fail('permission');
+        return;
+      }
+      stopContents = watchConversationContents(session, existing.id, receive, fail);
+      stopInbox?.();
+      return;
+    }
+    receive({
+      exists: false,
+      conversation: {
+        id: prepared.conversationId,
+        memberIds: [session.uid, prepared.peerUid],
+        peerUid: prepared.peerUid,
+        peerName: prepared.peerName,
+        preview: '',
+        lastMessageAt: null,
+        lastSenderId: null,
+        lastReadAt: null,
+      },
+      messages: [],
+    });
+  }, fail);
+  if (stopContents) stopInbox();
+  return () => {
+    active = false;
+    stopInbox?.();
+    stopContents?.();
+  };
 }
 export function watchPrivateConversations(
   session: MessagingSession,
@@ -509,9 +702,15 @@ export function parseNotification(
   )
     throw new MessagingError('permission');
   const data = object(row.data);
-  const schoolId = text(row.schoolId) || text(data.schoolId);
+  const schoolId = text(data.schoolId) || text(row.schoolId);
   if (!schoolId) return 'unscoped';
-  if (schoolId !== session.schoolId) return null;
+  // Compare campus aliases, but keep the payload's actual school document ID in the link.
+  const expectedSchool = toPublicSchoolId(session.schoolId);
+  const belongsElsewhere = [row.schoolId, data.schoolId].some((value) =>
+    value != null && value !== '' &&
+    (typeof value !== 'string' || toPublicSchoolId(value) !== expectedSchool),
+  );
+  if (belongsElsewhere) return null;
   if (typeof row.title !== 'string' || typeof row.body !== 'string')
     throw new MessagingError('unavailable');
   return {
@@ -636,11 +835,19 @@ export function notificationDestination(
     schoolParams.set('schoolId', schoolId);
   }
   const schoolSearch = schoolId ? `?${schoolParams.toString()}` : '';
+  if (notification.type === 'announcement' && data.channel === 'dormitory') {
+    const id = safeNoticeId(data.dormAnnouncementId);
+    if (!schoolId || (data.dormAnnouncementId != null && data.dormAnnouncementId !== '' && !id)) return null;
+    return { href: dormAnnouncementHref(schoolId, id), label: '查看本棟公告' };
+  }
   if (notification.type === 'announcement') {
     const announcementId = safeNoticeId(data.announcementId);
+    // 校園公告通知來自 schools/{schoolId}/announcements，不能改開同編號的舊集合。
+    if (schoolId && announcementId) schoolParams.set('source', 'school-announcement');
+    const announcementSearch = schoolParams.size ? `?${schoolParams.toString()}` : '';
     return announcementId
       ? {
-          href: `/announcements/${encodeURIComponent(announcementId)}${schoolSearch}`,
+          href: `/announcements/${encodeURIComponent(announcementId)}${announcementSearch}`,
           label: '查看公告',
         }
       : { href: `/announcements${schoolSearch}`, label: '查看公告' };
@@ -676,24 +883,34 @@ export function notificationDestination(
       label: '查看訂單／取餐',
     };
   }
+  // An older course link can carry a saved browsing campus. The inbox has
+  // already verified which school owns this notification.
+  function academicDestination(href: string, label: string) {
+    if (!schoolId) return { href, label };
+    const destination = new URL(href, 'https://campus.local');
+    destination.searchParams.delete('school');
+    destination.searchParams.set('campus', schoolId);
+    destination.searchParams.set('schoolId', schoolId);
+    return { href: destination.pathname + destination.search + destination.hash, label };
+  }
   if (notification.type === 'live_session') {
     const groupId = safeNoticeId(data.groupId) || safeNoticeId(data.courseId);
     if (!groupId) return null;
     const sessionId = safeNoticeId(data.sessionId);
     const base = `/course/${encodeURIComponent(groupId)}/attendance`;
-    return {
-      href: sessionId ? `${base}?sessionId=${encodeURIComponent(sessionId)}` : base,
-      label: '開啟點名',
-    };
+    return academicDestination(
+      sessionId ? `${base}?sessionId=${encodeURIComponent(sessionId)}` : base,
+      '開啟點名',
+    );
   }
   if (notification.type === 'assignment_submission') {
     const courseId = safeNoticeId(data.groupId) || safeNoticeId(data.courseId);
     if (!courseId) return null;
     const assignmentId = safeNoticeId(data.assignmentId);
     const href = assignmentId
-      ? `/teacher/course/${encodeURIComponent(courseId)}?assignmentId=${encodeURIComponent(assignmentId)}`
+      ? teacherSubmissionListHref(courseId, assignmentId)
       : `/teacher/course/${encodeURIComponent(courseId)}`;
-    return { href, label: '查看待批改繳交' };
+    return academicDestination(href, '查看待批改繳交');
   }
   if (notification.type === 'leave') {
     const requestId = parseLeaveRequestId(data.leaveRequestId) || parseLeaveRequestId(data.requestId);
@@ -705,10 +922,10 @@ export function notificationDestination(
       notification.data,
       notification.type === 'feedback' ? 'assignment' : notification.type,
     );
-    if (work) return { href: work, label: courseWorkOpenLabel(work) };
+    if (work) return academicDestination(work, courseWorkOpenLabel(work));
     const course = courseHrefFromData(notification.data);
-    if (course) return { href: course, label: courseWorkOpenLabel(course) };
-    return { href: '/grades?tab=feedback', label: '查看課業成績與回饋' };
+    if (course) return academicDestination(course, courseWorkOpenLabel(course));
+    return academicDestination('/grades?tab=feedback', '查看課業成績與回饋');
   }
   if (notification.type === 'message') {
     const conversationId = data.conversationId;
@@ -717,14 +934,14 @@ export function notificationDestination(
       !conversationId.includes('/') &&
       conversationId !== '.' &&
       conversationId !== '..'
-      ? { href: `/dms/${encodeURIComponent(conversationId)}`, label: '開啟對話' }
+      ? { href: `/dms/${encodeURIComponent(conversationId)}${schoolSearch}`, label: '開啟對話' }
       : null;
   }
   if (isAssignmentNotificationType(notification.type) || isMaterialNotificationType(notification.type)) {
     const href =
       courseWorkHrefFromData(notification.data, notification.type) ||
       courseHrefFromData(notification.data);
-    if (href) return { href, label: courseWorkOpenLabel(href) };
+    if (href) return academicDestination(href, courseWorkOpenLabel(href));
   }
   return null;
 }

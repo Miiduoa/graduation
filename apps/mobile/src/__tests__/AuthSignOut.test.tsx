@@ -132,8 +132,8 @@ test.each(['u2', null])('a deletion logout for a former account performs no clea
   expect(clearAllOfflineData).not.toHaveBeenCalled();
   expect(clearUserScopedStorage).not.toHaveBeenCalled();
   expect(mockBeginReminderCleanup).not.toHaveBeenCalled();
-  expect(mockBeginPlanCleanup).not.toHaveBeenCalled();
   expect(mockEndReminderCleanup).not.toHaveBeenCalled();
+  expect(mockBeginPlanCleanup).not.toHaveBeenCalled();
   expect(clearMockAuthSession).not.toHaveBeenCalled();
   expect(clearTCSession).not.toHaveBeenCalled();
   expect(clearOwnedPuCampusSessions).not.toHaveBeenCalled();
@@ -275,32 +275,6 @@ test('failed Agent reminder cleanup is surfaced yet releases the sign-out fence'
   warning.mockRestore();
 });
 
-test('sign-out waits for pending saved-plan writes to be fenced and removed', async () => {
-  const pending = deferred();
-  mockBeginPlanCleanup.mockReturnValueOnce(pending.promise);
-  render(<AuthProvider><Probe /></AuthProvider>);
-  await act(async () => undefined);
-  const outcome = auth.signOut('u1');
-  expect(mockBeginPlanCleanup).toHaveBeenCalledTimes(1);
-  expect(signOut).not.toHaveBeenCalled();
-  await act(async () => { pending.resolve(); await outcome; });
-  expect(signOut).toHaveBeenCalledTimes(1);
-  expect(mockEndPlanCleanup).toHaveBeenCalledTimes(1);
-});
-
-test('saved-plan cleanup failure reports incomplete cleanup and releases its fence', async () => {
-  mockBeginPlanCleanup.mockRejectedValueOnce(new Error('Unable to remove saved plans'));
-  render(<AuthProvider><Probe /></AuthProvider>);
-  await act(async () => undefined);
-  const warning = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-  await act(async () => auth.signOut('u1'));
-  expect(signOut).toHaveBeenCalledTimes(1);
-  expect(warning).toHaveBeenCalledWith('[auth] Some cleanup operations failed:',
-    expect.arrayContaining([expect.objectContaining({ message: 'Unable to remove saved plans' })]));
-  expect(mockEndPlanCleanup).toHaveBeenCalledTimes(1);
-  warning.mockRestore();
-});
-
 test('sign-out immediately rejects an in-flight raw AI read while cleanup is still pending', async () => {
   const cleanup = deferred();
   jest.mocked(clearAllCache).mockReturnValueOnce(cleanup.promise);
@@ -344,4 +318,30 @@ test('sign-out immediately rejects an in-flight raw AI read while cleanup is sti
 
   await act(async () => { cleanup.resolve(); await signingOut; });
   expect(signOut).toHaveBeenCalledTimes(1);
+});
+
+test('sign-out waits for pending saved-plan writes to be fenced and removed', async () => {
+  const pending = deferred();
+  mockBeginPlanCleanup.mockReturnValueOnce(pending.promise);
+  render(<AuthProvider><Probe /></AuthProvider>);
+  await act(async () => undefined);
+  const outcome = auth.signOut('u1');
+  expect(mockBeginPlanCleanup).toHaveBeenCalledTimes(1);
+  expect(signOut).not.toHaveBeenCalled();
+  await act(async () => { pending.resolve(); await outcome; });
+  expect(signOut).toHaveBeenCalledTimes(1);
+  expect(mockEndPlanCleanup).toHaveBeenCalledTimes(1);
+});
+
+test('saved-plan cleanup failure reports incomplete cleanup and releases its fence', async () => {
+  mockBeginPlanCleanup.mockRejectedValueOnce(new Error('Unable to remove saved plans'));
+  render(<AuthProvider><Probe /></AuthProvider>);
+  await act(async () => undefined);
+  const warning = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  await act(async () => auth.signOut('u1'));
+  expect(signOut).toHaveBeenCalledTimes(1);
+  expect(warning).toHaveBeenCalledWith('[auth] Some cleanup operations failed:',
+    expect.arrayContaining([expect.objectContaining({ message: 'Unable to remove saved plans' })]));
+  expect(mockEndPlanCleanup).toHaveBeenCalledTimes(1);
+  warning.mockRestore();
 });

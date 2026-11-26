@@ -36,7 +36,7 @@ jobs:
       run:
         working-directory: backend/ai-server
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -45,7 +45,7 @@ jobs:
       - name: Install native MLX and NumPy candidate versions
         run: |
           python -m pip install --upgrade pip
-          python -m pip install 'numpy==2.5.4' 'mlx-lm==0.32.2' 'python-dotenv>=1.2.2' 'PyYAML>=6.0'
+          python -m pip install 'numpy==2.5.5' 'mlx-lm==0.32.2' 'python-dotenv>=1.2.2' 'PyYAML>=6.0'
           python -m pip check
       - name: Verify Apple Silicon tensor and Campus One LoRA CLI
         run: python tests/mlx_lora_compat_smoke.py

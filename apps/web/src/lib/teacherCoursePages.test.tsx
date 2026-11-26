@@ -8,6 +8,9 @@ vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }
 vi.mock('@/components/teaching/TeacherAssignments', () => ({
   TeacherAssignments: () => <div>教師作業管理</div>,
 }));
+vi.mock('@/lib/signInOptions', () => ({
+  useSignInOptions: () => ({ studentId: true, loading: false, error: false }),
+}));
 vi.mock('./useTeacherCourse', () => ({ useTeacherCourse: vi.fn() }));
 vi.mock('./pageContext', () => ({
   resolveSchoolPageContext: () => ({
@@ -120,4 +123,20 @@ it('does not render records or tool links while access is denied', async () => {
   expect(screen.getByRole('alert').textContent).toBe('沒有課程權限');
   expect(screen.queryByRole('link', { name: '課堂點名' })).toBeNull();
   expect(screen.queryByText('資料結構')).toBeNull();
+});
+
+it('returns a signed-out teacher to the notified assignment after school sign-in', async () => {
+  vi.mocked(useTeacherCourse).mockReturnValue({
+    state: null, refresh, authLoading: false, signedIn: false,
+  });
+  await act(async () => {
+    render(<TeacherCoursePage
+      params={Promise.resolve({ courseId: 'course-a' })}
+      searchParams={Promise.resolve({ schoolId: 'pu', assignmentId: 'hw-1' })}
+    />);
+  });
+  const link = screen.getByRole('link', { name: '用學校帳號登入' });
+  const login = new URL(link.getAttribute('href')!, 'https://campus.local');
+  expect(login.searchParams.get('returnUrl')).toBe('/teacher/course/course-a?schoolId=pu&assignmentId=hw-1');
+  expect(login.searchParams.get('reconnect')).toBe('school');
 });

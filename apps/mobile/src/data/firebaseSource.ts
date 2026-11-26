@@ -1,3 +1,5 @@
+import { postNuniWebFn } from '../services/nuniWebFn';
+import { assertPrivateFileNamespace, privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import type { DataSource } from './source';
 import { lostFoundSource } from './lostFoundSource';
@@ -5,6 +7,7 @@ import { createOrderThroughServer } from './orderSource';
 import { toPublicSchoolId } from './schoolIds';
 import type {
   Announcement,
+  Attachment,
   ActionQueueItem,
   Assignment,
   BusArrival,
@@ -922,6 +925,22 @@ export function asFirebaseCourseGrades(rows: Grade[]): Grade[] {
 
 // ===== Firebase DataSource 實作 =====
 
+// Older drafts store URLs directly. Reject unreadable entries rather than silently
+// dropping them when the student confirms the attachment list.
+function matchesReviewedAttachments(raw: unknown, expected: readonly unknown[]): boolean {
+  if (raw == null) return expected.length === 0;
+  if (!Array.isArray(raw) || raw.length !== expected.length) return false;
+  const metadata = ['id', 'name', 'type', 'size', 'mimeType'] as const;
+  return raw.every((entry, index) => {
+    const previous = expected[index];
+    const [path] = privateAttachmentPaths([entry]);
+    if (!path || path !== privateAttachmentPaths([previous])[0]) return false;
+    if (typeof entry === 'string' || typeof previous === 'string') return entry === previous;
+    const reviewed = previous as Partial<Attachment>;
+    return metadata.every(key => entry[key] === reviewed[key]);
+  });
+}
+
 export const firebaseSource: DataSource = {
   // ===== 公告 =====
   async listAnnouncements(schoolId, options) {
@@ -1752,25 +1771,20 @@ export const firebaseSource: DataSource = {
 
   // ===== 群組貼文 =====
   async listGroupPosts(groupId, options) {
-    try {
-      const rows = await fetchCollectionAtPath<GroupPost>(
-        buildGroupCollectionPath(groupId, 'posts'),
-        [orderBy('createdAt', 'desc')],
-        options,
-      );
-      if (rows.length > 0) {
-        return rows.map((row) => ({ ...row, groupId: row.groupId ?? groupId }));
-      }
-    } catch (error) {
-      console.warn('[firebaseSource] listGroupPosts canonical read failed:', error);
-    }
-
-    return fetchCollection<GroupPost>(
-      'groupPosts',
-      [where('groupId', '==', groupId), orderBy('createdAt', 'desc')],
-      undefined,
-      options,
-    );
+    const user = getAuthInstance().currentUser;
+    if (!user) throw new Error('請先登入');
+    const page = await postNuniWebFn<
+      { groupId: string; pageSize: number },
+      { posts: (Omit<GroupPost, 'createdAt'> & { createdAt: { seconds: number; nanoseconds: number } })[] }
+    >('listGroupDiscussionPage', {
+      groupId, pageSize: options?.limit ?? options?.pageSize ?? DEFAULT_PAGE_SIZE,
+    }, user.uid);
+    if (getAuthInstance().currentUser !== user) throw new Error('帳號已變更');
+    return page.posts.map((post) => ({
+      ...post,
+      groupId,
+      createdAt: new Date(post.createdAt.seconds * 1000 + post.createdAt.nanoseconds / 1e6).toISOString(),
+    }));
   },
 
   async getGroupPost(id, groupId = undefined) {
@@ -2047,12 +2061,16 @@ export const firebaseSource: DataSource = {
     return submissions[0] ?? null;
   },
 
-  async submitAssignment(data) {
+  async submitAssignment(data, reviewedDraftAttachments) {
     const userId = data.userId;
     const assignmentId = data.assignmentId;
     const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
     const content = data.content?.trim() ?? '';
-    if (!userId || !content || content.length > 20000) {
+    const reviewed = reviewedDraftAttachments !== undefined;
+    const attachments = data.attachments ?? [];
+    for (const attachment of attachments)
+      assertPrivateFileNamespace(attachment.url, `groups/${groupId}/assignments/${assignmentId}/submissions/${userId}`);
+    if (!userId || (!content && !data.attachments?.length) || content.length > 20000) {
       throw new Error('請輸入 1 至 20,000 字的作業內容。');
     }
     if (!groupId || !assignmentId) {
@@ -2107,6 +2125,9 @@ export const firebaseSource: DataSource = {
       if (existing.exists() && existing.data()?.submittedAt) {
         throw new Error('這份作業已有繳交紀錄，請重新整理確認。');
       }
+      if (reviewed && !matchesReviewedAttachments(existing.data()?.attachments, reviewedDraftAttachments)) {
+        throw new Error('草稿附件已變更或無法辨識，請重新核對後再繳交。');
+      }
       if (getAuthInstance().currentUser?.uid !== userId) {
         throw new Error('登入身分已變更，請重新開啟課程。');
       }
@@ -2117,6 +2138,7 @@ export const firebaseSource: DataSource = {
           groupId,
           assignmentId,
           content,
+          ...(reviewed || attachments.length ? { attachments } : {}),
           status: 'submitted',
           submittedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -2132,6 +2154,7 @@ export const firebaseSource: DataSource = {
     if (!receipt || receipt.userId !== userId || receipt.groupId !== groupId
       || receipt.assignmentId !== assignmentId || receipt.content !== content
       || receipt.status !== 'submitted' || !receipt.submittedAt
+      || (reviewed && !matchesReviewedAttachments(receipt.attachments, attachments))
       || parseTaipeiInstant(receipt.submittedAt) === null) {
       throw new Error('繳交結果尚未確認，請重新讀取紀錄，內容仍會保留。');
     }
@@ -2963,7 +2986,7 @@ export const firebaseSource: DataSource = {
   async createRepairRequest(data) {
     const resolvedSchoolId = await resolveUserSchoolId(data.userId, data.schoolId);
     if (!resolvedSchoolId) {
-      throw new Error('缺少 schoolId，無法建立報修單');
+      throw new Error('缺少 schoolId，無法存成報修備忘');
     }
 
     const submitRepairRequest = httpsCallable<
@@ -2994,12 +3017,12 @@ export const firebaseSource: DataSource = {
       throw new Error(
         payload.errorCode === 'verify_failed'
           ? '報修寫入後驗證失敗，請稍後到宿舍頁再試。'
-          : '建立報修單失敗，請改用宿舍頁面處理。',
+          : '無法存成報修備忘，請改用宿舍頁面處理。',
       );
     }
     const requestId = payload?.repairId ?? payload?.requestId;
     if (!requestId) {
-      throw new Error('建立報修單失敗');
+      throw new Error('無法存成報修備忘');
     }
 
     const row = await fetchDocumentAtPath<RepairRequest>(

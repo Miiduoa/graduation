@@ -13,13 +13,15 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
-  NODE_VERSION: '22.23.4'
+  NODE_VERSION: '22.23.5'
   PNPM_VERSION: '10'
 
 jobs:
   security-gates:
     name: Security Gates
-    runs-on: ubuntu-latest
+    # Process-level installer recovery must match the supported Ubuntu runtime
+    # used by every job that actually installs the browser and system packages.
+    runs-on: ubuntu-24.04
     services:
       public-cafeteria-postgres:
         image: postgres:17
@@ -92,8 +94,16 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
           node --test scripts/dependency-security-gate.test.cjs scripts/dependency-security-compatibility.test.mjs packages/shared/tests/postLoginRoles.test.cjs scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
-          node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-materials-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/nuni-merchant-source.test.mjs scripts/nuni-merchant-native-transport.test.mjs scripts/seed-cafeterias.test.cjs
+          node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-materials-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/nuni-merchant-source.test.mjs scripts/nuni-merchant-native-transport.test.mjs scripts/seed-cafeterias.test.cjs scripts/demo/seed-oral-exam.test.mjs
+          node --test scripts/demo/seed-account-demo.test.mjs
+          node --test scripts/test-env/tronclass-launcher.test.mjs scripts/test-env/seed.test.cjs
+          bash scripts/qa/browser/install-playwright.test.sh
+          python3 scripts/verify-android-page-sizes.test.py
+          bash scripts/qa/android-llama-cpu/run.sh
           python3 deploy/nuni-api/food-ordering/build_test.py
+          python3 scripts/platform-lost-found/prepare_test.py
+          python3 deploy/nuni-api/assistant-permissions/prepare_test.py
+          python3 deploy/nuni-api/assistant-permissions/prepare.py --verify-only
           node --test deploy/nuni-web-legacy/source.test.mjs deploy/nuni-web-legacy/build.test.mjs deploy/nuni-api/security/source.test.mjs
 
       - name: Test public cafeteria HTTP and PostgreSQL contracts
@@ -106,6 +116,14 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/public-cafeteria-test" --ignore-scripts --no-audit --no-fund fastify@5.10.0 pg@8.22.0 typescript@5.9.3 @types/node@22.20.5
           node scripts/test-public-cafeterias.mjs
           python3 -m unittest discover -s scripts/public-cafeterias -p '*_test.py'
+
+      - name: Test isolated Google account linking contracts
+        env:
+          GOOGLE_LINK_TEST_DATABASE_URL: postgresql://cafeteria_test:cafeteria_test_only@127.0.0.1:5432/cafeteria_test
+          GOOGLE_LINK_TEST_DEPS: ${{ runner.temp }}/public-cafeteria-test/node_modules
+        run: |
+          node --test deploy/nuni-api/account-linking/google-link-service.test.mjs deploy/nuni-api/account-linking/google-link-routes.test.mjs
+          node --test deploy/nuni-api/account-linking/google-link-postgres.ci.mjs
 
       - name: Test personal imports and course access against PostgreSQL
         env:
@@ -159,6 +177,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: nuni UI design checks
+        run: |
+          node --test scripts/ui-design-gate.test.mjs
+          node scripts/ui-design-gate.mjs --base HEAD^1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -183,6 +208,9 @@ jobs:
 
       - name: Test platform public Agent admission contracts
         run: node scripts/test-platform-public-agent.mjs
+
+      - name: Test TronClass contract privacy, retention and controlled acceptance
+        run: node --test scripts/tronclass/analyze-har.test.mjs scripts/tronclass/prepare-ttl-profile.test.cjs scripts/tronclass/acceptance.test.mjs
 
   test-mobile:
     name: Mobile Tests
@@ -288,7 +316,10 @@ jobs:
         run: node scripts/build-functions-shared.cjs
 
       - name: Test web server lifecycle
-        run: node --test deploy/web/start.test.cjs deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs deploy/web/release-safety.test.mjs
+        run: node --test deploy/web/start.test.cjs deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs deploy/web/release-safety.test.mjs deploy/web/career-release-gate.test.mjs
+
+      - name: Validate paired course-study comparison evidence
+        run: node --test scripts/qa/course-study/compare.test.mjs
 
       - name: Test shared ordering contracts
         run: pnpm --filter @campus/shared test:food
@@ -296,15 +327,18 @@ jobs:
       - name: Test shared school catalogs and personal imports
         run: node --test --test-concurrency=1 packages/shared/tests/schools.test.cjs packages/shared/tests/ncnuCourseSchedule.test.cjs packages/shared/tests/nthuCourseSchedule.test.cjs packages/shared/tests/personalImportCloud.test.cjs
 
+      - name: Test assistant services, academic data and verified execution contracts
+        run: node --test packages/shared/tests/assistantServices.test.cjs packages/shared/tests/assistantTaskPlan.test.cjs packages/shared/tests/assistantRoleWorkflows.test.cjs packages/shared/tests/assistantRoleProfiles.test.cjs packages/shared/tests/assistantRoleTasks.test.cjs packages/shared/tests/assistantWorkSessionIntent.test.cjs packages/shared/tests/publicCourseWorkSessionRouting.test.cjs packages/shared/tests/importedAcademicSummary.test.cjs packages/shared/tests/assistantExecution.test.cjs packages/shared/tests/personalImportAcknowledgement.test.cjs
+
       - name: Test PDF and Excel readers with real document fixtures
         run: pnpm test:documents
 
-      - name: Run PostgreSQL attachment race and submission regressions
-        # The two suites otherwise silently skip 13 PostgreSQL-backed cases.
+      - name: Run PostgreSQL attachment and assistant permission regressions
+        # Include real multi-connection CAS and account-closure races for AI settings.
         env:
           NUNI_TEST_POSTGRES_PORT: '5432'
           PGPASSWORD: attachment_test_only
-        run: pnpm --filter web exec vitest run src/lib/nuni/assignmentFileStore.postgres.test.ts src/lib/nuni/assignmentFileService.test.ts --reporter=verbose
+        run: pnpm --filter web exec vitest run src/lib/nuni/assignmentFileStore.postgres.test.ts src/lib/nuni/assignmentFileService.test.ts src/lib/nuni/platformAssistantPermissionStore.database.test.ts --reporter=verbose
 
       - name: Run web tests
         # vitest 4 不接受 --ci flag（vitest run 已預設 CI-friendly）；
@@ -424,7 +458,7 @@ jobs:
 
       - name: Run Expo Doctor
         working-directory: apps/mobile
-        run: npx expo-doctor
+        run: npx expo-doctor@1.21.5
 
       - name: Bundle mobile JavaScript
         working-directory: apps/mobile
@@ -452,8 +486,8 @@ jobs:
             }
           }
 
-          if (config.build?.base?.node !== '22.23.4') {
-            throw new Error('EAS base Node must be 22.23.4');
+          if (config.build?.base?.node !== '22.23.5') {
+            throw new Error('EAS base Node must be 22.23.5');
           }
           if (config.build?.base?.pnpm !== '10.28.2') {
             throw new Error('EAS base pnpm must be 10.28.2');
@@ -470,7 +504,9 @@ jobs:
 
   build-web:
     name: Build Web
-    runs-on: ubuntu-latest
+    # Match the OS supported by the pinned Chromium tooling used by browser checks.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     needs: [security-gates, lint-and-typecheck]
     steps:
       - name: Checkout
@@ -536,6 +572,40 @@ jobs:
           test -s /tmp/campus-service-directory.html
           test "$(docker exec campus-one-web-ci id -u)" != "0"
           test -z "$(docker exec campus-one-web-ci find /app -name '.env' -o -name '.env.*' -o -name '*serviceAccount*.json' -o -name '*.pem' -o -name '*.key')"
+
+      - name: Setup Python for TronClass browser checks
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-1.57.0
+          restore-keys: |
+            ${{ runner.os }}-admin-playwright-1.57.0
+            ${{ runner.os }}-playwright-
+      - name: Install TronClass browser test tools
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          python -m pip install playwright==1.57.0
+          bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk
+
+      - name: Verify built TronClass workspace in Chromium
+        env:
+          TRONCLASS_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python scripts/tronclass/check-browser.py
+
+      - name: Preserve TronClass browser screenshots and results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tronclass-browser
+          path: artifacts/tronclass-browser
+          if-no-files-found: ignore
+          retention-days: 7
 
   deploy-functions:
     name: Deploy Firebase backend

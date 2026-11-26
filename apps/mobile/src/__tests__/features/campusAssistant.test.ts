@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { resumeOpenedCoursework } from '../../features/nuniCourseworkSnapshot';
 import type { CourseworkRead, CourseworkChoice } from '../../features/nuniCourseworkFollowUp';
 import type { NuniClassCoursework } from '../../services/nuniClassCoursework';
@@ -31,7 +32,8 @@ jest.mock('../../services/localLLMInference', () => ({
   getDefaultLocalLlmModelId: () => 'qwen2.5-0.5b',
 }));
 jest.mock('../../services/onDeviceSchoolContext', () => ({
-  collectOnDeviceSchoolContext: jest.fn(async ({ schoolId }: { schoolId: string }) => ({
+  collectOnDeviceSchoolContext: jest.fn(async ({ schoolId, uid }: { schoolId: string; uid: string }) => ({
+    ownerUid: uid,
     checkedAt: new Date().toISOString(),
     schoolId, schoolName: '靜宜大學',
     timetable: { source: 'not-available', updatedAt: null, courses: [] },
@@ -85,6 +87,70 @@ test('forwards selected school name without treating browsing as authorization',
     context: {
       schoolId: 'pu',
       schoolName: '靜宜大學',
+      screen: 'campus-assistant',
+      locale: 'zh-TW',
+      timezone: 'Asia/Taipei',
+    },
+  });
+});
+test.each(['device', 'campus'] as const)('keeps ordinary history but excludes other-campus public lookups from the %s model', async (mode) => {
+  const ordinary = [
+    { role: 'user' as const, content: '幫我整理閱讀計畫' },
+    { role: 'assistant' as const, content: '你可以先列出閱讀目標。' },
+  ];
+  const question = { role: 'user' as const, content: '請根據剛才的閱讀規劃，說明如何安排休息' };
+  // These turns exceed the old raw 20-message window: filtering must not let
+  // public lookups evict the ordinary conversation the next question refers to.
+  const publicTurns = Array.from({ length: 11 }, (_, index) => [
+    { role: 'user' as const, content: `查${index % 2 ? '清大' : '暨大'}的外校課程${index}` },
+    { role: 'assistant' as const, content: `外校公開課程${index}，不代表個人選課。`, tool: 'public-course-catalog' as const },
+  ]).flat();
+  const history = [...ordinary, ...publicTurns, question];
+  const original = JSON.stringify(history);
+  await askCampusAssistant({ ...input(), mode, messages: history });
+  const expected = [...ordinary, question];
+  if (mode === 'campus') {
+    expect(mockCallable.mock.calls[0][0].messages).toEqual(expected);
+    expect(mockCallable.mock.calls[0][0].context.schoolId).toBe('pu');
+    expect(localLLM.generate).not.toHaveBeenCalled();
+  } else {
+    expect(localLLM.generate).toHaveBeenCalledTimes(1);
+    expect(localLLM.generate.mock.calls[0][0].messages.slice(1)).toEqual(expected);
+    expect(mockCallable).not.toHaveBeenCalled();
+  }
+  expect(JSON.stringify(history)).toBe(original);
+});
+
+test('an invalid history ending in a public reply cannot revive its preceding question as a new request', async () => {
+  await expect(askCampusAssistant({ ...input(), messages: [
+    { role: 'user', content: '先前的一般問題' },
+    { role: 'assistant', content: '先前的一般回答' },
+    { role: 'user', content: '查清大資料庫課程' },
+    { role: 'assistant', content: '清大公開課程', tool: 'public-course-catalog' },
+  ] })).rejects.toThrow('Missing question');
+  expect(mockCallable).not.toHaveBeenCalled();
+  expect(localLLM.generate).not.toHaveBeenCalled();
+});
+
+test('forwards a conversation sessionId on the callable context', async () => {
+  await askCampusAssistant({ ...input(), sessionId: '  stable-session  ' });
+  expect(mockCallable).toHaveBeenCalledWith({
+    messages: [{ role: 'user', content: '查公告' }],
+    context: {
+      schoolId: 'pu',
+      screen: 'campus-assistant',
+      locale: 'zh-TW',
+      timezone: 'Asia/Taipei',
+      sessionId: 'stable-session',
+    },
+  });
+});
+test.each(['', '   '])('does not invent or send an empty sessionId %p', async (sessionId) => {
+  await askCampusAssistant({ ...input(), sessionId });
+  expect(mockCallable).toHaveBeenCalledWith({
+    messages: [{ role: 'user', content: '查公告' }],
+    context: {
+      schoolId: 'pu',
       screen: 'campus-assistant',
       locale: 'zh-TW',
       timezone: 'Asia/Taipei',
@@ -221,6 +287,7 @@ test('an offline campus data question resolves without an LLM or Firebase callab
 test('offline timetable read works without downloading a GGUF and never invokes a cloud model', async () => {
   const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
   jest.mocked(collectOnDeviceSchoolContext).mockResolvedValueOnce({
+    ownerUid: 'A',
     checkedAt: '2026-10-26T01:00:00Z',
     schoolId: 'pu',
     schoolName: '靜宜大學',
@@ -357,7 +424,7 @@ test('verified multi-step study plan runs on the phone without GGUF or cloud cal
   const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
   const checkedAt = new Date().toISOString();
   jest.mocked(collectOnDeviceSchoolContext).mockResolvedValueOnce({
-    checkedAt,
+    ownerUid: 'A', checkedAt,
     schoolId: 'pu', schoolName: '靜宜大學',
     timetable: {
       source: 'saved-device-copy',
@@ -406,7 +473,7 @@ test('offline plan never uses an expired snapshot belonging to another account',
   const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
   const checkedAt = new Date().toISOString();
   jest.mocked(collectOnDeviceSchoolContext).mockResolvedValueOnce({
-    checkedAt, schoolId: 'pu', schoolName: '靜宜大學',
+    ownerUid: 'A', checkedAt, schoolId: 'pu', schoolName: '靜宜大學',
     timetable: {
       source: 'saved-device-copy', updatedAt: checkedAt,
       courses: [{ name: '本人的資料庫課程', day: 1, start: 1, end: 2 }],
@@ -578,7 +645,7 @@ const classOccurrence = {
 function withUpcoming(classes: typeof classOccurrence[] | undefined, checkedAt = '2026-11-05T01:55:00Z') {
   const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
   collectOnDeviceSchoolContext.mockResolvedValueOnce({
-    schoolId: 'pu', checkedAt,
+    ownerUid: 'A', schoolId: 'pu', checkedAt,
     timetable: { source: 'saved-device-copy', updatedAt: checkedAt, courses: [], nextClasses: classes },
   });
 }
@@ -654,7 +721,7 @@ test('a room follow-up from another scope never asks the local store to resolve 
 function withCurrent(classes: typeof classOccurrence[] | undefined) {
   const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
   collectOnDeviceSchoolContext.mockResolvedValueOnce({
-    schoolId: 'pu', checkedAt: '2026-11-05T03:30:00Z',
+    ownerUid: 'A', schoolId: 'pu', checkedAt: '2026-11-05T03:30:00Z',
     timetable: { source: 'saved-device-copy', updatedAt: null, courses: [], currentClasses: classes },
   });
 }
@@ -758,7 +825,7 @@ describe('finding time between classes on the phone', () => {
     platformTimetable: { accountId: 'student', isCurrent: () => true } };
   const ask = (content: string) => ({ role: 'user' as const, content });
   const readContext = jest.mocked(require('../../services/onDeviceSchoolContext').collectOnDeviceSchoolContext);
-  const snapshot = (day: string, start: string, end: string) => ({ schoolId: 'pu', checkedAt,
+  const snapshot = (day: string, start: string, end: string) => ({ ownerUid: 'A', schoolId: 'pu', checkedAt,
     timetable: { source: 'saved-device-copy', updatedAt: checkedAt, courses: [], classGaps: [{
       startAt: Date.parse(day + 'T' + start + ':00+08:00'), endAt: Date.parse(day + 'T' + end + ':00+08:00'),
     }] } });
@@ -891,6 +958,14 @@ describe('finding time between classes on the phone', () => {
     const pending = askCampusAssistant({ ...request, messages: [ask('今天有哪些空堂？')] });
     mockUid = 'B';
     await expect(pending).rejects.toMatchObject({ code: 'session-changed' });
+  });
+
+  test('rejects an offline class-gap snapshot from a different Firebase account', async () => {
+    readContext.mockResolvedValueOnce({ ...snapshot('2026-11-06', '10:00', '15:00'), ownerUid: 'B' });
+    const reply = await askCampusAssistant({ ...request, messages: [ask('今天有哪些空堂？')] });
+    expect(reply.content).not.toContain('10:00–15:00');
+    expect(reply.classGapRead).toBeUndefined();
+    expect(mockCallable).not.toHaveBeenCalled();
   });
 
   test('requires a signed-in timetable owner before reading a private schedule', async () => {
@@ -1496,4 +1571,32 @@ test('offline school contacts use only the selected directory without model, tim
   expect(collectOnDeviceSchoolContext).not.toHaveBeenCalled();
   expect(localLLM.generate).not.toHaveBeenCalled();
   expect(mockCallable).not.toHaveBeenCalled();
+});
+
+test('answers a school account from its saved calendar in campus mode and omits the private turn from later model history', async () => {
+  const { personalImportStorageKey } = require('../../services/personalImports');
+  const query = { role: 'user' as const, content: '今天的課表和行程有衝突嗎？' };
+  const key = personalImportStorageKey({ owner: 'firebase:A', schoolId: 'nchu' });
+  const school = { uid: 'A', schoolId: 'nchu' };
+  const base = { schoolId: 'nchu', academicYear: '115', semester: '1', importedAt: '2026-11-24T00:00:00Z',
+    batchId: 'saved', source: { type: 'paste', rawText: '', line: 1 } };
+  jest.useFakeTimers({ now: new Date('2026-11-24T08:30:00+08:00') });
+  try {
+    await AsyncStorage.setItem(key, JSON.stringify({ version: 1, batches: [], records: [
+      { ...base, kind: 'timetable', id: 'class', title: '資料庫', dayOfWeek: 2, startTime: '09:00', endTime: '11:00' },
+      { ...base, kind: 'events', id: 'exact-id', title: '私人討論', date: '2026-11-24', startTime: '10:00', endTime: '12:00' },
+    ] }));
+    const reply = await askCampusAssistant({ ...input(), scope: school, messages: [query] });
+    expect(reply.content).toContain('10:00–11:00');
+    expect(reply).toMatchObject({ tool: 'class-calendar', source: 'device', hasActions: false,
+      classCalendarEvent: { owner: 'firebase:A', schoolId: 'nchu', eventId: 'exact-id', title: '私人討論' } });
+    expect(mockCallable).not.toHaveBeenCalled();
+    expect(localLLM.generate).not.toHaveBeenCalled();
+    const next = { role: 'user' as const, content: '學校的公告在哪裡查' };
+    await askCampusAssistant({ ...input(), scope: school, messages: [query, { ...reply, role: 'assistant' }, next] });
+    expect(mockCallable.mock.calls[0][0].messages).toEqual([next]);
+  } finally {
+    await AsyncStorage.removeItem(key);
+    jest.useRealTimers();
+  }
 });

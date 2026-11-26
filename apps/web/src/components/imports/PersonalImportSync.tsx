@@ -26,7 +26,7 @@ export function PersonalImportSyncBridge() {
   const { owner, schoolId } = scope;
   const nuni = useOptionalNuniSession();
   const identity = nuni?.session;
-  useEffect(() => {
+  useLayoutEffect(() => {
     const scope = { owner, schoolId };
     if (
       loading ||

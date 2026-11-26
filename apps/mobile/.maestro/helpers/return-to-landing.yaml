@@ -7,6 +7,14 @@ appId: ${APP_ID}
     commands:
       - runFlow:
           when:
+            platform: Android
+            notVisible:
+              id: login-landing
+          commands:
+            - back
+      - runFlow:
+          when:
+            platform: iOS
             notVisible:
               id: login-landing
           commands:

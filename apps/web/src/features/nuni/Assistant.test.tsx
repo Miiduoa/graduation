@@ -1,22 +1,29 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { Assistant } from './Assistant';
+import { browserRequest } from './Session';
+import { personalImportsStorageKey, readPersonalImports } from '@/lib/personalImports';
+import { createAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
+import type { V2Card } from './assistant/types';
+import { readAssistantExecutionJournal, saveAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
 const state = vi.hoisted(() => ({
-  context: 'session-a',
+  context: 'a'.repeat(43),
   school: 'pu',
   pending: false,
   authenticated: true,
+  query: '',
 }));
 vi.mock('./Session', () => ({
+  browserRequest: vi.fn(),
   useNuniSession: () => ({
     loading: false,
     error: '',
     pendingLogout: state.pending,
-    session: state.authenticated ? { context: state.context } : null,
+    session: state.authenticated ? { context: state.context, platformAccountId: 'alice' } : null,
   }),
 }));
-vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams() }));
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(state.query) }));
 vi.mock('@/lib/useCampusBrowseContext', () => ({
   useCampusBrowseContext: () => ({ status: 'ready', schoolId: state.school }),
 }));
@@ -24,17 +31,406 @@ vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main>,
 }));
 beforeEach(() => {
+  vi.mocked(browserRequest).mockReset();
   Element.prototype.scrollIntoView = vi.fn();
+  localStorage.clear();
+  sessionStorage.clear();
+  let lock = Promise.resolve();
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+    request: (_key: string, action: () => unknown) => {
+      const task = lock.then(action);
+      lock = task.then(() => undefined, () => undefined);
+      return task;
+    },
+  } });
 });
 afterEach(() => {
   vi.unstubAllGlobals();
-  state.context = 'session-a';
+  state.context = 'a'.repeat(43);
   state.school = 'pu';
   state.pending = false;
   state.authenticated = true;
+  state.query = '';
 });
 const json = (value: object) =>
   new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
+function publicCatalog(schoolId: 'ncnu' | 'nthu', changes: Record<string, unknown> = {}) {
+  return json({
+    schoolId,
+    sourceUrl: schoolId === 'ncnu'
+      ? 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall'
+      : 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json',
+    fetchedAt: '2026-11-07T08:00:00.000Z',
+    operation: { id: `${schoolId}.courses.search`, version: 1, responseSchemaVersion: 1, access: 'anonymous-public' },
+    courses: [{
+      code: 'CS430000', section: '01', title: '公開資料庫課程', department: '資訊系',
+      teacher: '公開授課老師', credits: '3', time: '一34', room: '資電館101', semester: '1151',
+    }],
+    truncated: false,
+    ...changes,
+  });
+}
+
+
+const calendarCard = (id = 'calendar-event-1', title = '精確作業安排', startTime = '20:00'): V2Card => ({
+  tool: 'propose_personal_event', token: 'token-' + id, mutationId: id, schoolId: 'pu',
+  destination: '個人行事曆', args: { title, date: '2030-11-04', allDay: false, startTime,
+    endTime: startTime === '20:00' ? '21:00' : '22:00' },
+});
+const receiptFor = (card: V2Card, replay = false, revision = 1) => createAssistantCalendarReceipt({
+  schoolId: card.schoolId, mutationId: card.mutationId, event: card.args, storage: 'synced',
+  revision, verifiedAt: '2026-11-07T11:00:00.000Z', replay,
+  record: { ...card.args, id: card.mutationId, batchId: card.mutationId, kind: 'events',
+    schoolId: card.schoolId, academicYear: '', semester: '', importedAt: '2026-11-07T10:59:00.000Z',
+    source: { type: 'paste', line: 1, rawText: '', name: '助理確認' } },
+});
+const checkFor = (card: V2Card, status: 'absent' | 'conflict' | 'revoked', retryable = false) => ({
+  version: 1, operation: 'calendar.create', status, schoolId: card.schoolId,
+  mutationId: card.mutationId, storage: 'synced', revision: 0,
+  checkedAt: '2026-11-07T11:00:00.000Z', authorizationValid: retryable, retryable,
+  ...(status === 'revoked' ? { alreadyRevoked: false } : {}),
+});
+
+async function askForPlan() {
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '幫我排作業' } });
+  fireEvent.click(screen.getByText('送出'));
+  return question;
+}
+
+it.each(['ASSISTANT_PERMISSION_DENIED', 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE'])(
+  'shows permission recovery and only reads back a calendar result after %s', async (code) => {
+    const card = calendarCard();
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+      if (url.endsWith('confirm')) return new Response(JSON.stringify({ error: code }), {
+        status: code === 'ASSISTANT_PERMISSION_DENIED' ? 403 : 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (url.endsWith('reconcile')) return json(checkFor(card, 'absent'));
+      return json({ answer: '請核對這筆行程', steps: [], cards: [card] });
+    }));
+    render(<Assistant />);
+    await askForPlan();
+    fireEvent.click(await screen.findByText('確認'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('這次沒有執行'));
+    await waitFor(() => expect(calls.filter((path) => path.endsWith('reconcile'))).toHaveLength(1));
+    expect(screen.getByRole('link', { name: '設定 AI 代辦權限' }).getAttribute('href')).toBe('/settings?section=assistant');
+    expect(calls.filter((path) => path.endsWith('confirm'))).toHaveLength(1);
+    expect(screen.queryByText('已核對並加入個人行事曆')).toBeNull();
+  },
+);
+
+it('v2 opens a scoped service while the provider is unavailable and without model consent', async () => {
+  const fetch = vi.fn(async () => json({ enabled: true, ready: false, version: 2 }));
+  vi.stubGlobal('fetch', fetch);
+  state.school = 'nthu';
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '開啟助理權限' } });
+  expect((screen.getByText('送出') as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByText('送出'));
+  expect((await screen.findByRole('link', { name: /開啟助理權限/ })).getAttribute('href'))
+    .toBe('/settings?section=assistant&schoolId=nthu');
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+});
+
+it.each([1, 2])('opens the public career page without a model request or application in assistant version %i', async (version) => {
+  const fetch = vi.fn(async () => json({ enabled: true, ready: false, version }));
+  vi.stubGlobal('fetch', fetch);
+  state.school = 'nthu';
+  render(<Assistant />);
+  fireEvent.change(await screen.findByLabelText('問題'), { target: { value: '打開校內工讀頁' } });
+  fireEvent.click(screen.getByText('送出'));
+  const career = await screen.findByRole('link', { name: /開啟職涯/ });
+  expect(career.getAttribute('href')).toBe('/career?schoolId=nthu');
+  expect(career.textContent).toContain('送出需在頁面確認');
+  expect(career.textContent).toContain('外部申請依原始公告另行辦理');
+  expect(screen.queryByText(/已(?:完成|申請|送出).*工讀|工讀申請成功/)).toBeNull();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(browserRequest).not.toHaveBeenCalled();
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+});
+
+function savePrivateLesson() {
+  localStorage.setItem(personalImportsStorageKey({ owner: 'platform:alice', schoolId: 'pu' }), JSON.stringify({
+    version: 1, records: [{ id: 'direct-class', kind: 'timetable', title: '實際資料庫課程',
+      schoolId: 'pu', academicYear: '115', semester: '1', dayOfWeek: 4,
+      startTime: '09:10', endTime: '10:00', location: '主顧 203',
+      batchId: 'saved', importedAt: '2026-11-10T00:00:00Z',
+      source: { type: 'paste', line: 1, rawText: '不外送的課表原文' } }],
+  }));
+}
+
+it.each([1, 2])('answers saved classes without provider consent in assistant version %i', async (version) => {
+  savePrivateLesson();
+  const fetch = vi.fn(async () => json({ enabled: true, ready: false, version }));
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  fireEvent.change(await screen.findByLabelText('問題'), { target: { value: '2026-11-12有哪些課？' } });
+  fireEvent.click(screen.getByText('送出'));
+  expect(await screen.findByText(/實際資料庫課程/)).toBeTruthy();
+  expect(screen.getByText(/09:10–10:00/)).toBeTruthy();
+  expect(screen.getByText(/主顧 203/)).toBeTruthy();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+});
+
+it('keeps direct personal answers out of later model requests and clears them after a campus change', async () => {
+  savePrivateLesson();
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json({ answer: '公開餐廳資訊', steps: [], cards: [] });
+  }));
+  const view = render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '2026-11-12有哪些課？' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText(/實際資料庫課程/);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '附近餐廳有哪些' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('公開餐廳資訊');
+  expect(bodies[0].history).toEqual([]);
+  expect(JSON.stringify(bodies)).not.toMatch(/實際資料庫課程|不外送的課表原文/);
+  state.school = 'nthu';
+  view.rerender(<Assistant />);
+  await screen.findByLabelText('問題');
+  expect(screen.queryByText(/實際資料庫課程/)).toBeNull();
+});
+
+it('does not send server reader results or their question in a subsequent model history', async () => {
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json(bodies.length === 1
+      ? { answer: '[同步私人課程](/settings) 09:10–10:00', dataRead: true,
+        steps: [{ name: 'get_schedule', status: 'ok', summary: '已查詢' }], cards: [] }
+      : { answer: '公開餐廳回覆', steps: [], cards: [] });
+  }));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '今天有哪些課？' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText(/同步私人課程/);
+  expect(screen.queryByRole('link', { name: '同步私人課程' })).toBeNull();
+  fireEvent.change(question, { target: { value: '附近餐廳有哪些' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('公開餐廳回覆');
+  expect(bodies[1].history).toEqual([]);
+  expect(JSON.stringify(bodies[1])).not.toMatch(/同步私人課程|今天有哪些課/);
+});
+
+it('discards an in-flight direct coursework result after the session changes', async () => {
+  let resolve!: (value: unknown) => void;
+  vi.mocked(browserRequest).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  vi.stubGlobal('fetch', vi.fn(async () => json({ enabled: true, ready: false, version: 2 })));
+  const view = render(<Assistant />);
+  fireEvent.change(await screen.findByLabelText('問題'), { target: { value: '我有哪些未交作業？' } });
+  fireEvent.click(screen.getByText('送出'));
+  await waitFor(() => expect(browserRequest).toHaveBeenCalledWith('class-workspaces', state.context, undefined));
+  state.context = 'b'.repeat(43);
+  view.rerender(<Assistant />);
+  resolve({ workspaces: [] });
+  await screen.findByLabelText('問題');
+  expect(screen.queryByText(/目前沒有可核對的學生課程/)).toBeNull();
+  expect(screen.queryByText('我有哪些未交作業？')).toBeNull();
+});
+
+it('finishes capability detection before mounting an editable conversation', async () => {
+  let resolve!: (value: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((done) => { resolve = done; })));
+  render(<Assistant />);
+  expect(screen.queryByLabelText('問題')).toBeNull();
+  expect(screen.getByText('正在確認助理是否啟用…')).toBeTruthy();
+  resolve(json({ enabled: true, ready: true, version: 2 }));
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '保留輸入草稿' } });
+  expect((screen.getByLabelText('問題') as HTMLTextAreaElement).value).toBe('保留輸入草稿');
+});
+
+function saveDeviceTimetable() {
+  localStorage.setItem('campus-one-personal-timetable:platform:alice:pu', JSON.stringify({
+    schoolId: 'pu', updatedAt: '2026-11-10T10:00:00.000Z', shareWithFriends: false,
+    meta: { year: '115', semester: '1' },
+    courses: [{ id: 'device-only-course', name: '裝置專用課程', day: 4, start: 1, end: 2,
+      room: '裝置教室 305', teacher: '', color: 'blue' }],
+  }));
+}
+
+it('v2 answers a saved timetable with class times and room while the provider is unavailable', async () => {
+  saveDeviceTimetable();
+  const fetch = vi.fn(async () => json({ enabled: true, ready: false, version: 2 }));
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '2026-11-12有什麼課' } });
+  expect((screen.getByText('送出') as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByText('送出'));
+  expect(await screen.findByText(/08:10–10:00.*裝置專用課程.*裝置教室 305/)).toBeTruthy();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+});
+
+it('v2 renders local class names as plain text instead of navigation or Markdown', async () => {
+  saveDeviceTimetable();
+  const key = 'campus-one-personal-timetable:platform:alice:pu';
+  const value = JSON.parse(localStorage.getItem(key)!);
+  value.courses[0].name = '[假導覽](/settings) **私人課名**';
+  localStorage.setItem(key, JSON.stringify(value));
+  vi.stubGlobal('fetch', vi.fn(async () => json({ enabled: true, ready: false, version: 2 })));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '2026-11-12有什麼課' } });
+  fireEvent.click(screen.getByText('送出'));
+  expect(await screen.findByText(/\[假導覽\]\(\/settings\) \*\*私人課名\*\*/)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '假導覽' })).toBeNull();
+});
+
+it('v2 keeps local timetable answers out of later cloud history and clears them on school changes', async () => {
+  saveDeviceTimetable();
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json({ answer: '已讀取校園餐廳資料', steps: [], cards: [] });
+  }));
+  const view = render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '2026-11-12有什麼課' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText(/裝置專用課程/);
+  expect(bodies).toHaveLength(0);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '附近餐廳有哪些' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('已讀取校園餐廳資料');
+  expect(bodies[0].history).toEqual([]);
+  expect(JSON.stringify(bodies)).not.toContain('裝置專用課程');
+  expect(JSON.stringify(bodies)).not.toContain('裝置教室');
+  state.school = 'ntpu';
+  view.rerender(<Assistant />);
+  await screen.findByLabelText('問題');
+  expect(screen.queryByText(/裝置專用課程/)).toBeNull();
+});
+
+it('v2 uses cloud reads for a timetable question only when local data is absent and consent is granted', async () => {
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json({ answer: '雲端課表查詢結果', steps: [], cards: [] });
+  }));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '我今天有什麼課' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText(/無法判定當天是否有課/);
+  expect(bodies).toHaveLength(0);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '我今天有什麼課' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('雲端課表查詢結果');
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0].consent).toBe(true);
+  expect(bodies[0].history).toEqual([]);
+});
+
+it('merges cloud calendar records with local receipts before answering and isolates them from model history', async () => {
+  const key = personalImportsStorageKey({ owner: 'platform:alice', schoolId: 'pu' });
+  const record = { id: 'local-receipt', kind: 'events', title: '本機行程', schoolId: 'pu',
+    academicYear: '', semester: '', date: '2026-11-12', allDay: false,
+    startTime: '18:00', endTime: '19:00', batchId: 'saved', importedAt: '2026-11-10T00:00:00Z',
+    source: { type: 'paste', line: 1, rawText: '來源原文' } };
+  const saved = JSON.stringify({ version: 1, records: [record] });
+  localStorage.setItem(key, saved);
+  vi.mocked(browserRequest).mockResolvedValueOnce({ schoolId: 'pu', revision: 2,
+    updatedAt: '2026-11-12T01:00:00Z', records: [record, { ...record, id: 'cloud-only', title: '雲端行程' }] });
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json({ answer: '公開餐廳資訊', steps: [], cards: [] });
+  }));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '2026-11-12有哪些行程？' } });
+  fireEvent.click(screen.getByText('送出'));
+  const answer = await screen.findByText(/雲端行程/);
+  expect(answer.textContent).toContain('本機行程');
+  expect(answer.textContent?.match(/｜本機行程/g)).toHaveLength(1);
+  expect(browserRequest).toHaveBeenCalledExactlyOnceWith('personal-imports/read', state.context, { schoolId: 'pu' });
+  expect(localStorage.getItem(key)).toBe(saved);
+  expect(bodies).toHaveLength(0);
+  fireEvent.change(question, { target: { value: '附近餐廳有哪些' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('公開餐廳資訊');
+  expect(bodies[0].history).toEqual([]);
+  expect(JSON.stringify(bodies)).not.toMatch(/本機行程|雲端行程|來源原文/);
+});
+
+it('v2 keeps local grades out of subsequent cloud history and clears them on scope change', async () => {
+  localStorage.setItem(personalImportsStorageKey({ owner: 'platform:alice', schoolId: 'pu' }), JSON.stringify({
+    version: 1, records: [{ id: 'grade-a', kind: 'grades', title: '個人成績專用課名',
+      schoolId: 'pu', academicYear: '115', semester: '1', grade: '87', credits: 3,
+      batchId: 'import-a', importedAt: '2026-11-07T10:00:00.000Z',
+      source: { type: 'paste', line: 1, rawText: '不可帶入模型的原始文字' } }],
+  }));
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json({ answer: '一般查詢回覆', steps: [], cards: [] });
+  }));
+  const view = render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '查看我的匯入成績' } });
+  fireEvent.click(screen.getByText('送出'));
+  expect(await screen.findByText(/個人成績專用課名/)).toBeTruthy();
+  expect(bodies).toHaveLength(0);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '附近餐廳有哪些' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('一般查詢回覆');
+  expect(bodies[0].history).toEqual([]);
+  expect(JSON.stringify(bodies)).not.toContain('個人成績專用課名');
+  state.school = 'nthu';
+  view.rerender(<Assistant />);
+  await screen.findByLabelText('問題');
+  expect(screen.queryByText(/個人成績專用課名/)).toBeNull();
+});
+
+it('excludes provider-selected academic reads with nonnumeric grades from subsequent history', async () => {
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json(bodies.length === 1
+      ? { answer: '私人課名甲：免修；私人課名乙：缺考',
+        steps: [{ name: 'get_imported_academics', status: 'ok', summary: '已核對個人紀錄' }], cards: [] }
+      : { answer: '一般餐點資訊', steps: [], cards: [] });
+  }));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '比較本學期匯入的成績和其他紀錄' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText(/私人課名甲/);
+  fireEvent.change(question, { target: { value: '附近餐廳有哪些' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('一般餐點資訊');
+  expect(bodies[1].history).toEqual([]);
+  expect(JSON.stringify(bodies[1])).not.toContain('私人課名');
+});
 it('disabled shows existing unavailable message without Firebase requests', async () => {
   const fetch = vi.fn(async (..._args: [string]) => {
     void _args;
@@ -71,7 +467,8 @@ it('two explicit confirmations precede public service link', async () => {
     }),
   );
   render(<Assistant />);
-  fireEvent.click(await screen.findByText('校園地圖'));
+  fireEvent.click(await screen.findByText('公開校園資訊查詢'));
+  fireEvent.click(screen.getByRole('button', { name: '校園地圖' }));
   await screen.findByText('公開地圖摘要');
   expect(calls).toHaveLength(2);
   fireEvent.click(screen.getByText('同意外送上述公開資料並查詢'));
@@ -79,7 +476,7 @@ it('two explicit confirmations precede public service link', async () => {
   expect(calls).toHaveLength(3);
   fireEvent.click(screen.getByText('確認服務，取得站內入口'));
   expect((await screen.findByText('開啟服務頁面')).getAttribute('href')).toBe('/map?schoolId=pu');
-  expect(screen.getByText(/私人課表、作業與借閱快照尚未支援/)).toBeTruthy();
+  expect(screen.getByText(/直接查課程、時間、教室與未交作業/)).toBeTruthy();
 });
 it('school and account changes abort in-flight work and discard late responses', async () => {
   let resolvePreview: (value: Response) => void = () => {};
@@ -93,18 +490,19 @@ it('school and account changes abort in-flight work and discard late responses',
   });
   vi.stubGlobal('fetch', fetch);
   const view = render(<Assistant />);
-  fireEvent.click(await screen.findByText('校園地圖'));
+  fireEvent.click(await screen.findByText('公開校園資訊查詢'));
+  fireEvent.click(screen.getByRole('button', { name: '校園地圖' }));
   await waitFor(() => expect(previewSignal).toBeDefined());
   state.school = 'other';
-  state.context = 'session-b';
+  state.context = 'b'.repeat(43);
   view.rerender(<Assistant />);
   expect(previewSignal?.aborted).toBe(true);
   resolvePreview(json({ intent: 'map', summary: '舊帳號內容', confirmation: 'old' }));
-  await screen.findByText('校園地圖');
+  await screen.findByText('公開校園資訊查詢');
   expect(screen.queryByText('舊帳號內容')).toBeNull();
   state.pending = true;
   view.rerender(<Assistant />);
-  expect(screen.queryByText('校園地圖')).toBeNull();
+  expect(screen.queryByRole('button', { name: '校園地圖' })).toBeNull();
 });
 
 it('provider unavailable preserves deterministic entries and disables model consent', async () => {
@@ -119,38 +517,26 @@ it('provider unavailable preserves deterministic entries and disables model cons
   render(<Assistant />);
   expect(await screen.findByText('模型目前無法使用，可直接開啟公開服務入口。')).toBeTruthy();
   expect(screen.getByText('直接開啟校園地圖').getAttribute('href')).toBe('/map?schoolId=pu');
-  fireEvent.click(screen.getByText('校園地圖'));
+  fireEvent.click(screen.getByText('公開校園資訊查詢'));
+  fireEvent.click(screen.getByRole('button', { name: '校園地圖' }));
   const consent = await screen.findByText('同意外送上述公開資料並查詢');
   expect((consent as HTMLButtonElement).disabled).toBe(true);
 });
 
 it('v2 uses conversation consent, memory, data steps and separate card confirmation', async () => {
   const bodies: Record<string, unknown>[] = [];
+  const card = calendarCard();
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init: RequestInit) => {
       if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
       const body = JSON.parse(init.body as string);
       bodies.push(body);
-      if (url.endsWith('confirm')) return json({ confirmed: true });
+      if (url.endsWith('confirm')) return json(receiptFor(card));
       return json({
         answer: 'v2 回答',
         steps: [{ name: 'get_schedule', status: 'ok', summary: '已查課表' }],
-        cards: [
-          {
-            tool: 'propose_personal_event',
-            token: 'synthetic-card',
-            mutationId: 'm1',
-            schoolId: 'pu',
-            destination: '個人行事曆',
-            args: {
-              title: '精確作業安排',
-              date: '2026-11-04',
-              startTime: '20:00',
-              endTime: '21:00',
-            },
-          },
-        ],
+        cards: [card],
       });
     }),
   );
@@ -167,15 +553,19 @@ it('v2 uses conversation consent, memory, data steps and separate card confirmat
   expect(screen.getByText('查了哪些資料')).toBeTruthy();
   expect(screen.getByText('精確作業安排')).toBeTruthy();
   fireEvent.click(screen.getByText('確認'));
-  await screen.findByText('已加入個人行事曆');
-  expect(bodies[1].token).toBe('synthetic-card');
+  await screen.findByText('已核對並加入個人行事曆');
+  expect(bodies[1].token).toBe(card.token);
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toEqual([receiptFor(card).record]);
+  expect(screen.getByRole('link', { name: '開啟這筆行程' }).getAttribute('href')).toBe('/calendar?schoolId=pu&eventId=calendar-event-1');
   fireEvent.change(question, { target: { value: '接續安排' } });
   fireEvent.click(screen.getByText('送出'));
   await waitFor(() => expect(bodies).toHaveLength(3));
   expect(bodies[2].history).toEqual([
     { role: 'user', content: '幫我排作業' },
-    { role: 'assistant', content: 'v2 回答' },
+    { role: 'assistant', content: expect.stringContaining('已讀回核對並儲存個人行程「精確作業安排」') },
   ]);
+  expect(JSON.stringify(bodies[2].history)).not.toContain(card.token);
+  expect(JSON.stringify(bodies[2].history)).not.toContain(card.mutationId);
 });
 
 it('v2 aborts on school/account changes and drops late answers and cards', async () => {
@@ -197,7 +587,7 @@ it('v2 aborts on school/account changes and drops late answers and cards', async
   fireEvent.change(question, { target: { value: '舊問題' } });
   fireEvent.click(screen.getByText('送出'));
   await waitFor(() => expect(oldSignal).toBeDefined());
-  state.context = 'session-b';
+  state.context = 'b'.repeat(43);
   state.school = 'other';
   view.rerender(<Assistant />);
   expect(oldSignal?.aborted).toBe(true);
@@ -217,7 +607,7 @@ it('v2 replaces old cards and cancellation waits for server revocation', async (
       const body = JSON.parse(init.body as string);
       if (url.endsWith('cancel')) {
         cancellations.push(body);
-        return json({ revoked: true });
+        return json(checkFor({ ...calendarCard('calendar-event-2', '安排2'), token: 'card-2' }, 'revoked'));
       }
       if (!body.routeToken) return json({ bootstrap: true, conversationId: 'server-conversation', routeToken: 'signed-route' });
       expect(body.routeToken).toBe('signed-route');
@@ -227,16 +617,7 @@ it('v2 replaces old cards and cancellation waits for server revocation', async (
         issuer: 'machine-A',
         answer: '提議' + seq,
         steps: [],
-        cards: [
-          {
-            tool: 'propose_personal_event',
-            token: 'card-' + seq,
-            mutationId: 'm-' + seq,
-            schoolId: 'pu',
-            destination: '個人曆',
-            args: { title: '安排' + seq },
-          },
-        ],
+        cards: [{ ...calendarCard('calendar-event-' + seq, '安排' + seq), token: 'card-' + seq }],
       });
     }),
   );
@@ -251,7 +632,7 @@ it('v2 replaces old cards and cancellation waits for server revocation', async (
   await screen.findByText('已被新提議取代');
   expect(screen.getAllByText('確認')).toHaveLength(1);
   fireEvent.click(screen.getByText('取消'));
-  await screen.findByText('已取消');
+  await screen.findByText('已撤銷未執行提議');
   expect(cancellations).toHaveLength(1);
   expect(cancellations[0]).toMatchObject({ token: 'card-2' });
 });
@@ -281,6 +662,349 @@ it('v2 consent names Groq only until capability reports a fallback', async () =>
   const onLabel = await screen.findByRole('checkbox');
   expect(onLabel.closest('label')?.textContent).toMatch(/Groq/);
   expect(onLabel.closest('label')?.textContent).toMatch(/Cloudflare Workers AI/);
+});
+
+it('does not treat HTTP success or a bare confirmed flag as a completed calendar task', async () => {
+  const card = calendarCard();
+  const calls: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    calls.push(url);
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.endsWith('confirm') || url.endsWith('reconcile')) return json({ confirmed: true });
+    return json({ answer: '請核對安排', steps: [], cards: [card] });
+  }));
+  render(<Assistant />);
+  await askForPlan();
+  fireEvent.click(await screen.findByText('確認'));
+  await screen.findByText(/尚未核對執行結果/);
+  expect(screen.queryByText('已核對並加入個人行事曆')).toBeNull();
+  expect(screen.queryByText('取消')).toBeNull();
+  expect(screen.queryByText('確認')).toBeNull();
+  expect(screen.getByRole('button', { name: '重新核對結果' })).toBeTruthy();
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toEqual([]);
+  expect(calls.filter((url) => url.endsWith('confirm'))).toHaveLength(1);
+  expect(calls.filter((url) => url.endsWith('reconcile'))).toHaveLength(1);
+});
+
+it.each(['schoolId', 'mutationId', 'title'] as const)('rejects a receipt with a different %s before mirroring local data', async (field) => {
+  const card = calendarCard();
+  const receipt = receiptFor(card);
+  const changed = field === 'title'
+    ? { ...receipt, record: { ...receipt.record, title: '不是使用者確認的行程' } }
+    : { ...receipt, [field]: field === 'schoolId' ? 'nthu' : 'different-event-id' };
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.endsWith('confirm') || url.endsWith('reconcile')) return json(changed);
+    return json({ answer: '請核對安排', steps: [], cards: [card] });
+  }));
+  render(<Assistant />);
+  await askForPlan();
+  fireEvent.click(await screen.findByText('確認'));
+  await screen.findByText(/尚未核對執行結果/);
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toEqual([]);
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'nthu' })).toEqual([]);
+});
+
+it('recovers a committed write with a lost response through one read-only check and no duplicate confirm', async () => {
+  const card = calendarCard();
+  const calls: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    calls.push(url);
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.endsWith('confirm')) throw new TypeError('response lost');
+    if (url.endsWith('reconcile')) return json(receiptFor(card, true));
+    return json({ answer: '請核對安排', steps: [], cards: [card] });
+  }));
+  render(<Assistant />);
+  await askForPlan();
+  const confirm = await screen.findByText('確認');
+  fireEvent.click(confirm);
+  fireEvent.click(confirm);
+  await screen.findByText('已核對並加入個人行事曆');
+  expect(calls.filter((url) => url.endsWith('confirm'))).toHaveLength(1);
+  expect(calls.filter((url) => url.endsWith('reconcile'))).toHaveLength(1);
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toHaveLength(1);
+});
+
+it('keeps verified items when a batch stops, then resumes only after the uncertain item is read back', async () => {
+  const cards = [calendarCard('calendar-event-1', '英文讀書'), calendarCard('calendar-event-2', '程式練習', '21:00'),
+    { ...calendarCard('calendar-event-3', '資料庫練習'), args: { title: '資料庫練習', date: '2030-11-05', allDay: false, startTime: '20:00', endTime: '21:00' } }];
+  const confirmed: string[] = [];
+  let canReconcile = false;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    const body = JSON.parse(String(init?.body));
+    const card = cards.find((value) => value.token === body.token);
+    if (url.endsWith('confirm')) {
+      confirmed.push(body.token);
+      if (card === cards[1]) throw new TypeError('lost response');
+      return json(receiptFor(card!, false, card === cards[2] ? 3 : 1));
+    }
+    if (url.endsWith('reconcile')) {
+      if (!canReconcile) throw new TypeError('network unavailable');
+      return json(receiptFor(card!, true, 2));
+    }
+    return json({ answer: '三項安排', steps: [], cards });
+  }));
+  render(<Assistant />);
+  await askForPlan();
+  fireEvent.click(await screen.findByRole('button', { name: '依序確認 3 筆個人行程' }));
+  await screen.findByText(/尚未核對執行結果/);
+  expect(confirmed).toEqual([cards[0].token, cards[1].token]);
+  expect(screen.getByLabelText('行程執行進度').textContent).toContain('已核對 1/3 項');
+  expect(screen.getByLabelText('行程執行進度').textContent).toContain('待核對 1 項');
+  expect((screen.getByText('確認') as HTMLButtonElement).disabled).toBe(true);
+  canReconcile = true;
+  // The first button belongs to the already verified first item.
+  fireEvent.click(screen.getAllByRole('button', { name: '重新核對結果' })[1]);
+  await waitFor(() => expect(screen.getByLabelText('行程執行進度').textContent).toContain('已核對 2/3 項'));
+  fireEvent.click(screen.getByText('確認'));
+  await waitFor(() => expect(screen.getByLabelText('行程執行進度').textContent).toContain('已核對 3/3 項'));
+  expect(confirmed).toEqual(cards.map((card) => card.token));
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toHaveLength(3);
+});
+
+it('restores the confirmation status after a read-only recovery before the next card', async () => {
+  const first = calendarCard('calendar-event-1', '英文讀書');
+  const second = calendarCard('calendar-event-2', '程式練習', '21:00');
+  const requests: string[] = [];
+  let finishSecond: ((result: Response) => void) | undefined;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    const body = JSON.parse(String(init?.body));
+    if (url.endsWith('confirm')) {
+      requests.push('confirm:' + body.token);
+      if (body.token === first.token) throw new TypeError('first receipt lost');
+      return new Promise<Response>((resolve) => { finishSecond = resolve; });
+    }
+    if (url.endsWith('reconcile')) {
+      requests.push('reconcile:' + body.token);
+      return json(receiptFor(first, true));
+    }
+    return json({ answer: '兩項讀書安排', steps: [], cards: [first, second] });
+  }));
+  render(<Assistant />);
+  await askForPlan();
+  fireEvent.click(await screen.findByRole('button', { name: '依序確認 2 筆個人行程' }));
+  await waitFor(() => expect(finishSecond).toBeDefined());
+  expect(requests).toEqual([
+    'confirm:' + first.token,
+    'reconcile:' + first.token,
+    'confirm:' + second.token,
+  ]);
+  // Calendar cards expose a separate live progress status; inspect the assistant status specifically.
+  expect(screen.getByText('正在確認操作結果').closest('[role="status"]')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '停止這次回答' })).toBeNull();
+  finishSecond!(json(receiptFor(second)));
+  await waitFor(() => expect(screen.getByLabelText('行程執行進度').textContent).toContain('已核對 2/2 項'));
+});
+
+it('cancellation reads an already committed row as verified instead of claiming it was removed', async () => {
+  const card = calendarCard();
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.endsWith('cancel')) return json(receiptFor(card, true));
+    return json({ answer: '請核對安排', steps: [], cards: [card] });
+  }));
+  render(<Assistant />);
+  await askForPlan();
+  fireEvent.click(await screen.findByText('取消'));
+  await screen.findByText('已核對並加入個人行事曆');
+  expect(screen.queryByText('已撤銷未執行提議')).toBeNull();
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toHaveLength(1);
+});
+
+it('records partial cancellation immediately and never retries a revoked earlier card', async () => {
+  const cards = [calendarCard('calendar-event-1', '英文讀書'), calendarCard('calendar-event-2', '程式練習', '21:00')];
+  const cancelled: string[] = [];
+  let recovered = false;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    const body = JSON.parse(String(init?.body));
+    const card = cards.find((value) => value.token === body.token);
+    if (url.endsWith('cancel')) {
+      cancelled.push(body.token);
+      if (card === cards[1]) throw new TypeError('lost cancellation response');
+      return json(checkFor(card!, 'revoked'));
+    }
+    if (url.endsWith('reconcile')) {
+      if (!recovered) throw new TypeError('offline');
+      return json(checkFor(card!, 'revoked'));
+    }
+    return json({ answer: '兩項安排', steps: [], cards });
+  }));
+  render(<Assistant />);
+  await askForPlan();
+  fireEvent.click((await screen.findAllByText('取消'))[0]);
+  await screen.findByText(/尚未核對執行結果/);
+  expect(screen.getAllByText('已撤銷未執行提議')).toHaveLength(1);
+  expect(cancelled).toEqual(cards.map((card) => card.token));
+  recovered = true;
+  fireEvent.click(screen.getByRole('button', { name: '重新核對結果' }));
+  await waitFor(() => expect(screen.getAllByText('已撤銷未執行提議')).toHaveLength(2));
+  expect(cancelled).toEqual(cards.map((card) => card.token));
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toEqual([]);
+});
+
+it('retains remote success when local persistence fails and recovery never creates another remote event', async () => {
+  const card = calendarCard();
+  const calls: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    calls.push(url);
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.endsWith('confirm') || url.endsWith('reconcile')) return json(receiptFor(card));
+    return json({ answer: '請核對安排', steps: [], cards: [card] });
+  }));
+  render(<Assistant />);
+  await askForPlan();
+  const storage: Storage = Object.hasOwn(localStorage, 'setItem') ? localStorage : Object.getPrototypeOf(localStorage);
+  const originalSetItem = localStorage.setItem;
+  const persist = vi.spyOn(storage, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+    if (this === localStorage) throw new Error('quota');
+    return originalSetItem.call(this, key, value);
+  });
+  fireEvent.click(await screen.findByText('確認'));
+  await screen.findByText(/帳號中已儲存，此裝置尚未更新/);
+  expect(screen.queryByRole('link', { name: '開啟這筆行程' })).toBeNull();
+  persist.mockRestore();
+  fireEvent.click(screen.getByRole('button', { name: '重新核對並更新此裝置' }));
+  await screen.findByRole('link', { name: '開啟這筆行程' });
+  expect(calls.filter((url) => url.endsWith('confirm'))).toHaveLength(1);
+  expect(calls.filter((url) => url.endsWith('reconcile'))).toHaveLength(1);
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toHaveLength(1);
+});
+
+it('drops a late execution receipt after a session or school change without mirroring either ledger', async () => {
+  const card = calendarCard();
+  let finish: (response: Response) => void = () => {};
+  let confirmationSignal: AbortSignal | undefined;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.endsWith('confirm')) {
+      confirmationSignal = init?.signal as AbortSignal;
+      return new Promise<Response>((resolve) => { finish = resolve; });
+    }
+    return json({ answer: '請核對安排', steps: [], cards: [card] });
+  }));
+  const view = render(<Assistant />);
+  await askForPlan();
+  fireEvent.click(await screen.findByText('確認'));
+  await waitFor(() => expect(confirmationSignal).toBeDefined());
+  state.context = 'c'.repeat(43);
+  state.school = 'nthu';
+  view.rerender(<Assistant />);
+  expect(confirmationSignal?.aborted).toBe(true);
+  finish(json(receiptFor(card)));
+  await screen.findByLabelText('問題');
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toEqual([]);
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'nthu' })).toEqual([]);
+  expect(screen.queryByText('已核對並加入個人行事曆')).toBeNull();
+});
+
+it('keeps the last verified receipt when a later read-only check is unavailable', async () => {
+  const card = calendarCard();
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.endsWith('confirm')) return json(receiptFor(card));
+    if (url.endsWith('reconcile')) throw new TypeError('temporary network failure');
+    return json({ answer: '請核對安排', steps: [], cards: [card] });
+  }));
+  render(<Assistant />);
+  await askForPlan();
+  fireEvent.click(await screen.findByText('確認'));
+  await screen.findByRole('link', { name: '開啟這筆行程' });
+  fireEvent.click(screen.getByRole('button', { name: '重新核對結果' }));
+  await screen.findByText(/這次查核未完成/);
+  expect(screen.getByText('已核對並加入個人行事曆')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '開啟這筆行程' })).toBeTruthy();
+  expect(screen.getByLabelText('行程執行進度').textContent).toContain('已核對 1/1 項');
+});
+
+it('saves a scoped recovery card before dispatch and resumes a reload with the original conversation read-only', async () => {
+  const card = calendarCard();
+  const confirmations: Record<string, unknown>[] = [];
+  const reconciliations: Record<string, unknown>[] = [];
+  let finish!: (response: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    const body = JSON.parse(String(init?.body));
+    if (url.endsWith('confirm')) {
+      confirmations.push(body);
+      const journal = readAssistantExecutionJournal({ owner: 'platform:alice', schoolId: 'pu', context: state.context });
+      expect(journal).toHaveLength(1);
+      expect(journal[0].conversationId).toBe(body.conversationId);
+      expect(journal[0].card.token).toBe(card.token);
+      return new Promise<Response>((resolve) => { finish = resolve; });
+    }
+    if (url.endsWith('reconcile')) {
+      reconciliations.push(body);
+      return json(receiptFor(card, true));
+    }
+    if (url.endsWith('followup')) return json({ version: 1, operation: 'coursework.followup',
+      schoolId: card.schoolId, mutationId: card.mutationId, checkedAt: '2026-11-07T11:00:00.000Z',
+      status: 'not_coursework', calendar: 'unavailable', task: null, source: null, event: card.args });
+    return json({ answer: '請核對安排', steps: [], cards: [card] });
+  }));
+  const first = render(<Assistant />);
+  await askForPlan();
+  fireEvent.click(await screen.findByText('確認'));
+  await waitFor(() => expect(confirmations).toHaveLength(1));
+  first.unmount();
+  render(<Assistant />);
+  await screen.findByRole('link', { name: '開啟這筆行程' });
+  expect(confirmations).toHaveLength(1);
+  expect(reconciliations).toHaveLength(1);
+  expect(reconciliations[0].conversationId).toBe(confirmations[0].conversationId);
+  expect(reconciliations[0].token).toBe(card.token);
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+  expect(readAssistantExecutionJournal({ owner: 'platform:alice', schoolId: 'pu', context: state.context })).toEqual([]);
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toHaveLength(1);
+  finish(json(receiptFor(card)));
+});
+
+it('does not dispatch a write when recovery storage cannot be saved', async () => {
+  const card = calendarCard();
+  const calls: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    calls.push(url);
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    return json({ answer: '請核對安排', steps: [], cards: [card] });
+  }));
+  render(<Assistant />);
+  await askForPlan();
+  const storage: Storage = Object.hasOwn(sessionStorage, 'setItem') ? sessionStorage : Object.getPrototypeOf(sessionStorage);
+  const originalSetItem = sessionStorage.setItem;
+  const persist = vi.spyOn(storage, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+    if (this === sessionStorage) throw new Error('quota');
+    return originalSetItem.call(this, key, value);
+  });
+  fireEvent.click(await screen.findByText('確認'));
+  await screen.findByText('重試原確認');
+  expect(calls.some((url) => url.endsWith('confirm'))).toBe(false);
+  expect(calls.some((url) => url.endsWith('reconcile'))).toBe(false);
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toEqual([]);
+  persist.mockRestore();
+});
+
+it('pauses automatic recovery after the first unavailable result and keeps local services usable', async () => {
+  const scope = { owner: 'platform:alice', schoolId: 'pu', context: state.context };
+  for (const card of [calendarCard('calendar-event-1', '英文'), calendarCard('calendar-event-2', '程式', '21:00')])
+    saveAssistantExecutionJournal(scope, { conversationId: 'prior-conversation', card }, () => true);
+  const calls: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    calls.push(url);
+    if (url.endsWith('capability')) return json({ enabled: true, ready: false, version: 2 });
+    throw new TypeError('network unavailable');
+  }));
+  render(<Assistant />);
+  await screen.findByText(/尚未核對執行結果/);
+  const question = screen.getByLabelText('問題');
+  fireEvent.change(question, { target: { value: '開啟校園地圖' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByRole('link', { name: /開啟校園地圖/ });
+  expect(calls.filter((url) => url.endsWith('reconcile'))).toHaveLength(1);
+  expect(calls.some((url) => url.endsWith('confirm'))).toBe(false);
+  expect(readAssistantExecutionJournal(scope)).toHaveLength(2);
 });
 
 it('v2 renders markdown, assignment rows and food cards without raw paths', async () => {
@@ -325,4 +1049,401 @@ it('v2 renders markdown, assignment rows and food cards without raw paths', asyn
   expect(screen.getByText('合成蔬食餐廳')).toBeTruthy();
   expect(screen.getByRole('link', { name: '前往點餐頁' }).getAttribute('href')).toContain('/food?');
   expect(screen.getByText('確認')).toBeTruthy();
+});
+
+it.each(['ncnu', 'nthu'] as const)('v2 reads %s public courses without model availability or cloud consent', async (schoolId) => {
+  state.school = schoolId;
+  const fetcher = vi.fn(async (url: string) => url.endsWith('capability')
+    ? json({ enabled: true, ready: false, version: 2 }) : publicCatalog(schoolId));
+  vi.stubGlobal('fetch', fetcher);
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '幫我查資料庫課程' } });
+  const send = screen.getByRole('button', { name: '送出' }) as HTMLButtonElement;
+  expect(send.disabled).toBe(false);
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(send);
+  await screen.findByText('公開資料庫課程');
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  const url = new URL(fetcher.mock.calls[1][0], 'https://nuni.tw');
+  expect(url.pathname).toBe('/api/public-course-catalog');
+  expect(url.searchParams.get('schoolId')).toBe(schoolId);
+  expect(url.searchParams.get('q')).toBe('資料庫');
+  expect(screen.getByRole('link', { name: '校方資料來源' })).toBeTruthy();
+  expect(screen.getByText(/115 學年度第 1 學期/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  fireEvent.change(question, { target: { value: '我的下一堂課' } });
+  // main/#595 keeps local timetable answers available without cloud consent.
+  expect(send.disabled).toBe(false);
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  '查清大資料庫課程，另外查公車',
+  '查今天課表，另外查清大資料庫課程',
+  '查我的行程，另外查清大資料庫課程',
+  '幫這份安排30分鐘，另外查清大資料庫課程',
+])('v2 sends the complete compound request without a local/public/followup early return: %s', async (phrase) => {
+  const requests: Record<string, unknown>[] = [];
+  const data = await publicCatalog('nthu').json();
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    requests.push(JSON.parse(String(init?.body)));
+    return json({ answer: '已保留兩項需求的處理結果。', steps: [], cards: [],
+      publicCourseResults: [{ search: { kind: 'search', schoolId: 'nthu', query: '資料庫' }, data }] });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  savePrivateLesson();
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: phrase } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('公開資料庫課程');
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({ schoolId: 'pu', question: phrase, history: [], consent: true });
+  expect(requests[0]).not.toHaveProperty('studyTarget');
+  expect(fetcher.mock.calls.every(([url]) => !url.startsWith('/api/public-course-catalog'))).toBe(true);
+  expect(new URL(screen.getByRole('link', { name: '查看課程與課表核對' }).getAttribute('href')!, 'https://nuni.tw')
+    .searchParams.get('schoolId')).toBe('nthu');
+});
+
+it('v2 excludes an entire mixed public/private result from later model history while keeping ordinary discussion', async () => {
+  const requests: Record<string, unknown>[] = [];
+  const data = await publicCatalog('nthu').json();
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    requests.push(JSON.parse(String(init?.body)));
+    return requests.length === 2
+      ? json({ answer: '私人行程與外校公開查詢已讀取', steps: [], cards: [],
+        publicCourseResults: [{ search: { kind: 'search', schoolId: 'nthu', query: '資料庫' }, data }] })
+      : json({ answer: '普通討論' + requests.length, steps: [], cards: [] });
+  }));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  const sendQuestion = (text: string) => {
+    fireEvent.change(question, { target: { value: text } });
+    fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  };
+  sendQuestion('幫我比較兩種讀書策略');
+  await screen.findByText('普通討論1');
+  sendQuestion('查清大資料庫課程，另外查我的行程');
+  await screen.findByText('公開資料庫課程');
+  sendQuestion('繼續比較剛才的兩種策略');
+  await screen.findByText('普通討論3');
+  expect(requests[2].history).toEqual([
+    { role: 'user', content: '幫我比較兩種讀書策略' }, { role: 'assistant', content: '普通討論1' },
+  ]);
+  expect(JSON.stringify(requests[2])).not.toMatch(/清大|私人行程|外校公開/);
+  expect(requests.every(request => request.schoolId === 'pu')).toBe(true);
+});
+
+it.each(['button', 'followup'] as const)('v2 continues an exact private coursework target after a mixed public task with %s', async (method) => {
+  const requests: Record<string, unknown>[] = [];
+  const data = await publicCatalog('nthu').json();
+  const target = { workspaceId: 'cw_one', taskId: 'cwa_one', kind: 'assignment',
+    title: '私人期末資料模型', courseTitle: '私人資料庫管理', dueAt: '2099-11-13T10:00:00Z' };
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    requests.push(JSON.parse(String(init?.body)));
+    return requests.length === 1 ? json({ answer: '私人作業及外校公開開課已讀取。', steps: [], cards: [],
+      dataRead: true, courseworkTargets: [target], courseworkDate: '2030-11-14',
+      publicCourseResults: [{ search: { kind: 'search', schoolId: 'nthu', query: '資料庫' }, data }],
+      taskPlan: { version: 1, steps: [
+        { id: 'public', serviceId: 'school-courses', label: '查清大公開課程', dependsOn: [],
+          status: 'completed', summary: '清大公開資料庫開課已核對。' },
+        { id: 'coursework', serviceId: 'classroom', label: '查目前帳號的未交作業', dependsOn: [],
+          status: 'completed', summary: '私人資料庫管理：私人期末資料模型尚未繳交。' },
+      ] },
+    }) : json({ answer: '已重新核對指定作業，準備時間尚待確認。', steps: [], cards: [], dataRead: true });
+  }));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '查清大資料庫課程，另外查我的未交作業' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('公開資料庫課程');
+  expect(screen.getByRole('region', { name: '跨功能任務步驟' })).toBeTruthy();
+  // Exact selection revalidates the original private IDs, without copying any source text to history.
+  fireEvent.click(screen.getByRole('checkbox'));
+  if (method === 'button') {
+    fireEvent.click(screen.getByRole('button', { name: '替私人資料庫管理的私人期末資料模型安排30分鐘' }));
+  } else {
+    fireEvent.change(question, { target: { value: '幫這份作業找30分鐘' } });
+    fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  }
+  await screen.findByText('已重新核對指定作業，準備時間尚待確認。');
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toMatchObject({ schoolId: 'pu', consent: false, history: [],
+    studyTarget: { workspaceId: 'cw_one', taskId: 'cwa_one', kind: 'assignment', date: '2030-11-14' } });
+  expect(JSON.stringify(requests[1])).not.toMatch(/nthu|清大|2099-11-13|尚未繳交/);
+});
+
+it.each(['account', 'school', 'logout'] as const)('v2 discards every late mixed result when the %s changes', async (change) => {
+  let finish!: (response: Response) => void;
+  let signal: AbortSignal | undefined;
+  const data = await publicCatalog('nthu').json();
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    signal = init.signal as AbortSignal;
+    return new Promise<Response>(resolve => { finish = resolve; });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<Assistant />);
+  fireEvent.click(await screen.findByRole('checkbox'));
+  fireEvent.change(screen.getByLabelText('問題'), { target: { value: '查清大資料庫課程，另外查我的行程' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(signal).toBeDefined());
+  if (change === 'account') state.context = 'session-b';
+  else if (change === 'school') state.school = 'ncnu';
+  else state.pending = true;
+  view.rerender(<Assistant />);
+  expect(signal?.aborted).toBe(true);
+  await act(async () => { finish(json({ answer: '舊校園私人行程', steps: [], cards: [],
+    publicCourseResults: [{ search: { kind: 'search', schoolId: 'nthu', query: '資料庫' }, data }] })); });
+  expect(screen.queryByText('公開資料庫課程')).toBeNull();
+  expect(screen.queryByText('舊校園私人行程')).toBeNull();
+  expect(screen.queryByRole('link', { name: '查看課程與課表核對' })).toBeNull();
+});
+
+it('v2 retains the complete mixed request after an error without dispatching either half separately', async () => {
+  const phrase = '查清大資料庫課程，另外查我的行程';
+  const fetcher = vi.fn(async (url: string) => url.endsWith('capability')
+    ? json({ enabled: true, ready: true, version: 2 })
+    : new Response(JSON.stringify({ error: 'UPSTREAM_UNAVAILABLE' }), {
+      status: 503, headers: { 'Content-Type': 'application/json' },
+    }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: phrase } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByRole('alert');
+  expect(screen.getByRole('alert').textContent).toContain('查詢未完成');
+  expect(screen.getByText(phrase)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '切換到這個問題' }));
+  expect((question as HTMLTextAreaElement).value).toBe(phrase);
+  expect(fetcher.mock.calls.map(([url]) => url)).toEqual(['/api/nuni/assistant/capability', '/api/nuni/assistant/ask']);
+  expect(screen.queryByRole('link', { name: '查看課程與課表核對' })).toBeNull();
+});
+
+it('v2 preserves the sign-in gate and seeds a shared q only as an editable draft', async () => {
+  state.query = 'q=' + encodeURIComponent('幫我查清大資料庫課程');
+  state.authenticated = false;
+  const fetcher = vi.fn(async () => json({ enabled: true, ready: false, version: 2 }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<Assistant />);
+  const login = screen.getByRole('link', { name: '請先登入以使用校園助理' });
+  const returnTo = new URL(login.getAttribute('href')!, 'https://nuni.tw').searchParams.get('returnTo');
+  expect(new URL(returnTo!, 'https://nuni.tw').searchParams.get('q')).toBe('幫我查清大資料庫課程');
+  expect(screen.queryByRole('textbox')).toBeNull();
+  expect(fetcher).not.toHaveBeenCalled();
+  state.authenticated = true;
+  view.rerender(<Assistant />);
+  expect((await screen.findByLabelText('問題') as HTMLTextAreaElement).value).toBe('幫我查清大資料庫課程');
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('link', { name: '查看課程與課表核對' })).toBeNull();
+});
+
+it('v2 retains signed proposal state and private conversation binding across another-campus public lookup', async () => {
+  const card = { ...calendarCard('keep-card', '待確認的讀書安排'), token: 'signed-pu-card' };
+  const bodies: Record<string, unknown>[] = [];
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.startsWith('/api/public-course-catalog?')) return publicCatalog('nthu');
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    bodies.push(body);
+    if (url.endsWith('confirm')) return json(receiptFor(card));
+    if (!body.routeToken) return json({ bootstrap: true, conversationId: 'bound-conversation', routeToken: 'bound-route' });
+    return json({ answer: '原校園私人提議', steps: [], cards: [card] });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '幫我安排讀書時間' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('待確認的讀書安排');
+  expect(bodies).toHaveLength(2);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '幫我查清大資料庫課程' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('公開資料庫課程');
+  const href = new URL(screen.getByRole('link', { name: '查看課程與課表核對' }).getAttribute('href')!, 'https://nuni.tw');
+  expect(href.searchParams.get('schoolId')).toBe('nthu');
+  expect(bodies).toHaveLength(2);
+  expect(screen.queryByText('已被新提議取代')).toBeNull();
+  expect(screen.queryByText('已核對並加入個人行事曆')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '確認' }));
+  await screen.findByText('已核對並加入個人行事曆');
+  expect(bodies[2]).toMatchObject({ schoolId: 'pu', token: 'signed-pu-card', conversationId: 'bound-conversation' });
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '接續安排' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(bodies).toHaveLength(4));
+  expect(bodies[3]).toMatchObject({
+    schoolId: 'pu', conversationId: 'bound-conversation', routeToken: 'bound-route',
+    history: [{ role: 'user', content: '幫我安排讀書時間' }, { role: 'assistant', content: expect.stringContaining('原校園私人提議') }],
+  });
+});
+
+it('v2 shows a source failure without treating it as an empty catalog or asking the model', async () => {
+  const fetcher = vi.fn(async (url: string) => url.endsWith('capability')
+    ? json({ enabled: true, ready: true, version: 2 })
+    : publicCatalog('nthu', { sourceUrl: 'https://example.test/unreviewed-courses' }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<Assistant />);
+  fireEvent.change(await screen.findByLabelText('問題'), { target: { value: '幫我查清大資料庫課程' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText(/暫時無法取得可核對/);
+  expect(screen.queryByText('公開資料庫課程')).toBeNull();
+  expect(screen.queryByText(/沒有符合的開課資料/)).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls.every(([url]) => !url.endsWith('/ask'))).toBe(true);
+});
+
+it.each(['account', 'school', 'logout'] as const)('v2 cancels public results when the %s changes', async (change) => {
+  let finish!: (response: Response) => void;
+  let signal: AbortSignal | undefined;
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: false, version: 2 });
+    signal = init.signal as AbortSignal;
+    return new Promise<Response>((resolve) => { finish = resolve; });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<Assistant />);
+  fireEvent.change(await screen.findByLabelText('問題'), { target: { value: '幫我查清大資料庫課程' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(signal).toBeDefined());
+  if (change === 'account') state.context = 'session-b';
+  else if (change === 'school') state.school = 'ncnu';
+  else state.pending = true;
+  view.rerender(<Assistant />);
+  expect(signal?.aborted).toBe(true);
+  await act(async () => { finish(publicCatalog('nthu')); });
+  expect(screen.queryByText('公開資料庫課程')).toBeNull();
+  expect(screen.queryByRole('link', { name: '查看課程與課表核對' })).toBeNull();
+  expect(fetcher.mock.calls.every(([url]) => !url.endsWith('/ask'))).toBe(true);
+});
+
+it('handles an obsolete service error as a request failure without offering a disable control', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(
+    JSON.stringify({ error: 'PLATFORM_SERVICE_DISABLED' }),
+    { status: 403, headers: { 'Content-Type': 'application/json' } },
+  )));
+  render(<Assistant />);
+  await screen.findByText('目前無法查詢，請重新選擇或稍後再試。');
+  expect(screen.queryByRole('link', { name: '管理平台權限' })).toBeNull();
+});
+
+it('keeps the next draft typed while a cloud answer is pending', async () => {
+  let resolveAnswer: (response: Response) => void = () => {};
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    return new Promise<Response>((resolve) => { resolveAnswer = resolve; });
+  }));
+  render(<Assistant />);
+  const field = await screen.findByLabelText('問題') as HTMLTextAreaElement;
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '幫我整理專題介紹的流程' } });
+  await waitFor(() => expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(field.value).toBe(''));
+  fireEvent.change(field, { target: { value: '也幫我找校園活動' } });
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
+  resolveAnswer(json({ answer: '已整理專題說明流程', steps: [], cards: [] }));
+  await screen.findByText('已整理專題說明流程');
+  expect(field.value).toBe('也幫我找校園活動');
+});
+
+it('keeps an unsuccessful question recoverable without discarding a later draft', async () => {
+  let resolveAnswer: (response: Response) => void = () => {};
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    return new Promise<Response>((resolve) => { resolveAnswer = resolve; });
+  }));
+  render(<Assistant />);
+  const field = await screen.findByLabelText('問題') as HTMLTextAreaElement;
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '請核對明天的專題會議' } });
+  await waitFor(() => expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(field.value).toBe(''));
+  fireEvent.change(field, { target: { value: '新的草稿不能消失' } });
+  resolveAnswer(new Response(JSON.stringify({ message: '查詢服務暫時無法連線' }), {
+    status: 503, headers: { 'Content-Type': 'application/json' },
+  }));
+  await screen.findByRole('group', { name: '未完成的問題' });
+  expect(field.value).toBe('新的草稿不能消失');
+  expect(screen.getByText('請核對明天的專題會議')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '切換到這個問題' }));
+  expect(field.value).toBe('請核對明天的專題會議');
+  expect(screen.getByText('新的草稿不能消失')).toBeTruthy();
+});
+
+it('stops only an in-flight model read, ignores late transport data, and keeps the next draft', async () => {
+  let lateAnswer: (response: Response) => void = () => {};
+  let stoppedSignal: AbortSignal | undefined;
+  let asks = 0;
+  const calls: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, options?: RequestInit) => {
+    calls.push(url);
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.endsWith('/ask')) {
+      asks += 1;
+      if (asks === 1) {
+        stoppedSignal = options?.signal as AbortSignal;
+        return new Promise<Response>((resolve) => { lateAnswer = resolve; });
+      }
+      return json({ answer: '新問題已回答', steps: [], cards: [] });
+    }
+    throw new Error('unexpected mutation endpoint');
+  }));
+  render(<Assistant />);
+  const field = await screen.findByLabelText('問題') as HTMLTextAreaElement;
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '先幫我規劃本週作業' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  const stop = await screen.findByRole('button', { name: '停止這次回答' });
+  fireEvent.change(field, { target: { value: '下一句已先寫好了' } });
+  fireEvent.click(stop);
+  await screen.findByRole('group', { name: '未完成的問題' });
+  expect(stoppedSignal?.aborted).toBe(true);
+  expect(field.value).toBe('下一句已先寫好了');
+  expect(screen.getByText('先幫我規劃本週作業')).toBeTruthy();
+  lateAnswer(json({ answer: '取消後晚到的舊答案', steps: [], cards: [] }));
+  await waitFor(() => expect(screen.queryByText('取消後晚到的舊答案')).toBeNull());
+  expect(calls.every((path) => !/\/(confirm|cancel|reconcile)$/.test(path))).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('新問題已回答');
+  expect(asks).toBe(2);
+  expect(field.value).toBe('');
+});
+
+it('stopping a cloud read never treats action confirmation as cancelled', async () => {
+  let lateAnswer: (response: Response) => void = () => {};
+  let calls = 0;
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.endsWith('/ask')) {
+      calls += 1;
+      if (calls === 1) return new Promise<Response>((resolve) => { lateAnswer = resolve; });
+      return json({ answer: '已再次核對需求', steps: [], cards: [] });
+    }
+    throw new Error('should never call a write endpoint');
+  }));
+  render(<Assistant />);
+  const field = await screen.findByLabelText('問題') as HTMLTextAreaElement;
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '請給我行程建議' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  fireEvent.click(await screen.findByRole('button', { name: '停止這次回答' }));
+  await screen.findByText(/已停止這次回答/);
+  lateAnswer(json({ answer: '這筆不是可執行的回執', steps: [], cards: [] }));
+  expect(screen.queryByText('這筆不是可執行的回執')).toBeNull();
+  expect(screen.queryByRole('button', { name: '停止這次回答' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
 });

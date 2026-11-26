@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { buildPersonalToday } from '@campus/shared';
+import { buildCampusClassroomMapHref } from '@campus/shared/src/campusClassroomLookup';
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolSelector } from '@/components/SchoolSelector';
@@ -60,6 +61,20 @@ function NextClassStrip({ now }: { now: Date }) {
       </span>
     </aside>
   );
+}
+
+function ClassroomMapLink({ schoolId, location }: { schoolId: string; location?: string }) {
+  const href = buildCampusClassroomMapHref({ schoolId, location });
+  return href ? (
+    <Link
+      href={href}
+      className="btn"
+      style={{ justifySelf: 'start' }}
+      aria-label={`找教室：${location}`}
+    >
+      找教室
+    </Link>
+  ) : null;
 }
 
 function Schedule({ now }: { now: Date }) {
@@ -167,6 +182,7 @@ function Schedule({ now }: { now: Date }) {
                       {entry.row.teacher ? ` · ${entry.row.teacher}` : ''}
                     </span>
                     {entry.conflict && <span className={styles.warning}>時段重疊，請核對課表</span>}
+                    <ClassroomMapLink schoolId={schoolId} location={entry.row.location} />
                   </div>
                   <span className={styles.status}>
                     {entry.status === 'ongoing'

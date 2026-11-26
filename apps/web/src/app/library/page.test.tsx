@@ -27,6 +27,14 @@ function catalogFormUrl() {
   data.forEach((value, key) => url.searchParams.append(key, String(value)));
   return url;
 }
+it('opens the Providence catalog form from the scoped library link for its documented alias', () => {
+  context.schoolId = 'tw-pu';
+  context.schoolSearch = '?schoolId=tw-pu';
+  render(<LibraryPage />);
+  expect(screen.getByRole('button', { name: '搜尋學校館藏 ↗' }).closest('form')?.action).toBe('https://webpacx.lib.pu.edu.tw/search');
+  expect(screen.getByText('蓋夏圖書館')).toBeTruthy();
+});
+
 it('searches the official catalog with the chosen field and user input', () => {
   render(<LibraryPage />);
   const input = screen.getByLabelText('關鍵字') as HTMLInputElement;

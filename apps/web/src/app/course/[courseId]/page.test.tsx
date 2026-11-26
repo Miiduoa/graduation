@@ -1,3 +1,4 @@
+import * as privateFileService from '@/lib/privateFiles';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import CoursePage from './page';
@@ -19,6 +20,10 @@ const auth = vi.hoisted(() => ({
   loading: false,
 }));
 const school = vi.hoisted(() => ({ selectedSchoolId: 'school-a', loading: false }));
+vi.mock('next/navigation', async (original) => ({
+  ...await original<typeof import('next/navigation')>(),
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => auth }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({ useOptionalSelectedSchool: () => school }));
 vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
@@ -69,7 +74,9 @@ function submit(id: string) {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.spyOn(privateFileService, 'claimPrivateFile').mockResolvedValue(undefined);
   window.localStorage.clear();
+  window.history.replaceState(null, '', '/course/course');
   auth.user = { uid: 'alice' };
   auth.loading = false;
   school.selectedSchoolId = 'school-a';
@@ -87,6 +94,17 @@ it('keeps guests outside coursework while showing its sign-in destination in the
   );
   expect(screen.getByRole('navigation', { name: '網站資訊' })).toBeTruthy();
   expect(loadCourseWork).not.toHaveBeenCalled();
+});
+
+it('keeps the original course content route usable by teachers', async () => {
+  vi.mocked(loadCourseWork).mockResolvedValue(coursework({ canTeach: true }));
+  await mount();
+  expect(screen.getByRole('heading', { level: 1, name: '資料結構' })).toBeTruthy();
+  expect(screen.getByText('私人教材')).toBeTruthy();
+  expect(screen.getByRole('region', { name: '作業 A' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '管理課堂點名' }).getAttribute('href')).toBe(
+    '/course/course/attendance',
+  );
 });
 
 it('keeps sibling edits mounted through another assignment submission and its background refresh', async () => {
@@ -432,4 +450,173 @@ it('offers scoped course counts and accessible shortcuts without inventing a wor
   expect(within(navigation).getByRole('link', { name: '本週待辦' }).getAttribute('href')).toBe('#week');
   expect(within(navigation).getByRole('link', { name: '教材櫃' }).getAttribute('href')).toBe('#course-materials-title');
   expect(within(navigation).getByRole('link', { name: '作業與評量' }).getAttribute('href')).toBe('#assignments');
+});
+
+it.each([
+  ['assignment', 'assignment'],
+  ['quiz', 'quiz'],
+  ['exam', 'quiz'],
+] as const)('opens the actual %s card from this week and moves keyboard focus to it', async (type, kind) => {
+  vi.mocked(loadCourseWork).mockResolvedValue(coursework({
+    assignments: [assignment('work-1', { type, dueAt: new Date().toISOString() })],
+  }));
+  await mount();
+  const week = screen.getByRole('region', { name: '本週' });
+  const link = within(week).getByRole('link', { name: /作業 work-1/ });
+  const card = screen.getByRole('region', { name: '作業 work-1' });
+  expect(link.getAttribute('href')).toBe(`#${kind}-work-1`);
+  fireEvent.click(link);
+  await waitFor(() => expect(window.location.hash).toBe(`#${kind}-work-1`));
+  await waitFor(() => expect(document.activeElement).toBe(card));
+  expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true');
+  expect(loadCourseWork).toHaveBeenCalledOnce();
+  expect(submitCourseText).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['教材櫃', 'course-materials-title'],
+  ['作業與評量', 'assignments'],
+] as const)('focuses the %s shortcut and returns to the same weekly task', async (name, id) => {
+  vi.mocked(loadCourseWork).mockResolvedValue(coursework({
+    assignments: [assignment('A', { dueAt: new Date().toISOString(), allowLateSubmission: true })],
+  }));
+  window.history.replaceState(null, '', '/course/course#assignment-A');
+  await mount();
+  const card = screen.getByRole('region', { name: '作業 A' });
+  await waitFor(() => expect(document.activeElement).toBe(card));
+  write('A', '切換內容後仍保留這份草稿');
+  const navigation = screen.getByRole('navigation', { name: '課程內容捷徑' });
+  fireEvent.click(within(navigation).getByRole('link', { name }));
+  const heading = document.getElementById(id);
+  await waitFor(() => expect(document.activeElement).toBe(heading));
+  expect(card.hasAttribute(COURSE_WORK_LANDING_ATTR)).toBe(false);
+  fireEvent.click(within(screen.getByRole('region', { name: '本週' })).getByRole('link', { name: /作業 A/ }));
+  await waitFor(() => expect(document.activeElement).toBe(card));
+  expect(card.getAttribute(COURSE_WORK_LANDING_ATTR)).toBe('true');
+  expect(answer('A').value).toBe('切換內容後仍保留這份草稿');
+  expect(loadCourseWork).toHaveBeenCalledOnce();
+});
+
+it('revisits the current task without requiring another hashchange, while modified clicks keep focus', async () => {
+  vi.mocked(loadCourseWork).mockResolvedValue(coursework({
+    assignments: [assignment('A', { dueAt: new Date().toISOString(), allowLateSubmission: true })],
+  }));
+  window.history.replaceState(null, '', '/course/course#assignment-A');
+  await mount();
+  const card = screen.getByRole('region', { name: '作業 A' });
+  await waitFor(() => expect(document.activeElement).toBe(card));
+  const link = within(screen.getByRole('region', { name: '本週' })).getByRole('link', { name: /作業 A/ });
+  const field = answer('A');
+  field.focus();
+  fireEvent.click(link, { ctrlKey: true });
+  expect(document.activeElement).toBe(field);
+  fireEvent.click(link, { metaKey: true });
+  expect(document.activeElement).toBe(field);
+  fireEvent.click(link);
+  expect(document.activeElement).toBe(card);
+  expect(window.location.hash).toBe('#assignment-A');
+  expect(loadCourseWork).toHaveBeenCalledOnce();
+});
+
+it('can return to the same card after a missing task link without a background refresh stealing focus', async () => {
+  window.history.replaceState(null, '', '/course/course#assignment-A');
+  await mount();
+  const card = screen.getByRole('region', { name: '作業 A' });
+  await waitFor(() => expect(document.activeElement).toBe(card));
+  await act(async () => {
+    window.history.replaceState(null, '', '/course/course#assignment-gone');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  const refresh = screen.getByRole('button', { name: '重新整理' });
+  refresh.focus();
+  await act(async () => {
+    window.history.replaceState(null, '', '/course/course#assignment-A');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await waitFor(() => expect(document.activeElement).toBe(card));
+  const field = answer('A');
+  field.focus();
+  fireEvent.click(refresh);
+  await waitFor(() => expect(loadCourseWork).toHaveBeenCalledTimes(2));
+  expect(document.activeElement).toBe(field);
+});
+
+it('uploads Supabase assignment attachments and submits their paths without requiring text', async () => {
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const privateFiles = await import('@/lib/privateFiles');
+  const upload = vi.spyOn(privateFiles, 'uploadPrivateFile').mockResolvedValue({ path: 'ignored' });
+  try {
+    await mount();
+    const region = within(screen.getByRole('region', { name: '作業 A' }));
+    fireEvent.change(region.getByLabelText('作業附件'), { target: { files: [new File(['answer'], 'answer.pdf', { type: 'application/pdf' })] } });
+    submit('A');
+    await waitFor(() => expect(submitCourseText).toHaveBeenCalledWith('course', 'A', 'alice', '', [expect.stringMatching(/^groups\/course\/assignments\/A\/submissions\/alice\/[A-Za-z0-9_-]+\.pdf$/)]));
+    expect(upload).toHaveBeenCalledWith(expect.objectContaining({ contentType: 'application/pdf', originalFilename: 'answer.pdf' }));
+  } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; upload.mockRestore(); }
+});
+
+it.each([429, 413])('preserves finalized attachments after upload failure %s and retries only remaining files', async (statusCode) => {
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const privateFiles = await import('@/lib/privateFiles');
+  const upload = vi.spyOn(privateFiles, 'uploadPrivateFile')
+    .mockResolvedValueOnce({ path: 'ignored' })
+    .mockRejectedValueOnce(Object.assign(new Error('Upload or finalization failed'), { statusCode }))
+    .mockResolvedValue({ path: 'ignored' });
+  try {
+    await mount();
+    const region = within(screen.getByRole('region', { name: '作業 A' }));
+    fireEvent.change(region.getByLabelText('作業附件'), { target: { files: ['one', 'two', 'three'].map(name => new File(['answer'], `${name}.pdf`, { type: 'application/pdf' })) } });
+    submit('A');
+    await region.findByText(statusCode === 429 ? '上傳太頻繁，請稍後再試' : '未能確認繳交結果。內容已保留；請重新整理確認紀錄，或稍後重試。');
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(submitCourseText).not.toHaveBeenCalled();
+    submit('A');
+    await waitFor(() => expect(submitCourseText).toHaveBeenCalled());
+    expect(upload).toHaveBeenCalledTimes(4);
+    expect(upload.mock.calls.map(([input]) => input.body instanceof File ? input.body.name : '')).toEqual(['one.pdf', 'two.pdf', 'two.pdf', 'three.pdf']);
+    expect(vi.mocked(submitCourseText).mock.calls[0][4]).toHaveLength(3);
+  } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; upload.mockRestore(); }
+});
+
+it('rejects selection of more than six attachments', async () => {
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  try {
+    await mount();
+    const region = within(screen.getByRole('region', { name: '作業 A' }));
+    fireEvent.change(region.getByLabelText('作業附件'), { target: { files: Array.from({ length: 7 }, () => new File(['x'], 'answer.pdf')) } });
+    expect(region.getByText('單次最多選取 6 個附件')).toBeTruthy();
+    expect((region.getByRole('button', { name: '繳交作業' }) as HTMLButtonElement).disabled).toBe(true);
+  } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; }
+});
+
+it('labels generated files by their submission order and keeps the filename of a named attachment', async () => {
+  vi.mocked(loadCourseWork).mockResolvedValue(coursework({ assignments: [
+    assignment('A', { submittedAt: '2026-11-23T07:24:00Z', attachments: [
+      'groups/course/assignments/A/submissions/alice/report.pdf',
+      'groups/course/assignments/A/submissions/alice/1795488100000-1-0123456789abcdef0123456789abcdef.docx',
+    ] }),
+  ] }));
+  await mount();
+  const receipt = within(screen.getByRole('region', { name: '作業 A' }));
+  expect(receipt.getByRole('button', { name: '下載 report.pdf' })).toBeTruthy();
+  expect(receipt.getByRole('button', { name: '下載 附件 2.docx' })).toBeTruthy();
+});
+
+it('keeps the notification campus and assignment through school sign-in', async () => {
+  auth.user = null;
+  window.history.replaceState(null, '', '/course/course?campus=ntu&schoolId=ntu&unrelated=old#assignment-A');
+  await mount();
+  const link = screen.getByRole('link', { name: '登入帳號' });
+  const href = link.getAttribute('href')!;
+  const login = new URL(href, window.location.origin);
+  expect(login.searchParams.get('campus')).toBe('ntu');
+  expect(login.searchParams.get('returnUrl')).toBe('/course/course?schoolId=ntu&campus=ntu#assignment-A');
+  const assign = vi.fn();
+  vi.stubGlobal('location', { ...window.location, search: window.location.search, hash: window.location.hash, assign });
+  try {
+    fireEvent.click(link);
+    expect(assign).toHaveBeenCalledWith(href);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

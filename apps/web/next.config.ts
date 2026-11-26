@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { NextConfig } from 'next';
 import { legacyEnabled, legacyHtmlRedirects, legacyRewrites } from './src/lib/legacy-routing';
 import { hasVerifiedCatalogSearch, officialLibraryDirectory } from '../../packages/shared/src/officialLibraries';
+import { firebaseEmulatorRewrites } from './src/lib/server/firebaseEmulatorConfig';
 
 const firebaseAdminBrowserStub = path.join(__dirname, 'src/lib/nodeNativeStub.ts');
 
@@ -18,12 +19,29 @@ const libraryFormOrigins = [...new Set(Object.values(officialLibraryDirectory)
   .filter((url) => url.protocol === 'https:' && !url.username && !url.password)
   .map((url) => url.origin))];
 
+// 私人媒體先下載為 Blob；只有 fetch 需要儲存服務來源。
+// 正式映像建置時沒有 Supabase 設定，CSP 又在建置時固定，故以正式專案 origin（非機密）為預設。
+const DEFAULT_PRIVATE_STORAGE_ORIGIN = 'https://hrrmkrayvrgnwcroyttp.supabase.co';
+const privateStorageOrigin = (() => {
+  for (const raw of [process.env.SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_URL]) {
+    if (!raw?.trim()) continue;
+    try {
+      const url = new URL(raw.trim());
+      if (url.protocol === 'https:' && !url.username && !url.password) return url.origin;
+    } catch {
+      // 無效設定不擴大來源。
+    }
+  }
+  return DEFAULT_PRIVATE_STORAGE_ORIGIN;
+})();
+
 const contentSecurityPolicy = [
   "default-src 'self'",
   "base-uri 'self'",
   "frame-ancestors 'none'",
   "object-src 'none'",
   "form-action 'self' https://accounts.google.com " + libraryFormOrigins.join(' '),
+  "media-src 'self' blob:",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline' https:",
@@ -31,7 +49,7 @@ const contentSecurityPolicy = [
   "worker-src 'self' blob:",
   // api.nuni.tw is the existing school-discovery host used by /auth/account.
   "connect-src 'self' https://api.nuni.tw https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://huggingface.co https://*.huggingface.co https://*.hf.co wss:" +
-    emulatorConnectSrc,
+    ' ' + privateStorageOrigin + emulatorConnectSrc,
 ].join('; ');
 
 const securityHeaders = [
@@ -52,7 +70,7 @@ const nextConfig: NextConfig = {
   // @huggingface/transformers 當 server external，不可再列入 transpilePackages，
   // 否則與 serverExternalPackages 衝突，Turbopack 建置會失敗。
   // 原生 Node 綁定不進瀏覽器包；權重也不進伺服器映像。
-  serverExternalPackages: ['onnxruntime-node', 'firebase-admin'],
+  serverExternalPackages: ['onnxruntime-node', 'firebase-admin', 'firebase-functions'],
   turbopack: {
     resolveAlias: {
       'onnxruntime-node': { browser: './src/lib/nodeNativeStub.ts' },
@@ -85,7 +103,8 @@ const nextConfig: NextConfig = {
     return legacyHtmlRedirects();
   },
   async rewrites() {
-    return legacyRewrites(legacyEnabled());
+    const legacy = legacyRewrites(legacyEnabled());
+    return { ...legacy, beforeFiles: [...firebaseEmulatorRewrites(), ...legacy.beforeFiles] };
   },
   async headers() {
     return [
@@ -124,17 +143,14 @@ const nextConfig: NextConfig = {
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=(self)' },
         ],
       },
-      ...[
-        '/merchant',
-        '/merchant/workspace',
-        '/course/:courseId/attendance',
-        '/teacher/course/:courseId/attendance',
-      ].map((source) => ({
-        source,
-        headers: [
-          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
-        ],
-      })),
+      ...['/merchant', '/merchant/workspace', '/course/:courseId/attendance', '/teacher/course/:courseId/attendance'].map(
+        (source) => ({
+          source,
+          headers: [
+            { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
+          ],
+        }),
+      ),
       // classroom camera 是建置時讀進映像的；開 ASSIGNMENT_FILE_SUBMIT_ENABLED 必須重建 Web 映像。
       ...(process.env.ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true'
         ? [

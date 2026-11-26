@@ -14,6 +14,7 @@ import { CommunityLoadError, useCommunityLoad } from '../../_components/useCommu
 import { CommunityAccess } from '../../_components/CommunityAccess';
 import { useBoardCreationAccess } from '../../_components/useBoardCreationAccess';
 import { BoardCreationStatus } from '../../_components/BoardCreationStatus';
+import { PostImagePreview } from '../../_components/PostImagePreview';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
@@ -37,7 +38,7 @@ const MAX_TAGS = 5;
 export default function PostComposePage() {
   const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext();
   return (
-    <SiteShell title="發文" subtitle="撰寫校園社群貼文" schoolName={ready ? schoolName : undefined}>
+    <SiteShell title="發文" schoolName={ready ? schoolName : undefined}>
       {ready ? (
         <CommunityAccess>
           <PostComposeInner key={schoolId} schoolId={schoolId} />
@@ -57,16 +58,16 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
   const { user, loading: authLoading } = useAuth();
   const searchParams = useSearchParams();
   const routeBoardId = searchParams?.get('boardId') ?? '';
+  const fromCreatorProfile = searchParams?.get('source') === 'profile';
 
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [boardsLoaded, setBoardsLoaded] = useState(false);
   const [boardId, setBoardId] = useState(routeBoardId);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [anonymous, setAnonymous] = useState(true);
+  const [anonymous, setAnonymous] = useState(!fromCreatorProfile);
   const [tagsRaw, setTagsRaw] = useState('');
   const [files, setFiles] = useState<File[]>([]);
-  const [previews, setPreviews] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const emptyRetryRef = useRef<HTMLButtonElement | null>(null);
@@ -115,19 +116,10 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
   const selectedBoard = useMemo(() => boards.find((b) => b.id === boardId), [boards, boardId]);
 
   useEffect(() => {
-    if (selectedBoard?.defaultAnonymous != null) {
+    if (!fromCreatorProfile && selectedBoard?.defaultAnonymous != null) {
       setAnonymous(selectedBoard.defaultAnonymous);
     }
-  }, [selectedBoard?.defaultAnonymous]);
-
-  // Generate object URLs for previews
-  useEffect(() => {
-    const urls = files.map((f) => URL.createObjectURL(f));
-    setPreviews(urls);
-    return () => {
-      urls.forEach((u) => URL.revokeObjectURL(u));
-    };
-  }, [files]);
+  }, [fromCreatorProfile, selectedBoard?.defaultAnonymous]);
 
   const onPickFiles = (list: FileList | null) => {
     if (!list) return;
@@ -315,6 +307,13 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
         />
         匿名貼文
       </label>
+      {fromCreatorProfile && (
+        <p style={{ marginTop: 5, marginBottom: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 }}>
+          {anonymous
+            ? '匿名貼文不會出現在個人作品中。'
+            : '這篇將以你的帳號署名發表，並顯示在你的個人作品中。'}
+        </p>
+      )}
 
       <Label>標題</Label>
       <input
@@ -353,9 +352,9 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
         onChange={(e) => onPickFiles(e.target.files)}
       />
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {previews.map((src, i) => (
+        {files.map((file, i) => (
           <div
-            key={src}
+            key={`${file.name}:${file.lastModified}:${i}`}
             style={{
               width: 84,
               height: 84,
@@ -365,7 +364,7 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
               background: 'var(--panel2)',
             }}
           >
-            <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <PostImagePreview file={file} />
             <button
               type="button"
               onClick={() => removeFile(i)}

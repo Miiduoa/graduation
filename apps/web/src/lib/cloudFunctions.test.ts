@@ -18,6 +18,9 @@ it('points hosted group invite callables at this Next.js app without a functions
   expect(getCloudFunctionUrl('reviewLeaveRequest', { env })).toBe('/api/fn/reviewLeaveRequest');
   expect(getCloudFunctionUrl('listLeaveReviewQueue', { env })).toBe('/api/fn/listLeaveReviewQueue');
   expect(getCloudFunctionUrl('signInPuStudentId', { env })).toBe('/api/fn/signInPuStudentId');
+  expect(getCloudFunctionUrl('ensureCampusStoryBinding', { env })).toBe(
+    '/api/fn/ensureCampusStoryBinding',
+  );
   expect(getCloudFunctionUrl('createGroup', { env })).toBe(
     'https://asia-east1-campus-one-tw.cloudfunctions.net/createGroup',
   );
@@ -61,4 +64,10 @@ it('lets the emulator win over NEXT_PUBLIC_FUNCTIONS_BASE_URL', () => {
   expect(getCloudFunctionUrl('askCampusAssistant', { env })).toBe(
     'http://localhost:5001/demo-campus/asia-east1/askCampusAssistant',
   );
+});
+
+it.each(['listGroupDiscussionPage', 'prepareDmConversation', 'sendDmText', 'replyToCampusStory'])('recognizes the hosted route for %s', (name) => {
+  for (const env of [{}, { NEXT_PUBLIC_FUNCTIONS_BASE_URL: fly }, { NEXT_PUBLIC_USE_FIREBASE_EMULATOR: 'true' }]) {
+    expect(getCloudFunctionUrl(name, { env })).toBe('/api/fn/' + name);
+  }
 });

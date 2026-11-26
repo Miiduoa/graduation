@@ -1,7 +1,13 @@
+import type { DormCloudRepair } from '@campus/shared/src/dormitoryCloud';
+import { DormWorkflow } from '../components/dorm/DormWorkflow';
+import { subscribeDormCloud } from '../services/dormitoryCloud';
+import { emptyDormCloud, dormCloudDate, dormParcelReturnNotice, DORM_CLOUD_REPAIR_LABELS, DORM_PACKAGES_EMPTY } from '@campus/shared/src/dormitoryCloud';
+import * as Clipboard from 'expo-clipboard';
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   Alert,
   Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -19,6 +25,7 @@ import {
   DORM_INSPECTION_ITEMS,
   DORM_MILESTONE_LIMIT,
   DORM_PARCEL_LIMIT,
+  DORM_REPAIR_COPY,
   DORM_REPAIR_REFERENCE_LIMIT,
   DORM_REPAIR_SHORTCUTS,
   DORM_REPAIR_CATEGORIES,
@@ -46,11 +53,14 @@ import { resolveDormitoryPublicGuide } from '@campus/shared/src/dormitoryGuide';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
+import { useAuth } from '../state/auth';
+import { hasReadySchoolSession } from '../app/SchoolSessionBoundary';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { useDormitoryOwner } from '../hooks/useDormLaundryReminder';
 import { laundryNotificationAllowed, refreshDormLaundryReminder } from '../services/dormLaundryReminder';
 import { parseDormRepairDictation } from '@campus/shared/src/dormRepairDictation';
 
-type ViewName = 'home' | 'guide' | 'repairs' | 'parcels' | 'dates' | 'checklist' | 'laundry';
+type ViewName = 'home' | 'guide' | 'repairs' | 'parcels' | 'dates' | 'checklist' | 'laundry' | 'announcements' | 'leave';
 const NAV: Array<{ id: ViewName; name: string }> = [
   { id: 'home', name: '總覽' },
   { id: 'guide', name: '宿舍指南' },
@@ -66,6 +76,9 @@ const REPAIR_INITIAL = {
   location: '',
   description: '',
   reference: '',
+  availability: '',
+  followUpDate: '',
+  followUpNote: '',
   category: 'other' as DormRepairCategory,
 };
 
@@ -113,19 +126,53 @@ function Field({
   );
 }
 
-export function DormitoryScreen({ navigation }: { navigation?: { goBack?: () => void } }) {
+type DormitoryRouteParams = { notificationView?: unknown; dormAnnouncementId?: unknown; sourceSchoolId?: unknown };
+
+export function dormNotificationView(value: unknown) {
+  return value === 'parcels' || value === 'repairs' || value === 'announcements' || value === 'leave'
+    ? value : undefined;
+}
+
+export function DormitoryScreen({ navigation, route }: {
+  navigation?: { goBack?: () => void; navigate?: (name: 'Dormitory') => void };
+  route?: { params?: DormitoryRouteParams };
+}) {
   const { school } = useSchool();
+  const auth = useAuth();
   const owner = useDormitoryOwner();
+  const [dismissedParams, setDismissedParams] = useState<DormitoryRouteParams>();
+  const params = route?.params === dismissedParams ? undefined : route?.params;
+  const notice = dormNotificationView(params?.notificationView);
+  const openWorkspace = () => {
+    if (navigation?.navigate) navigation.navigate('Dormitory');
+    else setDismissedParams(params);
+  };
   if (!owner) {
     return <AIDetailScreen title="宿舍" onBack={() => navigation?.goBack?.()}><AICard><Body>正在確認使用者…</Body></AICard></AIDetailScreen>;
+  }
+  const rawSource = notice ? params?.sourceSchoolId : undefined;
+  const sourceSchoolId = typeof rawSource === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(rawSource)
+    ? rawSource : undefined;
+  if (notice && (!hasReadySchoolSession(auth, school.id)
+    || (rawSource !== undefined && (!sourceSchoolId || toPublicSchoolId(sourceSchoolId) !== toPublicSchoolId(school.id)))
+    || (params?.dormAnnouncementId !== undefined && !sourceSchoolId))) {
+    return <AIDetailScreen title="宿舍通知" onBack={() => navigation?.goBack?.()}>
+      <AICard><Body>無法確認這則通知屬於目前的校園帳號，請從宿舍總覽查看自己的紀錄。</Body>
+        <AIButton label="查看宿舍總覽" onPress={openWorkspace} />
+      </AICard>
+    </AIDetailScreen>;
   }
   const key = dormStorageKey(owner, school.id);
   return (
     <DormitoryBody
-      key={key}
+      key={JSON.stringify([key, !!notice, sourceSchoolId])}
       storageKey={key}
+      cloudUid={owner.startsWith('firebase:') ? owner.slice(9) : null}
       schoolId={school.id}
       schoolName={school.name}
+      routeParams={params}
+      sourceSchoolId={sourceSchoolId}
+      openWorkspace={openWorkspace}
       guest={owner === 'guest'}
       onBack={() => navigation?.goBack?.()}
     />
@@ -133,21 +180,49 @@ export function DormitoryScreen({ navigation }: { navigation?: { goBack?: () => 
 }
 
 function DormitoryBody({
-  storageKey, schoolId, schoolName, guest, onBack,
+  storageKey, schoolId, schoolName, guest, onBack, cloudUid, routeParams, sourceSchoolId, openWorkspace,
 }: {
+  cloudUid: string | null;
   storageKey: string;
   schoolId: string;
   schoolName: string;
   guest: boolean;
   onBack: () => void;
+  routeParams?: DormitoryRouteParams;
+  sourceSchoolId?: string;
+  openWorkspace: () => void;
 }) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
+  const [cloud, setCloud] = useState(() => emptyDormCloud(!cloudUid));
+  const [cloudRetry, setCloudRetry] = useState(0);
+  const [showIdentity, setShowIdentity] = useState(false);
+  const [ownRepairs, setOwnRepairs] = useState<DormCloudRepair[]>([]);
+  const tonightRepairs = [...cloud.repairs.filter(r => !r.official), ...ownRepairs];
+  const [tonightLeave, setTonightLeave] = useState(false);
+  const parcelNotification = routeParams?.notificationView === 'parcels' ? routeParams : undefined;
+  useEffect(() => {
+    if (!cloudUid) return;
+    let active = true;
+    try { return subscribeDormCloud(schoolId, cloudUid, setCloud, sourceSchoolId); }
+    catch {
+      void Promise.resolve().then(() => { if (active) setCloud({ ...emptyDormCloud(), packagesState: 'error', repairsState: 'error' }); });
+      return () => { active = false; };
+    }
+  }, [schoolId, cloudUid, cloudRetry, parcelNotification, sourceSchoolId]);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState('');
   const [notice, setNotice] = useState('');
   const [conflict, setConflict] = useState(false);
   const [data, setData] = useState<DormWorkspace>(() => emptyDormWorkspace());
-  const [view, setView] = useState<ViewName>('home');
+  const noticeView = dormNotificationView(routeParams?.notificationView);
+  const [view, setView] = useState<ViewName>(noticeView ?? 'home');
+  const scrollRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (noticeView) {
+      setView(noticeView);
+      scrollRef.current?.scrollTo({ y: 0, animated: false });
+    }
+  }, [noticeView, routeParams]);
   const [room, setRoom] = useState({ building: '', room: '', bed: '' });
   const [repair, setRepair] = useState({ ...REPAIR_INITIAL });
   const [issueNarration, setIssueNarration] = useState('');
@@ -287,6 +362,7 @@ function DormitoryBody({
       ? {
         title: row.title, category: row.category, description: row.description,
         location: row.location, reference: row.reference ?? '',
+        availability: row.availability ?? '', followUpDate: row.followUpDate ?? '', followUpNote: row.followUpNote ?? '',
       }
       : {
         ...REPAIR_INITIAL,
@@ -309,6 +385,9 @@ function DormitoryBody({
     if (!editingId && data.repairs.length >= 80) {
       setNotice('本裝置最多保留 80 筆紀錄，請先整理舊資料。');
       return;
+    }
+    if (repair.followUpDate && !isValidDormDate(repair.followUpDate)) {
+      setNotice('請填寫有效的追問日期。'); return;
     }
     const original = data.repairs.find((r) => r.id === editingId);
     const id = editingId ?? pendingId ?? ('repair_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9));
@@ -420,6 +499,11 @@ function DormitoryBody({
     });
   }
 
+  async function copyRepair(row: DormRepair) {
+    try { await Clipboard.setStringAsync(formatDormRepairForCopy(row)); setNotice('已複製通報文字，請依校方正式管道辦理。'); }
+    catch { setNotice('無法複製，請改用分享通報文字。'); }
+  }
+
   async function shareRepair(row: DormRepair) {
     try {
       await Share.share({ message: formatDormRepairForCopy(row), title: '宿舍設備問題' });
@@ -449,13 +533,13 @@ function DormitoryBody({
 
   function renderRepairHandoff(category: DormRepairCategory, location: string, followUp = false) {
     const route = resolveDormRepairRoute(schoolId, category, location);
-    if (!route) return <Body muted>請向目前校園的宿舍服務台確認報修方式。</Body>;
+    if (!route) return <Body muted>{DORM_REPAIR_COPY.missingRoute}</Body>;
     const trackingUrl = followUp ? route.trackingUrl : undefined;
     return (
-      <View style={{ gap: 8, marginTop: 12 }}>
+      <View style={{ gap: 8, marginTop: 12 }} accessibilityLabel={DORM_REPAIR_COPY.officialChannelTitle}>
         <Body muted>{route.detail}</Body>
         {route.url !== trackingUrl && <AIButton label={route.label} onPress={() => void openPublicLink(route.url)} />}
-        {trackingUrl && <AIButton variant="ghost" label={route.trackingLabel ?? '查詢校方報修進度'}
+        {trackingUrl && <AIButton variant="ghost" label={route.trackingLabel ?? DORM_REPAIR_COPY.officialTrackingFallback}
           onPress={() => void openPublicLink(trackingUrl)} />}
       </View>
     );
@@ -476,16 +560,23 @@ function DormitoryBody({
   const flexRow: object = { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
   const pad: object = { paddingHorizontal: 16, marginTop: 16 };
 
+  const viewingNotice = view === noticeView;
   return (
-    <AIDetailScreen title="宿舍" subtitle={schoolName} onBack={onBack}
+    <AIDetailScreen title="宿舍" subtitle={schoolName} onBack={onBack} scrollRef={scrollRef}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
       <View style={{ ...pad, gap: 12 }}>
+        {viewingNotice && <AIButton label="查看宿舍總覽" variant="ghost" onPress={openWorkspace} />}
+        {(view === 'announcements' || view === 'leave') && (
+          <DormWorkflow schoolId={schoolId} sourceSchoolId={sourceSchoolId} uid={cloudUid} residentSection={view} notificationParams={routeParams} />
+        )}
+        {view === 'home' && <DormWorkflow schoolId={schoolId} uid={cloudUid} building={data.building} room={data.room} onTonightLeaveChange={setTonightLeave} onOwnRepairsChange={setOwnRepairs} />}
+        {!viewingNotice && <>
         <AICard title={data.building || '住得安心，事情好處理'}>
           <Body>{data.room ? ('寢室 ' + data.room + (data.bed ? ' · ' + data.bed : '')) : '把入住事項、設備問題與重要日期放在一起。'}</Body>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 16 }}>
             {([
-              { id: 'parcels' as const, count: String(pendingParcels.length), label: '待領包裹' },
-              { id: 'repairs' as const, count: String(data.repairs.filter((r) => r.status !== 'resolved').length), label: '待追蹤問題' },
+              { id: 'parcels' as const, count: String(pendingParcels.length), label: '我記的待領包裹' },
+              { id: 'repairs' as const, count: String(data.repairs.filter((r) => r.status !== 'resolved').length), label: DORM_REPAIR_COPY.openIssues },
               { id: 'dates' as const, count: String(milestones.filter((entry) => !entry.completed).length), label: '待辦日期' },
               { id: 'checklist' as const, count: progress.completed + '/' + progress.total, label: '準備進度' },
             ]).map((item) => (
@@ -527,7 +618,8 @@ function DormitoryBody({
         </ScrollView>
         <Body muted>{guest
           ? '訪客紀錄只存在此裝置，不會在登入後自動移到帳號，也不會同步到其他裝置。'
-          : '個人紀錄只儲存在此裝置，會依帳號及校園分開。正式住宿申請、報修和繳費不會從這裡送出。'}</Body>
+          : '「我自己記的」只存在此裝置，依帳號及校園分開；登錄的包裹與報修備忘從目前帳號的雲端資料讀取。'}</Body>
+        </>}
         {loading && <AICard><Body>正在讀取住宿紀錄…</Body></AICard>}
         {!!failure && <AICard badge="讀取失敗" badgeTone="danger"><Body>{failure}</Body></AICard>}
         {!!notice && <Text accessibilityRole="alert" style={{ color: aiTokens.text, lineHeight: 22 }}>{notice}</Text>}
@@ -535,6 +627,19 @@ function DormitoryBody({
 
         {!loading && !failure && view === 'home' && (
           <>
+            <AICard title="今晚宿舍">
+              {(cloud.packagesState === 'loading' || cloud.repairsState === 'loading') && <Body>正在讀取宿舍待辦…</Body>}
+              {(cloud.packagesState === 'error' || cloud.repairsState === 'error') && <><Body>雲端待辦暫時無法讀取。</Body><AIButton label="重試雲端紀錄" variant="ghost" onPress={() => setCloudRetry(n => n + 1)} /></>}
+              {cloud.packages.some(p => p.status === 'waiting' && !p.postal) && <Pressable accessibilityRole="button" style={{ height: 56, justifyContent: 'center' }} onPress={() => setView('parcels')}>
+                <Text style={{ color: aiTokens.text }}>待領包裹 {cloud.packages.filter(p => p.status === 'waiting' && !p.postal).length} 件 · 最早到件 {dormCloudDate(cloud.packages.find(p => p.status === 'waiting' && !p.postal)?.arrivedAt ?? null)}</Text>
+              </Pressable>}
+              {tonightRepairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && <Pressable accessibilityRole="button" style={{ height: 56, justifyContent: 'center' }} onPress={() => setView('repairs')}>
+                <Text style={{ color: aiTokens.text }}>{tonightRepairs.some(r => r.official) ? '報修處理中' : '報修備忘待辦'} {tonightRepairs.filter(r => r.status && r.status !== 'closed' && r.status !== 'cancelled').length} 件 · {DORM_CLOUD_REPAIR_LABELS[tonightRepairs.find(r => r.status && r.status !== 'closed' && r.status !== 'cancelled')!.status!]}</Text>
+              </Pressable>}
+              {!!data.laundryEndAt && remaining > 0 && <Pressable accessibilityRole="button" style={{ height: 56, justifyContent: 'center' }} onPress={() => setView('laundry')}><Text style={{ color: aiTokens.text }}>洗衣倒數 {remaining} 分鐘</Text></Pressable>}
+              {tonightLeave && <View style={{ height: 56, justifyContent: 'center' }}><Body>外宿已登記（已核可）</Body></View>}
+              {!tonightLeave && !cloud.packages.some(p => p.status === 'waiting' && !p.postal) && !tonightRepairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && !(data.laundryEndAt && remaining > 0) && !['loading', 'error'].includes(cloud.packagesState) && !['loading', 'error'].includes(cloud.repairsState) && <Body>今晚沒有待辦。</Body>}
+            </AICard>
             <AICard title="我的住宿備忘">
               <Body muted>此處資料由你自行填寫，不代表實際床位分配結果。</Body>
               <Field label="宿舍／學苑" value={room.building} maxLength={70} placeholder="例如：○○學苑" onChangeText={(value) => setRoom({ ...room, building: value })} />
@@ -619,8 +724,26 @@ function DormitoryBody({
 
         {!loading && !failure && view === 'repairs' && (
           <>
+            <AICard title="緊急請直接打服務台">
+              <Body>漏水、斷電或受困請先聯絡現場人員，勿等待報修紀錄。</Body>
+              {guide ? <><Body>{guide.officePhone} 轉 {guide.officeExtensions}</Body><AIButton variant="ghost" label="致電服務台" onPress={() => void openPublicLink('tel:' + guide.officePhone)} /></> : <Body>請依住宿指南或宿舍現場公告撥打服務台電話。</Body>}
+            </AICard>
+            <DormWorkflow key={viewingNotice ? 'notification' : 'workspace'} schoolId={schoolId} sourceSchoolId={sourceSchoolId} uid={cloudUid} building={data.building} room={data.room} notificationParams={viewingNotice ? routeParams : undefined} onTonightLeaveChange={setTonightLeave} onOwnRepairsChange={setOwnRepairs} />
+            <AICard title="雲端報修備忘">
+              <Body>此應用沒有將備忘送到學校。以下狀態僅是備忘標記，無法據此確認校方收件或設備修復；請依校方正式管道通報並確認。</Body>
+              {cloud.repairsState === 'loading' && <Body>正在讀取報修紀錄…</Body>}
+              {cloud.repairsState === 'guest' && <Body>登入校園帳號後可讀取自己的雲端報修備忘。</Body>}
+              {cloud.repairsState === 'error' && <><Body>報修紀錄讀取失敗，請確認帳號及網路。</Body><AIButton label="重試雲端紀錄" onPress={() => setCloudRetry(n => n + 1)} /></>}
+              {cloud.repairsState === 'ready' && !cloud.repairs.length && <Body>目前沒有雲端報修備忘。</Body>}
+              {cloud.repairs.filter(item => !item.official).map(item => <View key={item.id} style={{ gap: 8, marginTop: 14 }}>
+                <Body>{item.title}</Body><Body muted>{item.location}</Body>
+                {!item.status && <Body>備忘狀態不明，請確認原始紀錄。</Body>}
+                {item.steps.map(step => <Body key={step.status}>{DORM_CLOUD_REPAIR_LABELS[step.status]} · {dormCloudDate(step.at)}</Body>)}
+              </View>)}
+            </AICard>
+            <Text style={{ color: aiTokens.text, fontSize: 18, fontWeight: '600' }}>我自己記的</Text>
             <AICard title="設備問題">
-              <Body muted>請透過校方管道報修。這裡可整理問題、記下案號，並自行標記處理進度。</Body>
+              <Body muted>{DORM_REPAIR_COPY.intro}</Body>
               {!editor && !data.repairs.length && renderRepairHandoff('other', data.building)}
               <View style={{ marginTop: 14 }}><AIButton label="＋ 記錄問題" onPress={() => editRepair()} /></View>
               {!editor && <View style={{ marginTop: 16, gap: 10 }}>
@@ -699,12 +822,18 @@ function DormitoryBody({
                     )}
                   </View>
                   <Field label="位置" value={repair.location} maxLength={100} placeholder="例如：浴室洗手台" onChangeText={(text) => setRepair({ ...repair, location: text })} />
+                  <Field label={DORM_REPAIR_COPY.referenceLabel} value={repair.reference} maxLength={DORM_REPAIR_REFERENCE_LIMIT} placeholder={DORM_REPAIR_COPY.referencePlaceholder} onChangeText={(reference) => setRepair({ ...repair, reference })} />
+                  <Field label="可聯繫時段／入室協調（選填）" value={repair.availability} maxLength={160}
+                    placeholder="例如：平日 18 點後可聯繫，入室前請先協調" onChangeText={(availability) => setRepair({ ...repair, availability })} />
+                  <Field label="下次追問日期（選填，YYYY-MM-DD）" value={repair.followUpDate} maxLength={10}
+                    keyboardType="numbers-and-punctuation" placeholder="例如：2026-11-15" onChangeText={(followUpDate) => setRepair({ ...repair, followUpDate })} />
+                  <Field label="聯繫紀錄（自行記錄）" value={repair.followUpNote} maxLength={1200} multiline
+                    placeholder="例如：11/14 致電服務台，請我明天補照片；不是校方系統回覆" onChangeText={(followUpNote) => setRepair({ ...repair, followUpNote })} />
                   <Field label="詳細狀況" value={repair.description} maxLength={1200} multiline placeholder="詳細描述問題，方便向服務台通報" onChangeText={(text) => setRepair({ ...repair, description: text })} />
-                  <Field label="校方案號（選填）" value={repair.reference} maxLength={DORM_REPAIR_REFERENCE_LIMIT}
-                    placeholder="收到校方回覆後可補填" onChangeText={(reference) => setRepair({ ...repair, reference })} />
+                  <DormWorkflow schoolId={schoolId} uid={cloudUid} building={data.building} room={data.room} draft={repair} submitOnly />
                   {renderRepairHandoff(repair.category, repair.location, !!repair.reference.trim())}
                   <View style={{ ...flexRow, marginTop: 16 }}>
-                    <AIButton label="儲存紀錄" disabled={conflict} onPress={() => void saveRepair()} />
+                    <AIButton label={DORM_REPAIR_COPY.saveMemo} disabled={conflict} onPress={() => void saveRepair()} />
                     <AIButton label="取消" variant="ghost" onPress={() => { setEditor(false); setEditingId(null); setPendingId(null); }} />
                   </View>
                 </View>
@@ -724,13 +853,18 @@ function DormitoryBody({
                 <Body muted>{DORM_REPAIR_STATUSES[item.status]}</Body>
                 {!!item.location && <Body>位置：{item.location}</Body>}
                 {!!item.description && <Body>{item.description}</Body>}
-                {!!item.reference && <Text selectable style={{ color: aiTokens.text, lineHeight: 23 }}>校方案號：{item.reference}</Text>}
+                {!!item.reference && <Body>{DORM_REPAIR_COPY.referenceDisplay}：{item.reference}</Body>}
+                {!!item.availability && <Body>可聯繫時段／入室協調：{item.availability}</Body>}
+                {!!item.followUpDate && item.status !== 'resolved' && <Body>{item.followUpDate <= today ? '追問日期已到／已過' : '下次追問'}：{item.followUpDate}</Body>}
+                {!!item.followUpNote && <Body>聯繫紀錄（自行記錄）：{item.followUpNote}</Body>}
                 {(!editor || item.id !== editingId) && renderRepairHandoff(item.category, item.location, item.status !== 'draft' || !!item.reference)}
                 <View style={{ ...flexRow, marginTop: 12 }}>
                   <AIButton variant="ghost" label="編輯" onPress={() => editRepair(item)} />
+                  <AIButton variant="ghost" label="複製內容" onPress={() => void copyRepair(item)} />
                   <AIButton variant="ghost" label="分享通報文字" onPress={() => void shareRepair(item)} />
                   {item.status === 'draft' && <AIButton variant="ghost" label="我已自行通報" disabled={conflict} onPress={() => void updateRepairStatus(item.id, 'reported')} />}
                   {item.status !== 'resolved' && <AIButton variant="ghost" label="我已確認修復" disabled={conflict} onPress={() => void updateRepairStatus(item.id, 'resolved')} />}
+                  {item.status === 'resolved' && <AIButton variant="ghost" label="重新開啟備忘" disabled={conflict} onPress={() => void updateRepairStatus(item.id, 'draft')} />}
                   <AIButton variant="danger" label="刪除" disabled={conflict} onPress={() => {
                     Alert.alert('刪除此筆紀錄？', '只刪除此裝置上的備忘，不影響校方系統。', [
                       { text: '取消', style: 'cancel' },
@@ -746,8 +880,33 @@ function DormitoryBody({
 
         {!loading && !failure && view === 'parcels' && (
           <>
-            <AICard title="包裹與郵件">
+            <AICard title="校方登錄包裹">
+              {cloud.packagesState === 'loading' && <Body>正在讀取包裹…</Body>}
+              {cloud.packagesState === 'guest' && <Body>登入校園帳號後可讀取自己的包裹。</Body>}
+              {cloud.packagesState === 'error' && <><Body>包裹讀取失敗，私有包裹暫時保留上次紀錄，可能尚未更新。請確認帳號及網路。</Body><AIButton label="重試雲端紀錄" onPress={() => setCloudRetry(n => n + 1)} /></>}
+              {cloud.packagesState === 'ready' && !cloud.packages.filter(p => !p.postal).length && <Body>{DORM_PACKAGES_EMPTY}</Body>}
+              {cloud.packages.filter(p => !p.postal).map(item => <View key={item.id} style={{ gap: 8, marginTop: 16 }}>
+                <Body>{item.title}</Body><Body>到件日：{dormCloudDate(item.arrivedAt)}</Body><Body>領取地點：{item.location}</Body>
+                <Body>{item.status === 'waiting' ? '待領取' : item.status === 'collected' ? '已領取' : '已退件'}</Body>
+                {dormParcelReturnNotice(item, clock) && <Body muted>{dormParcelReturnNotice(item, clock)}</Body>}
+                {item.status === 'waiting' && <AIButton label="領取碼" onPress={() => setShowIdentity(true)} />}
+              </View>)}
+            </AICard>
+            {showIdentity && <Modal visible transparent animationType="fade" onRequestClose={() => setShowIdentity(false)}>
+              <View style={{ flex: 1, backgroundColor: aiTokens.surface, justifyContent: 'center', padding: 24, gap: 20 }} accessibilityViewIsModal>
+                <Text style={{ fontSize: 24, color: aiTokens.text }}>領取碼</Text>
+                <Body>請出示給服務台核對。這是身分頁，不是取件密碼；由服務台確認領取。</Body>
+                {cloud.identity ? <><Text selectable style={{ fontSize: 34, color: aiTokens.text }}>{cloud.identity.studentId}</Text><Text selectable style={{ fontSize: 34, color: aiTokens.text }}>{cloud.identity.name}</Text></>
+                  : <Body>目前無法讀取學號與姓名，請出示學生證給服務台核對。</Body>}
+                <AIButton label="關閉領取碼" onPress={() => setShowIdentity(false)} />
+              </View>
+            </Modal>}
+            <AICard title="行政大樓收發室"><Body>掛號包裹請看收發室公告</Body></AICard>
+            <AICard title="我自己記的">
               <Body muted>自行記錄待領包裹與掛號郵件。這裡沒有連接宿舍收發室、物流狀態或自動通知；請勿儲存取件驗證碼。</Body>
+              <Body muted>官方包裹查詢未串接。請先到校方住宿網站確認查件方式或聯絡收發室，再記下待領事項。</Body>
+              {official ? <AIButton variant="ghost" label="到校方確認包裹查詢方式 ↗" onPress={() => void openOfficial()} />
+                : <Body muted>目前沒有這所學校的住宿入口，請從學校官網尋找住宿單位。</Body>}
               <View style={{ marginTop: 15 }}><AIButton label="＋ 記錄包裹" onPress={() => editParcel()} /></View>
               {!parcelEditorOpen && (
                 <View style={{ ...flexRow, marginTop: 14 }}>

@@ -144,10 +144,19 @@ function Task({ port }: { port: PublicTaskPort }) {
   }, [invalidate]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (focusInput.current) {
-      input.current?.focus();
-      focusInput.current = false;
-    } else if (preview || operation || error) heading.current?.focus();
+      if (input.current && !input.current.disabled) {
+        input.current.focus();
+        focusInput.current = false;
+      }
+      return;
+    }
+    if (preview || operation || error) heading.current?.focus();
   }, [preview, operation, error, gate.kind]);
+  useEffect(() => {
+    if (!focusInput.current || !input.current || input.current.disabled) return;
+    input.current.focus();
+    focusInput.current = false;
+  }, [busy]);
   async function checkStatus(initial = false) {
     if (running.current) return;
     running.current = true;
@@ -430,8 +439,8 @@ function Task({ port }: { port: PublicTaskPort }) {
         } else {
           mayBeUnsettled.current = false;
           lastAck.current = null;
-          setGate({ kind: 'clear' });
           focusInput.current = true;
+          setGate({ kind: 'clear' });
         }
       }
     } catch {

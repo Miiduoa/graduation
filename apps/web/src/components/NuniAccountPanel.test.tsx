@@ -464,6 +464,7 @@ it('keeps explicit recovery retryable after a rejected refresh without claiming 
   mocks.account.refresh.mockReturnValueOnce(retry.promise);
   mocks.request.mockImplementation(async (path: string) => nuniPayload(path));
   fireEvent.click(screen.getByRole('button', { name: '重新確認帳號' }));
+  expect(mocks.account.refresh).toHaveBeenCalledTimes(2);
   expect(screen.queryByRole('form')).toBeNull();
   expect(reads()).toHaveLength(1);
   await act(async () => retry.resolve());

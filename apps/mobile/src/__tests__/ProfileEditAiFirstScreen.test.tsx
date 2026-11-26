@@ -18,7 +18,10 @@ jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../data/firebaseSource', () => ({ firebaseSource: { updateUser: jest.fn() } }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
-jest.mock('@react-navigation/native', () => ({ useNavigation: () => mockNavigation }));
+jest.mock('@react-navigation/native', () => ({
+  useNavigation: () => mockNavigation,
+  usePreventRemove: jest.fn(),
+}));
 
 function saved(patch: Partial<User> = {}): User {
   return {

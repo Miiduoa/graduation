@@ -66,17 +66,23 @@ jest.mock('expo-device', () => ({
 }));
 
 // Mock expo-constants
+// Tests of LMS behaviour opt into the enabled path. Production default remains
+// false unless EXPO_PUBLIC_TRONCLASS_DATA_ENABLED is exactly 'true'.
 jest.mock('expo-constants', () => ({
   expoConfig: {
     name: 'Campus App',
     slug: 'campus-app',
     version: '1.0.0',
+    extra: { tronClassDataEnabled: true },
   },
 }));
 
 // Mock expo-file-system
+const mockDocumentPath = 'file:///mock/documents';
+const mockDocumentFiles = new Map();
+beforeEach(() => mockDocumentFiles.clear());
 jest.mock('expo-file-system', () => ({
-  documentDirectory: 'file:///mock/documents/',
+  documentDirectory: mockDocumentPath + '/',
   cacheDirectory: 'file:///mock/cache/',
   EncodingType: { Base64: 'base64' },
   writeAsStringAsync: jest.fn(() => Promise.resolve()),
@@ -84,17 +90,37 @@ jest.mock('expo-file-system', () => ({
   deleteAsync: jest.fn(() => Promise.resolve()),
   getInfoAsync: jest.fn(() => Promise.resolve({ exists: false })),
   makeDirectoryAsync: jest.fn(() => Promise.resolve()),
+  Paths: { document: mockDocumentPath },
   File: class {
-    constructor(uri) {
-      this.uri = uri;
-      this.exists = true;
+    constructor(...segments) {
+      this.uri = segments.join('/');
       this.size = 12;
+    }
+    get exists() {
+      return !this.uri.startsWith(mockDocumentPath + '/') || mockDocumentFiles.has(this.uri);
     }
     async base64() {
       return '';
     }
     async arrayBuffer() {
       return new Uint8Array([1, 2, 3]).buffer;
+    }
+    info() {
+      return { exists: this.exists };
+    }
+    create() {
+      if (mockDocumentFiles.has(this.uri)) throw new Error('file already exists');
+      mockDocumentFiles.set(this.uri, '');
+    }
+    write(content) {
+      mockDocumentFiles.set(this.uri, content);
+    }
+    textSync() {
+      if (!mockDocumentFiles.has(this.uri)) throw new Error('file does not exist');
+      return mockDocumentFiles.get(this.uri);
+    }
+    delete() {
+      if (!mockDocumentFiles.delete(this.uri)) throw new Error('file does not exist');
     }
   },
 }));
@@ -128,12 +154,19 @@ jest.mock('firebase/auth', () => ({
   onAuthStateChanged: jest.fn(),
 }));
 
+jest.mock('firebase/functions', () => ({
+  getFunctions: jest.fn(),
+  httpsCallable: jest.fn(() => jest.fn(async () => ({ data: { success: true, stamped: [] } }))),
+  connectFunctionsEmulator: jest.fn(),
+}));
+
 jest.mock('firebase/firestore', () => ({
   getFirestore: jest.fn(),
   collection: jest.fn(),
   doc: jest.fn(),
   getDoc: jest.fn(),
   getDocs: jest.fn(),
+  getDocsFromServer: jest.fn(),
   addDoc: jest.fn(),
   updateDoc: jest.fn(),
   deleteDoc: jest.fn(),

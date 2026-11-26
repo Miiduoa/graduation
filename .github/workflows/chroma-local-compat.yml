@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        numpy-version: ['1.26.4', '2.5.4']
+        numpy-version: ['1.26.4', '2.5.5']
     timeout-minutes: 25
     defaults:
       run:
@@ -37,9 +37,9 @@ jobs:
       ANONYMIZED_TELEMETRY: 'false'
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Checkout the immutable pre-hardening application for legacy seed and rollback
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: 1bca9d770e996106c4a495442d16bba9d413f455
           path: .chroma-legacy-checkout

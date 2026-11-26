@@ -8,6 +8,7 @@ process.env.ONLINE_ORDERING_ENABLED = 'true';
 const { createGroupMembershipHandlers } = require('./groupMembership');
 const { createOrderHandler } = require('./createOrder');
 const { createSubmitProductFeedback } = require('./productFeedback');
+const { createReplyToCampusStory } = require('./storyReplies');
 
 const emulatorHost = /^(?:127\.0\.0\.1|localhost|0\.0\.0\.0):([0-9]{1,5})$/.exec(
   process.env.FIRESTORE_EMULATOR_HOST || '',
@@ -93,6 +94,60 @@ beforeEach(async () => {
 after(async () => {
   await db.terminate();
   await deleteApp(app);
+});
+
+test('simultaneous story replies with the same id create one DM message and one receipt', async () => {
+  const seed = db.batch();
+  seed.set(db.doc('users/alice'), { schoolId: 'pu' });
+  seed.set(db.doc('users/bob'), { schoolId: 'pu' });
+  seed.set(db.doc('campusStories/one'), { authorUid: 'bob', schoolId: 'pu', allowReplies: true, expiresAt: Date.now() + 60000 });
+  await seed.commit();
+  const send = createReplyToCampusStory({ db });
+  const request = { auth: { uid: 'alice' }, data: { viewerUid: 'alice', schoolId: 'pu', storyId: 'one',
+    authorUid: 'bob', replyId: 'reply-concurrency-test-001', content: '一起去嗎？' } };
+  const receipts = await Promise.all([send(request), send(request), send(request)]);
+  assert.deepEqual(receipts, [receipts[0], receipts[0], receipts[0]]);
+  const thread = db.doc('conversations/dm_pu_alice_bob');
+  const messages = await thread.collection('messages').get();
+  assert.equal(messages.size, 1);
+  assert.equal(messages.docs[0].id, receipts[0].messageId);
+  assert.ok(messages.docs[0].data().createdAt.toMillis() > 0);
+  assert.equal((await thread.get()).data().lastMessage.id, receipts[0].messageId);
+});
+
+test('existing members can still send and replay a private story reply after transfer', async () => {
+  const seed = db.batch();
+  seed.set(db.doc('users/alice'), { schoolId: 'pu' });
+  seed.set(db.doc('users/bob'), { schoolId: 'pu' });
+  seed.set(db.doc('users/charlie'), { schoolId: 'other' });
+  seed.set(db.doc('schools/other/members/charlie'), { status: 'active' });
+  seed.delete(db.doc('schools/pu/members/charlie'));
+  seed.set(db.doc('campusStories/transfer'), {
+    authorUid: 'bob', schoolId: 'pu', allowReplies: true, expiresAt: Date.now() + 60_000,
+  });
+  await seed.commit();
+
+  const send = createReplyToCampusStory({ db });
+  const reply = (uid, replyId) => send({
+    auth: { uid },
+    data: { schoolId: 'pu', storyId: 'transfer', viewerUid: uid, authorUid: 'bob', replyId, content: '明天見' },
+  });
+  const firstId = 'story-transfer-reply-first';
+  const secondId = 'story-transfer-reply-second';
+  const first = await reply('alice', firstId);
+  const thread = db.doc(`conversations/${first.conversationId}`);
+  await db.doc('users/bob').set({ primarySchoolId: 'pu' });
+  assert.deepEqual(await reply('alice', firstId), first);
+  const second = await reply('alice', secondId);
+  assert.notEqual(second.messageId, first.messageId);
+  assert.equal((await thread.collection('messages').get()).size, 2);
+  await assert.rejects(reply('charlie', 'story-outsider-reply-0001'), { code: 'permission-denied' });
+  await db.doc('users/alice').update({ schoolId: 'other' });
+  assert.deepEqual(await reply('alice', firstId), first);
+  await assert.rejects(reply('alice', 'story-transfer-reply-third'), { code: 'permission-denied' });
+  await db.doc('users/alice/blockedUsers/bob').set({});
+  assert.deepEqual(await reply('alice', firstId), first);
+  assert.equal((await thread.collection('messages').get()).size, 2);
 });
 
 test('concurrent feedback retries persist one receipt with a server timestamp', async () => {

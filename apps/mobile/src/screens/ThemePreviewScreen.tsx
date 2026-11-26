@@ -3,16 +3,17 @@ import { Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AIDetailScreen, AICard } from '../ui/aiFirst';
 import { useThemeMode } from '../state/theme';
-import type { ThemeMode } from '../ui/theme';
+import type { AppearanceMode } from '../state/appearancePreference';
 
 type Props = { navigation?: { goBack?: () => void } };
-const modes: Array<{ key: ThemeMode; label: string; description: string }> = [
+const modes: Array<{ key: AppearanceMode; label: string; description: string }> = [
+  { key: 'system', label: '跟隨系統', description: '隨裝置的外觀自動切換。' },
   { key: 'light', label: '淺色', description: '紙白底色與墨綠文字，適合日間閱讀。' },
   { key: 'dark', label: '深色', description: '降低畫面亮度，適合光線較暗的環境。' },
 ];
 
 export function ThemePreviewScreen({ navigation }: Props) {
-  const { theme, mode, setMode } = useThemeMode();
+  const { theme, appearanceMode, setMode } = useThemeMode();
   return (
     <AIDetailScreen
       title="外觀"
@@ -22,7 +23,7 @@ export function ThemePreviewScreen({ navigation }: Props) {
       <AICard title="介面主題">
         <View style={{ gap: theme.space.sm }}>
           {modes.map((option) => {
-            const selected = option.key === mode;
+            const selected = option.key === appearanceMode;
             return (
               <Pressable
                 key={option.key}
@@ -45,7 +46,13 @@ export function ThemePreviewScreen({ navigation }: Props) {
                 })}
               >
                 <Ionicons
-                  name={option.key === 'light' ? 'sunny-outline' : 'moon-outline'}
+                  name={
+                    option.key === 'system'
+                      ? 'phone-portrait-outline'
+                      : option.key === 'light'
+                        ? 'sunny-outline'
+                        : 'moon-outline'
+                  }
                   size={24}
                   color={theme.colors.accent}
                 />

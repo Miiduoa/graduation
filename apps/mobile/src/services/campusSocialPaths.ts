@@ -24,10 +24,6 @@ export function storyDocPath(storyId: string) {
   return `campusStories/${storyId}` as const;
 }
 
-export function storyViewDocPath(storyId: string, viewerUid: string) {
-  return `campusStories/${storyId}/storyViews/${viewerUid}` as const;
-}
-
 export function campusReportPath(reportId: string) {
   return `campusReports/${reportId}` as const;
 }

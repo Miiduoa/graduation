@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getSchoolLoginConfig } from './schoolLoginConfig';
 
@@ -26,7 +27,20 @@ type ProfileDocRef = {
 type ProfileTransaction = {
   get: (ref: ProfileDocRef) => Promise<DocSnapshot>;
   set: (ref: ProfileDocRef, data: Record<string, unknown>, options?: { merge?: boolean }) => void;
+  update: (ref: ProfileDocRef, data: Record<string, unknown>) => void;
 };
+
+function extraSchoolIdsFromProfile(account: Record<string, unknown>, loginSchoolId: string) {
+  const ids: string[] = [];
+  const values = [account.schoolId, account.primarySchoolId];
+  if (Array.isArray(account.schoolIds)) values.push(...account.schoolIds);
+  for (const value of values) {
+    if (typeof value === 'string' && value && value !== loginSchoolId && !ids.includes(value)) {
+      ids.push(value);
+    }
+  }
+  return ids;
+}
 
 export type SchoolLoginFirestore = {
   doc: (path: string) => ProfileDocRef;
@@ -88,19 +102,34 @@ export async function writeSchoolLoginProfile({
       id,
       ref: db.doc('schools/' + membershipSchoolId + '/courseTeachers/' + id),
     }));
+  const preview =
+    typeof userRef.get === 'function' ? await userRef.get() : { exists: false, data: () => ({}) };
+  const extraRefs = extraSchoolIdsFromProfile(
+    preview.exists ? preview.data() : {},
+    membershipSchoolId,
+  ).map((id) => db.doc('schools/' + id + '/members/' + uid));
 
   return db.runTransaction(async (tx) => {
     const userDoc = await tx.get(userRef);
     const memberDoc = await tx.get(memberRef);
+    const extraSnaps: DocSnapshot[] = [];
+    for (const ref of extraRefs) extraSnaps.push(await tx.get(ref));
     const offeringDocs = [];
     for (const offering of offeringRefs) {
       offeringDocs.push({ ...offering, snap: await tx.get(offering.ref) });
     }
 
     const account = userDoc.exists ? userDoc.data() : {};
-    if (account.accountDeletionInProgress === true || account.status === 'deleted') {
+    if (
+      account.accountDeletionInProgress === true ||
+      ['deleted', 'disabled', 'suspended', 'inactive'].includes(String(account.status || ''))
+    ) {
       throw new Error('account-deletion');
     }
+    const bindingGeneration =
+      typeof account.bindingGeneration === 'string' && account.bindingGeneration
+        ? account.bindingGeneration
+        : randomUUID();
     const membership = memberDoc.exists ? memberDoc.data() : null;
     if (membership?.status && membership.status !== 'active') {
       throw new Error('membership-disabled');
@@ -120,6 +149,10 @@ export async function writeSchoolLoginProfile({
         schoolId: membershipSchoolId,
         primarySchoolId: membershipSchoolId,
         lastLoginAt: FieldValue.serverTimestamp(),
+        bindingGeneration,
+        schoolIds: FieldValue.arrayUnion(membershipSchoolId),
+        campusStoryBindingHaltKind: FieldValue.delete(),
+        campusStoryBindingHaltAt: FieldValue.delete(),
         ...(userDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
       },
       { merge: true },
@@ -131,10 +164,22 @@ export async function writeSchoolLoginProfile({
         status: 'active',
         role: resolved.memberRole,
         lastLoginAt: FieldValue.serverTimestamp(),
+        profileBoundSchoolId: membershipSchoolId,
+        profileBoundGeneration: bindingGeneration,
         ...(memberDoc.exists ? {} : { joinedAt: FieldValue.serverTimestamp() }),
       },
       { merge: true },
     );
+    extraRefs.forEach((ref, index) => {
+      const snap = extraSnaps[index];
+      if (!snap?.exists) return;
+      const data = snap.data() || {};
+      if (data.profileBoundSchoolId == null && data.profileBoundGeneration == null) return;
+      tx.update(ref, {
+        profileBoundSchoolId: FieldValue.delete(),
+        profileBoundGeneration: FieldValue.delete(),
+      });
+    });
 
     for (const offering of offeringDocs) {
       const current = offering.snap.exists ? offering.snap.data() : {};

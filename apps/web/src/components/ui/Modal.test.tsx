@@ -1,4 +1,4 @@
-import { StrictMode, useState } from 'react';
+import { createRef, StrictMode, useState } from 'react';
 import { renderToString } from 'react-dom/server';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -32,6 +32,20 @@ function backdropClick(dialog: HTMLElement) {
   // jsdom has a zero-size rect, so negative coordinates are outside.
   fireEvent(dialog, new MouseEvent('pointerdown', { bubbles: true, clientX: -10, clientY: -10 }));
   fireEvent.click(dialog, { clientX: -10, clientY: -10 });
+}
+
+function mockConfirmationLayout(actionTop: number, initialScroll = 0) {
+  vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(366);
+  vi.spyOn(Element.prototype, 'clientTop', 'get').mockReturnValue(1);
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this instanceof HTMLDialogElement) return new DOMRect(16, 16, 288, 368);
+    const scroll = this.closest('dialog')?.scrollTop ?? 0;
+    return new DOMRect(36, actionTop - scroll, 248, 44);
+  });
+  vi.mocked(HTMLDialogElement.prototype.showModal).mockImplementation(function (this: HTMLDialogElement) {
+    this.setAttribute('open', '');
+    this.scrollTop = initialScroll;
+  });
 }
 
 describe('modal interaction', () => {
@@ -114,6 +128,57 @@ describe('modal interaction', () => {
 });
 
 describe('confirmation safety', () => {
+  it('keeps cancel as the starting focus when the complete action is visible', () => {
+    mockConfirmationLayout(300);
+    render(<ConfirmModal isOpen title="移除課程" message="確認移除這門課程。" onConfirm={vi.fn()} onClose={vi.fn()} />);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '取消' }));
+    expect(screen.getByRole('dialog').scrollTop).toBe(0);
+  });
+
+  it('starts an overflowing confirmation at its title and preserves later reading and focus', () => {
+    // Native showModal may have already scrolled to the first action.
+    mockConfirmationLayout(800, 500);
+    const opener = document.createElement('button');
+    document.body.append(opener);
+    opener.focus();
+    const { rerender, unmount } = render(
+      <ConfirmModal isOpen title="確認課表修改" message="請先核對完整修改內容。" onConfirm={vi.fn()} onClose={vi.fn()} />,
+    );
+    const dialog = screen.getByRole('dialog', { name: '確認課表修改' });
+    const title = screen.getByRole('heading', { name: '確認課表修改' });
+    expect(dialog.scrollTop).toBe(0);
+    expect(document.activeElement).toBe(title);
+    expect(title.getAttribute('tabindex')).toBe('-1');
+    const cancel = screen.getByRole('button', { name: '取消' });
+    expect(cancel.getAttribute('tabindex')).toBeNull();
+    expect(screen.getByRole('button', { name: '確認' }).getAttribute('tabindex')).toBeNull();
+
+    cancel.focus();
+    dialog.scrollTop = 500;
+    const opened = vi.mocked(HTMLDialogElement.prototype.showModal).mock.calls.length;
+    rerender(<ConfirmModal isOpen title="確認課表修改" message="內容更新仍保留目前閱讀位置。" onConfirm={vi.fn()} onClose={vi.fn()} />);
+    expect(dialog.scrollTop).toBe(500);
+    expect(document.activeElement).toBe(cancel);
+    expect(vi.mocked(HTMLDialogElement.prototype.showModal).mock.calls.length).toBe(opened);
+
+    unmount();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
+  it('does not override the explicit initial focus or scroll of an ordinary modal', () => {
+    mockConfirmationLayout(800, 500);
+    const target = createRef<HTMLButtonElement>();
+    render(
+      <Modal isOpen title="自訂流程" onClose={vi.fn()} initialFocusRef={target} footer={<button ref={target}>指定起點</button>}>
+        內容
+      </Modal>,
+    );
+    expect(document.activeElement).toBe(target.current);
+    expect(screen.getByRole('dialog').scrollTop).toBe(500);
+    expect(screen.getByRole('heading', { name: '自訂流程' }).hasAttribute('tabindex')).toBe(false);
+  });
+
   it('starts on cancel and does not submit an enclosing form', () => {
     const submit = vi.fn((event: React.FormEvent) => event.preventDefault());
     render(<form onSubmit={submit}><ConfirmModal isOpen title="移除資料" message="這個操作無法復原。" onConfirm={vi.fn()} onClose={vi.fn()} /></form>);

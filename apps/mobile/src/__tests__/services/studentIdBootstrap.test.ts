@@ -6,30 +6,35 @@ jest.mock('@campus/shared/src/puEcampusDataPolicy', () => ({
 }));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { secureSetItem } from '../../services/secureStorage';
+import { executeSmartAction } from '../../services/aiSmartActions';
 import Constants from 'expo-constants';
 import { signInWithCustomToken, signOut } from 'firebase/auth';
 import { getAdapter } from '../../data/apiAdapters';
 import { PUAdapter } from '../../data/apiAdapters/PUAdapter';
-import { clearPUSession, signInWithStudentId } from '../../services/studentIdAuth';
+import { captureSchoolSessionAssertion, clearPUSession, signInWithStudentId } from '../../services/studentIdAuth';
 import {
   clearMockAuthSession,
   loadMockAuthSession,
+  updateMockAuthRole,
   saveMockAuthSession,
 } from '../../services/mockAuth';
 import {
   clearPUCache,
   getAnyCachedCourses,
+  getAnyCachedTCCourses,
   getAnyCachedGrades,
   seedCachedGrades,
 } from '../../services/puDataCache';
 import { puLogin, puFetchCourses, puFetchGrades } from '../../services/puDirectScraper';
 import {
   clearTCSession,
+  getTCBackendSessionId,
   setTCBackendSession,
-  setTCSavedCredentials,
   tcFetchProfile,
   tcLogin,
 } from '../../services/tronClassClient';
+import { routePostLoginData } from '../../services/postLoginDataRouter';
 import { syncPostLoginContextFromCaches } from '../../services/postLoginContextFromCaches';
 import type { PostLoginContext } from '../../data/postLoginTypes';
 import * as postLoginContextHolder from '../../services/postLoginContextHolder';
@@ -51,12 +56,13 @@ jest.mock('../../services/postLoginContextFromCaches', () => ({
   syncPostLoginContextFromCaches: jest.fn(async () => undefined),
 }));
 jest.mock('../../services/postLoginDataRouter', () => ({
+  clearPostLoginCache: jest.fn(async () => undefined),
   routePostLoginData: jest.fn(async () => ({ roleInference: { inferredRole: 'student' } })),
   routePostLoginDataWithContext: jest.fn(async () => undefined),
 }));
 jest.mock('../../services/secureStorage', () => ({
   secureGetItem: async () => null,
-  secureSetItem: async () => undefined,
+  secureSetItem: jest.fn(async () => undefined),
   secureDeleteItem: async () => undefined,
   secureDeleteMany: async () => undefined,
 }));
@@ -81,7 +87,6 @@ jest.mock('../../services/tronClassClient', () => {
   const actual = jest.requireActual('../../services/tronClassClient');
   return {
     ...actual,
-    setTCSavedCredentials: jest.fn(actual.setTCSavedCredentials),
     setTCBackendSession: jest.fn(actual.setTCBackendSession),
     clearTCSession: jest.fn(actual.clearTCSession),
     tcLogin: jest.fn(async () => ({ success: false })),
@@ -273,6 +278,9 @@ test('real school login exchanges the hosted token, uses its actual UID and imme
   );
   expect(signInWithCustomToken).toHaveBeenCalledWith(mockAuth, 'school-custom-token');
   expect(result.uid).toBe(serverUid);
+  expect(secureSetItem).not.toHaveBeenCalledWith('@pu_tc_cred', expect.anything());
+  expect(await AsyncStorage.getItem('@pu_tc_cred_fb')).toBeNull();
+  expect(await AsyncStorage.getItem('@pu_cache:tc_credentials')).toBeNull();
   expect(await loadMockAuthSession()).toBeNull();
   expect(saveMockAuthSession).not.toHaveBeenCalled();
   expect(result.syncSummary?.items).toEqual(
@@ -283,7 +291,7 @@ test('real school login exchanges the hosted token, uses its actual UID and imme
         detail: '已讀取 1 筆上課紀錄',
       }),
       expect.objectContaining({ key: 'grades', state: 'received', detail: '已讀取 1 筆成績' }),
-      expect.objectContaining({ key: 'learning', state: 'received', detail: '已讀取 1 門課程' }),
+      expect.objectContaining({ key: 'learning', state: 'received', detail: expect.stringContaining('已取得 1 門課程') }),
     ]),
   );
   expect((await getAnyCachedCourses())?.courses[0].credits).toBe(1.5);
@@ -291,6 +299,7 @@ test('real school login exchanges the hosted token, uses its actual UID and imme
   expect(syncPostLoginContextFromCaches).toHaveBeenCalledWith(
     expect.objectContaining({ uid: serverUid, assertVerifiedSession: expect.any(Function) }),
   );
+  expect(routePostLoginData).toHaveBeenCalledWith('student', 'course-list', expect.objectContaining({ uid: serverUid, assertCurrent: expect.any(Function) }));
   expect(puLogin).not.toHaveBeenCalled();
   expect(puFetchCourses).not.toHaveBeenCalled();
   expect(puFetchGrades).not.toHaveBeenCalled();
@@ -330,7 +339,7 @@ test.each([400, 401, 403, 429, 503])(
     expect(signInWithCustomToken).not.toHaveBeenCalled();
     expect(puLogin).not.toHaveBeenCalled();
     expect(tcLogin).not.toHaveBeenCalled();
-    expect(setTCSavedCredentials).not.toHaveBeenCalled();
+    expect(secureSetItem).not.toHaveBeenCalledWith('@pu_tc_cred', expect.anything());
     expect(clearTCSession).not.toHaveBeenCalled();
     expect(await loadMockAuthSession()).toEqual(expect.objectContaining({ uid: 'previous-user' }));
     expect(await getAnyCachedGrades()).toEqual(priorGrades);
@@ -344,7 +353,7 @@ test.each([401, 403, 429, 503])(
     await expect(signInWithStudentId(params)).rejects.toThrow();
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(signInWithCustomToken).not.toHaveBeenCalled();
-    expect(setTCSavedCredentials).not.toHaveBeenCalled();
+    expect(secureSetItem).not.toHaveBeenCalledWith('@pu_tc_cred', expect.anything());
     expect(puLogin).not.toHaveBeenCalled();
   },
 );
@@ -359,7 +368,7 @@ test.each([undefined, ''])(
     expect(signInWithCustomToken).not.toHaveBeenCalled();
     expect(clearMockAuthSession).not.toHaveBeenCalled();
     expect(saveMockAuthSession).not.toHaveBeenCalled();
-    expect(setTCSavedCredentials).not.toHaveBeenCalled();
+    expect(secureSetItem).not.toHaveBeenCalledWith('@pu_tc_cred', expect.anything());
     expect(clearTCSession).not.toHaveBeenCalled();
     expect(await getAnyCachedGrades()).toEqual(priorGrades);
   },
@@ -378,7 +387,7 @@ test.each([
     await expect(signInWithStudentId(params)).rejects.toThrow();
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch.mock.calls[0][0]).not.toBe(`${hosted}/signInPuStudentId`);
-    expect(setTCSavedCredentials).not.toHaveBeenCalled();
+    expect(secureSetItem).not.toHaveBeenCalledWith('@pu_tc_cred', expect.anything());
   },
 );
 
@@ -398,7 +407,7 @@ test.each([undefined, '', '   '])(
       expect(signInWithCustomToken).not.toHaveBeenCalled();
       expect(puLogin).not.toHaveBeenCalled();
       expect(tcLogin).not.toHaveBeenCalled();
-      expect(setTCSavedCredentials).not.toHaveBeenCalled();
+      expect(secureSetItem).not.toHaveBeenCalledWith('@pu_tc_cred', expect.anything());
       expect(await loadMockAuthSession()).toEqual(expect.objectContaining({ uid: 'previous-user' }));
       expect(await getAnyCachedGrades()).toEqual(priorGrades);
     } finally {
@@ -413,7 +422,7 @@ test('token exchange failure preserves previous data and cannot trigger native l
   await expect(signInWithStudentId(params)).rejects.toThrow('custom-token-mismatch');
   expect(clearMockAuthSession).not.toHaveBeenCalled();
   expect(setTCBackendSession).not.toHaveBeenCalled();
-  expect(setTCSavedCredentials).not.toHaveBeenCalled();
+  expect(secureSetItem).not.toHaveBeenCalledWith('@pu_tc_cred', expect.anything());
   expect(clearTCSession).not.toHaveBeenCalled();
   expect(puLogin).not.toHaveBeenCalled();
   expect(await getAnyCachedGrades()).toEqual(priorGrades);
@@ -438,7 +447,7 @@ test('an aborted backend wait cannot store credentials or send a late hosted req
     await Promise.resolve();
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(signInWithCustomToken).not.toHaveBeenCalled();
-    expect(setTCSavedCredentials).not.toHaveBeenCalled();
+    expect(secureSetItem).not.toHaveBeenCalledWith('@pu_tc_cred', expect.anything());
     expect(clearTCSession).not.toHaveBeenCalled();
     expect(await getAnyCachedGrades()).toEqual(priorGrades);
   } finally {
@@ -460,7 +469,7 @@ test.each([false, true])(
     expect(mockAuth.currentUser).toBe(newerUser ? newer : null);
     expect(clearMockAuthSession).not.toHaveBeenCalled();
     expect(setTCBackendSession).not.toHaveBeenCalled();
-    expect(setTCSavedCredentials).not.toHaveBeenCalled();
+    expect(secureSetItem).not.toHaveBeenCalledWith('@pu_tc_cred', expect.anything());
     expect(clearTCSession).not.toHaveBeenCalled();
     expect(await getAnyCachedGrades()).toEqual(priorGrades);
   },
@@ -484,7 +493,7 @@ test('a newer Firebase user while hosted login is pending blocks the late token 
   await checked;
   expect(signInWithCustomToken).not.toHaveBeenCalled();
   expect(clearMockAuthSession).not.toHaveBeenCalled();
-  expect(setTCSavedCredentials).not.toHaveBeenCalled();
+  expect(secureSetItem).not.toHaveBeenCalledWith('@pu_tc_cred', expect.anything());
   expect(clearTCSession).not.toHaveBeenCalled();
   expect(await getAnyCachedGrades()).toEqual(priorGrades);
 });
@@ -507,7 +516,7 @@ test('logout during token exchange cannot be undone by a late credential', async
   expect(signOut).toHaveBeenCalledTimes(1);
   expect(mockAuth.currentUser).toBeNull();
   expect(clearMockAuthSession).not.toHaveBeenCalled();
-  expect(setTCSavedCredentials).not.toHaveBeenCalled();
+  expect(secureSetItem).not.toHaveBeenCalledWith('@pu_tc_cred', expect.anything());
   expect(await getAnyCachedGrades()).toEqual(priorGrades);
 });
 
@@ -525,7 +534,7 @@ test('an account switch while adapter loading is pending cannot seed or publish 
   ready.resolve(adapter);
   await checked;
   expect(setTCBackendSession).not.toHaveBeenCalled();
-  expect(setTCSavedCredentials).not.toHaveBeenCalled();
+  expect(secureSetItem).not.toHaveBeenCalledWith('@pu_tc_cred', expect.anything());
   expect(mockFetch).toHaveBeenCalledTimes(2);
   expect(syncPostLoginContextFromCaches).not.toHaveBeenCalled();
   expect(await getAnyCachedGrades()).toEqual(priorGrades);
@@ -546,6 +555,42 @@ test('hosted login without an LMS session completes only school data and does no
   expect(tcFetchProfile).not.toHaveBeenCalled();
   expect(mockFetch.mock.calls.some(([url]) => /TronClass/.test(String(url)))).toBe(false);
 });
+
+test('cloud sign-in with a verified LMS session fetches the course list without detailed requests', async () => {
+  mockFetch.mockResolvedValueOnce(response(200, loginPayload));
+  const result = await signInWithStudentId(params);
+  expect(result.syncSummary?.items.find((item) => item.key === 'learning')?.state).toBe('received');
+  const lmsRequests = mockFetch.mock.calls.filter(([url]) => /TronClass/i.test(String(url)));
+  expect(lmsRequests.map(([url]) => url)).toEqual([
+    `${primary}/puFetchTronClassData`, `${hosted}/getMyTronClassCourses`,
+  ]);
+  expect(JSON.parse(lmsRequests[0][1].body).dataType).toBe('courses');
+  expect(tcFetchProfile).not.toHaveBeenCalled();
+  expect(routePostLoginData).toHaveBeenCalledWith('student', 'course-list', expect.objectContaining({ uid: serverUid, assertCurrent: expect.any(Function) }));
+});
+
+test.each(['cloud', 'native'] as const)(
+  '%s login with only campus proof cannot read the previous LMS session or its courses',
+  async (source) => {
+    await setTCBackendSession('previous-lms-session', 81);
+    if (source === 'cloud') {
+      mockFetch.mockResolvedValueOnce(response(200, { ...loginPayload, tronClassSessionId: null }));
+    } else {
+      mockFetch.mockRejectedValueOnce(new Error('campus login temporarily offline'));
+      jest.mocked(puLogin).mockResolvedValueOnce({
+        success: true, session: { loggedIn: true, studentName: '測試同學' },
+      });
+    }
+    const result = await signInWithStudentId(params);
+    expect(result.syncSummary?.items.find((item) => item.key === 'learning')?.state).toBe('unavailable');
+    expect(tcLogin).toHaveBeenCalledTimes(1);
+    expect(tcFetchProfile).not.toHaveBeenCalled();
+    expect(mockFetch.mock.calls.some(([url]) => /TronClass/i.test(String(url)))).toBe(false);
+    expect(routePostLoginData).toHaveBeenCalledWith('student', 'none', expect.objectContaining({ assertCurrent: expect.any(Function) }));
+    expect(await getAnyCachedTCCourses()).toBeNull();
+    expect(await getTCBackendSessionId()).toBeNull();
+  },
+);
 
 test('an owned-source failure stays unavailable while the other school source remains usable', async () => {
   mockFetch.mockImplementation(async (url: string, options: RequestInit) => {
@@ -577,38 +622,109 @@ test('disabled LMS bootstrap never requests a course platform endpoint', async (
   const result = await signInWithStudentId(params);
   expect(result.syncSummary?.items.find((item) => item.key === 'learning')?.state).toBe('disabled');
   expect(mockFetch.mock.calls.some(([url]) => /TronClass/.test(String(url)))).toBe(false);
-  expect(setTCSavedCredentials).not.toHaveBeenCalled();
+  expect(secureSetItem).not.toHaveBeenCalledWith('@pu_tc_cred', expect.anything());
 });
 
-test('verified AI scope uses the actual school-login user and session revocation checks', async () => {
-  const context: PostLoginContext = {
-    uid: serverUid, schoolId: 'pu', origin: 'verified-school-login',
-    roles: {
-      primaryRole: 'student', subRoles: [], source: 'firestore',
-      flags: { isStudent: true, isTeacher: false, isDeptAdmin: false, isAdmin: false },
-    },
-    latestAnnouncements: [], partialErrors: [], builtAt: new Date().toISOString(),
-  };
-  const memory = jest.spyOn(postLoginContextHolder, 'getInMemoryPostLoginContext').mockReturnValue(context);
-  jest.mocked(syncPostLoginContextFromCaches).mockResolvedValueOnce(context);
+test.each(['expired', 'loggedOut', 'cleared', 'user', 'localMock', 'uid', 'schoolId', 'missingExpiry', 'infiniteExpiry'] as const)(
+  'successful login rejects AI cache access after session becomes %s', async (changed) => {
+    const context: PostLoginContext = {
+      uid: serverUid, schoolId: 'pu', origin: 'verified-school-login',
+      roles: {
+        primaryRole: 'student', subRoles: [], source: 'firestore',
+        flags: { isStudent: true, isTeacher: false, isDeptAdmin: false, isAdmin: false },
+      },
+      latestAnnouncements: [], partialErrors: [], builtAt: new Date().toISOString(),
+    };
+    const memory = jest.spyOn(postLoginContextHolder, 'getInMemoryPostLoginContext').mockReturnValue(context);
+    jest.mocked(syncPostLoginContextFromCaches).mockResolvedValueOnce(context);
+    try {
+      const identity = { userId: serverUid, schoolId: 'pu' };
+      expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+      const result = await signInWithStudentId(params);
+      const scope = getVerifiedSchoolAiScope(identity);
+      expect(scope?.context).toBe(context);
+
+      memory.mockReturnValue(null);
+      expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+      memory.mockReturnValue(JSON.parse(JSON.stringify(context)));
+      expect(getVerifiedSchoolAiScope(identity)).toBe(scope);
+
+      expect(captureSchoolSessionAssertion({ uid: serverUid, schoolId: 'pu' })).not.toThrow();
+      if (changed === 'expired') {
+        jest.useFakeTimers();
+        jest.setSystemTime(result.session.expiresAt!);
+      }
+      if (changed === 'loggedOut') result.session.loggedIn = false;
+      if (changed === 'cleared') clearPUSession();
+      if (changed === 'user') mockAuth.currentUser = { ...mockSchoolUser };
+      if (changed === 'localMock') result.session.localMock = true;
+      if (changed === 'uid') result.session.backendOwnerUid = 'other-owner';
+      if (changed === 'schoolId') result.session.schoolId = 'nthu';
+      if (changed === 'missingExpiry') result.session.expiresAt = undefined;
+      if (changed === 'infiniteExpiry') result.session.expiresAt = Infinity;
+      expect(isVerifiedSchoolAiScopeCurrent(scope!)).toBe(false);
+      expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+      expect(scope!.assertCurrent).toThrow();
+      await expect(executeSmartAction('query_grades', identity)).resolves.toEqual(
+        expect.objectContaining({ success: false, title: '學校資料尚未就緒' }),
+      );
+    } finally {
+      memory.mockRestore();
+    }
+  },
+);
+
+
+test('a missing school session is rejected and logout invalidates its assertion', () => {
+  const assertCurrent = captureSchoolSessionAssertion({ uid: serverUid, schoolId: 'pu' });
+  expect(assertCurrent).toThrow('學校 session 無效或已過期');
+  clearPUSession();
+  expect(assertCurrent).toThrow('學校登入已變更');
+});
+
+test('a restored school session assertion cannot survive a new login round for the same owner', async () => {
+  const assertCurrent = captureSchoolSessionAssertion({ uid: serverUid, schoolId: 'pu' });
+  await signInWithStudentId(params);
+  expect(assertCurrent).toThrow('學校登入已變更');
+});
+
+
+test('successful login sets a conservative expiry using the backend 30-day TTL for login and restoration', async () => {
+  const startedAt = Date.now();
+  const result = await signInWithStudentId(params);
+  expect(result.session.expiresAt).toBeGreaterThanOrEqual(startedAt + 30 * 24 * 60 * 60 * 1000);
+  expect(result.session.expiresAt).toBeLessThanOrEqual(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const assertCurrent = captureSchoolSessionAssertion({ uid: serverUid, schoolId: 'pu' });
+  expect(assertCurrent).not.toThrow();
+  jest.useFakeTimers();
+  jest.setSystemTime(result.session.expiresAt!);
+  expect(assertCurrent).toThrow('學校 session 無效或已過期');
+});
+
+
+test('an older inferred mock role cannot replace a different account signing in during the write', async () => {
+  const entered = deferred<void>();
+  const release = deferred<void>();
+  const original = AsyncStorage.setItem.bind(AsyncStorage);
+  const delayed = jest.spyOn(AsyncStorage, 'setItem').mockImplementationOnce(async (key, value) => {
+    entered.resolve();
+    await release.promise;
+    return original(key, value);
+  });
+  let current = true;
   try {
-    const identity = { userId: serverUid, schoolId: 'pu' };
-    expect(getVerifiedSchoolAiScope(identity)).toBeNull();
-    await signInWithStudentId(params);
-    const scope = getVerifiedSchoolAiScope(identity);
-    expect(scope?.context).toBe(context);
-
-    memory.mockReturnValue(null);
-    expect(getVerifiedSchoolAiScope(identity)).toBeNull();
-    memory.mockReturnValue(JSON.parse(JSON.stringify(context)));
-    expect(getVerifiedSchoolAiScope(identity)).toBe(scope);
-
-    mockAuth.currentUser = { ...mockSchoolUser };
-    expect(isVerifiedSchoolAiScopeCurrent(scope!)).toBe(false);
-    mockAuth.currentUser = mockSchoolUser;
-    clearPUSession();
-    expect(isVerifiedSchoolAiScopeCurrent(scope!)).toBe(false);
+    const old = expect(updateMockAuthRole(priorMock.uid, 'pu', 'teacher', () => {
+      if (!current) throw new Error('changed owner');
+    })).rejects.toThrow('changed owner');
+    await entered.promise;
+    current = false;
+    const next = { ...priorMock, uid: 'new-owner' };
+    const replacement = saveMockAuthSession(next);
+    release.resolve();
+    await Promise.all([old, replacement]);
+    expect(await loadMockAuthSession()).toMatchObject({ uid: 'new-owner', role: 'student' });
   } finally {
-    memory.mockRestore();
+    release.resolve();
+    delayed.mockRestore();
   }
 });

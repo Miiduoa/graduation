@@ -2,13 +2,16 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CampusDraftProvider, scopeStorageKey } from '@/components/CampusDraftProvider';
-import AssistantPage from './page';
+import { personalImportsStorageKey } from '@/lib/personalImports';
+import type { PersonalImportRecord } from '@campus/shared/src/imports/types';
+import AssistantPage from './LegacyAssistant';
 import { callCampusAssistant, executeCampusAgentWrite, getCampusAssistantSnapshot, type CampusAssistantEnvelope } from '@/lib/campusAssistantClient';
 
 const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
   query: '',
   functionsConfigured: true,
+  platformId: '' as string,
 }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(state.query) }));
 vi.mock('@/components/AuthGuard', () => ({
@@ -18,7 +21,10 @@ vi.mock('@/lib/signInOptions', () => ({
   useSignInOptions: () => ({ google: false, studentId: false, loading: false, retry: vi.fn() }),
 }));
 vi.mock('@/features/nuni/Session', () => ({
-  useOptionalNuniSession: () => null,
+  useOptionalNuniSession: () => state.platformId ? {
+    session: { platformAccountId: state.platformId, context: 'platform-session' },
+    loading: false, error: '', pendingLogout: false,
+  } : null,
 }));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({
@@ -61,6 +67,8 @@ beforeEach(() => {
   state.uid = 'alice';
   state.query = '';
   state.functionsConfigured = true;
+  state.platformId = '';
+  localStorage.clear();
   vi.mocked(getCampusAssistantSnapshot).mockImplementation(async (_userId, schoolId) => ({
     schoolId,
     checkedAt: '2026-10-26T12:00:00.000Z',
@@ -71,7 +79,40 @@ beforeEach(() => {
 });
 afterEach(() => {
   sessionStorage.clear();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
+
+// Wednesday 10:30 in Taipei. Only Date is faked so React and testing-library timers stay real.
+function freezeTaipeiWednesday() {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-18T10:30:00+08:00'));
+}
+type ConflictFixture = { classId: string; classTitle: string; eventId: string; eventTitle: string };
+function saveConflictFixture(owner: string, schoolId: string, fixture: ConflictFixture, extra: PersonalImportRecord[] = []) {
+  const base = {
+    schoolId, academicYear: '115', semester: '1', batchId: 'fixture-batch',
+    importedAt: '2026-11-10T01:00:00.000Z', source: { type: 'paste' as const, line: 1, rawText: '不得外送的匯入原文' },
+  };
+  const records: PersonalImportRecord[] = [
+    { ...base, id: fixture.classId, kind: 'timetable', title: fixture.classTitle, dayOfWeek: 3,
+      startTime: '14:10', endTime: '16:00', location: '私人教室 B203' },
+    { ...base, id: fixture.eventId, kind: 'events', title: fixture.eventTitle, academicYear: '', semester: '',
+      date: '2026-11-18', allDay: false, startTime: '15:00', endTime: '16:30' },
+    ...extra,
+  ];
+  localStorage.setItem(personalImportsStorageKey({ owner, schoolId }), JSON.stringify({ version: 1, records }));
+}
+const aliceFixture: ConflictFixture = {
+  classId: 'alice-class', classTitle: '資料庫管理', eventId: 'alice-event', eventTitle: '專題小組討論',
+};
+const bobFixture: ConflictFixture = {
+  classId: 'bob-class', classTitle: '作業系統', eventId: 'bob-event', eventTitle: '實驗室會議',
+};
+const eventLink = (schoolId: string, eventId: string) => `/calendar?schoolId=${schoolId}&eventId=${eventId}`;
+const logText = () => screen.getByRole('log').textContent ?? '';
+const logLink = (href: string) => Array.from(screen.getByRole('log').querySelectorAll('a'))
+  .find(link => link.getAttribute('href') === href);
 function ask(content = '私人課表') {
   fireEvent.change(screen.getByLabelText('你的問題'), { target: { value: content } });
   fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
@@ -83,6 +124,25 @@ function withCampusDraft(node: ReactNode) {
     </CampusDraftProvider>
   );
 }
+
+it('keeps live school grades available for dual sessions and reads explicit imports from their established owner', async () => {
+  state.platformId = 'platform-alice';
+  const imported = {
+    id: 'grade-1', kind: 'grades', title: '平台匯入專用科目', schoolId: 'pu',
+    academicYear: '115', semester: '1', credits: 3, grade: 'P', batchId: 'batch',
+    importedAt: '2026-11-07T10:00:00.000Z', source: { type: 'paste', line: 1, rawText: '不外送原文' },
+  };
+  localStorage.setItem(personalImportsStorageKey({ owner: 'platform:platform-alice', schoolId: 'pu' }),
+    JSON.stringify({ version: 1, records: [imported] }));
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '校方即時成績結果' } as CampusAssistantEnvelope);
+  render(<AssistantPage />);
+  ask('查看我的成績');
+  await screen.findByText('校方即時成績結果');
+  expect(callCampusAssistant).toHaveBeenCalledTimes(1);
+  ask('查看我的匯入成績');
+  await screen.findByText(/平台匯入專用科目/);
+  expect(callCampusAssistant).toHaveBeenCalledTimes(1);
+});
 
 it('uses the function name in the header instead of a school name before the school account is connected', () => {
   state.uid = null;
@@ -98,7 +158,9 @@ it('requires sign-in and does not send a query from a shared link automatically'
   expect(screen.getByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
   expect(screen.getByText('校園資訊可先從地圖、公車和公開公告查。')).toBeTruthy();
   expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
-  expect(screen.queryByRole('textbox')).toBeNull();
+  expect((screen.getByRole('textbox', { name: '保留的問題' }) as HTMLTextAreaElement).value).toBe('問題');
+  expect((screen.getByRole('textbox', { name: '保留的問題' }) as HTMLTextAreaElement).readOnly).toBe(true);
+  expect(screen.queryByRole('form', { name: '傳送問題' })).toBeNull();
   state.uid = 'alice';
   view.rerender(<AssistantPage />);
   expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('問題');
@@ -317,17 +379,125 @@ it('drops the previous campus conversation and cancels pending requests after a 
   expect(vi.mocked(callCampusAssistant).mock.calls[1][0].schoolId).toBe('nthu');
 });
 
-it('shows that the cloud assistant is not enabled instead of a retryable failure', () => {
+it('keeps public lookup input available while ordinary questions stay blocked without cloud functions', () => {
   state.functionsConfigured = false;
   render(<AssistantPage />);
   expect(screen.getByRole('heading', { name: '雲端助理尚未啟用' })).toBeTruthy();
   expect(screen.getByText(/正式站尚未接上雲端函式服務/)).toBeTruthy();
-  expect((screen.getByLabelText('你的問題') as HTMLTextAreaElement).disabled).toBe(true);
+  expect((screen.getByLabelText('你的問題') as HTMLTextAreaElement).disabled).toBe(false);
   expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByText('這次未能取得回覆。你的問題已保留，請稍後重試。')).toBeNull();
   expect(screen.queryByRole('button', { name: '重試' })).toBeNull();
-  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  ask('我的下一堂課');
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
   expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+function publicCatalogResponse(schoolId: 'ncnu' | 'nthu', changes: Record<string, unknown> = {}) {
+  return new Response(JSON.stringify({
+    schoolId,
+    sourceUrl: schoolId === 'ncnu'
+      ? 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall'
+      : 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json',
+    fetchedAt: '2026-11-07T08:00:00.000Z',
+    operation: { id: `${schoolId}.courses.search`, version: 1, responseSchemaVersion: 1, access: 'anonymous-public' },
+    courses: [{
+      code: 'CS430000', section: '01', title: '公開資料庫課程', department: '資訊系',
+      teacher: '公開授課老師', credits: '3', time: '一34', room: '資電館101', semester: '1151',
+    }],
+    truncated: false,
+    ...changes,
+  }), { headers: { 'Content-Type': 'application/json' } });
+}
+
+it.each(['ncnu', 'nthu'] as const)('queries %s public courses through the real shared client with no cloud assistant', async (schoolId) => {
+  state.query = `campus=${schoolId}`;
+  state.functionsConfigured = false;
+  const fetcher = vi.fn().mockResolvedValue(publicCatalogResponse(schoolId));
+  vi.stubGlobal('fetch', fetcher);
+  render(<AssistantPage />);
+  ask('幫我查資料庫課程');
+  expect(await screen.findByText('公開資料庫課程')).toBeTruthy();
+  const url = new URL(fetcher.mock.calls[0][0], 'https://nuni.tw');
+  expect(url.pathname).toBe('/api/public-course-catalog');
+  expect(url.searchParams.get('schoolId')).toBe(schoolId);
+  expect(url.searchParams.get('q')).toBe('資料庫');
+  expect(fetcher.mock.calls[0][1]).toMatchObject({ credentials: 'omit', redirect: 'error' });
+  const href = new URL(screen.getByRole('link', { name: '查看課程與課表核對' }).getAttribute('href')!, 'https://nuni.tw');
+  expect(href.searchParams.get('schoolId')).toBe(schoolId);
+  expect(href.searchParams.get('q')).toBe('資料庫');
+  expect(screen.getByText(/115 學年度第 1 學期/)).toBeTruthy();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+  expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+it('can explicitly look up another public campus and does not change the current conversation school', async () => {
+  state.query = 'campus=pu';
+  const fetcher = vi.fn().mockResolvedValue(publicCatalogResponse('nthu'));
+  vi.stubGlobal('fetch', fetcher);
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '原校園私人回覆' });
+  render(<AssistantPage />);
+  ask('幫我查清大資料庫課程');
+  await screen.findByText('公開資料庫課程');
+  expect(new URL(fetcher.mock.calls[0][0], 'https://nuni.tw').searchParams.get('schoolId')).toBe('nthu');
+  ask('我的下一堂課');
+  await screen.findByText('原校園私人回覆');
+  expect(vi.mocked(callCampusAssistant).mock.calls[0][0]).toMatchObject({
+    schoolId: 'pu', messages: [{ role: 'user', content: '我的下一堂課' }],
+  });
+});
+
+it('shows the public-source retry path for a forged response without falling back to the model', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(publicCatalogResponse('nthu', { sourceUrl: 'https://example.test/catalog' })));
+  render(<AssistantPage />);
+  ask('幫我查清大資料庫課程');
+  await screen.findByText(/暫時無法取得可核對/);
+  expect(screen.queryByText('公開資料庫課程')).toBeNull();
+  expect(screen.getByRole('link', { name: '查看課程與課表核對' })).toBeTruthy();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it.each(['clear', 'account', 'school'] as const)('discards a public lookup after %s changes', async (change) => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn().mockReturnValue(new Promise<Response>((resolve) => { finish = resolve; }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<AssistantPage />);
+  ask('幫我查清大資料庫課程');
+  await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+  const signal = fetcher.mock.calls[0][1].signal as AbortSignal;
+  if (change === 'clear') fireEvent.click(screen.getByRole('button', { name: '清除對話' }));
+  else {
+    if (change === 'account') state.uid = 'bob';
+    else state.query = 'campus=ncnu';
+    view.rerender(<AssistantPage />);
+  }
+  expect(signal.aborted).toBe(true);
+  await act(async () => { finish(publicCatalogResponse('nthu')); });
+  expect(screen.queryByText('公開資料庫課程')).toBeNull();
+  expect(screen.queryByRole('link', { name: '查看課程與課表核對' })).toBeNull();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it('keeps a pending signed write proposal available after a read-only public lookup', async () => {
+  const runId = '01234567-89ab-4cde-8012-3456789abcde';
+  vi.mocked(callCampusAssistant).mockResolvedValue({
+    content: '先核對報修草稿',
+    run: { runId, status: 'completed' },
+    actions: [{
+      action: 'queue_action', label: '確認送出報修', requiresConfirmation: true,
+      params: { toolName: 'createDormRepairRequest', agentRunId: runId,
+        input: { dormitory: 'A棟', room: '301', category: '冷氣', description: '不冷' } },
+    }],
+  });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(publicCatalogResponse('nthu')));
+  render(<AssistantPage />);
+  ask('A棟301冷氣不冷');
+  await screen.findByRole('button', { name: '檢視草稿' });
+  ask('幫我查清大資料庫課程');
+  await screen.findByText('公開資料庫課程');
+  expect(screen.getByRole('button', { name: '檢視草稿' })).toBeTruthy();
+  expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+  expect(callCampusAssistant).toHaveBeenCalledOnce();
 });
 
 it('keeps the composer enabled when Cloud Functions are configured', () => {
@@ -336,6 +506,42 @@ it('keeps the composer enabled when Cloud Functions are configured', () => {
   expect(screen.getByRole('heading', { name: '今天需要什麼幫忙？' })).toBeTruthy();
   expect((screen.getByLabelText('你的問題') as HTMLTextAreaElement).disabled).toBe(false);
   expect(screen.queryByText('雲端助理尚未啟用')).toBeNull();
+});
+
+it('provides service handoffs even when cloud functions are unavailable', async () => {
+  state.functionsConfigured = false;
+  state.query = 'schoolId=nthu';
+  render(<AssistantPage />);
+  ask('開啟宿舍服務');
+  expect((await screen.findByRole('link', { name: /開啟宿舍服務/ })).getAttribute('href'))
+    .toBe('/dormitory?schoolId=nthu');
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it('opens scoped career information without submitting a work-study application', async () => {
+  state.functionsConfigured = false;
+  state.query = 'schoolId=nthu';
+  render(<AssistantPage />);
+  ask('開啟職涯');
+  const career = await screen.findByRole('link', { name: /開啟職涯/ });
+  expect(career.getAttribute('href')).toBe('/career?schoolId=nthu');
+  expect(career.textContent).toContain('送出需在頁面確認');
+  expect(career.textContent).toContain('外部申請依原始公告另行辦理');
+  expect(screen.queryByText(/已(?:完成|申請|送出).*工讀|工讀申請成功/)).toBeNull();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+  expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+it('does not send local service questions into later cloud conversation history', async () => {
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '接續一般查詢' });
+  render(<AssistantPage />);
+  ask('開啟私人訊息');
+  await screen.findByRole('link', { name: /開啟私人訊息/ });
+  ask('我這週的作業有哪些');
+  await screen.findByText('接續一般查詢');
+  expect(vi.mocked(callCampusAssistant).mock.calls[0][0].messages).toEqual([
+    { role: 'user', content: '我這週的作業有哪些' },
+  ]);
 });
 
 it('does not send campus-specific requests before a campus is selected', () => {
@@ -372,7 +578,7 @@ it('requires a second explicit confirmation before executing a validated action'
     run: { runId, status: 'completed' },
     actions: [{
       action: 'queue_action',
-      label: '確認送出報修',
+      label: '確認存成報修備忘',
       requiresConfirmation: true,
       params: {
         toolName: 'createDormRepairRequest',
@@ -391,13 +597,46 @@ it('requires a second explicit confirmation before executing a validated action'
   fireEvent.click(screen.getByRole('button', { name: '檢視草稿' }));
   expect(screen.getByText('301')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '確認並執行' }));
-  await screen.findByText('伺服器已確認執行成功');
+  await screen.findByText('報修備忘已存好');
   expect(executeCampusAgentWrite).toHaveBeenCalledTimes(1);
   expect(vi.mocked(executeCampusAgentWrite).mock.calls[0][0]).toMatchObject({
     userId: 'alice', schoolId: 'pu', agentRunId: runId,
     toolName: 'createDormRepairRequest',
   });
-  expect(screen.getByText(/repair-123/)).toBeTruthy();
+  expect(screen.queryByText(/repair-123/)).toBeNull();
+  expect(screen.getByText('已幫你存成報修備忘，請依學校規定管道送出。此應用沒有送到學校。')).toBeTruthy();
+  expect(screen.queryByText('伺服器已確認執行成功')).toBeNull();
+  expect(screen.queryByText(/送出後即使離開此頁/)).toBeNull();
+  expect(screen.queryByText(/避免重複送出/)).toBeNull();
+});
+
+it('leave confirmation still uses the generic success copy, not the repair memo wording', async () => {
+  const runId = '01234567-89ab-4cde-8012-3456789abcde';
+  vi.mocked(callCampusAssistant).mockResolvedValue({
+    content: '請先確認請假內容',
+    run: { runId, status: 'completed' },
+    actions: [{
+      action: 'queue_action',
+      label: '確認請假',
+      requiresConfirmation: true,
+      params: {
+        toolName: 'submitLeaveRequest',
+        agentRunId: runId,
+        input: { courseId: 'course-1', date: '2026-10-29', type: '事假' },
+      },
+    }],
+  });
+  vi.mocked(executeCampusAgentWrite).mockResolvedValue({
+    success: true, toolName: 'submitLeaveRequest', requestId: 'leave-123',
+  });
+  render(<AssistantPage />);
+  ask('明天請假');
+  await screen.findByText('請先確認請假內容');
+  fireEvent.click(screen.getByRole('button', { name: '檢視草稿' }));
+  expect(screen.getByText(/送出後即使離開此頁，操作也可能繼續完成/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認並執行' }));
+  await screen.findByText('伺服器已確認執行成功');
+  expect(screen.queryByText('報修備忘已存好')).toBeNull();
 });
 
 it('never offers execution for an action not bound to its server run', async () => {
@@ -420,4 +659,76 @@ it('never offers execution for an action not bound to its server run', async () 
   await screen.findByText('草稿');
   expect(screen.queryByRole('button', { name: '檢視草稿' })).toBeNull();
   expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+it('answers a school-account timetable and calendar conflict from this device only, then keeps it out of cloud history', async () => {
+  freezeTaipeiWednesday();
+  const quietEvent: PersonalImportRecord = {
+    id: 'quiet-event', kind: 'events', title: '晚間聚餐', schoolId: 'pu', academicYear: '', semester: '',
+    date: '2026-11-18', allDay: false, startTime: '18:00', endTime: '19:00',
+    batchId: 'fixture-batch', importedAt: '2026-11-10T01:00:00.000Z',
+    source: { type: 'paste', line: 3, rawText: '不得外送的匯入原文' },
+  };
+  saveConflictFixture('school:alice', 'pu', aliceFixture, [quietEvent]);
+  // Same person at another school, another account, and the unselected platform namespace must stay unread.
+  saveConflictFixture('school:alice', 'ntpu',
+    { classId: 'other-school-class', classTitle: '其他學校課程', eventId: 'other-school-event', eventTitle: '其他學校行程' });
+  saveConflictFixture('school:bob', 'pu', bobFixture);
+  saveConflictFixture('platform:alice', 'pu',
+    { classId: 'platform-class', classTitle: '平台帳號課程', eventId: 'platform-event', eventTitle: '平台帳號行程' });
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '雲端一般回覆' });
+  render(<AssistantPage />);
+
+  ask('今天的課表和行程有衝突嗎？');
+  await waitFor(() => expect(logText()).toContain(aliceFixture.eventTitle));
+  expect(logText()).toContain(aliceFixture.classTitle);
+  expect(logText()).toMatch(/15:00[^\d]{1,6}16:00/);
+  expect(logLink(eventLink('pu', aliceFixture.eventId))).toBeDefined();
+  expect(logLink(eventLink('pu', quietEvent.id))).toBeUndefined();
+  for (const hidden of ['晚間聚餐', '其他學校', '實驗室會議', '作業系統', '平台帳號', '不得外送的匯入原文'])
+    expect(logText()).not.toContain(hidden);
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
+
+  ask('我這週的作業有哪些');
+  await screen.findByText('雲端一般回覆');
+  expect(callCampusAssistant).toHaveBeenCalledTimes(1);
+  const request = vi.mocked(callCampusAssistant).mock.calls[0][0];
+  expect(request).toMatchObject({ schoolId: 'pu', messages: [{ role: 'user', content: '我這週的作業有哪些' }] });
+  const serialized = JSON.stringify(request);
+  for (const secret of [aliceFixture.classTitle, aliceFixture.eventTitle, aliceFixture.eventId,
+    aliceFixture.classId, '私人教室 B203', '衝突', '15:00', '不得外送的匯入原文'])
+    expect(serialized).not.toContain(secret);
+});
+
+it('drops an earlier calendar conflict answer when the school account or school changes and reads only the new scope', async () => {
+  freezeTaipeiWednesday();
+  saveConflictFixture('school:alice', 'pu', aliceFixture);
+  saveConflictFixture('school:bob', 'pu', bobFixture);
+  const view = render(<AssistantPage />);
+
+  ask('今天的行程跟上課有撞期嗎？');
+  await waitFor(() => expect(logLink(eventLink('pu', aliceFixture.eventId))).toBeDefined());
+  expect(logText()).toContain(aliceFixture.eventTitle);
+
+  state.uid = 'bob';
+  view.rerender(<AssistantPage />);
+  expect(logText()).toBe('');
+  expect(screen.queryByText(new RegExp(aliceFixture.eventTitle))).toBeNull();
+  expect(logLink(eventLink('pu', aliceFixture.eventId))).toBeUndefined();
+
+  ask('今天的行程跟上課有撞期嗎？');
+  await waitFor(() => expect(logLink(eventLink('pu', bobFixture.eventId))).toBeDefined());
+  expect(logText()).toContain(bobFixture.eventTitle);
+  expect(logText()).toContain(bobFixture.classTitle);
+  expect(logText()).not.toContain(aliceFixture.eventTitle);
+  expect(logText()).not.toContain(aliceFixture.classTitle);
+
+  state.query = 'campus=nthu&schoolId=pu';
+  view.rerender(<AssistantPage />);
+  expect(logText()).toBe('');
+  expect(screen.queryByText(new RegExp(bobFixture.eventTitle))).toBeNull();
+  expect(logLink(eventLink('pu', bobFixture.eventId))).toBeUndefined();
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
+  expect(callCampusAssistant).not.toHaveBeenCalled();
 });

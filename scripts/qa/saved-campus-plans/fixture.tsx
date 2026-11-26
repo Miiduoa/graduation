@@ -6,11 +6,15 @@ import { CampusPlanComparisonCard } from '../../../apps/mobile/src/screens/Campu
 import { CampusEvidencePlanCard } from '../../../apps/mobile/src/screens/CampusEvidencePlanCard';
 import { NuniStudyPlanActions } from '../../../apps/mobile/src/screens/NuniStudyPlanActions';
 import { NuniPlanAssignmentOpenButton, type NuniPlanAssignmentOpenContext } from '../../../apps/mobile/src/screens/NuniPlanAssignmentOpenButton';
+import { StudyAssignmentAssistant } from '../../../apps/mobile/src/screens/nuni/StudyAssignmentAssistant';
+import { ThemeProvider } from '../../../apps/mobile/src/state/theme';
 import { applyTheme, theme } from '../../../apps/mobile/src/ui/theme';
+import type { NuniStudyAgenda, NuniStudyTask } from '../../../packages/shared/src/nuniStudyAgenda';
 import type { SavedCampusPlan } from '../../../apps/mobile/src/services/savedCampusPlans';
-import type { CampusPlanComparison } from '../../../apps/mobile/src/services/campusPlanComparison';
+import { compareCampusPlans, type CampusPlanComparison, type CampusPlanComparisonBasis } from '../../../apps/mobile/src/services/campusPlanComparison';
+import { copyCampusEvidencePlan } from '../../../apps/mobile/src/services/savedCampusPlanValidation';
 import type { CampusEvidencePlan } from '../../../apps/mobile/src/services/offlineCampusPlanner';
-import type { NuniPlanAssignmentSource } from '../../../apps/mobile/src/services/nuniPlanAssignmentTarget';
+import type { NuniPlanAssignmentSource, NuniPlanQuizSource } from '../../../apps/mobile/src/services/nuniPlanAssignmentTarget';
 
 const mode = new URLSearchParams(location.search).get('theme') === 'dark' ? 'dark' : 'light';
 applyTheme(mode);
@@ -107,6 +111,8 @@ declare global {
   interface Window {
     qaEvents: unknown[];
     qaSettleAssignmentRead?: (kind: 'ready' | 'unavailable' | 'changed') => void;
+    qaSettleQuizRead?: (kind: 'ready' | 'unavailable' | 'changed') => void;
+    qaReceiptRead?: 'received' | 'closed' | 'unavailable';
   }
 }
 window.qaEvents = [];
@@ -294,6 +300,34 @@ const assignmentPlan: CampusEvidencePlan = {
   },
 };
 
+const quizSource: NuniPlanQuizSource = {
+  accountId: assignmentSource.accountId, schoolId: assignmentSource.schoolId,
+  academicYear: assignmentSource.academicYear, semester: assignmentSource.semester,
+  workspaceId: assignmentSource.workspaceId, quizId: 'cwq_11111111-1111-4111-8111-111111111111',
+};
+const quizTask = {
+  kind: 'quiz' as const, title: '資料庫系統線上測驗：跨校課程整合、資料正規化與權限隔離',
+  groupName: '資料庫系統', dueAt: '2026-11-08T10:00:00.000Z', nuniQuizSource: quizSource,
+};
+const quizPlan: CampusEvidencePlan = {
+  ...assignmentPlan, title: '作業與測驗一起安排',
+  limitations: [
+    ...assignmentPlan.limitations.slice(0, 2),
+    '本次只納入已連結課程的作業與測驗，其他校務來源仍須自行核對。',
+  ],
+  steps: [{ ...quizTask, id: 'quiz-preparation', priority: 'urgent', evidence: 'authorized-quizzes', route: '/classroom',
+    detail: '參考期限 11/8 18:00。建議先用 10:10–10:40 複習這份測驗的課程內容；開考時間與作答方式請到課程頁核對。' },
+  ...assignmentPlan.steps.map((step) => ({ ...step,
+    detail: step.detail.replace('10:10–10:40', '10:40–11:10') })),
+  ],
+  agenda: { ...assignmentPlan.agenda!, quizzesAvailable: true,
+    days: assignmentPlan.agenda!.days.map((day) => ({ ...day,
+      deadlines: [{ ...quizTask, timeLabel: '18:00', overdue: false }, ...day.deadlines] })),
+    outsideWindow: [{ ...quizTask, title: '尚未確認期限的測驗', dueAt: null, reason: 'undated',
+      nuniQuizSource: { ...quizSource, quizId: 'cwq_22222222-2222-4222-8222-222222222222' } }],
+  },
+};
+
 // The production button and card are real. Only their injected reader and
 // navigation are controlled here; the navigation integration suite covers the
 // real planner, source checks, account guard and destination separately.
@@ -313,6 +347,18 @@ const assignmentContext: NuniPlanAssignmentOpenContext = {
       };
     });
   },
+  readQuizTarget: async (input) => {
+    window.qaEvents.push({ kind: 'quiz-read', source: input.source });
+    return new Promise((resolve) => {
+      window.qaSettleQuizRead = (kind) => {
+        delete window.qaSettleQuizRead;
+        resolve(kind === 'ready' ? { kind, params: {
+          tab: 'courses', workspaceId: input.source.workspaceId,
+          assignmentId: input.source.quizId, assistantAccountId: input.accountId,
+        } } : { kind });
+      };
+    });
+  },
 };
 const assignmentNavigation = {
   getState: () => ({ routeNames: ['NuniWorkspace'] }),
@@ -321,12 +367,12 @@ const assignmentNavigation = {
   },
 };
 
-function AssignmentPlanningApp() {
+function AssignmentPlanningApp({ quiz = false }: { quiz?: boolean }) {
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
   return <View style={{ minHeight: '100vh' as never, backgroundColor: theme.colors.bg, padding: 20, gap: 12 }}>
     <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>課業助理</Text>
-    <View testID="assignment-plan-preview">
-      <CampusEvidencePlanCard plan={assignmentPlan} disabled={false}
+    <View testID={quiz ? 'quiz-plan-preview' : 'assignment-plan-preview'}>
+      <CampusEvidencePlanCard plan={quiz ? quizPlan : assignmentPlan} disabled={false}
         progress={{ completedStepIds, onToggleStep: (stepId, done) => {
           window.qaEvents.push({ kind: 'toggle', stepId, done });
           setCompletedStepIds(done ? [stepId] : []);
@@ -338,12 +384,157 @@ function AssignmentPlanningApp() {
         )} />
     </View>
     <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 20 }}>
-      測試畫面：使用正式卡片與作業按鈕；來源、核對回覆與導覽皆為合成控制。本情境只驗證顯示與互動，未連接平台，也未載入作業接收頁。
+      測試畫面：使用正式卡片與課業按鈕；來源、核對回覆與導覽皆為合成控制。本情境只驗證顯示與互動，未連接平台，也未載入課程接收頁。
     </Text>
   </View>;
 }
 
+// Exercise the real saved-plan projection and comparison with controlled source
+// snapshots. Account verification and submissions are covered by native tests.
+const receiptBefore = copyCampusEvidencePlan({
+  ...quizPlan, title: '回到計畫核對作業與測驗',
+  agenda: { ...quizPlan.agenda!, outsideWindow: [] },
+  comparisonBasis: {
+    assignments: { status: 'complete', checkedAt: quizPlan.checkedAt, total: 1, items: [{
+      identity: [assignmentSource.workspaceId, assignmentSource.assignmentId],
+      title: assignmentPlan.steps[0].title, groupName: '資訊管理實務', dueAt: '2026-11-08T15:59:00.000Z',
+      activity: { state: 'open', receipt: null },
+    }] },
+    quizzes: { status: 'complete', checkedAt: quizPlan.checkedAt, total: 1, items: [{
+      identity: [quizSource.workspaceId, quizSource.quizId],
+      title: quizTask.title, groupName: quizTask.groupName, dueAt: quizTask.dueAt,
+      activity: { state: 'open', receipt: null },
+    }] },
+    timetableUpdatedAt: quizPlan.checkedAt,
+  },
+});
+const receiptSaved: SavedCampusPlan = {
+  id: 'receipt-study', question: '幫我安排今天的作業與測驗', plan: receiptBefore,
+  savedAt: receiptBefore.checkedAt, updatedAt: receiptBefore.checkedAt, completedStepIds: [],
+};
+
+function receiptAfter(read: NonNullable<Window['qaReceiptRead']>): CampusEvidencePlan {
+  const checkedAt = '2026-11-08T01:00:00.000Z';
+  const basis = (kind: 'assignment' | 'quiz'): CampusPlanComparisonBasis['assignments'] => {
+    if (read === 'unavailable') return { status: 'unavailable', checkedAt: null, total: null, items: [] };
+    const before = kind === 'assignment' ? receiptBefore.comparisonBasis!.assignments
+      : receiptBefore.comparisonBasis!.quizzes!;
+    return { ...before, checkedAt, items: before.items.map((item) => ({ ...item,
+      activity: { state: read === 'closed' ? 'closed' : 'open', receipt: read === 'received' ? {
+        submittedAt: kind === 'assignment' ? '2026-11-08T00:30:00.000Z' : '2026-11-08T00:31:00.000Z',
+      } : null },
+    })) };
+  };
+  return copyCampusEvidencePlan({
+    ...receiptBefore, checkedAt, title: '重新核對後的計畫',
+    overview: '依本次課程來源重新核對作業與測驗。',
+    steps: [{ id: 'receipt-review', title: '核對後續課業安排',
+      detail: read === 'unavailable' ? '本次資料來源無法讀取，請稍後重新核對。'
+        : '請查看前後紀錄的差異，並到課程頁核對後續要求。',
+      priority: 'verify', evidence: 'verification', route: '/classroom' }],
+    agenda: { ...receiptBefore.agenda!, assignmentsAvailable: read !== 'unavailable',
+      quizzesAvailable: read !== 'unavailable', days: receiptBefore.agenda!.days.map((day) => ({ ...day, deadlines: [] })) },
+    comparisonBasis: { assignments: basis('assignment'), quizzes: basis('quiz'),
+      timetableUpdatedAt: receiptBefore.comparisonBasis!.timetableUpdatedAt },
+  });
+}
+
+function ReceiptComparisonApp() {
+  const [plans, setPlans] = useState([receiptSaved]);
+  const [review, setReview] = useState<{ plan: CampusEvidencePlan; comparison: CampusPlanComparison } | null>(null);
+  return <View style={{ minHeight: '100vh' as never, backgroundColor: theme.colors.bg, padding: 20, gap: 14 }}>
+    <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>核對繳交與作答紀錄</Text>
+    {review ? <View testID="receipt-comparison-preview">
+      <CampusPlanComparisonCard comparison={review.comparison} disabled={false}
+        onOpenOriginal={() => { window.qaEvents.push({ kind: 'receipt-original' }); setReview(null); }} />
+      <CampusEvidencePlanCard plan={review.plan} disabled={false}
+        onOpenRoute={(route) => { window.qaEvents.push({ kind: 'open-route', route }); }} />
+    </View> : null}
+    <SavedCampusPlansPanel plans={plans} loading={false} busy={false} error=""
+      onRetry={() => { window.qaEvents.push({ kind: 'retry' }); }}
+      onDelete={(id) => { setPlans((old) => old.filter((saved) => saved.id !== id)); }}
+      onToggleStep={(id, stepId, done) => {
+        window.qaEvents.push({ kind: 'receipt-toggle', stepId, done });
+        setPlans((old) => old.map((saved) => saved.id === id ? { ...saved,
+          completedStepIds: done ? [...saved.completedStepIds, stepId]
+            : saved.completedStepIds.filter((value) => value !== stepId),
+        } : saved));
+      }}
+      onReplan={(saved) => {
+        const read = window.qaReceiptRead ?? 'received';
+        const plan = receiptAfter(read);
+        const comparison = compareCampusPlans(saved.plan, plan);
+        window.qaEvents.push({ kind: 'receipt-replan', read, completed: saved.completedStepIds,
+          receiptKinds: comparison.changes.filter((change) => change.kind === 'receipt').map((change) => change.category) });
+        setReview({ plan, comparison });
+      }}
+      onOpenRoute={(route) => { window.qaEvents.push({ kind: 'open-route', route }); }} />
+    <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 20 }}>
+      測試畫面：使用正式保存投影、比較與畫面元件；資料及重新讀取結果為合成範例，未連線登入、提交或查詢平台紀錄。
+    </Text>
+  </View>;
+}
+
+// The production assistant owns query parsing, date/status follow-ups and row
+// selection. Only its loaded course snapshot and navigation callback are fixed.
+const receiptQueryCourses: NuniStudyAgenda['workspaces'] = [
+  { id: 'receipt-database', title: '資料庫', state: 'active', memberRole: 'student' },
+  { id: 'receipt-programming', title: '程式設計', state: 'active', memberRole: 'student' },
+  { id: 'receipt-unavailable', title: '資訊管理實務', state: 'active', memberRole: 'student' },
+];
+function receiptQueryTask(
+  id: string, courseId: string, title: string, dueAt: string | null, submittedAt: string | null = null,
+): NuniStudyTask {
+  return {
+    id, courseId, title, dueAt, submittedAt,
+    courseTitle: receiptQueryCourses.find((course) => course.id === courseId)!.title,
+    kind: 'assignment', state: 'open', feedback: null, reviewedAt: null,
+  };
+}
+const receiptQueryAgenda: NuniStudyAgenda = {
+  workspaces: receiptQueryCourses, studiedCourseCount: receiptQueryCourses.length,
+  failedCourseIds: ['receipt-unavailable'], limitedCourseIds: ['receipt-database'],
+  tasks: [
+    receiptQueryTask('database-tomorrow-pending', 'receipt-database', '明日資料整理報告', '2026-11-08T10:00:00+08:00'),
+    receiptQueryTask('database-tomorrow-received', 'receipt-database', '資料庫概念摘要', '2026-11-08T18:00:00+08:00',
+      '2026-11-07T09:15:00+08:00'),
+    receiptQueryTask('database-next-week-pending', 'receipt-database', '下週索引練習', '2026-11-10T09:00:00+08:00'),
+    receiptQueryTask('database-next-week-received', 'receipt-database', '期末報告', '2026-11-10T18:00:00+08:00',
+      '2026-11-06T17:30:00+08:00'),
+    // A same-title receipt from another course must never replace the chosen course.
+    receiptQueryTask('programming-next-week-received', 'receipt-programming', '期末報告', '2026-11-10T18:00:00+08:00',
+      '2026-11-07T09:20:00+08:00'),
+    receiptQueryTask('database-undated-pending', 'receipt-database', '期限待確認報告', null),
+    receiptQueryTask('database-undated-received', 'receipt-database', '期限待確認摘要', null,
+      '2026-11-07T08:00:00+08:00'),
+  ],
+};
+
+function ReceiptDateQueryApp() {
+  return <ThemeProvider>
+    <View style={{ minHeight: '100vh' as never, backgroundColor: theme.colors.bg, padding: 20, gap: 14 }}>
+      <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>
+        依期限核對繳交紀錄
+      </Text>
+      <View testID="receipt-date-query-preview">
+        <StudyAssignmentAssistant data={receiptQueryAgenda} open={(courseId, activityId) => {
+          window.qaEvents.push({ kind: 'receipt-date-open', courseId, activityId });
+        }} />
+      </View>
+      <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 20 }}>
+        測試畫面：使用正式課業助理及日期查詢，課程與繳交紀錄為合成範例，開啟結果只記錄目標，未連接平台或載入原課程頁。
+      </Text>
+    </View>
+  </ThemeProvider>;
+}
+
 const scenario = new URLSearchParams(location.search).get('scenario');
-createRoot(document.getElementById('root')!).render(scenario === 'assignment' ? <AssignmentPlanningApp />
+if (scenario === 'receipt-date-query') {
+  // The real ThemeProvider reads this same preference through AsyncStorage Web.
+  localStorage.setItem('campus.themeMode.v2', mode);
+}
+createRoot(document.getElementById('root')!).render(scenario === 'receipt-date-query' ? <ReceiptDateQueryApp />
+  : scenario === 'receipt' ? <ReceiptComparisonApp />
+  : scenario === 'assignment' || scenario === 'quiz' ? <AssignmentPlanningApp quiz={scenario === 'quiz'} />
   : scenario === 'platform' || scenario === 'clock'
     ? <PlatformPlanningApp clock={scenario === 'clock'} /> : <App />);

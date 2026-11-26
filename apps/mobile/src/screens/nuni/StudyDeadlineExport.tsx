@@ -1,3 +1,7 @@
+import {
+  studyDeadlineConflictText,
+  type StudyDeadlineSource,
+} from '@campus/shared/src/studyDeadlineConflicts';
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import type { NuniStudyTask } from '@campus/shared/src/nuniStudyAgenda';
@@ -16,10 +20,12 @@ export function StudyDeadlineExport({
   tasks,
   partial,
   retry,
+  conflictSources,
 }: {
   tasks: NuniStudyTask[];
   partial: boolean;
   retry(): void;
+  conflictSources?: readonly StudyDeadlineSource[];
 }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
@@ -125,6 +131,8 @@ export function StudyDeadlineExport({
                 <Text key={studyCalendarKey(task)} style={copy}>
                   {task.courseTitle} · {task.title} ·{' '}
                   {formatTaipeiDateTime(task.dueAt!, { seconds: false })}
+                  {' · '}
+                  {studyDeadlineConflictText(task, conflictSources)}
                 </Text>
               ))}
               {button(

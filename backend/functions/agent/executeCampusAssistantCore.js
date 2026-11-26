@@ -61,6 +61,7 @@ const {
 } = require('../lib/campusWriteIntentResolve');
 const searchCampusDocs = require('./tools/searchCampusDocs');
 const { relevantItems } = require('../lib/assistantRelevance');
+const { resolveAssignmentPlanningTarget } = require('../lib/assignmentPlanningTarget');
 const { runTool } = require('./tools/registry');
 const {
   ASSISTANT_PERMISSIONS_SETTINGS_HREF,
@@ -69,6 +70,9 @@ const {
   loadAssistantWritePermissions,
 } = require('../lib/assistantWritePermissions');
 const { getIntentWritePlan } = require('./intentWritePlan');
+const { parseWashingReservationTarget, selectWashingReservation } = require('./washingReservationSelection');
+const { parseLibraryLoanRequest, chooseLibraryLoan } = require('./libraryLoanSelection');
+const { projectLibraryLoan, libraryLoanVersion } = require('./libraryLoanSource');
 
 const db = getFirestore();
 
@@ -113,54 +117,46 @@ function resolvePermissionScope(intent, hasAuth) {
   return resolveAgentPermissionScope(intent, hasAuth);
 }
 
-function extractLoanIdFromMessage(text) {
-  const s = String(text ?? '');
-  const labeled = s.match(/(?:借閱|loan|loanId|紀錄|編號|單號)[：:\s]*([A-Za-z0-9_-]{8,})/i);
-  if (labeled) return labeled[1].trim();
-  const loose = s.match(/\b([A-Za-z0-9_-]{18,32})\b/);
-  return loose ? loose[1] : null;
-}
-
-function dueTime(row) {
-  const d = toJsDate(row?.dueAt ?? row?.dueDate);
-  return d ? d.getTime() : Number.POSITIVE_INFINITY;
-}
-
-function chooseLibraryLoan(loans, message) {
-  if (!Array.isArray(loans) || loans.length === 0) return null;
-  const text = String(message ?? '').toLowerCase();
-  const explicitLoanId = extractLoanIdFromMessage(text);
-  if (explicitLoanId) {
-    const exact = loans.find((loan) => String(loan.id) === explicitLoanId || String(loan.loanId) === explicitLoanId);
-    if (exact) return exact;
-  }
-  const titleMatch = text.match(/[《「『"]([^》」』"]{2,80})[》」』"]/)?.[1];
-  if (titleMatch) {
-    const matched = loans.find((loan) =>
-      String(loan.bookTitle || loan.title || '').toLowerCase().includes(titleMatch.toLowerCase()),
-    );
-    if (matched) return matched;
-  }
-  const active = loans.filter((loan) => !['returned', 'cancelled'].includes(String(loan.status || '').toLowerCase()));
-  const pool = active.length > 0 ? active : loans;
-  return [...pool].sort((a, b) => dueTime(a) - dueTime(b))[0] || null;
-}
-
 async function resolveLibraryLoanInput({ uid, schoolId, timeZone, lastUserMessage }) {
-  const loanId = extractLoanIdFromMessage(lastUserMessage);
-  if (loanId) return { input: { loanId }, loan: { id: loanId } };
+  const target = parseLibraryLoanRequest(lastUserMessage);
+  if (target.kind === 'clarify') return { selectionIssue: 'clarify' };
+  let selected;
+  if (target.kind !== 'id') {
+    const result = await runTool(
+      'getLibraryLoans',
+      { uid, schoolId, timeZone, prefetched: {} },
+      { onlyOverdue: target.onlyOverdue },
+    ).catch((error) => {
+      if (isAuthorizationFailure(error)) throw error;
+      return null;
+    });
+    if (result?.ok !== true || !Array.isArray(result.loans)) return { unavailable: true };
+    const selection = chooseLibraryLoan(result.loans, target);
+    if (selection?.selectionIssue) return selection;
+    selected = selection?.loan;
+    if (!selected?.id) return null;
+  }
 
-  const result = await runTool(
-    'getLibraryLoans',
-    { uid, schoolId, timeZone, prefetched: {} },
-    { onlyOverdue: /逾期|過期/.test(String(lastUserMessage || '')) },
-  ).catch((error) => {
+  // The personal mirror is a discovery source, not authority to mutate a loan.
+  // Bind the displayed state to the canonical record before saving a proposal.
+  const loanId = target.kind === 'id' ? target.loanId : String(selected.id);
+  const snapshot = await db.doc(`schools/${schoolId}/libraryLoans/${loanId}`).get().catch((error) => {
     if (isAuthorizationFailure(error)) throw error;
-    return { loans: [] };
+    return null;
   });
-  const loan = chooseLibraryLoan(result.loans, lastUserMessage);
-  if (!loan?.id) return null;
-  return { input: { loanId: String(loan.id) }, loan };
+  if (!snapshot) return { unavailable: true };
+  const source = snapshot.exists ? snapshot.data() : null;
+  if (!source || source.userId !== uid || !['borrowed', 'active'].includes(source.status)) {
+    return { selectionIssue: 'not-found' };
+  }
+  const expectedLoanVersion = libraryLoanVersion(source);
+  if (selected && libraryLoanVersion(selected) !== expectedLoanVersion) {
+    return { sourceChanged: true };
+  }
+  return {
+    input: { loanId, expectedLoanVersion },
+    loan: projectLibraryLoan(loanId, source),
+  };
 }
 
 /**
@@ -356,6 +352,66 @@ async function executeCampusAssistantCore({
       const deniedEarly = await ensureWriteToolAllowed(writePlan.toolName);
       if (deniedEarly) return deniedEarly;
     }
+  }
+
+  if (intent === 'wash_cancel' || intent === 'wash_status') {
+    if (!uid) {
+      response.content = '請先登入目前學校的帳號，才能查核或取消本人的洗衣預約。';
+      return finalizeResponse();
+    }
+    const target = parseWashingReservationTarget(lastUserMessage);
+    if (target.kind === 'clarify') {
+      response.content = '請明確指定一筆洗衣預約，例如「取消 A2 洗衣機預約」；也可以先說「查我的洗衣預約」。這次沒有取消或新增預約。';
+      return finalizeResponse();
+    }
+    let source;
+    try {
+      source = await runTool('getMyWashingReservations', { uid, schoolId, timeZone },
+        target.reservationId ? { reservationId: target.reservationId } : {});
+    } catch (error) {
+      if (isAuthorizationFailure(error)) throw error;
+      if (error?.code === 'not-found') source = { ok: true, complete: true, reservations: [] };
+    }
+    if (source?.ok !== true || !Array.isArray(source.reservations) || source.complete !== true) {
+      response.content = '目前無法完整查核你的洗衣預約，這次沒有取消或新增預約。請稍後重新查詢，或提供要查核的預約編號。';
+      return finalizeResponse();
+    }
+    const rows = source.reservations;
+    const describe = (row) => `${row.dormitory}｜機台 ${row.machineId}｜開始 ${row.startTime}｜預約編號 ${row.reservationId}`;
+    const statusLabel = (status) => ({ reserved: '已預約', active: '使用中', inUse: '使用中', cancelled: '已取消', completed: '已完成', noshow: '未到場' })[status] || '狀態無法判定，尚未驗證取消';
+    response.citations = [{ type: 'system', id: 'my-washing-reservations', label: '目前學校的本人洗衣預約紀錄' }];
+    response.debug.sourcesUsed = rows.length;
+    if (intent === 'wash_status' && !target.reservationId && !target.machineId && !target.date && !target.time) {
+      response.content = rows.length
+        ? '目前有效的洗衣預約：\n' + rows.map((row) => `${describe(row)}｜${statusLabel(row.status)}`).join('\n') + '\n若要取消，請指定機台或預約編號；仍需另外確認。'
+        : '目前學校沒有查到本人有效的洗衣預約。若要核對先前取消是否完成，請提供那筆預約編號。';
+      return finalizeResponse();
+    }
+    const selected = selectWashingReservation(rows, target);
+    if (!selected.reservation) {
+      response.content = selected.issue === 'ambiguous'
+        ? '有多筆相符的洗衣預約，請指定其中一筆的日期、機台或預約編號：\n' + rows.map(describe).join('\n')
+        : '沒有找到符合指定條件的本人洗衣預約。請核對日期、機台或預約編號；這次沒有改選其他預約，也沒有寫入。';
+      return finalizeResponse();
+    }
+    const row = selected.reservation;
+    if (intent === 'wash_status' || !['reserved', 'active'].includes(row.status)) {
+      response.content = `${describe(row)}\n目前紀錄：${statusLabel(row.status)}。這次僅查核，沒有新增或重複取消。`;
+      return finalizeResponse();
+    }
+    const reviewed = { reservationId: row.reservationId, machineId: row.machineId, dormitory: row.dormitory,
+      startTime: row.startTime, reservedUntil: row.reservedUntil };
+    const reservationVersion = row.reservationVersion;
+    response.content = `已查核本人預約：\n${describe(row)}\n${row.reservedUntil ? `保留至 ${row.reservedUntil}\n` : ''}請檢視下方草稿並確認，確認後才會取消這筆預約；目前尚未取消。`;
+    response.actions = [assistantAction({
+      label: '取消洗衣預約', action: 'queue_action',
+      params: { toolName: 'cancelWashingReservation', input: { ...reviewed, expectedReservationVersion: reservationVersion }, agentRunId: requestId },
+      requiresConfirmation: true, sensitivity: 'high',
+      evidenceRefs: [{ type: 'system', id: 'my-washing-reservations', label: '本人洗衣預約' }],
+    })];
+    response.citations.push({ type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' });
+    response.suggestions = [`查洗衣預約 編號 ${row.reservationId}`, '查我的洗衣預約'];
+    return finalizeResponse();
   }
 
   const contactAnswer = getSchoolContactAnswer(schoolId, lastUserMessage);
@@ -598,7 +654,7 @@ async function executeCampusAssistantCore({
         }
         await recordStep('getDormRepairStatus', { repairId }, one, Date.now() - tOne);
         if (!one?.found) {
-          response.content = '找不到這筆報修；若剛送出，請稍後到宿舍「我的報修」確認，或改問「我的報修」。';
+          response.content = '找不到這筆報修備忘；若剛存下，請稍後到宿舍「我的報修」確認，或改問「我的報修」。';
           response.suggestions = ['我的報修'];
           return await finalizeResponse();
         }
@@ -616,7 +672,7 @@ async function executeCampusAssistantCore({
         const loc = `${one.dormitory || '—'} ${one.room || ''}`.trim();
         const descShort = one.description ? String(one.description).slice(0, 48) : '';
         response.content = [
-          `報修單 ${one.repairId}：${stZh}｜${loc}｜${one.category || '—'}`,
+          `報修備忘：${stZh}｜${loc}｜${one.category || '—'}`,
           descShort ? `摘要：${descShort}${String(one.description).length > 48 ? '…' : ''}` : '',
         ]
           .filter(Boolean)
@@ -658,7 +714,7 @@ async function executeCampusAssistantCore({
 
     const items = Array.isArray(listRows.items) ? listRows.items : [];
     if (items.length === 0) {
-      response.content = '最近沒有宿舍報修紀錄；若剛送出，請稍後再問或到宿舍頁確認。';
+      response.content = '最近沒有宿舍報修備忘；若剛存下，請稍後再問或到宿舍頁確認。';
       response.suggestions = ['我要報修'];
       return await finalizeResponse();
     }
@@ -674,10 +730,10 @@ async function executeCampusAssistantCore({
 
     const lines = items.map((row, i) => {
       const loc = `${row.dormitory || ''} ${row.room || ''}`.trim() || '—';
-      return `${i + 1}. ${row.repairId}｜${statusZh(row.status)}｜${loc}`;
+      return `${i + 1}. ${statusZh(row.status)}｜${loc}`;
     });
 
-    response.content = [`宿舍報修 ${items.length} 筆（最多顯示 15）：`, '', ...lines].join('\n');
+    response.content = [`宿舍報修備忘 ${items.length} 筆（最多顯示 15）：`, '', ...lines].join('\n');
     response.suggestions = ['我要報修'];
     response.actions = [
       assistantAction({
@@ -765,7 +821,7 @@ async function executeCampusAssistantCore({
 
   if (intent === 'reserve_seat') {
     if (!uid) {
-      response.content = '預約座位需要先登入。登入後再告訴我日期、時段與座位（或說「圖書館三樓隨便一席」）。';
+      response.content = '準備站內座位預約需要先登入。登入後請提供日期、開始與結束時間（或明確時長），以及確切座位編號。';
       response.suggestions = ['功能說明', '今日公告', '查課表'];
       return await finalizeResponse();
     }
@@ -776,15 +832,16 @@ async function executeCampusAssistantCore({
     const seatInput = resolveReserveSeatInput(lastUserMessage, timeZone);
     if (!seatInput) {
       response.content = [
-        '我可以幫你建立「圖書館／自習室」座位預約草稿，但目前無法從這句話辨識日期、時間或座位。',
+        '我可以整理站內管理的座位預約草稿，但還不能完整辨識這次要預約的日期、座位編號與起訖時間。',
         '',
-        '請補上例如：明天早上 9:00、圖書館三樓 A-15（或說隨便一席）。',
+        '請一次提供一個確切座位編號與同日完整時段，例如：明天 09:15 到 10:45，座位編號：你的座位ID；也可以提供開始時間與明確時長，例如 90 分鐘。',
+        '我不會自動挑選座位、預設兩小時或推測跨日時間。確認時才會核對站內座位與時段；這不是館方預約回執。',
       ].join('\n');
-      response.suggestions = ['明天 9:00 圖書館三樓隨便一席', '查課表', '今日公告'];
+      response.suggestions = ['補上確切座位與完整時段', '查課表', '今日公告'];
       return await finalizeResponse();
     }
     response.content = [
-      '我已整理座位預約內容，確認後才會寫入 seatReservations。',
+      '已整理站內管理的座位預約草稿；確認時才會核對座位與時段，目前尚未預約，這不是館方預約回執。',
       '',
       `座位：${seatInput.seatId}｜日期：${seatInput.date}｜${seatInput.startTime}–${seatInput.endTime}`,
     ].join('\n');
@@ -851,6 +908,26 @@ async function executeCampusAssistantCore({
     }
 
     const resolvedLoan = await resolveLibraryLoanInput({ uid, schoolId, timeZone, lastUserMessage });
+    if (resolvedLoan?.sourceChanged) {
+      response.content = '借閱資料已變更，暫時無法建立這筆確認。請重新查詢，或到圖書館頁核對目前書目與期限後，再準備續借或還書。';
+      response.suggestions = ['我有哪些書還沒還？', '查看借閱', '功能說明'];
+      return await finalizeResponse();
+    }
+    if (resolvedLoan?.unavailable) {
+      response.content = '目前無法完整讀取平台借閱紀錄，暫時無法確認要處理哪一本書。請稍後重試，或到圖書館頁核對借閱紀錄；這不代表沒有未歸還的書。';
+      response.suggestions = ['查看借閱', '我有哪些書還沒還？', '功能說明'];
+      return await finalizeResponse();
+    }
+    if (resolvedLoan?.selectionIssue) {
+      const issue = resolvedLoan.selectionIssue;
+      response.content = issue === 'not-found'
+        ? '本次讀取的 nuni 借閱紀錄中，沒有符合指定書名或借閱編號的未歸還書籍。請核對完整書名，或從圖書館頁選擇正確書目並提供借閱紀錄編號。'
+        : issue === 'ambiguous'
+          ? '本次讀取的 nuni 借閱紀錄中，有多筆符合指定書名，還不能確定要處理哪一本。請提供完整書名；若書名相同，請從圖書館頁選擇正確書目並提供借閱紀錄編號。'
+          : '請一次提供一個完整書名，例如：續借《資料結構》，或明確提供借閱紀錄編號，例如：借閱編號：紀錄ID。我確認目標後才會建立續借或還書確認。';
+      response.suggestions = ['我有哪些書還沒還？', '查看借閱', '功能說明'];
+      return await finalizeResponse();
+    }
     if (!resolvedLoan) {
       response.content = [
         intent === 'renew_book'
@@ -907,13 +984,13 @@ async function executeCampusAssistantCore({
       return await finalizeResponse();
     }
     const descSnippet = repairInput.description.slice(0, 120);
-    response.content = `已整理好報修草稿：${repairInput.dormitory} ${repairInput.room}｜${repairInput.category}。${descSnippet}${
+    response.content = `已整理好報修備忘草稿：${repairInput.dormitory} ${repairInput.room}｜${repairInput.category}。${descSnippet}${
       repairInput.description.length > 120 ? '…' : ''
-    }`;
+    }。確認後只會存在此應用，請依學校規定管道送出。`;
     response.suggestions = ['我的報修'];
     response.actions = [
       assistantAction({
-        label: '確認送出報修',
+        label: '確認存成報修備忘',
         action: 'queue_action',
         params: { toolName: 'createDormRepairRequest', input: repairInput, agentRunId: requestId },
         requiresConfirmation: true,
@@ -938,8 +1015,8 @@ async function executeCampusAssistantCore({
     const washInput = await resolveWashReserveInput(lastUserMessage, schoolId);
     if (!washInput) {
       response.content =
-        '我可以幫你預約洗衣機，但目前找不到可預約的機台或無法解析時間。請確認學校是否已建立 washingMachines 資料。';
-      response.suggestions = ['今晚八點洗衣', '今日公告', '查課表'];
+        '目前無法確認要預約的機台或時間。請提供此校園的單一機台編號與時間；指定機台不存在、無法使用或不明確時，請確認後再試。';
+      response.suggestions = ['提供機台編號與時間', '今日公告', '查課表'];
       return await finalizeResponse();
     }
     response.content = [
@@ -1012,7 +1089,15 @@ async function executeCampusAssistantCore({
       ? prefetched.assignments
       : await fetchAssistantPendingAssignments(uid, schoolId, { preferredGroupId: context.groupId });
     response.debug.sourcesUsed = pendingAssignments.length;
-    const target = pendingAssignments[0];
+    const selection = resolveAssignmentPlanningTarget(lastUserMessage, pendingAssignments);
+    const target = selection.target;
+
+    if (selection.reason === 'clarify') {
+      response.content =
+        '我還不能唯一確認你要拆解哪一份作業。請提供完整作業名稱；若有同名作業，請一併指定課程，例如：拆解「課程名稱」的「作業名稱」。';
+      response.suggestions = ['查看作業', '今日摘要'];
+      return await finalizeResponse();
+    }
 
     if (!target) {
       response.content =

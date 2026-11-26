@@ -1,13 +1,25 @@
 import { formatTaipeiDateTime, taipeiParts } from '@campus/shared/src/taipeiTime';
+import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
+import { getAssistantRoleWorkflow } from '@campus/shared/src/assistantRoleWorkflows';
 
-export const SUGGESTIONS = [
-  '這禮拜有什麼要交的',
-  '下一堂課在哪，幾點',
-  '中午吃什麼',
-  '幫我排今晚寫作業',
-];
+export const SUGGESTIONS = getAssistantRoleWorkflow('student').suggestions;
+
+const PERMISSION_MESSAGES: Record<string, string> = {
+  ASSISTANT_PERMISSION_DENIED: '這項 AI 代辦權限尚未開啟或已關閉，這次沒有執行。請到助理權限調整後再確認。',
+  ASSISTANT_PERMISSION_STORE_UNAVAILABLE: '目前無法確認 AI 代辦權限，這次沒有執行。請到助理權限重新讀取設定後再試。',
+};
+
+export function assistantPermissionMessage(code: unknown): string | undefined {
+  return typeof code === 'string' && Object.hasOwn(PERMISSION_MESSAGES, code)
+    ? PERMISSION_MESSAGES[code] : undefined;
+}
+
+export function assistantPermissionSettingsHref(message: string): string | null {
+  return Object.values(PERMISSION_MESSAGES).includes(message) ? '/settings?section=assistant' : null;
+}
 
 export const PAGE_LABELS: Record<string, string> = {
+  ...Object.fromEntries(ASSISTANT_SERVICES.map((service) => [service.href.split('?')[0].slice(1), service.label])),
   today: '今日',
   timetable: '課表',
   calendar: '行事曆',
@@ -20,6 +32,7 @@ export const PAGE_LABELS: Record<string, string> = {
   announcements: '公告',
   events: '活動',
   food: '點餐',
+  settings: '設定',
 };
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -30,6 +43,11 @@ export function pageKey(href: string): string {
 }
 
 export function pageLabel(href: string): string {
+  if (pageKey(href) === 'settings' && href.includes('?')) {
+    const params = new URLSearchParams(href.split('?')[1]?.split('#')[0]);
+    if (params.getAll('section').length === 1 && params.get('section') === 'assistant')
+      return '助理權限';
+  }
   return PAGE_LABELS[pageKey(href)] || '頁面';
 }
 
@@ -98,6 +116,10 @@ export function formatDueInstant(value: string): string {
 }
 
 export function stepFamily(name: string): string {
+  if (name === 'get_teaching_overview') return '授課概況';
+  if (name === 'get_merchant_overview') return '門市營運概況';
+  if (name === 'get_imported_academics') return '個人成績與學分紀錄';
+  if (name === 'list_campus_services') return '服務入口';
   if (/food/.test(name)) return '餐點與訂單';
   if (/transit/.test(name)) return '交通資訊';
   if (/campus/.test(name)) return '校園資訊';

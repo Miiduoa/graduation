@@ -7,7 +7,7 @@ import {
   getOfficialLibraryCatalogQueryMaxLength,
   hasVerifiedCatalogSearch,
 } from '@campus/shared/src/officialLibraries';
-import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
+import { AIDetailScreen, AICard, AIButton, AISection, AIRow, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { LibraryWebsiteFallback } from './LibraryWebsiteFallback';
@@ -15,7 +15,7 @@ import { useSchool } from '../state/school';
 
 type Navigation = {
   goBack?: () => void;
-  navigate?: (screen: string, params?: { initialQuery: string }) => void;
+  navigate?: (screen: string, params?: { initialQuery: string; autoSearch: boolean }) => void;
 };
 
 export default function LibraryAiFirstScreen({ navigation }: { navigation?: Navigation }) {
@@ -53,6 +53,7 @@ function LibraryContent({
 }) {
   const library = getOfficialLibrary(schoolId, schoolName);
   const verifiedSearch = hasVerifiedCatalogSearch(library);
+  const canSubmitSearch = library?.catalogSearch === 'pu-webpac' || verifiedSearch;
   const queryMaxLength = getOfficialLibraryCatalogQueryMaxLength(library);
   const [keyword, setKeyword] = useState('');
   const [error, setError] = useState('');
@@ -82,7 +83,7 @@ function LibraryContent({
     if (!isCurrent() || !library || !keyword.trim()) return;
     if (library.catalogSearch === 'pu-webpac') {
       if (navigation?.navigate) {
-        navigation.navigate('LibraryCatalog', { initialQuery: keyword.trim() });
+        navigation.navigate('LibraryCatalog', { initialQuery: keyword.trim(), autoSearch: true });
       } else {
         const url = buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName);
         if (url) await open(url);
@@ -106,7 +107,7 @@ function LibraryContent({
   return (
     <AIDetailScreen
       title="圖書館"
-      subtitle="找書、查借閱紀錄，安排下一次到館。"
+      subtitle={schoolName}
       onBack={() => navigation?.goBack?.()}
     >
       {!library ? (
@@ -129,13 +130,15 @@ function LibraryContent({
                 placeholder="書名、作者或 ISBN"
                 placeholderTextColor={aiTokens.muted}
                 value={keyword}
+                returnKeyType={canSubmitSearch ? 'search' : 'done'}
+                onSubmitEditing={canSubmitSearch ? () => void searchOfficialCatalog() : undefined}
                 maxLength={queryMaxLength}
                 onChangeText={(value) => { setKeyword(value); setNotice(''); }}
                 style={{
                   color: aiTokens.text,
                   borderColor: aiTokens.border,
                   borderWidth: 1,
-                  borderRadius: 12,
+                  borderRadius: 6,
                   padding: 12,
                   minHeight: 48,
                 }}
@@ -184,42 +187,22 @@ function LibraryContent({
                 前往這所學校圖書館的網站登入，查看到期日與可續借項目。續借是否成功以館方回覆為準。
               </Text>
               <AIButton
+                variant="ghost"
                 label={library.accountUrl ? '開啟我的借閱紀錄' : '前往圖書館官網登入'}
                 onPress={() => void open(library.accountUrl ?? library.websiteUrl)}
               />
             </View>
           </AICard>
-          <AICard title="到館前先看看">
-            <View style={{ gap: 12 }}>
-              <Text style={{ color: aiTokens.muted }}>
-                開放時間與空間使用情況請以校方公告為準。
-              </Text>
-              <AIButton
-                label="開館時間"
-                variant="ghost"
-                onPress={() => void open(library.hoursUrl ?? library.websiteUrl)}
-              />
-              {library.spacesUrl ? (
-                <AIButton
-                  label="空間與設備預約"
-                  variant="ghost"
-                  onPress={() => void open(library.spacesUrl!)}
-                />
-              ) : null}
-              {library.electronicResourcesUrl ? (
-                <AIButton
-                  label="電子資源"
-                  variant="ghost"
-                  onPress={() => void open(library.electronicResourcesUrl!)}
-                />
-              ) : null}
-              <AIButton
-                label="圖書館官網"
-                variant="ghost"
-                onPress={() => void open(library.websiteUrl)}
-              />
-            </View>
-          </AICard>
+          <AISection title="到館資訊" subtitle="開放時間與空間使用情況請以校方公告為準。">
+            <AIRow title="開館時間" onPress={() => void open(library.hoursUrl ?? library.websiteUrl)} />
+            {library.spacesUrl ? (
+              <AIRow title="空間與設備預約" onPress={() => void open(library.spacesUrl!)} />
+            ) : null}
+            {library.electronicResourcesUrl ? (
+              <AIRow title="電子資源" onPress={() => void open(library.electronicResourcesUrl!)} />
+            ) : null}
+            <AIRow title="圖書館官網" onPress={() => void open(library.websiteUrl)} />
+          </AISection>
           {error ? (
             <AICard>
               <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>

@@ -1,6 +1,6 @@
 /* eslint-disable */
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { ScrollView, Text, TextInput, View, Alert, Pressable } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View, Alert, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
@@ -17,15 +17,14 @@ import {
 } from '../features/academics';
 import {
   Screen,
-  Card,
   Button,
-  Pill,
-  AnimatedCard,
   Spinner,
   SegmentedControl,
 } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { useTabPanelScroll } from '../hooks/useTabPanelScroll';
 import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import {
   calculateDetailedCredits,
   type CreditCategory,
@@ -47,13 +46,72 @@ import {
   validCourseName,
 } from './creditAudit/manualCreditCourses';
 
-const legacyCategories: Array<{ key: CreditCategory; label: string; color: string }> = [
-  { key: 'required', label: '必修', color: '#FF3B30' },
-  { key: 'elective', label: '選修', color: theme.colors.accent },
-  { key: 'general', label: '通識', color: '#34C759' },
-  { key: 'english', label: '英文', color: '#AF52DE' },
-  { key: 'other', label: '其他', color: '#FF9500' },
+const legacyCategories: Array<{ key: CreditCategory; label: string }> = [
+  { key: 'required', label: '必修' },
+  { key: 'elective', label: '選修' },
+  { key: 'general', label: '通識' },
+  { key: 'english', label: '英文' },
+  { key: 'other', label: '其他' },
 ];
+
+type AuditStyles = ReturnType<typeof createStyles>;
+
+function pctOf(earned: number, required: number): number {
+  if (required > 0) return Math.min((earned / required) * 100, 100);
+  return earned > 0 ? 100 : 0;
+}
+
+/** 區塊：清楚標題 + 內容，不以卡片層層堆疊 */
+function Section({
+  title,
+  subtitle,
+  children,
+  styles: s,
+}: {
+  title?: string;
+  subtitle?: string;
+  children?: React.ReactNode;
+  styles: AuditStyles;
+}) {
+  return (
+    <View style={s.section}>
+      {title ? (
+        <View style={s.sectionHead}>
+          <Text accessibilityRole="header" style={s.sectionTitle}>
+            {title}
+          </Text>
+          {subtitle ? <Text style={s.sectionSub}>{subtitle}</Text> : null}
+        </View>
+      ) : null}
+      {children}
+    </View>
+  );
+}
+
+function ProgressBar({
+  pct,
+  color,
+  height = 6,
+  styles: s,
+}: {
+  pct: number;
+  color: string;
+  height?: number;
+  styles: AuditStyles;
+}) {
+  return (
+    <View style={[s.track, { height, borderRadius: height / 2 }]}>
+      <View
+        style={{
+          width: `${pct}%`,
+          height: '100%',
+          backgroundColor: color,
+          borderRadius: height / 2,
+        }}
+      />
+    </View>
+  );
+}
 
 /** 歷年學期仍可選，目前學年會排在前面。 */
 function localAcademicTerm(now = new Date()): { year: number; semester: 1 | 2 } {
@@ -92,12 +150,21 @@ function categoryToDetailedKey(cat: CreditCategory): string {
   }
 }
 
+const AUDIT_TABS = [
+  { id: 'add', label: '新增課程' },
+  { id: 'overview', label: '修課概覽' },
+  { id: 'saved', label: '已儲存' },
+  { id: 'transfer', label: '匯入/匯出' },
+] as const;
+
 export function CreditAuditInputScreen(props: any) {
+  const s = useThemeStyleSheet(createStyles);
   const onAdded: ((x: any) => void) | undefined = props?.route?.params?.onAdded;
   const auth = useAuth();
   const { school } = useSchool();
 
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState<(typeof AUDIT_TABS)[number]['id']>('add');
+  const panelScroll = useTabPanelScroll(tab);
   const [name, setName] = useState('');
   const [credits, setCredits] = useState('3');
   const [category, setCategory] = useState<CreditCategory>('elective');
@@ -506,14 +573,12 @@ export function CreditAuditInputScreen(props: any) {
 
   const unsyncedCount = savedCourses.filter((c) => !c.syncedToCloud).length;
 
-  const TABS = ['新增課程', '修課概覽', '已儲存', '匯入/匯出'];
-
   if (loading || loadedScope !== storageKey) {
     return (
       <Screen title="學分試算">
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={s.centered}>
           <Spinner size={32} />
-          <Text style={{ color: theme.colors.muted, marginTop: 12 }}>載入中...</Text>
+          <Text style={s.mutedText}>載入中...</Text>
         </View>
       </Screen>
     );
@@ -521,8 +586,8 @@ export function CreditAuditInputScreen(props: any) {
   if (loadError) {
     return (
       <Screen title="個人學分規劃">
-        <View style={{ padding: 24, gap: 14 }}>
-          <Text style={{ color: theme.colors.text, fontSize: 16, lineHeight: 24 }}>
+        <View style={s.errorBox}>
+          <Text accessibilityRole="alert" style={s.errorText}>
             {loadError}
           </Text>
           <Button text="重新讀取本機課程" kind="primary" onPress={() => void loadSavedCourses()} />
@@ -531,975 +596,879 @@ export function CreditAuditInputScreen(props: any) {
     );
   }
 
+  const totalPct = pctOf(detailedAudit.total.earned, Math.max(detailedAudit.total.required, 1));
+  const referencePct = pctOf(
+    detailedAudit.total.earned,
+    Math.max(detailedTemplate.totalCreditsRequired, 1),
+  );
+
   return (
     <Screen title="學分試算" subtitle="管理您的修課紀錄並追蹤畢業學分進度">
-      <SegmentedControl options={TABS} selected={tab} onChange={setTab} />
+      <SegmentedControl options={AUDIT_TABS} selected={tab} onChange={setTab} />
 
       <ScrollView
-        contentContainerStyle={{
-          gap: 12,
-          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
-          paddingTop: 12,
-        }}
+        ref={panelScroll}
+        contentContainerStyle={[s.content, { paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        {tab === 0 && (
+        {tab === 'add' && (
           <>
-            <AnimatedCard title="新增課程" subtitle="手動輸入修課資訊">
-              <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>課程名稱 *</Text>
-              <TextInput
-                value={name}
-                onChangeText={setName}
-                placeholder="例如：資料庫系統"
-                placeholderTextColor="rgba(168,176,194,0.6)"
-                style={{
-                  marginTop: 4,
-                  paddingVertical: 12,
-                  paddingHorizontal: 14,
-                  borderRadius: theme.radius.md,
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                  backgroundColor: theme.colors.surface2,
-                  color: theme.colors.text,
-                  fontSize: 15,
-                }}
-              />
-
-              <View style={{ height: 12 }} />
-
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>學分</Text>
+            <Section title="新增課程" subtitle="手動輸入修課資訊" styles={s}>
+              <View style={s.group}>
+                <View style={s.fieldBlock}>
+                  <Text style={s.fieldLabel}>課程名稱 *</Text>
                   <TextInput
-                    value={credits}
-                    onChangeText={setCredits}
-                    keyboardType="decimal-pad"
-                    style={{
-                      marginTop: 4,
-                      paddingVertical: 12,
-                      paddingHorizontal: 14,
-                      borderRadius: theme.radius.md,
-                      borderWidth: 1,
-                      borderColor: theme.colors.border,
-                      backgroundColor: theme.colors.surface2,
-                      color: theme.colors.text,
-                      fontSize: 15,
-                      textAlign: 'center',
-                    }}
+                    value={name}
+                    onChangeText={setName}
+                    placeholder="例如：資料庫系統"
+                    placeholderTextColor={theme.colors.muted}
+                    accessibilityLabel="課程名稱"
+                    style={s.input}
                   />
                 </View>
-                <View style={{ flex: 2 }}>
-                  <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>學期</Text>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    style={{ marginTop: 4 }}
-                  >
-                    <View style={{ flexDirection: 'row', gap: 6 }}>
-                      {semesters.map((sem) => (
-                        <Pressable
-                          key={sem}
-                          onPress={() => setSemester(sem)}
-                          style={{
-                            paddingVertical: 10,
-                            paddingHorizontal: 12,
-                            borderRadius: theme.radius.md,
-                            backgroundColor:
-                              semester === sem ? theme.colors.accent : theme.colors.surface2,
-                          }}
-                        >
-                          <Text
-                            style={{
-                              color: semester === sem ? '#fff' : theme.colors.text,
-                              fontSize: 13,
-                              fontWeight: '600',
-                            }}
-                          >
-                            {sem}
-                          </Text>
-                        </Pressable>
-                      ))}
+
+                <View style={[s.fieldBlock, s.divider]}>
+                  <View style={s.fieldRow}>
+                    <View style={s.fieldCreditCol}>
+                      <Text style={s.fieldLabel}>學分</Text>
+                      <TextInput
+                        value={credits}
+                        onChangeText={setCredits}
+                        keyboardType="decimal-pad"
+                        accessibilityLabel="學分"
+                        style={[s.input, s.inputCenter]}
+                      />
                     </View>
-                  </ScrollView>
+                    <View style={s.fieldSemesterCol}>
+                      <Text style={s.fieldLabel}>學期</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                        <View style={s.chipRow}>
+                          {semesters.map((sem) => {
+                            const active = semester === sem;
+                            return (
+                              <Pressable
+                                key={sem}
+                                accessibilityRole="button"
+                                accessibilityState={{ selected: active }}
+                                onPress={() => setSemester(sem)}
+                                style={[s.chip, active && s.chipActive]}
+                              >
+                                <Text style={[s.chipText, active && s.chipTextActive]}>{sem}</Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      </ScrollView>
+                    </View>
+                  </View>
                 </View>
-              </View>
 
-              <View style={{ height: 12 }} />
-
-              <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>
-                {referenceActive ? '參考學程分類（自行標示，非校方認列）' : '個人課程分類（自行標示）'}
-              </Text>
-              {referenceActive ? (
-              <View style={{ gap: 6, marginTop: 4 }}>
-                {detailedTemplate.categories.map((cat) => {
-                  const isMainSelected = detailedCatKey === cat.key && !detailedSubKey;
-                  const hasSubs = cat.subCategories && cat.subCategories.length > 0;
-                  const catColor = cat.color || theme.colors.accent;
-                  return (
-                    <View key={cat.key}>
-                      <Pressable
-                        onPress={() => {
-                          setDetailedCatKey(cat.key);
-                          setDetailedSubKey(undefined);
-                          setCategory(mapDetailedToLegacyCategory(cat.key));
-                        }}
-                        style={{
-                          paddingVertical: 10,
-                          paddingHorizontal: 14,
-                          borderRadius: theme.radius.md,
-                          backgroundColor:
-                            detailedCatKey === cat.key ? `${catColor}15` : theme.colors.surface2,
-                          borderWidth: 1,
-                          borderColor: detailedCatKey === cat.key ? catColor : theme.colors.border,
-                          flexDirection: 'row',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                        }}
-                      >
-                        <Text
-                          style={{
-                            color: detailedCatKey === cat.key ? catColor : theme.colors.text,
-                            fontWeight: '600',
-                            fontSize: 14,
-                          }}
-                        >
-                          {cat.label}
-                        </Text>
-                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                          {cat.minCredits}
-                          {cat.maxCredits != null ? `~${cat.maxCredits}` : '+'} 學分
-                        </Text>
-                      </Pressable>
-                      {hasSubs && detailedCatKey === cat.key && (
-                        <ScrollView
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          style={{ marginTop: 6, marginLeft: 12 }}
-                        >
-                          <View style={{ flexDirection: 'row', gap: 6 }}>
-                            {cat.subCategories!.map((sub) => {
-                              const isSubSel = detailedSubKey === sub.key;
-                              return (
-                                <Pressable
-                                  key={sub.key}
-                                  onPress={() => {
-                                    setDetailedCatKey(cat.key);
-                                    setDetailedSubKey(sub.key);
-                                    setCategory(mapDetailedToLegacyCategory(cat.key));
-                                  }}
-                                  style={{
-                                    paddingVertical: 8,
-                                    paddingHorizontal: 12,
-                                    borderRadius: theme.radius.sm,
-                                    backgroundColor: isSubSel
-                                      ? `${catColor}25`
-                                      : theme.colors.surface2,
-                                    borderWidth: 1,
-                                    borderColor: isSubSel ? catColor : theme.colors.border,
-                                  }}
-                                >
-                                  <Text
-                                    style={{
-                                      color: isSubSel ? catColor : theme.colors.muted,
-                                      fontSize: 12,
-                                      fontWeight: '500',
-                                    }}
-                                  >
-                                    {sub.label}
-                                  </Text>
-                                </Pressable>
-                              );
-                            })}
+                <View style={[s.fieldBlock, s.divider]}>
+                  <Text style={s.fieldLabel}>
+                    {referenceActive
+                      ? '參考學程分類（自行標示，非校方認列）'
+                      : '個人課程分類（自行標示）'}
+                  </Text>
+                  {referenceActive ? (
+                    <View style={s.subGroup}>
+                      {detailedTemplate.categories.map((cat, index) => {
+                        const selected = detailedCatKey === cat.key;
+                        const hasSubs = cat.subCategories && cat.subCategories.length > 0;
+                        return (
+                          <View key={cat.key} style={index > 0 && s.divider}>
+                            <Pressable
+                              accessibilityRole="radio"
+                              accessibilityState={{ checked: selected }}
+                              onPress={() => {
+                                setDetailedCatKey(cat.key);
+                                setDetailedSubKey(undefined);
+                                setCategory(mapDetailedToLegacyCategory(cat.key));
+                              }}
+                              style={[s.optionRow, selected && s.optionRowActive]}
+                            >
+                              <Ionicons
+                                name={selected ? 'radio-button-on' : 'radio-button-off'}
+                                size={20}
+                                color={selected ? theme.colors.accent : theme.colors.muted}
+                              />
+                              <Text style={[s.optionLabel, selected && s.optionLabelActive]}>
+                                {cat.label}
+                              </Text>
+                              <Text style={s.metaText}>
+                                {cat.minCredits}
+                                {cat.maxCredits != null ? `~${cat.maxCredits}` : '+'} 學分
+                              </Text>
+                            </Pressable>
+                            {hasSubs && selected && (
+                              <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                style={s.subChips}
+                              >
+                                <View style={s.chipRow}>
+                                  {cat.subCategories!.map((sub) => {
+                                    const isSubSel = detailedSubKey === sub.key;
+                                    return (
+                                      <Pressable
+                                        key={sub.key}
+                                        accessibilityRole="button"
+                                        accessibilityState={{ selected: isSubSel }}
+                                        onPress={() => {
+                                          setDetailedCatKey(cat.key);
+                                          setDetailedSubKey(sub.key);
+                                          setCategory(mapDetailedToLegacyCategory(cat.key));
+                                        }}
+                                        style={[s.chip, isSubSel && s.chipActive]}
+                                      >
+                                        <Text style={[s.chipText, isSubSel && s.chipTextActive]}>
+                                          {sub.label}
+                                        </Text>
+                                      </Pressable>
+                                    );
+                                  })}
+                                </View>
+                              </ScrollView>
+                            )}
                           </View>
-                        </ScrollView>
-                      )}
+                        );
+                      })}
                     </View>
-                  );
-                })}
-              </View>
-
-              ) : (
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-                {legacyCategories.map((entry) => (
-                  <Pressable
-                    key={entry.key}
-                    accessibilityRole="radio"
-                    accessibilityState={{ checked: category === entry.key }}
-                    accessibilityLabel={entry.label}
-                    onPress={() => {
-                      setCategory(entry.key);
-                      setDetailedCatKey(categoryToDetailedKey(entry.key));
-                      setDetailedSubKey(undefined);
-                    }}
-                    style={{
-                      minHeight: 44,
-                      justifyContent: 'center',
-                      paddingHorizontal: 16,
-                      borderRadius: theme.radius.md,
-                      borderWidth: 1,
-                      borderColor: category === entry.key ? theme.colors.accent : theme.colors.border,
-                      backgroundColor: category === entry.key ? theme.colors.accentSoft : theme.colors.surface2,
-                    }}
-                  >
-                    <Text style={{ color: theme.colors.text, fontWeight: category === entry.key ? '700' : '500' }}>
-                      {entry.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-              )}
-
-              <View style={{ height: 12 }} />
-
-              <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>
-                通過狀態（自行確認，不代表校方已認列）
-              </Text>
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
-                <View style={{ flex: 1 }}>
-                  <Button
-                    text="已確認通過"
-                    kind={passed ? 'primary' : 'secondary'}
-                    onPress={() => setPassed(true)}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Button
-                    text="尚未確認／未通過"
-                    kind={!passed ? 'primary' : 'secondary'}
-                    onPress={() => setPassed(false)}
-                  />
-                </View>
-              </View>
-
-              {passed && (
-                <View style={{ marginTop: 12 }}>
-                  <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>
-                    等第成績（可留空，不自動填 A）
-                  </Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    <View style={{ flexDirection: 'row', gap: 6 }}>
-                      {gradeOptions.map((g) => (
-                        <Pressable
-                          key={g}
-                          onPress={() => setGrade(g)}
-                          style={{
-                            width: 44,
-                            height: 44,
-                            borderRadius: 22,
-                            backgroundColor:
-                              grade === g ? theme.colors.accent : theme.colors.surface2,
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          }}
-                        >
-                          <Text
-                            style={{
-                              color: grade === g ? '#fff' : theme.colors.text,
-                              fontWeight: '700',
-                              fontSize: 13,
+                  ) : (
+                    <View style={s.chipWrap}>
+                      {legacyCategories.map((entry) => {
+                        const active = category === entry.key;
+                        return (
+                          <Pressable
+                            key={entry.key}
+                            accessibilityRole="radio"
+                            accessibilityState={{ checked: active }}
+                            accessibilityLabel={entry.label}
+                            onPress={() => {
+                              setCategory(entry.key);
+                              setDetailedCatKey(categoryToDetailedKey(entry.key));
+                              setDetailedSubKey(undefined);
                             }}
+                            style={[s.chip, active && s.chipActive]}
                           >
-                            {g}
-                          </Text>
-                        </Pressable>
-                      ))}
+                            <Text style={[s.chipText, active && s.chipTextActive]}>
+                              {entry.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
                     </View>
-                  </ScrollView>
-                </View>
-              )}
-
-              <View style={{ marginTop: 16 }}>
-                <Button
-                  text={saving ? '儲存中...' : '儲存課程'}
-                  kind="primary"
-                  onPress={handleSaveCourse}
-                  disabled={saving || !name.trim()}
-                />
-              </View>
-            </AnimatedCard>
-
-            {referenceActive ? (
-            <AnimatedCard
-              title="115 入學資工系參考情境"
-              subtitle={`${detailedTemplate.departmentName} ${detailedTemplate.academicYear} 學年度`}
-              delay={100}
-            >
-              <View style={{ gap: 12 }}>
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
-                >
-                  <Text style={{ color: theme.colors.muted }}>目前總學分</Text>
-                  <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
-                    {detailedAudit.total.earned} / {detailedAudit.total.required}
-                  </Text>
+                  )}
                 </View>
 
-                <View
-                  style={{
-                    height: 8,
-                    backgroundColor: theme.colors.border,
-                    borderRadius: 4,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <View
-                    style={{
-                      width: `${Math.min((detailedAudit.total.earned / Math.max(detailedAudit.total.required, 1)) * 100, 100)}%`,
-                      height: '100%',
-                      backgroundColor: theme.colors.accent,
-                      borderRadius: 4,
-                    }}
-                  />
-                </View>
-
-                {name.trim() && (
-                  <View
-                    style={{
-                      padding: 12,
-                      backgroundColor: theme.colors.accentSoft,
-                      borderRadius: theme.radius.md,
-                    }}
-                  >
-                    <View
-                      style={{
-                        flexDirection: 'row',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <Text style={{ color: theme.colors.accent }}>新增後總學分</Text>
-                      <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 18 }}>
-                        {detailedPreview.total.earned} / {detailedPreview.total.required}
-                      </Text>
+                <View style={[s.fieldBlock, s.divider]}>
+                  <Text style={s.fieldLabel}>通過狀態（自行確認，不代表校方已認列）</Text>
+                  <View style={s.buttonRow}>
+                    <View style={s.flex}>
+                      <Button
+                        text="已確認通過"
+                        kind={passed ? 'primary' : 'secondary'}
+                        onPress={() => setPassed(true)}
+                      />
                     </View>
-                    <Text style={{ color: theme.colors.accent, fontSize: 12, marginTop: 4 }}>
-                      +{Number(credits) || 0} 學分（
-                      {detailedTemplate.categories.find((c) => c.key === detailedCatKey)?.label ??
-                        '其他'}
-                      ）
-                    </Text>
+                    <View style={s.flex}>
+                      <Button
+                        text="尚未確認／未通過"
+                        kind={!passed ? 'primary' : 'secondary'}
+                        onPress={() => setPassed(false)}
+                      />
+                    </View>
+                  </View>
+                </View>
+
+                {passed && (
+                  <View style={[s.fieldBlock, s.divider]}>
+                    <Text style={s.fieldLabel}>等第成績（可留空，不自動填 A）</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      <View style={s.chipRow}>
+                        {gradeOptions.map((g) => {
+                          const active = grade === g;
+                          return (
+                            <Pressable
+                              key={g}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected: active }}
+                              accessibilityLabel={`成績 ${g}`}
+                              onPress={() => setGrade(g)}
+                              style={[s.gradeChip, active && s.chipActive]}
+                            >
+                              <Text style={[s.chipText, active && s.chipTextActive]}>{g}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </ScrollView>
                   </View>
                 )}
 
-                <View style={{ gap: 6 }}>
+                <View style={[s.fieldBlock, s.divider]}>
+                  <Button
+                    text={saving ? '儲存中...' : '儲存課程'}
+                    kind="primary"
+                    onPress={handleSaveCourse}
+                    disabled={saving || !name.trim()}
+                  />
+                </View>
+              </View>
+            </Section>
+
+            {referenceActive ? (
+              <Section
+                title="115 入學資工系參考情境"
+                subtitle={`${detailedTemplate.departmentName} ${detailedTemplate.academicYear} 學年度`}
+                styles={s}
+              >
+                <View style={s.group}>
+                  <View style={s.fieldBlock}>
+                    <View style={s.spaceBetween}>
+                      <Text style={s.metaText}>目前總學分</Text>
+                      <Text style={s.strongValue}>
+                        {detailedAudit.total.earned} / {detailedAudit.total.required}
+                      </Text>
+                    </View>
+                    <ProgressBar pct={totalPct} color={theme.colors.accent} height={8} styles={s} />
+                  </View>
+
+                  {name.trim() ? (
+                    <View style={[s.fieldBlock, s.divider]}>
+                      <View style={s.spaceBetween}>
+                        <Text style={s.fieldLabel}>新增後總學分</Text>
+                        <Text style={s.strongValue}>
+                          {detailedPreview.total.earned} / {detailedPreview.total.required}
+                        </Text>
+                      </View>
+                      <Text style={s.metaText}>
+                        +{Number(credits) || 0} 學分（
+                        {detailedTemplate.categories.find((c) => c.key === detailedCatKey)?.label ??
+                          '其他'}
+                        ）
+                      </Text>
+                    </View>
+                  ) : null}
+
                   {detailedAudit.byCategory.map((cat) => {
                     const catDef = detailedTemplate.categories.find((c) => c.key === cat.key);
-                    const catColor = catDef?.color || theme.colors.accent;
-                    const pct =
-                      cat.required > 0
-                        ? Math.min((cat.earned / cat.required) * 100, 100)
-                        : cat.earned > 0
-                          ? 100
-                          : 0;
                     return (
-                      <View
-                        key={cat.key}
-                        style={{
-                          padding: 10,
-                          backgroundColor: `${catColor}08`,
-                          borderRadius: theme.radius.md,
-                          borderWidth: 1,
-                          borderColor: `${catColor}20`,
-                        }}
-                      >
-                        <View
-                          style={{
-                            flexDirection: 'row',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                          }}
-                        >
-                          <Text style={{ color: catColor, fontSize: 13, fontWeight: '600' }}>
-                            {cat.label}
-                          </Text>
-                          <Text
-                            style={{ color: theme.colors.text, fontSize: 14, fontWeight: '700' }}
-                          >
+                      <View key={cat.key} style={[s.fieldBlock, s.divider]}>
+                        <View style={s.spaceBetween}>
+                          <Text style={s.optionLabel}>{cat.label}</Text>
+                          <Text style={s.rowValue}>
                             {cat.earned}/{cat.required}
                             {catDef?.maxCredits != null ? ` (上限${catDef.maxCredits})` : ''}
                           </Text>
                         </View>
-                        <View
-                          style={{
-                            height: 4,
-                            backgroundColor: `${catColor}20`,
-                            borderRadius: 2,
-                            marginTop: 6,
-                          }}
-                        >
-                          <View
-                            style={{
-                              width: `${pct}%`,
-                              height: '100%',
-                              backgroundColor: catColor,
-                              borderRadius: 2,
-                            }}
-                          />
-                        </View>
+                        <ProgressBar
+                          pct={pctOf(cat.earned, cat.required)}
+                          color={theme.colors.accent}
+                          height={4}
+                          styles={s}
+                        />
                       </View>
                     );
                   })}
-                </View>
 
-                {detailedAudit.warnings.length > 0 && (
-                  <View
-                    style={{
-                      padding: 10,
-                      backgroundColor: '#FEF3C7',
-                      borderRadius: theme.radius.md,
-                    }}
-                  >
-                    {detailedAudit.warnings.map((w, i) => (
-                      <Text key={i} style={{ color: '#92400E', fontSize: 12, lineHeight: 18 }}>
-                        {w}
-                      </Text>
-                    ))}
-                  </View>
-                )}
-              </View>
-            </AnimatedCard>
-            ) : (
-              <AnimatedCard title="我的修課學分" subtitle="已確認通過為自行標示，未套用畢業門檻">
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                  <Text style={{ color: theme.colors.muted, fontSize: 13 }}>自行標示通過</Text>
-                  <Text style={{ fontSize: 28, fontWeight: '700', color: theme.colors.text }}>
-                    {personalProgress.selfReportedCredits} <Text style={{ fontSize: 13 }}>學分</Text>
-                  </Text>
+                  {detailedAudit.warnings.length > 0 && (
+                    <View style={[s.warningBox, s.divider]}>
+                      <Ionicons name="warning-outline" size={18} color={theme.colors.warning} />
+                      <View style={s.flex}>
+                        {detailedAudit.warnings.map((w, i) => (
+                          <Text key={i} style={s.warningText}>
+                            {w}
+                          </Text>
+                        ))}
+                      </View>
+                    </View>
+                  )}
                 </View>
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 10, lineHeight: 19 }}>
-                  共 {personalProgress.totalCourses} 門手動記錄；{personalProgress.pendingCourses} 門尚未明示通過。
-                  這裡未核對重修、抵免、通識分類或畢業審查，請以學校正式資料為準。
-                </Text>
-              </AnimatedCard>
+              </Section>
+            ) : (
+              <Section
+                title="我的修課學分"
+                subtitle="已確認通過為自行標示，未套用畢業門檻"
+                styles={s}
+              >
+                <View style={s.group}>
+                  <View style={s.fieldBlock}>
+                    <View style={s.spaceBetween}>
+                      <Text style={s.metaText}>自行標示通過</Text>
+                      <Text style={s.bigValue}>
+                        {personalProgress.selfReportedCredits} <Text style={s.unit}>學分</Text>
+                      </Text>
+                    </View>
+                    <Text style={s.noteText}>
+                      共 {personalProgress.totalCourses} 門手動記錄；
+                      {personalProgress.pendingCourses} 門尚未明示通過。
+                      這裡未核對重修、抵免、通識分類或畢業審查，請以學校正式資料為準。
+                    </Text>
+                  </View>
+                </View>
+              </Section>
             )}
           </>
         )}
 
-        {tab === 1 && (
+        {tab === 'overview' && (
           <>
-            <AnimatedCard title="個人修課總覽" subtitle="根據手動記錄整理，不代替正式畢業審查">
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                <Text style={{ color: theme.colors.muted }}>自行標示通過的課程學分</Text>
-                <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>
-                  {personalProgress.selfReportedCredits}
-                </Text>
-              </View>
-              <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 10, lineHeight: 20 }}>
-                {personalProgress.reportedPassedCourses} 門標示通過，{personalProgress.pendingCourses} 門未確認。
-                未扣除重修與不能採計的課程，也未推定學校畢業資格。
-              </Text>
-              {canUseReference ? (
-                <Pressable
-                  accessibilityRole="button"
-                  style={{ minHeight: 44, paddingVertical: 12, justifyContent: 'center' }}
-                  onPress={() => {
-                    if (referenceActive) {
-                      setReferenceEnabled(false);
-                      return;
-                    }
-                    Alert.alert(
-                      '啟用 115 學年度資工系參考規則？',
-                      '僅供靜宜資訊工程學系 115 學年度入學學生自行估算。請先確認你的入學年度；系統不會把此範本當作正式畢業審查。',
-                      [
-                        { text: '取消', style: 'cancel' },
-                        { text: '我已核對，啟用參考', onPress: () => setReferenceEnabled(true) },
-                      ],
-                    );
-                  }}
-                >
-                  <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>
-                    {referenceActive ? '關閉系所參考規則' : '手動啟用 115 資工系參考規則'}
-                  </Text>
-                </Pressable>
-              ) : (
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 10, lineHeight: 19 }}>
-                  此學校／系所目前沒有對應的已核實畢業規則，無法以其他科系範本推定你的畢業門檻。
-                </Text>
-              )}
-            </AnimatedCard>
-            {referenceActive ? (
-              <>
-            {/* 使用者明確選擇後，才顯示對應系所的參考規則。 */}
-            <AnimatedCard
-              title="系所學分參考"
-              subtitle={`${detailedTemplate.schoolName} — ${detailedTemplate.departmentName}`}
+            <Section
+              title="個人修課總覽"
+              subtitle="根據手動記錄整理，不代替正式畢業審查"
+              styles={s}
             >
-              <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 19, marginBottom: 12 }}>
-                僅計算手動標示的學分與此版分類門檻；未核對必修課代碼、重修替代、抵免、修課年度及正式畢業資格。
-              </Text>
-              <View style={{ gap: 8 }}>
-                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                  {detailedTemplate.academicYear} 學年度入學 ／ {detailedTemplate.division} ／{' '}
-                  {detailedTemplate.studentType}
-                </Text>
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginTop: 4,
-                  }}
-                >
-                  <Text style={{ color: theme.colors.text, fontWeight: '600' }}>畢業總學分</Text>
-                  <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 22 }}>
-                    {detailedAudit.total.earned} / {detailedTemplate.totalCreditsRequired}
-                  </Text>
-                </View>
-                <View
-                  style={{
-                    height: 10,
-                    backgroundColor: theme.colors.border,
-                    borderRadius: 5,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <View
-                    style={{
-                      width: `${Math.min((detailedAudit.total.earned / Math.max(detailedTemplate.totalCreditsRequired, 1)) * 100, 100)}%`,
-                      height: '100%',
-                      backgroundColor: detailedAudit.satisfied ? '#34C759' : theme.colors.accent,
-                      borderRadius: 5,
-                    }}
-                  />
-                </View>
-                <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: 'right' }}>
-                  {detailedAudit.total.remaining > 0
-                    ? `還需 ${detailedAudit.total.remaining} 學分`
-                    : '參考學分量達門檻（非正式認列）'}
-                </Text>
-              </View>
-            </AnimatedCard>
-
-            {/* 各分類詳細進度 */}
-            {detailedAudit.byCategory.map((cat, idx) => {
-              const catDef = detailedTemplate.categories.find((c) => c.key === cat.key);
-              const catColor = catDef?.color || theme.colors.accent;
-              const pct =
-                cat.required > 0
-                  ? Math.min((cat.earned / cat.required) * 100, 100)
-                  : cat.earned > 0
-                    ? 100
-                    : 0;
-              return (
-                <AnimatedCard
-                  key={cat.key}
-                  title={cat.label}
-                  subtitle={`${cat.earned}/${cat.required} 學分${cat.remaining > 0 ? `（差 ${cat.remaining}）` : ' ✓'}`}
-                  delay={idx * 60}
-                >
-                  <View style={{ gap: 8 }}>
-                    <View style={{ height: 6, backgroundColor: `${catColor}20`, borderRadius: 3 }}>
-                      <View
-                        style={{
-                          width: `${pct}%`,
-                          height: '100%',
-                          backgroundColor: catColor,
-                          borderRadius: 3,
-                        }}
-                      />
-                    </View>
-
-                    {catDef?.notes && (
-                      <Text style={{ color: theme.colors.muted, fontSize: 11, lineHeight: 16 }}>
-                        {catDef.notes}
-                      </Text>
-                    )}
-
-                    {cat.subCategories && cat.subCategories.length > 0 && (
-                      <View style={{ gap: 6, marginTop: 4 }}>
-                        {cat.subCategories.map((sub) => {
-                          const subPct =
-                            sub.required > 0
-                              ? Math.min((sub.earned / sub.required) * 100, 100)
-                              : sub.earned > 0
-                                ? 100
-                                : 0;
-                          return (
-                            <View
-                              key={sub.key}
-                              style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
-                            >
-                              <View style={{ flex: 1 }}>
-                                <View
-                                  style={{ flexDirection: 'row', justifyContent: 'space-between' }}
-                                >
-                                  <Text
-                                    style={{
-                                      color: theme.colors.text,
-                                      fontSize: 12,
-                                      fontWeight: '500',
-                                    }}
-                                  >
-                                    {sub.label}
-                                  </Text>
-                                  <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                                    {sub.earned}/{sub.required}
-                                  </Text>
-                                </View>
-                                <View
-                                  style={{
-                                    height: 3,
-                                    backgroundColor: `${catColor}15`,
-                                    borderRadius: 2,
-                                    marginTop: 3,
-                                  }}
-                                >
-                                  <View
-                                    style={{
-                                      width: `${subPct}%`,
-                                      height: '100%',
-                                      backgroundColor: `${catColor}80`,
-                                      borderRadius: 2,
-                                    }}
-                                  />
-                                </View>
-                              </View>
-                              {sub.remaining <= 0 && sub.required > 0 && (
-                                <Ionicons name="checkmark-circle" size={16} color="#34C759" />
-                              )}
-                            </View>
-                          );
-                        })}
-                      </View>
-                    )}
-
-                    {catDef?.courses && catDef.courses.length > 0 && (
-                      <View style={{ marginTop: 4 }}>
-                        <Text
-                          style={{
-                            color: theme.colors.muted,
-                            fontSize: 11,
-                            fontWeight: '600',
-                            marginBottom: 4,
-                          }}
-                        >
-                          課程清單（{catDef.courses.filter((c) => c.required).length} 門必修）
-                        </Text>
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-                          {catDef.courses
-                            .filter((c) => c.required)
-                            .map((c, i) => (
-                              <View
-                                key={i}
-                                style={{
-                                  paddingVertical: 4,
-                                  paddingHorizontal: 8,
-                                  backgroundColor: `${catColor}10`,
-                                  borderRadius: theme.radius.sm,
-                                }}
-                              >
-                                <Text style={{ color: catColor, fontSize: 11 }}>
-                                  {c.name} ({c.credits})
-                                </Text>
-                              </View>
-                            ))}
-                        </View>
-                      </View>
-                    )}
+              <View style={s.group}>
+                <View style={s.fieldBlock}>
+                  <View style={s.spaceBetween}>
+                    <Text style={s.metaText}>自行標示通過的課程學分</Text>
+                    <Text style={s.bigValue}>{personalProgress.selfReportedCredits}</Text>
                   </View>
-                </AnimatedCard>
-              );
-            })}
-
-            {/* 非學分畢業條件 */}
-            <AnimatedCard
-              title="其他畢業條件"
-              subtitle="非學分認證要求"
-              delay={detailedAudit.byCategory.length * 60}
-            >
-              <View style={{ gap: 10 }}>
-                {detailedTemplate.nonCreditRequirements.map((req) => {
-                  const satisfied = nonCreditSatisfied[req.key] ?? false;
-                  return (
+                  <Text style={s.noteText}>
+                    {personalProgress.reportedPassedCourses} 門標示通過，
+                    {personalProgress.pendingCourses} 門未確認。
+                    未扣除重修與不能採計的課程，也未推定學校畢業資格。
+                  </Text>
+                </View>
+                <View style={[s.fieldBlock, s.divider]}>
+                  {canUseReference ? (
                     <Pressable
-                      key={req.key}
+                      accessibilityRole="button"
+                      style={s.linkButton}
                       onPress={() => {
-                        const previousScope = storageKey;
-                        const next = { ...nonCreditSatisfied, [req.key]: !nonCreditSatisfied[req.key] };
-                        void saveCreditChecklistStatus(checklistKey, next)
-                          .then(() => {
-                            if (activeScope.current === previousScope) setNonCreditSatisfied(next);
-                          })
-                          .catch(() => Alert.alert('尚未儲存', '這次勾選無法保存，請稍後重試。'));
-                      }}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        padding: 12,
-                        backgroundColor: satisfied ? '#34C75910' : theme.colors.surface2,
-                        borderRadius: theme.radius.md,
-                        borderWidth: 1,
-                        borderColor: satisfied ? '#34C75940' : theme.colors.border,
-                        gap: 12,
+                        if (referenceActive) {
+                          setReferenceEnabled(false);
+                          return;
+                        }
+                        Alert.alert(
+                          '啟用 115 學年度資工系參考規則？',
+                          '僅供靜宜資訊工程學系 115 學年度入學學生自行估算。請先確認你的入學年度；系統不會把此範本當作正式畢業審查。',
+                          [
+                            { text: '取消', style: 'cancel' },
+                            { text: '我已核對，啟用參考', onPress: () => setReferenceEnabled(true) },
+                          ],
+                        );
                       }}
                     >
-                      <Ionicons
-                        name={satisfied ? 'checkmark-circle' : 'ellipse-outline'}
-                        size={24}
-                        color={satisfied ? '#34C759' : theme.colors.muted}
-                      />
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>
-                          {req.label}
-                        </Text>
-                        <Text
-                          style={{
-                            color: theme.colors.muted,
-                            fontSize: 12,
-                            marginTop: 2,
-                            lineHeight: 16,
-                          }}
-                        >
-                          {req.description}
-                        </Text>
-                        {req.alternatives && req.alternatives.length > 0 && (
-                          <Text
-                            style={{
-                              color: theme.colors.muted,
-                              fontSize: 11,
-                              marginTop: 4,
-                              fontStyle: 'italic',
-                            }}
-                          >
-                            替代方案：{req.alternatives.join('、')}
-                          </Text>
-                        )}
-                      </View>
+                      <Text style={s.linkText}>
+                        {referenceActive ? '關閉系所參考規則' : '手動啟用 115 資工系參考規則'}
+                      </Text>
                     </Pressable>
-                  );
-                })}
-                <Text style={{ color: theme.colors.muted, fontSize: 11, textAlign: 'center' }}>
-                  個人勾選結果只保存在此裝置，不代表校方認證完成
-                </Text>
+                  ) : (
+                    <Text style={s.noteText}>
+                      此學校／系所目前沒有對應的已核實畢業規則，無法以其他科系範本推定你的畢業門檻。
+                    </Text>
+                  )}
+                </View>
               </View>
-            </AnimatedCard>
+            </Section>
 
-            {/* 附註 */}
-            {detailedTemplate.otherRules && detailedTemplate.otherRules.length > 0 && (
-              <AnimatedCard title="附註" delay={detailedAudit.byCategory.length * 60 + 60}>
-                <View style={{ gap: 6 }}>
-                  {detailedTemplate.otherRules.map((rule, i) => (
-                    <View key={i} style={{ flexDirection: 'row', gap: 6 }}>
-                      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>•</Text>
-                      <Text
-                        style={{ color: theme.colors.muted, fontSize: 12, flex: 1, lineHeight: 18 }}
-                      >
-                        {rule}
+            {referenceActive ? (
+              <>
+                {/* 使用者明確選擇後，才顯示對應系所的參考規則。 */}
+                <Section
+                  title="系所學分參考"
+                  subtitle={`${detailedTemplate.schoolName} — ${detailedTemplate.departmentName}`}
+                  styles={s}
+                >
+                  <View style={s.group}>
+                    <View style={s.fieldBlock}>
+                      <Text style={s.noteText}>
+                        僅計算手動標示的學分與此版分類門檻；未核對必修課代碼、重修替代、抵免、修課年度及正式畢業資格。
+                      </Text>
+                      <Text style={s.metaText}>
+                        {detailedTemplate.academicYear} 學年度入學 ／ {detailedTemplate.division} ／{' '}
+                        {detailedTemplate.studentType}
                       </Text>
                     </View>
-                  ))}
-                </View>
-              </AnimatedCard>
-            )}
+                    <View style={[s.fieldBlock, s.divider]}>
+                      <View style={s.spaceBetween}>
+                        <Text style={s.optionLabel}>畢業總學分</Text>
+                        <Text style={s.bigValue}>
+                          {detailedAudit.total.earned} / {detailedTemplate.totalCreditsRequired}
+                        </Text>
+                      </View>
+                      <ProgressBar
+                        pct={referencePct}
+                        color={detailedAudit.satisfied ? theme.colors.success : theme.colors.accent}
+                        height={8}
+                        styles={s}
+                      />
+                      <Text style={s.rightNote}>
+                        {detailedAudit.total.remaining > 0
+                          ? `還需 ${detailedAudit.total.remaining} 學分`
+                          : '參考學分量達門檻（非正式認列）'}
+                      </Text>
+                    </View>
+                  </View>
+                </Section>
+
+                {/* 各分類詳細進度 */}
+                <Section title="各分類進度" styles={s}>
+                  <View style={s.group}>
+                    {detailedAudit.byCategory.map((cat, idx) => {
+                      const catDef = detailedTemplate.categories.find((c) => c.key === cat.key);
+                      const requiredCourses = catDef?.courses?.filter((c) => c.required) ?? [];
+                      return (
+                        <View key={cat.key} style={[s.fieldBlock, idx > 0 && s.divider]}>
+                          <View style={s.spaceBetween}>
+                            <Text style={s.optionLabel}>{cat.label}</Text>
+                            <Text style={s.rowValue}>
+                              {cat.earned}/{cat.required} 學分
+                              {cat.remaining > 0 ? `（差 ${cat.remaining}）` : ' ✓'}
+                            </Text>
+                          </View>
+                          <ProgressBar
+                            pct={pctOf(cat.earned, cat.required)}
+                            color={cat.remaining > 0 ? theme.colors.accent : theme.colors.success}
+                            styles={s}
+                          />
+
+                          {catDef?.notes ? <Text style={s.noteText}>{catDef.notes}</Text> : null}
+
+                          {cat.subCategories && cat.subCategories.length > 0 && (
+                            <View style={s.subList}>
+                              {cat.subCategories.map((sub) => (
+                                <View key={sub.key} style={s.subItem}>
+                                  <View style={s.flex}>
+                                    <View style={s.spaceBetween}>
+                                      <Text style={s.subLabel}>{sub.label}</Text>
+                                      <Text style={s.metaText}>
+                                        {sub.earned}/{sub.required}
+                                      </Text>
+                                    </View>
+                                    <ProgressBar
+                                      pct={pctOf(sub.earned, sub.required)}
+                                      color={theme.colors.accent}
+                                      height={3}
+                                      styles={s}
+                                    />
+                                  </View>
+                                  {sub.remaining <= 0 && sub.required > 0 && (
+                                    <Ionicons
+                                      name="checkmark-circle"
+                                      size={16}
+                                      color={theme.colors.success}
+                                    />
+                                  )}
+                                </View>
+                              ))}
+                            </View>
+                          )}
+
+                          {requiredCourses.length > 0 && (
+                            <Text style={s.noteText}>
+                              課程清單（{requiredCourses.length} 門必修）：
+                              {requiredCourses.map((c) => `${c.name} (${c.credits})`).join('、')}
+                            </Text>
+                          )}
+                        </View>
+                      );
+                    })}
+                  </View>
+                </Section>
+
+                {/* 非學分畢業條件 */}
+                <Section title="其他畢業條件" subtitle="非學分認證要求" styles={s}>
+                  <View style={s.group}>
+                    {detailedTemplate.nonCreditRequirements.map((req, index) => {
+                      const satisfied = nonCreditSatisfied[req.key] ?? false;
+                      return (
+                        <Pressable
+                          key={req.key}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: satisfied }}
+                          accessibilityLabel={req.label}
+                          onPress={() => {
+                            const previousScope = storageKey;
+                            const next = {
+                              ...nonCreditSatisfied,
+                              [req.key]: !nonCreditSatisfied[req.key],
+                            };
+                            void saveCreditChecklistStatus(checklistKey, next)
+                              .then(() => {
+                                if (activeScope.current === previousScope) {
+                                  setNonCreditSatisfied(next);
+                                }
+                              })
+                              .catch(() =>
+                                Alert.alert('尚未儲存', '這次勾選無法保存，請稍後重試。'),
+                              );
+                          }}
+                          style={({ pressed }) => [
+                            s.checkRow,
+                            index > 0 && s.divider,
+                            pressed && s.pressed,
+                          ]}
+                        >
+                          <Ionicons
+                            name={satisfied ? 'checkmark-circle' : 'ellipse-outline'}
+                            size={24}
+                            color={satisfied ? theme.colors.success : theme.colors.muted}
+                          />
+                          <View style={s.flex}>
+                            <Text style={s.optionLabel}>{req.label}</Text>
+                            <Text style={s.metaText}>{req.description}</Text>
+                            {req.alternatives && req.alternatives.length > 0 && (
+                              <Text style={s.altText}>替代方案：{req.alternatives.join('、')}</Text>
+                            )}
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                    <View style={[s.fieldBlock, s.divider]}>
+                      <Text style={s.centerNote}>個人勾選結果只保存在此裝置，不代表校方認證完成</Text>
+                    </View>
+                  </View>
+                </Section>
+
+                {/* 附註 */}
+                {detailedTemplate.otherRules && detailedTemplate.otherRules.length > 0 && (
+                  <Section title="附註" styles={s}>
+                    <View style={s.group}>
+                      <View style={s.fieldBlock}>
+                        {detailedTemplate.otherRules.map((rule, i) => (
+                          <View key={i} style={s.bulletRow}>
+                            <Text style={s.metaText}>•</Text>
+                            <Text style={[s.metaText, s.flex]}>{rule}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  </Section>
+                )}
               </>
             ) : (
-              <AnimatedCard title="下一步怎麼安排" subtitle="先核對校方門檻，再決定修課計畫">
-                <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
+              <Section
+                title="下一步怎麼安排"
+                subtitle="先核對校方門檻，再決定修課計畫"
+                styles={s}
+              >
+                <Text style={s.noteText}>
                   可在「新增課程」整理成績與修課，或從 Web 學分規劃逐學期安排候選課程。
                   目前沒有你的學制與入學年度的正式採計規則，避免直接顯示錯誤的畢業達標百分比。
                 </Text>
-              </AnimatedCard>
+              </Section>
             )}
           </>
         )}
 
-        {tab === 2 && (
+        {tab === 'saved' && (
           <>
-            <AnimatedCard
+            <Section
               title={`已儲存課程（${savedCourses.length}）`}
-              subtitle={savedCourses.length === 0 ? '尚無本機課程' : unsyncedCount > 0 ? `${unsyncedCount} 門尚未同步` : '目前課程皆已標示同步'}
+              subtitle={
+                savedCourses.length === 0
+                  ? '尚無本機課程'
+                  : unsyncedCount > 0
+                    ? `${unsyncedCount} 門尚未同步`
+                    : '目前課程皆已標示同步'
+              }
+              styles={s}
             >
               {savedCourses.length === 0 ? (
-                <View style={{ alignItems: 'center', padding: 24 }}>
-                  <Ionicons name="school-outline" size={48} color={theme.colors.muted} />
-                  <Text style={{ color: theme.colors.muted, marginTop: 12 }}>尚未新增任何課程</Text>
-                  <Button
-                    text="新增第一門課程"
-                    onPress={() => setTab(0)}
-                    style={{ marginTop: 12 }}
-                  />
+                <View style={[s.group, s.emptyBox]}>
+                  <Ionicons name="school-outline" size={40} color={theme.colors.muted} />
+                  <Text style={s.mutedText}>尚未新增任何課程</Text>
+                  <Button text="新增第一門課程" onPress={() => setTab('add')} />
                 </View>
               ) : (
-                <View style={{ gap: 10 }}>
-                  {savedCourses.map((course) => {
+                <View style={s.group}>
+                  {savedCourses.map((course, index) => {
                     const catInfo = legacyCategories.find((c) => c.key === course.category);
+                    const meta = [
+                      catInfo?.label || course.category,
+                      course.semester,
+                      course.grade ? `成績 ${course.grade}` : null,
+                      !course.passed ? '未標示通過' : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ');
                     return (
-                      <View
-                        key={course.id}
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          padding: 12,
-                          backgroundColor: theme.colors.surface2,
-                          borderRadius: theme.radius.md,
-                          borderWidth: 1,
-                          borderColor: theme.colors.border,
-                          gap: 12,
-                        }}
-                      >
-                        <View
-                          style={{
-                            width: 40,
-                            height: 40,
-                            borderRadius: 20,
-                            backgroundColor: `${catInfo?.color || theme.colors.accent}20`,
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          }}
-                        >
-                          <Text
-                            style={{
-                              color: catInfo?.color || theme.colors.accent,
-                              fontWeight: '700',
-                              fontSize: 16,
-                            }}
-                          >
-                            {course.credits}
-                          </Text>
+                      <View key={course.id} style={[s.savedRow, index > 0 && s.divider]}>
+                        <View style={s.creditCol}>
+                          <Text style={s.creditValue}>{course.credits}</Text>
+                          <Text style={s.creditUnit}>學分</Text>
                         </View>
-                        <View style={{ flex: 1 }}>
-                          <Text
-                            style={{ color: theme.colors.text, fontWeight: '600' }}
-                            numberOfLines={1}
-                          >
+                        <View style={s.flex}>
+                          <Text style={s.optionLabel} numberOfLines={1}>
                             {course.name}
                           </Text>
-                          <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
-                            <Pill text={catInfo?.label || course.category} />
-                            {course.semester && <Pill text={course.semester} />}
-                            {course.grade && <Pill text={course.grade} kind="accent" />}
-                            {!course.passed && <Pill text="未標示通過" kind="accent" />}
-                          </View>
+                          <Text style={s.metaText} numberOfLines={2}>
+                            {meta}
+                          </Text>
                         </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          {course.syncedToCloud ? (
-                            <Ionicons name="cloud-done" size={18} color={theme.colors.success} />
-                          ) : (
-                            <Ionicons name="cloud-offline" size={18} color={theme.colors.muted} />
-                          )}
-                          <Pressable onPress={() => handleDeleteCourse(course.id)}>
-                            <Ionicons name="trash-outline" size={20} color={theme.colors.danger} />
-                          </Pressable>
-                        </View>
+                        <Ionicons
+                          name={course.syncedToCloud ? 'cloud-done-outline' : 'cloud-offline-outline'}
+                          size={18}
+                          color={course.syncedToCloud ? theme.colors.success : theme.colors.muted}
+                          accessibilityLabel={course.syncedToCloud ? '已同步' : '尚未同步'}
+                        />
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`刪除 ${course.name}`}
+                          hitSlop={4}
+                          onPress={() => handleDeleteCourse(course.id)}
+                          style={s.iconButton}
+                        >
+                          <Ionicons name="trash-outline" size={20} color={theme.colors.danger} />
+                        </Pressable>
                       </View>
                     );
                   })}
                 </View>
               )}
-            </AnimatedCard>
+            </Section>
 
             {savedCourses.length > 0 && (
-              <AnimatedCard delay={100}>
-                <View style={{ gap: 10 }}>
-                  <Button
-                    text={
-                      syncing
-                        ? '同步中...'
-                        : `同步到雲端${unsyncedCount > 0 ? ` (${unsyncedCount})` : ''}`
-                    }
-                    kind="primary"
-                    onPress={handleSyncToCloud}
-                    disabled={syncing || unsyncedCount === 0}
-                  />
-                  <Button text="清除所有資料" onPress={handleClearAll} />
-                </View>
-              </AnimatedCard>
+              <View style={s.buttonStack}>
+                <Button
+                  text={
+                    syncing
+                      ? '同步中...'
+                      : `同步到雲端${unsyncedCount > 0 ? ` (${unsyncedCount})` : ''}`
+                  }
+                  kind="primary"
+                  onPress={handleSyncToCloud}
+                  disabled={syncing || unsyncedCount === 0}
+                />
+                <Button text="清除所有資料" onPress={handleClearAll} />
+              </View>
             )}
           </>
         )}
 
-        {tab === 3 && (
+        {tab === 'transfer' && (
           <>
-            <AnimatedCard title="匯入課程" subtitle="先預覽、再確認寫入這台手機">
-              <Text style={{ color: theme.colors.muted, lineHeight: 20, marginBottom: 12 }}>
-                支援的 CSV 格式：{'\n'}
-                課程名稱, 學分, 分類, 成績, 學期{'\n'}
-                例如：資料庫系統, 3, 必修, A, 113-1, 否
-                {'\\n'}沒有「通過」欄位的匯入資料，一律先列為未確認，不會自動認定已取得學分。
-              </Text>
-              <Button
-                text={importing ? '匯入中...' : '選擇 CSV 檔案'}
-                kind="primary"
-                onPress={handleImportCSV}
-                disabled={importing}
-              />
-            </AnimatedCard>
-
-            <AnimatedCard title="同步設定" subtitle="雲端資料同步" delay={100}>
-              <View style={{ gap: 12 }}>
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
-                >
-                  <Text style={{ color: theme.colors.text }}>已儲存課程</Text>
-                  <Text style={{ color: theme.colors.muted }}>{savedCourses.length} 門</Text>
+            <Section title="匯入課程" subtitle="先預覽、再確認寫入這台手機" styles={s}>
+              <View style={s.group}>
+                <View style={s.fieldBlock}>
+                  <Text style={s.noteText}>
+                    支援的 CSV 格式：{'\n'}
+                    課程名稱, 學分, 分類, 成績, 學期{'\n'}
+                    例如：資料庫系統, 3, 必修, A, 113-1, 否
+                    {'\\n'}沒有「通過」欄位的匯入資料，一律先列為未確認，不會自動認定已取得學分。
+                  </Text>
+                  <Button
+                    text={importing ? '匯入中...' : '選擇 CSV 檔案'}
+                    kind="primary"
+                    onPress={handleImportCSV}
+                    disabled={importing}
+                  />
                 </View>
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
-                >
-                  <Text style={{ color: theme.colors.text }}>已同步</Text>
-                  <Text style={{ color: theme.colors.success }}>
+              </View>
+            </Section>
+
+            <Section title="同步設定" subtitle="雲端資料同步" styles={s}>
+              <View style={s.group}>
+                <View style={s.statRow}>
+                  <Text style={s.optionLabel}>已儲存課程</Text>
+                  <Text style={s.metaText}>{savedCourses.length} 門</Text>
+                </View>
+                <View style={[s.statRow, s.divider]}>
+                  <Text style={s.optionLabel}>已同步</Text>
+                  <Text style={[s.metaText, { color: theme.colors.success }]}>
                     {savedCourses.filter((c) => c.syncedToCloud).length} 門
                   </Text>
                 </View>
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
-                >
-                  <Text style={{ color: theme.colors.text }}>待同步</Text>
-                  <Text style={{ color: unsyncedCount > 0 ? '#FF9500' : theme.colors.muted }}>
+                <View style={[s.statRow, s.divider]}>
+                  <Text style={s.optionLabel}>待同步</Text>
+                  <Text
+                    style={[
+                      s.metaText,
+                      unsyncedCount > 0 && { color: theme.colors.warning },
+                    ]}
+                  >
                     {unsyncedCount} 門
                   </Text>
                 </View>
-
-                {auth.user ? (
-                  <Button
-                    text={syncing ? '同步中...' : '立即同步'}
-                    kind="primary"
-                    onPress={handleSyncToCloud}
-                    disabled={syncing || unsyncedCount === 0}
-                  />
-                ) : (
-                  <View
-                    style={{
-                      padding: 12,
-                      backgroundColor: theme.colors.surface2,
-                      borderRadius: theme.radius.md,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <Text style={{ color: theme.colors.muted, textAlign: 'center' }}>
-                      請先登入以啟用雲端同步功能
-                    </Text>
-                  </View>
-                )}
+                <View style={[s.fieldBlock, s.divider]}>
+                  {auth.user ? (
+                    <Button
+                      text={syncing ? '同步中...' : '立即同步'}
+                      kind="primary"
+                      onPress={handleSyncToCloud}
+                      disabled={syncing || unsyncedCount === 0}
+                    />
+                  ) : (
+                    <Text style={s.centerNote}>請先登入以啟用雲端同步功能</Text>
+                  )}
+                </View>
               </View>
-            </AnimatedCard>
+            </Section>
 
-            <AnimatedCard title="匯出資料" subtitle="將學分資料匯出" delay={200}>
+            <Section title="匯出資料" subtitle="將學分資料匯出" styles={s}>
               <Button
                 text="匯出為 CSV"
                 onPress={handleExportCSV}
                 disabled={savedCourses.length === 0}
               />
-            </AnimatedCard>
+            </Section>
           </>
         )}
       </ScrollView>
     </Screen>
   );
 }
+
+const createStyles = () =>
+  StyleSheet.create({
+    flex: { flex: 1 },
+    centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: theme.space.md },
+    mutedText: { color: theme.colors.textSecondary },
+    errorBox: { padding: theme.space.lg, gap: theme.space.md },
+    errorText: { color: theme.colors.text, fontSize: 16, lineHeight: 24 },
+    content: {
+      gap: theme.layout.sectionGap,
+      paddingTop: theme.space.md,
+    },
+    section: { gap: theme.space.sm },
+    sectionHead: { gap: 2 },
+    sectionTitle: {
+      color: theme.colors.text,
+      fontSize: theme.typography.h2.fontSize,
+      lineHeight: theme.typography.h2.lineHeight,
+      fontWeight: '700',
+    },
+    sectionSub: { color: theme.colors.textSecondary, fontSize: 13, lineHeight: 18 },
+    group: {
+      borderRadius: theme.radius.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+      overflow: 'hidden',
+    },
+    subGroup: {
+      borderRadius: theme.radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      overflow: 'hidden',
+    },
+    divider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.separator,
+    },
+    pressed: { backgroundColor: theme.colors.surfaceInteractive },
+    fieldBlock: { padding: theme.space.md, gap: theme.space.sm },
+    fieldRow: { flexDirection: 'row', gap: theme.space.md },
+    fieldCreditCol: { flex: 1, gap: theme.space.sm },
+    fieldSemesterCol: { flex: 2, gap: theme.space.sm },
+    fieldLabel: { color: theme.colors.textSecondary, fontSize: 13, lineHeight: 18, fontWeight: '600' },
+    input: {
+      minHeight: 44,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surfaceMuted,
+      color: theme.colors.text,
+      fontSize: 15,
+    },
+    inputCenter: { textAlign: 'center' },
+    chipRow: { flexDirection: 'row', gap: theme.space.sm },
+    chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.sm },
+    chip: {
+      minHeight: 44,
+      justifyContent: 'center',
+      paddingHorizontal: theme.space.md,
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+    },
+    chipActive: { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accent },
+    chipText: { color: theme.colors.textSecondary, fontSize: 14, fontWeight: '600' },
+    chipTextActive: { color: theme.colors.text, fontWeight: '700' },
+    gradeChip: {
+      width: 44,
+      height: 44,
+      borderRadius: theme.radius.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+    },
+    optionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.space.sm + 4,
+      minHeight: 48,
+      paddingHorizontal: theme.space.md,
+      paddingVertical: theme.space.sm,
+    },
+    optionRowActive: { backgroundColor: theme.colors.accentSoft },
+    optionLabel: { flex: 1, color: theme.colors.text, fontSize: 15, lineHeight: 21, fontWeight: '600' },
+    optionLabelActive: { fontWeight: '700' },
+    subChips: { paddingHorizontal: theme.space.md, paddingBottom: theme.space.sm },
+    buttonRow: { flexDirection: 'row', gap: theme.space.sm },
+    buttonStack: { gap: theme.space.sm },
+    spaceBetween: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: theme.space.sm,
+    },
+    metaText: { color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18 },
+    noteText: { color: theme.colors.textSecondary, fontSize: 12, lineHeight: 19 },
+    centerNote: { color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18, textAlign: 'center' },
+    rightNote: { color: theme.colors.textSecondary, fontSize: 12, textAlign: 'right' },
+    altText: { color: theme.colors.textSecondary, fontSize: 11, marginTop: 4, fontStyle: 'italic' },
+    strongValue: { color: theme.colors.text, fontWeight: '700', fontSize: 18 },
+    bigValue: { color: theme.colors.text, fontWeight: '700', fontSize: 26, lineHeight: 32 },
+    unit: { fontSize: 13, fontWeight: '400', color: theme.colors.textSecondary },
+    rowValue: { color: theme.colors.text, fontSize: 14, fontWeight: '700' },
+    track: { backgroundColor: theme.colors.separator, overflow: 'hidden' },
+    warningBox: {
+      flexDirection: 'row',
+      gap: theme.space.sm,
+      padding: theme.space.md,
+      backgroundColor: theme.colors.warningSoft,
+    },
+    warningText: { color: theme.colors.text, fontSize: 12, lineHeight: 18 },
+    linkButton: { minHeight: 44, justifyContent: 'center' },
+    linkText: { color: theme.colors.accent, fontWeight: '700' },
+    subList: { gap: theme.space.sm, marginTop: theme.space.xs },
+    subItem: { flexDirection: 'row', alignItems: 'center', gap: theme.space.sm },
+    subLabel: { color: theme.colors.text, fontSize: 12, fontWeight: '500' },
+    checkRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.space.sm + 4,
+      minHeight: 56,
+      padding: theme.space.md,
+    },
+    bulletRow: { flexDirection: 'row', gap: theme.space.sm - 2 },
+    emptyBox: {
+      alignItems: 'center',
+      padding: theme.space.lg,
+      gap: theme.space.sm + 4,
+    },
+    savedRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.space.sm + 4,
+      minHeight: 56,
+      paddingLeft: theme.space.md,
+      paddingRight: theme.space.xs,
+      paddingVertical: theme.space.sm,
+    },
+    creditCol: { alignItems: 'center', minWidth: 36 },
+    creditValue: { color: theme.colors.text, fontWeight: '700', fontSize: 18, lineHeight: 22 },
+    creditUnit: { color: theme.colors.textSecondary, fontSize: 11 },
+    iconButton: {
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    statRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      minHeight: 48,
+      paddingHorizontal: theme.space.md,
+    },
+  });

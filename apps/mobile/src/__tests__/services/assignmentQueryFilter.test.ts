@@ -8,8 +8,20 @@ const rows = [
   { title: '作業', groupName: '資料庫實務' },
 ];
 
-test.each(['我還有哪些作業待交？', '下週五的作業有哪些？', '還沒交的作業', '未來 7 天有哪些作業？'])('keeps the full snapshot for %s', (question) => {
+test.each(['我還有哪些作業待交？', '下週五的作業有哪些？', '還沒交的作業', '未來 7 天有哪些作業？',
+  '我明天已交的作業有哪些？', '已經交的作業有哪些？', '已繳的作業有哪些？',
+  '我繳交的作業有哪些？', '我提交的作業有哪些？', '我交的作業有哪些？'])('keeps the full snapshot for %s', (question) => {
   expect(filterAssignmentQuery(question, rows)).toEqual({ scope: null, items: rows });
+});
+
+test('keeps receipt words inside explicitly quoted course and assignment names literal', () => {
+  const named = [
+    { groupName: '已交', title: '交付報告' },
+    { groupName: '資料庫', title: '已交報告' },
+    { groupName: '工程倫理', title: '已交報告' },
+  ];
+  expect(filterAssignmentQuery('「已交」的作業有哪些？', named).items).toEqual([named[0]]);
+  expect(filterAssignmentQuery('資料庫的「已交報告」有哪些？', named).items).toEqual([named[1]]);
 });
 
 test('preserves every exact title match and its original course, including beyond the preview', () => {

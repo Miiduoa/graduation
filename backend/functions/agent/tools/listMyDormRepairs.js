@@ -57,7 +57,7 @@ async function execute(ctx, rawInput) {
 
 module.exports = {
   name: 'listMyDormRepairs',
-  description: '列出目前使用者在此學校的宿舍報修紀錄（依建立時間新到舊）。',
+  description: '列出目前使用者在此學校的宿舍報修備忘（依建立時間新到舊）。這是個人備忘，不是校方單據。',
   inputSchema,
   execute,
 };

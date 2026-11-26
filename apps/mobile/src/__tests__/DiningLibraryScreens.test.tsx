@@ -400,13 +400,14 @@ test('keeps the offline copy when the device has no network', async () => {
   expect(view.getByText('重新整理')).toBeTruthy();
   expect(view.queryByText('今日餐點')).toBeNull();
 });
-test('library search opens the existing real catalog with the typed query', () => {
+test.each(['button', 'keyboard'])('library search opens the submitted catalog query from the %s', (entry) => {
   const navigate = jest.fn();
   const view = render(<LibraryAiFirstScreen navigation={{ navigate }} />);
   expect(view.queryByText(/剩 23|63%|已續借|演算法導論|在架/)).toBeNull();
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), ' 分散式系統 ');
-  fireEvent.press(view.getByText('查詢館藏'));
-  expect(navigate).toHaveBeenCalledWith('LibraryCatalog', { initialQuery: '分散式系統' });
+  if (entry === 'button') fireEvent.press(view.getByText('查詢館藏'));
+  else fireEvent(view.getByLabelText('館藏關鍵字'), 'submitEditing');
+  expect(navigate).toHaveBeenCalledWith('LibraryCatalog', { initialQuery: '分散式系統', autoSearch: true });
 });
 test('borrowing and renewal open the official personal account instead of local writes', async () => {
   const view = render(<LibraryAiFirstScreen />);
@@ -765,6 +766,7 @@ test('a restaurant without dishes is still browsable and does not show a global 
   expect(view.queryByText('找不到符合的餐廳或餐點')).toBeNull();
   fireEvent.press(view.getByLabelText('查看校園餐廳甲的店家資訊'));
   expect(navigate).toHaveBeenCalledWith('校園', {
+    initial: false,
     screen: 'Storefront',
     params: { cafeteriaId: 'venue-a' },
   });
@@ -823,6 +825,7 @@ test('expanded menus keep their storefront destination and reset when the school
   expect(view.getByText('第二道餐點')).toBeTruthy();
   fireEvent.press(view.getByLabelText('查看校園餐廳甲的店家資訊'));
   expect(navigate).toHaveBeenLastCalledWith('校園', {
+    initial: false,
     screen: 'Storefront',
     params: { cafeteriaId: 'venue-a' },
   });
@@ -843,6 +846,7 @@ test('expanded menus keep their storefront destination and reset when the school
   expect(view.getByText('另一道新校餐點')).toBeTruthy();
   fireEvent.press(view.getByLabelText('查看另一校的餐廳的店家資訊'));
   expect(navigate).toHaveBeenLastCalledWith('校園', {
+    initial: false,
     screen: 'Storefront',
     params: { cafeteriaId: 'new-venue' },
   });

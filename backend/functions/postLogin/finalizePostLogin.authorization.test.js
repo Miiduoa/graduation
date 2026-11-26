@@ -44,7 +44,8 @@ jest.mock('../authz', () => ({
 const { getFirestore } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 const { resolveUserRoles } = require('../generated/shared/postLoginRoles');
-const { runFinalizePostLogin } = require('./finalizePostLogin');
+const { tcFetchCourses, tcFetchCourseMembers, tcFetchProfile } = require('../tronClassScraper');
+const { runFinalizePostLogin, runFinalizePersonalSchoolLogin } = require('./finalizePostLogin');
 
 function makeTimestamp(msFromNow = 60_000) {
   const d = new Date(Date.now() + msFromNow);
@@ -66,10 +67,11 @@ function buildDb({
     id: uid,
     path: `users/${uid}`,
     firestore: null,
-    get: async () => ({
-      exists: true,
-      data: () => ({ ...userState }),
-    }),
+                get: async () => ({
+                  exists: true,
+                  data: () => ({ ...userState }),
+                  createTime: { toMillis: () => 100 },
+                }),
     collection: (name) => {
       if (name === 'postLoginRuns') {
         return {
@@ -123,8 +125,11 @@ function buildDb({
       }
       if (name === '_puTronClassSessions') {
         return {
-          doc: () => ({
-            get: async () => ({ exists: false, data: () => null }),
+          doc: (id) => ({
+            get: async () => ({
+              exists: id === 'tron-session-1',
+              data: () => ({ ownerUid: uid, cookies: { SID: 'test' }, expiresAt: makeTimestamp() }),
+            }),
           }),
         };
       }
@@ -158,6 +163,7 @@ function buildDb({
                     return {
                       exists: true,
                       data: () => ({ ...schoolMemberDoc }),
+                      createTime: { toMillis: () => 200 },
                     };
                   }
                   if (sid === schoolId && memberUid === uid && sub === 'serviceRoles') {
@@ -170,6 +176,9 @@ function buildDb({
                     };
                   }
                   return { exists: false, data: () => null };
+                },
+                set: async (data) => {
+                  committed.push({ ref: { path: `schools/${sid}/${sub}/${memberUid}` }, data });
                 },
                 // batch.set target for members.externalIds
                 path: `schools/${sid}/${sub}/${memberUid}`,
@@ -191,6 +200,25 @@ function buildDb({
 describe('finalizePostLogin authorization', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  test.each([
+    ['personal sign-in', runFinalizePersonalSchoolLogin, false],
+    ['legacy caller', runFinalizePostLogin, true],
+  ])('%s keeps role evidence and reports the actual roster reads', async (_, finalize, readRosters) => {
+    const uid = 'teacher-1';
+    const { committed } = buildDb({ uid, userDoc: { role: 'teacher', schoolId: 'pu' } });
+    tcFetchCourses.mockResolvedValueOnce([{ id: 73, name: '資料庫', role: 'teacher' }]);
+    const result = await finalize({
+      auth: { uid },
+      data: { puSessionId: 'pu-session-1', tronSessionId: 'tron-session-1', includeCourseRosters: true },
+    });
+    expect(result.resolved.primaryRole).toBe('teacher');
+    expect(tcFetchProfile).toHaveBeenCalledTimes(1);
+    expect(result.summaries.tcCourseCount).toBe(1);
+    expect(tcFetchCourseMembers).toHaveBeenCalledTimes(readRosters ? 1 : 0);
+    expect(committed.some((op) => op.ref.path === 'schools/pu/courseRosters/tron_73')).toBe(readRosters);
+    expect(result.summaries.sourcesUsed.rosters).toBe(readRosters);
   });
 
   test('resolveUserRoles unit: polluted primaryRole does not grant admin', () => {
@@ -315,5 +343,26 @@ describe('finalizePostLogin authorization', () => {
     expect(claims.role).toBe('student');
     expect(claims.role).not.toBe('admin');
     expect(userState.role).toBe('student');
+  });
+
+  test('does not create a school member from client schoolId', async () => {
+    const uid = 'google-stu';
+    const { committed } = buildDb({
+      uid,
+      userDoc: {
+        role: 'student',
+        email: 'google@gmail.com',
+      },
+      schoolMemberDoc: null,
+    });
+
+    await runFinalizePostLogin({
+      auth: { uid },
+      data: { puSessionId: 'pu-session-1', schoolId: 'pu' },
+    });
+
+    expect(
+      committed.some((op) => String(op.ref?.path || '').includes('/members/')),
+    ).toBe(false);
   });
 });

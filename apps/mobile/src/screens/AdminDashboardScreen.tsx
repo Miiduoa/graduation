@@ -51,6 +51,7 @@ import {
   DEMO_ADMIN_LOGS,
   DEMO_ADMIN_CAFETERIAS,
 } from '../services/demoAdminMock';
+import { safeNavigate } from '../utils/safeNavigate';
 import { formatDateTime } from '../utils/format';
 import { isDevelopmentDemoSession } from '../services/release';
 import { eventRegistrationCount } from '../services/eventRegistrationCount';
@@ -64,7 +65,7 @@ import { ADMIN_TABS, AdminTabBar, type AdminTabKey } from './admin/AdminTabBar';
 import { AdminDataStatusRow, AdminListFeedback, AdminSurface } from './admin/AdminSurface';
 import {
   ADMIN_PAGE_SIZES,
-  adminWorkbenchStyles as adminStyles,
+  useAdminWorkbenchStyles,
   formatDataStatus,
   memberRoleLabel,
   type MemberRole,
@@ -203,6 +204,7 @@ function FormInput(props: {
   placeholder?: string;
   multiline?: boolean;
 }) {
+  const adminStyles = useAdminWorkbenchStyles();
   return (
     <View style={adminStyles.formField}>
       <Text style={adminStyles.formLabel}>{props.label}</Text>
@@ -225,6 +227,7 @@ function FormInput(props: {
 }
 
 export function AdminDashboardScreen(props: any) {
+  const adminStyles = useAdminWorkbenchStyles();
   const nav = props?.navigation;
   const { school } = useSchool();
   const auth = useAuth();
@@ -1793,6 +1796,10 @@ export function AdminDashboardScreen(props: any) {
               onChange={setAnnouncementSort}
             />
             <View style={adminStyles.actionStack}>
+              <Button
+                text="查看公開公告列表"
+                onPress={() => { safeNavigate(nav, '公告總覽'); }}
+              />
               <Button text="發布公告" kind="primary" onPress={() => openAnnouncementModal()} />
             </View>
             <View style={adminStyles.secondaryActions}>
@@ -1895,6 +1902,16 @@ export function AdminDashboardScreen(props: any) {
                     {ann.body ? <Text style={adminStyles.listItemMeta}>{ann.body}</Text> : null}
                     <Text style={adminStyles.listItemMeta}>{formatDateTime(ann.publishedAt)}</Text>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                      <Button
+                        text="查看公開頁"
+                        onPress={() => {
+                          safeNavigate(nav, '公告詳情', {
+                            id: ann.id,
+                            schoolId: school.id,
+                            sourceKind: 'school-announcement',
+                          });
+                        }}
+                      />
                       <Button text="編輯" onPress={() => openAnnouncementModal(ann)} />
                       <Button text="刪除" onPress={() => deleteAnnouncement(ann)} />
                     </View>

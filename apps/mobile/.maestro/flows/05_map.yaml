@@ -19,25 +19,22 @@ tags:
 - assertNotVisible:
     id: tab-Today
 
-# Also allow this guest flow to run by itself on a fresh installation.
-- runFlow:
-    when:
-      visible: '選擇我的學校'
-    file: ../helpers/select-nthu.yaml
-
-# Keep the tap target clear of the development warning banner at the screen edge.
-# A cold iOS accessibility swipe can exceed 20s; allow subsequent swipes to run.
-- scrollUntilVisible:
-    element:
-      id: public-Map
-    direction: DOWN
-    centerElement: true
-    timeout: 60000
-- assertVisible:
-    id: public-Map
-
+# The map shortcut is available before choosing a school.
 - tapOn:
     id: public-Map
+- extendedWaitUntil:
+    visible: '選擇校園 · 校園地圖|找到校園地點，再安排怎麼過去。'
+    timeout: 20000
+- runFlow:
+    when:
+      visible:
+        id: school-picker-search
+    commands:
+      - tapOn:
+          id: school-picker-search
+      - inputText: 'NTHU'
+      - tapOn:
+          id: school-picker-option-nthu
 
 # The landing-page button also says "校園地圖"; require the map-only subtitle.
 - extendedWaitUntil:

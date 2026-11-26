@@ -25,6 +25,7 @@ export type MapLocation = {
   building?: string;
   floor?: string;
   facilities?: string[];
+  transitStopIds?: unknown;
 };
 
 function validId(value: string) {
@@ -88,6 +89,7 @@ async function readMapLocations(schoolId: string): Promise<MapLocation[]> {
         ...(place.building ? { building: place.building } : {}),
         ...(place.floor ? { floor: place.floor } : {}),
         ...(place.facilities.length ? { facilities: place.facilities } : {}),
+        ...('transitStopIds' in place ? { transitStopIds: place.transitStopIds } : {}),
       }];
     })
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
@@ -107,12 +109,14 @@ function assertCurrent(uid: string, current: () => boolean) {
 export async function loadMapFavorites(uid: string, schoolId: string): Promise<string[]> {
   assertCurrent(uid, () => true);
   if (!validId(schoolId)) throw new Error('Invalid school');
-  const snapshot = await getDocsFromServer(
+  // A stalled Firestore read must not leave the map's saved-place UI waiting
+  // indefinitely. Do not fall back to another school's or user's favorites.
+  const snapshot = await withTimeout(getDocsFromServer(
     query(
       collection(getDb(), 'users', uid, 'schools', schoolId, 'favorites'),
       where('type', '==', 'poi'),
     ),
-  );
+  ), MAP_SOURCE_TIMEOUT_MS);
   assertCurrent(uid, () => true);
   return snapshot.docs.flatMap((entry) => {
     const data = entry.data();
@@ -164,4 +168,16 @@ export function walkingDirectionsUrl(destination: MapCoordinate, origin?: MapCoo
   });
   if (origin) parameters.set('origin', `${origin.lat},${origin.lng}`);
   return `https://www.google.com/maps/dir/?${parameters.toString()}`;
+}
+
+/** Opens Apple Maps walking directions to the existing marker, not a verified building entrance. */
+export function appleWalkingDirectionsUrl(destination: MapCoordinate, origin?: MapCoordinate): string {
+  // The documented legacy map URL also works on older iOS versions and WebViews.
+  // An omitted saddr lets Maps choose the user's actual starting position.
+  const parameters = new URLSearchParams({
+    daddr: `${destination.lat},${destination.lng}`,
+    dirflg: 'w',
+  });
+  if (origin) parameters.set('saddr', `${origin.lat},${origin.lng}`);
+  return `https://maps.apple.com/?${parameters.toString()}`;
 }

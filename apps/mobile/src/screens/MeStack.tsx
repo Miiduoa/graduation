@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 // 「我」入口：個人資料、課表、訊息、設定
 import MeAiFirstScreen from './MeAiFirstScreen';
+import MySocialProfileScreen from './MySocialProfileScreen';
 import ProfileEditAiFirstScreen from './ProfileEditAiFirstScreen';
 import AchievementsAiFirstScreen from './AchievementsAiFirstScreen';
 import SettingsAiFirstScreen from './SettingsAiFirstScreen';
@@ -25,7 +26,7 @@ import { SSOLoginScreen } from './SSOLoginScreen';
 import { NuniWorkspaceScreen } from './NuniWorkspaceScreen';
 import { NuniTimetableAssistantScreen } from './NuniTimetableAssistantScreen';
 import PersonalImportScreen from './PersonalImportScreen';
-import PersonalTimetableScreen from './PersonalTimetableScreen';
+import { StackTitledPersonalTimetable } from './PersonalTimetableScreen';
 import { DataExportScreen } from './DataExportScreen';
 import { AccountDeletionScreen } from './AccountDeletionScreen';
 import { AccessibilitySettingsScreen } from './AccessibilitySettingsScreen';
@@ -180,6 +181,7 @@ export function MeStack() {
         component={ProfileEditAiFirstScreen}
         options={{ title: '編輯個人資料', headerShown: false }}
       />
+      <Stack.Screen name="MySocialProfile" component={MySocialProfileScreen} options={{ title: '我的社群', headerShown: false }} />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
       <Stack.Screen
         name="NuniTimetableAssistant"
@@ -187,7 +189,7 @@ export function MeStack() {
         options={{ title: '課表助理', headerShown: false }}
       />
       <Stack.Screen name="PersonalImport" component={PersonalImportScreen} options={{ title: '匯入我的資料' }} />
-      <Stack.Screen name="PersonalTimetable" component={PersonalTimetableScreen} options={{ title: '我的課表' }} />
+      <Stack.Screen name="PersonalTimetable" component={StackTitledPersonalTimetable} options={{ title: '我的課表' }} />
       <Stack.Screen
         name="NuniWorkspace"
         component={NuniWorkspaceScreen}

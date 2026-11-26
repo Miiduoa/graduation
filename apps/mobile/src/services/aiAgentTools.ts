@@ -772,7 +772,7 @@ export function getToolDeclarations(role?: CampusActorRole): GeminiToolDeclarati
     },
     {
       name: 'create_repair_request',
-      description: '代替使用者提交宿舍維修申請。',
+      description: '幫使用者把宿舍報修存成個人備忘，不會送到學校。',
       parameters: {
         type: 'object',
         properties: {
@@ -2449,17 +2449,17 @@ const TOOL_EXECUTORS: Record<
         return {
           success: false,
           isWrite: true,
-          summary: '報修失敗：目前系統忙碌，請改用宿舍頁面處理。',
+          summary: '無法存成報修備忘：目前系統忙碌，請改用宿舍頁面處理。',
         };
       }
       return {
         success: true,
         isWrite: true,
         data: req,
-        summary: `✅ 已提交維修申請（編號：${req.id}）「${args.title}」${args.room ? `\n地點：${args.room}` : ''}`,
+        summary: `已幫你存成報修備忘「${args.title}」${args.room ? `\n地點：${args.room}` : ''}。請依學校規定管道送出。此應用沒有送到學校。`,
       };
     } catch (e: any) {
-      return { success: false, error: e.message, summary: '提交維修申請失敗。', isWrite: true };
+      return { success: false, error: e.message, summary: '無法存成報修備忘。', isWrite: true };
     }
   },
 

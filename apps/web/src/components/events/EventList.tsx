@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { campusEventPhase, campusEventPhaseLabel, compareCampusEventTime } from '@campus/shared/src/campusEventTime';
+import type { CampusEventShortlistController } from '@/lib/campusEventShortlist';
 import { replaceServiceListQuery } from '@/lib/serviceListNavigation';
 import { useServiceListQuery } from '@/lib/useServiceListQuery';
 import {
@@ -25,6 +26,7 @@ import {
   userFacingCampusEventError,
   type CampusEventFilters,
 } from './eventPresentation';
+import { CampusEventSaveButton } from './CampusEventSaveButton';
 import styles from './events.module.css';
 import { useEventClock } from './useEventClock';
 
@@ -62,10 +64,12 @@ function mergePage(existing: CampusEvent[], incoming: CampusEvent[]): CampusEven
   return merged;
 }
 
-export function EventList({ schoolId, schoolSearch, initialFilters }: {
+export function EventList({ schoolId, schoolSearch, initialFilters, shortlist }: {
   schoolId: string;
   schoolSearch: string;
   initialFilters?: CampusEventFilters;
+  /** Device-local saved events; the save button is omitted when the host does not provide it. */
+  shortlist?: CampusEventShortlistController;
 }) {
   const [state, setState] = useState<LoadState>({ status: 'loading', schoolId });
   const currentQuery = useServiceListQuery('/events', schoolId,
@@ -327,6 +331,11 @@ export function EventList({ schoolId, schoolSearch, initialFilters }: {
                     ? `${event.description.slice(0, 160)}…`
                     : event.description}
                 </p>
+              ) : null}
+              {shortlist ? (
+                <div className={styles.itemActions}>
+                  <CampusEventSaveButton event={event} shortlist={shortlist} />
+                </div>
               ) : null}
               </div>
             </article>

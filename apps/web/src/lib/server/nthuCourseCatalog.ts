@@ -1,10 +1,17 @@
 import { nthuCourseIdentity } from '@campus/shared/src/nthuCourseSchedule';
+import { resolvePublicCourseOperation } from '@campus/shared/src/publicCourseOperations';
+import {
+  evaluatePublicCourseFilters,
+  hasPublicCourseFilters,
+  parsePublicCourseFilters,
+  type PublicCourseFilters,
+} from '@campus/shared/src/publicCourseFilters';
 import type { PublicCatalogCourse, PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import { boundedBytes } from '../nuni/server';
 
 // NTHU publishes this daily JSON explicitly for analysis and system integration.
 // https://curricul.site.nthu.edu.tw/p/404-1208-111356.php?Lang=zh-tw
-const JSON_URL = 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json';
+const operation = resolvePublicCourseOperation('nthu')!;
 const MAX_BYTES = 6 * 1024 * 1024;
 const MATCH_LIMIT = 50;
 type CatalogEntry = { course: PublicCatalogCourse; searchText: string };
@@ -55,7 +62,7 @@ function parseCatalog(json: string): CatalogEntry[] {
 }
 
 async function loadCourses(): Promise<{ rows: CatalogEntry[]; fetchedAt: string }> {
-  const response = await fetch(JSON_URL, {
+  const response = await fetch(operation.upstreamUrl, {
     headers: { Accept: 'application/json, text/plain' },
     redirect: 'error',
     credentials: 'omit',
@@ -76,7 +83,10 @@ async function loadCourses(): Promise<{ rows: CatalogEntry[]; fetchedAt: string 
 // and a failed refresh remains rejected for 15 seconds before retrying upstream.
 let snapshot: { rows: Promise<{ rows: CatalogEntry[]; fetchedAt: string }>; expires: number } | undefined;
 
-export async function searchNthuCourseCatalog(query: string): Promise<PublicCourseCatalogResponse> {
+export async function searchNthuCourseCatalog(query: string, requestedFilters?: PublicCourseFilters): Promise<PublicCourseCatalogResponse> {
+  const filters = parsePublicCourseFilters(requestedFilters === undefined ? {} : requestedFilters);
+  if (!filters) throw new Error('Invalid course filters');
+  const filtered = hasPublicCourseFilters(filters);
   if (!snapshot || Date.now() >= snapshot.expires) {
     const next = { rows: loadCourses(), expires: Date.now() + 15 * 60_000 };
     snapshot = next;
@@ -86,10 +96,17 @@ export async function searchNthuCourseCatalog(query: string): Promise<PublicCour
   const currentSnapshot = snapshot;
   if (!currentSnapshot) throw new Error('Public catalog snapshot unavailable');
   const { rows, fetchedAt } = await currentSnapshot.rows;
-  const matches = rows.filter(row => terms.every(term => row.searchText.includes(term)));
+  let unresolvedCount = 0;
+  const matches = rows.filter(row => {
+    if (!terms.every(term => row.searchText.includes(term))) return false;
+    const match = evaluatePublicCourseFilters(row.course, 'nthu', filters);
+    if (match === 'unresolved') unresolvedCount += 1;
+    return match === 'match';
+  });
   return {
-    schoolId: 'nthu', sourceUrl: JSON_URL, fetchedAt,
+    schoolId: 'nthu', sourceUrl: operation.sourceUrl, fetchedAt,
     courses: matches.slice(0, MATCH_LIMIT).map(row => row.course),
     truncated: matches.length > MATCH_LIMIT,
+    ...(filtered ? { filters, unresolvedCount } : {}),
   };
 }

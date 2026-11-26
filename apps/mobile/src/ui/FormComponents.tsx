@@ -246,7 +246,7 @@ export function Checkbox({
               disabled && styles.checkboxDisabled,
             ]}
           >
-            {checked && <Ionicons name="checkmark" size={16} color={theme.colors.onAccent} />}
+            {checked && <Ionicons name="checkmark" size={14} color={theme.colors.onAccent} />}
           </View>
         </View>
 
@@ -504,14 +504,15 @@ export function FormActions({ children, align = 'right' }: FormActionsProps) {
 const createStyles = () => StyleSheet.create({
   // Input
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: 14,
   },
   labelRow: {
     flexDirection: 'row',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   label: {
-    fontSize: 14,
+    fontSize: theme.typography.label.fontSize,
+    lineHeight: theme.typography.label.lineHeight,
     fontWeight: '600',
     color: theme.colors.text,
   },
@@ -522,21 +523,21 @@ const createStyles = () => StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 48,
+    minHeight: 46,
     borderWidth: 1,
     borderRadius: theme.radius.md,
     backgroundColor: theme.colors.surface,
     overflow: 'hidden',
   },
   inputDisabled: {
-    backgroundColor: theme.colors.disabledBg,
-    opacity: 0.6,
+    backgroundColor: theme.colors.surfaceMuted,
+    opacity: 0.65,
   },
   input: {
     flex: 1,
-    minHeight: 48,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    minHeight: 46,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
     fontSize: theme.typography.body.fontSize,
     lineHeight: theme.typography.body.lineHeight,
     color: theme.colors.text,
@@ -545,24 +546,23 @@ const createStyles = () => StyleSheet.create({
     paddingLeft: 8,
   },
   inputLeftIcon: {
-    marginLeft: 14,
+    marginLeft: 12,
   },
   inputRightIcon: {
     minWidth: 44,
     minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 12,
+    padding: 10,
   },
   inputRightIconPressed: {
-    backgroundColor: theme.colors.surfaceInteractiveStrong,
-    opacity: 0.85,
+    backgroundColor: theme.colors.surface2,
   },
   hint: {
     fontSize: theme.typography.caption.fontSize,
     lineHeight: theme.typography.caption.lineHeight,
     color: theme.colors.muted,
-    marginTop: 6,
+    marginTop: 5,
   },
   errorText: {
     color: theme.colors.danger,
@@ -570,7 +570,7 @@ const createStyles = () => StyleSheet.create({
   errorTextSmall: {
     fontSize: 12,
     color: theme.colors.danger,
-    marginTop: 6,
+    marginTop: 5,
   },
   charCount: {
     position: 'absolute',
@@ -581,7 +581,7 @@ const createStyles = () => StyleSheet.create({
   },
   // Checkbox
   checkboxContainer: {
-    marginBottom: 12,
+    marginBottom: 8,
   },
   checkboxRow: {
     flexDirection: 'row',
@@ -589,21 +589,23 @@ const createStyles = () => StyleSheet.create({
     minHeight: 44,
   },
   checkboxRowPressed: {
-    opacity: 0.8,
+    opacity: 0.75,
   },
   checkboxTouchArea: {
     width: 44,
     height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 4,
+    marginLeft: -10,
+    marginRight: 2,
   },
   checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
+    width: 20,
+    height: 20,
+    borderRadius: theme.radius.sm,
+    borderWidth: 1.5,
+    borderColor: theme.colors.muted,
+    backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -619,9 +621,11 @@ const createStyles = () => StyleSheet.create({
   },
   checkboxContent: {
     flex: 1,
+    paddingTop: 11,
   },
   checkboxLabel: {
-    fontSize: 15,
+    fontSize: theme.typography.body.fontSize,
+    lineHeight: theme.typography.body.lineHeight,
     color: theme.colors.text,
     fontWeight: '500',
   },
@@ -629,23 +633,24 @@ const createStyles = () => StyleSheet.create({
     color: theme.colors.muted,
   },
   checkboxDescription: {
-    fontSize: 13,
+    fontSize: theme.typography.bodySmall.fontSize,
+    lineHeight: theme.typography.bodySmall.lineHeight,
     color: theme.colors.muted,
     marginTop: 2,
-    lineHeight: 18,
   },
   // Radio
   radioGroupContainer: {
-    marginBottom: 16,
+    marginBottom: 14,
   },
   radioGroupLabel: {
-    fontSize: 14,
+    fontSize: theme.typography.label.fontSize,
+    lineHeight: theme.typography.label.lineHeight,
     fontWeight: '600',
     color: theme.colors.text,
-    marginBottom: 12,
+    marginBottom: 6,
   },
   radioGroup: {
-    gap: 4,
+    gap: 2,
   },
   radioGroupHorizontal: {
     flexDirection: 'row',
@@ -658,7 +663,7 @@ const createStyles = () => StyleSheet.create({
     minHeight: 44,
   },
   radioRowPressed: {
-    opacity: 0.8,
+    opacity: 0.75,
   },
   radioRowHorizontal: {
     minHeight: 44,
@@ -668,14 +673,16 @@ const createStyles = () => StyleSheet.create({
     height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 4,
+    marginLeft: -10,
+    marginRight: 2,
   },
   radio: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: theme.colors.muted,
+    backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -689,16 +696,18 @@ const createStyles = () => StyleSheet.create({
     opacity: 0.5,
   },
   radioInner: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: theme.colors.accent,
   },
   radioContent: {
     flex: 1,
+    paddingTop: 11,
   },
   radioLabel: {
-    fontSize: 15,
+    fontSize: theme.typography.body.fontSize,
+    lineHeight: theme.typography.body.lineHeight,
     color: theme.colors.text,
     fontWeight: '500',
   },
@@ -706,34 +715,37 @@ const createStyles = () => StyleSheet.create({
     color: theme.colors.muted,
   },
   radioDescription: {
-    fontSize: 13,
+    fontSize: theme.typography.bodySmall.fontSize,
+    lineHeight: theme.typography.bodySmall.lineHeight,
     color: theme.colors.muted,
     marginTop: 2,
-    lineHeight: 18,
   },
   // Select
   select: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    minHeight: 46,
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.radius.md,
-    backgroundColor: theme.colors.surface2,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    backgroundColor: theme.colors.surface,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
   },
   selectError: {
     borderColor: theme.colors.danger,
   },
   selectDisabled: {
-    opacity: 0.6,
+    backgroundColor: theme.colors.surfaceMuted,
+    opacity: 0.65,
   },
   selectPressed: {
+    backgroundColor: theme.colors.surfaceMuted,
     borderColor: theme.colors.accent,
   },
   selectText: {
-    fontSize: 15,
+    fontSize: theme.typography.body.fontSize,
     color: theme.colors.text,
     flex: 1,
   },
@@ -742,28 +754,29 @@ const createStyles = () => StyleSheet.create({
   },
   // Slider
   sliderContainer: {
-    marginBottom: 16,
+    marginBottom: 14,
   },
   sliderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   sliderLabel: {
-    fontSize: 14,
+    fontSize: theme.typography.label.fontSize,
     fontWeight: '600',
     color: theme.colors.text,
   },
   sliderValue: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: theme.typography.label.fontSize,
+    fontWeight: '600',
     color: theme.colors.accent,
+    fontVariant: ['tabular-nums'],
   },
   sliderTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: theme.colors.border,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: theme.colors.surface3,
     position: 'relative',
   },
   sliderDisabled: {
@@ -775,21 +788,18 @@ const createStyles = () => StyleSheet.create({
     top: 0,
     height: '100%',
     backgroundColor: theme.colors.accent,
-    borderRadius: 3,
+    borderRadius: 2,
   },
   sliderThumb: {
     position: 'absolute',
-    top: -9,
-    marginLeft: -12,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: theme.colors.accent,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
+    top: -8,
+    marginLeft: -10,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 2,
+    borderColor: theme.colors.accent,
   },
   sliderLabels: {
     flexDirection: 'row',
@@ -802,27 +812,28 @@ const createStyles = () => StyleSheet.create({
   },
   // Form Section
   formSection: {
-    marginBottom: 24,
+    marginBottom: 22,
   },
   formSectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: theme.typography.h3.fontSize,
+    lineHeight: theme.typography.h3.lineHeight,
+    fontWeight: '600',
     color: theme.colors.text,
     marginBottom: 4,
   },
   formSectionDescription: {
-    fontSize: 13,
+    fontSize: theme.typography.bodySmall.fontSize,
+    lineHeight: theme.typography.bodySmall.lineHeight,
     color: theme.colors.muted,
-    marginBottom: 16,
-    lineHeight: 18,
+    marginBottom: 12,
   },
   formSectionContent: {
-    gap: 4,
+    gap: 2,
   },
   // Form Actions
   formActions: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
     marginTop: 8,
   },
 });

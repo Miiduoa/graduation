@@ -3,40 +3,38 @@
   min-width: 0;
 }
 
-.mobileLabel {
-  display: none;
-}
-
-.menu summary {
+.menu > summary {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
   min-height: 44px;
   padding: 10px 12px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   color: var(--muted);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-body-sm-size);
+  line-height: 1.5;
   white-space: nowrap;
   list-style: none;
   cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
   transition:
-    color 160ms ease,
-    background-color 160ms ease;
+    color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
 }
 
-.menu summary::-webkit-details-marker {
+.menu > summary::-webkit-details-marker {
   display: none;
 }
 
-.menu summary > svg {
+.menu > summary > svg {
   flex-shrink: 0;
   width: 17px;
   height: 17px;
 }
 
-.menu summary::after {
+.menu > summary::after {
   content: '';
   width: 5px;
   height: 5px;
@@ -44,11 +42,11 @@
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: rotate(45deg);
-  transition: transform 160ms ease;
+  transition: transform var(--motion-fast) var(--ease-out);
 }
 
 .menu[open] > summary,
-.menu summary[aria-current='page'] {
+.menu > summary[aria-current='page'] {
   color: var(--brand);
   background: var(--accent-soft);
 }
@@ -64,6 +62,8 @@
 }
 
 .menuPanel {
+  container-name: service-menu;
+  container-type: inline-size;
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
@@ -71,13 +71,17 @@
   display: flex;
   flex-direction: column;
   width: 480px;
-  max-height: min(70dvh, 640px);
+  max-height: max(
+    0px,
+    min(70dvh, 640px, calc(100dvh - var(--navigation-header-bottom, 84px) - 24px))
+  );
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--surface);
+  font-size: var(--font-body-sm-size);
   box-shadow: var(--shadow-lg);
-  animation: reveal 180ms ease-out both;
+  animation: reveal var(--motion-normal) var(--ease-out) both;
 }
 
 .menuHead {
@@ -111,6 +115,14 @@
   font-weight: 500;
 }
 
+.searchForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
 .searchField {
   display: flex;
   align-items: center;
@@ -119,7 +131,7 @@
   min-height: 48px;
   padding: 0 12px;
   border: 1px solid var(--border-strong);
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
 }
 
@@ -145,6 +157,24 @@
   -webkit-appearance: none;
 }
 
+.submitSearch {
+  min-width: 44px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-sm);
+  background: var(--brand);
+  color: var(--on-brand);
+  font: inherit;
+  font-size: var(--font-body-sm-size);
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
+}
+
 .clearSearch,
 .resultSummary button {
   flex-shrink: 0;
@@ -165,7 +195,7 @@
   border-radius: 4px;
   color: var(--muted);
   font-family: inherit;
-  font-size: 10px;
+  font-size: var(--font-label-sm-size);
   white-space: nowrap;
 }
 
@@ -180,24 +210,28 @@
   flex: 1 0 auto;
   min-height: 44px;
   padding: 8px 10px;
-  border: 1px solid transparent;
-  border-radius: 7px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
   font: inherit;
   font-size: var(--font-body-sm-size);
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
 }
 
 .filters button[aria-pressed='true'] {
-  border-color: var(--border);
-  background: var(--accent-soft);
+  border-bottom-color: var(--brand);
   color: var(--brand);
   font-weight: 600;
 }
 
 .resultSummary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -271,17 +305,16 @@
   justify-content: space-between;
   gap: 12px;
   min-height: 48px;
-  margin: -8px -8px 0;
-  padding: 12px 14px;
-  border-radius: 7px;
-  background: var(--accent-soft);
-  font-size: 14px;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--border-strong);
+  color: var(--brand);
+  font-size: var(--font-body-sm-size);
   font-weight: 600;
 }
 
-.menuOverview > span,
-.menuGroup a > span[aria-hidden] {
-  transition: transform 160ms ease;
+.menuOverview > span[aria-hidden='true'],
+.menuGroup a > span[aria-hidden='true'] {
+  transition: transform var(--motion-fast) var(--ease-out);
 }
 
 .menuGroup {
@@ -294,11 +327,11 @@
   min-width: 0;
 }
 
-.secondaryService {
-  min-height: 40px !important;
-  padding: 8px 10px 8px 22px !important;
+.menuGroup a.secondaryService {
+  min-height: 44px;
+  padding: 8px 10px 8px 22px;
   color: var(--muted);
-  font-size: 12px !important;
+  font-size: var(--font-label-size);
 }
 
 .secondaryService .serviceName {
@@ -308,10 +341,10 @@
 .menuGroup h2 {
   margin: 0 10px 6px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-label-sm-size);
   font-weight: 600;
-  line-height: 20px;
-  letter-spacing: 0.1em;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
 }
 
 .menuGroup a {
@@ -326,14 +359,14 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
   transition:
-    color 160ms ease,
-    background-color 160ms ease;
+    color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
 }
 
 .menuGroup a > span[aria-hidden] {
   flex-shrink: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-label-size);
 }
 
 .menuGroup a[aria-current='page'] {
@@ -343,24 +376,68 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .menu summary:hover,
-  .menuPanel a:hover {
+  .menu > summary:hover,
+  .menuPanel a:hover,
+  .menuPanel :is(.related, .moreServices) > summary:hover,
+  .filters button:hover,
+  .clearSearch:hover,
+  .resultSummary button:hover {
     color: var(--text);
     background: var(--panel);
   }
 
-  .menuPanel a:hover > span {
+  .menuPanel a:hover > span[aria-hidden='true'] {
     transform: translateX(3px);
+  }
+
+  .submitSearch:hover {
+    border-color: var(--brand2);
+    background: var(--brand2);
+  }
+}
+
+.menu > summary:active,
+.menuPanel a:active,
+.menuPanel :is(.related, .moreServices) > summary:active,
+.filters button:active,
+.clearSearch:active,
+.resultSummary button:active,
+.menuPanel .closeButton:active {
+  background: var(--panel2);
+}
+
+.submitSearch:active {
+  border-color: var(--brand2);
+  background: var(--brand2);
+}
+
+/* Current destinations and filters stay identifiable while pressed or hovered. */
+.menu[open] > summary:is(:hover, :active),
+.menu > summary[aria-current='page']:is(:hover, :active),
+.menuPanel a[aria-current='page']:is(:hover, :active),
+.filters button[aria-pressed='true']:is(:hover, :active) {
+  color: var(--brand);
+  background: var(--accent-soft);
+}
+
+/* em follows this panel's text preference, not a page-wide device breakpoint. */
+@container service-menu (max-width: 32em) {
+  .menuContents {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .searchForm {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shortcut {
+    display: none;
   }
 }
 
 @media (max-width: 1150px) {
-  .menu summary {
+  .menu > summary {
     padding-inline: 9px;
-  }
-
-  .menu summary > svg {
-    display: none;
   }
 }
 
@@ -369,7 +446,7 @@
     position: static;
   }
 
-  .menu summary > svg {
+  .menu > summary > svg {
     display: block;
   }
 
@@ -381,49 +458,42 @@
 }
 
 @media (max-width: 760px) {
-  .menu {
-    height: 100%;
-  }
-
-  .menu summary {
-    flex-direction: column;
-    gap: 4px;
-    min-height: 56px;
-    height: 100%;
-    padding: 5px 2px 7px;
-    border-radius: 9px;
-    font-size: var(--font-label-size);
-    line-height: 1.2;
+  .menu > summary {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 10px;
     -webkit-tap-highlight-color: transparent;
   }
 
-  .menu summary > svg {
-    width: 22px;
-    height: 22px;
+  .menu > summary > svg {
+    width: 19px;
+    height: 19px;
   }
 
-  .menu summary::after,
+  .menu > summary::after,
   .desktopLabel {
     display: none;
   }
 
-  .mobileLabel {
-    display: inline;
-  }
-
   .menuPanel {
     position: fixed;
-    top: auto;
-    bottom: calc(var(--mobile-nav-offset, calc(72px + env(safe-area-inset-bottom, 0px))) + 8px);
+    top: calc(var(--navigation-header-bottom, calc(68px + env(safe-area-inset-top, 0px))) + 8px);
+    bottom: auto;
     left: max(12px, env(safe-area-inset-left, 0px));
     right: max(12px, env(safe-area-inset-right, 0px));
     width: auto;
-    max-height: min(
-      72dvh,
-      calc(100dvh - var(--mobile-nav-offset, 72px) - env(safe-area-inset-top, 0px) - 24px)
+    max-height: max(
+      0px,
+      min(
+        72dvh,
+        calc(
+          100dvh - var(--mobile-nav-offset, 72px) -
+            var(--navigation-header-bottom, calc(68px + env(safe-area-inset-top, 0px))) - 16px
+        )
+      )
     );
-    border-radius: 16px;
-    animation-name: revealFromBottom;
+    border-radius: var(--radius);
+    animation-name: reveal;
   }
 
   .menuHead {
@@ -461,6 +531,20 @@
   }
 }
 
+@media (max-height: 600px) {
+  /* Landscape and short windows keep controls and every result in one reachable scroller. */
+  .menuPanel {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+
+  .menuContents {
+    flex-shrink: 0;
+    overflow-y: visible;
+  }
+}
+
 @media (max-width: 360px) {
   .menuContents {
     padding-inline: 14px;
@@ -495,10 +579,26 @@
   transition: none !important;
 }
 
+:global([data-reduced-motion='true']) .menu *::after {
+  transition: none !important;
+}
+
+:global([data-reduced-motion='true']) .menuPanel a:hover > span[aria-hidden='true'] {
+  transform: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .menu * {
     animation: none !important;
     transition: none !important;
+  }
+
+  .menu *::after {
+    transition: none !important;
+  }
+
+  .menuPanel a:hover > span[aria-hidden='true'] {
+    transform: none;
   }
 }
 
@@ -506,10 +606,66 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .serviceName small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-label-sm-size);
   font-weight: 400;
+  line-height: 1.5;
+}
+
+.related,
+.moreServices {
+  min-width: 0;
+}
+
+.menuPanel :is(.related, .moreServices) > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px;
+  color: var(--muted);
+  font-size: var(--font-label-size);
+  line-height: 1.5;
+  cursor: pointer;
+  list-style: none;
+  overflow-wrap: anywhere;
+  border-radius: 6px;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.menuPanel :is(.related, .moreServices) > summary::-webkit-details-marker {
+  display: none;
+}
+
+.menuPanel :is(.related, .moreServices) > summary::after {
+  content: '+';
+  flex-shrink: 0;
+  color: var(--brand);
+}
+
+.menuPanel :is(.related, .moreServices)[open] > summary::after {
+  content: '−';
+}
+
+.menuPanel :is(.related, .moreServices) > summary span {
+  margin-left: auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.related {
+  margin-inline-start: 10px;
+  border-inline-start: 1px solid var(--border);
+}
+
+.moreServices {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
 }

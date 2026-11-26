@@ -1,5 +1,5 @@
 import { inspectCampusClockAvailability } from './campusClockAvailability';
-import type { NuniPlanAssignmentSource } from './nuniPlanAssignmentTarget';
+import type { NuniPlanAssignmentSource, NuniPlanQuizSource } from './nuniPlanAssignmentTarget';
 
 /** Pure, read-only calendar calculations over context already verified by the caller. */
 export interface AgendaCourse {
@@ -10,11 +10,14 @@ export interface AgendaCourse {
   room?: string;
 }
 export interface AgendaAssignment {
+  /** Absent on older saved plans, whose deadlines are assignments. */
+  kind?: 'assignment' | 'quiz';
   title: string;
   groupName: string;
   dueAt: string | null;
   /** Kept only in the live result; persistence projects this source hint out. */
   nuniSource?: NuniPlanAssignmentSource;
+  nuniQuizSource?: NuniPlanQuizSource;
 }
 export interface PeriodInterval { start: number; end: number }
 export interface StudyWindow {
@@ -47,6 +50,8 @@ export interface CampusStudyAgenda {
   days: CampusAgendaDay[];
   timetableAvailable: boolean;
   assignmentsAvailable: boolean;
+  /** Absence means the plan did not inspect quizzes; false means that source failed. */
+  quizzesAvailable?: boolean;
   ignoredCourses: number;
   outsideWindow: Array<AgendaAssignment & { reason: 'undated' | 'before-window' | 'after-window' }>;
 }
@@ -141,6 +146,7 @@ export function buildCampusStudyAgenda(input: {
   now: number;
   courses: readonly AgendaCourse[] | null;
   assignments: readonly AgendaAssignment[] | null;
+  quizzes?: readonly AgendaAssignment[] | null;
 }): CampusStudyAgenda {
   const { startDay, endDay } = input.window;
   if (!Number.isSafeInteger(startDay) || !Number.isSafeInteger(endDay) ||
@@ -163,7 +169,9 @@ export function buildCampusStudyAgenda(input: {
     });
   }
   const outsideWindow: CampusStudyAgenda['outsideWindow'] = [];
-  for (const assignment of input.assignments ?? []) {
+  const deadlines = [...(input.assignments ?? []),
+    ...(input.quizzes ?? []).map((quiz) => ({ ...quiz, kind: 'quiz' as const }))];
+  for (const assignment of deadlines) {
     const due = confirmedTimestamp(assignment.dueAt);
     const dueDay = taipeiDayNumber(due);
     if (!Number.isFinite(dueDay) || dueDay < startDay || dueDay >= endDay) {
@@ -178,6 +186,7 @@ export function buildCampusStudyAgenda(input: {
   for (const day of days) day.deadlines.sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt));
   return {
     days, timetableAvailable: input.courses !== null, assignmentsAvailable: input.assignments !== null,
+    ...(input.quizzes !== undefined ? { quizzesAvailable: input.quizzes !== null } : {}),
     ignoredCourses: (input.courses?.length ?? 0) - courses.length, outsideWindow,
   };
 }
@@ -228,9 +237,19 @@ export function formatCampusStudyAgenda(agenda: CampusStudyAgenda): string[] {
         : '課表副本未排課，並非已確認空閒'
         : day.courses.length ? day.courses.map((course) => course.name + '（' + periodLabel(course) + '）').join('、')
       : '課表副本未排課，並非已確認空閒';
-    const tasks = !agenda.assignmentsAvailable ? '作業來源不可用'
-      : day.deadlines.length ? day.deadlines.map((item) => item.title + ' ' + item.timeLabel + ' 截止' + (item.overdue ? '（期限已過，需核對）' : '')).join('、')
-      : '已同步摘要未列出當日截止作業';
+    const taskNotes: string[] = [];
+    const assignments = day.deadlines.filter((item) => item.kind !== 'quiz');
+    const quizzes = day.deadlines.filter((item) => item.kind === 'quiz');
+    if (!agenda.assignmentsAvailable) taskNotes.push('作業來源不可用');
+    else if (!assignments.length) taskNotes.push('已同步摘要未列出當日截止作業');
+    if (agenda.quizzesAvailable === false) taskNotes.push('測驗來源不可用');
+    else if (agenda.quizzesAvailable === true && !quizzes.length) taskNotes.push('已同步摘要未列出當日測驗參考期限');
+    const listedTasks = day.deadlines.filter((item) =>
+      item.kind === 'quiz' ? agenda.quizzesAvailable === true : agenda.assignmentsAvailable,
+    ).map((item) => item.kind === 'quiz'
+      ? '測驗 ' + item.title + '，參考期限 ' + item.timeLabel + (item.overdue ? '（參考期限已過，需核對）' : '')
+      : '作業 ' + item.title + ' ' + item.timeLabel + ' 截止' + (item.overdue ? '（期限已過，需核對）' : ''));
+    const tasks = [...listedTasks, ...taskNotes].join('；');
     const clockNotes: string[] = [];
     if (availability && agenda.timetableAvailable) {
       if (!availability.valid) {

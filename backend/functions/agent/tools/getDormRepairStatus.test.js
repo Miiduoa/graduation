@@ -30,17 +30,19 @@ beforeEach(() => {
   mockReads.length = 0;
 });
 
-test('another account record returns an explicit denial without disclosing its contents', async () => {
+test('another account record is indistinguishable from a missing repair', async () => {
+  const missing = await execute(context, { repairId });
   mockRecords.set(path, {
     userId: 'bob', description: 'private-repair-description', room: 'private-room',
   });
 
   const result = await execute(context, { repairId });
 
-  expect(isAuthorizationDeniedResult(result)).toBe(true);
-  expect(result).toMatchObject({ found: false, forbidden: true, success: false, errorCode: 'permission-denied' });
-  expect(JSON.stringify(result)).not.toMatch(/private-repair-description|private-room|bob/);
-  expect(mockReads).toEqual([path]);
+  expect(result).toEqual({ found: false, repairId });
+  expect(result).toEqual(missing);
+  expect(isAuthorizationDeniedResult(result)).toBe(false);
+  expect(JSON.stringify(result)).not.toMatch(/private-repair-description|private-room|bob|permission-denied|forbidden/);
+  expect(mockReads).toEqual([path, path]);
 });
 
 test('a missing repair is not an authorization denial', async () => {

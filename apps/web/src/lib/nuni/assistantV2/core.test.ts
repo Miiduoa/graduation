@@ -234,7 +234,7 @@ describe('confirmation and CAS', () => {
     expect(f.writes).toHaveLength(1);
   });
   it('signs server routes and falls back when writes unavailable', async () => {
-    expect(pageHref({ page: 'orders' }, binding.schoolId)).toBe('/orders?schoolId=fixture-school');
+    expect(pageHref({ page: 'orders' }, binding.schoolId)).toBe('/food?schoolId=fixture-school');
     const f = fixtureAdapter(),
       tools = createTools(f.adapter, binding, secret, now, false);
     await tools.call('propose_personal_event', event);
@@ -614,7 +614,7 @@ it('known tool malformed JSON returns bounded error and missing data remains mar
     adapter: f.adapter,
   });
   expect(reply.steps[0]).toMatchObject({ status: 'error', summary: 'INVALID_TOOL_ARGUMENTS' });
-  expect(reply.context).toContain('personal-imports');
+  expect('context' in reply && reply.context).toContain('personal-imports');
 });
 
 it('tool summaries remain valid bounded JSON even with escaped large data', () => {

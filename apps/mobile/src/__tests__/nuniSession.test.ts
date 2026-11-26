@@ -3,6 +3,14 @@ import {
   NuniSessionController,
   type NuniSessionDependencies,
 } from '../services/nuniSessionController';
+import { NuniDraftScopeStore } from '../state/nuniDrafts';
+import { requestNativeTronClassSubmissionDownload } from '../services/tronClassNativeDownload';
+import * as nuniClient from '../services/nuniClient';
+
+jest.mock('../services/tronClassNativeDownload', () => ({
+  ...jest.requireActual('../services/tronClassNativeDownload'),
+  requestNativeTronClassSubmissionDownload: jest.fn(),
+}));
 
 const account = 'pa_11111111-1111-4111-8111-111111111111';
 const handle = `ps_${'a'.repeat(43)}`;
@@ -63,10 +71,12 @@ function setup(initial: string | null = null, initialFence = false, now = () => 
     begin: jest.fn(async () => {}),
     end: jest.fn(() => {}),
   };
+  const invalidateLocalDrafts = jest.fn();
   const controller = new NuniSessionController({
     storage,
     logoutFence,
     savedPlansCleanup,
+    invalidateLocalDrafts,
     request,
     credential,
     clearCredential,
@@ -80,6 +90,7 @@ function setup(initial: string | null = null, initialFence = false, now = () => 
     credential,
     clearCredential,
     savedPlansCleanup,
+    invalidateLocalDrafts,
     persisted: () => persisted,
     fenced: () => fenced,
   };
@@ -323,6 +334,29 @@ it('uses the same consumer transaction as Web, verifies current session, and sto
     expect.any(AbortSignal),
   );
   expect(JSON.parse(persisted()!)).not.toHaveProperty('isPlatformOperator');
+  expect(JSON.parse(persisted()!)).toEqual({
+    sessionHandle: handle,
+    platformAccountId: account,
+    expiresAt: 3_601_000,
+    pendingLogout: false,
+  });
+  expect(JSON.parse(persisted()!)).not.toHaveProperty('customToken');
+});
+it('advances the interactive sign-in generation on login and keeps it through refresh and logout', async () => {
+  const { controller } = setup();
+  await controller.refresh();
+  expect(controller.state.signInGeneration).toBeUndefined();
+
+  await controller.signIn();
+  const firstSignIn = controller.state.signInGeneration;
+  expect(firstSignIn).toEqual(expect.any(Number));
+  await controller.refresh();
+  expect(controller.state.signInGeneration).toBe(firstSignIn);
+  await controller.logout();
+  expect(controller.state.signInGeneration).toBe(firstSignIn);
+
+  await controller.signIn();
+  expect(controller.state.signInGeneration).toBeGreaterThan(firstSignIn!);
 });
 it('prevents double login and treats credential cancellation as cancellation', async () => {
   const { controller, credential } = setup();
@@ -671,4 +705,307 @@ it('removes a late pending-credential fallback write when logout finishes while 
   expect(persisted()).toBeNull();
   expect(fenced()).toBe(false);
   expect(controller.state).toMatchObject({ session: null, pendingLogout: false });
+});
+
+it('retains local input through a transient foreground check but revokes it before logout awaits anything', async () => {
+  const { controller, request, invalidateLocalDrafts } = setup(stored());
+  const drafts = new NuniDraftScopeStore(controller.canRetainLocalDrafts);
+  invalidateLocalDrafts.mockImplementation(drafts.clear);
+  await controller.refresh();
+  const original = drafts.forAccount(account);
+  original.cache.set('body', '未完成的課業內容');
+  request.mockRejectedValueOnce(new NuniError(503, 'TEMPORARY_UNAVAILABLE'));
+  await controller.refresh();
+  expect(controller.canRetainLocalDrafts(account)).toBe(true);
+  expect(drafts.forAccount(account)).toBe(original);
+  expect(original.cache.get('body')).toBe('未完成的課業內容');
+  const leaving = controller.logout();
+  // This check intentionally precedes the first awaited logout result and any UI render.
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(original.cache.get('body')).toBeUndefined();
+  original.cache.set('body', '舊表單的晚到內容');
+  expect(original.cache.size).toBe(0);
+  await leaving;
+  await controller.signIn();
+  const returned = drafts.forAccount(account);
+  expect(returned.revision).toBeGreaterThan(original.revision);
+  expect(returned.cache).not.toBe(original.cache);
+  expect(returned.cache.has('body')).toBe(false);
+  expect(controller.canRetainLocalDrafts(account)).toBe(true);
+});
+
+it.each([401, 409])('revokes detached route input after confirmed status %i even while the old credential remains', async (status) => {
+  const { controller, request, storage, persisted, invalidateLocalDrafts } = setup(stored());
+  const drafts = new NuniDraftScopeStore(controller.canRetainLocalDrafts);
+  invalidateLocalDrafts.mockImplementation(drafts.clear);
+  await controller.refresh();
+  const original = drafts.forAccount(account);
+  original.cache.set('body', '已離開畫面但仍保留的內容');
+  storage.clear.mockRejectedValueOnce(new Error('secure deletion unavailable'));
+  request.mockRejectedValueOnce(new NuniError(status, 'SESSION_REVOKED'));
+  await controller.refresh();
+  expect(persisted()).not.toBeNull();
+  expect(controller.state.session).toBeNull();
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(original.cache.get('body')).toBeUndefined();
+  original.cache.set('body', '舊回應');
+  expect(original.cache.size).toBe(0);
+  // A later server verification of the same account cannot revive the revoked Map.
+  await controller.refresh();
+  const verifiedAgain = drafts.forAccount(account);
+  expect(controller.canRetainLocalDrafts(account)).toBe(true);
+  expect(verifiedAgain.revision).toBeGreaterThan(original.revision);
+  expect(verifiedAgain.cache.has('body')).toBe(false);
+});
+
+it('revokes a confirmed unauthorized draft before slow credential deletion finishes', async () => {
+  const { controller, request, storage, invalidateLocalDrafts } = setup(stored());
+  const drafts = new NuniDraftScopeStore(controller.canRetainLocalDrafts);
+  invalidateLocalDrafts.mockImplementation(drafts.clear);
+  await controller.refresh();
+  const context = controller.state.session!.context;
+  const original = drafts.forAccount(account);
+  original.cache.set('body', '等待中的私人內容');
+  const pendingRead = deferred<unknown>();
+  request.mockReturnValueOnce(pendingRead.promise);
+  const reading = controller.request('class-workspaces', context);
+  const rejectedRead = expect(reading).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  const signal = request.mock.calls.at(-1)![3]!;
+  const deletion = deferred<void>();
+  storage.clear.mockReturnValueOnce(deletion.promise);
+  request.mockRejectedValueOnce(new NuniError(401, 'SESSION_REVOKED'));
+  const refresh = controller.refresh();
+  for (let i = 0; i < 30 && storage.clear.mock.calls.length === 0; i++) await Promise.resolve();
+  expect(storage.clear).toHaveBeenCalledTimes(1);
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(controller.isSessionCurrent(account, context)).toBe(false);
+  expect(controller.state).toMatchObject({ session: null, loading: true });
+  expect(signal.aborted).toBe(true);
+  expect(original.cache.get('body')).toBeUndefined();
+  const callsBefore = request.mock.calls.length;
+  await expect(controller.request('class-workspaces', context)).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  await controller.refresh();
+  await expect(controller.signIn()).rejects.toMatchObject({ code: 'SIGN_IN_BUSY' });
+  expect(request).toHaveBeenCalledTimes(callsBefore);
+  pendingRead.resolve({ workspaces: [] });
+  await rejectedRead;
+  deletion.resolve();
+  await refresh;
+});
+
+it('does not start a replacement login until every earlier revoked-credential deletion has settled', async () => {
+  const { controller, request, storage, persisted } = setup(stored());
+  await controller.refresh();
+  const deletion = deferred<void>();
+  const clear = storage.clear.getMockImplementation()!;
+  storage.clear.mockImplementationOnce(async () => { await deletion.promise; await clear(); });
+  request.mockRejectedValueOnce(new NuniError(401, 'SESSION_REVOKED'));
+  const refresh = controller.refresh();
+  for (let i = 0; i < 30 && storage.clear.mock.calls.length === 0; i++) await Promise.resolve();
+  await controller.logout();
+  expect(controller.state).toMatchObject({ session: null, loading: false, pendingLogout: false });
+  expect(storage.clear).toHaveBeenCalledTimes(2);
+  // Logout's own cleanup finished, but the earlier 401 cleanup can still delete storage.
+  await expect(controller.signIn()).rejects.toMatchObject({ code: 'SIGN_IN_BUSY' });
+  deletion.resolve();
+  await refresh;
+  await controller.signIn();
+  expect(controller.state.session?.platformAccountId).toBe(account);
+  expect(controller.canRetainLocalDrafts(account)).toBe(true);
+  expect(persisted()).not.toBeNull();
+});
+
+it('finishes verification after provider reactivation during an earlier secure deletion', async () => {
+  const { controller, request, storage } = setup(stored());
+  await controller.refresh();
+  const deletion = deferred<void>();
+  storage.clear.mockReturnValueOnce(deletion.promise);
+  request.mockRejectedValueOnce(new NuniError(401, 'SESSION_REVOKED'));
+  const refresh = controller.refresh();
+  for (let i = 0; i < 30 && storage.clear.mock.calls.length === 0; i++) await Promise.resolve();
+  controller.dispose();
+  controller.activate();
+  await controller.refresh();
+  expect(controller.state.loading).toBe(true);
+  deletion.resolve();
+  await refresh;
+  for (let i = 0; i < 30 && controller.state.loading; i++) await Promise.resolve();
+  expect(controller.state).toMatchObject({ session: null, loading: false, pendingLogout: false });
+});
+
+it('cannot read or refill expired input before the next refresh or after controller disposal', async () => {
+  let now = 1000;
+  const { controller, invalidateLocalDrafts } = setup(stored(false, 2000), false, () => now);
+  const drafts = new NuniDraftScopeStore(controller.canRetainLocalDrafts);
+  invalidateLocalDrafts.mockImplementation(drafts.clear);
+  await controller.refresh();
+  const original = drafts.forAccount(account);
+  original.cache.set('body', '即將逾時的草稿');
+  now = 2000;
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(original.cache.get('body')).toBeUndefined();
+  original.cache.set('body', '逾時後的晚到內容');
+  expect(original.cache.size).toBe(0);
+  controller.dispose();
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(invalidateLocalDrafts).toHaveBeenCalled();
+});
+
+describe('cancelable platform BFF requests', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('rejects a canceled connection before dispatching the private platform handle', async () => {
+    const { controller } = setup(stored());
+    await controller.refresh();
+    const bff = jest.spyOn(nuniClient, 'nuniBffRequest').mockResolvedValue({ connected: true });
+    const cancellation = new AbortController();
+    cancellation.abort();
+    await expect(controller.bffRequest('tronclass', controller.state.session!.context,
+      { action: 'connect' }, undefined, undefined, cancellation.signal))
+      .rejects.toMatchObject({ code: 'REQUEST_CANCELLED' });
+    expect(bff).not.toHaveBeenCalled();
+  });
+
+  it.each(['cancel', 'logout', 'dispose'] as const)('propagates %s to transport and rejects a late connection result', async cause => {
+    const { controller } = setup(stored());
+    await controller.refresh();
+    const context = controller.state.session!.context;
+    const pending = deferred<unknown>();
+    const bff = jest.spyOn(nuniClient, 'nuniBffRequest').mockReturnValue(pending.promise);
+    const cancellation = new AbortController();
+    const work = controller.bffRequest('tronclass', context, { action: 'connect' },
+      undefined, undefined, cancellation.signal);
+    const rejected = expect(work).rejects.toMatchObject({ code: cause === 'cancel' ? 'REQUEST_CANCELLED' : 'SESSION_CHANGED' });
+    const signal = bff.mock.calls[0][3]!;
+    expect(signal.aborted).toBe(false);
+    if (cause === 'cancel') cancellation.abort();
+    else if (cause === 'logout') await controller.logout();
+    else controller.dispose();
+    expect(signal.aborted).toBe(true);
+    pending.resolve({ connected: true });
+    await rejected;
+    expect(bff).toHaveBeenCalledTimes(1);
+  });
+
+  it('detaches caller cancellation after a completed read without canceling a later request', async () => {
+    const { controller } = setup(stored());
+    await controller.refresh();
+    const context = controller.state.session!.context;
+    const bff = jest.spyOn(nuniClient, 'nuniBffRequest').mockResolvedValue({ connected: true });
+    const cancellation = new AbortController();
+    const remove = jest.spyOn(cancellation.signal, 'removeEventListener');
+    await controller.bffRequest('tronclass', context, { action: 'status' },
+      undefined, undefined, cancellation.signal);
+    const completedSignal = bff.mock.calls[0][3]!;
+    cancellation.abort();
+    expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+    expect(completedSignal.aborted).toBe(false);
+    await expect(controller.bffRequest('tronclass', context, { action: 'status' }))
+      .resolves.toEqual({ connected: true });
+    expect(bff.mock.calls[1][3]!.aborted).toBe(false);
+  });
+});
+
+describe('private TronClass submission attachment capability', () => {
+  const input = { courseId: 10, homeworkId: 20, submissionId: '30', uploadId: 40, revision: 'a'.repeat(32) };
+  const file = { bytes: new Uint8Array([1, 2, 3]), filename: 'answer.pdf', contentType: 'application/pdf' };
+  const download = jest.mocked(requestNativeTronClassSubmissionDownload);
+  beforeEach(() => { download.mockReset().mockResolvedValue(file); });
+
+  it('uses the captured verified platform session and rejects extra authority before dispatch', async () => {
+    const { controller } = setup(stored());
+    await controller.refresh();
+    const context = controller.state.session!.context;
+    expect(await controller.tronClassSubmissionDownload(input, context)).toEqual(file);
+    expect(download).toHaveBeenCalledWith(`Platform ${handle}`, input, expect.any(Function), expect.any(AbortSignal));
+    expect(download.mock.calls[0][2]()).toBe(true);
+    await expect(controller.tronClassSubmissionDownload({ ...input, url: 'https://foreign.test' } as typeof input, context))
+      .rejects.toMatchObject({ code: 'TRONCLASS_INVALID_INPUT' });
+    await expect(controller.tronClassSubmissionDownload(input, 'stale-context'))
+      .rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await expect(controller.tronClassSubmissionDownload(input, context, cancelled.signal))
+      .rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+    expect(download).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['logout', 'dispose', 'leave'] as const)('aborts on %s and discards bytes from a late downloader', async (reason) => {
+    const { controller } = setup(stored());
+    await controller.refresh();
+    const context = controller.state.session!.context;
+    const pending = deferred<typeof file>();
+    download.mockReturnValueOnce(pending.promise);
+    const exit = new AbortController();
+    const work = controller.tronClassSubmissionDownload(input, context, exit.signal);
+    const rejected = expect(work).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+    const activeSignal = download.mock.calls[0][3]!;
+    expect(activeSignal.aborted).toBe(false);
+    if (reason === 'logout') await controller.logout();
+    else if (reason === 'dispose') controller.dispose();
+    else exit.abort();
+    expect(activeSignal.aborted).toBe(true);
+    pending.resolve(file);
+    await rejected;
+    expect(download).toHaveBeenCalledTimes(1);
+  });
+});
+
+const cloudImageInput = {
+  base64: 'aGVsbG8=', mime: 'image/png' as const, kind: 'timetable' as const, explicitConsent: true,
+};
+it('sends consented import images with the private platform handle rather than native context', async () => {
+  const { controller } = setup(stored());
+  await controller.refresh();
+  const context = controller.state.session!.context;
+  const originalFetch = global.fetch;
+  const fetcher = jest.fn().mockResolvedValue({
+    ok: true, json: async () => ({ provider: 'cloud-vision', output: '{"complete":true,"rows":[]}' }),
+  } as Response);
+  global.fetch = fetcher;
+  try {
+    await expect(controller.recognizeImportImage(context, cloudImageInput)).resolves.toMatchObject({ ok: true });
+    expect(fetcher).toHaveBeenCalledWith('https://nuni.tw/api/personal-import/recognize-image',
+      expect.objectContaining({
+        method: 'POST', headers: expect.objectContaining({ Authorization: `Platform ${handle}` }),
+        body: JSON.stringify({ kind: 'timetable', mime: 'image/png', imageBase64: 'aGVsbG8=',
+          explicitConsent: true, academicYear: '', semester: '' }),
+      }));
+    expect(context).toMatch(/^native-/);
+    await expect(controller.recognizeImportImage('stale-context', cloudImageInput))
+      .rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+    await expect(controller.recognizeImportImage(context, { ...cloudImageInput, explicitConsent: false }))
+      .resolves.toMatchObject({ ok: false, reason: 'invalid-input' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  } finally {
+    global.fetch = originalFetch;
+    controller.dispose();
+  }
+});
+it.each(['cancel', 'logout'] as const)('aborts an in-flight cloud image request on %s', async (action) => {
+  const { controller } = setup(stored());
+  await controller.refresh();
+  const context = controller.state.session!.context;
+  const abort = new AbortController();
+  let requestSignal: AbortSignal | undefined;
+  const originalFetch = global.fetch;
+  const fetcher = jest.fn((_url: unknown, options?: RequestInit): Promise<Response> => {
+    requestSignal = options?.signal as AbortSignal;
+    return new Promise((_resolve, reject) => {
+      requestSignal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    });
+  });
+  global.fetch = fetcher;
+  try {
+    const pending = controller.recognizeImportImage(context, { ...cloudImageInput, signal: abort.signal });
+    const rejected = expect(pending).rejects.toThrow();
+    expect(requestSignal?.aborted).toBe(false);
+    if (action === 'cancel') abort.abort();
+    else await controller.logout();
+    expect(requestSignal?.aborted).toBe(true);
+    await rejected;
+  } finally {
+    global.fetch = originalFetch;
+    controller.dispose();
+  }
 });

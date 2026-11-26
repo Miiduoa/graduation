@@ -131,6 +131,10 @@
   overflow: auto;
   touch-action: pan-y pinch-zoom;
 }
+.canvas:focus-visible {
+  outline: 3px solid #b8e6cb;
+  outline-offset: -4px;
+}
 .photo {
   width: 100%;
   min-height: 0;
@@ -161,6 +165,10 @@
   padding: 10px 16px;
   background: #161b19;
   line-height: 1.5;
+}
+.caption:focus-visible {
+  outline: 3px solid #b8e6cb;
+  outline-offset: -4px;
 }
 .unavailable {
   padding: 16px;
@@ -206,4 +214,27 @@
   .segments i {
     animation: none;
   }
+}
+.audienceButton {
+  min-height: 44px;
+  margin-bottom: 6px;
+  padding: 6px 14px;
+  border: 1px solid rgb(255 255 255 / 35%);
+  border-radius: 22px;
+  background: #202a26;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.receiptNotice {
+  display: block;
+  margin-bottom: 6px;
+  color: #fff;
+  font-size: 0.8rem;
+}
+.playbackNotice {
+  margin: 0 0 8px;
+  color: #fff;
+  font-size: 0.875rem;
+  line-height: 1.5;
 }

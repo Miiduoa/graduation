@@ -49,12 +49,14 @@ import { httpsCallable } from 'firebase/functions';
 import {
   TIMETABLE_DEVICE_ONLY_STORED_COPY,
   TIMETABLE_DEVICE_ONLY_SUBMIT_COPY,
+  TimetableLocalReadError,
   createCourseAppeal,
   createServerShare,
   loadAppealTeacherStatus,
   loadFriendTimetable,
   loadPersonalTimetable,
   loadSharedTimetable,
+  readPersonalTimetableOnDevice,
   revokeServerShare,
   savePersonalTimetable,
   type StoredTimetable,
@@ -106,6 +108,119 @@ beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
   vi.mocked(httpsCallable).mockClear();
+});
+
+it('reads an exact device snapshot, including unplaced courses, without cloud or storage writes', () => {
+  const owner = 'platform:account-a';
+  const key = `campus-one-personal-timetable:${owner}:pu`;
+  const courses = [course, { ...course, id: 'unplaced', day: 0, start: 0, end: 0 }];
+  const raw = JSON.stringify(storedTimetable(courses));
+  localStorage.setItem(key, raw);
+  const snapshot = readPersonalTimetableOnDevice('pu', owner);
+  expect(snapshot.found).toBe(true);
+  expect(snapshot.timetable.courses).toEqual(courses);
+  expect(localStorage.getItem(key)).toBe(raw);
+  expect(localStorage.length).toBe(1);
+  expect(firestore.getDoc).not.toHaveBeenCalled();
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+  expect(httpsCallable).not.toHaveBeenCalled();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['out-of-range periods', { ...course, start: 999, end: 999 }],
+  ['reversed periods', { ...course, end: 1 }],
+  ['coerced weekday', { ...course, day: '1' }],
+  ['missing course identifier', { ...course, id: '' }],
+  ['non-text course name', { ...course, name: ['資料庫'] }],
+  ['non-text classroom', { ...course, room: { name: '任垣305' } }],
+])('rejects %s before a strict read can invent a valid lesson', (_label, damaged) => {
+  const key = 'campus-one-personal-timetable:platform:account-a:pu';
+  const raw = JSON.stringify({ ...storedTimetable(), courses: [damaged] });
+  localStorage.setItem(key, raw);
+  expect(() => readPersonalTimetableOnDevice('pu', 'platform:account-a'))
+    .toThrow(new TimetableLocalReadError('corrupt'));
+  expect(localStorage.getItem(key)).toBe(raw);
+  expect(firestore.getDoc).not.toHaveBeenCalled();
+  expect(firestore.setDoc).not.toHaveBeenCalled();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it('rejects colliding normalized identifiers instead of merging distinct course records', () => {
+  const key = 'campus-one-personal-timetable:platform:account-a:pu';
+  const raw = JSON.stringify(storedTimetable([course, { ...course, id: ' c-1 ', name: '另一堂課' }]));
+  localStorage.setItem(key, raw);
+  expect(() => readPersonalTimetableOnDevice('pu', 'platform:account-a'))
+    .toThrow(new TimetableLocalReadError('corrupt'));
+  expect(localStorage.getItem(key)).toBe(raw);
+});
+
+it('preserves the editor loader compatibility while strict reads reject damaged periods', async () => {
+  const owner = 'platform:account-a';
+  const key = `campus-one-personal-timetable:${owner}:pu`;
+  const raw = JSON.stringify(storedTimetable([{ ...course, start: 999, end: 999 }]));
+  localStorage.setItem(key, raw);
+  expect(() => readPersonalTimetableOnDevice('pu', owner)).toThrow(TimetableLocalReadError);
+  const editable = await loadPersonalTimetable(null, 'pu', owner);
+  expect(editable.courses[0]).toMatchObject({ day: 1, start: 1, end: 1 });
+  expect(localStorage.getItem(key)).toBe(raw);
+});
+
+it('keeps missing device snapshots isolated from other accounts, campuses and guest data', () => {
+  localStorage.setItem('campus-one-personal-timetable:platform:other:pu', JSON.stringify(storedTimetable()));
+  localStorage.setItem('campus-one-personal-timetable:platform:account-a:nthu',
+    JSON.stringify({ ...storedTimetable(), schoolId: 'nthu' }));
+  localStorage.setItem('campus-one-personal-timetable:local:pu', JSON.stringify(storedTimetable()));
+  const snapshot = readPersonalTimetableOnDevice('pu', 'platform:account-a');
+  expect(snapshot.found).toBe(false);
+  expect(snapshot.timetable.courses).toEqual([]);
+  expect(localStorage.length).toBe(3);
+  expect(firestore.getDoc).not.toHaveBeenCalled();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it('recovers only the exact school identity legacy device copy and preserves an explicit empty replacement', () => {
+  const legacyKey = 'campus-one-personal-timetable:u-1';
+  const currentKey = 'campus-one-personal-timetable:school:u-1:pu';
+  const raw = JSON.stringify(storedTimetable());
+  localStorage.setItem(legacyKey, raw);
+  expect(readPersonalTimetableOnDevice('pu', 'platform:u-1').found).toBe(false);
+  expect(readPersonalTimetableOnDevice('pu', 'school:u-2').found).toBe(false);
+  expect(readPersonalTimetableOnDevice('nthu', 'school:u-1').found).toBe(false);
+  expect(readPersonalTimetableOnDevice('pu', 'school:u-1').timetable.courses).toEqual([course]);
+  expect(localStorage.getItem(currentKey)).toBeNull();
+  localStorage.setItem(currentKey, JSON.stringify(storedTimetable([])));
+  const empty = readPersonalTimetableOnDevice('pu', 'school:u-1');
+  expect(empty.found).toBe(true);
+  expect(empty.timetable.courses).toEqual([]);
+  expect(localStorage.getItem(legacyKey)).toBe(raw);
+  expect(firestore.getDoc).not.toHaveBeenCalled();
+});
+
+it.each(['', '{broken', JSON.stringify({ ...storedTimetable(), schoolId: 'nthu' })])(
+  'never falls back from a damaged current copy to an older valid timetable: %s', (raw) => {
+    const key = 'campus-one-personal-timetable:school:u-1:pu';
+    localStorage.setItem('campus-one-personal-timetable:u-1', JSON.stringify(storedTimetable()));
+    localStorage.setItem(key, raw);
+    expect(() => readPersonalTimetableOnDevice('pu', 'school:u-1'))
+      .toThrow(new TimetableLocalReadError('corrupt'));
+    expect(localStorage.getItem(key)).toBe(raw);
+    expect(firestore.getDoc).not.toHaveBeenCalled();
+  },
+);
+
+it('reports unavailable device storage without falling back to a network read', () => {
+  const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('storage blocked');
+  });
+  try {
+    expect(() => readPersonalTimetableOnDevice('pu', 'platform:account-a'))
+      .toThrow(new TimetableLocalReadError('unavailable'));
+    expect(firestore.getDoc).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  } finally {
+    getItem.mockRestore();
+  }
 });
 
 it('keeps imported timetables on this device and does not send them to the cloud', async () => {

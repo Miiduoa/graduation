@@ -8,6 +8,7 @@ import {
   TEACHER_LMS_UNAVAILABLE_COPY,
 } from '@/lib/schoolLoginErrorCopy';
 import {
+  isPuEcampusDataFetchEnabled,
   PU_ECAMPUS_DATA_PAUSED_CODE,
   PU_ECAMPUS_DATA_PAUSED_MESSAGE,
 } from '@campus/shared/src/puEcampusDataPolicy';
@@ -16,7 +17,7 @@ const { replace, signIn, state } = vi.hoisted(() => ({
   replace: vi.fn(),
   signIn: vi.fn(),
   state: {
-    params: new URLSearchParams('returnUrl=%2Fgrades'),
+    params: new URLSearchParams('returnUrl=%2Fgrades%3Ftab%3Dsemester'),
     user: { uid: 'one' } as { uid: string } | null,
     studentId: false,
     loading: false,
@@ -24,10 +25,20 @@ const { replace, signIn, state } = vi.hoisted(() => ({
     optionsError: false,
     retryOptions: vi.fn(),
     selectedSchoolId: null as string | null,
+    catalogStatus: 'ready',
     schoolDirectoryLoading: false,
     requestedUnavailable: false,
+    emulator: false,
     selectSchool: vi.fn(),
+    platformSession: null as { platformAccountId: string } | null,
+    platformLoading: false,
+    platformError: '',
+    platformPendingLogout: false,
   },
+}));
+vi.mock('@campus/shared/src/puEcampusDataPolicy', async (original) => ({
+  ...(await original<typeof import('@campus/shared/src/puEcampusDataPolicy')>()),
+  isPuEcampusDataFetchEnabled: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({
   usePathname: () => '/login',
@@ -57,19 +68,36 @@ vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: state.user, loading: state.loading }),
 }));
+vi.mock('@/features/nuni/Session', async (original) => ({
+  ...(await original<typeof import('@/features/nuni/Session')>()),
+  useNuniSession: () => ({
+    session: state.platformSession,
+    loading: state.platformLoading,
+    error: state.platformError,
+    pendingLogout: state.platformPendingLogout,
+  }),
+}));
 vi.mock('@/features/auth/client', () => ({
   isFirebaseConfigured: () => true,
+  isEmulatorTestEnv: () => state.emulator,
   signInWithPuStudentId: signIn,
+}));
+const { schools } = vi.hoisted(() => ({
+  schools: [
+    { id: 'pu', name: '靜宜大學' },
+    { id: 'ntu', name: '國立臺灣大學' },
+    { id: 'fju', name: '輔仁大學' },
+  ],
 }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({
   useOptionalSelectedSchool: () => ({
     selectedSchoolId: state.selectedSchoolId,
-    selectedSchool: state.selectedSchoolId ? { id: state.selectedSchoolId, name: '校園' } : null,
+    selectedSchool: schools.find(({ id }) => id === state.selectedSchoolId) ?? null,
     loading: state.schoolDirectoryLoading,
-    catalogStatus: 'ready',
+    catalogStatus: state.catalogStatus,
     requestedUnavailable: state.requestedUnavailable,
     selectSchool: state.selectSchool,
-    schools: [{ id: 'pu', name: '靜宜大學' }, { id: 'ntu', name: '國立臺灣大學' }],
+    schools,
   }),
 }));
 vi.mock('@/lib/signInOptions', async (original) => ({
@@ -84,7 +112,8 @@ vi.mock('@/lib/signInOptions', async (original) => ({
 }));
 beforeEach(() => {
   vi.clearAllMocks();
-  state.params = new URLSearchParams('returnUrl=%2Fgrades');
+  vi.mocked(isPuEcampusDataFetchEnabled).mockReturnValue(true);
+  state.params = new URLSearchParams('returnUrl=%2Fgrades%3Ftab%3Dsemester');
   state.user = { uid: 'one' };
   state.studentId = false;
   state.loading = false;
@@ -92,35 +121,85 @@ beforeEach(() => {
   state.optionsError = false;
   state.selectedSchoolId = null;
   state.schoolDirectoryLoading = false;
+  state.catalogStatus = 'ready';
   state.requestedUnavailable = false;
+  state.emulator = false;
+  state.platformSession = null;
+  state.platformLoading = false;
+  state.platformError = '';
+  state.platformPendingLogout = false;
   signIn.mockResolvedValue({ uid: 'one' });
   vi.stubGlobal('location', { ...window.location, replace });
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.useRealTimers();
+});
+it('signs in the development emulator fixture through the normal SDK path without prefilling school fields', async () => {
+  vi.stubEnv('NODE_ENV', 'development');
+  state.emulator = true;
+  state.user = null;
+  state.studentId = true;
+  state.selectedSchoolId = 'pu';
+  state.params = new URLSearchParams({ returnUrl: '/tronclass' });
+  render(<LoginPage />);
+  expect((screen.getByLabelText('學號') as HTMLInputElement).value).toBe('');
+  expect((screen.getByLabelText('密碼') as HTMLInputElement).value).toBe('');
+  fireEvent.click(screen.getByRole('button', { name: '使用本機測試學生甲' }));
+  await waitFor(() => expect(signIn).toHaveBeenCalledExactlyOnceWith(
+    'S0000001', 'campus-test-1234', expect.any(AbortSignal), 'pu',
+  ));
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/tronclass'));
+});
+it.each<[string, boolean]>([
+  ['production', true],
+  ['development', false],
+  ['test', true],
+])('does not render a local test login in %s with emulator=%s', (environment, emulator) => {
+  vi.stubEnv('NODE_ENV', environment);
+  state.emulator = emulator;
+  render(<LoginPage />);
+  expect(screen.queryByRole('button', { name: '使用本機測試學生甲' })).toBeNull();
+  expect(signIn).not.toHaveBeenCalled();
+});
+it('shows a retryable emulator login error without navigating or filling school credentials', async () => {
+  vi.stubEnv('NODE_ENV', 'development');
+  state.emulator = true;
+  state.user = null;
+  state.studentId = true;
+  state.params = new URLSearchParams({ returnUrl: '/tronclass' });
+  signIn.mockRejectedValueOnce(new Error('local-auth-unavailable'));
+  render(<LoginPage />);
+  fireEvent.click(screen.getByRole('button', { name: '使用本機測試學生甲' }));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(SCHOOL_LOGIN_GENERIC_ERROR));
+  expect(replace).not.toHaveBeenCalled();
+  expect((screen.getByRole('button', { name: '使用本機測試學生甲' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByLabelText('學號') as HTMLInputElement).value).toBe('');
+  expect((screen.getByLabelText('密碼') as HTMLInputElement).value).toBe('');
 });
 it('states student-id login is not open and never claims direct school-id connection', () => {
   state.user = null;
   state.studentId = false;
   const { container } = render(<LoginPage />);
-  expect(screen.getByText('尚未開放學號直接登入')).toBeTruthy();
+  expect(screen.getByText('學校帳號登入目前未開放，暫時無法連線這項服務。你原本要開啟的頁面已保留。')).toBeTruthy();
   expect(screen.getByText('可自行匯入課表、成績與活動')).toBeTruthy();
   expect(container.textContent).not.toContain('提供學號直接連線');
   expect(container.textContent).not.toContain('直接連線：靜宜大學');
   expect(container.textContent).not.toContain('可連線');
   expect(container.textContent).not.toContain('使用學號連線');
 });
-it('keeps unavailable school-login wording even when student-id option reports available', () => {
+it('describes the available school sign-in accurately while preserving the original task', () => {
   state.user = null;
   state.studentId = true;
   const { container } = render(<LoginPage />);
-  expect(screen.getAllByText('尚未開放').length).toBeGreaterThan(0);
-  expect(container.textContent).toContain('學號直接登入尚未開放');
-  expect(container.textContent).not.toContain('可連線');
-  expect(container.textContent).not.toContain('使用學號連線');
-  expect(container.textContent).not.toContain('提供學號直接連線');
-  expect(container.textContent).not.toContain('使用學校的既有帳號連線');
+  expect(screen.getByRole('heading', { name: '確認你的學校帳號' })).toBeTruthy();
+  expect(screen.getByText('輸入學號與密碼，完成後返回原本的頁面。')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '連線學校帳號' })).toBeTruthy();
+  expect(container.textContent).not.toContain('學號直接登入目前尚未開放');
+  expect(container.textContent).not.toContain('尚未開放學號直接登入');
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(signIn).not.toHaveBeenCalled();
 });
 it('keeps a school return destination during an availability failure instead of offering the wrong account', () => {
   state.user = null;
@@ -138,7 +217,7 @@ it('returns an already signed-in school user to the requested page only when stu
   state.user = { uid: 'pu-one' };
   state.studentId = true;
   render(<LoginPage />);
-  await waitFor(() => expect(replace).toHaveBeenCalledWith('/grades'));
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/grades?tab=semester'));
 });
 it.each(['', 'schoolId=pu'])(
   'returns home after school sign-in when the login URL has no returnUrl (%s)',
@@ -210,7 +289,7 @@ it('does not send a Google-only session into a school form that cannot sign in',
   expect(screen.queryByRole('button', { name: '連線學校帳號' })).toBeNull();
   expect(screen.queryByText('使用靜宜大學學號登入')).toBeNull();
   expect(screen.queryByTestId('platform-sign-in')).toBeNull();
-  expect(screen.getByRole('link', { name: '改用一般登入' }).getAttribute('href')).toBe('/login');
+  expect(screen.getByRole('link', { name: '改用一般登入' }).getAttribute('href')).toBe('/login?campus=all');
   expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' })).toBeTruthy();
 });
 it('allows a signed-in user to reconnect to school before returning', async () => {
@@ -224,7 +303,7 @@ it('allows a signed-in user to reconnect to school before returning', async () =
   await waitFor(() =>
     expect(signIn).toHaveBeenCalledWith('A1234567', 'test-only-password', expect.any(AbortSignal)),
   );
-  await waitFor(() => expect(replace).toHaveBeenCalledWith('/grades'));
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/grades?tab=semester'));
   expect((screen.getByLabelText('密碼') as HTMLInputElement).value).toBe('');
 });
 it('lets a school-only user choose the platform account for a social or classroom task', () => {
@@ -242,6 +321,82 @@ it('offers Google for course feedback while retaining the requested campus and t
   expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe(destination);
   expect(screen.queryByText('這個頁面要用學校帳號，Google 帳號無法代替。')).toBeNull();
   expect(replace).not.toHaveBeenCalled();
+});
+
+it.each([
+  '/orders?campus=pu',
+  '/student-card?campus=pu',
+  '/ai-assistant?campus=pu',
+  '/timetable?schoolId=ntu#today',
+  '/calendar?campus=nthu#week',
+  '/import?schoolId=pu',
+  '/dormitory?schoolId=ntu',
+  '/food?tenant=pu&order=order-1',
+  '/shops?schoolId=pu&campus=nthu',
+  '/lost-found?schoolId=pu',
+  '/lost-found/platform?schoolId=nthu&mine=1',
+  '/lost-found/platform/post?schoolId=pu',
+  '/lost-found/platform/plf_11111111-1111-4111-8111-111111111111?schoolId=pu#contact',
+  '/grades',
+  '/classroom/material-bookmarks?campus=pu',
+])('starts the platform task %s with Google while school login is unavailable', (destination) => {
+  state.user = null;
+  state.params = new URLSearchParams({ returnUrl: destination });
+  const { container } = render(<LoginPage />);
+  const platform = screen.getByTestId('platform-sign-in');
+  const school = container.querySelector('details[aria-label="學校帳號登入"]')!;
+  expect(platform.getAttribute('data-return-url')).toBe(destination);
+  expect(screen.getByText('登入後會返回原本的頁面。')).toBeTruthy();
+  expect(school.hasAttribute('open')).toBe(false);
+  expect(platform.compareDocumentPosition(school) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByRole('textbox', { name: '學號' })).toBeNull();
+  expect(signIn).not.toHaveBeenCalled();
+  expect(replace).not.toHaveBeenCalled();
+});
+
+it('keeps Google usable while the separate school-login lookup fails', () => {
+  state.user = null;
+  state.optionsError = true;
+  state.params = new URLSearchParams({ returnUrl: '/calendar?campus=ntu' });
+  render(<LoginPage />);
+  expect(screen.getByRole('button', { name: '使用 Google 帳號繼續' })).toBeTruthy();
+  expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe('/calendar?campus=ntu');
+  expect(replace).not.toHaveBeenCalled();
+});
+
+it.each([
+  { selectedSchoolId: 'pu', available: true, lookupError: false, first: true },
+  { selectedSchoolId: 'pu', available: false, lookupError: false, first: false },
+  { selectedSchoolId: 'pu', available: true, lookupError: true, first: false },
+  { selectedSchoolId: null, available: true, lookupError: false, first: false },
+])('prioritizes school on general entry only with an explicitly selected, available campus (%o)', ({
+  selectedSchoolId, available, lookupError, first,
+}) => {
+  state.user = null;
+  state.studentId = available;
+  state.selectedSchoolId = selectedSchoolId;
+  state.optionsError = lookupError;
+  state.params = new URLSearchParams({ returnUrl: '/' });
+  render(<LoginPage />);
+  const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+  const platform = screen.getByTestId('platform-sign-in');
+  expect(school.open).toBe(first);
+  expect(Boolean(school.compareDocumentPosition(platform) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(first);
+  expect(signIn).not.toHaveBeenCalled();
+  expect(replace).not.toHaveBeenCalled();
+});
+
+it('only expands optional school sign-in when the person chooses it', () => {
+  state.user = null;
+  state.studentId = true;
+  state.params = new URLSearchParams({ returnUrl: '/calendar' });
+  render(<LoginPage />);
+  const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+  expect(school.open).toBe(false);
+  fireEvent.click(school.querySelector('summary')!);
+  expect(school.open).toBe(true);
+  expect(screen.getByRole('button', { name: '連線學校帳號' })).toBeTruthy();
+  expect(signIn).not.toHaveBeenCalled();
 });
 
 it.each([
@@ -316,7 +471,7 @@ it('navigates after an 11-second school verification instead of bouncing back to
     finish({ uid: 'pu-one' });
   });
   expect(replace).toHaveBeenCalledOnce();
-  expect(replace).toHaveBeenCalledWith('/grades');
+  expect(replace).toHaveBeenCalledWith('/grades?tab=semester');
 });
 
 it('shows a school timeout notice and stays on the login form', async () => {
@@ -403,17 +558,43 @@ it('takes a guest from a private task to the service directory for the selected 
 
 it('keeps an explicit all-campus selection for a guest', () => {
   state.user = null;
-  state.params = new URLSearchParams({ returnUrl: '/grades', campus: 'all' });
+  state.params = new URLSearchParams({ returnUrl: '/grades?tab=semester', campus: 'all' });
   render(<LoginPage />);
   const destination = new URL(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')!, 'https://campus.local');
   expect(destination.pathname).toBe('/search');
   expect(destination.searchParams.get('campus')).toBe('all');
 });
 
+it.each(['pu', null])('keeps browsing campus %s when leaving login without signing in', (schoolId) => {
+  state.user = null;
+  state.selectedSchoolId = schoolId;
+  state.params = new URLSearchParams({
+    returnUrl: '/groups/photography/club/overview',
+    campus: schoolId || 'all',
+    token: 'private',
+  });
+  render(<LoginPage />);
+  const expected = schoolId
+    ? { schoolId: 'pu', campus: 'pu', school: 'PU' }
+    : { campus: 'all' };
+  for (const [name, pathname] of [
+    [/前往資料匯入/, '/import'],
+    ['校園地圖', '/map'],
+    ['公車資訊', '/bus'],
+    ['職涯', '/career'],
+    ['改用一般登入', '/login'],
+    [/返回首頁/, '/'],
+  ] as const) {
+    const target = new URL(screen.getByRole('link', { name }).getAttribute('href')!, 'https://campus.local');
+    expect(target.pathname).toBe(pathname);
+    expect(Object.fromEntries(target.searchParams)).toEqual(expected);
+  }
+});
+
 it('keeps the requested campus while the directory is loading', () => {
   state.user = null;
   state.schoolDirectoryLoading = true;
-  state.params = new URLSearchParams({ returnUrl: '/grades', schoolId: 'ntu' });
+  state.params = new URLSearchParams({ returnUrl: '/grades?tab=semester', schoolId: 'ntu' });
   render(<LoginPage />);
   const destination = new URL(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')!, 'https://campus.local');
   expect(destination.pathname).toBe('/search');
@@ -423,7 +604,7 @@ it('keeps the requested campus while the directory is loading', () => {
 it('keeps an unavailable campus request for the school selector', () => {
   state.user = null;
   state.requestedUnavailable = true;
-  state.params = new URLSearchParams({ returnUrl: '/grades', schoolId: 'unknown-campus' });
+  state.params = new URLSearchParams({ returnUrl: '/grades?tab=semester', schoolId: 'unknown-campus' });
   render(<LoginPage />);
   const destination = new URL(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')!, 'https://campus.local');
   expect(destination.searchParams.get('schoolId')).toBe('unknown-campus');
@@ -447,20 +628,26 @@ it('keeps a school task school-only when student ID is not available', () => {
   state.user = null;
   render(<LoginPage />);
   expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(screen.queryByRole('link', { name: '前往 TronClass 登入' })).toBeNull();
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('連線學校帳號');
   expect(
     screen.getByText('學校帳號登入目前未開放，暫時無法連線這項服務。你原本要開啟的頁面已保留。'),
   ).toBeTruthy();
   expect(screen.queryByText(STUDENT_ID_PREPARING_COPY)).toBeNull();
   expect(screen.queryByLabelText('學號')).toBeNull();
-  expect(screen.getByRole('link', { name: '改用一般登入' }).getAttribute('href')).toBe('/login');
+  expect(screen.getByRole('link', { name: '改用一般登入' }).getAttribute('href')).toBe('/login?campus=all');
   expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' })).toBeTruthy();
   expect(replace).not.toHaveBeenCalled();
 });
 
-it('treats lost-found as a school destination under Google-only sign-in options', () => {
+it.each([
+  '/lost-found?source=school&schoolId=pu',
+  '/lost-found?source=platform&source=school&schoolId=pu',
+  '/lost-found/post?schoolId=pu',
+  '/lost-found/legacy-item?schoolId=pu',
+])('keeps the retained school lost-found destination %s out of Google sign-in', (destination) => {
   state.user = null;
-  state.params = new URLSearchParams('returnUrl=%2Flost-found%3FschoolId%3Dpu');
+  state.params = new URLSearchParams({ returnUrl: destination });
   render(<LoginPage />);
   expect(screen.queryByTestId('platform-sign-in')).toBeNull();
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('連線學校帳號');
@@ -499,12 +686,14 @@ it('does not repeatedly redirect while school options are still loading', () => 
 });
 
 it.each([
+  '/connect?campus=pu&group=topics&q=campus',
   '/map?school=pu&focus=library#route',
   '/bus?schoolId=tw-pu',
   '/announcements/news-123?schoolId=tw-pu',
   '/cafeteria',
   '/cafeteria/stall?schoolId=pu',
   '/library',
+  '/career?schoolId=pu&campus=pu#deadlines',
   '/school-info',
 ])(
   'keeps public destination %s optional and preserves the task with either account or guest browsing',
@@ -528,10 +717,10 @@ it('keeps guest services accessible while school identity is loading or unavaila
   state.user = null;
   state.loading = true;
   render(<LoginPage />);
-  expect(screen.getByRole('link', { name: '校園地圖' }).getAttribute('href')).toBe('/map');
-  expect(screen.getByRole('link', { name: '公車資訊' }).getAttribute('href')).toBe('/bus');
+  expect(screen.getByRole('link', { name: '校園地圖' }).getAttribute('href')).toBe('/map?campus=all');
+  expect(screen.getByRole('link', { name: '公車資訊' }).getAttribute('href')).toBe('/bus?campus=all');
   expect(screen.getByRole('link', { name: '公開公告' }).getAttribute('href')).toBe(
-    '/announcements',
+    '/announcements?campus=all',
   );
   expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' })).toBeTruthy();
   expect(screen.queryByLabelText('密碼')).toBeNull();
@@ -637,7 +826,7 @@ it.each([
 it('retains the full original academic task after school verification', async () => {
   state.user = null;
   state.studentId = true;
-  state.params = new URLSearchParams({ returnUrl: '/timetable?school=pu&schoolId=tw-pu#today' });
+  state.params = new URLSearchParams({ returnUrl: '/timetable?school=pu&schoolId=tw-pu#today', reconnect: 'school' });
   render(<LoginPage />);
   fireEvent.change(screen.getByLabelText('學號'), { target: { value: ' a1234567 ' } });
   fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'test-only-password' } });
@@ -652,6 +841,25 @@ it('uses school credentials and returns to WOW Class courses with the selected c
   state.selectedSchoolId = 'pu';
   const destination = '/school-courses?school=pu&schoolId=pu&campus=pu';
   state.params = new URLSearchParams({ returnUrl: destination });
+  render(<LoginPage />);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
+  expect(signIn).toHaveBeenCalledWith('A1234567', 'test-only-password', expect.any(AbortSignal), 'pu');
+});
+it('returns a school reconnect to the same explicitly scoped profile', async () => {
+  state.user = null;
+  state.studentId = true;
+  state.selectedSchoolId = 'pu';
+  const destination = '/profile?schoolId=pu&campus=pu&school=PU';
+  state.params = new URLSearchParams({
+    reconnect: 'school',
+    returnUrl: destination,
+    schoolId: 'pu',
+    campus: 'pu',
+    school: 'PU',
+  });
   render(<LoginPage />);
   expect(screen.queryByTestId('platform-sign-in')).toBeNull();
   fillSchoolLogin();
@@ -682,6 +890,8 @@ it('still offers Google for ordinary platform tasks when student ID is unavailab
 });
 
 function fillSchoolLogin() {
+  const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+  if (!school.open) fireEvent.click(school.querySelector('summary')!);
   fireEvent.change(screen.getByLabelText('學號'), { target: { value: 'a1234567' } });
   fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'test-only-password' } });
 }
@@ -699,7 +909,7 @@ it('waits for restored school identity before redirecting or accepting credentia
   state.loading = false;
   view.rerender(<LoginPage />);
   expect(replace).toHaveBeenCalledOnce();
-  expect(replace).toHaveBeenCalledWith('/grades');
+  expect(replace).toHaveBeenCalledWith('/grades?tab=semester');
 });
 it.each(['unmount', 'change task'])(
   'does not navigate from a late school response after %s',
@@ -801,7 +1011,7 @@ it('offers an import path for a campus without student ID sign-in', () => {
   state.selectedSchoolId = 'ntu';
   render(<LoginPage />);
   expect(screen.queryByLabelText('學號')).toBeNull();
-  expect(screen.getByRole('link', { name: /前往資料匯入/ }).getAttribute('href')).toBe('/import?schoolId=ntu');
+  expect(screen.getByRole('link', { name: /前往資料匯入/ }).getAttribute('href')).toBe('/import?schoolId=ntu&campus=ntu&school=NTU');
   expect(screen.getByText(/直接複製網頁表格貼上，或匯入從學校下載的 HTML、PDF、CSV 與截圖/)).toBeTruthy();
 });
 
@@ -825,15 +1035,51 @@ it('does not treat another Firebase user as a verified school session', () => {
   expect(replace).not.toHaveBeenCalled();
 });
 
-it('offers task-specific entries before asking a visitor for credentials', () => {
+it('puts account sign-in first and reveals specialist work entries on request', () => {
   state.params = new URLSearchParams();
   state.user = null;
   render(<LoginPage />);
+  const roles = screen.getByLabelText('其他身分與工作入口') as HTMLDetailsElement;
+  const platform = screen.getByTestId('platform-sign-in');
+  expect(roles.open).toBe(false);
+  expect(screen.getByRole('link', { name: '第一次申請店家進駐' }).closest('details')).toBe(roles);
+  expect(platform.compareDocumentPosition(roles) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(roles.querySelector('summary')!);
+  expect(roles.open).toBe(true);
   expect(screen.getByRole('link', { name: '第一次申請店家進駐' }).getAttribute('href')).toBe('/merchant/apply');
   expect(screen.getByRole('link', { name: '查看申請或進入門市' }).getAttribute('href')).toBe('/merchant/workspace');
   expect(screen.getByRole('link', { name: '學生與教師進入課程' }).getAttribute('href')).toBe('/classroom');
   expect(screen.getByRole('link', { name: '校方人員登入' }).getAttribute('href')).toBe('/auth/account?method=school');
   expect(screen.getByRole('link', { name: '平台管理員登入' }).getAttribute('href')).toBe('/admin/login');
+  fireEvent.click(roles.querySelector('summary')!);
+  expect(roles.open).toBe(false);
+  expect(screen.getByRole('button', { name: '使用 Google 帳號繼續' })).toBeTruthy();
+});
+
+it.each(['pu', 'ntu'])('keeps public alternatives on the selected %s campus without copying login parameters', (schoolId) => {
+  state.user = null;
+  state.selectedSchoolId = schoolId;
+  state.params = new URLSearchParams({ returnUrl: '/calendar#week', session: 'private-marker' });
+  render(<LoginPage />);
+  for (const name of ['校園地圖', '公車資訊', '公開公告', '校園活動', '餐廳', '圖書館', '學校資訊']) {
+    const target = new URL(screen.getByRole('link', { name }).getAttribute('href')!, 'https://campus.local');
+    expect(target.searchParams.get('schoolId')).toBe(schoolId);
+    expect(target.searchParams.get('campus')).toBe(schoolId);
+    expect(target.searchParams.has('returnUrl')).toBe(false);
+    expect(target.searchParams.has('session')).toBe(false);
+  }
+  expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe('/calendar#week');
+  expect(replace).not.toHaveBeenCalled();
+});
+
+it('preserves an unavailable campus when opening a public alternative from sign-in', () => {
+  state.user = null;
+  state.requestedUnavailable = true;
+  state.params = new URLSearchParams({ schoolId: 'unknown-campus', returnUrl: '/grades?tab=semester' });
+  render(<LoginPage />);
+  expect(screen.getByRole('link', { name: '校園地圖' }).getAttribute('href')).toBe('/map?schoolId=unknown-campus');
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(signIn).not.toHaveBeenCalled();
 });
 
 it.each(['/merchant', '/merchant/apply', '/merchant/workspace'])(
@@ -843,8 +1089,219 @@ it.each(['/merchant', '/merchant/apply', '/merchant/workspace'])(
     state.studentId = true;
     render(<LoginPage />);
     expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe(returnUrl);
+    expect(screen.queryByRole('link', { name: '前往 TronClass 登入' })).toBeNull();
     expect(screen.queryByLabelText('學號')).toBeNull();
     expect(screen.queryByLabelText('密碼')).toBeNull();
     expect(replace).not.toHaveBeenCalled();
   },
 );
+
+it('prioritizes the confirmed selected school at general login without removing Google', () => {
+  state.params = new URLSearchParams();
+  state.user = null;
+  state.selectedSchoolId = 'pu';
+  state.studentId = true;
+  render(<LoginPage />);
+  const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+  const google = screen.getByTestId('platform-sign-in');
+  expect(school.open).toBe(true);
+  expect(school.compareDocumentPosition(google) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByRole('button', { name: '連線學校帳號' })).toBeTruthy();
+  expect(signIn).not.toHaveBeenCalled();
+});
+
+it.each(['session', 'loading', 'error', 'pendingLogout'] as const)(
+  'keeps platform continuation or recovery first when the account has %s',
+  (condition) => {
+    const destination = '/?schoolId=pu#today';
+    state.params = new URLSearchParams({ returnUrl: destination });
+    state.user = null;
+    state.selectedSchoolId = 'pu';
+    state.studentId = true;
+    const view = render(<LoginPage />);
+    const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+    const platform = screen.getByTestId('platform-sign-in');
+    expect(school.open).toBe(true);
+
+    if (condition === 'session') state.platformSession = { platformAccountId: 'existing-account' };
+    if (condition === 'loading') state.platformLoading = true;
+    if (condition === 'error') state.platformError = '無法確認登入狀態';
+    if (condition === 'pendingLogout') state.platformPendingLogout = true;
+    view.rerender(<LoginPage />);
+
+    expect(screen.getByTestId('platform-sign-in')).toBe(platform);
+    expect(platform.getAttribute('data-return-url')).toBe(destination);
+    expect(platform.compareDocumentPosition(school) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(school.open).toBe(false);
+    expect(signIn).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+
+    state.platformSession = null;
+    state.platformLoading = false;
+    state.platformError = '';
+    state.platformPendingLogout = false;
+    view.rerender(<LoginPage />);
+    expect(school.open).toBe(true);
+    expect(school.compareDocumentPosition(platform) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  },
+);
+
+it('retries campus availability into a single school-first entry while keeping the home return context', () => {
+  const destination = '/?schoolId=fju#today';
+  state.params = new URLSearchParams({ returnUrl: destination, schoolId: 'fju' });
+  state.user = null;
+  state.selectedSchoolId = 'fju';
+  state.studentId = true;
+  state.optionsError = true;
+  const view = render(<LoginPage />);
+  const platform = screen.getByTestId('platform-sign-in');
+  const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+  expect(platform.compareDocumentPosition(school) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(school.querySelector('summary')!);
+  fireEvent.click(screen.getByRole('button', { name: '重新確認登入方式' }));
+  expect(state.retryOptions).toHaveBeenCalledOnce();
+  expect(signIn).not.toHaveBeenCalled();
+
+  state.optionsError = false;
+  view.rerender(<LoginPage />);
+  expect(screen.getByTestId('platform-sign-in')).toBe(platform);
+  expect(platform.getAttribute('data-return-url')).toBe(destination);
+  expect(school.open).toBe(true);
+  expect(school.compareDocumentPosition(platform) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getAllByRole('button', { name: '連線學校帳號' })).toHaveLength(1);
+  expect(screen.getByRole('link', { name: /輔大 TronClass/ }).getAttribute('href')).toBe('https://elearn2.fju.edu.tw/');
+  const importUrl = new URL(screen.getByRole('link', { name: /前往資料匯入/ }).getAttribute('href')!, 'https://campus.local');
+  expect(importUrl.pathname).toBe('/import');
+  expect(Object.fromEntries(importUrl.searchParams)).toEqual({ schoolId: 'fju', campus: 'fju', school: 'FJU' });
+  expect(signIn).not.toHaveBeenCalled();
+  expect(replace).not.toHaveBeenCalled();
+});
+
+it.each(['loading', 'error', 'unavailable'])(
+  'keeps Google first and removes the old LMS entry while the selected campus is %s',
+  (condition) => {
+    state.params = new URLSearchParams();
+    state.user = null;
+    state.selectedSchoolId = 'fju';
+    state.studentId = true;
+    const view = render(<LoginPage />);
+    const platform = screen.getByTestId('platform-sign-in');
+    const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+    expect(school.open).toBe(true);
+
+    if (condition === 'loading') state.schoolDirectoryLoading = true;
+    else if (condition === 'error') state.catalogStatus = 'error';
+    else state.requestedUnavailable = true;
+    view.rerender(<LoginPage />);
+
+    expect(screen.getByTestId('platform-sign-in')).toBe(platform);
+    expect(school.open).toBe(false);
+    expect(platform.compareDocumentPosition(school) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(view.container.querySelector('a[href="https://elearn2.fju.edu.tw/"]')).toBeNull();
+    expect(signIn).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['pu', null])('keeps Google first during the PU student pause and blocks student credentials (%s)', (schoolId) => {
+  vi.mocked(isPuEcampusDataFetchEnabled).mockReturnValue(false);
+  state.studentId = true;
+  state.selectedSchoolId = schoolId;
+  state.params = new URLSearchParams();
+  render(<LoginPage />);
+  const platform = screen.getByTestId('platform-sign-in');
+  const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+  expect(platform.compareDocumentPosition(school) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(school.open).toBe(false);
+  fireEvent.click(school.querySelector('summary')!);
+  expect(screen.getByText(/靜宜學生的 E 校園登入已暫停/)).toBeTruthy();
+  const account = screen.getByLabelText('教師帳號');
+  const password = screen.getByLabelText('密碼') as HTMLInputElement;
+  expect(screen.queryByLabelText('學號')).toBeNull();
+  for (const student of ['1110700321', 's1234567', 'S1234567@pu.edu.tw']) {
+    fireEvent.change(account, { target: { value: student } });
+    expect(password.disabled).toBe(true);
+    fireEvent.submit(account.closest('form')!);
+  }
+  expect(signIn).not.toHaveBeenCalled();
+});
+
+it('keeps teacher verification on the requested school route during the PU student pause', async () => {
+  vi.mocked(isPuEcampusDataFetchEnabled).mockReturnValue(false);
+  state.user = null;
+  state.studentId = true;
+  state.selectedSchoolId = 'pu';
+  state.params = new URLSearchParams({ reconnect: 'school', returnUrl: '/profile?schoolId=pu' });
+  render(<LoginPage />);
+  expect((screen.getByLabelText('學校帳號登入') as HTMLDetailsElement).open).toBe(true);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  fireEvent.change(screen.getByLabelText('教師帳號'), { target: { value: 'teacher.yang' } });
+  fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'test-only-password' } });
+  fireEvent.click(screen.getByRole('button', { name: '使用教師帳號登入' }));
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/profile?schoolId=pu'));
+  expect(signIn).toHaveBeenCalledWith('TEACHER.YANG', 'test-only-password', expect.any(AbortSignal), 'pu');
+});
+
+it('does not prioritize a selected school when its sign-in is unavailable', () => {
+  state.params = new URLSearchParams();
+  state.user = null;
+  state.selectedSchoolId = 'pu';
+  state.studentId = false;
+  render(<LoginPage />);
+  const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+  const google = screen.getByTestId('platform-sign-in');
+  expect(school.open).toBe(false);
+  expect(google.compareDocumentPosition(school) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByLabelText('學號')).toBeNull();
+});
+
+it('opens the external TronClass institution directory without a selected nuni school', () => {
+  state.params = new URLSearchParams();
+  state.user = null;
+  render(<LoginPage />);
+  const directory = screen.getByRole('link', { name: '前往 TronClass 登入' });
+  expect(directory.getAttribute('href')).toBe('https://www.tronclass.com/login');
+  expect(directory.getAttribute('target')).toBe('_blank');
+  expect(directory.getAttribute('rel')).toContain('noreferrer');
+  expect(directory.closest('details')).toBeNull();
+  expect(screen.getByText(/在 TronClass 官網搜尋學校或機構/)).toBeTruthy();
+  expect(screen.queryByLabelText('密碼')).toBeNull();
+});
+
+it('offers the selected school’s official LMS even when in-app school login is closed', () => {
+  state.params = new URLSearchParams();
+  state.selectedSchoolId = 'fju';
+  const view = render(<LoginPage />);
+  fireEvent.click(screen.getByLabelText('學校帳號登入').querySelector('summary')!);
+  const link = screen.getByRole('link', { name: /輔大 TronClass/ });
+  expect(link.getAttribute('href')).toBe('https://elearn2.fju.edu.tw/');
+  expect(link.getAttribute('rel')).toContain('noreferrer');
+  expect(screen.queryByLabelText('密碼')).toBeNull();
+  expect(screen.getByRole('button', { name: '使用 Google 帳號繼續' })).toBeTruthy();
+
+  state.selectedSchoolId = 'ntu';
+  view.rerender(<LoginPage />);
+  expect(screen.queryByRole('link', { name: /輔大 TronClass/ })).toBeNull();
+  expect(screen.getByRole('link', { name: '前往 TronClass 登入' }).closest('details')).toBeNull();
+  expect(signIn).not.toHaveBeenCalled();
+});
+
+it('hides a previously selected LMS while the campus is unresolved or unavailable', () => {
+  state.params = new URLSearchParams();
+  state.selectedSchoolId = 'pu';
+  state.studentId = true;
+  const view = render(<LoginPage />);
+  const officialLink = 'a[href="https://tronclass.pu.edu.tw/"]';
+  expect(view.container.querySelector(officialLink)).toBeTruthy();
+  state.schoolDirectoryLoading = true;
+  view.rerender(<LoginPage />);
+  expect(view.container.querySelector(officialLink)).toBeNull();
+  state.schoolDirectoryLoading = false;
+  state.requestedUnavailable = true;
+  view.rerender(<LoginPage />);
+  expect(view.container.querySelector(officialLink)).toBeNull();
+  state.requestedUnavailable = false;
+  state.catalogStatus = 'error';
+  view.rerender(<LoginPage />);
+  expect(view.container.querySelector(officialLink)).toBeNull();
+});

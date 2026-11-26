@@ -50,7 +50,7 @@ CONFIRMATION_WRITE_TOOLS = frozenset(
 SETTINGS_HREF = "/settings?section=assistant"
 
 LABELS: dict[str, str] = {
-    "createDormRepairRequest": "送出宿舍報修",
+    "createDormRepairRequest": "存成宿舍報修備忘",
     "createOrder": "餐廳下單",
     "createPersonalTodoReminder": "建立個人待辦與提醒",
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   markStoryViewed,
   type CampusStoryDoc,
@@ -10,6 +10,8 @@ export function useStoryShelf(source: StoryAuthorGroup[], schoolId: string, uid?
   const [currentId, setCurrentId] = useState<string | null>(null);
   // Both tabs mount inside the account and school boundary in CommunityAccess.
   const storageKey = 'campus:story-reads:v1:' + JSON.stringify([schoolId, uid]);
+  // Separate the local unread ring from in-flight or acknowledged server receipts.
+  const receipts = useRef(new Set<string>());
   const [seen, setSeen] = useState<ReadonlySet<string>>(() => {
     try {
       const ids = JSON.parse(window.sessionStorage.getItem(storageKey) ?? '[]');
@@ -54,6 +56,11 @@ export function useStoryShelf(source: StoryAuthorGroup[], schoolId: string, uid?
         return;
       }
       setCurrentId(story.id);
+      const receipt = JSON.stringify([schoolId, uid, story.authorUid, story.id]);
+      if (story.authorUid !== uid && !receipts.current.has(receipt)) {
+        receipts.current.add(receipt);
+        void markStoryViewed(story, uid).catch(() => receipts.current.delete(receipt));
+      }
       if (seen.has(story.id)) return;
       const next = new Set([...seen, story.id]);
       setSeen(next);
@@ -62,7 +69,6 @@ export function useStoryShelf(source: StoryAuthorGroup[], schoolId: string, uid?
       } catch {
         /* Private browsing can disable storage. */
       }
-      void markStoryViewed(story.id, uid).catch(() => {});
     },
     [uid, schoolId, seen, storageKey],
   );
@@ -82,6 +88,8 @@ export function useStoryShelf(source: StoryAuthorGroup[], schoolId: string, uid?
         ? {
             group,
             index,
+            viewerUid: uid,
+            isOwner: !!uid && group.authorUid === uid && group.stories[index].authorUid === uid,
             hasPrevious: !!previous,
             hasNext: !!next,
             previous: () => {

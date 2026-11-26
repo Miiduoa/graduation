@@ -28,21 +28,37 @@ const serverSnapshot = () => false;
 
 const widths = { sm: '360px', md: '480px', lg: '640px', xl: '800px', full: 'calc(100vw - 32px)' };
 
-function Modal({
+function ModalSurface({
   isOpen, onClose, title, description, children, size = 'md', showCloseButton = true,
   closeOnOverlayClick = true, closeOnEsc = true, footer, initialFocusRef,
+  readStartOnOverflow = false,
   'aria-label': label, 'aria-describedby': describedBy,
-}: ModalProps) {
+}: ModalProps & { readStartOnOverflow?: boolean }) {
   const clientReady = useSyncExternalStore(subscribeToClient, clientSnapshot, serverSnapshot);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const backdropStart = useRef(false);
   const id = useId();
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!isOpen || !clientReady || !dialog) return;
-    return openModalSession(dialog, initialFocusRef?.current);
-  }, [isOpen, clientReady, initialFocusRef]);
+    const preferredFocus = initialFocusRef?.current;
+    const release = openModalSession(dialog, preferredFocus);
+    if (readStartOnOverflow && preferredFocus && titleRef.current) {
+      // showModal may scroll to the first button before applying initial focus.
+      // Long confirmations start with the decision's title, not its bottom actions.
+      dialog.scrollTop = 0;
+      const bounds = dialog.getBoundingClientRect();
+      const target = preferredFocus.getBoundingClientRect();
+      const top = bounds.top + dialog.clientTop;
+      const bottom = top + dialog.clientHeight;
+      if (dialog.clientHeight > 0 && (target.top < top || target.bottom > bottom)) {
+        titleRef.current.focus({ preventScroll: true });
+      }
+    }
+    return release;
+  }, [isOpen, clientReady, initialFocusRef, readStartOnOverflow]);
 
   if (!isOpen || !clientReady) return null;
   return createPortal(
@@ -79,7 +95,7 @@ function Modal({
       {(title || description || showCloseButton) && (
         <div className={styles.header}>
           <div className={styles.heading}>
-            {title && <h2 id={`${id}-title`} className={styles.title}>{title}</h2>}
+            {title && <h2 ref={titleRef} id={`${id}-title`} className={styles.title} tabIndex={readStartOnOverflow ? -1 : undefined}>{title}</h2>}
             {description && <p id={`${id}-description`} className={styles.description}>{description}</p>}
           </div>
           {showCloseButton && (
@@ -98,6 +114,10 @@ function Modal({
   );
 }
 
+function Modal(props: ModalProps) {
+  return <ModalSurface {...props} />;
+}
+
 interface ConfirmModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -108,11 +128,12 @@ interface ConfirmModalProps {
   cancelText?: string;
   variant?: 'danger' | 'warning' | 'info';
   loading?: boolean;
+  pendingAction?: ReactNode;
 }
 
 function ConfirmDialog({
   onClose, onConfirm, title, message, confirmText = '確認', cancelText = '取消',
-  variant = 'info', loading = false,
+  variant = 'info', loading = false, pendingAction,
 }: ConfirmModalProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const inFlight = useRef(false);
@@ -149,7 +170,7 @@ function ConfirmDialog({
   }
 
   return (
-    <Modal
+    <ModalSurface
       isOpen
       onClose={requestClose}
       title={title}
@@ -158,6 +179,7 @@ function ConfirmDialog({
       closeOnEsc={!busy}
       closeOnOverlayClick={!busy}
       initialFocusRef={cancelRef}
+      readStartOnOverflow
       aria-describedby={messageId}
       footer={
         <>
@@ -172,8 +194,9 @@ function ConfirmDialog({
     >
       <p id={messageId} className={styles.message}>{message}</p>
       {busy && <p role="status" className={styles.notice}>正在處理，請勿重複送出。</p>}
+      {busy && pendingAction}
       {error && <p role="alert" className={styles.error}>{error}</p>}
-    </Modal>
+    </ModalSurface>
   );
 }
 

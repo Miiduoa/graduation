@@ -70,7 +70,7 @@ test('navigateFromNotificationData threads schoolId so cross-school grades are r
     { data: payload },
     { role: 'student', schoolId: 'pu' },
   );
-  expect(mockRootNavigateNested).toHaveBeenCalledWith('我的', 'Notifications');
+  expect(mockRootNavigateNested).toHaveBeenCalledWith('訊息', 'Notifications');
   expect(mockApply).not.toHaveBeenCalled();
 });
 
@@ -110,7 +110,7 @@ test('hook handleResponse passes the live schoolId from SchoolNavigation args', 
     },
     { role: 'student', schoolId: 'pu' },
   );
-  expect(mockRootNavigateNested).toHaveBeenCalledWith('我的', 'Notifications');
+  expect(mockRootNavigateNested).toHaveBeenCalledWith('訊息', 'Notifications');
 
   // 切校後 listener 以新 schoolId 重新掛載；同校成績可開。
   rerender({ schoolId: 'nthu' });
@@ -150,6 +150,20 @@ test('hook handleResponse passes the live schoolId from SchoolNavigation args', 
     { role: 'student', schoolId: 'nthu' },
   );
   expect(mockApply).toHaveBeenCalled();
+});
+
+test.each([
+  { type: 'assignment_submission', groupId: 'course', assignmentId: 'work' },
+  { type: 'feedback', groupId: 'course', assignmentId: 'work' },
+  { type: 'order', orderId: 'order' },
+  { type: 'announcement', announcementId: 'a' },
+  { type: 'package', channel: 'dormitory' },
+])('an out-of-school $type tap only opens the inbox', (data) => {
+  const real = jest.requireActual('../utils/notificationDestination') as typeof import('../utils/notificationDestination');
+  mockResolve.mockImplementation(real.resolveNotificationDestination);
+  expect(navigateFromNotificationData({ ...data, schoolId: 'nthu' }, 'student', 'pu')).toBe(false);
+  expect(mockRootNavigateNested).toHaveBeenCalledWith('訊息', 'Notifications');
+  expect(mockApply).not.toHaveBeenCalled();
 });
 
 test.each([

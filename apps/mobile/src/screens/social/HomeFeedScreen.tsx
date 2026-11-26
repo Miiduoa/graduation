@@ -14,12 +14,12 @@ import {
   Alert,
   Share,
   ScrollView,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { theme, shadowStyle } from '../../ui/theme';
+import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { EmptyState } from '../../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
@@ -215,11 +215,11 @@ function HomeFeedContent() {
     } catch (cause) {
       if (loadVersion.current !== version) return;
       if (isAccessDenied(cause)) {
+        setStories([]);
         setAccessDenied(true);
         setPosts([]);
         setBoards([]);
         setSubscribedBoardIds(new Set());
-        setStories([]);
         setNameByUid({});
         setAvatarByUid({});
         setHasMore(false);
@@ -593,40 +593,42 @@ function HomeFeedContent() {
   return (
     <View style={[styles.root, { paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + insets.bottom }]}>
       {!!loadError && (
-        <View style={{ padding: 16, gap: 8 }}>
+        <View style={{ paddingHorizontal: 16, paddingVertical: 8, gap: 2 }}>
           <Text accessibilityRole="alert" style={{ color: theme.colors.textSecondary }}>
             {loadError}
           </Text>
           <Pressable
             accessibilityRole="button"
             onPress={() => void onRefresh()}
-            style={{ paddingVertical: 10 }}
+            style={{ minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' }}
           >
-            <Text style={{ color: theme.colors.accent, fontWeight: '600' }}>重新讀取動態</Text>
+            <Text style={styles.linkText}>重新讀取動態</Text>
           </Pressable>
         </View>
       )}
       {!!followingError && (
-        <View style={{ paddingHorizontal: 16, paddingVertical: 9, gap: 6 }}>
+        <View style={{ paddingHorizontal: 16, paddingVertical: 8, gap: 2 }}>
           <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>{followingError}</Text>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="重新載入追蹤"
             onPress={() => setFollowingRevision((prev) => prev + 1)}
+            style={{ minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' }}
           >
-            <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>重新載入追蹤</Text>
+            <Text style={styles.linkText}>重新載入追蹤</Text>
           </Pressable>
         </View>
       )}
       {savedView && !!bookmarksError && (
-        <View style={{ paddingHorizontal: 16, paddingVertical: 9, gap: 8 }}>
+        <View style={{ paddingHorizontal: 16, paddingVertical: 8, gap: 2 }}>
           <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>{bookmarksError}</Text>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="重新載入收藏"
             onPress={() => setBookmarkRevision((prev) => prev + 1)}
+            style={{ minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' }}
           >
-            <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>重新載入收藏</Text>
+            <Text style={styles.linkText}>重新載入收藏</Text>
           </Pressable>
         </View>
       )}
@@ -660,16 +662,11 @@ function HomeFeedContent() {
               onComposeStory={goStoryCompose}
               onComposePost={goCompose}
             />
-            <View style={{ paddingHorizontal: 14, paddingTop: 8, gap: 9 }}>
-              <View style={{
-                flexDirection: 'row', alignItems: 'center', minHeight: 44, gap: 9,
-                paddingHorizontal: 12, borderWidth: StyleSheet.hairlineWidth,
-                borderColor: theme.colors.border, borderRadius: theme.radius.md,
-                backgroundColor: theme.colors.surface,
-              }}>
+            <View style={{ paddingHorizontal: 16, paddingTop: 4, gap: 6 }}>
+              <View style={styles.searchBox}>
                 <Ionicons name="search" size={18} color={theme.colors.textSecondary} />
                 <TextInput
-                  style={{ flex: 1, minWidth: 0, color: theme.colors.text, paddingVertical: 10 }}
+                  style={styles.searchInput}
                   accessibilityLabel="搜尋本校貼文"
                   value={search}
                   onChangeText={setSearch}
@@ -682,7 +679,7 @@ function HomeFeedContent() {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="清除搜尋"
-                    hitSlop={10}
+                    style={styles.iconHit}
                     onPress={() => setSearch('')}
                   >
                     <Ionicons name="close-circle" size={20} color={theme.colors.textSecondary} />
@@ -692,12 +689,12 @@ function HomeFeedContent() {
               {isOffline && !!search.trim() && !discoveryUnavailable && (
                 <Text
                   accessibilityRole="text"
-                  style={{ color: theme.colors.warning, fontSize: 11, lineHeight: 16 }}
+                  style={{ color: theme.colors.warning, fontSize: 12, lineHeight: 16 }}
                 >
                   目前離線，僅能搜尋已載入的貼文；輸入的關鍵字會保留。
                 </Text>
               )}
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
                 {!discoveryUnavailable && <Text
                   accessibilityRole="text"
                   accessibilityLabel={
@@ -705,7 +702,7 @@ function HomeFeedContent() {
                       ? `${searchScopeLabel}，顯示 ${visiblePosts.length} 則`
                       : undefined
                   }
-                  style={{ color: theme.colors.textSecondary, fontSize: 12, flexShrink: 1, paddingRight: 8 }}
+                  style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 16, flexShrink: 1, paddingRight: 8 }}
                 >
                   {savedView
                     ? `顯示 ${visiblePosts.length} 則收藏`
@@ -715,7 +712,7 @@ function HomeFeedContent() {
                         ? `${searchScopeLabel} · 顯示 ${visiblePosts.length} 則`
                         : `已載入 ${posts.length} 則 · 顯示 ${visiblePosts.length} 則`}
                 </Text>}
-                <View style={{ flexDirection: 'row', gap: 6 }}>
+                <View style={{ flexDirection: 'row', columnGap: 4 }}>
                   {([
                     { key: 'recommended', label: savedView ? '收藏順序' : '推薦' },
                     { key: 'latest', label: savedView ? '貼文最新' : '最新' },
@@ -726,23 +723,17 @@ function HomeFeedContent() {
                       accessibilityLabel={item.label}
                       accessibilityState={{ selected: order === item.key }}
                       onPress={() => setOrder(item.key)}
-                      style={{
-                        minHeight: 40, minWidth: 56, paddingHorizontal: 12,
-                        alignItems: 'center', justifyContent: 'center',
-                        borderRadius: theme.radius.md,
-                        backgroundColor: order === item.key ? theme.colors.accent : theme.colors.surface,
-                        borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border,
-                      }}
+                      style={styles.orderHit}
                     >
-                      <Text style={{
-                        color: order === item.key ? theme.colors.onAccent : theme.colors.textSecondary,
-                        fontSize: 12, fontWeight: '700',
-                      }}>{item.label}</Text>
+                      <Text
+                        maxFontSizeMultiplier={1.4}
+                        style={[styles.orderText, order === item.key && styles.orderTextActive]}
+                      >{item.label}</Text>
                     </Pressable>
                   ))}
                 </View>
               </View>
-              {!discoveryUnavailable && !search.trim() && <Text style={{ color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16 }}>
+              {!discoveryUnavailable && !search.trim() && <Text style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 16 }}>
                 {savedView
                   ? '顯示本校最近最多 40 筆私人收藏，可跨裝置同步'
                   : followingView
@@ -763,7 +754,7 @@ function HomeFeedContent() {
                   </Text>
                 </View>
               ) : searchRecovery ? (
-                <View style={{ paddingHorizontal: 14, paddingVertical: 20, gap: 12 }}>
+                <View style={{ paddingHorizontal: 16, paddingVertical: 20, gap: 12 }}>
                   <EmptyState
                     variant="search"
                     title={searchRecovery.title}
@@ -774,7 +765,7 @@ function HomeFeedContent() {
                       <ActivityIndicator color={theme.colors.accent} />
                     </View>
                   ) : null}
-                  <View style={{ gap: 8 }}>
+                  <View>
                     {searchRecovery.actions.map((action) => (
                       <Pressable
                         key={action.id}
@@ -782,25 +773,19 @@ function HomeFeedContent() {
                         accessibilityLabel={action.label}
                         disabled={action.id === 'load-more' && (loadingMore || isOffline)}
                         onPress={() => runSearchRecovery(action.id)}
-                        style={{
-                          minHeight: 44,
-                          alignItems: 'center',
+                        style={({ pressed }) => ({
+                          minHeight: 48,
                           justifyContent: 'center',
-                          borderRadius: theme.radius.md,
-                          borderWidth: StyleSheet.hairlineWidth,
-                          borderColor: theme.colors.border,
-                          backgroundColor:
-                            action.id === 'load-more' ? theme.colors.accent : theme.colors.surface,
+                          borderBottomWidth: StyleSheet.hairlineWidth,
+                          borderBottomColor: theme.colors.border,
+                          backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
                           opacity: action.id === 'load-more' && (loadingMore || isOffline) ? 0.55 : 1,
-                        }}
+                        })}
                       >
-                        <Text style={{
-                          color: action.id === 'load-more'
-                            ? theme.colors.onAccent
-                            : theme.colors.text,
-                          fontWeight: '700',
-                          fontSize: 14,
-                        }}>
+                        <Text style={[
+                          styles.recoveryText,
+                          action.id === 'load-more' && styles.recoveryTextPrimary,
+                        ]}>
                           {action.label}
                         </Text>
                       </Pressable>
@@ -835,7 +820,7 @@ function HomeFeedContent() {
             const board = boardNameById[item.boardId] ?? item.boardId;
             return (
               <Pressable
-                style={styles.card}
+                style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                 onPress={() => nav?.navigate?.('PostDetail' as never, { postId: item.id })}
               >
                 <View style={styles.cardTop}>
@@ -850,20 +835,35 @@ function HomeFeedContent() {
                       <Text style={styles.avatarLetter}>{authorLine(item).slice(0, 1)}</Text>
                     </View>
                   )}
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.authorRow} numberOfLines={1}>
-                      <Text style={styles.author}>{authorLine(item)}</Text>
-                      <Text style={styles.dot}>  ·  </Text>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 8 }}>
+                      {!item.anonymous && item.authorUid ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`查看 ${authorLine(item)} 的個人頁`}
+                          style={{ minHeight: 28, justifyContent: 'center', flexShrink: 1 }}
+                          onPress={(event) => {
+                            event.stopPropagation?.();
+                            nav?.navigate?.('CreatorProfile' as never, { memberUid: item.authorUid, schoolId: school?.id } as never);
+                          }}
+                        >
+                          <Text style={styles.author} numberOfLines={1}>{authorLine(item)}</Text>
+                        </Pressable>
+                      ) : <Text style={styles.author} numberOfLines={1}>{authorLine(item)}</Text>}
                       <Text style={styles.meta}>{formatTs(item.createdAt)}</Text>
-                    </Text>
+                    </View>
                     <Pressable
-                      hitSlop={6}
-                      onPress={() =>
+                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`開啟${board}看板`}
+                      onPress={(event) => {
+                        // This button lives inside the post card; never also open PostDetail.
+                        event.stopPropagation?.();
                         nav?.navigate?.('BoardDetail' as never, {
                           boardId: item.boardId,
                           boardName: board,
-                        })
-                      }
+                        });
+                      }}
                     >
                       <Text style={styles.boardChip}>＃{board}</Text>
                     </Pressable>
@@ -883,17 +883,19 @@ function HomeFeedContent() {
                           disabled: followingLoading || !!followingError || followingPending.has(item.authorUid),
                         }}
                         disabled={followingLoading || !!followingError || followingPending.has(item.authorUid)}
-                        hitSlop={8}
                         onPress={(event) => {
                           event.stopPropagation?.();
                           void onToggleFollow(item.authorUid!);
                         }}
-                        style={[styles.authorFollow, followedIds.has(item.authorUid) && styles.authorFollowActive]}
+                        style={styles.authorFollow}
                       >
-                        <Text style={[
-                          styles.authorFollowText,
-                          followedIds.has(item.authorUid) && styles.authorFollowTextActive,
-                        ]}>
+                        <Text
+                          maxFontSizeMultiplier={1.4}
+                          style={[
+                            styles.authorFollowText,
+                            followedIds.has(item.authorUid) && styles.authorFollowTextActive,
+                          ]}
+                        >
                           {followedIds.has(item.authorUid) ? '追蹤中' : '追蹤'}
                         </Text>
                       </Pressable>
@@ -926,7 +928,6 @@ function HomeFeedContent() {
                     accessibilityLabel={liked ? '取消按讚' : '按讚'}
                     accessibilityState={{ selected: liked, disabled: pendingLikes.has(item.id) }}
                     disabled={pendingLikes.has(item.id)}
-                    hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                     onPress={(e) => {
                       e.stopPropagation?.();
                       void onToggleLike(item);
@@ -945,14 +946,13 @@ function HomeFeedContent() {
                     <Ionicons name="chatbubble-outline" size={16} color={theme.colors.textSecondary} />
                     <Text style={styles.statLabel}>{repliesDisplay(item)}</Text>
                   </View>
-                  <View style={{ flex: 1 }} />
+                  <View style={{ flexGrow: 1 }} />
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={savedIds.has(item.id) ? '取消收藏貼文' : '收藏貼文'}
                     accessibilityState={{ selected: savedIds.has(item.id), disabled: bookmarksPending.has(item.id) }}
                     disabled={bookmarksPending.has(item.id)}
                     style={styles.statHit}
-                    hitSlop={8}
                     onPress={(event) => {
                       event?.stopPropagation?.();
                       void onToggleBookmark(item);
@@ -971,7 +971,6 @@ function HomeFeedContent() {
                     accessibilityRole="button"
                     accessibilityLabel={`分享貼文：${item.title}`}
                     style={styles.statHit}
-                    hitSlop={8}
                     onPress={(event) => {
                       event.stopPropagation?.();
                       const url = `https://nuni.tw/community/post/${encodeURIComponent(item.id)}?schoolId=${encodeURIComponent(school?.id ?? '')}`;
@@ -982,7 +981,6 @@ function HomeFeedContent() {
                     <Ionicons name="share-outline" size={18} color={theme.colors.textSecondary} />
                     <Text style={styles.statLabel}>分享</Text>
                   </Pressable>
-                  <Ionicons name="chevron-forward" size={16} color={theme.colors.border} />
                 </View>
               </Pressable>
             );
@@ -1047,7 +1045,7 @@ function FeedHeader(props: {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 14, gap: 14 }}
+          contentContainerStyle={{ paddingHorizontal: 16, gap: 14 }}
         >
           <Pressable
             style={styles.storyItem}
@@ -1061,7 +1059,7 @@ function FeedHeader(props: {
                   <Image source={{ uri: avatarByUid[myUid] }} style={styles.storyImg} />
                 ) : (
                   <View style={[styles.storyImg, styles.storyAvatarFallback]}>
-                    <Ionicons name="person" size={20} color={theme.colors.onAccent} />
+                    <Ionicons name="person" size={20} color={theme.colors.text} />
                   </View>
                 )
               ) : (
@@ -1122,7 +1120,12 @@ function FeedHeader(props: {
       </View>
 
       {/* Filter chips */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+      <ScrollView
+        horizontal
+        accessibilityRole="tablist"
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterRow}
+      >
         {FILTERS.map((f) => {
           const active = filter === f.key;
           return (
@@ -1132,14 +1135,12 @@ function FeedHeader(props: {
               accessibilityRole="tab"
               accessibilityLabel={`${f.label}分類`}
               accessibilityState={{ selected: active }}
-              style={[styles.filterChip, active && styles.filterChipActive]}
+              style={styles.filterChip}
             >
-              <Ionicons
-                name={f.icon}
-                size={14}
-                color={active ? theme.colors.onAccent : theme.colors.textSecondary}
-              />
-              <Text style={[styles.filterTxt, active && styles.filterTxtActive]}>{f.label}</Text>
+              <Text
+                maxFontSizeMultiplier={1.4}
+                style={[styles.filterTxt, active && styles.filterTxtActive]}
+              >{f.label}</Text>
             </Pressable>
           );
         })}
@@ -1152,11 +1153,11 @@ function FeedHeader(props: {
 
 function MediaGrid({ uris }: { uris: string[] }) {
   const styles = useThemeStyleSheet(createStyles);
-  const w = Dimensions.get('window').width - 28; // root padding 14*2
-  const inner = w - 24; // card padding 12*2
+  const { width } = useWindowDimensions();
+  const inner = width - 32; // post horizontal padding 16*2
   if (uris.length === 1) {
     return (
-      <View style={{ marginTop: theme.space.md, borderRadius: theme.radius.md, overflow: 'hidden' }}>
+      <View style={{ marginTop: theme.space.md, borderRadius: theme.radius.sm, overflow: 'hidden' }}>
         <Image source={{ uri: uris[0] }} style={{ width: inner, height: Math.round(inner * 0.62) }} />
       </View>
     );
@@ -1165,7 +1166,7 @@ function MediaGrid({ uris }: { uris: string[] }) {
   return (
     <View style={[styles.mediaGrid, { marginTop: theme.space.md }]}>
       {uris.map((u) => (
-        <Image key={u} source={{ uri: u }} style={{ width: cellSize, height: cellSize, borderRadius: theme.radius.sm }} />
+        <Image key={u} source={{ uri: u }} style={{ width: cellSize, height: cellSize, borderRadius: theme.radius.xs }} />
       ))}
     </View>
   );
@@ -1177,6 +1178,50 @@ const createStyles = () => StyleSheet.create({
     backgroundColor: theme.colors.bg,
   },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  linkText: {
+    color: theme.colors.accent,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
+
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 44,
+    gap: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+  },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
+    color: theme.colors.text,
+    fontSize: 16,
+    paddingVertical: 8,
+  },
+  iconHit: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+
+  orderHit: {
+    minHeight: 44,
+    minWidth: 44,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orderText: { color: theme.colors.textSecondary, fontSize: 13, lineHeight: 18, fontWeight: '600' },
+  orderTextActive: {
+    color: theme.colors.accent,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
+    textDecorationColor: theme.colors.accent,
+  },
+  recoveryText: { color: theme.colors.text, fontWeight: '700', fontSize: 15 },
+  recoveryTextPrimary: {
+    color: theme.colors.accent,
+    textDecorationLine: 'underline',
+    textDecorationColor: theme.colors.accent,
+  },
 
   storyStripWrap: {
     paddingVertical: theme.space.md,
@@ -1184,7 +1229,7 @@ const createStyles = () => StyleSheet.create({
     borderBottomColor: theme.colors.border,
     backgroundColor: theme.colors.bg,
   },
-  storyItem: { width: 64, alignItems: 'center' },
+  storyItem: { width: 64, minHeight: 44, alignItems: 'center' },
   storyRing: {
     width: 60,
     height: 60,
@@ -1192,25 +1237,26 @@ const createStyles = () => StyleSheet.create({
     borderWidth: 2,
     borderColor: theme.colors.accent,
     padding: 2,
-    backgroundColor: theme.colors.surface,
+    backgroundColor: theme.colors.bg,
   },
   storyAddRing: { borderColor: theme.colors.border, borderStyle: 'dashed' },
   storyImg: { width: '100%', height: '100%', borderRadius: 26 },
   storyAvatarFallback: {
-    backgroundColor: theme.colors.accent,
+    backgroundColor: theme.colors.surface2,
     alignItems: 'center',
     justifyContent: 'center',
   },
   storyAddInner: {
-    backgroundColor: theme.colors.surface,
+    backgroundColor: theme.colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 26,
   },
-  storyLetter: { fontSize: 18, color: theme.colors.onAccent, fontWeight: '700' },
+  storyLetter: { fontSize: 18, color: theme.colors.text, fontWeight: '700' },
   storyName: {
     marginTop: 4,
-    fontSize: 11,
+    fontSize: 12,
+    lineHeight: 16,
     color: theme.colors.textSecondary,
     textAlign: 'center',
     maxWidth: 64,
@@ -1218,127 +1264,127 @@ const createStyles = () => StyleSheet.create({
 
   filterRow: {
     flexDirection: 'row',
-    paddingHorizontal: 14,
-    paddingTop: theme.space.md,
-    paddingBottom: theme.space.sm,
-    gap: 8,
+    paddingHorizontal: 16,
+    columnGap: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border,
   },
   filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
+    minHeight: 44,
+    justifyContent: 'center',
   },
-  filterChipActive: {
-    backgroundColor: theme.colors.accent,
-    borderColor: theme.colors.accent,
+  filterTxt: { fontSize: 14, lineHeight: 20, color: theme.colors.textSecondary, fontWeight: '600' },
+  filterTxtActive: {
+    color: theme.colors.accent,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
+    textDecorationColor: theme.colors.accent,
   },
-  filterTxt: { fontSize: 12, color: theme.colors.textSecondary, fontWeight: '600' },
-  filterTxtActive: { color: theme.colors.onAccent },
 
-    card: {
-      backgroundColor: theme.colors.surfaceElevated,
-      marginHorizontal: 14,
-      marginTop: theme.space.md,
-      borderRadius: theme.radius.xl,
-      padding: 12,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.border,
-      ...(theme.mode === 'light' ? shadowStyle(theme.shadows.md) : shadowStyle(theme.shadows.sm)),
-    },
-    cardTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-    avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.colors.surface },
-    avatarAnon: {
-      backgroundColor: theme.colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    avatarPlaceholder: {
-      backgroundColor: theme.colors.accent,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    avatarLetter: { color: theme.colors.onAccent, fontWeight: '700' },
-    authorRow: { fontSize: 13, color: theme.colors.text },
-    author: { color: theme.colors.text, fontWeight: '700' },
-    dot: { color: theme.colors.muted },
-    meta: { color: theme.colors.textSecondary, fontWeight: '500', fontSize: 12 },
-    boardChip: {
-      marginTop: 2,
-      color: theme.colors.accent,
-      fontWeight: '700',
-      fontSize: 12,
-    },
-
-  authorFollow: {
-    minHeight: 36,
-    paddingHorizontal: 12,
+  card: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: theme.colors.bg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border,
+  },
+  cardPressed: { backgroundColor: theme.colors.surface2 },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.colors.surface2 },
+  avatarAnon: {
+    backgroundColor: theme.colors.surface2,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
   },
-  authorFollowActive: {
-    borderColor: theme.colors.accent,
-    backgroundColor: theme.colors.accentSoft,
+  avatarPlaceholder: {
+    backgroundColor: theme.colors.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  authorFollowText: { fontSize: 12, fontWeight: '700', color: theme.colors.text },
-  authorFollowTextActive: { color: theme.colors.accent },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.text, marginBottom: 4 },
+  avatarLetter: { color: theme.colors.text, fontWeight: '700' },
+  author: { color: theme.colors.text, fontWeight: '800' },
+  meta: { color: theme.colors.textSecondary, fontWeight: '500', fontSize: 12 },
+  boardChip: {
+    marginTop: 2,
+    color: theme.colors.accent,
+    fontWeight: '700',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+
+  authorFollow: {
+    minHeight: 44,
+    minWidth: 44,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  authorFollowText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: theme.colors.text,
+    textDecorationLine: 'underline',
+    textDecorationColor: theme.colors.border,
+  },
+  authorFollowTextActive: {
+    color: theme.colors.accent,
+    textDecorationColor: theme.colors.accent,
+  },
+  cardTitle: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '800',
+    color: theme.colors.text,
+    marginBottom: 4,
+  },
   preview: { fontSize: 14, color: theme.colors.textSecondary, lineHeight: 20 },
 
   mediaGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
-    borderRadius: theme.radius.md,
+    borderRadius: theme.radius.sm,
     overflow: 'hidden',
   },
 
   tags: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    columnGap: 10,
     marginTop: theme.space.sm,
   },
   tag: {
     fontSize: 12,
-    color: theme.colors.accent,
-    backgroundColor: theme.colors.accentSoft ?? 'rgba(124,93,250,0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 999,
+    lineHeight: 16,
+    color: theme.colors.textSecondary,
   },
 
   cardFooter: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    marginTop: theme.space.md,
-    paddingTop: theme.space.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: theme.colors.border,
-    gap: 18,
+    marginTop: theme.space.sm,
+    columnGap: 4,
   },
-  statHit: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  statHit: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    minHeight: 44,
+    minWidth: 44,
+    paddingRight: 8,
+  },
   statLabel: { fontSize: 13, fontWeight: '700', color: theme.colors.textSecondary },
 
   fab: {
     position: 'absolute',
     right: 16,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: theme.colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    ...shadowStyle(theme.shadows.lg),
   },
 });
 

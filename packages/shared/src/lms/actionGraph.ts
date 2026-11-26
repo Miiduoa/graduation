@@ -166,7 +166,7 @@ export const ACTION_GRAPH: ActionDef[] = [
       visibleTo: ['student', 'staff'],
       companionSignal: 'onDormRepairCreated',
       inboxKinds: ['assignment'],
-      notes: '職員在服務頁看到新單；首次報修解鎖工具箱',
+      notes: '首次報修備忘可解鎖工具箱；正式通報請依學校管道，此應用不會送到學校',
     },
   },
   {

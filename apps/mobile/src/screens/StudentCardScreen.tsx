@@ -37,11 +37,25 @@ import {
   StudentCardNfcError,
 } from '../services/studentCardNfc';
 import { StudentCardNfc } from '../components/StudentCardNfc';
+import { AccountDemoStudentCard } from '../components/AccountDemoStudentCard';
+import { useOptionalNuniSession } from '../state/nuniSession';
 import { theme } from '../ui/theme';
+import { pageTitleFont } from '../ui/styles';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 
 type Icon = React.ComponentProps<typeof Ionicons>['name'];
+
+// The physical-card face stays a fixed forest/ink surface so it reads as a credential in any theme.
+const CARD = {
+  face: '#163D34',
+  ink: '#FFFDF7',
+  muted: '#CFE3D7',
+  rule: '#74978A',
+};
+// QR codes must stay dark on white, quiet zone included, regardless of theme.
+const QR_INK = '#101A17';
+const QR_PAPER = '#FFFFFF';
 
 function Action({
   label,
@@ -62,7 +76,7 @@ function Action({
       onPress={onPress}
       style={({ pressed }) => [s.button, secondary && s.secondary, pressed && s.pressed]}
     >
-      <Ionicons name={icon} size={20} color={secondary ? theme.colors.text : '#FFFFFF'} />
+      <Ionicons name={icon} size={20} color={secondary ? theme.colors.text : theme.colors.onAccent} />
       <Text style={[s.buttonText, secondary && s.secondaryText]}>{label}</Text>
     </Pressable>
   );
@@ -191,13 +205,12 @@ function Presentation({
     >
       <SafeAreaView style={s.presentation} accessibilityViewIsModal onAccessibilityEscape={onClose}>
         <ScrollView contentContainerStyle={s.sheet}>
-          <Text style={s.sheetBrand}>CAMPUS ONE</Text>
           <Text style={s.sheetSchool}>{schoolName}</Text>
           <Text accessibilityRole="header" style={s.sheetTitle}>
             {requestCode ? (transport === 'nfc' ? 'NFC 感應出示' : '學號驗證碼') : '出示學號'}
           </Text>
           {requestCode && !code && !error && (
-            <ActivityIndicator accessibilityLabel="正在取得驗證碼" color="#183F36" />
+            <ActivityIndicator accessibilityLabel="正在取得驗證碼" color={theme.colors.accent} />
           )}
           {error ? (
             <Text accessibilityRole="alert" style={s.sheetNote}>
@@ -210,16 +223,19 @@ function Presentation({
                 value={`https://nuni.tw/student-card/verify#${visibleCode.token}`}
                 size={Math.max(120, Math.min(256, width - 88))}
                 quietZone={16}
-                color="#101A17"
-                backgroundColor="#FFFFFF"
+                color={QR_INK}
+                backgroundColor={QR_PAPER}
               />
             </View>
           ) : null}
           {visibleCode && transport === 'nfc' && (
             <View style={s.nfcPresentation}>
-              <View style={s.nfcRing} accessible={false}>
-                <Ionicons name="radio-outline" size={54} color="#183F36" />
-              </View>
+              <Ionicons
+                accessible={false}
+                name={nfcError ? 'alert-circle-outline' : 'radio-outline'}
+                size={56}
+                color={nfcError ? theme.colors.danger : theme.colors.accent}
+              />
               <Text accessibilityLiveRegion="polite" style={s.nfcTitle}>
                 {nfcError ? '感應尚未開啟' : nfcReady ? '靠近對方手機' : '正在開啟感應…'}
               </Text>
@@ -227,16 +243,26 @@ function Presentation({
                 {nfcError || '請對方在 nuni 開啟「感應核對」，再靠近這支手機背面。'}
               </Text>
               {!nfcReady && !nfcError && (
-                <ActivityIndicator color="#183F36" accessibilityLabel="正在開啟感應" />
+                <ActivityIndicator color={theme.colors.accent} accessibilityLabel="正在開啟感應" />
               )}
-              {nfcReady && <Text style={s.nfcStatus}>感應出示已開啟</Text>}
+              {nfcReady && (
+                <View style={s.nfcStatusRow}>
+                  <Ionicons
+                    accessible={false}
+                    name="checkmark-circle"
+                    size={18}
+                    color={theme.colors.success}
+                  />
+                  <Text style={s.nfcStatus}>感應出示已開啟</Text>
+                </View>
+              )}
               {nfcError && (
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => setNfcAttempt((value) => value + 1)}
                   style={s.retryNfc}
                 >
-                  <Text style={s.transportText}>重新開啟感應</Text>
+                  <Text style={s.retryText}>重新開啟感應</Text>
                 </Pressable>
               )}
             </View>
@@ -269,7 +295,9 @@ function Presentation({
                 onPress={() => setTransport('nfc')}
                 style={[s.transport, transport === 'nfc' && s.transportSelected]}
               >
-                <Text style={s.transportText}>NFC 感應</Text>
+                <Text style={[s.transportText, transport === 'nfc' && s.transportTextSelected]}>
+                  NFC 感應
+                </Text>
               </Pressable>
               <Pressable
                 accessibilityRole="tab"
@@ -277,7 +305,9 @@ function Presentation({
                 onPress={() => setTransport('qr')}
                 style={[s.transport, transport === 'qr' && s.transportSelected]}
               >
-                <Text style={s.transportText}>QR Code</Text>
+                <Text style={[s.transportText, transport === 'qr' && s.transportTextSelected]}>
+                  QR Code
+                </Text>
               </Pressable>
             </View>
           )}
@@ -292,13 +322,14 @@ function Presentation({
 
 export default function StudentCardScreen() {
   const auth = useAuth();
+  const platform = useOptionalNuniSession();
   const { selectionReady, selection, school } = useSchool();
   const focused = useIsFocused();
   const s = useThemeStyleSheet(createStyles);
   const user = auth.user;
   const profile = auth.profile;
   const schoolId = toPublicSchoolId(selection.schoolId);
-  const ready = selectionReady && !auth.loading && !auth.profileLoading;
+  const ready = selectionReady && !auth.loading && !auth.profileLoading && !platform?.loading;
   let issue: string | undefined;
   if (!ready) issue = '正在確認帳號與學校…';
   else if (!user || user.isAnonymous || auth.tokenExpired) issue = '請先登入學校帳號。';
@@ -311,23 +342,39 @@ export default function StudentCardScreen() {
   )
     issue = '請切回帳號所屬的學校，再開啟學生證。';
   if (!focused) return null;
-  if (issue || !user || !profile || !schoolId)
-    return (
+  const regularCard =
+    issue || !user || !profile || !schoolId ? (
       <ScrollView style={s.page} contentContainerStyle={s.content}>
         <Text style={s.body}>{issue}</Text>
         {ready && <StudentCardNfc key={JSON.stringify([user?.uid, schoolId])} />}
         {ready && schoolId && <OfficialService key={schoolId} schoolId={schoolId} />}
       </ScrollView>
+    ) : (
+      <Wallet
+        key={JSON.stringify([user.uid, school.id, profile.studentId])}
+        user={user}
+        profile={profile}
+        schoolId={schoolId}
+        schoolName={school.name}
+      />
     );
-  return (
-    <Wallet
-      key={JSON.stringify([user.uid, school.id, profile.studentId])}
-      user={user}
-      profile={profile}
-      schoolId={schoolId}
-      schoolName={school.name}
-    />
-  );
+  const platformSession =
+    platform && !platform.pendingLogout && !platform.error ? platform.session : null;
+  if (ready && platformSession && schoolId) {
+    return (
+      <AccountDemoStudentCard
+        key={JSON.stringify([platformSession.platformAccountId, platformSession.context, schoolId])}
+        accountId={platformSession.platformAccountId}
+        context={platformSession.context}
+        schoolId={schoolId}
+        sessionExpiresAt={platformSession.expiresAt}
+        request={platform!.bffRequest}
+        fallback={regularCard}
+        footer={<OfficialService schoolId={schoolId} />}
+      />
+    );
+  }
+  return regularCard;
 }
 
 function Wallet({
@@ -364,12 +411,12 @@ function Wallet({
   return (
     <ScrollView style={s.page} contentContainerStyle={[s.content, { paddingBottom: bottom }]}>
       <View style={s.card}>
-        <View style={s.cardTop}>
-          <Text style={s.wordmark}>CAMPUS ONE</Text>
-          <Ionicons accessible={false} name="id-card-outline" size={27} color="#D2E8DC" />
-        </View>
         <Text style={s.cardSchool}>{schoolName}</Text>
-        <Text style={s.cardName}>{safeName}</Text>
+        <Text style={s.cardKind}>學生證</Text>
+        <View style={s.cardBody}>
+          <Text style={s.cardLabel}>姓名</Text>
+          <Text style={s.cardName}>{safeName}</Text>
+        </View>
         <View style={s.cardFoot}>
           <Text style={s.cardLabel}>{demo ? '示範卡面' : '個人檔案'}</Text>
           <Text style={s.masked} accessibilityLabel={studentId ? '學號已隱藏' : '未提供學號'}>
@@ -448,22 +495,25 @@ const createStyles = () =>
   StyleSheet.create({
     page: { backgroundColor: theme.colors.bg },
     content: { width: '100%', maxWidth: 560, alignSelf: 'center', padding: 20, gap: 28 },
-    card: { backgroundColor: '#163D34', borderRadius: 20, padding: 22 },
-    cardTop: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 12,
+    card: {
+      backgroundColor: CARD.face,
+      borderRadius: theme.radius.lg,
+      borderTopWidth: 4,
+      borderTopColor: theme.colors.gold,
+      paddingHorizontal: 22,
+      paddingTop: 20,
+      paddingBottom: 18,
     },
-    wordmark: {
-      color: '#D2E8DC',
-      fontSize: 12,
+    cardSchool: {
+      color: CARD.ink,
+      fontFamily: pageTitleFont,
+      fontSize: 24,
+      lineHeight: 30,
       fontWeight: '700',
-      letterSpacing: 2.5,
-      flexShrink: 1,
     },
-    cardSchool: { color: '#FFFDF7', fontSize: 24, fontWeight: '700', marginTop: 26 },
-    cardName: { color: '#E1EBE4', fontSize: 17, marginTop: 5 },
+    cardKind: { color: CARD.muted, fontSize: 13, letterSpacing: 4, marginTop: 4 },
+    cardBody: { marginTop: 28, gap: 4 },
+    cardName: { color: CARD.ink, fontSize: 22, lineHeight: 28, fontWeight: '600' },
     cardFoot: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -471,12 +521,17 @@ const createStyles = () =>
       justifyContent: 'space-between',
       gap: 8,
       borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: '#74978A',
-      marginTop: 24,
+      borderTopColor: CARD.rule,
+      marginTop: 22,
       paddingTop: 14,
     },
-    cardLabel: { color: '#D2E8DC', fontSize: 13 },
-    masked: { color: '#FFFDF7', fontSize: 16, fontVariant: ['tabular-nums'], letterSpacing: 1.8 },
+    cardLabel: { color: CARD.muted, fontSize: 13 },
+    masked: {
+      color: CARD.ink,
+      fontSize: 18,
+      fontVariant: ['tabular-nums'],
+      letterSpacing: 1.8,
+    },
     section: { gap: 12 },
     title: { color: theme.colors.text, fontSize: 19, fontWeight: '700' },
     body: { color: theme.colors.textSecondary, fontSize: 15, lineHeight: 23 },
@@ -487,77 +542,71 @@ const createStyles = () =>
       gap: 10,
       minHeight: 50,
       padding: 12,
-      borderRadius: 14,
-      backgroundColor: '#163D34',
+      borderRadius: theme.radius.lg,
+      backgroundColor: theme.colors.accent,
     },
-    buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600', flexShrink: 1 },
+    buttonText: { color: theme.colors.onAccent, fontSize: 16, fontWeight: '600', flexShrink: 1 },
     secondary: {
-      backgroundColor: theme.colors.surface,
-      borderColor: theme.colors.border,
+      backgroundColor: 'transparent',
+      borderColor: theme.colors.text,
       borderWidth: 1,
     },
     secondaryText: { color: theme.colors.text },
     pressed: { opacity: 0.78 },
-    presentation: { flex: 1, backgroundColor: '#F8FAF5' },
+    presentation: { flex: 1, backgroundColor: theme.colors.bg },
     sheet: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24 },
-    sheetBrand: { color: '#416557', fontSize: 12, fontWeight: '700', letterSpacing: 2.5 },
-    sheetSchool: { color: '#183F36', fontSize: 19, textAlign: 'center', fontWeight: '700' },
-    sheetTitle: { color: '#354F43', fontSize: 15, textAlign: 'center' },
-    qr: { borderRadius: 16, backgroundColor: '#FFFFFF', padding: 2, marginVertical: 4 },
+    sheetSchool: {
+      color: theme.colors.text,
+      fontFamily: pageTitleFont,
+      fontSize: 22,
+      textAlign: 'center',
+      fontWeight: '700',
+    },
+    sheetTitle: { color: theme.colors.textSecondary, fontSize: 15, textAlign: 'center' },
+    qr: {
+      backgroundColor: QR_PAPER,
+      borderRadius: theme.radius.sm,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      marginVertical: 4,
+    },
     number: {
-      color: '#102D24',
+      color: theme.colors.text,
       maxWidth: '100%',
       fontSize: 32,
       fontWeight: '700',
       textAlign: 'center',
       fontVariant: ['tabular-nums'],
     },
-    sheetNote: { color: '#40574D', fontSize: 15, textAlign: 'center' },
-    countdown: { color: '#40574D', fontSize: 14, fontVariant: ['tabular-nums'] },
+    sheetNote: { color: theme.colors.textSecondary, fontSize: 15, lineHeight: 22, textAlign: 'center' },
+    countdown: { color: theme.colors.textSecondary, fontSize: 14, fontVariant: ['tabular-nums'] },
     expiryTrack: {
       width: 120,
       height: 3,
-      backgroundColor: '#D8E3D8',
+      backgroundColor: theme.colors.border,
       borderRadius: 2,
       overflow: 'hidden',
     },
-    expiryProgress: { height: '100%', backgroundColor: '#416557' },
-    nfcPresentation: { alignItems: 'center', gap: 18, paddingVertical: 12 },
-    nfcRing: {
-      width: 128,
-      height: 128,
-      borderRadius: 64,
-      borderWidth: 1,
-      borderColor: '#CBDCCF',
-      backgroundColor: '#E8EFE5',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    nfcTitle: { color: '#102D24', fontSize: 26, fontWeight: '700', textAlign: 'center' },
-    nfcStatus: {
-      color: '#183F36',
-      fontSize: 13,
-      fontWeight: '600',
-      backgroundColor: '#DBE8DC',
-      borderRadius: 20,
-      paddingVertical: 7,
-      paddingHorizontal: 14,
-    },
+    expiryProgress: { height: '100%', backgroundColor: theme.colors.accent },
+    nfcPresentation: { alignItems: 'center', gap: 14, paddingVertical: 12 },
+    nfcTitle: { color: theme.colors.text, fontSize: 26, fontWeight: '700', textAlign: 'center' },
+    nfcStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    nfcStatus: { color: theme.colors.success, fontSize: 14, fontWeight: '600' },
     retryNfc: {
       minHeight: 44,
       paddingHorizontal: 16,
       paddingVertical: 12,
-      borderRadius: 12,
+      borderRadius: theme.radius.lg,
       borderWidth: 1,
-      borderColor: '#BACDBF',
+      borderColor: theme.colors.text,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
+    retryText: { color: theme.colors.text, fontWeight: '600', fontSize: 14 },
     transports: {
       flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 4,
-      padding: 4,
-      borderRadius: 14,
-      backgroundColor: '#E3EAE0',
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
       marginTop: 8,
     },
     transport: {
@@ -567,19 +616,21 @@ const createStyles = () =>
       paddingVertical: 12,
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: 11,
+      borderBottomWidth: 2,
+      borderBottomColor: 'transparent',
     },
-    transportSelected: { backgroundColor: '#FFFFFF' },
-    transportText: { color: '#183F36', fontWeight: '600', fontSize: 14 },
+    transportSelected: { borderBottomColor: theme.colors.accent },
+    transportText: { color: theme.colors.textSecondary, fontWeight: '600', fontSize: 14 },
+    transportTextSelected: { color: theme.colors.text },
     close: {
-      backgroundColor: '#163D34',
+      backgroundColor: theme.colors.accent,
       minHeight: 50,
-      borderRadius: 14,
+      borderRadius: theme.radius.lg,
       alignItems: 'center',
       justifyContent: 'center',
       marginHorizontal: 24,
       marginVertical: 12,
       padding: 12,
     },
-    closeText: { color: '#FFFFFF', fontWeight: '600', fontSize: 16 },
+    closeText: { color: theme.colors.onAccent, fontWeight: '600', fontSize: 16 },
   });

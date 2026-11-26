@@ -48,6 +48,9 @@ it('keeps the configured Fly API in a browser bundle with no runtime public env'
   expect(client.getCloudFunctionUrl('submitLeaveRequest')).toBe('/api/fn/submitLeaveRequest');
   expect(client.getCloudFunctionUrl('listLeaveReviewQueue')).toBe('/api/fn/listLeaveReviewQueue');
   expect(client.getCloudFunctionUrl('signInPuStudentId')).toBe('/api/fn/signInPuStudentId');
+  expect(client.getCloudFunctionUrl('ensureCampusStoryBinding')).toBe(
+    '/api/fn/ensureCampusStoryBinding',
+  );
 });
 
 it('does not treat Spark Cloud Functions hostnames as configured after browser compilation', async () => {
@@ -83,4 +86,11 @@ it('keeps emulator routing ahead of Fly routing after browser compilation', asyn
   expect(client.getCloudFunctionUrl('getRepairServiceCapability')).toBe(
     'http://127.0.0.1:53322/demo-browser/asia-east1/getRepairServiceCapability',
   );
+});
+
+it.each(['', 'https://nuni-functions.fly.dev'])('keeps DM hosted URLs available in compiled browser code (base=%s)', async (base) => {
+  const client = await browserBundle({ NEXT_PUBLIC_FUNCTIONS_BASE_URL: base });
+  for (const name of ['prepareDmConversation', 'sendDmText', 'replyToCampusStory']) {
+    expect(client.getCloudFunctionUrl(name)).toBe('/api/fn/' + name);
+  }
 });

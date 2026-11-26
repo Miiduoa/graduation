@@ -10,6 +10,10 @@ import {
   merchantWorkspaceStateLabel,
   type NuniMerchantApplicationInput,
 } from '@campus/shared/src/nuniMerchant';
+import {
+  merchantApplicationNextStep,
+  merchantOverviewNextStep,
+} from '@campus/shared/src/merchantJourney';
 import { NuniMerchantWorkspace } from './NuniMerchantWorkspace';
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
@@ -259,15 +263,15 @@ function MerchantAccount({ context }: { context: string }) {
 
   const selected = overview?.programs.find((program) => program.tenantId === draft.tenantId);
   const locked = busy || Boolean(pending);
-  const hasMerchantRecords = overview && (overview.workspaces.length > 0 || overview.applications.length > 0);
+  const hasMerchantRecords =
+    overview && (overview.workspaces.length > 0 || overview.applications.length > 0);
+  const nextStep = overview ? merchantOverviewNextStep(overview) : null;
   return (
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
       <Text accessibilityRole="header" style={styles.heading}>
-        店家合作
+        店家工作台
       </Text>
-      <Text style={styles.text}>
-        新店家請由負責人申請進駐。用原申請帳號查詢審核結果，核准並取得門市管理權限後，即可在此完成營運設定。
-      </Text>
+      <Text style={styles.text}>查看待處理事項、管理已授權門市，或追蹤進駐申請。</Text>
       {invalidSession ? (
         <>
           <Text accessibilityRole="alert" style={styles.text}>
@@ -287,6 +291,15 @@ function MerchantAccount({ context }: { context: string }) {
       ) : (
         overview && (
           <>
+            {nextStep ? (
+              <View style={styles.nextTask}>
+                <Text style={styles.text}>下一步</Text>
+                <Text accessibilityRole="header" style={styles.title}>
+                  {nextStep.title}
+                </Text>
+                <Text style={styles.text}>{nextStep.description}</Text>
+              </View>
+            ) : null}
             <Text accessibilityRole="header" style={styles.title}>
               我的門市
             </Text>
@@ -310,7 +323,9 @@ function MerchantAccount({ context }: { context: string }) {
                 </View>
               ))
             ) : (
-              <Text style={styles.text}>這個帳號目前沒有可管理的門市。已送件可在下方查看審核進度。</Text>
+              <Text style={styles.text}>
+                這個帳號目前沒有可管理的門市。已送件可在下方查看審核進度。
+              </Text>
             )}
             <Text accessibilityRole="header" style={styles.title}>
               我的申請
@@ -326,6 +341,35 @@ function MerchantAccount({ context }: { context: string }) {
                   </Text>
                   {application.reviewerNote ? (
                     <Text style={styles.text}>審核說明：{application.reviewerNote}</Text>
+                  ) : null}
+                  {application.state !== 'approved' ? (
+                    <Text style={styles.text}>
+                      {merchantApplicationNextStep(application.state)}
+                    </Text>
+                  ) : null}
+                  {application.state === 'approved' ? (
+                    <>
+                      <Text style={styles.text}>
+                        店家已核准。選擇這個場域的已授權門市，繼續設定菜單與營運資訊。
+                      </Text>
+                      {overview.workspaces.some(
+                        (workspace) => workspace.tenantId === application.tenantId,
+                      ) ? (
+                        overview.workspaces
+                          .filter((workspace) => workspace.tenantId === application.tenantId)
+                          .map((workspace) => (
+                            <Action
+                              key={workspace.locationId}
+                              disabled={busy}
+                              onPress={() => setSelectedWorkspace(workspace)}
+                            >{`前往管理門市：${workspace.locationName}`}</Action>
+                          ))
+                      ) : (
+                        <Text style={styles.text}>
+                          這個場域的門市尚未出現在清單，請重新載入；若仍未出現，請聯絡受理單位。
+                        </Text>
+                      )}
+                    </>
                   ) : null}
                 </View>
               ))
@@ -465,6 +509,16 @@ const createStyles = () =>
     title: { fontSize: 18, fontWeight: '600', color: theme.colors.text },
     text: { fontSize: 16, lineHeight: 24, color: theme.colors.text },
     row: { gap: 6, borderBottomWidth: 1, borderColor: theme.colors.border, paddingVertical: 12 },
+    nextTask: {
+      gap: 8,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderLeftWidth: 3,
+      borderLeftColor: theme.colors.accent,
+      borderRadius: 10,
+      padding: 16,
+      backgroundColor: theme.colors.surface,
+    },
     choices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     button: {
       borderWidth: 1,

@@ -35,8 +35,30 @@ export function isPermissionDeniedError(error: unknown): boolean {
   return /Missing or insufficient permissions|permission-denied/i.test(message);
 }
 
+export function isReadAccessDeniedError(error: unknown): boolean {
+  if (isPermissionDeniedError(error)) return true;
+  if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'string') {
+    return error.code.split('/').at(-1) === 'unauthenticated';
+  }
+  return error instanceof Error && /^unauthenticated$/i.test(error.message);
+}
+
 export function permissionDeniedError(): Error & { code: string } {
   const error = new Error('permission-denied') as Error & { code: string };
   error.code = 'permission-denied';
   return error;
+}
+
+/** Drop the sort only when Firestore reports that the query index is unavailable. */
+export async function readStoryQuery<T>(run: (ordered: boolean) => Promise<T>): Promise<T> {
+  try {
+    return await run(true);
+  } catch (cause) {
+    if (
+      !(cause instanceof Error) ||
+      !('code' in cause) || cause.code !== 'failed-precondition' ||
+      !/\bindex\b/i.test(cause.message)
+    ) throw cause;
+    return run(false);
+  }
 }

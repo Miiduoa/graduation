@@ -7,6 +7,8 @@ export type MemberGroup = {
   schoolId: string;
   name: string;
   description: string;
+  meetingTime?: string;
+  coverUrl?: string;
   type: 'course' | 'club' | 'study' | 'other';
   role: string;
   memberCount: number | null;
@@ -59,7 +61,10 @@ export async function readMemberGroup(
     id,
     schoolId,
     name: typeof data.name === 'string' && data.name.trim() ? data.name : '未命名群組',
+    coverUrl: typeof data.coverUrl === 'string' ? data.coverUrl : undefined,
     description: typeof data.description === 'string' ? data.description : '',
+    meetingTime:
+      typeof data.clubProfile?.meetingTime === 'string' ? data.clubProfile.meetingTime.trim() : '',
     type: ['course', 'club', 'study'].includes(data.type) ? data.type : 'other',
     role: typeof membership.role === 'string' ? membership.role : 'member',
     memberCount:

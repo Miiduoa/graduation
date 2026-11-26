@@ -13,6 +13,11 @@ export type LmsReadOk<T> = { ok: true; value: T };
 export type LmsReadFail = { ok: false; status: number | null };
 export type LmsReadResult<T> = LmsReadOk<T> | LmsReadFail;
 
+export type LmsReadOptions = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+};
+
 export type LmsHomeworkPage = {
   homework_activities: unknown[];
   total: number | null;
@@ -22,23 +27,57 @@ export type LmsReadonlySource = {
   fetchCourses: (
     cookies: Record<string, string>,
     options: { userId?: number; status: 'ongoing' | 'upcoming' },
+    readOptions?: LmsReadOptions,
   ) => Promise<unknown>;
   fetchHomeworkPage: (
     cookies: Record<string, string>,
     courseId: number,
     page: number,
     pageSize: number,
+    readOptions?: LmsReadOptions,
   ) => Promise<LmsReadResult<LmsHomeworkPage>>;
+  fetchHomeworkActivity?: (
+    cookies: Record<string, string>,
+    activityId: number,
+    readOptions?: LmsReadOptions,
+  ) => Promise<LmsReadResult<unknown>>;
+  /** Fixed course HTML, for positive server-rendered enrollment evidence only. */
+  fetchCoursePage?: (
+    cookies: Record<string, string>,
+    courseId: number,
+    readOptions?: LmsReadOptions,
+  ) => Promise<LmsReadResult<string>>;
+  fetchStudentSubmissionList?: (
+    cookies: Record<string, string>,
+    activityId: number,
+    studentId: number,
+    readOptions?: LmsReadOptions,
+  ) => Promise<LmsReadResult<unknown>>;
+  /** Individual student permission records, read only from the bound identity. */
+  fetchStudentMakeUpRecord?: (
+    cookies: Record<string, string>,
+    activityId: number,
+    studentId: number,
+    readOptions?: LmsReadOptions,
+  ) => Promise<LmsReadResult<unknown>>;
+  fetchStudentResubmitRecord?: (
+    cookies: Record<string, string>,
+    activityId: number,
+    studentId: number,
+    readOptions?: LmsReadOptions,
+  ) => Promise<LmsReadResult<unknown>>;
   fetchActivities: (
     cookies: Record<string, string>,
     courseId: number,
     query: '' | 'sub_course_id=0' | 'type=courseware_activity',
+    readOptions?: LmsReadOptions,
   ) => Promise<LmsReadResult<unknown[]>>;
   fetchCourseAnnouncements: (
     cookies: Record<string, string>,
     courseId: number,
+    readOptions?: LmsReadOptions,
   ) => Promise<LmsReadResult<unknown[]>>;
-  fetchSiteAnnouncements: (cookies: Record<string, string>) => Promise<LmsReadResult<unknown[]>>;
+  fetchSiteAnnouncements: (cookies: Record<string, string>, readOptions?: LmsReadOptions) => Promise<LmsReadResult<unknown[]>>;
 };
 
 async function wrapRead<T>(run: () => Promise<T>): Promise<LmsReadResult<T>> {
@@ -55,17 +94,27 @@ export function sessionKind(error: unknown): SchoolReadErrorKind {
 }
 
 export const tronClassLmsReadonlySource: LmsReadonlySource = {
-  fetchCourses: (cookies, options) =>
+  fetchCourses: (cookies, options, readOptions) =>
     tronClassScraper.tcFetchCourses(cookies, {
       ...options,
       status: options.status,
-    }),
-  fetchHomeworkPage: (cookies, courseId, page, pageSize) =>
-    wrapRead(() => tronClassScraper.tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize)),
-  fetchActivities: (cookies, courseId, query) =>
-    wrapRead(() => tronClassScraper.tcFetchActivitiesRaw(cookies, courseId, query)),
-  fetchCourseAnnouncements: (cookies, courseId) =>
-    wrapRead(() => tronClassScraper.tcFetchCourseAnnouncementsStrict(cookies, courseId)),
-  fetchSiteAnnouncements: (cookies) =>
-    wrapRead(() => tronClassScraper.tcFetchAnnouncementsStrict(cookies)),
+    }, readOptions),
+  fetchHomeworkPage: (cookies, courseId, page, pageSize, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize, readOptions)),
+  fetchHomeworkActivity: (cookies, activityId, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchHomeworkActivityStrict(cookies, activityId, readOptions)),
+  fetchCoursePage: (cookies, courseId, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchCoursePageForAuthorization(cookies, courseId, readOptions)),
+  fetchStudentSubmissionList: (cookies, activityId, studentId, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchStudentHomeworkSubmissionList(cookies, activityId, studentId, readOptions)),
+  fetchStudentMakeUpRecord: (cookies, activityId, studentId, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchStudentMakeUpHomeworkRecord(cookies, activityId, studentId, readOptions)),
+  fetchStudentResubmitRecord: (cookies, activityId, studentId, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchStudentResubmitHomeworkRecord(cookies, activityId, studentId, readOptions)),
+  fetchActivities: (cookies, courseId, query, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchActivitiesRaw(cookies, courseId, query, readOptions)),
+  fetchCourseAnnouncements: (cookies, courseId, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchCourseAnnouncementsStrict(cookies, courseId, readOptions)),
+  fetchSiteAnnouncements: (cookies, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchAnnouncementsStrict(cookies, readOptions)),
 };

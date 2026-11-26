@@ -1,8 +1,11 @@
 import type { ServiceAccountSigner } from './firebaseCustomToken';
+import { firebaseEmulatorRequested, localFirebaseEmulatorConfig } from './firebaseEmulatorConfig';
 
 const REQUIRED_PROJECT_ID = 'campus-one-tw';
+const EMULATOR_APP_NAME = 'campus-one-web-emulator';
 
 type FirebaseAdmin = {
+  messaging?: import('firebase-admin/messaging').Messaging;
   verifyIdToken: (
     token: string,
     checkRevoked?: boolean,
@@ -81,6 +84,34 @@ export function readServiceAccountSigner(
 async function initializeFirebaseAdmin(env: NodeJS.ProcessEnv): Promise<FirebaseAdmin | null> {
   initAttempts += 1;
   try {
+    if (firebaseEmulatorRequested(env)) {
+      const emulator = localFirebaseEmulatorConfig(env);
+      if (!emulator) {
+        cached = null;
+        return null;
+      }
+      const { projectId } = emulator;
+      // Both SDKs use their local emulator transport. Do not read or parse
+      // FIREBASE_SERVICE_ACCOUNT_JSON on this path, or reuse a production app.
+      const { getApps, initializeApp } = await import('firebase-admin/app');
+      const { getAuth } = await import('firebase-admin/auth');
+      const { getFirestore } = await import('firebase-admin/firestore');
+      const existing = getApps().find((app) => app.name === EMULATOR_APP_NAME);
+      if (existing && existing.options.projectId !== projectId) {
+        cached = null;
+        return null;
+      }
+      const app = existing ?? initializeApp({ projectId }, EMULATOR_APP_NAME);
+      const auth = getAuth(app);
+      cached = {
+        db: getFirestore(app),
+        verifyIdToken: async (token: string, checkRevoked?: boolean) => {
+          const decoded = await auth.verifyIdToken(token, checkRevoked === true);
+          return decoded as { uid: string } & Record<string, unknown>;
+        },
+      };
+      return cached;
+    }
     const raw = String(env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
     if (!raw) {
       cached = null;
@@ -92,21 +123,25 @@ async function initializeFirebaseAdmin(env: NodeJS.ProcessEnv): Promise<Firebase
       return null;
     }
     const { cert, getApps, initializeApp } = await import('firebase-admin/app');
+    const { getMessaging } = await import('firebase-admin/messaging');
     const { getAuth } = await import('firebase-admin/auth');
     const { getFirestore } = await import('firebase-admin/firestore');
-    const app =
-      getApps().length > 0
-        ? getApps()[0]
-        : initializeApp({
-            credential: cert({
-              projectId: account.project_id,
-              clientEmail: account.client_email,
-              privateKey: account.private_key,
-            }),
-            projectId: account.project_id,
-          });
+    const existing = getApps().find((app) => app.name === '[DEFAULT]');
+    if (existing && existing.options.projectId !== REQUIRED_PROJECT_ID) {
+      cached = null;
+      return null;
+    }
+    const app = existing ?? initializeApp({
+      credential: cert({
+        projectId: account.project_id,
+        clientEmail: account.client_email,
+        privateKey: account.private_key,
+      }),
+      projectId: account.project_id,
+    });
     const auth = getAuth(app);
     cached = {
+      messaging: getMessaging(app),
       db: getFirestore(app),
       verifyIdToken: async (token: string, checkRevoked?: boolean) => {
         const decoded = await auth.verifyIdToken(token, checkRevoked === true);

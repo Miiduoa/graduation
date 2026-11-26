@@ -73,6 +73,29 @@ test('missing sources are not presented as a free day or all work completed', ()
   expect(view.getByText('作業來源不可用，不能判定是否已全部完成。')).toBeTruthy();
 });
 
+test('a failed quiz source leaves known assignments visible and distinguishes missing data from an empty list', () => {
+  const agenda = buildCampusStudyAgenda({ window: resolveStudyWindow('今天', now)!, now, courses: [],
+    assignments: [{ title: '仍須繳交的作業', groupName: '資料庫', dueAt: '2026-10-27T20:00:00+08:00' }], quizzes: null });
+  const view = render(<CampusStudyAgendaCard agenda={agenda} disabled={false} />);
+  expect(view.getByText('仍須繳交的作業')).toBeTruthy();
+  expect(view.getByText('測驗來源不可用，不能判定是否已全部作答。')).toBeTruthy();
+  expect(view.getByText('0 門課 · 1 項作業 · 測驗未知')).toBeTruthy();
+  expect(view.queryByText(/0 項測驗/)).toBeNull();
+});
+
+test('quiz-only data remains visible with a reference deadline when assignments are unavailable', () => {
+  const agenda = buildCampusStudyAgenda({ window: resolveStudyWindow('今天', now)!, now, courses: [], assignments: null,
+    quizzes: [{ kind: 'quiz', title: '資料庫線上測驗', groupName: '資料庫', dueAt: '2026-10-27T12:00:00+08:00' }] });
+  const open = jest.fn();
+  const view = render(<CampusStudyAgendaCard agenda={agenda} disabled={false} onOpenRoute={open} />);
+  expect(view.getByText('資料庫線上測驗')).toBeTruthy();
+  expect(view.getByText('0 門課 · 作業未知 · 1 項測驗')).toBeTruthy();
+  expect(view.getByText('測驗參考期限 12:00 · 資料庫 · 期限已過，需核對作答狀態')).toBeTruthy();
+  expect(view.queryByText(/需核對繳交狀態/)).toBeNull();
+  fireEvent.press(view.getByText('核對當日課業'));
+  expect(open).toHaveBeenCalledWith('/classroom');
+});
+
 test('busy state disables expansion and action navigation', () => {
   const navigate = jest.fn();
   const view = render(<CampusStudyAgendaCard agenda={fixture()} disabled onOpenRoute={navigate} />);

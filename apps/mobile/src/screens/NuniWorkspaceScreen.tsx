@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { NavigationContext } from '@react-navigation/native';
 import {
   ActivityIndicator,
   Linking,
@@ -20,15 +21,19 @@ import {
 } from '@campus/shared/src/nuniAccount';
 import { NuniError } from '@campus/shared/src/nuni';
 import { useNuniSession } from '../state/nuniSession';
-import { NuniDraftProvider, useNuniDraftState, type NuniDraftCache } from '../state/nuniDrafts';
+import {
+  NuniDraftProvider, NuniDraftScopeStore, useNuniDraftScope, useNuniDraftState, type NuniDraftScope,
+} from '../state/nuniDrafts';
 import { clearAllFoodPendingForAccount } from '../state/foodPersistence';
 import { getGoogleCredentialCapability } from '../services/nuniGoogle';
 import { theme } from '../ui/theme';
+import { pageTitleFont } from '../ui/styles';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import type { PreAuthStackParamList } from './preAuthTypes';
 import { NuniCourses } from './nuni/NuniCourses';
 import { NuniMerchant } from './nuni/NuniMerchant';
 import { NuniFood } from './nuni/NuniFood';
+import { safeNavigate } from '../utils/safeNavigate';
 
 type Tab = 'courses' | 'food' | 'merchant' | 'account';
 
@@ -206,7 +211,7 @@ function Account({ onLogout }: { onLogout: () => void }) {
     };
   }, [context, request, revision]);
 
-  const openWeb = async (path: '/classroom/account' | '/admin') => {
+  const openWeb = async (path: '/classroom/account' | '/admin' | '/admin#audit') => {
     setLinkError('');
     try {
       await Linking.openURL(`https://nuni.tw${path}`);
@@ -263,6 +268,7 @@ function Account({ onLogout }: { onLogout: () => void }) {
           </Text>
           <Text style={s.body}>管理學校接入、服務狀態與檢舉。私人課程仍依課程成員資格授權。</Text>
           <Action label="開啟網頁管理工作台" onPress={() => void openWeb('/admin')} />
+          <Action label="查閱操作紀錄" onPress={() => void openWeb('/admin#audit')} />
         </View>
       ) : null}
       {linkError ? (
@@ -281,6 +287,7 @@ function Account({ onLogout }: { onLogout: () => void }) {
 function SignedInWorkspace({
   onLogout,
   initialTab,
+  entryTarget,
   courseAccountChanged,
   initialWorkspaceId,
   initialAssignmentId,
@@ -288,6 +295,7 @@ function SignedInWorkspace({
 }: {
   onLogout: () => void;
   initialTab?: Tab;
+  entryTarget?: PreAuthStackParamList['NuniWorkspace'];
   courseAccountChanged: boolean;
   initialWorkspaceId?: string;
   initialAssignmentId?: string;
@@ -295,10 +303,22 @@ function SignedInWorkspace({
 }) {
   const s = useThemeStyleSheet(createStyles);
   const [tab, setTab] = useNuniDraftState<Tab>('workspace:tab', 'courses');
-  useEffect(() => {
+  const navigation = React.useContext(NavigationContext);
+  const subscribeToFocus = React.useCallback((listener: () => void) => {
+    if (!navigation) return () => {};
+    const focus = navigation.addListener('focus', listener);
+    const blur = navigation.addListener('blur', listener);
+    return () => { focus(); blur(); };
+  }, [navigation]);
+  const isFocused = React.useCallback(() => navigation?.isFocused() ?? true, [navigation]);
+  const focused = React.useSyncExternalStore(subscribeToFocus, isFocused, isFocused);
+  useLayoutEffect(() => {
+    // React Navigation replaces params for a new explicit entry, even when its
+    // tab matches a previous entry. Reapply that intent before paint; ordinary
+    // tab changes and same-route renders keep the user's current work intact.
     if (initialTab && ['courses', 'food', 'merchant', 'account'].includes(initialTab))
       setTab(initialTab);
-  }, [initialTab, setTab]);
+  }, [entryTarget, initialTab, setTab]);
   return (
     <View testID="nuni-workspace" style={s.page}>
       <View accessibilityRole="tablist" style={s.tabs}>
@@ -322,7 +342,17 @@ function SignedInWorkspace({
           </Pressable>
         ))}
       </View>
+      {navigation ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="探索這個工作區的 nuni 用法"
+          onPress={() => safeNavigate(navigation, 'Explore', { workContext: tab === 'merchant' ? 'merchant' : 'student' })}
+          style={s.exploreEntry}>
+          <Text style={s.exploreEntryText}>探索更多用法</Text>
+        </Pressable>
+      ) : null}
       {tab === 'food' ? <NuniFood /> : null}
+      {tab === 'courses' ? <View style={s.courseAction}>
+        <Action label="連接 TronClass 與查看校方作業" onPress={() => safeNavigate(navigation, 'TronClassWorkspace')} />
+      </View> : null}
       <View
         style={[s.page, tab !== 'courses' && s.hidden]}
         accessibilityElementsHidden={tab !== 'courses'}
@@ -333,12 +363,17 @@ function SignedInWorkspace({
             已切換 nuni 帳號，請從目前帳號的課程重新選擇作業。
           </Text>
         )}
-        <NuniCourses
-          active={tab === 'courses'}
-          initialWorkspaceId={initialWorkspaceId}
-          initialAssignmentId={initialAssignmentId}
-          initialMaterialId={initialMaterialId}
-        />
+        {/* A second Workspace can be pushed above this route by the assistant.
+            Rebuild course editors from the shared draft and fresh server data
+            on return, so a hidden old editor cannot overwrite newer input. */}
+        {focused ? (
+          <NuniCourses
+            active={tab === 'courses'}
+            initialWorkspaceId={initialWorkspaceId}
+            initialAssignmentId={initialAssignmentId}
+            initialMaterialId={initialMaterialId}
+          />
+        ) : null}
       </View>
       <View
         style={[s.page, tab !== 'merchant' && s.hidden]}
@@ -388,7 +423,11 @@ export function NuniWorkspaceScreen({
   const active = useRef<{ epoch: number; id: number } | null>(null);
   const nextOperation = useRef(0);
   const mounted = useRef(true);
-  const drafts = useRef<{ accountId: string; cache: NuniDraftCache } | null>(null);
+  const sessionDrafts = useNuniDraftScope();
+  const localDrafts = useRef<NuniDraftScopeStore | null>(null);
+  if (!localDrafts.current) localDrafts.current = new NuniDraftScopeStore();
+  const draftStore = sessionDrafts ?? localDrafts.current;
+  const drafts = useRef<NuniDraftScope | null>(null);
   const cleanupError = (ownerEpoch: number) => {
     if (!mounted.current || identity.current.epoch !== ownerEpoch) return;
     setActionState((previous) => ({
@@ -400,6 +439,7 @@ export function NuniWorkspaceScreen({
   // An unexpired same-account foreground refresh keeps the verified session mounted.
   // Confirmed logout, expiry or a changed account still drop the in-memory draft scope.
   if (auth.pendingLogout || (!auth.session && !auth.loading && !auth.error)) {
+    draftStore.clear();
     if (drafts.current) {
       const accountId = drafts.current.accountId;
       drafts.current = null;
@@ -409,13 +449,13 @@ export function NuniWorkspaceScreen({
     }
   }
   if (auth.session && !auth.loading && !auth.pendingLogout && !auth.error && !action) {
-    if (drafts.current?.accountId !== auth.session.platformAccountId)
-      drafts.current = { accountId: auth.session.platformAccountId, cache: new Map() };
+    drafts.current = draftStore.forAccount(auth.session.platformAccountId);
   }
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      localDrafts.current?.clear();
     };
   }, []);
   const run = async (label: string, operation: () => Promise<unknown>) => {
@@ -438,6 +478,7 @@ export function NuniWorkspaceScreen({
   };
   const logout = () => {
     const accountId = drafts.current?.accountId ?? auth.session?.platformAccountId;
+    draftStore.clear();
     drafts.current = null;
     void run('正在登出…', async () => {
       // Revoke authentication immediately. Slow or unavailable device storage
@@ -450,8 +491,18 @@ export function NuniWorkspaceScreen({
     });
   };
   const merchantEntry = target?.tab === 'merchant';
+  const foodEntry = target?.tab === 'food';
+  const accountEntry = target?.tab === 'account';
   const openWeb = () => {
-    const path = merchantEntry ? '/merchant' : target?.tab === 'courses' ? '/classroom/login' : '/login';
+    const path = merchantEntry
+      ? '/merchant'
+      : target?.tab === 'courses'
+        ? '/classroom/login'
+        : foodEntry
+          ? '/login?returnUrl=%2Ffood'
+          : accountEntry
+            ? '/login?returnUrl=%2Fclassroom%2Faccount'
+            : '/login';
     void run('正在開啟網頁…', () => Linking.openURL(`https://nuni.tw${path}`));
   };
   if (auth.loading || action)
@@ -487,9 +538,10 @@ export function NuniWorkspaceScreen({
     return (
       <NuniDraftProvider cache={drafts.current!.cache}>
         <SignedInWorkspace
-          key={`${auth.session.platformAccountId}:${auth.session.context}`}
+          key={`${auth.session.platformAccountId}:${auth.session.context}:${drafts.current!.revision}`}
           onLogout={logout}
           initialTab={courseAccountChanged ? 'courses' : target?.tab}
+          entryTarget={target}
           courseAccountChanged={courseAccountChanged}
           initialWorkspaceId={target?.workspaceId}
           initialAssignmentId={target?.assignmentId}
@@ -500,7 +552,6 @@ export function NuniWorkspaceScreen({
   const capability = getGoogleCredentialCapability();
   return (
     <ScrollView testID="nuni-workspace" contentContainerStyle={s.content}>
-      <Text style={s.eyebrow}>CAMPUS ONE</Text>
       <Text accessibilityRole="header" style={s.heading}>
         登入或建立帳號
       </Text>
@@ -509,11 +560,17 @@ export function NuniWorkspaceScreen({
         繼續時會建立帳號；再次登入會回到原本的帳號。
       </Text>
       <View style={s.panel}>
-        <Text style={s.title}>{merchantEntry ? '店家進駐與門市管理' : '從你的課程開始'}</Text>
+        <Text style={s.title}>
+          {merchantEntry ? '店家進駐與門市管理' : foodEntry ? '點餐與訂單' : accountEntry ? '帳號與資格' : '從你的課程開始'}
+        </Text>
         <Text style={s.body}>
           {merchantEntry
             ? '新店家可在登入後申請進駐。門市負責人請用原申請帳號查進度或管理門市。店員請向負責人確認登入方式。'
-            : '學生可加入老師的課程與繳交作業。教師可建立課程，或進入獲授權的課班。'}
+            : foodEntry
+              ? '登入後回到點餐頁；可用服務依店家實際開放狀態顯示。'
+              : accountEntry
+                ? '登入後查看你的學校資格、申請進度與帳號設定。'
+                : '學生可加入老師的課程與繳交作業。教師可建立課程，或進入獲授權的課班。'}
         </Text>
         {capability.available ? (
           <Action label="使用 Google 繼續" onPress={() => void run('正在登入…', auth.signIn)} />
@@ -535,9 +592,11 @@ export function NuniWorkspaceScreen({
 
 const createStyles = () =>
   StyleSheet.create({
+    exploreEntry: { minHeight: 44, paddingHorizontal: 20, paddingVertical: 10, alignSelf: 'flex-end', justifyContent: 'center' },
+    exploreEntryText: { color: theme.colors.accent, fontSize: 14, lineHeight: 22 },
     page: { flex: 1, backgroundColor: theme.colors.bg },
     content: { flexGrow: 1, padding: 24, gap: 18, paddingBottom: 48 },
-    scopeNotice: { paddingHorizontal: 20, paddingTop: 8, color: theme.colors.text },
+    scopeNotice: { paddingHorizontal: 20, paddingTop: 8, color: theme.colors.text, fontSize: 14, lineHeight: 22 },
     center: {
       flex: 1,
       backgroundColor: theme.colors.bg,
@@ -545,29 +604,26 @@ const createStyles = () =>
       padding: 28,
       gap: 18,
     },
-    heading: { color: theme.colors.text, fontSize: 26, lineHeight: 36, fontWeight: '600' },
+    heading: { fontFamily: pageTitleFont, color: theme.colors.text, fontSize: 26, lineHeight: 36, fontWeight: '600' },
     title: { color: theme.colors.text, fontSize: 17, lineHeight: 25, fontWeight: '600' },
-    eyebrow: { color: theme.colors.muted, fontSize: 12, letterSpacing: 2 },
-    body: { color: theme.colors.textSecondary, fontSize: 15, lineHeight: 25 },
+    body: { color: theme.colors.textSecondary, fontSize: 15, lineHeight: 24 },
     note: { color: theme.colors.muted, fontSize: 13, lineHeight: 22 },
     error: { color: theme.colors.danger, fontSize: 15, lineHeight: 24 },
     input: {
       minHeight: 48,
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: 5,
+      borderColor: theme.colors.muted,
+      borderRadius: 8,
       padding: 12,
       color: theme.colors.text,
       backgroundColor: theme.colors.bg,
       fontSize: 16,
     },
     panel: {
-      padding: 20,
-      gap: 16,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: 8,
-      backgroundColor: theme.colors.focusSurface,
+      paddingTop: 16,
+      gap: 14,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
     },
     membership: {
       gap: 4,
@@ -580,27 +636,28 @@ const createStyles = () =>
       justifyContent: 'center',
       alignItems: 'center',
       backgroundColor: theme.colors.accent,
-      borderRadius: 5,
+      borderRadius: 8,
       padding: 14,
     },
     buttonText: { color: theme.colors.onAccent, fontSize: 15, fontWeight: '600' },
     disabled: { opacity: 0.5 },
     tabs: {
       flexDirection: 'row',
-      padding: 12,
-      gap: 8,
+      paddingHorizontal: 12,
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.border,
     },
     tab: {
       flex: 1,
-      minHeight: 46,
+      minHeight: 48,
       justifyContent: 'center',
       alignItems: 'center',
-      borderRadius: 5,
+      borderBottomWidth: 2,
+      borderBottomColor: 'transparent',
     },
-    selectedTab: { backgroundColor: theme.colors.accent },
-    tabText: { color: theme.colors.text, fontSize: 15 },
-    selectedTabText: { color: theme.colors.onAccent, fontWeight: '600' },
+    selectedTab: { borderBottomColor: theme.colors.accent },
+    tabText: { color: theme.colors.textSecondary, fontSize: 15 },
+    selectedTabText: { color: theme.colors.text, fontWeight: '600' },
+    courseAction: { paddingHorizontal: 16, paddingVertical: 8 },
     hidden: { display: 'none' },
   });

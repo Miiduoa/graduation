@@ -479,6 +479,235 @@ async def assignment_scenario(browser, port, width, mode):
             'fixtureScope': 'Real CampusEvidencePlanCard and NuniPlanAssignmentOpenButton with synthetic live-source metadata, controlled reader outcomes and navigation callbacks; no planner, fresh authorization, account transition, destination, network, storage or native-device verification.'}
 
 
+async def quiz_scenario(browser, port, width, mode):
+    label = f'quiz-{width}-{mode}'
+    page = await browser.new_page(viewport={'width': width, 'height': 844}, device_scale_factor=1)
+    errors, external = [], []
+    page.on('pageerror', lambda error: errors.append(str(error)))
+    page.on('request', lambda request: external.append(request.url)
+            if not request.url.startswith(f'http://127.0.0.1:{port}/') else None)
+    await page.goto(f'http://127.0.0.1:{port}/saved-plans-preview.html?theme={mode}&scenario=quiz', wait_until='networkidle')
+    preview = page.get_by_test_id('quiz-plan-preview')
+    actions = preview.get_by_role('button', name='查看這份測驗', exact=True)
+    await expect(actions).to_have_count(2)
+    await expect(preview.get_by_text('依據：已授權測驗摘要', exact=True)).to_be_visible()
+    await expect(preview.get_by_text(re.compile(r'^測驗參考期限 18:00'))).to_be_visible()
+    await expect(preview.get_by_role('button', name='查看這份作業', exact=True)).to_have_count(2)
+    checks = [await geometry(page)]
+    await page.screenshot(path=str(ROOT / f'{label}-mixed-plan.png'), full_page=True)
+    await actions.first.focus()
+    await actions.first.press('Enter')
+    await expect(preview.get_by_role('button', name='正在核對測驗…', exact=True)).to_be_disabled()
+    await page.evaluate("window.qaSettleQuizRead('unavailable')")
+    await expect(preview.get_by_role('alert')).to_have_text('暫時無法核對這份測驗，請稍後重試，或從課程與作業入口確認。')
+    retry = preview.get_by_role('button', name='重新核對這份測驗', exact=True)
+    await expect(retry).to_be_enabled()
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-retry.png'), full_page=True)
+    await retry.focus()
+    await retry.press('Enter')
+    await page.evaluate("window.qaSettleQuizRead('ready')")
+    await expect(preview.get_by_role('alert')).to_have_count(0)
+    await preview.get_by_role('button', name='查看其他 1 項課業', exact=True).click()
+    await expect(preview.get_by_text('測驗 · 參考期限未確認', exact=True)).to_be_visible()
+    await expect(actions).to_have_count(3)
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-undated.png'), full_page=True)
+    await actions.last.click()
+    await page.evaluate("window.qaSettleQuizRead('changed')")
+    await expect(preview.get_by_role('alert')).to_have_text('測驗來源或課程連結已變更，請重新核對，或從課程與作業入口確認。')
+    for checkbox in await preview.get_by_role('checkbox').all():
+        await expect(checkbox).to_have_attribute('aria-checked', 'false')
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-changed.png'), full_page=True)
+    events = await page.evaluate('window.qaEvents')
+    assert [event['kind'] for event in events] == ['quiz-read', 'quiz-read', 'assignment-navigation', 'quiz-read'], events
+    assert events[0]['source'] == events[1]['source'], events
+    assert events[2]['params']['assignmentId'] == events[0]['source']['quizId'], events
+    assert events[3]['source']['quizId'] != events[0]['source']['quizId'], events
+    assert not errors and not external, [errors, external]
+    for result in checks:
+        assert result['documentWidth'] <= width and not result['clipped'] and not result['smallControls'], result
+    await page.close()
+    return {'scenario': label, 'events': events, 'geometry': checks, 'pageErrors': errors, 'externalRequests': external,
+            'fixtureScope': 'Production mixed plan and quiz button with synthetic data, controlled reader and navigation; no account authorization, real quiz submission or native-device verification.'}
+
+
+async def receipt_scenario(browser, port, width, mode):
+    label = f'receipt-{width}-{mode}'
+    page = await browser.new_page(viewport={'width': width, 'height': 844}, device_scale_factor=1)
+    errors, external = [], []
+    page.on('pageerror', lambda error: errors.append(str(error)))
+    page.on('request', lambda request: external.append(request.url)
+            if not request.url.startswith(f'http://127.0.0.1:{port}/') else None)
+    await page.goto(f'http://127.0.0.1:{port}/saved-plans-preview.html?theme={mode}&scenario=receipt', wait_until='networkidle')
+    saved = page.get_by_role('button', name=re.compile(r'^查看回到計畫核對作業與測驗'))
+    await saved.focus()
+    await saved.press('Enter')
+    checkboxes = page.get_by_role('checkbox')
+    await expect(checkboxes).to_have_count(2)
+    await checkboxes.first.focus()
+    # Repeated keydown while Space is held must still produce one checkbox change.
+    await page.keyboard.down('Space')
+    await page.keyboard.down('Space')
+    await page.keyboard.up('Space')
+    await expect(checkboxes.first).to_have_attribute('aria-checked', 'true')
+    await expect(checkboxes.last).to_have_attribute('aria-checked', 'false')
+    # A historical plan never restores the precise live coursework buttons.
+    await expect(page.get_by_role('button', name='查看這份測驗', exact=True)).to_have_count(0)
+    await expect(page.get_by_role('button', name='查看這份作業', exact=True)).to_have_count(0)
+    checks = [await geometry(page)]
+    await page.screenshot(path=str(ROOT / f'{label}-original.png'), full_page=True)
+
+    replan = page.get_by_role('button', name='依目前資料重新規劃', exact=True)
+    await replan.focus()
+    await replan.press('Enter')
+    preview = page.get_by_test_id('receipt-comparison-preview')
+    await expect(preview.get_by_text('平台紀錄', exact=True)).to_have_count(2)
+    await expect(preview.get_by_text(re.compile(r'08:30')).first).to_be_visible()
+    await expect(preview.get_by_text(re.compile(r'08:31')).first).to_be_visible()
+    await expect(preview.get_by_role('checkbox')).to_have_count(0)
+    await expect(checkboxes.first).to_have_attribute('aria-checked', 'true')
+    await expect(checkboxes.last).to_have_attribute('aria-checked', 'false')
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-received.png'), full_page=True)
+    await preview.get_by_role('button', name='查看原計畫', exact=True).click()
+    await expect(preview).to_have_count(0)
+    await expect(page.get_by_text('已處理 1 / 2', exact=True)).to_be_visible()
+
+    await page.evaluate("window.qaReceiptRead = 'closed'")
+    await replan.focus()
+    await replan.press('Enter')
+    await expect(preview.get_by_text('平台紀錄', exact=True)).to_have_count(0)
+    await expect(preview.get_by_text(re.compile(r'關閉')).first).to_be_visible()
+    await expect(checkboxes.first).to_have_attribute('aria-checked', 'true')
+    await expect(checkboxes.last).to_have_attribute('aria-checked', 'false')
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-closed.png'), full_page=True)
+    await preview.get_by_role('button', name='查看原計畫', exact=True).click()
+
+    await page.evaluate("window.qaReceiptRead = 'unavailable'")
+    await replan.click()
+    await expect(preview.get_by_text('平台紀錄', exact=True)).to_have_count(0)
+    await expect(preview.get_by_text('來源不可用', exact=True)).to_have_count(2)
+    await expect(checkboxes.first).to_have_attribute('aria-checked', 'true')
+    await expect(checkboxes.last).to_have_attribute('aria-checked', 'false')
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-unavailable.png'), full_page=True)
+    events = await page.evaluate('window.qaEvents')
+    assert [event['kind'] for event in events] == [
+        'receipt-toggle', 'receipt-replan', 'receipt-original',
+        'receipt-replan', 'receipt-original', 'receipt-replan',
+    ], events
+    assert events[0] == {'kind': 'receipt-toggle', 'stepId': 'quiz-preparation', 'done': True}, events
+    replans = [event for event in events if event['kind'] == 'receipt-replan']
+    assert [event['read'] for event in replans] == ['received', 'closed', 'unavailable'], events
+    assert all(event['completed'] == ['quiz-preparation'] for event in replans), events
+    assert sorted(replans[0]['receiptKinds']) == ['assignment', 'quiz'], events
+    assert replans[1]['receiptKinds'] == [] and replans[2]['receiptKinds'] == [], events
+    assert not errors and not external, [errors, external]
+    for result in checks:
+        assert result['documentWidth'] <= width and not result['clipped'] and not result['smallControls'], result
+    await page.close()
+    return {'scenario': label, 'events': events, 'geometry': checks, 'pageErrors': errors, 'externalRequests': external,
+            'fixtureScope': 'Real saved-plan projection, comparison and presentation with controlled source snapshots; no account authorization, live submission, persistent storage or native-device verification.'}
+
+
+async def receipt_date_query_scenario(browser, port, width, mode):
+    label = f'receipt-date-query-{width}-{mode}'
+    page = await browser.new_page(viewport={'width': width, 'height': 844}, device_scale_factor=1)
+    errors, external, failed = [], [], []
+    page.on('pageerror', lambda error: errors.append(str(error)))
+    page.on('request', lambda request: external.append(request.url)
+            if not request.url.startswith(f'http://127.0.0.1:{port}/') else None)
+    page.on('requestfailed', lambda request: failed.append({'url': request.url, 'failure': request.failure}))
+    # The real query captures Date.now() at each question. Saturday in Taipei
+    # keeps tomorrow (Sunday) separate from the following Monday–Sunday week.
+    await page.add_init_script("Date.now = () => Date.parse('2026-11-07T02:00:00.000Z');")
+    await page.goto(f'http://127.0.0.1:{port}/saved-plans-preview.html?theme={mode}&scenario=receipt-date-query', wait_until='networkidle')
+    preview = page.get_by_test_id('receipt-date-query-preview')
+    expand = preview.get_by_role('button', name='問課業助理', exact=True)
+    await expand.focus()
+    await expand.press('Enter')
+    partial = preview.get_by_text('部分課程未完整載入，結果只包含這次取得的項目。', exact=True)
+    await expect(partial).to_be_visible()
+    checks = [await geometry(page)]
+    question = preview.get_by_role('textbox', name='輸入課業問題', exact=True)
+    query = preview.get_by_role('button', name='查詢課業', exact=True)
+    rows = preview.get_by_role('button', name=re.compile(r'^查看作業：'))
+    tomorrow_scope = preview.get_by_text('截止範圍：「明天」（台灣時間），依作業參考期限篩選。', exact=True)
+    undated = preview.get_by_text('另有 1 筆無可核對的參考期限，無法依日期判斷。', exact=True)
+
+    async def ask(text):
+        await question.fill(text)
+        await query.click()
+        await expect(question).to_have_value('')
+
+    await ask('我明天還沒交的作業有哪些？')
+    await expect(rows).to_have_count(1)
+    pending = preview.get_by_role('button', name='查看作業：資料庫 · 明日資料整理報告', exact=True)
+    await expect(pending).to_be_visible()
+    await expect(pending.get_by_text('本次未見繳交紀錄 · 請到原頁核對', exact=True)).to_be_visible()
+    await expect(pending.get_by_text('參考期限 2026/11/8 上午10:00', exact=True)).to_be_visible()
+    await expect(tomorrow_scope).to_be_visible()
+    await expect(undated).to_be_visible()
+    for title in ['資料庫概念摘要', '下週索引練習', '期末報告', '期限待確認報告', '期限待確認摘要']:
+        await expect(preview.get_by_text(title, exact=True)).to_have_count(0)
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-tomorrow-pending.png'), full_page=True)
+
+    await ask('那已交的呢？')
+    await expect(rows).to_have_count(1)
+    received = preview.get_by_role('button', name='查看作業：資料庫 · 資料庫概念摘要', exact=True)
+    await expect(received).to_be_visible()
+    await expect(received.get_by_text('已載入繳交紀錄 · 繳交時間 2026/11/7 上午9:15', exact=True)).to_be_visible()
+    await expect(received.get_by_text('參考期限 2026/11/8 下午6:00', exact=True)).to_be_visible()
+    await expect(tomorrow_scope).to_be_visible()
+    await expect(undated).to_be_visible()
+    await expect(pending).to_have_count(0)
+    await expect(preview.get_by_text('期末報告', exact=True)).to_have_count(0)
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-tomorrow-received.png'), full_page=True)
+
+    # Explicitly establish the course and deadline meaning before changing only
+    # the date. A receipt's submission time is deliberately outside that week.
+    await ask('資料庫明天截止的已繳交作業有哪些？')
+    await expect(rows).to_have_count(1)
+    await expect(received).to_be_visible()
+    await expect(tomorrow_scope).to_be_visible()
+    await ask('那下週呢？')
+    await expect(rows).to_have_count(1)
+    next_week = preview.get_by_role('button', name='查看作業：資料庫 · 期末報告', exact=True)
+    await expect(next_week).to_be_visible()
+    await expect(next_week.get_by_text('已載入繳交紀錄 · 繳交時間 2026/11/6 下午5:30', exact=True)).to_be_visible()
+    await expect(next_week.get_by_text('參考期限 2026/11/10 下午6:00', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('截止範圍：「下週」（台灣時間），依作業參考期限篩選。', exact=True)).to_be_visible()
+    await expect(tomorrow_scope).to_have_count(0)
+    await expect(undated).to_be_visible()
+    await expect(partial).to_be_visible()
+    await expect(preview.get_by_role('button', name='查看作業：程式設計 · 期末報告', exact=True)).to_have_count(0)
+    for title in ['明日資料整理報告', '資料庫概念摘要', '下週索引練習', '期限待確認報告', '期限待確認摘要']:
+        await expect(preview.get_by_text(title, exact=True)).to_have_count(0)
+    await expect(preview.get_by_text('來源：本次載入的 nuni 課程繳交紀錄。未見紀錄不代表校方 LMS 已確認未交。', exact=True)).to_be_visible()
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-next-week-received.png'), full_page=True)
+    await next_week.focus()
+    await expect(next_week).to_be_focused()
+    await next_week.press('Enter')
+    events = await page.evaluate('window.qaEvents')
+    assert events == [{
+        'kind': 'receipt-date-open', 'courseId': 'receipt-database',
+        'activityId': 'database-next-week-received',
+    }], events
+    assert not errors and not external and not failed, [errors, external, failed]
+    for result in checks:
+        assert result['documentWidth'] <= width and not result['clipped'] and not result['smallControls'], result
+    await page.close()
+    return {'scenario': label, 'events': events, 'geometry': checks, 'pageErrors': errors,
+            'externalRequests': external, 'failedRequests': failed,
+            'fixtureScope': 'Real StudyAssignmentAssistant, receipt/date query services and ThemeProvider with a controlled loaded NuniStudyAgenda and fixed query clock; real status/date follow-ups and exact-ID open callback. No account authorization, live fetch, submission, destination or native-device verification.'}
+
+
 async def main():
     handler = functools.partial(QuietHandler, directory=str(ROOT))
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
@@ -495,6 +724,9 @@ async def main():
                 results.append(await platform_scenario(browser, port, width, mode))
                 results.append(await clock_scenario(browser, port, width, mode))
                 results.append(await assignment_scenario(browser, port, width, mode))
+                results.append(await quiz_scenario(browser, port, width, mode))
+                results.append(await receipt_scenario(browser, port, width, mode))
+                results.append(await receipt_date_query_scenario(browser, port, width, mode))
             await browser.close()
     finally:
         server.shutdown()

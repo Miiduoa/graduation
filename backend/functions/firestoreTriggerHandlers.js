@@ -1,13 +1,23 @@
 'use strict';
 
+const { isClosedAccount } = require('./campusStoryAccessBinding');
+
 function createUserProfileChangedHandler({
   syncAuthClaims,
   syncDirectoryEntriesForUser,
+  inactivateLeftoverSchoolMemberships,
   log = console,
 }) {
   return async function onUserProfileChanged(event) {
     const uid = event.params.uid;
     const afterData = event.data.after?.data();
+    const created = event.data.before?.exists !== true;
+    const shouldRevokeBinding =
+      !afterData || isClosedAccount(afterData) || created;
+
+    if (shouldRevokeBinding && typeof inactivateLeftoverSchoolMemberships === 'function') {
+      await inactivateLeftoverSchoolMemberships(uid);
+    }
 
     if (!afterData) {
       await syncDirectoryEntriesForUser(uid, null);
@@ -28,7 +38,11 @@ function createUserProfileChangedHandler({
   };
 }
 
-function createSchoolMembershipChangedHandler({ syncSchoolDirectoryEntry, log = console }) {
+function createSchoolMembershipChangedHandler({
+  syncSchoolDirectoryEntry,
+  syncProfileSchoolBinding,
+  log = console,
+}) {
   return async function onSchoolMembershipChanged(event) {
     const { schoolId, uid } = event.params;
     const membership = event.data.after?.data() || null;
@@ -41,6 +55,14 @@ function createSchoolMembershipChangedHandler({ syncSchoolDirectoryEntry, log = 
       });
     } catch (error) {
       log.error('Failed to sync school directory membership:', error);
+    }
+
+    if (typeof syncProfileSchoolBinding === 'function') {
+      try {
+        await syncProfileSchoolBinding({ schoolId, uid, membership });
+      } catch (error) {
+        log.error('Failed to sync profile school binding:', error);
+      }
     }
   };
 }

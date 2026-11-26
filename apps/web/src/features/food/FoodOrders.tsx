@@ -14,6 +14,7 @@ import type {
   NuniFoodPaymentSessionProjection,
   NuniFoodOrderState,
 } from '@campus/shared/src/nuniFood';
+import { NuniNextStep } from '@/components/NuniNextStep';
 import { Button } from '@/components/ui/Button';
 import { Select, Textarea } from '@/components/ui/Input';
 import type { FoodClient } from './FoodWorkspace';
@@ -30,20 +31,26 @@ import {
   type FoodDraftCache,
 } from './foodState';
 import { FoodOrderReceipt } from './FoodOrderReceipt';
+import { FoodPickupAgent } from './FoodPickupAgent';
 import styles from './Food.module.css';
 
 export function FoodOrders({
   client,
   cache,
   accountId,
+  context,
   tenantId,
   initialOrder,
+  orderHref,
 }: {
   client: FoodClient;
   cache: FoodDraftCache;
   accountId: string;
+  context?: string;
   tenantId: string;
   initialOrder: string;
+  /** A host page can keep its own URL while reusing the same order actions. */
+  orderHref?: (orderId?: string) => string;
 }) {
   const [state, setState] = useState('');
   const [pageCursors, setPageCursors] = useState<string[]>([]);
@@ -86,13 +93,18 @@ export function FoodOrders({
     window.history.replaceState(
       null,
       '',
-      `/food?tenant=${encodeURIComponent(tenantId)}&order=${encodeURIComponent(orderId)}`,
+      orderHref?.(orderId) ??
+        `/food?tenant=${encodeURIComponent(tenantId)}&order=${encodeURIComponent(orderId)}`,
     );
   }
 
   function closeOrder() {
     setSelected('');
-    window.history.replaceState(null, '', `/food?tenant=${encodeURIComponent(tenantId)}`);
+    window.history.replaceState(
+      null,
+      '',
+      orderHref?.() ?? `/food?tenant=${encodeURIComponent(tenantId)}`,
+    );
     queueMicrotask(() => {
       const target = returnFocusRef.current;
       returnFocusRef.current = null;
@@ -112,6 +124,7 @@ export function FoodOrders({
           client={client}
           cache={cache}
           accountId={accountId}
+          context={context}
           tenantId={tenantId}
           orderId={selected}
           onChange={orders.reload}
@@ -246,6 +259,7 @@ export function FoodOrderDetail({
   client,
   cache,
   accountId,
+  context,
   tenantId,
   orderId,
   onChange,
@@ -254,6 +268,7 @@ export function FoodOrderDetail({
   client: FoodClient;
   cache: FoodDraftCache;
   accountId: string;
+  context?: string;
   tenantId: string;
   orderId: string;
   onChange(): Promise<unknown>;
@@ -273,7 +288,7 @@ export function FoodOrderDetail({
   );
   const [detail, setDetail] = useFoodDraft(cache, `${scope}:reason-detail`, '');
   const [cancelConfirmed, setCancelConfirmed] = useState(false);
-  const [showToken, setShowToken] = useState(false);
+  const [visibleToken, setVisibleToken] = useState<string | null>(null);
   const now = useFoodClock();
   const [checkout, setCheckout] = useState<NuniFoodPaymentSessionProjection | null>(null);
   const task = useFoodMutation({
@@ -291,7 +306,7 @@ export function FoodOrderDetail({
         : client.createPaymentSession(tenantId, orderId, intent.input),
     onSuccess(result, intent) {
       setCancelConfirmed(false);
-      setShowToken(false);
+      setVisibleToken(null);
       if (intent.action === 'pay') setCheckout(result as NuniFoodPaymentSessionProjection);
     },
     onRejected() {
@@ -316,6 +331,41 @@ export function FoodOrderDetail({
       })
     : '';
   const inProgress = receipt ? isFoodOrderInProgress(receipt.state) : false;
+  const suggestReadyPickup = receipt?.state === 'ready';
+  const refreshButton = (
+    <Button
+      disabled={task.busy || order.loading}
+      onClick={() => {
+        setVisibleToken(null);
+        setCheckout(null);
+        void order.reload();
+      }}
+    >
+      更新這筆訂單
+    </Button>
+  );
+  const credential = token && (
+    <div className={styles.pickupBlock}>
+      <Button
+        variant="primary"
+        disabled={locked}
+        aria-expanded={visibleToken === token.token}
+        onClick={() => setVisibleToken((value) => value === token.token ? null : token.token)}
+      >
+        {visibleToken === token.token ? '隱藏取餐憑證' : '出示取餐憑證'}
+      </Button>
+      {visibleToken === token.token && (
+        <>
+          <p>請只交給這間店的店員。取餐號碼不能取代這份一次性憑證。</p>
+          <code className={styles.token} aria-label="一次性取餐憑證">
+            {token.token}
+          </code>
+          <PickupQr token={token.token} />
+          <p>有效至 {foodTime(token.expiresAt)}</p>
+        </>
+      )}
+    </div>
+  );
   return (
     <section ref={panelRef} className={styles.panel} aria-label="訂單詳情" tabIndex={-1}>
       <div className={styles.bar}>
@@ -329,16 +379,7 @@ export function FoodOrderDetail({
           <Button disabled={task.busy} onClick={onBack}>
             返回訂單列表
           </Button>
-          <Button
-            disabled={task.busy || order.loading}
-            onClick={() => {
-              setShowToken(false);
-              setCheckout(null);
-              void order.reload();
-            }}
-          >
-            更新這筆訂單
-          </Button>
+          {(!suggestReadyPickup || token) && refreshButton}
         </div>
       </div>
       {order.loading && <p role="status">正在確認訂單…</p>}
@@ -346,10 +387,12 @@ export function FoodOrderDetail({
       <FoodMutationStatus task={task} />
       {receipt && (
         <div className={styles.stack}>
-          <div className={styles.nextStepBanner} role="status">
-            <p className={styles.eyebrow}>下一步</p>
-            <p>{nextStep}</p>
-          </div>
+          {!suggestReadyPickup && (
+            <div className={styles.nextStepBanner} role="status">
+              <p className={styles.eyebrow}>下一步</p>
+              <p>{nextStep}</p>
+            </div>
+          )}
           <div>
             <h3>
               {receipt.locationName} · {foodStateLabels[receipt.state]}
@@ -362,6 +405,25 @@ export function FoodOrderDetail({
               預計取餐 {foodTime(receipt.requestedPickupAt)} · 取餐號碼 {receipt.pickup.displayCode}
             </p>
           </div>
+          {suggestReadyPickup && (
+            <NuniNextStep reason={token
+              ? `「${receipt.locationName}」的餐點已備妥，請在櫃檯出示取餐憑證。`
+              : `「${receipt.locationName}」的餐點已備妥，請更新這筆訂單，重新確認取餐憑證。`}>
+              {credential || refreshButton}
+            </NuniNextStep>
+          )}
+          {context && (
+            <FoodPickupAgent
+              context={context}
+              accountId={accountId}
+              tenantId={tenantId}
+              orderId={receipt.id}
+              available={['paid', 'accepted', 'preparing', 'ready'].includes(receipt.state) &&
+                Date.parse(receipt.requestedPickupAt) > now}
+              suggestion={receipt.state === 'ready' ? null
+                : `「${receipt.locationName}」這筆訂單預計 ${foodTime(receipt.requestedPickupAt)} 取餐。可以先確認取餐時間會不會和課表或行事曆撞期。`}
+            />
+          )}
           <p className={styles.amount}>訂單總額 {foodMoney(receipt.total)}</p>
           {receipt.state === 'payment-pending' &&
             !(
@@ -425,30 +487,7 @@ export function FoodOrderDetail({
               。叫號不代表已取餐。
             </p>
           )}
-          {token && (
-            <div className={styles.pickupBlock}>
-              <Button
-                variant="primary"
-                disabled={locked}
-                onClick={() => setShowToken((value) => !value)}
-              >
-                {showToken ? '隱藏取餐憑證' : '出示取餐憑證'}
-              </Button>
-              {showToken && (
-                <>
-                  <p>請只交給這間店的店員。取餐號碼不能取代這份一次性憑證。</p>
-                  <code className={styles.token} aria-label="一次性取餐憑證">
-                    {token.token}
-                  </code>
-                  <PickupQr token={token.token} />
-                  <p>有效至 {foodTime(token.expiresAt)}</p>
-                </>
-              )}
-            </div>
-          )}
-          {receipt.state === 'ready' && !token && (
-            <p>取餐憑證目前無法使用，請更新這筆訂單取得最新狀態。</p>
-          )}
+          {!suggestReadyPickup && credential}
           {receipt.allowedActions.includes('cancel') && (
             <div className={styles.fields}>
               <h3>取消這筆訂單</h3>

@@ -1,7 +1,7 @@
 /**
  * TronClass 連線總開關（建置期／口試 demo 可關閉一切 LMS 網路）。
  *
- * - `app.config.ts` 注入 `extra.tronClassDataEnabled`（來自 `EXPO_PUBLIC_TRONCLASS_DATA_ENABLED`，預設 true）
+ * - `app.config.ts` 注入 `extra.tronClassDataEnabled`（來自 `EXPO_PUBLIC_TRONCLASS_DATA_ENABLED`，僅在明確為 true 時開啟，預設 false）
  * - `tronClassClient` / `studentIdAuth` / `puDataCache.ensureTronClassSession` 統一讀此旗標
  */
 import Constants from 'expo-constants';
@@ -10,9 +10,8 @@ export const TRONCLASS_DATA_DISABLED_MESSAGE = '目前已停用 LMS（TronClass�
 
 export function isTronClassDataFetchEnabled(): boolean {
   const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, unknown>;
-  if (extra.tronClassDataEnabled === false) return false;
   if (extra.tronClassDataEnabled === true) return true;
-  return true;
+  return false;
 }
 
 const TRONCLASS_PU_HOST = 'tronclass.pu.edu.tw';

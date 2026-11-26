@@ -1,3 +1,4 @@
+import { requestPersonalImportCloudImage } from '@campus/shared/src/imports/aiCloudImage';
 import {
   NuniError,
   nuniId,
@@ -13,9 +14,19 @@ import {
   parseNuniLoginTransaction,
   type NuniTransport,
 } from './nuniClient';
+import {
+  requestNativeTronClassDownload,
+  requestNativeTronClassSubmissionDownload,
+  validNativeTronClassSubmissionDownload,
+  type NativeTronClassDownloadInput,
+  type NativeTronClassSubmissionDownloadInput,
+  type NativeTronClassDownloadedFile,
+} from './tronClassNativeDownload';
 
 export type NativeNuniSession = NuniPrincipal & { context: string; expiresAt: number };
 export type NativeNuniState = {
+  /** Changes only after a successful interactive sign-in. */
+  signInGeneration?: number;
   session: NativeNuniSession | null;
   loading: boolean;
   error: string;
@@ -44,6 +55,8 @@ export type NuniSessionDependencies = {
     /** Release the cleanup barrier after both local cleanup and logout have settled. */
     end(): void;
   };
+  /** Revoke in-memory input synchronously, including callbacks held by closed routes. */
+  invalidateLocalDrafts(): void;
   request: NuniTransport;
   credential(clientId: string, nonce: string): Promise<string>;
   clearCredential(): Promise<void>;
@@ -78,6 +91,9 @@ export class NuniSessionController {
   private logoutPending = false;
   private savedPlansCleanupFailed = false;
   private disposed = false;
+  private localDraftsRevoked = true;
+  private credentialCleanups = 0;
+  private refreshAfterCleanup = false;
   private readonly now: () => number;
   constructor(private readonly deps: NuniSessionDependencies) {
     this.now = deps.now ?? Date.now;
@@ -89,8 +105,10 @@ export class NuniSessionController {
     };
   };
   private update(next: NativeNuniState) {
-    this.state = next;
-    if (!this.disposed) for (const listener of this.listeners) listener(next);
+    const signInGeneration = next.signInGeneration ?? this.state.signInGeneration;
+    const state = signInGeneration === undefined ? next : { ...next, signInGeneration };
+    this.state = state;
+    if (!this.disposed) for (const listener of this.listeners) listener(state);
   }
   private invalidate() {
     ++this.generation;
@@ -142,6 +160,17 @@ export class NuniSessionController {
     this.invalidate();
     this.update(next);
   }
+  private revokeLocalDrafts() {
+    this.localDraftsRevoked = true;
+    this.deps.invalidateLocalDrafts();
+  }
+  /** Retention is not authorization: masked revalidation can keep input but cannot send it. */
+  canRetainLocalDrafts = (accountId: string): boolean => {
+    return !this.disposed && !this.localDraftsRevoked && !this.loggingOut &&
+      !this.logoutPending && !this.state.pendingLogout && !!this.record &&
+      !this.record.pendingLogout && this.record.platformAccountId === accountId &&
+      this.record.expiresAt > this.now();
+  };
   // A transient foreground refresh or offline verification must preserve the owner's local alarms.
   localReminderOwner(): string | null | undefined {
     if (this.loggingOut || this.state.pendingLogout) return null;
@@ -159,6 +188,8 @@ export class NuniSessionController {
   };
   activate = () => {
     this.disposed = false;
+    // React can reactivate a provider while an earlier secure deletion is pending.
+    if (this.credentialCleanups) this.refreshAfterCleanup = true;
   };
   private async save() {
     if (this.record) await this.deps.storage.write(JSON.stringify(this.record));
@@ -194,12 +225,22 @@ export class NuniSessionController {
     }
   }
   private async forget() {
-    await this.deps.storage.clear();
-    this.record = null;
-    this.storageRead = true;
+    ++this.credentialCleanups;
+    try {
+      await this.deps.storage.clear();
+      this.record = null;
+      this.storageRead = true;
+    } finally {
+      --this.credentialCleanups;
+      if (!this.credentialCleanups && this.refreshAfterCleanup && !this.disposed) {
+        this.refreshAfterCleanup = false;
+        void this.refresh();
+      }
+    }
   }
   refresh = async (): Promise<void> => {
-    if (this.signingIn || this.loggingOut || this.disposed) return;
+    if (this.signingIn || this.loggingOut || this.disposed || this.credentialCleanups) return;
+    if (this.record && this.record.expiresAt <= this.now()) this.revokeLocalDrafts();
     const live = this.liveVerifiedSession();
     const run = live ? this.generation : this.invalidate();
     if (!live) {
@@ -228,6 +269,7 @@ export class NuniSessionController {
       // A fence without a credential can still mean local plans were not removed.
       // Only an explicit, successful cleanup retry may release this intent.
       if (this.logoutPending) {
+        this.revokeLocalDrafts();
         finish({
           session: null,
           loading: false,
@@ -239,10 +281,12 @@ export class NuniSessionController {
         return;
       }
       if (!this.record) {
+        this.revokeLocalDrafts();
         finish({ session: null, loading: false, error: '', pendingLogout: false });
         return;
       }
       if (this.record.expiresAt <= this.now()) {
+        this.revokeLocalDrafts();
         await this.forget();
         if (this.current(run))
           finish({
@@ -262,6 +306,7 @@ export class NuniSessionController {
         (live && principal.platformAccountId !== live.platformAccountId)
       )
         throw new NuniError(409, 'SESSION_CHANGED');
+      this.localDraftsRevoked = false;
       this.update({
         session: {
           ...principal,
@@ -277,12 +322,31 @@ export class NuniSessionController {
       const closed =
         error instanceof NuniError && (error.status === 401 || error.status === 409);
       if (live && !closed) return;
-      if (error instanceof NuniError && error.status === 401) {
-        try {
-          await this.forget();
-        } catch {
-          /* Retain a hidden session until secure deletion can be retried. */
+      if (closed) {
+        this.revokeLocalDrafts();
+        const closedRun = this.invalidate();
+        const rejectedState: NativeNuniState = {
+          session: null,
+          loading: false,
+          error: '無法確認登入狀態，請重新連線後再試。',
+          pendingLogout: this.logoutPending || !!this.record?.pendingLogout,
+        };
+        if (error.status === 401) {
+          // Stop using the revoked authority before waiting for Keychain/Keystore.
+          // The cleanup fence also prevents another login from being erased by
+          // this deletion after a concurrent logout has already finished.
+          const cleanup = this.forget();
+          this.update({ ...rejectedState, loading: true });
+          try {
+            await cleanup;
+          } catch {
+            /* Retain a hidden credential until secure deletion can be retried. */
+          }
+          if (this.current(closedRun)) this.update(rejectedState);
+        } else {
+          this.update(rejectedState);
         }
+        return;
       }
       if (this.current(run))
         finish({
@@ -294,9 +358,10 @@ export class NuniSessionController {
     }
   };
   signIn = async (): Promise<'signed-in' | 'cancelled'> => {
-    if (this.disposed || this.signingIn || this.loggingOut || this.state.loading)
+    if (this.disposed || this.signingIn || this.loggingOut || this.state.loading || this.credentialCleanups)
       throw new NuniError(409, 'SIGN_IN_BUSY');
     if (this.record || this.state.pendingLogout) throw new NuniError(409, 'SIGN_OUT_REQUIRED');
+    this.revokeLocalDrafts();
     this.signingIn = true;
     const run = this.invalidate();
     let issued: StoredSession | null = null;
@@ -325,6 +390,7 @@ export class NuniSessionController {
         expiresAt: this.now() + result.expiresInSeconds * 1000,
         pendingLogout: false,
       };
+      // Platform Google stores sessionHandle only. No Firebase customToken or uid.
       if (!this.current(run)) throw new NuniError(409, 'SESSION_CHANGED');
       const principal = parseNuniPrincipal(
         await this.call('sessions/current', issued.sessionHandle),
@@ -336,8 +402,10 @@ export class NuniSessionController {
       await this.save();
       if (!this.current(run)) throw new NuniError(409, 'SESSION_CHANGED');
       this.storageRead = true;
+      this.localDraftsRevoked = false;
       this.update({
         session: { ...principal, context: `native-${this.now()}-${run}`, expiresAt: this.record.expiresAt },
+        signInGeneration: run,
         loading: false,
         error: '',
         pendingLogout: false,
@@ -390,6 +458,7 @@ export class NuniSessionController {
   };
   logout = async (): Promise<void> => {
     if (this.loggingOut || this.disposed) return;
+    this.revokeLocalDrafts();
     this.loggingOut = true;
     const run = this.invalidate();
     this.logoutPending = true;
@@ -456,13 +525,49 @@ export class NuniSessionController {
       this.loggingOut = false;
     }
   };
+  recognizeImportImage = async (
+    expectedContext: string,
+    input: Pick<Parameters<typeof requestPersonalImportCloudImage>[0],
+      'base64' | 'mime' | 'kind' | 'academicYear' | 'semester' | 'explicitConsent' | 'signal'>,
+  ) => {
+    const session = this.state.session;
+    if (!session || session.context !== expectedContext || this.state.loading ||
+      this.state.pendingLogout || !this.record) throw new NuniError(409, 'SESSION_CHANGED');
+    if (this.record.expiresAt <= this.now()) {
+      await this.refresh();
+      throw new NuniError(401, 'SESSION_EXPIRED');
+    }
+    const run = this.generation;
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    input.signal?.addEventListener('abort', cancel, { once: true });
+    if (input.signal?.aborted) controller.abort();
+    this.controllers.add(controller);
+    try {
+      const result = await requestPersonalImportCloudImage({
+        ...input,
+        endpoint: 'https://nuni.tw/api/personal-import/recognize-image',
+        headers: { Authorization: 'Platform ' + this.record.sessionHandle },
+        signal: controller.signal,
+      });
+      if (!this.current(run) || this.state.session?.context !== expectedContext)
+        throw new NuniError(409, 'SESSION_CHANGED');
+      if (result.ok === false && result.reason === 'unauthenticated') await this.refresh();
+      return result;
+    } finally {
+      input.signal?.removeEventListener('abort', cancel);
+      this.controllers.delete(controller);
+    }
+  };
   bffRequest = async (
     path: string,
     expectedContext: string,
     input?: Record<string, unknown>,
     _method?: 'PUT',
     _query?: Record<string, string>,
+    signal?: AbortSignal,
   ): Promise<unknown> => {
+    if (signal?.aborted) throw new NuniError(499, 'REQUEST_CANCELLED');
     const session = this.state.session;
     if (
       !session ||
@@ -480,6 +585,8 @@ export class NuniSessionController {
     const run = this.generation;
     try {
       const controller = new AbortController();
+      const abort = () => controller.abort();
+      signal?.addEventListener('abort', abort, { once: true });
       this.controllers.add(controller);
       try {
         const result = await nuniBffRequest(
@@ -490,14 +597,79 @@ export class NuniSessionController {
         );
         if (!this.current(run) || this.state.session?.context !== expectedContext)
           throw new NuniError(409, 'SESSION_CHANGED');
+        if (controller.signal.aborted) throw new NuniError(499, 'REQUEST_CANCELLED');
         return result;
       } finally {
+        signal?.removeEventListener('abort', abort);
         this.controllers.delete(controller);
       }
     } catch (error) {
       if (!this.current(run)) throw new NuniError(409, 'SESSION_CHANGED');
+      if (signal?.aborted) throw new NuniError(499, 'REQUEST_CANCELLED');
       if (error instanceof NuniError && error.status === 401) await this.refresh();
       throw error;
+    }
+  };
+  /** An exact binary capability, not an arbitrary authenticated URL fetch. */
+  tronClassDownload = async (
+    input: NativeTronClassDownloadInput,
+    expectedContext: string,
+  ): Promise<NativeTronClassDownloadedFile> => {
+    const session = this.state.session;
+    if (!session || !this.record || !this.isSessionCurrent(session.platformAccountId, expectedContext))
+      throw new NuniError(409, 'SESSION_CHANGED');
+    const run = this.generation;
+    const controller = new AbortController();
+    this.controllers.add(controller);
+    try {
+      return await requestNativeTronClassDownload(
+        `Platform ${this.record.sessionHandle}`,
+        input,
+        () => this.current(run) && this.isSessionCurrent(session.platformAccountId, expectedContext),
+        controller.signal,
+      );
+    } catch (error) {
+      if (!this.current(run)) throw new NuniError(409, 'SESSION_CHANGED');
+      if (error instanceof NuniError && error.status === 401) await this.refresh();
+      throw error;
+    } finally { this.controllers.delete(controller); }
+  };
+  tronClassSubmissionDownload = async (
+    input: NativeTronClassSubmissionDownloadInput,
+    expectedContext: string,
+    signal?: AbortSignal,
+  ): Promise<NativeTronClassDownloadedFile> => {
+    if (!validNativeTronClassSubmissionDownload(input))
+      throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+    const session = this.state.session;
+    if (signal?.aborted || !session || !this.record ||
+      !this.isSessionCurrent(session.platformAccountId, expectedContext))
+      throw new NuniError(409, 'SESSION_CHANGED');
+    const run = this.generation;
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    this.controllers.add(controller);
+    try {
+      const result = await requestNativeTronClassSubmissionDownload(
+        `Platform ${this.record.sessionHandle}`,
+        input,
+        () => !controller.signal.aborted && this.current(run) &&
+          this.isSessionCurrent(session.platformAccountId, expectedContext),
+        controller.signal,
+      );
+      if (controller.signal.aborted || !this.current(run) ||
+        !this.isSessionCurrent(session.platformAccountId, expectedContext))
+        throw new NuniError(409, 'SESSION_CHANGED');
+      return result;
+    } catch (error) {
+      if (!this.current(run) || signal?.aborted)
+        throw new NuniError(409, 'SESSION_CHANGED');
+      if (error instanceof NuniError && error.status === 401) await this.refresh();
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', abort);
+      this.controllers.delete(controller);
     }
   };
   upload = async (
@@ -505,6 +677,7 @@ export class NuniSessionController {
     expectedContext: string,
     body: Uint8Array,
     contentType: string,
+    query?: Record<string, string>,
   ): Promise<unknown> => {
     const session = this.state.session;
     if (
@@ -531,6 +704,7 @@ export class NuniSessionController {
           body,
           contentType,
           controller.signal,
+          query,
         );
         if (!this.current(run) || this.state.session?.context !== expectedContext)
           throw new NuniError(409, 'SESSION_CHANGED');
@@ -579,6 +753,7 @@ export class NuniSessionController {
   };
   dispose = () => {
     this.disposed = true;
+    this.revokeLocalDrafts();
     this.invalidate();
     this.listeners.clear();
   };

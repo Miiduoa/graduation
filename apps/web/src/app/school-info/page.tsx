@@ -92,15 +92,10 @@ function SchoolInfoContent({ schoolId, schoolName, status }: CampusBrowseContext
     >
       <div className={`pageStack ${styles.page}`}>
         <div className={styles.plaque} data-testid="school-info-plaque">
-          <span className={styles.fasteners} aria-hidden="true">
-            <span />
-            <span />
-            <span />
-            <span />
-          </span>
           <section className={styles.identity}>
             <p className="eyebrow">{info.academicYear} 學年度名錄</p>
             <h2>{info.name}</h2>
+            <p className={styles.fieldLabel}>機構地址</p>
             <p className={styles.address}>
               {city}
               <br />
@@ -143,42 +138,46 @@ function SchoolInfoContent({ schoolId, schoolName, status }: CampusBrowseContext
         </div>
 
         {career ? (
-          <section className="card">
-            <h2>校方職涯資訊</h2>
-            <p>
-              {career.entryKind === 'student-portal-fallback'
-                ? '請在臺大學生專區查找職涯與實習資訊。'
-                : '職缺、實習與諮詢資訊請到所選學校官方網站查看。'}
-            </p>
-            <a className="btn" href={career.url} target="_blank" rel="noopener noreferrer">
-              {career.label} ↗
-            </a>
-            <p style={{ color: 'var(--muted)', fontSize: 14 }}>來源：{career.sourceLabel}</p>
+          <section className={styles.entry} aria-labelledby="school-info-career">
+            <h2 id="school-info-career">校方職涯資訊</h2>
+            <div className={styles.entryBody}>
+              <p>
+                {career.entryKind === 'student-portal-fallback'
+                  ? '請在臺大學生專區查找職涯與實習資訊。'
+                  : '職缺、實習與諮詢資訊請到所選學校官方網站查看。'}
+              </p>
+              <a className="btn" href={career.url} target="_blank" rel="noopener noreferrer">
+                {career.label} ↗
+              </a>
+              <p className={styles.meta}>來源：{career.sourceLabel}</p>
+            </div>
           </section>
         ) : null}
 
-        <section className="card">
-          <h2>資料來源</h2>
-          <p style={{ color: 'var(--muted)', lineHeight: 1.8 }}>
-            資料來自教育部統計處大專校院名錄（{info.academicYear} 學年度），快照日期{' '}
-            {PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE}
-            。此頁提供公開聯絡方式；校務服務依學校目前開放項目使用。
-          </p>
-          <PublicSourceNotice
-            sourceLabel={`教育部統計處大專校院名錄（${info.academicYear} 學年度）`}
-            confirmedAt={PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE}
-            timeLabel="最後確認（名錄快照）"
-            officialUrl={websiteUrl}
-            officialLabel="官方網站"
-          />
-          <a
-            className="btn"
-            href={PUBLIC_SCHOOL_INFO_CATALOG_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            政府資料開放平台名錄 ↗
-          </a>
+        <section className={styles.entry} aria-labelledby="school-info-source">
+          <h2 id="school-info-source">資料來源</h2>
+          <div className={styles.entryBody}>
+            <p className={styles.meta}>
+              資料來自教育部統計處大專校院名錄（{info.academicYear} 學年度），快照日期{' '}
+              {PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE}
+              。此頁提供公開聯絡方式；校務服務依學校目前開放項目使用。
+            </p>
+            <PublicSourceNotice
+              sourceLabel={`教育部統計處大專校院名錄（${info.academicYear} 學年度）`}
+              confirmedAt={PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE}
+              timeLabel="最後確認（名錄快照）"
+              officialUrl={websiteUrl}
+              officialLabel="官方網站"
+            />
+            <a
+              className="btn"
+              href={PUBLIC_SCHOOL_INFO_CATALOG_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              政府資料開放平台名錄 ↗
+            </a>
+          </div>
         </section>
       </div>
     </SiteShell>

@@ -112,12 +112,111 @@ function parseTimeToHHmm(text) {
   return null;
 }
 
-function addHoursToHHmm(hhmm, hoursToAdd) {
-  const [h, m] = hhmm.split(':').map(Number);
-  const total = h * 60 + m + hoursToAdd * 60;
-  const nh = Math.floor(total / 60) % 24;
-  const nm = total % 60;
-  return `${pad2(nh)}:${pad2(nm)}`;
+function seatClockMinutes(match, inheritedPeriod) {
+  let hour = parseCnHourToken(match[2]);
+  const minute = match[3] !== undefined ? Number(match[3])
+    : match[4] === '半' ? 30 : match[4] ? parseCnHourToken(match[4]) : 0;
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23 ||
+      !Number.isInteger(minute) || minute < 0 || minute > 59) return null;
+  const period = match[1] || inheritedPeriod;
+  if (period) {
+    if ((hour === 0 && period !== '凌晨') || (hour === 12 && /晚上|傍晚/.test(period))) return null;
+    if (/凌晨|早上|上午/.test(period)) {
+      if (hour > 12) return null;
+      if (period === '凌晨' && hour === 12) hour = 0;
+    } else if (period === '中午') {
+      if (hour === 1) hour = 13;
+      else if (hour !== 11 && hour !== 12) return null;
+    } else if (hour < 12) hour += 12;
+  }
+  return hour * 60 + minute;
+}
+
+/** Seat-only grammar: never change the parsing policy of other write tools. */
+function seatTimeRange(raw, consume) {
+  const clocks = [...raw.matchAll(/(?:(凌晨|早上|上午|中午|下午|傍晚|晚上)\s*)?([0-9零一二三四五六七八九十兩]{1,3})\s*(?::\s*(\d{2})|(?:點|時)(?:\s*(半|[0-9零一二三四五六七八九十兩]{1,3})\s*分?)?)/g)];
+  if (clocks.length < 1 || clocks.length > 2) return null;
+  for (const clock of clocks) {
+    // Reject partial matches such as 14:000, 1.5點, 3點一刻 or 14:00:30.
+    const before = raw[clock.index - 1] || '';
+    const after = raw[clock.index + clock[0].length] || '';
+    if (/[0-9零一二三四五六七八九十兩.]/.test(before) || /[0-9零一二三四五六七八九十兩:刻秒鐘半]/.test(after)) return null;
+  }
+  const start = seatClockMinutes(clocks[0]);
+  if (start === null) return null;
+  const durations = [...raw.matchAll(/(?<![0-9零一二三四五六七八九十兩.個])(?:(半)\s*小時|([0-9零一二三四五六七八九十兩]{1,4})\s*(?:個)?小時(?:\s*([0-9零一二三四五六七八九十兩]{1,3})\s*分(?:鐘)?)?|([0-9零一二三四五六七八九十兩]{1,4})\s*分鐘)(?![0-9.])/g)];
+  if (durations.length > 1) return null;
+  let duration = null;
+  if (durations.length) {
+    const value = durations[0];
+    if (/[+\-−]/.test(raw[value.index - 1] || '') ||
+        /^\s*(?:又|再)?\s*(?:半|[0-9零一二三四五六七八九十兩百千]|秒|刻)/.test(raw.slice(value.index + value[0].length))) return null;
+    const count = token => /^\d+$/.test(token) ? Number(token) : parseCnHourToken(token);
+    duration = value[1] ? 30 : value[2] ? count(value[2]) * 60 + (value[3] ? count(value[3]) : 0) : count(value[4]);
+    if (!Number.isInteger(duration) || duration <= 0 || duration >= 1440) return null;
+  }
+  let end;
+  if (clocks.length === 2) {
+    const connector = raw.slice(clocks[0].index + clocks[0][0].length, clocks[1].index).trim();
+    if (!/^(?:到|至|[-~–—])$/.test(connector)) return null;
+    end = seatClockMinutes(clocks[1], clocks[0][1]);
+    if (duration !== null && end - start !== duration) return null;
+  } else {
+    if (duration === null || /到|至|[~–—]/.test(raw)) return null;
+    end = start + duration;
+  }
+  if (end === null || end <= start || end >= 1440) return null;
+  for (const match of [...clocks, ...durations]) consume(match.index, match[0].length);
+  if (clocks.length === 2) consume(clocks[0].index + clocks[0][0].length,
+    clocks[1].index - clocks[0].index - clocks[0][0].length);
+  const clock = minutes => `${pad2(Math.floor(minutes / 60))}:${pad2(minutes % 60)}`;
+  return { startTime: clock(start), endTime: clock(end) };
+}
+
+function explicitSeatId(raw, consume) {
+  const ids = new Set();
+  const labels = [...raw.matchAll(/(?:座位(?:編號|代碼|ID)?|seat(?:Id|\s+id)?)\s*[:#]\s*([^\s,，。；;]+)/gi)];
+  for (const match of labels) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(match[1])) return null;
+    ids.add(match[1]);
+    consume(match.index, match[0].length);
+  }
+  for (const match of raw.matchAll(/\b((?:lib|seat)[-_][A-Za-z0-9_-]+)\b/gi)) {
+    if (/[A-Za-z0-9_./%\\-]/.test(raw[match.index - 1] || '') ||
+        !/^(?:[\s,，。;；!?！？、）)]|$)/.test(raw.slice(match.index + match[0].length))) return null;
+    ids.add(match[1]);
+    consume(match.index, match[0].length);
+  }
+  // Preserve the existing explicit third-floor A-row convention, including A-15.
+  // Merely naming a floor never selects a seat.
+  for (const match of raw.matchAll(/(?:三|3)\s*(?:樓|F)\s*A\s*-?\s*(\d{1,3})(?!\d)/gi)) {
+    if (/[A-Za-z0-9_.]/.test(raw[match.index - 1] || '') ||
+        !/^(?:[\s,，。;；!?！？、）)]|$)/.test(raw.slice(match.index + match[0].length))) return null;
+    ids.add(`lib-3F-A${match[1]}`);
+    consume(match.index, match[0].length);
+  }
+  return ids.size === 1 ? [...ids][0] : null;
+}
+
+function explicitSeatDate(raw, seatId, timeZone, consume) {
+  // A date embedded in an exact seat ID is never a requested reservation date.
+  const source = raw.replaceAll(seatId, ' '.repeat(seatId.length));
+  if (/\d{4}\s*年|隔天|隔日|次日/.test(source)) return null;
+  const dates = [...source.matchAll(/\d{4}[./-]\d{1,2}[./-]\d{1,2}|\d{1,2}\s*[/月]\s*\d{1,2}(?:日|號)?|明天|翌日|今天|今日|後天/g)];
+  if (dates.length !== 1) return null;
+  const mention = dates[0], after = source.slice(mention.index + mention[0].length);
+  if (/\d/.test(mention[0]) && (/[A-Za-z0-9_./-]/.test(source[mention.index - 1] || '') || /^[A-Za-z0-9_./-]/.test(after))) return null;
+  if (/^\s*(?:到|至|和|與|及|、|[-~–—])\s*\d/.test(after)) return null;
+  const monthDay = mention[0].match(/^(\d{1,2})\s*[/月]\s*(\d{1,2})(?:日|號)?$/);
+  // Omitted years belong to the selected timezone, not the server's local year.
+  const date = monthDay
+    ? `${todayYmd(timeZone).slice(0, 4)}-${pad2(Number(monthDay[1]))}-${pad2(Number(monthDay[2]))}`
+    : resolveDateFromText(mention[0], timeZone);
+  if (!date) return null;
+  const day = new Date(`${date}T00:00:00.000Z`);
+  if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0, 10) !== date) return null;
+  consume(mention.index, mention[0].length);
+  return date;
 }
 
 /**
@@ -126,24 +225,20 @@ function addHoursToHHmm(hhmm, hoursToAdd) {
  * @returns {{ seatId: string, date: string, startTime: string, endTime: string } | null}
  */
 function resolveReserveSeatInput(lastUserMessage, timeZone) {
-  const raw = String(lastUserMessage ?? '');
-  const date = resolveDateFromText(raw, timeZone);
-  const startTime = parseTimeToHHmm(raw);
-  if (!date || !startTime) return null;
-
-  let seatId = null;
-  const libSeat = raw.match(/(?:圖書館|自習)?\s*(?:三|3)\s*[樓Ff]\s*[AaＡ-]\s*(\d{1,3})/i);
-  if (libSeat) seatId = `lib-3F-A${libSeat[1]}`;
-  const explicit = raw.match(/([A-Za-z]+[-]?[0-9A-Za-z]+[-]?[0-9A-Za-z]+)/);
-  if (!seatId && explicit && /lib|seat|F|樓/i.test(raw)) seatId = explicit[1].replace(/\s+/g, '');
-
-  if (!seatId && (/隨便|任一|任意|都可以/.test(raw) || /圖書館三樓/.test(raw))) {
-    seatId = 'lib-3F-A01';
-  }
+  const raw = String(lastUserMessage ?? '').normalize('NFKC');
+  let remainder = raw;
+  const consume = (index, length) => {
+    remainder = remainder.slice(0, index) + ' '.repeat(length) + remainder.slice(index + length);
+  };
+  const seatId = explicitSeatId(raw, consume);
   if (!seatId) return null;
-
-  const endTime = addHoursToHHmm(startTime, 2);
-  return { seatId, date, startTime, endTime };
+  const date = explicitSeatDate(raw, seatId, timeZone, consume), range = seatTimeRange(raw, consume);
+  if (!date || !range) return null;
+  // Accept a small positive request grammar only. Unconsumed qualifiers, dates,
+  // IDs, time zones, negations and conditions must never silently change intent.
+  remainder = remainder.replace(/我想要|我想|我要|幫我|幫忙|請|預約|訂位|座位|圖書館|自習室|自習|從|開始|借用|使用|一下|謝謝|於|的/g, '')
+    .replace(/[\s,，。:;；!?！？、（）()]/g, '');
+  return remainder ? null : { seatId, date, ...range };
 }
 
 /**
@@ -230,6 +325,42 @@ function resolveRepairInput(lastUserMessage) {
   };
 }
 
+/** Return exact document IDs, or null for an unsupported explicit selector. */
+function washingMachineIdsFromText(raw) {
+  // Dates such as 11月18號 describe the requested time, not a machine number.
+  raw = raw.replace(/(?:[0-9]{4}年)?[0-9]{1,2}月[0-9]{1,2}[日號]?/g, ' ');
+  // Ordinals and display numbers are not document IDs. Ask for the ID instead of guessing.
+  if (/(?:第\s*[0-9０-９零一二三四五六七八九十兩]+\s*[台部個]|[0-9０-９零一二三四五六七八九十兩]+\s*號)/.test(raw)) return null;
+  const ids = new Set();
+  for (const match of raw.matchAll(/(?:洗衣機|機台(?:編號)?|機號|編號)\s*[:：#]?\s*[「『《"]([^」』》"]+)[」』》"]/g)) {
+    if (!/^[A-Za-z0-9_.-]{1,128}$/.test(match[1])) return null;
+    ids.add(match[1]);
+  }
+  for (const match of raw.matchAll(/(?:機台(?:編號)?|機號|編號)\s*[:：#]?\s*([^\s:：#])/g)) {
+    if (!/[A-Za-z0-9Ａ-Ｚａ-ｚ０-９_「『《"]/.test(match[1])) return null;
+  }
+  for (const match of raw.matchAll(/[A-Za-zＡ-Ｚａ-ｚ0-9０-９_./-]+/g)) {
+    const token = match[0];
+    const before = raw.slice(0, match.index);
+    const after = raw.slice(match.index + token.length);
+    if (/^\s*[棟樓層]/.test(after)) continue;
+    const labeled = /(?:洗衣機|機台(?:編號)?|機器|機號|編號)\s*[:：#]?\s*$/.test(before) ||
+      /^\s*(?:號)?(?:洗衣機|機台)/.test(after);
+    const inList = /(?:或|和|及|跟|與|、|,|，|\+)\s*$/.test(before) ||
+      /^\s*(?:或|和|及|跟|與|、|,|，|\+)/.test(after);
+    const isTimeOrDate = /^(?:[0-9]{4}[./-])?[0-9]{1,2}[./-][0-9]{1,2}$/.test(token) ||
+      (/^[0-9]+$/.test(token) && (/^\s*(?:[:：][0-9]{2}|[點時分年月日])/.test(after) || /[0-9]{1,2}\s*[:：]\s*$/.test(before)));
+    if ((/[A-Za-zＡ-Ｚａ-ｚ]/.test(token) && /[0-9０-９_-]/.test(token)) || ((labeled || inList) && !isTimeOrDate)) {
+      // Keep case and the complete token: A2 is not A20, a2, or a path ending in A2.
+      if (token.includes('/') || token.length > 128 || token === '.' || token === '..') return null;
+      ids.add(token);
+    }
+  }
+  if (/號\s*(?:洗衣機|機台)/.test(raw)) return null;
+  if (ids.size === 0 && /指定|編號|機號|機台\s*[:：]|洗衣機\s*[「『《"]/.test(raw)) return null;
+  return [...ids];
+}
+
 /**
  * @param {string} lastUserMessage
  * @param {string} schoolId
@@ -239,23 +370,27 @@ async function resolveWashReserveInput(lastUserMessage, schoolId) {
   const raw = String(lastUserMessage ?? '');
   if (!/洗衣機|洗衣/.test(raw) || !/預約|幫我|訂/.test(raw)) return null;
 
+  const machineIds = washingMachineIdsFromText(raw);
+  if (!machineIds || machineIds.length > 1) return null;
   const db = getFirestore();
-  const snap = await db
-    .collection('schools')
-    .doc(schoolId)
-    .collection('washingMachines')
-    .where('status', '==', 'available')
-    .limit(5)
-    .get()
-    .catch(() => null);
-
-  let machineId = null;
-  if (snap && !snap.empty) {
-    machineId = snap.docs[0].id;
+  const machines = db.collection('schools').doc(schoolId).collection('washingMachines');
+  let machineId;
+  let machineDormitory = null;
+  if (machineIds.length === 1) {
+    const machine = await machines.doc(machineIds[0]).get().catch(() => null);
+    if (!machine || !machine.exists || machine.data()?.status !== 'available') return null;
+    machineId = machine.id;
+    const dormitory = machine.data()?.dormitory;
+    if (typeof dormitory === 'string' && dormitory.trim()) machineDormitory = dormitory;
   } else {
-    const anySnap = await db.collection('schools').doc(schoolId).collection('washingMachines').limit(1).get();
-    if (anySnap.empty) return null;
-    machineId = anySnap.docs[0].id;
+    const snap = await machines.where('status', '==', 'available').limit(5).get().catch(() => null);
+    if (snap && !snap.empty) {
+      machineId = snap.docs[0].id;
+    } else {
+      const anySnap = await machines.limit(1).get().catch(() => null);
+      if (!anySnap || anySnap.empty) return null;
+      machineId = anySnap.docs[0].id;
+    }
   }
 
   const timeZone = 'Asia/Taipei';
@@ -274,8 +409,9 @@ async function resolveWashReserveInput(lastUserMessage, schoolId) {
   }
   if (!startIso) return null;
 
-  const dormM = raw.match(/([ABCDE一二三四五六七八九十]+棟)/);
-  const dormitory = dormM ? dormM[1] : '宿舍';
+  const dormM = raw.match(/([A-Za-zＡ-Ｚａ-ｚ一二三四五六七八九十]+棟)/);
+  if (machineDormitory && dormM && machineDormitory.trim().replace(/棟$/, '') !== dormM[1].replace(/棟$/, '')) return null;
+  const dormitory = machineDormitory || (dormM ? dormM[1] : '宿舍');
 
   return { dormitory, machineId, startTime: startIso };
 }

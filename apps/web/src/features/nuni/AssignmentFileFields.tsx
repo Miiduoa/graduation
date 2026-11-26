@@ -9,6 +9,8 @@ import {
   assignmentLateOpenLabel,
   assignmentReceiptStatusLabel,
   assignmentSubmissionLate,
+  assertAssignmentFileBudget,
+  assertAssignmentFileSize,
   classifyAssignmentFile,
   formatAssignmentFileSize,
   moveAssignmentFile,
@@ -20,10 +22,13 @@ import {
   type NuniSubmission,
   type NuniSubmissionFile,
 } from '@campus/shared/src/nuni';
+import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
 import { PhotoPdfEditor } from './PhotoPdfEditor';
 import { useClasses } from './CourseUI';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
+import fileStyles from './AssignmentFileFields.module.css';
 
 export type LocalAssignmentFile = {
   key: string;
@@ -43,22 +48,53 @@ export type AssignmentFileOperation = {
 
 export type AssignmentUploadProgress = { completed: number; total: number };
 
-function kindOf(file: File): 'image' | 'file' {
-  return file.type.startsWith('image/') ? 'image' : 'file';
+type AssignmentFileSelection = {
+  files: LocalAssignmentFile[];
+  added: number;
+  rejected: { name: string; reason: string }[];
+};
+
+function localAssignmentFileType(file: File) {
+  const contentType = file.type.trim() || 'application/octet-stream';
+  const { kind } = classifyAssignmentFile(file.name, contentType);
+  return { kind, contentType };
 }
 
-export function collectLocalFiles(current: LocalAssignmentFile[], incoming: FileList | File[]): LocalAssignmentFile[] {
+export function collectLocalFileSelection(
+  current: LocalAssignmentFile[],
+  incoming: FileList | File[],
+): AssignmentFileSelection {
   const next = [...current];
+  const rejected: AssignmentFileSelection['rejected'] = [];
+  let images = next.filter(({ kind }) => kind === 'image').length;
+  let documents = next.length - images;
   for (const file of Array.from(incoming)) {
-    try {
-      classifyAssignmentFile(file.name, file.type);
-    } catch {
+    if (next.some(({ file: selected }) => selected === file)) {
+      rejected.push({ name: file.name, reason: '這個檔案已在待送出清單中。' });
       continue;
     }
-    const kind = kindOf(file);
-    const used = next.filter((item) => item.kind === kind).length;
-    if (kind === 'image' && used >= MAX_ASSIGNMENT_IMAGES) continue;
-    if (kind === 'file' && used >= MAX_ASSIGNMENT_DOCUMENTS) continue;
+    let kind: LocalAssignmentFile['kind'] = 'file';
+    try {
+      ({ kind } = localAssignmentFileType(file));
+      if (kind === 'file') assertAssignmentFileSize(kind, file.size);
+      assertAssignmentFileBudget(images + Number(kind === 'image'), documents + Number(kind === 'file'));
+    } catch (cause) {
+      const code = cause instanceof NuniError ? cause.code : undefined;
+      let reason = '格式不支援，或副檔名與檔案格式不一致。';
+      if (code === 'ASSIGNMENT_FILE_NAME_INVALID') reason = '檔名無法使用，請重新命名後再選。';
+      if (code === 'ASSIGNMENT_FILE_TYPE_REJECTED' && !file.type.trim())
+        reason = '瀏覽器未提供檔案類型，請另存後重新選取。';
+      if (code === 'ASSIGNMENT_FILE_SIZE_REJECTED') reason = '檔案是空的，請重新選取。';
+      if (code === 'ASSIGNMENT_FILE_TOO_LARGE') reason = '檔案大小超過上限。';
+      if (code === 'ASSIGNMENT_FILE_LIMIT')
+        reason = kind === 'image'
+          ? `照片最多 ${MAX_ASSIGNMENT_IMAGES} 張，請先刪除不需要的照片。`
+          : `文件最多 ${MAX_ASSIGNMENT_DOCUMENTS} 個，請先刪除不需要的文件。`;
+      rejected.push({ name: file.name, reason });
+      continue;
+    }
+    if (kind === 'image') images += 1;
+    else documents += 1;
     next.push({
       key: `${file.name}:${file.size}:${file.lastModified}:${next.length}:${Math.random().toString(36).slice(2, 8)}`,
       file,
@@ -66,7 +102,14 @@ export function collectLocalFiles(current: LocalAssignmentFile[], incoming: File
       previewUrl: kind === 'image' ? URL.createObjectURL(file) : undefined,
     });
   }
-  return next;
+  return { files: next, added: next.length - current.length, rejected };
+}
+
+export function collectLocalFiles(
+  current: LocalAssignmentFile[],
+  incoming: FileList | File[],
+): LocalAssignmentFile[] {
+  return collectLocalFileSelection(current, incoming).files;
 }
 
 export function revokeUnusedAssignmentPreviews(
@@ -101,7 +144,11 @@ export function useAssignmentFilePreviews(files: LocalAssignmentFile[]) {
 }
 
 export async function compressAssignmentImageFile(file: File): Promise<File> {
-  if (!file.type.startsWith('image/') || /heic|heif/i.test(file.type) || typeof document === 'undefined')
+  if (
+    !file.type.startsWith('image/') ||
+    /heic|heif/i.test(file.type) ||
+    typeof document === 'undefined'
+  )
     return file;
   const bitmapFn = globalThis.createImageBitmap;
   if (typeof bitmapFn !== 'function') return file;
@@ -109,7 +156,9 @@ export async function compressAssignmentImageFile(file: File): Promise<File> {
     const bitmap = await bitmapFn(file);
     const size = assignmentImageTargetSize(bitmap.width, bitmap.height);
     const skip =
-      size.width === bitmap.width && size.height === bitmap.height && file.size <= 1.5 * 1024 * 1024;
+      size.width === bitmap.width &&
+      size.height === bitmap.height &&
+      file.size <= 1.5 * 1024 * 1024;
     if (skip) {
       bitmap.close?.();
       return file;
@@ -124,7 +173,9 @@ export async function compressAssignmentImageFile(file: File): Promise<File> {
     }
     context.drawImage(bitmap, 0, 0, size.width, size.height);
     bitmap.close?.();
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', 0.82),
+    );
     if (!blob || blob.size >= file.size) return file;
     return new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
       type: 'image/jpeg',
@@ -225,13 +276,21 @@ export function AssignmentFilePreview({
         ))}
       </ul>
       {opened?.previewUrl ? (
-        <div className={styles.lightbox} role="dialog" aria-modal="true" aria-label={opened.file.name}>
-          <button type="button" onClick={() => setOpenedKey(null)}>
-            關閉
-          </button>
+        <Modal
+          isOpen
+          onClose={() => setOpenedKey(null)}
+          title={opened.file.name}
+          description={formatAssignmentFileSize(opened.file.size)}
+          size="xl"
+          footer={
+            <Button type="button" variant="outline" onClick={() => setOpenedKey(null)}>
+              關閉預覽
+            </Button>
+          }
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={opened.previewUrl} alt={opened.file.name} />
-        </div>
+          <img className={fileStyles.previewImage} src={opened.previewUrl} alt={opened.file.name} />
+        </Modal>
       ) : null}
     </>
   );
@@ -257,7 +316,8 @@ export function SubmittedFileList({ files }: { files: NuniSubmissionFile[] }) {
             <span>
               <strong>{file.originalName}</strong>
               <small>
-                {formatAssignmentFileSize(file.byteSize)} · {file.kind === 'image' ? '照片' : '檔案'}
+                {formatAssignmentFileSize(file.byteSize)} ·{' '}
+                {file.kind === 'image' ? '照片' : '檔案'}
               </small>
               <span className={styles.fileEdit}>
                 <a href={view}>查看</a>
@@ -283,7 +343,9 @@ export function SubmissionReceipt({
     <section className={shared.receipt} aria-label="我的繳交紀錄">
       <strong>{assignmentReceiptStatusLabel(late)}</strong>
       <p>
-        <time dateTime={submission.submittedAt}>{formatTaipeiDateTime(submission.submittedAt)}</time>
+        <time dateTime={submission.submittedAt}>
+          {formatTaipeiDateTime(submission.submittedAt)}
+        </time>
       </p>
       {submission.files?.length ? <SubmittedFileList files={submission.files} /> : null}
     </section>
@@ -294,18 +356,29 @@ export function AssignmentFilePicker({
   files,
   onChange,
   disabled,
+  reviewRequired,
+  onReviewRequiredChange,
 }: {
   files: LocalAssignmentFile[];
   onChange: (files: LocalAssignmentFile[]) => void;
   disabled?: boolean;
+  reviewRequired: boolean;
+  onReviewRequiredChange: (required: boolean) => void;
 }) {
   const [pdfOpen, setPdfOpen] = useState(false);
+  const [selection, setSelection] = useState<Omit<AssignmentFileSelection, 'files'> | null>(null);
   const camera = useRef<HTMLInputElement>(null);
   const album = useRef<HTMLInputElement>(null);
   const docs = useRef<HTMLInputElement>(null);
-  function add(list: FileList | null) {
+  function add(list: FileList | File[] | null) {
     if (!list?.length) return;
-    onChange(collectLocalFiles(files, list));
+    const result = collectLocalFileSelection(files, list);
+    setSelection((previous) => ({
+      added: result.added,
+      rejected: result.rejected.length || !reviewRequired ? result.rejected : previous?.rejected ?? [],
+    }));
+    onReviewRequiredChange(true);
+    if (result.added) onChange(result.files);
   }
   return (
     <div className={styles.fileActions}>
@@ -345,19 +418,37 @@ export function AssignmentFilePicker({
           event.target.value = '';
         }}
       />
-      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled || pdfOpen} onClick={() => camera.current?.click()}>
+      <button
+        type="button"
+        className={`${shared.button} ${shared.secondary}`}
+        disabled={disabled || pdfOpen}
+        onClick={() => camera.current?.click()}
+      >
         拍照
       </button>
-      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled || pdfOpen} onClick={() => album.current?.click()}>
+      <button
+        type="button"
+        className={`${shared.button} ${shared.secondary}`}
+        disabled={disabled || pdfOpen}
+        onClick={() => album.current?.click()}
+      >
         相簿
       </button>
-      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled || pdfOpen} onClick={() => docs.current?.click()}>
+      <button
+        type="button"
+        className={`${shared.button} ${shared.secondary}`}
+        disabled={disabled || pdfOpen}
+        onClick={() => docs.current?.click()}
+      >
         檔案
       </button>
       <button
         type="button"
         className={`${shared.button} ${shared.secondary}`}
-        disabled={disabled || files.filter((file) => file.kind === 'file').length >= MAX_ASSIGNMENT_DOCUMENTS}
+        disabled={
+          disabled ||
+          files.filter((file) => file.kind === 'file').length >= MAX_ASSIGNMENT_DOCUMENTS
+        }
         onClick={() => setPdfOpen(true)}
       >
         照片轉 PDF
@@ -366,13 +457,53 @@ export function AssignmentFilePicker({
         <PhotoPdfEditor
           onCancel={() => setPdfOpen(false)}
           onConfirm={(file) => {
-            onChange(collectLocalFiles(files, [file]));
+            add([file]);
             setPdfOpen(false);
           }}
         />
       ) : null}
-      <p className={styles.note}>網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。</p>
-      <AssignmentFilePreview files={files} onChange={onChange} disabled={disabled} />
+      <p className={fileStyles.limits}>
+        照片 {files.filter((file) => file.kind === 'image').length}/{MAX_ASSIGNMENT_IMAGES} 張 ·
+        文件 {files.filter((file) => file.kind === 'file').length}/{MAX_ASSIGNMENT_DOCUMENTS} 個
+      </p>
+      {selection ? (
+        <div className={fileStyles.selection} role="status" aria-live="polite" aria-atomic="true">
+          <p>
+            {selection.added ? `已加入 ${selection.added} 個檔案。` : '這次沒有加入檔案。'}
+            {selection.rejected.length
+              ? ` ${selection.rejected.length} 個未加入，請確認下方原因。`
+              : null}
+          </p>
+          {selection.rejected.length ? (
+            <ul aria-label="未加入的檔案">
+              {selection.rejected.map((item, index) => (
+                <li key={`${index}:${item.name}`}>
+                  <strong>{item.name}</strong>：{item.reason}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+      <p className={styles.note}>
+        網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。
+      </p>
+      <AssignmentFilePreview
+        files={files}
+        onChange={(next) => {
+          onChange(next);
+          onReviewRequiredChange(next.length > 0);
+        }}
+        disabled={disabled}
+      />
+      {reviewRequired && (
+        <div>
+          <p>{files.length ? '請確認上方即將繳交的檔案。' : '目前沒有待送出的附件。'}</p>
+          <button type="button" disabled={disabled} onClick={() => onReviewRequiredChange(false)}>
+            確認附件清單
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -408,31 +539,40 @@ export async function uploadAndSubmitFiles(
   const prepared: LocalAssignmentFile[] = operation.prepared ?? [];
   if (!operation.prepared) {
     for (const item of files) {
-      if (item.kind !== 'image') {
-        prepared.push(item);
-        continue;
-      }
-      const compressed = await compressAssignmentImageFile(item.file);
-      prepared.push({ ...item, file: compressed, kind: 'image' });
+      const { file } = item;
+      // A BMP already queued by a previous picker may still submit as a smaller JPEG.
+      const queuedBmp = file.type === 'image/bmp' && /\.bmp$/i.test(file.name);
+      if (!queuedBmp) localAssignmentFileType(file);
+      prepared.push({ ...item, file: await compressAssignmentImageFile(file) });
     }
     operation.prepared = prepared;
   }
   onProgress?.({ completed: operation.uploaded?.length ?? 0, total: prepared.length });
-  const intents =
-    operation.intents ??
-    (prepared.length
+  if (!operation.intents) {
+    let images = 0;
+    let documents = 0;
+    // Validate the entire batch before the server reserves any staged quota.
+    const requests = prepared.map(({ file }, index) => {
+      const { kind, contentType } = localAssignmentFileType(file);
+      assertAssignmentFileSize(kind, file.size);
+      if (kind === 'image') images += 1;
+      else documents += 1;
+      return {
+        originalName: file.name,
+        contentType,
+        byteSize: file.size,
+        idempotencyKey: `${key}:file:${index}`,
+      };
+    });
+    assertAssignmentFileBudget(images, documents);
+    operation.intents = requests.length
       ? await classes.createAssignmentFileIntents(workspaceId, assignmentId, {
           idempotencyKey: `${key}:intents`,
-          files: prepared.map((item, index) => ({
-            originalName: item.file.name,
-            contentType:
-              item.file.type || (item.kind === 'image' ? 'image/jpeg' : 'application/octet-stream'),
-            byteSize: item.file.size,
-            idempotencyKey: `${key}:file:${index}`,
-          })),
+          files: requests,
         })
-      : []);
-  operation.intents = intents;
+      : [];
+  }
+  const intents = operation.intents;
   let completed = operation.uploaded?.length ?? 0;
   const uploads = await Promise.allSettled(
     intents.map(async (intent, index) => {

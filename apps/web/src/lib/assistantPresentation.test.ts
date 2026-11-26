@@ -58,3 +58,50 @@ it('allows only a pending write proposal bound to the server run', () => {
     ],
   })).toEqual([{ label: '確認請假', agentRunId: runId, toolName: 'submitLeaveRequest', input }]);
 });
+
+const washingInput = { reservationId: 'wash-1', expectedReservationVersion: 'a'.repeat(64),
+  machineId: 'A2', dormitory: '女生宿舍', startTime: '2030-01-02T09:00:00+08:00',
+  reservedUntil: '2030-01-02T02:00:00.000Z' };
+const washingRun = '01234567-89ab-4cde-8012-3456789abcde';
+function washingEnvelope(input = washingInput) {
+  return { content: '取消草稿', run: { runId: washingRun, status: 'completed' }, actions: [
+    { action: 'queue_action', label: '取消洗衣預約', requiresConfirmation: true, status: 'pending_confirmation',
+      params: { toolName: 'cancelWashingReservation', input, agentRunId: washingRun } },
+  ] };
+}
+it.each([washingInput.reservedUntil, null])('accepts a complete run-bound washing cancellation with end %s', reservedUntil => {
+  const input = { ...washingInput, reservedUntil };
+  expect(assistantWriteProposals(washingEnvelope(input as typeof washingInput))).toEqual([
+    { label: '取消洗衣預約', toolName: 'cancelWashingReservation', input, agentRunId: washingRun },
+  ]);
+});
+it.each(['reservationId', 'expectedReservationVersion', 'machineId', 'dormitory', 'startTime', 'reservedUntil'])
+  ('rejects a cancellation missing %s', key => {
+    const input = { ...washingInput } as Record<string, unknown>;
+    delete input[key];
+    expect(assistantWriteProposals(washingEnvelope(input as typeof washingInput))).toEqual([]);
+  });
+it.each([
+  { expectedReservationVersion: 'bad' }, { reservationId: '' }, { machineId: '' },
+  { dormitory: '' }, { startTime: 123 }, { reservedUntil: 'tomorrow' },
+  { reservationId: 'a/b' }, { machineId: 'a/b' }, { reservationId: 'a'.repeat(129) },
+  { machineId: 'a'.repeat(129) }, { dormitory: 'a'.repeat(101) }, { startTime: 'a'.repeat(41) },
+  { reservedUntil: '2030-02-30T02:00:00.000Z' }, { reservedUntil: '2030-01-02T10:00:00+08:00' },
+])('rejects malformed cancellation input %j', change => {
+  expect(assistantWriteProposals(washingEnvelope({ ...washingInput, ...change } as typeof washingInput))).toEqual([]);
+});
+it.each(['running', 'failed', undefined])('rejects cancellation from an unfinished run %s', status => {
+  const envelope = washingEnvelope();
+  envelope.run.status = status as string;
+  expect(assistantWriteProposals(envelope)).toEqual([]);
+});
+it.each(['completed', undefined])('requires pending confirmation for cancellation %s', status => {
+  const envelope = washingEnvelope();
+  envelope.actions[0].status = status as string;
+  expect(assistantWriteProposals(envelope)).toEqual([]);
+});
+it('rejects cancellation linked to another run', () => {
+  const envelope = washingEnvelope();
+  envelope.actions[0].params.agentRunId = 'other-run';
+  expect(assistantWriteProposals(envelope)).toEqual([]);
+});

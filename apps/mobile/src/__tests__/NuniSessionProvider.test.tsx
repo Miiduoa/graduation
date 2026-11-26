@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { NuniSessionProvider, useNuniSession } from '../state/nuniSession';
+import { NuniDraftProvider, useNuniDraftScope, useNuniDraftState } from '../state/nuniDrafts';
 import { nuniPlatformRequest } from '../services/nuniClient';
 import {
   beginSavedCampusPlansSignOutCleanup,
@@ -176,4 +177,45 @@ it('clears saved plans for all stored campus scopes without deleting unrelated l
   expect(persisted.has(savedCampusPlansStorageKey(otherSchool))).toBe(false);
   expect(persisted.get('campus-theme')).toBe('dark');
   expect(view.result.current.error).toBe('');
+});
+
+it('revokes a popped route setter at logout before React renders and without a workspace screen', async () => {
+  const owner = renderHook(() => ({ auth: useNuniSession(), drafts: useNuniDraftScope()! }), {
+    wrapper: NuniSessionProvider,
+  });
+  await waitFor(() => expect(owner.result.current.auth.session?.platformAccountId).toBe(account));
+  const cache = owner.result.current.drafts.forAccount(account).cache;
+  const editor = renderHook(() => useNuniDraftState('assignment:body', ''), {
+    wrapper: ({ children }) => <NuniDraftProvider cache={cache}>{children}</NuniDraftProvider>,
+  });
+  const capturedSetter = editor.result.current[1];
+  act(() => capturedSetter('只有此登入保留的內容'));
+  let logout!: Promise<void>;
+  act(() => {
+    logout = owner.result.current.auth.logout();
+    capturedSetter('登出後的晚到內容');
+    expect(cache.get('assignment:body')).toBeUndefined();
+    expect(cache.size).toBe(0);
+  });
+  await act(async () => logout);
+  expect(owner.result.current.auth.session).toBeNull();
+  expect([...persisted.values()].join('\n')).not.toContain('只有此登入保留的內容');
+});
+
+it('a new app session provider starts with no prior route input even for the same verified account', async () => {
+  const useOwner = () => ({ auth: useNuniSession(), drafts: useNuniDraftScope()! });
+  const first = renderHook(useOwner, { wrapper: NuniSessionProvider });
+  await waitFor(() => expect(first.result.current.auth.session?.platformAccountId).toBe(account));
+  const cache = first.result.current.drafts.forAccount(account).cache;
+  cache.set('assignment:body', '不寫入裝置儲存空間的內容');
+  cache.set('assignment:intent', { key: 'one-request', body: '不寫入裝置儲存空間的內容' });
+  first.unmount();
+  expect(cache.size).toBe(0);
+  const reopened = renderHook(useOwner, { wrapper: NuniSessionProvider });
+  await waitFor(() => expect(reopened.result.current.auth.session?.platformAccountId).toBe(account));
+  const current = reopened.result.current.drafts.forAccount(account).cache;
+  expect(current).not.toBe(cache);
+  expect(current.has('assignment:body')).toBe(false);
+  expect(current.has('assignment:intent')).toBe(false);
+  expect([...persisted.values()].join('\n')).not.toContain('不寫入裝置儲存空間的內容');
 });

@@ -1,0 +1,984 @@
+import { isDormPostalParcel, projectDormRepair, type DormCloudRepair } from '@campus/shared/src/dormitoryCloud';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
+import {
+  DORM_TICKET_LABELS,
+  DORM_LEAVE_LABELS,
+  dormTicketOverdue,
+  formatDormWorkflowTime,
+  deliverDormAnnouncementBatches,
+  dormAnnouncementDraftError,
+  dormAnnouncementPublishedTime,
+  dormAnnouncementReceipt,
+  dormRequestKey,
+  parseDormResidentsCsv,
+  dormWorkflowSummary,
+  type DormAnnouncementReceipt,
+  type DormWorkflowConfig,
+  type DormWorkflowRows,
+  type DormTicket,
+  type DormLeave,
+  type DormTicketStatus,
+} from '@campus/shared/src/dormWorkflow';
+import { View, Text, TextInput, Pressable, Image, Linking, Share } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { getAuthInstance } from '../../firebase';
+import { postNuniWebFn } from '../../services/nuniWebFn';
+import { aiTokens } from '../../ui/aiFirst';
+type FocusTarget = TextInput;
+const invoke = async <T,>(data: Record<string, unknown>, uid: string | null | undefined): Promise<T> => {
+  if (!uid) throw new Error('請先登入。');
+  return postNuniWebFn('dormWorkflow', data, uid);
+};
+function Box({ children }: { children: React.ReactNode }) {
+  return (
+    <View
+      style={{
+        gap: 10,
+        padding: 12,
+        marginVertical: 6,
+        borderWidth: 1,
+        borderColor: aiTokens.border,
+        borderRadius: 12,
+      }}
+    >
+      {children}
+    </View>
+  );
+}
+function Label({
+  children,
+  strong,
+  accent,
+  live,
+}: {
+  children: React.ReactNode;
+  strong?: boolean;
+  accent?: boolean;
+  live?: boolean;
+}) {
+  return (
+    <Text
+      accessibilityLiveRegion={live ? 'polite' : undefined}
+      style={{ color: accent ? aiTokens.ai : aiTokens.text, fontWeight: strong ? '700' : '400' }}
+    >
+      {children}
+    </Text>
+  );
+}
+function Btn({
+  label,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={{
+        minHeight: 44,
+        padding: 12,
+        opacity: disabled ? 0.5 : 1,
+        borderWidth: 1,
+        borderColor: aiTokens.border,
+        borderRadius: 8,
+      }}
+    >
+      <Text style={{ color: aiTokens.text }}>{label}</Text>
+    </Pressable>
+  );
+}
+function Field({
+  label,
+  value,
+  onChange,
+  multiline,
+  focusRef,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  multiline?: boolean;
+  focusRef?: React.RefObject<FocusTarget | null>;
+}) {
+  return (
+    <View style={{ gap: 4 }}>
+      <Text style={{ color: aiTokens.text }}>{label}</Text>
+      <TextInput
+        ref={focusRef}
+        accessibilityLabel={label}
+        value={value}
+        onChangeText={onChange}
+        multiline={multiline}
+        maxLength={multiline ? 50000 : 2000}
+        style={{
+          minHeight: multiline ? 88 : 44,
+          color: aiTokens.text,
+          padding: 10,
+          borderWidth: 1,
+          borderColor: aiTokens.border,
+          borderRadius: 8,
+        }}
+      />
+    </View>
+  );
+}
+function Photo({ url, label }: { url: string; label: string }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={() => void Linking.openURL(url)}
+    >
+      <Image
+        source={{ uri: url }}
+        accessibilityLabel={label}
+        style={{ width: '100%', height: 180 }}
+        resizeMode="contain"
+      />
+    </Pressable>
+  );
+}
+function TicketPhoto({ schoolId, uid, id, index }: { schoolId: string; uid: string; id: string; index: number }) {
+  const [url, setUrl] = useState('');
+  const [error, setError] = useState('');
+  const open = async () => {
+    try {
+      setUrl((await invoke<{ url: string }>({ schoolId, action: 'repairPhoto', id, index }, uid)).url);
+    } catch {
+      setError('無法讀取照片，請重新整理確認權限');
+    }
+  };
+  return (
+    <View>
+      <Pressable accessibilityRole="button" onPress={() => void open()}>
+        <Label>查看報修照片 {index + 1}</Label>
+      </Pressable>
+      {!!error && <Label>{error}</Label>}
+      {!!url && <Photo url={url} label={'報修照片 ' + (index + 1)} />}
+    </View>
+  );
+}
+async function exportSummary(text: string) {
+  await Share.share({ title: '宿舍統計 CSV', message: text });
+}
+async function pickPhotos(schoolId: string, uid: string, remaining: number): Promise<string[]> {
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    allowsMultipleSelection: true,
+    selectionLimit: remaining,
+    quality: 0.8,
+  });
+  if (result.canceled) return [];
+  if (result.assets.length > remaining) throw new Error('照片最多三張');
+  return Promise.all(
+    result.assets.map(async (asset) => {
+      const blob = await (await fetch(asset.uri)).blob();
+      if (blob.size > 6 * 1024 * 1024) throw new Error('每張照片最多 6MB');
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1]);
+        reader.onerror = () => reject(new Error('無法讀取照片'));
+        reader.readAsDataURL(blob);
+      });
+      return (
+        await invoke<{ path: string }>({
+          schoolId,
+          action: 'uploadPhoto',
+          base64,
+          contentType: asset.mimeType || 'image/jpeg',
+        }, uid)
+      ).path;
+    }),
+  );
+}
+export function DormWorkflow({
+  schoolId,
+  sourceSchoolId,
+  uid,
+  building = '',
+  room = '',
+  draft,
+  submitOnly = false,
+  initialStaff = false,
+  residentSection,
+  notificationParams,
+  onTonightLeaveChange,
+  onOwnRepairsChange,
+}: {
+  schoolId: string;
+  sourceSchoolId?: string;
+  uid?: string | null;
+  submitOnly?: boolean;
+  initialStaff?: boolean;
+  residentSection?: 'announcements' | 'leave';
+  notificationParams?: { notificationView?: unknown; dormAnnouncementId?: unknown };
+  onOwnRepairsChange?: (repairs: DormCloudRepair[]) => void;
+  onTonightLeaveChange?: (approved: boolean) => void;
+  building?: string;
+  room?: string;
+  draft?: { title: string; description: string; category: string; location: string };
+}) {
+  const documentSchoolId = sourceSchoolId ?? toPublicSchoolId(schoolId) ?? schoolId;
+  const capabilityKey = JSON.stringify([uid, schoolId, documentSchoolId]);
+  const [capability, setCapability] = useState<{ key: string; config: DormWorkflowConfig } | null>(
+    null,
+  );
+  // Only a successful capability response may open official submission forms.
+  const config =
+    capability?.key === capabilityKey
+      ? capability.config
+      : {
+          enabled: false,
+          repairs: false,
+          packages: false,
+          admin: false,
+          role: 'student' as const,
+        };
+  const [rows, setRows] = useState<DormWorkflowRows>({
+    repairs: [],
+    leaves: [],
+    packages: [],
+    residents: [],
+  });
+  const [residentSearch, setResidentSearch] = useState<{
+    query: string;
+    residents: DormWorkflowRows['residents'];
+  } | null>(null);
+  const [configAttempt, setConfigAttempt] = useState(0);
+  const [configError, setConfigError] = useState(false);
+  const [rowsError, setRowsError] = useState(false);
+  const [rowsLoaded, setRowsLoaded] = useState(false);
+  const [loadedNotification, setLoadedNotification] = useState<typeof notificationParams>();
+  const summaryReady = rowsLoaded && !Object.values(rows.nextCursors || {}).some(Boolean);
+  const [ownLeaves, setOwnLeaves] = useState<DormLeave[]>([]);
+  const [staffMode, setStaffMode] = useState(false);
+  const [tab, setTab] = useState('repairs');
+  const [values, setValues] = useState<Record<string, string>>({});
+  const residentCandidates =
+    residentSearch && residentSearch.query === values.search
+      ? residentSearch.residents
+      : rows.residents;
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [includeHistory, setIncludeHistory] = useState(false);
+  const [images, setImages] = useState<string[]>([]);
+  const [requestKey, setRequestKey] = useState(dormRequestKey);
+  const [announcementKey, setAnnouncementKey] = useState(dormRequestKey);
+  const [pendingAnnouncementKey, setPendingAnnouncementKey] = useState<string | null>(null);
+  const [preview, setPreview] = useState(false);
+  const generation = useRef(0);
+  const rowGeneration = useRef(0);
+  const paginationStarted = useRef(false);
+  const selectedStudentId = useRef('');
+  const inputRef = useRef<FocusTarget | null>(null);
+  const set = (key: string, value: string) => {
+    if (key.startsWith('announce')) setAnnouncementKey(dormRequestKey());
+    setValues((old) => ({ ...old, [key]: value }));
+    setPreview(false);
+  };
+  const call = useCallback(
+    async <T,>(data: Record<string, unknown>): Promise<T> =>
+      invoke<T>({ ...data, schoolId: documentSchoolId }, uid),
+    [documentSchoolId, uid],
+  );
+  const refresh = useCallback(
+    async (staff = staffMode) => {
+      paginationStarted.current = false;
+      setRowsLoaded(false);
+      setRowsError(false);
+      setNotice((old) => old === '讀取失敗，請重試。' ? '' : old);
+      const token = generation.current;
+      const rowToken = ++rowGeneration.current;
+      try {
+        const [result, mine] = await Promise.all([
+          call<Partial<DormWorkflowRows>>({
+            action: staff ? 'workspace' : 'mine',
+            ...(staff && includeHistory ? { includeHistory: true } : {}),
+          }),
+          staff ? call<Partial<DormWorkflowRows>>({ action: 'mine' }) : Promise.resolve(null),
+        ]);
+        if (token === generation.current && rowToken === rowGeneration.current) {
+          setRows({ repairs: [], leaves: [], packages: [], residents: [], ...result });
+          setRowsLoaded(true);
+          setLoadedNotification(notificationParams);
+          setRowsError(false);
+          setOwnLeaves((mine ?? result).leaves ?? []);
+        }
+      } catch (error) {
+        if (token !== generation.current || rowToken !== rowGeneration.current) return;
+        setRowsError(true);
+        throw error;
+      }
+    },
+    [call, staffMode, includeHistory, notificationParams],
+  );
+  const loadMore = async () => {
+    paginationStarted.current = true;
+    rowGeneration.current++;
+    const token = generation.current;
+    const rowToken = rowGeneration.current;
+    setBusy(true);
+    try {
+      const page = await call<DormWorkflowRows>({
+        action: 'workspace',
+        cursors: rows.nextCursors,
+        includeHistory,
+      });
+      if (token !== generation.current || rowToken !== rowGeneration.current) return;
+      setRows((old) => ({
+        ...old,
+        repairs: [...old.repairs, ...page.repairs],
+        leaves: [...old.leaves, ...page.leaves],
+        packages: [...old.packages, ...page.packages],
+        residents: [...old.residents, ...page.residents],
+        nextCursors: page.nextCursors,
+      }));
+    } catch {
+      if (token === generation.current) setNotice('讀取失敗，請重試。');
+    } finally {
+      if (token === generation.current) setBusy(false);
+    }
+  };
+  useEffect(() => {
+    generation.current++;
+    const token = generation.current;
+    setCapability(null);
+    setConfigError(false);
+    setNotice('');
+    setRowsError(false);
+    setRowsLoaded(false);
+    setOwnLeaves([]);
+    selectedStudentId.current = '';
+    setRows({ repairs: [], leaves: [], packages: [], residents: [] });
+    setValues({});
+    setResidentSearch(null);
+    setImages([]);
+    setRequestKey(dormRequestKey());
+    setAnnouncementKey(dormRequestKey());
+    setPreview(false);
+    setBusy(false);
+    setStaffMode(false);
+    if (!uid) return;
+    void call<DormWorkflowConfig>({ action: 'config' })
+      .then((c) => {
+        if (!c || typeof c.enabled !== 'boolean') throw new Error('宿舍設定無法讀取');
+        if (token === generation.current) {
+          setCapability({ key: capabilityKey, config: c });
+          if (c.enabled && initialStaff && (c.repairs || c.packages)) {
+            setStaffMode(true);
+            setTab(c.admin ? 'summary' : c.repairs ? 'repairs' : 'packages');
+          }
+        }
+      })
+      .catch(() => {
+        if (token === generation.current) setConfigError(true);
+      });
+    return () => {
+      generation.current++;
+    };
+  }, [call, uid, initialStaff, capabilityKey, configAttempt]);
+  useEffect(() => {
+    if (capability?.key !== capabilityKey || submitOnly) return;
+    let active = true;
+    const load = () => {
+      void refresh().catch(() => {
+        if (active) setNotice('讀取失敗，請重試。');
+      });
+    };
+    load();
+    const timer = setInterval(() => {
+      if (!paginationStarted.current) load();
+    }, 60000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      rowGeneration.current++;
+    };
+  }, [capability, capabilityKey, refresh, submitOnly]);
+  useEffect(() => {
+    const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    onTonightLeaveChange?.(ownLeaves.some((r) => r.date === today && r.status === 'approved'));
+  }, [ownLeaves, onTonightLeaveChange]);
+  useEffect(() => {
+    if (!staffMode)
+      onOwnRepairsChange?.(
+        rows.repairs.map((r) => projectDormRepair(r.id, { ...r, workflow: 'dorm_staff' })),
+      );
+  }, [rows.repairs, staffMode, onOwnRepairsChange]);
+  async function act(data: Record<string, unknown>, done?: () => void) {
+    if (busy) return;
+    if (
+      data.action === 'registerPackage' &&
+      (!selectedStudentId.current ||
+        data.studentId !== selectedStudentId.current ||
+        !residentCandidates.some((r) => r.id === selectedStudentId.current))
+    )
+      return;
+    setBusy(true);
+    setNotice('');
+    const token = generation.current;
+    let publicationConfirmed = false;
+    try {
+      const send = () => call<DormAnnouncementReceipt & {
+        updated?: number;
+        skipped?: number;
+      }>(data);
+      const result = data.action === 'announce'
+        ? await deliverDormAnnouncementBatches(
+            send,
+            () => token === generation.current && getAuthInstance().currentUser?.uid === uid,
+            (receipt) => {
+              publicationConfirmed = true;
+              setPendingAnnouncementKey(String(data.key));
+              setNotice(dormAnnouncementReceipt(receipt));
+            },
+          )
+        : await send();
+      if (token !== generation.current) return;
+      if (!result.pendingRecipients) done?.();
+      setNotice(
+        result.updated !== undefined
+          ? `${result.updated ? `已更新 ${result.updated} 件包裹` : '未核銷任何包裹'}，跳過 ${result.skipped ?? 0} 件。`
+          : data.action === 'announce'
+            ? dormAnnouncementReceipt(result)
+            : data.action === 'registerPackage'
+              ? isDormPostalParcel(data)
+                ? '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'
+                : '已登錄，學生開啟 nuni 宿舍頁即可看到。'
+              : '紀錄已更新。',
+      );
+      await refresh();
+    } catch (error) {
+      if (token === generation.current)
+        setNotice(publicationConfirmed ? '公告已發布，暫時無法繼續傳送推播。請稍後重試。'
+          : error instanceof Error ? error.message : '操作失敗，請重試。');
+    } finally {
+      if (token === generation.current) setBusy(false);
+    }
+  }
+  if (!uid) return null;
+  if (capability?.key !== capabilityKey)
+    return (
+      <Box>
+        <Label>{configError ? '宿舍服務暫時無法使用，請稍後再試。' : '正在確認宿舍服務…'}</Label>
+        {configError && <Btn label="重試" onPress={() => setConfigAttempt((value) => value + 1)} />}
+      </Box>
+    );
+  if (!config.enabled && submitOnly) return null;
+  const f = (key: string, label: string, initial = '', multiline = false) => (
+    <Field
+      key={key}
+      label={label}
+      value={values[key] ?? initial}
+      multiline={multiline}
+      onChange={(value) => set(key, value)}
+    />
+  );
+  const get = (key: string, fallback = '') => values[key] ?? fallback;
+  const announcementError = preview
+    ? dormAnnouncementDraftError(get('announceBuilding'), get('announceTitle'), get('announceBody'))
+    : null;
+  const button = (title: string, data: Record<string, unknown>, done?: () => void) => (
+    <Btn
+      label={title}
+      disabled={
+        busy ||
+        (data.action === 'registerPackage' &&
+          !residentCandidates.some((r) => r.id === data.studentId))
+      }
+      onPress={() => void act(data, done)}
+    />
+  );
+  const ticket = (r: DormTicket, staff: boolean) => (
+    <Box key={r.id}>
+      <Label strong>
+        {r.title} · {r.dormitory} {r.room}
+      </Label>
+      <Label>{r.description}</Label>
+      <Label strong>{DORM_TICKET_LABELS[r.dormStatus]}</Label>
+      {dormTicketOverdue(r) && (
+        <Label strong accent>
+          超過 3 天
+        </Label>
+      )}
+      {r.history.map((h, i) => (
+        <Label key={i}>
+          {DORM_TICKET_LABELS[h.status]} ·{' '}
+          {formatDormWorkflowTime(h.at)}
+        </Label>
+      ))}
+      {r.schoolReference && <Label>學校單號 {r.schoolReference}（輔導員填）</Label>}
+      {!!r.vendor && staff && <Label>廠商：{r.vendor}</Label>}
+      {!!r.expectedDate && <Label>預計日期：{r.expectedDate}</Label>}
+      {r.images?.map((url, i) => (
+        <TicketPhoto key={url} schoolId={documentSchoolId} uid={uid} id={r.id} index={i} />
+      ))}
+      {staff ? (
+        <>
+          {button('儲存維修安排', {
+            action: 'repairDetails',
+            id: r.id,
+            schoolReference: get(r.id + 'ref', r.schoolReference),
+            vendor: get(r.id + 'vendor', r.vendor),
+            expectedDate: get(r.id + 'date', r.expectedDate),
+          })}
+          {f(r.id + 'ref', '學校單號（選填）', r.schoolReference)}
+          {f(r.id + 'vendor', '廠商（選填）', r.vendor)}
+          {f(r.id + 'date', '預計日期 YYYY-MM-DD（選填）', r.expectedDate)}
+          {(['sent', 'received', 'scheduled'] as string[]).includes(r.dormStatus) &&
+            button(
+              { sent: '輔導員已收到', received: '已安排維修', scheduled: '已修好，請確認' }[
+                r.dormStatus as 'sent' | 'received' | 'scheduled'
+              ],
+              {
+                action: 'repairStatus',
+                id: r.id,
+                status: { sent: 'received', received: 'scheduled', scheduled: 'fixed' }[
+                  r.dormStatus as 'sent' | 'received' | 'scheduled'
+                ],
+                schoolReference: get(r.id + 'ref', r.schoolReference),
+                vendor: get(r.id + 'vendor', r.vendor),
+                expectedDate: get(r.id + 'date', r.expectedDate),
+              },
+            )}
+        </>
+      ) : (
+        <>
+          {config.enabled &&
+            r.dormStatus === 'fixed' &&
+            button('確認修好並結案', { action: 'repairStatus', id: r.id, status: 'closed' })}
+          {config.enabled &&
+            ['fixed', 'closed'].includes(r.dormStatus) &&
+            button('還沒修好', { action: 'repairStatus', id: r.id, status: 'sent' })}
+        </>
+      )}
+    </Box>
+  );
+  const leave = (r: DormLeave, staff: boolean) => (
+    <Box key={r.id}>
+      <Label strong>
+        {r.date} · {r.building} {r.room} · {DORM_LEAVE_LABELS[r.status]}
+      </Label>
+      {staff && (
+        <Label>
+          申請人：{r.applicantName || '姓名待確認'} · 學號 {r.maskedStudentId || '待確認'}
+        </Label>
+      )}
+      <Label>{r.reason}</Label>
+      {r.history.map((h, i) => (
+        <Label key={i}>
+          {DORM_LEAVE_LABELS[h.status]} · {formatDormWorkflowTime(h.at)}
+        </Label>
+      ))}
+      {staff && r.status === 'pending' && (
+        <>
+          {button('核可外宿', { action: 'decideLeave', id: r.id, status: 'approved' })}
+          {button('不核可', { action: 'decideLeave', id: r.id, status: 'rejected' })}
+        </>
+      )}
+    </Box>
+  );
+  const targetAnnouncementId = residentSection === 'announcements' ? notificationParams?.dormAnnouncementId : undefined;
+  const announcements = rows.announcements?.filter((a) => targetAnnouncementId === undefined || a.id === targetAnnouncementId).map((a) => (
+    <Box key={a.id}>
+      <Label strong>{a.title} · {a.building}</Label>
+      <Label>{dormAnnouncementPublishedTime(a.publishedAt)}</Label>
+      <Label>{a.body}</Label>
+    </Box>
+  ));
+  if (residentSection) {
+    const showAnnouncements = residentSection === 'announcements';
+    const records = showAnnouncements ? announcements : rows.leaves.map((r) => leave(r, false));
+    let content: React.ReactNode;
+    if (rowsError) {
+      content = <>
+        <Label>無法讀取宿舍紀錄，請稍後再試。</Label>
+        <Btn label="重新讀取" onPress={() => void refresh().catch(() => {})} />
+      </>;
+    } else if (!rowsLoaded || notificationParams !== loadedNotification) {
+      content = <Label>正在讀取宿舍紀錄…</Label>;
+    } else if (records?.length) {
+      content = records;
+    } else if (targetAnnouncementId !== undefined) {
+      content = <Label>目前查不到這則宿舍公告，可能已移除或不屬於目前住宿棟別。</Label>;
+    } else {
+      content = <Label>{showAnnouncements ? '目前沒有可查看的本棟公告。' : '目前沒有可查看的外宿卡。'}</Label>;
+    }
+    return (
+      <Box>
+        <Label strong>{showAnnouncements ? '本棟公告' : '我的外宿卡'}</Label>
+        {content}
+      </Box>
+    );
+  }
+  if (!config.enabled && !rows.repairs.length && !rows.leaves.length && !notice) return null;
+  if (!config.enabled)
+    return (
+      <Box>
+        <Label strong>宿舍歷史紀錄（唯讀）</Label>
+        <Label live>{notice}</Label>
+        {rows.repairs.map((r) => ticket(r, false))}
+        {rows.leaves.map((r) => leave(r, false))}
+      </Box>
+    );
+  return (
+    <Box>
+      <Label strong>{staffMode ? '輔導員工作台' : '宿舍輔導員服務'}</Label>
+      <Label live>{notice}</Label>
+      {!submitOnly && (
+        <Btn
+          label="重新整理"
+          disabled={busy}
+          onPress={() => void refresh().catch(() => setNotice('讀取失敗，請重試。'))}
+        />
+      )}
+      {!submitOnly && !notificationParams && (config.repairs || config.packages) && (
+        <Btn
+          label={staffMode ? '回學生服務' : '開啟輔導員工作台'}
+          disabled={busy}
+          onPress={() => {
+            setStaffMode(!staffMode);
+            setTab(config.admin ? 'summary' : config.repairs ? 'repairs' : 'packages');
+            setRows({ repairs: [], leaves: [], packages: [], residents: [] });
+          }}
+        />
+      )}
+      {staffMode && (
+        <Btn
+          label={includeHistory ? '回待處理紀錄' : '包含已結案及已處理紀錄'}
+          disabled={busy}
+          onPress={() => setIncludeHistory((value) => !value)}
+        />
+      )}
+      {staffMode && Object.values(rows.nextCursors || {}).some(Boolean) && (
+        <Btn label="載入更多紀錄" disabled={busy} onPress={() => void loadMore()} />
+      )}
+      {!staffMode ? (
+        <>
+          {!!draft && (
+            <Box>
+              <Label strong>將這份備忘送給輔導員</Label>
+              {f('building', '棟別', building)}
+              {f('room', '房間', room)}
+              <Label>請先確認問題名稱、位置及描述。漏水、斷電、受困請直接打服務台。</Label>
+              {images.map((url, i) => (
+                <Box key={url}>
+                  <Label>照片 {i + 1} 已上傳</Label>
+                  <Btn
+                    label={'移除照片 ' + (i + 1)}
+                    disabled={busy}
+                    onPress={() => setImages((old) => old.filter((x) => x !== url))}
+                  />
+                </Box>
+              ))}
+              <Btn
+                label={`新增照片（${images.length}/3）`}
+                disabled={busy || images.length >= 3}
+                onPress={() => {
+                  const photoGeneration = generation.current;
+                  setBusy(true);
+                  void pickPhotos(documentSchoolId, uid, 3 - images.length)
+                    .then((photos) => {
+                      if (photoGeneration === generation.current)
+                        setImages((old) => [...old, ...photos].slice(0, 3));
+                    })
+                    .catch(() => setNotice('照片上傳失敗，請重試。'))
+                    .finally(() => setBusy(false));
+                }}
+              />
+              {button(
+                '送給宿舍輔導員',
+                {
+                  action: 'submitRepair',
+                  key: requestKey,
+                  building: get('building', building),
+                  room: get('room', room),
+                  title: draft.title,
+                  description: [draft.location, draft.description].filter(Boolean).join('\n'),
+                  category: draft.category,
+                  images,
+                },
+                () => {
+                  setRequestKey(dormRequestKey());
+                  setImages([]);
+                },
+              )}
+            </Box>
+          )}
+          {!submitOnly && (
+            <>
+              <Label strong>本棟公告</Label>
+              {announcements}
+              <Label strong>報修處理進度</Label>
+              {rowsError ? (
+                <Box>
+                  <Label>工單讀取失敗，請重試。</Label>
+                  <Btn label="重試" onPress={() => void refresh().catch(() => {})} />
+                </Box>
+              ) : !rowsLoaded ? (
+                <Label>正在讀取工單…</Label>
+              ) : !rows.repairs.length ? (
+                <Label>目前沒有送給輔導員的工單。</Label>
+              ) : null}
+              {rows.repairs.map((r) => ticket(r, false))}
+              <Box>
+                <Label strong>外宿卡</Label>
+                <Label>棟別與寢室依校方住宿名冊帶入</Label>
+                {f('leaveDate', '外宿日期 YYYY-MM-DD')}
+                {f('reason', '外宿原因', '', true)}
+                {button(
+                  '送給輔導員核可',
+                  {
+                    action: 'requestLeave',
+                    key: requestKey,
+                    date: get('leaveDate'),
+                    reason: get('reason'),
+                  },
+                  () => {
+                    setRequestKey(dormRequestKey());
+                    set('reason', '');
+                  },
+                )}
+                {rows.leaves.map((r) => leave(r, false))}
+              </Box>
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          {config.admin && (
+            <Box>
+              <Label strong>住服組總覽（不含學生個資）</Label>
+              <Label>
+                {summaryReady
+                  ? dormWorkflowSummary(rows)
+                  : '請先載入全部紀錄，再查看或匯出完整統計。'}
+              </Label>
+              <Btn
+                label="匯出宿舍統計"
+                disabled={busy || !summaryReady}
+                onPress={() => {
+                  if (!summaryReady || busy) return;
+                  void exportSummary(dormWorkflowSummary(rows)).catch(() =>
+                    setNotice('匯出失敗。'),
+                  );
+                }}
+              />
+            </Box>
+          )}
+          <Box>
+            <Btn label="包裹" disabled={!config.packages} onPress={() => setTab('packages')} />
+            <Btn label="報修" disabled={!config.repairs} onPress={() => setTab('repairs')} />
+            <Btn label="住宿生" disabled={!config.packages} onPress={() => setTab('residents')} />
+          </Box>
+          {tab === 'repairs' && config.repairs && (
+            <>
+              {(Object.keys(DORM_TICKET_LABELS) as DormTicketStatus[]).map((status) => (
+                <Box key={status}>
+                  <Label strong>
+                    {DORM_TICKET_LABELS[status]}（
+                    {rows.repairs.filter((r) => r.dormStatus === status).length}）
+                  </Label>
+                  {rows.repairs.filter((r) => r.dormStatus === status).map((r) => ticket(r, true))}
+                </Box>
+              ))}
+              <Label strong>外宿卡審核</Label>
+              {rows.leaves.map((r) => leave(r, true))}
+            </>
+          )}
+          {tab === 'packages' && config.packages && (
+            <>
+              <Label strong>連續登錄包裹</Label>
+              <Field
+                focusRef={inputRef}
+                label="學號末三碼或姓名（本棟住宿生）"
+                value={get('search')}
+                onChange={(value) => {
+                  selectedStudentId.current = '';
+                  setValues((old) => ({ ...old, search: value, studentId: '' }));
+                  setPreview(false);
+                }}
+              />
+              <Btn
+                label="以完整學號查詢"
+                disabled={busy || !get('search').trim()}
+                onPress={async () => {
+                  const query = get('search');
+                  const token = generation.current;
+                  setBusy(true);
+                  setNotice('');
+                  try {
+                    const result = await call<{ residents: DormWorkflowRows['residents'] }>({
+                      action: 'findResident',
+                      studentId: query,
+                    });
+                    if (token !== generation.current) return;
+                    setResidentSearch({ query, residents: result.residents });
+                    if (!result.residents.length) setNotice('找不到本棟符合學號的住宿生。');
+                  } catch (error) {
+                    if (token === generation.current)
+                      setNotice(error instanceof Error ? error.message : '查詢失敗，請重試。');
+                  } finally {
+                    if (token === generation.current) setBusy(false);
+                  }
+                }}
+              />
+              {!!get('search') &&
+                residentCandidates
+                  .filter(
+                    (r) =>
+                      residentSearch?.query === get('search') ||
+                      r.studentId.includes(get('search')) ||
+                      r.name.includes(get('search')),
+                  )
+                  .slice(0, 8)
+                  .map((r) => (
+                    <Btn
+                      key={r.id}
+                      label={`${r.studentId} ${r.name} ${r.building} ${r.room}`}
+                      onPress={() => {
+                        selectedStudentId.current = r.id;
+                        setValues((old) => ({
+                          ...old,
+                          studentId: r.id,
+                          search: residentSearch?.query === old.search ? old.search : r.studentId,
+                        }));
+                        setPreview(false);
+                      }}
+                    />
+                  ))}
+              <Label>
+                已選住宿生：
+                {residentCandidates.find((r) => r.id === get('studentId'))?.studentId || ''}
+              </Label>
+              {f('item', '品名（可使用鍵盤語音輸入）')}
+              {f('location', '領取地點')}
+              {button(
+                '登錄包裹',
+                {
+                  action: 'registerPackage',
+                  key: requestKey,
+                  studentId: get('studentId'),
+                  description: get('item'),
+                  location: get('location'),
+                },
+                () => {
+                  setRequestKey(dormRequestKey());
+                  selectedStudentId.current = '';
+                  setValues((old) => ({ ...old, search: '', studentId: '' }));
+                  set('item', '');
+                  inputRef.current?.focus();
+                },
+              )}
+              {f('collectStudent', '核對學生領取碼上的學號')}
+              <Label>以下僅列末三碼相符的包裹；核銷以輸入的完整學號為準。</Label>
+              {rows.packages
+                .filter(
+                  (p) =>
+                    get('collectStudent').length >= 3 &&
+                    String(p.studentId || '').endsWith(get('collectStudent').slice(-3)) &&
+                    p.status === 'waiting',
+                )
+                .map((p) => (
+                  <Label key={p.id}>
+                    {p.description} · {p.location}
+                  </Label>
+                ))}
+              {button('已核對姓名與學號・全部核銷', {
+                action: 'collectPackages',
+                studentId: get('collectStudent'),
+              })}
+              <Label strong>逾期清單（每日 21:00 值班檢查）</Label>
+              {rows.packages
+                .filter(
+                  (p) =>
+                    p.status === 'waiting' && Date.now() - parcelTime(p.arrivedAt) >= 3 * 86400000,
+                )
+                .map((p) => (
+                  <Box key={p.id}>
+                    <Label>
+                      {p.studentId} · {p.description} · {p.location}
+                    </Label>
+                    {button('標記退件', { action: 'returnPackage', id: p.id })}
+                  </Box>
+                ))}
+            </>
+          )}
+          {tab === 'residents' && config.packages && (
+            <>
+              <Label>
+                CSV：學號、棟、房、床。每批最多 400 位；學號必須對應本校已啟用帳號；一般 SSO
+                帳號需完成校方身分同步；若仍無法匯入，請聯絡管理員確認校方提供的學號。
+              </Label>
+              {f('csv', '貼上住宿生 CSV', '', true)}
+              <Btn
+                label="驗證並匯入住宿生"
+                disabled={busy}
+                onPress={() => {
+                  try {
+                    void act({
+                      action: 'importResidents',
+                      rows: parseDormResidentsCsv(get('csv')),
+                    });
+                  } catch (e) {
+                    setNotice(e instanceof Error ? e.message : 'CSV 格式錯誤');
+                  }
+                }}
+              />
+              {rows.residents.map((r) => (
+                <Box key={r.id}>
+                  <Label>
+                    {r.studentId} {r.name} · {r.building} {r.room} {r.bed}
+                  </Label>
+                  {button('移出住宿名冊', { action: 'deactivateResident', studentId: r.id })}
+                </Box>
+              ))}
+              <Label strong>本棟公告</Label>
+              {f('announceBuilding', '公告棟別')}
+              {f('announceTitle', '公告標題')}
+              {f('announceBody', '公告內容', '', true)}
+              <Btn label="預覽公告" disabled={busy} onPress={() => setPreview(true)} />
+              {announcementError && <Text accessibilityRole="alert" style={{ color: aiTokens.text }}>{announcementError}</Text>}
+              {preview && !announcementError && (
+                <Box>
+                  <Label strong>{get('announceTitle')}</Label>
+                  <Label>{get('announceBody')}</Label>
+                  <Label>只通知 {get('announceBuilding')} 住宿生名冊內的人。</Label>
+                  {button(
+                    pendingAnnouncementKey === announcementKey ? '繼續傳送待處理的推播' : '確認發布本棟公告',
+                    {
+                      action: 'announce',
+                      key: announcementKey,
+                      building: get('announceBuilding'),
+                      title: get('announceTitle'),
+                      body: get('announceBody'),
+                    },
+                    () => {
+                      setPendingAnnouncementKey(null);
+                      setValues((old) => (
+                        old.announceTitle === get('announceTitle') && old.announceBody === get('announceBody')
+                          && old.announceBuilding === get('announceBuilding')
+                          ? { ...old, announceTitle: '', announceBody: '' } : old
+                      ));
+                      setPreview(false);
+                    },
+                  )}
+                </Box>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </Box>
+  );
+}
+function parcelTime(value: number | { _seconds: number }): number {
+  return typeof value === 'number' ? value : value?._seconds * 1000;
+}

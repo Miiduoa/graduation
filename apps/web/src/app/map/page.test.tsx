@@ -10,8 +10,8 @@ vi.mock('@/components/SiteShell', () => ({
 }));
 vi.mock('next/dynamic', () => ({
   default: () =>
-    function Map({ school, route, focus }: { school: string; route?: string; focus?: string }) {
-      return <output aria-label="地圖目的地">{JSON.stringify({ school, route, focus })}</output>;
+    function Map({ school, route, focus, query }: { school: string; route?: string; focus?: string; query?: string }) {
+      return <output aria-label="地圖目的地">{JSON.stringify({ school, route, focus, query })}</output>;
     },
 }));
 
@@ -50,6 +50,7 @@ it('handles repeated map search parameters without passing arrays to route parsi
   const searchParams = Promise.resolve({
     route: ['gate,library', 'ignored'],
     focus: ['library', 'ignored'],
+    query: ['主顧303', '另一間不應採用'],
   });
   await act(async () => {
     render(
@@ -62,6 +63,7 @@ it('handles repeated map search parameters without passing arrays to route parsi
     school: 'pu',
     route: 'gate,library',
     focus: 'library',
+    query: '主顧303',
   });
 });
 

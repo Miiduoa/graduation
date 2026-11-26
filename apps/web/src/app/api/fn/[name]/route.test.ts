@@ -83,6 +83,18 @@ it('returns 503 尚未啟用 when no service account is configured', async () =>
   );
   expect(schoolLogin.status).toBe(503);
   expect(await schoolLogin.json()).toEqual({ error: '尚未啟用' });
+  const storyBinding = await POST(
+    new Request('https://nuni.tw/api/fn/ensureCampusStoryBinding', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer nope' },
+      body: JSON.stringify({ data: {} }),
+    }),
+    { params: Promise.resolve({ name: 'ensureCampusStoryBinding' }) },
+  );
+  expect(storyBinding.status).toBe(503);
+  expect(await storyBinding.json()).toEqual({
+    error: { status: 'UNAVAILABLE', message: '尚未啟用' },
+  });
 });
 
 it('returns 404 for createGroup even though the handler still exists', async () => {

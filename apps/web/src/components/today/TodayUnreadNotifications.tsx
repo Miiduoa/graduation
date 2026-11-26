@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import {
@@ -16,6 +17,7 @@ import {
   TODAY_NOTIFY_UNSIGNED,
 } from '@/lib/todayCourseWork';
 import { isFirebaseConfigured } from '@/lib/firebase';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import styles from './StudentToday.module.css';
 
 type FeedState =
@@ -26,6 +28,7 @@ type FeedState =
 export function TodayUnreadNotifications({ unsigned }: { unsigned: boolean }) {
   const { user, loading: authLoading } = useAuth();
   const school = useOptionalSelectedSchool();
+  const campusSearch = useCampusNavigationSearch(useSearchParams());
   const schoolId = school?.selectedSchool?.id || '';
   if (!unsigned && !authLoading && !user) return null;
   return (
@@ -35,6 +38,7 @@ export function TodayUnreadNotifications({ unsigned }: { unsigned: boolean }) {
       schoolId={schoolId}
       unsigned={unsigned}
       authLoading={authLoading}
+      inboxHref={campusServiceHref('/messages', campusSearch)}
     />
   );
 }
@@ -44,11 +48,13 @@ function UnreadFeed({
   schoolId,
   unsigned,
   authLoading,
+  inboxHref,
 }: {
   uid?: string;
   schoolId: string;
   unsigned: boolean;
   authLoading: boolean;
+  inboxHref: string;
 }) {
   const [feed, setFeed] = useState<FeedState>({ status: 'loading' });
   const [retryKey, setRetryKey] = useState(0);
@@ -57,7 +63,7 @@ function UnreadFeed({
   const canWatch = !unsigned && !authLoading && !!uid && !!schoolId && configured;
 
   useEffect(() => {
-    if (!canWatch || !uid || !schoolId) return;
+    if (!canWatch || !uid) return;
     let active = true;
     const stop = watchAccountNotifications(
       { uid, schoolId },
@@ -92,13 +98,13 @@ function UnreadFeed({
       </h2>
       {unsigned ? (
         <p className={styles.empty}>
-          {TODAY_NOTIFY_UNSIGNED} <Link href="/messages">前往通知匣</Link>
+          {TODAY_NOTIFY_UNSIGNED} <Link href={inboxHref}>前往通知匣</Link>
         </p>
       ) : !configured && !authLoading ? (
         <p className={styles.empty}>目前無法取得校園通知。</p>
       ) : !schoolId ? (
         <p className={styles.empty}>
-          先選擇校園後，就能在這裡看到該校的未讀通知。 <Link href="/messages">前往通知匣</Link>
+          先選擇校園後，就能在這裡看到該校的未讀通知。 <Link href={inboxHref}>前往通知匣</Link>
         </p>
       ) : feed.status === 'loading' || authLoading ? (
         <div className={styles.skeleton} aria-busy="true">
@@ -120,19 +126,19 @@ function UnreadFeed({
           >
             重試
           </button>
-          <Link className={styles.import} href="/messages">
+          <Link className={styles.import} href={inboxHref}>
             前往通知匣
           </Link>
         </>
       ) : visible.length === 0 ? (
         <p className={styles.empty}>
-          {TODAY_NOTIFY_EMPTY} <Link href="/messages">查看全部通知</Link>
+          {TODAY_NOTIFY_EMPTY} <Link href={inboxHref}>查看全部通知</Link>
         </p>
       ) : (
         <ul className={styles.list}>
           {visible.map((item) => {
             const destination = notificationDestination(item);
-            const href = destination?.href || '/messages';
+            const href = destination?.href || inboxHref;
             // Reload the document so attendance receives its camera permissions policy.
             const DestinationLink = item.type === 'live_session' ? 'a' : Link;
             return (
@@ -150,13 +156,13 @@ function UnreadFeed({
           })}
           {extra > 0 ? (
             <li>
-              <Link className={styles.more} href="/messages">
+              <Link className={styles.more} href={inboxHref}>
                 還有 {extra} 則未讀
               </Link>
             </li>
           ) : (
             <li>
-              <Link className={styles.more} href="/messages">
+              <Link className={styles.more} href={inboxHref}>
                 查看全部通知
               </Link>
             </li>

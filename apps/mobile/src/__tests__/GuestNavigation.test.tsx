@@ -3,18 +3,21 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { PreAuthStack } from '../screens/PreAuthStack';
 import { Text } from 'react-native';
+import Constants from 'expo-constants';
 import { SchoolSessionBoundary, hasReadySchoolSession } from '../app/SchoolSessionBoundary';
 import { preAuthLinking } from '../app/preAuthLinking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { dormStorageKey } from '@campus/shared/src/dormitory';
+import { loadCampusEvent, loadCampusEventPage, type CampusEvent } from '../services/publicCampusContent';
 import {
   resetSchoolLoginProviderCache,
   setSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
 
+const originalExtra = Constants.expoConfig?.extra;
 let mockBrowsingSchoolId = 'pu';
-let mockPlatformSession: { platformAccountId: string } | null = null;
 let mockSelectionReady = true;
+let mockPlatformSession: { platformAccountId: string } | null = null;
 let mockSchoolAuth: {
   user: { uid: string } | null;
   profile: { uid: string; schoolId: string } | null;
@@ -33,7 +36,10 @@ jest.mock('../state/auth', () => ({ useAuth: () => mockSchoolAuth }));
 // Supply the same selected-campus context that production SchoolProvider supplies.
 jest.mock('../state/school', () => ({
   useSchool: () => ({
-    school: { id: mockBrowsingSchoolId, name: mockBrowsingSchoolId === 'pu' ? '靜宜大學' : '國立清華大學' },
+    school: {
+      id: mockBrowsingSchoolId,
+      name: mockBrowsingSchoolId === 'pu' ? '靜宜大學' : '國立清華大學',
+    },
     schoolId: mockBrowsingSchoolId || null,
     selection: { schoolId: mockBrowsingSchoolId || null },
     selectionReady: mockSelectionReady,
@@ -52,6 +58,7 @@ jest.mock('expo-linking', () => ({
   },
 }));
 beforeEach(() => {
+  Object.assign(Constants.expoConfig!, { extra: { ...originalExtra, appEnv: 'development' } });
   mockSelectionReady = true;
   mockBrowsingSchoolId = 'pu';
   mockPlatformSession = null;
@@ -68,17 +75,32 @@ beforeEach(() => {
   setSchoolLoginProviderKinds(['school-issued']);
 });
 afterEach(() => {
+  Object.assign(Constants.expoConfig!, { extra: originalExtra });
   resetSchoolLoginProviderCache();
 });
 
 jest.unmock('@react-navigation/native');
 jest.mock('../state/theme', () => ({
-  useThemeMode: () => ({ themeMode: 'light', mode: 'light', theme: require('../ui/theme').getCurrentTheme() }),
+  useThemeMode: () => ({
+    themeMode: 'light',
+    mode: 'light',
+    theme: require('../ui/theme').getCurrentTheme(),
+  }),
   useTheme: () => require('../ui/theme').getCurrentTheme(),
 }));
 jest.mock('../state/nuniSession', () => ({
-  useNuniSession: () => ({ session: mockPlatformSession, loading: false, error: '', pendingLogout: false }),
-  useOptionalNuniSession: () => ({ session: mockPlatformSession, loading: false, error: '', pendingLogout: false }),
+  useNuniSession: () => ({
+    session: mockPlatformSession,
+    loading: false,
+    error: '',
+    pendingLogout: false,
+  }),
+  useOptionalNuniSession: () => ({
+    session: mockPlatformSession,
+    loading: false,
+    error: '',
+    pendingLogout: false,
+  }),
 }));
 jest.mock('../state/schedule', () => ({
   useSchedule: () => ({
@@ -103,6 +125,12 @@ jest.mock('../screens/NuniWorkspaceScreen', () => ({
     return <Text testID="platform-workspace">nuni 帳號</Text>;
   },
 }));
+jest.mock('../screens/PlatformLostFoundScreen', () => ({
+  PlatformLostFoundScreen: () => {
+    const { Text } = require('react-native');
+    return <Text testID="platform-lost-found-screen">平台失物招領</Text>;
+  },
+}));
 jest.mock('../screens/SSOLoginScreen', () => ({
   SSOLoginScreen: () => {
     const { Text } = require('react-native');
@@ -111,11 +139,17 @@ jest.mock('../screens/SSOLoginScreen', () => ({
 }));
 jest.mock('../screens/PersonalImportScreen', () => {
   const { Text } = require('react-native');
-  return { __esModule: true, default: () => <Text testID="personal-import-screen">匯入課表紀錄</Text> };
+  return {
+    __esModule: true,
+    default: () => <Text testID="personal-import-screen">匯入課表紀錄</Text>,
+  };
 });
 jest.mock('../screens/PersonalTimetableScreen', () => {
   const { Text } = require('react-native');
-  return { __esModule: true, default: () => <Text testID="personal-timetable-screen">整週個人課表</Text> };
+  return {
+    __esModule: true,
+    PublicPersonalTimetable: () => <Text testID="personal-timetable-screen">整週個人課表</Text>,
+  };
 });
 
 jest.mock('../screens/GoogleMapsLikeScreen', () => {
@@ -136,21 +170,102 @@ jest.mock('../screens/LibraryCatalogScreen', () => {
 });
 jest.mock('../screens/SchoolInfoScreen', () => {
   const { Text } = require('react-native');
-  return { __esModule: true, default: () => <Text testID="public-school-info-screen">學校資訊</Text> };
+  return {
+    __esModule: true,
+    default: () => <Text testID="public-school-info-screen">學校資訊</Text>,
+  };
 });
 jest.mock('../screens/StudentCardScreen', () => {
   const { Text } = require('react-native');
-  return { __esModule: true, default: () => <Text testID="public-student-card-screen">數位學生證</Text> };
+  return {
+    __esModule: true,
+    default: () => <Text testID="public-student-card-screen">數位學生證</Text>,
+  };
 });
+jest.mock('../services/publicCampusContent', () => ({
+  ...jest.requireActual('../services/publicCampusContent'),
+  loadCampusEvent: jest.fn(),
+  loadCampusEventPage: jest.fn(),
+}));
 jest.mock('../screens/CampusContentScreens', () => {
   const { Text } = require('react-native');
   return {
+    ...jest.requireActual('../screens/CampusContentScreens'),
     CampusAnnouncementsScreen: () => <Text testID="public-announcements-screen">公开公告</Text>,
     CampusAnnouncementDetailScreen: () => <Text testID="public-announcement-screen">公告詳情</Text>,
   };
 });
 
-test('the signed-out stack opens school login through the real navigation helper', async () => {
+const publicEvent: CampusEvent = {
+  id: 'open-day', schoolId: 'pu', source: 'school-club-events', title: '天文觀測夜',
+  description: '活動當晚請到科學館集合。', startsAt: '2027-01-02T10:00:00Z', appRegistrationConfigured: true,
+};
+
+test.each([null, { platformAccountId: 'google-only' }])(
+  'opens, saves, and revisits an event through public navigation with account %j',
+  async (session) => {
+    mockPlatformSession = session;
+    jest.mocked(loadCampusEventPage).mockResolvedValue({ items: [publicEvent], nextCursor: null, source: publicEvent.source });
+    jest.mocked(loadCampusEvent).mockResolvedValue(publicEvent);
+    const navigation = createNavigationContainerRef();
+    const unhandled = jest.fn();
+    const view = render(
+      <NavigationContainer ref={navigation} onUnhandledAction={unhandled}>
+        <PreAuthStack />
+      </NavigationContainer>,
+    );
+    fireEvent.press(await view.findByRole('button', { name: '校園活動' }));
+    fireEvent.press(await view.findByRole('button', { name: /^天文觀測夜/ }));
+    expect(await view.findByText('活動介紹')).toBeTruthy();
+    expect(navigation.getCurrentRoute()).toMatchObject({
+      name: '活動詳情', params: { id: publicEvent.id, schoolId: 'pu', source: publicEvent.source },
+    });
+    expect(await view.findByText('請登入目前學校的帳號，再確認報名資格與狀態。')).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name: '收藏活動：天文觀測夜' }));
+    await view.findByRole('button', { name: '取消收藏：天文觀測夜' });
+    act(() => navigation.goBack());
+    fireEvent.press(await view.findByRole('tab', { name: '已收藏' }));
+    fireEvent.press(await view.findByRole('button', { name: '查看活動：天文觀測夜' }));
+    expect(await view.findByText('活動介紹')).toBeTruthy();
+    expect(loadCampusEvent).toHaveBeenCalledWith('pu', publicEvent.id, publicEvent.source);
+    fireEvent.press(view.getByRole('button', { name: '取消收藏：天文觀測夜' }));
+    await view.findByRole('button', { name: '收藏活動：天文觀測夜' });
+    expect(unhandled).not.toHaveBeenCalled();
+  },
+);
+
+test.each([
+  ['pu', 'pu', 'school-club-events', true],
+  ['pu', 'tw-pu', 'school-club-events', true],
+  ['pu', 'tw-pu', undefined, true],
+  ['nthu', 'pu', 'school-club-events', false],
+  ['nthu', 'tw-pu', undefined, false],
+] as const)(
+  'a public event link with selected campus %s, school hint %s and source %s respects campus identity',
+  async (school, hint, source, matches) => {
+    mockBrowsingSchoolId = school;
+    mockInitialUrl = `campus://event/open-day?schoolId=${hint}${source ? `&source=${source}` : ''}`;
+    jest.mocked(loadCampusEvent).mockClear().mockResolvedValue(publicEvent);
+    const navigation = createNavigationContainerRef();
+    const view = render(
+      <NavigationContainer ref={navigation} linking={preAuthLinking}>
+        <PreAuthStack />
+      </NavigationContainer>,
+    );
+    if (matches) {
+      await view.findByText('活動介紹');
+      expect(loadCampusEvent).toHaveBeenCalledWith(school, publicEvent.id, source);
+    } else {
+      await view.findByText('找不到這場活動，可能已移除或不屬於目前學校。');
+      expect(loadCampusEvent).not.toHaveBeenCalled();
+    }
+    expect(navigation.canGoBack()).toBe(true);
+    act(() => navigation.goBack());
+    await view.findByTestId('login-landing');
+  },
+);
+
+test('the signed-out development stack opens school login through the real navigation helper', async () => {
   const onUnhandledAction = jest.fn();
   const navigation = createNavigationContainerRef();
   const content = () => (
@@ -168,17 +283,76 @@ test('the signed-out stack opens school login through the real navigation helper
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
-test('the primary signed-out entry opens the independent platform workspace', async () => {
+test('a signed-out production user can reach the platform while PU student login is paused', async () => {
+  Object.assign(Constants.expoConfig!, {
+    extra: {
+      appEnv: 'production',
+      release: { releasedSchoolIds: ['pu'], features: { enabled: true, sso: true } },
+    },
+  });
   const navigation = createNavigationContainerRef();
   const view = render(
     <NavigationContainer ref={navigation}>
       <PreAuthStack />
     </NavigationContainer>,
   );
-  fireEvent.press(await view.findByTestId('login-start'));
+  const platformLogin = await view.findByTestId('login-start');
+  expect(view.queryByTestId('school-login-start')).toBeNull();
+  fireEvent.press(platformLogin);
   await view.findByTestId('platform-workspace');
   expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
 });
+
+test.each([null, { platformAccountId: 'google-only' }])(
+  'platform lost-found has a reachable entry before school authentication (%j)',
+  async (session) => {
+    mockPlatformSession = session;
+    mockSchoolAuth.loading = true;
+    mockSchoolAuth.profileLoading = true;
+    const navigation = createNavigationContainerRef();
+    const view = render(
+      <SchoolSessionBoundary
+        publicContent={
+          <NavigationContainer ref={navigation}>
+            <PreAuthStack />
+          </NavigationContainer>
+        }
+      >
+        <Text>Private school navigation</Text>
+      </SchoolSessionBoundary>,
+    );
+    fireEvent.press(await view.findByTestId('platform-lost-found-start'));
+    await view.findByTestId('platform-lost-found-screen');
+    expect(navigation.getCurrentRoute()?.name).toBe('PlatformLostFound');
+    expect(view.queryByTestId('school-login-form')).toBeNull();
+  },
+);
+
+test.each(['cold', 'warm'])(
+  'a %s platform lost-found detail link opens without registering legacy Firebase routes',
+  async (start) => {
+    const id = 'plf_11111111-1111-4111-8111-111111111111';
+    const url = `campus://platform-lost-found/${id}?schoolId=pu`;
+    mockPlatformSession = { platformAccountId: 'google-only' };
+    if (start === 'cold') mockInitialUrl = url;
+    const navigation = createNavigationContainerRef();
+    const view = render(
+      <NavigationContainer ref={navigation} linking={preAuthLinking}>
+        <PreAuthStack />
+      </NavigationContainer>,
+    );
+    if (start === 'warm') {
+      await view.findByTestId('login-landing');
+      await waitFor(() => expect(mockLinkListener).toBeDefined());
+      act(() => mockLinkListener?.({ url }));
+    }
+    await view.findByTestId('platform-lost-found-screen');
+    expect(navigation.getCurrentRoute()?.name).toBe('PlatformLostFound');
+    expect(navigation.getCurrentRoute()?.params).toEqual({ id, schoolId: 'pu' });
+    expect(navigation.getRootState().routeNames).not.toContain('LostFound');
+    expect(view.queryByTestId('school-login-form')).toBeNull();
+  },
+);
 
 test('a guest can open the real import route without a school or platform account', async () => {
   const navigation = createNavigationContainerRef();
@@ -198,7 +372,7 @@ test('a guest can open the real import route without a school or platform accoun
 test.each([
   ['campus://campus-one', 'NuniWorkspace', 'platform-workspace'],
   ['campus://sso-login', 'SSOLogin', 'school-login-form'],
-  ['campus://shops', 'SSOLogin', 'school-login-form'],
+  ['campus://shops', 'NuniWorkspace', 'platform-workspace'],
 ])('a cold %s opens before any school authentication', async (url, route, target) => {
   mockInitialUrl = url;
   const navigation = createNavigationContainerRef();
@@ -209,12 +383,57 @@ test.each([
   );
   await view.findByTestId(target);
   expect(navigation.getCurrentRoute()?.name).toBe(route);
+  if (url === 'campus://shops') {
+    expect(navigation.getCurrentRoute()?.params).toEqual({ tab: 'food' });
+    expect(view.queryByTestId('school-login-form')).toBeNull();
+  }
   expect(navigation.canGoBack()).toBe(true);
   act(() => navigation.goBack());
   await view.findByTestId('login-landing');
   fireEvent.press(view.getByTestId('school-login-start'));
   await view.findByTestId('school-login-form');
 });
+
+test.each(['cold', 'warm'])(
+  'a %s legacy food link opens for a Google-only account without changing school identity',
+  async (start) => {
+    mockPlatformSession = { platformAccountId: 'google-only' };
+    mockBrowsingSchoolId = 'nthu';
+    const url =
+      'campus://shops?schoolId=pu&campus=pu&tab=merchant&role=admin' +
+      '&assistantAccountId=other&platformAccountId=other&context=secret&token=secret';
+    if (start === 'cold') mockInitialUrl = url;
+    const navigation = createNavigationContainerRef();
+    const view = render(
+      <NavigationContainer ref={navigation} linking={preAuthLinking}>
+        <PreAuthStack />
+      </NavigationContainer>,
+    );
+    if (start === 'warm') {
+      await view.findByTestId('login-landing');
+      await waitFor(() => expect(mockLinkListener).toBeDefined());
+      act(() => mockLinkListener?.({ url }));
+    }
+    await view.findByTestId('platform-workspace');
+    expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
+    expect(navigation.getCurrentRoute()?.params).toEqual({
+      tab: 'food',
+      schoolId: 'pu',
+      campus: 'pu',
+    });
+    expect(view.queryByTestId('school-login-form')).toBeNull();
+    expect(mockBrowsingSchoolId).toBe('nthu');
+    expect(mockSchoolAuth).toMatchObject({ user: null, profile: null });
+    expect(mockPlatformSession).toEqual({ platformAccountId: 'google-only' });
+  },
+);
+
+test.each(['shops/vendor-one', '/shops/vendor/vendor-one', 'shops/detail/order-one?schoolId=pu'])(
+  'an unsupported legacy detail %s does not resolve to a food success route',
+  (path) => {
+    expect(preAuthLinking.getStateFromPath?.(path, preAuthLinking.config)).toBeUndefined();
+  },
+);
 
 test('a warm platform link works in the school-signed-out stack and cleans up its subscription', async () => {
   const navigation = createNavigationContainerRef();
@@ -252,6 +471,46 @@ test('a dormitory link opens the selected campus workspace for a signed-in platf
     await AsyncStorage.removeItem(key);
   }
 });
+
+test.each(['cold', 'warm'])(
+  'a %s career link keeps the selected campus, opens public announcements, and returns to the guest entry',
+  async (start) => {
+    mockBrowsingSchoolId = 'nthu';
+    const url = 'campus://career?schoolId=pu&role=admin';
+    if (start === 'cold') mockInitialUrl = url;
+    const navigation = createNavigationContainerRef();
+    const onUnhandledAction = jest.fn();
+    const view = render(
+      <NavigationContainer
+        ref={navigation}
+        linking={preAuthLinking}
+        onUnhandledAction={onUnhandledAction}
+      >
+        <PreAuthStack />
+      </NavigationContainer>,
+    );
+    if (start === 'warm') {
+      await view.findByTestId('login-landing');
+      await waitFor(() => expect(mockLinkListener).toBeDefined());
+      act(() => mockLinkListener?.({ url }));
+    }
+    expect(
+      await view.findByRole('link', { name: '登入後可申請校內工讀與查看實習學分' }),
+    ).toBeTruthy();
+    expect(navigation.getCurrentRoute()?.name).toBe('Career');
+    expect(view.getByText('生活 › 職涯 · 國立清華大學')).toBeTruthy();
+    expect(view.queryByTestId('school-login-form')).toBeNull();
+    expect(mockBrowsingSchoolId).toBe('nthu');
+    expect(mockSchoolAuth).toMatchObject({ user: null, profile: null });
+    fireEvent.press(view.getByRole('button', { name: '查看校方公告' }));
+    expect(await view.findByTestId('public-announcements-screen')).toBeTruthy();
+    act(() => navigation.goBack());
+    expect(navigation.getCurrentRoute()?.name).toBe('Career');
+    act(() => navigation.goBack());
+    expect(navigation.getCurrentRoute()?.name).toBe('LoginLanding');
+    expect(onUnhandledAction).not.toHaveBeenCalled();
+  },
+);
 
 test.each([
   ['Map', 'public-map-screen'],
@@ -381,7 +640,6 @@ test('account changes unmount private content before exposing the next account',
   expect(cleanup).toHaveBeenCalledTimes(1);
 });
 
-
 test('browsing another school unmounts private school screens and restores them only after returning', () => {
   mockSchoolAuth = {
     user: { uid: 'pu-student' },
@@ -431,7 +689,6 @@ test('school aliases do not bypass cross-campus isolation', () => {
   expect(hasReadySchoolSession(mockSchoolAuth, null)).toBe(false);
 });
 
-
 test('the public library remains reachable after browsing away from the logged-in school', async () => {
   mockSchoolAuth = {
     user: { uid: 'u1' },
@@ -442,7 +699,11 @@ test('the public library remains reachable after browsing away from the logged-i
   mockBrowsingSchoolId = 'nthu';
   const view = render(
     <SchoolSessionBoundary
-      publicContent={<NavigationContainer><PreAuthStack /></NavigationContainer>}
+      publicContent={
+        <NavigationContainer>
+          <PreAuthStack />
+        </NavigationContainer>
+      }
     >
       <Text testID="private-school">靜宜私人課務</Text>
     </SchoolSessionBoundary>,
@@ -452,11 +713,17 @@ test('the public library remains reachable after browsing away from the logged-i
   expect(await view.findByTestId('public-library-screen')).toBeTruthy();
 });
 
-
 test('a restored account cannot mount private navigation before school choice is resolved', () => {
-  mockSchoolAuth = { user: { uid: 'u1' }, profile: { uid: 'u1', schoolId: 'pu' }, loading: false, profileLoading: false };
+  mockSchoolAuth = {
+    user: { uid: 'u1' },
+    profile: { uid: 'u1', schoolId: 'pu' },
+    loading: false,
+    profileLoading: false,
+  };
   const content = () => (
-    <SchoolSessionBoundary publicContent={<Text>公開入口</Text>}><Text>私人課務</Text></SchoolSessionBoundary>
+    <SchoolSessionBoundary publicContent={<Text>公開入口</Text>}>
+      <Text>私人課務</Text>
+    </SchoolSessionBoundary>
   );
   mockSelectionReady = false;
   const view = render(content());
@@ -468,4 +735,23 @@ test('a restored account cannot mount private navigation before school choice is
   mockBrowsingSchoolId = 'pu';
   view.rerender(content());
   expect(view.getByText('私人課務')).toBeTruthy();
+});
+
+test('a guest opens exploration before selecting a school and can return to the same entry', async () => {
+  mockBrowsingSchoolId = '';
+  const onUnhandledAction = jest.fn();
+  const navigation = createNavigationContainerRef();
+  const view = render(
+    <NavigationContainer ref={navigation} onUnhandledAction={onUnhandledAction}>
+      <PreAuthStack />
+    </NavigationContainer>,
+  );
+  fireEvent.press(await view.findByLabelText('探索更多 nuni 用法'));
+  await view.findByTestId('explore-screen');
+  expect(navigation.getCurrentRoute()?.name).toBe('Explore');
+  expect(view.getByText('從想完成的事，找到 nuni 的用法。')).toBeTruthy();
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+  await act(async () => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('LoginLanding');
+  await view.findByTestId('login-landing');
 });

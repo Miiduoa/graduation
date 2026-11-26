@@ -3,6 +3,7 @@
 !pnpm-lock.yaml
 !pnpm-workspace.yaml
 !patches/
+!patches/next@16.4.5.patch
 !patches/query-string@7.1.3.patch
 !tsconfig.json
 !vendor/
@@ -19,9 +20,18 @@
 !scripts/import-ai/**
 !backend/
 !backend/functions/
+!backend/functions/dormWorkflow.js
+!backend/functions/authz.js
+!backend/functions/dormName.js
+!backend/functions/dormSsoIdentity.js
 !backend/functions/puScraper.js
 !backend/functions/tronClassScraper.js
+!backend/functions/tronClassAccountLifecycle.js
+!backend/functions/campusStoryAccessBinding.js
+!backend/functions/campusAnnouncements/
+!backend/functions/campusAnnouncements/catalog.js
 !backend/functions/lib/
+!backend/functions/lib/notificationService.js
 !backend/functions/lib/puGradeDocument.js
 !backend/functions/lib/puCreditSummary.js
 !backend/functions/lib/puCourseTime.js

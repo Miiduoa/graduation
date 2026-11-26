@@ -81,13 +81,16 @@ it('uses only the supplied directory, searches it, and treats selection as brows
   expect(screen.getByLabelText('瀏覽校園')).toBeTruthy();
   expect(screen.getByText(/不會更換帳號或取得校務資料權限/)).toBeTruthy();
   fireEvent.change(screen.getByLabelText('搜尋校園'), { target: { value: 'B' } });
-  expect(screen.queryByRole('option', { name: '甲校' })).toBeNull();
-  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  expect(screen.queryByRole('button', { name: /甲校/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /乙校/ }));
   expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
   expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({
     schoolId: 'school-b',
   });
-  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: '' } });
+  const all = screen.getByRole('button', { name: '不限校園' });
+  all.focus();
+  fireEvent.click(all);
+  expect(document.activeElement).toBe(screen.getByLabelText('搜尋校園'));
   expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
   expect(navigation.search).toBe('?campus=all');
 });
@@ -443,9 +446,9 @@ it('clears an old code when changing to a school listed only by the live directo
   expect(params.has('school')).toBe(false);
 });
 
-it('clears map deep links when changing campuses while preserving unrelated map search filters', () => {
+it('clears every map destination and classroom query when changing campuses', () => {
   navigation.pathname = '/map';
-  navigation.search = '?schoolId=school-a&campus=school-a&route=library,gate&focus=library&q=%E8%87%AA%E7%BF%92';
+  navigation.search = '?schoolId=school-a&campus=school-a&route=library,gate&focus=library&q=自習&query=主顧303&room=PH303&view=list';
   render(<View />);
   expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
   fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
@@ -454,17 +457,27 @@ it('clears map deep links when changing campuses while preserving unrelated map 
   expect(next.get('campus')).toBe('school-b');
   expect(next.has('route')).toBe(false);
   expect(next.has('focus')).toBe(false);
-  expect(next.get('q')).toBe('自習');
+  for (const key of ['q', 'query', 'room']) expect(next.has(key)).toBe(false);
+  expect(next.get('view')).toBe('list');
 });
 
 it('keeps a current-school map link intact when choosing the same campus again', () => {
   navigation.pathname = '/map';
-  navigation.search = '?schoolId=school-a&campus=school-a&route=library,gate&focus=library';
+  navigation.search = '?schoolId=school-a&campus=school-a&route=library,gate&focus=library&query=主顧303';
   render(<View />);
   act(() => capturedSelection.selectSchool('school-a'));
   const next = new URLSearchParams(navigation.search);
   expect(next.get('route')).toBe('library,gate');
   expect(next.get('focus')).toBe('library');
+  expect(next.get('query')).toBe('主顧303');
+});
+
+it('clears classroom requests when switching a map to all campuses', () => {
+  navigation.pathname = '/map';
+  navigation.search = '?campus=school-a&query=主顧303&q=主顧&room=303';
+  render(<View />);
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: '' } });
+  expect(navigation.replace).toHaveBeenCalledWith('/map?campus=all', { scroll: false });
 });
 
 function DraftField() {
@@ -514,7 +527,8 @@ it('asks before switching schools when the current campus has an unsaved draft',
   );
   render(<DraftView />);
   fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '甲校未送文字' } });
-  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  fireEvent.change(screen.getByLabelText('搜尋校園'), { target: { value: '乙' } });
+  fireEvent.click(screen.getByRole('button', { name: /乙校/ }));
   expect(screen.getByRole('dialog')).toBeTruthy();
   expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
   expect(navigation.replace).not.toHaveBeenCalled();
@@ -525,7 +539,7 @@ it('asks before switching schools when the current campus has an unsaved draft',
   expect(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))).toBe(
     JSON.stringify({ schoolId: 'school-a' }),
   );
-  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  fireEvent.click(screen.getByRole('button', { name: /乙校/ }));
   fireEvent.click(screen.getByRole('button', { name: '捨棄草稿並切換' }));
   expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
   expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('');
@@ -779,4 +793,32 @@ it('cancels event-detail draft confirmation on a platform account change with th
   view.rerender(<IdentityView account="bob" />);
   expect(localStorage.getItem(bobPreference)).toBe(JSON.stringify({ schoolId: 'school-b' }));
   expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
+});
+
+for (const scenario of [
+  { name: '無偏好時採用帳號學校', expected: '甲校' },
+  { name: '無法解析偏好時採用帳號學校', stored: '{', expected: '甲校' },
+  { name: 'campus=all 優先於帳號學校', query: 'campus=all', expected: '不限校園' },
+  { name: 'schoolId=all 優先於帳號學校', query: 'schoolId=all', expected: '不限校園' },
+  { name: '網址指定其他校優先於帳號學校', query: 'campus=school-b', expected: '乙校' },
+  { name: '已存其他校優先於帳號學校', stored: JSON.stringify({ schoolId: 'school-b' }), expected: '乙校' },
+  { name: '已存不限校園優先於帳號學校', stored: JSON.stringify({ schoolId: null }), expected: '不限校園' },
+]) {
+  it(scenario.name, () => {
+    navigation.search = scenario.query ?? '';
+    const key = schoolPreferenceKey(defaults.ownerKey);
+    if (scenario.stored) localStorage.setItem(key, scenario.stored);
+    render(<View accountSchoolId="school-a" />);
+    expect(screen.getByTestId('selected-school').textContent).toBe(scenario.expected);
+    expect(localStorage.getItem(key)).toBe(scenario.stored ?? null);
+    expect(navigation.replace).not.toHaveBeenCalled();
+  });
+}
+
+it('訪客或帳號學校不在目前目錄時維持不限校園', () => {
+  const view = render(<View ownerKey={null} />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+  view.rerender(<View accountSchoolId="missing" />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+  expect(capturedSelection.requestedUnavailable).toBe(false);
 });

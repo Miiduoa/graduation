@@ -1,19 +1,14 @@
+import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
+import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import {
-  collection,
   deleteDoc,
   doc,
-  getDocsFromServer,
-  limit,
-  orderBy,
-  query,
   runTransaction,
   serverTimestamp,
-  startAfter,
   updateDoc,
-  type QueryDocumentSnapshot,
   type DocumentData,
 } from 'firebase/firestore';
-import { getAuth, getDb, isFirebaseConfigured } from '@/lib/firebase';
+import { getAuth, getCloudFunctionUrl, getDb, isFirebaseConfigured } from '@/lib/firebase';
 import { readMemberGroup, type MemberGroup } from './groupService';
 
 export type GroupDiscussionPost = {
@@ -22,21 +17,25 @@ export type GroupDiscussionPost = {
   kind: 'post' | 'question' | 'announcement';
   title: string;
   body: string;
+  attachments?: string[];
   authorId: string;
   authorName: string | null;
   schoolId: string;
   createdAt: unknown;
 };
 
+export type DiscussionCursor = { id: string; createdAt: { seconds: number; nanoseconds: number } };
+
 export type DiscussionPage = {
   posts: GroupDiscussionPost[];
-  cursor: QueryDocumentSnapshot<DocumentData> | null;
+  cursor: DiscussionCursor | null;
   hasMore: boolean;
 };
 
 export type CreateDiscussionInput = {
   title: string;
   body: string;
+  attachments?: string[];
   kind?: 'post' | 'question' | 'announcement';
   /** 每次發布意圖的穩定 ID；重試必須重用，成功後換新意圖。 */
   postId: string;
@@ -64,7 +63,11 @@ export function createPublicationIntentId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
-  return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return `p_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  }
+  throw new Error('Cryptographic randomness is unavailable');
 }
 
 function mapPost(
@@ -91,12 +94,14 @@ function mapPost(
     authorName: typeof data.authorName === 'string' ? data.authorName : null,
     schoolId: typeof data.schoolId === 'string' ? data.schoolId : '',
     createdAt: data.createdAt ?? null,
+    attachments: privateAttachmentPaths(data.attachments),
   };
 }
 
 function samePublication(
   data: DocumentData,
-  input: { title: string; body: string; kind: string; uid: string; schoolId: string },
+  input: { title: string; body: string; kind: string; uid: string; schoolId: string;
+    attachments?: string[]; },
 ): boolean {
   return (
     data.authorId === input.uid &&
@@ -105,7 +110,8 @@ function samePublication(
     typeof data.title === 'string' &&
     data.title.trim() === input.title &&
     typeof data.body === 'string' &&
-    data.body.trim() === input.body
+    data.body.trim() === input.body &&
+    JSON.stringify(data.attachments ?? []) === JSON.stringify(input.attachments ?? [])
   );
 }
 
@@ -114,29 +120,32 @@ export async function loadGroupDiscussionPage(
   schoolId: string,
   groupId: string,
   current: CurrentScope = () => true,
-  cursor: QueryDocumentSnapshot<DocumentData> | null = null,
+  cursor: DiscussionCursor | null = null,
 ): Promise<{ group: MemberGroup; page: DiscussionPage }> {
   assertCurrent(uid, current);
   if (!validId(groupId)) throw new Error('Invalid group identifier');
   const group = await readMemberGroup(uid, schoolId, groupId);
   assertCurrent(uid, current);
-  const postsRef = collection(getDb(), 'groups', groupId, 'posts');
-  const pageQuery = cursor
-    ? query(postsRef, orderBy('createdAt', 'desc'), startAfter(cursor), limit(PAGE_SIZE))
-    : query(postsRef, orderBy('createdAt', 'desc'), limit(PAGE_SIZE));
-  const snap = await getDocsFromServer(pageQuery);
+  const user = getAuth()!.currentUser!;
+  const token = await user.getIdToken();
   assertCurrent(uid, current);
-  const posts = snap.docs
-    .map((entry) => mapPost(groupId, entry))
+  if (getAuth()?.currentUser !== user) throw new Error('Login session changed');
+  const response = await fetch(getCloudFunctionUrl('listGroupDiscussionPage'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ data: { groupId, pageSize: PAGE_SIZE, cursor } }),
+    cache: 'no-store',
+    signal: AbortSignal.timeout(20000),
+  });
+  const payload = await response.json();
+  assertCurrent(uid, current);
+  if (getAuth()?.currentUser !== user) throw new Error('Login session changed');
+  if (!response.ok || payload.error) throw new Error('無法載入群組貼文');
+  const page = payload.result as DiscussionPage;
+  const posts = page.posts
+    .map((entry) => mapPost(groupId, { id: entry.id, data: () => entry }))
     .filter((row): row is GroupDiscussionPost => row != null);
-  return {
-    group,
-    page: {
-      posts,
-      cursor: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1]! : null,
-      hasMore: snap.docs.length >= PAGE_SIZE,
-    },
-  };
+  return { group, page: { posts, cursor: page.cursor, hasMore: page.hasMore } };
 }
 
 function assertTxnScope(uid: string, schoolId: string, current: CurrentScope) {
@@ -174,6 +183,7 @@ export async function createGroupDiscussionPost(
     throw new Error('Only group managers can post announcements');
   }
 
+  for (const path of input.attachments ?? []) assertPrivateFileNamespace(path, `groups/${groupId}/posts/${input.postId}`);
   const ref = doc(getDb(), 'groups', groupId, 'posts', input.postId);
   const memberRef = doc(getDb(), 'groups', groupId, 'members', uid);
   const author = authorName?.trim() || null;
@@ -189,6 +199,11 @@ export async function createGroupDiscussionPost(
     likes: 0,
     likedBy: [] as string[],
     clientIntentId: input.postId,
+    published: true,
+    status: 'published',
+    deleted: false,
+    deletedAt: null,
+    ...(input.attachments?.length ? { attachments: input.attachments } : {}),
   };
 
   const result = await runTransaction(getDb(), async (transaction) => {
@@ -206,7 +221,9 @@ export async function createGroupDiscussionPost(
     }
     if (existing.exists()) {
       const data = existing.data()!;
-      if (samePublication(data, { title, body, kind, uid, schoolId })) {
+      if (
+        samePublication(data, { title, body, kind, uid, schoolId, attachments: input.attachments })
+      ) {
         const mapped = mapPost(groupId, existing);
         if (!mapped) throw new Error('Existing post could not be confirmed');
         return { status: 'existing' as const, post: mapped };
@@ -231,6 +248,7 @@ export async function createGroupDiscussionPost(
     authorName: author,
     schoolId,
     createdAt: null,
+    attachments: input.attachments ?? [],
   };
 }
 

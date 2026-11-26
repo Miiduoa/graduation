@@ -1,0 +1,219 @@
+{
+  "capturedAt": "2026-11-23T12:26:25Z",
+  "repository": "Miiduoa/graduation",
+  "mainBaseline": "15bdca30796646d93263ddf8442eca248aa196b4",
+  "previousCandidate": "ae40bc6f6c9dd72d5b61ac59f02a2d27c505ea08",
+  "sourceBranchCount": 17,
+  "featureFixDependencyBranchCount": 14,
+  "integrationBranchCount": 3,
+  "snapshotNote": "20:09（台灣時間）初次重新盤點，20:26 補入準備期間新增的 TronClass 與地圖提交後固定來源：18 個現存分支，扣除 main 後 17 個仍有未合入的提交，包含本整合分支與另外 2 個歷史整合分支。#740 已正式合入 main 且來源分支刪除；本輪保留主線已核可的普通顯示與簡化草稿契約，再補必要儲存確認與跨分頁保護。之後的新提交不自動算成本輪已驗收。",
+  "branches": [
+    {
+      "name": "dependabot/npm_and_yarn/backend/functions/functions-patch-minor-fb4b230888",
+      "sha": "1ba40c96fcc8f3f1f036c2de74fc336355e76811",
+      "pullRequest": 746
+    },
+    {
+      "name": "dependabot/pip/backend/ai-server/ai-server-pip-patch-minor-db01d85267",
+      "sha": "1445008c13c617e886f4329794c4e357c4d0ce96",
+      "pullRequest": 747
+    },
+    {
+      "name": "dependabot/pip/backend/ai-server/numpy-gte-2.5.5",
+      "sha": "cceb31073a6fa9b548e6f9459cf37abcd22c5008",
+      "pullRequest": 748
+    },
+    {
+      "name": "feat/agent-role-orchestration-20261123",
+      "sha": "29eb04f58238c388123d3408cd8250cb7270e719",
+      "pullRequest": 751
+    },
+    {
+      "name": "feat/agent-washing-cancellation-cloud-20261117",
+      "sha": "3205c5a88bfe6f4f325a8a7b2b994cec637eea8a",
+      "pullRequest": 703
+    },
+    {
+      "name": "feat/calendar-day-flow-20261123",
+      "sha": "5646e7197e40fe19ece15e016282bcda506d726a",
+      "pullRequest": 752
+    },
+    {
+      "name": "feat/merchant-workspace-continuity-20261123",
+      "sha": "d45d0405e8b2295a80b6bceb529f63ad4bcada40",
+      "pullRequest": 750
+    },
+    {
+      "name": "feat/nuni-system-experience-20261123",
+      "sha": "21547d426144311ba8babc5828f26bff484b8205",
+      "pullRequest": 754
+    },
+    {
+      "name": "feat/nuni-task-flow-20261121",
+      "sha": "04aaccd2cfe6e9966bf8f1e071cb9c0c4ba9dcd1",
+      "pullRequest": 739
+    },
+    {
+      "name": "feat/tronclass-native-submit-20261113",
+      "sha": "b557781206280e94255fa37b03942ef596eba34b",
+      "pullRequest": 616
+    },
+    {
+      "name": "fix/campus-spatial-offscreen-webgl-start-20261119",
+      "sha": "281ac372f1e02e693dd8ebac3d8bb64ebbb1dd68",
+      "pullRequest": 722
+    },
+    {
+      "name": "fix/mobile-agent-exact-homework-handoff-20261122",
+      "sha": "a926543cca8d1e61a9d1c1920b5b6bca9f715d71",
+      "pullRequest": 741
+    },
+    {
+      "name": "fix/mobile-board-subscribe-pending-20261120",
+      "sha": "0759938b30860382073b33904255b6c125720d35",
+      "pullRequest": 729
+    },
+    {
+      "name": "fix/multi-school-web-catalog-freshness-20261123",
+      "sha": "8aefa6f4850f06648544cdf0d5500c10adeded3f",
+      "pullRequest": 749
+    },
+    {
+      "name": "integration/all-branches-20261121",
+      "sha": "a3447cb016b7180d976884468e1c497a0cbfa7ff",
+      "pullRequest": 738
+    },
+    {
+      "name": "integration/all-branches-20261123",
+      "sha": "ae40bc6f6c9dd72d5b61ac59f02a2d27c505ea08",
+      "pullRequest": 753
+    },
+    {
+      "name": "integration/campus-services-20261106",
+      "sha": "8e07b78a90c751cc616c761a19580f86a0e44775",
+      "pullRequest": 515
+    },
+    {
+      "name": "main",
+      "sha": "15bdca30796646d93263ddf8442eca248aa196b4"
+    }
+  ],
+  "previousSnapshots": [
+    {
+      "capturedAt": "2026-11-23T08:44:58Z",
+      "repository": "Miiduoa/graduation",
+      "mainBaseline": "8aaefb93ada76113792b7f21559fcba2b0170db5",
+      "sourceBranchCount": 18,
+      "snapshotNote": "保留本次最終盤點的 18 個來源提交；#719 已合入 main 並刪除來源分支，仍保留其 SHA。納入 16:44（台灣時間）觀測到的 #754 新分支與 #722、#740 後續提交；之後的新提交不自動歸入本輪驗收。",
+      "branches": [
+        {
+          "name": "dependabot/npm_and_yarn/backend/functions/functions-patch-minor-fb4b230888",
+          "sha": "1ba40c96fcc8f3f1f036c2de74fc336355e76811",
+          "pullRequest": 746
+        },
+        {
+          "name": "dependabot/pip/backend/ai-server/ai-server-pip-patch-minor-db01d85267",
+          "sha": "1445008c13c617e886f4329794c4e357c4d0ce96",
+          "pullRequest": 747
+        },
+        {
+          "name": "dependabot/pip/backend/ai-server/numpy-gte-2.5.5",
+          "sha": "cceb31073a6fa9b548e6f9459cf37abcd22c5008",
+          "pullRequest": 748
+        },
+        {
+          "name": "feat/agent-role-orchestration-20261123",
+          "sha": "29eb04f58238c388123d3408cd8250cb7270e719",
+          "pullRequest": 751
+        },
+        {
+          "name": "feat/agent-washing-cancellation-cloud-20261117",
+          "sha": "3205c5a88bfe6f4f325a8a7b2b994cec637eea8a",
+          "pullRequest": 703
+        },
+        {
+          "name": "feat/calendar-day-flow-20261123",
+          "sha": "5646e7197e40fe19ece15e016282bcda506d726a",
+          "pullRequest": 752
+        },
+        {
+          "name": "feat/merchant-workspace-continuity-20261123",
+          "sha": "d45d0405e8b2295a80b6bceb529f63ad4bcada40",
+          "pullRequest": 750
+        },
+        {
+          "name": "feat/nuni-system-experience-20261123",
+          "sha": "21547d426144311ba8babc5828f26bff484b8205",
+          "pullRequest": 754
+        },
+        {
+          "name": "feat/nuni-task-flow-20261121",
+          "sha": "04aaccd2cfe6e9966bf8f1e071cb9c0c4ba9dcd1",
+          "pullRequest": 739
+        },
+        {
+          "name": "feat/tronclass-native-submit-20261113",
+          "sha": "5d0543d9a82de67adb8bf578cd20a28916eeae21",
+          "pullRequest": 616
+        },
+        {
+          "name": "fix/campus-spatial-offscreen-webgl-start-20261119",
+          "sha": "15856e4d2132df62ac5e043b8d84efe0b1582d74",
+          "pullRequest": 722
+        },
+        {
+          "name": "fix/course-study-invisible-source-evidence-20261119",
+          "sha": "916bf75630b1d9b7bc0c6a6f7e6ae841e120d262",
+          "pullRequest": 719
+        },
+        {
+          "name": "fix/mobile-agent-exact-homework-handoff-20261122",
+          "sha": "a926543cca8d1e61a9d1c1920b5b6bca9f715d71",
+          "pullRequest": 741
+        },
+        {
+          "name": "fix/mobile-board-subscribe-pending-20261120",
+          "sha": "0759938b30860382073b33904255b6c125720d35",
+          "pullRequest": 729
+        },
+        {
+          "name": "fix/mobile-creator-card-confirm-timeout-20261121",
+          "sha": "d6c7fbed784520c624393eb49e94a8f046744ef9",
+          "pullRequest": 740
+        },
+        {
+          "name": "fix/multi-school-web-catalog-freshness-20261123",
+          "sha": "8aefa6f4850f06648544cdf0d5500c10adeded3f",
+          "pullRequest": 749
+        },
+        {
+          "name": "integration/all-branches-20261121",
+          "sha": "a3447cb016b7180d976884468e1c497a0cbfa7ff",
+          "pullRequest": 738
+        },
+        {
+          "name": "integration/campus-services-20261106",
+          "sha": "8e07b78a90c751cc616c761a19580f86a0e44775",
+          "pullRequest": 515
+        },
+        {
+          "name": "main",
+          "sha": "8aaefb93ada76113792b7f21559fcba2b0170db5"
+        }
+      ]
+    }
+  ],
+  "initialRoundCapturedAt": "2026-11-23T12:09:00Z",
+  "sourceUpdatesDuringPreparation": [
+    {
+      "name": "feat/tronclass-native-submit-20261113",
+      "previousSha": "5d0543d9a82de67adb8bf578cd20a28916eeae21",
+      "sha": "b557781206280e94255fa37b03942ef596eba34b"
+    },
+    {
+      "name": "fix/campus-spatial-offscreen-webgl-start-20261119",
+      "previousSha": "8962a963f4b7dc45d88e7d45cb74139003ba115d",
+      "sha": "281ac372f1e02e693dd8ebac3d8bb64ebbb1dd68"
+    }
+  ]
+}

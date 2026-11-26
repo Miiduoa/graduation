@@ -6,8 +6,11 @@ import {
   directoryCampusServices,
   flattenCampusServices,
   presentCampusService,
+  readCampusServiceFilters,
   searchCampusServices,
+  serviceAccessLabel,
   visibleCampusServices,
+  writeCampusServiceFilters,
 } from './campusServices';
 
 it('keeps announcements and bus, and shows ordering-off copy for /food as a note', () => {
@@ -24,11 +27,32 @@ it('keeps announcements and bus, and shows ordering-off copy for /food as a note
   expect(food?.text).not.toContain('選餐點');
 });
 
-it('lists lost-found as a school-account service, not a platform Google task', () => {
+it('lists lost-found as a Google platform service', () => {
   const lostFound = CAMPUS_SERVICES.find((service) => service.href === '/lost-found');
-  expect(lostFound?.access).toBe('school');
-  expect(lostFound?.access).not.toBe('platform');
+  expect(lostFound?.access).toBe('platform');
+  expect(lostFound?.text).toContain('Google');
 });
+
+it('keeps student identity and the shared school/Google assistant under the account section', () => {
+  const card = CAMPUS_SERVICES.find((service) => service.href === '/student-card');
+  const assistant = CAMPUS_SERVICES.find((service) => service.href === '/ai-assistant');
+  expect(card?.category).toBe('account');
+  expect(card?.access).toBe('account');
+  expect(assistant?.category).toBe('account');
+  expect(assistant?.access).toBe('account');
+  expect(serviceAccessLabel(assistant!.access, { loading: false, studentId: false })).toBe('依帳號查看');
+});
+
+it.each(['Google', '公開 貼文', '跨校'])(
+  'finds public exchange through %s without requiring school sign-in availability',
+  (query) => {
+    const service = searchCampusServices(query, 'connect').find((entry) => entry.href === '/social');
+    expect(service?.access).toBe('platform');
+    expect(serviceAccessLabel(service!.access, { loading: false, studentId: false })).toBe('Google 帳號');
+    expect(directoryCampusServices().some((entry) => entry.href === '/social')).toBe(true);
+    expect(CAMPUS_SERVICES.find((entry) => entry.href === '/community')?.access).toBe('school');
+  },
+);
 
 it.each(['WOW Class', 'TronClass', 'LMS', '玩課雲'])(
   'finds the school course secondary through %s under 課程與作業',
@@ -46,11 +70,24 @@ it('lists the read-only homework surface as a searchable secondary', () => {
   expect(service?.access).toBe('public');
 });
 
-it.each(['總機', '職涯', '實習'])('finds school info through %s without a retired career entry', (query) => {
+it.each(['總機', '地址', '聯絡'])('finds school contact information through %s', (query) => {
   const services = searchCampusServices(query);
   expect(services.some((service) => service.href === '/school-info')).toBe(true);
-  expect(services.some((service) => service.href.includes('career'))).toBe(false);
 });
+
+it.each(['職涯', '實習', '校內工讀', '徵才', 'career'])(
+  'finds the public career workspace through %s instead of a school-info detour',
+  (query) => {
+    const services = searchCampusServices(query, 'campus');
+    expect(services.find((service) => service.href === '/career')).toMatchObject({
+      name: '職涯',
+      access: 'public',
+      category: 'campus',
+    });
+    expect(services.filter((service) => service.href === '/career')).toHaveLength(1);
+    expect(services.some((service) => service.href === '/school-info')).toBe(false);
+  },
+);
 
 it('exposes a separate public campus-events entry beside clubs', () => {
   const events = searchCampusServices('講座').find((service) => service.href === '/events');
@@ -72,6 +109,8 @@ it('does not rewrite non-food services when ordering is off', () => {
 it('lists the local dormitory workspace without implying an official application', () => {
   const dorm = CAMPUS_SERVICES.find((service) => service.href === '/dormitory');
   expect(dorm?.access).toBe('device');
+  expect(dorm?.text).toContain('宿舍備忘');
+  expect(dorm?.text).not.toMatch(/單號|已送出給學校|查詢進度/);
   expect(searchCampusServices('報修').some((service) => service.href === '/dormitory')).toBe(true);
 });
 
@@ -137,6 +176,15 @@ it('keeps academic vocabulary aligned across directory primaries', () => {
   expect(byHref.get('/grades?tab=feedback')).toBe('成績回饋');
 });
 
+it('reads and writes directory query filters without keeping an unknown category', () => {
+  const params = new URLSearchParams('q=借書&category=missing&session=old');
+  expect(readCampusServiceFilters(params)).toEqual({ query: '借書', category: 'all' });
+  writeCampusServiceFilters(params, '借書', 'campus');
+  expect(params.get('q')).toBe('借書');
+  expect(params.get('category')).toBe('campus');
+  expect(params.get('session')).toBe('old');
+});
+
 it('exposes merchant and leave entries in the flattened catalog for intent lookup', () => {
   const hrefs = visibleCampusServices().map((service) => service.href);
   expect(hrefs).toContain('/merchant');
@@ -150,4 +198,8 @@ it('finds the student card by its everyday names', () => {
     expect(searchCampusServices(term).some((service) => service.href === '/student-card')).toBe(true);
   }
   expect(directoryCampusServices().some((service) => service.href === '/student-card')).toBe(true);
+});
+
+it.each(['職涯', '實習', '工讀'])('finds the existing career workspace through %s', (query) => {
+  expect(searchCampusServices(query).some((service) => service.href === '/career')).toBe(true);
 });

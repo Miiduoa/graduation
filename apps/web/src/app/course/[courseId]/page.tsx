@@ -1,7 +1,10 @@
 'use client';
+import { PRIVATE_IMAGE_TYPES, safePrivateFileName } from '@campus/shared/src/privateFileAccess';
 
 import { use, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import { PRIVATE_FILE_UPLOADS_PER_MINUTE, PRIVATE_FILE_UPLOAD_RATE_MESSAGE } from '@campus/shared/src/privateFileUploads';
+import { privateFilesEnabled, privateGroupAssignmentPath, uploadPrivateFile, claimPrivateFile } from '@/lib/privateFiles';
+import { PrivateAttachment } from '@/components/PrivateAttachment';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
@@ -11,6 +14,8 @@ import {
   type CourseAssignment,
   type CourseWork,
 } from '@/lib/courseWork';
+import { useSearchParams } from 'next/navigation';
+import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigationLinks';
 import { LoginLink } from '@/components/LoginLink';
 import {
   COURSE_WORK_MISSING_ASSIGNMENT,
@@ -25,7 +30,8 @@ import { useLocationHash } from '@/lib/useLocationHash';
 import { gradeReadOwner, markPublishedGradeReadByLanding } from '@/lib/lmsStudentGrades';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { materialBrowserStorage, useMaterialReadIds } from '@/lib/useMaterialClientState';
-import { formatTaipeiDateTime, parseTaipeiInstant, taipeiParts } from '@campus/shared/src/taipeiTime';
+import { formatTaipeiDateTime, parseTaipeiInstant,
+  taipeiParts, } from '@campus/shared/src/taipeiTime';
 import styles from '../../home.module.css';
 import courseStyles from './courseWorkspace.module.css';
 
@@ -53,6 +59,9 @@ function Assignment({
     const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
   }, []);
+  const [files, setFiles] = useState<File[]>([]);
+  const uploadedFiles = useRef<string[]>([]);
+  const [savedAttachments, setSavedAttachments] = useState<string[]>([]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -80,13 +89,47 @@ function Assignment({
     setBusy(true);
     setError('');
     try {
-      await submitCourseText(courseId, assignment.id, uid, answer);
+      if (privateFilesEnabled() && files.length) {
+        const batch = Date.now();
+        for (const [index, file] of files.entries()) {
+          const completed = uploadedFiles.current[index];
+          if (completed) {
+            try { await claimPrivateFile(completed, `groups/${courseId}/assignments/${assignment.id}/submissions/${uid}`); continue; }
+            catch (error) {
+              if ((error as { statusCode?: number }).statusCode !== 410) throw error;
+              delete uploadedFiles.current[index];
+            }
+          }
+          const path = privateGroupAssignmentPath(
+            courseId,
+            assignment.id,
+            uid,
+            safePrivateFileName(`${batch}-${index}-${crypto.randomUUID().replace(/-/g, '')}`, file.name),
+          );
+          if (!path) throw new Error('附件路徑無效');
+          await uploadPrivateFile({
+            path,
+            body: file,
+            originalFilename: file.name,
+            contentType: file.type || 'application/octet-stream',
+          });
+          uploadedFiles.current[index] = path;
+          try { await claimPrivateFile(path, `groups/${courseId}/assignments/${assignment.id}/submissions/${uid}`); }
+          catch (error) { if ((error as { statusCode?: number }).statusCode === 410) delete uploadedFiles.current[index]; throw error; }
+        }
+      }
+      if (!active.current) return;
+      if (uploadedFiles.current.length)
+        await submitCourseText(courseId, assignment.id, uid, answer, uploadedFiles.current);
+      else
+        await submitCourseText(courseId, assignment.id, uid, answer);
       if (!active.current) return;
       setSavedText(answer);
+      setSavedAttachments(uploadedFiles.current);
       onSaved();
-    } catch {
+    } catch (error) {
       if (!active.current) return;
-      setError('未能確認繳交結果。內容已保留；請重新整理確認紀錄，或稍後重試。');
+      setError((error as { statusCode?: number })?.statusCode === 429 ? PRIVATE_FILE_UPLOAD_RATE_MESSAGE : '未能確認繳交結果。內容已保留；請重新整理確認紀錄，或稍後重試。');
     } finally {
       busyRef.current = false;
       if (active.current) setBusy(false);
@@ -109,8 +152,8 @@ function Assignment({
       </div>
       <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.description || '教師尚未填寫作業說明。'}</p>
       {submitted ? (
-        <div role="status">
-          <p>
+        <div>
+          <p role="status">
             {assignment.grade
               ? '已繳交 · 教師已發布評分'
               : '已繳交 · 等待老師評分'}
@@ -118,10 +161,12 @@ function Assignment({
               ? ` · ${new Date(assignment.submittedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`
               : ''}
           </p>
-          {!assignment.grade ? (
-            <p>作業已收到；老師公布評分後，會顯示在這裡。</p>
-          ) : null}
+          {!assignment.grade ?
+            <p>作業已收到；老師公布評分後，會顯示在這裡。</p> : null}
           <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.submittedText ?? savedText}</p>
+          {(assignment.attachments?.length ? assignment.attachments : savedAttachments).map((path, index) => (
+            <PrivateAttachment key={path} path={path} ordinal={index + 1} />
+          ))}
           {assignment.grade ? (
             <div
               aria-label="作業評分"
@@ -161,7 +206,7 @@ function Assignment({
             id={`answer-${assignment.id}`}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            required
+            required={!files.length}
             maxLength={20000}
             rows={7}
             disabled={busy}
@@ -177,8 +222,31 @@ function Assignment({
               color: 'var(--text)',
             }}
           />
+          {privateFilesEnabled() && (
+            <label>
+              作業附件
+              <input
+                type="file"
+                multiple
+                disabled={busy}
+                accept={[...PRIVATE_IMAGE_TYPES, '.pdf', '.txt', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'].join(',')}
+                onChange={(event) => {
+                  const selected = Array.from(event.target.files ?? []);
+                  if (selected.length > PRIVATE_FILE_UPLOADS_PER_MINUTE) {
+                    setError(`單次最多選取 ${PRIVATE_FILE_UPLOADS_PER_MINUTE} 個附件`);
+                    event.target.value = '';
+                    return;
+                  }
+                  setError('');
+                  setFiles(selected);
+                  uploadedFiles.current = [];
+                }}
+              />
+            </label>
+          )}
           {error && <p role="alert">{error}</p>}
-          <button type="submit" className={styles.primary} disabled={busy || !text.trim()}>
+          <button type="submit" className={styles.primary} disabled={busy || (!text.trim() && !files.length)}
+          >
             {busy ? '繳交中…' : '繳交作業'}
           </button>
         </form>
@@ -194,7 +262,8 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
   const school = useOptionalSelectedSchool();
   const hash = useLocationHash();
   const scopeLoading = !hydrated || authLoading || school?.loading;
-  const returnPath = coursePageReturnPath(courseId, hash);
+  const campusSearch = buildCampusNavigationSearch(useSearchParams());
+  const returnPath = campusServiceHref(coursePageReturnPath(courseId, hash), campusSearch);
 
   if (scopeLoading || !user) {
     return (
@@ -208,7 +277,10 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
             <LoginLink
               className={styles.primary}
               returnPath={returnPath}
-              liveReturnPath={() => coursePageReturnPath(courseId, window.location.hash)}
+              liveReturnPath={() => campusServiceHref(
+                coursePageReturnPath(courseId, window.location.hash),
+                buildCampusNavigationSearch(new URLSearchParams(window.location.search)),
+              )}
             >
               登入帳號
             </LoginLink>
@@ -230,13 +302,14 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
 function accessDenied(error: unknown) {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : null;
   if (code === 'permission-denied' || code === 'unauthenticated') return true;
-  return error instanceof Error && [
+  return ( error instanceof Error && [
     'permission-denied',
     'unauthenticated',
     '找不到課程，或你尚未加入這門課。',
     '登入身分已變更，請重新開啟課程。',
     '請先登入。',
-  ].includes(error.message);
+    ].includes(error.message)
+  );
 }
 
 function weekStartTaipei(now: Date): number | null {
@@ -273,7 +346,9 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
   const readIds = useMaterialReadIds(uid);
   const hashId = hash.replace(/^#/, '').split('#')[0];
   const linked = parseCourseWorkHash(hash);
-  const weekHash = hashId === 'week';
+  const sectionHash = ['week', 'course-materials-title', 'assignments'].includes(hashId)
+    ? hashId
+    : '';
   const submitHash = hashId.endsWith('-submit') ? hashId : '';
   useLayoutEffect(() => {
     active.current = true;
@@ -304,10 +379,14 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
     void load();
   }, [load]);
   useEffect(() => {
-    if (course && weekHash && revealed.current !== 'week') {
+    // A new destination can later return to the same work; background refreshes cannot.
+    revealed.current = '';
+  }, [hash]);
+  useEffect(() => {
+    if (course && sectionHash && revealed.current !== sectionHash) {
       const frame = window.requestAnimationFrame(() => {
-        if (!landOnCourseWork('week')) return;
-        revealed.current = 'week';
+        if (!landOnCourseWork(sectionHash)) return;
+        revealed.current = sectionHash;
       });
       return () => window.cancelAnimationFrame(frame);
     }
@@ -344,7 +423,16 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [course, courseId, linked, uid, weekHash, submitHash]);
+  }, [course, courseId, linked, uid, sectionHash, submitHash]);
+  function revisitTarget(event: React.MouseEvent<HTMLAnchorElement>, target: string) {
+    if (
+      event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey ||
+      event.shiftKey || event.altKey || event.currentTarget.hash !== window.location.hash
+    ) return;
+    // Native hash navigation emits no change when the current shortcut is chosen again.
+    // Keep the anchor's URL/history behavior, while restoring its keyboard reading position.
+    landOnCourseWork(target);
+  }
   function refresh() {
     if (!active.current) return;
     // Keep same-scope forms mounted while the server refreshes sibling submissions.
@@ -378,7 +466,9 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
             >
               {course.canTeach ? '管理課堂點名' : '簽到與出席紀錄'}
             </a>
-            <button type="button" className={styles.secondary} onClick={refresh} disabled={refreshing}>
+            <button type="button" className={styles.secondary} onClick={refresh}
+              disabled={refreshing}
+            >
               重新整理
             </button>
           </div>
@@ -397,9 +487,9 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
             </div>
           </div>
           <nav className={courseStyles.jumpNavigation} aria-label="課程內容捷徑">
-            <a href="#week">本週待辦</a>
-            <a href="#course-materials-title">教材櫃</a>
-            <a href="#assignments">作業與評量</a>
+            <a href="#week" onClick={(event) => revisitTarget(event, 'week')}>本週待辦</a>
+            <a href="#course-materials-title" onClick={(event) => revisitTarget(event, 'course-materials-title')}>教材櫃</a>
+            <a href="#assignments" onClick={(event) => revisitTarget(event, 'assignments')}>作業與評量</a>
           </nav>
           <section
             className={`${styles.section} ${styles.courseWorkTarget}`}
@@ -413,7 +503,11 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
               <ul className={styles.list}>
                 {weekAssignments(course.assignments).map((item) => (
                   <li key={item.id}>
-                    <a href={`#assignment-${encodeURIComponent(item.id)}`} className={styles.task}>
+                    <a
+                      href={`#${workKind(item)}-${encodeURIComponent(item.id)}`}
+                      className={styles.task}
+                      onClick={(event) => revisitTarget(event, `${workKind(item)}-${item.id}`)}
+                    >
                       <strong>{item.title}</strong>
                       {item.dueAt ? (
                         <span className={courseStyles.dueDate}>
@@ -429,10 +523,8 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
             )}
           </section>
           <section className={styles.section} aria-labelledby="course-materials-title">
-            <h2 id="course-materials-title">教材櫃</h2>
-            <p className={styles.sectionNote}>
-              依單元或週次整理教材，開啟項目即可閱讀。
-            </p>
+            <h2 id="course-materials-title" className={styles.courseWorkTarget} tabIndex={-1}>教材櫃</h2>
+            <p className={styles.sectionNote}>依單元或週次整理教材，開啟項目即可閱讀。</p>
             {linked?.kind === 'material' && !course.modules.some((item) => item.id === linked.id) ? (
               <p role="status" className={styles.notice}>
                 {COURSE_WORK_MISSING_MATERIAL}
@@ -485,7 +577,7 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
               <p>尚未發布課程單元。</p>
             )}
           </section>
-          <h2 id="assignments" className={styles.section}>
+          <h2 id="assignments" className={`${styles.section} ${styles.courseWorkTarget}`} tabIndex={-1}>
             作業與評量
           </h2>
           {linked &&

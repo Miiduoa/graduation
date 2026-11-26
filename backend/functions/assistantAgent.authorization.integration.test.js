@@ -110,6 +110,27 @@ test.each(['draftQuizFromBank', 'upsertQuestionBank', 'upsertRubric'])(
   },
 );
 
+test('a foreign dorm repair ticket is treated as missing and does not stop later tools', async () => {
+  mockDocuments.set('schools/pu/repairRequests/repair-1', {
+    userId: 'bob', description: 'private-repair-description', room: 'private-room',
+  });
+  const dispatch = jest.spyOn(registry, 'runTool');
+  const fetchImpl = model([
+    call('status', 'getDormRepairStatus', { repairId: 'repair-1' }),
+    call('menu', 'getCafeteriaMenu', { cafeteriaId: 'later-read' }),
+  ]);
+
+  const result = await run(fetchImpl);
+
+  expect(result.securityEvent).toBeUndefined();
+  expect(dispatch).toHaveBeenCalledTimes(2);
+  expect(result.toolCallsTrace[0].output).toEqual({ found: false, repairId: 'repair-1' });
+  expect(result.toolCallsTrace[1].name).toBe('getCafeteriaMenu');
+  expect(JSON.stringify(result)).not.toMatch(/private-repair-description|private-room|bob/);
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+  expect(globalThis.fetch).not.toHaveBeenCalled();
+});
+
 test('revoking order permission after tool publication stops dispatch and a later request can recover', async () => {
   mockDocuments.set(permissionPath, { createOrder: true });
   const draftArgs = {

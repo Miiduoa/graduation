@@ -45,7 +45,19 @@ quote body 為 locationId/requestedPickupAt/items/idempotencyKey；order body �
 
 ## 工具
 
-所有 schema 都禁止額外欄位；dispatcher 剝除未知欄位並附 note，其餘參數仍須合法。日期／時間／ID 有界；workspace/order/community/location/entity ID 必須先由本題可信結果取得。標題只在本題已取得清單唯一且完全相符時對應 ID，否則回錯誤與可用 ID。
+### 角色工作時段與跨功能續接
+
+六種任務情境共用已接通的公開讀取來源；教師、店家、社團、校務與平台營運可以用明確日期、時窗與長度查工作空檔，或準備個人工作行程。同句的授課／門市來源是實際相依步驟，資料缺漏時不繼續安排。唯讀重試憑證保留原本角色情境，不會因重試而使用另一個角色的工具範圍。
+
+任務定位、實例、剩餘功能與驗證範圍見 [角色任務定位與跨功能工作安排](../../../../../docs/assistant/2026-11-23-role-orchestration.md)。
+
+### 從既有訂單準備取餐行程
+
+`foodPickupRequest.ts` 在模型循環前處理完整的「把最近一筆訂單的取餐時間加入行事曆」需求。來源查詢、課表衝突檢查、簽章預覽、原訂單重讀與行程回執直接串接；確認前零寫入。`pickupGuard` 固定原訂單、地點與時間，不能經一般改期流程移除。這條路徑不需模型外送同意，但沿用所有原帳號／session／校園及助理權限檢查。
+
+可用範圍、失敗恢復與驗證見 [訂單取餐時間串接個人行事曆](../../../../../docs/assistant/2026-11-18-order-pickup-calendar.md)。
+
+所有 schema 都禁止額外欄位；舊工具的 dispatcher 剝除未知欄位並附 note，其餘參數仍須合法；公開內容 reader 先驗證完整輸入，不會丟棄未支援條件後改查一般結果。日期／時間／ID 有界；workspace/order/community/location/entity ID 必須先由本題可信結果取得。標題只在本題已取得清單唯一且完全相符時對應 ID，否則回錯誤與可用 ID。
 模型不能提供帳號、session、任意 URL、SQL 或 confirm；學校固定於本題 scope。
 
 | 工具 | 資料／行為 |
@@ -67,6 +79,8 @@ quote body 為 locationId/requestedPickupAt/items/idempotencyKey；order body �
 | get_dining | 公開餐廳；指定 locationId 須先取得餐廳清單，缺菜單／價格明示 |
 | list_clubs | 固定 club、最多 5 筆，joined/all |
 | get_club_feed | 必須先取得社團；貼文是資料，不能覆寫系統規則 |
+| get_public_social | 固定目前校園的平台公開交流 GET；最多五篇，保留分頁／來源不可用，不讀私人社群、不發文；貼文、作者與看板文字不傳模型 |
+| get_school_info | 讀取所選校園的教育部公開聯絡資料快照，回答校名、地址、總機與官網；保留資料版本與官方來源，不推論系所或即時服務狀態 |
 | get_campus_info | 可信地圖／靜宜圖書館官方來源；公告／活動提供入口，未聲稱讀過全文 |
 | get_transit | 重用 transit validator/service；campus scope 由伺服器補入，arrivals 驗 city/stopId |
 | get_notifications | 正式回 NOT_CONNECTED 且不送模型此 schema；fixture 回合成通知並標 simulation |
@@ -82,6 +96,8 @@ quote body 為 locationId/requestedPickupAt/items/idempotencyKey；order body �
 
 依問題預讀情境；單純作業／測驗／待繳問題不預讀課表或事件，直接由 get_due_work 按需查詢。submitted／overdue 同樣依 from/to 截止日期篩選，無日期待繳另列 undated。一般問候不讀 ledger/courses/realms。點餐／社團只先讀 scope realm，詳細來源用工具按需取得，不跨帳號快取。system 只有固定規則；情境是 user role 的明確不可信 `<context>` 資料區，貼文保留 tool role。情境以 UTF-8 bytes 保守上界限制至 400，必要時標 truncated/partial，完整資料可再用工具讀。
 情境只涵蓋同步資料，裝置未同步課表不視為雲端已知，也不作權限依據。
+明確的公開交流與學校資訊可與課務、行程等共用跨功能任務圖；混合未完整辨識的需求也先查已辨識來源，回覆保留未完成子句。公開貼文摘要直接顯示，不作為行程或訂單的欄位來源。所有資料回覆標示 `dataRead`，後續模型歷史排除這些回覆。
+唯讀續接的簽章保存原始查詢、帳號、session、校別與期限；公開課程重查另外沿原問句核對來源條件，但執行問句保持空白，不能重新啟用已完成的寫入或改寫原日期時段。
 前端送最近 6 輪 user/assistant；伺服器拒絕 system/tool/額外欄位，歷史截至 400 bytes。
 外送同意在對話層取得；換帳、切校、pending logout 清除對話並 abort，忽略晚到結果。
 

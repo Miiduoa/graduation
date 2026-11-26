@@ -10,7 +10,7 @@
 
 .panel h2 {
   margin: 0 0 16px;
-  font-size: 18px;
+  font-size: var(--font-h3-size, 1.0625rem);
   font-weight: 600;
 }
 
@@ -23,7 +23,7 @@
 .state {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--font-body-sm-size, 0.8125rem);
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
@@ -43,7 +43,7 @@
   width: 100%;
 }
 
-.compact summary {
+.compact > summary {
   position: relative;
   min-height: 44px;
   padding: 11px 28px 11px 10px;
@@ -51,8 +51,8 @@
   border: 1px solid transparent;
   border-radius: 7px;
   color: var(--text);
-  font-size: 13px;
-  line-height: 20px;
+  font-size: var(--font-body-sm-size, 0.8125rem);
+  line-height: 1.5;
   font-weight: 500;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -63,20 +63,20 @@
     border-color 160ms ease;
 }
 
-.compact summary::-webkit-details-marker {
+.compact > summary::-webkit-details-marker {
   display: none;
 }
 
-.compact summary::after {
+.compact > summary::after {
   content: '';
   position: absolute;
   right: 12px;
-  top: 17px;
+  top: 50%;
   width: 5px;
   height: 5px;
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
-  transform: rotate(45deg);
+  transform: translateY(-75%) rotate(45deg);
   transition: transform 160ms ease;
 }
 
@@ -86,30 +86,34 @@
 }
 
 .compact[open] > summary::after {
-  top: 20px;
-  transform: rotate(225deg);
+  transform: translateY(-25%) rotate(225deg);
 }
 
-.compact summary:focus-visible {
+.compact > summary:focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
 
-.compact summary.compactName {
+.compact > summary.compactName {
   color: var(--muted);
 }
 
 .popover {
   position: absolute;
-  display: flex;
-  flex-direction: column;
+  display: block;
   padding: 0;
   z-index: 210;
   right: 0;
   top: calc(100% + 10px);
   width: min(360px, calc(100vw - 40px));
   max-height: 70dvh;
-  overflow: hidden;
+  /* One scroll area keeps the title, search, choice and close action reachable
+     when text grows or a landscape window leaves little vertical room. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: 12px;
+  scrollbar-width: thin;
   box-shadow: var(--shadow-lg);
   animation: reveal 180ms ease-out both;
 }
@@ -151,16 +155,16 @@
 }
 
 .popover > .content {
-  min-height: 0;
   padding: 20px 24px 24px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
 }
 
 .content :is(input, select) {
   min-height: 48px;
   font-size: max(16px, var(--font-body-size));
+}
+
+.content input[type='search']::-webkit-search-cancel-button {
+  appearance: none;
 }
 
 .searchFeedback {
@@ -179,10 +183,108 @@
   flex-shrink: 0;
 }
 
+.matches {
+  min-width: 0;
+  animation: reveal var(--motion-fast, 160ms) var(--ease-out, ease-out);
+}
+
+.resultList {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  overflow: clip;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 12px);
+}
+
+.resultList li + li {
+  border-top: 1px solid var(--border);
+}
+
+.result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color var(--motion-fast, 160ms) ease;
+}
+
+.schoolText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.schoolText strong {
+  font-size: var(--font-body-size);
+  font-weight: 600;
+}
+.schoolText small,
+.current,
+.browseScope {
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+  line-height: 1.5;
+}
+
+.result svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.result[aria-current='true'] {
+  background: var(--accent-soft);
+}
+.current {
+  color: var(--brand);
+  font-weight: 600;
+}
+.result:focus-visible,
+.more > summary:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -3px;
+}
+
+.more > summary {
+  width: fit-content;
+  min-height: 44px;
+  padding: 11px 6px;
+  color: var(--brand);
+  font-size: var(--font-body-sm-size);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.browseScope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
 @media (hover: hover) and (pointer: fine) {
-  .compact summary:hover {
+  .result:hover,
+  .compact > summary:hover {
     background: var(--panel);
   }
+}
+
+.result:active {
+  background: var(--panel2);
 }
 
 @media (max-width: 760px) {
@@ -225,9 +327,8 @@
 }
 
 @media (max-width: 360px) {
-  .compact summary {
+  .compact > summary {
     padding-left: 5px;
-    font-size: 12px;
   }
 }
 
@@ -242,14 +343,71 @@
   }
 }
 
+:global([data-reduced-motion='true']) .matches,
+:global([data-reduced-motion='true']) .result,
 :global([data-reduced-motion='true']) .compact * {
   animation: none !important;
   transition: none !important;
 }
 
+:global([data-reduced-motion='true']) .compact *::after {
+  transition: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .matches,
+  .result,
   .compact * {
     animation: none !important;
     transition: none !important;
+  }
+
+  .compact *::after {
+    transition: none !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .popover,
+  .compact[open] > summary:not(:focus-visible) {
+    outline: 1px solid currentColor;
+    outline-offset: -1px;
+  }
+}
+
+@media (forced-colors: active) {
+  .panel,
+  .popover {
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+
+  .description,
+  .state,
+  .compact > summary.compactName {
+    color: CanvasText;
+  }
+
+  .resultList,
+  .resultList li + li,
+  .popoverHead,
+  .description {
+    border-color: CanvasText;
+  }
+
+  .compact[open] > summary,
+  .popover .closeButton {
+    color: ButtonText;
+    background: ButtonFace;
+    border-color: ButtonText;
+  }
+
+  .result:focus-visible,
+  .more > summary:focus-visible,
+  .compact > summary:focus-visible,
+  .popover .closeButton:focus-visible {
+    outline-color: Highlight;
   }
 }

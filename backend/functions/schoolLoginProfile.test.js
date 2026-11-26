@@ -1,4 +1,17 @@
+const { FieldValue } = require('firebase-admin/firestore');
 const { createSchoolLoginProfileWriter } = require('./schoolLoginProfile');
+
+function applyWrite(current, data) {
+  const next = { ...current };
+  for (const [key, value] of Object.entries(data || {})) {
+    if (value && typeof value.isEqual === 'function' && value.isEqual(FieldValue.delete())) {
+      delete next[key];
+    } else {
+      next[key] = value;
+    }
+  }
+  return next;
+}
 
 let records;
 let retryWith;
@@ -7,11 +20,22 @@ const memberPath = 'schools/pu/members/alice';
 beforeEach(() => {
   records = new Map();
   retryWith = null;
-  const ref = (path) => ({ path, collection: (name) => collection(`${path}/${name}`) });
-  const collection = (path) => ({ doc: (id) => ref(`${path}/${id}`) });
   const snapshot = (reference) => ({
     exists: records.has(reference.path),
     data: () => records.get(reference.path),
+  });
+  const ref = (path) => ({
+    path,
+    collection: (name) => collection(`${path}/${name}`),
+    async get() {
+      return snapshot({ path });
+    },
+  });
+  const collection = (path) => ({
+    doc: (id) => ref(`${path}/${id}`),
+    async get() {
+      return { docs: [] };
+    },
   });
   write = createSchoolLoginProfileWriter({
     db: {
@@ -23,6 +47,7 @@ beforeEach(() => {
           return callback({
             getAll: async (...refs) => refs.map(snapshot),
             set: (reference, data) => writes.push({ reference, data }),
+            update: (reference, data) => writes.push({ reference, data }),
           });
         };
         let result = await attempt();
@@ -31,7 +56,7 @@ beforeEach(() => {
           result = await attempt();
         }
         for (const { reference, data } of writes)
-          records.set(reference.path, { ...records.get(reference.path), ...data });
+          records.set(reference.path, applyWrite(records.get(reference.path), data));
         return result;
       },
     },
@@ -50,7 +75,13 @@ test.each(['admin', 'editor', 'teacher', 'staff', 'principal'])(
   async (role) => {
     records.set('users/alice', { role, primaryRole: 'admin' });
     await login(role);
-    expect(records.get(memberPath)).toMatchObject({ role: 'member', status: 'active' });
+    expect(records.get(memberPath)).toMatchObject({
+      role: 'member',
+      status: 'active',
+      profileBoundSchoolId: 'pu',
+    });
+    expect(records.get(memberPath).profileBoundGeneration).toBe(records.get('users/alice').bindingGeneration);
+    expect(typeof records.get('users/alice').bindingGeneration).toBe('string');
     expect(records.get('users/alice').primaryRole).not.toBe('admin');
     expect(records.get('users/alice').role).not.toBe('admin');
   },
@@ -94,7 +125,13 @@ test.each(['inactive', 'suspended', 'revoked'])(
   },
 );
 
-test.each([{ status: 'deleted' }, { accountDeletionInProgress: true }])(
+test.each([
+  { status: 'deleted' },
+  { status: 'disabled' },
+  { status: 'suspended' },
+  { status: 'inactive' },
+  { accountDeletionInProgress: true },
+])(
   'reauthentication cannot reopen an unavailable account %j',
   async (profile) => {
     records.set('users/alice', profile);
@@ -121,4 +158,29 @@ test('a concurrent suspension aborts all login profile writes', async () => {
   retryWith = [[memberPath, { role: 'admin', status: 'inactive' }]];
   await expect(login()).rejects.toMatchObject({ code: 'permission-denied' });
   expect(records.has('users/alice')).toBe(false);
+});
+
+test('school login stamps the login school and clears leftover story stamps', async () => {
+  records.set('users/alice', {
+    role: 'student',
+    schoolId: 'ncku',
+    primarySchoolId: 'ncku',
+    schoolIds: ['ncku'],
+    campusStoryBindingHaltKind: 'multiple',
+    campusStoryBindingHaltAt: Date.now(),
+  });
+  records.set('schools/ncku/members/alice', {
+    status: 'active',
+    role: 'member',
+    profileBoundSchoolId: 'ncku',
+    profileBoundGeneration: 'old-gen',
+  });
+  await login();
+  expect(records.get(memberPath)).toMatchObject({
+    status: 'active',
+    profileBoundSchoolId: 'pu',
+  });
+  expect(records.get('schools/ncku/members/alice').profileBoundSchoolId).toBeUndefined();
+  expect(records.get('users/alice').campusStoryBindingHaltKind).toBeUndefined();
+  expect(records.get('users/alice').schoolId).toBe('pu');
 });

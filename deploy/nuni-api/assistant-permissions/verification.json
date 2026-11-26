@@ -1,0 +1,42 @@
+{
+  "schema": "campus.platform-assistant-permissions-verification/v1",
+  "sourceRepository": "Miiduoa/nuni-prod",
+  "sourceCommit": "9de47b4b3492325e430562c37bcad552867162db",
+  "sourceTree": "0dc4e9d6562f2aba622b8a6df02631d8bd425b4d",
+  "authenticatedRecursiveTreeTruncated": false,
+  "sourceBlobEntries": 3096,
+  "verifiedDirectoryHashesIncludingRoot": 303,
+  "materializedAndHashVerifiedPatchInputBlobs": 17,
+  "patchedBaseTree": "6776b19a7cea998728469c3091c0ea7c264f6aa3",
+  "composedTree": "83381c1b04e3a603389f562ada17ef11b9d5facf",
+  "lostFoundInputTree": "fffde885da74a84cfd9ae702f955db99507dc855",
+  "candidateTree": "841c117c46775fec3af27da9d88abaf0ae13b2f7",
+  "allowedChangedPaths": ["apps/api/src/migrations/283_platform_assistant_permissions.sql"],
+  "candidateTreeVerification": "Complete Git tree metadata and verified changed blobs; unchanged unmaterialized blobs retain their authenticated source SHA.",
+  "fullArchivedRuntimeMaterialized": false,
+  "imageBuilt": false,
+  "deployed": false,
+  "productionMigrationRun": false,
+  "productionCredentialsRead": false,
+  "localChecks": {
+    "permissionPackagingTests": 9,
+    "existingApiBuilderTests": 13,
+    "existingLostFoundPackagingTests": 11,
+    "webTargetedTestsPassed": 407,
+    "webTargetedSuitesPassed": 28,
+    "webTargetedTestsSkipped": 3,
+    "embeddedPostgresCasesIncluded": 8,
+    "realPostgresConcurrencyCasesPendingCi": 3,
+    "mobileTargetedTestsPassed": 110,
+    "mobileTargetedSuitesPassed": 6,
+    "webProductionBuildWithTestFirebaseValues": true,
+    "webMobileSharedTypechecksPassed": true,
+    "changedCodeLintPassed": true
+  },
+  "limits": [
+    "Embedded PostgreSQL verifies SQL behavior and ACLs; it is not a multi-connection race test or production account verification.",
+    "The three real multi-connection PostgreSQL cases are explicitly skipped in the local embedded mode and wired into the existing PostgreSQL CI job.",
+    "Browser visual verification was not completed: the connected browser lacked an originating context, and the cloud browser could not reach the local fixture server. Component interaction tests passed.",
+    "Publishing requires a complete authorized archive, verified current production source compatibility, full API build/regression, and normal migration/ACL validation."
+  ]
+}

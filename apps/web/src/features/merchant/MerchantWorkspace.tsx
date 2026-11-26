@@ -1,28 +1,60 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { AccountDemoDiningPanel } from '@/features/food/AccountDemoDiningPanel';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
-import { NuniError } from '@campus/shared/src/nuni';
+import { NuniError, nuniRecord } from '@campus/shared/src/nuni';
 import {
-  loadMerchantOverview,
+  parseMerchantOverview,
+  parseMerchantWorkspaces,
   merchantApplicationStateLabel,
   merchantWorkspaceStateLabel,
   parseMerchantApplication,
   validateMerchantApplicationInput,
   type MerchantOverviewView,
   type NuniMerchantApplicationInput,
+  type NuniMerchantWorkspace,
 } from '@campus/shared/src/nuniMerchant';
+import {
+  createMerchantOperations,
+  type NuniMerchantWorkspaceDetail,
+} from '@campus/shared/src/nuniMerchantOperations';
+import {
+  merchantApplicationNextStep,
+  merchantOverviewNextStep,
+} from '@campus/shared/src/merchantJourney';
 import styles from './MerchantWorkspace.module.css';
 import { MerchantOperations, type MerchantOperationDrafts } from './MerchantOperations';
 import { clearAllFoodPendingForAccount } from '@/features/food/foodPersistence';
 import type { FoodDraftCache } from '@/features/food/foodState';
+import {
+  merchantApplicationsHref,
+  merchantLocationsHref,
+  merchantWorkspaceHref,
+  type MerchantWorkspaceLocation,
+} from '@/lib/merchantWorkspaceNavigation';
+import { useMerchantWorkspaceRoute } from '@/lib/useMerchantWorkspaceRoute';
 
-type Overview = Awaited<ReturnType<typeof loadMerchantOverview>>;
+import {
+  createMerchantConfirmations,
+  readFailureKind,
+  workspaceKey,
+  type MerchantOverview,
+} from './merchantConfirmation';
 type Draft = Omit<NuniMerchantApplicationInput, 'idempotencyKey'>;
 const emptyDraft = (): Draft => ({
   tenantId: '',
@@ -45,14 +77,14 @@ const requirementLabel: Record<string, string> = {
   'online-payment': '完成線上付款資格',
 };
 function expired(error: unknown) {
-  return error instanceof NuniError && (error.status === 401 || error.code === 'SESSION_CHANGED');
+  return readFailureKind(error) === 'expired';
 }
 
 const merchantEntry = {
   overview: {
     path: '/merchant',
-    title: '店家合作',
-    subtitle: '申請校園門市、查看審核進度或管理自己的門市。',
+    title: '店家工作台',
+    subtitle: '查看待處理事項、管理已授權門市，或追蹤進駐申請。',
   },
   apply: {
     path: '/merchant/apply',
@@ -67,8 +99,23 @@ const merchantEntry = {
 } as const;
 
 export function MerchantWorkspace({ view = 'overview' }: { view?: MerchantOverviewView }) {
+  return (
+    <Suspense fallback={<p role="status">正在確認工作位置…</p>}>
+      <MerchantWorkspaceContent view={view} />
+    </Suspense>
+  );
+}
+
+function MerchantWorkspaceContent({ view }: { view: MerchantOverviewView }) {
   const entry = merchantEntry[view];
   const auth = useNuniSession();
+  const navigation = useMerchantWorkspaceRoute(view !== 'apply');
+  const locationKey =
+    navigation.location.status === 'selected'
+      ? `${navigation.location.tenantId}:${navigation.location.locationId}`
+      : null;
+  const previousLocationRef = useRef(locationKey);
+  const returnLocationRef = useRef<string | null>(null);
   const [cleanupError, setCleanupError] = useState('');
   const [operationScope, setOperationScope] = useState<{
     accountId: string | null;
@@ -79,6 +126,15 @@ export function MerchantWorkspace({ view = 'overview' }: { view?: MerchantOvervi
     ? null
     : (auth.session?.platformAccountId ??
       (!auth.loading && !auth.error ? null : operationScope.accountId));
+  useLayoutEffect(() => {
+    returnLocationRef.current = null;
+    previousLocationRef.current = null;
+  }, [confirmedAccount]);
+  useLayoutEffect(() => {
+    if (previousLocationRef.current && !locationKey)
+      returnLocationRef.current = previousLocationRef.current;
+    previousLocationRef.current = locationKey;
+  }, [locationKey, confirmedAccount]);
   if (confirmedAccount !== operationScope.accountId) {
     // An unavailable session is not proof of logout. Keep uncertain write intent
     // hidden until this account returns, or discard it for a confirmed identity change.
@@ -93,29 +149,79 @@ export function MerchantWorkspace({ view = 'overview' }: { view?: MerchantOvervi
     setOperationScope({ accountId: confirmedAccount, locations: new Map(), food: new Map() });
     return null;
   }
+  const nativeWorkspace =
+    auth.session && navigation.hydrated ? (
+      <AccountWorkspace
+        key={`${auth.session.platformAccountId}:${auth.session.context}`}
+        view={view}
+        location={navigation.location}
+        showApplications={navigation.showApplications}
+        showLocations={navigation.showLocations}
+        onNavigate={navigation.navigate}
+        returnLocationRef={returnLocationRef}
+        context={auth.session.context}
+        operationDrafts={operationScope.locations}
+        foodDrafts={operationScope.food}
+        suspended={auth.loading}
+        onSwitchAccount={auth.logout}
+        onExpired={auth.refresh}
+      />
+    ) : null;
   return (
-    <SiteShell title={entry.title} subtitle={entry.subtitle}>
+    <SiteShell
+      title={navigation.location.status === 'selected' ? '店家工作台' : entry.title}
+      subtitle={
+        navigation.location.status === 'selected' ? '接續這間門市的營運與訂單。' : entry.subtitle
+      }
+    >
       {cleanupError ? <p role="alert">{cleanupError}</p> : null}
-      {auth.session && !auth.pendingLogout && !auth.error ? (
-        <AccountWorkspace
-          key={`${auth.session.platformAccountId}:${auth.session.context}`}
-          view={view}
-          context={auth.session.context}
-          operationDrafts={operationScope.locations}
-          foodDrafts={operationScope.food}
-          suspended={auth.loading}
-          onSwitchAccount={auth.logout}
-          onExpired={auth.refresh}
-        />
+      {!navigation.hydrated ? (
+        <p role="status">正在確認工作位置…</p>
+      ) : auth.session && !auth.pendingLogout && !auth.error ? (
+        nativeWorkspace
       ) : (
-        <NuniSignIn returnUrl={entry.path} />
+        <NuniSignIn
+          returnUrl={
+            navigation.location.status === 'selected'
+              ? merchantWorkspaceHref(navigation.location)
+              : navigation.showApplications
+                ? merchantApplicationsHref
+                : navigation.showLocations
+                  ? merchantLocationsHref
+                  : entry.path
+          }
+        />
       )}
     </SiteShell>
   );
 }
 
+function MerchantListLoader({
+  load,
+  invalidate,
+  restoreFocus,
+  children,
+}: {
+  load: () => Promise<void>;
+  invalidate: () => void;
+  restoreFocus: () => void;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    void load();
+    return invalidate;
+  }, [load, invalidate]);
+  useEffect(restoreFocus, [restoreFocus]);
+  return children;
+}
+
 function AccountWorkspace({
   view,
+  location,
+  showApplications,
+  showLocations,
+  onNavigate,
+  returnLocationRef,
   context,
   operationDrafts,
   foodDrafts,
@@ -124,6 +230,11 @@ function AccountWorkspace({
   onSwitchAccount,
 }: {
   view: MerchantOverviewView;
+  location: MerchantWorkspaceLocation;
+  showApplications: boolean;
+  showLocations: boolean;
+  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+  returnLocationRef: React.RefObject<string | null>;
   context: string;
   operationDrafts: MerchantOperationDrafts;
   foodDrafts: FoodDraftCache;
@@ -131,59 +242,249 @@ function AccountWorkspace({
   onExpired: () => Promise<void>;
   onSwitchAccount: () => Promise<void>;
 }) {
-  const [overview, setOverview] = useState<Overview | null>(null);
+  const [
+    {
+      overview,
+      details,
+      verifiedListedRows,
+      listedWorkspaceTenants,
+      applicationsKnown,
+      manageableWorkspaces,
+      revocations,
+    },
+    setWorkspaceSnapshot,
+  ] = useState({
+    overview: null as MerchantOverview | null,
+    details: new Map<string, NuniMerchantWorkspaceDetail>(),
+    verifiedListedRows: new Map<string, NuniMerchantWorkspace>(),
+    revocations: { list: 0, details: new Map<string, number>() },
+    listedWorkspaceTenants: undefined as ReadonlySet<string> | undefined,
+    applicationsKnown: false,
+    manageableWorkspaces: new Set<string>(),
+  });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [detailError, setDetailError] = useState('');
   const [invalidSession, setInvalidSession] = useState(false);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [applyingAgain, setApplyingAgain] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState('');
+  const [receivedApplicationId, setReceivedApplicationId] = useState<string | null>(null);
+  const notice = receivedApplicationId
+    ? '申請已收件。審核通過後仍需完成營運設定，才會開放店家服務。'
+    : '';
   const [submitError, setSubmitError] = useState('');
   const [pending, setPending] = useState<NuniMerchantApplicationInput | null>(null);
-  const [selectedLocation, setSelectedLocation] = useState<{
-    tenantId: string;
-    locationId: string;
-  } | null>(null);
+  const selectedLocation = location.status === 'selected' ? location : null;
+  const locationKey = selectedLocation
+    ? `${selectedLocation.tenantId}:${selectedLocation.locationId}`
+    : null;
+  const [visitedLocations, setVisitedLocations] = useState<
+    Map<string, Pick<NonNullable<typeof selectedLocation>, 'tenantId' | 'locationId'>>
+  >(() => new Map());
+  if (selectedLocation && locationKey && !visitedLocations.has(locationKey)) {
+    // Keep the owner of each in-flight write mounted across history entries.
+    const { tenantId, locationId } = selectedLocation;
+    setVisitedLocations(new Map(visitedLocations).set(locationKey, { tenantId, locationId }));
+  }
+  const locationLinks = useRef(new Map<string, HTMLAnchorElement>());
+  const locationsHeading = useRef<HTMLHeadingElement>(null);
+  const applicationsHeading = useRef<HTMLHeadingElement>(null);
+  const listPath = view === 'overview' ? '/merchant' : '/merchant/workspace';
+  const [hasVerifiedLocation, setHasVerifiedLocation] = useState(false);
+  const [listHref, setListHref] = useState<string | null>(null);
+  if (location.status === 'list') {
+    const href = showApplications
+      ? merchantApplicationsHref
+      : showLocations
+        ? merchantLocationsHref
+        : listPath;
+    if (href !== listHref) setListHref(href);
+  }
   const generation = useRef(0);
+  const [confirmed] = useState(() => createMerchantConfirmations(operationDrafts));
   const mounted = useRef(true);
   const busyRef = useRef(false);
   const enabled = useRef(false);
+  const sessionGeneration = useRef(0);
   useLayoutEffect(() => {
     enabled.current = !suspended && !invalidSession;
     return () => {
       enabled.current = false;
+      ++sessionGeneration.current;
     };
   }, [suspended, invalidSession]);
   const invalidate = useCallback(() => {
     ++generation.current;
   }, []);
+  const publishOverview = useCallback(() => {
+    const nextOverview = confirmed.overview();
+    setReceivedApplicationId((id) =>
+      id && nextOverview?.applications.some((row) => row.applicationId === id) ? id : null,
+    );
+    setWorkspaceSnapshot({
+      overview: nextOverview,
+      details: confirmed.verifiedDetails(),
+      verifiedListedRows: confirmed.verifiedListedRows(),
+      revocations: confirmed.workspaceRevocations(),
+      listedWorkspaceTenants: confirmed.listedWorkspaceTenants(),
+      applicationsKnown: confirmed.hasApplicationList(),
+      manageableWorkspaces: new Set(
+        nextOverview?.workspaces.map(workspaceKey).filter(confirmed.canEnterWorkspace),
+      ),
+    });
+  }, [confirmed]);
+  useLayoutEffect(
+    () => confirmed.subscribeReadChanges(publishOverview),
+    [confirmed, publishOverview],
+  );
+  const onWorkspaceRevoked = useCallback((showInList?: boolean) => {
+    if (showInList) setDetailError('目前無法取得部分門市的管理權限，請重新載入。');
+    publishOverview();
+  }, [publishOverview]);
+  const clearOverview = useCallback(() => {
+    confirmed.clearSession();
+    publishOverview();
+  }, [confirmed, publishOverview]);
   const expire = useCallback(() => {
+    if (!mounted.current || !enabled.current) return;
+    enabled.current = false;
+    ++sessionGeneration.current;
+    invalidate();
+    clearOverview();
     setInvalidSession(true);
-    setOverview(null);
     setDraft(emptyDraft());
     setPending(null);
+    setSubmitError('');
     void onExpired();
-  }, [onExpired]);
+  }, [clearOverview, invalidate, onExpired]);
+  const captureSession = useCallback(() => {
+    const session = sessionGeneration.current;
+    return () => mounted.current && enabled.current && session === sessionGeneration.current;
+  }, []);
   const load = useCallback(async () => {
     const run = ++generation.current;
+    const listRevision = confirmed.beginRequest();
+    // Navigation can retire the loader while its observations still belong to this session.
+    const isSameSession = captureSession();
+    const isCurrent = () => isSameSession() && run === generation.current;
     setLoading(true);
     setLoadError('');
+    setDetailError('');
+    const denied = (error: unknown) => readFailureKind(error) === 'denied';
+    const targets = new Map<string, Pick<NuniMerchantWorkspaceDetail, 'tenantId' | 'locationId'>>();
+    const addTargets = (items: Iterable<Pick<NuniMerchantWorkspaceDetail, 'tenantId' | 'locationId'>>) => {
+      for (const item of items) targets.set(workspaceKey(item), item);
+    };
+    function observeFailure<T>(request: Promise<T>, onFailure?: (error: unknown) => void) {
+      return request.catch((error: unknown) => {
+        if (isSameSession()) {
+          if (expired(error)) expire();
+          else onFailure?.(error);
+        }
+        throw error;
+      });
+    }
+
     try {
-      const data = await loadMerchantOverview(
-        (path, input) => browserRequest(path, context, input),
-        view,
+      const [programs, submitted, stores] = await Promise.allSettled([
+        observeFailure(
+          view === 'workspace'
+            ? Promise.resolve([])
+            : browserRequest('merchant-onboarding-programs', context).then(
+                (value) => parseMerchantOverview({ ...nuniRecord(value), applications: [] }).programs,
+              ),
+        ),
+        observeFailure(
+          browserRequest('merchant-applications', context).then((value) => {
+            if (isSameSession()) {
+              confirmed.mergeApplications(
+                parseMerchantOverview({ ...nuniRecord(value), programs: [] }).applications,
+                listRevision,
+              );
+              publishOverview();
+            }
+          }),
+          (error) => {
+            if (denied(error) && confirmed.rejectApplications(listRevision)) {
+              publishOverview();
+            }
+          },
+        ),
+        // Confirm the list as soon as it settles, independently of application progress.
+        (view === 'apply'
+          ? Promise.resolve([])
+          : browserRequest('merchant-workspaces', context).then((value) =>
+              parseMerchantWorkspaces(value, { preserveMissingReadiness: true }),
+            )
+        ).then((rows) => {
+          if (isSameSession()) {
+            confirmed.mergeWorkspaceList(rows, listRevision);
+            publishOverview();
+          }
+        }).catch((error: unknown) => {
+          const result = confirmed.rejectRead(isSameSession, error, listRevision, expire);
+          if (result.kind === 'denied' || result.kind === 'unavailable') publishOverview();
+          throw error;
+        }),
+      ]);
+      if (!isCurrent()) return;
+      if (programs.status === 'fulfilled') confirmed.setPrograms(programs.value);
+      else if (denied(programs.reason)) confirmed.setPrograms();
+
+      let accessDenied = false;
+      let detailUnavailable = false;
+      const operations = createMerchantOperations(
+        (path, input, method) => browserRequest(path, context, input, method),
+        { allowOmittedReadRequirements: true },
       );
-      if (mounted.current && enabled.current && run === generation.current) setOverview(data);
+      addTargets(confirmed.knownWorkspaces());
+      addTargets(visitedLocations.values());
+
+      await Promise.all(
+        [...targets.values()].map(async (item) => {
+          const key = workspaceKey(item);
+          if (
+            !confirmed.needsAccessRefresh(key) &&
+            submitted.status === 'fulfilled' &&
+            stores.status === 'fulfilled' &&
+            !operationDrafts.get(key)?.uncertain
+          )
+            return;
+          const revision = confirmed.beginRequest();
+          try {
+            const detail = await operations.get(item.tenantId, item.locationId);
+            if (!isSameSession()) return;
+            confirmed.confirmDetail(detail, revision, true);
+            publishOverview();
+          } catch (error) {
+            const result = confirmed.rejectRead(isSameSession, error, revision, expire, { key, source: 'detail' });
+            if ('revoked' in result && result.revoked !== undefined) {
+              accessDenied = true;
+              publishOverview();
+            }
+            if (result.kind === 'unavailable') detailUnavailable = true;
+          }
+        }),
+      );
+      if (!isCurrent()) return;
+      publishOverview();
+      if ([programs, submitted, stores].some((result) => result.status === 'rejected'))
+        setLoadError('目前無法確認店家資料，請重新載入。');
+      if (accessDenied) {
+        setDetailError('目前無法取得部分門市的管理權限，請重新載入。');
+      } else if (detailUnavailable) {
+        setDetailError((current) => current || '目前無法更新部分門市資料，請重新載入。');
+      }
     } catch (error) {
-      if (mounted.current && enabled.current && run === generation.current) {
+      if (isCurrent()) {
         if (expired(error)) expire();
         else setLoadError('目前無法確認店家資料，請重新載入。');
       }
     } finally {
-      if (mounted.current && run === generation.current) setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [context, expire, view]);
+  }, [captureSession, context, expire, operationDrafts, publishOverview, view, confirmed, visitedLocations]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -192,18 +493,34 @@ function AccountWorkspace({
     };
   }, [invalidate]);
   useEffect(() => {
-    if (!suspended && !invalidSession) void load();
+    if (view !== 'apply' || suspended || invalidSession) return;
+    void load();
     return invalidate;
-  }, [load, suspended, invalidSession, invalidate]);
+  }, [view, suspended, invalidSession, load, invalidate]);
+  const revealApplications = showApplications && location.status === 'list' && !!overview;
+  useEffect(() => {
+    if (revealApplications && document.activeElement === document.body)
+      applicationsHeading.current?.focus();
+  }, [revealApplications]);
+  const hasOverview = !!overview;
+  const restoreListFocus = useCallback(() => {
+    if (!hasOverview || showApplications || !returnLocationRef.current) return;
+    const target = locationLinks.current.get(returnLocationRef.current) ?? locationsHeading.current;
+    if (!target) return;
+    returnLocationRef.current = null;
+    // Do not move focus away from a control the person chose while waiting for the list.
+    if (document.activeElement === document.body) target.focus();
+  }, [hasOverview, returnLocationRef, showApplications]);
 
   const selected = overview?.programs.find((item) => item.tenantId === draft.tenantId);
   const update = (field: keyof Draft, value: string) =>
     setDraft((current) => ({ ...current, [field]: value }));
+  const submissionBlocked = loading || (!!loadError && !pending);
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!enabled.current || busyRef.current || !overview || loading || loadError) return;
+    if (!enabled.current || busyRef.current || !overview || submissionBlocked) return;
     setSubmitError('');
-    setNotice('');
+    setReceivedApplicationId(null);
     let payload: NuniMerchantApplicationInput;
     try {
       payload =
@@ -215,6 +532,7 @@ function AccountWorkspace({
           idempotencyKey: `merchant-apply-${crypto.randomUUID()}`,
         });
       if (
+        !pending &&
         !overview.programs.some(
           (program) =>
             program.tenantId === payload.tenantId &&
@@ -231,29 +549,20 @@ function AccountWorkspace({
     busyRef.current = true;
     setBusy(true);
     setPending(payload);
+    const revision = confirmed.beginRequest();
+    const isSameSession = captureSession();
     try {
       const application = parseMerchantApplication(
         await browserRequest('merchant-applications', context, payload),
       );
-      if (!mounted.current || !enabled.current) return;
-      setOverview((current) =>
-        current
-          ? {
-              ...current,
-              applications: [
-                application,
-                ...current.applications.filter(
-                  (item) => item.applicationId !== application.applicationId,
-                ),
-              ],
-            }
-          : current,
-      );
+      if (!isSameSession()) return;
+      const accepted = confirmed.confirmApplication(application, revision);
+      publishOverview();
       setPending(null);
       setDraft(emptyDraft());
-      setNotice('申請已收件。審核通過後仍需完成營運設定，才會開放店家服務。');
+      if (accepted) setReceivedApplicationId(application.applicationId);
     } catch (error) {
-      if (!mounted.current || !enabled.current) return;
+      if (!isSameSession()) return;
       if (expired(error)) expire();
       else if (
         !pending &&
@@ -275,42 +584,92 @@ function AccountWorkspace({
     }
   }
 
-  if (selectedLocation && !invalidSession)
-    return (
-      <MerchantOperations
-        key={`${context}:${selectedLocation.tenantId}:${selectedLocation.locationId}`}
-        context={context}
-        drafts={operationDrafts}
-        foodDrafts={foodDrafts}
-        {...selectedLocation}
-        suspended={suspended}
-        onBack={() => setSelectedLocation(null)}
-        onExpired={expire}
-        onChanged={(detail) => {
-          if (!mounted.current || !enabled.current) return;
-          setOverview((current) =>
-            current
+  const onWorkspaceChanged = useCallback(
+    (detail: NuniMerchantWorkspaceDetail, verifiedAccess: boolean, revision: number) => {
+      if (!mounted.current || !enabled.current) return null;
+      const confirmation = confirmed.confirmDetail(detail, revision, verifiedAccess);
+      if (confirmation) setHasVerifiedLocation(true);
+      publishOverview();
+      return confirmation;
+    },
+    [publishOverview, confirmed],
+  );
+
+  const onMenuConfirmed = useCallback(
+    (detail: NuniMerchantWorkspaceDetail, revision: number, createdItems: number) => {
+      if (!mounted.current || !enabled.current) return false;
+      const accepted = confirmed.confirmMenu(
+        workspaceKey(detail), revision, createdItems, detail.readinessVersion,
+      );
+      if (accepted) publishOverview();
+      return accepted;
+    },
+    [confirmed, publishOverview],
+  );
+
+  const withOperations = (content?: ReactNode) => (
+    <>
+      {[...visitedLocations].map(([key, store]) => (
+        <MerchantOperations
+          key={key}
+          context={context}
+          drafts={operationDrafts}
+          foodDrafts={foodDrafts}
+          tenantId={store.tenantId}
+          locationId={store.locationId}
+          visible={key === locationKey}
+          suspended={suspended}
+          navigation={
+            selectedLocation && key === locationKey
               ? {
-                  ...current,
-                  workspaces: current.workspaces.map((workspace) =>
-                    workspace.tenantId === detail.tenantId &&
-                    workspace.locationId === detail.locationId
-                      ? detail
-                      : workspace,
-                  ),
+                  section: selectedLocation.section,
+                  queue: selectedLocation.queue,
+                  backHref: listHref ?? (hasVerifiedLocation ? merchantLocationsHref : listPath),
+                  onNavigate,
                 }
-              : current,
-          );
-        }}
-      />
+              : undefined
+          }
+          onExpired={expire}
+          captureSession={captureSession}
+          confirmedDetail={details.get(key) ?? null}
+          confirmations={confirmed}
+          confirmedListRow={verifiedListedRows.get(key)}
+          receiptFloorFor={(version) => confirmed.workspaceReceiptFloor(key, version)}
+          accessRevocation={revocations.details.get(key) ?? revocations.list}
+          onChanged={onWorkspaceChanged}
+          onMenuConfirmed={onMenuConfirmed}
+          onRevoked={onWorkspaceRevoked}
+        />
+      ))}
+      {content}
+    </>
+  );
+  if (suspended)
+    return withOperations(
+      selectedLocation ? null : <p role="status">正在核對帳號資料，店家資料暫時隱藏。</p>,
     );
-  if (suspended) return <p role="status">正在重新確認帳號，店家資料暫時隱藏。</p>;
   if (invalidSession)
     return (
       <section className={styles.panel}>
         <p role="alert">登入或帳號已變更，這次店家資料與草稿已清除。</p>
-        <Button onClick={() => setInvalidSession(false)}>重新載入店家資料</Button>
+        <Button onClick={() => {
+          confirmed.restoreSettledReceipts();
+          setInvalidSession(false);
+        }}>
+          重新載入店家資料
+        </Button>
       </section>
+    );
+  if (selectedLocation) return withOperations();
+  if (location.status === 'invalid')
+    return withOperations(
+      <section className={styles.panel}>
+        <h2>無法開啟這個門市連結</h2>
+        <p role="alert">門市連結不完整或已失效，請從已授權門市重新選擇。</p>
+        <Link className="btn" href="/merchant/workspace" onClick={onNavigate}>
+          查看我的門市
+        </Link>
+      </section>,
     );
   if (view === 'apply' && notice) {
     return (
@@ -341,9 +700,31 @@ function AccountWorkspace({
       </section>
     );
   }
-  return (
+  const workspaceListEmpty = listedWorkspaceTenants?.size === 0;
+  const hasMerchantRecords = !!(
+    listedWorkspaceTenants?.size || overview?.workspaces.length || overview?.applications.length
+  );
+  const hasApplicationDraft =
+    Object.entries(draft).some(
+      ([field, value]) => field !== 'businessKind' && typeof value === 'string' && value.trim(),
+    ) ||
+    draft.businessKind !== 'company' ||
+    draft.serviceModes.length !== 1 ||
+    draft.serviceModes[0] !== 'pickup';
+  const nextStep =
+    overview &&
+    (overview.workspaces.length > 0 ||
+      (workspaceListEmpty && applicationsKnown && (hasMerchantRecords || !loadError)))
+      ? merchantOverviewNextStep(overview)
+      : null;
+  const list = (
     <div className={styles.stack}>
-      {view !== 'workspace' && (
+      {(view === 'apply' ||
+        (view === 'overview' &&
+          workspaceListEmpty &&
+          applicationsKnown &&
+          !loadError &&
+          !hasMerchantRecords)) && (
         <section className={styles.intro}>
           <h2>店家如何進駐</h2>
           <p>請準備店名、營業地點及聯絡方式。已經申請過的店家可以直接查看審核進度。</p>
@@ -362,21 +743,41 @@ function AccountWorkspace({
         </Button>
       </div>
       {loading && <p role="status">正在載入店家資料…</p>}
-      {loadError && <p role="alert">{loadError}</p>}
+      {loadError ? <p role="alert">{loadError}</p> : detailError ? <p role="status">{detailError}</p> : null}
+      {notice && <p role="status">{notice}</p>}
       {overview && (
-        <div className={styles.stack} hidden={loading || !!loadError}>
+        <div className={styles.stack} hidden={view === 'apply' && submissionBlocked}>
+          {view !== 'apply' && nextStep && (view === 'workspace' || hasMerchantRecords) &&
+            (nextStep.section !== 'locations' || manageableWorkspaces.size > 0) && (
+            <section className={styles.nextTask} aria-labelledby="merchant-next-step-title">
+              <p className={styles.eyebrow}>下一步</p>
+              <h3 id="merchant-next-step-title">{nextStep.title}</h3>
+              <p>{nextStep.description}</p>
+              {nextStep.section === 'apply' ? (
+                <Link href="/merchant/apply">開始進駐申請</Link>
+              ) : (
+                <a href={`#merchant-${nextStep.section}-title`}>
+                  {nextStep.section === 'locations' ? '選擇門市' : '查看申請進度'}
+                </a>
+              )}
+            </section>
+          )}
           {view !== 'apply' && (
             <section className={styles.panel} aria-labelledby="merchant-locations-title">
-              <h3 id="merchant-locations-title">已授權門市</h3>
+              <h3 id="merchant-locations-title" tabIndex={-1} ref={locationsHeading}>
+                已授權門市
+              </h3>
               {overview.workspaces.length === 0 ? (
-                <>
-                  <p>
-                    這個帳號目前沒有已核准的門市。如果你是店員，請向門市負責人確認工作帳號與接單方式。
-                  </p>
-                  {view === 'workspace' && (
-                    <Button onClick={() => void onSwitchAccount()}>登出並切換店家帳號</Button>
-                  )}
-                </>
+                workspaceListEmpty && (
+                  <>
+                    <p>
+                      這個帳號目前沒有已核准的門市。如果你是店員，請向門市負責人確認工作帳號與接單方式。
+                    </p>
+                    {view === 'workspace' && (
+                      <Button onClick={() => void onSwitchAccount()}>登出並切換店家帳號</Button>
+                    )}
+                  </>
+                )
               ) : (
                 <ul className={styles.list}>
                   {overview.workspaces.map((item) => (
@@ -399,16 +800,23 @@ function AccountWorkspace({
                             .join('、')}
                         </p>
                       )}
-                      <Button
-                        onClick={() =>
-                          setSelectedLocation({
+                      {manageableWorkspaces.has(workspaceKey(item)) && (
+                        <Link
+                          className="btn"
+                          ref={(node) => {
+                            const key = `${item.tenantId}:${item.locationId}`;
+                            if (node) locationLinks.current.set(key, node);
+                            else locationLinks.current.delete(key);
+                          }}
+                          href={merchantWorkspaceHref({
                             tenantId: item.tenantId,
                             locationId: item.locationId,
-                          })
-                        }
-                      >
-                        管理門市：{item.locationName}
-                      </Button>
+                          })}
+                          onClick={onNavigate}
+                        >
+                          管理門市：{item.locationName}
+                        </Link>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -417,9 +825,13 @@ function AccountWorkspace({
           )}
           {view !== 'apply' && (
             <section className={styles.panel} aria-labelledby="merchant-applications-title">
-              <h3 id="merchant-applications-title">申請進度</h3>
+              <h3 id="merchant-applications-title" tabIndex={-1} ref={applicationsHeading}>
+                申請進度
+              </h3>
               {overview.applications.length === 0 ? (
-                <p>你還沒有送出進駐申請。</p>
+                applicationsKnown && (listedWorkspaceTenants !== undefined || !loadError) && (
+                  <p>你還沒有送出進駐申請。</p>
+                )
               ) : (
                 <ul className={styles.list}>
                   {overview.applications.map((item) => (
@@ -434,11 +846,40 @@ function AccountWorkspace({
                         })}
                       </p>
                       {item.reviewerNote && <p>審核說明：{item.reviewerNote}</p>}
-                      {item.state === 'needs-information' && (
-                        <p>請依審核說明向受理單位提供資料，不必重複建立申請。</p>
+                      {item.state !== 'approved' && (
+                        <p>{merchantApplicationNextStep(item.state)}</p>
                       )}
                       {item.state === 'approved' && (
-                        <p>店家已核准。請查看已授權門市，確認尚待完成的營運條件。</p>
+                        <div className={styles.stack}>
+                          <p>店家已核准。選擇這個場域的已授權門市，繼續設定菜單與營運資訊。</p>
+                          {overview.workspaces.some(
+                            (workspace) => workspace.tenantId === item.tenantId,
+                          ) ? (
+                            overview.workspaces
+                              .filter(
+                                (workspace) =>
+                                  workspace.tenantId === item.tenantId &&
+                                  manageableWorkspaces.has(workspaceKey(workspace)),
+                              )
+                              .map((workspace) => (
+                                <Link
+                                  className="btn"
+                                  key={workspace.locationId}
+                                  href={merchantWorkspaceHref({
+                                    tenantId: workspace.tenantId,
+                                    locationId: workspace.locationId,
+                                  })}
+                                  onClick={onNavigate}
+                                >
+                                  前往管理門市：{workspace.locationName}
+                                </Link>
+                              ))
+                          ) : listedWorkspaceTenants?.has(item.tenantId) === false && (
+                            <p>
+                              這個場域的門市尚未出現在清單，請重新載入；若仍未出現，請聯絡受理單位。
+                            </p>
+                          )}
+                        </div>
                       )}
                     </li>
                   ))}
@@ -446,12 +887,19 @@ function AccountWorkspace({
               )}
             </section>
           )}
-          {view === 'workspace' ? (
-            <Link href="/merchant/apply">申請新門市</Link>
-          ) : (
+          {view === 'workspace' ||
+          (view === 'overview' &&
+            hasMerchantRecords &&
+            !pending &&
+            !submitError &&
+            !hasApplicationDraft) ? (
+            <div className={styles.entryActions}>
+              <Link href="/merchant/apply">申請新門市</Link>
+            </div>
+          ) : loadError && !pending && !hasApplicationDraft ? null : (
             <section className={styles.panel} aria-labelledby="merchant-apply-title">
               <h3 id="merchant-apply-title">申請進駐</h3>
-              {overview.programs.length === 0 ? (
+              {!pending && overview.programs.length === 0 ? (
                 <p>目前沒有場域開放進駐申請。</p>
               ) : (
                 <form
@@ -488,8 +936,10 @@ function AccountWorkspace({
                       disabled={!selected}
                       placeholder="請選擇營運區域"
                       options={
-                        selected?.campuses.map((item) => ({ value: item.id, label: item.name })) ??
-                        []
+                        selected?.campuses.map((item) => ({
+                          value: item.id,
+                          label: item.name,
+                        })) ?? []
                       }
                     />
                   </fieldset>
@@ -617,17 +1067,33 @@ function AccountWorkspace({
                     type="submit"
                     variant="primary"
                     loading={busy}
-                    disabled={loading || !!loadError}
+                    disabled={submissionBlocked}
                   >
                     {busy ? '正在確認收件…' : pending ? '重試同一份申請' : '送出進駐申請'}
                   </Button>
                 </form>
               )}
-              {notice && <p role="status">{notice}</p>}
             </section>
           )}
         </div>
       )}
     </div>
+  );
+  if (view === 'apply') return list;
+  const nativeList = (
+    <MerchantListLoader load={load} invalidate={invalidate} restoreFocus={restoreListFocus}>
+      {list}
+    </MerchantListLoader>
+  );
+  return withOperations(
+    showApplications || showLocations || hasVerifiedLocation ? (
+      nativeList
+    ) : (
+      <AccountDemoDiningPanel
+        view="merchant"
+        entryOnly={view === 'overview'}
+        fallback={nativeList}
+      />
+    ),
   );
 }

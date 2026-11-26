@@ -6,8 +6,9 @@ import { assistantRequest } from './assistantTransport';
 export async function handleAssistant(request: NextRequest, segments: string[]) {
   if (process.env.CAMPUS_ASSISTANT_ENABLED !== 'true') throw new NuniError(404, 'NOT_FOUND');
   const action = segments[1];
-  if (process.env.CAMPUS_ASSISTANT_V2_ENABLED === 'true' && segments.length === 2)
+  if (process.env.CAMPUS_ASSISTANT_V2_ENABLED === 'true' && segments.length === 2) {
     return (await import('./assistantV2/handler')).handleV2(request, action);
+  }
   if (
     segments.length !== 2 ||
     !['capability', 'preview', 'ask', 'route', 'execute', 'enqueue'].includes(action)

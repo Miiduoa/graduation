@@ -49,7 +49,11 @@ export function useSocialResource<T>(
   };
 }
 
-export function useSocialMutation(context: string, enabled: boolean, onExpired: () => void) {
+export function useSocialMutation(
+  context: string,
+  enabled: boolean,
+  onExpired: () => void,
+) {
   const owner = useMemo(() => ({ context, keys: new Map<string, string>() }), [context]);
   const current = useRef<object | null>(null),
     lock = useRef<object | null>(null),

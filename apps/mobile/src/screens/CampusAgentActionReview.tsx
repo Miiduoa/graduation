@@ -1,8 +1,10 @@
 import React, { useRef, useState } from 'react';
 import { Text, View } from 'react-native';
+import { DORM_REPAIR_COPY } from '@campus/shared/src/dormitory';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import {
   confirmCampusAgentWrite,
+  isWashingCancellationReceipt,
   type CampusAgentWriteProposal,
   type CampusAgentWriteReceipt,
 } from '../features/campusAssistantActions';
@@ -22,14 +24,17 @@ const inputLabels: Record<string, string> = {
   description: '問題描述',
   urgency: '緊急程度',
   machineId: '洗衣機',
+  reservationId: '預約編號',
+  reservedUntil: '預約保留期限（UTC）',
 };
 
 function readableFields(input: Record<string, unknown>) {
   return Object.entries(input).filter(([key, value]) =>
-    !!inputLabels[key] && (typeof value === 'string' || typeof value === 'number'))
+    !!inputLabels[key] && (typeof value === 'string' || typeof value === 'number' ||
+      (key === 'reservedUntil' && value === null)))
     .map(([key, value]) => ({
       label: inputLabels[key],
-      value: String(value).slice(0, 400),
+      value: key === 'reservedUntil' && value === null ? '未提供到期時間' : String(value).slice(0, 400),
     }));
 }
 
@@ -79,6 +84,10 @@ export function CampusAgentActionReview({
         schoolId,
         isCurrent,
       });
+      if (proposal.toolName === 'cancelWashingReservation' && value.success &&
+          !isWashingCancellationReceipt(value, proposal.input, { userId, schoolId })) {
+        throw new Error('invalid-receipt');
+      }
       if (isCurrent()) setReceipt(value);
     } catch (error) {
       if (isPermissionDeniedError(error)) {
@@ -90,8 +99,10 @@ export function CampusAgentActionReview({
     }
   }
 
-  const reference = receipt?.requestId || receipt?.repairId ||
-    receipt?.reservationId || receipt?.loanId;
+  const isRepair = proposal.toolName === 'createDormRepairRequest';
+  const isWashingCancellation = proposal.toolName === 'cancelWashingReservation';
+  const reference = isRepair ? undefined : isWashingCancellation ? receipt?.reservationId :
+    receipt?.requestId || receipt?.repairId || receipt?.reservationId || receipt?.loanId;
   const success = receipt?.success === true;
   return (
     <View style={{
@@ -105,11 +116,11 @@ export function CampusAgentActionReview({
     }}>
       <Text style={{ color: aiTokens.muted, fontSize: 12, fontWeight: '700' }}>
         {success
-          ? '伺服器已確認完成'
+          ? (isRepair ? DORM_REPAIR_COPY.assistantWriteSuccess : '伺服器已確認完成')
           : permissionDenied
             ? '設定已關閉此寫入動作'
             : attempted
-              ? '已送出確認，請核對結果'
+              ? (isRepair ? DORM_REPAIR_COPY.assistantWritePending : '已送出確認，請核對結果')
               : '需要本人確認 · 尚未執行'}
       </Text>
       <Text style={{ color: aiTokens.text, fontSize: 16, fontWeight: '700' }}>
@@ -136,7 +147,8 @@ export function CampusAgentActionReview({
           ) : success ? (
             <View style={{ gap: 6 }}>
               <Text accessibilityRole="alert" style={{ color: aiTokens.text, fontWeight: '700' }}>
-                伺服器已確認執行成功
+                {isRepair ? DORM_REPAIR_COPY.assistantWriteSuccess :
+                  isWashingCancellation ? '洗衣預約已取消' : '伺服器已確認執行成功'}
               </Text>
               {reference ? (
                 <Text selectable style={{ color: aiTokens.muted }}>
@@ -144,7 +156,11 @@ export function CampusAgentActionReview({
                 </Text>
               ) : null}
               <Text style={{ color: aiTokens.muted, lineHeight: 20, fontSize: 12 }}>
-                請到對應服務頁面核對完整紀錄。
+                {isRepair
+                  ? DORM_REPAIR_COPY.assistantSavedMemo
+                  : isWashingCancellation
+                    ? '伺服器已確認取消上方這筆洗衣預約，可重新查詢我的洗衣預約核對狀態。'
+                    : '請到對應服務頁面核對完整紀錄。'}
               </Text>
             </View>
           ) : permissionDenied ? (
@@ -162,7 +178,11 @@ export function CampusAgentActionReview({
                 {uncertain ? '執行狀態尚未確認' : receipt?.success === false ? '伺服器未確認操作成功' : '正在等待執行結果…'}
               </Text>
               <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 20 }}>
-                為避免重複送出，請先到對應服務頁面查核。這份草稿不會再次自動執行。
+                {isRepair
+                  ? DORM_REPAIR_COPY.assistantWriteUncertain
+                  : isWashingCancellation
+                    ? '請重新查詢我的洗衣預約核對狀態，或到宿舍服務查看紀錄。這份草稿不會再次自動執行。'
+                    : '為避免重複送出，請先到對應服務頁面查核。這份草稿不會再次自動執行。'}
               </Text>
             </View>
           )}

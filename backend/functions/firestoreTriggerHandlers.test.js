@@ -51,6 +51,7 @@ describe('firestore trigger handlers (permission sync)', () => {
 
   test('profile delete clears directory entries', async () => {
     const directory = { u1: { schoolId: 'pu' } };
+    const leftover = [];
     const handler = createUserProfileChangedHandler({
       syncAuthClaims: async () => {
         throw new Error('should not set claims on delete');
@@ -58,17 +59,41 @@ describe('firestore trigger handlers (permission sync)', () => {
       syncDirectoryEntriesForUser: async (uid, userData) => {
         if (!userData) delete directory[uid];
       },
+      inactivateLeftoverSchoolMemberships: async (uid) => {
+        leftover.push(uid);
+      },
     });
 
     await handler(writtenEvent({ uid: 'u1' }, null, { role: 'admin' }));
     expect(directory.u1).toBeUndefined();
+    expect(leftover).toEqual(['u1']);
+  });
+
+  test('closed or rebuilt profiles revoke leftover story stamps', async () => {
+    const leftover = [];
+    const handler = createUserProfileChangedHandler({
+      syncAuthClaims: async () => {},
+      syncDirectoryEntriesForUser: async () => {},
+      inactivateLeftoverSchoolMemberships: async (uid) => {
+        leftover.push(uid);
+      },
+    });
+
+    await handler(writtenEvent({ uid: 'u2' }, { status: 'suspended' }, { status: 'active' }));
+    await handler(writtenEvent({ uid: 'u3' }, { role: 'student' }, null));
+    await handler(writtenEvent({ uid: 'u4' }, { status: 'active', displayName: 'Still here' }, { status: 'active' }));
+    expect(leftover).toEqual(['u2', 'u3']);
   });
 
   test('membership change syncs the school directory entry', async () => {
     const entries = [];
+    const bindings = [];
     const handler = createSchoolMembershipChangedHandler({
       syncSchoolDirectoryEntry: async (payload) => {
         entries.push(payload);
+      },
+      syncProfileSchoolBinding: async (payload) => {
+        bindings.push(payload);
       },
     });
 
@@ -81,6 +106,9 @@ describe('firestore trigger handlers (permission sync)', () => {
     );
 
     expect(entries).toEqual([
+      { schoolId: 'pu', uid: 'u1', membership: { status: 'active', role: 'student' } },
+    ]);
+    expect(bindings).toEqual([
       { schoolId: 'pu', uid: 'u1', membership: { status: 'active', role: 'student' } },
     ]);
   });

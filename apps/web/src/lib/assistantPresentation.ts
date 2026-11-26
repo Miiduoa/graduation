@@ -96,8 +96,46 @@ const WRITE_TOOLS = new Set([
   'returnBook',
   'createDormRepairRequest',
   'reserveWashingMachine',
+  'cancelWashingReservation',
   'createOrder',
 ]);
+
+export interface WashingCancellationInput extends Record<string, unknown> {
+  reservationId: string;
+  expectedReservationVersion: string;
+  machineId: string;
+  dormitory: string;
+  startTime: string;
+  reservedUntil: string | null;
+}
+
+const cancellationFields = ['reservationId', 'expectedReservationVersion', 'machineId', 'dormitory', 'startTime', 'reservedUntil'];
+const cancellationText = (value: unknown, max: number): value is string => typeof value === 'string' &&
+  value.trim().length > 0 && value.length <= max && !/[\p{Cc}\p{Cf}]/u.test(value);
+const cancellationId = (value: unknown) => cancellationText(value, 128) && !value.includes('/');
+const cancellationEnd = (value: unknown) => value === null || (typeof value === 'string' &&
+  Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value);
+
+/** Cancellation must display the exact reservation snapshot the server will compare. */
+export function isWashingCancellationInput(value: unknown): value is WashingCancellationInput {
+  const input = fields(value);
+  return Object.keys(input).length === cancellationFields.length &&
+    cancellationFields.every(key => Object.hasOwn(input, key)) &&
+    cancellationId(input.reservationId) && cancellationId(input.machineId) &&
+    cancellationText(input.dormitory, 100) && cancellationText(input.startTime, 40) &&
+    typeof input.expectedReservationVersion === 'string' && /^[a-f0-9]{64}$/i.test(input.expectedReservationVersion) &&
+    cancellationEnd(input.reservedUntil);
+}
+
+export function isWashingCancellationReceipt(value: unknown, input: unknown,
+  scope: { userId: string; schoolId: string }): boolean {
+  const receipt = fields(value);
+  return isWashingCancellationInput(input) && receipt.success === true &&
+    receipt.toolName === 'cancelWashingReservation' && receipt.status === 'cancelled' &&
+    receipt.userId === scope.userId && receipt.schoolId === scope.schoolId &&
+    ['reservationId', 'machineId', 'dormitory', 'startTime', 'reservedUntil']
+      .every(key => Object.hasOwn(receipt, key) && receipt[key] === input[key]);
+}
 
 export interface AssistantWriteProposal {
   label: string;
@@ -118,6 +156,9 @@ export function assistantWriteProposals(envelope: CampusAssistantEnvelope): Assi
     if (action.action !== 'queue_action' || action.requiresConfirmation !== true ||
         !WRITE_TOOLS.has(text(params.toolName)) || params.agentRunId !== runId ||
         !params.input || Array.isArray(params.input) || !Object.keys(input).length) return [];
+    if (params.toolName === 'cancelWashingReservation' &&
+        (envelope.run?.status !== 'completed' || action.status !== 'pending_confirmation' ||
+          !isWashingCancellationInput(input))) return [];
     try {
       if (JSON.stringify(input).length > 4000) return [];
     } catch {

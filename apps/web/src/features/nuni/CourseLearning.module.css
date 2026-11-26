@@ -311,27 +311,6 @@
   color: var(--brand);
   font-size: 13px;
 }
-.lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  display: grid;
-  align-content: start;
-  gap: 12px;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.72);
-}
-.lightbox img {
-  width: min(100%, 720px);
-  max-height: 80vh;
-  object-fit: contain;
-  justify-self: center;
-  background: #111;
-}
-.lightbox button {
-  justify-self: end;
-  min-height: 40px;
-}
 .fileGlyph {
   display: flex;
   align-items: center;

@@ -15,10 +15,12 @@
   font-weight: 600;
 }
 .status {
-  background: var(--accent-soft);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: clamp(24px, 4vw, 42px);
+  background: transparent;
+  border: 0;
+  border-top: 2px solid var(--text);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: clamp(20px, 3.5vw, 32px) 0;
   margin-bottom: 28px;
 }
 .status h2 {
@@ -79,9 +81,9 @@
 .sourceBadge {
   color: var(--text);
   padding: 3px 9px;
-  border: 1px solid var(--border);
-  border-radius: 99px;
-  font-size: 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .source button {
@@ -89,11 +91,13 @@
   min-height: 44px;
 }
 .schoolSummary {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
+  border: 0;
+  border-top: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 20px 0;
   margin: 24px 0;
-  background: var(--surface);
+  background: transparent;
 }
 .schoolSummary h2 {
   font-size: 16px;
@@ -276,21 +280,34 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
 }
 .segment button {
+  min-height: 44px;
   background: transparent;
   border: 0;
-  padding: 10px 16px;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+  padding: 10px 14px;
   color: var(--muted);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
 }
 .segment button[aria-pressed='true'],
 .segment button[aria-selected='true'] {
-  background: var(--brand);
-  color: var(--on-brand);
+  background: transparent;
+  border-bottom-color: var(--brand);
+  color: var(--text);
+  font-weight: 650;
+}
+@media (forced-colors: active) {
+  .segment button[aria-pressed='true'],
+  .segment button[aria-selected='true'] {
+    border-bottom-color: Highlight;
+    color: Highlight;
+  }
 }
 .week {
   display: grid;
@@ -370,6 +387,21 @@
   margin: 4px 0;
   font-size: 13px;
   color: var(--muted);
+}
+.friendActions {
+  flex: 0 1 55%;
+  justify-content: flex-end;
+}
+@media (max-width: 600px) {
+  .list > li.friendRow {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .friendActions {
+    flex: none;
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 .score {
   max-width: 40%;

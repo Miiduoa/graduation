@@ -61,6 +61,7 @@ function todayElement(overrides: Partial<ComponentProps<typeof StudentToday>> = 
       importHref="/import?kind=timetable&campus=pu"
       weekHref="/timetable?campus=pu"
       timetableHref="/timetable?campus=pu"
+      timetableSchoolId="pu"
       {...overrides}
     />
   );
@@ -69,6 +70,45 @@ function todayElement(overrides: Partial<ComponentProps<typeof StudentToday>> = 
 function view(overrides: Partial<ComponentProps<typeof StudentToday>> = {}) {
   return render(todayElement(overrides));
 }
+
+it('ignores a previous visit\'s saved position when opening Today', () => {
+  sessionStorage.setItem('campus-today-scroll', '960');
+  try {
+    const result = view({ scopeKey: 'account-a:pu' });
+    expect(screen.getByRole('heading', { name: '今天' })).toBeTruthy();
+    expect(window.scrollTo).not.toHaveBeenCalled();
+
+    result.rerender(todayElement({ scopeKey: 'account-b:ntnu', timetableSchoolId: 'ntnu' }));
+    expect(window.scrollTo).not.toHaveBeenCalled();
+    result.unmount();
+  } finally {
+    sessionStorage.removeItem('campus-today-scroll');
+  }
+});
+
+it('leaves restored reading positions to the router without persisting them across accounts', () => {
+  // The router may already have restored a history entry before this content mounts.
+  const scrollY = Object.getOwnPropertyDescriptor(window, 'scrollY');
+  Object.defineProperty(window, 'scrollY', { configurable: true, value: 480 });
+  sessionStorage.removeItem('campus-today-scroll');
+  try {
+    const result = view({ scopeKey: 'account-a:pu', skeleton: true });
+    result.rerender(todayElement({ scopeKey: 'account-a:pu', classes: [klass()] }));
+    expect(window.scrollTo).not.toHaveBeenCalled();
+    expect(window.scrollY).toBe(480);
+
+    window.dispatchEvent(new Event('pagehide'));
+    result.unmount();
+    expect(sessionStorage.getItem('campus-today-scroll')).toBeNull();
+
+    const nextAccount = view({ scopeKey: 'account-b:ntnu', timetableSchoolId: 'ntnu' });
+    expect(window.scrollTo).not.toHaveBeenCalled();
+    nextAccount.unmount();
+  } finally {
+    if (scrollY) Object.defineProperty(window, 'scrollY', scrollY);
+    sessionStorage.removeItem('campus-today-scroll');
+  }
+});
 
 it('shows the next class once in the timetable with a keyboard-accessible destination', () => {
   view({ classes: [klass()] });
@@ -81,30 +121,90 @@ it('shows the next class once in the timetable with a keyboard-accessible destin
   expect(screen.getAllByText('資料庫系統')).toHaveLength(1);
   const link = within(row).getByRole('link', { name: /資料庫系統.*看課程/ });
   expect(link.getAttribute('href')).toBe('/course/cs-db#week');
-  expect(within(row).getAllByRole('link')).toHaveLength(1);
+  expect(within(row).getAllByRole('link')).toHaveLength(2);
+  expect(within(row).getByRole('link', { name: /^找教室：/ })).toBeTruthy();
   link.focus();
   expect(document.activeElement).toBe(link);
   expect(screen.queryByText(/為你推薦|智慧|AI 幫你/)).toBeNull();
 });
 
-it('keeps the assistant mounted after the planner while the day finishes loading', () => {
+it('keeps the first-screen workspace draft mounted while the day finishes loading', () => {
   const assistant = <input aria-label="助理草稿測試" defaultValue="" />;
   const result = view({ skeleton: true, assistant });
   const draft = screen.getByRole('textbox');
   fireEvent.change(draft, { target: { value: '下一堂課在哪裡？' } });
   result.rerender(todayElement({ classes: [klass()], assistant }));
   expect(screen.getByRole('textbox')).toBe(draft);
-  expect(draft.compareDocumentPosition(screen.getByTestId('next-action')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
-  expect(draft.compareDocumentPosition(screen.getByTestId('today-classes')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  expect(
+    draft.compareDocumentPosition(screen.getByTestId('next-action')) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    draft.compareDocumentPosition(screen.getByTestId('today-classes')) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
   expect((draft as HTMLInputElement).value).toBe('下一堂課在哪裡？');
 });
 
+it('keeps the actual day before the task agent and preserves the agent while home data refreshes', () => {
+  const agent = <button type="button">首頁代辦測試</button>;
+  const result = view({ skeleton: true, agent });
+  const button = screen.getByRole('button', { name: '首頁代辦測試' });
+  result.rerender(todayElement({ classes: [klass()], agent }));
+  expect(screen.getByRole('button', { name: '首頁代辦測試' })).toBe(button);
+  const planner = screen.getByTestId('today-unified-flow');
+  expect(button.compareDocumentPosition(planner) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+});
+
+it('keeps the workspace before the day and planning before optional suggestions without resetting drafts', () => {
+  const agent = <input aria-label="代辦測試" defaultValue="保留原本的安排" />;
+  const assistant = <input aria-label="助理草稿測試" defaultValue="接著幫我找教室" />;
+  const personalization = <section aria-label="個人化安排">生活與年級偏好</section>;
+  const view = render(todayElement({ agent, assistant, personalization, classes: [klass()] }));
+  const planning = screen.getByRole('textbox', { name: '代辦測試' });
+  const conversation = screen.getByRole('textbox', { name: '助理草稿測試' });
+  const assistance = screen.getByTestId('today-assistance');
+  expect(assistance.contains(planning)).toBe(true);
+  expect(screen.getByTestId('today-workspace-entry').contains(conversation)).toBe(true);
+  expect(conversation.compareDocumentPosition(screen.getByTestId('today-unified-flow')) &
+    Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(assistance.compareDocumentPosition(screen.getByRole('region', { name: '個人化安排' })) &
+    Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  view.rerender(todayElement({ agent, assistant, personalization, skeleton: true }));
+  expect(screen.getByRole('textbox', { name: '代辦測試' })).toBe(planning);
+  expect(screen.getByRole('textbox', { name: '助理草稿測試' })).toBe(conversation);
+  expect((conversation as HTMLInputElement).value).toBe('接著幫我找教室');
+});
+
+it('keeps immediate coursework before personalized suggestions and preserves the assistant draft', () => {
+  const assistant = <input aria-label="助理草稿測試" defaultValue="請幫我安排今天" />;
+  const personalization = <section aria-label="個人化安排">依年級與生活需求安排</section>;
+  const result = view({ classes: [klass()], todos: [todo()], assistant, personalization });
+  const next = screen.getByTestId('next-action');
+  const suggestions = screen.getByRole('region', { name: '個人化安排' });
+  expect(next.compareDocumentPosition(suggestions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const draft = screen.getByRole('textbox');
+  result.rerender(
+    todayElement({
+      classes: [klass()],
+      todos: [todo()],
+      assistant,
+      personalization: <section aria-label="個人化安排">改成期末準備</section>,
+    }),
+  );
+  expect(screen.getByRole('textbox')).toBe(draft);
+  expect((draft as HTMLInputElement).value).toBe('請幫我安排今天');
+});
+
 it('marks a class in progress and expands the rest of the day without leaving Today', () => {
-  const classes = Array.from({ length: 5 }, (_, i) => klass({
-    id: 'class-' + i, title: '課程 ' + i,
-    startAt: now.getTime() + (i - 1) * 3_600_000,
-    endAt: now.getTime() + (i - 1) * 3_600_000 + 50 * 60_000,
-  }));
+  const classes = Array.from({ length: 5 }, (_, i) =>
+    klass({
+      id: 'class-' + i,
+      title: '課程 ' + i,
+      startAt: now.getTime() + (i - 1) * 3_600_000,
+      endAt: now.getTime() + (i - 1) * 3_600_000 + 50 * 60_000,
+    }),
+  );
   view({ classes });
   const list = within(screen.getByTestId('today-classes'));
   expect(within(screen.getByTestId('next-action')).getByText('上課中')).toBeTruthy();
@@ -112,19 +212,26 @@ it('marks a class in progress and expands the rest of the day without leaving To
   expect(list.queryByText('課程 0')).toBeNull();
   fireEvent.click(list.getByRole('button', { name: '再看 1 堂課' }));
   expect(list.getByRole('link', { name: /(?=.*課程 0)(?=.*已結束)/ })).toBeTruthy();
-  expect(list.getByRole('link', { name: TODAY_COPY.viewFullTimetable }).getAttribute('href')).toBe('/timetable?campus=pu');
+  expect(list.getByRole('link', { name: TODAY_COPY.viewFullTimetable }).getAttribute('href')).toBe(
+    '/timetable?campus=pu',
+  );
   fireEvent.click(list.getByRole('button', { name: '收起課程' }));
   expect(list.queryByText('課程 0')).toBeNull();
 });
 
 it('labels an overnight deadline with its Taipei calendar day', () => {
-  view({ now: new Date('2026-10-25T22:00:00+08:00'), todos: [todo({
-    dueAt: Date.parse('2026-10-26T08:00:00+08:00'),
-  })] });
+  view({
+    now: new Date('2026-10-25T22:00:00+08:00'),
+    todos: [
+      todo({
+        dueAt: Date.parse('2026-10-26T08:00:00+08:00'),
+      }),
+    ],
+  });
   expect(within(screen.getByTestId('next-action')).getByText('明天截止')).toBeTruthy();
-  expect(screen.getByTestId('next-action').querySelector(`.${styles.rowDeadline}`)?.textContent).toBe(
-    '10/26 週一 08:00 截止',
-  );
+  expect(
+    screen.getByTestId('next-action').querySelector(`.${styles.rowDeadline}`)?.textContent,
+  ).toBe('10/26 週一 08:00 截止');
 });
 
 it('orders the unified flow as classes, due work, then unread notifications', () => {
@@ -173,19 +280,106 @@ it('puts the due-work row before later classes and keeps one task with separate 
   expect(document.activeElement).toBe(submit);
 });
 
-it('shows the unsigned sentence when the student is not signed in', () => {
+it('gives a guest one setup action and one sign-in instead of repeated locked sections', () => {
   view({ unsigned: true, timetableStatus: 'empty' });
-  expect(screen.getAllByText(TODAY_COPY.unsigned).length).toBeGreaterThan(0);
-  expect(screen.getByText(TODAY_COPY.noTimetable)).toBeTruthy();
-  expect(screen.getByRole('link', { name: TODAY_COPY.importTimetable }).getAttribute('href')).toBe(
+  expect(screen.queryByText(TODAY_COPY.unsigned)).toBeNull();
+  expect(screen.queryByTestId('today-work')).toBeNull();
+  expect(screen.queryByTestId('today-notifications')).toBeNull();
+  expect(screen.getByRole('link', { name: '登入查看作業與通知' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '匯入我的課表' }).getAttribute('href')).toBe(
     '/import?kind=timetable&campus=pu',
   );
 });
 
+it('replaces confirmed empty setup with one starting point while keeping signed-in notifications', () => {
+  view({ timetableStatus: 'empty', lmsUnconnected: true });
+  const start = screen.getByTestId('next-action');
+  expect(within(start).getByRole('heading', { name: '建立第一份課表' })).toBeTruthy();
+  expect(screen.getAllByRole('link', { name: '匯入我的課表' })).toHaveLength(1);
+  expect(screen.getByRole('link', { name: '加入 nuni 課程' }).getAttribute('href')).toBe(
+    '/classroom?campus=pu',
+  );
+  expect(screen.queryByRole('link', { name: /登入/ })).toBeNull();
+  expect(screen.queryByTestId('today-classes')).toBeNull();
+  expect(screen.queryByTestId('today-work')).toBeNull();
+  expect(screen.getByTestId('today-notifications')).toBeTruthy();
+});
+
+it('keeps course information when only the personal timetable needs setup', () => {
+  view({ timetableStatus: 'empty', lmsUnconnected: false });
+  expect(screen.getByRole('link', { name: '匯入我的課表' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '加入 nuni 課程' })).toBeNull();
+  expect(screen.getByTestId('today-work').textContent).toContain('目前沒有今日或即將到期的作業。');
+  expect(screen.getByTestId('today-notifications')).toBeTruthy();
+});
+
+it('does not turn partially loaded course data into onboarding or a claim of no assignments', () => {
+  const result = view({ timetableStatus: 'empty', refreshing: true });
+  expect(screen.queryByRole('region', { name: '建立第一份課表' })).toBeNull();
+  expect(screen.queryByText('目前沒有今日或即將到期的作業。')).toBeNull();
+  expect(screen.getByText('正在確認作業與期限…')).toBeTruthy();
+  result.rerender(todayElement({ timetableStatus: 'ready', refreshing: true }));
+  expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
+  result.rerender(todayElement({ timetableStatus: 'empty', todos: [todo()] }));
+  expect(screen.queryByRole('region', { name: '建立第一份課表' })).toBeNull();
+  expect(screen.getByTestId('next-action').textContent).toContain('作業三 繳交');
+  expect(screen.getByRole('link', { name: TODAY_COPY.goSubmit })).toBeTruthy();
+});
+
+it('keeps read failures recoverable instead of covering them with setup', () => {
+  const retry = vi.fn();
+  view({ timetableStatus: 'empty', todosError: '作業暫時讀不到', onRetryTodos: retry });
+  expect(screen.queryByRole('region', { name: '建立第一份課表' })).toBeNull();
+  expect(screen.getByRole('alert').textContent).toBe('作業暫時讀不到');
+  fireEvent.click(screen.getByRole('button', { name: TODAY_COPY.retry }));
+  expect(retry).toHaveBeenCalledOnce();
+});
+
+it('keeps confirmed setup links and keyboard focus while the same account refreshes', () => {
+  const props = { timetableStatus: 'empty' as const, lmsUnconnected: true, courseDataResolved: true };
+  const result = view(props);
+  const course = screen.getByRole('link', { name: '加入 nuni 課程' });
+  const bus = screen.getByRole('link', { name: /查公車/ });
+  course.focus();
+  result.rerender(todayElement({ ...props, refreshing: true }));
+  expect(screen.getByRole('link', { name: '加入 nuni 課程' })).toBe(course);
+  expect(document.activeElement).toBe(course);
+  expect(screen.getByRole('link', { name: /查公車/ })).toBe(bus);
+  expect(screen.queryByTestId('today-work')).toBeNull();
+  bus.focus();
+  result.rerender(todayElement(props));
+  expect(document.activeElement).toBe(bus);
+});
+
+it('keeps public services after real coursework and updates their campus without resetting the assistant', () => {
+  const assistant = <input aria-label="接續草稿" defaultValue="稍後再問" />;
+  const result = view({ classes: [klass()], assistant, campusSearch: 'campus=pu' });
+  const draft = screen.getByRole('textbox', { name: '接續草稿' });
+  const navigation = screen.getByRole('navigation', { name: '常用校園服務' });
+  expect(navigation.compareDocumentPosition(screen.getByTestId('today-unified-flow')) &
+    Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  expect(within(navigation).getAllByRole('link')).toHaveLength(4);
+  result.rerender(todayElement({
+    assistant,
+    timetableStatus: 'empty',
+    lmsUnconnected: true,
+    campusSearch: 'school=NCHU&schoolId=nchu&campus=nchu',
+    importHref: '/import?kind=timetable&campus=nchu',
+    timetableHref: '/timetable?campus=nchu',
+  }));
+  expect(screen.getByRole('textbox', { name: '接續草稿' })).toBe(draft);
+  expect(screen.getAllByRole('navigation', { name: '常用校園服務' })).toHaveLength(1);
+  const services = screen.getByRole('navigation', { name: '常用校園服務' });
+  for (const link of within(services).getAllByRole('link')) {
+    expect(link.getAttribute('href')).toContain('campus=nchu');
+    expect(link.getAttribute('href')).not.toContain('campus=pu');
+  }
+});
+
 it('opens the existing week for a guest without classes on Sunday instead of restarting setup', () => {
   view({ unsigned: true, timetableStatus: 'ready', classes: [], todos: [] });
-  expect(screen.getByRole('heading', { name: '課表準備好了。' })).toBeTruthy();
-  expect(screen.queryByRole('heading', { name: '先把課表放進來。' })).toBeNull();
+  expect(screen.getByRole('heading', { name: '本週課表' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '建立第一份課表' })).toBeNull();
   expect(screen.getByRole('link', { name: '查看這週課表' }).getAttribute('href')).toBe(
     '/timetable?campus=pu',
   );
@@ -219,7 +413,9 @@ it('keeps a known task actionable while timetable data is still loading', () => 
 it('does not declare there are no assignments when the course platform is unconnected', () => {
   view({ timetableStatus: 'ready', lmsUnconnected: true });
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
-  expect(screen.getByRole('link', { name: '查看我的課程' }).getAttribute('href')).toBe('/classroom');
+  expect(screen.getByRole('link', { name: '查看我的課程' }).getAttribute('href')).toBe(
+    '/classroom?campus=pu',
+  );
 });
 
 it('shows upcoming work due after 24 hours as the next assignment, not due today', () => {
@@ -370,9 +566,49 @@ it('updates the current class room and destination when the class identifier sta
   const card = screen.getByTestId('next-action');
   expect(card.textContent).toContain('新教室 201');
   expect(card.textContent).not.toContain('管理大樓 M302');
-  expect(within(card).getByRole('link', { name: /看課程$/ }).getAttribute('href')).toBe(
-    '/course/cs-new#week',
+  expect(
+    within(card)
+      .getByRole('link', { name: /看課程$/ })
+      .getAttribute('href'),
+  ).toBe('/course/cs-new#week');
+  const mapHref = within(card)
+    .getByRole('link', { name: '找教室：新教室 201' })
+    .getAttribute('href');
+  const map = new URL(mapHref!, 'https://campus.example');
+  expect(map.searchParams.get('query')).toBe('新教室 201');
+  expect(map.searchParams.get('schoolId')).toBe('pu');
+});
+
+it('keeps classroom navigation separate from course work and uses the timetable school in the unified schedule', () => {
+  view({ timetableSchoolId: 'ncku', classes: [klass()] });
+  const links = screen.getAllByRole('link', { name: '找教室：管理大樓 M302' });
+  expect(links).toHaveLength(1);
+  for (const link of links) {
+    const url = new URL(link.getAttribute('href')!, 'https://campus.example');
+    expect(url.pathname).toBe('/map');
+    expect(url.searchParams.get('schoolId')).toBe('ncku');
+    expect(url.searchParams.get('query')).toBe('管理大樓 M302');
+    expect(link.parentElement?.closest('a, button')).toBeNull();
+    expect(link.getAttribute('tabindex')).not.toBe('-1');
+  }
+  expect(screen.getByRole('link', { name: /資料庫系統.*看課程/ }).getAttribute('href')).toBe(
+    '/course/cs-db#week',
   );
+});
+
+it.each([undefined, null, 'personal', 'all'])(
+  'does not infer a map school from a timetable URL or account (%s)',
+  (timetableSchoolId) => {
+    view({ timetableSchoolId, classes: [klass()] });
+    expect(screen.queryByRole('link', { name: /^找教室：/ })).toBeNull();
+  },
+);
+
+it('does not offer a classroom destination for a blank room or unconfirmed timetable', () => {
+  const page = view({ classes: [klass({ location: '  ' })] });
+  expect(screen.queryByRole('link', { name: /^找教室：/ })).toBeNull();
+  page.rerender(todayElement({ timetableStatus: 'loading', classes: [klass()] }));
+  expect(screen.queryByRole('link', { name: /^找教室：/ })).toBeNull();
 });
 
 it('drops the previous action immediately on sign-out and on a different account or school scope', () => {
@@ -391,7 +627,8 @@ it('drops the previous action immediately on sign-out and on a different account
     todayElement({ scopeKey: 'account-b:nthu', unsigned: true, todos: [], classes: [] }),
   );
   expect(screen.queryByTestId('next-action')).toBeNull();
-  expect(screen.getByText(TODAY_COPY.unsigned)).toBeTruthy();
+  expect(screen.getByRole('link', { name: '登入查看作業與通知' })).toBeTruthy();
+  expect(screen.queryByTestId('today-work')).toBeNull();
   expect(screen.queryByText('新校園待辦')).toBeNull();
 });
 
@@ -447,8 +684,8 @@ it('keeps one welcome area without duplicate login copy when the guest campus ch
     expect(screen.queryByTestId('next-action')).toBeNull();
     page.rerender(todayElement({ scopeKey: 'guest:pu', unsigned: true, timetableStatus: 'empty' }));
     expect(screen.queryByTestId('next-action')).toBeNull();
-    expect(screen.getAllByTestId('today-work')).toHaveLength(1);
-    expect(screen.getAllByText(TODAY_COPY.unsigned)).toHaveLength(1);
+    expect(screen.queryByTestId('today-work')).toBeNull();
+    expect(screen.getAllByRole('link', { name: '登入查看作業與通知' })).toHaveLength(1);
     const servicePaths = screen
       .getAllByRole('link')
       .map((link) => new URL(link.getAttribute('href')!, 'https://campus.example').pathname);
@@ -461,4 +698,34 @@ it('keeps one welcome area without duplicate login copy when the guest campus ch
     error.mockRestore();
     warning.mockRestore();
   }
+});
+
+it.each(['pending', 'empty', 'error'] as const)(
+  'keeps the calendar reachable from %s coursework',
+  (state) => {
+    view({
+      todos: state === 'pending' ? [todo()] : [],
+      todosError: state === 'error' ? '作業暫時讀不到' : '',
+    });
+    const work = within(screen.getByTestId('today-work'));
+    const calendar = work.getByRole('link', { name: '查看行事曆' });
+    expect(calendar.getAttribute('href')).toBe('/calendar?campus=pu');
+    calendar.focus();
+    expect(document.activeElement).toBe(calendar);
+    if (state === 'pending') {
+      expect(work.getByRole('link', { name: /作業三 繳交/ }).getAttribute('href')).toBe(
+        '/course/cs-db#assignment-hw-3',
+      );
+    }
+  },
+);
+
+it('keeps a guest timetable error recoverable without suggesting it has never been created', () => {
+  const retry = vi.fn();
+  view({ unsigned: true, timetableStatus: 'error', onRetryTimetable: retry });
+  expect(screen.queryByRole('heading', { name: '建立第一份課表' })).toBeNull();
+  expect(screen.getByRole('alert').textContent).toBe(TODAY_COPY.timetableUnavailable);
+  fireEvent.click(screen.getByRole('button', { name: TODAY_COPY.retry }));
+  expect(retry).toHaveBeenCalledOnce();
+  expect(screen.getAllByRole('link', { name: '登入查看作業與通知' })).toHaveLength(1);
 });

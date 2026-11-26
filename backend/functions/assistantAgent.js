@@ -36,6 +36,8 @@ const PERSONAL_INTENTS = new Set([
   'personal_schedule',
   'leave_request',
   'leave_status',
+  'wash_cancel',
+  'wash_status',
 ]);
 
 const CAMPUS_INTERNAL_INTENTS = new Set(['announcements', 'events', 'menus', 'pois']);

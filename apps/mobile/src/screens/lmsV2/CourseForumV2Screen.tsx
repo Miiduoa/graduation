@@ -1,4 +1,5 @@
 import React from 'react';
+import { useAuth } from '../../state/auth';
 import { theme } from '../../ui/theme';
 import { useThemeMode } from '../../state/theme';
 import { View } from 'react-native';
@@ -14,6 +15,7 @@ import {
 
 export default function CourseForumV2Screen() {
   useThemeMode();
+  const { user } = useAuth();
   const { courseId, courseName } = useCourseV2Params();
   const nav = useCourseV2Nav();
   const loadable = useLoadable(async () => {
@@ -27,7 +29,7 @@ export default function CourseForumV2Screen() {
       .limit(100);
     if (error) throw error;
     return data ?? [];
-  });
+  }, JSON.stringify([courseId, user?.uid]));
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>

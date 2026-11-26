@@ -1,5 +1,5 @@
 import {
-  queryCampusAssignments, assignmentDeadlineLabel, ASSIGNMENT_WORKBENCH_PAGE_SIZE,
+  queryCampusAssignments, assignmentDueTime, assignmentDeadlineLabel, ASSIGNMENT_WORKBENCH_PAGE_SIZE,
   type CampusAssignmentRow, type CampusAssignmentFilter,
 } from '../../services/campusAssignmentQuery';
 
@@ -36,7 +36,8 @@ test('overdue uses the actual instant, not the displayed date', () => {
 
 test('missing and invalid timestamps are unknown, never overdue or a fabricated date', () => {
   expect(titles('undated')).toEqual(['無日期', '壞日期']);
-  expect(assignmentDeadlineLabel(tasks[8], now)).toContain('未提供');
+  expect(assignmentDeadlineLabel(tasks[7], now)).toContain('未提供');
+  expect(assignmentDeadlineLabel(tasks[8], now)).toContain('格式無法核對');
   expect(assignmentDeadlineLabel(tasks[0], now)).toContain('期限已過');
 });
 
@@ -96,4 +97,32 @@ test('empty matches remain distinct from source availability', () => {
 
 test('an invalid reference clock cannot produce date-based claims', () => {
   expect(() => query(tasks, { now: NaN })).toThrow('invalid-assignment-query-time');
+});
+
+test('invalid calendar days and impossible UTC offsets cannot become a fabricated deadline', () => {
+  for (const invalid of [
+    '2026-02-30T08:00:00Z',
+    '2026-02-29T08:00:00Z',
+    '2026-11-21T10:00:00+15:00',
+    '2026-11-21T10:00:00+08:60',
+    '2026-11-21T10:00:00',
+  ]) {
+    // These were accepted or normalized by Date.parse in the original UI.
+    expect(assignmentDueTime(invalid)).toBeNull();
+    const damaged = row('來源期限錯誤', invalid);
+    expect(assignmentDeadlineLabel(damaged, now)).toContain('格式無法核對');
+    expect(query([damaged], { filter: 'undated' }).matched).toBe(1);
+    expect(query([damaged], { filter: 'seven-days' }).matched).toBe(0);
+    expect(query([damaged], { filter: 'overdue' }).matched).toBe(0);
+  }
+  expect(assignmentDeadlineLabel(row('未提供', null), now)).toContain('未提供');
+});
+
+test('real leap days and explicit Taiwan offsets retain their exact instants', () => {
+  expect(assignmentDueTime('2028-02-29T08:00:00Z')).toBe(Date.parse('2028-02-29T08:00:00Z'));
+  expect(assignmentDueTime('2026-10-28T00:30:00+08:00')).toBe(now);
+  expect(assignmentDeadlineLabel(row('正好到期', '2026-10-28T00:30:00+08:00'), now))
+    .toContain('正好到截止點');
+  expect(query([row('正好到期', '2026-10-28T00:30:00+08:00')], { filter: 'overdue' }).matched)
+    .toBe(0);
 });

@@ -100,6 +100,12 @@ async def lifespan(app: FastAPI):
         logger.info("Indexing APP knowledge (RAG enabled)...")
         await asyncio.to_thread(index_all_app_knowledge)
         logger.info("APP knowledge indexed")
+        try:
+            from rag.sync_firestore import migrate_legacy_firestore_index
+            migration = await asyncio.to_thread(migrate_legacy_firestore_index)
+            logger.info("Legacy Firestore RAG migration: %s", migration)
+        except Exception as exc:
+            logger.error("Legacy Firestore RAG migration failed: %s", exc)
     else:
         logger.info("RAG disabled")
 

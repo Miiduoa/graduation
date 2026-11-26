@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { parseAssistantCalendarEvent } from '@campus/shared/src/assistantExecution';
+import type { PlatformAssistantPermissions } from '@campus/shared/src/platformAssistantPermissions';
 if (typeof window !== 'undefined') throw new Error('Server only');
 export class V2Error extends Error {
   constructor(
@@ -9,6 +11,10 @@ export class V2Error extends Error {
   ) {
     super(code);
   }
+}
+export function isSessionInvalidation(error: unknown): boolean {
+  const value = error as { status?: number; code?: string } | null;
+  return value?.status === 401 || value?.code === 'SESSION_CHANGED';
 }
 export const fail = (code = 'INVALID_INPUT', status = 422): never => {
   throw new V2Error(status, code);
@@ -116,6 +122,9 @@ export function eventArgs(raw: unknown): EventArgs {
     if ((out.endDate || out.date) === out.date && out.startTime >= out.endTime) return fail();
   } else if (v.startTime !== undefined || v.endTime !== undefined) return fail();
   if (out.endDate && Date.parse(out.endDate) - Date.parse(out.date) > 31 * 86400000) return fail();
+  // Every proposed event must also be representable by the shared verified
+  // receipt; do not discover an invalid date or control character after writing.
+  try { parseAssistantCalendarEvent(out); } catch { return fail(); }
   return out;
 }
 export type Binding = {
@@ -131,6 +140,10 @@ export type Card = {
   mutationId: string;
   schoolId: string;
   destination: string;
+  /** Presentation hint only; the signed source guard is the execution authority. */
+  sourceBound?: 'food-pickup';
+  /** Read-continuation hint only. Follow-up authenticates the signed study guard. */
+  coursework?: boolean;
 };
 export type Step = { name: string; status: 'ok' | 'error' | 'cached'; summary: string };
 export type Message = {
@@ -173,8 +186,28 @@ export type Task = {
   submitted: boolean;
   state: string;
 };
+export type CourseworkStudyTarget = {
+  workspaceId: string;
+  taskId: string;
+  kind: 'assignment' | 'quiz';
+  date?: string;
+};
+export type CourseworkStudyGuard = {
+  workspaceId: string;
+  taskId: string;
+  kind: 'assignment' | 'quiz';
+  fingerprint: string;
+  policy: 'coursework-gap' | 'study';
+};
+export type FoodPickupGuard = {
+  tenantId: string;
+  orderId: string;
+  fingerprint: string;
+  durationMinutes: number;
+};
 export type Adapter = {
   simulation: boolean;
+  permissions?(): Promise<PlatformAssistantPermissions>;
   remainingApiCalls?(): number;
   food?: {
     enabled(): boolean;
@@ -189,8 +222,27 @@ export type Adapter = {
   };
   ledger(): Promise<Ledger>;
   courses(): Promise<{ courses: Course[]; partial: boolean }>;
+  /** A fresh school-scoped student membership check for a specifically selected course. */
+  course?(courseId: string): Promise<Course | null>;
   work(courseId: string): Promise<Task[]>;
   materials(courseId: string, cursor?: string): Promise<unknown>;
+  /** Reviewed anonymous catalogs; this never changes the private school binding. */
+  publicCourses?(search: import('@campus/shared/src/publicCourseAssistant').PublicCourseAssistantSearch): Promise<unknown>;
+  /** Anonymous public content in this adapter's fixed school, never a private school login. */
+  publicCampus?(kind: import('./publicCampus').PublicCampusKind, limit: number): Promise<unknown>;
+  /** Public campus locations in this adapter's fixed school, with source coverage. */
+  campusMap?(args: import('./campusMap').CampusMapArguments): Promise<unknown>;
+  /** Re-read one selected public event in its exact, fixed-school source. */
+  publicEvent?(target: import('./publicEvent').PublicEventTarget): Promise<unknown>;
+  /** Platform-authenticated list summaries only; never contact details or publication. */
+  lostFound?(args: import('./lostFound').LostFoundArguments): Promise<unknown>;
+  /** Platform public feed for this fixed school; never private school conversations. */
+  publicSocial?(args: import('./publicSocial').PublicSocialArguments): Promise<unknown>;
+  /** Fresh reviewed owner-teacher membership; never the student's own submission view. */
+  teachingOverview?(args: import('./teacherWorkspace').TeachingArguments): Promise<unknown>;
+  /** Merchant-authorized locations in this fixed school; never customer order history. */
+  merchantOverview?(args: import('./merchantWorkspace').MerchantArguments,
+    expectedTarget?: { tenantId: string; locationId: string }): Promise<unknown>;
   realms(): Promise<{ tenantId: string; schoolId?: string }[]>;
   orders(
     tenantId: string,
@@ -220,6 +272,37 @@ export type Adapter = {
     mutationId: string;
   }): Promise<Ledger>;
 };
+export type AssistantPermissionKey = keyof PlatformAssistantPermissions;
+export const ASSISTANT_PERMISSION_SETTINGS_HREF = '/settings?section=assistant';
+
+export function proposalPermission(name: string): AssistantPermissionKey | undefined {
+  if (name === 'propose_personal_event' || name === 'propose_study_plan') return 'createPersonalEvent';
+  if (name === 'propose_food_order' || name === 'reorder_last_food_order') return 'prepareFoodOrder';
+}
+
+/** Recheck each proposal and execution; store defaults allow unset permissions, read failures block actions. */
+export async function requireAssistantPermission(adapter: Adapter, key: AssistantPermissionKey) {
+  if (!adapter.permissions) return;
+  let permissions: PlatformAssistantPermissions;
+  try {
+    permissions = await adapter.permissions();
+  } catch (error) {
+    if ((error as { status?: number } | null)?.status === 401) throw error;
+    return fail('ASSISTANT_PERMISSION_STORE_UNAVAILABLE', 503);
+  }
+  if (!permissions) return fail('ASSISTANT_PERMISSION_STORE_UNAVAILABLE', 503);
+  if (permissions[key] !== true) return fail('ASSISTANT_PERMISSION_DENIED', 403);
+}
+
+export function assistantPermissionRecovery(code: string) {
+  if (code !== 'ASSISTANT_PERMISSION_DENIED' && code !== 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE') return;
+  return {
+    href: ASSISTANT_PERMISSION_SETTINGS_HREF,
+    nextStep: code === 'ASSISTANT_PERMISSION_DENIED'
+      ? '這項助理操作權限尚未開啟。請到設定的助理權限調整；不要自動重試或宣稱已產生確認卡。'
+      : '目前無法確認助理操作權限。請到設定重新讀取；不要自動重試或宣稱已產生確認卡。',
+  };
+}
 export async function bounded<T>(
   work: (signal: AbortSignal) => Promise<T>,
   signal: AbortSignal,

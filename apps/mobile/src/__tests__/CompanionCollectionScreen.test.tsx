@@ -37,6 +37,13 @@ beforeEach(() => {
 });
 afterEach(() => applyTheme('light'));
 
+it('dorm repair achievement is a personal memo, not a school ticket or work order', () => {
+  const dorm = ACHIEVEMENTS.find((item) => item.id === 'dorm_repair_first');
+  expect(dorm?.description).toContain('報修備忘');
+  expect(dorm?.description).not.toMatch(/提交|叫工人|工單|單號/);
+  expect(dorm?.unlock.description).not.toMatch(/叫工人|工單|單號|提交報修/);
+});
+
 it('provides honest per-category progress and accessible category switching', async () => {
   const view = render(<CompanionCollectionScreen />);
   await waitFor(() => expect(view.getByTestId('companion-collection')).toBeTruthy());

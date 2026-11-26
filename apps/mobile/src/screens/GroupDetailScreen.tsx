@@ -1,6 +1,23 @@
+import { postNuniWebFn } from '../services/nuniWebFn';
+import { privateFileNonce } from '../services/privateFileNonce';
+import { claimPrivateFile } from '../services/privateFiles';
+import { safePrivateFileName } from '@campus/shared/src/privateFileAccess';
 /* eslint-disable */
+import { PRIVATE_FILE_UPLOADS_PER_MINUTE, PRIVATE_FILE_UPLOAD_RATE_MESSAGE } from '@campus/shared/src/privateFileUploads';
+import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
+import { storage } from '../services/storage';
+import * as DocumentPicker from 'expo-document-picker';
+import {
+  isSupabaseFileStorageEnabled,
+  privateGroupPostPath,
+  privateGroupCoverPath,
+  uploadPrivateFile,
+} from '../services/privateFiles';
+import { PrivateImage } from '../ui/PrivateImage';
+import { PrivateAttachment } from '../ui/PrivateAttachment';
+import { ClubProfile } from './ClubProfile';
 import { ClubSummary, clubSummaryEnabled } from './ClubSummary';
-import React, { useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ScrollView, Text, TextInput, View, Pressable, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -44,6 +61,7 @@ type Group = {
   type: 'course' | 'club' | 'admin';
   name: string;
   joinCode: string;
+  coverUrl?: string;
   isPublished?: boolean;
   verification?: { status?: 'unverified' | 'verified_teacher' | 'verified_org' };
 };
@@ -68,6 +86,7 @@ type Post = {
   likes?: number;
   userLiked?: boolean;
   commentCount?: number;
+  attachments?: string[];
 };
 
 type Comment = {
@@ -258,6 +277,18 @@ export function GroupDetailScreen(props: any) {
 
   const [q, setQ] = useState('');
   const [composeKind, setComposeKind] = useState<PostKind>('question');
+  const [postFiles, setPostFiles] = useState<DocumentPicker.DocumentPickerAsset[]>([]);
+  const [fileBusy, setFileBusy] = useState(false);
+  const [attachmentsLocked, setAttachmentsLocked] = useState(false);
+  const uploadDraft = useRef<{ postId: string; completed: Map<DocumentPicker.DocumentPickerAsset, string> } | null>(null);
+  const posting = useRef(false);
+  useEffect(() => {
+    uploadDraft.current = null;
+    setAttachmentsLocked(false);
+    setPostFiles([]);
+  }, [groupId, auth.user?.uid, school.id]);
+  const [coverRevision, setCoverRevision] = useState(0);
+  const [coverPath, setCoverPath] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [topic, setTopic] = useState<Topic>('課程討論');
@@ -312,18 +343,15 @@ export function GroupDetailScreen(props: any) {
   } = useAsyncList<Post>(async () => {
     if (isFirebaseMockMode()) return (groupId ? DEMO_POSTS_FOR_GROUP[groupId] : undefined) ?? [];
     if (!groupId) return [];
-    const ref = collection(db, 'groups', groupId, 'posts');
-    const qy = query(ref, orderBy('createdAt', 'desc'), limit(50));
-    const snap = await getDocs(qy);
-    const rows = snap.docs.map((d) => {
-      const data = d.data() as any;
-      return {
-        id: d.id,
-        ...data,
-        likes: data.likes || 0,
-        userLiked: data.likedBy?.includes(auth.user?.uid) || false,
-      };
-    }) as Post[];
+    if (!auth.user) return [];
+    const page = await postNuniWebFn<{ groupId: string; pageSize: number }, { posts: (Post & { likedBy?: string[] })[] }>(
+      'listGroupDiscussionPage', { groupId, pageSize: 50 }, auth.user.uid,
+    );
+    const rows = page.posts.map((data) => ({
+      ...data,
+      likes: data.likes || 0,
+      userLiked: data.likedBy?.includes(auth.user?.uid ?? '') || false,
+    }));
     return rows;
   }, [db, groupId, auth.user?.uid]);
 
@@ -395,8 +423,8 @@ export function GroupDetailScreen(props: any) {
       if (a.pinned && !b.pinned) return -1;
       if (!a.pinned && b.pinned) return 1;
       if (a.pinned && b.pinned) {
-        const aTime = (a.pinnedAt?.toMillis?.() ?? 0) as number;
-        const bTime = (b.pinnedAt?.toMillis?.() ?? 0) as number;
+        const aTime = (a.pinnedAt?.toMillis?.() ?? (a.pinnedAt?.seconds ?? 0) * 1000) as number;
+        const bTime = (b.pinnedAt?.toMillis?.() ?? (b.pinnedAt?.seconds ?? 0) * 1000) as number;
         return bTime - aTime;
       }
       return 0;
@@ -519,6 +547,7 @@ export function GroupDetailScreen(props: any) {
   };
 
   const onCreatePost = async () => {
+    if (posting.current) return;
     setErr(null);
     if (!auth.user) {
       setErr('請先到『我的』登入後再發文');
@@ -538,7 +567,47 @@ export function GroupDetailScreen(props: any) {
     }
 
     try {
-      const postRef = await addDoc(collection(db, 'groups', groupId, 'posts'), {
+      posting.current = true;
+      setFileBusy(true);
+      const progress = uploadDraft.current ?? {
+        postId: doc(collection(db, 'groups', groupId, 'posts')).id,
+        completed: new Map<DocumentPicker.DocumentPickerAsset, string>(),
+      };
+      uploadDraft.current = progress;
+      setAttachmentsLocked(true);
+      const postRef = doc(db, 'groups', groupId, 'posts', progress.postId);
+      const attachments: string[] = [];
+      if (isSupabaseFileStorageEnabled()) {
+        for (const [index, file] of postFiles.entries()) {
+          let completed = progress.completed.get(file);
+          if (completed) {
+            try { await claimPrivateFile(completed, `groups/${groupId}/posts/${postRef.id}`); }
+            catch (error) {
+              if ((error as { statusCode?: number }).statusCode !== 410) throw error;
+              progress.completed.delete(file);
+              completed = undefined;
+            }
+          }
+          if (completed) {
+            attachments.push(completed);
+            continue;
+          }
+          const path = privateGroupPostPath(
+            groupId,
+            postRef.id,
+            safePrivateFileName(`${index}-${Date.now().toString(36)}-${privateFileNonce()}`, file.name),
+          );
+          if (!path) throw new Error('附件路徑無效');
+          const blob = await (await fetch(file.uri)).blob();
+          await uploadPrivateFile({ path, body: blob, originalFilename: file.name, contentType: file.mimeType || blob.type });
+          progress.completed.set(file, path);
+          try { await claimPrivateFile(path, `groups/${groupId}/posts/${postRef.id}`); }
+          catch (error) { if ((error as { statusCode?: number }).statusCode === 410) progress.completed.delete(file); throw error; }
+          attachments.push(path);
+        }
+      }
+      await setDoc(postRef, {
+        ...(attachments.length ? { attachments } : {}),
         kind: composeKind,
         title: title.trim(),
         body: body.trim(),
@@ -550,15 +619,25 @@ export function GroupDetailScreen(props: any) {
         schoolId: school.id,
         likes: 0,
         likedBy: [],
+        published: true,
+        status: 'published',
+        deleted: false,
+        deletedAt: null,
       });
 
       // 如果是問題，助理回覆由伺服器在提問建立後產生，這邊不用再寫
+      uploadDraft.current = null;
+      setAttachmentsLocked(false);
+      setPostFiles([]);
       setTitle('');
       setBody('');
       setTopic('課程討論');
       reloadPosts();
     } catch (e: any) {
-      setErr(e?.message ?? '發文失敗');
+      setErr(e?.statusCode === 429 ? PRIVATE_FILE_UPLOAD_RATE_MESSAGE : e?.message ?? '發文失敗');
+    } finally {
+      posting.current = false;
+      setFileBusy(false);
     }
   };
 
@@ -640,6 +719,14 @@ export function GroupDetailScreen(props: any) {
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
+        {group?.type === 'club' && group.schoolId === school.id && groupId && auth.user?.uid && (
+          <ClubProfile
+            key={JSON.stringify([auth.user.uid, school.id, groupId])}
+            uid={auth.user.uid}
+            schoolId={school.id}
+            groupId={groupId}
+          />
+        )}
         {group?.type === 'club' && group.schoolId === school.id && groupId && auth.user?.uid && clubSummaryEnabled() && (
           <ClubSummary
             key={`${auth.user.uid}:${school.id}:${groupId}`}
@@ -707,6 +794,46 @@ export function GroupDetailScreen(props: any) {
           ) : null}
         </Card>
 
+        {(coverPath || group?.coverUrl) && (
+          <PrivateImage
+            key={coverRevision}
+            uri={coverPath || group!.coverUrl!}
+            style={{ width: '100%', height: 180 }}
+          />
+        )}
+        {isSupabaseFileStorageEnabled() &&
+          ['owner', 'admin', 'instructor', 'moderator'].includes(myRole) && (
+            <Button
+              text="更換群組封面"
+              disabled={fileBusy}
+              onPress={async () => {
+                if (!groupId || fileBusy) return;
+                setFileBusy(true);
+                try {
+                  const file = await storage.pickImage({ quality: 0.85 });
+                  if (!file) return;
+                  const extension = file.type?.split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
+                  const path = privateGroupCoverPath(groupId, extension);
+                  if (!path) throw new Error('封面路徑無效');
+                  const blob = await (await fetch(file.uri)).blob();
+                  const uploaded = await uploadPrivateFile({
+                    path,
+                    body: blob,
+                    contentType: file.type || blob.type,
+                  });
+                  await claimPrivateFile(uploaded.path, `groups/${groupId}`);
+                  await updateDoc(doc(db, 'groups', groupId), { coverUrl: uploaded.path });
+                  setCoverPath(uploaded.path);
+                  setCoverRevision((value) => value + 1);
+                } catch {
+                  Alert.alert('封面更新失敗', '請稍後再試。');
+                } finally {
+                  setFileBusy(false);
+                }
+              }}
+            />
+          )}
+
         {canManageCourse ? (
           <Card
             title="課程管理（教師）"
@@ -759,6 +886,36 @@ export function GroupDetailScreen(props: any) {
               : '提出問題或分享資訊。課程公告由教師與管理員發布。'
           }
         >
+          {isSupabaseFileStorageEnabled() && (
+            <Button
+              text={`附加圖片或文件（${postFiles.length}）`}
+              disabled={fileBusy || attachmentsLocked}
+              onPress={async () => {
+                try {
+                  const picked = await DocumentPicker.getDocumentAsync({
+                    type: [
+                      'image/*',
+                      'application/pdf',
+                      'text/plain',
+                      'application/msword',
+                      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    ],
+                    multiple: true,
+                    copyToCacheDirectory: true,
+                  });
+                  if (!picked.canceled) {
+                    if (picked.assets.length > PRIVATE_FILE_UPLOADS_PER_MINUTE) {
+                      setErr(`單次最多選取 ${PRIVATE_FILE_UPLOADS_PER_MINUTE} 個附件`);
+                      return;
+                    }
+                    setPostFiles(picked.assets);
+                  }
+                } catch {
+                  Alert.alert('無法選取附件');
+                }
+              }}
+            />
+          )}
           <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
             <Button
               text={composeKind === 'question' ? '✓ 問題' : '問題'}
@@ -854,8 +1011,21 @@ export function GroupDetailScreen(props: any) {
             <Button
               text={auth.user ? '送出' : '請先登入'}
               kind="primary"
-              disabled={!auth.user}
+              disabled={!auth.user || fileBusy}
               onPress={onCreatePost}
+            />
+            <Button
+              text="放棄草稿"
+              disabled={fileBusy}
+              onPress={() => {
+                uploadDraft.current = null;
+                setAttachmentsLocked(false);
+                setPostFiles([]);
+                setTitle('');
+                setBody('');
+                setTopic('課程討論');
+                setErr(null);
+              }}
             />
             <Button
               text="重新整理"
@@ -1043,6 +1213,9 @@ export function GroupDetailScreen(props: any) {
                     <Text style={{ color: theme.colors.text, lineHeight: 20 }} numberOfLines={3}>
                       {p.body}
                     </Text>
+                    {privateAttachmentPaths(p.attachments).map((path) => (
+                      <PrivateAttachment key={path} path={path} />
+                    ))}
 
                     {/* 助理回覆或最新留言 */}
                     {lastComment ? (

@@ -56,7 +56,9 @@ jest.mock('../../services/tronClassClient', () => ({
 }));
 jest.mock('../../services/testSeedData', () => ({ isTestAccount: () => false, seedTestData: jest.fn() }));
 jest.mock('../../services/postLoginContextFromCaches', () => ({}));
-jest.mock('../../services/postLoginDataRouter', () => ({}));
+jest.mock('../../services/postLoginDataRouter', () => ({
+  clearPostLoginCache: jest.fn(async () => undefined),
+}));
 jest.mock('../../data/apiAdapters', () => ({ getAdapter: jest.fn() }));
 
 const directSession = { loggedIn: true as const, studentName: '測試同學' };
@@ -71,6 +73,7 @@ beforeEach(async () => {
     extra: {
       appEnv: 'production',
       release: { releasedSchoolIds: ['pu'], features: { enabled: true, sso: true } },
+      tronClassDataEnabled: true,
     },
   });
 });

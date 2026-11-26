@@ -3,6 +3,7 @@
  * 執行 resolveUserRoles、寫入 users / members.externalIds、courseRosters、postLoginRuns，並同步 custom claims。
  */
 
+const { randomUUID } = require('node:crypto');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { assertSessionOwner } = require('../sessionSecurity');
@@ -11,6 +12,12 @@ const { puFetchCourses } = require('../puScraper');
 const { tcFetchCourses, tcFetchProfile, tcFetchCourseMembers } = require('../tronClassScraper');
 const { normalizeServiceRoleRecord } = require('../authz');
 const { resolveUserRoles } = require('../generated/shared/postLoginRoles');
+const {
+  nextBindingGeneration,
+  campusStoryStampFields,
+  restampEligibility,
+  clearHaltFields,
+} = require('../campusStoryAccessBinding');
 
 const MAX_MEMBER_COURSES = 10;
 const MAX_EMAIL_LOOKUPS = 40;
@@ -53,7 +60,7 @@ async function pruneOldPostLoginRuns(userRef) {
   }
 }
 
-async function runFinalizePostLogin(request) {
+async function runFinalizePostLogin(request, { includeCourseRosters = true } = {}) {
   const uid = request.auth?.uid;
   if (!uid) {
     throw new HttpsError('unauthenticated', 'Must be logged in');
@@ -144,11 +151,13 @@ async function runFinalizePostLogin(request) {
   const schoolId =
     String(userDoc.schoolId || userDoc.primarySchoolId || request.data?.schoolId || '').trim() ||
     null;
+  const memberSchoolId = String(userDoc.schoolId || userDoc.primarySchoolId || '').trim() || null;
 
   let schoolMemberDoc = null;
   let serviceRolesDoc = null;
+  let memSnap = null;
   if (schoolId) {
-    const memSnap = await db.collection('schools').doc(schoolId).collection('members').doc(uid).get();
+    memSnap = await db.collection('schools').doc(schoolId).collection('members').doc(uid).get();
     schoolMemberDoc = memSnap.exists ? memSnap.data() || {} : null;
     const srSnap = await db.collection('schools').doc(schoolId).collection('serviceRoles').doc(uid).get();
     serviceRolesDoc = srSnap.exists ? normalizeServiceRoleRecord(srSnap.data() || {}) : null;
@@ -179,8 +188,10 @@ async function runFinalizePostLogin(request) {
     .filter((id) => Number.isFinite(id) && id > 0)
     .slice(0, MAX_MEMBER_COURSES);
 
+  const readRosters = includeCourseRosters &&
+    Boolean(tronData?.cookies && teachingCourseIds.length);
   const rosterSummaries = [];
-  if (tronData?.cookies && teachingCourseIds.length) {
+  if (readRosters) {
     const settled = await Promise.allSettled(
       teachingCourseIds.map(async (courseId) => {
         const members = await tcFetchCourseMembers(tronData.cookies, courseId);
@@ -243,7 +254,7 @@ async function runFinalizePostLogin(request) {
     pu: true,
     tronCourses: !!(tronData?.cookies),
     tronProfile: !!(tronData?.cookies),
-    rosters: !!(tronData?.cookies && teachingCourseIds.length > 0),
+    rosters: readRosters,
   };
 
   const externalIds = {
@@ -256,23 +267,39 @@ async function runFinalizePostLogin(request) {
     lastResolvedAt: FieldValue.serverTimestamp(),
   };
 
-  const batch = db.batch();
-  batch.set(
-    userRef,
-    {
-      role: resolved.primaryRole,
-      postLoginRoles: resolved.roles,
-      teachingRoles: resolved.teachingRoles,
-      orgRoles: resolved.orgRoles,
-      lastPostLoginResolvedAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+  const userUpdate = {
+    role: resolved.primaryRole,
+    postLoginRoles: resolved.roles,
+    teachingRoles: resolved.teachingRoles,
+    orgRoles: resolved.orgRoles,
+    lastPostLoginResolvedAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+    ...clearHaltFields(FieldValue),
+  };
+  let memberUpdate = null;
+  if (memberSchoolId && memSnap?.exists && memberSchoolId === schoolId) {
+    memberUpdate = { externalIds };
+    if (
+      restampEligibility({
+        membership: schoolMemberDoc,
+        memberSnap: memSnap,
+        userSnap,
+      }).ok
+    ) {
+      const bindingGeneration = nextBindingGeneration(userDoc, randomUUID);
+      Object.assign(memberUpdate, campusStoryStampFields(memberSchoolId, bindingGeneration));
+      userUpdate.bindingGeneration = bindingGeneration;
+    }
+  }
 
-  if (schoolId) {
-    const memRef = db.collection('schools').doc(schoolId).collection('members').doc(uid);
-    batch.set(memRef, { externalIds }, { merge: true });
+  const batch = db.batch();
+  batch.set(userRef, userUpdate, { merge: true });
+  if (memberUpdate) {
+    batch.set(
+      db.collection('schools').doc(memberSchoolId).collection('members').doc(uid),
+      memberUpdate,
+      { merge: true },
+    );
   }
 
   const runRef = userRef.collection('postLoginRuns').doc();
@@ -359,6 +386,11 @@ async function runFinalizePostLogin(request) {
   };
 }
 
+function runFinalizePersonalSchoolLogin(request) {
+  return runFinalizePostLogin(request, { includeCourseRosters: false });
+}
+
 module.exports = {
+  runFinalizePersonalSchoolLogin,
   runFinalizePostLogin,
 };

@@ -34,6 +34,13 @@ describe('assistantWritePermissions', () => {
     assert.equal(defaults.createPersonalTodoReminder, false);
   });
 
+  test('washing cancellation needs its own explicit grant', () => {
+    assert.equal(createDefaultAssistantWritePermissions().cancelWashingReservation, false);
+    assert.equal(isAssistantWriteToolAllowed(normalizeAssistantWritePermissions({ reserveWashingMachine: true }), 'cancelWashingReservation'), false);
+    assert.equal(isAssistantWriteToolAllowed(normalizeAssistantWritePermissions({ cancelWashingReservation: true }), 'cancelWashingReservation'), true);
+    assert.equal(isAssistantWriteToolAllowed(normalizeAssistantWritePermissions({ cancelWashingReservation: 'true' }), 'cancelWashingReservation'), false);
+  });
+
   test('missing or invalid payload fails closed', () => {
     assert.equal(isAssistantWriteToolAllowed(null, 'createOrder'), false);
     assert.equal(isAssistantWriteToolAllowed(undefined, 'createOrder'), false);
@@ -76,5 +83,16 @@ describe('assistantWritePermissions', () => {
     assert.match(message, /送出請假申請/);
     assert.match(message, /settings\?section=assistant/);
     assert.match(assistantWritePermissionDeniedMessage('proposeOrder'), /餐廳下單/);
+  });
+
+  test('dorm repair permission is a personal memo, not a school ticket', () => {
+    const repair = ASSISTANT_WRITE_PERMISSION_DEFINITIONS.find((row) => row.key === 'createDormRepairRequest');
+    assert.ok(repair);
+    assert.equal(repair.label, '存成宿舍報修備忘');
+    assert.match(repair.description, /個人備忘/);
+    assert.match(repair.description, /不會送到學校/);
+    assert.doesNotMatch(repair.label, /送出宿舍報修|工單|叫工人/);
+    assert.doesNotMatch(repair.description, /送出宿舍維修申請|提交報修|工單/);
+    assert.match(assistantWritePermissionDeniedMessage('createDormRepairRequest'), /存成宿舍報修備忘/);
   });
 });

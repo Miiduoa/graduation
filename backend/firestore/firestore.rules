@@ -19,6 +19,18 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
     }
 
+    // Story access requires a server-bound campus profile. A leftover
+    // school membership must not authorize a deleted account, and a
+    // client-rebuilt student profile cannot stamp schoolId / primarySchoolId.
+    function isCanonicalStoryMember(schoolId) {
+      return isSchoolMember(schoolId)
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('primarySchoolId', '') == schoolId
+        );
+    }
+
     function hasAnyServiceRole(schoolId, uid) {
       return exists(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid))
         && get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.status == 'active'
@@ -86,6 +98,63 @@ service cloud.firestore {
         && (!('orderingUrl' in request.resource.data) || isOptionalStorefrontUrl(request.resource.data.orderingUrl));
     }
 
+    function creatorCardValid(schoolId, uid) {
+      let data = request.resource.data;
+      return data.keys().hasAll(['schoolId', 'ownerUid', 'headline', 'bio', 'linkUrl', 'updatedAt'])
+        && data.keys().hasOnly(['schoolId', 'ownerUid', 'headline', 'bio', 'linkUrl', 'pinnedPostId', 'updatedAt'])
+        && data.schoolId == schoolId
+        && data.ownerUid == uid
+        && (
+          data.get('pinnedPostId', '') == ''
+          || (
+            data.get('pinnedPostId', '') is string
+            && data.get('pinnedPostId', '').size() <= 128
+            && data.get('pinnedPostId', '').matches('^[A-Za-z0-9_-]{1,128}$')
+          )
+        )
+        && data.headline is string
+        && data.headline.size() <= 64
+        && data.bio is string
+        && data.bio.size() <= 220
+        && data.linkUrl is string
+        && data.linkUrl.size() <= 512
+        && (data.linkUrl == '' || isHttpsStorefrontUrl(data.linkUrl))
+        && data.updatedAt == request.time;
+    }
+
+    function creatorPinTargetValid(schoolId, uid, postId) {
+      return postId == ''
+        || (
+          postId is string
+          && postId.size() <= 128
+          && postId.matches('^[A-Za-z0-9_-]{1,128}$')
+          && exists(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId))
+          && get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.get('authorUid', '') == uid
+          && get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.get('anonymous', true) == false
+          && get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.get('schoolId', '') == schoolId
+        );
+    }
+
+    function creatorHighlightPostSigned(schoolId, uid, postId) {
+      let postPath = /databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId);
+      return postId is string
+        && postId.matches('^[A-Za-z0-9_-]{1,128}$')
+        && exists(postPath)
+        && get(postPath).data.get('schoolId', '') == schoolId
+        && get(postPath).data.get('authorUid', '') == uid
+        && get(postPath).data.get('anonymous', true) == false;
+    }
+
+    function creatorHighlightValid(schoolId, uid) {
+      let data = request.resource.data;
+      return data.keys().hasAll(['schoolId', 'ownerUid', 'postId', 'updatedAt'])
+        && data.keys().hasOnly(['schoolId', 'ownerUid', 'postId', 'updatedAt'])
+        && data.schoolId == schoolId
+        && data.ownerUid == uid
+        && data.updatedAt == request.time
+        && creatorHighlightPostSigned(schoolId, uid, data.postId);
+    }
+
     function isActiveGroupMember(groupId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
@@ -103,10 +172,88 @@ service cloud.firestore {
         );
     }
 
+    // An active old-school membership alone must not permit access after transfer.
+    function isCurrentSchoolMember(schoolId) {
+      return schoolId is string
+        && schoolId.size() > 0
+        && isSchoolMember(schoolId)
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId;
+    }
+
+    // Prefer an explicit primary school for transfer students. Legacy accounts
+    // without a school binding still need active membership in the target school.
+    function isCurrentLostFoundMember(schoolId) {
+      let profileExists = exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      let profile = profileExists
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data : {};
+      let primary = profile.get('primarySchoolId', null);
+      let school = profile.get('schoolId', null);
+      return schoolId is string && schoolId.size() > 0
+        && isSchoolMember(schoolId)
+        && ((primary != null && primary != '') ? primary == schoolId
+          : ((school != null && school != '') ? school == schoolId : true));
+    }
+
     function isConversationMember(conversationId) {
+      // get() on a missing conversation denies. Existing chats stay at
+      // signed-in identity + membership, matching main.
       return isSignedIn()
-        && exists(/databases/$(database)/documents/conversations/$(conversationId))
         && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds;
+    }
+
+    // Read receipts can only add the authenticated reader. Never permit
+    // overwriting or removing another participant's acknowledgement.
+    function onlyOwnMessageReadReceipt() {
+      let before = resource.data.get('readBy', []);
+      let after = request.resource.data.get('readBy', null);
+      return before is list && after is list
+        && (
+          (request.auth.uid in before && after == before)
+          || (!(request.auth.uid in before) && after == before.concat([request.auth.uid]))
+        );
+    }
+
+    // Reactions use emoji -> [uid] on existing mobile and web clients.
+    // Check every supported emoji independently: an active member may only
+    // append/remove their own UID, never rewrite a peer's acknowledgement.
+    function onlyOwnReactionEmoji(before, after, emoji) {
+      let uid = request.auth.uid;
+      let oldVotes = before.get(emoji, []);
+      let newVotes = after.get(emoji, []);
+      return oldVotes is list && newVotes is list
+        && (
+          newVotes == oldVotes
+          || (!(uid in oldVotes) && newVotes == oldVotes.concat([uid]))
+          || (uid in oldVotes && newVotes == oldVotes.removeAll([uid]))
+        );
+    }
+
+    function onlyOwnMessageReaction() {
+      let uid = request.auth.uid;
+      let before = resource.data.get('reactions', {});
+      let after = request.resource.data.get('reactions', {});
+      let changed = after.diff(before).affectedKeys();
+      return before is map && after is map
+        && (
+          // Older clients use UID -> emoji. Preserve their current contract,
+          // but never allow one member to modify another UID's value.
+          (changed.hasOnly([uid]) && (
+            !(uid in after) || (
+              after[uid] is string && after[uid].size() > 0 && after[uid].size() <= 32
+            )
+          ))
+          // Newer clients use emoji -> [UID]. No peer UID may be changed.
+          || (
+            changed.hasOnly(['👍', '❤️', '😂', '😆', '🎉', '😢'])
+            && (!changed.hasAny(['👍']) || onlyOwnReactionEmoji(before, after, '👍'))
+            && (!changed.hasAny(['❤️']) || onlyOwnReactionEmoji(before, after, '❤️'))
+            && (!changed.hasAny(['😂']) || onlyOwnReactionEmoji(before, after, '😂'))
+            && (!changed.hasAny(['😆']) || onlyOwnReactionEmoji(before, after, '😆'))
+            && (!changed.hasAny(['🎉']) || onlyOwnReactionEmoji(before, after, '🎉'))
+            && (!changed.hasAny(['😢']) || onlyOwnReactionEmoji(before, after, '😢'))
+          )
+        );
     }
 
     // 使用者自己個人資料上的名字；邀請和找人代號顯示的名字只能用這個，不能自己填
@@ -226,7 +373,10 @@ service cloud.firestore {
       let assignment = get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)).data;
       let due = assignment.get('dueAt', null);
       return assignment.get('published', true) != false
-        && !(assignment.get('status', '') in ['draft', 'closed'])
+        && !(assignment.get('status', '') in [
+          'draft', 'closed', 'scheduled', 'pending', 'unpublished',
+          'archived', 'cancelled', 'canceled', 'deleted'
+        ])
         && (due == null || assignment.get('allowLateSubmission', false) == true
           || (due is timestamp && request.time <= due)
           || (due is string && request.time <= timestamp.value(due)));
@@ -418,8 +568,47 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Creator cards contain only explicitly published social fields.
+      // Private account and directory fields are never copied into this document.
+      match /creatorProfiles/{uid} {
+        allow get: if isSchoolMember(schoolId);
+        allow list: if false;
+        allow create: if isSelf(uid) && isSchoolMember(schoolId)
+          && creatorCardValid(schoolId, uid)
+          && creatorPinTargetValid(schoolId, uid, request.resource.data.get('pinnedPostId', ''));
+        allow update: if isSelf(uid) && isSchoolMember(schoolId)
+          && resource.data.get('schoolId', '') == schoolId
+          && resource.data.get('ownerUid', '') == uid
+          && creatorCardValid(schoolId, uid)
+          && (
+            request.resource.data.get('pinnedPostId', '') == resource.data.get('pinnedPostId', '')
+            || creatorPinTargetValid(schoolId, uid, request.resource.data.get('pinnedPostId', ''))
+          );
+        // The owner may withdraw an already-published card after losing school membership.
+        allow delete: if isSelf(uid);
+      }
+
+      // Only a member's own signed post can be featured. Owners may unfeature after revocation.
+      match /creatorHighlights/{uid} {
+        allow get: if isSelf(uid)
+          || (isSchoolMember(schoolId) && (
+            resource == null
+            || creatorHighlightPostSigned(schoolId, uid, resource.data.get('postId', ''))
+          ));
+        allow list: if false;
+        allow create: if isSelf(uid) && isSchoolMember(schoolId)
+          && creatorHighlightValid(schoolId, uid);
+        allow update: if isSelf(uid) && isSchoolMember(schoolId)
+          && resource.data.get('schoolId', '') == schoolId
+          && resource.data.get('ownerUid', '') == uid
+          && creatorHighlightValid(schoolId, uid);
+        allow delete: if isSelf(uid);
+      }
+
       match /members/{uid} {
         allow read: if isSelf(uid) || hasRole(schoolId, 'admin') || requesterHasAnyServiceRole(schoolId);
+        // Admin SDK only. Clients cannot write status, profileBoundSchoolId,
+        // lastLoginAt, joinedAt, or any other membership field.
         allow write: if false;
       }
 
@@ -475,24 +664,52 @@ service cloud.firestore {
             || requesterIsCafeteriaOperator(schoolId, cafeteriaId);
 
           match /likes/{uid} {
-            allow read: if isSignedIn();
+            // Like receipts identify a person and their storefront interests.
+            // Web and Mobile only GET the logged-in user's exact receipt.
+            allow get: if isSelf(uid);
+            allow list: if false;
             allow create, delete: if isSelf(uid);
             allow update: if false;
           }
 
           match /comments/{commentId} {
+            // A comment is a user-authored public message, not a trusted
+            // moderation/merchant record. Protect both its identity and shape.
+            function storefrontCommentTextValid() {
+              return request.resource.data.get('text', null) is string
+                && request.resource.data.text.size() >= 1
+                && request.resource.data.text.size() <= 2000;
+            }
+
+            function storefrontPostExists() {
+              return exists(/databases/$(database)/documents/schools/$(schoolId)/cafeterias/$(cafeteriaId)/posts/$(postId));
+            }
+
             allow read: if isSignedIn();
             allow create: if isSignedIn()
+              && storefrontPostExists()
+              && request.resource.data.keys().hasOnly(['authorId', 'text', 'createdAt'])
               && request.resource.data.authorId == request.auth.uid
-              && request.resource.data.text is string
-              && request.resource.data.text.size() >= 1
-              && request.resource.data.text.size() <= 2000;
-            allow update, delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+              && storefrontCommentTextValid()
+              && request.resource.data.get('createdAt', request.time) == request.time;
+            allow update: if isSignedIn()
+              && storefrontPostExists()
+              && resource.data.authorId == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'updatedAt'])
+              && storefrontCommentTextValid()
+              && request.resource.data.get('updatedAt', request.time) == request.time;
+            allow delete: if isSignedIn()
+              && storefrontPostExists()
+              && resource.data.authorId == request.auth.uid;
           }
         }
 
         match /followers/{uid} {
-          allow read: if isSignedIn();
+          // A storefront follow receipt exposes personal shopping interests.
+          // Web and Mobile only read the current user's own receipt by exact ID.
+          // Listing an entire store's followers would reveal other accounts.
+          allow get: if isSelf(uid);
+          allow list: if false;
           allow create, delete: if isSelf(uid);
           allow update: if false;
         }
@@ -641,9 +858,20 @@ service cloud.firestore {
       }
 
       match /lostFound/{docId} {
-        allow read: if isSignedIn();
-        allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-        allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+        // Contact details must stay in the current school, not every signed-in account.
+        allow read: if isCurrentLostFoundMember(schoolId);
+        allow create: if isCurrentLostFoundMember(schoolId)
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.get('schoolId', schoolId) == schoolId
+          && request.resource.data.get('reporterId', request.auth.uid) == request.auth.uid;
+        allow update: if isCurrentLostFoundMember(schoolId)
+          && resource.data.userId == request.auth.uid
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.get('schoolId', schoolId) == resource.data.get('schoolId', schoolId)
+          && request.resource.data.get('reporterId', request.auth.uid)
+            == resource.data.get('reporterId', request.auth.uid);
+        allow delete: if isCurrentLostFoundMember(schoolId)
+          && resource.data.userId == request.auth.uid;
       }
 
       match /orders/{orderId} {
@@ -830,39 +1058,75 @@ service cloud.firestore {
 
     // Conversations (DMs and group chats)
     match /conversations/{conversationId} {
-      allow read: if isSignedIn() && request.auth.uid in resource.data.memberIds;
+      // Presence/read/typing maps contain one key per participant. A normal
+      // client may touch only its own key, using atomic field-path updates;
+      // replacing a peer's value (or the whole map) is not an acknowledgement.
+      function ownPresenceOnCreate(field) {
+        let value = request.resource.data.get(field, {});
+        return value is map && value.keys().hasOnly([request.auth.uid]);
+      }
+
+      function ownPresenceChange(field) {
+        let before = resource.data.get(field, {});
+        let after = request.resource.data.get(field, {});
+        return before is map && after is map
+          && after.diff(before).affectedKeys().hasOnly([request.auth.uid]);
+      }
+
+      function conversationPresenceWriteOk() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return !changed.hasAny(['onlineUsers', 'lastReadBy', 'typingUsers'])
+          || (
+            ownPresenceChange('onlineUsers')
+            && ownPresenceChange('lastReadBy')
+            && ownPresenceChange('typingUsers')
+          );
+      }
+
+      allow read: if isSignedIn()
+        && request.auth.uid in resource.data.memberIds;
       allow create: if isSignedIn()
         && request.auth.uid in request.resource.data.memberIds
+        && request.resource.data.get('schoolId', '') != ''
         && request.resource.data.schoolId != null
-        && isSchoolMember(request.resource.data.schoolId);
+        && isSchoolMember(request.resource.data.schoolId)
+        && ownPresenceOnCreate('onlineUsers')
+        && ownPresenceOnCreate('lastReadBy')
+        && ownPresenceOnCreate('typingUsers');
       allow update: if isSignedIn()
         && request.auth.uid in resource.data.memberIds
         && request.resource.data.schoolId == resource.data.schoolId
-        && request.resource.data.memberIds == resource.data.memberIds;
+        && request.resource.data.memberIds == resource.data.memberIds
+        && conversationPresenceWriteOk();
       allow delete: if false;
 
       match /messages/{messageId} {
-        allow read: if isSignedIn()
-          && exists(/databases/$(database)/documents/conversations/$(conversationId))
-          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds;
-        allow create: if isSignedIn()
-          && exists(/databases/$(database)/documents/conversations/$(conversationId))
-          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds
-          && request.resource.data.senderId == request.auth.uid;
-        allow update: if isSignedIn()
-          && exists(/databases/$(database)/documents/conversations/$(conversationId))
-          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds
+        allow read: if isConversationMember(conversationId);
+        allow create: if isConversationMember(conversationId)
+          && !request.resource.data.keys().hasAny(['storyReplyTo', 'attachmentPath', 'attachmentGeneration'])
+          && request.resource.data.senderId == request.auth.uid
+          // A sender cannot declare that other participants already read a new message.
+          && request.resource.data.get('readBy', [request.auth.uid]) == [request.auth.uid]
+          // Reactions are only produced through per-member updates, not forged on send.
+          && request.resource.data.get('reactions', {}) == {};
+        allow update: if isConversationMember(conversationId)
           && request.resource.data.senderId == resource.data.senderId
           && (
             (
               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy'])
-              && request.auth.uid in request.resource.data.readBy
+              && onlyOwnMessageReadReceipt()
             )
             || (
               resource.data.senderId == request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['recalledAt', 'updatedAt'])
+              && (!('attachmentPath' in resource.data) || (
+                !('recalledAt' in resource.data) && request.resource.data.recalledAt == request.time
+              ))
             )
-            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'updatedAt'])
+            || (
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'updatedAt'])
+              && onlyOwnMessageReaction()
+            )
           );
         allow delete: if false;
       }
@@ -903,35 +1167,209 @@ service cloud.firestore {
           return activeAuthor() && resource.data.get('kind', 'post') != 'announcement';
         }
 
-        allow read: if isActiveGroupMember(groupId);
+        // Apply the same bounded title/body payload as the Web composer at the
+        // Firestore SDK boundary. Optional legacy fields remain optional.
+        function postTextWithinLimits() {
+          return (!('title' in request.resource.data)
+              || (request.resource.data.title is string
+                && request.resource.data.title.size() <= 120))
+            && (!('body' in request.resource.data)
+              || (request.resource.data.body is string
+                && request.resource.data.body.size() <= 8000));
+        }
+
+        // LIST requires explicit publication constraints because rules are not filters.
+        // Exact reads retain legacy defaults while rejecting explicit hidden states.
+        function isCanonicalVisiblePost() {
+          return resource.data.get('published', false) == true
+            && resource.data.get('status', '') == 'published'
+            && resource.data.get('deleted', true) == false
+            && resource.data.get('deletedAt', 'missing') == null;
+        }
+
+        allow get: if isActiveGroupMember(groupId)
+          && (canManageGroup(groupId)
+            || resource.data.get('authorId', '') == request.auth.uid
+            || isVisiblePostForReactions());
+        allow list: if isActiveGroupMember(groupId)
+          && (canManageGroup(groupId) || isCanonicalVisiblePost());
         // 助理回覆的狀態（assistantReply）只由伺服器寫
         allow create: if isActiveGroupMember(groupId)
+          && postTextWithinLimits()
           && request.resource.data.authorId == request.auth.uid
           && !('assistantReply' in request.resource.data)
+          // AI origin fields are server-owned, including legacy/alternate SDK writes.
+          && request.resource.data.get('isAI', false) == false
+          && !('generatedBy' in request.resource.data)
+          && request.resource.data.get('authorName', '') != '助理回覆'
+          // No member may mint votes while creating a post.
+          && request.resource.data.get('likedBy', []) == []
+          && request.resource.data.get('likes', 0) == 0
           && (request.resource.data.kind != 'announcement' || canManageGroup(groupId));
-        allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny(['authorId', 'assistantReply'])
-          && (canManageGroup(groupId)
-            || (ownsOrdinaryPost() && request.resource.data.get('kind', 'post') != 'announcement'));
-        allow delete: if canManageGroup(groupId) || ownsOrdinaryPost();
+        // Ordinary members may react to a published post, but only with their
+        // own single vote. Content editors cannot forge other members' votes.
+        function ownPostVoteOnly() {
+          let before = resource.data;
+          let after = request.resource.data;
+          return after.diff(before).affectedKeys().hasOnly(['likes', 'likedBy', 'updatedAt'])
+            && changesOnlyOwnVote(
+              before.get('likedBy', []), after.get('likedBy', []),
+              before.get('likes', 0), after.get('likes', 0)
+            );
+        }
+
+        function isVisiblePostForReactions() {
+          return resource.data.get('published', true) != false
+            && !(resource.data.get('status', '') in [
+              'draft', 'scheduled', 'pending', 'unpublished',
+              'archived', 'cancelled', 'canceled', 'deleted'
+            ])
+            && resource.data.get('deleted', false) != true
+            && resource.data.get('deletedAt', null) == null;
+        }
+
+        allow update: if (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['title', 'body'])
+            || postTextWithinLimits())
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'authorId', 'assistantReply', 'isAI', 'generatedBy'
+          ])
+          && request.resource.data.get('isAI', false) == false
+          && request.resource.data.get('authorName', '') != '助理回覆'
+          && (
+            (isActiveGroupMember(groupId) && isCanonicalVisiblePost() && ownPostVoteOnly())
+            || (
+              (canManageGroup(groupId)
+                || (ownsOrdinaryPost()
+                  && request.resource.data.get('kind', 'post') != 'announcement'
+                  // A moderator's soft deletion cannot be undone by the post author.
+                  // Ordinary author edits of active posts remain allowed.
+                  // Non-managers may edit only a currently published/visible
+                  // post. Moderators alone can reopen archived, scheduled or
+                  // unpublished content; a stale author write must not revive it.
+                  && isVisiblePostForReactions()
+                  // Default-value equality allowed missing visibility flags
+                  // to be materialized as public by a legacy post author.
+                  && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                    'published', 'status', 'deleted', 'deletedAt'
+                  ])))
+              && request.resource.data.get('likedBy', []) == resource.data.get('likedBy', [])
+              && request.resource.data.get('likes', 0) == resource.data.get('likes', 0)
+            )
+          );
+        // A member cannot erase a post after a moderator has held, archived or
+        // withdrawn it. The author may remove an ordinary visible post only;
+        // active managers retain the ability to remove held and legacy drafts.
+        allow delete: if canManageGroup(groupId)
+          || (ownsOrdinaryPost() && isVisiblePostForReactions());
 
         match /comments/{commentId} {
-          allow read: if isActiveGroupMember(groupId);
+          // Comments are a separate collection path: membership alone must not
+          // expose replies on explicitly hidden or withdrawn parents.
+          // Missing metadata retains the historical published-post behavior.
+          // The parent lookup is fixed to this group/post, not client input.
+          function canReadPostComments() {
+            let postData = get(/databases/$(database)/documents/groups/$(groupId)/posts/$(postId)).data;
+            return isActiveGroupMember(groupId)
+              && exists(/databases/$(database)/documents/groups/$(groupId)/posts/$(postId))
+              && (
+                postData.get('authorId', null) == request.auth.uid
+                || (
+                  postData.get('published', true) != false
+                  && !(postData.get('status', '') in [
+                    'draft', 'scheduled', 'pending', 'unpublished',
+                    'archived', 'cancelled', 'canceled', 'deleted'
+                  ])
+                  && postData.get('deleted', false) != true
+                  && postData.get('deletedAt', null) == null
+                )
+              );
+          }
+
+          allow read: if canReadPostComments();
           // 助理回覆只由伺服器（Cloud Functions）寫入；用戶端不能寫、不能改、不能冒用助理的名字
-          allow create: if isActiveGroupMember(groupId)
+          // Direct SDK clients must not forge answer/vote state or persist
+          // unbounded / non-text comment bodies. Server replies use Admin SDK.
+          function validNewMemberComment() {
+            let body = request.resource.data.get('body', null);
+            return body is string
+              && body.size() > 0
+              && body.size() <= 5000
+              && request.resource.data.get('likedBy', []) == []
+              && request.resource.data.get('likeCount', 0) == 0
+              && request.resource.data.get('isAnswer', false) == false
+              && request.resource.data.get('isBestAnswer', false) == false;
+          }
+
+          allow create: if canReadPostComments()
             && commentId != 'assistant'
             && request.resource.data.authorId == request.auth.uid
             && request.resource.data.get('isAI', false) != true
             && !('generatedBy' in request.resource.data)
-            && request.resource.data.get('authorName', '') != '助理回覆';
-          allow update: if commentId != 'assistant'
+            && request.resource.data.get('authorName', '') != '助理回覆'
+            && validNewMemberComment();
+          allow update: if canReadPostComments()
+            && commentId != 'assistant'
             && resource.data.authorId != 'campus-assistant'
             && resource.data.get('isAI', false) != true
             && request.resource.data.get('isAI', false) != true
             && request.resource.data.get('generatedBy', null) == resource.data.get('generatedBy', null)
             && request.resource.data.get('authorName', '') != '助理回覆'
             && request.resource.data.authorId == resource.data.authorId
-            && (canManageGroup(groupId) || activeAuthor());
-          allow delete: if commentId != 'assistant' && (canManageGroup(groupId) || activeAuthor());
+            && (
+              !request.resource.data.diff(resource.data).affectedKeys().hasAny(['body'])
+              || (
+                request.resource.data.get('body', null) is string
+                && request.resource.data.body.size() > 0
+                && request.resource.data.body.size() <= 5000
+              )
+            )
+            && (
+              request.resource.data.get('isAnswer', false) == resource.data.get('isAnswer', false)
+              || canManageGroup(groupId)
+            )
+            && (
+              request.resource.data.get('isBestAnswer', false) == resource.data.get('isBestAnswer', false)
+              || canManageGroup(groupId)
+            )
+            // A comment owner/manager may not manufacture likes for other members.
+            // Preserve the old vote fields during ordinary edits; a reaction change
+            // may only add/remove the current UID with the exact count delta.
+            && (
+              (
+                request.resource.data.get('likedBy', []) == resource.data.get('likedBy', [])
+                && request.resource.data.get('likeCount', 0) == resource.data.get('likeCount', 0)
+              )
+              || (
+                request.resource.data.diff(resource.data).affectedKeys()
+                  .hasOnly(['likedBy', 'likeCount', 'updatedAt'])
+                && changesOnlyOwnVote(
+                  resource.data.get('likedBy', []),
+                  request.resource.data.get('likedBy', []),
+                  resource.data.get('likeCount', 0),
+                  request.resource.data.get('likeCount', 0)
+                )
+              )
+            )
+            // The parent post author is not automatically the author of each
+            // reply. Only the reply author or an active manager may edit text;
+            // any active member may make an own-vote-only reaction change.
+            && (
+              canManageGroup(groupId)
+              || resource.data.authorId == request.auth.uid
+              || (
+                request.resource.data.diff(resource.data).affectedKeys()
+                  .hasOnly(['likedBy', 'likeCount', 'updatedAt'])
+                && changesOnlyOwnVote(
+                  resource.data.get('likedBy', []),
+                  request.resource.data.get('likedBy', []),
+                  resource.data.get('likeCount', 0),
+                  request.resource.data.get('likeCount', 0)
+                )
+              )
+            );
+          allow delete: if canReadPostComments()
+            && commentId != 'assistant'
+            && (canManageGroup(groupId) || resource.data.authorId == request.auth.uid);
         }
       }
 
@@ -1083,6 +1521,13 @@ service cloud.firestore {
       }
 
       match /liveSessions/{sessionId} {
+        // A hidden v1 parent must not be bypassed via a directly addressed
+        // questions/polls subcollection or a query against those subcollections.
+        function hasSafeLiveSessionParent() {
+          return exists(/databases/$(database)/documents/groups/$(groupId)/liveSessions/$(sessionId))
+            && get(/databases/$(database)/documents/groups/$(groupId)/liveSessions/$(sessionId)).data.get('schemaVersion', 0) == 2;
+        }
+
         // Version 1 documents contain public QR secrets and attendance rosters.
         // Clients must query schemaVersion == 2; legacy sessions require migration.
         allow read: if isActiveGroupMember(groupId) && resource.data.schemaVersion == 2;
@@ -1105,7 +1550,7 @@ service cloud.firestore {
               && changesOnlyOwnVote(before.get('upvotedBy', []), after.upvotedBy, before.get('upvotes', 0), after.upvotes);
           }
 
-          allow read: if isActiveGroupMember(groupId);
+          allow read: if isActiveGroupMember(groupId) && hasSafeLiveSessionParent();
           allow create: if isActiveGroupMember(groupId)
             && request.resource.data.authorId == request.auth.uid
             && sessionAcceptsQuestions()
@@ -1120,7 +1565,7 @@ service cloud.firestore {
         }
 
         match /polls/{pollId} {
-          allow read: if isActiveGroupMember(groupId);
+          allow read: if isActiveGroupMember(groupId) && hasSafeLiveSessionParent();
           allow create, update, delete: if canManageGroup(groupId);
         }
       }
@@ -1132,17 +1577,25 @@ service cloud.firestore {
       }
 
       match /attendanceSessions/{sessionId} {
+        // The parent's v2 gate applies to child roster and correction paths too.
+        function hasSafeAttendanceSessionParent() {
+          return exists(/databases/$(database)/documents/groups/$(groupId)/attendanceSessions/$(sessionId))
+            && get(/databases/$(database)/documents/groups/$(groupId)/attendanceSessions/$(sessionId)).data.get('schemaVersion', 0) == 2;
+        }
+
         allow read: if isActiveGroupMember(groupId) && resource.data.schemaVersion == 2;
         allow write: if false;
 
         match /attendanceRecords/{recordId} {
-          allow read: if canManageGroup(groupId)
-            || (isActiveGroupMember(groupId) && recordId == request.auth.uid);
+          allow read: if hasSafeAttendanceSessionParent()
+            && (canManageGroup(groupId)
+              || (isActiveGroupMember(groupId) && recordId == request.auth.uid));
           allow write: if false;
         }
         // 僅伺服器可寫、寫入後不可改的教師更正紀錄。學生不能列舉稽核明細。
         match /attendanceCorrections/{correctionId} {
-          allow read: if isActiveGroupMember(groupId)
+          allow read: if hasSafeAttendanceSessionParent()
+            && isActiveGroupMember(groupId)
             && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role in ['owner', 'instructor'];
           allow write: if false;
         }
@@ -1162,7 +1615,18 @@ service cloud.firestore {
           'postLoginRoles',
           'teachingRoles',
           'orgRoles',
-          'lastPostLoginResolvedAt'
+          'lastPostLoginResolvedAt',
+          'status',
+          'schoolId',
+          'primarySchoolId',
+          'profileBoundSchoolId',
+          'bindingGeneration',
+          'lastLoginAt',
+          'schoolIds',
+          'campusStoryBindingHaltAt',
+          'campusStoryBindingHaltKind',
+          'notificationDeliveryDisabled',
+          'accountDeletionInProgress'
         ]);
       // Update: denylist authority/security keys via affectedKeys so insert/change/remove
       // are all blocked even when the existing doc lacks those optional fields.
@@ -1178,6 +1642,12 @@ service cloud.firestore {
           'balance',
           'schoolId',
           'primarySchoolId',
+          'profileBoundSchoolId',
+          'bindingGeneration',
+          'lastLoginAt',
+          'schoolIds',
+          'campusStoryBindingHaltAt',
+          'campusStoryBindingHaltKind',
           'notificationDeliveryDisabled',
           'accountDeletionInProgress',
           'createdAt'
@@ -1434,7 +1904,10 @@ service cloud.firestore {
       }
 
       match /notifications/{notificationId} {
-        allow read, update, delete: if isSelf(uid);
+        allow read, delete: if isSelf(uid);
+        // The OS tap must match the server-issued receipt for this account.
+        allow update: if isSelf(uid) && (!notificationId.matches('dorm_[0-9a-f]{64}')
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']));
         allow create: if false;
       }
 
@@ -1738,22 +2211,70 @@ service cloud.firestore {
     }
 
     match /campusStories/{storyId} {
-      allow read: if isSignedIn() && isSchoolMember(resource.data.schoolId);
+      // Both document lookups and queries must exclude expired content.
+      // Query callers constrain expiresAt ahead of request.time so Firestore
+      // can prove the read is safe without inspecting each returned document.
+      allow get: if isSignedIn()
+        && isCanonicalStoryMember(resource.data.schoolId)
+        && resource.data.expiresAt is int
+        && resource.data.expiresAt > request.time.toMillis();
+      // Query range filters cannot prove the stored field has an integer
+      // type; the numeric expiry comparison is still enforced server-side.
+      allow list: if isSignedIn()
+        && isCanonicalStoryMember(resource.data.schoolId)
+        && resource.data.expiresAt > request.time.toMillis();
       allow create: if isSignedIn()
         && request.resource.data.authorUid == request.auth.uid
         && request.resource.data.schoolId != null
-        && isSchoolMember(request.resource.data.schoolId)
-        && request.resource.data.expiresAt != null;
-      allow delete: if isSignedIn() && resource.data.authorUid == request.auth.uid;
+        && isCanonicalStoryMember(request.resource.data.schoolId)
+        // School-wide story readers must not accept arbitrary client claims,
+        // forged view counters or unbounded text payloads.
+        && request.resource.data.keys().hasOnly([
+          'schoolId', 'authorUid', 'kind', 'text', 'mediaUrl', 'bgColor',
+          'poiId', 'poiName', 'createdAt', 'expiresAt', 'viewCount', 'allowReplies'
+        ])
+        && request.resource.data.get('allowReplies', false) is bool
+        && request.resource.data.kind in ['image', 'video', 'text']
+        && request.resource.data.get('viewCount', 0) == 0
+        && request.resource.data.get('text', '') is string
+        && request.resource.data.get('text', '').size() <= 2000
+        // The mobile publisher stores epoch milliseconds. Bound the lifetime
+        // to one day plus five minutes of client clock skew.
+        && request.resource.data.expiresAt is int
+        && request.resource.data.expiresAt > request.time.toMillis()
+        && request.resource.data.expiresAt <= request.time.toMillis() + 86700000;
+      allow delete: if isSignedIn() && resource.data.authorUid == request.auth.uid
+        && isCanonicalStoryMember(resource.data.schoolId);
       allow update: if false;
 
+      function story() {
+        return get(/databases/$(database)/documents/campusStories/$(storyId)).data;
+      }
+      function canAccessReceipts() {
+        let parent = story();
+        return isCurrentSchoolMember(parent.schoolId)
+          && parent.expiresAt is int && parent.expiresAt > request.time.toMillis();
+      }
+      function validOwnReceipt(viewerUid) {
+        return request.auth.uid == viewerUid
+          && request.resource.data.keys().hasOnly(['viewerUid', 'viewedAt'])
+          && request.resource.data.viewerUid == viewerUid
+          && request.resource.data.viewedAt == request.time;
+      }
+
+      // Old receipts lack author/school provenance. A reused story ID must never expose them.
       match /storyViews/{viewerUid} {
-        allow read: if isSignedIn()
-          && isSchoolMember(get(/databases/$(database)/documents/campusStories/$(storyId)).data.schoolId);
-        allow create: if isSignedIn()
-          && viewerUid == request.auth.uid
-          && isSchoolMember(get(/databases/$(database)/documents/campusStories/$(storyId)).data.schoolId);
-        allow delete, update: if false;
+        allow get: if canAccessReceipts() && request.auth.uid == viewerUid;
+        allow create: if canAccessReceipts() && validOwnReceipt(viewerUid);
+      }
+
+      match /schools/{schoolId}/authors/{authorUid}/views/{viewerUid} {
+        function currentAudience() {
+          return canAccessReceipts() && story().schoolId == schoolId && story().authorUid == authorUid;
+        }
+        allow get: if currentAudience() && (request.auth.uid == viewerUid || request.auth.uid == authorUid);
+        allow list: if currentAudience() && request.auth.uid == authorUid;
+        allow create: if currentAudience() && viewerUid != authorUid && validOwnReceipt(viewerUid);
       }
     }
 
@@ -1844,7 +2365,13 @@ service cloud.firestore {
     }
 
     match /postLikes/{docId} {
-      allow read: if isSignedIn();
+      // A global list of votes exposes campus members' identities across
+      // groups. Keep exact-document reads to members of the parent post;
+      // enumeration is server-only until consumers use a school-scoped index.
+      allow get: if isSignedIn()
+        && resource.data.get('postId', null) is string
+        && canReadGroupPost(resource.data.postId);
+      allow list: if false;
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && canReadGroupPost(request.resource.data.postId);
@@ -1896,22 +2423,38 @@ service cloud.firestore {
 
     // Messages
     match /messages/{docId} {
+      // Legacy root messages are still used by older clients. Their read
+      // receipts must have the same owner-only semantics as nested messages.
       allow read: if isConversationMember(resource.data.conversationId);
       allow create: if isSignedIn()
         && request.resource.data.senderId == request.auth.uid
-        && isConversationMember(request.resource.data.conversationId);
+        && isConversationMember(request.resource.data.conversationId)
+        && request.resource.data.get('readBy', [request.auth.uid]) == [request.auth.uid];
       allow update: if isConversationMember(resource.data.conversationId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy', 'updatedAt'])
-        && request.auth.uid in request.resource.data.readBy;
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['readBy'])
+          || onlyOwnMessageReadReceipt()
+        );
       allow delete: if false;
     }
 
     // Lost & Found (global)
     match /lostFoundItems/{docId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      // Legacy Web/Mobile feeds query schoolId == current school.
+      // Unscoped lists and missing schoolId are denied instead of exposing contact info.
+      allow read: if isCurrentLostFoundMember(resource.data.schoolId);
+      allow create: if isCurrentLostFoundMember(request.resource.data.schoolId)
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.get('reporterId', request.auth.uid) == request.auth.uid;
+      allow update: if isCurrentLostFoundMember(resource.data.schoolId)
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.schoolId == resource.data.schoolId
+        && request.resource.data.get('reporterId', request.auth.uid)
+          == resource.data.get('reporterId', request.auth.uid);
+      allow delete: if isCurrentLostFoundMember(resource.data.schoolId)
+        && resource.data.userId == request.auth.uid;
     }
 
     // Library

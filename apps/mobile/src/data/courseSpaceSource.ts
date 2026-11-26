@@ -10,6 +10,7 @@ import {
   setDoc,
   where,
   type Firestore,
+  type SnapshotMetadata,
 } from 'firebase/firestore';
 import { getAuthInstance, getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { joinClassroomAttendance } from '../services/liveAttendance';
@@ -537,6 +538,11 @@ async function getActiveInboxSession(db: Firestore, groupId: string) {
 }
 
 type InboxMode = 'inbox' | 'learning' | 'today';
+const TODAY_INBOX_LIMIT = 14;
+
+const confirmedSnapshot = (metadata?: SnapshotMetadata) =>
+  metadata?.fromCache === false && metadata.hasPendingWrites === false;
+
 type StudentTaskWindow = { dueAt: Date | null; lateSubmissionOpen: boolean };
 
 function studentTaskWindow(
@@ -561,15 +567,23 @@ export async function listInboxTasks(
   userId: string,
   schoolId?: string,
   mode: InboxMode = 'inbox',
+  onTodayCoverage?: (confirmed: boolean) => void,
 ): Promise<InboxTask[]> {
   if (mode === 'today' && !schoolId?.trim()) throw new Error('請先選擇學校後查看課程。');
   if (isFirebaseMockMode()) return [];
   const db = getDb();
-  const memberships = await listCourseMemberships(db, userId, schoolId);
+  let membershipsConfirmed = false;
+  let courseworkConfirmed = true;
+  const memberships = onTodayCoverage
+    ? await listCourseMemberships(db, userId, schoolId, metadata => {
+        membershipsConfirmed = confirmedSnapshot(metadata);
+      })
+    : await listCourseMemberships(db, userId, schoolId);
   const courses = mode === 'today'
     ? memberships.filter((course) => course.role === 'member')
     : memberships;
   if (!courses.length) {
+    onTodayCoverage?.(membershipsConfirmed);
     return mode === 'inbox' ? (await listActionQueueInboxTasks(userId)).slice(0, 14) : [];
   }
 
@@ -633,6 +647,7 @@ export async function listInboxTasks(
       const assignmentSnap = await getDocs(
         collection(db, 'groups', membership.groupId, 'assignments'),
       );
+      if (onTodayCoverage && !confirmedSnapshot(assignmentSnap.metadata)) courseworkConfirmed = false;
       const assignments: Array<{ id: string } & Record<string, unknown>> =
         assignmentSnap.docs.map((docSnap) => ({
           id: docSnap.id,
@@ -662,6 +677,7 @@ export async function listInboxTasks(
             ),
           );
           for (const [index, snapshot] of results.entries()) {
+            if (onTodayCoverage && !confirmedSnapshot(snapshot.metadata)) courseworkConfirmed = false;
             const assignment = batch[index];
             if (assignment && snapshot.exists() && snapshot.data()?.submittedAt) {
               submitted.add(assignment.id);
@@ -777,6 +793,8 @@ export async function listInboxTasks(
 
   const fromGroups = tasks.flat();
   if (mode === 'today') {
+    // One unconfirmed source can change which deadline the home reminder should use.
+    onTodayCoverage?.(membershipsConfirmed && courseworkConfirmed && fromGroups.length <= TODAY_INBOX_LIMIT);
     // The Today card prioritizes deadlines within 24 hours, then open late work.
     // All tasks in this seven-day window have valid deadlines.
     const tomorrow = now + 24 * 60 * 60 * 1000;
@@ -787,7 +805,7 @@ export async function listInboxTasks(
         const b = right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
         return Number(dueSoon(b)) - Number(dueSoon(a)) || a - b || left.id.localeCompare(right.id);
       })
-      .slice(0, 14);
+      .slice(0, TODAY_INBOX_LIMIT);
   }
   const fromAssistantQueue = mode === 'inbox' ? await listActionQueueInboxTasks(userId) : [];
 

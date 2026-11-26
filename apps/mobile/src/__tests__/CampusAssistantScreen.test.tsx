@@ -20,6 +20,9 @@ jest.mock('../app/useAIOverlay', () => ({
 }));
 let mockUid: string | null = 'A';
 let mockSchool = 'pu';
+let mockSelection: { schoolId: string | null } | undefined;
+let mockLegacySchool = false;
+let mockSelectionReady: boolean | undefined = true;
 let mockPlatform: {
   loading?: boolean; session?: { platformAccountId: string; context?: string };
   isSessionCurrent?: (id: string, context: string) => boolean;
@@ -34,7 +37,8 @@ jest.mock('../state/auth', () => ({
 }));
 jest.mock('../state/school', () => ({
   useSchool: () => ({
-    selectionReady: true, selection: { schoolId: mockSchool },
+    selectionReady: mockSelectionReady,
+    selection: mockLegacySchool ? undefined : mockSelection ?? { schoolId: mockSchool },
     school: {
       id: mockSchool,
       name: mockSchool === 'pu' ? '靜宜大學' : `學校（${mockSchool}）`,
@@ -56,6 +60,7 @@ jest.mock('../features/campusAssistant', () => ({
   })),
 }));
 jest.mock('../features/campusAssistantActions', () => ({
+  ...jest.requireActual('../features/campusAssistantActions'),
   confirmCampusAgentWrite: jest.fn(),
 }));
 jest.mock('../services/campusSenseSnapshot', () => ({
@@ -104,11 +109,70 @@ beforeEach(async () => {
   jest.mocked(getCampusAssignmentReminderStatus).mockResolvedValue([]);
   mockUid = 'A';
   mockSchool = 'pu';
+  mockSelection = undefined;
+  mockLegacySchool = false;
+  mockSelectionReady = true;
   mockUpcomingClass = false;
   mockPlatform = null;
   mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
   await AsyncStorage.clear();
 });
+test('campus follow-up questions reuse one sessionId', async () => {
+  request.mockResolvedValue({ content: '已記下', hasActions: false });
+  const view = render(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '第一題');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '追問細節');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  const first = request.mock.calls[0][0].sessionId;
+  const second = request.mock.calls[1][0].sessionId;
+  expect(typeof first).toBe('string');
+  expect(first.length).toBeGreaterThan(8);
+  expect(second).toBe(first);
+  expect(request.mock.calls[0][0].mode).toBe('campus');
+});
+
+test.each([
+  ['legacy selected school', undefined, true, 'pu'],
+  ['legacy caller without readiness', undefined, undefined, 'pu'],
+  ['explicit selection', { schoolId: 'nthu' }, true, 'nthu'],
+  ['explicitly unselected school', { schoolId: null }, true, ''],
+  ['selection still loading', undefined, false, ''],
+] as const)('%s preserves assistant access and school scope', async (_name, selection, ready, expectedSchoolId) => {
+  mockSelection = selection;
+  mockLegacySchool = selection === undefined;
+  mockSelectionReady = ready;
+  request.mockResolvedValue({ content: '已記下', hasActions: false });
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '查校方公告');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  if (ready === false) {
+    expect(request).not.toHaveBeenCalled();
+  } else {
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({ scope: { uid: 'A', schoolId: expectedSchoolId } }));
+  }
+});
+
+test.each(['account', 'school'])('changing %s starts a new campus sessionId', async (change) => {
+  request.mockResolvedValue({ content: '已記下', hasActions: false });
+  const view = render(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '第一題');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  const first = request.mock.calls[0][0].sessionId;
+  if (change === 'school') mockSchool = 'other';
+  else mockUid = 'B';
+  view.rerender(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '新範圍的問題');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  const next = request.mock.calls[1][0].sessionId;
+  expect(typeof next).toBe('string');
+  expect(next.length).toBeGreaterThan(8);
+  expect(next).not.toBe(first);
+});
+
 test('failed questions remain editable and retry does not add duplicated history', async () => {
   request
     .mockRejectedValueOnce(new Error('unavailable'))
@@ -121,6 +185,8 @@ test('failed questions remain editable and retry does not add duplicated history
   expect(view.getByText(/問題已保留/)).toBeTruthy();
   await act(async () => fireEvent.press(view.getByText('重試查詢')));
   expect(request.mock.calls[1][0].messages).toEqual([{ role: 'user', content: '查公告' }]);
+  expect(request.mock.calls[1][0].sessionId).toBe(request.mock.calls[0][0].sessionId);
+  expect(typeof request.mock.calls[0][0].sessionId).toBe('string');
   expect(view.getByText('已找到公告')).toBeTruthy();
   expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
 });
@@ -327,6 +393,7 @@ test('assistant offers the existing service directly instead of inventing a tran
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '圖書館怎麼走');
   fireEvent.press(view.getByText('前往校園地圖'));
   expect(navigate).toHaveBeenCalledWith('校園', {
+    initial: false,
     screen: 'MapV2',
     params: undefined,
   });
@@ -349,6 +416,7 @@ test('a verified offline timetable result opens only its allowlisted local servi
   expect(view.getByText(/本機規則／已保存資料/)).toBeTruthy();
   fireEvent.press(view.getByText('開啟我的課表'));
   expect(navigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'PersonalTimetable',
     params: undefined,
   });
@@ -375,7 +443,7 @@ test('a server proposal requires review and a second explicit tap before writing
     source: 'campus',
     hasActions: true,
     proposals: [{
-      label: '確認送出報修',
+      label: '確認存成報修備忘',
       toolName: 'createDormRepairRequest',
       input: { dormitory: 'A棟', room: '301', category: '冷氣', description: '不冷' },
       agentRunId: runId,
@@ -390,7 +458,7 @@ test('a server proposal requires review and a second explicit tap before writing
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), 'A棟301冷氣不冷');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
 
-  expect(view.getByText('確認送出報修')).toBeTruthy();
+  expect(view.getByText('確認存成報修備忘')).toBeTruthy();
   expect(view.getByText('需要本人確認 · 尚未執行')).toBeTruthy();
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
   fireEvent.press(view.getByText('檢視任務草稿'));
@@ -405,11 +473,15 @@ test('a server proposal requires review and a second explicit tap before writing
     userId: 'A', schoolId: 'pu',
     proposal: { agentRunId: runId, toolName: 'createDormRepairRequest' },
   });
-  expect(view.getByText('伺服器已確認執行成功')).toBeTruthy();
-  expect(view.getByText('紀錄編號：repair-123')).toBeTruthy();
+  expect(view.getAllByText('報修備忘已存好').length).toBeGreaterThan(0);
+  expect(view.queryByText('伺服器已確認執行成功')).toBeNull();
+  expect(view.queryByText('已送出確認，請核對結果')).toBeNull();
+  expect(view.queryByText(/repair-123/)).toBeNull();
+  expect(view.getByText('已幫你存成報修備忘，請依學校規定管道送出。此應用沒有送到學校。')).toBeTruthy();
   expect(view.queryByText('確認並執行')).toBeNull();
   fireEvent.press(view.getByText('開啟服務頁核對紀錄'));
   expect(navigate).toHaveBeenCalledWith('校園', {
+    initial: false,
     screen: 'Dormitory',
     params: undefined,
   });
@@ -436,6 +508,39 @@ test('a lost write receipt is never displayed as success or offered for automati
   expect(view.queryByText('伺服器已確認執行成功')).toBeNull();
   expect(view.queryByText('確認並執行')).toBeNull();
   expect(confirmCampusAgentWrite).toHaveBeenCalledTimes(1);
+});
+
+test('the campus chat confirms the chosen washing cancellation and opens its actual service', async () => {
+  const proposal = {
+    label: '確認取消洗衣預約', toolName: 'cancelWashingReservation' as const,
+    input: { reservationId: 'washing-2', machineId: 'A2', dormitory: 'A棟', startTime: '18:30',
+      reservedUntil: null, expectedReservationVersion: 'a'.repeat(64) },
+    agentRunId: '01234567-89ab-4cde-8012-3456789abcde',
+  };
+  request.mockResolvedValueOnce({ content: '請確認這筆洗衣預約。', source: 'campus',
+    hasActions: true, proposals: [proposal] });
+  jest.mocked(confirmCampusAgentWrite).mockResolvedValueOnce({
+    success: true, toolName: 'cancelWashingReservation', reservationId: 'washing-2',
+    machineId: 'A2', dormitory: 'A棟', startTime: '18:30', reservedUntil: null,
+    status: 'cancelled', schoolId: 'pu', userId: 'A',
+  });
+  const navigate = jest.fn();
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  selectCampusMode(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '取消洗衣預約 washing-2');
+  await act(async () => { fireEvent.press(view.getByText('送出問題')); });
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  fireEvent.press(view.getByText('檢視任務草稿'));
+  expect(view.getByText('washing-2')).toBeTruthy();
+  expect(view.getByText('未提供到期時間')).toBeTruthy();
+  await act(async () => { fireEvent.press(view.getByText('確認並執行')); });
+  expect(confirmCampusAgentWrite).toHaveBeenCalledTimes(1);
+  expect(confirmCampusAgentWrite).toHaveBeenCalledWith(expect.objectContaining({
+    userId: 'A', schoolId: 'pu', proposal,
+  }));
+  expect(view.getByText('洗衣預約已取消')).toBeTruthy();
+  fireEvent.press(view.getByText('開啟服務頁核對紀錄'));
+  expect(navigate).toHaveBeenCalledWith('校園', { screen: 'Dormitory', params: undefined, initial: false });
 });
 
 test('a user explicitly syncs authorized context before it reaches local inference', async () => {
@@ -608,7 +713,9 @@ test('the seven-day agent entry shows sourced steps and only navigates to verifi
 
   fireEvent.press(view.getByText('開啟課程與作業核對'));
   expect(navigate).toHaveBeenCalledWith('學習', {
-    screen: 'CoursesHome', params: undefined,
+    initial: false,
+    screen: 'CoursesHome',
+    params: undefined,
   });
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
 });
@@ -964,7 +1071,11 @@ test('tapping a result retains the unsent draft and opens only the selected sour
   expect(turns[2]).toEqual({ role: 'user', content: '第 2 筆' });
   expect(field.props.value).toBe('還在輸入的問題');
   fireEvent.press(view.getByText('查看這份作業'));
-  expect(navigate).toHaveBeenCalledWith('學習', { screen: 'HomeworkSubmit', params: { groupId: 'db1', assignmentId: 'report' } });
+  expect(navigate).toHaveBeenCalledWith('學習', {
+    initial: false,
+    screen: 'HomeworkSubmit',
+    params: { groupId: 'db1', assignmentId: 'report' },
+  });
   expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
   expect(view.getByText('確認設定本機提醒')).toBeTruthy();
 });
@@ -1018,10 +1129,18 @@ test('the next-class shortcut opens the selected occurrence in its own term and 
   expect(view.getByText('同時段有多堂課')).toBeTruthy();
   expect(view.queryByText('開啟我的課表')).toBeNull();
   fireEvent.press(view.getByRole('button', { name: /在課表中查看專題.*B203/ }));
-  expect(navigate).toHaveBeenCalledWith('學習', { screen: 'PersonalTimetable', params: {
-    schoolId: 'pu', courseId: second.courseId, date: second.date, term: second.term,
-    startAt: Date.parse('2026-11-05T10:10:00+08:00'), reminderScope: JSON.stringify({ owner: 'firebase:A', schoolId: 'pu' }),
-  } });
+  expect(navigate).toHaveBeenCalledWith('學習', {
+    initial: false,
+    screen: 'PersonalTimetable',
+    params: {
+      schoolId: 'pu',
+      courseId: second.courseId,
+      date: second.date,
+      term: second.term,
+      startAt: Date.parse('2026-11-05T10:10:00+08:00'),
+      reminderScope: JSON.stringify({ owner: 'firebase:A', schoolId: 'pu' }),
+    },
+  });
   mockSchool = 'other';
   view.rerender(<CampusAssistantScreen navigation={{ navigate }} />);
   expect(view.queryByText('B203')).toBeNull();
@@ -1050,10 +1169,18 @@ test('one tap on current class checks the device and can open a staggered overla
   expect(view.getByText('查詢時間 2026/11/5 上午10:25（台灣時間）')).toBeTruthy();
   expect(view.queryByText('下一堂課')).toBeNull();
   fireEvent.press(view.getByRole('button', { name: /在課表中查看資料庫.*10:10–11:00.*B203/ }));
-  expect(navigate).toHaveBeenCalledWith('學習', { screen: 'PersonalTimetable', params: {
-    schoolId: 'pu', courseId: second.courseId, date: second.date, term: second.term,
-    startAt: Date.parse('2026-11-05T10:10:00+08:00'), reminderScope: JSON.stringify({ owner: 'firebase:A', schoolId: 'pu' }),
-  } });
+  expect(navigate).toHaveBeenCalledWith('學習', {
+    initial: false,
+    screen: 'PersonalTimetable',
+    params: {
+      schoolId: 'pu',
+      courseId: second.courseId,
+      date: second.date,
+      term: second.term,
+      startAt: Date.parse('2026-11-05T10:10:00+08:00'),
+      reminderScope: JSON.stringify({ owner: 'firebase:A', schoolId: 'pu' }),
+    },
+  });
 });
 
 test('a verified free period offers the next class without erasing an unsent draft', async () => {
@@ -1134,6 +1261,7 @@ test.each(['firebase', 'nuni'])('%s students can refine a saved timetable gap wi
     .mockResolvedValueOnce(result(tomorrow, '13:00–15:00'))
     .mockResolvedValueOnce(result({ ...tomorrow, minMinutes: 60 }, '符合條件的空堂為 13:00–15:00'));
   const view = render(<CampusAssistantScreen route={isNuni ? platformRoute : undefined} />);
+  await waitForCalendarRecovery(view);
   await act(async () => fireEvent.press(view.getByRole('button', { name: '查今日空堂' })));
   expect(request.mock.calls[0][0]).toMatchObject({ mode: 'device', messages: [{ role: 'user', content: '今天有哪些空堂？' }] });
   expect(view.getByText('今日空堂')).toBeTruthy();
@@ -1158,6 +1286,7 @@ test('the gap shortcut and its results stay in the signed-in local timetable sco
   request.mockResolvedValueOnce({ content: '另一個帳號的課表資料', source: 'device', tool: 'saved-timetable',
     classGapRead: { day: 'today', minMinutes: 0, owner: 'firebase:B', schoolId: 'pu', checkedAt: new Date().toISOString() } });
   const view = render(<CampusAssistantScreen />);
+  await waitForCalendarRecovery(view);
   await act(async () => fireEvent.press(view.getByRole('button', { name: '查今日空堂' })));
   expect(view.queryByText('另一個帳號的課表資料')).toBeNull();
   expect(view.getByText('無法核對這筆課表，請再查一次。')).toBeTruthy();
@@ -1181,6 +1310,7 @@ test('gap filter controls keep the latest query and draft when clearing a no-mat
     .mockResolvedValueOnce(result(available, '15:30–16:00（30 分鐘）'))
     .mockResolvedValueOnce(result(allDay, '10:00–12:00（120 分鐘）'));
   const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
   const field = view.getByLabelText('詢問校園助理');
   fireEvent.changeText(field, '後天下午三點半以後有一個半小時空堂嗎？');
   await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
@@ -1203,6 +1333,10 @@ test('gap filter controls keep the latest query and draft when clearing a no-mat
   expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
 });
 
+async function waitForCalendarRecovery(view: ReturnType<typeof render>) {
+  await waitFor(() => expect(view.queryByText('正在找回並核對先前的行程操作…')).toBeNull());
+}
+
 test('platform lookup, room follow-up and exact class link use the same nuni owner with no Firebase features', async () => {
   setPlatformFixture('student-b');
   const item = { courseId: 'manual:n1', term: '115|1', name: '平台帳號的專題', room: 'A301',
@@ -1212,6 +1346,7 @@ test('platform lookup, room follow-up and exact class link use the same nuni own
     .mockResolvedValueOnce({ content: item.room, source: 'device', tool: 'saved-timetable', savedClassRead: { ...read, focus: 'room' } });
   const navigate = jest.fn();
   const view = render(<CampusAssistantScreen route={platformRoute} navigation={{ navigate, getState: () => ({ routeNames: ['PersonalTimetable', 'PersonalImport'] }) }} />);
+  await waitForCalendarRecovery(view);
   expect(view.getByText('課業助理')).toBeTruthy();
   expect(view.getByRole('tab', { name: '已儲存計畫' })).toBeTruthy();
   expect(view.getByText('整理今日重點')).toBeTruthy();
@@ -1263,12 +1398,14 @@ test('a platform session replacement discards pending results even for the same 
   const response = deferred<object>();
   request.mockReturnValue(response.promise);
   const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
   fireEvent.press(view.getByText('現在有課嗎？'));
   const claim = request.mock.calls[0][0].platformTimetable;
   setPlatformFixture('student-b', 'context-new');
   expect(claim.isCurrent()).toBe(false);
   view.rerender(<CampusAssistantScreen route={platformRoute} />);
   await act(async () => response.resolve({ content: '舊學生的課表', source: 'device' }));
+  await waitForCalendarRecovery(view);
   expect(view.queryByText('舊學生的課表')).toBeNull();
   expect(view.getByText('現在有課嗎？')).toBeTruthy();
 });
@@ -1279,6 +1416,7 @@ test('a missing nuni timetable opens the public import screen; unrelated questio
     .mockResolvedValueOnce({ content: '可查現在或下一堂課。', source: 'device', tool: 'saved-timetable' });
   const navigate = jest.fn();
   const view = render(<CampusAssistantScreen route={platformRoute} navigation={{ navigate, getState: () => ({ routeNames: ['PersonalImport'] }) }} />);
+  await waitForCalendarRecovery(view);
   await act(async () => fireEvent.press(view.getByText('現在有課嗎？')));
   fireEvent.press(view.getByRole('button', { name: '匯入課表' }));
   expect(navigate).toHaveBeenCalledWith('PersonalImport', { kind: 'timetable' });
@@ -1313,6 +1451,7 @@ test('the nuni course action opens a specific assignment and keeps a typed draft
     } });
   const screen = render(<CampusAssistantScreen route={platformRoute}
     navigation={{ navigate, getState: () => ({ routeNames: ['NuniWorkspace', 'PersonalImport', 'PersonalTimetable'] }) }} />);
+  await waitForCalendarRecovery(screen);
   await act(async () => fireEvent.press(screen.getByText('查下一堂課')));
   const input = screen.getByLabelText('詢問校園助理');
   fireEvent.changeText(input, '保留我的草稿');
@@ -1344,6 +1483,7 @@ test('course choices show reviewed class details, verify the selected ID, and ma
     ],
   }));
   const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '這堂課有什麼作業？');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   await act(async () => fireEvent.press(view.getByRole('button', { name: /資料結構.*115學年度.*乙班.*林老師/ })));
@@ -1379,6 +1519,7 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
         .mockResolvedValueOnce(card({ step: 'review', message: '請核對作業和提醒時間。' }))
         .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
       const screen = render(<CampusAssistantScreen route={platformRoute} />);
+      await waitForCalendarRecovery(screen);
       fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這堂課有什麼作業？');
       await act(async () => fireEvent.press(screen.getByText('送出問題')));
       await act(async () => fireEvent.press(screen.getByRole('button', { name: '提醒我交這份' })));
@@ -1411,6 +1552,7 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
       .mockResolvedValueOnce(reply());
     const screen = render(<CampusAssistantScreen route={platformRoute}
       navigation={{ navigate, getState: () => ({ routeNames: ['NuniWorkspace'] }) }} />);
+    await waitForCalendarRecovery(screen);
     const input = screen.getByLabelText('詢問校園助理');
     fireEvent.changeText(input, '這堂課有什麼作業？');
     await act(async () => fireEvent.press(screen.getByText('送出問題')));
@@ -1435,6 +1577,7 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
     request.mockResolvedValueOnce(reply())
       .mockResolvedValueOnce(reply({ view: { kind: 'priority', ids: ['first'], message: '最早逾期、仍在收件的作業。' } }));
     const screen = render(<CampusAssistantScreen route={platformRoute} />);
+    await waitForCalendarRecovery(screen);
     fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這門課有哪些作業？');
     await act(async () => fireEvent.press(screen.getByText('送出問題')));
     await act(async () => fireEvent.press(screen.getByRole('button', { name: '哪個最急？' })));
@@ -1451,6 +1594,7 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
       view: { kind: 'receipt', ids: ['first'], message: '舊的收據回答' } }))
       .mockResolvedValueOnce(reply());
     const screen = render(<CampusAssistantScreen route={platformRoute} />);
+    await waitForCalendarRecovery(screen);
     fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這門課有哪些作業？');
     await act(async () => fireEvent.press(screen.getByText('送出問題')));
     expect(screen.getByText('作業已更新，這是上次查詢的紀錄。')).toBeTruthy();
@@ -1513,6 +1657,7 @@ function resumablePlan(): CampusEvidencePlan {
 }
 
 async function askForSavedPlan(view: ReturnType<typeof render>, plan = resumablePlan()) {
+  await waitForCalendarRecovery(view);
   request.mockResolvedValueOnce({ content: plan.content, source: 'device', tool: 'campus-plan', hasActions: false, plan });
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '今天要先處理什麼？');
   await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
@@ -1744,6 +1889,7 @@ test('platform weekly planning uses its captured session and saves a resumable n
   const plan = planWithComparisonEvidence();
   request.mockResolvedValueOnce({ content: plan.content, source: 'device', tool: 'campus-plan', hasActions: false, plan });
   let view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
   await act(async () => fireEvent.press(view.getByRole('button', { name: '規劃未來七天' })));
   const input = request.mock.calls[0][0];
   expect(input).toMatchObject({ scope: { uid: '', schoolId: 'pu' }, mode: 'device',
@@ -1764,6 +1910,7 @@ test('platform weekly planning uses its captured session and saves a resumable n
   view.unmount();
 
   view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
   await waitFor(() => expect(view.getByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeTruthy());
   fireEvent.press(view.getByRole('button', { name: '繼續已儲存的計畫（1）' }));
   fireEvent.press(view.getByRole('button', { name: /查看今日優先行動/ }));
@@ -1834,6 +1981,7 @@ test('a live platform plan retries the same precise assignment, preserves the dr
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
   view.unmount();
   view = render(<CampusAssistantScreen route={platformRoute} navigation={navigation} />);
+  await waitForCalendarRecovery(view);
   await waitFor(() => expect(view.getByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeTruthy());
   fireEvent.press(view.getByRole('button', { name: '繼續已儲存的計畫（1）' }));
   fireEvent.press(view.getByRole('button', { name: /查看今日優先行動/ }));
@@ -1905,6 +2053,7 @@ test('platform saved plans stay separate from a Firebase account with the same i
 async function openPlatformPlanForReplanning() {
   setPlatformFixture('student-b');
   const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
   await askForSavedPlan(view, planWithComparisonEvidence());
   request.mockClear();
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '待會再問教室');
@@ -1991,4 +2140,336 @@ test('all platform source limitations remain accessible in both live and saved p
   fireEvent.press(view.getByRole('button', { name: /查看今日優先行動/ }));
   fireEvent.press(view.getByRole('button', { name: '查看全部 4 項資料限制' }));
   expect(view.getByText(/本次已達資料來源上限，不能判定其他課程沒有作業/)).toBeTruthy();
+});
+
+test.each(['device', 'campus'])(
+  '%s question leaves the composer usable and never clears a follow-up typed during the reply',
+  async (mode) => {
+    const waiting = deferred<{ content: string; hasActions: boolean }>();
+    request.mockReturnValueOnce(waiting.promise);
+    const view = render(<CampusAssistantScreen />);
+    if (mode === 'campus') selectCampusMode(view);
+    const field = view.getByLabelText('詢問校園助理');
+    fireEvent.changeText(field, '幫我核對這週作業');
+    act(() => fireEvent.press(view.getByText('送出問題')));
+    expect(field.props.editable).toBe(true);
+    expect(field.props.value).toBe('');
+    expect(view.getByText('幫我核對這週作業')).toBeTruthy();
+    fireEvent.changeText(field, '下一題請查空堂');
+    expect(field.props.value).toBe('下一題請查空堂');
+    expect(request).toHaveBeenCalledTimes(1);
+    await act(async () => waiting.resolve({ content: '本週作業已核對', hasActions: false }));
+    expect(view.getByText('本週作業已核對')).toBeTruthy();
+    expect(field.props.value).toBe('下一題請查空堂');
+    expect(request).toHaveBeenCalledTimes(1);
+  },
+);
+
+test('an unsuccessful mobile question can be recovered without deleting the newer draft', async () => {
+  const waiting = deferred<{ content: string; hasActions: boolean }>();
+  request.mockReturnValueOnce(waiting.promise);
+  const view = render(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, '查明天的公告');
+  act(() => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.changeText(field, '下一題先寫好了');
+  await act(async () => waiting.reject(new Error('network unavailable')));
+  expect(field.props.value).toBe('下一題先寫好了');
+  expect(view.getByText('查明天的公告')).toBeTruthy();
+  expect(request).toHaveBeenCalledTimes(1);
+  fireEvent.press(view.getByText('切換到保留的問題'));
+  expect(field.props.value).toBe('查明天的公告');
+  expect(view.getByText('下一題先寫好了')).toBeTruthy();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+test('cancelling device inference restores its original question without wiping a follow-up', async () => {
+  const waiting = deferred<{ content: string; hasActions: boolean }>();
+  request.mockReturnValueOnce(waiting.promise);
+  const view = render(<CampusAssistantScreen />);
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, '排今晚讀書時間');
+  act(() => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.changeText(field, '下一週也要安排');
+  expect(view.getByText('排今晚讀書時間')).toBeTruthy();
+  fireEvent.press(view.getByText('停止本機回答'));
+  expect(request.mock.calls[0][0].signal.aborted).toBe(true);
+  await act(async () => waiting.resolve({ content: '不該顯示的過期回答', hasActions: false }));
+  expect(view.queryByText('不該顯示的過期回答')).toBeNull();
+  expect(field.props.value).toBe('下一週也要安排');
+  expect(view.getByText('切換到保留的問題')).toBeTruthy();
+  fireEvent.press(view.getByText('切換到保留的問題'));
+  expect(field.props.value).toBe('排今晚讀書時間');
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+test('reading older phone replies stays in place until the user requests the latest reply', async () => {
+  const waiting = deferred<{ content: string; hasActions: boolean }>();
+  request.mockReturnValueOnce(waiting.promise);
+  const view = render(<CampusAssistantScreen />);
+  const field = view.getByLabelText('詢問校園助理');
+  const scroll = view.getByTestId('assistant-conversation-scroll');
+  fireEvent.changeText(field, '整理這週作業');
+  act(() => fireEvent.press(view.getByText('送出問題')));
+  // Simulate the reader swiping up while the answer is still pending.
+  act(() => fireEvent.scroll(scroll, { nativeEvent: {
+    contentOffset: { y: 0 }, layoutMeasurement: { height: 400 },
+    contentSize: { height: 1200 },
+  } }));
+  expect(view.getByText('回到最新回覆')).toBeTruthy();
+  await act(async () => waiting.resolve({ content: '已整理本週作業', hasActions: false }));
+  expect(view.getByText('已整理本週作業')).toBeTruthy();
+  expect(view.getByText('回到最新回覆')).toBeTruthy();
+  fireEvent.press(view.getByText('回到最新回覆'));
+  expect(view.queryByText('回到最新回覆')).toBeNull();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+test('a running study brief still names its original task while the next draft is being written', async () => {
+  const syncing = deferred<Awaited<ReturnType<typeof refreshCampusSenseSnapshot>>>();
+  jest.mocked(refreshCampusSenseSnapshot).mockReturnValueOnce(syncing.promise);
+  const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
+  fireEvent.press(view.getByText('今日重點'));
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, '幫我查週末活動');
+  expect(field.props.value).toBe('幫我查週末活動');
+  expect(view.getByText('今天要先處理什麼？')).toBeTruthy();
+  fireEvent.press(view.getByText('取消這次同步'));
+  await act(async () => syncing.resolve({
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable', count: null },
+    assignments: { status: 'available', count: 0, items: [] },
+    announcements: { status: 'available', items: [] },
+  }));
+  expect(field.props.value).toBe('幫我查週末活動');
+  expect(request).not.toHaveBeenCalled();
+});
+
+async function selectWorkContext(view: ReturnType<typeof render>, label: string) {
+  await waitForCalendarRecovery(view);
+  fireEvent.press(view.getByRole('button', { name: '切換工作情境' }));
+  fireEvent.press(view.getByRole('radio', { name: label }));
+  await waitForCalendarRecovery(view);
+}
+
+test('work contexts are explicit on the platform route and isolate professional tasks, drafts and chat', async () => {
+  const campus = render(<CampusAssistantScreen />);
+  expect(campus.queryByRole('button', { name: '切換工作情境' })).toBeNull();
+  campus.unmount();
+  setPlatformFixture('member');
+  const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByRole('button', { name: '查下一堂課' })).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '切換工作情境' }));
+  expect(view.getAllByRole('radio')).toHaveLength(6);
+  expect(view.getByRole('radio', { name: '學生與個人' }).props.accessibilityState.checked).toBe(true);
+  fireEvent.press(view.getByRole('radio', { name: '教師與助教' }));
+  await waitForCalendarRecovery(view);
+  expect(view.queryByRole('button', { name: '查下一堂課' })).toBeNull();
+  expect(view.queryByRole('tab', { name: '已儲存計畫' })).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '找明天下午一小時備課' }));
+  expect(request).not.toHaveBeenCalled();
+  request.mockResolvedValueOnce({ content: '已查到備課空檔', source: 'device', hasActions: false });
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
+  expect(request.mock.calls[0][0]).toMatchObject({ taskProfile: 'teacher',
+    scope: { uid: '', schoolId: 'pu' }, messages: [{ role: 'user', content: '找明天下午一小時備課' }] });
+  const originalScope = request.mock.calls[0][0].isCurrent;
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '稍後再安排備課');
+  await selectWorkContext(view, '店家');
+  expect(originalScope()).toBe(false);
+  expect(view.queryByText('已查到備課空檔')).toBeNull();
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  fireEvent.press(view.getByRole('button', { name: '安排明天下午半小時盤點' }));
+  request.mockResolvedValueOnce({ content: '門市工作回覆', source: 'device', hasActions: false });
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
+  expect(request.mock.calls[1][0]).toMatchObject({ taskProfile: 'merchant',
+    messages: [{ role: 'user', content: '安排明天下午半小時盤點' }] });
+  await selectWorkContext(view, '教師與助教');
+  expect(originalScope()).toBe(false);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('稍後再安排備課');
+});
+
+test.each(['account', 'session', 'school'] as const)('work context and drafts reset on %s change', async (change) => {
+  setPlatformFixture('member');
+  const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await selectWorkContext(view, '平台營運');
+  fireEvent.press(view.getByRole('button', { name: '找明天下午半小時維護檢查' }));
+  if (change === 'school') mockSchool = 'nthu';
+  else setPlatformFixture(change === 'account' ? 'other' : 'member', 'new-session');
+  await act(async () => view.rerender(<CampusAssistantScreen route={platformRoute} />));
+  await waitForCalendarRecovery(view);
+  expect(view.getByRole('button', { name: '查下一堂課' })).toBeTruthy();
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  await selectWorkContext(view, '平台營運');
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+});
+
+test('switching work context cannot drop an in-flight answer or an unconfirmed personal calendar preview', async () => {
+  setPlatformFixture('member');
+  const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await selectWorkContext(view, '教師與助教');
+  const lookup = deferred<unknown>();
+  request.mockReturnValueOnce(lookup.promise);
+  fireEvent.press(view.getByRole('button', { name: '安排明天下午一小時備課' }));
+  fireEvent.press(view.getByRole('button', { name: '送出問題' }));
+  expect(view.getByRole('button', { name: '切換工作情境' })).toBeDisabled();
+  await act(async () => lookup.resolve({
+    source: 'device', content: '請核對備課時間', tool: 'calendar-action',
+    calendarTask: { state: 'review', proposal: {
+      owner: 'nuni:member', schoolId: 'pu', mutationId: 'sample-preview',
+      createdAt: '2026-11-23T09:00:00.000Z', event: { date: '2026-11-25',
+        title: '備課', startTime: '13:00', endTime: '14:00', allDay: false },
+    } },
+  }));
+  expect(view.getByRole('button', { name: '切換工作情境' })).toBeDisabled();
+  fireEvent.press(view.getByRole('button', { name: '先不要' }));
+  await selectWorkContext(view, '社團幹部');
+  expect(view.getByRole('button', { name: '安排明天下午一小時社團籌備' })).toBeTruthy();
+  expect(view.queryByRole('button', { name: '確認加入個人行事曆' })).toBeNull();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+test('an exploration entry opens the selected platform context with a draft and never sends automatically', async () => {
+  setPlatformFixture('member');
+  const route = { name: 'NuniTimetableAssistant', params: {
+    prompt: '安排明天下午一小時備課', taskProfile: 'teacher', draftEntryId: 'entry-teacher',
+  } };
+  const view = render(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe(route.params.prompt);
+  expect(view.getByText('工作助理')).toBeTruthy();
+  expect(request).not.toHaveBeenCalled();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  fireEvent.press(view.getByRole('button', { name: '送出問題' }));
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  expect(request.mock.calls[0][0]).toMatchObject({ taskProfile: 'teacher', platformTimetable: { accountId: 'member' } });
+});
+
+test('returning from exploration replaces the intended draft in an existing conversation without a send', async () => {
+  setPlatformFixture('member');
+  const route = { name: 'NuniTimetableAssistant', params: {
+    prompt: '下一堂課在哪裡', taskProfile: 'student', draftEntryId: 'entry-one',
+  } };
+  const view = render(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '尚未送出的舊草稿');
+  view.rerender(<CampusAssistantScreen route={{ ...route, params: {
+    prompt: '開啟店家工作區', taskProfile: 'merchant', draftEntryId: 'entry-two',
+  } }} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('開啟店家工作區');
+  expect(view.getByText('工作助理')).toBeTruthy();
+  expect(request).not.toHaveBeenCalled();
+});
+
+test.each(['account', 'session', 'school'] as const)('a new exploration handoff is accepted after a %s change in the same mounted screen', async (change) => {
+  setPlatformFixture('member');
+  const route = { name: 'NuniTimetableAssistant', params: {
+    prompt: '安排明天下午半小時盤點', taskProfile: 'merchant', draftEntryId: 'entry-original',
+  } };
+  const view = render(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  if (change === 'school') mockSchool = 'nthu';
+  else setPlatformFixture(change === 'account' ? 'other' : 'member', 'another-session');
+  view.rerender(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+
+  const next = { ...route, params: {
+    prompt: '安排明天下午一小時備課', taskProfile: 'teacher', draftEntryId: 'entry-fresh',
+  } };
+  view.rerender(<CampusAssistantScreen route={next} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe(next.params.prompt);
+  expect(view.getByText('工作助理')).toBeTruthy();
+  expect(request).not.toHaveBeenCalled();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(request.mock.calls[0][0]).toMatchObject({
+    taskProfile: 'teacher', platformTimetable: { accountId: change === 'account' ? 'other' : 'member' },
+    scope: { schoolId: change === 'school' ? 'nthu' : 'pu' },
+    messages: [{ role: 'user', content: next.params.prompt }],
+  });
+});
+
+test.each(['account', 'session', 'school'] as const)('a stale exploration entry cannot replay after a %s change or a newer handoff', async (change) => {
+  setPlatformFixture('member');
+  const route = { name: 'NuniTimetableAssistant', params: {
+    prompt: '安排明天下午半小時盤點', taskProfile: 'merchant', draftEntryId: 'entry-merchant',
+  } };
+  const view = render(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe(route.params.prompt);
+  if (change === 'school') mockSchool = 'nthu';
+  else setPlatformFixture(change === 'account' ? 'other' : 'member', 'another-session');
+  view.rerender(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  expect(view.queryByText('工作助理')).toBeNull();
+  expect(request).not.toHaveBeenCalled();
+
+  view.rerender(<CampusAssistantScreen route={{ ...route, params: {
+    prompt: '安排明天下午一小時備課', taskProfile: 'teacher', draftEntryId: 'entry-fresh',
+  } }} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('安排明天下午一小時備課');
+  view.rerender(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  expect(view.queryByText('工作助理')).toBeNull();
+
+  // Returning to the original account/campus must not revive its old entry ID.
+  mockSchool = 'pu';
+  setPlatformFixture('member');
+  view.rerender(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  expect(view.queryByText('工作助理')).toBeNull();
+  expect(request).not.toHaveBeenCalled();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+test.each(['session-loading', 'school-loading'] as const)('an exploration handoff waits for %s when its receiving identity stays the same', async (pending) => {
+  setPlatformFixture('member');
+  if (pending === 'session-loading') mockPlatform!.loading = true;
+  else mockSelectionReady = false;
+  const route = { name: 'NuniTimetableAssistant', params: {
+    prompt: '安排明天下午一小時備課', taskProfile: 'teacher', draftEntryId: 'entry-pending',
+  } };
+  const view = render(<CampusAssistantScreen route={route} />);
+  expect(request).not.toHaveBeenCalled();
+  mockPlatform!.loading = false;
+  mockSelectionReady = true;
+  view.rerender(<CampusAssistantScreen route={route} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe(route.params.prompt);
+  expect(view.getByText('工作助理')).toBeTruthy();
+  expect(view.queryByText('請重新帶入問題')).toBeNull();
+  expect(request).not.toHaveBeenCalled();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+test.each(['account', 'school'] as const)('a pending exploration handoff is discarded after a real %s change and offers recovery', async (change) => {
+  setPlatformFixture('member');
+  mockPlatform!.loading = true;
+  const route = { name: 'NuniTimetableAssistant', params: {
+    prompt: '安排明天下午一小時備課', taskProfile: 'teacher', draftEntryId: 'entry-pending',
+  } };
+  const navigation = { navigate: jest.fn(), getState: () => ({ routeNames: ['Explore'] }) };
+  const view = render(<CampusAssistantScreen route={route} navigation={navigation} />);
+  if (change === 'school') mockSchool = 'nthu';
+  else setPlatformFixture('other', 'another-session');
+  mockPlatform!.loading = false;
+  view.rerender(<CampusAssistantScreen route={route} navigation={navigation} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  expect(view.queryByText('工作助理')).toBeNull();
+  expect(view.getByText('請重新帶入問題')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '重新探索用法' }));
+  expect(navigation.navigate).toHaveBeenCalledWith('Explore', undefined);
+  expect(request).not.toHaveBeenCalled();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
 });

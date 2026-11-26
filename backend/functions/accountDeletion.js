@@ -2,6 +2,8 @@ const { FieldPath, FieldValue } = require('firebase-admin/firestore');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { assertPrivacyRequestOwner } = require('./userDataExport');
 const { releaseDeletedUserEventRegistration } = require('./eventRegistration');
+const { closeCampusStoryAccess } = require('./campusStoryAccessBinding');
+const { closeTronClassOwner } = require('./tronClassAccountLifecycle');
 
 const PAGE_SIZE = 200;
 // Account closure removes access and private account data. These shared records
@@ -166,9 +168,11 @@ function createDeleteUserAccountHandler({
 
     // Check responsibilities before removing anything. A retry also checks
     // current ownership, rather than trusting the state seen in a prior attempt.
+    const schoolMemberRefs = [];
     for (const collection of ['members', 'operators']) {
       await scanPages(db.collectionGroup(collection), async (doc) => {
         const kind = canonicalMembership(doc.ref.path, collection, uid);
+        if (kind === 'school') schoolMemberRefs.push(doc.ref);
         const active =
           kind === 'operator' ? doc.data().status !== 'inactive' : doc.data().status === 'active';
         if (!kind || !active || doc.data().role !== 'owner') return;
@@ -178,10 +182,30 @@ function createDeleteUserAccountHandler({
       });
     }
 
-    await userRef.set(
-      { accountDeletionInProgress: true, notificationDeliveryDisabled: true },
-      { merge: true },
-    );
+    await closeCampusStoryAccess({
+      db,
+      uid,
+      FieldValue,
+      memberRefs: schoolMemberRefs,
+      userUpdate: {
+        accountDeletionInProgress: true,
+        notificationDeliveryDisabled: true,
+        campusStoryBindingHaltKind: FieldValue.delete(),
+        campusStoryBindingHaltAt: FieldValue.delete(),
+      },
+    });
+
+    // Independent LMS bindings use provider-qualified owners, not ownerUid.
+    // Close their write barrier before erasing credentials and private ledgers.
+    // 獨立綁定只會替符合 TronClass 擁有者格式的 UID 建立；其他 UID 不可能有綁定，
+    // 略過即可，避免原本合法的刪帳被這個步驟擋住。
+    if (
+      /^[^\s/]{1,128}$/.test(uid) &&
+      ![...uid].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+    )
+      await closeTronClassOwner({ db, ownerKey: `firebase:${uid}`, now: () => currentTime });
+    // Isolated dorm cleanup: revoke dorm authority and erase new private records.
+    await require('./dormAccountDeletion').clearDormAccountData({ db, uid, scanPages });
 
     // Remove school authority first so ordinary membership-checked writes stop.
     for (const collection of ['members', 'directory', 'serviceRoles', 'operators']) {
@@ -225,6 +249,31 @@ function createDeleteUserAccountHandler({
       });
     }
 
+    // Public creator profiles can outlive school membership. Match the exact
+    // school path so unrelated collections with the same name remain intact.
+    await scanPages(db.collectionGroup('creatorProfiles'), async (doc) => {
+      const parts = doc.ref.path.split('/');
+      if (
+        parts.length === 4 &&
+        parts[0] === 'schools' &&
+        parts[2] === 'creatorProfiles' &&
+        parts[3] === uid
+      )
+        await doc.ref.delete();
+    });
+
+    // Featured-post pointers are also a new per-school author record.
+    await scanPages(db.collectionGroup('creatorHighlights'), async (doc) => {
+      const parts = doc.ref.path.split('/');
+      if (
+        parts.length === 4 &&
+        parts[0] === 'schools' &&
+        parts[2] === 'creatorHighlights' &&
+        parts[3] === uid
+      )
+        await doc.ref.delete();
+    });
+
     // Only the controlled event contract can release a seat. Old registration
     // records are retained rather than guessing how their counters work.
     await scanPages(db.collectionGroup('registrations').where('userId', '==', uid), async (doc) => {
@@ -232,6 +281,52 @@ function createDeleteUserAccountHandler({
       if (!(await releaseEventRegistration({ db, registrationRef: doc.ref, uid }))) {
         precondition('event-registration', '活動報名需要主辦人確認，帳號尚未刪除。');
       }
+    });
+
+    // Career records belong to the student uid, never the referenced teacher.
+    // Scan like other collection groups so deletion does not depend on a new
+    // collection-group uid index. Filter exact school paths and the owner uid.
+    for (const collection of ['careerApplications', 'internshipRecords']) {
+      await scanPages(db.collectionGroup(collection), async (doc) => {
+        const parts = doc.ref.path.split('/');
+        if (
+          parts.length === 4 &&
+          parts[0] === 'schools' &&
+          parts[2] === collection &&
+          doc.data()?.uid === uid
+        )
+          await db.recursiveDelete(doc.ref);
+      });
+    }
+
+    await scanPages(db.collectionGroup('clubMemberRecords'), async (doc) => {
+      const parts = doc.ref.path.split('/');
+      if (
+        parts.length === 4 &&
+        parts[0] === 'groups' &&
+        parts[2] === 'clubMemberRecords' &&
+        parts[3] === uid
+      )
+        await db.recursiveDelete(doc.ref);
+    });
+
+    // Keep the historical officer seat, replacing all personal/attribution fields.
+    await scanPages(db.collectionGroup('officers'), async (doc) => {
+      const parts = doc.ref.path.split('/');
+      if (
+        parts.length !== 6 ||
+        parts[0] !== 'schools' ||
+        parts[2] !== 'clubs' ||
+        parts[4] !== 'officers' ||
+        parts[5] !== uid
+      )
+        return;
+      const data = doc.data();
+      const placeholder = { accountClosed: true };
+      for (const field of ['role', 'confirmedAt']) {
+        if (data[field] !== undefined) placeholder[field] = data[field];
+      }
+      await doc.ref.set(placeholder);
     });
 
     for (const [collection, field] of [

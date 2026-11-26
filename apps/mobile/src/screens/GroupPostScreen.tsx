@@ -1,4 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
+import { PrivateAttachment } from '../ui/PrivateAttachment';
 import React, { useMemo, useState, useRef, useEffect, useSyncExternalStore } from 'react';
 import {
   ScrollView,
@@ -57,6 +59,7 @@ type Post = {
   kind: PostKind;
   title: string;
   body: string;
+  attachments?: string[];
   authorId: string;
   authorName?: string | null;
   authorAvatarUrl?: string | null;
@@ -663,6 +666,9 @@ export function GroupPostScreen(props: any) {
                   <Text style={{ color: theme.colors.text, lineHeight: 22, fontSize: 15 }}>
                     {post.body}
                   </Text>
+                  {privateAttachmentPaths(post.attachments).map((path) => (
+                    <PrivateAttachment key={path} path={path} />
+                  ))}
                 </>
               )}
 

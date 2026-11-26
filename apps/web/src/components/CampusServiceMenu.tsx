@@ -5,7 +5,7 @@ import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvi
 import Link from 'next/link';
 import { CampusIcon } from './CampusIcon';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import {
   visibleCampusServices,
   SERVICE_CATEGORIES,
@@ -13,9 +13,17 @@ import {
   writeCampusServiceFilters,
   countCampusSearchResults,
   secondaryCampusServices,
+  groupCampusServiceEntries,
   type CampusService,
   type ServiceCategory,
 } from '@/lib/campusServices';
+import {
+  forgetDirectorySearch,
+  rememberDirectorySearch,
+  restoreDirectorySearch,
+  expandedDirectorySections,
+} from '@/lib/campusDirectorySearch';
+import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
 import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import styles from './CampusServiceMenu.module.css';
 import {
@@ -47,7 +55,7 @@ function ServiceMenuLink({
   id: string;
   filtering: boolean;
   secondary?: boolean;
-  onClose: () => void;
+  onClose: (href: string) => void;
 }) {
   return (
     <Link
@@ -59,7 +67,9 @@ function ServiceMenuLink({
         service.href === '/food' && !isWebOnlineOrderingEnabled() ? `${id}-food-status` : undefined
       }
       aria-current={currentService === service.href ? 'page' : undefined}
-      onClick={onClose}
+      onClick={(event) => {
+        if (isCurrentTabNavigationClick(event, event.currentTarget)) onClose(href);
+      }}
     >
       <span className={styles.serviceName}>
         {service.name}
@@ -78,19 +88,61 @@ export function CampusServiceMenu() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const pathname = usePathname();
   const params = useSearchParams();
-  const currentService = visibleCampusServices(schoolLmsEnabled).filter((service) =>
-    campusServiceMatches(service.href, pathname, params),
-  ).sort((first, second) => second.href.length - first.href.length)[0]?.href;
+  const context = useCampusNavigationSearch(params);
+  const currentService = visibleCampusServices(schoolLmsEnabled)
+    .filter((service) => campusServiceMatches(service.href, pathname, params))
+    .sort((first, second) => second.href.length - first.href.length)[0]?.href;
   const menu = useRef<HTMLDetailsElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const results = useRef<HTMLDivElement>(null);
+  const directoryLink = useRef<HTMLAnchorElement>(null);
+  const skipToggleSideEffects = useRef(false);
+  const composing = useRef(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<ServiceCategory | 'all'>('all');
+  const [restoredExpanded, setRestoredExpanded] = useState<string[]>([]);
   const id = useId();
+  function assignMenuOpen(open: boolean) {
+    const element = menu.current;
+    if (!element || element.open === open) return;
+    skipToggleSideEffects.current = true;
+    element.open = open;
+    if (open) {
+      // 還原打開後，瀏覽器可能延遲派發 toggle，並在把焦點移回頁面時觸發 blur。
+      setTimeout(() => {
+        skipToggleSideEffects.current = false;
+      }, 0);
+      return;
+    }
+    skipToggleSideEffects.current = false;
+  }
+  useLayoutEffect(() => {
+    const snapshot = restoreDirectorySearch('menu', pathname || '/');
+    if (!snapshot) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRestoredExpanded([]);
+      return;
+    }
+    // Restore filters after history navigation back to this page.
+    setQuery(snapshot.query.slice(0, 100));
+    setCategory(snapshot.category);
+    setRestoredExpanded(snapshot.expanded ?? []);
+    if (!snapshot.open) return;
+    const previouslyFocused = document.activeElement;
+    assignMenuOpen(true);
+    if (
+      previouslyFocused instanceof HTMLElement &&
+      previouslyFocused !== document.activeElement &&
+      previouslyFocused.isConnected
+    ) {
+      previouslyFocused.focus({ preventScroll: true });
+    }
+  }, [pathname]);
   useEffect(() => {
     function dismiss(event: PointerEvent) {
       const element = menu.current;
       if (element?.open && event.target instanceof Node && !element.contains(event.target)) {
+        forgetDirectorySearch('menu');
         element.open = false;
       }
     }
@@ -123,21 +175,81 @@ export function CampusServiceMenu() {
   const matches = searchCampusServices(query, category, schoolLmsEnabled);
   const browsing = !query.trim();
   const filtering = browsing ? category !== 'all' : true;
-  const context = useCampusNavigationSearch(params);
   const href = (path: string) => campusServiceHref(path, context);
   const directoryParams = new URLSearchParams(context);
   writeCampusServiceFilters(directoryParams, query, category);
+  const directoryHref = campusServiceHref('/search', directoryParams.toString());
   function closeMenu() {
     if (!menu.current?.open) return;
-    menu.current.open = false;
+    assignMenuOpen(false);
     setQuery('');
     setCategory('all');
+    setRestoredExpanded([]);
     menu.current.querySelector('summary')?.focus({ preventScroll: true });
   }
+  function dismissMenu() {
+    forgetDirectorySearch('menu');
+    closeMenu();
+  }
+  function persistAndClose(destination: string) {
+    rememberDirectorySearch('menu', {
+      path: pathname || '/',
+      destination,
+      query,
+      category,
+      open: true,
+      expanded: expandedDirectorySections(results.current),
+    });
+    closeMenu();
+  }
   function resetSearch() {
+    forgetDirectorySearch('menu');
     setQuery('');
     setCategory('all');
+    setRestoredExpanded([]);
     search.current?.focus({ preventScroll: true });
+  }
+  function renderService(service: CampusService & { note?: string }) {
+    const children = browsing ? secondaryCampusServices(service.href, schoolLmsEnabled) : [];
+    return (
+      <div key={service.href} className={styles.serviceEntry}>
+        <ServiceMenuLink
+          service={service}
+          href={href(service.href)}
+          currentService={currentService}
+          id={id}
+          filtering={filtering}
+          onClose={persistAndClose}
+        />
+        {children.length > 0 && (
+          <details
+            className={styles.related}
+            data-directory-section={`service:${service.href}`}
+            open={
+              restoredExpanded.includes(`service:${service.href}`) ||
+              children.some((child) => child.href === currentService) ||
+              undefined
+            }
+          >
+            <summary aria-label={`${service.name}的相關服務`}>
+              相關服務 <span>{children.length}</span>
+            </summary>
+            {children.map((child) => (
+              <ServiceMenuLink
+                key={child.href}
+                service={child}
+                href={href(child.href)}
+                currentService={currentService}
+                id={id}
+                filtering={filtering}
+                secondary
+                onClose={persistAndClose}
+              />
+            ))}
+          </details>
+        )}
+      </div>
+    );
   }
   return (
     <details
@@ -146,19 +258,30 @@ export function CampusServiceMenu() {
       className={styles.menu}
       key={pathname}
       onToggle={(event) => {
+        // Nested service disclosures must not reset the surrounding search or menu.
+        if (event.target !== event.currentTarget) return;
+        if (skipToggleSideEffects.current) return;
         if (!event.currentTarget.open) {
           setQuery('');
           setCategory('all');
+          setRestoredExpanded([]);
         }
       }}
       onKeyDown={(event) => {
-        if (event.key === 'Escape' && !event.nativeEvent.isComposing && event.currentTarget.open) {
+        if (
+          event.key === 'Escape' &&
+          !composing.current &&
+          !event.nativeEvent.isComposing &&
+          event.nativeEvent.keyCode !== 229 &&
+          event.currentTarget.open
+        ) {
           event.preventDefault();
           event.stopPropagation();
-          closeMenu();
+          dismissMenu();
         }
       }}
       onBlur={(event) => {
+        if (skipToggleSideEffects.current) return;
         if (
           event.relatedTarget instanceof Node &&
           !event.currentTarget.contains(event.relatedTarget)
@@ -172,13 +295,13 @@ export function CampusServiceMenu() {
         aria-controls={`${id}-services`}
         aria-keyshortcuts="Control+k Meta+k"
         aria-current={primaryNavigationSection(pathname) === 'more' ? 'page' : undefined}
+        onClick={() => {
+          if (menu.current?.open) forgetDirectorySearch('menu');
+        }}
       >
         <CampusIcon name="services" size={17} />
         <span className={styles.desktopLabel} aria-hidden="true">
           所有服務
-        </span>
-        <span className={styles.mobileLabel} aria-hidden="true">
-          更多
         </span>
       </summary>
       <div className={styles.menuPanel} id={`${id}-services`}>
@@ -188,7 +311,7 @@ export function CampusServiceMenu() {
             type="button"
             className={styles.closeButton}
             aria-label="關閉所有服務"
-            onClick={closeMenu}
+            onClick={dismissMenu}
           >
             <svg
               viewBox="0 0 24 24"
@@ -209,44 +332,74 @@ export function CampusServiceMenu() {
           <label htmlFor={`${id}-query`} className={styles.searchLabel}>
             搜尋服務
           </label>
-          <div className={styles.searchField}>
-            <CampusIcon name="search" size={19} />
-            <input
-              ref={search}
-              id={`${id}-query`}
-              type="search"
-              autoComplete="off"
-              maxLength={100}
-              value={query}
-              placeholder="課表、借書、公車…"
-              aria-controls={`${id}-results`}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'ArrowDown' && !event.nativeEvent.isComposing) {
-                  const first =
-                    results.current?.querySelector<HTMLAnchorElement>('[data-service-link]');
-                  if (first) {
-                    event.preventDefault();
-                    first.focus();
-                  }
-                }
-              }}
-            />
-            {query ? (
-              <button
-                type="button"
-                className={styles.clearSearch}
-                onClick={() => {
-                  setQuery('');
-                  search.current?.focus({ preventScroll: true });
+          <form
+            className={styles.searchForm}
+            role="search"
+            aria-label="搜尋校園服務"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (composing.current) return;
+              // Use the same Next link as touch or
+              // pointer selection, rather than introducing a second route path.
+              directoryLink.current?.click();
+            }}
+          >
+            <div className={styles.searchField}>
+              <CampusIcon name="search" size={19} />
+              <input
+                ref={search}
+                id={`${id}-query`}
+                type="search"
+                autoComplete="off"
+                maxLength={100}
+                value={query}
+                placeholder="課表、借書、公車…"
+                aria-controls={`${id}-results`}
+                onCompositionStart={() => {
+                  composing.current = true;
                 }}
-              >
-                清除
-              </button>
-            ) : (
-              <kbd className={styles.shortcut}>⌘ / Ctrl K</kbd>
-            )}
-          </div>
+                onCompositionEnd={() => {
+                  composing.current = false;
+                }}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  const choosingCharacters =
+                    composing.current ||
+                    event.nativeEvent.isComposing ||
+                    event.nativeEvent.keyCode === 229;
+                  if (event.key === 'Enter' && choosingCharacters) {
+                    event.preventDefault();
+                    return;
+                  }
+                  if (event.key === 'ArrowDown' && !choosingCharacters) {
+                    const first =
+                      results.current?.querySelector<HTMLAnchorElement>('[data-service-link]');
+                    if (first) {
+                      event.preventDefault();
+                      first.focus();
+                    }
+                  }
+                }}
+              />
+              {query ? (
+                <button
+                  type="button"
+                  className={styles.clearSearch}
+                  onClick={() => {
+                    setQuery('');
+                    search.current?.focus({ preventScroll: true });
+                  }}
+                >
+                  清除
+                </button>
+              ) : (
+                <kbd className={styles.shortcut}>⌘ / Ctrl K</kbd>
+              )}
+            </div>
+            <button type="submit" className={styles.submitSearch}>
+              查看結果
+            </button>
+          </form>
           <div className={styles.filters} role="group" aria-label="快速篩選服務">
             <button
               type="button"
@@ -284,48 +437,47 @@ export function CampusServiceMenu() {
           id={`${id}-results`}
         >
           <Link
-            href={campusServiceHref('/search', directoryParams.toString())}
+            ref={directoryLink}
+            href={directoryHref}
             className={styles.menuOverview}
             aria-current={pathname === '/search' ? 'page' : undefined}
-            onClick={closeMenu}
+            onClick={(event) => {
+              if (isCurrentTabNavigationClick(event, event.currentTarget)) {
+                persistAndClose(directoryHref);
+              }
+            }}
           >
             尋找校園服務 <span aria-hidden="true">→</span>
           </Link>
           {SERVICE_CATEGORIES.map((group) => {
             const services = matches.filter((service) => service.category === group.id);
             if (!services.length) return null;
+            const entries = groupCampusServiceEntries(services, group.id, !filtering);
+            const currentInMore = entries.more.some(
+              (service) =>
+                service.href === currentService ||
+                secondaryCampusServices(service.href, schoolLmsEnabled).some(
+                  (child) => child.href === currentService,
+                ),
+            );
             return (
               <section key={group.id} className={styles.menuGroup} aria-label={group.label}>
                 <h2>{group.label}</h2>
-                {services.map((service) => {
-                  const children = browsing
-                    ? secondaryCampusServices(service.href, schoolLmsEnabled)
-                    : [];
-                  return (
-                    <div key={service.href} className={styles.serviceEntry}>
-                      <ServiceMenuLink
-                        service={service}
-                        href={href(service.href)}
-                        currentService={currentService}
-                        id={id}
-                        filtering={filtering}
-                        onClose={closeMenu}
-                      />
-                      {children.map((child) => (
-                        <ServiceMenuLink
-                          key={child.href}
-                          service={child}
-                          href={href(child.href)}
-                          currentService={currentService}
-                          id={id}
-                          filtering={filtering}
-                          secondary
-                          onClose={closeMenu}
-                        />
-                      ))}
-                    </div>
-                  );
-                })}
+                {entries.primary.map(renderService)}
+                {entries.more.length > 0 && (
+                  <details
+                    className={styles.moreServices}
+                    data-directory-section={`group:${group.id}`}
+                    open={
+                      restoredExpanded.includes(`group:${group.id}`) || currentInMore || undefined
+                    }
+                  >
+                    <summary>
+                      更多{categoryLabels[group.id]}服務 <span>{entries.more.length}</span>
+                    </summary>
+                    {entries.more.map(renderService)}
+                  </details>
+                )}
               </section>
             );
           })}

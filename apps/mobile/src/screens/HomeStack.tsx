@@ -5,7 +5,7 @@
  * 只保留核心路由：
  * - TodayHome: RoleAwareTodayScreen（今天）
  * - 公告/活動詳情
- * - 校園社群（唯一的社交入口）
+ * - 校園社群（舊連結相容入口，主要入口在交流）
  * - CampusGame：校園漫步原型（`campus://home/campus-game`）
  * - 智慧行事曆
  *
@@ -29,6 +29,7 @@ import RoleAwareTodayScreen from './RoleAwareTodayScreen';
 import AnnouncementDetailAiFirstScreen from './AnnouncementDetailAiFirstScreen';
 import AnnouncementsListAiFirstScreen from './AnnouncementsListAiFirstScreen';
 import EventDetailAiFirstScreen from './EventDetailAiFirstScreen';
+import { CampusEventCalendarDraftScreen } from './PersonalCalendarScreen';
 import EventsListAiFirstScreen from './EventsListAiFirstScreen';
 import { CampusAssistantScreen } from './CampusAssistantScreen';
 import { CommunityScreen } from './CommunityScreen';
@@ -36,6 +37,7 @@ import { BoardDetailScreen } from './social/BoardDetailScreen';
 import { PostComposeScreen } from './social/PostComposeScreen';
 import { PostDetailScreen } from './social/PostDetailScreen';
 import { StoryComposeScreen } from './social/StoryComposeScreen';
+import { CreatorProfileScreen } from './social/CreatorProfileScreen';
 import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
 import { CampusGameScreen } from './CampusGameScreen';
 
@@ -109,6 +111,11 @@ export function HomeStack() {
         options={{ title: '活動詳情', headerShown: false }}
       />
       <Stack.Screen
+        name="CampusEventCalendarDraft"
+        component={CampusEventCalendarDraftScreen}
+        options={{ title: '個人行事曆' }}
+      />
+      <Stack.Screen
         name="CampusSocialScreen"
         component={CommunityScreen}
         options={{ title: '校園社群', headerShown: false }}
@@ -119,6 +126,8 @@ export function HomeStack() {
         options={{ title: '校園漫步' }}
       />
       <Stack.Screen name="BoardDetail" component={BoardDetailScreen} options={{ title: '看板' }} />
+      {/* Separate route keeps the general anonymous draft mounted and untouched. */}
+      <Stack.Screen name="CreatorPostCompose" component={PostComposeScreen} options={{ title: '發表貼文' }} />
       <Stack.Screen name="PostCompose" component={PostComposeScreen} options={{ title: '發文' }} />
       <Stack.Screen
         name="StoryCompose"
@@ -126,6 +135,7 @@ export function HomeStack() {
         options={{ title: '發 Story' }}
       />
       <Stack.Screen name="PostDetail" component={PostDetailScreen} options={{ title: '貼文' }} />
+      <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} options={{ title: '校園個人頁' }} />
       <Stack.Screen
         name="SmartCalendarScreen"
         component={UnifiedCalendarScreen}

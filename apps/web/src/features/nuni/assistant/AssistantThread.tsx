@@ -1,17 +1,90 @@
-import Link from 'next/link';
-import { useEffect, useId, useRef } from 'react';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
+import { useAssistantWorkspaceHandoff } from '@/components/AssistantWorkspaceContext';
+import type { ReactNode } from 'react';
+import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
+import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
+import { parseAssistantPublicCourseResults } from '@campus/shared/src/assistantPublicCourseResults';
+import { parseAssistantFoodPickupIntent } from '@campus/shared/src/assistantFoodPickupIntent';
+import { getAssistantRoleProfile, type AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
+import { assistantRoleTaskGuide } from '@campus/shared/src/assistantRoleTasks';
+import { parseImportedAcademicIntent } from '@campus/shared/src/importedAcademicSummary';
+import { resolveAssistantServiceIntent } from '@campus/shared/src/assistantServices';
+import { AssistantRoleContext } from './AssistantRoleContext';
+import { PublicCourseAssistantResult } from '@/components/PublicCourseAssistantResult';
+import { useEffect, useId, useRef, useState } from 'react';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { SpokenReply } from '@/components/SpokenReply';
 import { AssistantCardStack } from './AssistantCards';
+import { AssistantTaskPlan } from './AssistantTaskPlan';
+import { AssistantCampusEvents } from './AssistantCampusEvents';
+import { parseCampusEventCommand, type AssistantCampusEventTarget } from '@/lib/assistantCampusEvent';
+import { parseCampusMapCommand } from '@/lib/nuni/assistantV2/campusMapRequest';
+import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
+import { isAssistantTaskRetryQuestion, type AssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
 import { AssistantMarkdown } from './AssistantMarkdown';
-import { SUGGESTIONS, stepFamily, stepStatus } from './copy';
+import { accountDemoAssistantIntent, type AccountDemoAssistantScope } from '@/lib/accountDemoAssistant';
+import { AccountDemoAssistantCard } from './AccountDemoAssistantCard';
+import { AssistantServiceLinks, LocalAssistantLinks } from '@/components/AssistantServiceLinks';
+import { TODAY_CONFLICT_QUESTION } from '@campus/shared/src/classCalendarOverlapQuestion';
+import { parseLocalScheduleIntent } from '@/lib/assistantLocalSchedule';
+import { personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
+import { canAnswerTronClassQuestion, tronClassExplicitNavigationQuestion } from '@/lib/tronClassAgentIntent';
+import { courseworkStudyFollowup, parseAssistantCourseworkTargets, type AssistantCourseworkTarget } from '@/lib/assistantCoursework';
+import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
+import { assistantPermissionSettingsHref, stepFamily, stepStatus } from './copy';
+import { assistantTaskProfileForWorkContext, assistantWorkContextForTaskProfile, assistantWorkContextFromQuestion, getAssistantRoleWorkflow, type AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
+import { AssistantRoleTasks } from './AssistantRoleTasks';
 import styles from './AssistantReply.module.css';
-import type { V2Turn } from './types';
+import draftStyles from './AssistantDraft.module.css';
+import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, restoreComposerDraft, sendComposerDraft } from './composerDraft';
+import type { V2ActionStates, V2Card, V2Turn } from './types';
+
+const PRIORITY_SUGGESTION = '今天先做什麼？';
+const PICKUP_SUGGESTION = '把最近訂單的取餐時間加入行事曆';
+
+/** Classify before any reader runs; the composer and execution must use the same source boundary. */
+export function assistantQuestionReadRoute(taskProfile: AssistantRoleProfileId, question: string) {
+  const query = question.trim();
+  const personal = personalAssistantReadIntent(query);
+  const schedule = parseLocalScheduleIntent(query);
+  const academic = parseImportedAcademicIntent(query);
+  const restricted = taskProfile !== 'student' && (personal?.kind === 'coursework' || personal?.kind === 'today-priority' || academic !== null || canAnswerTronClassQuestion(query));
+  const personalTime = schedule !== null || personal?.kind === 'schedule' || personal?.kind === 'calendar';
+  // A complete read intent is more precise than work-related keywords. Restricted
+  // sources receive fixed guidance even when their parser accepts unusual spacing.
+  const roleGuide = restricted ? assistantRoleTaskGuide(taskProfile, '我的工作')
+    : personalTime ? null : assistantRoleTaskGuide(taskProfile, query);
+  return {
+    roleGuide,
+    local: !restricted && !roleGuide && Boolean(resolveAssistantServiceIntent(query) || schedule || academic),
+    personal: !restricted && !roleGuide && personal !== null,
+    preferCampusReads: personal?.kind === 'calendar',
+  };
+}
+
+function ReplyBody({ reply }: { reply: V2Turn['reply'] }) {
+  if (parseAssistantTaskPlan(reply.taskPlan))
+    return <p>已逐項整理這次任務，結果與尚待處理的項目如下。</p>;
+  if (reply.local || reply.dataRead || reply.publicCourseResults !== undefined || reply.eventTargets !== undefined || reply.campusEventPreview)
+    return <div className={styles.prose}><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{reply.answer}</p></div>;
+  return <AssistantMarkdown text={reply.answer} />;
+}
+
+function PublicCourseResults({ results }: { results: unknown }) {
+  if (results === undefined) return null;
+  const reads = parseAssistantPublicCourseResults(results);
+  if (!reads) return <p className={styles.muted}>公開課程結果尚未通過核對，請重新查詢。</p>;
+  return reads.map((read, index) => <PublicCourseAssistantResult key={read.schoolId + ':' + index} read={read} />);
+}
 
 export function AssistantThread({
   inline = false,
   schoolId,
+  taskProfile = 'student',
+  onTaskProfile,
+  taskProfileLocked = false,
   ready,
+  foodPickupEnabled = false,
   fallback,
   consent,
   onConsent,
@@ -20,28 +93,67 @@ export function AssistantThread({
   turns,
   states,
   pending,
+  pendingLabel,
+  asking,
+  onStopAsk,
   error,
+  recoverableQuestion,
+  onRecoverQuestion,
   onAsk,
+  onStudyTarget,
+  onEventTarget,
+  eventBlockedReason,
+  onTaskRetry,
+  taskRetryForTurn,
   onStop,
   onConfirm,
   onCancel,
+  onReconcile,
+  demoScope,
+  renderPlanRevision,
+  renderPlanComparison,
+  renderTronClass,
+  allowBatchConfirmation,
+  preferredWorkContext,
 }: {
   inline?: boolean;
   schoolId: string;
+  taskProfile?: AssistantRoleProfileId;
+  onTaskProfile?: (profile: AssistantRoleProfileId) => void;
+  taskProfileLocked?: boolean;
   ready: boolean;
+  foodPickupEnabled?: boolean;
   fallback: boolean;
   consent: boolean;
   onConsent: (value: boolean) => void;
   question: string;
   onQuestion: (value: string) => void;
   turns: V2Turn[];
-  states: Record<string, string>;
+  states: V2ActionStates;
   pending: boolean;
+  pendingLabel?: string;
+  asking: boolean;
+  onStopAsk: () => void;
   error: string;
+  recoverableQuestion: string;
+  onRecoverQuestion: () => void;
   onAsk: () => void;
+  onStudyTarget?: (target: AssistantCourseworkTarget, date?: string) => void;
+  onEventTarget?: (turn: V2Turn, target: AssistantCampusEventTarget) => void;
+  eventBlockedReason?: string;
+  onTaskRetry?: (turn: V2Turn, stepIds: string[]) => void;
+  taskRetryForTurn?: (turn: V2Turn) => AssistantTaskRetry | null;
   onStop?: () => void;
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
+  onReconcile?: (card: V2Card) => void;
+  demoScope?: AccountDemoAssistantScope;
+  renderPlanRevision?: (turn: V2Turn) => ReactNode;
+  renderPlanComparison?: (turn: V2Turn) => ReactNode;
+  renderTronClass?: (turn: V2Turn) => ReactNode;
+  allowBatchConfirmation?: (turn: V2Turn) => boolean;
+  /** Display preference from an already-loaded workspace, never authorization. */
+  preferredWorkContext?: AssistantWorkContext;
 }) {
   const fieldId = useId();
   const log = useRef<HTMLDivElement>(null);
@@ -49,6 +161,47 @@ export function AssistantThread({
   const dock = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  const followLatest = useRef(true);
+  const revisionFocus = useRef(false);
+  const [showJump, setShowJump] = useState(false);
+  const [draft, setDraft] = useState(EMPTY_COMPOSER_DRAFT);
+  const [chosenWorkContext, setWorkContext] = useState<AssistantWorkContext | null>(null);
+  const [initialWorkContext] = useState(() => assistantWorkContextFromQuestion(question));
+  const manuallySelectedContext = useRef(false);
+  const workContext = chosenWorkContext ?? (onTaskProfile && taskProfile !== 'student'
+    ? assistantWorkContextForTaskProfile(taskProfile)
+    : preferredWorkContext ?? initialWorkContext);
+  // Only an explicit entry question initializes the task profile. Loaded workspace
+  // preferences affect examples only; a later manual selection takes priority.
+  useEffect(() => {
+    if (!onTaskProfile || taskProfileLocked || manuallySelectedContext.current || taskProfile !== 'student') return;
+    const next = assistantTaskProfileForWorkContext(initialWorkContext);
+    if (next !== taskProfile) onTaskProfile(next);
+  }, [onTaskProfile, taskProfileLocked, taskProfile, initialWorkContext]);
+  function chooseTaskProfile(next: AssistantRoleProfileId) {
+    if (taskProfileLocked) return;
+    manuallySelectedContext.current = true;
+    setWorkContext(assistantWorkContextForTaskProfile(next));
+    onTaskProfile?.(next);
+  }
+  function chooseWorkContext(next: AssistantWorkContext) {
+    // The inline workspace has one context control. Keep its displayed context
+    // aligned with the current operation while signed actions are unresolved.
+    if (inline && taskProfileLocked) return;
+    manuallySelectedContext.current = true;
+    setWorkContext(next);
+    if (!taskProfileLocked) onTaskProfile?.(assistantTaskProfileForWorkContext(next));
+  }
+  useAssistantWorkspaceHandoff(inline, (entry) => {
+    if (taskProfileLocked || pending || onStop) return {
+      ok: false,
+      message: '先完成、取消或核對目前的安排，再帶入新的問題與工作情境。原草稿尚未變更。',
+    };
+    if (entry.workContext) chooseWorkContext(entry.workContext);
+    onQuestion(entry.prompt);
+    return { ok: true };
+  });
+  const workflow = getAssistantRoleWorkflow(workContext);
   useEffect(() => {
     const root = shell.current;
     const node = dock.current;
@@ -62,14 +215,45 @@ export function AssistantThread({
     const observer = new ResizeObserver(apply);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [inline, turns.length, question, pending]);
+  }, [inline, turns.length, question, pending, draft]);
   useEffect(() => {
+    const node = log.current;
+    const scrollTarget = inline ? node : window;
+    if (!scrollTarget) return;
+    // The inline thread owns its scroll position; outer page scrolling must not change it.
+    const trackScroll = () => {
+      if (!end.current || turns.length === 0) return;
+      const nearLatest = inline && node
+        ? node.scrollHeight - node.clientHeight - Math.max(0, node.scrollTop) <= 48
+        : end.current.getBoundingClientRect().top - window.innerHeight <= 144;
+      followLatest.current = nearLatest;
+      setShowJump(!nearLatest);
+    };
+    scrollTarget.addEventListener('scroll', trackScroll, { passive: true });
+    return () => scrollTarget.removeEventListener('scroll', trackScroll);
+  }, [inline, turns.length]);
+  useEffect(() => {
+    if (!followLatest.current || (!turns.length && !pending && !error)) return;
+    const active = document.activeElement;
+    // After a disabled-control blur, a later external focus does not bubble
+    // through this thread. Treat a real destination differently from body/html.
+    if (revisionFocus.current && active instanceof Element && active !== document.body &&
+      active !== document.documentElement && !shell.current?.contains(active)) revisionFocus.current = false;
+    if (revisionFocus.current) {
+      // Reply updates must not move the form while someone is editing a plan.
+      // The existing jump action or a new question explicitly resumes following.
+      followLatest.current = false;
+      setShowJump(true);
+      return;
+    }
     if (inline) {
       if (log.current) log.current.scrollTop = log.current.scrollHeight;
       return;
     }
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
+    // Automatic updates must finish before the next keyboard interaction. An
+    // in-flight smooth scroll can outlive a later focus({ preventScroll: true }).
+    // Only the explicit jump action below requests animated scrolling.
+    end.current?.scrollIntoView({ behavior: 'instant', block: 'end' });
   }, [inline, turns, pending, error]);
   useEffect(() => {
     const node = field.current;
@@ -78,48 +262,105 @@ export function AssistantThread({
     node.style.height = Math.min(node.scrollHeight, 132) + 'px';
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
+  const navigation = taskProfile === 'student' && !!tronClassExplicitNavigationQuestion(question);
+  const tronClass = taskProfile === 'student' && canAnswerTronClassQuestion(question);
+  const publicCompound = !tronClass && publicCourseCompoundRequest(question, schoolId);
+  const publicCourseIntent = !tronClass && !publicCompound && resolvePublicCourseAssistantIntent(question, schoolId);
+  const profile = getAssistantRoleProfile(taskProfile)!;
+  const foodPickup = !tronClass && taskProfile === 'student' && parseAssistantFoodPickupIntent(question) !== null;
+  const readRoute = assistantQuestionReadRoute(taskProfile, question);
+  const useProfileExamples = taskProfile !== 'student' && workContext === assistantWorkContextForTaskProfile(taskProfile);
+  const studentWork = taskProfile === 'student' && workContext === 'student';
+  const suggestions = useProfileExamples ? profile.examples.map(example => example.prompt)
+    : [...(studentWork ? [PRIORITY_SUGGESTION] : []), ...workflow.suggestions,
+      ...(studentWork ? [TODAY_CONFLICT_QUESTION] : []),
+      ...(foodPickupEnabled && taskProfile === 'student' ? [PICKUP_SUGGESTION] : [])];
+  const canSubmit = !pending && !onStop && !!question.trim() &&
+    ((!!demoScope && !!accountDemoAssistantIntent(question)) || readRoute.roleGuide || (foodPickup ? foodPickupEnabled
+      : tronClass || navigation || parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) ||
+        (onTaskRetry && isAssistantTaskRetryQuestion(question)) ||
+        (!publicCompound && (!!publicCourseIntent || readRoute.local || readRoute.personal ||
+          (onStudyTarget && taskProfile === 'student' && courseworkStudyFollowup(question) !== null))) || (consent && ready)));
+  function submitQuestion() {
+    // Rejected keyboard/form submits must not resume automatic scrolling.
+    if (!canSubmit) return;
+    revisionFocus.current = false;
+    followLatest.current = true;
+    setShowJump(false);
+    setDraft(sendComposerDraft(draft, question));
+    onAsk();
+  }
   function applyChip(phrase: string) {
-    onQuestion(phrase);
+    const next = chooseComposerSuggestion(draft, question, phrase);
+    setDraft(next.draft);
+    if (next.question !== question) onQuestion(next.question);
     field.current?.focus();
   }
+  function restoreDraft() {
+    const next = restoreComposerDraft(draft, question);
+    setDraft(next.draft);
+    if (next.question !== question) onQuestion(next.question);
+    field.current?.focus();
+  }
+  const consentDescription = <>
+    同意在本次對話將問題、對話紀錄及必要課表、作業、匯入紀錄摘要（成績欄位會遮罩）、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
+    Groq
+    {fallback ? '；若主要模型無法連線，可能改送到 Cloudflare Workers AI' : ''}
+  </>;
   const consentControl = (
     <label className={styles.consent}>
       <input type="checkbox" checked={consent} onChange={(e) => onConsent(e.target.checked)} />
-      同意在本次對話將問題、對話紀錄及必要課表、作業、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
-      Groq
-      {fallback ? '；若主要模型無法連線，可能改送到 Cloudflare Workers AI' : ''}
+      {consentDescription}
     </label>
   );
+  const workContextControl = <AssistantRoleTasks context={workContext} onContext={chooseWorkContext} schoolId={schoolId}
+    linkedServiceIds={turns.flatMap(turn => turn.reply.roleGuide ? turn.reply.serviceIds ?? [] : [])}
+    disabled={inline && taskProfileLocked} compact={inline || turns.length > 0} />;
+  const availabilityNotice = !ready ? (
+    <p className={styles.notice} role={inline ? undefined : 'status'}>
+      {taskProfile === 'student'
+        ? '雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也能使用已授權的 TronClass、查校園地點、核對下一堂課教室，從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。'
+        : '雲端回答暫時無法使用，仍可核對保存的個人行程，或從下方建議接續目前的工作。'}
+      {foodPickupEnabled && taskProfile === 'student' ? '也能把最近訂單的取餐時間排入個人行事曆，確認後才會儲存。' : ''}
+    </p>
+  ) : null;
   return (
-    <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2">
+    <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2"
+      onFocusCapture={event => {
+        const target = event.target;
+        // Keep this intent if pending disables the editor and the browser blurs it.
+        // A deliberate focus elsewhere in this thread replaces the intent.
+        revisionFocus.current = target instanceof HTMLElement && !!log.current?.contains(target) &&
+          !!target.closest('[data-assistant-plan-revision="true"]');
+      }}
+      onBlurCapture={event => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && !event.currentTarget.contains(next)) revisionFocus.current = false;
+      }}>
+      {!inline && onTaskProfile && <AssistantRoleContext value={taskProfile} disabled={taskProfileLocked} onChange={chooseTaskProfile} />}
       {!inline && (
         <>
-          <p className={styles.intro}>課表與事件僅包含已同步資料；建立個人事件不會發送推播提醒。</p>
+          <p className={styles.intro}>{taskProfile === 'student'
+            ? '直接查課程、時間、教室與未交作業，也可查個人行程。連接並授權後，可請助理查詢 TronClass、下載教材與準備作業。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。'
+            : '查詢自己的行程與公開校園資訊，或接續目前的工作。個人時間安排會先預覽，確認後才儲存。'}</p>
           <nav className={styles.services} aria-label="校園服務入口">
-            <Link href={'/map' + schoolQuery}>校園地圖</Link>
-            <Link href={'/bus' + schoolQuery}>公車資訊</Link>
-            <Link href={'/cafeteria' + schoolQuery}>餐廳資訊</Link>
+            <AssistantReplyLink href={'/map' + schoolQuery}>校園地圖</AssistantReplyLink>
+            <AssistantReplyLink href={'/bus' + schoolQuery}>公車資訊</AssistantReplyLink>
+            <AssistantReplyLink href={'/cafeteria' + schoolQuery}>餐廳資訊</AssistantReplyLink>
           </nav>
         </>
       )}
-      {!ready ? (
-        <p className={styles.notice} role="status">
-          模型目前無法使用。
-        </p>
-      ) : null}
-      {inline && turns.length > 0 && consent ? (
-        <details className={styles.consentSettings}>
-          <summary>本次對話的資料使用設定</summary>
-          {consentControl}
-        </details>
-      ) : consentControl}
-      <div ref={log} className={styles.log} role="log" aria-busy={pending || undefined}>
+      {!inline && workContextControl}
+      {!inline && availabilityNotice}
+      {!inline && consentControl}
+      <div ref={log} className={styles.log} role="log" aria-label="對話紀錄"
+        tabIndex={inline ? 0 : undefined} aria-busy={pending || undefined}>
         {!inline && turns.length === 0 && !pending ? (
           <div className={styles.empty}>
-            <h2>今天想問什麼？</h2>
-            <p>可以問作業截止、下一堂課、校園餐廳或幫你排一段讀書時間。回覆會整理成卡片，需你確認後才會寫入。</p>
+            <h2>{taskProfile === 'student' ? '今天想問什麼？' : profile.title}</h2>
+            <p>{taskProfile === 'student' ? '選一個問題後，可以在下方修改再送出。安排個人行程時，會先提供確認卡。' : profile.description}</p>
             <div className={styles.chips}>
-              {SUGGESTIONS.map((phrase) => (
+              {suggestions.map((phrase) => (
                 <button key={phrase} type="button" className={styles.chip} onClick={() => applyChip(phrase)}>
                   {phrase}
                 </button>
@@ -128,7 +369,7 @@ export function AssistantThread({
           </div>
         ) : null}
         {turns.map((turn, i) => (
-          <article className={styles.turn} key={i}>
+          <article className={styles.turn} style={i === turns.length - 1 ? undefined : { animation: 'none' }} key={i}>
             <div className={`${styles.row} ${styles.rowUser}`}>
               <div className={`${styles.bubble} ${styles.bubbleUser}`}>
                 <p>{turn.question}</p>
@@ -136,12 +377,41 @@ export function AssistantThread({
             </div>
             <div className={`${styles.row} ${styles.rowAssistant}`}>
               <div className={`${styles.bubble} ${styles.bubbleAssistant}`}>
-                {inline ? (
+                {turn.publicCourse?.read ? <PublicCourseAssistantResult read={turn.publicCourse.read} /> : turn.publicCourse ? <p>{turn.reply.answer}</p> : inline ? (
                   <SpokenReply text={turn.reply.answer} disabled={pending}>
-                    <AssistantMarkdown text={turn.reply.answer} />
+                    <ReplyBody reply={turn.reply} />
                   </SpokenReply>
-                ) : <AssistantMarkdown text={turn.reply.answer} />}
+                ) : <ReplyBody reply={turn.reply} />}
+                {renderTronClass?.(turn)}
+                {turn.reply.roleGuide && turn.reply.serviceIds && <AssistantServiceLinks serviceIds={turn.reply.serviceIds} schoolId={schoolId} audience="platform" />}
+                {onStudyTarget && taskProfile === 'student' && parseAssistantCourseworkTargets(turn.reply.courseworkTargets).length > 0 ? (
+                  <div className={styles.courseworkChoices} role="group" aria-label="安排作業準備時間">
+                    <p className={styles.muted}>先找時段並預覽，確認後才加入個人行程。</p>
+                    {parseAssistantCourseworkTargets(turn.reply.courseworkTargets).map((target) => (
+                      <button key={target.workspaceId + ':' + target.kind + ':' + target.taskId}
+                        type="button" className={styles.courseworkChoice}
+                        disabled={pending || !!onStop}
+                        aria-label={`替${target.courseTitle}的${target.title}安排30分鐘`}
+                        onClick={() => onStudyTarget(target, turn.reply.courseworkDate)}>
+                        <strong>{target.title}</strong>
+                        <span>{target.courseTitle} · {formatTaipeiDateTime(target.dueAt, { seconds: false })} 截止</span>
+                        <span className={styles.courseworkAction}>安排 30 分鐘</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                <AssistantCampusEvents targets={turn.reply.eventTargets} schoolId={schoolId}
+                  pending={pending || !!onStop} blockedReason={eventBlockedReason}
+                  sourceOnly={turn.reply.campusEventPreview === true}
+                  onSelect={onEventTarget ? target => onEventTarget(turn, target) : undefined} />
+                {turn.reply.local && <LocalAssistantLinks result={turn.reply.local} schoolId={schoolId} audience="platform" />}
+                {turn.reply.demo ? <p className={styles.sim}>本人帳號展示資料</p> : null}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
+                <AssistantTaskPlan schoolId={schoolId} plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states}
+                  retry={taskRetryForTurn ? taskRetryForTurn(turn) : turn.reply.taskRetry}
+                  pending={pending || !!onStop}
+                  onRetry={onTaskRetry ? stepIds => onTaskRetry(turn, stepIds) : undefined} />
+                <PublicCourseResults results={turn.reply.publicCourseResults} />
                 {turn.reply.steps.length ? (
                   <details className={styles.sources}>
                     <summary>查了哪些資料</summary>
@@ -156,13 +426,22 @@ export function AssistantThread({
                 ) : null}
               </div>
             </div>
+            {renderPlanComparison?.(turn)}
             <AssistantCardStack
               cards={turn.reply.cards}
+              allowBatchConfirmation={allowBatchConfirmation?.(turn) ?? true}
               states={states}
               pending={pending}
               onConfirm={onConfirm}
               onCancel={(index) => onCancel(turn, index)}
+              onReconcile={onReconcile}
             />
+            {demoScope && turn.reply.demo?.proposal && <AccountDemoAssistantCard
+              key={JSON.stringify([demoScope.context, demoScope.accountId, demoScope.schoolId, turn.reply.demo.proposal.id])}
+              proposal={turn.reply.demo.proposal}
+              scope={demoScope}
+            />}
+            {!turn.reply.campusEventPreview && renderPlanRevision?.(turn)}
           </article>
         ))}
         {pending ? (
@@ -171,49 +450,102 @@ export function AssistantThread({
               <span aria-hidden="true" />
               <span aria-hidden="true" />
               <span aria-hidden="true" />
-              <span className={styles.muted}>正在整理回覆</span>
+              <span className={styles.muted}>{pendingLabel ?? (asking ? '正在整理回覆' : '正在核對操作結果')}</span>
+              {asking ? (
+                <button type="button" className={styles.stopReply} onClick={onStopAsk} data-assistant-stop-read="true">
+                  停止這次回答
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}
         {error ? (
           <p className={styles.alert} role="alert">
             {error}
+            {assistantPermissionSettingsHref(error) && <>
+              {' '}<AssistantReplyLink href={assistantPermissionSettingsHref(error)!}>設定 AI 代辦權限</AssistantReplyLink>
+            </>}
           </p>
+        ) : null}
+        {recoverableQuestion ? (
+          <div className={styles.recover} role="group" aria-label="未完成的問題">
+            <p>未完成的問題已保留，切換時不會刪除現在的草稿。</p>
+            <p className={styles.recoverText}>{recoverableQuestion}</p>
+            <button type="button" disabled={pending} onClick={onRecoverQuestion}>
+              切換到這個問題
+            </button>
+          </div>
         ) : null}
         <div ref={end} className={styles.logEnd} />
       </div>
       <div ref={dock} className={styles.composerDock}>
+        {showJump ? (
+          <button
+            type="button"
+            className={styles.jumpLatest}
+            onClick={() => {
+              revisionFocus.current = false;
+              followLatest.current = true;
+              setShowJump(false);
+              if (inline) {
+                // Keep the homepage in place and leave keyboard focus on a persistent target.
+                const node = log.current;
+                if (node) {
+                  node.focus({ preventScroll: true });
+                  node.scrollTop = node.scrollHeight;
+                }
+              } else {
+                const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+                end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
+              }
+            }}
+          >
+            回到最新回覆
+          </button>
+        ) : null}
         {turns.length > 0 && !inline ? (
           <div className={`${styles.chips} ${styles.chipsCompact}`} aria-label="建議問題">
-            {SUGGESTIONS.map((phrase) => (
+            {suggestions.map((phrase) => (
               <button key={phrase} type="button" className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>
             ))}
           </div>
         ) : null}
+        {draft.saved !== null ? (
+          <div className={draftStyles.restore} role="group" aria-label="已保留的輸入內容">
+            <span>另有一份草稿已保留</span>
+            <button type="button" onClick={restoreDraft}>切換保留草稿</button>
+          </div>
+        ) : null}
+        {draft.notice ? <p className={draftStyles.notice} role="status">{draft.notice}</p> : null}
         <form
           className={styles.composer}
           aria-label="傳送問題"
           onSubmit={(e) => {
             e.preventDefault();
-            onAsk();
+            submitQuestion();
           }}
         >
           <label htmlFor={fieldId}>問題</label>
           <textarea
             id={fieldId}
-            readOnly={pending}
+            aria-describedby={`${fieldId}-hint`}
             ref={field}
             value={question}
             maxLength={1000}
             rows={1}
-            placeholder={inline && turns.length ? '接著問…' : '輸入問題'}
-            onChange={(e) => onQuestion(e.target.value)}
+            placeholder={inline && turns.length ? '接著問…' : useProfileExamples ? profile.placeholder : workflow.placeholder}
+            onChange={(e) => {
+              setDraft(editComposerDraft(draft));
+              onQuestion(e.target.value);
+            }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              // In Chinese/Japanese IMEs Enter selects a candidate; it is not a send gesture.
+              if (e.key === 'Enter' && !e.shiftKey &&
+                  !e.nativeEvent.isComposing && e.keyCode !== 229) {
                 e.preventDefault();
-                onAsk();
+                submitQuestion();
               }
             }}
           />
@@ -221,6 +553,7 @@ export function AssistantThread({
             <VoiceDictationButton
               disabled={pending || !ready}
               onTranscript={(text) => {
+                setDraft(editComposerDraft(draft));
                 onQuestion([question.trim(), text.trim()].filter(Boolean).join(' ').slice(0, 1000));
                 field.current?.focus();
               }}
@@ -239,21 +572,45 @@ export function AssistantThread({
               停止回答
             </button>
           ) : (
-            <button key="send" className={styles.send} disabled={!consent || !ready || pending || !question.trim()}>
+            <button key="send" className={styles.send} disabled={!canSubmit}>
               送出
             </button>
           )}
         </form>
-        {inline && ready && !turns.length && !question && !pending && (
+        <p id={`${fieldId}-hint`} className={styles.composerHint}>
+          {pending ? '正在處理上一個問題，可以先輸入下一句。' : 'Enter 送出 · Shift + Enter 換行'}
+        </p>
+        {inline && (studentWork || ready || foodPickupEnabled) && !turns.length && !question && !pending && (
           <div className={styles.chips} aria-label="試著問">
-            {['下一堂課在哪裡？', '這週有哪些作業要交？'].map((phrase) => (
+            {(studentWork ? [PRIORITY_SUGGESTION, '下一堂課在哪裡？', '這週有哪些作業要交？', TODAY_CONFLICT_QUESTION, ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
               <button type="button" key={phrase} className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>
             ))}
           </div>
         )}
+        {publicCourseIntent && <p className={styles.muted}>直接查詢校方公開資料；到查課頁核對後再匯入課表。</p>}
       </div>
+      {inline && (
+        <div className={styles.workspacePreferences}>
+          {workContextControl}
+          {taskProfileLocked && <p className={styles.workspaceHint}>先完成或取消目前的安排，再切換工作情境。</p>}
+          {!ready && <p className={styles.workspaceHint} role="status">雲端回答暫時無法使用，仍可查已接通的資料與校園服務。</p>}
+          <div className={styles.inlineSettings}>
+            <label className={styles.inlineConsent}>
+              <input type="checkbox" checked={consent} aria-describedby={`${fieldId}-data-use`}
+                onChange={(event) => onConsent(event.target.checked)} />
+              同意在本次對話使用 Groq 雲端回答
+            </label>
+            <details className={styles.consentSettings}>
+              <summary>本次對話的資料使用設定</summary>
+              <p id={`${fieldId}-data-use`} className={styles.workspaceHint}>{consentDescription}</p>
+              <p className={styles.workspaceHint}>工作情境只調整任務建議；資料查詢和操作仍依你原有的權限開放。可隨時取消上方同意。</p>
+              {availabilityNotice}
+            </details>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -48,16 +48,16 @@ it('preserves school context and source on detail and login URLs', () => {
   expect(
     buildCampusEventDetailHref('evt-1', 'school-club-events', '?schoolId=nthu&campus=nthu'),
   ).toBe('/events/evt-1?schoolId=nthu&campus=nthu&source=school-club-events');
-  expect(
+  const destination = new URL(
     buildCampusEventLoginHref('/events/evt-1?schoolId=nthu&source=school-club-events'),
-  ).toContain('reconnect=school');
-  expect(
-    decodeURIComponent(
-      buildCampusEventLoginHref('/events/evt-1?schoolId=nthu&source=school-club-events').split(
-        'returnUrl=',
-      )[1]!,
-    ),
-  ).toBe('/events/evt-1?schoolId=nthu&source=school-club-events');
+    'https://campus.local',
+  );
+  expect(destination.pathname).toBe('/login');
+  expect(Object.fromEntries(destination.searchParams)).toEqual({
+    reconnect: 'school',
+    returnUrl: '/events/evt-1?schoolId=nthu&source=school-club-events',
+    schoolId: 'nthu',
+  });
 });
 
 it('rejects invalid sources and treats missing dates as unknown', () => {
@@ -117,4 +117,12 @@ it('filters loaded items locally and hides raw English internals', () => {
   expect(userFacingCampusEventError(new Error('這次沒有存成報名紀錄'), '後備')).toBe(
     '這次沒有存成報名紀錄',
   );
+});
+
+it('keeps the saved view in return links with the campus context and only when it is on', () => {
+  expect(readCampusEventFilters({ saved: '1', q: '講座' })).toEqual({ q: '講座', view: 'all', saved: true });
+  expect(readCampusEventFilters({ saved: 'true' })).toEqual({ q: '', view: 'all' });
+  expect(buildCampusEventListHref('?schoolId=nthu&campus=nthu&saved=1&x=1', { q: '', view: 'all', saved: true }))
+    .toBe('/events?schoolId=nthu&campus=nthu&saved=1');
+  expect(buildCampusEventListHref('?schoolId=nthu&saved=1')).toBe('/events?schoolId=nthu');
 });

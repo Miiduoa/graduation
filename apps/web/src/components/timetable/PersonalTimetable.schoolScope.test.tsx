@@ -149,6 +149,7 @@ it('restores the configured grid after switching from an unknown period school',
   const view = render(<PersonalTimetable />);
   await screen.findByText(/尚未取得這所學校的節次時間/);
   context.schoolId = 'pu';
+  context.records = [record('pu', 'pu-course', '靜宜課程')];
   view.rerender(<PersonalTimetable />);
   expect(await screen.findByRole('button', { name: '格子' })).toBeTruthy();
   expect(screen.queryByText(/尚未取得這所學校的節次時間/)).toBeNull();
@@ -179,8 +180,9 @@ it('does not show a manual and imported copy of the same class as conflicting co
   await screen.findAllByText('同一門課');
   fireEvent.click(screen.getByRole('button', { name: '一週' }));
   // The date-specific schedule correctly repeats a title already in the weekly baseline.
-  // Its <strong> is not a second weekly course; count only the weekly <h4> cards.
-  expect(screen.getAllByRole('heading', { name: '同一門課', level: 4 })).toHaveLength(1);
+  // It is not a second weekly course; count only the weekly agenda rows.
+  const week = screen.getByRole('region', { name: '一週課程' });
+  expect(within(week).getAllByRole('button', { name: /同一門課/ })).toHaveLength(1);
   expect(screen.queryByRole('region', { name: '衝堂' })).toBeNull();
 });
 
@@ -202,7 +204,7 @@ it('resets the timetable and importer when the browsing school changes', async (
 it('does not offer a school login link for sharing when student ID sign-in is closed', async () => {
   context.schoolId = 'pu';
   const view = render(<PersonalTimetable />);
-  await screen.findByRole('button', { name: '新增課程' });
+  await screen.findByRole('region', { name: '還沒有課表' });
   expect(screen.getByText(SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY)).toBeTruthy();
   expect(screen.queryByText(SHARE_NEEDS_SCHOOL_LOGIN_COPY)).toBeNull();
   expect(screen.queryByText(/這個功能還沒接通/)).toBeNull();
@@ -226,15 +228,20 @@ it('offers school login for sharing only when student ID sign-in is open', async
   context.schoolId = 'pu';
   context.signIn.studentId = true;
   render(<PersonalTimetable />);
-  await screen.findByRole('button', { name: '新增課程' });
+  await screen.findByRole('region', { name: '還沒有課表' });
   expect(screen.getByText(SHARE_NEEDS_SCHOOL_LOGIN_COPY, { exact: false })).toBeTruthy();
   expect(screen.queryByText(SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY)).toBeNull();
-  expect(screen.getByRole('link', { name: '登入學校帳號' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Ftimetable%3Fcampus%3Dpu',
-  );
-  expect(screen.getByRole('link', { name: '登入查看好友' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Ftimetable%3Fcampus%3Dpu',
-  );
+  for (const name of ['登入學校帳號', '登入查看好友']) {
+    const destination = new URL(
+      screen.getByRole('link', { name }).getAttribute('href')!,
+      'https://campus.local',
+    );
+    expect(destination.pathname).toBe('/login');
+    expect(Object.fromEntries(destination.searchParams)).toEqual({
+      returnUrl: '/timetable?campus=pu',
+      campus: 'pu',
+    });
+  }
   expect(screen.queryByRole('button', { name: '複製分享連結' })).toBeNull();
 });
 
@@ -249,7 +256,7 @@ it.each([
     context.signIn.error = error;
     context.signIn.studentId = true;
     render(<PersonalTimetable />);
-    await screen.findByRole('button', { name: '新增課程' });
+    await screen.findByRole('region', { name: '還沒有課表' });
     expect(screen.getByText(SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY)).toBeTruthy();
     expect(screen.queryByText(SHARE_NEEDS_SCHOOL_LOGIN_COPY)).toBeNull();
     expect(screen.queryByRole('link', { name: '登入學校帳號' })).toBeNull();

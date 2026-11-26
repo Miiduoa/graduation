@@ -284,3 +284,58 @@ test('無關未知提醒只回傳警告，仍可取得本作業收據', async ()
   expect(receipt.reminderWarning).toContain('仍可能響鈴');
   expect(transaction.set).toHaveBeenCalled();
 });
+
+test.each([
+  'groups/course/assignments/work/submissions/other/file.pdf',
+  'groups/course/posts/post/file.pdf',
+  'groups/course/cover.jpg',
+])('rejects attachments outside the submission namespace: %s', async (url) => {
+  await expect(firebaseSource.submitAssignment({
+    groupId: 'course', assignmentId: 'work', userId: 'alice', content: 'answer',
+    attachments: [{ id: url, url, name: 'file.pdf', type: 'document' }],
+  })).rejects.toThrow('附件不屬於此文件');
+  expect(runTransaction).not.toHaveBeenCalled();
+});
+
+const reviewedText = { assignmentId: 'work', userId: 'alice', groupId: 'course', content: 'Answer' };
+const filePath = (name: string) => `groups/course/assignments/work/submissions/alice/${name}.pdf`;
+
+test('clears the last reviewed attachment when finalizing a legacy draft', async () => {
+  const original = filePath('original');
+  transaction.get.mockReset().mockResolvedValueOnce(document({}))
+    .mockResolvedValueOnce(document({ attachments: [original] }));
+  await firebaseSource.submitAssignment({ ...reviewedText, attachments: [] }, [original]);
+  expect(transaction.set).toHaveBeenCalledWith(expect.anything(),
+    expect.objectContaining({ attachments: [] }), { merge: true });
+});
+
+test.each([
+  { label: 'new file', current: [{ url: filePath('extra') }], expected: [] },
+  { label: 'deleted file', current: [], expected: [filePath('removed')] },
+  { label: 'unrecognized entry', current: [{ name: 'unrecognized' }], expected: [] },
+  { label: 'changed order', current: [filePath('two'), filePath('one')], expected: [filePath('one'), filePath('two')] },
+])('requires another review when draft attachments have changed ($label)', async ({ current, expected }) => {
+  transaction.get.mockReset().mockResolvedValueOnce(document({}))
+    .mockResolvedValueOnce(document({ attachments: current }));
+  await expect(firebaseSource.submitAssignment({ ...reviewedText, attachments: [] }, expected))
+    .rejects.toThrow('請重新核對');
+  expect(transaction.set).not.toHaveBeenCalled();
+});
+
+test('withholds confirmation and reminder updates when the receipt omits a reviewed upload', async () => {
+  const file = { id: 'file', url: filePath('notes'), name: 'notes.pdf', type: 'document' as const };
+  await expect(firebaseSource.submitAssignment({ ...reviewedText, attachments: [file] }, []))
+    .rejects.toThrow('繳交結果尚未確認');
+  expect(transaction.set).toHaveBeenCalledWith(expect.anything(),
+    expect.objectContaining({ attachments: [file] }), { merge: true });
+  expect(reconcileSubmittedAssignmentReceipt).not.toHaveBeenCalled();
+});
+
+test('a renamed file at the same URL must be reviewed before finalizing the draft', async () => {
+  const original = { id: 'file', url: filePath('notes'), name: '草稿.pdf', type: 'document' as const };
+  transaction.get.mockReset().mockResolvedValueOnce(document({}))
+    .mockResolvedValueOnce(document({ attachments: [{ ...original, name: '定稿.pdf' }] }));
+  await expect(firebaseSource.submitAssignment({ ...reviewedText, attachments: [original] }, [original]))
+    .rejects.toThrow('請重新核對');
+  expect(transaction.set).not.toHaveBeenCalled();
+});

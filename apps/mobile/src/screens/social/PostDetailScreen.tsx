@@ -439,7 +439,13 @@ export function PostDetailScreen(props: any) {
                     <Text style={styles.avatarLetter}>{authorShown().slice(0, 1)}</Text>
                   </View>
                 )}
-                <Text style={styles.author}>{authorShown()}</Text>
+                {!post.anonymous && post.authorUid ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`查看 ${authorShown()} 的個人頁`}
+                    onPress={() => props?.navigation?.navigate?.('CreatorProfile', { memberUid: post.authorUid, schoolId: school?.id })}
+                  ><Text style={styles.author}>{authorShown()}</Text></Pressable>
+                ) : <Text style={styles.author}>{authorShown()}</Text>}
               </View>
               <Pressable hitSlop={8} onPress={openMenu} accessibilityLabel="貼文操作">
                 <Ionicons name="ellipsis-horizontal" size={18} color={theme.colors.textSecondary} />

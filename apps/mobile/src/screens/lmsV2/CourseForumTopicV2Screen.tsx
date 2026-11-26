@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useAuth } from '../../state/auth';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { View, Text, TextInput, Pressable, ScrollView, Alert, StyleSheet } from 'react-native';
@@ -14,6 +15,7 @@ import {
 
 export default function CourseForumTopicV2Screen() {
   const styles = useThemeStyleSheet(createStyles);
+  const { user } = useAuth();
   const { courseId, topicId, courseName } = useCourseV2Params();
   const [reply, setReply] = useState('');
   const [posting, setPosting] = useState(false);
@@ -33,7 +35,7 @@ export default function CourseForumTopicV2Screen() {
       .order('created_at', { ascending: true })
       .limit(200);
     return { topic, posts: (posts ?? []).filter((p: any) => !p.deleted_at) };
-  });
+  }, JSON.stringify([courseId, topicId, user?.uid]));
 
   const handlePost = async () => {
     if (!reply.trim() || !topicId) return;

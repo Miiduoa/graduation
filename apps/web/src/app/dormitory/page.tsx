@@ -1,4 +1,5 @@
 'use client';
+import type { DormCloudRepair } from '@campus/shared/src/dormitoryCloud';
 
 import { useEffect, useRef, useState } from 'react';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
@@ -7,6 +8,7 @@ import {
   DORM_INSPECTION_ITEMS,
   DORM_MILESTONE_LIMIT,
   DORM_PARCEL_LIMIT,
+  DORM_REPAIR_COPY,
   DORM_REPAIR_REFERENCE_LIMIT,
   DORM_REPAIR_SHORTCUTS,
   DORM_REPAIR_CATEGORIES,
@@ -38,6 +40,11 @@ import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from './dormitory.module.css';
 
+
+import { DormWorkflow } from '@/components/dorm/DormWorkflow';
+import { subscribeDormCloud } from './cloud';
+import { emptyDormCloud, dormCloudDate, dormParcelReturnNotice, DORM_CLOUD_REPAIR_LABELS, DORM_PACKAGES_EMPTY } from '@campus/shared/src/dormitoryCloud';
+
 type View = 'overview' | 'guide' | 'repairs' | 'parcels' | 'dates' | 'checklist' | 'laundry';
 type StorageState =
   | { status: 'loading' }
@@ -49,10 +56,13 @@ type RepairDraft = {
   location: string;
   description: string;
   reference: string;
+  availability: string;
+  followUpDate: string;
+  followUpNote: string;
 };
 
 type ParcelDraft = { title: string; pickupPoint: string; dueDate: string };
-const EMPTY_REPAIR: RepairDraft = { category: 'other', title: '', location: '', description: '', reference: '' };
+const EMPTY_REPAIR: RepairDraft = { category: 'other', title: '', location: '', description: '', reference: '', availability: '', followUpDate: '', followUpNote: '' };
 const EMPTY_PARCEL: ParcelDraft = { title: '', pickupPoint: '', dueDate: '' };
 const VIEWS: ReadonlyArray<{ id: View; label: string }> = [
   { id: 'overview', label: '總覽' },
@@ -64,6 +74,21 @@ const VIEWS: ReadonlyArray<{ id: View; label: string }> = [
   { id: 'laundry', label: '洗衣計時' },
 ];
 
+function PickupIdentity({ identity, onClose }: { identity: { studentId: string; name: string } | null; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const node = dialog.current;
+    if (node && typeof node.showModal === 'function') node.showModal();
+    else node?.setAttribute('open', '');
+  }, []);
+  return <dialog ref={dialog} aria-label="領取碼" className={styles.handoff} onCancel={onClose} style={{ maxWidth: 'min(90vw, 480px)' }}>
+    <h3>領取碼</h3><p>請出示給服務台核對。這是身分頁，不是取件密碼；由服務台確認領取。</p>
+    {identity ? <><p style={{ fontSize: 34 }}>{identity.studentId}</p><p style={{ fontSize: 34 }}>{identity.name}</p></>
+      : <p>目前無法讀取學號與姓名，請出示學生證給服務台核對。</p>}
+    <button type="button" onClick={onClose}>關閉領取碼</button>
+  </dialog>;
+}
+
 function RepairHandoff({ schoolId, category, location, followUp = false }: {
   schoolId: string;
   category: DormRepairCategory;
@@ -71,11 +96,11 @@ function RepairHandoff({ schoolId, category, location, followUp = false }: {
   followUp?: boolean;
 }) {
   const route = resolveDormRepairRoute(schoolId, category, location);
-  if (!route) return <p className={styles.muted}>請向這所學校的住宿服務單位確認報修方式。</p>;
+  if (!route) return <p className={styles.muted}>{DORM_REPAIR_COPY.missingRoute}</p>;
   const trackingUrl = followUp ? route.trackingUrl : undefined;
   return (
-    <div className={styles.handoff} role="group" aria-label="校方報修管道">
-      <strong>校方報修管道</strong>
+    <div className={styles.handoff} role="group" aria-label={DORM_REPAIR_COPY.officialChannelTitle}>
+      <strong>{DORM_REPAIR_COPY.officialChannelTitle}</strong>
       <p>{route.detail}</p>
       <div className={styles.actions}>
         {trackingUrl !== route.url && (
@@ -83,7 +108,7 @@ function RepairHandoff({ schoolId, category, location, followUp = false }: {
             rel="noopener noreferrer">{route.label}</a>
         )}
         {trackingUrl && <a className={styles.external} href={trackingUrl} target="_blank" rel="noopener noreferrer">
-          {route.trackingLabel ?? '查詢校方報修進度'}
+          {route.trackingLabel ?? DORM_REPAIR_COPY.officialTrackingFallback}
         </a>}
       </div>
     </div>
@@ -96,6 +121,23 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
   schoolName: string;
   guest: boolean;
 }) {
+  const { user } = useAuth();
+  const cloudUid = user?.uid;
+  const [cloud, setCloud] = useState(() => emptyDormCloud(!cloudUid));
+  const [cloudRetry, setCloudRetry] = useState(0);
+  const [showIdentity, setShowIdentity] = useState(false);
+  const [ownRepairs, setOwnRepairs] = useState<DormCloudRepair[]>([]);
+  const tonightRepairs = [...cloud.repairs.filter(r => !r.official), ...ownRepairs];
+  const [tonightLeave, setTonightLeave] = useState(false);
+  useEffect(() => {
+    if (!cloudUid) return;
+    let active = true;
+    try { return subscribeDormCloud(schoolId, cloudUid, setCloud); }
+    catch {
+      void Promise.resolve().then(() => { if (active) setCloud({ ...emptyDormCloud(), packagesState: 'error', repairsState: 'error' }); });
+      return () => { active = false; };
+    }
+  }, [schoolId, cloudUid, cloudRetry]);
   const [storage, setStorage] = useState<StorageState>({ status: 'loading' });
   const [view, setView] = useState<View>('overview');
   const [notice, setNotice] = useState('');
@@ -210,7 +252,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
     setPendingId(null);
     const residence = storage.status === 'ready' ? storage.data : null;
     setRepairDraft(repair
-      ? { title: repair.title, category: repair.category, location: repair.location, description: repair.description, reference: repair.reference ?? '' }
+      ? { title: repair.title, category: repair.category, location: repair.location, description: repair.description, reference: repair.reference ?? '', availability: repair.availability ?? '', followUpDate: repair.followUpDate ?? '', followUpNote: repair.followUpNote ?? '' }
       : {
         ...EMPTY_REPAIR,
         category: shortcut?.category ?? 'other',
@@ -223,19 +265,17 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
     setView('repairs');
   }
 
-  async function copyRepair(repair: DormRepair, part: 'description' | 'reference') {
-    const value = part === 'reference' ? repair.reference : formatDormRepairForCopy(repair);
+  async function copyRepair(repair: DormRepair) {
+    const value = formatDormRepairForCopy(repair);
     if (!value) return;
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
       await navigator.clipboard.writeText(value);
       setSaveError('');
-      setNotice(part === 'reference' ? '已複製校方單號。' : '已複製問題說明，請依該校正式管道通報。');
+      setNotice('已複製問題說明，請依該校正式管道通報。');
     } catch {
       setNotice('');
-      setSaveError(part === 'reference'
-        ? '無法自動複製。請選取畫面上的校方單號，手動複製。'
-        : '無法自動複製。請選取問題文字，手動複製後交給住宿服務單位。');
+      setSaveError('無法自動複製。請選取問題文字，手動複製後交給住宿服務單位。');
     }
   }
 
@@ -249,6 +289,9 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
       setSaveError('本裝置最多保留 80 筆紀錄，請先整理舊資料。');
       return;
     }
+    if (repairDraft.followUpDate && !isValidDormDate(repairDraft.followUpDate)) {
+      setSaveError('請填寫有效的追問日期。'); return;
+    }
     const current = data.repairs.find((item) => item.id === editingId);
     const id = editingId ?? pendingId ?? ('repair_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9));
     setPendingId(id);
@@ -259,6 +302,9 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
       location: repairDraft.location.trim(),
       description: repairDraft.description.trim(),
       reference: repairDraft.reference.trim(),
+      availability: repairDraft.availability.trim(),
+      followUpDate: repairDraft.followUpDate,
+      followUpNote: repairDraft.followUpNote.trim(),
       status: current?.status ?? 'draft',
       createdAt: current?.createdAt ?? Date.now(),
       updatedAt: Date.now(),
@@ -389,10 +435,10 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
   return (
     <SiteShell title="宿舍" subtitle="住宿安排與生活紀錄，依目前選擇的學校顯示。" schoolName={schoolName}>
       <div className={styles.stack}>
+        {view === 'overview' && <DormWorkflow schoolId={schoolId} uid={cloudUid} building={data.building} room={data.room} onTonightLeaveChange={setTonightLeave} onOwnRepairsChange={setOwnRepairs} />}
         <section className={styles.hero}>
           <div className={styles.heroIntro}>
-            <p className={styles.eyebrow}>{schoolName} / 住宿生活</p>
-            <h2>{data.building || '住得安心，事情好處理'}</h2>
+            <h2>{data.building || '我的住宿紀錄'}</h2>
             <p>{data.room
               ? '寢室 ' + data.room + (data.bed ? ' · ' + data.bed : '') + '｜你自己的住宿紀錄'
               : '把要辦的事、需要修的設備和重要日期放在一起。住宿資格仍以校方系統為準。'}</p>
@@ -403,8 +449,8 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
             </div>
           </div>
           <div className={styles.heroStats} aria-label="個人紀錄快捷入口">
-            <button type="button" onClick={() => setView('parcels')}><strong>{pendingParcels.length}</strong><span>待領包裹</span></button>
-             <button type="button" onClick={() => setView('repairs')}><strong>{openRepairs.length}</strong><span>待追蹤問題</span></button>
+            <button type="button" onClick={() => setView('parcels')}><strong>{pendingParcels.length}</strong><span>我記的待領包裹</span></button>
+             <button type="button" onClick={() => setView('repairs')}><strong>{openRepairs.length}</strong><span>{DORM_REPAIR_COPY.openIssues}</span></button>
             <button type="button" onClick={() => setView('dates')}><strong>{milestones.filter((item) => !item.completed).length}</strong><span>待辦日期</span></button>
             <button type="button" onClick={() => setView('checklist')}><strong>{progress.completed}/{progress.total}</strong><span>準備進度</span></button>
           </div>
@@ -423,7 +469,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
           <p className={styles.note}>目前是訪客模式。紀錄只保存在此瀏覽器，不會在登入後自動轉到其他帳號，也不會同步到手機。</p>
         )}
         {!guest && (
-          <p className={styles.note}>此處是個人管理工具，資料僅保存在這台裝置；切換帳號或校園後會使用不同紀錄，不代表學校正式申請資料。</p>
+          <p className={styles.note}>此處是個人管理工具，「我自己記的」僅存在這台裝置；登錄的包裹與報修備忘紀錄從目前帳號的雲端資料讀取。</p>
         )}
         {conflict && (
           <section className={styles.warning} role="alert">
@@ -435,10 +481,25 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
         {saveError && <p role="alert" className={styles.error}>{saveError}</p>}
         {notice && <p role="status" className={styles.success}>{notice}</p>}
 
+        {view === 'overview' && <section className={styles.panel} aria-label="今晚宿舍">
+          <h3>今晚宿舍</h3>
+          {cloud.packagesState === 'loading' || cloud.repairsState === 'loading' ? <p role="status">正在讀取宿舍待辦…</p> : null}
+          {cloud.packagesState === 'error' || cloud.repairsState === 'error' ? <p role="alert">雲端待辦暫時無法讀取。<button type="button" onClick={() => setCloudRetry(n => n + 1)}>重試雲端紀錄</button></p> : null}
+          {cloud.packages.some(p => p.status === 'waiting' && !p.postal) && <button type="button" style={{ height: 56, display: 'block', width: '100%', textAlign: 'left' }} onClick={() => setView('parcels')}>
+            待領包裹 {cloud.packages.filter(p => p.status === 'waiting' && !p.postal).length} 件 · 最早到件 {dormCloudDate(cloud.packages.find(p => p.status === 'waiting' && !p.postal)?.arrivedAt ?? null)}
+          </button>}
+          {tonightRepairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && <button type="button" style={{ height: 56, display: 'block', width: '100%', textAlign: 'left' }} onClick={() => setView('repairs')}>
+            {tonightRepairs.some(r => r.official) ? '報修處理中' : '報修備忘待辦'} {tonightRepairs.filter(r => r.status && r.status !== 'closed' && r.status !== 'cancelled').length} 件 · {DORM_CLOUD_REPAIR_LABELS[tonightRepairs.find(r => r.status && r.status !== 'closed' && r.status !== 'cancelled')!.status!]}
+          </button>}
+          {!!data.laundryEndAt && remaining > 0 && <button type="button" style={{ height: 56, display: 'block', width: '100%', textAlign: 'left' }} onClick={() => setView('laundry')}>洗衣倒數 {remaining} 分鐘</button>}
+          {tonightLeave && <p style={{ minHeight: 56, display: 'flex', alignItems: 'center' }}>外宿已登記（已核可）</p>}
+          {!tonightLeave && !cloud.packages.some(p => p.status === 'waiting' && !p.postal) && !tonightRepairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && !(data.laundryEndAt && remaining > 0) && !['loading', 'error'].includes(cloud.packagesState) && !['loading', 'error'].includes(cloud.repairsState) && <p>今晚沒有待辦。</p>}
+        </section>}
+
         {view === 'overview' && (
           <div className={styles.columns}>
             <section className={styles.panel}>
-              <div className={styles.sectionTitle}><div><p className={styles.eyebrow}>個人資料</p><h3>我的住宿資訊</h3></div><span className={styles.status}>僅此裝置</span></div>
+              <div className={styles.sectionTitle}><div><h3>我的住宿資訊</h3></div><span className={styles.status}>僅此裝置</span></div>
               <p className={styles.muted}>這是自己保存的備忘，不會變更校方床位或住宿資格。</p>
               <div className={styles.formGrid}>
                 <label>宿舍或學苑名稱<input maxLength={70} value={infoDraft.building} onChange={(e) => setInfoDraft({ ...infoDraft, building: e.target.value })} placeholder="例如：○○學苑" /></label>
@@ -522,11 +583,28 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
 
         {view === 'repairs' && (
           <section className={styles.panel}>
+            <div className={styles.handoff}><strong>緊急請直接打服務台</strong>
+              <p>漏水、斷電或受困請先聯絡現場人員，勿等待報修紀錄。</p>
+              {guide ? <a href={'tel:' + guide.officePhone}>{guide.officePhone} 轉 {guide.officeExtensions}</a> : <p>請依住宿指南或宿舍現場公告撥打服務台電話。</p>}
+            </div>
+            <DormWorkflow schoolId={schoolId} uid={cloudUid} building={data.building} room={data.room} onTonightLeaveChange={setTonightLeave} onOwnRepairsChange={setOwnRepairs} />
+            <h3>雲端報修備忘</h3>
+            <p>此應用沒有將備忘送到學校。以下狀態僅是備忘標記，無法據此確認校方收件或設備修復；請依校方正式管道通報並確認。</p>
+            {cloud.repairsState === 'loading' && <p role="status">正在讀取報修紀錄…</p>}
+            {cloud.repairsState === 'guest' && <p>登入校園帳號後可讀取自己的雲端報修備忘。</p>}
+            {cloud.repairsState === 'error' && <p role="alert">報修紀錄讀取失敗，請確認帳號及網路。<button type="button" onClick={() => setCloudRetry(n => n + 1)}>重試雲端紀錄</button></p>}
+            {cloud.repairsState === 'ready' && !cloud.repairs.length && <p>目前沒有雲端報修備忘。</p>}
+            <ul className={styles.repairs}>{cloud.repairs.filter(item => !item.official).map(item => <li key={item.id}>
+              <h4>{item.title}</h4><p>{item.location}</p>
+              {!item.status && <p>備忘狀態不明，請確認原始紀錄。</p>}
+              <ol>{item.steps.map(step => <li key={step.status}>{DORM_CLOUD_REPAIR_LABELS[step.status]} · {dormCloudDate(step.at)}</li>)}</ol>
+            </li>)}</ul>
+            <h3>我自己記的</h3>
             <div className={styles.sectionTitle}>
-              <div><p className={styles.eyebrow}>MAINTENANCE NOTES</p><h3>設備問題紀錄</h3></div>
+              <div><h3>設備問題紀錄</h3></div>
               <button type="button" className={styles.primary} onClick={() => beginRepair()}>＋ 記錄問題</button>
             </div>
-            <p className={styles.muted}>儲存只是個人備忘，不會送出報修。已向校方通報的狀態由你自行註記，不是校方系統回覆。</p>
+            <p className={styles.muted}>{DORM_REPAIR_COPY.intro}</p>
             {!editorOpen && data.repairs.length === 0 && <RepairHandoff schoolId={schoolId} category="other" location={data.building} />}
             {!editorOpen && <div className={styles.shortcutBar} aria-label="常見設備問題">
               <span>快速記錄</span>
@@ -561,12 +639,19 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
                   <label>問題名稱 *<input required minLength={2} maxLength={90} value={repairDraft.title} onChange={(e) => setRepairDraft({ ...repairDraft, title: e.target.value })} placeholder="例如：浴室水龍頭持續滴水" /></label>
                   <label>類別<select value={repairDraft.category} onChange={(e) => setRepairDraft({ ...repairDraft, category: e.target.value as DormRepairCategory })}>{Object.entries(DORM_REPAIR_CATEGORIES).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
                   <label>位置<input maxLength={100} value={repairDraft.location} onChange={(e) => setRepairDraft({ ...repairDraft, location: e.target.value })} placeholder="例如：浴室洗手台" /></label>
-                  <label>校方報修單號（選填）<input maxLength={DORM_REPAIR_REFERENCE_LIMIT} value={repairDraft.reference}
-                    onChange={(e) => setRepairDraft({ ...repairDraft, reference: e.target.value })} placeholder="收到校方單號後再填寫" /></label>
+                  <label>{DORM_REPAIR_COPY.referenceLabel}<input maxLength={DORM_REPAIR_REFERENCE_LIMIT} value={repairDraft.reference} placeholder={DORM_REPAIR_COPY.referencePlaceholder} onChange={(e) => setRepairDraft({ ...repairDraft, reference: e.target.value })} /></label>
+                  <label>可聯繫時段／入室協調（選填）<input maxLength={160} value={repairDraft.availability} placeholder="例如：平日 18 點後可聯繫，入室前請先協調"
+                    onChange={(e) => setRepairDraft({ ...repairDraft, availability: e.target.value })} /></label>
+                  <label>下次追問日期（選填）<input type="date" min="2000-01-01" max="2099-12-31" value={repairDraft.followUpDate}
+                    onChange={(e) => setRepairDraft({ ...repairDraft, followUpDate: e.target.value })} /></label>
+                  <label className={styles.wide}>聯繫紀錄（自行記錄）<textarea rows={3} maxLength={1200} value={repairDraft.followUpNote}
+                    placeholder="例如：11/14 致電服務台，請我明天補充照片；不是校方系統回覆"
+                    onChange={(e) => setRepairDraft({ ...repairDraft, followUpNote: e.target.value })} /></label>
                   <label className={styles.wide}>詳細狀況<textarea rows={4} maxLength={1200} value={repairDraft.description} onChange={(e) => setRepairDraft({ ...repairDraft, description: e.target.value })} placeholder="故障情況、開始時間、需要注意的事項" /></label>
                 </div>
+                <DormWorkflow schoolId={schoolId} uid={cloudUid} building={data.building} room={data.room} draft={repairDraft} submitOnly />
                 <RepairHandoff schoolId={schoolId} category={repairDraft.category} location={repairDraft.location} followUp={!!repairDraft.reference.trim()} />
-                <div className={styles.actions}><button type="submit" className={styles.primary}>儲存紀錄</button><button type="button" className={styles.secondary} onClick={() => { setEditorOpen(false); setEditingId(null); setPendingId(null); }}>取消</button></div>
+                <div className={styles.actions}><button type="submit" className={styles.primary}>{DORM_REPAIR_COPY.saveMemo}</button><button type="button" className={styles.secondary} onClick={() => { setEditorOpen(false); setEditingId(null); setPendingId(null); }}>取消</button></div>
               </form>
             )}
             <div className={styles.filters} role="group" aria-label="問題狀態篩選">
@@ -582,17 +667,24 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
                     <div className={styles.repairHead}><div><span className={styles.category}>{DORM_REPAIR_CATEGORIES[item.category]}</span><h4>{item.title}</h4></div><span className={styles.status}>{DORM_REPAIR_STATUSES[item.status]}</span></div>
                     {item.location && <p>位置：{item.location}</p>}
                     {item.description && <p className={styles.description}>{item.description}</p>}
-                    {item.reference && <p className={styles.description}>自行登記的校方單號　<strong>{item.reference}</strong></p>}
+                    {item.reference && <p>{DORM_REPAIR_COPY.referenceDisplay}：{item.reference}</p>}
+                    {item.availability && <p>可聯繫時段／入室協調：{item.availability}</p>}
+                    {item.followUpDate && item.status !== 'resolved' && <p>{item.followUpDate <= today ? '追問日期已到／已過' : '下次追問'}：{item.followUpDate}</p>}
+                    {item.followUpNote && <p className={styles.description}>聯繫紀錄（自行記錄）：{item.followUpNote}</p>}
                     {(!editorOpen || editingId !== item.id) && (
                       <RepairHandoff schoolId={schoolId} category={item.category} location={item.location} followUp={item.status !== 'draft' || !!item.reference} />
                     )}
                     <p className={styles.source}>最後更新：{item.updatedAt ? new Date(item.updatedAt).toLocaleDateString('zh-TW') : '未記錄'}</p>
                     <div className={styles.actions}>
                       <button type="button" onClick={() => beginRepair(item)}>編輯</button>
-                      <button type="button" onClick={() => void copyRepair(item, 'description')}>複製通報文字</button>
-                      {item.reference && <button type="button" onClick={() => void copyRepair(item, 'reference')}>複製單號</button>}
+                      <button type="button" onClick={() => void copyRepair(item)}>複製內容</button>
+                      {item.reference && <button type="button" onClick={async () => {
+                        try { await navigator.clipboard.writeText(item.reference!); setSaveError(''); setNotice('已複製編號。'); }
+                        catch { setNotice(''); setSaveError('無法複製，請手動選取編號。'); }
+                      }}>複製編號</button>}
                       {item.status === 'draft' && <button type="button" onClick={() => save({ ...data, repairs: data.repairs.map((r) => r.id === item.id ? { ...r, status: 'reported', updatedAt: Date.now() } : r) })}>我已自行通報</button>}
                       {item.status !== 'resolved' && <button type="button" onClick={() => save({ ...data, repairs: data.repairs.map((r) => r.id === item.id ? { ...r, status: 'resolved', updatedAt: Date.now() } : r) })}>我已確認修復</button>}
+                      {item.status === 'resolved' && <button type="button" onClick={() => save({ ...data, repairs: data.repairs.map(r => r.id === item.id ? { ...r, status: 'draft', updatedAt: Date.now() } : r) })}>重新開啟備忘</button>}
                       {deleteId === item.id ? (
                         <><button className={styles.danger} type="button" onClick={() => { if (save({ ...data, repairs: data.repairs.filter((r) => r.id !== item.id) })) setDeleteId(null); }}>確認刪除</button><button type="button" onClick={() => setDeleteId(null)}>保留</button></>
                       ) : <button type="button" onClick={() => setDeleteId(item.id)}>刪除</button>}
@@ -600,18 +692,37 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
                   </li>
                 ))}
               </ul>
-            ) : <div className={styles.empty}><h4>這個狀態還沒有紀錄</h4><p>遇到設備問題時可以先記下細節，再到校方正式管道辦理。</p></div>}
+            ) : <div className={styles.empty}><h4>這個狀態還沒有紀錄</h4><p>{DORM_REPAIR_COPY.emptyHint}</p></div>}
           </section>
         )}
 
 
-        {view === 'parcels' && (
+        {view === 'parcels' && (<>
+          <section className={styles.panel} aria-label="校方登錄包裹">
+            <h3>校方登錄包裹</h3>
+            {cloud.packagesState === 'loading' && <p role="status">正在讀取包裹…</p>}
+            {cloud.packagesState === 'guest' && <p>登入校園帳號後可讀取自己的包裹。</p>}
+            {cloud.packagesState === 'error' && <p role="alert">包裹讀取失敗，私有包裹暫時保留上次紀錄，可能尚未更新。請確認帳號及網路。<button type="button" onClick={() => setCloudRetry(n => n + 1)}>重試雲端紀錄</button></p>}
+            {cloud.packagesState === 'ready' && !cloud.packages.filter(p => !p.postal).length && <p>{DORM_PACKAGES_EMPTY}</p>}
+            <ul className={styles.milestones}>{cloud.packages.filter(p => !p.postal).map(item => <li key={item.id}>
+              <div><h4>{item.title}</h4><p>到件日：{dormCloudDate(item.arrivedAt)}</p><p>領取地點：{item.location}</p>
+                <p>{item.status === 'waiting' ? '待領取' : item.status === 'collected' ? '已領取' : '已退件'}</p>
+                {dormParcelReturnNotice(item, now) && <p className={styles.muted}>{dormParcelReturnNotice(item, now)}</p>}
+              </div>
+              {item.status === 'waiting' && <button type="button" onClick={() => setShowIdentity(true)}>領取碼</button>}
+            </li>)}</ul>
+            {showIdentity && <PickupIdentity identity={cloud.identity} onClose={() => setShowIdentity(false)} />}
+          </section>
+          <section className={styles.panel}><h3>行政大樓收發室</h3><p>掛號包裹請看收發室公告</p></section>
           <section className={styles.panel}>
             <div className={styles.sectionTitle}>
-              <div><p className={styles.eyebrow}>取件備忘</p><h3>包裹與郵件</h3></div>
+              <div><p className={styles.eyebrow}>取件備忘</p><h3>我自己記的</h3></div>
               <button type="button" className={styles.primary} onClick={() => beginParcel()}>＋ 記錄包裹</button>
             </div>
             <p className={styles.muted}>自行記下要領的包裹或掛號郵件。此處沒有接入學校收發室、物流追蹤或自動取件通知；請勿儲存取件驗證碼。</p>
+            <p className={styles.muted}>官方包裹查詢未串接。請先到校方住宿網站確認查件方式或聯絡收發室，再記下待領事項。</p>
+            {official ? <a className={styles.external} href={official.url} target="_blank" rel="noopener noreferrer">到校方確認包裹查詢方式 ↗</a>
+              : <p className={styles.muted}>目前沒有這所學校的住宿入口，請從學校官網尋找住宿單位。</p>}
             {!parcelEditorOpen && <div className={styles.shortcutBar} aria-label="快速記錄包裹">
               <span>快速開始</span>
               {['網購包裹', '掛號郵件', '其他物品'].map((title) =>
@@ -668,12 +779,12 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
             ) : <div className={styles.empty}><h4>目前沒有{parcelFilter === 'collected' ? '已領取' : parcelFilter === 'all' ? '' : '待領取'}的紀錄</h4>
               <p>收到領件通知後，簡單記下物品與領取地點即可。</p></div>}
           </section>
-        )}
+        </>)}
 
         {view === 'dates' && (
           <section className={styles.panel}>
             <div className={styles.sectionTitle}>
-              <div><p className={styles.eyebrow}>個人行程</p><h3>重要日期</h3></div>
+              <div><h3>重要日期</h3></div>
               <button type="button" className={styles.primary} onClick={() => beginMilestone()}>＋ 新增日期</button>
             </div>
             <p className={styles.muted}>自行記下申請、繳費、搬入與退宿日期。這裡不會自動讀取校方期限，也不會送出申請或通知。</p>
@@ -719,10 +830,10 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
 
         {view === 'checklist' && (
           <div className={styles.checklist}>
-            <div className={styles.panel}><p className={styles.eyebrow}>PERSONAL CHECKLIST</p><h3>入住與退宿清單</h3><p>勾選只記錄自己的準備進度，不會建立校方申請。總進度：{progress.completed} / {progress.total}</p><progress max={progress.total} value={progress.completed} aria-label="準備事項完成進度" /></div>
+            <div className={styles.panel}><h3>入住與退宿清單</h3><p>勾選只記錄自己的準備進度，不會建立校方申請。總進度：{progress.completed} / {progress.total}</p><progress max={progress.total} value={progress.completed} aria-label="準備事項完成進度" /></div>
             <section className={styles.panel}>
               <div className={styles.sectionTitle}>
-                <div><p className={styles.eyebrow}>入住檢查</p><h3>房況與設備點檢</h3></div>
+                <div><h3>房況與設備點檢</h3></div>
                 <span className={styles.status}>{inspectionProgress.checked}/{inspectionProgress.total} 已確認</span>
               </div>
               <p className={styles.muted}>入住時逐項確認房況；這是你的個人記錄，不是校方驗收。發現異常，可直接預填設備問題，再依學校正式方式通報。</p>
@@ -773,7 +884,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
         {view === 'laundry' && (
           <div className={styles.columns}>
             <section className={styles.panel}>
-              <p className={styles.eyebrow}>LAUNDRY TIMER</p><h3>個人洗衣計時</h3>
+              <h3>個人洗衣計時</h3>
               <p>手動記錄這次洗衣或烘衣的預估完成時間。沒有連線洗衣機，也不顯示即時空機狀態。</p>
               <div className={styles.clock} role="status" aria-live="off">
                 <strong>{data.laundryEndAt ? (remaining ? remaining + ' 分鐘' : '預估已完成') : '尚未開始'}</strong>

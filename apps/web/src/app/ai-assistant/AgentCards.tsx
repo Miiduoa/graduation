@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { AssistantReplyAnchor, AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { useEffect, useRef, useState } from 'react';
 import {
   ASSISTANT_PERMISSIONS_SETTINGS_HREF,
@@ -10,14 +10,14 @@ import {
 import type { AgentCard } from '@/lib/campusAssistantClient';
 import { confirmCreateOrder, watchOrderQueueNumber } from '@/lib/campusAssistantClient';
 import { fetchAssistantWritePermissions, getAuth } from '@/lib/firebase';
-import { describePickupNumber, type PickupNumberView } from '@campus/shared/src/ordering/pickupNumber';
+import { describePickupNumber, describeTerminalOrderReceipt, type PickupNumberView } from '@campus/shared/src/ordering/pickupNumber';
 
 const ORDER_NOT_SENT_TEXT = '訂單沒送出去，請再試一次。';
 
 interface Props {
   cards: AgentCard[];
   schoolId?: string;
-  onOrderConfirmed?: (result: { orderId: string; cafeteria: string; total: number }) => void;
+  onOrderConfirmed?: (result: { orderId: string; cafeteria: string; total: number; status?: string }) => void;
 }
 
 export function AgentCardList({ cards, schoolId = 'pu', onOrderConfirmed }: Props) {
@@ -106,9 +106,9 @@ function DirectionsCard({ payload }: { payload: DirectionsPayload }) {
         {payload.from.name} → {payload.to.name}
       </h3>
       <p>由 Google 地圖提供可通行的路線與步行時間。</p>
-      <a href={payload.navigationUrl} target="_blank" rel="noopener noreferrer" className="cta">
+      <AssistantReplyAnchor href={payload.navigationUrl} target="_blank" rel="noopener noreferrer" className="cta">
         開啟 Google 步行導航 ↗
-      </a>
+      </AssistantReplyAnchor>
       <style jsx>{`
         .directions {
           padding: 18px;
@@ -230,6 +230,7 @@ type OrderSubmittedPayload = {
   cafeteria: string;
   total: number;
   itemCount: number;
+  status?: unknown;
 };
 
 type NavigatePayload = {
@@ -270,9 +271,9 @@ function RouteCard({ payload }: { payload: RoutePayload }) {
           ))}
         </ol>
       ) : null}
-      <Link href={url} className="cta">
+      <AssistantReplyLink href={url} className="cta">
         在地圖開啟路線 →
-      </Link>
+      </AssistantReplyLink>
       <style jsx>{`
         .card.route {
           background: var(--surface);
@@ -386,9 +387,9 @@ function PoiCard({ payload }: { payload: PoiPayload }) {
               <span className="row-meta">尚未提供座標，暫時無法導航。</span>
             </div>
           ) : (
-            <Link key={p.id} href={`/map?focus=${p.id}`} className="row">
+            <AssistantReplyLink key={p.id} href={`/map?focus=${p.id}`} className="row">
               {content}
-            </Link>
+            </AssistantReplyLink>
           );
         })}
       </div>
@@ -683,9 +684,11 @@ function OrderDraftCard({
         note: payload.note,
       });
       if (res.success && res.orderId) {
-        setResult({ ok: true, message: `訂單已建立，訂單號 ${res.orderId}`, orderId: res.orderId });
+        const terminalText = describeTerminalOrderReceipt(res.status);
+        setResult({ ok: true, message: `${terminalText ?? '訂單已建立'}，訂單號 ${res.orderId}`, orderId: res.orderId });
         setPickup(
-          describePickupNumber({
+          terminalText ? null : describePickupNumber({
+            status: res.status,
             queueNumber: res.queueNumber,
             createdAt: res.createdAt,
             items:
@@ -697,6 +700,7 @@ function OrderDraftCard({
           orderId: res.orderId,
           cafeteria: res.cafeteria || payload.cafeteriaName,
           total: res.total || payload.total,
+          status: res.status,
         });
       } else {
         // 伺服器明確說不成立（菜單或金額變了）才照實轉述並換新編號；其他一律用同一個編號再試一次
@@ -778,7 +782,7 @@ function OrderDraftCard({
           <div style={{ whiteSpace: 'pre-line' }}>{result.message}</div>
           {result.permissionDenied ? (
             <div className="pickup">
-              <Link href={ASSISTANT_PERMISSIONS_SETTINGS_HREF}>前往設定</Link>
+              <AssistantReplyLink href={ASSISTANT_PERMISSIONS_SETTINGS_HREF}>前往設定</AssistantReplyLink>
             </div>
           ) : null}
           {result.ok && pickup?.state === 'assigned' ? (
@@ -943,7 +947,7 @@ function OrderSubmittedCard({ payload }: { payload: OrderSubmittedPayload }) {
   return (
     <div className="card submitted">
       <div className="head">
-        <span className="title">訂單已建立：{payload.cafeteria}</span>
+        <span className="title">{describeTerminalOrderReceipt(payload.status) ?? '訂單已建立'}：{payload.cafeteria}</span>
       </div>
       <div className="body">
         訂單號 <code>{payload.orderId}</code>
@@ -989,7 +993,7 @@ function NavigateCard({ payload }: { payload: NavigatePayload }) {
     if (!from || !to) return null;
     const url = `/map?route=${from},${to}`;
     return (
-      <Link href={url} className="nav">
+      <AssistantReplyLink href={url} className="nav">
         <span>{payload.reason || '在地圖開啟'}</span>
         <span className="chev">›</span>
         <style jsx>{`
@@ -1014,7 +1018,7 @@ function NavigateCard({ payload }: { payload: NavigatePayload }) {
             font-size: 18px;
           }
         `}</style>
-      </Link>
+      </AssistantReplyLink>
     );
   }
   return null;

@@ -43,6 +43,7 @@ jest.mock('../utils/safeNavigate', () => ({
 }));
 
 beforeEach(() => {
+  jest.spyOn(require('../services/privateFiles'), 'claimPrivateFile').mockResolvedValue(undefined);
   jest.clearAllMocks();
   mockUid = 'alice';
   mockSchool = 'pu';
@@ -87,7 +88,7 @@ test('loads the assignment from Firestore and submits the same text path as web'
     userId: 'alice',
     groupId: 'course',
     content: '我的答案',
-  });
+  }, []);
 });
 
 test('opens the class-workspace file submit flow when the Expo flag is on', async () => {
@@ -429,7 +430,7 @@ test('opens a real server draft for editing and confirms its first submission', 
   await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
   expect(mockSource.submitAssignment).toHaveBeenCalledWith({
     assignmentId: 'work', userId: 'alice', groupId: 'course', content: '我的答案',
-  });
+  }, []);
   expect(view.getByText('已繳交 · 等待老師評分')).toBeTruthy();
 });
 
@@ -519,4 +520,361 @@ test('提醒警告不影響繳交成功，並提供管理及稍後重試入口',
   act(() => manage?.onPress?.());
   expect(mockSafeNavigate).toHaveBeenCalledWith(mockNavigate, 'CampusAssistant');
   expect(onAssignmentSubmitted).toHaveBeenCalled();
+});
+
+test('Supabase enables attachment selection and stores the object path in the existing attachment shape', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const picker = require('expo-document-picker');
+  jest
+    .spyOn(picker, 'getDocumentAsync')
+    .mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///answer', name: 'answer.pdf', mimeType: 'application/pdf' }],
+    });
+  const privateFiles = require('../services/privateFiles');
+  const upload = jest
+    .spyOn(privateFiles, 'uploadPrivateFile')
+    .mockResolvedValue({ path: 'ignored' });
+  const previousFetch = global.fetch;
+  global.fetch = jest.fn(async () => ({
+    blob: async () => new Blob(['answer'], { type: 'application/pdf' }),
+  })) as unknown as typeof fetch;
+  mockSource.submitAssignment.mockImplementation(async (data) => ({
+    ...data,
+    id: 'alice',
+    status: 'submitted',
+    submittedAt: '2026-10-19T00:00:00Z',
+  }));
+  const view = render(
+    <HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />,
+  );
+  try {
+    await view.findByText('期末報告');
+    await act(async () => fireEvent.press(view.getByRole('button', { name: /新增作業附件/ })));
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(upload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: expect.stringMatching(/^groups\/course\/assignments\/work\/submissions\/alice\/[A-Za-z0-9_-]+\.pdf$/),
+        originalFilename: 'answer.pdf',
+      }),
+    );
+    expect(mockSource.submitAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: '',
+        attachments: [
+          expect.objectContaining({
+            url: expect.stringMatching(/^groups\/course\/assignments\/work\/submissions\/alice\//),
+          }),
+        ],
+      }),
+      [],
+    );
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = previousFetch;
+    upload.mockRestore();
+  }
+});
+
+test('Supabase preserves upload progress after 429 and only retries unfinished files', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const picker = require('expo-document-picker');
+  jest
+    .spyOn(picker, 'getDocumentAsync')
+    .mockResolvedValue({
+      canceled: false,
+      assets: ['one', 'two', 'three'].map(name => ({ uri: `file:///${name}`, name: `${name}.pdf`, mimeType: 'application/pdf' })),
+    });
+  const privateFiles = require('../services/privateFiles');
+  const upload = jest
+    .spyOn(privateFiles, 'uploadPrivateFile')
+    .mockResolvedValueOnce({ path: 'ignored' })
+    .mockRejectedValueOnce(Object.assign(new Error('上傳太頻繁，請稍後再試'), { statusCode: 429 }))
+    .mockResolvedValue({ path: 'ignored' });
+  const previousFetch = global.fetch;
+  global.fetch = jest.fn(async () => ({
+    blob: async () => new Blob(['answer'], { type: 'application/pdf' }),
+  })) as unknown as typeof fetch;
+  mockSource.submitAssignment.mockImplementation(async (data) => ({
+    ...data,
+    id: 'alice',
+    status: 'submitted',
+    submittedAt: '2026-10-19T00:00:00Z',
+  }));
+  const view = render(
+    <HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />,
+  );
+  try {
+    await view.findByText('期末報告');
+    await act(async () => fireEvent.press(view.getByRole('button', { name: /新增作業附件/ })));
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(mockSource.submitAssignment).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledWith('繳交尚未確認', '上傳太頻繁，請稍後再試');
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(upload).toHaveBeenCalledTimes(4);
+    expect(upload.mock.calls.map(([input]) => input.originalFilename)).toEqual(['one.pdf', 'two.pdf', 'two.pdf', 'three.pdf']);
+    expect(mockSource.submitAssignment.mock.calls[0][0].attachments).toHaveLength(3);
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = previousFetch;
+    upload.mockRestore();
+  }
+});
+
+test('Supabase rejects selecting more than six attachments', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const picker = require('expo-document-picker');
+  jest
+    .spyOn(picker, 'getDocumentAsync')
+    .mockResolvedValue({
+      canceled: false,
+      assets: Array.from({ length: 7 }, () => ({ uri: 'file:///answer', name: 'answer.pdf', mimeType: 'application/pdf' })),
+    });
+  const privateFiles = require('../services/privateFiles');
+  const upload = jest
+    .spyOn(privateFiles, 'uploadPrivateFile')
+    .mockResolvedValue({ path: 'ignored' });
+  const previousFetch = global.fetch;
+  global.fetch = jest.fn(async () => ({
+    blob: async () => new Blob(['answer'], { type: 'application/pdf' }),
+  })) as unknown as typeof fetch;
+  mockSource.submitAssignment.mockImplementation(async (data) => ({
+    ...data,
+    id: 'alice',
+    status: 'submitted',
+    submittedAt: '2026-10-19T00:00:00Z',
+  }));
+  const view = render(
+    <HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />,
+  );
+  try {
+    await view.findByText('期末報告');
+    await act(async () => fireEvent.press(view.getByRole('button', { name: /新增作業附件/ })));
+    expect(Alert.alert).toHaveBeenCalledWith('最多只能附上 6 個附件', expect.any(String));
+    expect(view.getByRole('button', { name: /新增作業附件/ })).toBeTruthy();
+    expect(upload).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = previousFetch;
+    upload.mockRestore();
+  }
+});
+
+describe('reviewing selected homework attachments', () => {
+  const picker = require('expo-document-picker') as typeof import('expo-document-picker');
+  const privateFiles = require('../services/privateFiles') as typeof import('../services/privateFiles');
+  const originalFetch = global.fetch;
+
+  function selection(...names: string[]): import('expo-document-picker').DocumentPickerSuccessResult {
+    return {
+      canceled: false,
+      assets: names.map((name, i) => ({ uri: `file:///picked/${i}/${name}`, name, mimeType: 'application/pdf', lastModified: 0 })),
+    };
+  }
+
+  beforeEach(() => {
+    process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  });
+
+  afterEach(() => {
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  test('after partial upload, removing a completed file and adding another submits only the reviewed files in order', async () => {
+    jest.spyOn(picker, 'getDocumentAsync')
+      .mockResolvedValueOnce(selection('removed.pdf', 'keep.pdf', 'retry.pdf'))
+      .mockResolvedValueOnce(selection('extra.pdf'));
+    const upload = jest.spyOn(privateFiles, 'uploadPrivateFile')
+      .mockImplementationOnce(async ({ path }) => ({ path }))
+      .mockImplementationOnce(async ({ path }) => ({ path }))
+      .mockRejectedValueOnce(Object.assign(new Error('稍後再試'), { statusCode: 429 }))
+      .mockImplementation(async ({ path }) => ({ path }));
+    global.fetch = jest.fn(async () => ({
+      blob: async () => new Blob(['answer'], { type: 'application/pdf' }),
+    })) as unknown as typeof fetch;
+    mockSource.submitAssignment.mockImplementation(async (data) => ({ ...receipt, ...data }));
+    const view = render(<HomeworkSubmitScreen route={{ params }} />);
+    const add = () => view.getByRole('button', { name: /新增作業附件/ });
+    await view.findByLabelText('文字作業內容');
+    await act(async () => fireEvent.press(add()));
+    for (const name of ['removed.pdf', 'keep.pdf', 'retry.pdf']) expect(view.getByText(name)).toBeTruthy();
+
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(mockSource.submitAssignment).not.toHaveBeenCalled();
+    await act(async () => fireEvent.press(view.getByRole('button', { name: /移除.*removed\.pdf/ })));
+    await act(async () => fireEvent.press(add()));
+    expect(view.queryByText('removed.pdf')).toBeNull();
+    expect(view.getByText('keep.pdf')).toBeTruthy();
+    expect(view.getByText('extra.pdf')).toBeTruthy();
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+
+    expect(upload.mock.calls.map(([file]) => file.originalFilename)).toEqual([
+      'removed.pdf', 'keep.pdf', 'retry.pdf', 'retry.pdf', 'extra.pdf',
+    ]);
+    const paths = upload.mock.calls.map(([file]) => file.path);
+    expect(mockSource.submitAssignment.mock.calls[0][0].attachments).toEqual([
+      expect.objectContaining({ name: 'keep.pdf', url: paths[1] }),
+      expect.objectContaining({ name: 'retry.pdf', url: paths[3] }),
+      expect.objectContaining({ name: 'extra.pdf', url: paths[4] }),
+    ]);
+    expect(mockSource.submitAssignment).toHaveBeenCalledTimes(1);
+    expect(view.getByRole('button', { name: 'keep.pdf' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'extra.pdf' })).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'removed.pdf' })).toBeNull();
+  });
+
+  test('cancel and a selection over the cumulative limit leave the earlier files intact', async () => {
+    const pick = jest.spyOn(picker, 'getDocumentAsync')
+      .mockResolvedValueOnce(selection('a.pdf', 'b.pdf'))
+      .mockResolvedValueOnce({ canceled: true, assets: null })
+      .mockResolvedValueOnce(selection('c.pdf', 'd.pdf', 'e.pdf', 'f.pdf', 'g.pdf'));
+    const view = render(<HomeworkSubmitScreen route={{ params }} />);
+    await view.findByLabelText('文字作業內容');
+    for (let i = 0; i < 3; i++) {
+      await act(async () => fireEvent.press(view.getByRole('button', { name: /新增作業附件/ })));
+    }
+    expect(pick).toHaveBeenCalledTimes(3);
+    expect(view.getByText('a.pdf')).toBeTruthy();
+    expect(view.getByText('b.pdf')).toBeTruthy();
+    expect(view.queryByText('c.pdf')).toBeNull();
+    expect(jest.mocked(Alert.alert).mock.calls.flat().join(' ')).toMatch(/6 個附件/);
+  });
+
+  test('refreshes saved draft files by path, keeps local removals and submits the reviewed version without uploading again', async () => {
+    const folder = 'groups/course/assignments/work/submissions/alice/';
+    const stored = (name: string, filename: string) => ({
+      id: filename, name, url: folder + filename, type: 'document',
+    });
+    const oldA = stored('書面報告.pdf', 'a.pdf');
+    const oldB = stored('舊版摘要.pdf', 'b.pdf');
+    const newB = { ...oldB, name: '定稿摘要.pdf' };
+    const c = folder + 'legacy.pdf';
+    const serverDraft = { ...receipt, status: 'draft', submittedAt: null, content: '' };
+    mockSource.getSubmission
+      .mockResolvedValueOnce({ ...serverDraft, attachments: [oldA, oldB] })
+      .mockResolvedValue({ ...serverDraft, attachments: [c, newB, oldA] });
+    mockSource.submitAssignment.mockImplementation(async (data) => ({ ...receipt, ...data }));
+    const upload = jest.spyOn(privateFiles, 'uploadPrivateFile');
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+
+    const view = render(<HomeworkSubmitScreen route={{ params }} />);
+    await view.findByText(oldA.name);
+    fireEvent.press(view.getByRole('button', { name: /移除.*書面報告/ }));
+    await act(async () => { mockFocusCleanup?.(); mockFocusAgain(); });
+    expect(await view.findByText('legacy.pdf')).toBeTruthy();
+    expect(view.getByText(newB.name)).toBeTruthy();
+    expect(view.queryByText(oldA.name)).toBeNull();
+    expect(view.queryByText(oldB.name)).toBeNull();
+    expect(view.queryByRole('button', { name: /新增作業附件/ })).toBeNull();
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(mockSource.submitAssignment).toHaveBeenCalledWith(
+      { assignmentId: 'work', userId: 'alice', groupId: 'course', content: '',
+        attachments: [expect.objectContaining({ url: c, name: 'legacy.pdf' }), newB] },
+      [c, newB, oldA],
+    );
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  test('the receipt reopens with recorded filenames and falls back to the basename for legacy attachments', async () => {
+    const url = 'groups/course/assignments/work/submissions/alice/opaque.pdf';
+    const legacy = 'groups/course/assignments/work/submissions/alice/legacy.pdf';
+    mockSource.getSubmission.mockResolvedValue({ ...receipt, attachments: [{ url, name: '實驗報告.pdf' }, legacy] });
+    const view = render(<HomeworkSubmitScreen route={{ params }} />);
+    expect(await view.findByRole('button', { name: '實驗報告.pdf' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'legacy.pdf' })).toBeTruthy();
+    expect(view.queryByText('opaque.pdf')).toBeNull();
+  });
+
+  test('removing the last existing file sends an empty attachment list with the draft that was reviewed', async () => {
+    const url = 'groups/course/assignments/work/submissions/alice/old.pdf';
+    mockSource.getSubmission.mockResolvedValue({ ...receipt, status: 'draft', submittedAt: null, attachments: [url] });
+    const view = render(<HomeworkSubmitScreen route={{ params }} />);
+    await view.findByText('old.pdf');
+    fireEvent.press(view.getByRole('button', { name: /移除.*old.pdf/ }));
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(mockSource.submitAssignment).toHaveBeenCalledWith(
+      { assignmentId: 'work', userId: 'alice', groupId: 'course', content: '我的答案', attachments: [] },
+      [url],
+    );
+  });
+
+  test('if a refreshed draft pushes selected attachments over six, keeps every row and requires removal before uploading', async () => {
+    const urls = Array.from({ length: 6 }, (_, i) => `groups/course/assignments/work/submissions/alice/${i}.pdf`);
+    const draft = { ...receipt, status: 'draft', submittedAt: null };
+    mockSource.getSubmission
+      .mockResolvedValueOnce({ ...draft, attachments: urls.slice(0, 5) })
+      .mockResolvedValue({ ...draft, attachments: urls });
+    jest.spyOn(picker, 'getDocumentAsync').mockResolvedValueOnce(selection('local.pdf'));
+    const upload = jest.spyOn(privateFiles, 'uploadPrivateFile').mockImplementation(async ({ path }) => ({ path }));
+    global.fetch = jest.fn(async () => ({
+      blob: async () => new Blob(['answer'], { type: 'application/pdf' }),
+    })) as unknown as typeof fetch;
+    mockSource.submitAssignment.mockImplementation(async (data) => ({ ...receipt, ...data }));
+    const view = render(<HomeworkSubmitScreen route={{ params }} />);
+    await view.findByText('0.pdf');
+    await act(async () => fireEvent.press(view.getByRole('button', { name: /新增作業附件/ })));
+    await act(async () => { mockFocusCleanup?.(); mockFocusAgain(); });
+    expect(await view.findByText(/共有 7 個附件.*請移除 1 個附件/)).toBeTruthy();
+    expect(view.getAllByRole('button', { name: /移除.*附件/ })).toHaveLength(7);
+    expect(view.getByText('local.pdf')).toBeTruthy();
+    expect(view.getByRole('button', { name: '繳交作業' })).toBeDisabled();
+    fireEvent.press(view.getByLabelText('繳交作業'));
+    expect(upload).not.toHaveBeenCalled();
+    expect(mockSource.submitAssignment).not.toHaveBeenCalled();
+    fireEvent.press(view.getByRole('button', { name: /移除.*0\.pdf/ }));
+    expect(view.queryByText(/共有 7 個附件/)).toBeNull();
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(mockSource.submitAssignment.mock.calls[0][0].attachments.map((file: { name: string }) => file.name))
+      .toEqual(['1.pdf', '2.pdf', '3.pdf', '4.pdf', '5.pdf', 'local.pdf']);
+  });
+
+  test('presents all attachments in a legacy draft over the limit and prevents only additions', async () => {
+    const urls = Array.from({ length: 7 }, (_, i) => `groups/course/assignments/work/submissions/alice/${i}.pdf`);
+    mockSource.getSubmission.mockResolvedValue({ ...receipt, status: 'draft', submittedAt: null, attachments: urls });
+    mockSource.submitAssignment.mockImplementation(async (data) => ({ ...receipt, ...data }));
+    const view = render(<HomeworkSubmitScreen route={{ params }} />);
+    await view.findByText('6.pdf');
+    expect(view.getAllByRole('button', { name: /移除.*附件/ })).toHaveLength(7);
+    expect(view.getByRole('button', { name: /新增作業附件/ })).toBeDisabled();
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(mockSource.submitAssignment.mock.calls[0][0].attachments.map((file: { url: string }) => file.url)).toEqual(urls);
+    expect(mockSource.submitAssignment.mock.calls[0][1]).toEqual(urls);
+  });
+
+  test.each(['return', 'school'])('discards a late native picker result after a %s transition', async (change) => {
+    const late = deferred<ReturnType<typeof selection>>();
+    const pick = jest.spyOn(picker, 'getDocumentAsync')
+      .mockResolvedValueOnce(selection('first.pdf'))
+      .mockReturnValueOnce(late.promise);
+    const view = render(<HomeworkSubmitScreen route={{ params }} />);
+    await view.findByLabelText('文字作業內容');
+    const add = () => view.getByRole('button', { name: /新增作業附件/ });
+    await act(async () => fireEvent.press(add()));
+    act(() => {
+      fireEvent.press(add());
+      fireEvent.press(add());
+      fireEvent.press(view.getByLabelText('繳交作業'));
+    });
+    expect(pick).toHaveBeenCalledTimes(2);
+    expect(mockSource.submitAssignment).not.toHaveBeenCalled();
+    if (change === 'return') {
+      await act(async () => { mockFocusCleanup?.(); mockFocusAgain(); });
+    } else {
+      mockSchool = 'other-school';
+      view.rerender(<HomeworkSubmitScreen route={{ params }} />);
+    }
+    await view.findByLabelText('文字作業內容');
+    await act(async () => late.resolve(selection('late.pdf')));
+    expect(view.queryByText('late.pdf')).toBeNull();
+    expect(Boolean(view.queryByText('first.pdf'))).toBe(change === 'return');
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(add()).toBeEnabled();
+  });
 });

@@ -15,6 +15,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -32,13 +33,16 @@ import {
   PU_ECAMPUS_DATA_PAUSED_MESSAGE,
 } from '@campus/shared/src/puEcampusDataPolicy';
 import { formatDateTime } from '../utils/format';
-import { Screen, Pill, Button, Card } from '../ui/components';
+import { Screen, Button } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { TextAction } from '../ui/interactive/TextAction';
 import { useAuth } from '../state/auth';
 import { useSchedule } from '../state/schedule';
 import { useSchool } from '../state/school';
 import { PublicCourseCatalogScreen } from './PublicCourseCatalogScreen';
+import { parsePublicCourseFilters, type PublicCourseFilters } from '@campus/shared/src/publicCourseFilters';
+import { isPublicCourseOperationQuery } from '@campus/shared/src/publicCourseOperations';
 import { safeNavigate } from '../utils/safeNavigate';
 
 import {
@@ -66,6 +70,40 @@ import { analytics } from '../services/analytics';
 import { isTronClassPuHostedUrl } from '../services/tronClassDataEnabled';
 import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
+// ─── 子元件：單選 chip（森林綠 = 選取；未選取只有細框） ───────
+
+const hairline = StyleSheet.hairlineWidth;
+
+function ChoiceChip(props: { label: string; selected: boolean; onPress: () => void; bold?: boolean }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: props.selected }}
+      onPress={props.onPress}
+      style={{
+        paddingHorizontal: 14,
+        minHeight: 44,
+        justifyContent: 'center',
+        borderRadius: theme.radius.md,
+        borderWidth: 1,
+        borderColor: props.selected ? theme.colors.accent : theme.colors.border,
+        backgroundColor: props.selected ? theme.colors.accent : 'transparent',
+      }}
+    >
+      <Text
+        style={{
+          color: props.selected ? theme.colors.onAccent : theme.colors.text,
+          fontSize: 14,
+          fontWeight: props.selected || props.bold ? '700' : '400',
+        }}
+      >
+        {props.label}
+      </Text>
+    </Pressable>
+  );
+}
+
+
 // ─── 子元件：橫向 chip 列 ─────────────────────────────────
 
 function ChipRow<T extends string | number>(props: {
@@ -76,44 +114,16 @@ function ChipRow<T extends string | number>(props: {
   return (
     <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false}>
       <View style={{ flexDirection: 'row', gap: 8, paddingVertical: 2, paddingRight: 16 }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ selected: !props.selected }}
-          onPress={() => props.onSelect(undefined)}
-          style={{
-            paddingHorizontal: 14,
-            minHeight: 44,
-            justifyContent: 'center',
-            paddingVertical: 7,
-            borderRadius: 16,
-            borderWidth: 1,
-            borderColor: !props.selected ? theme.colors.accent : theme.colors.border,
-            backgroundColor: !props.selected ? theme.colors.accent + '1F' : theme.colors.surface,
-          }}
-        >
-          <Text style={{ color: theme.colors.text, fontSize: 13 }}>不限</Text>
-        </Pressable>
+        <ChoiceChip label="不限" selected={!props.selected} onPress={() => props.onSelect(undefined)} />
         {props.items.map((it) => {
           const active = props.selected === it.value;
           return (
-            <Pressable
+            <ChoiceChip
               key={String(it.value)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
+              label={it.label}
+              selected={active}
               onPress={() => props.onSelect(active ? undefined : it.value)}
-              style={{
-                paddingHorizontal: 14,
-                minHeight: 44,
-                justifyContent: 'center',
-                paddingVertical: 7,
-                borderRadius: 16,
-                borderWidth: 1,
-                borderColor: active ? theme.colors.accent : theme.colors.border,
-                backgroundColor: active ? theme.colors.accent + '1F' : theme.colors.surface,
-              }}
-            >
-              <Text style={{ color: theme.colors.text, fontSize: 13 }}>{it.label}</Text>
-            </Pressable>
+            />
           );
         })}
       </View>
@@ -132,10 +142,15 @@ const Section = ({
   hint?: string;
   children: React.ReactNode;
 }) => (
-  <View style={{ gap: 6 }}>
+  <View style={{ gap: 8 }}>
     <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-      <Text style={{ fontWeight: '700', fontSize: 14, color: theme.colors.text }}>{title}</Text>
-      {hint ? <Text style={{ color: theme.colors.muted, fontSize: 11 }}>{hint}</Text> : null}
+      <Text
+        accessibilityRole="header"
+        style={{ fontWeight: '600', fontSize: 13, letterSpacing: 0.3, color: theme.colors.textSecondary }}
+      >
+        {title}
+      </Text>
+      {hint ? <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{hint}</Text> : null}
     </View>
     {children}
   </View>
@@ -159,35 +174,18 @@ function FilterPanel(props: {
   }, [filter.college]);
 
   return (
-    <View style={{ gap: 16, paddingBottom: 24 }}>
+    <View style={{ gap: 20, paddingBottom: 24 }}>
       <Section title="學期">
         <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', gap: 8, paddingRight: 16 }}>
-            {buildCatalogSemesters().slice(0, 12).map((s) => {
-              const active = filter.semester === s.code;
-              return (
-                <Pressable
-                  key={s.code}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  onPress={() => props.onChange({ semester: s.code })}
-                  style={{
-                    paddingHorizontal: 14,
-                    minHeight: 44,
-                    justifyContent: 'center',
-                    paddingVertical: 8,
-                    borderRadius: 18,
-                    borderWidth: 1,
-                    borderColor: active ? theme.colors.accent : theme.colors.border,
-                    backgroundColor: active ? theme.colors.accent + '1F' : theme.colors.surface,
-                  }}
-                >
-                  <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '600' }}>
-                    {s.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
+            {buildCatalogSemesters().slice(0, 12).map((s) => (
+              <ChoiceChip
+                key={s.code}
+                label={s.label}
+                selected={filter.semester === s.code}
+                onPress={() => props.onChange({ semester: s.code })}
+              />
+            ))}
           </View>
         </ScrollView>
       </Section>
@@ -202,7 +200,7 @@ function FilterPanel(props: {
           style={{
             borderWidth: 1,
             borderColor: theme.colors.border,
-            borderRadius: 10,
+            borderRadius: theme.radius.md,
             paddingHorizontal: 14,
             paddingVertical: 12,
             color: theme.colors.text,
@@ -283,7 +281,7 @@ function FilterPanel(props: {
         />
       </Section>
 
-      <Button text="重設篩選條件" kind="ghost" onPress={props.onReset} />
+      <TextAction label="重設篩選條件" onPress={props.onReset} />
     </View>
   );
 }
@@ -301,148 +299,106 @@ function CourseCard(props: {
 }) {
   const c = props.course;
   const [adding, setAdding] = useState(false);
-  const typeTone =
-    c.courseTypeKey === 'required'
-      ? 'danger'
-      : c.courseTypeKey === 'general'
-        ? 'success'
-        : c.courseTypeKey === 'elective'
-          ? 'accent'
-          : 'default';
+  const tags = [
+    c.tags.includes('co_teaching') ? '合授' : null,
+    c.tags.includes('practice') ? '實習' : null,
+    c.tags.includes('emi') ? 'EMI' : null,
+    c.tags.includes('micro_credit') ? '微學分' : null,
+  ].filter(Boolean);
+  const facts = [c.teacher || '—', `${c.credits} 學分`, c.courseType, c.classOffered].filter(Boolean);
+  const metaStyle = { color: theme.colors.muted, fontSize: 13, lineHeight: 19 } as const;
 
   return (
     <View
       style={{
-        padding: 14,
-        marginBottom: 10,
-        gap: 10,
-        borderRadius: 14,
-        borderWidth: 1,
-        backgroundColor: theme.colors.surface,
-        borderColor: props.conflict ? theme.colors.danger : theme.colors.border,
+        paddingVertical: 16,
+        paddingLeft: props.conflict ? 12 : 0,
+        gap: 4,
+        borderTopWidth: hairline,
+        borderTopColor: theme.colors.separator,
+        borderLeftWidth: props.conflict ? 2 : 0,
+        borderLeftColor: theme.colors.danger,
       }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-        <View style={{ flex: 1 }}>
-          <Text
-            style={{ fontWeight: '700', fontSize: 16, color: theme.colors.text }}
-            numberOfLines={2}
-          >
-            {c.name || '未命名課程'}
-          </Text>
-          {c.nameEn ? (
-            <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-              {c.nameEn}
-            </Text>
-          ) : null}
-        </View>
-        <Pill text={`${c.credits} 學分`} kind="accent" size="sm" />
-      </View>
+      <Text
+        style={{ fontWeight: '700', fontSize: 17, lineHeight: 24, color: theme.colors.text }}
+        numberOfLines={2}
+      >
+        {c.name || '未命名課程'}
+      </Text>
+      {c.nameEn ? <Text style={metaStyle}>{c.nameEn}</Text> : null}
 
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-        {c.courseType ? <Pill text={c.courseType} kind={typeTone as any} size="sm" /> : null}
-        {c.classOffered ? <Pill text={c.classOffered} kind="muted" size="sm" /> : null}
-        {c.tags.includes('co_teaching') ? <Pill text="合授" kind="warning" size="sm" /> : null}
-        {c.tags.includes('practice') ? <Pill text="實習" kind="warning" size="sm" /> : null}
-        {c.tags.includes('emi') ? <Pill text="EMI" kind="accent" size="sm" /> : null}
-        {c.tags.includes('micro_credit') ? <Pill text="微學分" kind="warning" size="sm" /> : null}
-      </View>
+      <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 21 }}>
+        {facts.join(' · ')}
+      </Text>
+      <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 21 }}>
+        {c.timePlaceRaw || '時間未公告'}
+      </Text>
+      <Text style={metaStyle}>
+        選課代號 {c.code}
+        {props.showRemain && c.remaining != null && c.capacity != null
+          ? ` · 餘額 ${c.remaining}/${c.capacity}`
+          : c.capacity != null
+            ? ` · 容量 ${c.capacity}`
+            : ''}
+      </Text>
+      {tags.length ? <Text style={metaStyle}>{tags.join(' · ')}</Text> : null}
 
-      <View style={{ gap: 4 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Ionicons name="person-outline" size={13} color={theme.colors.muted} />
-          <Text style={{ color: theme.colors.text, fontSize: 13 }}>{c.teacher || '—'}</Text>
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
-          <Ionicons
-            name="time-outline"
-            size={13}
-            color={theme.colors.muted}
-            style={{ marginTop: 2 }}
-          />
-          <Text style={{ color: theme.colors.text, fontSize: 13, flex: 1 }}>
-            {c.timePlaceRaw || '時間未公告'}
-          </Text>
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Ionicons name="barcode-outline" size={13} color={theme.colors.muted} />
-          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-            選課代號 {c.code}
-            {props.showRemain && c.remaining != null && c.capacity != null
-              ? ` · 餘額 ${c.remaining}/${c.capacity}`
-              : c.capacity != null
-                ? ` · 容量 ${c.capacity}`
-                : ''}
-          </Text>
-        </View>
-      </View>
+      {c.notes ? <Text style={{ ...metaStyle, fontSize: 12, lineHeight: 17 }}>備註：{c.notes}</Text> : null}
 
-      {c.notes ? (
-        <Text style={{ color: theme.colors.muted, fontSize: 11, lineHeight: 16 }}>
-          備註：{c.notes}
+      {props.conflict ? (
+        <Text style={{ color: theme.colors.danger, fontSize: 13, lineHeight: 19, marginTop: 4 }}>
+          ⚠️ 與已選課衝堂：{props.conflict}
         </Text>
       ) : null}
 
-      {props.conflict ? (
-        <View
-          style={{
-            padding: 8,
-            borderRadius: 8,
-            backgroundColor: theme.colors.dangerSoft,
-            borderWidth: 1,
-            borderColor: theme.colors.danger,
-          }}
-        >
-          <Text style={{ color: theme.colors.danger, fontSize: 12 }}>⚠️ 與已選課衝堂：{props.conflict}</Text>
+      {(props.onSyllabus && c.syllabusUrl) || props.canAddToSchedule ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20, marginTop: 8 }}>
+          {props.canAddToSchedule ? (
+            props.added ? (
+              <Pressable
+                disabled
+                accessibilityRole="button"
+                accessibilityState={{ disabled: true }}
+                style={{ minHeight: 44, justifyContent: 'center' }}
+              >
+                <Text style={{ color: theme.colors.success, fontSize: 14, fontWeight: '600' }}>
+                  已在本機課程清單
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                disabled={adding}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: adding, busy: adding }}
+                onPress={async () => {
+                  setAdding(true);
+                  try {
+                    await props.onAdd();
+                  } finally {
+                    setAdding(false);
+                  }
+                }}
+                style={{
+                  paddingHorizontal: 16,
+                  borderRadius: theme.radius.sm,
+                  minHeight: 44,
+                  justifyContent: 'center',
+                  backgroundColor: theme.colors.accent,
+                  opacity: adding ? 0.7 : 1,
+                }}
+              >
+                <Text style={{ color: theme.colors.onAccent, fontSize: 14, fontWeight: '700' }}>
+                  {adding ? '加入中…' : '加入本機課程清單'}
+                </Text>
+              </Pressable>
+            )
+          ) : null}
+          {props.onSyllabus && c.syllabusUrl ? (
+            <TextAction label="查看課綱" accessibilityRole="link" onPress={props.onSyllabus} />
+          ) : null}
         </View>
       ) : null}
-
-      <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
-        {props.onSyllabus && c.syllabusUrl ? (
-          <Pressable
-            accessibilityRole="link"
-            onPress={props.onSyllabus}
-            style={{
-              flex: 1,
-              paddingVertical: 10,
-              borderRadius: 10,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              alignItems: 'center',
-            }}
-          >
-            <Text style={{ color: theme.colors.text, fontSize: 13 }}>查看課綱</Text>
-          </Pressable>
-        ) : null}
-        {props.canAddToSchedule ? (
-          <Pressable
-            disabled={props.added || adding}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: props.added || adding, busy: adding }}
-            onPress={async () => {
-              setAdding(true);
-              try {
-                await props.onAdd();
-              } finally {
-                setAdding(false);
-              }
-            }}
-            style={{
-              flex: 1,
-              paddingVertical: 10,
-              borderRadius: 10,
-              minHeight: 44,
-              justifyContent: 'center',
-              backgroundColor: props.added ? theme.colors.accentSoft : theme.colors.accent,
-              alignItems: 'center',
-            }}
-          >
-            <Text style={{ color: props.added ? theme.colors.accent : theme.colors.onAccent, fontSize: 13, fontWeight: '700' }}>
-              {props.added ? '已在本機課程清單' : adding ? '加入中…' : '加入本機課程清單'}
-            </Text>
-          </Pressable>
-        ) : null}
-      </View>
     </View>
   );
 }
@@ -460,11 +416,14 @@ function UnsupportedCourseCatalogScreen(props: {
   const [linkError, setLinkError] = useState('');
   return (
     <Screen title="課綱查詢" subtitle={`${props.school.name} · 尚未接入內建課綱`}>
-      <Card title="這所學校尚未接入課綱查詢">
-        <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+      <View style={{ gap: 8 }}>
+        <Text accessibilityRole="header" style={{ ...theme.typography.h3, color: theme.colors.text }}>
+          這所學校尚未接入課綱查詢
+        </Text>
+        <Text style={{ color: theme.colors.textSecondary, lineHeight: 22 }}>
           {unsupportedCourseCatalogMessage(props.school.id, props.school.name)}
         </Text>
-        <View style={{ gap: 10, marginTop: 14 }}>
+        <View style={{ gap: 4, marginTop: 12 }}>
           {official ? (
             <Button
               text={`開啟${official.label}`}
@@ -476,47 +435,108 @@ function UnsupportedCourseCatalogScreen(props: {
               }}
             />
           ) : null}
-          <Button
-            text="查看我的課表"
-            kind="ghost"
-            onPress={() => {
-              safeNavigate(props.navigation, 'PersonalTimetable');
+          <View
+            style={{
+              marginTop: 8,
+              borderTopWidth: hairline,
+              borderTopColor: theme.colors.separator,
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              columnGap: 20,
             }}
-          />
-          <Button
-            text="匯入我的資料"
-            kind="ghost"
-            onPress={() => {
-              safeNavigate(props.navigation, 'PersonalImport');
-            }}
-          />
+          >
+            <TextAction
+              label="查看我的課表"
+              onPress={() => {
+                safeNavigate(props.navigation, 'PersonalTimetable');
+              }}
+            />
+            <TextAction
+              label="匯入我的資料"
+              onPress={() => {
+                safeNavigate(props.navigation, 'PersonalImport');
+              }}
+            />
+          </View>
           {linkError ? (
-            <Text accessibilityRole="alert" style={{ color: theme.colors.danger, fontSize: 12 }}>
+            <Text accessibilityRole="alert" style={{ color: theme.colors.danger, fontSize: 13 }}>
               {linkError}
             </Text>
           ) : null}
         </View>
-      </Card>
+      </View>
     </Screen>
   );
+}
+
+function publicCatalogEntry(value: unknown): { keyword: string; filters: PublicCourseFilters; requestedSemester?: string } | null {
+  if (value === undefined) return { keyword: '', filters: {} };
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    let keyword = '';
+    let requestedSemester: string | undefined;
+    const filterValues: Record<string, unknown> = {};
+    for (const key of Reflect.ownKeys(value)) {
+      if (key !== 'keyword' && key !== 'weekday' && key !== 'credits' && key !== 'semester') return null;
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !('value' in descriptor)) return null;
+      if (key === 'keyword') {
+        if (!isPublicCourseOperationQuery(descriptor.value)) return null;
+        keyword = descriptor.value;
+      } else if (key === 'semester') {
+        if (typeof descriptor.value !== 'string' || !/^\d{3}[12]$/.test(descriptor.value)) return null;
+        requestedSemester = descriptor.value;
+      } else filterValues[key] = descriptor.value;
+    }
+    const filters = parsePublicCourseFilters(filterValues);
+    return filters ? { keyword, filters, ...(requestedSemester ? { requestedSemester } : {}) } : null;
+  } catch {
+    return null;
+  }
 }
 
 export function CourseCatalogScreen(props: CatalogScreenProps) {
   const { school } = useSchool();
   const auth = useAuth();
+  const requestedPublicSchool = props.route?.params?.publicSchoolId;
+  const publicSchoolId = requestedPublicSchool === 'ncnu' || requestedPublicSchool === 'nthu'
+    ? requestedPublicSchool : null;
+  const capability = resolveCourseCatalogCapability(publicSchoolId ?? school.id);
+  const isPublicCatalog = capability?.providerId === 'ncnu-public' || capability?.providerId === 'nthu-public';
+  const entry = isPublicCatalog ? publicCatalogEntry(props.route?.params?.filter) : null;
   const scopeKey = JSON.stringify({
     schoolId: school.id,
+    publicSchoolId,
     uid: auth.user?.uid ?? auth.profile?.uid ?? null,
-    entryFilter: props.route?.params?.filter ?? null,
+    entryFilter: isPublicCatalog ? entry ?? 'invalid-public-filter' : props.route?.params?.filter ?? null,
+    autoSearch: props.route?.params?.autoSearch === true,
   });
   const activeScope = useRef(scopeKey);
   activeScope.current = scopeKey;
-  const capability = resolveCourseCatalogCapability(school.id);
+
+  // A public handoff may browse another campus, but never changes the selected
+  // school or the account used by the existing personal-import review.
+  if (requestedPublicSchool !== undefined && !publicSchoolId) {
+    return <Screen title="公開開課查詢" subtitle="查課連結無法確認">
+      <Text accessibilityRole="alert" style={{ color: theme.colors.textSecondary, lineHeight: 22 }}>
+        這個公開查課連結的學校無法確認，請回到助理重新查詢。
+      </Text>
+    </Screen>;
+  }
 
   if (capability?.providerId === 'ncnu-public' || capability?.providerId === 'nthu-public') {
-    const keyword = props.route?.params?.filter?.keyword;
+    if (!entry) return <Screen title="公開開課查詢" subtitle="查課條件無法確認">
+      <Text accessibilityRole="alert" style={{ color: theme.colors.textSecondary, lineHeight: 22 }}>
+        這個公開查課連結的星期、學分或搜尋條件無法確認，請回到助理重新查詢。
+      </Text>
+    </Screen>;
     const schoolId = capability.providerId === 'nthu-public' ? 'nthu' : 'ncnu';
-    return <PublicCourseCatalogScreen key={scopeKey} schoolId={schoolId} navigation={props.navigation} initialQuery={typeof keyword === 'string' ? keyword.slice(0, 80) : ''} />;
+    return <PublicCourseCatalogScreen key={scopeKey} schoolId={schoolId} navigation={props.navigation}
+      initialQuery={entry.keyword} initialFilters={entry.filters} requestedSemester={entry.requestedSemester}
+      autoSearch={props.route?.params?.autoSearch === true}
+      currentSchoolName={publicSchoolId && publicSchoolId !== school.id ? school.name : undefined} />;
   }
 
   if (!capability) {
@@ -706,7 +726,7 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
   // ─── 渲染 ──────────────────────────────────────────────
 
   const renderHeader = () => (
-    <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, gap: 12 }}>
+    <View style={{ paddingTop: 8, paddingBottom: 12, gap: 12 }}>
       {/* 搜尋列 */}
       <View
         style={{
@@ -716,7 +736,7 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
           backgroundColor: theme.colors.surface,
           borderWidth: 1,
           borderColor: theme.colors.border,
-          borderRadius: 12,
+          borderRadius: theme.radius.md,
           paddingHorizontal: 12,
         }}
       >
@@ -768,36 +788,12 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
                 !filter.category &&
                 !filter.keyword);
             return (
-              <Pressable
+              <ChoiceChip
                 key={qa.id}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
+                label={qa.label}
+                selected={active}
                 onPress={() => applyFilter({ semester: filter.semester, ...qa.defaultFilter })}
-                style={{
-                  paddingHorizontal: 14,
-                  minHeight: 44,
-                  justifyContent: 'center',
-                  paddingVertical: 8,
-                  borderRadius: 18,
-                  borderWidth: 1,
-                  borderColor: active
-                    ? theme.colors.accent
-                    : theme.colors.accent + '40',
-                  backgroundColor: active
-                    ? theme.colors.accent + '22'
-                    : theme.colors.surface,
-                }}
-              >
-                <Text
-                  style={{
-                    color: theme.colors.accent,
-                    fontSize: 13,
-                    fontWeight: active ? '800' : '600',
-                  }}
-                >
-                  {qa.label}
-                </Text>
-              </Pressable>
+              />
             );
           })}
         </View>
@@ -805,22 +801,21 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
 
       {/* 狀態列 */}
       {result && (!error || (pausedResult && result.source === 'cache')) ? (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-          <Pill
-            text={currentSemLabel}
-            kind="muted"
-            size="sm"
-            icon="calendar"
-          />
-          <Text style={{ color: theme.colors.muted, fontSize: 12, flexShrink: 1 }}>
-            {filter.keyword ? `「${filter.keyword}」 · ` : ''}{result.courses.length} 筆
-            {result.source === 'cache' ? ` · 本機紀錄 ${formatDateTime(result.fetchedAt)}` : ''}
-          </Text>
-        </View>
+        <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 19 }}>
+          {currentSemLabel} · {filter.keyword ? `「${filter.keyword}」 · ` : ''}{result.courses.length} 筆
+          {result.source === 'cache' ? ` · 本機紀錄 ${formatDateTime(result.fetchedAt)}` : ''}
+        </Text>
       ) : null}
 
       {pausedResult ? (
-        <View style={{ padding: 14, gap: 8, borderRadius: 12, backgroundColor: theme.colors.surface2 }}>
+        <View
+          style={{
+            paddingTop: 12,
+            gap: 6,
+            borderTopWidth: hairline,
+            borderTopColor: theme.colors.separator,
+          }}
+        >
           <Text accessibilityRole="header" style={{ color: theme.colors.text, fontWeight: '700' }}>
             校方課綱更新已暫停
           </Text>
@@ -830,9 +825,8 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
               : '這台裝置沒有儲存這組條件的課程資料。可以改用其他條件，或查看自己的課表。'}
           </Text>
           {result?.source !== 'cache' ? (
-            <Button
-              text="查看我的課表"
-              kind="outline"
+            <TextAction
+              label="查看我的課表"
               onPress={() => {
                 safeNavigate(props.navigation, 'PersonalTimetable');
               }}
@@ -840,63 +834,26 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
           ) : null}
         </View>
       ) : error ? (
-        <View
-          style={{
-            padding: 10,
-            borderRadius: 10,
-            backgroundColor: theme.colors.dangerSoft,
-            borderWidth: 1,
-            borderColor: theme.colors.danger,
-            flexDirection: 'row',
-            gap: 8,
-          }}
-        >
-          <Ionicons name="alert-circle" size={16} color={theme.colors.danger} />
-          <Text accessibilityRole="alert" style={{ color: theme.colors.danger, fontSize: 13, flex: 1 }}>{error}</Text>
+        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start' }}>
+          <Ionicons name="alert-circle" size={16} color={theme.colors.danger} style={{ marginTop: 2 }} />
+          <Text accessibilityRole="alert" style={{ color: theme.colors.danger, fontSize: 14, lineHeight: 20, flex: 1 }}>{error}</Text>
         </View>
       ) : null}
     </View>
   );
 
   const renderOnboarding = () => (
-    <View style={{ padding: 24, alignItems: 'center', gap: 12 }}>
-      <View
-        style={{
-          width: 64,
-          height: 64,
-          borderRadius: 32,
-          backgroundColor: theme.colors.accent + '1A',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Ionicons name="library-outline" size={32} color={theme.colors.accent} />
-      </View>
-      <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
+    <View style={{ paddingVertical: 24, gap: 8 }}>
+      <Text accessibilityRole="header" style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
         靜宜大學 課綱查詢
       </Text>
-      <Text
-        style={{
-          color: theme.colors.muted,
-          fontSize: 13,
-          textAlign: 'center',
-          lineHeight: 18,
-          maxWidth: 280,
-        }}
-      >
+      <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 21 }}>
         即時查詢校方公開的「{currentSemLabel}」開課資料，包含選課代號、時間地點、選課人數與教師。
       </Text>
-      <Text
-        style={{
-          color: theme.colors.muted,
-          fontSize: 12,
-          textAlign: 'center',
-          marginTop: 4,
-        }}
-      >
+      <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: 4 }}>
         試試上方搜尋框，或選一個快捷篩選 →
       </Text>
-      <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+      <View style={{ marginTop: 8 }}>
         {[
           { label: '熱門：演算法', kw: '演算法' },
           { label: '熱門：經濟學', kw: '經濟學' },
@@ -904,17 +861,16 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
         ].map((s) => (
           <Pressable
             key={s.kw}
+            accessibilityRole="button"
             onPress={() => applyFilter({ ...filter, keyword: s.kw })}
             style={{
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-              borderRadius: 16,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              backgroundColor: theme.colors.surface,
+              minHeight: 48,
+              justifyContent: 'center',
+              borderTopWidth: hairline,
+              borderTopColor: theme.colors.separator,
             }}
           >
-            <Text style={{ color: theme.colors.text, fontSize: 13 }}>{s.label}</Text>
+            <Text style={{ color: theme.colors.accent, fontSize: 15, fontWeight: '600' }}>{s.label}</Text>
           </Pressable>
         ))}
       </View>
@@ -922,36 +878,25 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
   );
 
   const renderEmpty = () => (
-    <View style={{ padding: 32, alignItems: 'center', gap: 10 }}>
-      <Ionicons
-        name="search-outline"
-        size={44}
-        color={theme.colors.muted}
-        style={{ opacity: 0.4 }}
-      />
-      <Text style={{ color: theme.colors.text, fontWeight: '700' }}>查無符合條件的課程</Text>
-      <Text
-        style={{
-          color: theme.colors.muted,
-          fontSize: 12,
-          textAlign: 'center',
-          maxWidth: 260,
-          lineHeight: 18,
-        }}
-      >
+    <View style={{ paddingVertical: 24, gap: 8 }}>
+      <Text accessibilityRole="header" style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>查無符合條件的課程</Text>
+      <Text style={{ color: theme.colors.muted, fontSize: 14, lineHeight: 21 }}>
         系統使用了你目前的篩選條件。試著放寬條件、改變學期，或檢查是否拼錯字。
       </Text>
       <Pressable
+        accessibilityRole="button"
         onPress={openFilter}
         style={{
-          marginTop: 6,
+          marginTop: 8,
+          alignSelf: 'flex-start',
+          minHeight: 44,
+          justifyContent: 'center',
           paddingHorizontal: 18,
-          paddingVertical: 9,
-          borderRadius: 18,
+          borderRadius: theme.radius.sm,
           backgroundColor: theme.colors.accent,
         }}
       >
-        <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 13 }}>調整條件</Text>
+        <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>調整條件</Text>
       </Pressable>
     </View>
   );
@@ -974,7 +919,7 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
         }}
         ListEmptyComponent={
           loading ? (
-            <View style={{ padding: 30, alignItems: 'center' }}>
+            <View style={{ paddingVertical: 30, alignItems: 'center' }}>
               <ActivityIndicator color={theme.colors.accent} />
               <Text style={{ marginTop: 10, color: theme.colors.muted, fontSize: 12 }}>
                 {fetchingPaused ? '正在讀取本機課綱紀錄…' : '正在連線校方系統…'}
@@ -1032,8 +977,8 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
               justifyContent: 'space-between',
               alignItems: 'center',
               padding: 16,
-              borderBottomWidth: 1,
-              borderBottomColor: theme.colors.border,
+              borderBottomWidth: hairline,
+              borderBottomColor: theme.colors.separator,
             }}
           >
             <Pressable accessibilityRole="button" onPress={() => setDraftFilter(null)} style={iconControl}>

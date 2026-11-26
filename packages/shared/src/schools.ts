@@ -1,4 +1,5 @@
 import type { School } from './index';
+import { schoolEnglishNames } from './schoolEnglishNames';
 
 /**
  * Multi-school directory (mock).
@@ -256,32 +257,119 @@ function withoutWhitespace(value: string) {
   return normalizeSchoolQuery(value).replace(/\s+/g, '');
 }
 
-/** 代號完全相符優先，各組維持名錄順序，不變更輸入資料。 */
+/** English-only folding keeps punctuation in codes, URLs and Chinese aliases meaningful. */
+function englishSearchKey(value: string) {
+  return value.replace(/&/g, 'and').replace(/[.,'’‘\s-]+/g, '');
+}
+
+const englishNames = new Map(
+  schoolEnglishNames.map(
+    ([id, name, englishName]) =>
+      [
+        id,
+        {
+          name: normalizeSchoolQuery(name),
+          englishName,
+          searchKey: englishSearchKey(normalizeSchoolQuery(englishName)),
+        },
+      ] as const,
+  ),
+);
+
+function schoolQuery(query: string | null | undefined) {
+  const text = normalizeSchoolQuery(query ?? '');
+  const terms = text.split(/\s+/).filter(Boolean);
+  return {
+    compact: text.replace(/\s+/g, ''),
+    // Spaced-out codes such as “N C C U” must not match scattered letters of English names.
+    english: /[a-z]{2}/.test(text) ? englishSearchKey(text) : '',
+    terms: terms.map((term) => ({ term, english: englishSearchKey(term) })),
+  };
+}
+
+type MatchRank = 'code' | 'display' | 'english' | 'partial';
+function matchSchool(
+  school: SchoolSearchFields,
+  query: ReturnType<typeof schoolQuery>,
+): { rank: MatchRank; englishName: string | null } | null {
+  if (
+    query.compact &&
+    [school.code, school.id].some((code) => code && withoutWhitespace(code) === query.compact)
+  )
+    return { rank: 'code', englishName: null };
+
+  const displayName = normalizeSchoolQuery(school.name ?? '');
+  if (query.english && displayName && englishSearchKey(displayName) === query.english) {
+    return { rank: 'display', englishName: null };
+  }
+  const fields = [
+    school.name,
+    school.shortName,
+    school.code,
+    school.id,
+    ...(school.aliases ?? []),
+    ...(school.domains ?? []),
+  ]
+    .filter((field): field is string => Boolean(field))
+    .map(withoutWhitespace);
+  const matchesLocal =
+    fields.some((field) => field.includes(query.compact)) ||
+    query.terms.every(({ term }) => fields.some((field) => field.includes(term)));
+
+  // A matching label or code alone cannot identify a remote tenant.
+  const id = school.id === 'tw-nchu' ? 'nchu' : school.id === 'tw-pu' ? 'pu' : school.id;
+  const known = id && query.english ? englishNames.get(id) : undefined;
+  if (known && displayName === known.name) {
+    const exactName = known.searchKey === query.english;
+    if (
+      exactName ||
+      known.searchKey.includes(query.english) ||
+      query.terms.every(
+        ({ term, english }) =>
+          fields.some((field) => field.includes(term)) ||
+          (english && known.searchKey.includes(english)),
+      )
+    ) {
+      return {
+        rank: exactName ? 'english' : 'partial',
+        englishName: matchesLocal ? null : known.englishName,
+      };
+    }
+  }
+  return matchesLocal ? { rank: 'partial', englishName: null } : null;
+}
+
+/** Explain English-assisted matches while leaving ordinary Chinese and code results uncluttered. */
+export function matchingSchoolEnglishName(
+  school: SchoolSearchFields,
+  query: string,
+): string | null {
+  return matchSchool(school, schoolQuery(query))?.englishName ?? null;
+}
+
+/** 代號完全相符優先，其次英文全名完全相符，各組維持名錄順序，不變更輸入資料。 */
 export function searchSchools(query?: string | null): School[];
-export function searchSchools<T extends SchoolSearchFields>(query: string | null | undefined, schools: readonly T[]): T[];
+export function searchSchools<T extends SchoolSearchFields>(
+  query: string | null | undefined,
+  schools: readonly T[],
+): T[];
 export function searchSchools(
   query?: string | null,
   schools: readonly SchoolSearchFields[] = mockSchools,
 ): SchoolSearchFields[] {
-  const needle = withoutWhitespace(query ?? '');
-  const terms = normalizeSchoolQuery(query ?? '').split(/\s+/).filter(Boolean);
-  const exact: SchoolSearchFields[] = [];
-  const partial: SchoolSearchFields[] = [];
+  const search = schoolQuery(query);
+  if (!search.compact) return [...schools];
+  const matches: Record<MatchRank, SchoolSearchFields[]> = {
+    code: [],
+    display: [],
+    english: [],
+    partial: [],
+  };
   for (const school of schools) {
-    const fields = [school.name, school.shortName, school.code, school.id,
-      ...(school.aliases ?? []), ...(school.domains ?? [])]
-      .filter((field): field is string => Boolean(field))
-      .map(withoutWhitespace);
-    const exactCode = needle && [school.code, school.id].some(
-      (code) => code && withoutWhitespace(code) === needle,
-    );
-    if (exactCode) exact.push(school);
-    else if (fields.some((field) => field.includes(needle)) ||
-      terms.every((term) => fields.some((field) => field.includes(term)))) {
-      partial.push(school);
-    }
+    const match = matchSchool(school, search);
+    if (match) matches[match.rank].push(school);
   }
-  return [...exact, ...partial];
+  return [...matches.code, ...matches.display, ...matches.english, ...matches.partial];
 }
 
 export function findSchoolById(id?: string | null): School | undefined {

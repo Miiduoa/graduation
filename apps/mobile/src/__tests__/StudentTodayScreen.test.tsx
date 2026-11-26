@@ -1,6 +1,7 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
-import { RefreshControl } from 'react-native';
+import type { PersonalImportRecord } from '@campus/shared';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { AppState, RefreshControl } from 'react-native';
 import { askCampusAssistant } from '../features/campusAssistant';
 import StudentTodayScreen from '../screens/StudentTodayScreen';
 import { loadStudentHome } from '../data/studentHome';
@@ -21,10 +22,14 @@ let mockAuth = {
 };
 const mockNavigate = jest.fn();
 const mockNavigation = { navigate: mockNavigate };
+let mockPersonalizationScope: { owner: string; schoolId: string } | null = null;
 const mockTimetable = {
   status: 'ready' as 'loading' | 'ready' | 'error' | 'empty',
+  scope: { owner: 'firebase:student-a', schoolId: 'school-a' } as { owner: string; schoolId: string } | null,
   classes: [] as TodayClass[],
-  termKey: '115-1',
+  refreshing: false,
+  termKey: '115|1',
+  personalSchedule: null as { scope: { owner: string; schoolId: string }; records: PersonalImportRecord[] } | null,
   retry: jest.fn(),
 };
 
@@ -39,7 +44,10 @@ jest.mock('../services/tronClassClient', () => ({ hasTCSession: jest.fn(async ()
 jest.mock('../hooks/useTodayTimetableData', () => ({
   useTodayTimetableData: () => mockTimetable,
 }));
+// The scoped preference UI has its own account/school lifecycle coverage.
+jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => mockPersonalizationScope }));
 jest.mock('@react-navigation/native', () => ({
+  NavigationContext: require('react').createContext(null),
   useNavigation: () => mockNavigation,
   useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
 }));
@@ -68,7 +76,7 @@ function result(name = '資料結構'): Awaited<ReturnType<typeof loadStudentHom
     priority: 1,
     dueAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
   };
-  return { courses: [course], tasks: [task] };
+  return { courses: [course], tasks: [task], tasksComplete: true };
 }
 
 function deferred<T>() {
@@ -101,9 +109,13 @@ beforeEach(() => {
   jest.setSystemTime(new Date('2026-11-03T08:00:00+08:00'));
   jest.clearAllMocks();
   mockAuth = { user: { uid: 'student-a' }, profile: { uid: 'student-a', schoolId: 'school-a', role: 'student' } };
+  mockPersonalizationScope = null;
   mockTimetable.status = 'ready';
+  mockTimetable.scope = { owner: 'firebase:student-a', schoolId: 'school-a' };
   mockTimetable.classes = [];
-  mockTimetable.termKey = '115-1';
+  mockTimetable.refreshing = false;
+  mockTimetable.termKey = '115|1';
+  mockTimetable.personalSchedule = null;
   mockTimetable.retry.mockReset().mockResolvedValue(undefined);
   clearSchoolTheme();
   applyTheme('light');
@@ -125,6 +137,102 @@ test('opens timetable import from the empty timetable state', async () => {
   expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalImport', { kind: 'timetable' });
 });
 
+test('keeps the four public campus services available while coursework loads and after it resolves', async () => {
+  const first = deferred<ReturnType<typeof result>>();
+  jest.mocked(loadStudentHome).mockReturnValueOnce(first.promise);
+  const view = render(<StudentTodayScreen />);
+  const labels = ['找教室', '查公車', '找餐廳', '查館藏'];
+  for (const label of labels) {
+    expect(view.getByLabelText('校園服務：' + label)).toBeTruthy();
+  }
+  fireEvent.press(view.getByLabelText('校園服務：找教室'));
+  expect(mockNavigate).toHaveBeenCalledWith('校園', {
+    initial: false,
+    screen: 'MapV2',
+    params: undefined,
+  });
+  await act(async () => first.resolve(result()));
+  for (const label of labels) {
+    expect(view.getByLabelText('校園服務：' + label)).toBeTruthy();
+  }
+});
+
+test('offers timetable setup guidance only for a confirmed empty timetable', async () => {
+  mockTimetable.status = 'empty';
+  const view = render(<StudentTodayScreen />);
+  const guidance = '匯入課表截圖或檔案，下次打開就能查看上課時間與教室。';
+  expect(await view.findByText(guidance)).toBeTruthy();
+  fireEvent.press(view.getByText(TODAY_COPY.importTimetable));
+  expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalImport', { kind: 'timetable' });
+  mockTimetable.status = 'error';
+  view.rerender(<StudentTodayScreen />);
+  expect(view.queryByText(guidance)).toBeNull();
+});
+
+test('keeps one inline workspace with supported examples and a separate exploration entry', async () => {
+  const view = render(<StudentTodayScreen />);
+  await view.findAllByText('繳交期末報告');
+  expect(view.getAllByLabelText('說出或輸入想做的事')).toHaveLength(1);
+  expect(view.queryByLabelText('想交給 nuni 的事')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '填入需求：這禮拜有哪些待交作業' }));
+  expect(view.getByDisplayValue('這禮拜有哪些待交作業')).toBeTruthy();
+  expect(askCampusAssistant).not.toHaveBeenCalled();
+  fireEvent.press(view.getByRole('button', { name: '探索更多 nuni 用法' }));
+  expect(mockNavigate).toHaveBeenCalledWith('校園', {
+    screen: 'Explore', params: { workContext: 'student' }, initial: false,
+  });
+  expect(askCampusAssistant).not.toHaveBeenCalled();
+});
+
+test('keeps the assistant usable during the first course load without dropping the draft', async () => {
+  const first = deferred<ReturnType<typeof result>>();
+  jest.mocked(loadStudentHome).mockReturnValueOnce(first.promise);
+  const view = render(<StudentTodayScreen />);
+  expect(view.getByTestId('today-skeleton')).toBeTruthy();
+  // The task entry is first in both the visual and assistive reading order,
+  // even while coursework is still loading.
+  const loadingOrder = view.root.findAll(() => true);
+  expect(loadingOrder.indexOf(view.getByTestId('today-task-workspace')))
+    .toBeLessThan(loadingOrder.indexOf(view.getByTestId('today-skeleton')));
+  const input = view.getByLabelText('說出或輸入想做的事');
+  fireEvent.changeText(input, '想找等一下的教室');
+  await act(async () => first.resolve(result()));
+  expect(view.queryByTestId('today-skeleton')).toBeNull();
+  expect(view.getByLabelText('說出或輸入想做的事')).toBe(input);
+  expect(view.getByDisplayValue('想找等一下的教室')).toBeTruthy();
+  const readyOrder = view.root.findAll(() => true);
+  expect(readyOrder.indexOf(view.getByTestId('today-task-workspace')))
+    .toBeLessThan(readyOrder.indexOf(view.getByText('今天課表')));
+  expect(askCampusAssistant).not.toHaveBeenCalled();
+});
+
+test('keeps an in-flight question and draft while retrying coursework in the same scope', async () => {
+  const answer = deferred<Awaited<ReturnType<typeof askCampusAssistant>>>();
+  const retry = deferred<ReturnType<typeof result>>();
+  jest.mocked(askCampusAssistant).mockReturnValueOnce(answer.promise);
+  const view = render(<StudentTodayScreen />);
+  await view.findAllByText('繳交期末報告');
+  const input = view.getByLabelText('說出或輸入想做的事');
+  fireEvent.changeText(input, '我的下一堂課在哪裡？');
+  fireEvent.press(view.getByLabelText('詢問手機助理'));
+  const request = jest.mocked(askCampusAssistant).mock.lastCall![0];
+  jest.mocked(loadStudentHome).mockRejectedValueOnce(new Error('unavailable'));
+  fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
+  await view.findByText('無法讀取校務課程。請確認登入狀態與網路連線後重試。');
+  jest.mocked(loadStudentHome).mockReturnValueOnce(retry.promise);
+  fireEvent.press(view.getByText(TODAY_COPY.retry));
+  expect(view.getByTestId('today-skeleton')).toBeTruthy();
+  expect(view.getByLabelText('說出或輸入想做的事')).toBe(input);
+  expect(view.getByDisplayValue('我的下一堂課在哪裡？')).toBeTruthy();
+  expect(request.signal?.aborted).toBe(false);
+  await act(async () => answer.resolve({ content: '下一堂在主顧樓 302。', source: 'device', hasActions: false }));
+  expect(view.getByText('下一堂在主顧樓 302。')).toBeTruthy();
+  await act(async () => retry.resolve(result()));
+  expect(view.queryByTestId('today-skeleton')).toBeNull();
+  expect(view.getByText('下一堂在主顧樓 302。')).toBeTruthy();
+  expect(askCampusAssistant).toHaveBeenCalledTimes(1);
+});
+
 test.each(['assignment', 'quiz'] as const)('opens the course from a %s todo row', async (kind) => {
   const data = result();
   data.tasks[0].kind = kind;
@@ -132,6 +240,7 @@ test.each(['assignment', 'quiz'] as const)('opens the course from a %s todo row'
   const view = render(<StudentTodayScreen />);
   fireEvent.press(await view.findByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
@@ -144,7 +253,9 @@ test('a todo without a course ID carries the course name to Classroom search', a
   const view = render(<StudentTodayScreen />);
   fireEvent.press(await view.findByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
-    screen: 'Classroom', params: { q: '資料結構', from: 'timetable' },
+    initial: false,
+    screen: 'Classroom',
+    params: { q: '資料結構', from: 'timetable' },
   });
 });
 
@@ -307,6 +418,7 @@ test('reveals the remaining work inline and lets the student collapse the list',
   expect(rootNavigateNested).not.toHaveBeenCalled();
   fireEvent.press(view.getByLabelText('作業 3，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
@@ -342,6 +454,7 @@ test('a malformed deadline stays visible as undated instead of disappearing', as
   expect(view.getAllByText(/未設截止時間/).length).toBeGreaterThan(0);
   fireEvent.press(view.getByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
@@ -390,6 +503,7 @@ test('the explicit submit button opens the real assignment', async () => {
   fireEvent.press(submit);
   expect(mockNavigate).toHaveBeenCalledTimes(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'HomeworkSubmit',
     params: {
       courseId: 'course-a',
@@ -424,7 +538,7 @@ test('the empty schedule follows OLED mode and keeps the full timetable reachabl
   });
   expect(view.getByText('今天沒有排課。')).toHaveStyle({ color: createDarkTheme().colors.muted });
   fireEvent.press(view.getByText(TODAY_COPY.viewFullTimetable));
-  expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalTimetable', { term: '115-1' });
+  expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalTimetable', { term: '115|1' });
 });
 
 test('one-tap homework uses the real current inbox task instead of a guessed target', async () => {
@@ -432,6 +546,7 @@ test('one-tap homework uses the real current inbox task instead of a guessed tar
   await view.findAllByText('繳交期末報告');
   fireEvent.press(view.getByLabelText('直接前往交作業'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'HomeworkSubmit',
     params: expect.objectContaining({ courseId: 'course-a', hwId: 'homework-a' }),
   });
@@ -442,6 +557,7 @@ test('a natural-language location query opens the registered campus map without 
   fireEvent.changeText(await view.findByLabelText('說出或輸入想做的事'), '圖書館怎麼走');
   fireEvent.press(view.getByLabelText('前往校園地圖'));
   expect(mockNavigate).toHaveBeenCalledWith('校園', {
+    initial: false,
     screen: 'MapV2',
     params: undefined,
   });
@@ -500,6 +616,7 @@ test('today class without linkedCourseId opens Classroom with timetable search p
   fireEvent.press(await view.findByRole('button', { name: /^下一堂課，資料結構，/ }));
   expect(view.getAllByText('資料結構')).toHaveLength(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'Classroom',
     params: { q: '資料結構', from: 'timetable', code: 'CS301' },
   });
@@ -517,6 +634,7 @@ test('today class with linkedCourseId still opens CourseHub', async () => {
   fireEvent.press(await view.findByRole('button', { name: /^下一堂課，資料結構，/ }));
   expect(view.getAllByText('資料結構')).toHaveLength(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: {
       courseSpaceId: 'cw_11111111-1111-4111-8111-111111111111',
@@ -538,6 +656,7 @@ test('today class with blank course name resolves via courseWorkNavForClass to C
   const view = render(<StudentTodayScreen />);
   fireEvent.press(await view.findByText('教室未填'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'Classroom',
     params: {},
   });
@@ -549,6 +668,7 @@ test('today class list press without linkedCourseId opens Classroom search', asy
   const view = render(<StudentTodayScreen />);
   fireEvent.press(await view.findByText('主顧 303'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'Classroom',
     params: { q: '資料結構', from: 'timetable', code: 'CS301' },
   });
@@ -566,6 +686,7 @@ test('today class list press with linkedCourseId opens CourseHub', async () => {
   const view = render(<StudentTodayScreen />);
   fireEvent.press(await view.findByText('主顧 303'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: {
       courseSpaceId: 'cw_11111111-1111-4111-8111-111111111111',
@@ -583,6 +704,7 @@ test.each([-48, 3, 72])('the single work row opens its course for a deadline off
   expect(await view.findAllByText('繳交期末報告')).toHaveLength(1);
   fireEvent.press(view.getByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
@@ -599,6 +721,7 @@ test('after classes end, the work row and its separate submit button retain thei
   await view.findByText('已結束');
   fireEvent.press(view.getByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
@@ -607,6 +730,7 @@ test('after classes end, the work row and its separate submit button retain thei
   fireEvent.press(submit);
   expect(mockNavigate).toHaveBeenCalledTimes(2);
   expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
+    initial: false,
     screen: 'HomeworkSubmit',
     params: expect.objectContaining({ courseId: 'course-a', hwId: 'homework-a', scrollToSubmit: true }),
   });
@@ -639,13 +763,16 @@ test.each([
   fireEvent.press(quiz);
   expect(mockNavigate).toHaveBeenCalledTimes(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'QuizTaking',
     params: { groupId: 'course-a', groupName: '資料結構', quizId: 'quiz-42', dueAt: dueAt.toISOString() },
   });
   fireEvent.press(course);
   expect(mockNavigate).toHaveBeenCalledTimes(2);
   expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
-    screen: 'CourseHub', params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
+    initial: false,
+    screen: 'CourseHub',
+    params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
 });
 
@@ -681,10 +808,127 @@ test('a class starting soon keeps the urgent quiz visible in the collapsed list 
   const headings = view.getAllByRole('header').map(node => node.props.children);
   expect(headings.indexOf('待處理')).toBeLessThan(headings.indexOf('今天課表'));
   fireEvent.press(view.getByRole('button', { name: '去作答，期中考' }));
-  expect(mockNavigate).toHaveBeenCalledWith('學習', { screen: 'QuizTaking',
+  expect(mockNavigate).toHaveBeenCalledWith('學習', { initial: false, screen: 'QuizTaking',
     params: { groupId: 'course-a', groupName: '資料結構', quizId: 'quiz-42', dueAt: dueAt.toISOString() } });
   expect(view.getByText(TODAY_COPY.moreTodos(11))).toBeVisible();
   expect(view.queryByLabelText('補交 2，資料結構')).toBeNull();
+});
+
+test('the header opens the student card before the timetable finishes loading', () => {
+  mockTimetable.status = 'loading';
+  const view = render(<StudentTodayScreen />);
+  fireEvent.press(view.getByLabelText('開啟數位學生證'));
+  expect(rootNavigateNested).toHaveBeenCalledWith('我的', 'StudentCard');
+});
+
+test.each(['assignment', 'quiz'] as const)('shows the class deadline before the list and opens the exact %s', async kind => {
+  const dueAt = new Date('2026-11-03T09:20:00+08:00');
+  const data = result();
+  const original = data.tasks[0];
+  data.tasks.push({ ...original, kind, id: 'near', assignmentId: 'near-id', dueAt });
+  mockTimetable.classes = [todayClass({ title: '網路概論' })];
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  const button = await view.findByRole('button', { name: `查看提醒的${kind === 'quiz' ? '測驗' : '作業'}，繳交期末報告` });
+  const headers = view.getAllByRole('header').map(node => node.props.children);
+  expect(headers).toContain('nuni 提醒');
+  expect(headers.indexOf('nuni 提醒')).toBeLessThan(headers.indexOf('待處理'));
+  expect(view.getByText(/網路概論.*09:00.*09:50.*09:20/)).toBeVisible();
+  fireEvent.press(button);
+  expect(mockNavigate).toHaveBeenCalledWith('學習', { initial: false,
+    screen: kind === 'quiz' ? 'QuizTaking' : 'HomeworkSubmit',
+    params: kind === 'quiz'
+      ? { groupId: original.groupId, groupName: original.groupName, quizId: 'near-id', dueAt: dueAt.toISOString() }
+      : { courseId: original.groupId, hwTitle: original.title, hwId: 'near-id', dueAt: dueAt.toISOString(), scrollToSubmit: true },
+  });
+  jest.mocked(loadStudentHome).mockResolvedValue({ ...data, tasks: [original] });
+  fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
+  await waitFor(() => expect(view.queryByText('nuni 提醒')).toBeNull());
+});
+
+test.each(['account', 'school', 'timetable', 'coursework', 'truncated', 'missing-id'] as const)(
+  'hides the deadline reminder once its %s evidence is unavailable', async change => {
+    const data = result();
+    data.tasks[0].dueAt = new Date('2026-11-03T09:20:00+08:00');
+    mockTimetable.classes = [todayClass()];
+    jest.mocked(loadStudentHome).mockResolvedValue(data);
+    const view = render(<StudentTodayScreen />);
+    let button = await view.findByRole('button', { name: '查看提醒的作業，繳交期末報告' });
+    while (button.parent && !button.props.onPress) button = button.parent;
+    const stalePress = button.props.onPress;
+    expect(typeof stalePress).toBe('function');
+    if (change === 'account' || change === 'school') {
+      mockTimetable.scope = change === 'account'
+        ? { owner: 'nuni:student-a', schoolId: 'school-a' }
+        : { owner: 'firebase:student-a', schoolId: 'school-b' };
+    } else if (change === 'timetable') {
+      mockTimetable.status = 'error';
+    } else {
+      if (change === 'coursework') jest.mocked(loadStudentHome).mockRejectedValue(new Error('offline'));
+      if (change === 'truncated') jest.mocked(loadStudentHome).mockResolvedValue({ ...data, tasksComplete: false });
+      if (change === 'missing-id') {
+        jest.mocked(loadStudentHome).mockResolvedValue({ ...data, tasks: [{ ...data.tasks[0], assignmentId: '' }] });
+      }
+      fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
+    }
+    view.rerender(<StudentTodayScreen />);
+    await waitFor(() => expect(view.queryByText('nuni 提醒')).toBeNull());
+    act(() => stalePress());
+    expect(mockNavigate).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['114|1', '116|1', ''])('does not attribute a deadline to an unverified semester %s', async term => {
+  const data = result();
+  data.tasks[0].dueAt = new Date('2026-11-03T09:20:00+08:00');
+  mockTimetable.termKey = term;
+  mockTimetable.classes = [todayClass()];
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  await view.findAllByText('繳交期末報告');
+  expect(view.queryByText('nuni 提醒')).toBeNull();
+});
+
+test('rechecks coursework once on returning to the foreground and withdraws a completed assignment', async () => {
+  const data = result();
+  data.tasks[0].dueAt = new Date('2026-11-03T09:20:00+08:00');
+  mockTimetable.classes = [todayClass()];
+  jest.mocked(loadStudentHome).mockResolvedValueOnce(data);
+  const pending = deferred<ReturnType<typeof result>>();
+  jest.mocked(loadStudentHome).mockReturnValueOnce(pending.promise);
+  const listeners = new Set<(state: string) => void>();
+  const original = AppState.addEventListener;
+  AppState.addEventListener = (_event, listener) => {
+    const callback = listener as (state: string) => void;
+    listeners.add(callback);
+    return { remove: () => { listeners.delete(callback); } };
+  };
+  try {
+    const view = render(<StudentTodayScreen />);
+    await view.findByText('nuni 提醒');
+    act(() => listeners.forEach(listener => listener('background')));
+    expect(view.queryByText('nuni 提醒')).toBeNull();
+    act(() => { for (const listener of listeners) { listener('active'); listener('active'); } });
+    expect(loadStudentHome).toHaveBeenCalledTimes(2);
+    expect(view.queryByText('nuni 提醒')).toBeNull();
+    await act(async () => pending.resolve({ ...data, tasks: [] }));
+    expect(view.queryByText('nuni 提醒')).toBeNull();
+  } finally { AppState.addEventListener = original; }
+});
+
+test('rereads both sources once when the Taipei date changes while focused', async () => {
+  jest.setSystemTime(new Date('2026-11-03T23:59:30+08:00'));
+  const intervals = jest.spyOn(global, 'setInterval');
+  try {
+    const view = render(<StudentTodayScreen />);
+    await view.findAllByText('繳交期末報告');
+    const tick = intervals.mock.calls.find(([, delay]) => delay === 60_000)?.[0];
+    expect(typeof tick).toBe('function');
+    jest.setSystemTime(new Date('2026-11-04T00:00:30+08:00'));
+    await act(async () => { (tick as () => void)(); (tick as () => void)(); });
+    expect(loadStudentHome).toHaveBeenCalledTimes(2);
+    expect(mockTimetable.retry).toHaveBeenCalledTimes(1);
+  } finally { intervals.mockRestore(); }
 });
 
 test('distinguishes a class in progress and shows the timetable before non-urgent work', async () => {
@@ -700,9 +944,67 @@ test('distinguishes a class in progress and shows the timetable before non-urgen
   expect(headings.indexOf('今天課表')).toBeLessThan(headings.indexOf('待處理'));
 });
 
-test('the header opens the student card before the timetable finishes loading', () => {
-  mockTimetable.status = 'loading';
+test('the personalization entry stays after urgent work and the timetable', async () => {
+  mockPersonalizationScope = { owner: 'firebase:student-a', schoolId: 'school-a' };
+  mockTimetable.classes = [todayClass()];
+  const data = result();
+  data.tasks[0].dueAt = new Date(Date.now() + 60 * 60 * 1000);
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
   const view = render(<StudentTodayScreen />);
-  fireEvent.press(view.getByLabelText('開啟數位學生證'));
-  expect(rootNavigateNested).toHaveBeenCalledWith('我的', 'StudentCard');
+  await view.findByText('讓今天更適合你');
+  const headings = view.getAllByRole('header').map(node => node.props.children);
+  expect(headings.indexOf('待處理')).toBeLessThan(headings.indexOf('今天課表'));
+  expect(headings.indexOf('今天課表')).toBeLessThan(headings.indexOf('讓今天更適合你'));
+});
+
+test.each(['pending', 'empty', 'error'])('opens the calendar from %s coursework', async (state) => {
+  if (state === 'empty') jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
+  if (state === 'error') jest.mocked(loadStudentHome).mockRejectedValue(new Error('offline'));
+  const view = render(<StudentTodayScreen />);
+  const calendar = await view.findByRole('button', { name: '查看行事曆' });
+  fireEvent.press(calendar);
+  expect(mockNavigate).toHaveBeenLastCalledWith('Today', {
+    initial: false,
+    screen: 'SmartCalendarScreen',
+    params: undefined,
+  });
+  if (state === 'pending') expect(await view.findByText('繳交期末報告')).toBeTruthy();
+});
+
+
+test('school Today offers the exact event only while the student, school and personal data agree', async () => {
+  const scope = { owner: 'firebase:student-a', schoolId: 'school-a' };
+  const row = {
+    batchId: 'saved', importedAt: '2026-11-01T01:00:00Z', academicYear: '115', semester: '1',
+    schoolId: 'school-a', source: { type: 'paste' as const, line: 1, rawText: '' },
+  };
+  const records: PersonalImportRecord[] = [
+    { ...row, id: 'course', kind: 'timetable', title: '程式設計', dayOfWeek: 2, startTime: '09:00', endTime: '11:00' },
+    { ...row, id: 'meeting', kind: 'events', title: '面談', date: '2026-11-03', startTime: '09:30', endTime: '10:30' },
+  ];
+  mockTimetable.personalSchedule = { scope, records };
+  let resume: ((state: 'active' | 'background') => void) | undefined;
+  const appState = jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+    resume = listener;
+    return { remove: jest.fn() };
+  });
+  const screen = render(<StudentTodayScreen />);
+  const action = '查看個人行程「面談」';
+  fireEvent.press(await screen.findByRole('button', { name: action }));
+  expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalCalendar', {
+    eventId: 'meeting', eventScope: JSON.stringify(scope),
+  });
+  for (const stale of [{ ...scope, owner: 'nuni:student-a' }, { ...scope, schoolId: 'different-school' }]) {
+    mockTimetable.personalSchedule = { scope: stale, records };
+    screen.rerender(<StudentTodayScreen />);
+    expect(screen.queryByRole('button', { name: action })).toBeNull();
+  }
+  mockTimetable.personalSchedule = { scope, records };
+  screen.rerender(<StudentTodayScreen />);
+  expect(screen.getByRole('button', { name: action })).toBeTruthy();
+  act(() => resume?.('background'));
+  jest.setSystemTime(new Date('2026-11-04T08:00:00+08:00'));
+  act(() => resume?.('active'));
+  expect(screen.queryByRole('button', { name: action })).toBeNull();
+  appState.mockRestore();
 });

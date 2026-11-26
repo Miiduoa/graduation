@@ -21,7 +21,8 @@ function mockRef(path, constraints = []) {
       const data = mockDocuments.get(path);
       if (data instanceof Error) throw data;
       if (Array.isArray(data) || path.split('/').length % 2 === 1) {
-        const docs = (data || []).map((row) => ({ id: row.id, data: () => row.data }));
+        const maximum = constraints.find(([kind]) => kind === 'limit')?.[1] ?? Infinity;
+        const docs = (data || []).slice(0, maximum).map((row) => ({ id: row.id, data: () => row.data }));
         return { empty: docs.length === 0, docs };
       }
       return { exists: Boolean(data), data: () => data };
@@ -475,14 +476,19 @@ describe('authorization failures inside the real core stop the callable', () => 
     },
   );
 
-  test('a repair owned by another account yields a contained run without the private record', async () => {
+  test('a repair owned by another account looks the same as a missing repair', async () => {
     mockDocuments.set(`schools/pu/repairRequests/${repairId}`, {
       userId: 'another-student', description: 'private-denial-detail', room: 'private-denial-detail',
     });
 
+    const missing = await ask(`查我的報修狀態，單號：missing-${repairId}`);
     const result = await ask(`查我的報修狀態，單號：${repairId}`);
 
-    expectContained(result);
+    expect(result.run.status).toBe('completed');
+    expect(result.content).toBe(missing.content);
+    expect(result.content).toContain('找不到這筆報修');
+    expect(result.evaluation.reason).not.toBe('stopped unauthorized tool request');
+    expect(JSON.stringify(result)).not.toContain('private-denial-detail');
     expect(mockModel).not.toHaveBeenCalled();
   });
 
@@ -498,13 +504,17 @@ describe('authorization failures inside the real core stop the callable', () => 
     ['查我的請假狀態', 'leaveRequests', '目前無法讀取請假紀錄'],
     [`查我的報修狀態，單號：${repairId}`, `schools/pu/repairRequests/${repairId}`, '暫時讀不到這筆報修狀態'],
     ['我的報修', 'schools/pu/repairRequests', '暫時讀不到報修列表'],
-    ['幫我續借快到期的書', `users/${uid}/schools/pu/libraryLoans`, '目前找不到可續借的借閱紀錄'],
+    ['幫我續借快到期的書', `users/${uid}/schools/pu/libraryLoans`, '無法完整讀取'],
   ])('an ordinary reader outage keeps the existing recovery response: %s', async (message, path, copy) => {
     mockDocuments.set(path, new Error('temporary-reader-outage'));
     const result = await ask(message);
 
     expect(result.run.status).toBe('completed');
     expect(result.content).toContain(copy);
+    if (path.endsWith('/libraryLoans')) {
+      expect(result.actions).toEqual([]);
+      expect(result.content).not.toContain('目前找不到');
+    }
     expect(mockModel).not.toHaveBeenCalled();
   });
 });

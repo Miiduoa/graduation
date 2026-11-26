@@ -1,4 +1,4 @@
-import { runAIToolLayer } from '../../services/aiToolLayer';
+import { getCrossRoleEffectsForIntent, runAIToolLayer } from '../../services/aiToolLayer';
 
 describe('aiToolLayer assignment planning', () => {
   it('turns the dashboard study prompt into an executable sprint plan', () => {
@@ -38,5 +38,26 @@ describe('aiToolLayer assignment planning', () => {
     expect(result.handled).toBe(true);
     expect(result.answer).toContain('沒有拿到可驗證');
     expect(result.answer).not.toContain('目前沒有查到待繳作業');
+  });
+});
+
+describe('aiToolLayer dorm repair copy', () => {
+  it('does not claim the app files an official repair or work order', () => {
+    const effects = getCrossRoleEffectsForIntent({
+      role: 'student',
+      intent: 'repair_status',
+      message: '宿舍冷氣壞了幫我報修',
+    });
+    const blob = JSON.stringify(effects);
+    expect(blob).toContain('報修備忘');
+    expect(blob).toContain('學校管道');
+    expect(blob).not.toMatch(/才能正式送出|提交報修|送出報修|工單|叫工人/);
+
+    const result = runAIToolLayer({
+      message: '宿舍冷氣壞了幫我報修',
+      context: { schoolId: 'tw-pu', role: 'student', repairRequests: [] },
+    });
+    expect(result.answer).toContain('報修備忘');
+    expect(result.answer).not.toMatch(/報修案件|工單|單號/);
   });
 });

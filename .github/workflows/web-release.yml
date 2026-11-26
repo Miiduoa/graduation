@@ -33,6 +33,7 @@ on:
       - 'deploy/web/release-check*'
       - 'deploy/web/transit-release-gate*'
       - 'deploy/web/runtime-security-check*'
+      - 'deploy/web/career-release-gate*'
       - '.github/workflows/web-release.yml'
   push:
     branches: [main]
@@ -40,6 +41,7 @@ on:
       - 'deploy/web/release-check*'
       - 'deploy/web/transit-release-gate*'
       - 'deploy/web/runtime-security-check*'
+      - 'deploy/web/career-release-gate*'
       - '.github/workflows/web-release.yml'
 
 permissions:
@@ -68,8 +70,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: '22.23.4'
-      - run: node --test deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs deploy/web/release-safety.test.mjs deploy/web/runtime-security-check.test.cjs
+          node-version: '22.23.5'
+      - run: node --test deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs deploy/web/release-safety.test.mjs deploy/web/runtime-security-check.test.cjs deploy/web/career-release-gate.test.mjs
 
   release:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
@@ -90,6 +92,7 @@ jobs:
       CAMPUS_RELEASE_SHA: ${{ inputs.expected_revision }}
       NEXT_PUBLIC_SITE_URL: https://nuni.tw
       NEXT_PUBLIC_FUNCTIONS_BASE_URL: ${{ vars.NEXT_PUBLIC_FUNCTIONS_BASE_URL }}
+      NEXT_PUBLIC_FILE_STORAGE_BACKEND: ${{ vars.NEXT_PUBLIC_FILE_STORAGE_BACKEND }}
       ASSIGNMENT_FILE_SUBMIT_ENABLED: ${{ inputs.assignment_file_submit_enabled == 'true' && 'true' || vars.ASSIGNMENT_FILE_SUBMIT_ENABLED == 'true' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -97,7 +100,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: '22.23.4'
+          node-version: '22.23.5'
       - name: Require exact main revision and successful full CI
         env:
           GH_TOKEN: ${{ github.token }}
@@ -127,6 +130,10 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_NUNI_WEB_DEPLOY_TOKEN }}
         run: node deploy/web/transit-release-gate.mjs fly release-evidence/before.json
+      - name: Verify career settings credentials and reads inside every existing Web machine
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_NUNI_WEB_DEPLOY_TOKEN }}
+        run: node deploy/web/career-release-gate.mjs settings release-evidence/before.json release-evidence/career-before.json
       - name: Build production image on the existing GitHub runner
         run: |
           set -euo pipefail
@@ -135,6 +142,7 @@ jobs:
             --build-arg CAMPUS_RELEASE_SHA \
             --build-arg NEXT_PUBLIC_SITE_URL \
             --build-arg NEXT_PUBLIC_FUNCTIONS_BASE_URL \
+            --build-arg NEXT_PUBLIC_FILE_STORAGE_BACKEND \
             --build-arg NEXT_PUBLIC_FIREBASE_API_KEY \
             --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN \
             --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID \
@@ -164,11 +172,11 @@ jobs:
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const report = JSON.parse(fs.readFileSync('release-evidence/runtime-security.json', 'utf8'));
-          if (report.ok !== true || report.expectedVersion !== '16.4.2') {
+          if (report.ok !== true || report.expectedVersion !== '16.4.5') {
             throw new Error('Built image failed current/legacy Next runtime security check.');
           }
           if (
-            report.expectedPackages?.next !== '16.4.2' ||
+            report.expectedPackages?.next !== '16.4.5' ||
             report.expectedPackages?.sharp !== '0.35.5' ||
             report.expectedPackages?.['source-map-js'] !== '1.2.2'
           ) {
@@ -176,13 +184,13 @@ jobs:
           }
           for (const name of ['current', 'legacy']) {
             const runtime = report.runtimes?.[name];
-            if (runtime?.version !== '16.4.2') {
+            if (runtime?.version !== '16.4.5') {
               throw new Error(`Built image ${name} Next runtime is not the approved version.`);
             }
             const nextVersions = (runtime.packages?.next || []).map((item) => item.version);
             const sharpVersions = (runtime.packages?.sharp || []).map((item) => item.version);
             const sourceMapVersions = (runtime.packages?.['source-map-js'] || []).map((item) => item.version);
-            if (!nextVersions.length || nextVersions.some((version) => version !== '16.4.2')) {
+            if (!nextVersions.length || nextVersions.some((version) => version !== '16.4.5')) {
               throw new Error(`Built image ${name} next pin scan failed: ${JSON.stringify(nextVersions)}`);
             }
             if (!sharpVersions.length || sharpVersions.some((version) => version !== '0.35.5')) {
@@ -214,6 +222,7 @@ jobs:
           node deploy/web/release-check.mjs snapshot "$RUNNER_TEMP/campus-web-machines-current.json" release-evidence/pre-rollout.json
           rm -f "$RUNNER_TEMP/campus-web-machines-current.json"
           node deploy/web/release-check.mjs stable release-evidence/before.json release-evidence/pre-rollout.json
+          node deploy/web/career-release-gate.mjs settings release-evidence/pre-rollout.json release-evidence/career-before-rollout.json
           node deploy/web/transit-release-gate.mjs fly release-evidence/pre-rollout.json release-evidence/transit-before-rollout.json
       - name: Roll out to existing Web machines only
         id: rollout
@@ -240,7 +249,7 @@ jobs:
           }
           // Afterdeploy: same immutable digest that passed runtime-security-check is live.
           const runtime = JSON.parse(fs.readFileSync('release-evidence/runtime-security.json', 'utf8'));
-          if (runtime.ok !== true || runtime.expectedVersion !== '16.4.2') {
+          if (runtime.ok !== true || runtime.expectedVersion !== '16.4.5') {
             throw new Error('Missing successful pre-rollout runtime security evidence for the released image.');
           }
           const image = JSON.parse(fs.readFileSync('release-evidence/image.json', 'utf8'));
@@ -249,6 +258,8 @@ jobs:
           }
           NODE
           node deploy/web/transit-release-gate.mjs fly release-evidence/after.json release-evidence/transit-after-rollout.json
+          node deploy/web/career-release-gate.mjs settings release-evidence/after.json release-evidence/career-after-settings.json
+          node deploy/web/career-release-gate.mjs feed release-evidence/after.json release-evidence/career-after-feed.json
           node deploy/web/release-check.mjs verify
           node deploy/web/transit-release-gate.mjs public
       - name: Restore previous Web image after failed verification

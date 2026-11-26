@@ -38,7 +38,7 @@ type CourseReadState = {
 
 function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; returnUrl: string }) {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
-  const options = useSignInOptions();
+  const options = useSignInOptions(undefined, true, 'school');
   const [status, setStatus] = useState<TronClassCourseStatus>('ongoing');
   const [search, setSearch] = useState('');
   const [reload, setReload] = useState(0);
@@ -226,7 +226,9 @@ export default function SchoolCoursesPage() {
       ) : !isOfficialAcademicSchool(browse.schoolId) ? (
         <>
           {(browse.schoolId === 'ncnu' || browse.schoolId === 'nthu') && getPublicSchoolInfo(browse.schoolId, browse.schoolName) && (
-            <PublicCourseSearch key={browse.schoolId} schoolId={browse.schoolId} schoolName={browse.schoolName} schoolSearch={browse.schoolSearch} />
+            <PublicCourseSearch key={browse.schoolId} schoolId={browse.schoolId} schoolName={browse.schoolName}
+              schoolSearch={browse.schoolSearch} queryParameters={params.getAll('q')}
+              weekdayParameters={params.getAll('weekday')} creditsParameters={params.getAll('credits')} />
           )}
           <SchoolLearningLinks schoolId={browse.schoolId} schoolName={browse.schoolName} courseSearch={browse.schoolSearch} />
         </>

@@ -12,7 +12,20 @@ type MembershipRecovery = {
   resolve: () => void;
   reject: (failure: unknown) => void;
   targetVersion: number;
+  failure?: unknown;
+  settled?: boolean;
 };
+
+function settleRecovery(
+  operation: MembershipRecovery,
+  outcome: 'resolve' | 'reject',
+  failure?: unknown,
+) {
+  if (operation.settled) return;
+  operation.settled = true;
+  if (outcome === 'resolve') operation.resolve();
+  else operation.reject(failure ?? operation.failure ?? new Error('Account recovery failed'));
+}
 
 /** Account-level information only. Teaching roles belong to individual courses. */
 export function NuniAccountPanel() {
@@ -77,7 +90,9 @@ function ConfirmedAccountPanel({
       mounted.current = false;
       const operation = recoveryOperation.current;
       recoveryOperation.current = null;
-      operation?.reject(new Error('Account scope changed during membership recovery'));
+      if (operation) {
+        settleRecovery(operation, 'reject', new Error('Account scope changed during membership recovery'));
+      }
     };
   }, []);
   useEffect(() => {
@@ -86,7 +101,7 @@ function ConfirmedAccountPanel({
     if (!loading && recovery === 'idle' && readerVersion === operation.targetVersion) {
       recoveryOperation.current = null;
       // Complete after the previous reader's cleanup, so it cannot start another read.
-      operation.resolve();
+      settleRecovery(operation, 'resolve');
     }
   }, [loading, readerVersion, recovery]);
   useEffect(() => {
@@ -111,7 +126,12 @@ function ConfirmedAccountPanel({
       resolve = yes;
       reject = no;
     });
-    const operation = { promise, resolve, reject, targetVersion: readerVersion + 1 };
+    const operation: MembershipRecovery = {
+      promise,
+      resolve,
+      reject,
+      targetVersion: readerVersion + 1,
+    };
     recoveryOperation.current = operation;
     // The legacy membership button does not await the returned promise.
     void promise.catch(() => {});
@@ -123,9 +143,10 @@ function ConfirmedAccountPanel({
       } catch (failure) {
         if (mounted.current && recoveryOperation.current === operation) {
           recoveryOperation.current = null;
+          operation.failure = failure;
+          settleRecovery(operation, 'reject', failure);
           setReaderSuppressed(true);
           setRecovery('error');
-          operation.reject(failure);
         }
       }
     })();

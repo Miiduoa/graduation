@@ -305,6 +305,10 @@ function guardCourseView(Component: React.ComponentType<any>) {
   };
 }
 
+// Keep in-progress coursework mounted when the navigator refreshes its theme or profile.
+const GuardedQuizTaking = guardCourseView(QuizTakingScreen);
+const GuardedHomeworkSubmit = guardCourseView(HomeworkSubmitScreen);
+
 function GuardedTeacherGrading(props: any) {
   return (
     <RouteGuard requires={['courses.grade', 'courses.manage']}>
@@ -318,9 +322,21 @@ function LearnLanding(props: any) {
   if (auth.loading || auth.profileLoading || (auth.user && auth.profile?.uid !== auth.user.uid))
     return <RoleAwareTodayScreen {...props} />;
   const role = resolveDashboardRole(auth.user ? auth.profile : null);
-  if (role === 'teacher') return <TeacherTodayScreen />;
-  if (role === 'student') return <LearnAiFirstScreen />;
+  if (role === 'teacher' || role === 'ta') return <TeacherTodayScreen />;
+  if (role === 'student' || role === 'club_officer') return <LearnAiFirstScreen />;
   return <RoleWorkspaceScreen key={auth.user?.uid} {...props} role={role} />;
+}
+
+/** Opening a teaching task must not route a department/admin back to its own landing.
+ * TeacherToday reads only actual course memberships; a display role grants no course access.
+ */
+function TeachingLanding(props: any) {
+  const auth = useAuth();
+  if (auth.loading || auth.profileLoading || (auth.user && auth.profile?.uid !== auth.user.uid))
+    return <RoleAwareTodayScreen {...props} />;
+  const role = resolveDashboardRole(auth.user ? auth.profile : null);
+  if (['teacher', 'ta', 'department', 'admin'].includes(role)) return <TeacherTodayScreen />;
+  return <LearnLanding {...props} />;
 }
 
 export function LearnStack() {
@@ -361,7 +377,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="TeachingHub"
-        component={LearnLanding}
+        component={TeachingLanding}
         options={{ title: '課務', headerShown: false }}
       />
       <Stack.Screen
@@ -434,6 +450,11 @@ export function LearnStack() {
         name="CourseCatalog"
         component={CourseCatalogScreen}
         options={{ title: '課綱查詢', headerShown: false }}
+      />
+      <Stack.Screen
+        name="TronClassWorkspace"
+        getComponent={() => require('./TronClassWorkspaceScreen').TronClassWorkspaceScreen}
+        options={{ title: 'TronClass 課務' }}
       />
       <Stack.Screen
         name="QuizCenter"
@@ -514,8 +535,8 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="QuizTaking"
-        component={lmsV2Enabled ? CourseQuizTakingV2Screen : guardCourseView(QuizTakingScreen)}
-        options={{ title: '測驗資訊', headerShown: false }}
+        component={lmsV2Enabled ? CourseQuizTakingV2Screen : GuardedQuizTaking}
+        options={{ title: '測驗作答', headerBackButtonMenuEnabled: false }}
       />
       <Stack.Screen
         name="PeerReview"
@@ -556,8 +577,8 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="HomeworkSubmit"
-        component={guardCourseView(HomeworkSubmitScreen)}
-        options={{ title: '繳交作業', headerShown: false }}
+        component={GuardedHomeworkSubmit}
+        options={{ title: '繳交作業' }}
       />
       <Stack.Screen
         name="VideoMaterial"

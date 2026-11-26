@@ -25,7 +25,7 @@ function envelope(overrides: Record<string, unknown> = {}) {
       action: 'queue_action',
       status: 'pending_confirmation',
       requiresConfirmation: true,
-      label: '確認送出報修',
+      label: '確認存成報修備忘',
       params: { toolName: 'createDormRepairRequest', input, agentRunId: runId },
     }],
     ...overrides,
@@ -42,7 +42,7 @@ beforeEach(() => {
 
 test('only trusted completed run actions become executable proposals', () => {
   expect(campusAgentWriteProposals(envelope())).toEqual([{
-    label: '確認送出報修',
+    label: '確認存成報修備忘',
     agentRunId: runId,
     toolName: 'createDormRepairRequest',
     input,
@@ -113,4 +113,120 @@ test('a model-looking success without a typed server receipt is rejected', async
     userId: 'alice', schoolId: 'pu', isCurrent: () => true,
     proposal: campusAgentWriteProposals(envelope())[0],
   })).rejects.toThrow('invalid-receipt');
+});
+
+const washingInput = {
+  reservationId: 'washing-2',
+  machineId: 'A2',
+  dormitory: 'A棟',
+  startTime: '18:30',
+  reservedUntil: '2030-01-02T10:40:00.000Z',
+  expectedReservationVersion: 'a'.repeat(64),
+};
+const washingProposal = {
+  toolName: 'cancelWashingReservation' as const,
+  label: '確認取消洗衣預約',
+  input: washingInput,
+  agentRunId: runId,
+};
+const washingReceipt = {
+  success: true, toolName: 'cancelWashingReservation',
+  reservationId: 'washing-2', machineId: 'A2', dormitory: 'A棟',
+  startTime: '18:30', reservedUntil: '2030-01-02T10:40:00.000Z',
+  status: 'cancelled', schoolId: 'pu', userId: 'alice',
+};
+
+function washingEnvelope(payload: Record<string, unknown> = washingInput) {
+  return envelope({ actions: [{
+    action: 'queue_action', status: 'pending_confirmation', requiresConfirmation: true,
+    label: washingProposal.label,
+    params: { toolName: washingProposal.toolName, input: payload, agentRunId: runId },
+  }] });
+}
+
+test.each([washingInput.reservedUntil, null])('admits the complete washing cancellation snapshot with reservation expiry %s', reservedUntil => {
+  const payload = { ...washingInput, reservedUntil };
+  expect(campusAgentWriteProposals(washingEnvelope(payload))).toEqual([{ ...washingProposal, input: payload }]);
+});
+
+test.each([
+  { reservationId: undefined }, { reservationId: 'other/path' },
+  { reservationId: 'x'.repeat(129) }, { machineId: 'other/path' },
+  { machineId: '' }, { dormitory: '' }, { startTime: '' },
+  { dormitory: 'x'.repeat(101) }, { startTime: 'x'.repeat(41) },
+  { reservedUntil: undefined }, { reservedUntil: 'not-a-time' },
+  { reservedUntil: '2030-02-30T10:40:00.000Z' }, { reservedUntil: '2030-01-02T18:40:00+08:00' },
+  { expectedReservationVersion: undefined }, { expectedReservationVersion: 'not-a-version' },
+  { unexpectedField: 'unreviewed' },
+])('does not expose cancellation without a complete source snapshot %#', override => {
+  expect(campusAgentWriteProposals(washingEnvelope({ ...washingInput, ...override }))).toEqual([]);
+});
+
+test('requires a completed matching run and pending confirmation for washing cancellation', () => {
+  const complete = washingEnvelope();
+  expect(campusAgentWriteProposals({ ...complete, run: { runId, status: 'failed' } })).toEqual([]);
+  const action = complete.actions[0] as Record<string, unknown>;
+  expect(campusAgentWriteProposals({ ...complete, actions: [{ ...action, status: 'completed' }] })).toEqual([]);
+  expect(campusAgentWriteProposals({ ...complete, actions: [{ ...action, requiresConfirmation: false }] })).toEqual([]);
+  expect(campusAgentWriteProposals({ ...complete, run: { runId: 'ffffffff-ffff-ffff-ffff-ffffffffffff', status: 'completed' } })).toEqual([]);
+});
+
+test.each([washingInput.reservedUntil, null])('sends the reviewed washing reservation unchanged and accepts a matching receipt with expiry %s', async reservedUntil => {
+  const proposal = { ...washingProposal, input: { ...washingInput, reservedUntil } };
+  mockCallable.mockResolvedValue({ data: { ...washingReceipt, reservedUntil } });
+  await expect(confirmCampusAgentWrite({
+    userId: 'alice', schoolId: 'pu', isCurrent: () => true, proposal,
+  })).resolves.toEqual({ ...washingReceipt, reservedUntil });
+  expect(mockCallable).toHaveBeenCalledTimes(1);
+  expect(mockCallable).toHaveBeenCalledWith({
+    toolName: 'cancelWashingReservation', input: proposal.input, agentRunId: runId,
+    context: { schoolId: 'pu', timezone: 'Asia/Taipei' },
+  });
+});
+
+test.each([
+  { success: true, toolName: 'cancelWashingReservation' },
+  ...[
+    { reservationId: 'washing-other' }, { machineId: 'A1' }, { dormitory: 'B棟' },
+    { startTime: '19:30' }, { reservedUntil: null }, { reservedUntil: undefined },
+    { status: 'reserved' }, { schoolId: 'other-school' }, { userId: 'bob' },
+  ].map(change => ({ ...washingReceipt, ...change })),
+])('rejects bare or mismatched washing cancellation success %#', async data => {
+  mockCallable.mockResolvedValue({ data });
+  await expect(confirmCampusAgentWrite({
+    userId: 'alice', schoolId: 'pu', isCurrent: () => true, proposal: washingProposal,
+  })).rejects.toThrow('invalid-receipt');
+});
+
+test('washing cancellation refuses mock mode or a stale scope and ignores a late receipt', async () => {
+  mockFakeMode = true;
+  await expect(confirmCampusAgentWrite({
+    userId: 'alice', schoolId: 'pu', isCurrent: () => true, proposal: washingProposal,
+  })).rejects.toThrow('session-changed');
+  mockFakeMode = false;
+  await expect(confirmCampusAgentWrite({
+    userId: 'alice', schoolId: 'pu', isCurrent: () => false, proposal: washingProposal,
+  })).rejects.toThrow('session-changed');
+  expect(mockCallable).not.toHaveBeenCalled();
+
+  let current = true;
+  let settle!: (value: unknown) => void;
+  mockCallable.mockImplementationOnce(() => new Promise(resolve => { settle = resolve; }));
+  const response = confirmCampusAgentWrite({
+    userId: 'alice', schoolId: 'pu', isCurrent: () => current, proposal: washingProposal,
+  });
+  const rejected = expect(response).rejects.toThrow('session-changed');
+  current = false;
+  settle?.({ data: washingReceipt });
+  await rejected;
+  expect(mockCallable).toHaveBeenCalledTimes(1);
+});
+
+test('washing cancellation keeps a failed receipt failed without retrying', async () => {
+  const failure = { success: false, toolName: 'cancelWashingReservation', errorCode: 'failed-precondition' };
+  mockCallable.mockResolvedValueOnce({ data: failure });
+  await expect(confirmCampusAgentWrite({
+    userId: 'alice', schoolId: 'pu', isCurrent: () => true, proposal: washingProposal,
+  })).resolves.toEqual(failure);
+  expect(mockCallable).toHaveBeenCalledTimes(1);
 });

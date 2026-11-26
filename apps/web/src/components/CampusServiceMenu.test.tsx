@@ -1,6 +1,7 @@
+import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directoryStorageFailures';
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CampusServiceMenu } from './CampusServiceMenu';
 import { AppHeader } from './AppHeader';
 import { visibleCampusServices } from '@/lib/campusServices';
@@ -18,6 +19,7 @@ const firebase = vi.hoisted(() => ({
 vi.mock('./SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => auth,
+  useOptionalNuniSession: () => auth,
 }));
 vi.mock('next/navigation', () => ({
   usePathname: () => navigation.pathname,
@@ -26,6 +28,25 @@ vi.mock('next/navigation', () => ({
 vi.mock('./AuthGuard', () => ({
   useAuth: () => ({ user: firebase.user, signOutUser: vi.fn() }),
 }));
+
+// jsdom exposes descendants of closed <details> in role queries; check native disclosure state.
+function expandedLinks() {
+  return screen.getAllByRole('link').filter((link) => {
+    let parent = link.parentElement;
+    while (parent) {
+      if (parent instanceof HTMLDetailsElement && !parent.open) return false;
+      parent = parent.parentElement;
+    }
+    return true;
+  });
+}
+
+function expandAllServices() {
+  const menu = screen.getByText('所有服務').closest('details')!;
+  for (const detail of menu.querySelectorAll('details')) {
+    if (!detail.open) fireEvent.click(detail.querySelector('summary')!);
+  }
+}
 
 const originalServices = [
   ['/announcements', '公告'],
@@ -57,6 +78,7 @@ beforeEach(() => {
   navigation.pathname = '/map';
   navigation.search = '';
   window.history.replaceState({}, '', '/map');
+  sessionStorage.clear();
   auth.session = null;
   auth.loading = false;
   auth.pendingLogout = false;
@@ -66,6 +88,7 @@ beforeEach(() => {
 it('retains all existing services and search while adding a separate classroom entry', () => {
   render(<CampusServiceMenu />);
   fireEvent.click(screen.getByText('所有服務'));
+  expandAllServices();
   for (const [href, label] of originalServices) {
     expect(
       screen.getByRole('link', { name: label === '成績' ? /^成績$/ : label }).getAttribute('href'),
@@ -81,7 +104,7 @@ it('retains all existing services and search while adding a separate classroom e
   );
   expect(screen.getByRole('link', { name: '餐廳' }).getAttribute('href')).toBe('/cafeteria');
   expect(screen.queryByRole('link', { name: '跨校交流' })).toBeNull();
-  expect(screen.queryByRole('link', { name: '職涯' })).toBeNull();
+  expect(screen.getByRole('link', { name: '職涯' }).getAttribute('href')).toBe('/career');
   expect(screen.getByRole('link', { name: '店家合作' }).getAttribute('href')).toBe('/merchant');
   expect(screen.getByRole('link', { name: '點餐與取餐' }).getAttribute('href')).toBe('/food');
   expect(screen.getByRole('link', { name: '學校資訊' }).getAttribute('href')).toBe('/school-info');
@@ -98,6 +121,7 @@ it('preserves school context without copying unrelated session or return paramet
     'school=pu&schoolId=tw-pu&campus=other-campus&returnUrl=%2Fsettings&session=other';
   render(<CampusServiceMenu />);
   fireEvent.click(screen.getByText('所有服務'));
+  expandAllServices();
   for (const link of screen.getAllByRole('link')) {
     const target = new URL(link.getAttribute('href')!, 'https://campus.example');
     expect(target.searchParams.get('school')).toBe('pu');
@@ -117,26 +141,26 @@ it('preserves school context without copying unrelated session or return paramet
 it('sends a signed-in firebase user to profile from 我', () => {
   firebase.user = { uid: 'u1' };
   render(<AppHeader />);
-  expect(screen.getByRole('link', { name: '我' }).getAttribute('href')).toBe('/profile');
+  expect(screen.getByRole('link', { name: '我的' }).getAttribute('href')).toBe('/profile');
 });
 
 it('sends a signed-in nuni student to profile from 我 instead of login', () => {
   auth.session = { platformAccountId: 'a', isPlatformOperator: false };
   render(<AppHeader />);
-  expect(screen.getByRole('link', { name: '我' }).getAttribute('href')).toBe('/profile');
+  expect(screen.getByRole('link', { name: '我的' }).getAttribute('href')).toBe('/profile');
 });
 
-it('keeps 我 on login when neither firebase nor nuni session is present', () => {
+it('keeps the account destination stable for a guest who can choose how to sign in', () => {
   render(<AppHeader />);
-  expect(screen.getByRole('link', { name: '我' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fprofile',
-  );
+  expect(screen.getByRole('link', { name: '我的' }).getAttribute('href')).toBe('/profile');
 });
 
 it('routes the Nuni account to its courses and hides operator links during revalidation', () => {
   auth.session = { platformAccountId: 'a', isPlatformOperator: true };
   const view = render(<AppHeader />);
   expect(screen.getByRole('link', { name: '課務' }).getAttribute('href')).toBe('/timetable');
+  expect(screen.getByRole('link', { name: '我的' }).getAttribute('href')).toBe('/profile');
+  fireEvent.click(screen.getByLabelText('帳號'));
   expect(screen.getByRole('link', { name: '我的帳號' }).getAttribute('href')).toBe('/profile');
   expect(screen.getByRole('link', { name: '平台管理' })).toBeTruthy();
   expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
@@ -150,6 +174,7 @@ it('marks classroom children as part of the added service without selecting exis
   navigation.pathname = '/classroom/course/cw_11111111-1111-4111-8111-111111111111';
   render(<CampusServiceMenu />);
   fireEvent.click(screen.getByText('所有服務'));
+  expandAllServices();
   expect(screen.getByRole('link', { name: '課程與作業' }).getAttribute('aria-current')).toBe('page');
   expect(screen.getByRole('link', { name: '課程與群組' }).getAttribute('aria-current')).toBeNull();
 });
@@ -185,11 +210,12 @@ it('keeps the nuni header and original school login around the complete shared m
   navigation.search = 'schoolId=tw-pu';
   render(<AppHeader />);
   fireEvent.click(screen.getByText('所有服務'));
+  expandAllServices();
   for (const [, label] of originalServices)
     expect(screen.getByRole('link', { name: label === '成績' ? /^成績$/ : label })).toBeTruthy();
   expect(screen.getByRole('link', { name: '課程與作業' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fmap%3FschoolId%3Dtw-pu',
+    '/login?returnUrl=%2Fmap%3FschoolId%3Dtw-pu&schoolId=tw-pu',
   );
   expect(screen.getByRole('link', { name: '今天' }).getAttribute('href')).toBe('/?schoolId=tw-pu');
 });
@@ -298,17 +324,17 @@ it('identifies a nested service without selecting a route with only a matching p
   expect(screen.getByRole('link', { name: '公告' }).getAttribute('aria-current')).toBeNull();
 });
 
-it('marks 生活 active for campus event list and detail without replacing 社團活動', () => {
+it('marks 探索 active for campus event list and detail without replacing 社團活動', () => {
   navigation.pathname = '/events';
   const { rerender } = render(<AppHeader />);
-  expect(screen.getByRole('link', { name: '生活' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: '探索' }).getAttribute('aria-current')).toBe('page');
   fireEvent.click(screen.getByText('所有服務'));
   expect(screen.getByRole('link', { name: '校園活動' }).getAttribute('href')).toBe('/events');
   expect(screen.getByRole('link', { name: '社團活動' }).getAttribute('href')).toBe('/clubs');
   navigation.pathname = '/events/talk-1';
   navigation.search = 'schoolId=nthu&source=school-club-events';
   rerender(<AppHeader />);
-  expect(screen.getByRole('link', { name: '生活' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: '探索' }).getAttribute('aria-current')).toBe('page');
 });
 
 it('selects only the specific account service and closes its overview link on the current page', () => {
@@ -355,6 +381,8 @@ it('finds a service in place, keeps its school context, and resets an empty filt
   expect((search as HTMLInputElement).value).toBe('');
   expect(document.activeElement).toBe(search);
   expect(screen.getByRole('link', { name: '課表' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '圖書館' }).closest('details')!.open).toBe(false);
+  fireEvent.click(screen.getByText(/更多生活服務/));
   expect(screen.getByRole('link', { name: '圖書館' })).toBeTruthy();
 });
 
@@ -380,16 +408,20 @@ it('opens service search with the keyboard shortcut without taking over text edi
 });
 
 it.each([
-  ['/cafeteria/restaurant-1', '生活'],
-  ['/bus/registered', '生活'],
-  ['/library', '生活'],
+  ['/cafeteria/restaurant-1', '探索'],
+  ['/bus/registered', '探索'],
+  ['/library', '探索'],
   ['/grades', '課務'],
   ['/credit-planner', '課務'],
   ['/classroom/grades', '課務'],
-  ['/settings', '我'],
-  ['/classroom/account', '我'],
-  ['/orders/order-1', '生活'],
-  ['/school-info', '生活'],
+  ['/settings', '我的'],
+  ['/classroom/account', '我的'],
+  ['/orders/order-1', '探索'],
+  ['/school-info', '探索'],
+  ['/community/post/topic-1', '交流'],
+  ['/social', '交流'],
+  ['/dms/chat-1', '交流'],
+  ['/student-card', '我的'],
 ])('shows the parent section for %s', (pathname, label) => {
   navigation.pathname = pathname;
   render(<AppHeader />);
@@ -419,30 +451,288 @@ it('clears a completed search immediately before a route change can remove the d
   });
   fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
   navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
   view.rerender(<CampusServiceMenu />);
   screen.getByText('所有服務').closest('details')!.open = true;
   expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe('');
   expect(screen.getByRole('link', { name: '課表' })).toBeTruthy();
 });
 
+it('reopens the directory with the same query and category after returning from a service', () => {
+  const view = render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.click(screen.getByRole('button', { name: '篩選校園生活' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋服務' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+  navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+  navigation.pathname = '/map';
+  window.history.replaceState({}, '', '/map');
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+  expect(screen.getByRole('button', { name: '篩選校園生活' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  expect(screen.getByRole('link', { name: '圖書館' })).toBeTruthy();
+});
 
-it('uses the existing Today assistant when its header voice shortcut is pressed', () => {
+it('does not reopen the directory from an off-site stored destination', () => {
+  sessionStorage.setItem(
+    'campus.directory.search.v1',
+    JSON.stringify({
+      menu: {
+        path: '/map',
+        destination: 'https://evil.test/library',
+        query: '借書',
+        category: 'campus',
+        open: true,
+      },
+    }),
+  );
+  render(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+  fireEvent.click(screen.getByText('所有服務'));
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe('');
+});
+
+async function dispatchToggleAfterTask(menu: HTMLDetailsElement) {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    menu.dispatchEvent(new Event('toggle'));
+  });
+}
+
+function restoreOpenDirectory(view: ReturnType<typeof render>) {
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋服務' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+  navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
+  view.rerender(<CampusServiceMenu />);
+  navigation.pathname = '/map';
+  window.history.replaceState({}, '', '/map');
+  view.rerender(<CampusServiceMenu />);
+}
+
+function expectDirectoryNotRestored() {
+  const next = render(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+  fireEvent.click(screen.getByText('所有服務'));
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe('');
+  next.unmount();
+}
+
+it('keeps the snapshot when a delayed close toggle arrives after opening a service', async () => {
+  const view = render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.click(screen.getByRole('button', { name: '篩選校園生活' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋服務' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+  const menu = screen.getByText('所有服務').closest('details')!;
+  expect(menu.open).toBe(false);
+  await dispatchToggleAfterTask(menu);
+  navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+  navigation.pathname = '/map';
+  window.history.replaceState({}, '', '/map');
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+  expect(screen.getByRole('button', { name: '篩選校園生活' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  expect(screen.getByRole('link', { name: '圖書館' })).toBeTruthy();
+});
+
+it('does not forget the snapshot when a delayed toggle arrives after restoring open', async () => {
+  const view = render(<CampusServiceMenu />);
+  restoreOpenDirectory(view);
+  const menu = screen.getByText('所有服務').closest('details')!;
+  expect(menu.open).toBe(true);
+  await dispatchToggleAfterTask(menu);
+  expect(menu.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+  view.unmount();
+  render(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+});
+
+it('does not close or forget when restoring open moves focus back to the page', () => {
+  const view = render(
+    <>
+      <button type="button">頁面內容</button>
+      <CampusServiceMenu />
+    </>,
+  );
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋服務' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+  navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
+  view.rerender(
+    <>
+      <button type="button">頁面內容</button>
+      <CampusServiceMenu />
+    </>,
+  );
+  const page = screen.getByRole('button', { name: '頁面內容' });
+  page.focus();
+  navigation.pathname = '/map';
+  window.history.replaceState({}, '', '/map');
+  view.rerender(
+    <>
+      <button type="button">頁面內容</button>
+      <CampusServiceMenu />
+    </>,
+  );
+  const menu = screen.getByText('所有服務').closest('details')!;
+  expect(menu.open).toBe(true);
+  fireEvent.blur(menu, { relatedTarget: page });
+  expect(menu.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+  view.unmount();
+  render(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+});
+
+it('does not restore after clearing filters, viewing all services, or collapsing the summary', () => {
+  const cleared = render(<CampusServiceMenu />);
+  restoreOpenDirectory(cleared);
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  cleared.unmount();
+  expectDirectoryNotRestored();
+
+  const emptied = render(<CampusServiceMenu />);
+  restoreOpenDirectory(emptied);
+  fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看全部服務' }));
+  emptied.unmount();
+  expectDirectoryNotRestored();
+
+  const collapsed = render(<CampusServiceMenu />);
+  restoreOpenDirectory(collapsed);
+  const menu = screen.getByText('所有服務').closest('details')!;
+  expect(menu.open).toBe(true);
+  fireEvent.click(screen.getByText('所有服務'));
+  expect(menu.open).toBe(false);
+  collapsed.unmount();
+  expectDirectoryNotRestored();
+});
+
+it('keeps the directory usable when sessionStorage throws', () => {
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('quota');
+  });
+  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  try {
+    render(<CampusServiceMenu />);
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜尋服務' }), {
+      target: { value: '借書' },
+    });
+    expect(screen.getByRole('link', { name: '圖書館' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+  } finally {
+    vi.restoreAllMocks();
+  }
+});
+
+it('does not steal focus when restoring an open directory', () => {
+  const view = render(
+    <>
+      <button type="button">頁面內容</button>
+      <CampusServiceMenu />
+    </>,
+  );
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋服務' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+  navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
+  view.rerender(
+    <>
+      <button type="button">頁面內容</button>
+      <CampusServiceMenu />
+    </>,
+  );
+  const page = screen.getByRole('button', { name: '頁面內容' });
+  page.focus();
+  expect(document.activeElement).toBe(page);
+  navigation.pathname = '/map';
+  window.history.replaceState({}, '', '/map');
+  view.rerender(
+    <>
+      <button type="button">頁面內容</button>
+      <CampusServiceMenu />
+    </>,
+  );
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+  expect(document.activeElement).toBe(page);
+});
+
+it('uses the existing Today conversation when its header assistant shortcut is pressed', () => {
   navigation.pathname = '/';
-  const openTodayVoice = vi.fn();
-  render(<AppHeader onOpenVoice={openTodayVoice} />);
-  fireEvent.click(screen.getByRole('button', { name: '開啟校園語音 AI' }));
-  expect(openTodayVoice).toHaveBeenCalledOnce();
+  const openTodayAssistant = vi.fn();
+  render(<AppHeader onOpenAssistant={openTodayAssistant} />);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  expect(openTodayAssistant).toHaveBeenCalledOnce();
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
-it('opens a keyboard-dismissible voice AI entry without leaving the current service', () => {
+it('opens a keyboard-dismissible assistant on the current service with a login return for guests', async () => {
   const view = render(<AppHeader />);
-  fireEvent.click(view.getByRole('button', { name: '開啟校園語音 AI' }));
-  const dialog = view.getByRole('dialog', { name: '校園語音與 AI 快速操作' });
+  const trigger = view.getByRole('button', { name: '開啟校園助理' });
+  fireEvent.click(trigger);
+  await act(async () => {
+    // Wait for the real lazy entry to load, including cold transforms under CI coverage.
+    await import('./TodayCampusEntry');
+  });
+  const dialog = view.getByRole('dialog', { name: '校園助理' });
   expect(dialog).toBeTruthy();
-  expect(view.getByRole('heading', { name: '說出想做的事，直接找到入口。' })).toBeTruthy();
+  const login = await view.findByRole('link', { name: '登入後，接著詢問校園助理' });
+  expect(new URL(login.getAttribute('href')!, window.location.origin).searchParams.get('returnUrl'))
+    .toBe('/map#campus-assistant-entry');
   fireEvent.keyDown(dialog, { key: 'Escape' });
   expect(view.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(trigger);
 });
 
 it('hides readonly homework by default and restores it when enabled', () => {
@@ -468,9 +758,207 @@ it('continues a filtered menu search in the directory while keeping only the cam
   const links = screen.getAllByRole('link').length - 1;
   expect(screen.getByRole('status').textContent).toBe(`找到 ${links} 項服務`);
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書 & 續借' } });
-  const directory = new URL(screen.getByRole('link', { name: /尋找校園服務/ }).getAttribute('href')!, window.location.origin);
+  const directory = new URL(
+    screen.getByRole('link', { name: /尋找校園服務/ }).getAttribute('href')!,
+    window.location.origin,
+  );
   expect(directory.pathname).toBe('/search');
   expect(Object.fromEntries(directory.searchParams)).toEqual({
-    schoolId: 'nthu', q: '借書 & 續借', category: 'campus',
+    schoolId: 'nthu',
+    q: '借書 & 續借',
+    category: 'campus',
   });
+});
+
+it('keeps exactly five primary destinations and moves service search out of the tab sequence', () => {
+  navigation.search = 'schoolId=nthu&session=private';
+  render(<AppHeader />);
+  const nav = screen.getByRole('navigation', { name: '主要導覽' });
+  const links = Array.from(nav.querySelectorAll('a'));
+  expect(links.map((link) => link.textContent)).toEqual(['今天', '探索', '課務', '交流', '我的']);
+  expect(links.map((link) => new URL(link.href).pathname)).toEqual([
+    '/', '/explore', '/timetable', '/connect', '/profile',
+  ]);
+  for (const link of links) {
+    const destination = new URL(link.href);
+    expect(destination.searchParams.get('schoolId')).toBe('nthu');
+    expect(destination.searchParams.has('session')).toBe(false);
+  }
+  const menu = screen.getByText('所有服務').closest('details')!;
+  expect(nav.contains(menu)).toBe(false);
+  fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+  expect(menu.open).toBe(true);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋服務' }));
+});
+
+
+it('starts with a small set of everyday entries and exposes secondary services on request', () => {
+  render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  expect(expandedLinks()).toHaveLength(17);
+  expect(screen.getByRole('link', { name: '刪除帳號' }).closest('details')!.open).toBe(false);
+  expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(false);
+  fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
+  expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '學分' } });
+  expect(screen.getByRole('link', { name: '學分規劃' })).toBeTruthy();
+});
+
+it('does not reset a category when a nested disclosure toggles', async () => {
+  render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
+  const summary = screen.getByLabelText('課程與作業的相關服務');
+  fireEvent.click(summary);
+  fireEvent.click(summary);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+});
+
+it('restores the expanded service family when returning to the menu origin', () => {
+  const view = render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
+  fireEvent.click(screen.getByRole('link', { name: '教材收藏' }));
+  navigation.pathname = '/classroom/material-bookmarks';
+  view.rerender(<CampusServiceMenu />);
+  navigation.pathname = '/map';
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
+  expect(screen.getByRole('link', { name: '校園地圖' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: '教材收藏' }).getAttribute('aria-current')).toBeNull();
+});
+
+describe.each(directoryStorageFailures)('menu navigation with storage %s', (failure) => {
+  it.each(['service link', 'directory link', 'submit'] as const)('follows the %s', (entry) => {
+    render(<CampusServiceMenu />);
+    const menu = screen.getByText('所有服務').closest('details')!;
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    const link = entry === 'service link'
+      ? screen.getByRole('link', { name: '圖書館' })
+      : screen.getByRole('link', { name: /尋找校園服務/ });
+    const expectedPath = entry === 'service link' ? '/library' : '/search';
+    const click = vi.fn();
+    document.addEventListener('click', click);
+    const previousState = window.history.state;
+    const storage = rejectDirectoryStorage(failure);
+    try {
+      fireEvent.click(entry === 'submit' ? screen.getByRole('button', { name: '查看結果' }) : link);
+      const linkClicks = click.mock.calls
+        .map(([event]) => event as MouseEvent)
+        .filter((event) => event.target === link);
+      expect(linkClicks).toHaveLength(1);
+      expect(linkClicks[0].defaultPrevented).toBe(false);
+      expect(new URL((link as HTMLAnchorElement).href).pathname).toBe(expectedPath);
+      expect(menu.open).toBe(false);
+      expect(screen.queryByText('搜尋草稿暫時無法儲存，請稍後再試。')).toBeNull();
+    } finally {
+      document.removeEventListener('click', click);
+      storage.mockRestore();
+    }
+    expect(window.history.state).toEqual(previousState);
+  });
+});
+
+it.each([{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }])(
+  'keeps the open search and current history intact for modified service clicks %j',
+  (modifiers) => {
+    render(<CampusServiceMenu />);
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.click(screen.getByRole('button', { name: '篩選校園生活' }));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    const original = window.history.state;
+    fireEvent.click(screen.getByRole('link', { name: '圖書館' }), modifiers);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+    expect(screen.getByRole('button', { name: '篩選校園生活' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(window.history.state).toEqual(original);
+    expect(sessionStorage.getItem('campus.directory.search.v1')).toBeNull();
+  },
+);
+
+it.each(['cancelled', 'new-tab', 'download'])(
+  'does not discard the search for a %s service link',
+  (kind) => {
+    render(<CampusServiceMenu />);
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    const link = screen.getByRole('link', { name: '圖書館' });
+    if (kind === 'cancelled')
+      link.addEventListener('click', (event) => event.preventDefault(), { once: true });
+    if (kind === 'new-tab') link.setAttribute('target', '_blank');
+    if (kind === 'download') link.setAttribute('download', 'service.txt');
+    fireEvent.click(link);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+    expect(sessionStorage.getItem('campus.directory.search.v1')).toBeNull();
+  },
+);
+
+it('keeps the search open when the full directory is opened in another tab', () => {
+  render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /尋找校園服務/ }), { metaKey: true });
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+  expect(sessionStorage.getItem('campus.directory.search.v1')).toBeNull();
+});
+
+it('submits the explicit search with the same filters and campus, without forwarding unrelated parameters', () => {
+  navigation.search = 'schoolId=pu&campus=pu&session=private&q=old';
+  window.history.replaceState({}, '', `/map?${navigation.search}`);
+  render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.click(screen.getByRole('button', { name: '篩選校園生活' }));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書 & 續借' } });
+  const directory = screen.getByRole('link', { name: /尋找校園服務/ });
+  const follow = vi.fn(() => directory.getAttribute('href'));
+  directory.addEventListener('click', follow);
+  fireEvent.click(screen.getByRole('button', { name: '查看結果' }));
+  expect(follow).toHaveBeenCalledTimes(1);
+  const destination = new URL(follow.mock.results[0].value!, window.location.origin);
+  expect(destination.pathname).toBe('/search');
+  expect(Object.fromEntries(destination.searchParams)).toEqual({
+    schoolId: 'pu',
+    campus: 'pu',
+    q: '借書 & 續借',
+    category: 'campus',
+  });
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+});
+
+it('lets Enter choose Chinese characters before allowing an explicit full-search submission', () => {
+  render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  const input = screen.getByRole('searchbox');
+  const form = screen.getByRole('search', { name: '搜尋校園服務' });
+  const directory = screen.getByRole('link', { name: /尋找校園服務/ });
+  const follow = vi.fn(() => directory.getAttribute('href'));
+  directory.addEventListener('click', follow);
+  input.focus();
+  fireEvent.compositionStart(input);
+  fireEvent.change(input, { target: { value: '圖書' } });
+  fireEvent.keyDown(input, { key: 'ArrowDown', isComposing: false });
+  expect(document.activeElement).toBe(input);
+  fireEvent.keyDown(input, { key: 'Escape', isComposing: false });
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect(fireEvent.keyDown(input, { key: 'Enter', isComposing: true })).toBe(false);
+  fireEvent.submit(form);
+  expect(follow).not.toHaveBeenCalled();
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  fireEvent.compositionEnd(input);
+  expect(fireEvent.keyDown(input, { key: 'Enter', keyCode: 229 })).toBe(false);
+  expect(follow).not.toHaveBeenCalled();
+  fireEvent.change(input, { target: { value: '圖書館' } });
+  expect(fireEvent.keyDown(input, { key: 'Enter' })).toBe(true);
+  fireEvent.submit(form);
+  expect(follow).toHaveBeenCalledTimes(1);
+  expect(follow.mock.results[0].value).toBe('/search?q=%E5%9C%96%E6%9B%B8%E9%A4%A8');
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
 });

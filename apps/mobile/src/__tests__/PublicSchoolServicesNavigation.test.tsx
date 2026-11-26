@@ -4,7 +4,7 @@ import { createNavigationContainerRef, NavigationContainer } from '@react-naviga
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert, Linking } from 'react-native';
 import { resolveDormRepairRoute } from '@campus/shared/src/dormRepairRoutes';
-import { dormStorageKey, normalizeDormWorkspace } from '@campus/shared/src/dormitory';
+import { DORM_REPAIR_COPY, DORM_REPAIR_DISALLOWED_COPY, dormStorageKey, normalizeDormWorkspace } from '@campus/shared/src/dormitory';
 import { PreAuthStack } from '../screens/PreAuthStack';
 import { getDefaultCatalogFilter } from '../data/courseCatalogConstants';
 import { CourseCatalogScreen } from '../screens/CourseCatalogScreen';
@@ -20,7 +20,7 @@ const SCHOOL_NAMES: Record<string, string> = {
   ntpu: '國立臺北大學',
   ntu: '國立臺灣大學',
   nthu: '國立清華大學',
-  nycu: '國立陽明交通大學',
+  tku: '淡江大學',
 };
 
 let mockBrowsingSchoolId = 'ncku';
@@ -113,7 +113,7 @@ jest.mock('../screens/PersonalImportScreen', () => {
 });
 jest.mock('../screens/PersonalTimetableScreen', () => {
   const { Text } = require('react-native');
-  return { __esModule: true, default: () => <Text testID="personal-timetable-screen">整週個人課表</Text> };
+  return { __esModule: true, PublicPersonalTimetable: () => <Text testID="personal-timetable-screen">整週個人課表</Text> };
 });
 jest.mock('../screens/GoogleMapsLikeScreen', () => {
   const { Text } = require('react-native');
@@ -140,8 +140,9 @@ jest.mock('../screens/CampusContentScreens', () => {
 });
 jest.mock('../components/TodayTimetablePanel', () => ({ TodayTimetablePanel: () => null }));
 jest.mock('../components/SchoolBrowsingControl', () => ({
-  SchoolBrowsingControl: () => {
-    const { Text } = require('react-native');
+  SchoolBrowsingControl: ({ destination }: { destination?: { title: string; onCancel: () => void } }) => {
+    const { Button, Text } = require('react-native');
+    if (destination) return <Button title={`取消開啟${destination.title}`} onPress={destination.onCancel} />;
     return <Text testID="school-browsing-control">瀏覽校園</Text>;
   },
 }));
@@ -385,7 +386,7 @@ test.each([
     route: 'Career',
     openLabel: '前往成大生涯發展與就業輔導組',
     url: 'https://grad-osa.ncku.edu.tw/',
-    marker: /職涯資料尚未連結到校方系統/,
+    marker: /登入後可申請校內工讀與查看實習學分/,
   },
 ] as const)(
   'non-PU guest can open %s and its school official link without school login',
@@ -426,14 +427,18 @@ test('guest Dormitory provides an editable personal workspace without claiming s
   expect(await view.findByText('住得安心，事情好處理')).toBeTruthy();
   expect(view.getByText(/訪客紀錄只存在此裝置/)).toBeTruthy();
   fireEvent.press(view.getByText('設備問題'));
+  expect(view.getByText(DORM_REPAIR_COPY.intro)).toBeTruthy();
   expect(view.getByText('＋ 記錄問題')).toBeTruthy();
+  expect(view.queryByText(DORM_REPAIR_DISALLOWED_COPY)).toBeNull();
   fireEvent.press(view.getByText('＋ 記錄問題'));
   expect(view.getByText('新增問題')).toBeTruthy();
+  expect(view.getByText(DORM_REPAIR_COPY.saveMemo)).toBeTruthy();
+  expect(view.queryByText(DORM_REPAIR_DISALLOWED_COPY)).toBeNull();
   expect(view.queryByTestId('school-login-form')).toBeNull();
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
-test('residents can open the current school repair channel without saving and later record a case number', async () => {
+test('residents can open the current school repair channel without saving and later record a school-issued identifier', async () => {
   setBrowsingSchoolId('ntou');
   const key = dormStorageKey('guest', 'ntou');
   await AsyncStorage.removeItem(key);
@@ -452,11 +457,12 @@ test('residents can open the current school repair channel without saving and la
   fireEvent.press(view.getByText(network.label));
   expect(Linking.openURL).toHaveBeenLastCalledWith('tel:0800080412');
   expect(await AsyncStorage.getItem(key)).toBeNull();
-  fireEvent.press(view.getByText('儲存紀錄'));
+  fireEvent.press(view.getByText(DORM_REPAIR_COPY.saveMemo));
   fireEvent.press(await view.findByText('編輯'));
-  fireEvent.changeText(view.getByLabelText('校方案號（選填）'), '  CASE-168  ');
-  fireEvent.press(view.getByText('儲存紀錄'));
-  expect(await view.findByText('校方案號：CASE-168')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText(DORM_REPAIR_COPY.referenceLabel), '  CASE-168  ');
+  fireEvent.press(view.getByText(DORM_REPAIR_COPY.saveMemo));
+  expect(await view.findByText(DORM_REPAIR_COPY.referenceDisplay + '：CASE-168')).toBeTruthy();
+  expect(view.queryByText(DORM_REPAIR_DISALLOWED_COPY)).toBeNull();
   fireEvent.press(view.getByText(network.label));
   expect(Linking.openURL).toHaveBeenLastCalledWith('tel:0800080412');
   const stored = normalizeDormWorkspace(JSON.parse((await AsyncStorage.getItem(key))!));
@@ -465,16 +471,16 @@ test('residents can open the current school repair channel without saving and la
 
   fireEvent.press(view.getByText('編輯'));
   fireEvent.press(view.getByText('水電與漏水'));
-  fireEvent.press(view.getByText('儲存紀錄'));
+  fireEvent.press(view.getByText(DORM_REPAIR_COPY.saveMemo));
   await view.findByText('編輯');
-  fireEvent.press(view.getByText('查海大修繕處理狀況'));
+  fireEvent.press(view.getByText('到海大教務系統網站查修繕紀錄'));
   expect(Linking.openURL).toHaveBeenLastCalledWith(general.url);
   expect(view.queryByText(general.label)).toBeNull();
 
   act(() => setBrowsingSchoolId('ncku'));
   fireEvent.press(await view.findByText('設備問題'));
   await view.findByText('＋ 記錄問題');
-  expect(view.queryByText('校方案號：CASE-168')).toBeNull();
+  expect(view.queryByText(DORM_REPAIR_COPY.referenceDisplay + '：CASE-168')).toBeNull();
   expect(view.queryByText(network.label)).toBeNull();
   await AsyncStorage.removeItem(key);
 });
@@ -543,7 +549,7 @@ test('Career wrapper keeps route.name for resolver and only offers registered pu
 });
 
 test('a school without configured sources shows honest unsupported states without inventing links', async () => {
-  setBrowsingSchoolId('nycu');
+  setBrowsingSchoolId('tku');
   const { view, navigation, onUnhandledAction } = renderPublicStack();
   fireEvent.press(await view.findByTestId('public-Health'));
   await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('Health'));
@@ -635,14 +641,24 @@ test('a direct library route waits for school selection and resumes the original
   setBrowsingSchoolId('');
   const { view, navigation, onUnhandledAction } = renderPublicStack();
   await view.findByTestId('login-landing');
-  expect(view.queryByTestId('public-Library')).toBeNull();
-  act(() => navigation.navigate('Library' as never));
-  await view.findByText('先選擇要瀏覽的學校');
+  fireEvent.press(view.getByTestId('public-Library'));
+  await view.findByText('取消開啟圖書館');
   expect(view.queryByTestId('public-library-screen')).toBeNull();
   expect(navigation.getCurrentRoute()?.name).toBe('Library');
   act(() => setBrowsingSchoolId('nthu'));
   await view.findByTestId('public-library-screen');
   expect(navigation.getCurrentRoute()?.name).toBe('Library');
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test('cancelling the guest service picker returns to the originating landing screen without opening a service', async () => {
+  setBrowsingSchoolId('');
+  const { view, navigation, onUnhandledAction } = renderPublicStack();
+  fireEvent.press(await view.findByTestId('public-BusSchedule'));
+  fireEvent.press(await view.findByText('取消開啟公車查詢'));
+  await view.findByTestId('login-landing');
+  expect(navigation.getCurrentRoute()?.name).toBe('LoginLanding');
+  expect(view.queryByTestId('public-bus-screen')).toBeNull();
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 

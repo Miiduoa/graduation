@@ -57,3 +57,23 @@ test('clock times, separate meetings, course identity and raw labels survive the
   assert.equal(parsed.rows[0].className, '0');
   assert.deepEqual(parsed.issues.filter(issue => issue.severity === 'error'), []);
 });
+
+test('duplicate weekday-periods in the same public course require manual review, not a CSV import', () => {
+  const sample = {
+    code: '130032', section: '0', title: '資料庫管理系統', department: '資管系',
+    teacher: '教師', time: '1ab1bc', room: '管268', semester: '1151', credits: '3',
+  };
+  for (const time of ['1ab1bc', '1abb', '1ab1ab']) {
+    for (const semester of ['1151', '1161']) {
+      assert.ok(ncnuCourseMeetings(time, semester));
+      assert.equal(ncnuTimetableImportCsv({ ...sample, time, semester }), null);
+    }
+  }
+  // Adjacent groups without repeated periods, and identical periods on another
+  // weekday, remain valid instead of over-blocking normal split sessions.
+  assert.deepEqual(ncnuCourseMeetings('1ab1cd', '1151').map(({ periodLabel }) => periodLabel), ['ab', 'cd']);
+  assert.deepEqual(ncnuCourseMeetings('1ab2ab', '1151').map(({ dayOfWeek }) => dayOfWeek), [1, 2]);
+  assert.equal(parsePersonalImport(ncnuTimetableImportCsv({ ...sample, time: '1ab1cd' }), {
+    kind: 'timetable', schoolId: 'ncnu', academicYear: '', semester: '',
+  }).rows.length, 2);
+});

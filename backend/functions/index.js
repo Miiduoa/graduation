@@ -36,6 +36,10 @@ const { createOrderHandler } = require('./createOrder');
 const { assertOnlineOrderingEnabled, isOrderAssistantAction } = require('./lib/onlineOrdering');
 const { createOrderStatusHandlers } = require('./orderTransitions');
 const { createSubmitProductFeedback } = require('./productFeedback');
+const { createReplyToCampusStory } = require('./storyReplies');
+const { createDmAttachmentDelivery } = require('./dmAttachmentDelivery');
+const { createDmPhotos } = require('./dmPhotos');
+const { createDmConversations } = require('./dmConversations');
 const { createEventRegistrationHandlers, prepareRegistrationPolicy } = require('./eventRegistration');
 const { readRealtimeBusCache } = require('./busArrivals');
 const {
@@ -133,7 +137,7 @@ const {
   tcFetchSyllabus,
   tcFetchCourseFullData,
 } = require('./tronClassScraper');
-const { runFinalizePostLogin } = require('./postLogin/finalizePostLogin');
+const { runFinalizePostLogin, runFinalizePersonalSchoolLogin } = require('./postLogin/finalizePostLogin');
 const { buildPuSignInAcademicFields } = require('./lib/puSignInAcademicFields');
 const {
   createUserProfileChangedHandler,
@@ -142,6 +146,16 @@ const {
   createGroupQuestionAssistantReplyTrigger,
   createGradePublishedNotificationHandler,
 } = require('./firestoreTriggerHandlers');
+const {
+  clearProfileSchoolBindingForRevokedMembership,
+  inactivateLeftoverSchoolMemberships,
+  isClosedAccount,
+  nextBindingGeneration,
+  campusStoryStampFields,
+  createEnsureCampusStoryBindingHandler,
+  clearHaltFields,
+  clearCampusStoryBindingHalt,
+} = require('./campusStoryAccessBinding');
 const {
   createAssignmentPublishedNotifyHandler,
   createSubmissionNotifyHandler,
@@ -637,36 +651,50 @@ async function provisionUniversalDevAccount({ account, schoolId }) {
 
   const uid = userRecord.uid;
   const userRef = db.collection('users').doc(uid);
-  const userDoc = await userRef.get();
   const memberRef = db.collection('schools').doc(schoolId).collection('members').doc(uid);
-  const memberDoc = await memberRef.get();
+  let profileExisted = false;
 
-  await userRef.set(
-    {
-      email: account.email,
-      displayName: account.displayName,
-      role: account.role,
-      schoolId,
-      primarySchoolId: schoolId,
-      lastLoginAt: FieldValue.serverTimestamp(),
-      devUniversalAccount: true,
-      devUniversalScope: 'all-schools',
-      schoolIds: FieldValue.arrayUnion(schoolId),
-      ...(userDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
-    },
-    { merge: true },
-  );
-
-  await memberRef.set(
-    {
-      status: 'active',
-      role: toSchoolMemberRole(account.role),
-      devUniversalAccount: true,
-      updatedAt: FieldValue.serverTimestamp(),
-      ...(memberDoc.exists ? {} : { joinedAt: FieldValue.serverTimestamp() }),
-    },
-    { merge: true },
-  );
+  await db.runTransaction(async (tx) => {
+    const [userDoc, memberDoc] = await tx.getAll(userRef, memberRef);
+    profileExisted = userDoc.exists;
+    const accountData = userDoc.exists ? userDoc.data() || {} : {};
+    if (isClosedAccount(accountData)) {
+      throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。', {
+        reason: 'account-deletion',
+      });
+    }
+    const bindingGeneration = nextBindingGeneration(accountData, () => nodeCrypto.randomUUID());
+    tx.set(
+      userRef,
+      {
+        email: account.email,
+        displayName: account.displayName,
+        role: account.role,
+        schoolId,
+        primarySchoolId: schoolId,
+        lastLoginAt: FieldValue.serverTimestamp(),
+        bindingGeneration,
+        devUniversalAccount: true,
+        devUniversalScope: 'all-schools',
+        schoolIds: FieldValue.arrayUnion(schoolId),
+        ...clearHaltFields(FieldValue),
+        ...(userDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
+      },
+      { merge: true },
+    );
+    tx.set(
+      memberRef,
+      {
+        status: 'active',
+        role: toSchoolMemberRole(account.role),
+        devUniversalAccount: true,
+        updatedAt: FieldValue.serverTimestamp(),
+        ...campusStoryStampFields(schoolId, bindingGeneration),
+        ...(memberDoc.exists ? {} : { joinedAt: FieldValue.serverTimestamp() }),
+      },
+      { merge: true },
+    );
+  });
 
   await syncAuthClaims(uid, {
     role: account.role,
@@ -682,7 +710,7 @@ async function provisionUniversalDevAccount({ account, schoolId }) {
   return {
     uid,
     customToken,
-    isNewUser: createdAuthUser || !userDoc.exists,
+    isNewUser: createdAuthUser || !profileExisted,
     role: account.role,
     displayName: account.displayName,
     email: account.email,
@@ -2536,13 +2564,18 @@ exports.updateUserProfile = onCall(
   },
 );
 
-exports.finalizePostLogin = onCall(
-  {
-    region: REGION,
-    timeoutSeconds: 120,
-    memory: '512MiB',
-  },
-  async (request) => runFinalizePostLogin(request),
+const postLoginRuntime = { region: REGION, timeoutSeconds: 120, memory: '512MiB' };
+exports.finalizePostLogin = onCall(postLoginRuntime, (request) => runFinalizePostLogin(request));
+exports.finalizePersonalSchoolLogin = onCall(postLoginRuntime, runFinalizePersonalSchoolLogin);
+
+exports.ensureCampusStoryBinding = onCall(
+  { region: REGION },
+  createEnsureCampusStoryBindingHandler({
+    db,
+    FieldValue,
+    randomUUID: () => nodeCrypto.randomUUID(),
+    HttpsError,
+  }),
 );
 
 exports.onUserProfileChanged = onDocumentWritten(
@@ -2553,6 +2586,13 @@ exports.onUserProfileChanged = onDocumentWritten(
   createUserProfileChangedHandler({
     syncAuthClaims,
     syncDirectoryEntriesForUser,
+    inactivateLeftoverSchoolMemberships: (uid) =>
+      inactivateLeftoverSchoolMemberships({
+        db,
+        uid,
+        FieldValue,
+        loadMemberships: (memberUid) => directorySync.loadSchoolMembershipDocs(db, memberUid),
+      }),
   }),
 );
 
@@ -2563,6 +2603,16 @@ exports.onSchoolMembershipChanged = onDocumentWritten(
   },
   createSchoolMembershipChangedHandler({
     syncSchoolDirectoryEntry,
+    syncProfileSchoolBinding: async ({ schoolId, uid, membership }) => {
+      await clearCampusStoryBindingHalt({ db, FieldValue, uid });
+      return clearProfileSchoolBindingForRevokedMembership({
+        db,
+        FieldValue,
+        schoolId,
+        uid,
+        membership,
+      });
+    },
   }),
 );
 
@@ -2762,6 +2812,7 @@ exports.bulkUpdateSchoolAnnouncements = onCall(
 );
 
 exports.submitProductFeedback = onCall({ region: REGION }, createSubmitProductFeedback({ db }));
+exports.replyToCampusStory = onCall({ region: REGION }, createReplyToCampusStory({ db }));
 const {
   createCreateTimetableShareHandler,
   createRevokeTimetableShareHandler,
@@ -3705,6 +3756,14 @@ exports.updateRepairStatus = onCall(
       throw new HttpsError('not-found', 'Repair request not found');
     }
 
+    if (requestDoc.data()?.workflow === 'dorm_staff') {
+      return require('./dormWorkflow').createDormWorkflowHandler({ db, sendPushToUser })({
+        ...request,
+        data: { ...request.data, action: 'repairStatus', id: requestId,
+          status: { pending: 'sent', assigned: 'received', in_progress: 'scheduled', completed: 'fixed' }[status] },
+      });
+    }
+
     await requestRef.update({
       status,
       staffNote: note || null,
@@ -3716,8 +3775,10 @@ exports.updateRepairStatus = onCall(
       await sendPushToUser(
         repairData.userId,
         {
-          title: status === 'assigned' ? '🔧 報修已受理' : '✅ 報修已完成',
-          body: status === 'assigned' ? '您的報修已派員處理' : '您的報修已完成，請確認',
+          title: status === 'assigned' ? '報修備忘狀態已更新' : '報修備忘已更新',
+          body: status === 'assigned'
+            ? '此應用沒有送到學校。這只是備忘狀態變更，不是校方回覆。'
+            : '此應用沒有送到學校。實際是否修好請向校方確認。',
         },
         {
           type: 'repair',
@@ -3806,23 +3867,7 @@ exports.confirmPackagePickup = onCall(
 
     await assertActiveSchoolMember(schoolId, uid);
 
-    const packageRef = db.collection('schools').doc(schoolId).collection('packages').doc(packageId);
-    const packageDoc = await packageRef.get();
-
-    if (!packageDoc.exists) {
-      throw new HttpsError('not-found', 'Package not found');
-    }
-
-    if (packageDoc.data().recipientId !== uid) {
-      throw new HttpsError('permission-denied', 'This is not your package');
-    }
-
-    await packageRef.update({
-      status: 'picked_up',
-      pickedUpAt: FieldValue.serverTimestamp(),
-    });
-
-    return { success: true };
+    return require('./packagePickup').confirmPackagePickup({ db, schoolId, packageId, uid });
   },
 );
 
@@ -5828,3 +5873,21 @@ console.log('Firebase Cloud Functions loaded successfully');
 exports.clubAdmin = onCall({ region: REGION }, require('./clubAdmin').createClubAdmin({ db }));
 
 exports.clubRoster = onCall({ region: REGION }, require('./clubRoster').createClubRoster({ db }));
+
+// Server-side three-document authorization; Cloud Storage Rules have a two-document cap.
+const attachmentServices = {
+  db,
+  getBucket: () => require('firebase-admin/storage').getStorage().bucket(),
+};
+const legacyAttachmentDelivery = createDmAttachmentDelivery(attachmentServices);
+const dmPhotos = createDmPhotos(attachmentServices);
+const dmConversations = createDmConversations({ db });
+exports.prepareDmConversation = onCall({ region: REGION }, dmConversations.prepare);
+exports.sendDmText = onCall({ region: REGION }, dmConversations.sendText);
+exports.dmAttachmentDelivery = onCall({ region: REGION }, request =>
+  request.data?.action === 'uploadPhoto' || request.data?.folder === 'photos'
+    ? dmPhotos.delivery(request) : legacyAttachmentDelivery(request));
+exports.sendDmPhoto = onCall({ region: REGION }, dmPhotos.send);
+
+// Opt-in dorm staff workflow. Existing memo/package endpoints retain their access.
+exports.dormWorkflow = onCall({ region: REGION }, require('./dormWorkflow').createDormWorkflowHandler({ db, sendPushToUser }));

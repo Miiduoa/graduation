@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { View, Text, Pressable, ScrollView, Alert, StyleSheet } from 'react-native';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
@@ -7,13 +8,26 @@ import {
 } from '../../services/lmsV2QuizDelivery';
 import { quizOptions, type QuizAnswerInput } from '../../services/lmsV2QuizModels';
 import { QuizQuestionEditor } from './QuizQuestionEditor';
+import { useUnsavedQuizExit } from '../../hooks/useUnsavedQuizExit';
+import { useAuth } from '../../state/auth';
 import {
   CourseV2Header, useCourseV2Params, useLoadable, CourseV2Loading, CourseV2Error,
 } from './_courseV2Shell';
 
+function comparableAnswer(answer: QuizAnswerInput) {
+  if (Array.isArray(answer)) return answer.length ? [...answer].sort() : null;
+  if (typeof answer === 'string') return answer.trim() || null;
+  return answer;
+}
+
 export default function CourseQuizTakingV2Screen() {
+  const { user } = useAuth();
+  const params = useCourseV2Params();
+  return <QuizTakingV2 key={JSON.stringify([user?.uid, params.courseId, params.quizId])} {...params} />;
+}
+
+function QuizTakingV2({ courseId, quizId, courseName }: ReturnType<typeof useCourseV2Params>) {
   const styles = useThemeStyleSheet(createStyles);
-  const { courseId, quizId, courseName } = useCourseV2Params();
   const loadable = useLoadable(() => loadLmsQuizWorkspace(courseId, quizId!));
   const [drafts, setDrafts] = useState<Record<string, QuizAnswerInput>>({});
   const [saved, setSaved] = useState<Record<string, QuizAnswerInput>>({});
@@ -22,11 +36,28 @@ export default function CourseQuizTakingV2Screen() {
   const [message, setMessage] = useState('');
   const [now, setNow] = useState(Date.now());
   const busyRef = useRef(false);
+  const submitConfirmation = useRef<symbol | null>(null);
+  const focusSession = useRef<symbol | null>(null);
+  useFocusEffect(useCallback(() => {
+    focusSession.current = Symbol();
+    return () => {
+      focusSession.current = null;
+      submitConfirmation.current = null;
+    };
+  }, []));
 
   const session = loadable.data;
   const attempt = session?.attempt;
   const currentKey = attempt ? attempt.id + ':' + (attempt.submitted_at ?? '') : '';
-  useEffect(() => {
+  // An alert or pending write can outlive both the screen and the attempt it targeted.
+  const liveAttempt = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    liveAttempt.current = currentKey;
+    return () => { liveAttempt.current = null; };
+  }, [currentKey]);
+  const isCurrent = () => liveAttempt.current === currentKey;
+  useLayoutEffect(() => () => { submitConfirmation.current = null; }, [drafts, busy, currentKey]);
+  useLayoutEffect(() => {
     if (session && sessionKey !== currentKey) {
       setDrafts({});
       setSaved(session.answers);
@@ -34,11 +65,12 @@ export default function CourseQuizTakingV2Screen() {
       setMessage('');
     }
   }, [currentKey, sessionKey, session]);
+  const active = !!attempt && !attempt.submitted_at;
   useEffect(() => {
-    if (!attempt || attempt.submitted_at) return;
+    if (!active) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [attempt?.id, attempt?.submitted_at]);
+  }, [active]);
 
   const valueOf = (questionId: string): QuizAnswerInput =>
     Object.prototype.hasOwnProperty.call(drafts, questionId)
@@ -46,37 +78,42 @@ export default function CourseQuizTakingV2Screen() {
       : (saved[questionId] ?? null);
 
   const changed = session?.questions.filter((question) =>
-    JSON.stringify(valueOf(question.id)) !== JSON.stringify(saved[question.id] ?? null)) ?? [];
-  const active = !!attempt && !attempt.submitted_at;
+    JSON.stringify(comparableAnswer(valueOf(question.id))) !==
+    JSON.stringify(comparableAnswer(saved[question.id] ?? null))) ?? [];
   const unsupported = session?.questions.some((q) =>
     !['single', 'multiple', 'boolean', 'short', 'essay'].includes(q.question_type) ||
     (['single', 'multiple'].includes(q.question_type) && quizOptions(q.choices).length === 0)
   ) ?? false;
   const totalAllowed = session?.quiz.max_attempts ?? 1;
+  useUnsavedQuizExit(active && changed.length > 0, busy, drafts);
 
   const begin = async () => {
-    if (busyRef.current || !quizId || !courseId) return;
+    if (!isCurrent() || busyRef.current || !quizId || !courseId) return;
     busyRef.current = true;
     setBusy(true);
     setMessage('');
     try {
-      const result = await beginLmsQuizAttempt({ courseId, quizId });
+      const result = await beginLmsQuizAttempt({ courseId, quizId }, isCurrent);
+      if (!isCurrent()) return;
       if (!result.success) {
         setMessage(result.summary);
         return;
       }
       await loadable.refresh();
-      setMessage(result.summary);
+      if (liveAttempt.current !== null) setMessage(result.summary);
     } catch {
-      setMessage('目前無法確認測驗狀態，請重新整理再試。');
+      if (isCurrent()) setMessage('目前無法確認測驗狀態，請重新整理再試。');
     } finally {
-      busyRef.current = false;
-      setBusy(false);
+      if (liveAttempt.current !== null) {
+        busyRef.current = false;
+        setBusy(false);
+      }
     }
   };
 
   const persist = async (submit: boolean) => {
-    if (!attempt || busyRef.current || !active || !session) return;
+    const originFocus = focusSession.current;
+    if (!originFocus || !isCurrent() || !attempt || busyRef.current || !active || !session) return;
     busyRef.current = true;
     setBusy(true);
     setMessage('');
@@ -86,6 +123,7 @@ export default function CourseQuizTakingV2Screen() {
         const result = await storeLmsQuizAnswer({
           attemptId: attempt.id, questionId: question.id, answer: next,
         });
+        if (!isCurrent()) return;
         if (!result.success) {
           setMessage('第 ' + (session.questions.indexOf(question) + 1) + ' 題沒有儲存成功：' + result.summary);
           return;
@@ -102,27 +140,44 @@ export default function CourseQuizTakingV2Screen() {
         return;
       }
       const result = await finishLmsQuizAttempt({ attemptId: attempt.id });
+      if (!isCurrent()) return;
       if (!result.success) {
         setMessage(result.summary);
         return;
       }
       setMessage(result.summary);
       await loadable.refresh();
-      Alert.alert('交卷已確認', result.summary);
+      if (originFocus === focusSession.current && liveAttempt.current?.startsWith(attempt.id + ':')) {
+        Alert.alert('交卷已確認', result.summary);
+      }
     } catch {
-      setMessage('未取得完整確認。請保留作答內容並重新讀取，避免重複操作。');
+      if (isCurrent()) setMessage('未取得完整確認。請保留作答內容並重新讀取，避免重複操作。');
     } finally {
-      busyRef.current = false;
-      setBusy(false);
+      if (liveAttempt.current !== null) {
+        busyRef.current = false;
+        setBusy(false);
+      }
     }
   };
 
   const confirmSubmit = () => {
-    if (!active || busyRef.current) return;
+    if (!focusSession.current || !active || busyRef.current || submitConfirmation.current) return;
+    const token = Symbol();
+    submitConfirmation.current = token;
+    const dismiss = () => {
+      if (submitConfirmation.current === token) submitConfirmation.current = null;
+    };
     Alert.alert('確認交卷', '交卷前會先儲存變更。正式交卷後，這次作答不能再修改。', [
-      { text: '繼續作答', style: 'cancel' },
-      { text: '確認交卷', onPress: () => void persist(true) },
-    ]);
+      { text: '繼續作答', style: 'cancel', onPress: dismiss },
+      {
+        text: '確認交卷',
+        onPress: () => {
+          if (submitConfirmation.current !== token) return;
+          dismiss();
+          void persist(true);
+        },
+      },
+    ], { cancelable: true, onDismiss: dismiss });
   };
 
   if (loadable.loading && !session) return <CourseV2Loading label="正在核對測驗及作答紀錄…" />;
