@@ -120,7 +120,7 @@ async function readLedgerSnapshot(
     try {
       // With rollback evidence, retry before a transient primary read can
       // send recovery down the path for a missing ledger.
-      primary = await (journal ? readNativeStorage(key) : AsyncStorage.getItem(key));
+      primary = await (journal ? readNativeStorageWithBatchFallback(key) : AsyncStorage.getItem(key));
     } catch (error) {
       if (web) throw error;
       primaryError = error;

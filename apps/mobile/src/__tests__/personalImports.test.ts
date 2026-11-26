@@ -940,6 +940,7 @@ test.each([
       // A previous version could leave a raw primary verified only by the sidecar.
       const raw = JSON.stringify(expected);
       await nativeSet(key, raw);
+      new File(Paths.document, `personal-imports-${sha256(key)}.rollback.attempt`).delete();
       new File(Paths.document, `personal-imports-${sha256(key)}.rollback.verified`).write(sha256(raw));
     }
     if (receiptReadFailsAfterSave) {
@@ -1320,13 +1321,32 @@ const nativeRecoveryCases: RecoveryFaultCase[] = [
       ['documents', 'directory list', 'list', 'restart'],
     ], { solePublication, legacyPublication },
   ]),
-  ['settlement survives an old rejection backup after pending deletion', [
-    ['.rollback.json', 'remove', 'delete', 'save'],
+  ['settlement survives an unreadable attempt file with the committed marker still readable', [
+    ['.rollback.pending', 'remove', 'delete', 'save'],
+    ['.rollback.verified', 'write', 'write', 'save'],
     ['.rollback.json', 'restart read', 'textSync', 'restart'],
-    ['.rollback.rejected', 'existence check', 'info', 'restart'],
-    ['.rollback.rejected', 'exists check', 'exists', 'restart'],
-    ['documents', 'directory list', 'list', 'restart'],
-  ], { solePublication: '.rollback.settled', orphanedSettlement: true }],
+    ['.rollback.attempt', 'restart read', 'textSync', 'restart'],
+  ], { solePublication: '.rollback.settled' }],
+  ...([false, true] as const).map((unknownPending): RecoveryFaultCase => [
+    'settlement survives an old rejection backup after pending deletion' +
+      (unknownPending ? ' with unknown pending metadata' : ''), [
+      ['.rollback.json', 'remove', 'delete', 'save'],
+      ['.rollback.json', 'restart read', 'textSync', 'restart'],
+      ['.rollback.rejected', 'existence check', 'info', 'restart'],
+      ['.rollback.rejected', 'exists check', 'exists', 'restart'],
+      ...(unknownPending ? [
+        ['.rollback.pending', 'existence check', 'info', 'restart'],
+        ['.rollback.pending', 'exists check', 'exists', 'restart'],
+      ] satisfies RecoveryFaultCase[1] : []),
+      ['documents', 'directory list', 'list', 'restart'],
+    ], { solePublication: '.rollback.settled', orphanedSettlement: true },
+  ]),
+  [':verified-write survives two primary getItem exceptions with multiGet available', [
+    ...isolatedProofCases.find(([location]) => location === ':verified-write')![1],
+    ['.rollback.pending', 'remove', 'delete', 'save'],
+    ['.rollback.json', 'restart read', 'textSync', 'restart'],
+    ['', 'restart read', 'getItem', 'restart'],
+  ], { solePublication: ':verified-write' }],
   ...(['bound copy', 'checkpoint'] as const).map((recoverySource): RecoveryFaultCase => [
     'primary-only save reloads from ' + recoverySource + ' when neither proof nor primary repair survives', [
       ...blockPublicationLayers(publicationLayers),
@@ -1657,7 +1677,7 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
   const publicationFileFault = faults.has('.rollback.published') || faults.has('.rollback.published.bak');
   const backupRetirementFault = faults.has('.rollback.committed');
   const forceBackupRetirement = backupRetirementFault && !faults.has('.rollback.pending');
-  const keepPending = !missingProbe && !saveMissingProbe && (late || backupRetirementFault || publicationFileFault || faults.has(':checkpoint') ||
+  const keepPending = !orphanedSettlement && !missingProbe && !saveMissingProbe && (late || backupRetirementFault || publicationFileFault || faults.has(':checkpoint') ||
     faults.has('.rollback.pending') || faults.has('.rollback.verified') || faults.has('.rollback.settled'));
   const failure = new Error('模擬儲存故障');
   const inject = (location: string, fault: RecoveryFault, api: RecoveryApi) => {
@@ -2083,6 +2103,13 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     if (failures.some(([location, fault]) => location === rejectedAttempt && fault === 'restart read')) {
       expect(getMany.mock.calls.slice(batchReadsBeforeRestart)).toContainEqual([[key + rejectedAttempt]]);
     }
+    if (failures.some(([location, fault, api]) => location === '' && fault === 'restart read' && api === 'getItem')) {
+      const primaryReads = get.mock.calls.slice(readsBeforeRestart).filter(([entry]) => entry === key);
+      expect(primaryReads).toHaveLength(2);
+      const batchIndex = getMany.mock.calls.findIndex(([keys], index) => index >= batchReadsBeforeRestart && keys.includes(key));
+      expect(batchIndex).toBeGreaterThanOrEqual(batchReadsBeforeRestart);
+      await expect(getMany.mock.results[batchIndex].value).resolves.toContainEqual([key, await native.get(key)]);
+    }
     if (faults.get('') === 'restart read once') {
       const restartKeys = get.mock.calls.slice(readsBeforeRestart).map(([entry]) => entry);
       expect(restartKeys.filter((entry) => entry === key)).toHaveLength(2);
@@ -2181,6 +2208,144 @@ test.each(nativeRecoveryCases)('native journal fault matrix: %s', async (
     set.mockImplementation(originalStorage.set);
   }
 });
+
+test.each(['stale backup receipt', 'no backup receipt'] as const)(
+  'restart before retirement with an unreadable copy and %s',
+  async (receiptKind) => {
+    const scope = { owner: 'nuni:interrupted-first-write-' + receiptKind, schoolId: 'pu' };
+    const key = personalImportStorageKey(scope);
+    const backupKey = key + ':verified-write-backup';
+    const prefix = 'personal-imports-' + sha256(key) + '.rollback.';
+    const file = (suffix: string) => new File(Paths.document, prefix + suffix);
+    const { ledger: original } = await appendPersonalImports(scope, [row('original')]);
+    const ledgerA = { ...original, records: original.records.map((record) => ({ ...record, title: '統計' })) };
+    const ledgerB = { ...original, records: original.records.map((record) => ({ ...record, title: '化學' })) };
+    let authorized = true;
+    const save = (ledger: PersonalImportLedger) => mutatePersonalImportLedger(
+      scope, () => authorized, () => ({ ledger, result: ledger }), 'local', { allowNativePrimaryOnly: true },
+    );
+    const set = jest.mocked(AsyncStorage.setItem);
+    const setMany = jest.mocked(AsyncStorage.multiSet);
+    const nativeSet = set.getMockImplementation()!;
+    const nativeSetMany = setMany.getMockImplementation()!;
+    const nativeWrite = File.prototype.write;
+    const nativeDelete = File.prototype.delete;
+    const nativeCreate = File.prototype.create;
+    const nativeText = File.prototype.textSync;
+    const fault = new Error('模擬儲存故障');
+    const faultedFile = jest.fn(() => { throw fault; });
+    let savingA = true;
+    let primaryWrites = 0;
+    let restarting = false;
+    const write = jest.spyOn(File.prototype, 'write').mockImplementation(function (this: File, value, options) {
+      if (savingA && (
+        ['verified', 'published', 'published.bak', 'settled', 'receipt'].some((suffix) => this.uri === file(suffix).uri) ||
+        (this.uri === file('pending').uri && markerState(value) === 'committed') ||
+        (this.uri === file('json').uri && typeof value === 'string' && value.includes('\ncommitted:'))
+      )) faultedFile();
+      nativeWrite.call(this, value, options);
+    });
+    const remove = jest.spyOn(File.prototype, 'delete').mockImplementation(function (this: File) {
+      if (savingA && this.uri === file('pending').uri) faultedFile();
+      nativeDelete.call(this);
+    });
+    const create = jest.spyOn(File.prototype, 'create').mockImplementation(function (this: File, options) {
+      if (savingA && this.uri === file('committed').uri) faultedFile();
+      nativeCreate.call(this, options);
+    });
+    const rollbackRead = jest.fn(() => { throw fault; });
+    const read = jest.spyOn(File.prototype, 'textSync').mockImplementation(function (this: File) {
+      if (restarting && this.uri === file('json').uri) rollbackRead();
+      return nativeText.call(this);
+    });
+    const notified = jest.fn();
+    const unsubscribe = subscribePersonalImports(notified);
+    set.mockImplementation(async (entry, value) => {
+      if (savingA && (entry === key + ':verified-write' || (entry === key && ++primaryWrites > 1))) throw fault;
+      await nativeSet(entry, value);
+    });
+    setMany.mockImplementation(async (entries) => {
+      if (savingA && entries.some(([entry]) => entry === key + ':verified-write')) throw fault;
+      await nativeSetMany(entries);
+    });
+    try {
+      await save(ledgerA);
+      const rawA = (await AsyncStorage.getItem(key))!;
+      const receiptA = (await AsyncStorage.getItem(backupKey))!;
+      expect(receiptA).toMatch(/^attempt:/);
+      expect(receiptA.endsWith(sha256(rawA))).toBe(true);
+      expect(notified).toHaveBeenCalledTimes(1);
+      savingA = false;
+      await save(ledgerB);
+      const rawB = (await AsyncStorage.getItem(key))!;
+      expect(rawB).not.toBe(rawA);
+      expect(await AsyncStorage.getItem(backupKey)).toBe(receiptA);
+      expect(file('settled').textSync().endsWith(sha256(rawB))).toBe(true);
+      expect(notified).toHaveBeenCalledTimes(2);
+      if (receiptKind === 'no backup receipt') await AsyncStorage.removeItem(backupKey);
+      await nativeSet(key + ':checkpoint', rawB);
+      notified.mockClear();
+
+      let interrupt!: () => void;
+      let resume!: () => void;
+      const interrupted = new Promise<void>((resolve) => { interrupt = resolve; });
+      const resumed = new Promise<void>((resolve) => { resume = resolve; });
+      const landed = jest.fn(async () => {
+        interrupt();
+        await resumed;
+      });
+      set.mockImplementation(async (entry, value) => {
+        await nativeSet(entry, value);
+        if (entry === key && authorized) await landed();
+      });
+      const pendingSave = save(ledgerA);
+      const failedSave = expect(pendingSave).rejects.toThrow('帳號或學校已切換');
+      try {
+        await Promise.race([interrupted, pendingSave]);
+        expect(landed).toHaveBeenCalledTimes(1);
+        expect(await AsyncStorage.getItem(key)).toBe(rawA);
+        expect(file('pending').textSync()).toBe('');
+        expect(file('committed').info().exists).toBe(false);
+        expect(file('settled').info().exists).toBe(false);
+        const attempt = file('json').textSync().split('\n')[0];
+        expect(attempt).toContain(sha256(rawA));
+        expect(attempt).not.toBe(receiptA.split('\n')[0]);
+        const prepared = 'prepared:\n' + attempt + '\n' + sha256(rawB);
+        expect(read.mock.results.some((result, index) => result.type === 'return' && result.value === prepared &&
+          read.mock.contexts[index].uri === file('attempt').uri &&
+          read.mock.invocationCallOrder[index] < landed.mock.invocationCallOrder[0])).toBe(true);
+        const get = jest.mocked(AsyncStorage.getItem);
+        const readsBeforeRestart = get.mock.calls.length;
+        const fileReadsBeforeRestart = read.mock.calls.length;
+        restarting = true;
+        await jest.isolateModulesAsync(async () => {
+          const restarted = require('../services/personalImports') as typeof import('../services/personalImports');
+          await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledgerB);
+        });
+        expect(rollbackRead).toHaveBeenCalledTimes(2);
+        expect(read.mock.results.slice(fileReadsBeforeRestart).some(({ type, value }) =>
+          type === 'return' && value === prepared)).toBe(true);
+        const backupReadIndex = get.mock.calls.findIndex(([entry], index) => index >= readsBeforeRestart && entry === backupKey);
+        expect(backupReadIndex).toBeGreaterThanOrEqual(readsBeforeRestart);
+        await expect(get.mock.results[backupReadIndex].value).resolves.toBe(receiptKind === 'stale backup receipt' ? receiptA : null);
+        expect(notified).not.toHaveBeenCalled();
+      } finally {
+        restarting = false;
+        authorized = false;
+        resume();
+        await failedSave;
+      }
+    } finally {
+      unsubscribe();
+      set.mockImplementation(nativeSet);
+      setMany.mockImplementation(nativeSetMany);
+      write.mockRestore();
+      remove.mockRestore();
+      create.mockRestore();
+      read.mockRestore();
+    }
+  },
+);
 
 test.each([
   ['committed', 'bound'], ['committed', 'unrelated'],

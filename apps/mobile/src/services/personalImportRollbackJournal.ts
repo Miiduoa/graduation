@@ -19,6 +19,7 @@ const rearmedPattern = /^rearmed(?::[^\n:]+)?:\n/;
 const ordinaryAttemptPrefix = 'ordinary-';
 const attemptPattern = /^attempt:([^:\n]+):([a-f0-9]{64}):([a-f0-9]{64})(?::([a-f0-9]{64}))?\n/;
 const committedMarkerPrefix = committedMarker + '\n';
+const preparedAttemptPrefix = 'prepared:\n';
 const committedPayloadPattern = /^committed:([a-f0-9]{64})\n/;
 const committedReceiptPattern = /^([a-f0-9]{64})\n([a-f0-9]{64})$/;
 const targetedRejectionPattern = /^rejected:([a-f0-9]{64}):([a-f0-9]{64})$/;
@@ -511,7 +512,6 @@ type NativeCommitProof = {
 type NativeCommitProofContext = {
   attempt?: string;
   legacyBinding?: string;
-  allowUnboundAttempt?: boolean;
   requireAttempt?: boolean;
   denials?: readonly (string | null | undefined)[];
   rejectedPrimaryHash?: string;
@@ -521,7 +521,7 @@ export function verifyNativeCommitProof(
   raw: string,
   proofs: readonly NativeCommitProof[],
   {
-    attempt, legacyBinding, allowUnboundAttempt = false, requireAttempt = false, denials = [], rejectedPrimaryHash,
+    attempt, legacyBinding, requireAttempt = false, denials = [], rejectedPrimaryHash,
   }: NativeCommitProofContext = {},
 ): { legacyBinding?: string } | undefined {
   const hash = sha256(raw);
@@ -530,7 +530,7 @@ export function verifyNativeCommitProof(
   for (const proof of proofs) {
     const bound = proof.value?.match(attemptPattern);
     if (bound) {
-      if ((attempt ? bound[0] === attempt : allowUnboundAttempt) && !denials.includes(bound[0]) &&
+      if (bound[0] === attempt && !denials.includes(bound[0]) &&
           bound.slice(2).includes(hash) && proof.value?.slice(bound[0].length) === hash) {
         return {};
       }
@@ -618,6 +618,7 @@ export function capturePersonalImportRollback(key: string) {
     : undefined;
   const retired = !deletionBinding && (retirementPresent === true || retirementProof !== undefined);
   let markerCommitted = false;
+  let markerRejected = false;
   let markerAttempt: RegExpMatchArray | undefined;
   let markerOriginalHash: string | undefined;
   let rejected = rejectionRecorded;
@@ -626,8 +627,9 @@ export function capturePersonalImportRollback(key: string) {
   let markerError: unknown;
   try {
     const state = markerPresent === false ? undefined : readRollbackFile(marker);
-    rejected ||= state === rejectedMarker;
-    rejectionUnreadable &&= state !== rejectedMarker;
+    markerRejected = state === rejectedMarker;
+    rejected ||= markerRejected;
+    rejectionUnreadable &&= !markerRejected;
     const committedBinding = state?.startsWith(committedMarkerPrefix)
       ? state.slice(committedMarkerPrefix.length)
       : undefined;
@@ -660,7 +662,14 @@ export function capturePersonalImportRollback(key: string) {
   const body = stored?.replace(rearmedPattern, '');
   const payloadAttempt = body?.match(attemptPattern);
   if (retired && !rejectionRecorded && stored !== undefined && !rearmed && !payloadAttempt) return undefined;
-  const attempt = stored === undefined ? markerAttempt : payloadAttempt;
+  // An attempt is established before the primary write. Keep its binding
+  // independently of pending status and of the rollback copy's readability.
+  const preparedState = stored === undefined ? readOptionalFile(preparedAttemptFile(key)) : undefined;
+  const prepared = preparedState?.startsWith(preparedAttemptPrefix)
+    ? preparedState.slice(preparedAttemptPrefix.length) : undefined;
+  const preparedAttempt = prepared?.match(attemptPattern);
+  const attempt = stored === undefined ? preparedAttempt ?? markerAttempt : payloadAttempt;
+  const originalHash = preparedAttempt ? prepared?.slice(preparedAttempt[0].length) : markerOriginalHash;
   const encoded = payloadAttempt ? body?.slice(payloadAttempt[0].length) : body;
   const matchesAttemptedPrimary = attempt && ((raw: string) => {
     const hash = sha256(raw);
@@ -696,8 +705,9 @@ export function capturePersonalImportRollback(key: string) {
   const unreadableCopy = stored === undefined && payloadError !== undefined;
   // An orphan's backup may describe an older rollback. Let the verifier compare
   // the proof against the current bytes and any exact denial before using it.
-  const canUseCommitProof = (!rejected || rejectionUnreadable ||
-    (unreadableCopy && markerPresent === false && primaryRejection === undefined && rejectionHash !== undefined)) &&
+  const staleBackupMayBePresent = unreadableCopy && primaryRejection === undefined &&
+    rejectionHash !== undefined && attempt !== undefined;
+  const canUseCommitProof = !markerRejected && (!rejected || rejectionUnreadable || staleBackupMayBePresent) &&
     (rejectedRaw === undefined || attempt !== undefined);
   return {
     // An unreadable marker cannot establish retirement. Keep the payload
@@ -715,13 +725,12 @@ export function capturePersonalImportRollback(key: string) {
     markerError: (rejected || rejectedRaw !== undefined) && encoded !== undefined ? undefined : markerError,
     payloadError: rejectedRaw === undefined ? payloadError : undefined,
     unreadableCopy,
-    matchesCommittedCheckpoint: unreadableCopy && markerOriginalHash && primaryHashPattern.test(markerOriginalHash)
-      ? (raw: string | null) => sha256(raw ?? 'null') === markerOriginalHash
+    matchesCommittedCheckpoint: unreadableCopy && originalHash && primaryHashPattern.test(originalHash)
+      ? (raw: string | null) => sha256(raw ?? 'null') === originalHash
       : undefined,
     commitProofs: proofs,
     commitProofContext: canUseCommitProof ? {
       attempt: attempt?.[0],
-      allowUnboundAttempt: unreadableCopy,
       rejectedPrimaryHash: targetedRejection?.[2],
     } : undefined,
     readBackupDenial: unreadableCopy ? () => readOptionalFile(rejectionBackup) : undefined,
@@ -790,6 +799,10 @@ function readRollbackResolution(state: string | undefined): string | undefined {
   const attempt = receipt.match(attemptPattern);
   if (attempt && primaryHashPattern.test(receipt.slice(attempt[0].length))) return receipt;
   return undefined;
+}
+
+function preparedAttemptFile(key: string): File {
+  return new File(Paths.document, `personal-imports-${sha256(key)}.rollback.attempt`);
 }
 
 function retirementFile(key: string): File {
@@ -1010,6 +1023,19 @@ export function preparePersonalImportRollback(
       throw error;
     }
   }
+  if (attempt) {
+    const prepared = preparedAttemptPrefix + attempt + sha256(encoded);
+    const file = preparedAttemptFile(key);
+    try {
+      file.write(prepared);
+      if (readRollbackFile(file) !== prepared) {
+        throw new Error('無法確認匯入資料的還原識別已寫入。');
+      }
+    } catch (error) {
+      if (!rejected && !hadRejection) throw new NativeRollbackUnavailableError(error);
+      throw error;
+    }
+  }
   // A surviving settlement belongs to its original attempt.
   discardPayload(settlement);
   // A retry carries the rejection in its verified payload until publication.
@@ -1059,6 +1085,7 @@ export function preparePersonalImportRollback(
       discardPayload(publicationBackup);
       clearNativeVerificationReceipt(key);
       discardPayload(payload);
+      if (probeJournalFile(payload) === false) discardPayload(preparedAttemptFile(key));
       return true;
     }
     if (deletionBound && attempt && probeJournalFile(marker) === true) discardPayload(retirement);
@@ -1138,7 +1165,6 @@ export function preparePersonalImportRollback(
         if (current?.commitProofContext && verifyNativeCommitProof(primary, current.commitProofs, {
           ...current.commitProofContext,
           attempt: attempt || current.commitProofContext.attempt,
-          allowUnboundAttempt: false,
           requireAttempt: attempt !== '',
         })) return true;
       } catch {
@@ -1259,6 +1285,7 @@ export function clearPersonalImportRollback(key: string): void {
     discardPayload(settlementFile(key));
     clearNativeVerificationReceipt(key);
     discardPayload(payload);
+    if (probeJournalFile(payload) === false) discardPayload(preparedAttemptFile(key));
   }
 }
 
