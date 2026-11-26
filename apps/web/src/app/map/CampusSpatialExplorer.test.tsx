@@ -867,7 +867,7 @@ it('offers an accessible way to recover a suspended scene when mobile visibility
     act(() => intersection?.(entries, {} as IntersectionObserver));
   };
 
-  // Wait for the committed ready state, not just the scene factory call.
+  // Wait for React to commit the focusable host and ready state, not just the scene factory.
   // A slow worker may observe create() before React commits the ready UI.
   await waitFor(() => expect(host.tabIndex).toBe(0));
   // Keyboard focus was on the active 3D host when it suspended.

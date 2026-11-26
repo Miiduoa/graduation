@@ -3,7 +3,9 @@
 import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { createNuniFoodClient } from '@campus/shared/src/nuniFood';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { SiteShell } from '@/components/SiteShell';
 import { AccountDemoDiningPanel } from './AccountDemoDiningPanel';
 import { NuniSignIn } from '@/components/NuniSignIn';
@@ -21,6 +23,13 @@ import styles from './Food.module.css';
 const subscribeToHydration = () => () => {};
 const clientHydrated = () => true;
 const serverHydrated = () => false;
+
+function tenantSchoolId(campusSearch: string, browseSchoolId: string | null): string {
+  const raw = campusSearch.startsWith('?') ? campusSearch.slice(1) : campusSearch;
+  const listed = new URLSearchParams(raw).get('schoolId') || new URLSearchParams(raw).get('campus');
+  if (listed && listed !== 'all') return toPublicSchoolId(listed) || '';
+  return browseSchoolId || '';
+}
 
 export type FoodClient = ReturnType<typeof createNuniFoodClient>;
 export type PreparedFoodItem = {
@@ -42,6 +51,8 @@ export function FoodWorkspace({
   campusSearch?: string;
 }) {
   const auth = useNuniSession();
+  const campus = useCampusBrowseContext();
+  const schoolId = tenantSchoolId(campusSearch, campus.status === 'ready' ? campus.schoolId : null);
   const browseSearch = buildCampusNavigationSearch(new URLSearchParams(campusSearch));
   // Delayed Suspense on /food must hydrate against the server's account-checking markup.
   const hydrated = useSyncExternalStore(subscribeToHydration, clientHydrated, serverHydrated);
@@ -74,6 +85,7 @@ export function FoodWorkspace({
         accountId={auth.session.platformAccountId}
         context={auth.session.context}
         cache={scope.drafts}
+        schoolId={schoolId}
         initialLocation={initialLocation}
         initialTenant={initialTenant}
         initialOrder={initialOrder}
@@ -131,6 +143,7 @@ function FoodAccount({
   accountId,
   context,
   cache,
+  schoolId,
   initialTenant,
   initialOrder,
   initialLocation,
@@ -139,6 +152,7 @@ function FoodAccount({
   accountId: string;
   context: string;
   cache: FoodDraftCache;
+  schoolId: string;
   initialTenant: string;
   initialOrder: string;
   initialLocation: string;
@@ -268,6 +282,7 @@ function FoodAccount({
                 accountId={accountId}
                 context={context}
                 tenantId={tenantId}
+                schoolId={schoolId}
                 initialOrder={
                   created?.tenantId === tenantId
                     ? created.orderId

@@ -31,6 +31,7 @@ import { DemoStoreProvider } from './src/state/demoStore';
 import { AuthProvider, useAuth } from './src/state/auth';
 import { PersonalImportSyncBridge } from './src/components/PersonalImportSyncBridge';
 import { PersonalEventReminderBridge } from './src/components/PersonalEventReminderBridge';
+import { PersonalImportAuthorityProvider } from './src/state/personalImportAuthority';
 import {
   markPublicNavigationReady,
   markPublicNavigationUnready,
@@ -985,22 +986,24 @@ function AppInner() {
     <SchoolProvider>
       <NuniSessionProvider>
         <AuthProvider>
-          <PersonalImportSyncBridge />
-          <PersonalEventReminderBridge />
-          <StudentCardLinkHandler />
-          <NotificationsProvider>
-            <ToastProvider>
-              <AuthAwareStateProviders>
-                <DemoProvider>
-                  <DemoRoleProvider>
-                    <DemoStoreProvider>
-                      <AppNavigation />
-                    </DemoStoreProvider>
-                  </DemoRoleProvider>
-                </DemoProvider>
-              </AuthAwareStateProviders>
-            </ToastProvider>
-          </NotificationsProvider>
+          <PersonalImportAuthorityProvider>
+            <PersonalImportSyncBridge />
+            <PersonalEventReminderBridge />
+            <StudentCardLinkHandler />
+            <NotificationsProvider>
+              <ToastProvider>
+                <AuthAwareStateProviders>
+                  <DemoProvider>
+                    <DemoRoleProvider>
+                      <DemoStoreProvider>
+                        <AppNavigation />
+                      </DemoStoreProvider>
+                    </DemoRoleProvider>
+                  </DemoProvider>
+                </AuthAwareStateProviders>
+              </ToastProvider>
+            </NotificationsProvider>
+          </PersonalImportAuthorityProvider>
         </AuthProvider>
       </NuniSessionProvider>
     </SchoolProvider>

@@ -32,7 +32,10 @@ const navigation = { navigate: jest.fn(), goBack: jest.fn() };
 jest.mock('../state/auth', () => ({
   useAuth: () => ({ user: mockUid ? { uid: mockUid } : null }),
 }));
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool, selectionReady: true }) }));
+jest.mock('../state/personalImportScope', () => ({
+  usePersonalImportScope: () => ({ owner: mockUid ?? 'guest:device', schoolId: mockSchool.id }),
+}));
 jest.mock('../services/publicCampusContent', () => ({
   loadCampusAnnouncements: jest.fn(),
   loadCampusAnnouncementFeed: jest.fn(),
@@ -603,6 +606,7 @@ test('event date filters work and list navigation uses the actual event ID', asy
   expect(safeNavigate).toHaveBeenCalledWith(navigation, '活動詳情', {
     id: 'e1',
     source: event.source,
+    schoolId: event.schoolId,
   });
   expect(view.queryByText(/黑客松|32\/50|AI 為你推薦|我報名的/)).toBeNull();
 });
@@ -652,9 +656,65 @@ test('an event read denied by the server offers no share or calendar action', as
   await view.findByText('目前無法讀取，請確認網路連線後重試。');
   expect(view.queryByText('分享活動')).toBeNull();
   expect(view.queryByText('匯出行事曆')).toBeNull();
+  expect(view.queryByText('開啟行程草稿')).toBeNull();
   expect(share).not.toHaveBeenCalled();
   expect(exportAndShareICalFile).not.toHaveBeenCalled();
 });
+
+test('a scoped event link cannot suggest a same-ID event from a different school', async () => {
+  mockSchool = { id: 'other' };
+  const view = render(<EventScreen route={{ params: { id: event.id, schoolId: 'pu' } }} />);
+  await view.findByText('找不到這場活動，可能已移除或不屬於目前學校。');
+  expect(loadCampusEvent).not.toHaveBeenCalled();
+  expect(view.queryByText('開啟行程草稿')).toBeNull();
+});
+
+test('a legacy event link follows the current school so the same ID can be read after a school switch', async () => {
+  const view = render(<EventScreen route={{ key: 'search-1', params: { id: event.id } }} />);
+  await view.findByText(event.title);
+  mockSchool = { id: 'other' };
+  jest
+    .mocked(loadCampusEvent)
+    .mockResolvedValue({ ...event, schoolId: 'other', title: '另一校的同編號活動' });
+  view.rerender(<EventScreen route={{ key: 'search-1', params: { id: event.id } }} />);
+  await view.findByText('另一校的同編號活動');
+  expect(loadCampusEvent).toHaveBeenCalledWith('other', event.id, undefined);
+});
+
+test.each(['timer', 'foreground'])(
+  'the event calendar suggestion expires at the actual end on %s',
+  async (wake) => {
+    jest.useFakeTimers();
+    const end = Date.parse('2030-11-24T08:05:17Z');
+    jest.setSystemTime(end - 5_000);
+    let foreground: ((state: AppStateStatus) => void) | undefined;
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, listener) => {
+      foreground = listener;
+      return { remove: jest.fn() };
+    });
+    jest.mocked(loadCampusEvent).mockResolvedValue({
+      ...event,
+      calendarTime: { startsAt: '2030-11-24T08:00:00Z', endsAt: new Date(end).toISOString() },
+    });
+    const view = render(<EventScreen route={{ params: { id: event.id } }} />);
+    try {
+      await act(async () => {});
+      expect(view.getByText('開啟行程草稿')).toBeTruthy();
+      if (wake === 'timer') {
+        act(() => jest.advanceTimersByTime(4_999));
+        expect(view.getByText('開啟行程草稿')).toBeTruthy();
+        act(() => jest.advanceTimersByTime(1));
+      } else {
+        jest.setSystemTime(end + 1);
+        act(() => foreground?.('active'));
+      }
+      expect(view.queryByText('開啟行程草稿')).toBeNull();
+    } finally {
+      view.unmount();
+      jest.useRealTimers();
+    }
+  },
+);
 
 test('unknown event dates cannot export a made-up schedule and failed sharing allows retry', async () => {
   jest.mocked(loadCampusEvent).mockResolvedValue({ ...event, startsAt: '' });

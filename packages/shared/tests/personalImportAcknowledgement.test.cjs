@@ -60,7 +60,7 @@ async function run(current, transport, resolution, checkpoints = []) {
   const result = await performPersonalImportSync('pu', current, transport, () => true, resolution, async (next) => {
     checkpoints.push(clone(next));
     Object.assign(current, clone(next));
-  });
+  }, () => {});
   Object.assign(current, clone(result.state));
   return result;
 }
