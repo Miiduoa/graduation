@@ -179,6 +179,7 @@ function MapContent({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const routeNoteId = useId();
   const detailNoteId = useId();
+  const classroomNoteId = useId();
   const [selection, setSelection] = useState<MapLocation | '' | 'revoked' | null>(null);
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [nearbyOnly, setNearbyOnly] = useState(false);
@@ -286,7 +287,8 @@ function MapContent({
   // Explicit selections (including closing a detail) and focus links take priority.
   // A missing explicit destination must not silently turn into another building.
   // A later source update can make a room ambiguous; derive this instead of retaining a guess.
-  const classroomPlace = classroomLinkActive && classroom.status === 'matched' ? classroom.matches[0] : null;
+  const classroomPlace = classroomLinkActive && classroom.status === 'matched'
+    ? confirmedRoutePlace(locations, classroom.matches[0] ?? null) : null;
   const automaticClassroomId = placeState.source === 'ready' ? classroomPlace?.id : undefined;
   const automaticPlace = focus ? focusedPlace : locations.find((location) => location.id === automaticClassroomId);
   const selected = typeof selection === 'object' && selection !== null
@@ -621,11 +623,27 @@ function MapContent({
             <p role="status">暫時無法確認這間教室的位置，請重新讀取地點資料或核對校方地圖。</p>
           ) : classroom.status === 'matched' && classroomPlace ? <>
             <p>可對應「{classroomPlace.name}」的位置。抵達後請依課表與現場標示確認教室。</p>
-            {selected?.id !== classroomPlace.id && (
-              <button className="btn" type="button" onClick={() => selectLocation(classroomPlace)}>
-                定位{classroomPlace.name}
-              </button>
-            )}
+            <p id={classroomNoteId}>
+              導航終點是建築地點標記，並非已核實的入口或室內教室；路線由第三方地圖規劃。
+              {isProvidencePendingVerification(school, classroomPlace) && (
+                <strong>這個地點只有單一資料來源，位置待再次確認。</strong>
+              )}
+            </p>
+            <div className={styles.actions}>
+              <a className="btn primary" href={walkingDirectionsUrl(classroomPlace, myLocation ?? undefined)}
+                aria-describedby={classroomNoteId} target="_blank" rel="noopener noreferrer">
+                使用 Google 地圖前往{classroomPlace.name}
+              </a>
+              <a className="btn" href={appleWalkingDirectionsUrl(classroomPlace, myLocation ?? undefined)}
+                aria-describedby={classroomNoteId} target="_blank" rel="noopener noreferrer">
+                使用 Apple 地圖前往{classroomPlace.name}
+              </a>
+              {selected?.id !== classroomPlace.id && (
+                <button className="btn" type="button" onClick={() => selectLocation(classroomPlace)}>
+                  定位{classroomPlace.name}
+                </button>
+              )}
+            </div>
           </> : classroom.status === 'ambiguous' ? <>
             <p>有多個相符地點，請核對位置後選擇。</p>
             <ul className={styles.classroomCandidates}>
@@ -642,7 +660,7 @@ function MapContent({
           </> : (
             <p>目前地點資料無法確認這間教室的位置。請改用建築全名搜尋，或核對校方地圖。</p>
           )}
-          {(placeState.source === 'error' || (placeState.source === 'ready' && (classroom.status === 'ambiguous' || classroom.status === 'unmatched'))) && (
+          {(placeState.source === 'error' || (placeState.source === 'ready' && (classroom.status !== 'matched' || !classroomPlace))) && (
             <div className={styles.actions}>
               <button className="btn" type="button" onClick={() => {
                 searchInputRef.current?.focus();

@@ -171,8 +171,22 @@ it('resolves classroom deep links to a unique real building while retaining the 
   expect(appleUrl.searchParams.get('dirflg')).toBe('w');
   expect(document.getElementById(apple.getAttribute('aria-describedby')!)?.textContent).toContain('並非已核實的校舍入口或室內教室');
   expect(screen.queryByText(/樓層：3|三樓教室|3F/)).toBeNull();
+  const direct = within(result);
+  const directGoogle = direct.getByRole('link', { name: '使用 Google 地圖前往主顧樓' });
+  const directApple = direct.getByRole('link', { name: '使用 Apple 地圖前往主顧樓' });
+  expect(new URL(directGoogle.getAttribute('href')!).searchParams.get('destination')).toBe(destination.searchParams.get('destination'));
+  expect(new URL(directGoogle.getAttribute('href')!).searchParams.has('origin')).toBe(false);
+  expect(new URL(directApple.getAttribute('href')!).searchParams.get('daddr')).toBe(destination.searchParams.get('destination'));
+  expect(new URL(directApple.getAttribute('href')!).searchParams.has('saddr')).toBe(false);
+  expect(new URL(directApple.getAttribute('href')!).searchParams.get('dirflg')).toBe('w');
+  expect(directGoogle.getAttribute('aria-describedby')).toBe(directApple.getAttribute('aria-describedby'));
+  expect(document.getElementById(directGoogle.getAttribute('aria-describedby')!)?.textContent).toContain('並非已核實的入口或室內教室');
+  expect(directGoogle.getAttribute('rel')).toBe('noopener noreferrer');
+  expect(directApple.getAttribute('rel')).toBe('noopener noreferrer');
+  expect(result.compareDocumentPosition(screen.getByLabelText('地圖狀態')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '關閉地點詳情' }));
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
+  expect(direct.getByRole('link', { name: '使用 Google 地圖前往主顧樓' })).toBe(directGoogle);
   fireEvent.click(within(result).getByRole('button', { name: '定位主顧樓' }));
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-zhugu');
   fireEvent.click(screen.getByRole('button', { name: '看整個校園' }));
@@ -203,6 +217,7 @@ it('requires a choice between ambiguous same-school buildings and never selects 
   render(<MapClient school="another-school" query="教學101" />);
   const result = await screen.findByRole('region', { name: '教室定位結果' });
   expect(within(result).getByText(/有多個相符地點/)).toBeTruthy();
+  expect(within(result).queryByRole('link', { name: /地圖前往/ })).toBeNull();
   expect(result.compareDocumentPosition(screen.getByLabelText('地圖狀態')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
   expect(screen.queryByRole('link', { name: '從目前位置導航' })).toBeNull();
@@ -246,6 +261,11 @@ it('honors explicit focus over a resolved classroom and resets the request when 
   await sourceSettled();
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-library');
   expect(screen.getByRole('button', { name: '定位主顧樓' })).toBeTruthy();
+  const classroomLink = screen.getByRole('link', { name: '使用 Google 地圖前往主顧樓' });
+  const detailLink = screen.getByRole('link', { name: '從目前位置導航' });
+  expect(new URL(classroomLink.getAttribute('href')!).searchParams.get('destination')).not.toBe(
+    new URL(detailLink.getAttribute('href')!).searchParams.get('destination'),
+  );
   view.rerender(<MapClient school="pu" query="無法辨識303" />);
   await sourceSettled();
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('無法辨識303');
@@ -275,11 +295,14 @@ it('does not offer a provisional classroom destination while the campus source i
   expect(result.getByRole('status').textContent).toContain('尚未確認這間教室的位置');
   expect(result.queryByRole('button', { name: '定位主顧樓' })).toBeNull();
   expect(result.queryByText(/可對應「主顧樓」的位置/)).toBeNull();
+  expect(result.queryByRole('link', { name: /地圖前往/ })).toBeNull();
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
 
   await act(async () => source.resolve([]));
   expect(result.queryByRole('status')).toBeNull();
   expect(result.getByText(/可對應「主顧樓」的位置/)).toBeTruthy();
+  expect(result.getByRole('link', { name: '使用 Google 地圖前往主顧樓' })).toBeTruthy();
+  expect(result.getByRole('link', { name: '使用 Apple 地圖前往主顧樓' })).toBeTruthy();
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-zhugu');
 });
 
@@ -293,6 +316,7 @@ it.each(['PH303', 'ZZ303'])('does not confirm classroom %s from bundled data aft
   expect(await result.findByText(/暫時無法確認這間教室的位置/)).toBeTruthy();
   expect(result.queryByText(/可對應「主顧樓」的位置/)).toBeNull();
   expect(result.queryByText(/目前地點資料無法確認/)).toBeNull();
+  expect(result.queryByRole('link', { name: /地圖前往/ })).toBeNull();
   expect(result.queryByRole('button', { name: '定位主顧樓' })).toBeNull();
   expect(result.getByRole('link', { name: '核對校方地圖' })).toBeTruthy();
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
