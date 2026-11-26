@@ -378,6 +378,13 @@ function MapContent({
             setPositionError('定位結果無效，請重新取得位置。');
             return;
           }
+          // Building-level navigation needs a reasonably precise fix. This is a
+          // product cutoff, not a guarantee that a reported fix is correct.
+          if (!Number.isFinite(coords.accuracy) || coords.accuracy < 0 || coords.accuracy > 100) {
+            setPositionStatus('error');
+            setPositionError('定位精度不足（需在 100 公尺內），請到空曠處重新定位，或手動選擇起點。');
+            return;
+          }
           setMyLocation({ lat: coords.latitude, lng: coords.longitude });
           setPositionStatus('idle');
         },

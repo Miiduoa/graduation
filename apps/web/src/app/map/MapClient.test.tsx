@@ -1043,7 +1043,7 @@ it('obtains position only on request and orders nearby locations by measured str
   const far = { ...library, id: 'far', name: '遠方校舍', lat: 24.26, lng: 120.59 };
   vi.mocked(loadMapLocations).mockResolvedValueOnce([library, gate, far]);
   const getCurrentPosition = vi.fn((success: PositionCallback) =>
-    success({ coords: { latitude: gate.lat, longitude: gate.lng } } as GeolocationPosition),
+    success({ coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition),
   );
   Object.defineProperty(navigator, 'geolocation', {
     configurable: true,
@@ -1084,7 +1084,7 @@ it.each([[91, 120], [-91, 120], [24, 181], [24, -181], [NaN, 120], [24, Infinity
       render(<MapClient school="pu" />);
       await sourceSettled();
       fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
-      act(() => callbacks[0]({ coords: { latitude: gate.lat, longitude: gate.lng } } as GeolocationPosition));
+      act(() => callbacks[0]({ coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition));
       const nearby = screen.getByRole('button', { name: '附近 1 公里' });
       fireEvent.click(nearby);
       expect(nearby.getAttribute('aria-pressed')).toBe('true');
@@ -1092,7 +1092,7 @@ it.each([[91, 120], [-91, 120], [24, 181], [24, -181], [NaN, 120], [24, Infinity
       fireEvent.click(screen.getByRole('button', { name: '更新我的位置' }));
       expect(nearby.getAttribute('aria-pressed')).toBe('false');
       expect(nearby.hasAttribute('disabled')).toBe(true);
-      act(() => callbacks[1]({ coords: { latitude, longitude } } as GeolocationPosition));
+      act(() => callbacks[1]({ coords: { latitude, longitude, accuracy: 10 } } as GeolocationPosition));
       expect(screen.getByText('定位結果無效，請重新取得位置。')).toBeTruthy();
       expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
@@ -1102,12 +1102,46 @@ it.each([[91, 120], [-91, 120], [24, 181], [24, -181], [NaN, 120], [24, Infinity
       expect(apple.searchParams.has('saddr')).toBe(false);
 
       fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
-      act(() => callbacks[2]({ coords: { latitude: gate.lat, longitude: gate.lng } } as GeolocationPosition));
+      act(() => callbacks[2]({ coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition));
       expect(nearby.hasAttribute('disabled')).toBe(false);
       expect(nearby.getAttribute('aria-pressed')).toBe('false');
       expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
     } finally {
       Object.defineProperty(navigator, 'geolocation', { configurable: true, value: undefined });
+    }
+  },
+);
+
+it.each([101, 1000, -1, NaN, Infinity, undefined])(
+  'does not use a low-quality or malformed GPS fix (accuracy %s m) for nearby results or navigation',
+  async (accuracy) => {
+    state.user = null;
+    const callbacks: PositionCallback[] = [];
+    const original = Object.getOwnPropertyDescriptor(navigator, 'geolocation');
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: { getCurrentPosition: (callback: PositionCallback) => { callbacks.push(callback); } },
+    });
+    try {
+      render(<MapClient school="pu" />);
+      await sourceSettled();
+      fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+      act(() => callbacks[0]({ coords: { latitude: gate.lat, longitude: gate.lng, accuracy } } as GeolocationPosition));
+      expect(screen.getByText(/定位精度不足/)).toBeTruthy();
+      expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toBeNull();
+      expect(screen.getByRole('button', { name: '附近 1 公里' }).hasAttribute('disabled')).toBe(true);
+      fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+      const google = new URL(screen.getByRole('link', { name: '從目前位置導航' }).getAttribute('href')!);
+      const apple = new URL(screen.getByRole('link', { name: '使用 Apple 地圖從目前位置導航' }).getAttribute('href')!);
+      expect(google.searchParams.has('origin')).toBe(false);
+      expect(apple.searchParams.has('saddr')).toBe(false);
+      fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+      act(() => callbacks[1]({ coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 100 } } as GeolocationPosition));
+      expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
+      expect(screen.queryByText(/定位精度不足/)).toBeNull();
+    } finally {
+      if (original) Object.defineProperty(navigator, 'geolocation', original);
+      else Reflect.deleteProperty(navigator, 'geolocation');
     }
   },
 );
@@ -1129,13 +1163,13 @@ it('recovers when geolocation throws synchronously and ignores callbacks from th
     fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
     expect(screen.getByText('目前無法取得位置，請確認定位與網路後再試一次。')).toBeTruthy();
     expect(screen.getByRole('button', { name: '查看我的位置' }).hasAttribute('disabled')).toBe(false);
-    const position = { coords: { latitude: gate.lat, longitude: gate.lng } } as GeolocationPosition;
+    const position = { coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition;
     act(() => callbacks[0](position));
     expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
     act(() => callbacks[1](position));
     expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
-    act(() => callbacks[1]({ coords: { latitude: library.lat, longitude: library.lng } } as GeolocationPosition));
+    act(() => callbacks[1]({ coords: { latitude: library.lat, longitude: library.lng, accuracy: 10 } } as GeolocationPosition));
     expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
     expect(screen.queryByText('目前無法取得位置，請確認定位與網路後再試一次。')).toBeNull();
   } finally {
@@ -1151,7 +1185,7 @@ it('restores every campus place when clearing the overview filters while keeping
   Object.defineProperty(navigator, 'geolocation', {
     configurable: true,
     value: { getCurrentPosition: (callback: PositionCallback) => {
-      callback({ coords: { latitude: gate.lat, longitude: gate.lng } } as GeolocationPosition);
+      callback({ coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition);
     } },
   });
   try {
@@ -1209,7 +1243,7 @@ it('does not send geolocation results to another campus after a school switch', 
     vi.mocked(loadMapLocations).mockResolvedValueOnce([{ ...gate, name: '新校園正門' }]);
     view.rerender(<MapClient school="new-school" />);
     await screen.findByRole('button', { name: '查看新校園正門' });
-    act(() => resolve({ coords: { latitude: 24, longitude: 120 } } as GeolocationPosition));
+    act(() => resolve({ coords: { latitude: 24, longitude: 120, accuracy: 10 } } as GeolocationPosition));
     expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toBeNull();
   } finally {
     Object.defineProperty(navigator, 'geolocation', { configurable: true, value: undefined });
@@ -1244,11 +1278,11 @@ it('ignores a stale position callback after a newer location attempt', async () 
     render(<MapClient school="pu" />);
     await screen.findByRole('button', { name: '查看蓋夏圖書館' });
     fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
-    act(() => callbacks[0]({ coords: { latitude: library.lat, longitude: library.lng } } as GeolocationPosition));
+    act(() => callbacks[0]({ coords: { latitude: library.lat, longitude: library.lng, accuracy: 10 } } as GeolocationPosition));
     fireEvent.click(screen.getByRole('button', { name: '更新我的位置' }));
-    act(() => callbacks[0]({ coords: { latitude: 0, longitude: 0 } } as GeolocationPosition));
+    act(() => callbacks[0]({ coords: { latitude: 0, longitude: 0, accuracy: 10 } } as GeolocationPosition));
     expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toBeNull();
-    act(() => callbacks[1]({ coords: { latitude: gate.lat, longitude: gate.lng } } as GeolocationPosition));
+    act(() => callbacks[1]({ coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition));
     expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toEqual({
       lat: gate.lat,
       lng: gate.lng,
