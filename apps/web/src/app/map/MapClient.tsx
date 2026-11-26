@@ -722,10 +722,20 @@ function MapContent({
           先前選擇的地點已變更或無法唯一確認，已停用地點導航。請重新選擇地點。
         </p>
       )}
-      {!sourcePending && focus && !locations.some((location) => location.id === focus) && (
-        <p className={styles.notice} role="status">
-          找不到連結指定的地點，請搜尋地點名稱。
-        </p>
+      {!sourcePending && focus && selection === null && !selected && (
+        <div className={styles.notice}>
+          <p role="status">
+            {ambiguousPlaceIds.has(focus)
+              ? '連結指定的地點識別碼重複，無法確認位置。'
+              : '找不到連結指定的地點，請搜尋地點名稱。'}
+          </p>
+          <button className="btn" type="button" onClick={() => {
+            setSelection('');
+            searchInputRef.current?.focus();
+          }}>
+            清除連結地點
+          </button>
+        </div>
       )}
       {school === 'pu' && (
         <section className={`card ${styles.source}`} aria-label="地圖資料來源">

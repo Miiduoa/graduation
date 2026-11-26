@@ -477,6 +477,36 @@ it('never replaces a missing explicit focus with the classroom guess, including 
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('new-zhugu');
 });
 
+it.each(['missing', 'duplicate'] as const)('recovers an unavailable focus link without restoring it on login (%s)', async (kind) => {
+  state.user = null;
+  const focus = kind === 'missing' ? 'missing-place' : gate.id;
+  vi.mocked(loadMapLocations).mockResolvedValue(kind === 'missing'
+    ? [library]
+    : [library, gate, { ...gate, name: '測試用重複識別碼', lat: gate.lat + 0.002 }]);
+  render(<MapClient school="other-school" focus={focus} />);
+  const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  const clear = await screen.findByRole('button', { name: '清除連結地點' });
+  expect(mapState().selected).toBeNull();
+  expect(screen.getByText(kind === 'missing'
+    ? '找不到連結指定的地點，請搜尋地點名稱。'
+    : '連結指定的地點識別碼重複，無法確認位置。')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '從目前位置導航' })).toBeNull();
+  const loginFocus = () => {
+    const login = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
+    return new URL(login.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('focus');
+  };
+  expect(loginFocus()).toBe(focus);
+  clear.focus();
+  fireEvent.click(clear);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
+  expect(screen.queryByRole('button', { name: '清除連結地點' })).toBeNull();
+  expect(mapState().selected).toBeNull();
+  expect(loginFocus()).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看' + library.name }));
+  expect(mapState().selected).toEqual(library);
+  expect(loginFocus()).toBe(library.id);
+});
+
 it('retains the requested classroom in loading, failure and empty-school states', async () => {
   const source = deferred<MapLocation[]>();
   vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
