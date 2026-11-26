@@ -8,22 +8,45 @@ appId: ${APP_ID}
     timeout: 30000
 - tapOn:
     id: school-picker-open
+    enabled: true
+    retryTapIfNoChange: true
 - extendedWaitUntil:
     visible:
       id: school-picker-search
     timeout: 15000
-- tapOn:
-    id: school-picker-search
-- inputText: 'PU'
-- assertVisible:
-    id: school-picker-search
-    text: '^PU$'
+# Match the passing NTHU flow: native text entry can complete with a prefix.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: school-picker-search
+          enabled: true
+      - waitForAnimationToEnd:
+          timeout: 5000
+      - eraseText: 2
+      - inputText: 'PU'
+      - assertVisible:
+          id: school-picker-search
+          text: '^PU$'
 - extendedWaitUntil:
     visible:
       id: school-picker-option-pu
     timeout: 20000
 - tapOn:
     id: school-picker-option-pu
+# Changing schools can return the landing scroll view to the top.
+# Require dismissal, then locate and assert the selected school, not just the hero.
 - extendedWaitUntil:
-    visible: '目前瀏覽靜宜大學，選擇其他學校'
+    notVisible:
+      id: school-picker-search
     timeout: 15000
+- scrollUntilVisible:
+    element:
+      id: school-picker-open
+      text: '目前瀏覽靜宜大學，選擇其他學校'
+    direction: DOWN
+    centerElement: false
+    timeout: 20000
+- assertVisible:
+    id: school-picker-open
+    text: '目前瀏覽靜宜大學，選擇其他學校'
