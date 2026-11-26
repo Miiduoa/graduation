@@ -43,10 +43,9 @@ function MaestroHarness() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  // This component is registered only by index.maestro.ts. iOS launch
-  // arguments never reach JS SettingsManager on the CI simulator, so the
-  // in-window control is always armed here. Production index.ts never
-  // imports this file, and campus://maestro/sign-in cannot open it.
+  // This component is registered only by index.maestro.ts. Keep the control
+  // off the navigation header so iOS BackButton stays tappable. Production
+  // index.ts never imports this file, and campus://maestro/sign-in cannot open it.
 
   const openHarness = () => {
     setError('');
@@ -90,7 +89,7 @@ function MaestroHarness() {
         accessibilityLabel="開啟模擬器測試登入"
         collapsable={false}
         onPress={openHarness}
-        style={[styles.trigger, { top: Math.max(insets.top, 12) + 4 }]}
+        style={[styles.trigger, { bottom: Math.max(insets.bottom, 8) + 12 }]}
       >
         <Text style={styles.triggerLabel}>測試登入</Text>
       </Pressable>
