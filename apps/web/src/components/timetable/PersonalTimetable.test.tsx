@@ -928,7 +928,14 @@ describe('focus after confirmed timetable changes', () => {
     fireEvent.click(
       within(screen.getByRole('region', { name: '編輯課程' })).getByRole('button', { name: '儲存' }),
     );
-  const editorClosed = () => waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  // The portal can disappear before the passive modal cleanup and focus handoff.
+  // Wait for the entire observable outcome, not just removal of the dialog node.
+  const editorClosed = (target: () => HTMLElement) =>
+    waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(document.body.style.overflow).not.toBe('hidden');
+      expect(document.activeElement).toBe(target());
+    });
   const savedButton = (name: string) => screen.getAllByRole('button', { name: new RegExp(`編輯 ${name}`) })[0];
 
   it('focuses the first grid period of an edited course, not its focused continuation opener', async () => {
@@ -938,9 +945,26 @@ describe('focus after confirmed timetable changes', () => {
     fireEvent.click(opener);
     fireEvent.change(screen.getByLabelText('課名'), { target: { value: '改名課程' } });
     saveEditor();
-    await editorClosed();
-    expect(document.activeElement).toBe(savedButton('改名課程'));
+    await editorClosed(() => savedButton('改名課程'));
     expect(document.activeElement?.getAttribute('aria-label')).not.toContain('續堂');
+  });
+
+  it('waits for a confirmed save before releasing the modal and focusing the first period', async () => {
+    const pending = deferred<{ stored: 'cloud' }>();
+    mocks.save.mockReturnValueOnce(pending.promise);
+    await ready();
+    const opener = screen.getByRole('button', { name: /編輯 原本課程.*第 2 節，續堂/ });
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.change(screen.getByLabelText('課名'), { target: { value: '延後確認課程' } });
+    saveEditor();
+    expect(screen.getByRole('dialog', { name: '編輯課程' })).toBeTruthy();
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(screen.queryByRole('button', { name: /編輯 延後確認課程/ })).toBeNull();
+    await act(async () => pending.resolve({ stored: 'cloud' }));
+    await editorClosed(() => savedButton('延後確認課程'));
+    expect(document.activeElement?.getAttribute('aria-label')).not.toContain('續堂');
+    expect((document.activeElement as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('focuses a new course after its empty-cell opener disappears', async () => {
@@ -950,9 +974,8 @@ describe('focus after confirmed timetable changes', () => {
     fireEvent.click(opener);
     fireEvent.change(screen.getByLabelText('課名'), { target: { value: '新格位課程' } });
     saveEditor();
-    await editorClosed();
+    await editorClosed(() => savedButton('新格位課程'));
     expect(opener.isConnected).toBe(false);
-    expect(document.activeElement).toBe(savedButton('新格位課程'));
   });
 
   it('focuses the saved course in the week list', async () => {
@@ -962,9 +985,9 @@ describe('focus after confirmed timetable changes', () => {
     opener.focus();
     addCourse('一週新課');
     saveEditor();
-    await editorClosed();
-    const week = screen.getByRole('region', { name: '一週課程' });
-    expect(document.activeElement).toBe(within(week).getByRole('button', { name: /一週新課/ }));
+    await editorClosed(() =>
+      within(screen.getByRole('region', { name: '一週課程' })).getByRole('button', { name: /一週新課/ }),
+    );
   });
 
   it('shows the changed day before focusing a course in the single-day view', async () => {
@@ -975,10 +998,8 @@ describe('focus after confirmed timetable changes', () => {
       target: { value: '3' },
     });
     saveEditor();
-    await editorClosed();
+    await editorClosed(() => screen.getByRole('button', { name: /原本課程/ }));
     expect((screen.getByLabelText('上課日') as HTMLSelectElement).value).toBe('3');
-    const saved = screen.getByRole('button', { name: /原本課程/ });
-    expect(document.activeElement).toBe(saved);
   });
 
   it.each([
@@ -993,9 +1014,8 @@ describe('focus after confirmed timetable changes', () => {
     await ready();
     addCourse('保留收據課程');
     saveEditor();
-    await editorClosed();
+    await editorClosed(() => savedButton('保留收據課程'));
     expect(screen.getByRole('status').textContent).toMatch(receipt);
-    expect(document.activeElement).toBe(savedButton('保留收據課程'));
   });
 
   it('focuses the stable add action after a confirmed deletion', async () => {
@@ -1005,9 +1025,8 @@ describe('focus after confirmed timetable changes', () => {
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('button', { name: '刪除' }));
     fireEvent.click(screen.getByRole('button', { name: '確認刪除' }));
-    await editorClosed();
+    await editorClosed(() => screen.getByRole('button', { name: '新增課程' }));
     expect(screen.queryByRole('button', { name: /編輯 原本課程/ })).toBeNull();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: '新增課程' }));
   });
 
   it('returns focus to the empty timetable action after deleting the only course', async () => {
@@ -1019,8 +1038,7 @@ describe('focus after confirmed timetable changes', () => {
     fireEvent.click(week.getByRole('button', { name: /編輯 原本課程/ }));
     fireEvent.click(screen.getByRole('button', { name: '刪除' }));
     fireEvent.click(screen.getByRole('button', { name: '確認刪除' }));
-    await editorClosed();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: '手動新增課程' }));
+    await editorClosed(() => screen.getByRole('button', { name: '手動新增課程' }));
   });
 
   it('keeps default focus restoration when an unchanged editor is cancelled', async () => {

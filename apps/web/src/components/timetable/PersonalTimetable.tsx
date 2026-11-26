@@ -244,10 +244,11 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
     };
   }, []);
   const editorOpen = editing !== null;
-  // Wait for the editor to release focus and the saved course to appear in its new position.
+  // Wait for the editor to release focus and the saved course to become interactive.
+  // A save may commit the new course and close the editor in separate renders.
   useEffect(() => {
     const request = focusAfterCommit.current;
-    if (editorOpen || !request) return;
+    if (editorOpen || busy || !request) return;
     focusAfterCommit.current = null;
     if (!activeRef.current) return;
     const savedCourse =
@@ -257,7 +258,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           ).find((element) => element.dataset.courseFocusId === request.id)
         : undefined;
     (savedCourse ?? addCourseRef.current)?.focus();
-  }, [editorOpen]);
+  }, [editorOpen, busy]);
   const [notice, setNotice] = useState('');
   const [importMode, setImportMode] = useState<ImportMode>('merge');
   const [drafts, setDrafts] = useState<ImportDraft[]>([]);
