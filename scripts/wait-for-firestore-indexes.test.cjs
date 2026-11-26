@@ -577,7 +577,8 @@ test('invalid checked-in overrides fail before network access', async () => {
     {},
     [{}],
     [{ ...override, indexes: undefined }],
-    [{ ...override, ttl: true }],
+    [{ ...override, ttl: 'true' }],
+    [{ ...override, ttl: null }],
     [
       {
         ...override,
@@ -617,4 +618,44 @@ test('directory display-name group queries use a single-field override without l
     fieldPath: 'displayName',
   }]);
   assert.equal(fieldRequirements(directory)[0].keys.length, 4);
+});
+
+test('TTL-only index exemptions wait for the exact field policy to be active', async () => {
+  const f = fieldFixture((_request, count) => {
+    const field = remoteField('READY', { indexes: [] });
+    if (count > 1) field.ttlConfig = { state: count === 2 ? 'CREATING' : 'ACTIVE' };
+    return reply({ fields: [field] });
+  });
+  f.options.fieldOverrides = [{ ...override, indexes: [], ttl: true }];
+  await waitForIndexes(f.options);
+  assert.equal(f.fieldRequests.length, 3);
+  assert.match(f.logs[0], /TTL_MISSING/);
+  assert.match(f.logs[1], /TTL_CREATING/);
+});
+
+test('ready indexes cannot stand in for a missing, damaged or delayed TTL policy', async () => {
+  for (const ttlConfig of [
+    undefined, { state: 'CREATING' }, { state: 'NEEDS_REPAIR' }, {}, null,
+    { state: 'STATE_UNSPECIFIED' }, { state: 'ACTIVE', expirationOffset: '86400s' },
+    { state: 'ACTIVE', expirationOffset: 0 },
+  ]) {
+    const field = { ...remoteField(), ...(ttlConfig === undefined ? {} : { ttlConfig }) };
+    const f = fieldFixture(() => reply({ fields: [field] }));
+    f.options.fieldOverrides = [{ ...override, ttl: true }];
+    await assert.rejects(waitForIndexes(f.options), /TTL|timed out/);
+  }
+});
+
+test('a declared disabled TTL policy cannot pass while remote deletion is still enabled', async () => {
+  const f = fieldFixture((_request, count) => reply({ fields: [{ ...remoteField('READY', { indexes: [] }),
+    ...(count === 1 ? { ttlConfig: { state: 'ACTIVE' } } : {}) }] }));
+  f.options.fieldOverrides = [{ ...override, indexes: [], ttl: false }];
+  await waitForIndexes(f.options);
+  assert.equal(f.fieldRequests.length, 2);
+  assert.match(f.logs[0], /TTL_ENABLED.*must be disabled/);
+});
+
+test('the default Spark deployment does not silently enable paid TTL deletion', () => {
+  const actual = loadDeployment(path.resolve(__dirname, '../firebase.json'));
+  assert.equal(actual.fieldOverrides.some(field => field.ttl === true), false);
 });

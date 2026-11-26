@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import type {
@@ -7,6 +7,7 @@ import type {
 } from '@campus/shared/src/nuniFood';
 import { future, money, queueFixture, shiftFixture } from '@/features/food/foodTestFixtures';
 import { loadFoodPending } from '@/features/food/foodPersistence';
+import { merchantWorkspaceHref } from '@/lib/merchantWorkspaceNavigation';
 import { MerchantOrderDesk } from './MerchantOrderDesk';
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
@@ -498,3 +499,224 @@ it.each([401, 403, 409])(
     expect(writes[2][2]).toEqual(writes[0][2]);
   },
 );
+
+function activeQueueOrder(): NuniFoodStaffOrderQueueItem {
+  return {
+    ...queueFixture(),
+    id: 'order-2',
+    pickupDisplayCode: 'B202',
+    state: 'ready',
+    allowedActions: ['fulfill-pickup'],
+  };
+}
+
+it('filters this page through real links without writes and keeps focused filters stable during polling', async () => {
+  queue = [queueFixture(), activeQueueOrder()];
+  mount();
+  const filters = await screen.findByRole('navigation', { name: '訂單篩選' });
+  expect(
+    within(filters).getByRole('link', { name: '全部，本頁 2 筆' }).getAttribute('aria-current'),
+  ).toBe('page');
+  expect(within(filters).getByRole('link', { name: '待收款與確認，本頁 1 筆' })).toBeTruthy();
+  const active = within(filters).getByRole('link', { name: '備餐與取餐，本頁 1 筆' });
+  expect(active.getAttribute('href')).toBe(
+    '/merchant/workspace?tenant=campus-one&location=store-1&section=orders&queue=active',
+  );
+  active.focus();
+  fireEvent.click(active);
+  expect(active.getAttribute('aria-current')).toBe('page');
+  expect(screen.queryByText('取餐 A101 · 待付款')).toBeNull();
+  expect(screen.getByText('取餐 B202 · 可以取餐')).toBeTruthy();
+  expect(screen.getByLabelText('收銀班別')).toBeTruthy();
+  expect(screen.getByText('數字只包含目前這一頁已載入的訂單。')).toBeTruthy();
+  expect(mocks.request.mock.calls.filter(([, , input]) => input)).toHaveLength(0);
+  queue = [
+    queueFixture(),
+    activeQueueOrder(),
+    { ...activeQueueOrder(), id: 'order-3', pickupDisplayCode: 'B203' },
+  ];
+  await quietRefresh();
+  expect(document.activeElement).toBe(active);
+  expect(active.getAttribute('aria-label')).toBe('備餐與取餐，本頁 2 筆');
+  expect(screen.queryByText('取餐 A101 · 待付款')).toBeNull();
+  expect(mocks.request.mock.calls.filter(([, , input]) => input)).toHaveLength(0);
+});
+
+it('explains an empty page filter and clears it without pretending the store has no orders', async () => {
+  mount();
+  fireEvent.click(await screen.findByRole('link', { name: '備餐與取餐，本頁 0 筆' }));
+  expect(screen.getByText('這一頁沒有備餐與取餐的訂單。')).toBeTruthy();
+  expect(screen.queryByText('取餐 A101 · 待付款')).toBeNull();
+  const clear = screen.getByRole('link', { name: '清除篩選，查看本頁全部訂單' });
+  expect(clear.getAttribute('href')).toBe(
+    '/merchant/workspace?tenant=campus-one&location=store-1&section=orders',
+  );
+  fireEvent.click(clear);
+  expect(screen.getByText('取餐 A101 · 待付款')).toBeTruthy();
+  expect(screen.queryByText('這一頁沒有備餐與取餐的訂單。')).toBeNull();
+  expect(mocks.request.mock.calls.filter(([, , input]) => input)).toHaveLength(0);
+});
+
+it('invalidates an unsent confirmation when switching filters and requires fresh confirmation for another order', async () => {
+  queue = [queueFixture(), activeQueueOrder()];
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: '登記櫃檯收款：A101' }));
+  fireEvent.click(screen.getByLabelText('我已實際收到這筆訂單的款項'));
+  expect(button('確認：登記櫃檯收款').disabled).toBe(false);
+  fireEvent.click(screen.getByRole('link', { name: '備餐與取餐，本頁 1 筆' }));
+  expect(screen.queryByRole('region', { name: '確認訂單操作' })).toBeNull();
+  fireEvent.click(button('核對憑證並交付餐點：B202'));
+  expect(
+    (screen.getByLabelText('我已核對憑證，準備把這份餐交給顧客') as HTMLInputElement).checked,
+  ).toBe(false);
+  expect(button('確認：核對憑證並交付餐點').disabled).toBe(true);
+  fireEvent.click(screen.getByRole('link', { name: '待收款與確認，本頁 1 筆' }));
+  fireEvent.click(button('登記櫃檯收款：A101'));
+  expect((screen.getByLabelText('我已實際收到這筆訂單的款項') as HTMLInputElement).checked).toBe(
+    false,
+  );
+  expect(button('確認：登記櫃檯收款').disabled).toBe(true);
+  expect(mocks.request.mock.calls.filter(([, , input]) => input)).toHaveLength(0);
+});
+
+it('keeps submitted and uncertain operations visible across filters and retries only the original payload', async () => {
+  let rejectWrite!: (reason: unknown) => void;
+  let attempts = 0;
+  mocks.request.mockImplementation((path, context, input) =>
+    path.endsWith('/counter-payment') && ++attempts === 1
+      ? new Promise((_resolve, reject) => {
+          rejectWrite = reject;
+        })
+      : respond(path, context, input),
+  );
+  mount();
+  await confirm('登記櫃檯收款', '我已實際收到這筆訂單的款項');
+  await screen.findByText('正在確認這次操作…');
+  const original = loadFoodPending('account-a', 'merchant-food:campus-one:store-1');
+  fireEvent.click(screen.getByRole('link', { name: '備餐與取餐，本頁 0 筆' }));
+  expect(screen.getByRole('region', { name: '確認訂單操作' }).textContent).toContain('取餐 A101');
+  expect(button('確認：登記櫃檯收款').disabled).toBe(true);
+  expect(loadFoodPending('account-a', 'merchant-food:campus-one:store-1')).toEqual(original);
+  expect(attempts).toBe(1);
+  await act(async () => rejectWrite(new NuniError(0, 'NETWORK_ERROR')));
+  await screen.findByText(/尚未確認這次操作的結果/);
+  expect(screen.getByRole('region', { name: '確認訂單操作' })).toBeTruthy();
+  expect(button('重試同一份操作').disabled).toBe(false);
+  expect(attempts).toBe(1);
+  fireEvent.click(button('重試同一份操作'));
+  await screen.findByText('訂單 order-1：已付款，待店家接單。');
+  const writes = mocks.request.mock.calls.filter(([path]) => path.endsWith('/counter-payment'));
+  expect(writes).toHaveLength(2);
+  expect(writes[1][2]).toEqual(writes[0][2]);
+  expect(screen.queryByRole('region', { name: '確認訂單操作' })).toBeNull();
+});
+
+it('keeps parent-controlled filters in sync and forwards modified clicks without changing the current queue', async () => {
+  queue = [queueFixture(), activeQueueOrder()];
+  const change = vi.fn((event: React.MouseEvent<HTMLAnchorElement>) => event.preventDefault());
+  const props = {
+    context: 'context-a',
+    tenantId: 'campus-one',
+    locationId: 'store-1',
+    cache: new Map<string, unknown>(),
+    onQueueChange: change,
+    queueHref: (value: 'all' | 'incoming' | 'active') =>
+      merchantWorkspaceHref({
+        tenantId: 'campus-one',
+        locationId: 'store-1',
+        section: 'orders',
+        queue: value,
+      }),
+  };
+  const view = render(<MerchantOrderDesk {...props} queue="incoming" />);
+  const active = await screen.findByRole('link', { name: '備餐與取餐，本頁 1 筆' });
+  fireEvent.click(active, { metaKey: true });
+  expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ metaKey: true }), 'active');
+  expect(screen.getByText('取餐 A101 · 待付款')).toBeTruthy();
+  expect(screen.queryByText('取餐 B202 · 可以取餐')).toBeNull();
+  fireEvent.click(active);
+  expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ metaKey: false }), 'active');
+  expect(screen.queryByText('取餐 B202 · 可以取餐')).toBeNull();
+  view.rerender(<MerchantOrderDesk {...props} queue="active" />);
+  expect(screen.getByText('取餐 B202 · 可以取餐')).toBeTruthy();
+  expect(screen.queryByText('取餐 A101 · 待付款')).toBeNull();
+  expect(mocks.request.mock.calls.filter(([, , input]) => input)).toHaveLength(0);
+});
+
+it.each(['ctrlKey', 'metaKey'] as const)(
+  'does not close an unsent confirmation on %s link clicks',
+  async (modifier) => {
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: '登記櫃檯收款：A101' }));
+    fireEvent.click(screen.getByLabelText('我已實際收到這筆訂單的款項'));
+    const active = screen.getByRole('link', { name: '備餐與取餐，本頁 0 筆' });
+    // Prevent jsdom's unsupported navigation only after the component's click handler ran.
+    const preventNavigation = (event: Event) => event.preventDefault();
+    window.addEventListener('click', preventNavigation, { once: true });
+    fireEvent.click(active, { [modifier]: true });
+    expect(screen.getByRole('link', { name: '全部，本頁 1 筆' }).getAttribute('aria-current')).toBe(
+      'page',
+    );
+    expect(button('確認：登記櫃檯收款').disabled).toBe(false);
+    expect(screen.queryByText('這一頁沒有備餐與取餐的訂單。')).toBeNull();
+    expect(mocks.request.mock.calls.filter(([, , input]) => input)).toHaveLength(0);
+  },
+);
+
+it('restores the same-page cursor from its workspace cache and leaves other stores on their own page', async () => {
+  const cache = new Map<string, unknown>();
+  mocks.request.mockImplementation(async (path, context, input, _unused, query) => {
+    if (path.endsWith('/orders')) {
+      return {
+        orders: path.includes('/store-2/')
+          ? queue.map((order) => ({ ...order, locationId: 'store-2' }))
+          : queue,
+        ...(query?.cursor ? {} : { nextCursor: 'page-2' }),
+      };
+    }
+    if (path.includes('/store-2/') && path.endsWith('/shift'))
+      return { ...shiftFixture(), locationId: 'store-2' };
+    return respond(path, context, input);
+  });
+  const first = mount(cache);
+  fireEvent.click(await screen.findByRole('button', { name: '下一頁待處理訂單' }));
+  await screen.findByRole('button', { name: '回到第一頁待處理訂單' });
+  expect(cache.get('merchant-food:campus-one:store-1:cursor')).toBe('page-2');
+  first.unmount();
+  mocks.request.mockClear();
+  const returned = mount(cache);
+  await screen.findByRole('button', { name: '回到第一頁待處理訂單' });
+  expect(mocks.request.mock.calls.find(([path]) => path.endsWith('/orders'))?.[4]).toMatchObject({
+    cursor: 'page-2',
+  });
+  returned.unmount();
+  mocks.request.mockClear();
+  mount(cache, 'context-a', 'store-2');
+  await screen.findByText('目前收銀班別');
+  expect(
+    mocks.request.mock.calls.find(([path]) => path.endsWith('/orders'))?.[4]?.cursor,
+  ).toBeUndefined();
+  expect(screen.queryByRole('button', { name: '回到第一頁待處理訂單' })).toBeNull();
+  expect(cache.get('merchant-food:campus-one:store-1:cursor')).toBe('page-2');
+});
+
+it('offers first-page recovery when a restored cursor is no longer accepted', async () => {
+  const cache = new Map<string, unknown>([
+    ['merchant-food:campus-one:store-1:cursor', 'expired-page'],
+  ]);
+  mocks.request.mockImplementation((path, context, input, _unused, query) => {
+    if (path.endsWith('/orders') && query?.cursor)
+      return Promise.reject(new NuniError(422, 'INVALID_INPUT'));
+    return respond(path, context, input);
+  });
+  mount(cache);
+  await screen.findByRole('alert');
+  expect(screen.queryByText('取餐 A101 · 待付款')).toBeNull();
+  fireEvent.click(button('回到第一頁待處理訂單'));
+  await screen.findByText('取餐 A101 · 待付款');
+  expect(cache.get('merchant-food:campus-one:store-1:cursor')).toBeUndefined();
+  const reads = mocks.request.mock.calls.filter(([path]) => path.endsWith('/orders'));
+  expect(reads[0][4]).toMatchObject({ cursor: 'expired-page' });
+  expect(reads.at(-1)?.[4]?.cursor).toBeUndefined();
+  expect(mocks.request.mock.calls.filter(([, , input]) => input)).toHaveLength(0);
+});
