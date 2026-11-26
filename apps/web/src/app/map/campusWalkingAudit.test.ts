@@ -322,13 +322,97 @@ describe('trusted OSM walking segment audit bridge', () => {
     }
   });
 
-  it('does not treat an unlocked tag alone as an access audit', () => {
+  it('does not promote motorroad restrictions from fresh or cached OSM data', () => {
+    const cases: Record<string, string>[] = [
+      { motorroad: 'yes' }, { motorroad: '1' }, { motorroad: 'true' },
+      { motorroad: 'unknown' }, { motorroad: '' },
+      { motorroad: 'yes', foot: 'yes' },
+      { motorroad: 'no', 'motorroad:conditional': 'yes @ (Mo-Fr)' },
+      { 'motorroad:conditional': '' },
+    ];
+    for (const tags of cases) {
+      const data = parseCampusWalkingOsmCandidates({
+        osm3s: { timestamp_osm_base: '2026-11-24T08:00:00Z' },
+        elements: [points[0], points[1],
+          { type: 'way', id: 101, nodes: [1, 2], tags: { highway: 'service', ...tags }, ...revision },
+        ],
+      }, 'fixture', bounds, now)!;
+      expect(data.graph.edges[0].access).toBe('restricted');
+      data.graph.edges[0].access = 'unknown';
+      const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+      expect(graph.edges[0].access).toBe('restricted');
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1, now)).toBeNull();
+    }
+    for (const motorroad of ['no', 'false', '0']) {
+      const data = candidates();
+      data.ways[0].tags.motorroad = motorroad;
+      expect(findCampusWalkingRoute(data.graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+      const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+      expect(graph.edges[0].access).toBe('reviewed-open');
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).not.toBeNull();
+    }
+  });
+
+  it('blocks conflicting active highway lifecycle tags before and after caching', () => {
+    for (const key of ['construction', 'disused', 'abandoned']) {
+      for (const value of ['yes', 'footway', 'unknown', '']) {
+        const data = parseCampusWalkingOsmCandidates({
+          osm3s: { timestamp_osm_base: '2026-11-24T08:00:00Z' },
+          elements: [points[0], points[1],
+            { type: 'way', id: 101, nodes: [1, 2],
+              tags: { highway: 'footway', foot: 'yes', [key]: value }, ...revision },
+          ],
+        }, 'fixture', bounds, now)!;
+        expect(data.graph.edges[0].access).toBe('restricted');
+        data.graph.edges[0].access = 'unknown';
+        const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+        expect(graph.edges[0].access).toBe('restricted');
+        expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+        expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1, now)).toBeNull();
+      }
+      for (const value of ['no', 'false', '0']) {
+        const data = candidates();
+        data.ways[0].tags[key] = value;
+        expect(findCampusWalkingRoute(data.graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+        const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+        expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).not.toBeNull();
+      }
+      for (const location of ['from', 'to']) {
+        const data = parseCampusWalkingOsmCandidates({
+          osm3s: { timestamp_osm_base: '2026-11-24T08:00:00Z' },
+          elements: [
+            { ...points[0], tags: location === 'from' ? { [key]: 'yes' } : {} },
+            { ...points[1], tags: location === 'to' ? { [key]: 'yes' } : {} },
+            { type: 'way', id: 101, nodes: [1, 2], tags: { highway: 'footway' }, ...revision },
+          ],
+        }, 'fixture', bounds, now)!;
+        expect(data.graph.edges[0].access).toBe('restricted');
+        data.graph.edges[0].access = 'unknown';
+        const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+        expect(graph.edges[0].access).toBe('restricted');
+        expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+      }
+    }
+    // A historic road may legitimately have been repurposed as a footway.
     const data = candidates();
-    data.nodes[0].tags.locked = 'no';
-    data.ways[0].tags.locked = 'no';
-    expect(findCampusWalkingRoute(data.graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+    data.ways[0].tags['abandoned:highway'] = 'primary';
     const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
     expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).not.toBeNull();
+  });
+
+  it('does not treat an unlocked tag alone as an access audit', () => {
+    for (const locked of ['no', 'false', '0']) {
+      for (const location of ['way', 'from', 'to']) {
+        const data = candidates();
+        if (location === 'way') data.ways[0].tags.locked = locked;
+        else data.nodes[location === 'from' ? 0 : 1].tags.locked = locked;
+        expect(findCampusWalkingRoute(data.graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+        const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+        expect(graph.edges[0].access).toBe('reviewed-open');
+        expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).not.toBeNull();
+      }
+    }
   });
 
   it('allows explicitly open access only after a matching audit', () => {

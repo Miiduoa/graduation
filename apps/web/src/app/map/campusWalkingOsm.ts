@@ -105,11 +105,24 @@ const restrictsWalking = (tags: Tags) =>
   nonOutdoor(tags) ||
   hasNonPublicAccess(tags.foot) ||
   hasNonPublicAccess(tags.access) ||
+  // Motorroad commonly implies motor-vehicle-only access; conflicting or
+  // unrecognised values must not be promoted to a reviewed walking route.
+  // https://wiki.openstreetmap.org/wiki/Tag:motorroad=yes
+  (tags.motorroad !== undefined && !['no', 'false', '0'].includes(tags.motorroad)) ||
+  tags['motorroad:conditional'] !== undefined ||
+  // Conflicting direct lifecycle tags require review, including endpoints
+  // that lack a highway key. Historical namespace tags alone may describe
+  // a repurposed, usable path.
+  // https://wiki.openstreetmap.org/wiki/Lifecycle_prefix
+  ['construction', 'disused', 'abandoned'].some(key =>
+    tags[key] !== undefined && !['no', 'false', '0'].includes(tags[key])) ||
   !!(tags.barrier && tags.barrier !== 'no') ||
   // Locked gates/doors may lack a separate barrier tag. A conditional lock
   // or malformed access schedule is not a verified all-hours passage.
+  // Explicit negatives match motorroad and lifecycle so locked=false/0
+  // is not treated as a restriction.
   // https://wiki.openstreetmap.org/wiki/Key:locked
-  (tags.locked !== undefined && tags.locked !== 'no') ||
+  (tags.locked !== undefined && !['no', 'false', '0'].includes(tags.locked)) ||
   tags['locked:conditional'] !== undefined ||
   tags['access:conditional'] !== undefined || tags['foot:conditional'] !== undefined ||
   tags.opening_hours !== undefined;
