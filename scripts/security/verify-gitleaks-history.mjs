@@ -7,6 +7,21 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const SHA = /^[a-f0-9]{40}$/;
+// These two fixed, nonfunctional strings test that CLI errors do not echo
+// private input. Their squash commits repeat the complete reviewed test blobs.
+// The inventory is intentionally exact: another commit, line or file needs review.
+const reviewedTestFixtures = Object.freeze([
+  {
+    reviewed: '86922724ef4de26b36b8e25ce96a751a9d5c7e9c:scripts/audit-group-post-visibility.test.cjs:generic-api-key:51',
+    observed: '2a9bad18dd88a6873b08063df8b308e5df2cf9e0:scripts/audit-group-post-visibility.test.cjs:generic-api-key:51',
+    reviewedBlob: '95536dff7ce30ef1e27d43182c816019977caf71',
+  },
+  {
+    reviewed: '7a26c85c0fc3a68943ce1887fde8c371e76977f8:scripts/qa/course-study/compare.test.mjs:generic-api-key:494',
+    observed: '66a88348a216bbeee31e332968ca8cc39e4eea70:scripts/qa/course-study/compare.test.mjs:generic-api-key:494',
+    reviewedBlob: '03dcd5a143da8c61ac4400ff9b3525b0b87ad0c2',
+  },
+]);
 // #616's main squash repeats the byte-identical, loopback-only emulator helper.
 // This is one reviewed file identity, not another general script allowlist.
 const reviewedTronclassEmulatorFixture = Object.freeze({
@@ -75,12 +90,14 @@ export function validateAliases(manifest, baseline, candidate, readHistoricalPod
   for (const alias of manifest.aliases) {
     assert.ok(reviewed.has(alias.reviewed), 'Alias has no previously reviewed fingerprint');
   }
-  const fixtures = manifest.reviewedTestFixtures ?? [];
-  assert.ok(Array.isArray(fixtures) && fixtures.length <= 2, 'Invalid reviewed fixture count');
+  const fixtures = manifest.reviewedTestFixtures === undefined ? [] : manifest.reviewedTestFixtures;
+  assert.ok(Array.isArray(fixtures) && fixtures.length <= reviewedTestFixtures.length, 'Invalid reviewed fixture count');
   for (const fixture of fixtures) {
-    const { path, rule } = parseFingerprint(fixture.reviewed);
-    assert.ok(path.startsWith('scripts/') && /\.test\.[cm]js$/.test(path) && rule === 'generic-api-key', 'Fixture must be an exact finding in a test script');
-    assert.match(fixture.reviewedBlob, SHA, 'A reviewed test fixture requires a pinned Git blob');
+    assert.ok(fixture && typeof fixture === 'object' && !Array.isArray(fixture), 'Invalid reviewed test fixture');
+    const { reviewed, observed, reviewedBlob } = fixture;
+    const pinned = reviewedTestFixtures.find((entry) => entry.observed === observed);
+    assert.ok(pinned, 'Unknown reviewed test fixture');
+    assert.deepEqual({ reviewed, observed, reviewedBlob }, pinned, 'Historical test fixture must keep its exact reviewed fingerprint and blob');
   }
   const emulatorFixture = manifest.reviewedTronclassEmulatorFixture;
   if (emulatorFixture !== undefined) {
