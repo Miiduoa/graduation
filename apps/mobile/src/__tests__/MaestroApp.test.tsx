@@ -1,6 +1,7 @@
 import React from 'react';
-import { act, render, waitFor } from '@testing-library/react-native';
-import { MAESTRO_LOGIN_LINK } from '../app/maestroHarnessLink';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+
+const mockIsMaestroEmulatorLoginLaunch = jest.fn(() => false);
 
 jest.mock('expo-constants', () => ({
   expoConfig: {
@@ -20,6 +21,11 @@ jest.mock('../../e2e/emulatorConfig', () => ({
   MAESTRO_LOGIN_LINK: 'campus://maestro/sign-in',
 }));
 
+jest.mock('../../e2e/maestroLaunchFlag', () => ({
+  MAESTRO_EMULATOR_LOGIN_ARGUMENT: 'maestroEmulatorLogin',
+  isMaestroEmulatorLoginLaunch: () => mockIsMaestroEmulatorLoginLaunch(),
+}));
+
 jest.mock('../../App', () => {
   const React = require('react');
   const { View } = require('react-native');
@@ -28,54 +34,45 @@ jest.mock('../../App', () => {
 
 jest.mock('../firebase', () => ({ getAuthInstance: jest.fn() }));
 
-let mockInitialUrl: string | null = null;
-let mockLinkListener: ((event: { url: string }) => void) | undefined;
-const mockRemoveLinkListener = jest.fn();
-
-jest.mock('expo-linking', () => ({
-  createURL: () => 'campus://',
-  getInitialURL: async () => mockInitialUrl,
-  addEventListener: (_type: string, listener: (event: { url: string }) => void) => {
-    mockLinkListener = listener;
-    return { remove: mockRemoveLinkListener };
-  },
-}));
-
 import { MaestroApp } from '../../e2e/MaestroApp';
 
 beforeEach(() => {
-  mockInitialUrl = null;
-  mockLinkListener = undefined;
-  mockRemoveLinkListener.mockClear();
+  mockIsMaestroEmulatorLoginLaunch.mockReturnValue(false);
 });
 
-test('keeps the real app visible until the emulator-login URI arrives', async () => {
+test('keeps the real app visible and hides the harness without a Maestro launch argument', () => {
   const view = render(<MaestroApp />);
   expect(view.getByTestId('app-shell')).toBeTruthy();
+  expect(view.queryByTestId('maestro-open-emulator-login')).toBeNull();
   expect(view.queryByTestId('maestro-emulator-login')).toBeNull();
-  await act(async () => undefined);
 });
 
-test('shows the emulator login overlay in the same window as the app', async () => {
+test('shows an in-window emulator login control only when Maestro launched with the argument', () => {
+  mockIsMaestroEmulatorLoginLaunch.mockReturnValue(true);
   const view = render(<MaestroApp />);
-  await waitFor(() => expect(mockLinkListener).toBeTruthy());
-  act(() => mockLinkListener?.({ url: MAESTRO_LOGIN_LINK }));
   expect(view.getByTestId('app-shell')).toBeTruthy();
+  expect(view.getByTestId('maestro-open-emulator-login')).toBeTruthy();
+  expect(view.queryByTestId('maestro-emulator-login')).toBeNull();
+  fireEvent.press(view.getByTestId('maestro-open-emulator-login'));
   expect(view.getByTestId('maestro-emulator-login')).toBeTruthy();
   expect(view.getByTestId('maestro-email')).toBeTruthy();
   expect(view.getByTestId('maestro-password')).toBeTruthy();
   expect(view.getByTestId('maestro-sign-in')).toBeTruthy();
+  expect(view.queryByTestId('maestro-open-emulator-login')).toBeNull();
 });
 
-test('opens the overlay from a trailing-slash or empty-host emulator-login URI', async () => {
-  mockInitialUrl = 'campus:///maestro/sign-in/';
+test('does not put the launch trigger back over the app after the overlay opens', () => {
+  mockIsMaestroEmulatorLoginLaunch.mockReturnValue(true);
   const view = render(<MaestroApp />);
-  await waitFor(() => expect(view.getByTestId('maestro-emulator-login')).toBeTruthy());
+  fireEvent.press(view.getByTestId('maestro-open-emulator-login'));
+  expect(view.queryByTestId('maestro-open-emulator-login')).toBeNull();
+  expect(view.getByTestId('app-shell')).toBeTruthy();
 });
 
-test('does not open the overlay for an unrelated campus link', async () => {
+test('does not open the overlay from a crafted campus URI', async () => {
   const view = render(<MaestroApp />);
-  await waitFor(() => expect(mockLinkListener).toBeTruthy());
-  act(() => mockLinkListener?.({ url: 'campus://groups' }));
+  await act(async () => undefined);
+  await waitFor(() => expect(view.getByTestId('app-shell')).toBeTruthy());
   expect(view.queryByTestId('maestro-emulator-login')).toBeNull();
+  expect(view.queryByTestId('maestro-open-emulator-login')).toBeNull();
 });

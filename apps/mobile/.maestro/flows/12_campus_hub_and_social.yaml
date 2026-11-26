@@ -14,7 +14,10 @@ tags:
 - waitForAnimationToEnd:
     timeout: 2500
 
-- openLink: campus://community
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://community
 
 - extendedWaitUntil:
     visible: '校園社群'

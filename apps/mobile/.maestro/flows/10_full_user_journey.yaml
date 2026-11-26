@@ -3,27 +3,42 @@ name: Authenticated deep-link journey
 tags: [regression, journey]
 ---
 - runFlow: ../helpers/sign-in-student.yaml
-- openLink: campus://announcements
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://announcements
 - extendedWaitUntil:
     visible: '公開處室公告的摘要與原文連結。一般帳號即可查看。'
     timeout: 20000
 - takeScreenshot: journey_announcements
-- openLink: campus://events
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://events
 - extendedWaitUntil:
     visible: '查看時間、地點與主辦單位資訊。'
     timeout: 20000
 - takeScreenshot: journey_events
-- openLink: campus://map
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://map
 - extendedWaitUntil:
     visible: '找到校園地點，再安排怎麼過去。'
     timeout: 20000
 - takeScreenshot: journey_map
-- openLink: campus://cafeteria
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://cafeteria
 - extendedWaitUntil:
     visible: '選店、看菜單，再決定吃什麼。'
     timeout: 20000
 - takeScreenshot: journey_cafeteria
-- openLink: campus://settings
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://settings
 - extendedWaitUntil:
     visible: '目前登入帳號'
     timeout: 20000

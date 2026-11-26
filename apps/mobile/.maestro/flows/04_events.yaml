@@ -3,7 +3,10 @@ name: Authenticated event filters and detail
 tags: [smoke, events]
 ---
 - runFlow: ../helpers/sign-in-student.yaml
-- openLink: campus://events
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://events
 - extendedWaitUntil:
     visible: '查看時間、地點與主辦單位資訊。'
     timeout: 20000

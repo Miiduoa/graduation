@@ -8,6 +8,7 @@ tags:
 # app state preserves the installed bundle and removes earlier Firebase sessions.
 - launchApp:
     clearState: true
+    stopApp: true
 
 - extendedWaitUntil:
     visible:
@@ -17,12 +18,23 @@ tags:
     id: tab-Today
 
 # Choose this flow's campus independently of onboarding or prior signed-in runs.
-- scrollUntilVisible:
-    element:
+# Do not scroll a picker that is already on screen; that hides it on iOS.
+- hideKeyboard
+- runFlow:
+    when:
+      notVisible:
+        id: school-picker-open
+    commands:
+      - scrollUntilVisible:
+          element:
+            id: school-picker-open
+          direction: DOWN
+          centerElement: true
+          timeout: 20000
+- extendedWaitUntil:
+    visible:
       id: school-picker-open
-    direction: DOWN
-    centerElement: false
-    timeout: 30000
+    timeout: 15000
 - runFlow: ../helpers/select-nthu.yaml
 
 # Keep the tap target clear of the development warning banner at the screen edge.

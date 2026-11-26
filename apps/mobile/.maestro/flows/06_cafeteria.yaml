@@ -3,7 +3,10 @@ name: Authenticated cafeteria catalog and filters
 tags: [smoke, cafeteria]
 ---
 - runFlow: ../helpers/sign-in-student.yaml
-- openLink: campus://cafeteria
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://cafeteria
 - extendedWaitUntil:
     visible: '校園餐廳'
     timeout: 20000

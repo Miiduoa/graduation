@@ -1,4 +1,8 @@
-/** Isolated emulator-login URI used only by the Maestro test entrypoint. */
+/**
+ * Reserved URI that production navigation must ignore. The emulator-login
+ * overlay is compiled only into index.maestro.ts and opens from a Maestro
+ * launch argument, never from this URI.
+ */
 export const MAESTRO_LOGIN_LINK = 'campus://maestro/sign-in';
 
 function pathSegments(pathname: string): string[] {

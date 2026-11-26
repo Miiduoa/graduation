@@ -1,15 +1,23 @@
 appId: ${APP_ID}
 ---
+# Emulator login is compiled only into index.maestro.ts. Production builds never
+# mount this control, and a crafted campus:// URI cannot open it.
 - launchApp:
     clearState: true
+    stopApp: true
+    arguments:
+      maestroEmulatorLogin: '1'
 - extendedWaitUntil:
     visible:
       id: login-landing
     timeout: 90000
 - assertNotVisible:
     id: tab-Today
+- hideKeyboard
 - runFlow: select-pu.yaml
-- openLink: campus://maestro/sign-in
+- tapOn:
+    id: maestro-open-emulator-login
+    enabled: true
 - extendedWaitUntil:
     visible:
       id: maestro-emulator-login

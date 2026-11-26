@@ -36,7 +36,7 @@ test.each([
   expect(isReservedMaestroHarnessUrl(candidate as string | null | undefined)).toBe(false);
 });
 
-test('keeps the emulator-login URI out of guest and school navigation state', () => {
+test('a crafted emulator-login URI cannot drive production navigation', () => {
   expect(preAuthLinking.getStateFromPath?.('maestro/sign-in', preAuthLinking.config)).toBeUndefined();
   expect(schoolLinking.getStateFromPath?.('maestro/sign-in', schoolLinking.config)).toBeUndefined();
 });

@@ -53,7 +53,10 @@ tags: [smoke, auth]
 - assertNotVisible:
     id: tab-Today
 # A stale school deep link after logout must not restore private navigation.
-- openLink: campus://groups
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://groups
 - extendedWaitUntil:
     visible:
       id: login-landing

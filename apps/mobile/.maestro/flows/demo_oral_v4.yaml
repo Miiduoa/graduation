@@ -6,11 +6,15 @@ tags: [demo, oral, regression]
 # Exercise its supported public replacement; this does not establish school auth.
 - launchApp:
     clearState: true
+    stopApp: true
 - extendedWaitUntil:
     visible:
       id: login-landing
     timeout: 90000
-- openLink: campus://demo/oral-exam
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://demo/oral-exam
 - extendedWaitUntil:
     visible:
       id: oral-exam-demo

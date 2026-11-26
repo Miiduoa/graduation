@@ -275,6 +275,8 @@ export function SchoolBrowsingControl({
         ) : null}
         <Pressable
           accessibilityRole="button"
+          accessible
+          collapsable={false}
           testID="school-picker-open"
           accessibilityLabel={school.id ? `目前瀏覽${school.name}，選擇其他學校` : '選擇我的學校'}
           onPress={() => {

@@ -3,7 +3,10 @@ name: Authenticated announcement search and detail
 tags: [smoke, announcements]
 ---
 - runFlow: ../helpers/sign-in-student.yaml
-- openLink: campus://announcements
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://announcements
 - extendedWaitUntil:
     visible: '公開處室公告的摘要與原文連結。一般帳號即可查看。'
     timeout: 20000

@@ -1,15 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import * as Linking from 'expo-linking';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { getAuthInstance } from '../src/firebase';
-import { isReservedMaestroHarnessUrl } from '../src/app/maestroHarnessLink';
 import {
   assertMaestroEmulatorConfig,
   MAESTRO_STUDENT_EMAIL,
   MAESTRO_STUDENT_UID,
 } from './emulatorConfig';
+import { isMaestroEmulatorLoginLaunch } from './maestroLaunchFlag';
 
 const extra = Constants.expoConfig?.extra ?? {};
 assertMaestroEmulatorConfig({
@@ -29,26 +29,30 @@ assertMaestroEmulatorConfig({
 const App = require('../App').default as React.ComponentType;
 
 export function MaestroApp() {
+  return (
+    <SafeAreaProvider>
+      <MaestroHarness />
+    </SafeAreaProvider>
+  );
+}
+
+function MaestroHarness() {
+  const insets = useSafeAreaInsets();
   const [visible, setVisible] = useState(false);
+  const [offerTrigger, setOfferTrigger] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const harnessEnabled = isMaestroEmulatorLoginLaunch();
 
-  useEffect(() => {
-    let active = true;
-    const open = (url: string | null) => {
-      if (active && isReservedMaestroHarnessUrl(url)) {
-        setError('');
-        setEmail('');
-        setPassword('');
-        setVisible(true);
-      }
-    };
-    const listener = Linking.addEventListener('url', ({ url }) => open(url));
-    void Linking.getInitialURL().then(open);
-    return () => { active = false; listener.remove(); };
-  }, []);
+  const openHarness = () => {
+    setError('');
+    setEmail('');
+    setPassword('');
+    setOfferTrigger(false);
+    setVisible(true);
+  };
 
   const login = async () => {
     if (busy) return;
@@ -77,6 +81,18 @@ export function MaestroApp() {
 
   return <>
     <App />
+    {harnessEnabled && offerTrigger && !visible ? (
+      <Pressable
+        testID="maestro-open-emulator-login"
+        accessibilityRole="button"
+        accessibilityLabel="開啟模擬器測試登入"
+        collapsable={false}
+        onPress={openHarness}
+        style={[styles.trigger, { top: Math.max(insets.top, 12) + 4 }]}
+      >
+        <Text style={styles.triggerLabel}>測試登入</Text>
+      </Pressable>
+    ) : null}
     {visible ? (
       <View
         testID="maestro-emulator-login"
@@ -104,6 +120,18 @@ export function MaestroApp() {
 }
 
 const styles = StyleSheet.create({
+  trigger: {
+    position: 'absolute',
+    left: 8,
+    zIndex: 20,
+    elevation: 20,
+    minHeight: 44,
+    minWidth: 44,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+    backgroundColor: '#14213d',
+  },
+  triggerLabel: { color: '#fff', fontSize: 13, fontWeight: '600' },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 9999,
