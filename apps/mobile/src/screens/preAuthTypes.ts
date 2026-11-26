@@ -17,6 +17,7 @@ export type PreAuthStackParamList = {
   PlatformLostFound: { id?: string; schoolId?: string } | undefined;
   Career: undefined;
   SSOLogin: undefined;
+  TronClassWorkspace: undefined;
   NuniTimetableAssistant: undefined;
   PersonalImport: { kind?: 'timetable' | 'grades' | 'events' } | undefined;
   PersonalTimetable: { term?: string; courseId?: string; schoolId?: string; date?: string; startAt?: number; reminderScope?: string } | undefined;

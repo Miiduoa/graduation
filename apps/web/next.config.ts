@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { NextConfig } from 'next';
 import { legacyEnabled, legacyHtmlRedirects, legacyRewrites } from './src/lib/legacy-routing';
 import { hasVerifiedCatalogSearch, officialLibraryDirectory } from '../../packages/shared/src/officialLibraries';
+import { firebaseEmulatorRewrites } from './src/lib/server/firebaseEmulatorConfig';
 
 const firebaseAdminBrowserStub = path.join(__dirname, 'src/lib/nodeNativeStub.ts');
 
@@ -102,7 +103,8 @@ const nextConfig: NextConfig = {
     return legacyHtmlRedirects();
   },
   async rewrites() {
-    return legacyRewrites(legacyEnabled());
+    const legacy = legacyRewrites(legacyEnabled());
+    return { ...legacy, beforeFiles: [...firebaseEmulatorRewrites(), ...legacy.beforeFiles] };
   },
   async headers() {
     return [

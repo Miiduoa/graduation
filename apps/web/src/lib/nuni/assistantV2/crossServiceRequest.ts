@@ -1,3 +1,4 @@
+import { isTronClassNavigationTarget } from '../../tronClassAgentIntent';
 import type { AssistantServiceId } from '@campus/shared/src/assistantServices';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
@@ -41,7 +42,7 @@ const HANDOFFS: readonly [RegExp, AssistantServiceId][] = [
   [/^(?:申請)?請假$/, 'leave'], [/^(?:課程)?申訴$/, 'appeals'], [/^(?:私訊|私人訊息|訊息|傳訊息)$/, 'messages'],
   [/^(?:我的)?通知$/, 'notifications'], [/^(?:校園社群|社群|貼文|發文)$/, 'community'], [/^(?:學分|學分規劃)$/, 'credits'],
   [/^(?:學校資格|綁定學校)$/, 'school-account'], [/^(?:數位)?學生證$/, 'student-card'],
-  [/^(?:玩課雲|TronClass|tronclass)(?:作業|課程)?$/, 'school-lms'], [/^(?:失物|失物招領|招領)$/, 'lost-found'],
+  [/^(?:失物|失物招領|招領)$/, 'lost-found'],
   [/^好友$/, 'friends'], [/^群組$/, 'groups'], [/^(?:店家|商家)(?:工作區)?$/, 'merchant'],
   [/^(?:助理權限|AI權限)$/, 'assistant-permissions'], [/^設定$/, 'settings'], [/^帳號$/, 'account'],
   [/^(?:學期)?成績$/, 'grades'], [/^(?:點餐|菜單|下單)$/, 'food'],
@@ -261,7 +262,8 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
     const handoffs = HANDOFFS.filter(([pattern]) => pattern.test(handoffClause));
     // An unsupported service operation remains a visible handoff, never a
     // completed task. Ambiguous multi-service clauses remain conversational.
-    const services = [...new Set(handoffs.map(([, service]) => service))];
+    const services = isTronClassNavigationTarget(handoffClause)
+      ? ['school-lms' as const] : [...new Set(handoffs.map(([, service]) => service))];
     if (services.length !== 1) return null;
     // An unsupported ownership or date filter must not be stripped into the
     // now-connected lost-found feed. Explicit navigation is still a handoff.
