@@ -1,5 +1,11 @@
 # 281 與撤回過濾的 API 發布來源
 
+## 2026-11-26：學期解析來源驗證修正
+
+`courseAccess.ts` 抽出共用的 `courseTerm` 解析後，封裝來源綁定也須一起更新。已先核對固定上游 `9de47b4b3492325e430562c37bcad552867162db` 的完整 Git tree metadata、所用原始 blobs 與四份補丁 checksum，重現既有 base／composed／lost-found input tree，再重建新的三層來源綁定。
+
+本次 overlay tree 為 `f20474d2ba6d3dc08f55dbeeceda5b6d751332a3`，composed candidate tree 為 `67855adc6365cc320de71ebfe147df205ac609e5`。對應的 lost-found input 與 assistant-permissions tree 也同步重算，來源見各自的 `source.json`。未下載的上游 blobs 保留其 Git 物件 ID；本次驗證的是完整 tree 結構與來源差異，正式封裝仍使用具備完整 Git objects 與工作樹的一般 prepare 流程。
+
 ## 2026-11-07：Agent 單筆行程核對的來源增量
 
 Agent 的單筆行程核對新增可選的 `acknowledged` 裝置同步元資料，對應來源為 `packages/shared/src/imports/sync.ts`。本輪以既有固定上游 commit、四份 checksum 相符的補丁與 base tree，重新執行 `prepare.py --refresh-manifest`；再於另一份獨立乾淨 checkout 執行一般 prepare，兩次產出相同的 candidate tree。
