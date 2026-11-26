@@ -547,6 +547,7 @@ it('resolves deep links from loaded places and hands walking directions to a rea
   vi.mocked(loadMapLocations).mockReturnValueOnce(loading.promise);
   render(<MapClient school="pu" route="gate,library" focus="library" />);
   expect(screen.queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '交換起點與終點' })).toBeNull();
   await act(async () => loading.resolve([library, gate]));
   const destination = new URL(
     screen.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!,
@@ -880,7 +881,23 @@ it('keeps both login returns in sync with manually changed and cleared routes', 
     return destination.searchParams.get('route');
   });
   expect(returnRoutes()).toEqual(['gate,library', 'gate,library']);
+  const reverse = screen.getByRole('button', { name: '交換起點與終點' });
+  reverse.focus();
+  fireEvent.click(reverse);
+  expect(document.activeElement).toBe(reverse);
+  expect(returnRoutes()).toEqual(['library,gate', 'library,gate']);
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route.map((place: MapLocation) => place.id)).toEqual(['library', 'gate']);
+  const google = new URL(screen.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  const apple = new URL(screen.getByRole('link', { name: '使用 Apple 地圖規劃路線' }).getAttribute('href')!);
+  expect(google.searchParams.get('origin')).toBe('24.2275,120.5635');
+  expect(google.searchParams.get('destination')).toBe('24.22495,120.56535');
+  expect(apple.searchParams.get('saddr')).toBe(google.searchParams.get('origin'));
+  expect(apple.searchParams.get('daddr')).toBe(google.searchParams.get('destination'));
+  expect(screen.getByRole('region', { name: '步行導航' }).textContent).toContain('不代表已核實的建築入口');
+  fireEvent.click(reverse);
+  expect(returnRoutes()).toEqual(['gate,library', 'gate,library']);
   fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  expect(screen.queryByRole('button', { name: '交換起點與終點' })).toBeNull();
   expect(returnRoutes()).toEqual([null, null]);
   fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
   expect(returnRoutes()).toEqual([null, null]);

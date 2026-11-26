@@ -534,7 +534,7 @@ function MapContent({
         <section className={`card ${styles.route}`} aria-label="步行導航">
           <div>
             <p className={styles.eyebrow}>前往目的地</p>
-            <h2>
+            <h2 aria-live="polite" aria-atomic="true">
               {routeLocations[0].name} → {routeLocations[1].name}
             </h2>
             <p>
@@ -567,6 +567,13 @@ function MapContent({
             >
               使用 Apple 地圖規劃路線
             </a>
+            <button
+              className="btn"
+              type="button"
+              onClick={() => setRouteDraft({ from: { ...routeLocations[1] }, to: { ...routeLocations[0] } })}
+            >
+              交換起點與終點
+            </button>
             <button className="btn" onClick={clearRoute}>
               清除路線
             </button>
