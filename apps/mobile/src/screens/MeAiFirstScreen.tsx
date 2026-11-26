@@ -24,14 +24,16 @@ type ListRowProps = {
 function AccountRow({ title, subtitle, onPress, first, styles: s }: ListRowProps) {
   return (
     <Pressable
+      accessible
       accessibilityRole="button"
-      accessibilityLabel={subtitle ? `${title}，${subtitle}` : title}
+      accessibilityLabel={title}
+      accessibilityHint={subtitle}
       onPress={onPress}
       style={({ pressed }) => [s.row, !first && s.rowBorder, pressed && s.rowPressed]}
     >
-      <View style={s.rowCopy}>
-        <Text style={s.rowTitle}>{title}</Text>
-        {subtitle ? <Text style={s.rowSubtitle}>{subtitle}</Text> : null}
+      <View style={s.rowCopy} accessible={false}>
+        <Text accessible={false} style={s.rowTitle}>{title}</Text>
+        {subtitle ? <Text accessible={false} style={s.rowSubtitle}>{subtitle}</Text> : null}
       </View>
       <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
     </Pressable>

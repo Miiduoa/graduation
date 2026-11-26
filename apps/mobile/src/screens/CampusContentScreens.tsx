@@ -272,8 +272,10 @@ function ContentFilter({
 }) {
   return (
     <Pressable
+      accessible
       accessibilityRole="button"
-      accessibilityLabel={`篩選：${label}`}
+      accessibilityLabel={label}
+      accessibilityHint="篩選此類內容"
       accessibilityState={{ selected }}
       onPress={onPress}
       style={({ pressed }) => ({
@@ -290,6 +292,7 @@ function ContentFilter({
       })}
     >
       <Text
+        accessible={false}
         style={{
           color: selected ? aiTokens.ai : aiTokens.text,
           fontSize: 14,
@@ -386,9 +389,10 @@ function ContentRow({
   const tags = labels.filter((label): label is string => Boolean(label));
   return (
     <Pressable
+      accessible
       accessibilityRole="button"
-      accessibilityLabel={[title, pinned && '置頂', ...tags, subtitle].filter(Boolean).join('，')}
-      accessibilityHint={`開啟${kind}詳情`}
+      accessibilityLabel={[title, pinned && '置頂'].filter(Boolean).join('，')}
+      accessibilityHint={[...tags, subtitle].filter(Boolean).join('，') || `開啟${kind}詳情`}
       onPress={() => {
         Keyboard.dismiss();
         onPress();
@@ -412,7 +416,10 @@ function ContentRow({
             paddingVertical: 2,
           }}
         >
-          <Text style={{ color: aiTokens.text, fontSize: 12, lineHeight: 18, fontWeight: '700' }}>
+          <Text
+            accessible={false}
+            style={{ color: aiTokens.text, fontSize: 12, lineHeight: 18, fontWeight: '700' }}
+          >
             置頂
           </Text>
         </View>
@@ -422,6 +429,7 @@ function ContentRow({
           {tags.map((label) => (
             <Text
               key={label}
+              accessible={false}
               style={{ color: aiTokens.ai, fontSize: 12, lineHeight: 18, fontWeight: '600' }}
             >
               {label}
@@ -429,12 +437,18 @@ function ContentRow({
           ))}
         </View>
       ) : null}
-      <Text style={{ color: aiTokens.text, fontSize: 17, lineHeight: 25, fontWeight: '600' }}>
+      <Text
+        accessible={false}
+        style={{ color: aiTokens.text, fontSize: 17, lineHeight: 25, fontWeight: '600' }}
+      >
         {title}
       </Text>
-      <Text style={{ color: aiTokens.muted, fontSize: 13, lineHeight: 20 }}>{subtitle}</Text>
+      <Text accessible={false} style={{ color: aiTokens.muted, fontSize: 13, lineHeight: 20 }}>
+        {subtitle}
+      </Text>
       {preview ? (
         <Text
+          accessible={false}
           numberOfLines={2}
           style={{ color: aiTokens.textSecondary, fontSize: 14, lineHeight: 22 }}
         >

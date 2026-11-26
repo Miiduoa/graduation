@@ -75,6 +75,20 @@ const event = {
   location: '大禮堂',
   source: 'school-club-events' as const,
 };
+function getContentFilter(
+  view: ReturnType<typeof render>,
+  label: string,
+) {
+  const match = view
+    .getAllByRole('button')
+    .find(
+      (el) =>
+        el.props.accessibilityLabel === label && el.props.accessibilityHint === '篩選此類內容',
+    );
+  if (!match) throw new Error(`content filter not found: ${label}`);
+  return match;
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -120,7 +134,7 @@ test('announcements use school data with working categories and a registered det
   await view.findByText('校方的新公告');
   expect(loadCampusAnnouncementFeed).toHaveBeenCalledWith('pu');
   expect(view.queryByText(/期末考程序|32 則|AI 從|全部已讀/)).toBeNull();
-  fireEvent.press(view.getByRole('button', { name: '篩選：教務' }));
+  fireEvent.press(view.getByRole('button', { name: '教務' }));
   expect(view.queryByText('社團活動')).toBeNull();
   fireEvent.press(view.getByText('校方的新公告'));
   expect(safeNavigate).toHaveBeenCalledWith(navigation, '公告詳情', { id: 'a1' });
@@ -969,14 +983,14 @@ test('switching announcement views clears an unavailable category and preserves 
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   await view.findByText('校方的新公告');
   fireEvent.changeText(view.getByLabelText('搜尋公告'), '公告');
-  fireEvent.press(view.getByRole('button', { name: '篩選：全部公告' }));
-  fireEvent.press(view.getByRole('button', { name: '篩選：系統' }));
+  fireEvent.press(view.getByRole('button', { name: '全部公告' }));
+  fireEvent.press(view.getByRole('button', { name: '系統' }));
   expect(view.queryByText('校方的新公告')).toBeNull();
   expect(view.getByText('系統維護公告')).toBeTruthy();
-  fireEvent.press(view.getByRole('button', { name: '篩選：學生公告' }));
+  fireEvent.press(view.getByRole('button', { name: '學生公告' }));
   expect(view.getByLabelText('搜尋公告').props.value).toBe('公告');
   expect(view.getByText('校方的新公告')).toBeTruthy();
-  expect(view.getByRole('button', { name: '篩選：全部 1' }).props.accessibilityState.selected).toBe(
+  expect(view.getByRole('button', { name: '全部 1' }).props.accessibilityState.selected).toBe(
     true,
   );
 });
@@ -999,7 +1013,7 @@ test('students can narrow all loaded results to pinned posts, then reset or chan
   await view.findByText('校園消息 0');
   expect(view.queryByText('校園消息 31')).toBeNull();
   const pressFilter = (label: string) =>
-    fireEvent.press(view.getByRole('button', { name: `篩選：${label}` }));
+    fireEvent.press(view.getByRole('button', { name: label }));
   pressFilter('只看置頂（2）');
   expect(view.queryByText('校園消息 0')).toBeNull();
   fireEvent.press(view.getByRole('button', { name: /校園消息 31，置頂/ }));
@@ -1009,7 +1023,7 @@ test('students can narrow all loaded results to pinned posts, then reset or chan
   expect(view.getByText('校園消息 30')).toBeTruthy();
   fireEvent.changeText(view.getByLabelText('搜尋公告'), '校園消息 1');
   expect(view.getByText('找不到符合的公告')).toBeTruthy();
-  expect(view.getByRole('button', { name: '篩選：只看置頂（0）' })).toBeSelected();
+  expect(view.getByRole('button', { name: '只看置頂（0）' })).toBeSelected();
   pressFilter('全部公告');
   expect(view.getByLabelText('搜尋公告').props.value).toBe('校園消息 1');
   expect(view.getByText('校園消息 1')).toBeTruthy();
@@ -1026,7 +1040,7 @@ test.each(['school', 'account'] as const)(
     const view = render(<AnnouncementsScreen navigation={navigation} />);
     await view.findByText('校方的新公告');
     fireEvent.changeText(view.getByLabelText('搜尋公告'), '舊範圍搜尋');
-    fireEvent.press(view.getByRole('button', { name: '篩選：教務' }));
+    fireEvent.press(view.getByRole('button', { name: '教務' }));
     const pending = deferred<Awaited<ReturnType<typeof loadCampusAnnouncementFeed>>>();
     jest.mocked(loadCampusAnnouncementFeed).mockReturnValueOnce(pending.promise);
     if (changed === 'school') mockSchool = { id: 'ncku' };
@@ -1150,16 +1164,16 @@ test('event time filters keep ongoing events out of the past and identify missin
   });
   const view = render(<EventsScreen navigation={navigation} />);
   await view.findByText('午間講座');
-  expect(view.getByRole('button', { name: /未公告結束的展覽，已開始/ })).toBeTruthy();
-  fireEvent.press(view.getByRole('button', { name: '篩選：進行中' }));
+  expect(view.getByRole('button', { name: '未公告結束的展覽' })).toBeTruthy();
+  fireEvent.press(getContentFilter(view, '進行中'));
   expect(view.getByText('午間講座')).toBeTruthy();
   expect(view.queryByText('未公告結束的展覽')).toBeNull();
   expect(view.queryByText('昨天的工作坊')).toBeNull();
-  fireEvent.press(view.getByRole('button', { name: '篩選：已開始／過往' }));
+  fireEvent.press(view.getByRole('button', { name: '已開始／過往' }));
   expect(view.queryByText('午間講座')).toBeNull();
   expect(view.getByText('未公告結束的展覽')).toBeTruthy();
   expect(view.getByText('昨天的工作坊')).toBeTruthy();
-  fireEvent.press(view.getByRole('button', { name: '篩選：時間待公告' }));
+  fireEvent.press(view.getByRole('button', { name: '時間待公告' }));
   expect(view.getByText('待公布場次')).toBeTruthy();
   expect(view.queryByText('校方的新活動')).toBeNull();
 });
@@ -1170,7 +1184,7 @@ test.each(['school', 'account'] as const)(
     const view = render(<EventsScreen navigation={navigation} />);
     await view.findByText('校方的新活動');
     fireEvent.changeText(view.getByLabelText('搜尋活動'), '舊搜尋');
-    fireEvent.press(view.getByRole('button', { name: '篩選：進行中' }));
+    fireEvent.press(getContentFilter(view, '進行中'));
     const pending = deferred<ReturnType<typeof eventPage>>();
     jest.mocked(loadCampusEventPage).mockReturnValueOnce(pending.promise);
     if (changed === 'school') mockSchool = { id: 'ncku' };
@@ -1179,7 +1193,7 @@ test.each(['school', 'account'] as const)(
     expect(view.queryByDisplayValue('舊搜尋')).toBeNull();
     await act(async () => pending.resolve(eventPage([{ ...event, title: '新範圍的活動' }])));
     expect(view.getByLabelText('搜尋活動').props.value).toBe('');
-    expect(view.getByRole('button', { name: '篩選：全部' }).props.accessibilityState.selected).toBe(
+    expect(view.getByRole('button', { name: '全部' }).props.accessibilityState.selected).toBe(
       true,
     );
     expect(view.getByText('新範圍的活動')).toBeTruthy();
@@ -1208,7 +1222,7 @@ test('returning to the foreground updates event phases and removes its subscript
   });
   const view = render(<EventsScreen navigation={navigation} />);
   await view.findByText('上午活動');
-  fireEvent.press(view.getByRole('button', { name: '篩選：進行中' }));
+  fireEvent.press(getContentFilter(view, '進行中'));
   expect(view.queryByText('上午活動')).toBeNull();
   now.mockReturnValue(Date.parse('2026-10-25T04:00:00Z'));
   act(() => updateAppState?.('active'));
@@ -1227,11 +1241,11 @@ test.each([
     const dismiss = jest.spyOn(Keyboard, 'dismiss');
     const view = render(<Screen navigation={navigation} />);
     await view.findByText(title);
-    const filter = view.getByRole('button', { name: `篩選：${filterLabel}` });
+    const filter = view.getByRole('button', { name: filterLabel });
     expect(StyleSheet.flatten(filter.props.style).minHeight).toBe(44);
     fireEvent.press(filter);
     expect(
-      view.getByRole('button', { name: `篩選：${filterLabel}` }).props.accessibilityState.selected,
+      view.getByRole('button', { name: filterLabel }).props.accessibilityState.selected,
     ).toBe(true);
     expect(view.UNSAFE_getByType(ScrollView).props.keyboardShouldPersistTaps).toBe('handled');
     expect(view.UNSAFE_getByType(ScrollView).props.keyboardDismissMode).toBe('on-drag');

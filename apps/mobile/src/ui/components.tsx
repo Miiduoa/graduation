@@ -298,9 +298,9 @@ export function Card(props: {
   const content = (
     <View style={{ borderRadius: theme.radius.lg, ...style.shell }}>
       <View
-        accessible={!!props.title}
-        accessibilityRole={props.title ? 'header' : undefined}
-        accessibilityLabel={accessibilityLabel}
+        accessible={!!props.title && !props.children}
+        accessibilityRole={props.title && !props.children ? 'header' : undefined}
+        accessibilityLabel={props.children ? undefined : accessibilityLabel}
         style={{
           padding: theme.layout.cardPadding,
           borderRadius: theme.radius.lg,

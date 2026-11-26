@@ -9,7 +9,7 @@ import { Pressable, View, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeVersion } from '../ui/useThemeStyleSheet';
 import { useAuth } from '../state/auth';
-import { useNotifications } from '../state/notifications';
+import { useOptionalNotifications } from '../state/notifications';
 import { headerDrawer } from './HeaderDrawer';
 import { theme } from '../ui/theme';
 
@@ -20,7 +20,7 @@ export interface HeaderAvatarButtonProps {
 export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
   useThemeVersion();
   const auth = useAuth();
-  const notifs = useNotifications();
+  const notifs = useOptionalNotifications();
   const initial = (auth.profile?.displayName ?? auth.user?.email ?? '訪')
     .trim()
     .charAt(0)
@@ -63,7 +63,7 @@ export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
           )}
         </View>
         {/* 紅點：未讀通知 */}
-        {notifs.unreadCount > 0 ? (
+        {(notifs?.unreadCount ?? 0) > 0 ? (
           <View
             style={{
               position: 'absolute',
@@ -81,7 +81,7 @@ export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
             }}
           >
             <Text style={{ color: theme.colors.onDanger, fontSize: 9, fontWeight: '700' }}>
-              {notifs.unreadCount > 9 ? '9+' : notifs.unreadCount}
+              {notifs && notifs.unreadCount > 9 ? '9+' : notifs?.unreadCount}
             </Text>
           </View>
         ) : null}

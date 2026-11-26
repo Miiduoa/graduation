@@ -32,6 +32,11 @@ let mockSchoolAuth: {
   tokenExpired: false,
 };
 jest.mock('../state/auth', () => ({ useAuth: () => mockSchoolAuth }));
+jest.mock('../state/notifications', () => ({
+  useNotifications: () => ({ unreadCount: 0 }),
+  useOptionalNotifications: () => ({ unreadCount: 0 }),
+}));
+jest.mock('../components/HeaderDrawer', () => ({ headerDrawer: { open: jest.fn() } }));
 // Navigation tests render the signed-out stack without mounting the app shell.
 // Supply the same selected-campus context that production SchoolProvider supplies.
 jest.mock('../state/school', () => ({

@@ -11,6 +11,7 @@ import { useAuth } from '../state/auth';
 import { useOptionalNuniSession } from '../state/nuniSession';
 import { useSchool } from '../state/school';
 import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
+import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 import { AIScreen } from '../ui/aiFirst';
 import { theme } from '../ui/theme';
 import { pageTitleFont } from '../ui/styles';
@@ -71,9 +72,12 @@ function ExploreContent({ navigation, audience, initialContext }: ServiceScreenP
   return (
     <AIScreen contentContainerStyle={s.content} testID="explore-screen">
       <View style={s.masthead}>
-        <View style={s.titleBlock}>
-          <Text accessibilityRole="header" style={s.title}>探索</Text>
-          <Text style={s.lead}>從想完成的事，找到 nuni 的用法。</Text>
+        <View style={s.titleRow}>
+          <View style={s.titleBlock}>
+            <Text accessibilityRole="header" style={s.title}>探索</Text>
+            <Text style={s.lead}>從想完成的事，找到 nuni 的用法。</Text>
+          </View>
+          <HeaderAvatarButton />
         </View>
         <SchoolBrowsingControl compact />
       </View>
@@ -158,7 +162,8 @@ function ExploreContent({ navigation, audience, initialContext }: ServiceScreenP
 const createStyles = () => StyleSheet.create({
   content: { paddingHorizontal: theme.layout.screenHorizontalPadding, gap: 20 },
   masthead: { paddingTop: 24, gap: 16 },
-  titleBlock: { gap: 8 },
+  titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  titleBlock: { flex: 1, minWidth: 0, gap: 8 },
   title: { fontFamily: pageTitleFont, color: theme.colors.text, fontSize: 34, lineHeight: 42, fontWeight: '700' },
   lead: { color: theme.colors.textSecondary, fontSize: 17, lineHeight: 26 },
   search: { flexDirection: 'row', alignItems: 'center', minHeight: 52, paddingHorizontal: 14, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 14, gap: 10, backgroundColor: theme.colors.surface },
