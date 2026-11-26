@@ -105,6 +105,11 @@ const restrictsWalking = (tags: Tags) =>
   nonOutdoor(tags) ||
   hasNonPublicAccess(tags.foot) ||
   hasNonPublicAccess(tags.access) ||
+  // Motorroad commonly implies motor-vehicle-only access; conflicting or
+  // unrecognised values must not be promoted to a reviewed walking route.
+  // https://wiki.openstreetmap.org/wiki/Tag:motorroad=yes
+  (tags.motorroad !== undefined && !['no', 'false', '0'].includes(tags.motorroad)) ||
+  tags['motorroad:conditional'] !== undefined ||
   !!(tags.barrier && tags.barrier !== 'no') ||
   // Locked gates/doors may lack a separate barrier tag. A conditional lock
   // or malformed access schedule is not a verified all-hours passage.
