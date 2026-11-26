@@ -305,6 +305,46 @@ it('waits for the source before automatically selecting a classroom that may be 
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
 });
 
+it.each([true, false])('plans a classroom destination using an existing origin (shared=%s)', async (shared) => {
+  state.user = null;
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" query="PH303" focus="gate"
+    route={shared ? 'gate,library' : undefined} />);
+  const card = within(screen.getByRole('region', { name: '教室定位結果' }));
+  const action = () => card.queryByRole('button', { name: '將主顧樓設為終點' });
+  expect(action()).toBeNull();
+  await act(async () => source.resolve([library, gate]));
+  if (!shared) {
+    expect(action()).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  }
+  const classroomButton = card.getByRole('button', { name: '將主顧樓設為終點' });
+  expect(document.getElementById(classroomButton.getAttribute('aria-describedby')!)?.textContent)
+    .toContain('並非已核實的入口或室內教室');
+  fireEvent.click(classroomButton);
+  const routeCard = within(screen.getByRole('region', { name: '步行導航' }));
+  const google = new URL(routeCard.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  const apple = new URL(routeCard.getByRole('link', { name: '使用 Apple 地圖規劃路線' }).getAttribute('href')!);
+  const map = JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(map.route.map((place: MapLocation) => place.id)).toEqual(['gate', 'pu-zhugu']);
+  expect(google.searchParams.get('origin')).toBe(`${gate.lat},${gate.lng}`);
+  expect(google.searchParams.get('destination')).toBe(`${map.route[1].lat},${map.route[1].lng}`);
+  expect(apple.searchParams.get('saddr')).toBe(google.searchParams.get('origin'));
+  expect(apple.searchParams.get('daddr')).toBe(google.searchParams.get('destination'));
+  fireEvent.click(routeCard.getByRole('button', { name: '清除路線' }));
+  expect(action()).toBeNull();
+});
+
+it('does not restore an origin from an invalid shared route for classroom planning', async () => {
+  render(<MapClient school="pu" query="PH303" route="missing-origin,library" />);
+  await sourceSettled();
+  const card = within(screen.getByRole('region', { name: '教室定位結果' }));
+  expect(card.getByRole('link', { name: '使用 Google 地圖前往主顧樓' })).toBeTruthy();
+  expect(card.queryByRole('button', { name: '將主顧樓設為終點' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+});
+
 it('does not offer a provisional classroom destination while the campus source is syncing', async () => {
   const source = deferred<MapLocation[]>();
   vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
