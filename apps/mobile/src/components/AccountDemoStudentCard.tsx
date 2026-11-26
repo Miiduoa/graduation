@@ -15,8 +15,14 @@ import { parseAccountDemoSnapshot, type AccountDemoSnapshot } from '@campus/shar
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { maskStudentId, STUDENT_CARD_TTL_MS } from '@campus/shared/src/studentCard';
 import { theme } from '../ui/theme';
+import { pageTitleFont } from '../ui/styles';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
+
+// The card face stays a fixed forest/ink surface; QR stays dark on white in every theme.
+const CARD = { face: '#163D34', ink: '#FFFDF7', muted: '#CFE3D7', rule: '#74978A' };
+const QR_INK = '#101A17';
+const QR_PAPER = '#FFFFFF';
 
 type LoadState =
   | { status: 'loading' }
@@ -245,7 +251,6 @@ function DemoWallet({
     <>
       <View style={s.card} accessibilityLabel="展示學生證">
         <View style={s.cardHeader}>
-          <Text style={s.brand}>nuni</Text>
           <Text style={s.cardLabel}>展示學生證</Text>
         </View>
         <Text style={s.school}>{profile.schoolName}</Text>
@@ -324,7 +329,6 @@ function DemoPresentation({
     >
       <SafeAreaView style={s.presentation} accessibilityViewIsModal onAccessibilityEscape={onClose}>
         <ScrollView contentContainerStyle={s.sheet}>
-          <Text style={s.sheetBrand}>nuni</Text>
           <Text style={s.sheetSchool}>{demo.profile.schoolName}</Text>
           <Text accessibilityRole="header" style={s.sheetNote}>
             展示學生證 · {mode === 'code' ? 'QR Code' : '出示學號'}
@@ -337,8 +341,8 @@ function DemoPresentation({
                     value={payload}
                     size={220}
                     quietZone={16}
-                    color="#102D24"
-                    backgroundColor="#FFFFFF"
+                    color={QR_INK}
+                    backgroundColor={QR_PAPER}
                   />
                 </View>
               )}
@@ -363,18 +367,32 @@ const createStyles = () =>
     section: { gap: 12 },
     title: { color: theme.colors.text, fontSize: 19, fontWeight: '700' },
     body: { color: theme.colors.textSecondary, fontSize: 15, lineHeight: 23 },
-    card: { backgroundColor: '#163D34', borderRadius: 20, padding: 22 },
+    card: {
+      backgroundColor: CARD.face,
+      borderRadius: theme.radius.lg,
+      borderTopWidth: 4,
+      borderTopColor: theme.colors.gold,
+      paddingHorizontal: 22,
+      paddingTop: 18,
+      paddingBottom: 18,
+    },
     cardHeader: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 12,
     },
-    brand: { color: '#FFFDF7', fontSize: 26, fontWeight: '700', letterSpacing: -1 },
-    cardLabel: { color: '#D2E8DC', fontSize: 13 },
-    school: { color: '#FFFDF7', fontSize: 24, fontWeight: '700', marginTop: 24 },
-    name: { color: '#E1EBE4', fontSize: 19, marginTop: 8 },
-    department: { color: '#D2E8DC', fontSize: 14, marginTop: 6 },
+    cardLabel: { color: CARD.muted, fontSize: 13 },
+    school: {
+      color: CARD.ink,
+      fontFamily: pageTitleFont,
+      fontSize: 24,
+      lineHeight: 30,
+      fontWeight: '700',
+      marginTop: 18,
+    },
+    name: { color: CARD.ink, fontSize: 22, lineHeight: 28, fontWeight: '600', marginTop: 22 },
+    department: { color: CARD.muted, fontSize: 14, marginTop: 4 },
     cardFooter: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -382,52 +400,63 @@ const createStyles = () =>
       justifyContent: 'space-between',
       gap: 8,
       borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: '#74978A',
-      marginTop: 24,
+      borderTopColor: CARD.rule,
+      marginTop: 22,
       paddingTop: 14,
     },
-    masked: { color: '#FFFDF7', fontSize: 16, fontVariant: ['tabular-nums'], letterSpacing: 1.8 },
+    masked: { color: CARD.ink, fontSize: 18, fontVariant: ['tabular-nums'], letterSpacing: 1.8 },
     button: {
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: 50,
       padding: 12,
-      borderRadius: 14,
-      backgroundColor: '#163D34',
+      borderRadius: theme.radius.lg,
+      backgroundColor: theme.colors.accent,
     },
-    buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600', flexShrink: 1 },
+    buttonText: { color: theme.colors.onAccent, fontSize: 16, fontWeight: '600', flexShrink: 1 },
     secondary: {
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: 50,
       padding: 12,
-      borderRadius: 14,
-      backgroundColor: theme.colors.surface,
-      borderColor: theme.colors.border,
+      borderRadius: theme.radius.lg,
+      backgroundColor: 'transparent',
+      borderColor: theme.colors.text,
       borderWidth: 1,
     },
     secondaryText: { color: theme.colors.text, fontSize: 16, fontWeight: '600' },
-    presentation: { flex: 1, backgroundColor: '#F8FAF5' },
+    presentation: { flex: 1, backgroundColor: theme.colors.bg },
     sheet: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24 },
-    sheetBrand: { color: '#416557', fontSize: 26, fontWeight: '700', letterSpacing: -1 },
-    sheetSchool: { color: '#183F36', fontSize: 19, fontWeight: '700', textAlign: 'center' },
-    sheetNote: { color: '#40574D', fontSize: 15, textAlign: 'center' },
+    sheetSchool: {
+      color: theme.colors.text,
+      fontFamily: pageTitleFont,
+      fontSize: 22,
+      fontWeight: '700',
+      textAlign: 'center',
+    },
+    sheetNote: { color: theme.colors.textSecondary, fontSize: 15, textAlign: 'center' },
     number: {
-      color: '#102D24',
+      color: theme.colors.text,
       maxWidth: '100%',
       fontSize: 30,
       fontWeight: '700',
       textAlign: 'center',
       fontVariant: ['tabular-nums'],
     },
-    qr: { borderRadius: 16, backgroundColor: '#FFFFFF', padding: 2, marginVertical: 4 },
+    qr: {
+      backgroundColor: QR_PAPER,
+      borderRadius: theme.radius.sm,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      marginVertical: 4,
+    },
     close: {
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: 50,
       padding: 12,
-      borderRadius: 14,
-      backgroundColor: '#163D34',
+      borderRadius: theme.radius.lg,
+      backgroundColor: theme.colors.accent,
       marginHorizontal: 24,
       marginVertical: 12,
     },

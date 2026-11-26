@@ -8,6 +8,7 @@ import { TodayAgentPanel, todayAgentTaskKey, recoverableTodayArrangement } from 
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import type { HomeTask } from '@/lib/homeOverview';
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
+import { needsCourseworkTracking, retainAssistantCourseworkTracking } from '@/lib/assistantCourseworkTracking';
 import {
   readAssistantExecutionJournal,
   saveAssistantExecutionJournal,
@@ -15,8 +16,8 @@ import {
   type AssistantExecutionJournalEntry,
 } from '@/lib/assistantExecutionJournal';
 import { readTodayAgentFollowupsForDisplay, readTodayAgentFollowups, saveTodayAgentFollowup, removeTodayAgentFollowup, assertTodayAgentFollowupCapacity,
-  todayAgentFollowupStorageKey, type TodayAgentFollowupEntry } from '@/lib/todayAgentFollowups';
-import { calendarExpectation, canConfirmAction, priorCalendarActionsVerified, withAssistantRequestDeadline } from './assistant/execution';
+  todayAgentFollowupStorageKey, subscribeTodayAgentFollowups, type TodayAgentFollowupEntry } from '@/lib/todayAgentFollowups';
+import { calendarExpectation, canConfirmAction, isAssistantCalendarActionReady, priorCalendarActionsVerified, withAssistantRequestDeadline } from './assistant/execution';
 import type { V2ActionState, V2ActionStates, V2Card, V2Reply } from './assistant/types';
 
 type Scope = { context: string; accountId: string; schoolId: string };
@@ -65,7 +66,7 @@ function claimAutomaticPreview(scope: Scope): boolean {
 }
 const settled = (state: V2ActionState | undefined) =>
   state?.status === 'cancelled' || state?.status === 'superseded' ||
-  (state?.status === 'verified' && state.local === 'ready' && !state.verificationWarning);
+  isAssistantCalendarActionReady(state);
 const sameCard = (left: V2Card, right: V2Card) =>
   left.token === right.token && left.mutationId === right.mutationId &&
   left.schoolId === right.schoolId && left.conversationId === right.conversationId &&
@@ -94,12 +95,16 @@ function planReply(raw: unknown, scope: Scope, conversationId: string): V2Reply 
     if (!rawCard || typeof rawCard !== 'object') throw new Error('安排內容無法核對。');
     const card = rawCard as Record<string, unknown>;
     if (card.tool !== 'propose_personal_event' || card.schoolId !== scope.schoolId ||
+        (card.coursework !== undefined && card.coursework !== true) ||
         typeof card.token !== 'string' || !/^[A-Za-z0-9_.-]{1,2048}$/.test(card.token) ||
         typeof card.mutationId !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(card.mutationId) ||
         typeof card.destination !== 'string' || !card.destination || card.destination.length > 300)
       throw new Error('安排內容無法核對，沒有送出任何操作。');
+    // This endpoint prepares coursework only, including older responses without
+    // the display hint. Recovered journal cards retain their original hint.
     return { tool: card.tool, args: { ...parseAssistantCalendarEvent(card.args) }, token: card.token,
-      mutationId: card.mutationId, schoolId: scope.schoolId, destination: card.destination, conversationId };
+      mutationId: card.mutationId, schoolId: scope.schoolId, destination: card.destination, conversationId,
+      coursework: true };
   });
   const steps = value.steps.map((rawStep) => {
     if (!rawStep || typeof rawStep !== 'object') throw new Error('安排步驟無法核對。');
@@ -123,6 +128,7 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
   const trackingSnapshot = useRef('');
   const lastFollowup = useRef(0);
   const followupQueued = useRef(false);
+  const trackingWriter = useRef(Symbol('today-arrangement'));
   const localScope = { owner: 'platform:' + scope.accountId, schoolId: scope.schoolId };
   const journalScope = { ...localScope, context: scope.context };
   const active = (run: Lifetime) => lifetime.current === run && !run.controller.signal.aborted;
@@ -195,7 +201,7 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
           const result = parseAssistantCourseworkFollowup(raw, { schoolId: scope.schoolId,
             mutationId: entry.card.mutationId, event: entry.card.args });
           if (result.status === 'not_coursework') {
-            await removeTodayAgentFollowup(localScope, entry.card.mutationId, () => active(run));
+            await removeTodayAgentFollowup(localScope, entry.card.mutationId, () => active(run), trackingWriter.current);
             results.delete(entry.card.mutationId);
           } else {
             results.set(result.mutationId, result);
@@ -203,7 +209,7 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
             // A fresh completed source can retire old tracking; the original calendar event remains untouched.
             if (['submitted', 'closed'].includes(result.status) && result.calendar === 'matching' && ended !== null &&
                 Date.parse(result.checkedAt) - ended > 7 * 86400000)
-              await removeTodayAgentFollowup(localScope, entry.card.mutationId, () => active(run));
+              await removeTodayAgentFollowup(localScope, entry.card.mutationId, () => active(run), trackingWriter.current);
           }
         } catch {
           if (!active(run)) return;
@@ -294,22 +300,30 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
     const result = parseAssistantCalendarExecutionResult(raw, calendarExpectation(card));
     if (result.status === 'verified') {
       let localMessage = '';
+      let verificationWarning = '';
       try { await mirrorAssistantCalendarReceipt(result, localScope, () => active(run)); }
       catch (error) { localMessage = error instanceof Error ? error.message : '此裝置尚未更新，請重新核對。'; }
       if (!active(run)) return false;
-      if (!localMessage) {
+      if (!localMessage && needsCourseworkTracking(card, true)) {
         try {
-          await saveTodayAgentFollowup(localScope, { issuedContext: scope.context, conversationId: card.conversationId!,
+          if (card.coursework === undefined) {
+            const followup = await retainAssistantCourseworkTracking({ scope: localScope, context: scope.context,
+              conversationId: card.conversationId!, card, receipt: result, active: () => active(run),
+              source: trackingWriter.current, read: input => send(run, 'followup', input) });
+            if (followup && followup.calendar !== 'matching')
+              verificationWarning = '行程的最新狀態仍需確認，原安排與追蹤紀錄已保留。請重新核對或查看行事曆。';
+          } else await saveTodayAgentFollowup(localScope, { issuedContext: scope.context, conversationId: card.conversationId!,
             card: { tool: 'propose_personal_event', token: card.token, args: parseAssistantCalendarEvent(card.args),
-              mutationId: card.mutationId, schoolId: card.schoolId, destination: card.destination } }, result, () => active(run));
+              mutationId: card.mutationId, schoolId: card.schoolId, destination: card.destination } }, result, () => active(run), trackingWriter.current);
         } catch (error) {
-          localMessage = error instanceof Error ? error.message : '這部裝置尚未保留安排追蹤紀錄，請重新核對。';
-          update(run, { trackingReady: false, trackingError: localMessage });
+          verificationWarning = error instanceof Error ? error.message : '這部裝置尚未保留安排追蹤紀錄，請重新核對。';
+          update(run, { trackingReady: false, trackingError: verificationWarning });
         }
       }
       setAction(run, card, { status: 'verified', receipt: result,
-        local: localMessage ? 'unavailable' : 'ready', ...(localMessage ? { localMessage } : {}) });
-      if (!localMessage) {
+        local: localMessage ? 'unavailable' : 'ready', ...(localMessage ? { localMessage } : {}),
+        ...(verificationWarning ? { verificationWarning } : {}) });
+      if (!localMessage && !verificationWarning) {
         forget(run, card);
         try {
           await refreshTracking(run, readTodayAgentFollowups(localScope).filter(entry => entry.card.mutationId === card.mutationId));
@@ -317,7 +331,7 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
           update(run, { trackingReady: false, trackingError: '行程已加入，但後續追蹤暫時無法核對，請重新確認資料。' });
         }
       }
-      return !localMessage;
+      return !localMessage && !verificationWarning;
     }
     if (result.status === 'revoked') {
       setAction(run, card, { status: 'cancelled' });
@@ -467,13 +481,13 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
             !canConfirmAction(stateRef.current.states[card.mutationId]) ||
             !priorCalendarActionsVerified(currentCards, index, stateRef.current.states)) break;
         try {
-          assertTodayAgentFollowupCapacity(localScope, card.mutationId);
+          if (card.coursework === true) assertTodayAgentFollowupCapacity(localScope, card.mutationId);
           await assertAssistantCalendarLocalReady(card.args, localScope, () => active(run));
           if (!active(run)) break;
           if (!checkJournal(run, false)) break;
           if (!trackingCurrent(run)) break;
           if (retireExpiredPreview(run)) break;
-          assertTodayAgentFollowupCapacity(localScope, card.mutationId);
+          if (card.coursework === true) assertTodayAgentFollowupCapacity(localScope, card.mutationId);
           remember(run, card);
         } catch (error) {
           setAction(run, card, { status: 'blocked', message: error instanceof Error ? error.message : '尚未送出，請先確認裝置的行事曆。' });
@@ -552,13 +566,16 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
   }
   useEffect(() => {
     const foreground = () => { void refreshFollowups(true); };
-    const changed = (event: StorageEvent) => {
-      if (event.key !== null && event.key !== todayAgentFollowupStorageKey(localScope)) return;
+    const invalidate = () => {
       const run = lifetime.current;
       if (!run || !active(run)) return;
       update(run, { trackingReady: false });
       void refreshFollowups();
     };
+    const changed = (event: StorageEvent) => {
+      if (event.key === null || event.key === todayAgentFollowupStorageKey(localScope)) invalidate();
+    };
+    const unsubscribe = subscribeTodayAgentFollowups(localScope, invalidate, trackingWriter.current);
     window.addEventListener('focus', foreground);
     document.addEventListener('visibilitychange', foreground);
     window.addEventListener('storage', changed);
@@ -566,6 +583,7 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
       window.removeEventListener('focus', foreground);
       document.removeEventListener('visibilitychange', foreground);
       window.removeEventListener('storage', changed);
+      unsubscribe();
     };
     // The component lifetime is fixed to one account and campus. Reads use stateRef and never dispatch a write.
     // eslint-disable-next-line react-hooks/exhaustive-deps

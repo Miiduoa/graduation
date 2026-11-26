@@ -23,7 +23,7 @@ const EARTH_RADIUS = 6_371_008.8;
 const DEG = Math.PI / 180;
 const ALLOWANCE = 0.0004;
 const MAX_WAYS = 128;
-const MAX_VERTICES = 160;
+export const MAX_VERTICES = 160;
 const MAX_POI_OFFSET_METERS = 30;
 const ILLUSTRATIVE_HEIGHT = 12;
 
@@ -352,11 +352,18 @@ function heightFromOsmTags(value: unknown):
   // Keep the required space for spelled-out aliases; never guess other units.
   const metric = /^(\d{1,3}(?:\.\d{1,6})?)(?:\s*m|\s+(?:metre|metres|meter|meters))?$/.exec(label);
   const feet = /^(\d{1,3}(?:\.\d{1,6})?)\s+(?:ft|feet)$/i.exec(label);
+  // OSM's unit specification also permits kilometre, mile, nautical mile
+  // and yard for height. Convert only explicitly declared units to metres;
+  // no inferred building levels or 12 m fallback for a supplied tag.
+  // https://wiki.openstreetmap.org/wiki/Map_features/Units
+  const otherUnits = /^(\d{1,3}(?:\.\d{1,6})?)\s+(km|mi|nmi|yd)$/.exec(label);
+  const metresPerUnit: Record<string, number> = { km: 1000, mi: 1609.344, nmi: 1852, yd: 0.9144 };
   const feetInches = /^(\d{1,3})'(?:([0-9]{1,2})")?$/.exec(label);
   if (feetInches && Number(feetInches[2] ?? 0) >= 12) return null;
   const height = metric ? Number(metric[1]) :
     feet ? Number(feet[1]) * 0.3048 :
-      feetInches ? Number(feetInches[1]) * 0.3048 + Number(feetInches[2] ?? 0) * 0.0254 : NaN;
+      otherUnits ? Number(otherUnits[1]) * metresPerUnit[otherUnits[2]] :
+        feetInches ? Number(feetInches[1]) * 0.3048 + Number(feetInches[2] ?? 0) * 0.0254 : NaN;
   return Number.isFinite(height) && height >= 2.5 && height <= 100
     ? { heightMeters: height, heightBasis: 'osm-tag' } : null;
 }

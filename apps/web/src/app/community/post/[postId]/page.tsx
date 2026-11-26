@@ -21,8 +21,9 @@ import { Button } from '@/components/ui/Button';
 import { Input, Textarea } from '@/components/ui/Input';
 import {
   COMMUNITY_FORM_PENDING_COPY,
+  preventCommunityFormEnter,
+  useCommunityCompletionFocus,
   useCommunityFormSession,
-  type CommunityFormCloseReason,
 } from '../../_components/useCommunityFormSession';
 import formStyles from '../../_components/CommunityForm.module.css';
 import modalStyles from '@/components/ui/Modal.module.css';
@@ -58,7 +59,7 @@ export default function PostDetailPage() {
   const { user } = useAuth();
   const params = useParams<{ postId: string }>();
   return (
-    <SiteShell title="貼文" subtitle="校園交流" schoolName={ready ? schoolName : undefined}>
+    <SiteShell title="貼文" schoolName={ready ? schoolName : undefined}>
       {ready ? (
         <CommunityAccess>
           <PostDetailInner
@@ -80,6 +81,13 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const { user } = useAuth();
 
   const [post, setPost] = useState<CampusPostDoc | null>(null);
+  const postReads = useRef({ started: 0, settled: 0, confirmed: 0 });
+  const postDeletion = useRef<'pending' | 'confirmed' | null>(null);
+  const replyDeletions = useRef(new Map<string, 'pending' | 'confirmed'>());
+  const replyReads = useRef({ started: 0, settled: 0, confirmed: 0 });
+  const [postRefreshError, setPostRefreshError] = useState(false);
+  const [repliesRefreshError, setRepliesRefreshError] = useState(false);
+  const refreshError = postRefreshError || repliesRefreshError;
   const [replies, setReplies] = useState<CampusReply[]>([]);
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
@@ -90,11 +98,18 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const [replyParentId, setReplyParentId] = useState<string | null>(null);
   const [sendingReply, setSendingReply] = useState(false);
   const [likeBusy, setLikeBusy] = useState(false);
-  const [editSession, setEditSession] = useState<{ scope: string; open: boolean } | null>(null);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  const replyInputRef = useRef<HTMLTextAreaElement>(null);
+  const restoreEditFocus = useCommunityCompletionFocus(editButtonRef);
+  const restoreReplyFocus = useCommunityCompletionFocus(replyInputRef);
+  const replyWritePending = useRef(false);
+  const likeWritePending = useRef(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [bookmarkState, setBookmarkState] = useState<{ scope: string; saved: boolean } | null>(
     null,
   );
+  const bookmarkWritePending = useRef(false);
   const [bookmarkBusy, setBookmarkBusy] = useState(false);
   const [bookmarkError, setBookmarkError] = useState('');
   const [bookmarkUnavailable, setBookmarkUnavailable] = useState(false);
@@ -131,8 +146,9 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   }, [user?.uid, schoolId, postId, bookmarkRevision]);
 
   const onToggleBookmark = async () => {
-    if (!user?.uid || !postId || !bookmarkReady || bookmarkBusy || bookmarkUnavailable) return;
+    if (!user?.uid || !postId || !bookmarkReady || bookmarkWritePending.current || bookmarkUnavailable) return;
     const uid = user.uid;
+    bookmarkWritePending.current = true;
     setBookmarkBusy(true);
     setBookmarkError('');
     try {
@@ -147,21 +163,58 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         setBookmarkError('這次收藏未成功更新，請確認校籍與連線後重試。');
       }
     } finally {
+      bookmarkWritePending.current = false;
       setBookmarkBusy(false);
     }
   };
 
-  const loadPost = useCallback(async () => {
+  const loadPost = useCallback(async (source: 'default' | 'server' = 'default', initialRead = false) => {
     if (!postId || !schoolId) return;
-    const row = await getCampusPostById(schoolId, postId);
-    setPost(row);
+    const reads = postReads.current;
+    const request = ++reads.started;
+    // A read started before the latest confirmed write cannot replace its result.
+    const isCurrent = () =>
+      postDeletion.current !== 'confirmed' && request > Math.max(reads.settled, reads.confirmed);
+    try {
+      const row = await getCampusPostById(schoolId, postId, source);
+      if (!isCurrent()) return;
+      reads.settled = request;
+      setPost(row ? { ...row, title: row.title ?? '' } : null);
+      setPostRefreshError(false);
+    } catch (error) {
+      if (initialRead) throw error;
+      if (!isCurrent()) return;
+      reads.settled = request;
+      setPostRefreshError(true);
+    }
   }, [postId, schoolId]);
 
-  const loadReplies = useCallback(async () => {
+  const loadReplies = useCallback(async (initialRead = false) => {
     if (!postId || !schoolId) return;
-    const rows = await listCampusReplies(schoolId, postId);
-    setReplies(rows);
+    const reads = replyReads.current;
+    const request = ++reads.started;
+    const isCurrent = () => request > Math.max(reads.settled, reads.confirmed);
+    try {
+      const rows = await listCampusReplies(schoolId, postId, 'default');
+      if (!isCurrent()) return;
+      reads.settled = request;
+      setReplies(rows.map((reply) =>
+        replyDeletions.current.get(reply.id) === 'confirmed' ? deletedReply(reply) : reply,
+      ));
+      setRepliesRefreshError(false);
+    } catch (error) {
+      if (initialRead) throw error;
+      if (!isCurrent()) return;
+      reads.settled = request;
+      setRepliesRefreshError(true);
+    }
   }, [postId, schoolId]);
+
+  const refreshThreadAfterWrite = async () => {
+    postReads.current.confirmed = postReads.current.started;
+    replyReads.current.confirmed = replyReads.current.started;
+    await Promise.all([loadPost(), loadReplies()]);
+  };
 
   const hydrateProfiles = useCallback(async () => {
     if (!schoolId) return;
@@ -186,18 +239,21 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     setAvatarByUid(a);
   }, [schoolId, post, replies]);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        await Promise.all([loadPost(), loadReplies()]);
-      } catch {
-        setLoadError('無法讀取貼文，請確認連線與學校資格後重試。');
-      } finally {
-        setLoading(false);
-      }
-    })();
+  const readThread = useCallback(async (errorMessage: string) => {
+    setLoadError('');
+    setLoading(true);
+    try {
+      await Promise.all([loadPost('default', true), loadReplies(true)]);
+    } catch {
+      setLoadError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
   }, [loadPost, loadReplies]);
+
+  useEffect(() => {
+    void readThread('無法讀取貼文，請確認連線與學校資格後重試。');
+  }, [readThread]);
 
   useEffect(() => {
     void hydrateProfiles().catch(() => {
@@ -210,7 +266,9 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const isMine = !!(post && !post.anonymous && post.authorUid && post.authorUid === user?.uid);
 
   const submitReply = async () => {
-    if (!user?.uid || !schoolId || !postId || !replyText.trim()) return;
+    if (!user?.uid || !schoolId || !postId || replyWritePending.current || !replyText.trim()) return;
+    replyWritePending.current = true;
+    setSendingReply(true);
     const boardForAlias = post?.boardId ?? 'general';
     let aliasSnap: string | undefined;
     if (replyAnonymous) {
@@ -220,7 +278,6 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         aliasSnap = '匿名';
       }
     }
-    setSendingReply(true);
     try {
       let depth = 0;
       if (replyParentId) {
@@ -234,40 +291,61 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         parentReplyId: replyParentId,
         depth,
       });
+      restoreReplyFocus();
       setReplyText('');
       setReplyParentId(null);
-      await Promise.all([loadReplies(), loadPost()]);
+      void refreshThreadAfterWrite();
     } catch {
       alert('這次未能送出，請稍後再試。');
     } finally {
+      replyWritePending.current = false;
       setSendingReply(false);
     }
   };
 
   const onToggleLike = async () => {
-    if (!user?.uid || !schoolId || !postId) return;
+    if (!user?.uid || !schoolId || !postId || likeWritePending.current || postDeletion.current) return;
+    likeWritePending.current = true;
     setLikeBusy(true);
     try {
-      await toggleCampusPostLike(schoolId, postId, user.uid);
-      await loadPost();
+      const uid = user.uid;
+      const liked = await toggleCampusPostLike(schoolId, postId, uid);
+      postReads.current.confirmed = postReads.current.started;
+      setPost((current) => {
+        if (!current || postDeletion.current === 'confirmed') return current;
+        const likedBy = Array.isArray(current.likedBy) ? current.likedBy : [];
+        if (likedBy.includes(uid) === liked) return current;
+        return {
+          ...current,
+          likedBy: liked ? [...likedBy, uid] : likedBy.filter((id) => id !== uid),
+          likes: Math.max(0, (current.likes ?? likedBy.length) + (liked ? 1 : -1)),
+        };
+      });
+      await loadPost('server');
     } catch {
       alert('這次未能按讚，請稍後再試。');
     } finally {
+      likeWritePending.current = false;
       setLikeBusy(false);
     }
   };
 
   const onDeletePost = () => {
-    if (!schoolId || !postId) return;
+    if (!schoolId || !postId || postDeletion.current) return;
     if (!confirm('確定要刪除這篇貼文？此操作不可復原。')) return;
+    postDeletion.current = 'pending';
     void (async () => {
       try {
         await deleteCampusPost(schoolId, postId);
-        alert('已刪除');
-        router.push(`/community?schoolId=${encodeURIComponent(schoolId)}`);
       } catch {
+        postDeletion.current = null;
         alert('這次未能刪除，請稍後再試。');
+        return;
       }
+      postDeletion.current = 'confirmed';
+      setPost(null);
+      alert('已刪除');
+      router.push(`/community?schoolId=${encodeURIComponent(schoolId)}`);
     })();
   };
 
@@ -289,15 +367,20 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   };
 
   const onDeleteReply = (r: CampusReply) => {
-    if (!schoolId || !postId) return;
+    if (!schoolId || !postId || postDeletion.current || r.deleted || replyDeletions.current.has(r.id)) return;
     if (!confirm('確定要刪除這則留言？')) return;
+    replyDeletions.current.set(r.id, 'pending');
     void (async () => {
       try {
         await softDeleteCampusReply(schoolId, postId, r.id);
-        await Promise.all([loadReplies(), loadPost()]);
       } catch {
+        replyDeletions.current.delete(r.id);
         alert('這次未能刪除，請稍後再試。');
+        return;
       }
+      replyDeletions.current.set(r.id, 'confirmed');
+      setReplies((current) => current.map((reply) => reply.id === r.id ? deletedReply(reply) : reply));
+      await refreshThreadAfterWrite();
     })();
   };
 
@@ -320,29 +403,24 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     }
   };
 
-  if (loadError)
-    return (
-      <div role="alert" className="card" style={{ padding: 24 }}>
-        <p>{loadError}</p>
-        <button
-          className="btn"
-          onClick={() => {
-            setLoadError('');
-            setLoading(true);
-            void Promise.all([loadPost(), loadReplies()])
-              .catch(() => setLoadError('無法讀取貼文，請稍後重試。'))
-              .finally(() => setLoading(false));
-          }}
-        >
-          重試
-        </button>
-      </div>
-    );
-
   if (loading) {
     return (
       <div className="card" style={{ padding: 24 }}>
         載入中…
+      </div>
+    );
+  }
+  if (loadError || (!post && postRefreshError)) {
+    return (
+      <div role="alert" className="card" style={{ padding: 24 }}>
+        <p>{loadError || '無法讀取貼文，請確認連線與學校資格後重試。'}</p>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => void readThread('無法讀取貼文，請稍後重試。')}
+        >
+          重試
+        </button>
       </div>
     );
   }
@@ -377,6 +455,17 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
 
   return (
     <div style={{ maxWidth: 720 }}>
+      {refreshError && (
+        <p role="status">
+          部分資料無法更新。{' '}
+          <button
+            type="button"
+            onClick={() => void Promise.all([loadPost(), loadReplies()])}
+          >
+            重新讀取
+          </button>
+        </p>
+      )}
       <div className="card" style={{ padding: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div
@@ -419,7 +508,8 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
               <>
                 <button
                   type="button"
-                  onClick={() => setEditSession({ scope: bookmarkScope, open: true })}
+                  ref={editButtonRef}
+                  onClick={() => setEditOpen(true)}
                   style={btnGhost}
                 >
                   ✏️ 編輯
@@ -648,6 +738,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
             匿名留言
           </label>
           <textarea
+            ref={replyInputRef}
             className="input"
             value={replyText}
             onChange={(e) => setReplyText(e.target.value)}
@@ -665,6 +756,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
               type="button"
               className="btn primary"
               disabled={sendingReply || !replyText.trim()}
+              onKeyDown={preventCommunityFormEnter}
               onClick={() => void submitReply()}
             >
               {sendingReply ? '送出中…' : '送出留言'}
@@ -673,22 +765,25 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         </div>
       </div>
 
-      {editSession?.scope === bookmarkScope && isMine && post.id === postId && (
+      {editOpen && isMine && post.id === postId && (
         <EditPostModal
           key={bookmarkScope}
-          open={editSession.open}
+          open
           initial={{
             title: post.title,
             content: post.content,
             tagsRaw: (post.tags ?? []).join(', '),
           }}
-          onClose={(reason) =>
-            setEditSession(reason === 'pending' ? { scope: bookmarkScope, open: false } : null)
-          }
+          onClose={() => setEditOpen(false)}
           onSubmit={(patch) => updateCampusPost(schoolId, postId, patch)}
-          onSaved={(patch) => {
-            setEditSession(null);
+          onSaved={(patch, dismissed) => {
+            if (!dismissed) {
+              restoreEditFocus();
+              setEditOpen(false);
+            }
+            postReads.current.confirmed = postReads.current.started;
             setPost((current) => (current?.id === postId ? { ...current, ...patch } : current));
+            void loadPost('server');
           }}
         />
       )}
@@ -702,30 +797,28 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   );
 }
 
+function deletedReply(reply: CampusReply): CampusReply {
+  return { ...reply, deleted: true, content: '（此留言已被作者刪除）' };
+}
+
 type EditPostPatch = { title: string; content: string; tags: string[] };
 
 function EditPostModal(props: {
   open: boolean;
   initial: { title: string; content: string; tagsRaw: string };
-  onClose: (reason: CommunityFormCloseReason) => void;
+  onClose: () => void;
   onSubmit: (patch: EditPostPatch) => Promise<void>;
-  onSaved: (patch: EditPostPatch) => void;
+  onSaved: (patch: EditPostPatch, dismissed: boolean) => void;
 }) {
   const [title, setTitle] = useState(props.initial.title);
   const [content, setContent] = useState(props.initial.content);
   const [tagsRaw, setTagsRaw] = useState(props.initial.tagsRaw);
-  const [validated, setValidated] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const formId = useId();
   const session = useCommunityFormSession(props.onClose);
 
   function submit() {
     if (session.busy) return;
-    setValidated(true);
-    if (!title.trim()) {
-      titleRef.current?.focus();
-      return;
-    }
     const patch = {
       title: title.trim(),
       content: content.trim(),
@@ -737,7 +830,7 @@ function EditPostModal(props: {
     };
     void session.submit(
       () => props.onSubmit(patch),
-      () => props.onSaved(patch),
+      (dismissed) => props.onSaved(patch, dismissed),
       '暫時無法確認儲存結果，修改內容已保留。請先查看貼文，再決定是否重試。',
     );
   }
@@ -749,20 +842,22 @@ function EditPostModal(props: {
       title="編輯貼文"
       size="lg"
       initialFocusRef={titleRef}
-      showCloseButton={!session.busy}
-      closeOnEsc={session.canClose}
-      closeOnOverlayClick={session.canClose}
       footer={
         <>
           <Button
             type="button"
             variant="ghost"
             onClick={session.requestClose}
-            disabled={!session.canClose}
           >
-            {session.busy && session.slow ? '先關閉' : '取消'}
+            取消
           </Button>
-          <Button type="submit" form={formId} variant="primary" loading={session.busy}>
+          <Button
+            type="submit"
+            form={formId}
+            variant="primary"
+            loading={session.busy}
+            onKeyDown={preventCommunityFormEnter}
+          >
             {session.busy ? '儲存中…' : '儲存'}
           </Button>
         </>
@@ -771,6 +866,7 @@ function EditPostModal(props: {
       <form
         id={formId}
         noValidate
+        onKeyDown={preventCommunityFormEnter}
         onSubmit={(event) => {
           event.preventDefault();
           submit();
@@ -780,10 +876,8 @@ function EditPostModal(props: {
           <Input
             ref={titleRef}
             label="標題"
-            required
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            error={validated && !title.trim() ? '請填寫標題。' : undefined}
           />
           <Textarea
             label="內文"

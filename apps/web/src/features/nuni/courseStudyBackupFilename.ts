@@ -1,5 +1,3 @@
-import { hasVisibleStudyContent } from './courseStudySession';
-
 /**
  * A visible local filename stem shared by note TXT, reading JSON and practice
  * JSON exports. Do not leak invisible format controls into mobile file lists.
@@ -38,6 +36,19 @@ function fallbackFilenameBoundary(value: string, requestedEnd = MAX_FILENAME_COD
       (nextPoint >= 0xd7cb && nextPoint <= 0xd7fb);
     const previousT = (previousPoint >= 0x11a8 && previousPoint <= 0x11ff) ||
       (previousPoint >= 0xd7cb && previousPoint <= 0xd7fb);
+    // UAX #29 GB9b: a Prepend code point belongs to the following grapheme.
+    // A 48-point cut between it and the next character leaves a dangling mark
+    // on WebViews without a working Intl.Segmenter.
+    const previousPrepend = (previousPoint >= 0x0600 && previousPoint <= 0x0605) ||
+      previousPoint === 0x06dd || previousPoint === 0x070f ||
+      (previousPoint >= 0x0890 && previousPoint <= 0x0891) ||
+      previousPoint === 0x08e2 || previousPoint === 0x110bd ||
+      previousPoint === 0x110cd ||
+      (previousPoint >= 0x111c2 && previousPoint <= 0x111c3) ||
+      previousPoint === 0x1193f || previousPoint === 0x11941 ||
+      previousPoint === 0x11a3a ||
+      (previousPoint >= 0x11a84 && previousPoint <= 0x11a89) ||
+      previousPoint === 0x11d46;
     if (next && (
       /^\p{Mark}$/u.test(next) || next === '\u200c' || next === '\u200d' ||
       previous === '\u200c' || previous === '\u200d' ||
@@ -45,7 +56,7 @@ function fallbackFilenameBoundary(value: string, requestedEnd = MAX_FILENAME_COD
       (nextPoint >= 0xe0020 && nextPoint <= 0xe007f) ||
       (previous === '\r' && next === '\n') ||
       (nextV && (previousL || previousV)) ||
-      (nextT && (previousV || previousT))
+      (nextT && (previousV || previousT)) || previousPrepend
     )) {
       end -= 1;
       continue;
@@ -117,10 +128,12 @@ export function courseStudyBackupFilenameStem(sourceTitle: string): string {
     .trim()
     .replace(/\.(pdf|txt|md|markdown)$/i, '')
     .replace(/^[. ]+|[. ]+$/gu, '');
-  const stem = truncateFilenameStem(safe).trim();
-  // Joiners are meaningful inside Persian/Indic words and emoji sequences,
-  // but a title made ONLY of default-ignorable characters would leave a
-  // seemingly blank filename in iOS Files and Android Downloads.
-  // Retain visible source spelling; change only the local export filename.
-  return hasVisibleStudyContent(stem) ? stem : '讀書白板';
+  const filename = truncateFilenameStem(safe).trim();
+  // Unicode default-ignorable characters and the Braille blank remain
+  // nonempty after trim(). A 48-code-point cut can hide the only readable
+  // part of the course title, leaving a visually blank download filename.
+  // Keep ZWJ/ZWNJ inside otherwise readable multilingual/emoji titles.
+  return /[^\p{Default_Ignorable_Code_Point}\u2800]/u.test(filename)
+    ? filename
+    : '讀書白板';
 }

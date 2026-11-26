@@ -207,6 +207,17 @@ function headerLookup(headers, name) {
   return found;
 }
 
+function redactRelayLogPath(path) {
+  const parts = path.split('/');
+  return parts.map((segment, index) => {
+    if (!segment) return segment;
+    if (/^\d+$/.test(segment)) return ':id';
+    if (/^(?=.*\d)[^/]{8,}$/.test(segment) || segment.length >= 16) return ':id';
+    if (parts[index - 1]?.toLowerCase() === 'uploads') return ':id';
+    return segment;
+  }).join('/');
+}
+
 function createCjsRelayFetch(config, fetchImpl = globalThis.fetch, now = Date.now, nonceFn = randomRelayNonce) {
   if (typeof fetchImpl !== 'function') {
     throw new Error('Campus relay fetch is unavailable');
@@ -257,7 +268,7 @@ function createCjsRelayFetch(config, fetchImpl = globalThis.fetch, now = Date.no
         JSON.stringify({
           msg: 'pu_edge_relay_client',
           host: parsed.hostname,
-          path: parsed.pathname,
+          path: redactRelayLogPath(parsed.pathname),
           status: response.status,
           ms: Date.now() - started,
           ...(colo ? { colo } : {}),

@@ -211,21 +211,21 @@ async def check_action_feedback(page, config, report, capture):
     missing = page.get_by_role('region', name='找不到這個頁面', exact=True)
     await expect(missing.get_by_role('heading', name='找不到這個頁面', exact=True)).to_have_count(1)
     await expect(missing.get_by_role('button', name='重新載入', exact=True)).to_have_count(0)
-    return_life = missing.get_by_role('link', name='返回生活', exact=True)
+    return_explore = missing.get_by_role('link', name='返回探索', exact=True)
     all_services = missing.get_by_role('link', name='查看全部校園服務', exact=True)
-    life_href = await campus_href(return_life, '/life')
+    explore_href = await campus_href(return_explore, '/explore')
     await campus_href(all_services, '/search')
     missing_geometry = await recovery_layout(page, missing)
     await page.locator('#page-content').focus()
-    for target in (return_life, all_services):
+    for target in (return_explore, all_services):
         await page.keyboard.press('Tab')
         await visible_keyboard_target(page, target, report)
     await capture('recovery-missing')
     await page.keyboard.press('Shift+Tab')
-    await visible_keyboard_target(page, return_life, report)
-    await return_life.press('Enter')
+    await visible_keyboard_target(page, return_explore, report)
+    await return_explore.press('Enter')
     ledger = await page.evaluate('window.__interfaceQA.snapshot()')
-    assert ledger['navigations'][-1] == life_href and ledger['state']['pathname'] == '/life', ledger
+    assert ledger['navigations'][-1] == explore_href and ledger['state']['pathname'] == '/explore', ledger
 
     await page.get_by_role('button', name='檢查頁面重試', exact=True).click()
     failed = page.get_by_role('region', name='這個頁面暫時打不開', exact=True)

@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import { mkdir, readFile, writeFile, rm, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { waitForChromePort } from './credit-scenario-adoption-chrome.mjs';
 
 // 只執行實際元件＋合成資料，不載入 Firebase、校務連線或正式帳號。
 const root = process.cwd();
@@ -82,8 +83,7 @@ try {
     '--disable-background-networking','--disable-component-update','--disable-sync','--no-first-run',
     '--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
   chrome.stderr.on('data', (chunk) => { logs += chunk.toString(); });
-  let port;
-  await until(async () => { try { port = (await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]; return true; } catch { return false; } }, 'Chrome 啟動');
+  const port = await waitForChromePort(chrome, profile);
   const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
   const page = targets.find((target) => target.type === 'page'); assert.ok(page, '找不到測試分頁');
   socket = new WebSocket(page.webSocketDebuggerUrl);

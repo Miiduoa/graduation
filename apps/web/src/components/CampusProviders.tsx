@@ -13,7 +13,9 @@ import {
   useSelectedSchool,
   type BrowseSchool,
 } from './SelectedSchoolProvider';
+import { DirectoryVisitProvider } from './DirectoryVisit';
 import { PersonalImportSyncBridge } from './imports/PersonalImportSync';
+import { AssistantWorkspaceProvider } from './AssistantWorkspaceProvider';
 
 type Catalog = { schools: BrowseSchool[]; status: 'loading' | 'ready' | 'error' };
 const CATALOG_RETRY_DELAY_MS = 4_000;
@@ -29,6 +31,16 @@ function catalogRetryDelayMs(retryAfter: string | null) {
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function directoryText(value: unknown) {
+  return typeof value === 'string' ? value.trim() || undefined : undefined;
+}
+
+function directoryTerms(value: unknown) {
+  return Array.isArray(value)
+    ? value.flatMap((entry) => directoryText(entry) || [])
+    : undefined;
 }
 
 async function loadCatalog(): Promise<BrowseSchool[]> {
@@ -59,6 +71,10 @@ async function loadCatalog(): Promise<BrowseSchool[]> {
     return {
       id: school.id,
       name: school.name,
+      shortName: directoryText(school.shortName),
+      code: directoryText(school.code),
+      aliases: directoryTerms(school.aliases),
+      domains: directoryTerms(school.domains),
       ...(school.status === 'open' || school.status === 'not-open'
         ? { status: school.status }
         : {}),
@@ -157,7 +173,7 @@ function SchoolPreferences({ children }: { children: ReactNode }) {
     >
       <CampusDraftMount>
         <PersonalImportSyncBridge />
-        {children}
+        <AssistantWorkspaceProvider>{children}</AssistantWorkspaceProvider>
       </CampusDraftMount>
     </SelectedSchoolProvider>
   );
@@ -168,15 +184,22 @@ function CampusDraftMount({ children }: { children: ReactNode }) {
   const school = useSelectedSchool();
   const nuni = useNuniSession();
   const ready = !school.loading && school.catalogStatus === 'ready';
+  const owner = campusDraftIdentity(auth.user?.uid, nuni.session?.platformAccountId);
+  const identityReady = !auth.loading && !nuni.loading && !nuni.error && !nuni.pendingLogout;
+  const visitBlocked = auth.error || nuni.error || nuni.pendingLogout || school.catalogStatus === 'error';
+  const visitScope = visitBlocked ? null : ready && identityReady
+    ? JSON.stringify([owner, school.selectedSchoolId]) : undefined;
   // 身分未確認時隱藏草稿；校園目錄重讀仍保留同帳號的編輯內容。
   return (
     <CampusDraftProvider
-      uid={campusDraftIdentity(auth.user?.uid, nuni.session?.platformAccountId)}
-      identityReady={!auth.loading && !nuni.loading && !nuni.error && !nuni.pendingLogout}
+      uid={owner}
+      identityReady={identityReady}
       schoolId={school.selectedSchoolId}
       ready={ready}
     >
-      {children}
+      <DirectoryVisitProvider scope={visitScope}>
+        {children}
+      </DirectoryVisitProvider>
     </CampusDraftProvider>
   );
 }

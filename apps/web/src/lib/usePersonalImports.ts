@@ -77,9 +77,10 @@ export function usePersonalImports(scope: PersonalImportScope, enabled = true) {
       window.removeEventListener(PERSONAL_IMPORT_CHANGE, refresh);
     };
   }, [key, enabled, owner, schoolId, attempt]);
-  const visible = enabled && state?.key === key && state.attempt === attempt ? state : null;
+  const scoped = enabled && state?.key === key ? state : null;
+  const visible = scoped?.attempt === attempt ? scoped : null;
   return {
-    records: visible?.records ?? [],
+    records: scoped?.records ?? [],
     error: visible?.error ?? '',
     loading: !visible,
     syncEnabled: visible?.syncEnabled ?? false,

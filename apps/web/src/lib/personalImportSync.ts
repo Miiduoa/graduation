@@ -51,6 +51,8 @@ export function cancelPersonalImportSync(scope: PersonalImportScope) {
   notify();
 }
 
+const SYNC_LOCK_WAIT_MS = 15_000;
+
 export async function setPersonalImportSyncEnabled(
   scope: PersonalImportScope,
   enabled: boolean,
@@ -69,6 +71,7 @@ export async function setPersonalImportSyncEnabled(
       result: undefined,
     }),
     active,
+    enabled ? SYNC_LOCK_WAIT_MS : undefined,
   );
 }
 
@@ -96,7 +99,7 @@ export function syncPersonalImports(
     try {
       const result = await withPersonalImportSyncLock(
         scope,
-        async (state, checkpoint) => {
+        async (state, checkpoint, assertSnapshot) => {
           const result = await performPersonalImportSync(
             scope.schoolId,
             state,
@@ -104,10 +107,12 @@ export function syncPersonalImports(
             current,
             resolution,
             checkpoint,
+            assertSnapshot,
           );
           return { state: result.state, result };
         },
         current,
+        SYNC_LOCK_WAIT_MS,
       );
       if (!current()) return;
       if (!result.state.sync?.enabled) {

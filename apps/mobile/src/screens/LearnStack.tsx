@@ -305,6 +305,10 @@ function guardCourseView(Component: React.ComponentType<any>) {
   };
 }
 
+// Keep in-progress coursework mounted when the navigator refreshes its theme or profile.
+const GuardedQuizTaking = guardCourseView(QuizTakingScreen);
+const GuardedHomeworkSubmit = guardCourseView(HomeworkSubmitScreen);
+
 function GuardedTeacherGrading(props: any) {
   return (
     <RouteGuard requires={['courses.grade', 'courses.manage']}>
@@ -531,8 +535,8 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="QuizTaking"
-        component={lmsV2Enabled ? CourseQuizTakingV2Screen : guardCourseView(QuizTakingScreen)}
-        options={{ title: '測驗資訊', headerShown: false }}
+        component={lmsV2Enabled ? CourseQuizTakingV2Screen : GuardedQuizTaking}
+        options={{ title: '測驗作答', headerBackButtonMenuEnabled: false }}
       />
       <Stack.Screen
         name="PeerReview"
@@ -573,8 +577,8 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="HomeworkSubmit"
-        component={guardCourseView(HomeworkSubmitScreen)}
-        options={{ title: '繳交作業', headerShown: false }}
+        component={GuardedHomeworkSubmit}
+        options={{ title: '繳交作業' }}
       />
       <Stack.Screen
         name="VideoMaterial"

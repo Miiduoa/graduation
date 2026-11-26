@@ -24,6 +24,31 @@ import {
 } from './fixtures/tronClassIntegration';
 
 const scope = { courseId: homework.courseId, homeworkId: homework.id, operationId };
+it('does not dispatch an already cancelled native connection', async () => {
+  const request = jest.fn();
+  const client = createNativeTronClassClient({ owner: 'platform:a', isCurrent: () => true, request, upload: jest.fn() });
+  const controller = new AbortController();
+  controller.abort();
+  await expect(client.connect('student', 'synthetic-password', null, controller.signal))
+    .rejects.toMatchObject({ code: 'REQUEST_CANCELLED' });
+  expect(request).not.toHaveBeenCalled();
+});
+
+it('passes native connection cancellation to transport and rejects a late success', async () => {
+  let finish!: (value: unknown) => void;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const request = jest.fn(() => pending);
+  const client = createNativeTronClassClient({ owner: 'platform:a', isCurrent: () => true, request, upload: jest.fn() });
+  const controller = new AbortController();
+  const result = client.connect('student', 'synthetic-password', null, controller.signal);
+  const rejected = expect(result).rejects.toMatchObject({ code: 'REQUEST_CANCELLED' });
+  expect(request).toHaveBeenCalledWith({ action: 'connect', schoolId: 'pu', account: 'student',
+    password: 'synthetic-password', expectedRevision: null }, controller.signal);
+  controller.abort();
+  finish(connection);
+  await rejected;
+});
+
 it('keeps availability separate from nuni write permission and accepts older preparations without it', () => {
   expect(parseNativeTronClassPreparation({ ...preparation, availability }, scope))
     .toMatchObject({ availability, canSubmit: false });
@@ -45,7 +70,7 @@ it('loads an independently typed course picker using the same verified native id
   const request = jest.fn(async () => index);
   const client = createNativeTronClassClient({ owner: 'platform:a', isCurrent: () => true, request, upload: jest.fn() });
   expect(await client.courses(revision)).toEqual(index);
-  expect(request).toHaveBeenCalledWith({ action: 'courses' });
+  expect(request).toHaveBeenCalledWith({ action: 'courses', revision });
   await expect(client.courses('b'.repeat(32))).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
   request.mockResolvedValueOnce({ ...index, kind: 'snapshot' });
   await expect(client.courses(revision)).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
@@ -91,6 +116,40 @@ it('refuses coursework outside the returned course set and duplicate assignments
     parseNativeTronClassSnapshot({ ...snapshot, homework: [homework, homework] }),
   ).toThrow('INVALID_RESPONSE');
 });
+it.each(['announcements', 'materials'] as const)(
+  'rejects %s from a course absent from the native snapshot course set',
+  (area) => {
+    const foreignAnnouncement = {
+      id: 'notice-99', courseId: 99, courseName: '其他課程', title: '私人公告',
+      content: 'private fixture', publishedAt: stamp, href: 'https://tronclass.pu.edu.tw',
+      source: 'course',
+    };
+    const foreignMaterial = {
+      id: 'material-99', courseId: 99, courseName: '其他課程', title: '私人教材',
+      type: 'file', href: 'https://tronclass.pu.edu.tw', files: [],
+    };
+    const item = area === 'announcements' ? foreignAnnouncement : foreignMaterial;
+    expect(() => parseNativeTronClassSnapshot({ ...snapshot, [area]: [item] }))
+      .toThrow('INVALID_RESPONSE');
+  },
+);
+it('accepts only in-scope or explicitly school-wide supplemental items in a partial snapshot', () => {
+  const announcement = {
+    id: 'notice-10', courseId: 10, courseName: '程式設計', title: '課堂公告',
+    content: 'fixture content', publishedAt: stamp, href: 'https://tronclass.pu.edu.tw',
+    source: 'course',
+  };
+  const material = {
+    id: 'campus-file', courseId: null, courseName: '', title: '校園共用資料',
+    type: 'file', href: 'https://tronclass.pu.edu.tw', files: [],
+  };
+  const partial = { ...snapshot, partial: true,
+    announcements: [announcement], materials: [material],
+    errors: [{ courseId: 99, area: 'materials' as const, message: '其他課程無法同步。' }],
+  };
+  expect(parseNativeTronClassSnapshot(partial)).toEqual(partial);
+});
+
 it.each(['raw-school-id', 'A'.repeat(64), true])(
   'rejects an invalid verified identity fingerprint: %s',
   (studentKey) => {
@@ -250,6 +309,32 @@ it('checks the binding revision on both sync and fresh preparation', async () =>
     code: 'TRONCLASS_BINDING_CHANGED',
   });
   await expect(client.prepare(10, 20, revision)).resolves.toEqual(preparation);
+});
+it('sends the selected binding revision before native preparation and both sync scopes', async () => {
+  let activeRevision = revision;
+  const readSchool = jest.fn((action: string) => action === 'prepare' ? preparation : snapshot);
+  const request = jest.fn(async (input: Record<string, unknown>) => {
+    if (input.revision !== activeRevision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+    return readSchool(String(input.action));
+  });
+  const client = createNativeTronClassClient({
+    owner: 'platform:a', isCurrent: () => true, request, upload: jest.fn(),
+  });
+  await expect(client.prepare(10, 20, revision)).resolves.toEqual(preparation);
+  await expect(client.sync(revision, 10)).resolves.toEqual(snapshot);
+  await expect(client.sync(revision)).resolves.toEqual(snapshot);
+  expect(request.mock.calls.map(([input]) => input)).toEqual([
+    { action: 'prepare', courseId: 10, homeworkId: 20, revision },
+    { action: 'sync', courseId: 10, revision },
+    { action: 'sync', revision },
+  ]);
+
+  readSchool.mockClear();
+  activeRevision = 'b'.repeat(32);
+  await expect(client.prepare(10, 20, revision)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+  await expect(client.sync(revision, 10)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+  await expect(client.sync(revision)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+  expect(readSchool).not.toHaveBeenCalled();
 });
 it('checks uploaded file ID, exact bytes metadata and SHA256 before submit can reference it', async () => {
   const upload = jest.fn(async () => ({

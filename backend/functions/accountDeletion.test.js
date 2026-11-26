@@ -791,3 +791,11 @@ test('account deletion drains dorm identities, authority, private records and pa
   expect(state.docs.has('groups/g/dormSsoIdentities/alice')).toBe(true);
   await state.handler(request()); // Retrying cleanup remains safe.
 });
+
+test.each(['alice smith', 'alice\tsmith', 'alice\u0000smith', 'alice\u001fsmith', 'alice\u007fsmith'])(
+  'deletes an account with a UID outside the TronClass owner format without creating a binding barrier (%j)', async (uid) => {
+    const state = store([[`users/${uid}`, { name: 'Private name' }]]);
+    await expect(state.handler(request({}, uid))).resolves.toBeDefined();
+    expect([...state.docs.keys()].some((path) => path.startsWith('_tronClassBindings/'))).toBe(false);
+  },
+);

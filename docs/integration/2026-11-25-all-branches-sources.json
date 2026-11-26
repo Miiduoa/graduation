@@ -1,0 +1,378 @@
+{
+  "repository": "Miiduoa/graduation",
+  "captured_at": "2026-11-25T13:52:32.501479+00:00",
+  "captured_at_taipei": "2026-11-25T21:52:32.501479+08:00",
+  "base_main": "149cfbe2f806ee15da1985854b34dfe72a7e07d9",
+  "previous_integration": "fd9fd408f08177b59fb9c9c2954f61fdaab1a329",
+  "candidate_before_final_validation": "b05f079493866cdb6f8d26ed652d47f5e7b40262",
+  "source_count": 40,
+  "integrated_source_count": 38,
+  "main_merged": false,
+  "production_deployed": false,
+  "branches": [
+    {
+      "branch": "chore/independent-merge-governance-20261125",
+      "sha": "54b8c21230637c2bb63766fd817c981a21eb217c",
+      "pull_request": 797,
+      "included_in_candidate": false,
+      "disposition": "separate-security-review",
+      "reason": "Independent merge-governance proposals remain separate; current designated-App rules are unchanged."
+    },
+    {
+      "branch": "feat/agent-role-orchestration-20261123",
+      "sha": "29eb04f58238c388123d3408cd8250cb7270e719",
+      "pull_request": 751,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/agent-role-workflows-20261124",
+      "sha": "db0816eec28d2764db1788c57c68ae48c07e153a",
+      "pull_request": 761,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/agent-washing-cancellation-cloud-20261117",
+      "sha": "3205c5a88bfe6f4f325a8a7b2b994cec637eea8a",
+      "pull_request": 703,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/assistant-campus-awareness-20261124",
+      "sha": "93ef0a652b45d8fb6b626cfdbef2d51cc922654c",
+      "pull_request": 762,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/campus-first-identity-entry-20261124",
+      "sha": "2923abd813726e112437c6eb282329941cf3ffef",
+      "pull_request": 791,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/campus-project-design-language",
+      "sha": "6eb2c4c7b7bd657f5a40cc65ad6a79f8bd886eaf",
+      "pull_request": 785,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/campus-service-index-20261124",
+      "sha": "882bef84fadae04ce93c446cb009e3fd2674ca9f",
+      "pull_request": 777,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/contextual-campus-next-step-20261124",
+      "sha": "10f2498c550e06984c089de0b22b70d004290b0c",
+      "pull_request": 774,
+      "included_in_candidate": true,
+      "disposition": "integrated",
+      "initial_snapshot_sha": "7c63e8ec7f0ca1faa1c837030c2893e60f494d45"
+    },
+    {
+      "branch": "feat/merchant-workspace-continuity-20261123",
+      "sha": "8faf6262306656422e007d0d694d4094a619ae6d",
+      "pull_request": 750,
+      "included_in_candidate": true,
+      "disposition": "integrated",
+      "initial_snapshot_sha": "df7f91f156b3d9343de33ed9cd91398b9f14c75d"
+    },
+    {
+      "branch": "feat/mobile-coursework-review-20261124",
+      "sha": "b87d54a47ff0806aca14ddcaec57dc98393e069e",
+      "pull_request": 760,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/notification-workflows-20261124",
+      "sha": "5765d011f4cbeec4ef9711d2b20e629499d5bcec",
+      "pull_request": 766,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/nuni-ai-workspace-20261124",
+      "sha": "887d53320cddded1914a8162d0a6d1e30102bcaa",
+      "pull_request": 788,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/nuni-assistant-first-workspace-20261124",
+      "sha": "ba554dac81bc25a280537237646f4bac3eb3b115",
+      "pull_request": 789,
+      "included_in_candidate": true,
+      "disposition": "integrated",
+      "initial_snapshot_sha": "b0cf33958eca3d34bf0ed9a7b0af4c4db709a4d3"
+    },
+    {
+      "branch": "feat/nuni-bilingual-search-and-session-continuity-20261124",
+      "sha": "9e3d09fa93c032fbd96cb843e67a33a1fadb46ff",
+      "pull_request": 783,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/nuni-campus-context-followthrough",
+      "sha": "f1f2c3fd6d5d7cd3ebfa33390d48d4cdd5776194",
+      "pull_request": 775,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/nuni-campus-entry-motion-20261124",
+      "sha": "3c49303f6d6e14315e668dcd3314e6dc4f41305c",
+      "pull_request": 779,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/nuni-feedback-and-recovery-20261124",
+      "sha": "3aaedd8a8163242f84d332ecda3d8ccdaccace4b",
+      "pull_request": 763,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/nuni-first-value-20261123",
+      "sha": "96e84d857cf9598ee959f8a736e7a788bedcca7e",
+      "pull_request": 757,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/nuni-system-experience-20261123",
+      "sha": "21547d426144311ba8babc5828f26bff484b8205",
+      "pull_request": 754,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/nuni-task-flow-20261121",
+      "sha": "04aaccd2cfe6e9966bf8f1e071cb9c0c4ba9dcd1",
+      "pull_request": 739,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/nuni-today-first-use-parity-20261124",
+      "sha": "9836a8e10ce4738aa1c705ef16dbe3c4b2873d9d",
+      "pull_request": 778,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/saved-campus-events-20261124",
+      "sha": "4b3a33ac3f28b0ca281f1a03bf6d47259c764b0d",
+      "pull_request": 784,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/school-first-account-entry-20261124",
+      "sha": "e6295be2920ee14228d0e90a33bdd9663b946cdc",
+      "pull_request": 792,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/timetable-day-design-20261124",
+      "sha": "8f9a12408769a712479e5a80ad287afd03f2cdd9",
+      "pull_request": 781,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "feat/tronclass-native-submit-20261113",
+      "sha": "220cb2e2d74f0847a7d0241878413097dd183d6b",
+      "pull_request": 616,
+      "included_in_candidate": true,
+      "disposition": "integrated",
+      "remote_branch_deleted": true,
+      "merged_pull_request": true,
+      "merge_commit_sha": "149cfbe2f806ee15da1985854b34dfe72a7e07d9"
+    },
+    {
+      "branch": "fix/campus-map-location-recovery-20261125",
+      "sha": "87977e4ecbe8a75174ee93a772d873d1c848a599",
+      "pull_request": 795,
+      "included_in_candidate": true,
+      "disposition": "integrated",
+      "initial_snapshot_sha": "084bc90d197c897f31a7e117efe475fdae41753f"
+    },
+    {
+      "branch": "fix/campus-walking-snapshot-coherence-20261125",
+      "sha": "f9a925e9cfcf979095325d890db87943012b80eb",
+      "pull_request": 794,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "fix/mobile-list-refresh-state-20261124",
+      "sha": "1258a607b82815ad8062059eb188490dcb819e9d",
+      "pull_request": 786,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "fix/mobile-nonblocking-http-metrics-20261124",
+      "sha": "5171e8bddc54226b1bcb3230680541be511202be",
+      "pull_request": 782,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "fix/mobile-voice-mute-lifecycle-20261125",
+      "sha": "fa38e452ea848ae646b66c607dbe78fdb50e7ff0",
+      "pull_request": 793,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "fix/shared-request-lifecycle-20261124",
+      "sha": "8ebf957c9646fe2b61234fa336e6a042ff673057",
+      "pull_request": 780,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "integration/all-branches-20261121",
+      "sha": "a3447cb016b7180d976884468e1c497a0cbfa7ff",
+      "pull_request": 738,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "integration/all-branches-20261123",
+      "sha": "30835c5be9b6111bda8843bc289012ebfb3161c9",
+      "pull_request": 753,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "integration/all-branches-20261124-final",
+      "sha": "fd9fd408f08177b59fb9c9c2954f61fdaab1a329",
+      "pull_request": 768,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "integration/all-branches-followup-20261124",
+      "sha": "ecb3b8193f7ede42faf78a7b34f1560d7f5dda2f",
+      "pull_request": 764,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "integration/campus-services-20261106",
+      "sha": "8e07b78a90c751cc616c761a19580f86a0e44775",
+      "pull_request": 515,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "integration/reliability-spatial-batch-20261125",
+      "sha": "a9fff06646102ed7f6a031ecbd8dea3a2d63367f",
+      "pull_request": 796,
+      "included_in_candidate": true,
+      "disposition": "integrated"
+    },
+    {
+      "branch": "main",
+      "sha": "149cfbe2f806ee15da1985854b34dfe72a7e07d9",
+      "pull_request": null,
+      "included_in_candidate": true,
+      "disposition": "integrated",
+      "initial_snapshot_sha": "cc06b4da2abe1b954a0411b68ca6ea6a0788c70e"
+    },
+    {
+      "branch": "security/nuni-merge-gate-pilot-20261125",
+      "sha": "c583dca2e145421044b234f1a3af7ac5900ab20a",
+      "pull_request": 798,
+      "included_in_candidate": false,
+      "disposition": "separate-security-review",
+      "reason": "Independent merge-governance proposals remain separate; current designated-App rules are unchanged."
+    }
+  ],
+  "followup_snapshot_at": "2026-11-25T14:32:57.448515+00:00",
+  "followup_snapshot_at_taipei": "2026-11-25T22:32:57.448515+08:00",
+  "followup_sources": [
+    {
+      "branch": "feat/contextual-campus-next-step-20261124",
+      "pull_request": 774,
+      "previous_sha": "7c63e8ec7f0ca1faa1c837030c2893e60f494d45",
+      "sha": "625cb3edf629a74b32c9c311bc524c38e59b5e83"
+    },
+    {
+      "branch": "feat/merchant-workspace-continuity-20261123",
+      "pull_request": 750,
+      "previous_sha": "df7f91f156b3d9343de33ed9cd91398b9f14c75d",
+      "sha": "dfd58f210dfc5a5a691363f29f0ae8f64400b36a"
+    }
+  ],
+  "scope_note": "40 refs in the initial snapshot, including main and the prior integration branch. All 38 included source heads are ancestors of the candidate. The TronClass source branch was deleted after squash merge into main; its original source commit remains included. Two independent governance/security proposals remain excluded.",
+  "followup_snapshots": [
+    {
+      "captured_at": "2026-11-25T14:32:57.448515+00:00",
+      "sources": [
+        {
+          "branch": "feat/contextual-campus-next-step-20261124",
+          "pull_request": 774,
+          "previous_sha": "7c63e8ec7f0ca1faa1c837030c2893e60f494d45",
+          "sha": "625cb3edf629a74b32c9c311bc524c38e59b5e83"
+        },
+        {
+          "branch": "feat/merchant-workspace-continuity-20261123",
+          "pull_request": 750,
+          "previous_sha": "df7f91f156b3d9343de33ed9cd91398b9f14c75d",
+          "sha": "dfd58f210dfc5a5a691363f29f0ae8f64400b36a"
+        }
+      ]
+    },
+    {
+      "captured_at": "2026-11-25T14:43:26.285307+00:00",
+      "sources": [
+        {
+          "branch": "feat/contextual-campus-next-step-20261124",
+          "pull_request": 774,
+          "previous_sha": "625cb3edf629a74b32c9c311bc524c38e59b5e83",
+          "sha": "10f2498c550e06984c089de0b22b70d004290b0c"
+        },
+        {
+          "branch": "feat/merchant-workspace-continuity-20261123",
+          "pull_request": 750,
+          "previous_sha": "dfd58f210dfc5a5a691363f29f0ae8f64400b36a",
+          "sha": "8faf6262306656422e007d0d694d4094a619ae6d"
+        },
+        {
+          "branch": "feat/nuni-assistant-first-workspace-20261124",
+          "pull_request": 789,
+          "previous_sha": "b0cf33958eca3d34bf0ed9a7b0af4c4db709a4d3",
+          "sha": "ba554dac81bc25a280537237646f4bac3eb3b115"
+        },
+        {
+          "branch": "fix/campus-map-location-recovery-20261125",
+          "pull_request": 795,
+          "previous_sha": "084bc90d197c897f31a7e117efe475fdae41753f",
+          "sha": "87977e4ecbe8a75174ee93a772d873d1c848a599"
+        },
+        {
+          "branch": "main",
+          "pull_request": null,
+          "previous_sha": "cc06b4da2abe1b954a0411b68ca6ea6a0788c70e",
+          "sha": "149cfbe2f806ee15da1985854b34dfe72a7e07d9"
+        }
+      ]
+    }
+  ],
+  "initial_base_main": "cc06b4da2abe1b954a0411b68ca6ea6a0788c70e",
+  "final_source_cutoff": "2026-11-25T14:43:26.285307+00:00",
+  "final_source_cutoff_taipei": "2026-11-25T22:43:26.285307+08:00"
+}

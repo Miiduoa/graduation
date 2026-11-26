@@ -62,6 +62,11 @@ export function taipeiParts(value: string | number | Date): TaipeiParts | null {
   };
 }
 
+export function taipeiDayKey(value: string | number | Date): string | null {
+  const parts = taipeiParts(value);
+  return parts ? `${parts.year}-${pad(parts.month)}-${pad(parts.day)}` : null;
+}
+
 export function formatTaipeiDateTime(
   value: string | number | Date,
   options?: { seconds?: boolean },

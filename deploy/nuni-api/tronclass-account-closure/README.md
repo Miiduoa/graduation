@@ -27,7 +27,7 @@ TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL=postgresql://<dedicated-worker-role>:<se
 
 `ENABLED=true` 但 URL 缺少／格式錯誤時，不建立連線，並發出固定的設定錯誤訊息；其他初始化及執行失敗也只有固定訊息。應由既有 server log／錯誤監控監看這些訊息與待處理事件數，不公開事件內容。
 
-- 啟動後 0–5 秒首次檢查，此後每次完成再等待 60–65 秒，單一程序不重疊執行。
+- 啟動後立即執行首次檢查，此後每次完成再等待 60–65 秒，單一程序不重疊執行。
 - 每輪預設至多 10 件，程式允許的上限為 20 件。
 - 租約 5 分鐘；程序中斷後其他 instance 可在租約到期重新領取。
 - 清理失敗保留事件，只存固定 `cleanup_failed`，退避從 30 秒倍增，最高 30 分鐘。
@@ -62,6 +62,8 @@ worker 不需要 `platform_accounts` 的 SELECT、UPDATE 或 DELETE；**不可�
 3. 以受信任 schema/search path，在同一 migration 交易套用候選及 PUBLIC 撤權，核對 trigger、歷史 closed/deleted 事件與最小角色權限。正常 API role 必須能關帳，但不能直接建立任意清理事件。
 4. 先保持 worker 旗標關閉發布相容 Web；migration 與專用角色驗收完成後，再設定專用 DB URL 及精確啟用旗標，重啟 Node instance。
 5. 以受控平台帳號驗證關帳事件、Firestore barrier／私人紀錄清理、outbox 成功刪除及故障後重試。此驗收不需要寫入校方作業。
+
+Web 端平台帳號的新綁定除了檢查 worker 旗標與專用 DB URL 皆已設定，還要求本 instance 的 worker 在 10 分鐘內完成過一次全部成功的批次。批次結束時 outbox 若仍有清理失敗事件（含退避中尚未到期者），worker 不會更新就緒時間；但這不會立即撤銷上一次成功批次的就緒狀態，新綁定仍可在該次成功後的 10 分鐘有效期內被接受，期限過後才會因就緒時間過舊而被拒絕；每次批次開始前，worker 會以專用角色確認 outbox 與 `platform_accounts` 存在、具備 outbox SELECT／DELETE 權限，以及 `attempts`、`next_attempt_at`、`lease_token`、`lease_expires_at`、`last_failure` 五個欄位各自的 UPDATE 權限，且 `tronclass_account_closed`、`tronclass_account_deleted` 兩個 trigger 皆以一般交易會觸發的模式啟用（停用或 replica-only 都不算）。首次批次在啟動時立即執行，綁定最多等待 3 秒。任何一項未通過都回覆 `TRONCLASS_RETENTION_REQUIRED` 且不保存校方 session；因此步驟 4 的 migration 驗收完成前，平台帳號無法新綁定。
 
 回滾 worker 時可關閉旗標並保留 outbox／trigger，事件會等待恢復；不能刪除 Firestore 永久關帳 barrier 或不確定的校方作業鎖。
 

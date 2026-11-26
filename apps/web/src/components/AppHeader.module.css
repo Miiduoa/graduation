@@ -1,16 +1,19 @@
 .header {
+  --header-rule: color-mix(in srgb, var(--text) 38%, var(--border));
   position: relative;
   z-index: 30;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) minmax(100px, 180px) auto;
-  grid-template-areas: 'brand navigation campus account';
+  grid-template-columns: auto minmax(0, 1fr) minmax(120px, 200px) auto;
+  grid-template-areas:
+    'brand . campus account'
+    'navigation navigation navigation navigation';
   align-items: center;
-  gap: 18px;
+  column-gap: 20px;
+  row-gap: 14px;
   width: 100%;
-  min-height: 84px;
   max-width: var(--page-width);
   margin-inline: auto;
-  padding: 18px var(--page-padding-inline);
+  padding: 20px var(--page-padding-inline) 0;
   border-bottom: 1px solid var(--border);
   color: var(--text);
   background: var(--bg);
@@ -21,7 +24,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
   width: fit-content;
   min-width: 44px;
   min-height: 44px;
@@ -31,9 +34,11 @@
 }
 
 .wordmark {
-  font-size: 19px;
+  font-family: var(--font-heading);
+  font-size: 1.75rem;
   font-weight: 700;
-  letter-spacing: -0.65px;
+  line-height: 1;
+  letter-spacing: 0.02em;
 }
 
 .mark {
@@ -44,7 +49,7 @@
   width: 28px;
   height: 28px;
   overflow: hidden;
-  border-radius: 7px;
+  border-radius: 2px;
   line-height: 0;
 }
 
@@ -57,10 +62,12 @@
 .nav {
   grid-area: navigation;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 32px;
   min-width: 0;
+  padding-top: 2px;
+  border-top: 1px solid var(--border);
 }
 
 .nav > a {
@@ -69,25 +76,23 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-width: 48px;
-  min-height: 44px;
-  padding: 10px 12px;
-  border-radius: 11px;
+  min-width: 44px;
+  min-height: 48px;
+  padding: 0 2px;
+  border-radius: 0;
   color: var(--muted);
-  font-size: var(--font-body-sm-size);
-  line-height: 20px;
+  font-size: var(--font-body-size, 0.9375rem);
+  line-height: 1.4;
   white-space: nowrap;
   text-decoration: none;
-  transition:
-    background-color var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
+  transition: color var(--motion-fast) var(--ease-out);
 }
 
 .nav > a > svg {
+  display: none;
   flex-shrink: 0;
-  width: 17px;
-  height: 17px;
-  transition: transform var(--motion-fast) var(--ease-out);
+  width: 22px;
+  height: 22px;
 }
 
 .navLabel {
@@ -96,36 +101,53 @@
   text-align: center;
 }
 
+.navigationHeading,
+.workspaceTools {
+  display: none;
+}
+
+.voiceContext {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+  line-height: 1.7;
+}
+
+.voiceContext a {
+  margin-inline-start: 4px;
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.nav > a::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: transparent;
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+
 .nav > a[aria-current='page'] {
-  color: var(--brand);
-  background: var(--accent-soft);
-  font-weight: 650;
+  color: var(--text);
+  font-weight: 700;
 }
 
 .nav > a[aria-current='page']::after {
-  content: '';
-  position: absolute;
-  bottom: 4px;
-  left: calc(50% - 6px);
-  width: 12px;
-  height: 2px;
-  border-radius: 1px;
-  background: currentColor;
+  background: var(--brand);
 }
 
 .nav > a:active {
-  color: var(--brand);
-  background: var(--panel2);
-}
-
-.nav > a:active > svg {
-  transform: scale(0.92);
+  color: var(--text);
 }
 
 .campus {
   grid-area: campus;
   min-width: 0;
-  max-width: 180px;
+  max-width: 200px;
 }
 
 .account {
@@ -133,7 +155,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
   font-size: var(--font-body-sm-size);
   line-height: 20px;
@@ -145,12 +167,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 44px;
   min-height: 44px;
-  padding: 10px;
-  border: 1px solid transparent;
-  border-radius: 11px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
   font: inherit;
@@ -158,10 +180,17 @@
   white-space: nowrap;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition:
-    background-color var(--motion-fast) var(--ease-out),
-    border-color var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
+  transition: color var(--motion-fast) var(--ease-out);
+}
+
+.account > a > span,
+.account > button > span,
+.accountMenu > summary > span:not(.retryIndicator) {
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 5px;
+  transition: text-decoration-color var(--motion-fast) var(--ease-out);
 }
 
 .account > .voiceTrigger {
@@ -170,15 +199,20 @@
 
 .account > .voiceTrigger[aria-expanded='true'],
 .accountMenu[open] > summary {
-  background: var(--accent-soft);
-  color: var(--brand);
-  border-color: var(--border);
+  color: var(--text);
+}
+
+.account > .voiceTrigger[aria-expanded='true'] > span,
+.accountMenu[open] > summary > span:not(.retryIndicator) {
+  text-decoration-color: currentColor;
 }
 
 .account > .login {
-  margin-inline-start: 4px;
-  padding-inline: 15px;
-  border-color: var(--brand);
+  min-height: 44px;
+  margin-inline-start: 8px;
+  padding-inline: 20px;
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-sm);
   background: var(--brand);
   color: var(--on-brand);
   font-weight: 600;
@@ -199,7 +233,6 @@
 
 .accountMenu > summary {
   position: relative;
-  gap: 6px;
   color: var(--text);
   list-style: none;
 }
@@ -225,8 +258,8 @@
 
 .retryIndicator {
   position: absolute;
-  top: 7px;
-  right: 5px;
+  top: 8px;
+  right: 4px;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -235,13 +268,12 @@
 
 .accountPanel,
 .voicePanel {
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--surface);
+  border: 1px solid var(--header-rule);
+  border-top: 2px solid var(--text);
+  border-radius: 0;
+  background: var(--bg);
   color: var(--text);
-  box-shadow:
-    0 12px 36px color-mix(in srgb, var(--text) 8%, transparent),
-    var(--shadow-sm);
+  box-shadow: none;
   animation: panelEnter var(--motion-normal) var(--ease-out);
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -250,12 +282,12 @@
 .accountPanel {
   position: absolute;
   z-index: 210;
-  top: calc(100% + 10px);
+  top: calc(100% + 8px);
   right: 0;
   width: 256px;
   max-width: calc(100vw - 24px);
   max-height: calc(100dvh - 120px);
-  padding: 8px;
+  padding: 4px 12px 8px;
   overflow-x: hidden;
   overflow-y: auto;
   scroll-padding-block: 12px;
@@ -267,9 +299,11 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 0 6px 10px;
-  font-size: var(--font-body-sm-size);
-  font-weight: 650;
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-heading);
+  font-size: 1.0625rem;
+  font-weight: 700;
   color: var(--text);
 }
 
@@ -281,16 +315,16 @@
   flex: 0 0 44px;
   width: 44px;
   height: 44px;
+  margin-inline-end: -10px;
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: 11px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
-  font: inherit;
+  font: 500 var(--font-body-sm-size) / 1.5 var(--font-ui);
+  font-weight: 400;
   cursor: pointer;
-  transition:
-    background-color var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
+  transition: color var(--motion-fast) var(--ease-out);
 }
 
 .accountPanel > a,
@@ -300,18 +334,17 @@
   gap: 10px;
   width: 100%;
   min-height: 48px;
-  padding: 12px;
-  border: 1px solid transparent;
-  border-radius: 10px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
   background: transparent;
   color: var(--text);
   font: inherit;
   text-align: start;
   text-decoration: none;
   cursor: pointer;
-  transition:
-    background-color var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
+  transition: color var(--motion-fast) var(--ease-out);
 }
 
 .accountPanel > a > svg:last-child {
@@ -320,23 +353,21 @@
 }
 
 .accountPanel > .logout {
-  margin-top: 6px;
-  border-top-color: var(--border);
-  border-radius: 0 0 10px 10px;
+  border-bottom: 0;
   color: var(--muted);
 }
 
 .accountStatus {
   margin: 0;
-  padding: 10px 12px;
+  padding: 10px 0;
   color: var(--muted);
 }
 
 .accountError {
-  margin: 6px 4px 4px;
-  padding: 12px;
-  border-radius: 10px;
-  background: var(--danger-soft);
+  margin: 8px 0 4px;
+  padding: 10px 0 10px 12px;
+  border-left: 2px solid var(--danger);
+  background: transparent;
   color: var(--danger);
   line-height: 1.6;
   overflow-wrap: anywhere;
@@ -348,20 +379,43 @@
 }
 
 .voicePanel {
-  --voice-header-bottom: calc(84px + env(safe-area-inset-top, 0px));
+  --voice-header-bottom: calc(110px + env(safe-area-inset-top, 0px));
   position: fixed;
   z-index: 90;
   top: calc(var(--voice-header-bottom) + 8px);
   right: max(16px, env(safe-area-inset-right, 0px));
   width: min(460px, calc(100vw - 32px));
   max-height: min(660px, calc(100dvh - var(--voice-header-bottom) - 24px));
-  padding: 10px;
+  padding: 4px 16px 12px;
   overflow-y: auto;
   scroll-padding-block: 12px;
 }
 
 .voicePanel:focus {
   outline: none;
+}
+
+.voicePanel[hidden] {
+  display: none;
+}
+
+.voicePanelHeading {
+  margin-bottom: 12px;
+  background: var(--bg);
+}
+
+.voicePanelHeading h2 {
+  margin: 0;
+  font: inherit;
+}
+
+.voicePanelHeading > button {
+  width: auto;
+  min-width: 44px;
+  flex-basis: auto;
+  padding-inline: 10px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
 .header :is(a, button, summary):focus-visible,
@@ -373,30 +427,44 @@
 
 .error {
   max-width: var(--page-width);
-  margin: 12px auto 0;
+  margin: 0 auto;
   padding: 12px var(--page-padding-inline);
-  background: var(--danger-soft);
+  border-left: 2px solid var(--danger);
+  background: transparent;
   color: var(--danger);
   font-size: var(--font-body-sm-size);
   line-height: 1.7;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .nav > a:hover,
+  .nav > a:hover {
+    color: var(--text);
+  }
+
+  .nav > a:not([aria-current='page']):hover::after {
+    background: var(--header-rule);
+  }
+
   .account > a:hover,
   .account > button:not(:disabled):hover,
   .accountMenu > summary:hover,
-  .accountPanel > a:hover,
-  .accountPanel > button:not(:disabled):hover,
   .accountHeading > button:hover,
-  .voicePanelHeading > button:hover {
+  .voicePanelHeading > button:hover,
+  .accountPanel > a:hover,
+  .accountPanel > button:not(:disabled):hover {
     color: var(--text);
-    background: var(--panel);
   }
 
-  .nav > a[aria-current='page']:hover {
-    color: var(--brand);
-    background: var(--accent-soft);
+  .account > a:hover > span,
+  .account > button:not(:disabled):hover > span,
+  .accountMenu > summary:hover > span:not(.retryIndicator) {
+    text-decoration-color: currentColor;
+  }
+
+  .accountPanel > a:hover,
+  .accountPanel > button:not(:disabled):hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
   }
 
   .account > .login:hover {
@@ -406,25 +474,15 @@
   }
 }
 
-.account > button:active,
-.accountMenu > summary:active,
-.accountPanel > :is(a, button):active,
-.accountHeading > button:active,
-.voicePanelHeading > button:active {
-  background: var(--panel2);
+.account > .login:active {
+  background: var(--brand2);
 }
 
 @media (max-width: 1150px) {
-  .header {
-    grid-template-columns: auto minmax(0, 1fr) minmax(100px, 150px) auto;
-    gap: 12px;
+  .nav {
+    gap: 24px;
   }
 
-  .nav > a {
-    padding-inline: 10px;
-  }
-
-  .nav > a > svg,
   .voiceTrigger > span,
   .quickSearch > span {
     display: none;
@@ -433,42 +491,24 @@
 
 @media (max-width: 940px) {
   .header {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    grid-template-areas:
-      'brand campus account'
-      'navigation navigation navigation';
-    gap: 10px 16px;
-    padding-block: 14px 10px;
-  }
-
-  .campus {
-    justify-self: end;
-    width: min(100%, 220px);
-    max-width: none;
+    grid-template-columns: auto minmax(0, 1fr) minmax(100px, 200px) auto;
+    padding-inline: 24px;
+    column-gap: 14px;
   }
 
   .nav {
-    justify-content: flex-start;
-    gap: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border);
-  }
-
-  .nav > a {
-    padding-inline: 16px;
-  }
-
-  .nav > a > svg {
-    display: block;
+    gap: 20px;
   }
 }
 
 @media (max-width: 760px) {
   .header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas: 'brand campus account';
-    gap: 8px;
-    min-height: calc(68px + env(safe-area-inset-top, 0px));
-    padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 12px;
+    column-gap: 8px;
+    row-gap: 0;
+    min-height: calc(64px + env(safe-area-inset-top, 0px));
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px;
   }
 
   .wordmark,
@@ -483,14 +523,14 @@
 
   .campus > details > div {
     position: fixed;
-    top: calc(var(--navigation-header-bottom, 68px) + 8px);
+    top: calc(var(--navigation-header-bottom, 64px) + 8px);
     left: max(12px, env(safe-area-inset-left, 0px));
     right: max(12px, env(safe-area-inset-right, 0px));
     width: auto;
     margin-top: 0;
     max-height: max(
       0px,
-      calc(100dvh - var(--mobile-nav-offset, 72px) - var(--navigation-header-bottom, 68px) - 16px)
+      calc(100dvh - var(--mobile-nav-offset, 72px) - var(--navigation-header-bottom, 64px) - 16px)
     );
   }
 
@@ -501,15 +541,16 @@
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     align-items: stretch;
-    gap: 4px;
+    gap: 0;
     /* The measured offset is shared with content and floating panels. It must
        not size this bar, or enlarged labels would create a resize loop. */
     min-height: calc(var(--mobile-nav-height, 72px) + env(safe-area-inset-bottom, 0px));
     height: auto;
-    padding: 6px max(12px, env(safe-area-inset-right, 0px))
-      calc(6px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
-    border-top: 1px solid var(--border);
-    background: var(--surface);
+    padding: 0 max(0px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px)
+      max(0px, env(safe-area-inset-left, 0px));
+    overflow: visible;
+    border-top: 1px solid var(--header-rule);
+    background: var(--bg);
   }
 
   .nav > a {
@@ -518,8 +559,7 @@
     min-width: 0;
     min-height: 56px;
     height: auto;
-    padding: 5px 2px 7px;
-    border-radius: 13px;
+    padding: 8px 2px 8px;
     font-size: var(--font-label-size);
     line-height: 1.2;
     white-space: normal;
@@ -528,20 +568,29 @@
   }
 
   .nav > a > svg {
-    width: 22px;
-    height: 22px;
+    display: block;
   }
 
   .navLabel {
     flex-shrink: 0;
   }
 
-  .nav > a[aria-current='page']::after {
-    bottom: 3px;
+  .nav > a::after {
+    top: -1px;
+    bottom: auto;
+    height: 3px;
+  }
+
+  .nav > a:not([aria-current='page']) > svg {
+    color: var(--muted);
+  }
+
+  .nav > a[aria-current='page'] > svg {
+    color: var(--brand);
   }
 
   .account {
-    gap: 2px;
+    gap: 0;
   }
 
   .account > a,
@@ -556,6 +605,7 @@
 
   .account > .login {
     margin-inline-start: 0;
+    padding-inline: 16px;
   }
 
   .account > [role='status'] {
@@ -565,16 +615,16 @@
 
   .accountPanel {
     position: fixed;
-    top: calc(var(--navigation-header-bottom, 68px) + 8px);
+    top: calc(var(--navigation-header-bottom, 64px) + 8px);
     right: max(12px, env(safe-area-inset-right, 0px));
     max-height: max(
       0px,
-      calc(100dvh - var(--mobile-nav-offset, 72px) - var(--navigation-header-bottom, 68px) - 16px)
+      calc(100dvh - var(--mobile-nav-offset, 72px) - var(--navigation-header-bottom, 64px) - 16px)
     );
   }
 
   .voicePanel {
-    --voice-header-bottom: calc(68px + env(safe-area-inset-top, 0px));
+    --voice-header-bottom: calc(64px + env(safe-area-inset-top, 0px));
     top: auto;
     bottom: calc(var(--mobile-nav-offset, 72px) + 10px);
     right: max(12px, env(safe-area-inset-right, 0px));
@@ -585,45 +635,225 @@
   }
 }
 
-@supports (backdrop-filter: blur(16px)) {
-  @media (max-width: 760px) {
-    .nav {
-      background: color-mix(in srgb, var(--surface) 94%, transparent);
-      backdrop-filter: blur(16px);
-    }
+@media (max-width: 360px) {
+  .header {
+    grid-template-areas:
+      'brand campus campus'
+      'account account account';
+    row-gap: 6px;
+  }
+
+  .header:has(.campus:empty) {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: 'brand account';
+  }
+
+  .campus:empty {
+    display: none;
+  }
+
+  .campus {
+    min-width: 44px;
+  }
+
+  .account {
+    justify-self: stretch;
+    justify-content: flex-end;
+  }
+
+  .campus > details > div,
+  .accountPanel {
+    top: calc(var(--navigation-header-bottom, 128px) + 8px);
   }
 }
 
-@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  .nav {
+@media screen and (min-width: 1140px) {
+  :global([data-workspace-shell='true']) > .header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'campus account';
+    min-height: 84px;
+    padding-block: 18px;
+    row-gap: 0;
+  }
+
+  :global([data-workspace-shell='true']) > .header .brand {
+    position: fixed;
+    inset: 24px auto auto 24px;
+    gap: 10px;
+  }
+
+  :global([data-workspace-shell='true']) > .header .wordmark {
+    font-size: 1.5rem;
+    letter-spacing: -0.03em;
+  }
+
+  :global([data-workspace-shell='true']) > .header .nav {
+    position: fixed;
+    inset: 96px auto 208px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 6px;
+    width: var(--workspace-navigation-width);
+    padding: 0 16px 16px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    border: 0;
+    background: var(--surface2);
+  }
+
+  :global([data-workspace-shell='true']) > .header .navigationHeading {
+    display: block;
+    flex-shrink: 0;
+    padding: 0 12px 12px;
+    color: var(--muted);
+    font-size: var(--font-label-size);
+    line-height: 1.5;
+  }
+
+  :global([data-workspace-shell='true']) > .header .nav > a {
+    flex-shrink: 0;
+    justify-content: flex-start;
+    gap: 12px;
+    min-height: 48px;
+    padding: 12px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    font-size: var(--font-body-size);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    transition: color var(--motion-fast) var(--ease-out), background-color var(--motion-fast) var(--ease-out);
+  }
+
+  :global([data-workspace-shell='true']) > .header .nav > a > svg {
+    display: block;
+    width: 20px;
+    height: 20px;
+  }
+
+  :global([data-workspace-shell='true']) > .header .navLabel {
+    text-align: start;
+  }
+
+  :global([data-workspace-shell='true']) > .header .nav > a::after {
+    display: none;
+  }
+
+  :global([data-workspace-shell='true']) > .header .nav > a[aria-current='page'] {
+    color: var(--text);
     background: var(--surface);
-    backdrop-filter: none;
+    border-color: var(--border);
+    font-weight: 650;
+  }
+
+  :global([data-workspace-shell='true']) > .header .workspaceTools {
+    position: fixed;
+    inset: auto auto 24px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: calc(var(--workspace-navigation-width) - 32px);
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    background: var(--surface2);
+  }
+
+  .workspaceTools > a {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    color: var(--muted);
+    font-size: var(--font-body-sm-size);
+    line-height: 1.5;
+    text-decoration: none;
+  }
+
+  .workspaceTools > a > svg {
+    flex-shrink: 0;
+  }
+
+  .workspaceTools > a[aria-current='page'] {
+    color: var(--text);
+    background: var(--surface);
+    font-weight: 650;
+  }
+
+  :global([data-workspace-shell='true']) > .header .account > .voiceTrigger {
+    margin-inline-end: 8px;
+    padding-inline: 14px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text);
+    background: var(--surface);
+  }
+
+  :global([data-workspace-shell='true']) > .header .voiceTrigger > span {
+    display: inline;
+  }
+
+  .voicePanel {
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 8px 20px 18px;
+    box-shadow: 0 18px 60px rgb(0 0 0 / 12%);
+  }
+}
+
+@media screen and (min-width: 1140px) and (max-height: 600px) {
+  :global([data-workspace-shell='true']) > .header .nav {
+    bottom: 16px;
+  }
+
+  :global([data-workspace-shell='true']) > .header .workspaceTools {
+    display: none;
+  }
+}
+
+@media screen and (min-width: 1140px) and (hover: hover) and (pointer: fine) {
+  :global([data-workspace-shell='true']) > .header .nav > a:not([aria-current='page']):hover,
+  .workspaceTools > a:hover {
+    color: var(--text);
+    background: color-mix(in srgb, var(--text) 5%, var(--surface2));
   }
 }
 
 @media (prefers-contrast: more) {
-  .nav > a[aria-current='page']:not(:focus-visible),
-  .accountMenu[open] > summary:not(:focus-visible),
+  .header {
+    --header-rule: var(--text);
+  }
+
+  .nav > a[aria-current='page'] {
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 6px;
+  }
+
   .accountPanel,
   .voicePanel {
-    outline: 1px solid currentColor;
-    outline-offset: -1px;
+    border-color: var(--text);
   }
 }
 
 @media (forced-colors: active) {
-  .nav > a[aria-current='page']:not(:focus-visible) {
-    outline: 2px solid Highlight;
-    outline-offset: -2px;
+  .nav > a[aria-current='page']::after {
+    background: Highlight;
   }
 
   .nav,
+  .header,
   .accountPanel,
   .voicePanel {
     border-color: CanvasText;
     background: Canvas;
-    backdrop-filter: none;
-    box-shadow: none;
+  }
+
+  .account > .login {
+    border-color: ButtonText;
   }
 }
 
@@ -657,10 +887,6 @@
   transition: none !important;
 }
 
-:global([data-reduced-motion='true']) .nav > a:active > svg {
-  transform: none;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .header *,
   .header *::after,
@@ -669,56 +895,14 @@
     animation: none !important;
     transition: none !important;
   }
-
-  .nav > a:active > svg {
-    transform: none;
-  }
 }
 
 @media print {
+  .workspaceTools,
+  .navigationHeading,
   .nav,
   .account,
   .voicePanel {
     display: none;
-  }
-}
-
-.voicePanel[hidden] {
-  display: none;
-}
-.voicePanelHeading h2 {
-  margin: 0;
-  font: inherit;
-}
-.voicePanelHeading {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--surface);
-}
-.voicePanelHeading > button {
-  width: auto;
-  min-width: 44px;
-  flex-basis: auto;
-  padding-inline: 10px;
-}
-
-@media (max-width: 360px) {
-  .header {
-    grid-template-areas:
-      'brand campus campus'
-      'account account account';
-    row-gap: 8px;
-  }
-  .campus {
-    min-width: 44px;
-  }
-  .account {
-    justify-self: stretch;
-    justify-content: flex-end;
-  }
-  .campus > details > div,
-  .accountPanel {
-    top: calc(var(--navigation-header-bottom, 128px) + 8px);
   }
 }

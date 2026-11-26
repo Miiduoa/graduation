@@ -132,11 +132,11 @@ tags:
 - takeScreenshot: personal_import_entry
 - runFlow: ../helpers/return-to-landing.yaml
 
-# Retain the public map entry assertion after bringing it into the viewport.
+# The guest shortcuts are above the account and school import sections.
 - scrollUntilVisible:
     element:
       id: public-Map
-    direction: DOWN
+    direction: UP
     centerElement: true
 - assertVisible:
     id: public-Map

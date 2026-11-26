@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useDirectoryVisit } from './DirectoryVisit';
 import { CampusIcon } from './CampusIcon';
 import { useSchoolLmsReadonlyEnabled } from './SchoolLmsReadonlyProvider';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
@@ -26,6 +27,7 @@ type DirectoryReturn = {
   journey: ServiceJourney;
   url: string;
   scope: string;
+  ownerToken?: string;
   serviceHref: string;
 };
 
@@ -43,6 +45,7 @@ function directoryReturnState(state: unknown): DirectoryReturn | null {
     (value.journey === 'life' || value.journey === 'connect') &&
     typeof value.url === 'string' &&
     typeof value.scope === 'string' &&
+    (value.ownerToken === undefined || typeof value.ownerToken === 'string') &&
     typeof value.serviceHref === 'string'
     ? (value as DirectoryReturn)
     : null;
@@ -62,9 +65,17 @@ function captureDirectoryReturn(event: PopStateEvent) {
   publishDirectoryReturn(saved?.url === currentDirectoryUrl() ? saved : null);
 }
 
+function cancelDirectoryReturn() {
+  if (pendingReturn) publishDirectoryReturn(null);
+}
+
 function subscribeDirectoryReturn(listener: () => void) {
   if (observedWindow !== window) {
     observedWindow?.removeEventListener('popstate', captureDirectoryReturn);
+    for (const event of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
+      observedWindow?.removeEventListener(event, cancelDirectoryReturn, true);
+      window.addEventListener(event, cancelDirectoryReturn, { capture: true, passive: true });
+    }
     observedWindow = window;
     pendingReturn = null;
     // The directory is unmounted while its service is open. Keep one observer
@@ -78,6 +89,17 @@ function subscribeDirectoryReturn(listener: () => void) {
 const getPendingDirectoryReturn = () => pendingReturn;
 const getServerDirectoryReturn = () => null;
 
+function focusServiceRow(directory: HTMLElement | null, serviceHref: string) {
+  const target = Array.from(directory?.querySelectorAll<HTMLAnchorElement>('a[data-service-href]') ?? [])
+    .find((link) => link.dataset.serviceHref === serviceHref);
+  if (!target) return;
+  const parent = target.closest('details');
+  if (parent) parent.open = true;
+  target.focus({ preventScroll: true });
+  target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+  return target;
+}
+
 function ServiceRow({
   service,
   scope,
@@ -86,6 +108,7 @@ function ServiceRow({
   recommended,
   publicOnly,
   onVisit,
+  grouped,
 }: {
   service: CampusService;
   scope: string;
@@ -94,8 +117,10 @@ function ServiceRow({
   recommended: boolean;
   publicOnly: boolean;
   onVisit: (event: MouseEvent<HTMLAnchorElement>, serviceHref: string) => void;
+  grouped: boolean;
 }) {
   const id = useId();
+  const Heading = grouped ? 'h4' : 'h3';
   const children = showChildren
     ? secondaryCampusServices(service.href, schoolLmsEnabled).filter(
         (child) => !publicOnly || isDirectlyAvailable(child),
@@ -116,14 +141,14 @@ function ServiceRow({
         </span>
         <div className={styles.serviceBody}>
           <div className={styles.serviceTitle}>
-            <h3 id={`${id}-name`}>{service.name}</h3>
+            <Heading id={`${id}-name`}>{service.name}</Heading>
             {recommended && <span className={styles.recommended}>從這裡開始</span>}
           </div>
           <p id={`${id}-description`}>{service.text}</p>
-          <span id={`${id}-access`} className={styles.access}>
-            {SERVICE_ACCESS[service.access]}
-          </span>
         </div>
+        <span id={`${id}-access`} className={styles.access}>
+          {SERVICE_ACCESS[service.access]}
+        </span>
         <CampusIcon name="arrow" size={18} />
       </Link>
       {children.length > 0 && (
@@ -167,9 +192,11 @@ export function ServiceDirectory({
   const queryString = params?.toString() || '';
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const scope = useCampusNavigationSearch(params);
+  const visit = useDirectoryVisit();
   const id = useId();
   const composing = useRef(false);
   const search = useRef<HTMLInputElement>(null);
+  const resultsHeading = useRef<HTMLHeadingElement>(null);
   const directory = useRef<HTMLDivElement>(null);
   const historyReturn = useSyncExternalStore(
     subscribeDirectoryReturn,
@@ -217,6 +244,19 @@ export function ServiceDirectory({
   const filtering = Boolean(filters.query.trim() || filters.group !== 'all' || filters.publicOnly);
   const searching = Boolean(filters.query.trim());
   const resultsId = `${journey}-service-results`;
+  const resultsTitle = searching
+    ? '搜尋結果'
+    : filters.group !== 'all'
+      ? groups.find((group) => group.id === filters.group)?.label
+      : filters.publicOnly
+        ? '免登入服務'
+        : '服務目錄';
+
+  useEffect(() => {
+    if (!visit?.restoreRow) return;
+    focusServiceRow(directory.current, visit.restoreRow);
+    visit.finishReturn();
+  }, [visit]);
 
   useEffect(() => {
     if (
@@ -225,12 +265,14 @@ export function ServiceDirectory({
       historyReturn.journey !== journey
     )
       return;
+    if (visit && visit.ownerToken === undefined) return;
     const current = directoryReturnState(window.history.state);
     if (
       current?.token !== historyReturn.token ||
       current.url !== currentDirectoryUrl() ||
       current.url !== historyReturn.url ||
-      current.scope !== scope
+      current.scope !== scope ||
+      (visit && (!visit.ownerToken || current.ownerToken !== visit.ownerToken))
     ) {
       publishDirectoryReturn(null);
       return;
@@ -239,16 +281,21 @@ export function ServiceDirectory({
     // popstate. A new entry, changed campus or edited filters cannot opt in.
     if (new URL(current.url, window.location.origin).searchParams.toString() !== queryString)
       return;
-    const target = Array.from(
-      directory.current?.querySelectorAll<HTMLAnchorElement>('a[data-service-href]') ?? [],
-    ).find((link) => link.dataset.serviceHref === current.serviceHref);
+    const target = focusServiceRow(directory.current, current.serviceHref);
+    if (target && window.location.hash) {
+      // A native fragment restoration can blur the link immediately after the
+      // router mounts it. Respect any new user input during that frame.
+      const frame = window.requestAnimationFrame(() => {
+        if (getPendingDirectoryReturn() !== historyReturn) return;
+        if (document.activeElement === document.body && target.isConnected && currentDirectoryUrl() === current.url) {
+          focusServiceRow(directory.current, current.serviceHref);
+        }
+        publishDirectoryReturn(null);
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
     publishDirectoryReturn(null);
-    if (!target) return;
-    const parent = target.closest('details');
-    if (parent) parent.open = true;
-    target.focus({ preventScroll: true });
-    target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
-  }, [historyReturn, journey, queryString, schoolLmsEnabled, scope]);
+  }, [historyReturn, journey, queryString, schoolLmsEnabled, scope, visit]);
 
   function rememberReturn(event: MouseEvent<HTMLAnchorElement>, serviceHref: string) {
     if (
@@ -262,6 +309,14 @@ export function ServiceDirectory({
     )
       return;
     publishDirectoryReturn(null);
+    const returnParams = new URLSearchParams(scope);
+    writeJourneyFilters(returnParams, filters);
+    const ownerToken = visit?.remember({
+      journey,
+      serviceHref,
+      destination: campusServiceHref(serviceHref, scope).split('#', 1)[0]!,
+      returnHref: campusServiceHref(journey === 'life' ? '/life' : '/connect', returnParams.toString()),
+    });
     try {
       window.history.replaceState(
         {
@@ -271,6 +326,7 @@ export function ServiceDirectory({
             journey,
             url: currentDirectoryUrl(),
             scope,
+            ownerToken,
             serviceHref,
           } satisfies DirectoryReturn,
         },
@@ -318,7 +374,7 @@ export function ServiceDirectory({
     search.current?.focus();
   }
 
-  const renderServices = (services: readonly CampusService[]) => (
+  const renderServices = (services: readonly CampusService[], grouped = false) => (
     <ul className={styles.serviceList}>
       {services.map((service) => (
         <ServiceRow
@@ -330,6 +386,7 @@ export function ServiceDirectory({
           recommended={!filtering && recommendedHref === service.href}
           publicOnly={Boolean(filters.publicOnly)}
           onVisit={rememberReturn}
+          grouped={grouped}
         />
       ))}
     </ul>
@@ -342,58 +399,67 @@ export function ServiceDirectory({
         <form
           role="search"
           aria-label={journey === 'life' ? '生活服務搜尋' : '交流服務搜尋'}
-          onSubmit={(event) => event.preventDefault()}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (composing.current) return;
+            // Only an explicit search leaves the field. Live filtering and
+            // category changes keep the user's current input position.
+            resultsHeading.current?.focus();
+          }}
         >
           <label className={styles.searchLabel} htmlFor={`${id}-search`}>
             快速找服務
           </label>
-          <div className={styles.searchField}>
-            <CampusIcon name="search" size={21} />
-            <input
-              ref={search}
-              id={`${id}-search`}
-              type="search"
-              value={filters.query}
-              onChange={(event) =>
-                updateFilters({ ...filters, query: event.target.value }, !composing.current)
-              }
-              onCompositionStart={() => {
-                composing.current = true;
-              }}
-              onCompositionEnd={(event) => {
-                composing.current = false;
-                updateFilters({ ...filters, query: event.currentTarget.value });
-              }}
-              onKeyDown={(event) => {
-                if (
-                  event.key === 'Escape' &&
-                  !event.nativeEvent.isComposing &&
-                  !composing.current &&
-                  filters.query
-                ) {
-                  event.preventDefault();
-                  updateFilters({ ...filters, query: '' });
+          <div className={styles.searchRow}>
+            <div className={styles.searchField}>
+              <CampusIcon name="search" size={21} />
+              <input
+                ref={search}
+                id={`${id}-search`}
+                type="search"
+                value={filters.query}
+                onChange={(event) =>
+                  updateFilters({ ...filters, query: event.target.value }, !composing.current)
                 }
-              }}
-              placeholder={journey === 'life' ? '借書、公車、取餐…' : '話題、訊息、好友…'}
-              autoComplete="off"
-              enterKeyHint="search"
-              maxLength={journey === 'life' ? 80 : 100}
-              aria-controls={resultsId}
-            />
-            {filters.query && (
-              <button
-                type="button"
-                className={styles.clearSearch}
-                aria-label="清除搜尋"
-                onClick={() => {
-                  updateFilters({ ...filters, query: '' });
-                  search.current?.focus();
+                onCompositionStart={() => {
+                  composing.current = true;
                 }}
-              >
-                清除
-              </button>
-            )}
+                onCompositionEnd={(event) => {
+                  composing.current = false;
+                  updateFilters({ ...filters, query: event.currentTarget.value });
+                }}
+                onKeyDown={(event) => {
+                  const usingInputMethod =
+                    event.nativeEvent.isComposing || composing.current || event.keyCode === 229;
+                  if (event.key === 'Enter' && usingInputMethod) event.preventDefault();
+                  if (event.key === 'Escape' && !usingInputMethod && filters.query) {
+                    event.preventDefault();
+                    updateFilters({ ...filters, query: '' });
+                  }
+                }}
+                placeholder={journey === 'life' ? '借書、公車、取餐…' : '話題、訊息、好友…'}
+                autoComplete="off"
+                enterKeyHint="search"
+                maxLength={journey === 'life' ? 80 : 100}
+                aria-controls={resultsId}
+              />
+              {filters.query && (
+                <button
+                  type="button"
+                  className={styles.clearSearch}
+                  aria-label="清除搜尋"
+                  onClick={() => {
+                    updateFilters({ ...filters, query: '' });
+                    search.current?.focus();
+                  }}
+                >
+                  清除
+                </button>
+              )}
+            </div>
+            <button type="submit" className={styles.searchSubmit} aria-controls={resultsId} aria-label="查看結果">
+              <CampusIcon name="search" size={19} /><span>查看結果</span>
+            </button>
           </div>
         </form>
         <div className={styles.filterBar}>
@@ -419,27 +485,39 @@ export function ServiceDirectory({
             />
             只看免登入服務
           </label>
-          <p className={styles.resultCount} role="status" aria-live="polite" aria-atomic="true">
-            {filtering ? '找到' : '共'} {matches.length} 項服務
-          </p>
         </div>
       </div>
 
-      <div id={resultsId}>
+      <section id={resultsId} aria-label="服務搜尋結果">
+        <div className={`${styles.sectionHeading} ${styles.resultsHeading}`}>
+          <div className={styles.resultsSummary}>
+            <h2
+              ref={resultsHeading}
+              id={`${id}-results-title`}
+              tabIndex={-1}
+              className={styles.resultsTitle}
+              aria-describedby={`${id}-results-count`}
+            >
+              {resultsTitle}
+            </h2>
+            <p
+              id={`${id}-results-count`}
+              className={styles.resultCount}
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {filtering ? '找到' : '共'} {matches.length} 項服務
+            </p>
+          </div>
+          {filtering && (
+            <button type="button" className={styles.resetFilters} onClick={resetFilters}>
+              顯示全部服務
+            </button>
+          )}
+        </div>
         {filtering ? (
-          <section aria-labelledby={`${id}-results-title`}>
-            <div className={styles.sectionHeading}>
-              <h2 id={`${id}-results-title`}>
-                {searching
-                  ? '搜尋結果'
-                  : filters.group !== 'all'
-                    ? groups.find((group) => group.id === filters.group)?.label
-                    : '免登入服務'}
-              </h2>
-              <button type="button" className={styles.resetFilters} onClick={resetFilters}>
-                顯示全部服務
-              </button>
-            </div>
+          <>
             {matches.length > 0 ? (
               renderServices(matches)
             ) : (
@@ -449,7 +527,7 @@ export function ServiceDirectory({
                 <p>換個關鍵字，或顯示全部服務再找一次。</p>
               </div>
             )}
-          </section>
+          </>
         ) : (
           <div className={styles.groups}>
             {groups.map((group) => {
@@ -458,20 +536,19 @@ export function ServiceDirectory({
               );
               if (services.length === 0) return null;
               return (
-                <section key={group.id} aria-labelledby={`${id}-${group.id}`}>
-                  <div className={styles.sectionHeading}>
+                <section key={group.id} className={styles.group} aria-labelledby={`${id}-${group.id}`}>
+                  <div className={`${styles.sectionHeading} ${styles.groupHeading}`}>
                     <div>
-                      <h2 id={`${id}-${group.id}`}>{group.label}</h2>
-                      <p>{group.description}</p>
+                      <h3 id={`${id}-${group.id}`}>{group.label}</h3>
                     </div>
                   </div>
-                  {renderServices(services)}
+                  {renderServices(services, true)}
                 </section>
               );
             })}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

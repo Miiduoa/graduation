@@ -108,7 +108,7 @@ export function MessagesStack() {
       <Stack.Screen
         name="AssignmentDetail"
         component={HomeworkSubmitScreen}
-        options={{ title: '作業', headerShown: false }}
+        options={{ title: '繳交作業' }}
       />
       <Stack.Screen
         name="AdminCourseVerify"

@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { useEffect, useState } from 'react';
 import {
   getCampusAssistantSnapshot,
@@ -62,8 +62,7 @@ export function CampusSensePanel({ userId, schoolId, revision, onAsk }: Props) {
     <section className={styles.sense} aria-label="個人校園情境">
       <div className={styles.senseHeader}>
         <div>
-          <span className={styles.eyebrow}>校園情境</span>
-          <h2>先看今天值得注意的事</h2>
+          <h2>今日課務與公告</h2>
           <p>僅整理已授權、實際讀取到的資料；沒有連線的服務會另外標示。</p>
         </div>
         <button
@@ -85,7 +84,7 @@ export function CampusSensePanel({ userId, schoolId, revision, onAsk }: Props) {
           <div className={styles.senseItem}>
             <div className={styles.senseItemTop}>
               <span>待處理作業</span>
-              <Link href="/today-v2">前往待辦</Link>
+              <AssistantReplyLink href="/today-v2">前往待辦</AssistantReplyLink>
             </div>
             {loading && !snapshot ? (
               <p className={styles.senseMuted}>正在確認…</p>
@@ -111,7 +110,7 @@ export function CampusSensePanel({ userId, schoolId, revision, onAsk }: Props) {
           <div className={styles.senseItem}>
             <div className={styles.senseItemTop}>
               <span>最新校園公告</span>
-              <Link href="/announcements">查看公告</Link>
+              <AssistantReplyLink href="/announcements">查看公告</AssistantReplyLink>
             </div>
             {loading && !snapshot ? (
               <p className={styles.senseMuted}>正在確認…</p>
@@ -134,7 +133,7 @@ export function CampusSensePanel({ userId, schoolId, revision, onAsk }: Props) {
           <div className={styles.senseItem}>
             <div className={styles.senseItemTop}>
               <span>今日課表</span>
-              <Link href="/timetable">開啟課表</Link>
+              <AssistantReplyLink href="/timetable">開啟課表</AssistantReplyLink>
             </div>
             {loading && !snapshot ? (
               <p className={styles.senseMuted}>正在確認…</p>

@@ -5,6 +5,7 @@ const REQUIRED_PROJECT_ID = 'campus-one-tw';
 const EMULATOR_APP_NAME = 'campus-one-web-emulator';
 
 type FirebaseAdmin = {
+  messaging?: import('firebase-admin/messaging').Messaging;
   verifyIdToken: (
     token: string,
     checkRevoked?: boolean,
@@ -122,21 +123,25 @@ async function initializeFirebaseAdmin(env: NodeJS.ProcessEnv): Promise<Firebase
       return null;
     }
     const { cert, getApps, initializeApp } = await import('firebase-admin/app');
+    const { getMessaging } = await import('firebase-admin/messaging');
     const { getAuth } = await import('firebase-admin/auth');
     const { getFirestore } = await import('firebase-admin/firestore');
-    const app =
-      getApps().length > 0
-        ? getApps()[0]
-        : initializeApp({
-            credential: cert({
-              projectId: account.project_id,
-              clientEmail: account.client_email,
-              privateKey: account.private_key,
-            }),
-            projectId: account.project_id,
-          });
+    const existing = getApps().find((app) => app.name === '[DEFAULT]');
+    if (existing && existing.options.projectId !== REQUIRED_PROJECT_ID) {
+      cached = null;
+      return null;
+    }
+    const app = existing ?? initializeApp({
+      credential: cert({
+        projectId: account.project_id,
+        clientEmail: account.client_email,
+        privateKey: account.private_key,
+      }),
+      projectId: account.project_id,
+    });
     const auth = getAuth(app);
     cached = {
+      messaging: getMessaging(app),
       db: getFirestore(app),
       verifyIdToken: async (token: string, checkRevoked?: boolean) => {
         const decoded = await auth.verifyIdToken(token, checkRevoked === true);

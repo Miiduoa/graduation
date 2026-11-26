@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
+import { toCampusRole } from '@campus/shared/src/roles';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFrame } from '@/components/AppFrame';
 import { StudentCardEntry } from '@/components/StudentCardEntry';
@@ -274,13 +275,26 @@ export default function HomePage() {
     const timer = window.setTimeout(() => setLeavingTodoIds([]), 200);
     return () => window.clearTimeout(timer);
   }, [todos]);
+  // Partial course callbacks do not set updatedAt. Keep a confirmed snapshot
+  // actionable during same-account refreshes without treating the first partial
+  // response as a complete empty account.
+  const courseDataResolved =
+    sources.length > 0 && sources.every((source) => !!rows[source]?.updatedAt);
   const lmsUnconnected =
-    signedIn && !!data && !error && !loading && !failed && data.courses.length === 0;
+    signedIn && !!data && !error && !failed && courseDataResolved && data.courses.length === 0;
 
   const assistant = (
     <TodayAssistantDisclosure
       key={`assistant:${assistantScope}`}
-      preferredWorkContext={teacherOnly ? 'teacher' : undefined}
+      preferredWorkContext={
+        !sessionLoading && !blocked && nuni.session?.isPlatformOperator
+          ? 'operator'
+          : teacherOnly
+            ? 'teacher'
+            : uid && ['staff', 'department_head', 'principal', 'admin'].includes(toCampusRole(role) ?? '')
+              ? 'staff'
+              : undefined
+      }
       ref={assistantEntry}
       onOpenChange={handleAssistantToggle}
     />
@@ -373,12 +387,15 @@ export default function HomePage() {
           now={now}
           unsigned={!signedIn}
           teachingCourses={teaching}
+          upcomingTodos={todos}
           coursesLoading={loading}
           coursesError={error}
           onRetryCourses={() => void refresh()}
         />
       ) : (
         <StudentTodayPage
+          platformSession={context && accountId && !sessionLoading && !blocked && !nuni.error
+            ? { accountId, context } : undefined}
           assistant={assistant}
           agent={agent}
           workspaces={workspaces}
@@ -388,6 +405,7 @@ export default function HomePage() {
           unsigned={!signedIn}
           skeleton={busy}
           refreshing={loading && !!data}
+          courseDataResolved={courseDataResolved}
           todos={todos}
           todosError={error || data?.tasksError || ''}
           lmsUnconnected={lmsUnconnected}

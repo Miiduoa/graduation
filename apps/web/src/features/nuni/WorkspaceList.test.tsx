@@ -12,8 +12,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: state.push }),
-  useSearchParams: () =>
-    new URLSearchParams(state.fixedSearchParams ?? window.location.search),
+  useSearchParams: () => new URLSearchParams(state.fixedSearchParams ?? window.location.search),
 }));
 vi.mock('./Session', () => ({
   browserRequest: state.request,
@@ -70,13 +69,18 @@ beforeEach(() => {
 it('keeps the device bookmark list reachable even with no current courses', async () => {
   state.request.mockResolvedValue({ workspaces: [] });
   render(<WorkspaceList />);
-  expect(screen.getByRole('link', { name: '查看收藏的教材' }).getAttribute('href'))
-    .toBe('/classroom/material-bookmarks');
+  expect(screen.getByRole('link', { name: '查看收藏的教材' }).getAttribute('href')).toBe(
+    '/classroom/material-bookmarks',
+  );
   await waitFor(() => expect(state.request).toHaveBeenCalledTimes(1));
 });
 
 it('carries the current course search and filters into device bookmarks without unrelated parameters', async () => {
-  window.history.replaceState({}, '', '/classroom?campus=tw-pu&q=Data&courses=studying&task=feedback&taskCourse=course-a&view=members&returnTo=https%3A%2F%2Fexample.test');
+  window.history.replaceState(
+    {},
+    '',
+    '/classroom?campus=tw-pu&q=Data&courses=studying&task=feedback&taskCourse=course-a&view=members&returnTo=https%3A%2F%2Fexample.test',
+  );
   render(<WorkspaceList />);
   await screen.findByRole('link', { name: /Data 資料庫系統/ });
   fireEvent.change(screen.getByRole('searchbox', { name: '搜尋課程名稱' }), {
@@ -86,7 +90,11 @@ it('carries the current course search and filters into device bookmarks without 
   const destination = new URL(href, window.location.origin);
   expect(destination.pathname).toBe('/classroom/material-bookmarks');
   expect(Object.fromEntries(destination.searchParams)).toEqual({
-    campus: 'tw-pu', q: '資料庫', courses: 'studying', task: 'feedback', taskCourse: 'course-a',
+    campus: 'tw-pu',
+    q: '資料庫',
+    courses: 'studying',
+    task: 'feedback',
+    taskCourse: 'course-a',
   });
 });
 
@@ -111,14 +119,98 @@ it('combines role, archive and normalized name search, then clears an empty resu
     target: { value: '不存在的課程' },
   });
   expect(screen.getByRole('heading', { name: '找不到「不存在的課程」' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '全部課程' }));
+  const reset = screen.getByRole('button', { name: '全部課程' });
+  reset.focus();
+  fireEvent.click(reset);
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  expect(document.activeElement).toBe(screen.getByRole('searchbox'));
   expect(screen.getByRole('link', { name: /Data 資料庫系統/ })).toBeTruthy();
   expect(screen.getByRole('link', { name: /互動設計/ })).toBeTruthy();
   expect(screen.getByRole('link', { name: /研究方法/ })).toBeTruthy();
   expect(screen.queryByRole('link', { name: /資料庫入門/ })).toBeNull();
   expect(new URLSearchParams(window.location.search).has('courses')).toBe(false);
   expect(new URLSearchParams(window.location.search).has('q')).toBe(false);
+  expect(state.request).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  { name: 'composition session', startComposition: true, isComposing: false, keyCode: 27 },
+  { name: 'native composition flag', startComposition: false, isComposing: true, keyCode: 27 },
+  { name: 'IME key code', startComposition: false, isComposing: false, keyCode: 229 },
+])(
+  'keeps the search and timetable context when Escape belongs to $name',
+  async ({ startComposition, isComposing, keyCode }) => {
+    const initialParams = new URLSearchParams({
+      campus: 'tw-pu',
+      q: '互動設計',
+      from: 'timetable',
+      code: 'ID201',
+      courses: 'teaching',
+      task: 'feedback',
+      taskCourse: 'course-a',
+    });
+    state.fixedSearchParams = initialParams.toString();
+    window.history.replaceState(
+      { courseDirectory: 'retained' },
+      '',
+      `/classroom?${initialParams}#course-list`,
+    );
+    render(<WorkspaceList />);
+    const course = await screen.findByTestId('classroom-query-unique');
+    const input = screen.getByRole('searchbox', { name: '搜尋課程名稱' }) as HTMLInputElement;
+    const currentUrl = window.location.href;
+    const courseHref = course.getAttribute('href');
+    input.focus();
+    if (startComposition) fireEvent.compositionStart(input);
+
+    expect(fireEvent.keyDown(input, { key: 'Escape', keyCode, isComposing })).toBe(true);
+
+    expect(input.value).toBe('互動設計');
+    expect(window.location.href).toBe(currentUrl);
+    expect(screen.getByTestId('classroom-query-unique').getAttribute('href')).toBe(courseHref);
+    expect(screen.getByText(/· 課表對應/)).toBeTruthy();
+    expect(document.activeElement).toBe(input);
+
+    if (startComposition) fireEvent.compositionEnd(input);
+    fireEvent.keyDown(input, { key: 'Escape', keyCode: 27, isComposing: false });
+
+    expect(input.value).toBe('');
+    expect(Object.fromEntries(new URLSearchParams(window.location.search))).toEqual({
+      campus: 'tw-pu',
+      courses: 'teaching',
+      task: 'feedback',
+      taskCourse: 'course-a',
+    });
+    expect(window.location.hash).toBe('#course-list');
+    expect(window.history.state).toEqual({ courseDirectory: 'retained' });
+    expect(screen.queryByText(/· 課表對應/)).toBeNull();
+    expect(screen.getByRole('link', { name: /互動設計/ })).toBeTruthy();
+    expect(screen.getByRole('link', { name: /研究方法/ })).toBeTruthy();
+    expect(document.activeElement).toBe(input);
+    expect(state.request).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('returns focus to course search after clearing without dropping the campus or task filter', async () => {
+  window.history.replaceState({}, '', '/classroom?campus=tw-pu&q=Data&task=feedback');
+  render(<WorkspaceList />);
+  await screen.findByRole('link', { name: /Data 資料庫系統/ });
+  const input = screen.getByRole('searchbox', { name: '搜尋課程名稱' }) as HTMLInputElement;
+  const clear = screen.getByRole('button', { name: '清除搜尋' });
+  clear.focus();
+
+  fireEvent.click(clear);
+
+  expect(document.activeElement).toBe(input);
+  expect(input.value).toBe('');
+  expect(screen.queryByRole('button', { name: '清除搜尋' })).toBeNull();
+  expect(Object.fromEntries(new URLSearchParams(window.location.search))).toEqual({
+    campus: 'tw-pu',
+    task: 'feedback',
+  });
+  fireEvent.change(input, { target: { value: '互動' } });
+  expect(screen.getByRole('link', { name: /互動設計/ })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /Data 資料庫系統/ })).toBeNull();
   expect(state.request).toHaveBeenCalledTimes(1);
 });
 
@@ -148,11 +240,7 @@ it('prefilters from /classroom?q=&from=timetable with unique, multi and zero mat
       },
     ],
   });
-  window.history.replaceState(
-    {},
-    '',
-    '/classroom?q=%E8%B3%87%E6%96%99%E5%BA%AB&from=timetable',
-  );
+  window.history.replaceState({}, '', '/classroom?q=%E8%B3%87%E6%96%99%E5%BA%AB&from=timetable');
   const multi = render(<WorkspaceList />);
   expect((await screen.findByTestId('classroom-query-status-multi')).textContent).toBe(
     '「資料庫」找到 2 門課程',
@@ -162,17 +250,11 @@ it('prefilters from /classroom?q=&from=timetable with unique, multi and zero mat
   expect(screen.queryByRole('link', { name: /互動設計/ })).toBeNull();
   multi.unmount();
 
-  window.history.replaceState(
-    {},
-    '',
-    '/classroom?q=%E4%B8%8D%E5%AD%98%E5%9C%A8&from=timetable',
-  );
+  window.history.replaceState({}, '', '/classroom?q=%E4%B8%8D%E5%AD%98%E5%9C%A8&from=timetable');
   render(<WorkspaceList />);
   const empty = await screen.findByTestId('classroom-query-none');
   expect(within(empty).getByRole('heading', { name: '找不到「不存在」' })).toBeTruthy();
-  expect(
-    within(empty).getByText(/課表上的這門課尚未對應到課程空間/),
-  ).toBeTruthy();
+  expect(within(empty).getByText(/課表上的這門課尚未對應到課程空間/)).toBeTruthy();
   expect(within(empty).getByRole('button', { name: '全部課程' })).toBeTruthy();
   expect(within(empty).getByRole('button', { name: '加入課程' })).toBeTruthy();
 });
@@ -254,7 +336,11 @@ it('keeps from/code in course return context while attributed, and drops them af
   );
   render(<WorkspaceList />);
   const attributed = await screen.findByRole('link', { name: /互動設計/ });
-  expect(Object.fromEntries(new URL(attributed.getAttribute('href')!, window.location.origin).searchParams)).toMatchObject({
+  expect(
+    Object.fromEntries(
+      new URL(attributed.getAttribute('href')!, window.location.origin).searchParams,
+    ),
+  ).toMatchObject({
     q: '互動設計',
     from: 'timetable',
     code: 'ID201',
@@ -310,8 +396,7 @@ it('clears timetable attribution when the user changes course filter, and restor
 });
 
 it('drops timetable attribution after search edit when useSearchParams stays stale after replaceState', async () => {
-  const stale =
-    'q=%E5%B9%BD%E9%9D%88%E8%AA%B2%E8%A1%A8%E8%AA%B2&from=timetable&code=ZZ999';
+  const stale = 'q=%E5%B9%BD%E9%9D%88%E8%AA%B2%E8%A1%A8%E8%AA%B2&from=timetable&code=ZZ999';
   state.fixedSearchParams = stale;
   window.history.replaceState({}, '', `/classroom?${stale}`);
   const view = render(<WorkspaceList />);
@@ -333,8 +418,7 @@ it('drops timetable attribution after search edit when useSearchParams stays sta
   expect(state.fixedSearchParams).toContain('from=timetable');
 
   act(() => {
-    state.fixedSearchParams =
-      'q=%E4%BA%92%E5%8B%95%E8%A8%AD%E8%A8%88&from=timetable&code=ID201';
+    state.fixedSearchParams = 'q=%E4%BA%92%E5%8B%95%E8%A8%AD%E8%A8%88&from=timetable&code=ID201';
     window.history.replaceState(
       {},
       '',

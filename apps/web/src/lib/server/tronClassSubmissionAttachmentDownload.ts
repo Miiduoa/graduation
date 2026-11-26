@@ -79,7 +79,7 @@ export function createTronClassSubmissionAttachmentDownloader(dependencies: {
     };
     const operation = async () => {
       await check();
-      const binding = await bindings.requireBinding(ownerKey);
+      const binding = await bindings.requireBinding(ownerKey, input.revision);
       if (binding.revision !== input.revision) fail(409, 'TRONCLASS_BINDING_CHANGED');
       await check();
       const scope = { courseId: input.courseId, homeworkId: input.homeworkId };

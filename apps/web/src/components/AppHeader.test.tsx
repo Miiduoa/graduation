@@ -1,6 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AppHeader } from './AppHeader';
+import {
+  ASSISTANT_ROLE_WORKFLOWS,
+  type AssistantWorkContext,
+} from '@campus/shared/src/assistantRoleWorkflows';
 
 const state = vi.hoisted(() => ({
   pathname: '/library',
@@ -11,6 +15,7 @@ const state = vi.hoisted(() => ({
   loading: false,
   pendingLogout: false,
   ask: vi.fn(),
+  workContext: null as AssistantWorkContext | null,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -46,6 +51,9 @@ vi.mock('@/lib/functionsUrl', async (original) => ({
   areFunctionsConfigured: () => false,
 }));
 vi.mock('@/features/nuni/Assistant', async () => {
+  const { AssistantReplyLink } = await import('./AssistantReplyLink');
+  const { AssistantRoleTasks } = await import('@/features/nuni/assistant/AssistantRoleTasks');
+  const { SpokenReply } = await import('./SpokenReply');
   const { VoiceDictationButton } = await import('./VoiceDictationButton');
   return {
     Conversation: ({
@@ -69,9 +77,15 @@ vi.mock('@/features/nuni/Assistant', async () => {
         </label>
         <VoiceDictationButton onTranscript={inlineDraft.setText} />
         <button type="submit">送出問題</button>
-        <a href="/library?campus=pu" onClick={(event) => event.preventDefault()}>
+        <AssistantReplyLink href="/library?campus=pu" onClick={(event) => event.preventDefault()}>
           查看參考服務
-        </a>
+        </AssistantReplyLink>
+        {state.workContext && (
+          <AssistantRoleTasks context={state.workContext} onContext={() => {}} schoolId="pu" />
+        )}
+        <SpokenReply text="請查看開館時間">
+          <AssistantReplyLink href="#hours">查看開館時間</AssistantReplyLink>
+        </SpokenReply>
       </form>
     ),
   };
@@ -86,12 +100,49 @@ beforeEach(() => {
   state.loading = false;
   state.pendingLogout = false;
   state.ask.mockReset();
+  state.workContext = null;
   window.history.replaceState({}, '', '/library?campus=pu');
   Element.prototype.scrollIntoView = vi.fn();
   sessionStorage.clear();
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+it.each(['legacy', 'missing matchMedia', 'missing removal'] as const)(
+  'mounts and unmounts with %s media support and releases resize listeners',
+  (support) => {
+    const addListener = vi.fn();
+    const removeListener = vi.fn();
+    const query = {
+      matches: true,
+      addListener,
+      removeListener: support === 'legacy' ? removeListener : undefined,
+    };
+    vi.stubGlobal('ResizeObserver', undefined);
+    vi.stubGlobal('matchMedia', support === 'missing matchMedia' ? undefined : () => query);
+    const add = vi.spyOn(window, 'addEventListener');
+    const remove = vi.spyOn(window, 'removeEventListener');
+    try {
+      const view = render(<AppHeader />);
+      expect(screen.getByRole('banner')).toBeTruthy();
+      const resizeListeners = add.mock.calls.filter(([type]) => type === 'resize');
+      expect(resizeListeners.length).toBeGreaterThanOrEqual(2);
+      view.unmount();
+      for (const [, listener] of resizeListeners) {
+        expect(remove).toHaveBeenCalledWith('resize', listener);
+      }
+      if (support === 'legacy') {
+        expect(addListener).toHaveBeenCalledOnce();
+        expect(removeListener).toHaveBeenCalledWith(addListener.mock.calls[0][0]);
+      } else {
+        expect(addListener).not.toHaveBeenCalled();
+      }
+    } finally {
+      add.mockRestore();
+      remove.mockRestore();
+    }
+  },
+);
 
 it('refreshes disclosure clearance after the header moves and releases its layout observers', () => {
   let onResize: (() => void) | undefined;
@@ -189,6 +240,102 @@ it('keeps the assistant draft and voice session when a link has not navigated th
   view.rerender(<AppHeader />);
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(abort).toHaveBeenCalledOnce();
+});
+
+it('closes and stops playback on a fragment link before the route or hash changes', async () => {
+  const cancel = vi.fn();
+  const speak = vi.fn();
+  vi.stubGlobal('speechSynthesis', {
+    cancel,
+    speak,
+    getVoices: () => [{ localService: true, lang: 'zh-TW' }],
+  });
+  vi.stubGlobal('SpeechSynthesisUtterance', class {});
+  const overflow = () => [document.body.style.overflow, document.documentElement.style.overflow];
+  const initialOverflow = overflow();
+  render(<AppHeader />);
+  const trigger = screen.getByRole('button', { name: '開啟校園助理' });
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByRole('button', { name: '朗讀回覆' }));
+  expect(speak).toHaveBeenCalledOnce();
+  const link = screen.getByRole<HTMLAnchorElement>('link', { name: '查看開館時間' });
+  fireEvent.click(link, { ctrlKey: true });
+  expect(cancel).not.toHaveBeenCalled();
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  expect(overflow()).toEqual(initialOverflow);
+
+  fireEvent.click(link);
+  expect(window.location.hash).toBe('');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  window.history.pushState({}, '', link.href);
+  expect(window.location.hash).toBe('#hours');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(document.activeElement).toBe(trigger);
+  expect(overflow()).toEqual(initialOverflow);
+});
+
+const navigationEntries = [
+  { name: /校園地圖/, query: '開啟校園地圖' },
+  { name: /校園地圖/, query: '有哪些服務' },
+  { name: '查看開館時間' },
+  ...ASSISTANT_ROLE_WORKFLOWS.flatMap(({ id, services }) =>
+    services.map(({ label }) => ({ name: label, workContext: id })),
+  ),
+];
+
+it.each(
+  navigationEntries.flatMap((entry) =>
+    [true, false].flatMap((sameUrl) =>
+      ['mouse', 'Enter'].map((gesture) => ({ ...entry, sameUrl, gesture })),
+    ),
+  ),
+)('handles $name ($query, same URL: $sameUrl, $gesture) while speaking', async (entry) => {
+  const cancel = vi.fn();
+  const speak = vi.fn();
+  vi.stubGlobal('speechSynthesis', {
+    cancel,
+    speak,
+    getVoices: () => [{ localService: true, lang: 'zh-TW' }],
+  });
+  vi.stubGlobal('SpeechSynthesisUtterance', class {});
+  if ('workContext' in entry) state.workContext = entry.workContext;
+  render(<AppHeader />);
+  const trigger = screen.getByRole('button', { name: '開啟校園助理' });
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByRole('button', { name: '朗讀回覆' }));
+  expect(speak).toHaveBeenCalledOnce();
+  if ('query' in entry) {
+    fireEvent.click(screen.getByRole('button', { name: '找校園服務' }));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: entry.query } });
+  }
+  const link = screen.getByRole<HTMLAnchorElement>('link', { name: entry.name });
+  if (entry.sameUrl) window.history.replaceState({}, '', link.href);
+  else window.history.replaceState({}, '', '/bus');
+  const currentUrl = window.location.href;
+  expect(link.href === currentUrl).toBe(entry.sameUrl);
+
+  for (const gesture of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }]) {
+    fireEvent.click(link, gesture);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  }
+  link.target = '_blank';
+  fireEvent.click(link);
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  expect(cancel).not.toHaveBeenCalled();
+  link.removeAttribute('target');
+  if (entry.gesture === 'Enter') {
+    link.focus();
+    expect(document.activeElement).toBe(link);
+    fireEvent.keyDown(link, { key: 'Enter' });
+  }
+  // jsdom does not dispatch the browser's activation click for Enter on a link.
+  fireEvent.click(link, { detail: entry.gesture === 'Enter' ? 0 : 1 });
+  expect(window.location.href).toBe(currentUrl);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(document.activeElement).toBe(trigger);
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
 });
 
 it('opens the actual account conversation without a search detour, recording, or automatic submission', async () => {

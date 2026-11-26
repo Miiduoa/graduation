@@ -5,6 +5,7 @@ import { createAssistantCalendarReceipt } from '@campus/shared/src/assistantExec
 import { Assistant } from './Assistant';
 import type { V2Card } from './assistant/types';
 import type { AssistantCampusEventTarget } from '@/lib/assistantCampusEvent';
+import { readAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
 
 const auth = vi.hoisted(() => ({ context: 'a'.repeat(43), account: 'alice', school: 'pu', authenticated: true }));
 vi.mock('./Session', () => ({
@@ -49,7 +50,7 @@ const target = (id: string, title: string): AssistantCampusEventTarget => ({
 const targets = [target('photo', '校園攝影講座'), target('music', '校園音樂工作坊')];
 const cardFor = (item = targets[1]): V2Card => ({
   tool: 'propose_personal_event', token: 'signed-source-event', mutationId: 'av2_' + 'e'.repeat(32),
-  schoolId: 'pu', destination: '個人行事曆（無推播提醒）',
+  schoolId: 'pu', destination: '個人行事曆（無推播提醒）', coursework: false,
   args: { title: item.title, date: '2030-11-16', allDay: false, startTime: '14:00', endTime: '16:00' },
 });
 const original = (): V2Card => ({ ...cardFor(), token: 'original-study-token', mutationId: 'av2_' + 'a'.repeat(32),
@@ -119,7 +120,13 @@ async function readEvents() {
 const selectEvent = () => fireEvent.click(screen.getByRole('button', { name: '將校園音樂工作坊加入個人行事曆' }));
 
 it('previews only the selected event in an independent conversation, then confirms with its original card', async () => {
-  const requests = mockServer();
+  const requests = mockServer({ override: request => {
+    if (request.action === 'confirm') {
+      const saved = readAssistantExecutionJournal({ owner: 'platform:alice', schoolId: 'pu', context: auth.context });
+      expect(saved[0].card.coursework).toBe(false);
+    }
+    return undefined;
+  } });
   render(<Assistant />);
   const question = await readEvents();
   expect(requests.filter(request => request.action === 'event-preview')).toHaveLength(0);

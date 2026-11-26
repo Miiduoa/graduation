@@ -1,10 +1,11 @@
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import {
   assistantServiceHref,
   ASSISTANT_SERVICE_CATEGORY_LABELS,
   getAssistantService,
   type AssistantServiceId,
 } from '@campus/shared/src/assistantServices';
+import type { LocalAssistantResult } from '@/lib/assistantLocalActions';
 import styles from './AssistantServiceLinks.module.css';
 
 export function AssistantServiceLinks({
@@ -25,10 +26,10 @@ export function AssistantServiceLinks({
   const links = (items: typeof services) => (
     <nav className={styles.grid} aria-label="接續服務">
       {items.map((service) => (
-        <Link className={styles.link} href={service.href} key={service.id}>
+        <AssistantReplyLink className={styles.link} href={service.href} key={service.id}>
           <strong>開啟{service.label}</strong>
           <span>{service.summary}</span>
-        </Link>
+        </AssistantReplyLink>
       ))}
     </nav>
   );
@@ -47,4 +48,25 @@ export function AssistantServiceLinks({
       })}
     </details>
   ) : links(services);
+}
+
+export function LocalAssistantLinks({ result, schoolId, audience = 'school' }: {
+  result: LocalAssistantResult;
+  schoolId: string;
+  audience?: 'school' | 'platform';
+}) {
+  const calendarEvents = result.calendarEvents ?? [];
+  return <>
+    {calendarEvents.length > 0 && (
+      <nav className={styles.grid} aria-label="重疊的個人行程">
+        {calendarEvents.map(event => (
+          <AssistantReplyLink key={event.id} className={styles.link} prefetch={false}
+            href={'/calendar?' + new URLSearchParams({ schoolId, eventId: event.id })}>
+            查看行程「{event.title}」
+          </AssistantReplyLink>
+        ))}
+      </nav>
+    )}
+    <AssistantServiceLinks serviceIds={result.serviceIds} schoolId={schoolId} audience={audience} />
+  </>;
 }

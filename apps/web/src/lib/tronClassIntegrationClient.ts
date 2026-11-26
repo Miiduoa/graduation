@@ -24,6 +24,7 @@ export class TronClassRequestError extends Error {
     readonly code: string,
     message: string,
     readonly status = 0,
+    readonly sourceRevision?: string,
   ) {
     super(message);
     this.name = 'TronClassRequestError';
@@ -240,10 +241,26 @@ export function parseTronClassResult(action: string, value: unknown, input: Reco
         (item) =>
           isRecord(item) &&
           (item.courseId === null || isId(item.courseId)) &&
-          ['courses', 'homework', 'materials', 'announcements'].includes(String(item.area)) &&
+          typeof item.area === 'string' &&
+          ['courses', 'homework', 'materials', 'announcements'].includes(item.area) &&
           isText(item.message),
         1000,
       )
+    )
+      return invalidResponse();
+    const snapshot = value as TronClassSnapshot;
+    const courses = new Set(snapshot.courses.map((course) => course.id));
+    const homework = new Set(snapshot.homework.map((row) => `${row.courseId}:${row.id}`));
+    // Match native: partial sync may report missing courses as errors, but
+    // their private content must not cross the response boundary.
+    const outsideCourseScope = (row: { courseId: number | null }) =>
+      row.courseId !== null && !courses.has(row.courseId);
+    if (
+      courses.size !== snapshot.courses.length ||
+      homework.size !== snapshot.homework.length ||
+      snapshot.homework.some((row) => !courses.has(row.courseId)) ||
+      snapshot.announcements.some(outsideCourseScope) ||
+      snapshot.materials.some(outsideCourseScope)
     )
       return invalidResponse();
   } else if (action === 'prepare') {
@@ -268,6 +285,9 @@ export function parseTronClassResult(action: string, value: unknown, input: Reco
       !(value.receipt === null || isReceipt(value.receipt))
     )
       return invalidResponse();
+    if (input.revision !== undefined && value.revision !== input.revision) {
+      throw new TronClassRequestError('TRONCLASS_BINDING_CHANGED', 'TronClass 連線已變更，請重新讀取後再操作。', 409);
+    }
     if (value.rules !== undefined) {
       const rules = value.rules;
       if (!isRecord(rules)) return invalidResponse();
@@ -376,6 +396,7 @@ export function createTronClassClient(identity: TronClassIdentity) {
   }
 
   async function request<T>(action: string, input: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted();
     const authHeaders = await headers();
     signal?.throwIfAborted();
     const deadline = AbortSignal.timeout(action === 'connect' || action === 'disconnect' ? 90000 : 60000);
@@ -418,19 +439,19 @@ export function createTronClassClient(identity: TronClassIdentity) {
   }
 
   return {
-    status: () => request<TronClassConnection>('status'),
-    connect: (account: string, password: string, expectedRevision: string | null) =>
+    status: (signal?: AbortSignal) => request<TronClassConnection>('status', {}, signal),
+    connect: (account: string, password: string, expectedRevision: string | null, signal?: AbortSignal) =>
       request<TronClassConnection>('connect', {
         schoolId: 'pu',
         account,
         password,
         expectedRevision,
-      }),
+      }, signal),
     disconnect: (expectedRevision: string | null) =>
       request<TronClassConnection>('disconnect', { expectedRevision }),
-    courses: (signal?: AbortSignal) => request<TronClassCourseIndex>('courses', {}, signal),
-    sync: (courseId?: number, signal?: AbortSignal) =>
-      request<TronClassSnapshot>('sync', courseId === undefined ? {} : { courseId }, signal),
+    courses: (signal?: AbortSignal, revision?: string) => request<TronClassCourseIndex>('courses', { revision }, signal),
+    sync: (courseId?: number, signal?: AbortSignal, revision?: string) =>
+      request<TronClassSnapshot>('sync', { courseId, revision }, signal),
     async downloadMaterial(input: {
       courseId: number;
       activityId: number;
@@ -462,8 +483,8 @@ export function createTronClassClient(identity: TronClassIdentity) {
       }
       return downloadFile('/api/tronclass/submission-attachment', input, signal);
     },
-    prepare: (courseId: number, homeworkId: number) =>
-      request<TronClassPreparation>('prepare', { courseId, homeworkId }),
+    prepare: (courseId: number, homeworkId: number, revision: string) =>
+      request<TronClassPreparation>('prepare', { courseId, homeworkId, revision }),
     submit: (input: {
       courseId: number;
       homeworkId: number;

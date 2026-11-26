@@ -18,6 +18,7 @@ on:
       - 'apps/web/src/components/QuickCampusEntry*'
       - 'apps/web/src/components/VoiceDictationButton*'
       - 'apps/web/src/components/PageRecovery*'
+      - 'apps/web/src/components/PageLoadingCard*'
       - 'apps/web/src/app/error.tsx'
       - 'apps/web/src/app/not-found.tsx'
       - 'apps/web/src/app/search/**'
@@ -36,6 +37,13 @@ on:
       - 'apps/web/src/lib/community/firestore.ts'
       - 'apps/web/src/app/page.tsx'
       - 'packages/shared/src/assignmentFiles.ts'
+      - 'apps/web/src/components/timetable/CourseEditor*'
+      - 'apps/web/src/components/timetable/timetable.module.css'
+      - 'apps/web/src/components/imports/PersonalImportCenter*'
+      - 'apps/web/src/components/imports/PersonalImport.module.css'
+      - 'apps/web/src/lib/personalImports*'
+      - 'apps/web/src/lib/usePersonalImports*'
+      - 'apps/web/src/lib/scrollBehavior*'
       - 'apps/web/src/app/globals.css'
       - 'apps/web/src/app/home.module.css'
       - 'apps/web/src/lib/campusNavigation*'
@@ -65,7 +73,7 @@ jobs:
   browser:
     name: Navigation, motion and feedback on desktop and mobile
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       TZ: Asia/Taipei
       NEXT_TELEMETRY_DISABLED: '1'

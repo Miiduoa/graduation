@@ -1,5 +1,5 @@
 import type { StudyMode, StudyPassage } from '@/lib/studyTutor';
-import { STUDY_SESSION_LIMITS, hasVisibleStudyAttempt, hasVisibleStudyContent, type StudyPassageMemory } from './courseStudySession';
+import { STUDY_SESSION_LIMITS, type StudyPassageMemory } from './courseStudySession';
 import { locateStudyEvidence } from './studyEvidence';
 import { courseStudyNotesFilename } from './courseStudyNotes';
 
@@ -71,8 +71,19 @@ function emptyResponse(): StudyPracticeResponse {
   return { attempt: '', answerVisible: false, hintVisible: false, outcome: null };
 }
 
-// Preserve the public import path used by practice/checkpoint consumers.
-export { hasVisibleStudyAttempt } from './courseStudySession';
+/**
+ * A pasted response made only of whitespace, direction markers, joiners or
+ * variation selectors is not a visible attempt. Do not unlock the reference
+ * answer or count it as answered. Visible text, symbols, numbers and emoji
+ * remain valid. This only affects practice presentation, not the v1 backup
+ * schema or source text.
+ */
+export function hasVisibleStudyAttempt(attempt: string): boolean {
+  // Standalone accent/enclosing marks and U+2800 Braille blank are not
+  // substantive answers. A mark attached to a real letter, and a nonblank
+  // Braille cell, still have a visible base and remain valid.
+  return attempt.replace(/[\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800]/gu, '').length > 0;
+}
 
 /** Read actual source order and only the selected lesson of the requested mode. */
 export function buildStudyPracticeDeck(
@@ -280,26 +291,18 @@ export function buildCourseStudyPracticeNotes(
       `第 ${index + 1} 題／共 ${round.cards.length} 題`,
       `原文位置：${card.label}`,
       `讀法：${modeLabels[card.mode]}・第 ${card.lessonId} 次講解`,
-      '自我檢查題：', hasVisibleStudyContent(card.question)
-        ? card.question : 'AI 未提供可讀題目，請對照本段原文自行練習',
+      '自我檢查題：', card.question,
       '', '本輪試答：', hasVisibleStudyAttempt(response.attempt) ? response.attempt : '（尚未作答）',
       `本人自評：${response.outcome ? outcomeLabels[response.outcome] : '尚未自評'}`,
       `原文提示：${response.hintVisible ? '已展開' : '未展開'}`,
     );
-    if (canRevealAnswer) {
-      if (hasVisibleStudyContent(card.answer))
-        lines.push('', '參考回答（本輪已展開）：', card.answer);
-      else
-        lines.push('', '參考回答：AI 未提供可讀回答，請對照本段原文');
-    }
+    if (canRevealAnswer) lines.push('', '參考回答（本輪已展開）：', card.answer);
     if (response.hintVisible || canRevealAnswer) {
       // Practice cards snapshot a generated quote. Only the exact current
       // passage can justify an "original source quote" label in exported TXT.
       // An opened hint never turns an AI fabrication into source evidence.
       lines.push('');
-      if (!hasVisibleStudyContent(card.sourceQuote)) {
-        lines.push('AI 引句：未提供可讀引句');
-      } else if (locateStudyEvidence(card.sourceText, card.sourceQuote)) {
+      if (locateStudyEvidence(card.sourceText, card.sourceQuote)) {
         lines.push('原文引句：', card.sourceQuote);
       } else {
         lines.push('AI 引句（無法在本段逐字定位）：', card.sourceQuote);

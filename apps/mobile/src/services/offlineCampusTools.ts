@@ -10,6 +10,14 @@ import { buildOfflineCampusPlan, type CampusEvidencePlan } from './offlineCampus
 import { ASSIGNMENT_PAGE_SIZE } from './assignmentResultPage';
 import { isNuniReceiptStatusFollowUp } from './nuniReceiptQuery';
 
+function copySnapshotItems<T>(items: T[]): T[] {
+  const copy = new Array<T>(items.length);
+  for (let index = 0; index < copy.length; index += 1) {
+    if (index in items) copy[index] = items[index];
+  }
+  return copy;
+}
+
 export interface AssignmentPageRequest {
   offset: number;
   asOf: number;
@@ -438,8 +446,16 @@ export function runOfflineCampusTool(
       content: '已同步的摘要只列待交項目。請在原始課程頁核對繳交紀錄。' };
   }
   const now = Date.parse(context.checkedAt);
-  const snapshot = Number.isFinite(now)
+  const verified = Number.isFinite(now)
     ? validCampusSenseSnapshot(senseSnapshot, { uid: ownerUid, schoolId: context.schoolId }, now) : null;
+  // Query helpers receive local arrays and keep the original evidence rows.
+  const snapshot = verified && {
+    ...verified,
+    assignments: { ...verified.assignments, items: Array.isArray(verified.assignments?.items)
+      ? copySnapshotItems(verified.assignments.items) : verified.assignments?.items },
+    announcements: { ...verified.announcements, items: Array.isArray(verified.announcements?.items)
+      ? copySnapshotItems(verified.announcements.items) : verified.announcements?.items },
+  };
   // A deadline list (including “未來七天”) is a query over assignments, not a study plan.
   const assignmentOnly = (askingAssignments || assignmentFilterQuestion !== undefined) &&
     !PRIORITY_QUESTION.test(intent) && !/安排|規劃|計畫|優先順序|公告|通知|提醒|課表|空堂/.test(intent);

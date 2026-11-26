@@ -360,3 +360,100 @@ export async function recheckCourseworkStudySlot(slot: CourseworkStudySlot, cont
     return { kind: result.kind === 'no-slot' ? 'changed' : result.kind, message: result.message };
   }
 }
+
+/** A requested personal work interval on one Taipei date. Bounds are inclusive of the whole requested range. */
+export type WorkSessionWindow = Readonly<{ date: string; from: string; to: string; minutes: number }>;
+export type WorkSessionSlot = Readonly<{ date: string; startTime: string; endTime: string; checkedAt: string }>;
+export type WorkSessionSlotResult = Failure | { kind: 'available'; slot: WorkSessionSlot; checkedAt: string };
+export type WorkSessionTimeCheck = CourseworkStudyTimeCheck;
+
+function workWindow(window: WorkSessionWindow): { start: number; end: number; day: number } {
+  const minutes = window?.minutes;
+  if (!window || typeof window.date !== 'string' || !isPersonalImportDate(window.date) ||
+      typeof window.from !== 'string' || !isPersonalImportTime(window.from) ||
+      typeof window.to !== 'string' || !isPersonalImportTime(window.to) ||
+      !Number.isInteger(minutes) || minutes < 15 || minutes > 180)
+    throw new AvailabilityError('blocked', '工作時段的日期、時間範圍或長度無法核對，請重新提出完整的需求。');
+  const start = Date.parse(`${window.date}T${window.from}:00+08:00`);
+  const end = Date.parse(`${window.date}T${window.to}:00+08:00`);
+  const day = Date.parse(`${window.date}T00:00:00+08:00`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(day) || end - start < minutes * 60_000)
+    throw new AvailabilityError('blocked', '指定的時間範圍無法容納這段工作時間，請重新提出需求。');
+  return { start, end, day };
+}
+
+/** Fail closed on an expired window, or one beyond today plus six days, without reading private data. */
+function workWindowBlock(bounds: { end: number; day: number }): string | null {
+  const now = Date.now();
+  const midnight = Date.parse(`${classDate(new Date(now))}T00:00:00+08:00`);
+  if (bounds.end <= now || bounds.day < midnight) return '指定的日期或時段已過，沒有可安排的未來時段。請重新指定。';
+  if (bounds.day >= midnight + 7 * DAY) return '指定日期超出今天起七天的查詢範圍，請重新指定日期。';
+  return null;
+}
+
+/**
+ * Earliest strictly-future five-minute-grid interval of the requested length inside the whole window.
+ * Candidates exist only inside class-bounded gaps that already hold the ten-minute margins.
+ */
+function earliestFit(gaps: readonly CampusClockInterval[], lower: number, upper: number, minutes: number): Interval | null {
+  let best: Interval | null = null;
+  for (const gap of gaps) {
+    const start = Math.ceil(Math.max(Date.parse(gap.startAt), lower) / GRID) * GRID;
+    const end = start + minutes * 60_000;
+    if (end <= Math.min(Date.parse(gap.endAt), upper) && (!best || start < best.start)) best = { start, end };
+  }
+  return best;
+}
+
+/** Read-only. A blank day, or time outside class-bounded gaps, is never evidence of availability. */
+export async function findWorkSessionSlot(context: AssistantCalendarContext, window: WorkSessionWindow,
+  options: { signal?: AbortSignal } = {}): Promise<WorkSessionSlotResult> {
+  try {
+    if (options.signal?.aborted) return { kind: 'blocked', message: STOPPED };
+    const bounds = workWindow(window);
+    const early = workWindowBlock(bounds);
+    if (early) return { kind: 'blocked', message: early };
+    const evidence = await readEvidence(context, options.signal);
+    const late = workWindowBlock(bounds);
+    if (late) return { kind: 'blocked', message: late };
+    const gaps = freeWindows(evidence, window.date);
+    if (gaps === null) return { kind: 'unavailable', message: UNAVAILABLE };
+    const chosen = earliestFit(gaps, Math.max(bounds.start, Date.now() + 1), bounds.end, window.minutes);
+    if (options.signal?.aborted || !sameGeneration(evidence.generation, context)) return { kind: 'blocked', message: CHANGED };
+    if (!chosen) return { kind: 'no-slot', message: `${window.date} ${window.from}–${window.to} 內，已存課表的課間空堂沒有足夠的 ${window.minutes} 分鐘。` };
+    return { kind: 'available', checkedAt: evidence.checkedAt, slot: Object.freeze({ date: window.date,
+      startTime: clock(chosen.start), endTime: clock(chosen.end), checkedAt: evidence.checkedAt }) };
+  } catch (error) { return failure(error); }
+}
+
+/**
+ * Re-read the exact original interval for a confirmation. Changed evidence blocks the
+ * write; it never selects another time. The ledger fingerprint is compared inside the write lock.
+ */
+export async function recheckWorkSessionTime(time: { date: string; startTime: string; endTime: string },
+  window: WorkSessionWindow, context: AssistantCalendarContext, signal?: AbortSignal): Promise<WorkSessionTimeCheck> {
+  try {
+    if (signal?.aborted) return { kind: 'blocked', message: STOPPED };
+    const bounds = workWindow(window);
+    if (!time || time.date !== window.date || typeof time.startTime !== 'string' || !isPersonalImportTime(time.startTime) ||
+        typeof time.endTime !== 'string' || !isPersonalImportTime(time.endTime))
+      return { kind: 'blocked', message: '這份工作時段的日期或時間無法核對，請重新尋找空堂。' };
+    const start = Date.parse(`${time.date}T${time.startTime}:00+08:00`);
+    const end = Date.parse(`${time.date}T${time.endTime}:00+08:00`);
+    if (!Number.isFinite(start) || end - start !== window.minutes * 60_000 || start % GRID !== 0 ||
+        start < bounds.start || end > bounds.end)
+      return { kind: 'blocked', message: '這份時段不是原本需求範圍內可核對的空堂，請重新尋找。' };
+    if (workWindowBlock({ end, day: bounds.day }) || start <= Date.now()) return { kind: 'changed', message: CHANGED };
+    const evidence = await readEvidence(context, signal);
+    if (signal?.aborted || !sameGeneration(evidence.generation, context)) return { kind: 'blocked', message: CHANGED };
+    const gaps = freeWindows(evidence, time.date);
+    if (gaps === null) return { kind: 'unavailable', message: UNAVAILABLE };
+    if (workWindowBlock({ end, day: bounds.day }) || start <= Date.now() ||
+        !gaps.some((gap) => start >= Date.parse(gap.startAt) && end <= Date.parse(gap.endAt)))
+      return { kind: 'changed', message: CHANGED };
+    return { kind: 'ready', writeCheck: writeCheck(evidence, start, context, signal) };
+  } catch (error) {
+    const result = failure(error);
+    return { kind: result.kind === 'no-slot' ? 'changed' : result.kind, message: result.message };
+  }
+}

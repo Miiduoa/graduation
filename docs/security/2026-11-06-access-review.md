@@ -1073,3 +1073,101 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - 程式與測試精確本地提交 `02b56d2c490ab5e130dbfe70f87b6bb00affbcdd`，tree `60eca1f9f9a171ff49a4815ab22974f9f352ba99`。使用 Node `22.23.5`、Firebase CLI `15.34.1`、Rules testing `5.0.0`、Firebase `12.8.0`、Java 21，真正 Firestore `1.22.0`／Storage rules `1.1.3` Emulator。`node --test backend/tests/club-admin-rules.test.cjs` 為 **5/5**；`node --test --test-name-pattern="firestore security rules|course assignment submissions|campus story" backend/tests/security-rules.test.js` 為 **137/137**，兩者均 **0 failed／0 skipped**，同一 emulators:exec 終態 exit 0。包含所有本輪新增安全案例、合法首次評分／原子更正、同登入狀態撤權及恢復；預期拒絕測試的 PERMISSION_DENIED 訊息不算失敗。
 - 本機較廣範圍執行的既有 Storage 正向案例 `only a story draft owner can replace its photo before publication` 仍出現 `storage/unauthorized`／Storage member lookup null，觀察到具體失敗後停止該較廣測試；未將其算入成功。以原 `000fd11c` 的原始 Rules、原始測試及相同工具鏈亦重現同一案例失敗。本輪沒有更改 Storage 規則、刪除測試或放寬授權；最終整合版本仍需在標準 GitHub CI 完整重跑跨產品 Emulator。
 - 本節是來源整合與本機回歸紀錄，沒有代替最終總整合 SHA 的 CI、CodeQL、Maestro 或指定 App 5504170「審查通過」。沒有推送 main、操作正式資料、遷移、金鑰或部署；歷史含 teacherNotes／錯綁／缺少 canonical 校籍的資料須依既有資料邊界處理。
+### 2026-11-22｜校籍轉換後的舊校群組建立權限重放（隔離驗證候選）
+
+- **來源缺口**：`groups/{groupId}` 的 create 僅檢查 target `schoolId` 的 membership 與 creator UID。若 canonical `users/{uid}.schoolId/primarySchoolId` 已轉校但舊校 membership 仍 active，持有舊登入狀態者仍可建立舊校群組，造成權限撤銷與新資源建立不一致。此為來源／合成身份的授權缺口，沒有正式環境利用證據。
+- **最小修改**：僅把群組 create 的 membership predicate 替換為既有 `isConsistentRootPostSchoolMember(request.resource.data.schoolId)`；該 helper 要求 server-bound canonical profile、舊校會員有效且兩個有值的校籍欄位無衝突。原 `createdBy` 與 `verification.status=unverified` 限制保留。沒有擴大其他群組操作、教師成績寫入或正式資料權限。
+- **合成回歸**：新增 `new group creation cannot replay stale school membership after transfer`，在真 Firebase Emulator 檢驗同一登入 context 正常建立、跨校拒絕、轉校後同時重放、現職校園建立、衝突校籍、canonical 帳號刪除、學籍撤權與恢復。分開推送原 Rules + 新測試的 RED 版本，便於反證修補必要性。
+- **本文件階段**：僅屬候選原始碼及回歸，精確 SHA 的 GitHub Actions／Emulator RED-GREEN 結果必須由工作流程實際日誌取得；若原合法測試失敗須先修復。完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、指定 App 5504170 審查與正式發布均未因這個候選自動完成。
+- **範圍／限制**：只做隔離合成測試及 GitHub feature 分支推送，不執行遭拒的 npm/pnpm audit，不碰 E 校園、正式資料／金鑰／附件 token、migration、部署。既有 grading 原子更正、歷史 staff-only 備註、GCS／Supabase 已發 URL 撤銷及真 Storage CAS 仍未解決。
+
+
+
+- **獨立 RED（原 Rules + 同一新增測試）**：[`5b08c98d1bf75345103d4245094c88634d00c0b0`](https://github.com/Miiduoa/graduation/commit/5b08c98d1bf75345103d4245094c88634d00c0b0)；[Actions #44986136524](https://github.com/Miiduoa/graduation/actions/runs/44986136524) 已 `completed/failure`，Firestore／Storage／transaction Emulator **555/556 pass、1 fail、0 skip**；新案例 `new group creation cannot replay stale school membership after transfer` `not ok 1`，實際失敗是 `Expected request to fail, but it succeeded.`。此為刻意保留的原規則漏洞再現，不是修補版失敗。
+- **精確 GREEN 程式 SHA**：[`dc2ddaeeabcd8b3cc6aec3ca8cc10deb72cf5293`](https://github.com/Miiduoa/graduation/commit/dc2ddaeeabcd8b3cc6aec3ca8cc10deb72cf5293)；[Actions #44986140349](https://github.com/Miiduoa/graduation/actions/runs/44986140349)、[job 137097009535](https://github.com/Miiduoa/graduation/actions/runs/44986140349/job/137097009535) 已 `completed/success`。同一新案例 `ok 1`，真 Emulator **556/556 pass、13 suites、0 fail/skip**，Web Emulator **56/56**，Functions DM **148/148**，Mobile DM **112/112**，Web DM **177/177**，合計 **1,049/1,049**；Mobile／Web typecheck、Web ESLint、Web Build 亦成功。這是完整定向 Firebase 工作流程成功，並**非**新 SHA 的完整 PR CI。
+- **版本／發布邊界**：此安全分支從原 `6d42b9dbb4995037cbdefb556f05f5b9758d4a9d` 以 `expected_sha`、`force=false` 推進，新程式對原版本的 diff 只有 Rules 3 增 1 刪、測試 46 行新增及安全紀錄。與主線整合須重新檢查最新精確 base/head，且仍缺完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、nuni-merge-gate App 5504170 的「審查通過」；此輪沒有自行合併或部署。此證據紀錄若另有純文件提交，不能將該 SHA 的 CI 誤寫為原程式提交結果。
+
+
+### Course curriculum stale teacher writes (2026-11-22)
+
+**Isolation-only change — not deployed.** The original manager predicate checks active group/school membership but does not require the *current* canonical school after a transfer. Consequently, an instructor with retained old-campus membership can mutate course `knowledgeBase`, module/material records, quizzes and milestones. No production exploitation is asserted.
+
+**Minimal patch**: only the create/update/delete permissions of these five curriculum object types now use the existing `canManageCurrentGroup(groupId)` school-consistency predicate. KnowledgeBase remains nondeletable and retains existing assignment-field restrictions. Reads and grading/atomic revision logic are unchanged, so the earlier Firestore 1000-expression issue is not widened.
+
+**Reproducible regression**: `backend/tests/security-rules.test.js` adds `stale campus managers cannot rewrite course materials and quizzes after transfer`, with synthetic campus/group membership, authorized teacher and unauthorized student; same authenticated teacher SDK context after server-side campus transfer; stale writes/creates/deletes, conflicting school fields, school and group revocation, replay and restoration. RED test-only branch commit `da308484b0592c254a72c4f0bc9b1fc43ff81b57`, retaining the old production Rules, is evidence of the prepatch behavior, while this security branch carries the tightened Rules and the *same* test. CI results must be tied to exact commit; pending independent check until GitHub reports it. No real user data, E-campus access, deployment, migration, external audit transmission or privileged token cleanup was attempted.
+
+**Release hold**: canonical legacy accounts without a valid school binding will be denied this teaching content write path; assess in isolated data before rollout. Full CI, CodeQL, Supabase permissions, Python security, Mobile Agent Regression, applicable Maestro, GCS signed-URL revocation/staging and required nuni-merge-gate App 5504170 check remain separate gates.
+
+**Initial RED/GREEN evidence and fixture correction:** [RED run #45003965495](https://github.com/Miiduoa/graduation/actions/runs/45003965495) reported 556/557 with one deliberate failure `Expected request to fail, but it succeeded` at test line 180 under the original rules. [First GREEN run #45004012091](https://github.com/Miiduoa/graduation/actions/runs/45004012091) also reported 556/557 because the new test wrongly required a successful `knowledgeBase` deletion even though production Rules deliberately reject that operation for every actor. Correct the test to assert that deletion remains rejected, while retaining valid deletion for modules/materials/quizzes/milestones. No security rules were loosened. This follow-up commit requires fresh full regression and release checks.
+
+
+### 2026-11-22｜轉校教師不可憑舊校教職讀取出席 QR 機密、其他學生成員出席與更正紀錄（隔離候選）
+
+- **版本與來源**：以安全分支 `0402812dc8417ef7a6a3630860d77ae1d5b5c9a5` 為父提交，核對當時 main `d6c489922c912087a3734b4bceae214523a31ee8`。保留原 feature 分支；程式、回歸與此原始紀錄同一提交，以 GitHub expected_sha / force=false 前進。
+- **來源缺口**：`groups/{groupId}/liveSessionSecrets` 教師 QR token GET、`attendanceSessions/{sessionId}/attendanceRecords` 班級全員出席收據管理讀取與 `attendanceCorrections` 教師更正紀錄，只核對舊校及舊群組 active membership；教師 canonical 雙校籍已部分或完全轉移，但舊 membership 尚在時可由舊認證 context 繼續讀取。這是 Rules 推得的可利用路徑，**不是正式環境洩露證據**。
+- **最小修補**：三個教師敏感 read 分支要求 `isActiveCurrentGroupMember` 或 `canManageCurrentGroup`，仍需原有 instructor/owner 或 manager 權限。保留學生讀本人 attendanceRecords、維持 admin 不可讀 QR、歷史 v1 parent 不可讀及伺服器專用寫入。沒有更動 QR token 的已發網址生命周期，也不宣稱已失效。
+- **可重跑測試**：`backend/tests/security-rules.test.js` 的 `transferred staff cannot replay attendance QR secrets, private roster or correction logs` 使用 Firebase Emulator 合成教師、owner、admin、學生及第二校，在**同一認證 context** 模擬 canonical schoolId／primarySchoolId 衝突、學校／群組會員撤銷、刪除 canonical profile、連續重放與恢復；合法讀取及跨帳號拒讀均納入；舊 attendance fixture 新增由模擬器管理者設定的伺服器校籍，不放寬 Rules。
+- **驗證界線**：精確新 SHA 必須由真 Firebase Emulator／既有 CI 重新驗證；未取得前不能宣稱 GREEN。完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、nuni-merge-gate App 5504170 對精確整合 head 審查及正式發布仍為獨立限制。正式校籍資料缺失者將 fail-closed，需隔離盤點補齊，不做正式 migration。GCS/Supabase 已發網址撤銷、Storage 競態、教師成績寫入、教師備註歷史移轉、minimatch 相容性仍未結案。未執行遭拒的 npm/pnpm audit，未動正式資料、金鑰、token、E 校園、合併或部署。
+
+- **首次 Emulator 失敗與合法 fixture 補正（2026-11-22 12:47 UTC）**：新安全 SHA `04387a7de1fc7259b4dcd8502e78b72f296e717f` 的 [Security rules and transactions #45023813110](https://github.com/Miiduoa/graduation/actions/runs/45023813110) 及 [CI Firestore #45023818780](https://github.com/Miiduoa/graduation/actions/runs/45023818780) 為 **557/558 pass、1 fail、0 skipped**。新加入的 `transferred staff cannot replay attendance QR secrets, private roster or correction logs` 確實 `ok 4`，原有 `only active instructors may read immutable attendance corrections` 因測試教師只有舊校與班級 membership、缺 `users/teacher` 的 server-bound canonical 校籍而被新的 fail-closed 規則拒讀。此次**只**用隔離測試管理者補上該合法教師的 `campusBoundProfile('tw-demo-uni')`，不降低安全規則。新提交的 CI／Emulator 成果需要重新核對。正式歷史教師缺 canonical 校籍的相容性仍需受控盤點，不執行正式 migration。
+
+
+## 2026-11-23｜私有 AI 知識片段的舊校籍重放讀取（隔離候選）
+
+- **現象與範圍**：舊校 `schools/{schoolId}/aiKnowledge` 的 school visibility 及 editor 私有片段，只核對可殘留的學校會員角色；`groups/{groupId}/aiKnowledge` 私有課程片段只核對可殘留的群組／舊校會員。已轉校者若會員尚未被移除，原本的授權規則仍可能接受同一個登入 session 的 GET。這是規則上的可達邊界，未對正式用戶或資料驗證，也不代表已發生資料外洩。
+- **最小修補**：學校 scope 保留 public 可匿名讀取；school 或僅 editor 可讀取的片段改要求既有雙校籍欄位一致的 canonical profile 與 active 校籍。群組私有片段改要求 `isActiveCurrentGroupMember(groupId)`，保留有效群組成員正常讀取；兩種路徑維持伺服器唯寫。
+- **合成回歸**：新增 `transferred campus members cannot replay private AI knowledge reads`，覆蓋正常 school/student/editor、公開片段、陌生帳號、連續舊會話重放、校籍遷移與雙欄位衝突、校籍／群組撤銷、刪除 canonical 帳號與恢復。本次測試不連學校、正式環境或外部 RAG 服務。
+- **精確來源**：前一版完整 CI/CodeQL 對應 `15e833793af4ff7d22d3c7595db454a91c278275`，兩者已 success；新測試-only RED commit `b9f3b34cb4cd81889d84c00d4531d86e73a21a74`；本次 GREEN Rules/文件提交須以 GitHub 新 SHA 自動回歸結果確認，不能提前宣稱通過。
+- **尚未發布**：CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、review threads 與指定 nuni-merge-gate App 5504170 必須依最終精確 head 再核對。正式 GCS/Storage token 清理與 staging 競態、歷史備註分離、成績原子更正仍未解決；本次沒有部署、migration、正式金鑰及 E 校園存取。直接 npm/pnpm audit 的外送限制持續維持。
+
+
+## 2026-11-23｜轉校教師不得沿用舊校資格寫入成績與原子修訂（隔離候選，待 CI）
+
+- 來源：沿用安全 PR #743 的 `1726012808ed101d8da81f3143656db68a41b312`，截至修改前新 SHA 的完整 CI、CodeQL、Firestore emulator 均成功，review／unresolved threads 為 0，但尚未取得指定 nuni-merge-gate App 5504170 的「審查通過」。此候選仍不具合併／發布資格。
+- 風險：巢狀 `submissions` 第一筆正式評分、舊版暫定評分，以及已發布成績的原子 `gradeRevisions` 雙寫，仍只使用 `canManageGroup`。同一舊登入 context 在教師已轉校而舊 membership 尚未撤銷時，可能寫入舊校成績與稽核軌跡。屬規則可達性缺口，非正式資料遭濫用的證據。
+- 最小修補：將上述三條教師寫入支線改為 `canManageCurrentGroup(groupId)`。學生首次作答分支、正式成績的欄位限制／必須同交易寫入稽核紀錄，以及唯新增且不可竄改 revision 的條件均保持原樣。
+- 新增 `transferred teachers cannot replay initial grading or audited corrections with old memberships` 真 Firebase emulator 測試，使用合成資料與同一登入 context，涵蓋正常第一筆正式／舊版評分、原子修訂、跨帳號拒絕、雙向校籍衝突、學校／課程撤權、連續重放與恢復。需核對精確新 SHA 的 emulator，尤其原子修訂 Firestore Rules 1,000-expression 上限；本紀錄尚不宣稱已驗證通過。
+- 保持 npm/pnpm audit 外送限制、E 校園暫停、正式資料／金鑰／token／migration／部署禁止條件。正式 GCS/Supabase 舊 URL 撤銷與真 Storage CAS、歷史 teacherNotes 移轉、minimatch 相容性及指定 App 5504170 核可仍未解決。
+
+### 2026-11-23：首次成績撤權修補造成既有合法評分拒絕，進行規則運算量精簡
+
+- GitHub 精確 6418245b1cf183f55439f8345057f8ee73ea113a 的 Firestore Rules workflow 45067898798 實際失敗：560 tests，557 passed、3 failed、0 skipped。失敗包括 legacy first grade、新增 transfer grading，以及原子 immutable revision；原因均為 Firestore 1000 expressions evaluated 上限，並非越權操作成功。
+- 此修補繼續強制教師目前校籍與有效教學資格，減少重複評估 group manager 角色、重複 group-school membership 及 grade helper 中已受外層 current manager 保護的 school membership。不修改稽核欄位與原子修訂相互驗證。必須在新精確 head 完成 Emulator 及 CI 才能宣稱修復。
+- 仍禁止未授權直接 pnpm/npm audit；未操作正式資料、金鑰、歷史附件 token、migration、E 校園、main 合併或部署。指定 App 5504170 審查、GCS/Supabase 已發網址撤銷、Storage 真實競態、教師備註移轉仍未結案。
+
+## 2026-11-23｜轉校後學校醫療人員不得重放私人健康紀錄讀取（隔離候選）
+
+- **基準與範圍：** 安全 PR #743 原精確 head `6eeffc2b076751c5e5a680d5aec1006f43aaefca` 的 CI Summary、CodeQL、Firestore Rules、Security Gates、Web/Mobile Build 均已成功；PR reviews 與未解決 inline threads 均為 0，指定 nuni-merge-gate App 5504170 仍未對候選核可。當時 main 為 `1a1f368630352a9c99d80fe21033b74154c5509d`，兩分支 diverged。實際合併與部署禁止條件不變。
+- **獨立發現：** 學校 `healthRecords` 與 `healthAppointments` 的管理員、health 服務角色讀取僅依舊校 active membership／serviceRoles，可在帳號伺服器校籍已轉到其他學校、舊授權收據未撤銷時繼續精確 GET 舊校其他學生的私密健康資料。這是原始 Rules 潛在授權漏洞，不代表正式資料已遭存取。
+- **最小修補：** 僅對兩個集合的教職管理員／health 服務人員讀取額外套用既有 `isConsistentRootPostSchoolMember(schoolId)`：canonical profile 必須存在、有效校籍與雙校籍欄位不得矛盾，並要求當前學校會員資格與角色仍有效。**病患本人 `userId` 讀取支線不變**（即使轉校後仍可讀本人歷史資料），原本服務端唯寫不變。不可將此視為已撤銷先前發出的外部檔案 URL。
+- **可重跑合成回歸：** `backend/tests/security-rules.test.js` 新增 `transferred campus health staff cannot replay confidential patient records`：正常 admin／health staff／病患本人、其他學生／陌生人拒絕、轉校後使用同一登入 context 並行及重複讀取、雙校籍欄位衝突、來源學校會員撤權、health 角色撤權、canonical 帳號刪除及恢復。RED 測試-only 精確 commit [`5c66a5c56100531e2f9853fcb7584734a0a56c84`](https://github.com/Miiduoa/graduation/commit/5c66a5c56100531e2f9853fcb7584734a0a56c84)；其 GitHub Actions 結果須獨立核對。GREEN 規則／文件版本仍待精確 head 真 Firebase Emulator、CI 及審查驗證，不能提前宣稱通過。
+- **發行與其他殘餘風險：** 歷史單一校籍欄位及轉校後本人病歷讀取需端到端相容驗收。PR #738 尚須納入新安全 head、完整精確 head 檢查與 App 5504170 審查；正式 GCS／Supabase 已發網址撤銷、真 Storage CAS、教師私密備註分離、minimatch 雙鎖檔及正式發布／回復驗證仍待處理。未接觸正式資料、附件 token、migration、金鑰、E 校園或執行遭拒絕的 pnpm/npm audit。
+
+### 2026-11-23｜健康紀錄讀取修補首版：原有合法 staff fixture 缺少可信校籍
+
+- RED 測試-only `5c66a5c56100531e2f9853fcb7584734a0a56c84` 的 [Security rules and transactions #45090623998](https://github.com/Miiduoa/graduation/actions/runs/45090623998) 實際 **561 tests／560 pass／1 fail／0 skipped**，新增 `transferred campus health staff cannot replay confidential patient records` 在原規則下明確「Expected request to fail, but it succeeded」，定位到測試轉校後重放，證實舊權限可達。
+- 原 Rules 修補 `4125142c601292422a34ee819c9f64249caf12c6` 的 [Rules workflow #45090880485](https://github.com/Miiduoa/graduation/actions/runs/45090880485) 是 **561 tests／558 pass／3 fail／0 skipped**；新增越權回歸已 `ok 1`，失敗是 `school-responsibility-rules.test.cjs` 兩個合法健康集合管理員／health-staff 讀取與一次正常 editor 角色授權，fixture 沒建立可信 `users/admin`、`users/editor`、`users/health-staff` 的 canonical school profile。
+- 本次只補上述 **合成測試使用者** 的伺服器校籍資料，不改健康紀錄的 Rules 檢查、不把失敗當作可省略。需在後續精確 SHA 真 Firebase Emulator 再驗證所有測試、同一角色正常查詢與跨校撤權案例，不能提前宣稱 GREEN。未操作正式病歷、金鑰、token、migration、E 校園、發布或受限 audit。
+
+### PR #743 相容範圍收斂
+
+Firestore 規則採回 merge-base `40cbb474d2d435a784f5356b08a0984059903d82`。本節更新上文候選版本對下列路徑的描述，供後續重做時對照。
+
+| 規則範圍 | 起始 HEAD `480b5588` 與基準的差異及本輪結果 |
+| --- | --- |
+| 跨校登入 | 起始 HEAD 已撤除共用登入綁定的額外拒絕，沿用目標校有效資格。各功能在基準本來就有的個別條件仍適用。 |
+| 舊根集合貼文、留言與按讚收據 | 起始 HEAD 已撤除發布與封存狀態的額外限制。本輪採回讀取函式原式，依父貼文群組的有效會籍判斷。 |
+| 成績列與巢狀作業收據 | 撤除本人 UID 路徑的新擁有者一致性檢查。巢狀作業仍要求有效群組及校籍，根集合本人收據仍依既有欄位優先順序。 |
+| 舊作業指派評閱 | 評閱收據路徑與提交擁有者對應即可授權根集合提交讀取。撤除新增的群組、校籍與收據內嵌評閱者條件。 |
+| 退課或校籍撤銷後的互評 | 恢復本人評閱路徑的草稿與已提交紀錄讀寫。更新仍受基準的身分欄位條件約束。 |
+| 互評更新 | 恢復客戶端首次送出時間、重送刷新及單獨修改留言或分數。規則保護 `reviewerId` 與 `submissionOwnerId`，其餘更新沿用基準。 |
+
+兩版規則使用同一批測試資料與預期。未受指派的他人資料、撤權後依會籍控制的巢狀提交、目標校資格不足時的群組權限，以及舊按讚收據的建立權屬與禁止列舉，仍依基準拒絕。
+
+
+### 2026-11-23｜全分支整合沿用 #743 已審查的存取行為
+
+- 本輪以 `main b75017aa56c4211931662cf6b61933b47aeb0211` 整合 #738 的 `a3447cb016b7180d976884468e1c497a0cbfa7ff`。#743 最終 head `01509da46ef36c942b78a33ad2da681767a91190` 已取得指定 App 5504170 的「審查通過」後合入 main；其「相容範圍收斂」決策優先於上文較早候選紀錄。
+- 逐段比較本次自動合併的 Rules 與兩個來源：222 行差異均會重新加入 #743 已撤回的校籍一致性、根集合發布旗標、互評欄位及教師寫入額外限制。因此 `backend/firestore/firestore.rules` 沿用本輪 main 的完整原式，不把歷史修補的已驗證敘述當成目前主線行為。新增功能所需的 `_puTronClassLmsCache` 已在兩邊明確設定 `allow read, write: if false`，仍由伺服器處理。
+- 測試保留 main 的目標校資格、舊資料及 merge-base 相容矩陣；另保留 #738 獨有的本人歷史訂單相容測試，涵蓋轉學生／缺新欄位舊帳號讀取、停權／刪帳拒絕與跨帳號拒讀。俱樂部測試沿用 main，避免只以新增 canonical fixture 掩蓋舊會員相容性。
+- 兩邊的歷史來源及驗證紀錄均保留。以上是本輪衝突決策；最終整合 SHA 的 Emulator、完整 CI、CodeQL 與指定 App 審查須另行核對，不繼承 #743 或舊 #738 的成功狀態。

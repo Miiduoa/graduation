@@ -6,6 +6,7 @@ import {
   Pressable,
   Alert,
   Animated,
+  ScrollView,
   StyleSheet,
   Platform,
 } from 'react-native';
@@ -15,6 +16,7 @@ import * as Haptics from 'expo-haptics';
 import { Magnetometer, Accelerometer } from 'expo-sensors';
 import { Screen, Button, Pill, AnimatedCard } from '../ui/components';
 import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 import { useSchool } from '../state/school';
 import { canUseProvidencePathNetwork } from '../features/campusArScope';
 import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
@@ -126,13 +128,27 @@ function getDirectionColor(direction: NavigationStep['direction']): string {
       return theme.colors.success;
     case 'up':
     case 'down':
-      return '#FF9500';
+      return theme.colors.warning;
     default:
       return theme.colors.accent;
   }
 }
 
+/** High-contrast directional indicator colors for fixed dark camera HUD overlays. */
+function getCameraOverlayDirectionColor(direction: NavigationStep['direction']): string {
+  switch (direction) {
+    case 'destination':
+      return '#93C7A1';
+    case 'up':
+    case 'down':
+      return '#E2C17D';
+    default:
+      return '#FFFFFF';
+  }
+}
+
 export function ARNavigationScreen(props: any) {
+  useThemeVersion();
   const { school } = useSchool();
   if (!canUseProvidencePathNetwork(school.id)) {
     return (
@@ -162,6 +178,7 @@ export function ARNavigationScreen(props: any) {
 }
 
 function ProvidenceARNavigationScreen(props: any) {
+  useThemeVersion();
   const nav = props?.navigation;
   const destination = props?.route?.params?.destination ?? '目的地';
   const destinationId = props?.route?.params?.destinationId;
@@ -643,11 +660,11 @@ function ProvidenceARNavigationScreen(props: any) {
                   width: 200,
                   height: 200,
                   borderRadius: 100,
-                  borderWidth: 3,
-                  borderColor: `${theme.colors.accent}40`,
+                  borderWidth: 2,
+                  borderColor: 'rgba(255,255,255,0.32)',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  backgroundColor: 'rgba(0,0,0,0.3)',
+                  backgroundColor: 'rgba(0,0,0,0.42)',
                 }}
               >
                 <View
@@ -655,8 +672,8 @@ function ProvidenceARNavigationScreen(props: any) {
                     width: 150,
                     height: 150,
                     borderRadius: 75,
-                    borderWidth: 2,
-                    borderColor: `${theme.colors.accent}60`,
+                    borderWidth: 1.5,
+                    borderColor: 'rgba(255,255,255,0.52)',
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
@@ -669,7 +686,7 @@ function ProvidenceARNavigationScreen(props: any) {
                     <Ionicons
                       name={getDirectionIcon(currentInstruction.direction) as any}
                       size={80}
-                      color={getDirectionColor(currentInstruction.direction)}
+                      color={getCameraOverlayDirectionColor(currentInstruction.direction)}
                     />
                   </Animated.View>
                 </View>
@@ -689,10 +706,10 @@ function ProvidenceARNavigationScreen(props: any) {
                   <View
                     key={i}
                     style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: 4,
-                      backgroundColor: `${theme.colors.accent}${40 + i * 15}`,
+                      width: 6,
+                      height: 6,
+                      borderRadius: 3,
+                      backgroundColor: `rgba(255,255,255,${0.35 + i * 0.14})`,
                     }}
                   />
                 ))}
@@ -705,30 +722,38 @@ function ProvidenceARNavigationScreen(props: any) {
                   flexDirection: 'row',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  padding: 12,
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
                   borderRadius: theme.radius.md,
-                  backgroundColor: 'rgba(0,0,0,0.6)',
+                  backgroundColor: 'rgba(0,0,0,0.72)',
                 }}
               >
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name="navigate" size={18} color={theme.colors.accent} />
-                  <Text style={{ color: '#fff', fontWeight: '700' }}>{distanceRemaining}m</Text>
+                  <Ionicons name="navigate" size={18} color="#8FC4A3" />
+                  <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>{distanceRemaining}m</Text>
                 </View>
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={voiceGuidanceEnabled ? '關閉語音導引' : '開啟語音導引'}
                   onPress={() => setVoiceGuidanceEnabled(!voiceGuidanceEnabled)}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 36, minHeight: 36, justifyContent: 'center' }}
                 >
                   <Ionicons
                     name={voiceGuidanceEnabled ? 'volume-high' : 'volume-mute'}
                     size={18}
-                    color={voiceGuidanceEnabled ? theme.colors.success : theme.colors.muted}
+                    color={voiceGuidanceEnabled ? '#93C7A1' : 'rgba(255,255,255,0.65)'}
                   />
                 </Pressable>
-                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                <Text style={{ color: 'rgba(255,255,255,0.82)', fontSize: 12 }}>
                   精度 {geo.accuracy ? `${Math.round(geo.accuracy)}m` : '--'}
                 </Text>
-                <Pressable onPress={handleEndNavigation}>
-                  <Ionicons name="close-circle" size={24} color={theme.colors.danger} />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="結束導航"
+                  onPress={handleEndNavigation}
+                  style={{ minWidth: 36, minHeight: 36, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Ionicons name="close-circle" size={24} color="#F2A79B" />
                 </Pressable>
               </View>
               {deviationDistance !== null && (
@@ -737,10 +762,10 @@ function ProvidenceARNavigationScreen(props: any) {
                     marginTop: 8,
                     padding: 8,
                     borderRadius: theme.radius.md,
-                    backgroundColor: 'rgba(0,0,0,0.45)',
+                    backgroundColor: 'rgba(0,0,0,0.68)',
                   }}
                 >
-                  <Text style={{ color: '#fff', fontSize: 12 }}>
+                  <Text style={{ color: '#FFFFFF', fontSize: 12 }}>
                     路線偏移：{Math.round(deviationDistance)}m（已啟用路網吸附）
                   </Text>
                 </View>
@@ -751,12 +776,12 @@ function ProvidenceARNavigationScreen(props: any) {
                     marginTop: 8,
                     padding: 10,
                     borderRadius: theme.radius.md,
-                    backgroundColor: 'rgba(255,149,0,0.2)',
+                    backgroundColor: 'rgba(0,0,0,0.78)',
                     borderWidth: 1,
-                    borderColor: 'rgba(255,149,0,0.4)',
+                    borderColor: '#E2C17D',
                   }}
                 >
-                  <Text style={{ color: '#fff', fontSize: 12 }}>
+                  <Text style={{ color: '#FFFFFF', fontSize: 12 }}>
                     定位精度偏低，建議移動到空曠處；若超過 {LOW_ACCURACY_M}m，請改用一般地圖導航。
                   </Text>
                 </View>
@@ -765,7 +790,7 @@ function ProvidenceARNavigationScreen(props: any) {
 
             {!isCameraReady && hasPermission && (
               <View style={{ position: 'absolute', top: '40%', left: 16, right: 16 }}>
-                <Text style={{ color: '#fff', fontSize: 13, textAlign: 'center', opacity: 0.7 }}>
+                <Text style={{ color: '#FFFFFF', fontSize: 13, textAlign: 'center', opacity: 0.85 }}>
                   正在啟動相機...
                 </Text>
               </View>
@@ -774,12 +799,12 @@ function ProvidenceARNavigationScreen(props: any) {
             <View style={{ position: 'absolute', bottom: 100, left: 16, right: 16 }}>
               <View
                 style={{
-                  padding: 12,
+                  padding: 10,
                   borderRadius: theme.radius.md,
-                  backgroundColor: 'rgba(0,0,0,0.7)',
+                  backgroundColor: 'rgba(0,0,0,0.72)',
                 }}
               >
-                <Text style={{ color: '#fff', fontSize: 11, textAlign: 'center' }}>
+                <Text style={{ color: '#FFFFFF', fontSize: 11, textAlign: 'center' }}>
                   羅盤方位: {Math.round(compassHeading)}° | 傾斜: {Math.round(devicePitch)}° | 追蹤:{' '}
                   {hasLiveLocation ? '即時定位' : '等待定位'}
                 </Text>
@@ -792,7 +817,7 @@ function ProvidenceARNavigationScreen(props: any) {
               style={{
                 padding: 16,
                 borderRadius: theme.radius.lg,
-                backgroundColor: theme.colors.surface2,
+                backgroundColor: theme.colors.surface,
                 borderWidth: 1,
                 borderColor: theme.colors.border,
               }}
@@ -800,17 +825,19 @@ function ProvidenceARNavigationScreen(props: any) {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                 <View
                   style={{
-                    width: 50,
-                    height: 50,
-                    borderRadius: 25,
-                    backgroundColor: `${getDirectionColor(currentInstruction.direction)}20`,
+                    width: 48,
+                    height: 48,
+                    borderRadius: theme.radius.md,
+                    backgroundColor: theme.colors.surface2,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
                 >
                   <Ionicons
                     name={getDirectionIcon(currentInstruction.direction) as any}
-                    size={28}
+                    size={26}
                     color={getDirectionColor(currentInstruction.direction)}
                   />
                 </View>
@@ -835,7 +862,7 @@ function ProvidenceARNavigationScreen(props: any) {
                     {Math.round(progress * 100)}%
                   </Text>
                 </View>
-                <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.colors.border }}>
+                <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.colors.surface2, overflow: 'hidden' }}>
                   <View
                     style={{
                       width: `${progress * 100}%`,
@@ -850,20 +877,27 @@ function ProvidenceARNavigationScreen(props: any) {
 
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="重新定位"
                 onPress={() => geo.getCurrentPosition()}
-                style={{
+                style={({ pressed }) => ({
                   flex: 1,
-                  paddingVertical: 14,
+                  minHeight: 48,
+                  paddingVertical: 12,
                   borderRadius: theme.radius.md,
                   backgroundColor: theme.colors.surface2,
                   alignItems: 'center',
+                  justifyContent: 'center',
                   borderWidth: 1,
                   borderColor: theme.colors.border,
-                }}
+                  opacity: pressed ? 0.8 : 1,
+                })}
               >
                 <Text style={{ color: theme.colors.text, fontWeight: '700' }}>重新定位</Text>
               </Pressable>
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="改用一般地圖"
                 onPress={async () => {
                   if (!target) return;
                   const url =
@@ -877,17 +911,18 @@ function ProvidenceARNavigationScreen(props: any) {
                     Alert.alert('無法開啟地圖', '請稍後再試。');
                   }
                 }}
-                style={{
+                style={({ pressed }) => ({
                   flex: 2,
-                  paddingVertical: 14,
+                  minHeight: 48,
+                  paddingVertical: 12,
                   borderRadius: theme.radius.md,
-                  backgroundColor: `${theme.colors.accent}20`,
+                  backgroundColor: theme.colors.accent,
                   alignItems: 'center',
-                  borderWidth: 1,
-                  borderColor: `${theme.colors.accent}40`,
-                }}
+                  justifyContent: 'center',
+                  opacity: pressed ? 0.85 : 1,
+                })}
               >
-                <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>改用一般地圖</Text>
+                <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>改用一般地圖</Text>
               </Pressable>
             </View>
           </View>
@@ -898,21 +933,25 @@ function ProvidenceARNavigationScreen(props: any) {
 
   return (
     <Screen>
-      <View style={{ flex: 1, gap: 12 }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ gap: 12, paddingBottom: 24 }}
+        showsVerticalScrollIndicator={false}
+      >
         <AnimatedCard title="AR 實景導航" subtitle={`前往：${target?.name ?? destination}`}>
-          <View style={{ alignItems: 'center', padding: 20 }}>
+          <View style={{ alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8 }}>
             <View
               style={{
-                width: 100,
-                height: 100,
-                borderRadius: 50,
+                width: 72,
+                height: 72,
+                borderRadius: theme.radius.lg,
                 backgroundColor: theme.colors.accentSoft,
                 alignItems: 'center',
                 justifyContent: 'center',
-                marginBottom: 16,
+                marginBottom: 14,
               }}
             >
-              <Ionicons name="camera" size={50} color={theme.colors.accent} />
+              <Ionicons name="camera-outline" size={36} color={theme.colors.accent} />
             </View>
             <Text
               style={{
@@ -929,7 +968,7 @@ function ProvidenceARNavigationScreen(props: any) {
                 color: theme.colors.muted,
                 fontSize: 13,
                 textAlign: 'center',
-                marginTop: 8,
+                marginTop: 6,
                 lineHeight: 20,
               }}
             >
@@ -938,25 +977,34 @@ function ProvidenceARNavigationScreen(props: any) {
           </View>
 
           <View style={{ gap: 12 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-around',
+                paddingVertical: 10,
+                borderTopWidth: StyleSheet.hairlineWidth,
+                borderBottomWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.colors.separator,
+              }}
+            >
               <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 24 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
                   {target ? target.lat.toFixed(4) : '--'}
                 </Text>
-                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>目標緯度</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>目標緯度</Text>
               </View>
               <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 24 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
                   {target ? target.lng.toFixed(4) : '--'}
                 </Text>
-                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>目標經度</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>目標經度</Text>
               </View>
-              <View style={{ alignItems: 'center' }}>
+              <View style={{ alignItems: 'center', justifyContent: 'center' }}>
                 <Pill
                   text={loadingTarget || routing ? '確認路線中' : routeError ? '待修正' : routePoints.length >= 2 ? '路線已取得' : '尚未查詢'}
                   kind={loadingTarget || routing ? 'muted' : routeError ? 'danger' : routePoints.length >= 2 ? 'success' : 'muted'}
                 />
-                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>路線狀態</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>路線狀態</Text>
               </View>
             </View>
 
@@ -965,7 +1013,7 @@ function ProvidenceARNavigationScreen(props: any) {
                 style={{
                   padding: 10,
                   borderRadius: theme.radius.md,
-                  backgroundColor: `${theme.colors.danger}15`,
+                  backgroundColor: theme.colors.dangerSoft,
                 }}
               >
                 <Text style={{ color: theme.colors.danger, fontSize: 12 }}>{routeError}</Text>
@@ -976,7 +1024,7 @@ function ProvidenceARNavigationScreen(props: any) {
                 style={{
                   padding: 10,
                   borderRadius: theme.radius.md,
-                  backgroundColor: `${theme.colors.success}15`,
+                  backgroundColor: theme.colors.successSoft,
                 }}
               >
                 <Text style={{ color: theme.colors.success, fontSize: 12 }}>
@@ -988,6 +1036,7 @@ function ProvidenceARNavigationScreen(props: any) {
             <Button
               text={routing ? '正在查詢步行路線…' : hasPermission ? '查詢路線並開始 AR 導航' : '授權相機並查詢路線'}
               kind="primary"
+              fullWidth
               onPress={handleStartNavigation}
               disabled={!target || loadingTarget || routing}
             />
@@ -1001,37 +1050,37 @@ function ProvidenceARNavigationScreen(props: any) {
           }
           delay={100}
         >
-          <View style={{ gap: 8 }}>
+          <View>
             {(!target ? FALLBACK_STEPS : generatedSteps).map((step, idx) => (
               <View
                 key={step.id}
                 style={{
                   flexDirection: 'row',
                   alignItems: 'center',
-                  padding: 12,
-                  borderRadius: theme.radius.md,
-                  backgroundColor: theme.colors.surface2,
+                  paddingVertical: 10,
+                  borderTopWidth: idx === 0 ? 0 : StyleSheet.hairlineWidth,
+                  borderTopColor: theme.colors.separator,
                   gap: 12,
                 }}
               >
                 <View
                   style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    backgroundColor: `${getDirectionColor(step.direction)}20`,
+                    width: 34,
+                    height: 34,
+                    borderRadius: theme.radius.sm,
+                    backgroundColor: theme.colors.surface2,
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
                 >
                   <Ionicons
                     name={getDirectionIcon(step.direction) as any}
-                    size={18}
+                    size={17}
                     color={getDirectionColor(step.direction)}
                   />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontWeight: '600' }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>
                     {step.instruction}
                   </Text>
                   {step.landmark && (
@@ -1047,40 +1096,34 @@ function ProvidenceARNavigationScreen(props: any) {
         </AnimatedCard>
 
         <AnimatedCard title="導航技術" subtitle="公開步行路網 + 裝置感測器" delay={200}>
-          <View style={{ gap: 10 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Ionicons name="git-network-outline" size={20} color={theme.colors.accent} />
-              <Text style={{ color: theme.colors.muted, flex: 1, lineHeight: 20 }}>
-                步行路網由第三方供應商查詢，失敗時不會生成示意路線
-              </Text>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Ionicons name="videocam-outline" size={20} color={theme.colors.accent} />
-              <Text style={{ color: theme.colors.muted, flex: 1, lineHeight: 20 }}>
-                相機即時 AR 方向箭頭與距離疊加
-              </Text>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Ionicons name="compass-outline" size={20} color={theme.colors.success} />
-              <Text style={{ color: theme.colors.muted, flex: 1, lineHeight: 20 }}>
-                磁力計 + 加速計感測器融合，平滑方位
-              </Text>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Ionicons name="locate-outline" size={20} color={theme.colors.success} />
-              <Text style={{ color: theme.colors.muted, flex: 1, lineHeight: 20 }}>
-                路線偏移偵測 + 自動重新規劃路徑
-              </Text>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Ionicons name="accessibility-outline" size={20} color={theme.colors.info} />
-              <Text style={{ color: theme.colors.muted, flex: 1, lineHeight: 20 }}>
-                觸覺回饋 + 語音提示 + 角度轉彎偵測
-              </Text>
-            </View>
+          <View>
+            {[
+              { icon: 'git-network-outline', text: '步行路網由第三方供應商查詢，失敗時不會生成示意路線' },
+              { icon: 'videocam-outline', text: '相機即時 AR 方向箭頭與距離疊加' },
+              { icon: 'compass-outline', text: '磁力計 + 加速計感測器融合，平滑方位' },
+              { icon: 'locate-outline', text: '路線偏移偵測 + 自動重新規劃路徑' },
+              { icon: 'accessibility-outline', text: '觸覺回饋 + 語音提示 + 角度轉彎偵測' },
+            ].map((item, idx) => (
+              <View
+                key={item.icon}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                  paddingVertical: 9,
+                  borderTopWidth: idx === 0 ? 0 : StyleSheet.hairlineWidth,
+                  borderTopColor: theme.colors.separator,
+                }}
+              >
+                <Ionicons name={item.icon as any} size={18} color={theme.colors.accent} />
+                <Text style={{ color: theme.colors.muted, flex: 1, fontSize: 13, lineHeight: 19 }}>
+                  {item.text}
+                </Text>
+              </View>
+            ))}
           </View>
         </AnimatedCard>
-      </View>
+      </ScrollView>
     </Screen>
   );
 }

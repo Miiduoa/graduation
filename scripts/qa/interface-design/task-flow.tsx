@@ -55,8 +55,10 @@ type CourseState = 'ready' | 'loading' | 'error' | 'empty';
 function TaskFlowFixture() {
   const [timetableStatus, setTimetableStatus] = useState<TimetableStatus>('loading');
   const [courseState, setCourseState] = useState<CourseState>('ready');
+  const [reviewRequired, setReviewRequired] = useState(false);
   const [files, setFiles] = useState<LocalAssignmentFile[]>([]);
-  const [dialog, setDialog] = useState<'review' | 'group' | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [groupOpen, setGroupOpen] = useState(false);
   const [completed, setCompleted] = useState('');
   const [timetableRetries, setTimetableRetries] = useState(0);
   const [courseRetries, setCourseRetries] = useState(0);
@@ -102,6 +104,7 @@ function TaskFlowFixture() {
             : []
         }
         onRetryTimetable={() => setTimetableRetries((count) => count + 1)}
+        upcomingTodos={[]}
         teachingCourses={courseState === 'empty' ? [] : [course]}
         coursesLoading={courseState === 'loading'}
         coursesError={courseState === 'error' ? '部分課程資料尚未讀到，請重試。' : ''}
@@ -111,7 +114,12 @@ function TaskFlowFixture() {
       />
       <section className={home.section} aria-label="附件選擇驗收">
         <h2>作業附件</h2>
-        <AssignmentFilePicker files={files} onChange={setFiles} />
+        <AssignmentFilePicker
+          files={files}
+          onChange={setFiles}
+          reviewRequired={reviewRequired}
+          onReviewRequiredChange={setReviewRequired}
+        />
       </section>
       <section className={home.section} aria-label="長圖預覽驗收">
         <h2>預覽課程筆記</h2>
@@ -120,8 +128,8 @@ function TaskFlowFixture() {
       <section className={home.section} aria-label="社群表單驗收">
         <h2>課程交流</h2>
         <div className="fixture-buttons">
-          <Button onClick={() => setDialog('review')}>寫課程評價</Button>
-          <Button onClick={() => setDialog('group')}>建立讀書會</Button>
+          <Button onClick={() => setReviewOpen(true)}>寫課程評價</Button>
+          <Button onClick={() => setGroupOpen(true)}>建立讀書會</Button>
         </div>
         {completed && <p role="status">{completed}</p>}
       </section>
@@ -143,26 +151,26 @@ function TaskFlowFixture() {
           ))}
         </div>
       </section>
-      {dialog === 'review' && (
+      {reviewOpen && (
         <ReviewModal
           schoolId="pu"
           myUid="synthetic-teacher"
-          onClose={() => setDialog(null)}
-          onSubmitted={() => {
+          onClose={() => setReviewOpen(false)}
+          onSubmitted={(dismissed) => {
             setCompleted('合成評價已完成');
-            setDialog(null);
+            if (!dismissed) setReviewOpen(false);
           }}
         />
       )}
-      {dialog === 'group' && (
+      {groupOpen && (
         <CreateGroupModal
           schoolId="pu"
           myUid="synthetic-teacher"
           myName="合成老師"
-          onClose={() => setDialog(null)}
-          onCreated={() => {
+          onClose={() => setGroupOpen(false)}
+          onCreated={(dismissed) => {
             setCompleted('合成讀書會已完成');
-            setDialog(null);
+            if (!dismissed) setGroupOpen(false);
           }}
         />
       )}

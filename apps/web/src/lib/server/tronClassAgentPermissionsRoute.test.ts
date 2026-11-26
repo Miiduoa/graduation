@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { NuniError } from '@campus/shared/src/nuni';
 import { handleTronClassAgentPermissions } from './tronClassAgentPermissionsRoute';
@@ -22,6 +22,8 @@ function setup() {
 }
 afterEach(() => vi.unstubAllEnvs());
 
+beforeEach(() => vi.stubEnv('TRONCLASS_INTEGRATION_ENABLED', 'true'));
+
 describe('TronClass Agent permission HTTP boundary', () => {
   it('returns only the authenticated owner grant without caching', async () => {
     const deps = setup();
@@ -33,6 +35,16 @@ describe('TronClass Agent permission HTTP boundary', () => {
     expect(result.headers.get('cache-control')).toContain('no-store');
   });
 
+  it('passes the visible source revision to grant status before reading the current grant', async () => {
+    const deps = setup();
+    const sourceRevision = 'c'.repeat(32);
+    deps.grants.get.mockRejectedValue(new NuniError(409, 'TRONCLASS_BINDING_CHANGED'));
+    const response = await handleTronClassAgentPermissions(request({ action: 'status', revision: sourceRevision }), deps);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: 'TRONCLASS_BINDING_CHANGED' });
+    expect(deps.grants.get).toHaveBeenCalledExactlyOnceWith(ownerKey, sourceRevision);
+  });
+
   it('updates the authenticated scope and forwards the expected revision/version', async () => {
     const deps = setup();
     const input = { revision: grant.revision, expectedVersion: null, permissions: grant.permissions };
@@ -40,7 +52,7 @@ describe('TronClass Agent permission HTTP boundary', () => {
     expect(deps.grants.set).toHaveBeenCalledWith(ownerKey, input);
   });
 
-  it.each([{ action: 'status', ownerKey: 'firebase:other' }, { action: 'status', revision: grant.revision },
+  it.each([{ action: 'status', ownerKey: 'firebase:other' }, { action: 'status', revision: 'invalid' },
     { action: 'set', ...grant, expectedVersion: null }, { action: 'submit' }, []])('rejects unrelated input %#', async (body) => {
     const deps = setup();
     expect((await handleTronClassAgentPermissions(request(body), deps)).status).toBe(422);

@@ -6,18 +6,23 @@ import type {
   TronClassAgentCapabilityResult, TronClassAgentReply, TronClassAgentStep,
 } from '../tronClassAgentTypes';
 import { TRONCLASS_AGENT_MAX_ACTIONS } from '../tronClassAgentTypes';
-import { parseTronClassAgentIntent } from '../tronClassAgentIntent';
+import {
+  hasTronClassReadTargetConflict, isTronClassCompoundDownloadAndPrepare, parseTronClassAgentIntent,
+  tronClassAgentCourseScope,
+} from '../tronClassAgentIntent';
 import type { TronClassHomeworkItem, TronClassPreparation, TronClassSnapshot } from '../tronClassIntegrationTypes';
 import { tronClassUploadKey } from '../tronClassIntegrationClient';
 import { createTronClassAgentGrantService } from './tronClassAgentGrants';
-import { createTronClassIntegrationReader } from './tronClassIntegrationSource';
+import { createTronClassIntegrationReader, type TronClassSnapshotReadOptions, type TronClassSnapshotAuthorization } from './tronClassIntegrationSource';
+import { createTronClassBindingService, type TronClassBindingService } from './tronClassBinding';
 import { getDefaultTronClassSubmissionService } from './tronClassSubmission';
 
 export type TronClassAgentGrants = Pick<ReturnType<typeof createTronClassAgentGrantService>, 'get' | 'require' | 'assertCurrent'>;
 export type TronClassAgentDependencies = {
   grants?: TronClassAgentGrants;
+  bindings?: Pick<TronClassBindingService, 'requireBinding' | 'assertCurrent'>;
   read?: ReturnType<typeof createTronClassIntegrationReader>;
-  prepare?: (ownerKey: string, input: { courseId: number; homeworkId: number }) => Promise<TronClassPreparation>;
+  prepare?: (ownerKey: string, input: { courseId: number; homeworkId: number }, binding: TronClassSnapshotAuthorization['binding']) => Promise<TronClassPreparation>;
   now?: () => number;
   requestId?: () => string;
   /** Reauthenticate the nuni actor before the final grant check and response. */
@@ -56,6 +61,19 @@ function isUnqualifiedRequest(question: string, names: string[]): boolean {
     .replace(/下載|教材|講義|檔案|附件|準備|預覽|草稿|作業|課程|未交|未繳|待交|待繳|尚未|還沒/g, '')
     .replace(/please|download|prepare|draft|my|the|all|materials?|handouts?|files?|homework|assignments?|courses?/g, '')
     .replace(/[\p{P}\p{S}]/gu, '').length === 0;
+}
+
+function resolveCourse(
+  snapshot: Pick<TronClassSnapshot, 'courses' | 'errors' | 'partial'>,
+  scope: NonNullable<ReturnType<typeof tronClassAgentCourseScope>>,
+  question: string,
+  allowSoleCourseFallback: boolean,
+): number | undefined {
+  if (scope.requiresConfirmation || snapshot.errors.some((error) => error.area === 'courses')) return;
+  const selected = scope.resolve(snapshot.courses);
+  if (selected !== undefined) return selected;
+  if (allowSoleCourseFallback && scope.unqualified && snapshot.courses.length === 1 && !snapshot.partial &&
+    isUnqualifiedRequest(question, ['公告', '通知'])) return snapshot.courses[0].id;
 }
 
 function selectedSnapshot(snapshot: TronClassSnapshot, options: {
@@ -118,25 +136,39 @@ function downloadActions(snapshot: TronClassSnapshot, question: string, mayAutom
 
 export function createTronClassAgentService(dependencies: TronClassAgentDependencies = {}) {
   const grants = dependencies.grants ?? createTronClassAgentGrantService();
-  // One overview and one selected-course read remain bounded within a request.
-  const read = dependencies.read ?? createTronClassIntegrationReader({ budgetMs: 20_000 });
-  const prepareSource = dependencies.prepare ?? (async (ownerKey, input) => (await getDefaultTronClassSubmissionService()).prepare(ownerKey, input));
+  const bindings = dependencies.bindings ?? createTronClassBindingService();
+  // Stable automatic selection reads the course index three times: the overview,
+  // a full-list recheck, and the index guard immediately before private reads.
+  const read = dependencies.read ?? createTronClassIntegrationReader({ bindings, budgetMs: 20_000 });
+  const prepareSource: NonNullable<TronClassAgentDependencies['prepare']> = dependencies.prepare ??
+    (async (ownerKey, input, binding) => (await getDefaultTronClassSubmissionService()).prepare(ownerKey, input, undefined, binding));
   const now = dependencies.now ?? Date.now;
   const requestId = dependencies.requestId ?? randomUUID;
 
-  async function requireScopes(ownerKey: string, scope: TronClassAgentScope = 'readCourseData'): Promise<TronClassRequiredAgentGrant> {
-    const grant = await grants.require(ownerKey, 'readCourseData');
-    if (scope !== 'readCourseData') sameGrant(grant, await grants.require(ownerKey, scope));
+  async function requireScopes(ownerKey: string, scope: TronClassAgentScope, sourceRevision?: string): Promise<TronClassRequiredAgentGrant> {
+    const grant = sourceRevision === undefined
+      ? await grants.require(ownerKey, 'readCourseData')
+      : await grants.require(ownerKey, 'readCourseData', sourceRevision);
+    if (sourceRevision !== undefined && grant.revision !== sourceRevision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+    if (scope !== 'readCourseData') sameGrant(grant, await grants.require(ownerKey, scope, grant.revision));
     return grant;
   }
   async function assertScopes(ownerKey: string, grant: TronClassRequiredAgentGrant, scope: TronClassAgentScope): Promise<void> {
     await grants.assertCurrent(ownerKey, grant, 'readCourseData');
     if (scope !== 'readCourseData') await grants.assertCurrent(ownerKey, grant, scope);
   }
-  async function prepareWithGrant(ownerKey: string, input: { courseId: number; homeworkId: number }, grant: TronClassRequiredAgentGrant) {
+  async function bindingForGrant(ownerKey: string, grant: TronClassRequiredAgentGrant) {
+    const binding = await bindings.requireBinding(ownerKey, grant.revision);
+    if (binding.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+    return binding;
+  }
+  async function prepareWithGrant(ownerKey: string, input: { courseId: number; homeworkId: number },
+    grant: TronClassRequiredAgentGrant, snapshot?: TronClassSnapshotAuthorization['binding']) {
     if (!positiveId(input.courseId) || !positiveId(input.homeworkId)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
     await assertScopes(ownerKey, grant, 'prepareHomework');
-    const result = await prepareSource(ownerKey, input);
+    const binding = snapshot ?? await bindingForGrant(ownerKey, grant);
+    await bindings.assertCurrent(ownerKey, binding.revision);
+    const result = await prepareSource(ownerKey, input, binding);
     if (result.revision !== grant.revision || result.courseId !== input.courseId || result.homeworkId !== input.homeworkId) {
       throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
     }
@@ -150,24 +182,30 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
     async capability(ownerKey: string): Promise<TronClassAgentCapabilityResult> {
       const grant = await grants.get(ownerKey);
       await dependencies.beforeResult?.();
-      sameGrant(grant, await grants.get(ownerKey));
+      sameGrant(grant, await grants.get(ownerKey, grant.revision));
       return { source: 'tronclass', revision: grant.revision, grantVersion: grant.version, capabilities: tronClassAgentCapabilities(grant) };
     },
-    async prepare(ownerKey: string, input: { courseId: number; homeworkId: number }): Promise<TronClassPreparation> {
-      const grant = await requireScopes(ownerKey, 'prepareHomework');
-      const result = await prepareWithGrant(ownerKey, input, grant);
+    async prepare(ownerKey: string, input: { courseId: number; homeworkId: number; revision: string }): Promise<TronClassPreparation> {
+      const grant = await requireScopes(ownerKey, 'prepareHomework', input.revision);
+      if (input.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+      const result = await prepareWithGrant(ownerKey, { courseId: input.courseId, homeworkId: input.homeworkId }, grant);
       await dependencies.beforeResult?.();
       await assertScopes(ownerKey, grant, 'prepareHomework');
       return result;
     },
     async ask(ownerKey: string, input: TronClassAgentAskInput): Promise<TronClassAgentReply> {
-      const query = parseTronClassAgentIntent(input.question);
-      if (!query || (input.courseId !== undefined && !positiveId(input.courseId)) ||
+      const unsupportedReason = hasTronClassReadTargetConflict(input.question) ? 'read_target_conflict'
+        : isTronClassCompoundDownloadAndPrepare(input.question) ? 'multiple_actions' : null;
+      const query = unsupportedReason ? { intent: 'unsupported', pendingOnly: false, unsupportedReason } as const
+        : parseTronClassAgentIntent(input.question);
+      const courseScope = tronClassAgentCourseScope(input.question, input.compoundQuestion);
+      if (!query || !courseScope || (input.courseId !== undefined && (!positiveId(input.courseId) || !input.revision)) ||
         (input.homeworkId !== undefined && (!positiveId(input.homeworkId) || !input.courseId || query.intent !== 'prepare'))) {
         throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
       }
       const scope = query.intent === 'download' ? 'downloadMaterials' : query.intent === 'prepare' ? 'prepareHomework' : 'readCourseData';
-      const grant = await requireScopes(ownerKey, scope);
+      const grant = await requireScopes(ownerKey, scope, input.revision);
+      if (input.revision !== undefined && input.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
       const capabilities = tronClassAgentCapabilities(grant);
       const steps: TronClassAgentStep[] = [];
       const base = { source: 'tronclass' as const, requestId: requestId(), intent: query.intent,
@@ -187,49 +225,77 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         return finish({ ...base, answer: query.intent === 'unsupported'
           ? query.unsupportedReason === 'multiple_actions'
             ? '請先選擇要下載教材，或要準備哪一份作業；確認一個目標後，我會完成該步驟，再處理下一項。'
-            : '這項操作目前尚未開放給 Agent。可以協助查詢課程、作業狀態與公告、下載教材，或先準備作業；目前不會送交或修改校方資料。'
+            : query.unsupportedReason === 'read_target_conflict'
+              ? '請先確認要查詢哪一種玩課雲資料。'
+              : '這項操作目前尚未開放給 Agent。可以協助查詢課程、作業狀態與公告、下載教材，或先準備作業；目前不會送交或修改校方資料。'
           : '可依你開啟的權限查詢 TronClass 課程與作業、整理公告教材、下載教材，並在對話內準備作業。送交、發文與其他校方寫入操作目前尚未開放。',
         steps: [{ id: 'capability', tool: 'select_target', status: query.intent === 'unsupported' ? 'blocked' : 'completed', message: '已核對 Agent 可用功能與授權範圍。' }] });
       }
-      const guardedRead = async (courseId?: number) => {
+      const readsHomework = query.intent === 'homework' || query.intent === 'prepare';
+      const snapshotRead = (courseId?: number, acceptCourseIndex?: TronClassSnapshotReadOptions['acceptCourseIndex']) => ({
+        ...(acceptCourseIndex ? { requireCompleteCourses: true, acceptCourseIndex } : {}),
+        ...(courseId !== undefined ? { courseId } : {}),
+        include: {
+          homework: readsHomework && courseId !== undefined,
+          announcements: query.intent === 'announcements' && courseId !== undefined,
+          materials: (query.intent === 'materials' || query.intent === 'download') && courseId !== undefined,
+        },
+      });
+      let authorization: TronClassSnapshotAuthorization | undefined;
+      const guardedRead = async (courseId?: number, acceptCourseIndex?: TronClassSnapshotReadOptions['acceptCourseIndex']) => {
         await assertScopes(ownerKey, grant, scope);
-        const result = await read(ownerKey, courseId ? { courseId } : {});
+        if (!authorization) {
+          const binding = await bindingForGrant(ownerKey, grant);
+          authorization = { binding, assertGrant: () => assertScopes(ownerKey, grant, scope) };
+        }
+        const result = await read(ownerKey, snapshotRead(courseId, acceptCourseIndex), undefined, authorization);
         if (result.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
-        if (courseId && !result.courses.some((course) => course.id === courseId)) throw new NuniError(403, 'TRONCLASS_COURSE_NOT_FOUND');
+        if (courseId && !acceptCourseIndex &&
+          !result.courses.some((course) => course.id === courseId)) throw new NuniError(403, 'TRONCLASS_COURSE_NOT_FOUND');
         await assertScopes(ownerKey, grant, scope);
         return result;
       };
-      let snapshot = await guardedRead(input.courseId);
+      let courseId = input.courseId;
+      let snapshot = await guardedRead(courseId);
       steps.push({ id: 'courses', tool: 'read_courses', status: snapshot.errors.some((error) => error.area === 'courses') ? 'partial' : 'completed', message: `已核對目前帳號的 ${snapshot.courses.length} 門課程。` });
       if (query.intent === 'courses') return finish({ ...base, fetchedAt: snapshot.fetchedAt,
         snapshot: selectedSnapshot(snapshot, { courseId: input.courseId }),
         answer: `${snapshot.partial ? '部分課程資料尚未讀完。' : ''}已讀取 ${snapshot.courses.length} 門 TronClass 課程，可在這裡選擇課程查看作業、公告與教材。` });
 
-      let courseId = input.courseId;
       if (!courseId) {
-        const matches = snapshot.courses.filter((course) => containsName(input.question, course.name) ||
-          (course.code.length > 1 && containsName(input.question, course.code)));
-        if (matches.length === 1) courseId = matches[0].id;
-        else if (['materials', 'announcements', 'download'].includes(query.intent) && snapshot.courses.length === 1 &&
-          !snapshot.partial && isUnqualifiedRequest(input.question, ['公告', '通知', ...snapshot.courses.map((course) => course.name)])) {
-          courseId = snapshot.courses[0].id;
+        const resolveScope = (index: Parameters<typeof resolveCourse>[0]) =>
+          resolveCourse(index, courseScope, input.question, !readsHomework);
+        const selected = resolveScope(snapshot);
+        if (selected) {
+          snapshot = await guardedRead();
+          if (resolveScope(snapshot) === selected) {
+            snapshot = await guardedRead(selected, index => resolveScope(index) === selected);
+            // A private feed failure does not invalidate the course index.
+            if (resolveScope({ ...snapshot, partial: false }) === selected) courseId = selected;
+          }
+          if (snapshot.errors.some((error) => error.area === 'courses')) {
+            steps.push({ id: 'courses-refresh', tool: 'read_courses', status: 'partial', message: '重新核對時未取得完整課程清單。' });
+          }
         }
-        if (courseId) snapshot = await guardedRead(courseId);
       }
-      if (['materials', 'announcements', 'download'].includes(query.intent) && !courseId) {
-        steps.push({ id: 'choose-course', tool: 'select_target', status: 'blocked', message: '尚未選定唯一課程，沒有替你猜測教材或公告來源。' });
+      if (!courseId) {
+        steps.push({ id: 'choose-course', tool: 'select_target', status: 'blocked', message: '尚未選定唯一課程。' });
         return finish({ ...base, fetchedAt: snapshot.fetchedAt, snapshot: selectedSnapshot(snapshot), selection: 'course',
-          answer: snapshot.courses.length ? '請選擇要查詢的課程，我會接著讀取這門課的公告或教材。' : '這次未取得可選的課程，請重新整理 TronClass 連線。' });
+          answer: readsHomework
+            ? courseScope.requiresConfirmation
+              ? '這個請求包含全部作業的範圍，請先確認要查詢哪一門課的作業。'
+              : '請確認要查詢哪一門課的作業。'
+            : snapshot.courses.length ? '請選擇要查詢的課程，我會接著讀取這門課的公告或教材。' : '這次未取得可選的課程，請重新整理 TronClass 連線。' });
       }
       if (query.intent === 'homework') {
-        const homework = snapshot.homework.filter((item) => (!courseId || item.courseId === courseId) && (!query.pendingOnly || item.submitted !== true));
+        const homework = snapshot.homework.filter((item) => item.courseId === courseId && (!query.pendingOnly || item.submitted !== true));
         const result = selectedSnapshot(snapshot, { courseId, homework });
         steps.push({ id: 'homework', tool: 'read_homework', status: snapshot.partial ? 'partial' : 'completed', message: '已讀取作業與校方提供的繳交狀態；未回傳狀態的項目保留為待確認。' });
         const actions: TronClassAgentAction[] = capabilities.prepareHomework ? homework.map((item) => ({ kind: 'prepare_homework', id: `homework:${item.courseId}:${item.id}`, courseId: item.courseId, homeworkId: item.id, title: item.title, revision: grant.revision })) : [];
         return finish({ ...base, fetchedAt: snapshot.fetchedAt, snapshot: result, actions, answer: homeworkAnswer(result, query.pendingOnly) });
       }
       if (query.intent === 'prepare') {
-        const homework = snapshot.homework.filter((item) => (!courseId || item.courseId === courseId) && (!query.pendingOnly || item.submitted !== true));
+        const homework = snapshot.homework.filter((item) => item.courseId === courseId && (!query.pendingOnly || item.submitted !== true));
         const matches = input.homeworkId ? homework.filter((item) => item.id === input.homeworkId && item.courseId === input.courseId)
           : homework.filter((item) => containsName(input.question, item.title));
         const candidates = matches.length ? matches : homework;
@@ -244,7 +310,7 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
           return finish({ ...base, fetchedAt: snapshot.fetchedAt, snapshot: result, selection: 'homework', actions,
             answer: candidates.length ? '請選擇要準備的作業，我會讀取規則並開啟準備區。' : snapshot.partial ? '作業資料尚未讀完，請重新查詢後選擇。' : '這次沒有找到符合條件的作業。' });
         }
-        const preparation = await prepareWithGrant(ownerKey, { courseId: target.courseId, homeworkId: target.id }, grant);
+        const preparation = await prepareWithGrant(ownerKey, { courseId: target.courseId, homeworkId: target.id }, grant, authorization?.binding);
         steps.push({ id: 'prepare', tool: 'prepare_homework', status: 'completed', message: '已讀取作業規則並開啟準備區，尚未上傳或送交。' });
         return finish({ ...base, fetchedAt: new Date(now()).toISOString(), snapshot: result, preparation, answer: AGENT_PREPARATION_ONLY });
       }

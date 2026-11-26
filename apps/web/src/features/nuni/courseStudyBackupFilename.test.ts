@@ -3,6 +3,91 @@ import { courseStudyBackupFilenameStem } from './courseStudyBackupFilename';
 import { courseStudyNotesFilename } from './courseStudyNotes';
 import { courseStudyProgressFilename } from './courseStudyProgress';
 import { courseStudyPracticeCheckpointFilename } from './courseStudyPracticeCheckpoint';
+import { courseStudyBackupFilenameStem as mergeBaseFilenameStem } from './__fixtures__/courseStudyMergeBase/courseStudyBackupFilename';
+
+describe('backup filename stems compared with merge-base', () => {
+  it('keeps the merge-base names for readable code points, and safely names invisible-only titles', () => {
+    for (let point = 0; point <= 0x10ffff; point += 1) {
+      const title = String.fromCodePoint(point);
+      const baseline = mergeBaseFilenameStem(title);
+      const expected = /[^\p{Default_Ignorable_Code_Point}\u2800]/u.test(baseline)
+        ? baseline : '讀書白板';
+      const actual = courseStudyBackupFilenameStem(title);
+      if (actual !== expected) {
+        expect(actual, `U+${point.toString(16).toUpperCase().padStart(4, '0')}`).toBe(expected);
+      }
+    }
+  });
+
+  it.each([
+    ...Array.from('\u0600\u0601\u0602\u0603\u0604\u0605\u06dd\u070f\u08e2\u{110bd}',
+      (symbol) => [`visible format symbol U+${symbol.codePointAt(0)?.toString(16).toUpperCase()}`, symbol + '.pdf']),
+    ['interlinear annotation anchor retained by merge-base', '\ufff9.pdf'],
+    ['unassigned default-ignorable code point', '\u{e0000}.pdf'],
+    ['private-use code point', '\ue000.pdf'],
+    ['Devanagari spacing mark (Mc)', 'ः.pdf'],
+    ['Bengali spacing mark (Mc)', 'ঃ.pdf'],
+    ['Thai tone mark (Mn)', '\u0e48.pdf'],
+    ['Myanmar vowel sign (Mc)', '\u102b.pdf'],
+    ['Arabic fatha (Mn)', '\u064e.pdf'],
+    ['combining acute accent (Mn)', '\u0301.pdf'],
+    ['combining enclosing circle (Me)', '\u20dd.pdf'],
+    ['braille blank with ZWJ', '\u2800\u200d.pdf'],
+    ['zero-width space', '\u200b'],
+    ['BOM', '\ufeff'],
+    ['directional controls', '\u200e\u202e\u2069'],
+    ['control characters', '\u0001\u0007'],
+    ['whitespace', ' \t\n '],
+    ['ideographic space', '\u3000\u3000'],
+    ['Unicode next-line whitespace', '\u0085'],
+    ['empty after extension removal', '.pdf'],
+    ['visible text with invisible characters', '\u061c課\u200c程\u200b.pdf'],
+    ['visible format symbol with invisible characters', '\u200c\u06dd\ufe0f.pdf'],
+    ['invisible characters between visible symbols', '\u06dd\ufe0f\u200c\u070f.pdf'],
+    ['Persian text with ZWNJ', 'می‌روم.md'],
+    ['emoji with ZWJ', '👩‍💻.md'],
+    ['emoji with variation selector', '✈️.pdf'],
+    ['long title', '課'.repeat(80) + '.md'],
+    ['reserved name', 'CON.txt'],
+    ['reserved filename characters', '<>:"/\\|?*'],
+    ['leading dots', '...課程.pdf'],
+    ['ZWNJ', '\u200c'],
+    ['ZWJ', '\u200d\u200d'],
+    ['ZWJ before an extension', '\u200d.md'],
+    ['variation selectors', '\ufe0f\u{e0100}'],
+    ['Hangul filler', '\u3164'],
+    ['mixed invisible characters', '\u3000\u200c\u200d\ufeff\u202e\ufe0f\u00ad.pdf'],
+    ['48 Hangul fillers before visible text', '\u3164'.repeat(48) + '課程.pdf'],
+    ['47 Hangul fillers before visible text', '\u3164'.repeat(47) + '課程.pdf'],
+    ['47 Hangul fillers before a visible format symbol', '\u3164'.repeat(47) + '\u06dd'],
+    ['visible text and format symbol at the truncation boundary', '課'.repeat(46) + '\u06dd一後續.pdf'],
+    ['visible text before a long Hangul filler run', '課' + '\u3164'.repeat(80)],
+  ])('matches merge-base for %s', (_label, title) => {
+    const baseline = mergeBaseFilenameStem(title);
+    const stem = /[^\p{Default_Ignorable_Code_Point}\u2800]/u.test(baseline)
+      ? baseline : '讀書白板';
+    expect(courseStudyBackupFilenameStem(title)).toBe(stem);
+    expect(courseStudyNotesFilename(title)).toBe(stem + '-學習筆記.txt');
+    expect(courseStudyProgressFilename(title)).toBe(stem + '-閱讀進度.campus-study.json');
+    expect(courseStudyPracticeCheckpointFilename(title)).toBe(stem + '-逐題練習.campus-practice.json');
+  });
+  it('keeps mobile TXT and checkpoint filenames visible when truncation hides the readable title', () => {
+    const hidden = '\u3164'.repeat(48) + '資料分析.pdf';
+    expect(mergeBaseFilenameStem(hidden)).toBe('\u3164'.repeat(48));
+    expect(courseStudyBackupFilenameStem(hidden)).toBe('讀書白板');
+    expect(courseStudyNotesFilename(hidden)).toBe('讀書白板-學習筆記.txt');
+    expect(courseStudyProgressFilename(hidden)).toBe('讀書白板-閱讀進度.campus-study.json');
+    expect(courseStudyPracticeCheckpointFilename(hidden)).toBe('讀書白板-逐題練習.campus-practice.json');
+
+    expect(courseStudyBackupFilenameStem('\u200d'.repeat(52) + '講義.md')).toBe('讀書白板');
+    expect(courseStudyBackupFilenameStem('\u2800'.repeat(52) + '課程.txt')).toBe('讀書白板');
+    // A visible character at the cut is still enough to distinguish the file.
+    expect(courseStudyBackupFilenameStem('\u3164'.repeat(47) + '課程.pdf'))
+      .toBe('\u3164'.repeat(47) + '課');
+    expect(courseStudyBackupFilenameStem('👩‍💻 課程.pdf')).toBe('👩‍💻 課程');
+  });
+
+});
 
 describe('mobile backup filename grapheme boundaries', () => {
   const prefix = '課'.repeat(47);
@@ -23,19 +108,6 @@ describe('mobile backup filename grapheme boundaries', () => {
     expect(courseStudyPracticeCheckpointFilename(title)).toBe(prefix + '-逐題練習.campus-practice.json');
   });
 
-  it('uses a readable stem for invisible-only source titles across TXT and both JSON backups', () => {
-    for (const invisibleTitle of ['\u200c', '\u200d\u200d', '\u0301', '\u2800\u200d', '\u200d.md']) {
-      expect(courseStudyBackupFilenameStem(invisibleTitle)).toBe('讀書白板');
-      expect(courseStudyNotesFilename(invisibleTitle)).toBe('讀書白板-學習筆記.txt');
-      expect(courseStudyProgressFilename(invisibleTitle)).toBe('讀書白板-閱讀進度.campus-study.json');
-      expect(courseStudyPracticeCheckpointFilename(invisibleTitle)).toBe('讀書白板-逐題練習.campus-practice.json');
-    }
-    // A joiner between visible characters is a meaningful part of a name.
-    expect(courseStudyBackupFilenameStem('👩‍💻.md')).toBe('👩‍💻');
-    expect(courseStudyBackupFilenameStem('می‌روم.md')).toBe('می‌روم');
-    expect(courseStudyBackupFilenameStem('資料庫.md')).toBe('資料庫');
-  });
-
   it('preserves a complete boundary cluster and the original 48-code-point cap', () => {
     const full = '課'.repeat(45) + '👩‍💻';
     expect(courseStudyBackupFilenameStem(full + '後續文字.md')).toBe(full);
@@ -52,6 +124,44 @@ describe('mobile backup filename grapheme boundaries', () => {
         expect(courseStudyBackupFilenameStem(prefix + cluster + '後續文字.md')).toBe(prefix);
       }
       expect(courseStudyBackupFilenameStem('課'.repeat(45) + '👩‍💻' + '後續')).toBe('課'.repeat(45) + '👩‍💻');
+    } finally {
+      if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor);
+      else Reflect.deleteProperty(Intl, 'Segmenter');
+    }
+  });
+
+
+  it('keeps Unicode Prepend marks attached in filenames on older mobile WebViews', () => {
+    // GB9b: each code point is joined to the following glyph in one grapheme.
+    const prepends = [
+      0x0600, 0x0605, 0x06dd, 0x070f, 0x0890, 0x08e2, 0x110bd,
+      0x110cd, 0x111c2, 0x1193f, 0x11a3a, 0x11a84, 0x11d46,
+    ].map((point) => String.fromCodePoint(point));
+    const prefix = '課'.repeat(47);
+    const titles = prepends.map((prepend) => prefix + prepend + 'ع後續.md');
+    const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
+    const assertNames = () => {
+      for (const title of titles) {
+        expect(courseStudyBackupFilenameStem(title)).toBe(prefix);
+        expect(courseStudyNotesFilename(title)).toBe(prefix + '-學習筆記.txt');
+        expect(courseStudyProgressFilename(title)).toBe(prefix + '-閱讀進度.campus-study.json');
+        expect(courseStudyPracticeCheckpointFilename(title)).toBe(prefix + '-逐題練習.campus-practice.json');
+      }
+      // A whole Prepend+letter grapheme still fits exactly after 46 letters.
+      expect(courseStudyBackupFilenameStem('課'.repeat(46) + String.fromCodePoint(0x0600) + 'ع後續.md'))
+        .toBe('課'.repeat(46) + String.fromCodePoint(0x0600) + 'ع');
+    };
+    try {
+      Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: undefined });
+      assertNames();
+      // A broken WebView may report each code point as a complete grapheme.
+      Object.defineProperty(Intl, 'Segmenter', {
+        configurable: true,
+        value: class {
+          segment(value: string) { return Array.from(value, (segment) => ({ segment })); }
+        },
+      });
+      assertNames();
     } finally {
       if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor);
       else Reflect.deleteProperty(Intl, 'Segmenter');

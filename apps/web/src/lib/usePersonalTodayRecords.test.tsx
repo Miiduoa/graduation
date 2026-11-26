@@ -186,6 +186,20 @@ function TodayReadout() {
   );
 }
 
+it('exposes imported courses while the first manual timetable read is pending', async () => {
+  storeImportedCourse('先讀到的匯入課程');
+  const manual = deferred<StoredTimetable>();
+  state.load.mockReturnValueOnce(manual.promise);
+  render(<TodayReadout />);
+
+  expect(screen.getByText('先讀到的匯入課程')).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toBe('正在確認課表');
+  await act(async () => manual.resolve(timetable('後讀到的手動課程')));
+  expect(screen.getByRole('status').textContent).toBe('已確認課表');
+  expect(screen.getByText('先讀到的匯入課程')).toBeTruthy();
+  expect(screen.getByText('後讀到的手動課程')).toBeTruthy();
+});
+
 it('retries a failed imported ledger and the manual source without remounting the active task', async () => {
   const key = storeImportedCourse('恢復的匯入課程');
   const read = localStorage.getItem.bind(localStorage);
@@ -210,12 +224,13 @@ it('retries a failed imported ledger and the manual source without remounting th
   fireEvent.click(screen.getByRole('button', { name: '重新讀取課表' }));
   expect(screen.getByRole('status').textContent).toBe('正在確認課表');
   expect(screen.queryByRole('alert')).toBeNull();
-  expect(screen.queryByText('舊手動課程')).toBeNull();
+  expect(screen.getByText('舊手動課程')).toBeTruthy();
   expect(state.load).toHaveBeenCalledTimes(2);
   await act(async () => next.resolve(timetable('重讀的手動課程')));
   expect(screen.getByRole('status').textContent).toBe('已確認課表');
   expect(screen.getByText('恢復的匯入課程')).toBeTruthy();
   expect(screen.getByText('重讀的手動課程')).toBeTruthy();
+  expect(screen.queryByText('舊手動課程')).toBeNull();
   expect(screen.getByRole('textbox', { name: '未送出草稿' })).toBe(draft);
   expect((draft as HTMLInputElement).value).toBe('重讀時也要保留的草稿');
   expect(getItem.mock.calls.filter(([item]) => item === key).length).toBeGreaterThan(1);
@@ -234,6 +249,8 @@ it('keeps both sources in the current account and campus when an older retry fin
   await screen.findByText('已確認課表');
   fireEvent.click(screen.getByRole('button', { name: '重新讀取課表' }));
   expect(screen.getByRole('status').textContent).toBe('正在確認課表');
+  expect(screen.getByText('帳號 A 匯入課程')).toBeTruthy();
+  expect(screen.getByText('帳號 A 手動課程')).toBeTruthy();
   state.owner = 'school:b';
   state.uid = 'b';
   state.schoolId = 'nthu';

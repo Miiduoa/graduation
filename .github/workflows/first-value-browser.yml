@@ -1,0 +1,92 @@
+name: First Value Browser
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'apps/web/src/components/today/**'
+      - 'apps/web/src/app/page.tsx'
+      - 'apps/web/src/app/page.test.tsx'
+      - 'apps/web/src/app/layout.tsx'
+      - 'apps/web/src/app/layout.test.tsx'
+      - 'apps/web/src/app/settings/**'
+      - 'apps/web/src/components/PWAInstall*'
+      - 'apps/web/src/lib/pwaInstallation*'
+      - 'apps/web/src/app/globals.css'
+      - 'apps/web/src/app/home.module.css'
+      - 'apps/web/src/components/CampusIcon*'
+      - 'apps/web/src/lib/campusNavigation*'
+      - 'apps/web/src/lib/todayScreen*'
+      - 'apps/web/src/lib/todayCourseWork*'
+      - 'packages/shared/src/pickNextAction*'
+      - 'scripts/qa/first-value/**'
+      - 'scripts/qa/browser/**'
+      - 'package.json'
+      - 'apps/web/package.json'
+      - 'apps/web/tsconfig.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/first-value-browser.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: first-value-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: First use and returning journeys on desktop and mobile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Taipei
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '10.28.2'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.5'
+          cache: pnpm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify home, install and settings behavior
+        run: |
+          mkdir -p artifacts/first-value
+          pnpm --filter web test \
+            src/components/today/TodayWelcome.test.tsx \
+            src/components/today/StudentToday.test.tsx \
+            src/components/today/StudentToday.schoolNavigation.test.tsx \
+            src/components/today/TodayUnreadNotifications.test.tsx \
+            src/components/today/TodayUnreadNotifications.schoolNavigation.test.tsx \
+            src/app/page.test.tsx \
+            src/components/PWAInstallBanner.test.tsx \
+            src/app/settings/page.test.tsx \
+            src/app/layout.test.tsx \
+            --reporter=default --reporter=json \
+            --outputFile=../../artifacts/first-value/unit-tests.json
+      - name: Install Chromium and Chinese fonts
+        run: |
+          python -m pip install playwright==1.57.0
+          bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk
+      - name: Bundle actual product UI with synthetic data boundaries
+        run: node scripts/qa/first-value/build.mjs
+      - name: Check first-use and returning-user journeys
+        run: python scripts/qa/first-value/check.py
+      - name: Upload browser evidence and source hashes
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: first-value-browser
+          path: artifacts/first-value
+          retention-days: 7

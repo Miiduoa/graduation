@@ -1,0 +1,37 @@
+# ADR 0004 — 校園優先、統一帳號與逐項授權的資料同步
+
+Status: Proposed. The draft implements entry, mobile session handling and course-list receipts. Production identity migration is pending.
+Baseline: 322d42e045c4dfc23f46abe69a6da84046500e6f
+
+## Decision
+
+For students, choose school once and prefer the school's approved sign-in (TronClass or its identity provider when supported). Create/resume one nuni person account only after authoritative proof. Google is an optional sign-in credential linked to that same person, not automatic proof of enrollment or a second personal data partition. Keep Google-first for public platform tasks, merchants and unverified participants; maintain guest access and existing users. Teacher and staff roles require independent school or course authority.
+
+The present PU student adapter is form-password against E campus; teacher LMS adapter uses TronClass proof. The Web runtime student-login flag and App release/provider/LMS flags are deliberately not flipped. A working LMS read adapter does not establish approval for direct student SSO or unrestricted site crawling.
+
+## Integration evidence
+
+The [official TronClass login](https://www.tronclass.com/login) currently opens a public institution finder. On 2026-11-24 a browser search for 海洋 listed 國立台灣海洋大學 and selecting it opened the [university's TronClass site](https://tronclass.ntou.edu.tw/). Web and App can link to this finder before a nuni school is selected. This live route differs from the older FAQ description of the website login as personal/trial only. The directory navigates to an institution and supplies no verified nuni identity or data grant.
+
+Each school publishes its own sign-in destination. The directory identifies five official TronClass portals (PU, FJU, THU, NCUE and STU). Following one of these links opens the school site. Each tenant still needs an approved identity provider, a stable subject, and a verified data grant before nuni can import personal records. [TronClass institution login FAQ](https://support.tronclass.com/tw/question/login/) · [Higher education integration](https://www.tronclass.com/solutions-higher-education.html)
+
+Personal Google sign-in currently resolves a platform account. The pinned API also supports adding a school-configured credential to a tenant-local campus account. That endpoint requires an existing campus-account session in the same tenant. A PU Firebase school session and a consumer Google platform account still need an explicit ownership mapping, collision handling, and lookup at subsequent login. The first pilot should demonstrate that both sign-in methods return the same person and that disconnecting TronClass revokes future LMS reads. [Platform sign-in service](https://github.com/Miiduoa/nuni-prod/blob/9de47b4b3492325e430562c37bcad552867162db/apps/api/src/accounts/platform-account-service.ts#L171-L225) · [Tenant credential linking](https://github.com/Miiduoa/nuni-prod/blob/9de47b4b3492325e430562c37bcad552867162db/apps/api/src/accounts/account-service.ts#L246-L303)
+
+## Target contract (not yet implemented)
+
+- Canonical person ID, provider identities with unique (issuer, school/tenant, subject), membership and role grants separately scoped. Reuse existing authority/mappings only after reconciling Nuni and Firebase sessions; no parallel replacement table before migration design.
+- Linking transaction: authenticated person, recent reauthentication of both credentials, short-lived single-use nonce bound to account/tenant/provider, server-side issuer/audience/state/PKCE validation, atomic uniqueness and audit. A conflicting existing account requires a reviewed recovery path; do not match by email, name or student ID string alone. Prevent unlinking the last usable credential. Revoke source access independently of signing out and maintain migration rollback.
+- A school/source connector declares allowed scopes, capability/read/write and session lifetime. Prefer official OAuth/SSO and documented APIs or a school-approved adapter. No storing raw passwords; any existing credential retention requires audit and removal before rollout. Do not bypass MFA, provider gates, account controls, or fetch records outside the signed-in user's permissions.
+- After proof, consent screen lists scopes. Read own profile, course list, LMS assignments/status, announcements, learning materials, personal scores, attendance, calendar and other approved source data only. Course catalog is not proof of enrolled data. E campus official timetable, transcripts, credit audit, or other systems need separate authorized capability; never claim TronClass contains them. Avoid collecting unnecessary classmates' data. Write scopes (homework submission, discussion, etc.) are separately authorized and user-confirmed, with idempotency and authoritative receipt.
+- Fast initial login; background incremental, bounded-concurrency sync. Persist receipt per canonical person + school + source + scope + run ID with source timestamp, last success, state (pending/partial/received/empty/denied/expired/failed/disabled), coverage, and retry metadata. Never overwrite a successful receipt with an ambiguous empty/error result. Recheck generation, membership and token on writes; cancel stale jobs on switch/revoke. Isolate storage/cache and clear access on disconnect/delete. Do not persist passwords, cookies, tokens or private records in logs.
+- Agent tools query only authorized user-scoped projections through the same capability gate; no raw tokens or blanket site access. Cite source/freshness, handle missing data, and require explicit approval for external side effects. Web/App share the same account and connection contract.
+
+## Rollout
+
+1. Entry/receipt correctness (this slice): available selected school first for general entry, retain platform and task-specific routes, recover from transient provider lookup, distinguish course-list receipt from full LMS synchronization.
+2. Verify school-authorized direct student flow in a dedicated test environment, provider contracts, exact authenticated subject and revocation. Inventory existing Firebase/Nuni identities; design transactional linking and migration tests before enabling account merge.
+3. Build one real read-only school connector end to end (profile, owned courses, assignments and submission status), with owner/tenant scoped receipts and negative tests. Then add materials, announcements, scores, attendance and independent campus sources; measure coverage against authorized fixtures rather than assuming full-site parity.
+4. Add Google link/unlink, cross-device login and recovery once both proofs and atomic uniqueness are tested. Use migration dry run, collision report, rollback and staged rollout. Keep existing Google-only accounts intact.
+5. Expose connections, progress, last sync, retry and revoke in one account screen; then connect Agent and confirmed write actions.
+
+Acceptance: school-first and Google-only routes remain usable; login works with partial source outage; no cross-account/tenant leak or stale sync overwrite; provider disable/revoke fails closed; duplicate linking, replay, wrong issuer, wrong person, unlinked Google, account switch, stale tokens, permission loss and recovery tested; no real user credentials or live writes in CI. Do not merge or enable production until runtime verification, CI/security checks and school/source authorization are available.

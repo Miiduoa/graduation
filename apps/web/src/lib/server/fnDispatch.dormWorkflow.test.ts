@@ -11,7 +11,7 @@ const storage = vi.hoisted(() => ({
 vi.mock('firebase-admin/storage', () => storage);
 afterEach(() => vi.restoreAllMocks());
 
-function fixture(uid = 'student') {
+function fixture(uid = 'student', messaging?: FnRuntime['messaging']) {
   const store = createMemoryGroupStore([
     ['schools/pu', { dormWorkflowEnabled: true }],
     ['schools/pu/members/student', { status: 'active', role: 'student' }],
@@ -25,7 +25,7 @@ function fixture(uid = 'student') {
     if (token !== 'fixture-token') throw new Error('invalid token');
     return { uid };
   });
-  const runtime: FnRuntime = { db: store.db as FnRuntime['db'], verifyIdToken };
+  const runtime: FnRuntime = { db: store.db as FnRuntime['db'], verifyIdToken, messaging };
   const call = (data: Record<string, unknown>, token: string | null = 'fixture-token') =>
     dispatchFnRequest(
       'dormWorkflow',
@@ -49,6 +49,45 @@ it('requires verified auth and active membership', async () => {
   expect((await call({ action: 'config' })).status).toBe(200);
   expect(verifyIdToken).toHaveBeenCalledWith('fixture-token', true);
   expect((await fixture('outsider').call({ action: 'config' })).status).toBe(403);
+});
+
+it('publishes to the resident workspace and reports provider acceptance for eligible devices', async () => {
+  const sendEachForMulticast = vi.fn().mockResolvedValue({
+    responses: [{ success: true }, { success: false, error: { code: 'messaging/internal-error' } }],
+  });
+  const { call, store } = fixture('staff', { sendEachForMulticast });
+  store.docs.set('schools/pu/members/staff', { role: 'staff', status: 'active' });
+  store.docs.set('schools/pu/dormStaffRoles/staff', { status: 'active', packages: true, buildings: ['A'] });
+  store.docs.set('users/student/pushTokens/one', { token: 'device-one', type: 'fcm' });
+  store.docs.set('users/student/pushTokens/two', { token: 'device-two', type: 'fcm' });
+  const notice = { action: 'announce', building: 'A', title: '停水', body: '週三下午供水暫停', key: 'water' };
+  const published = await (await call(notice)).json();
+  expect(published).toMatchObject({ result: { acceptedRecipients: 1, recipients: 1 } });
+  expect(await (await call(notice)).json()).toEqual(published);
+  const inboxPrefix = 'users/student/notifications/';
+  const inboxRows = [...store.docs].filter(([path]) => path.startsWith(inboxPrefix));
+  expect(inboxRows).toHaveLength(1);
+  const [[path, inbox]] = inboxRows;
+  const inboxNotificationId = path.slice(inboxPrefix.length);
+  expect(inboxNotificationId).toMatch(/^dorm_[0-9a-f]{64}$/);
+  expect(inbox.data).toEqual({
+    type: 'announcement',
+    channel: 'dormitory',
+    schoolId: 'pu',
+    dormAnnouncementId: published.result.id,
+    inboxNotificationId,
+    deliveryKey: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+  });
+  expect(sendEachForMulticast).toHaveBeenCalledTimes(1);
+  expect(sendEachForMulticast).toHaveBeenCalledWith(expect.objectContaining({
+    tokens: ['device-one', 'device-two'],
+    data: inbox.data,
+  }));
+  store.docs.set('users/student/settings/notifications', { announcements: false });
+  expect(await (await call({ ...notice, key: 'next' })).json()).toMatchObject({
+    result: { acceptedRecipients: 0, recipients: 1 },
+  });
+  expect(sendEachForMulticast).toHaveBeenCalledTimes(1);
 });
 
 it('rejects unknown actions and keeps setStaff unreachable', async () => {

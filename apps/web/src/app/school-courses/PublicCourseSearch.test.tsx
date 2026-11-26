@@ -62,6 +62,158 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it.each([
+  { condition: 'missing', fetchedAt: undefined, warning: '目前沒有校方資料的擷取時間' },
+  { condition: 'older than 24 hours', fetchedAt: '2026-11-22T03:59:00.000Z', warning: '距離伺服器上次取得校方資料已超過 24 小時' },
+  { condition: 'more than 5 minutes in the future', fetchedAt: '2026-11-23T04:06:00.000Z', warning: '伺服器提供的擷取時間比此裝置時間晚超過 5 分鐘' },
+])('shows a verifiable official-catalog path when source evidence is $condition', async ({ fetchedAt, warning }) => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  try {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt })));
+    render(<PublicCourseSearch {...props} />);
+    submit('005076');
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.getByText(new RegExp(warning))).toBeTruthy();
+    expect(screen.getByRole('link', { name: '官方課程目錄' }).getAttribute('href'))
+      .toBe('https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall');
+    expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it('rechecks freshness after the device clock advances while the page stays open', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  try {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-23T04:00:00.000Z' })));
+    render(<PublicCourseSearch {...props} />);
+    submit('005076');
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
+    now.mockReturnValue(Date.parse('2026-11-24T04:00:01.000Z'));
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(screen.getByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeTruthy();
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it.each([
+  '2026-11-22T04:01:00.000Z',
+  '2026-11-23T04:04:00.000Z',
+])('does not falsely flag a valid retrieval timestamp %s', async (fetchedAt) => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  try {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt })));
+    render(<PublicCourseSearch {...props} />);
+    submit('005076');
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時|伺服器提供的擷取時間比此裝置時間晚超過 5 分鐘|目前沒有校方資料的擷取時間/)).toBeNull();
+    expect(screen.queryByRole('link', { name: '官方課程目錄' })).toBeNull();
+  } finally {
+    now.mockRestore();
+  }
+});
+
+
+it('keeps freshness tied to its accepted search, rechecks later searches, and preserves source provenance', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  const fetchedAt = '2026-11-22T04:01:00.000Z';
+  const oldWarning = /距離伺服器上次取得校方資料已超過 24 小時/;
+  const fetcher = vi.fn().mockImplementation(() => Promise.resolve(response([course], { fetchedAt })));
+  try {
+    vi.stubGlobal('fetch', fetcher);
+    render(<PublicCourseSearch {...props} />);
+    submit('005076');
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(oldWarning)).toBeNull();
+
+    now.mockReturnValue(Date.parse('2026-11-23T04:02:00.000Z'));
+    fireEvent.click(screen.getByRole('checkbox', { name: /選入批次核對/ }));
+    expect(screen.getByRole('status', { name: '選取課程' }).textContent).toContain('已選 1 門課');
+    expect(screen.queryByText(oldWarning)).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    fireEvent.submit(screen.getByRole('search', { name: '搜尋校方開課資料' }));
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.getByText(oldWarning)).toBeTruthy();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('校方資料擷取：2026-11-22 12:01（台灣時間；非校方更新時間）')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '帶入課表核對' }));
+    const draft = readPersonalImportDraft(importContext.scope);
+    expect(draft?.source.name).toContain('來源：https://ccweb6.ncnu.edu.tw/');
+    expect(draft?.source.name).toContain('資料擷取：2026-11-22 12:01（台灣時間；非校方更新時間）');
+    expect(draft?.source.name).not.toContain('2026-11-23 12:02');
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it.each(['focus', 'visibilitychange'])('rechecks displayed freshness on %s without requerying or altering the source', async (event) => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  const fetcher = vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-22T04:01:00.000Z' }));
+  try {
+    vi.stubGlobal('fetch', fetcher);
+    render(<PublicCourseSearch {...props} />);
+    await act(async () => { submit('005076'); });
+    expect(screen.getByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
+    now.mockReturnValue(Date.parse('2026-11-23T04:02:00.000Z'));
+    await act(async () => {
+      (event === 'focus' ? window : document).dispatchEvent(new Event(event));
+    });
+    expect(screen.getByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeTruthy();
+    expect(screen.getByText('校方資料擷取：2026-11-22 12:01（台灣時間；非校方更新時間）')).toBeTruthy();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it('refreshes freshness while the result stays open and releases its clock when unmounted', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-23T04:00:00.000Z'));
+  const fetcher = vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-22T04:00:30.000Z' }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<PublicCourseSearch {...props} />);
+  await act(async () => { submit('005076'); });
+  expect(screen.getByRole('heading', { name: course.title })).toBeTruthy();
+  expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
+  expect(vi.getTimerCount()).toBe(1);
+  fireEvent.click(screen.getByRole('checkbox', { name: /選入批次核對/ }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  expect(screen.getByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeTruthy();
+  expect(screen.getByRole('status', { name: '選取課程' }).textContent).toContain('已選 1 門課');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: '帶入課表核對' }));
+  const draft = readPersonalImportDraft(importContext.scope);
+  expect(draft?.source.name).toContain('來源：https://ccweb6.ncnu.edu.tw/');
+  expect(draft?.source.name).toContain('資料擷取：2026-11-22 12:00（台灣時間；非校方更新時間）');
+  // jsdom schedules the draft storage event separately; settle only that
+  // immediate task, leaving the next freshness interval pending.
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(vi.getTimerCount()).toBe(1);
+  await act(async () => { view.unmount(); });
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('uses the newly accepted response time before the next minute tick', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  try {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-23T04:05:58.000Z' })));
+    render(<PublicCourseSearch {...props} />);
+    now.mockReturnValue(Date.parse('2026-11-23T04:00:59.000Z'));
+    submit('005076');
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(/伺服器提供的擷取時間比此裝置時間晚超過 5 分鐘/)).toBeNull();
+  } finally {
+    now.mockRestore();
+  }
+});
+
 it('carries linked weekday and credits into a verified search and imports every meeting of a matching course', async () => {
   const multiDay = { ...course, time: '3cd4i' };
   const fetcher = vi.fn().mockResolvedValue(filteredResponse([multiDay], { weekday: 3, credits: 3 }, { unresolvedCount: 2 }));
@@ -716,7 +868,8 @@ it.each(['fetch', 'body'])('times out a stalled %s, retries the same query and i
   await act(async () => { finish(); });
   expect(screen.queryByText(course.title)).toBeNull();
   expect(screen.getByRole('status').textContent).toContain('沒有找到「005076」課程');
-  expect(vi.getTimerCount()).toBe(0);
+  // The request deadline is released; only the accepted result's clock remains.
+  expect(vi.getTimerCount()).toBe(1);
 });
 
 it('clears the request deadline when a pending search is unmounted', async () => {
@@ -764,6 +917,10 @@ it('prepares both meetings for the current owner and opens the review section wi
   await chooseCourse();
   expect(push).toHaveBeenCalledWith('/import?kind=timetable&campus=ncnu#import-review');
   const draft = readPersonalImportDraft(importContext.scope);
+  expect(draft?.source.name).toBe(
+    '國立暨南國際大學｜115學年度第1學期公開開課資料｜來源：https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall｜資料擷取：2026-11-06 16:00（台灣時間；非校方更新時間）',
+  );
+  expect(draft?.rows.every(row => row.source.name === draft.source.name)).toBe(true);
   expect(draft?.rows.map(row => [row.schoolId, row.dayOfWeek, row.periodLabel])).toEqual([['ncnu', 3, 'cd'], ['ncnu', 4, 'i']]);
   expect(draft).toMatchObject({ kind: 'timetable', year: '115', semester: '1', rows: [{ courseCode: course.code }, { courseCode: course.code }] });
   expect(readPersonalImportDraft({ owner: 'guest', schoolId: 'ncnu' })).toBeNull();
@@ -775,27 +932,47 @@ it.each([
     url: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall' },
   { schoolId: 'nthu' as const, schoolName: '國立清華大學',
     url: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json' },
-])('preserves the verified $schoolId catalog source, actual term and fetch time in the draft', async ({ schoolId, schoolName, url }) => {
+])('preserves the $schoolId catalog source and actual term in the batch draft when retrieval time is missing', async ({ schoolId, schoolName, url }) => {
   importContext.scope.schoolId = schoolId;
-  await chooseCourse(schoolId);
+  const first = schoolId === 'nthu' ? nthuCourse : course;
+  const second = schoolId === 'nthu'
+    ? { ...first, code: '11510AES 520301', section: '01', title: '另一班' }
+    : { ...first, section: 'b', title: '另一班' };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([first, second], { schoolId, fetchedAt: undefined })));
+  render(<PublicCourseSearch {...(schoolId === 'nthu' ? nthuProps : props)} />);
+  submit(first.code);
+  await screen.findByRole('heading', { name: second.title });
+  screen.getAllByRole('checkbox', { name: /選入批次核對/ }).forEach(check => fireEvent.click(check));
+  fireEvent.click(screen.getByRole('button', { name: '將選取的課程一起帶入核對' }));
   const draft = readPersonalImportDraft(importContext.scope);
   expect(draft?.source.name).toBe(
-    `${schoolName}｜115學年度第1學期公開開課資料｜來源：${url}｜資料擷取：2026-11-06 16:00（台灣時間；非校方更新時間）`,
+    `${schoolName}｜115學年度第1學期公開開課資料｜來源：${url}｜資料擷取：時間未提供`,
   );
-  expect(draft?.rows.length).toBe(2);
+  expect(draft?.rows).toHaveLength(schoolId === 'nthu' ? 4 : 2);
   expect(draft?.rows.every(row => row.source.name === draft.source.name)).toBe(true);
   expect(readPersonalImports(importContext.scope)).toEqual([]);
 });
 
-it('marks a missing public catalog retrieval time as unknown, never as a school update', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt: undefined })));
-  render(<PublicCourseSearch {...props} />);
-  submit('005076');
+it.each([
+  { schoolId: 'ncnu' as const, schoolName: '國立暨南國際大學', selected: course, expectedDays: [5],
+    url: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall' },
+  { schoolId: 'ncnu' as const, schoolName: '國立暨南國際大學', selected: { ...course, time: '3cd4i' }, expectedDays: [3, 4],
+    url: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall' },
+  { schoolId: 'nthu' as const, schoolName: '國立清華大學', selected: nthuCourse, expectedDays: [1, 5],
+    url: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json' },
+])('does not invent retrieval time for a single $schoolId course review draft ($selected.time)', async ({ schoolId, schoolName, selected, expectedDays, url }) => {
+  importContext.scope.schoolId = schoolId;
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([selected], { schoolId, fetchedAt: undefined })));
+  render(<PublicCourseSearch {...(schoolId === 'nthu' ? nthuProps : props)} />);
+  submit(selected.code);
   fireEvent.click(await screen.findByRole('button', { name: '帶入課表核對' }));
   const draft = readPersonalImportDraft(importContext.scope);
-  expect(draft?.source.name).toContain('115學年度第1學期公開開課資料');
-  expect(draft?.source.name).toContain('資料擷取：時間未提供');
-  expect(draft?.source.name).not.toContain('本學期');
+  expect(draft?.source.name).toBe(
+    `${schoolName}｜115學年度第1學期公開開課資料｜來源：${url}｜資料擷取：時間未提供`,
+  );
+  expect(draft?.rows.map(row => row.dayOfWeek)).toEqual(expectedDays);
+  expect(draft?.rows.every(row => row.source.name === draft.source.name)).toBe(true);
+  expect(readPersonalImports(importContext.scope)).toEqual([]);
 });
 
 it.each((['ncnu', 'nthu'] as const).flatMap((schoolId) =>
@@ -873,6 +1050,7 @@ it('keeps each NTHU meeting paired with its room and prepares the draft for the 
   expect(draft?.source.name).toBe(
     '國立清華大學｜115學年度第1學期公開開課資料｜來源：https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json｜資料擷取：2026-11-06 16:00（台灣時間；非校方更新時間）',
   );
+  expect(draft?.rows.every(row => row.source.name === draft.source.name)).toBe(true);
   expect(draft?.rows.map(row => [row.courseCode, row.className, row.dayOfWeek, row.location])).toEqual([
     ['11510AES 520300', '00', 1, 'BMES醫環618'], ['11510AES 520300', '00', 5, 'BMES醫環501'],
   ]);
@@ -956,24 +1134,30 @@ it('selects two public courses and creates one scoped review draft with every me
   expect(draft?.year).toBe('115');
   expect(draft?.semester).toBe('1');
   expect(draft?.source.name).toContain('來源：https://ccweb6.ncnu.edu.tw/');
-  expect(draft?.source.name).toContain('資料擷取：2026-11-06 16:00');
+  expect(draft?.source.name).toContain('資料擷取：2026-11-06 16:00（台灣時間；非校方更新時間）');
   expect(draft?.rows.map(row => row.dayOfWeek)).toEqual([5, 3, 4]);
   expect(draft?.rows.map(row => row.courseCode)).toEqual(['005076', '130021', '130021']);
   expect(readPersonalImports(importContext.scope)).toEqual([]);
   expect(push).toHaveBeenCalledTimes(1);
 });
 
-it('does not partially import mixed-semester or duplicate public listings', async () => {
+it.each([
+  { title: '另一學期', code: '130021', section: 'b', semester: '1152' },
+  { title: '缺少學分', code: '130021', credits: '' },
+  { title: '全形班別', section: 'ａ' },
+  { title: '大寫班別、教師不同', section: 'A', teacher: '另一位老師' },
+  { title: '大寫班別、時段不同', section: 'A', time: '3cd' },
+])('does not create a batch draft containing $title', async (second) => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([
     course,
-    { ...course, code: '130021', section: 'b', semester: '1152', title: '另一學期' },
+    { ...course, ...second },
   ])));
   render(<PublicCourseSearch {...props} />);
   submit('實習');
-  await screen.findByRole('heading', { name: '另一學期' });
+  await screen.findByRole('heading', { name: second.title });
   screen.getAllByRole('checkbox', { name: /選入批次核對/ }).forEach(check => fireEvent.click(check));
   fireEvent.click(screen.getByRole('button', { name: '將選取的課程一起帶入核對' }));
-  expect(screen.getByRole('alert').textContent).toContain('不同學期');
+  expect(screen.getByRole('alert').textContent).toContain('請取消問題課程後重試');
   expect(readPersonalImportDraft(importContext.scope)).toBeNull();
   expect(push).not.toHaveBeenCalled();
 });

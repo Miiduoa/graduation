@@ -1,6 +1,7 @@
+import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directoryStorageFailures';
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuickCampusEntry } from './QuickCampusEntry';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
 import { DIRECTORY_SEARCH_STORAGE_KEY } from '@/lib/campusDirectorySearch';
@@ -379,65 +380,6 @@ it('keeps the quick-entry query after returning from a matched service', () => {
   expect(screen.getByRole('link', { name: /圖書館/ })).toBeTruthy();
 });
 
-it('reports an ordinary service selection once even when its destination is already open', () => {
-  window.history.replaceState({}, '', '/library');
-  const onNavigate = vi.fn();
-  render(<QuickCampusEntry onNavigate={onNavigate} />);
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }));
-  expect(onNavigate).toHaveBeenCalledExactlyOnceWith('/library');
-  expect(JSON.parse(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)!).quick).toMatchObject({
-    path: '/library',
-    destination: '/library',
-    query: '借書',
-  });
-});
-
-it.each([
-  { metaKey: true },
-  { ctrlKey: true },
-  { shiftKey: true },
-  { altKey: true },
-  { button: 1 },
-])('preserves the current quick task and draft storage for modified clicks: %s', (gesture) => {
-  const onNavigate = vi.fn();
-  render(<QuickCampusEntry onNavigate={onNavigate} />);
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }), gesture);
-  expect(onNavigate).not.toHaveBeenCalled();
-  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
-  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
-});
-
-it.each([
-  ['target', '_blank'],
-  ['target', 'service-reference'],
-  ['download', ''],
-])('does not treat a %s=%s link as leaving the current task', (attribute, value) => {
-  const onNavigate = vi.fn();
-  render(<QuickCampusEntry onNavigate={onNavigate} />);
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  const link = screen.getByRole('link', { name: /圖書館/ });
-  link.setAttribute(attribute, value);
-  fireEvent.click(link);
-  expect(onNavigate).not.toHaveBeenCalled();
-  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
-});
-
-it('does not store a return draft or close its container when navigation was cancelled', () => {
-  const onNavigate = vi.fn();
-  render(
-    <div onClickCapture={(event) => event.preventDefault()}>
-      <QuickCampusEntry onNavigate={onNavigate} />
-    </div>,
-  );
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }));
-  expect(onNavigate).not.toHaveBeenCalled();
-  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
-  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
-});
-
 it('does not restore the quick-entry query after starting over', () => {
   const view = render(<QuickCampusEntry />);
   fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), {
@@ -764,4 +706,82 @@ it('does not revive a saved quick draft after another account types while its ca
   view.rerender(<QuickCampusEntry />);
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
   expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
+});
+
+it('reports an ordinary service selection once even when its destination is already open', () => {
+  window.history.replaceState({}, '', '/library');
+  const onNavigate = vi.fn();
+  render(<QuickCampusEntry onNavigate={onNavigate} />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }));
+  expect(onNavigate).toHaveBeenCalledExactlyOnceWith('/library');
+  expect(JSON.parse(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)!).quick).toMatchObject({
+    path: '/library',
+    destination: '/library',
+    query: '借書',
+  });
+});
+
+it.each([
+  { metaKey: true },
+  { ctrlKey: true },
+  { shiftKey: true },
+  { altKey: true },
+  { button: 1 },
+])('preserves the current quick task for modified clicks: %s', (gesture) => {
+  const onNavigate = vi.fn();
+  render(<QuickCampusEntry onNavigate={onNavigate} />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }), gesture);
+  expect(onNavigate).not.toHaveBeenCalled();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+});
+
+it.each([
+  ['target', '_blank'],
+  ['target', 'service-reference'],
+  ['download', ''],
+])('does not treat a %s=%s link as leaving the current task', (attribute, value) => {
+  const onNavigate = vi.fn();
+  render(<QuickCampusEntry onNavigate={onNavigate} />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  const link = screen.getByRole('link', { name: /圖書館/ });
+  link.setAttribute(attribute, value);
+  fireEvent.click(link);
+  expect(onNavigate).not.toHaveBeenCalled();
+});
+
+it('does not close its container when navigation was cancelled', () => {
+  const onNavigate = vi.fn();
+  render(
+    <div onClickCapture={(event) => event.preventDefault()}>
+      <QuickCampusEntry onNavigate={onNavigate} />
+    </div>,
+  );
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }));
+  expect(onNavigate).not.toHaveBeenCalled();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+});
+
+describe.each(directoryStorageFailures)('quick navigation with storage %s', (failure) => {
+  it.each([
+    [/圖書館/, '/library'],
+    ['詢問校園助理', '/ai-assistant'],
+    ['搜尋更多服務', '/search'],
+  ] as const)('follows %s and invokes the panel navigation callback', (name, path) => {
+    const onNavigate = vi.fn();
+    render(<QuickCampusEntry onNavigate={onNavigate} />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    const link = screen.getByRole('link', { name });
+    const storage = rejectDirectoryStorage(failure);
+    try {
+      expect(fireEvent.click(link)).toBe(true);
+    } finally {
+      storage.mockRestore();
+    }
+    const [href] = onNavigate.mock.calls[0];
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(new URL(href, window.location.origin).pathname).toBe(path);
+  });
 });

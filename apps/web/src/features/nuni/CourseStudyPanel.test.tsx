@@ -25,7 +25,7 @@ beforeEach(() => { mocks.read.mockReset(); mocks.run.mockReset(); mocks.availabl
 
 
 
-it('keeps invisible-only note drafts out of TXT actions while still protecting them from accidental close', () => {
+it('keeps invisible-only note drafts available to TXT actions while still protecting them from accidental close', () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
   const download = screen.getByRole('button', { name: '下載本次筆記' });
@@ -34,8 +34,8 @@ it('keeps invisible-only note drafts out of TXT actions while still protecting t
 
   expect(download.hasAttribute('disabled')).toBe(true);
   fireEvent.change(note, { target: { value: invisible } });
-  expect(download.hasAttribute('disabled')).toBe(true);
-  expect(copy.hasAttribute('disabled')).toBe(true);
+  expect(download.hasAttribute('disabled')).toBe(false);
+  expect(copy.hasAttribute('disabled')).toBe(false);
 
   fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
   expect(screen.getByRole('heading', { name: '要關閉讀書白板嗎？' })).toBeTruthy();
@@ -46,14 +46,14 @@ it('keeps invisible-only note drafts out of TXT actions while still protecting t
   expect(download.hasAttribute('disabled')).toBe(false);
   expect(copy.hasAttribute('disabled')).toBe(false);
   fireEvent.change(note, { target: { value: invisible } });
-  expect(download.hasAttribute('disabled')).toBe(true);
+  expect(download.hasAttribute('disabled')).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
   expect(download.hasAttribute('disabled')).toBe(false);
   expect(copy.hasAttribute('disabled')).toBe(false);
   expect(note.value).toBe(invisible);
 });
 
-it('counts only readable notes in a progress preview without deleting saved invisible drafts', () => {
+it.each([1, 2])('counts and exports a restored nonblank note in a v%i backup', (version) => {
   const source = studySourceFromText({ id: material.id, title: material.title, text: material.body });
   const invisible = '\u200d\u0301\u2800';
   const progress = serializeCourseStudyProgress({
@@ -61,14 +61,14 @@ it('counts only readable notes in a progress preview without deleting saved invi
     passages: { '0:0': { ...emptyStudyPassage(), note: invisible } },
   });
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
-  fireEvent.change(screen.getByLabelText('貼上已備份的進度 JSON'), { target: { value: progress } });
+  fireEvent.change(screen.getByLabelText('貼上已備份的進度 JSON'), { target: { value: JSON.stringify({ ...JSON.parse(progress), version }) } });
   fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
   const preview = screen.getByRole('region', { name: '閱讀進度預覽' });
-  expect(within(preview).getByText('個人筆記').parentElement?.querySelector('dd')?.textContent).toBe('0 段');
+  expect(within(preview).getByText('個人筆記').parentElement?.querySelector('dd')?.textContent).toBe('1 段');
 
   fireEvent.click(within(preview).getByRole('button', { name: '還原這份進度' }));
   expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value).toBe(invisible);
-  expect(screen.getByRole('button', { name: '下載本次筆記' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: '下載本次筆記' }).hasAttribute('disabled')).toBe(false);
 });
 
 it('isolates study notes when two different account/course scopes share an ambiguous colon-joined key', () => {
@@ -165,11 +165,11 @@ it('shows the authorized material without downloading or generating until reques
   expect(screen.getByText(/不會自動評分/)).toBeTruthy();
 });
 
-it('keeps invisible-only self-check drafts from unlocking a reference answer in the reading UI', async () => {
+it('uses the original nonblank self-check gate and resets disclosure on edit', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
   await screen.findByRole('region', { name: '本段 AI 講解' });
-  for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f', '\ufff9', '\ufffa', '\ufffb']) {
+  for (const invisible of [' ', '\t', '\ufeff']) {
     fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: invisible } });
     const compare = screen.getByRole('button', { name: '對照參考回答' }) as HTMLButtonElement;
     expect(compare.disabled).toBe(true);
@@ -177,14 +177,14 @@ it('keeps invisible-only self-check drafts from unlocking a reference answer in 
     fireEvent.click(compare);
     expect(screen.queryByText(explanation.answer)).toBeNull();
   }
-  for (const visible of ['主鍵', 'x²+y²', '👩‍💻', 'e\u0301', '⠃']) {
+  for (const visible of ['主鍵', 'x²+y²', '👩‍💻', 'e\u0301', '⠃', '\u200b', '\u0301', '\ufff9']) {
     fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: visible } });
     const compare = screen.getByRole('button', { name: '對照參考回答' }) as HTMLButtonElement;
     expect(compare.disabled).toBe(false);
     fireEvent.click(compare);
     expect(screen.getByText(explanation.answer)).toBeTruthy();
     // Editing an already revealed response invalidates its disclosure.
-    fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: '\u200b' } });
+    fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: '' } });
     expect(screen.queryByText(explanation.answer)).toBeNull();
   }
 });
@@ -3272,32 +3272,6 @@ it.each([
   }
 });
 
-it('flags unreadable AI self-check question and revealed answer in the reading UI without losing the student attempt', async () => {
-  const invisible = '\u200d\u2066\u0301\u2800';
-  mocks.run.mockResolvedValueOnce({ ...explanation, question: invisible, answer: invisible });
-  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
-  const lesson = await screen.findByRole('region', { name: '本段 AI 講解' });
-  expect(within(lesson).getByText(/AI 未提供可讀的自我檢查題/)).toBeTruthy();
-  expect(within(lesson).queryByText(/AI 未提供可讀的參考回答/)).toBeNull();
-
-  const compare = within(lesson).getByRole('button', { name: '對照參考回答' }) as HTMLButtonElement;
-  expect(compare.disabled).toBe(true);
-  fireEvent.click(compare);
-  expect(within(lesson).queryByText(/AI 未提供可讀的參考回答/)).toBeNull();
-
-  const attempt = within(lesson).getByLabelText('先寫下你的想法') as HTMLTextAreaElement;
-  fireEvent.change(attempt, { target: { value: '每個學生學號都應不同。' } });
-  expect(compare.disabled).toBe(false);
-  fireEvent.click(compare);
-  expect(within(lesson).getByText(/AI 未提供可讀的參考回答/)).toBeTruthy();
-  expect(compare.getAttribute('aria-expanded')).toBe('true');
-  expect(attempt.value).toBe('每個學生學號都應不同。');
-  fireEvent.change(attempt, { target: { value: '我需要再核對教材。' } });
-  expect(within(lesson).queryByText(/AI 未提供可讀的參考回答/)).toBeNull();
-  expect(mocks.run).toHaveBeenCalledTimes(1);
-});
-
 it('retains readable Chinese and combined emoji AI self-check content while keeping answers hidden until disclosure', async () => {
   const question = '主鍵和👩‍💻的例子有何不同？';
   const answer = '每位學生的主鍵不可重複，e\u0301 與 👩‍💻 都能正常顯示。';
@@ -3312,4 +3286,25 @@ it('retains readable Chinese and combined emoji AI self-check content while keep
     { target: { value: '先檢查唯一性。' } });
   fireEvent.click(within(lesson).getByRole('button', { name: '對照參考回答' }));
   expect(within(lesson).getByText(answer)).toBeTruthy();
+});
+
+
+it.each([
+  ['campus-one-study-progress', 3, '目前不支援這個閱讀進度檔的版本'],
+  ['campus-one-study-practice', 2, '這不是目前支援的逐題練習進度檔'],
+])('rejects an unsupported %s version without changing existing work', (format, version, message) => {
+  const source = studySourceFromText({ id: 'backup', title: '另一份教材', text: '備份裡的教材內容。' });
+  const progress = JSON.parse(serializeCourseStudyProgress({
+    scope, source, position: { sectionIndex: 0, passageIndex: 0, mode: 'understand' }, passages: {},
+  }));
+  const saved = version === 3 ? { ...progress, version } : { format, version, progress, practice: {} };
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '現有筆記' } });
+  fireEvent.change(screen.getByLabelText('貼上已備份的進度 JSON'), { target: { value: JSON.stringify(saved) } });
+  fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
+  expect(screen.getByRole('alert').textContent).toContain(message);
+  expect(screen.queryByRole('button', { name: '還原這份進度' })).toBeNull();
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(note.value).toBe('現有筆記');
 });

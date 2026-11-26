@@ -3,7 +3,12 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { PERSONAL_IMPORT_MAX_ID_LENGTH } from '@campus/shared/src/imports/types';
 import { buildPersonalToday } from '@campus/shared';
+import {
+  currentTermClassCalendarMeetings,
+  findClassCalendarOverlaps,
+} from '@campus/shared/src/classCalendarOverlap';
 import {
   formatTodayHeaderDate,
   formatTodoDueLine,
@@ -19,6 +24,8 @@ import {
   type TodayClass,
   type TodayTodo,
 } from '@campus/shared/src/pickNextAction';
+import { TodayDeadlineReminder, type ReminderSession } from './TodayDeadlineReminder';
+import { currentTimetableTermKey, isCurrentPriorityTerm } from '@campus/shared/src/todayPriority';
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
 import { TODAY_FLOW_CLASS_TITLE, TODAY_FLOW_WORK_TITLE } from '@/lib/todayCourseWork';
@@ -29,19 +36,27 @@ import { assignmentHref, assignmentSubmitHref, todayClassesFromSchedule } from '
 import styles from './StudentToday.module.css';
 import { TodayUnreadNotifications } from './TodayUnreadNotifications';
 import { TodayClassRows } from './TodayClassRows';
-import { TodayWelcome } from './TodayWelcome';
+import { TodayServiceShortcuts, TodayWelcome } from './TodayWelcome';
+import {
+  TodayClassCalendarConflict,
+  type TodayClassCalendarConflictItem,
+} from './TodayClassCalendarConflict';
 import { CampusPersonalizationSection } from './CampusPersonalizationSection';
 
 export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigned-scope';
 
 type Props = {
+  platformSession?: ReminderSession;
   assistant?: ReactNode;
   workspaces?: ReactNode;
   agent?: ReactNode;
   personalization?: ReactNode;
+  /** Only passed once the signed-in account's current campus data is fully confirmed. */
+  conflict?: TodayClassCalendarConflictItem | null;
   scopeKey?: string;
   /** The actual personal timetable scope, which can differ from the signed-in school. */
   timetableSchoolId?: string | null;
+  timetableTermKey?: string;
   /** Browsing context stays distinct from a timetable whose school is still resolving. */
   campusSearch?: string;
   now: Date | null;
@@ -49,6 +64,8 @@ type Props = {
   unsigned: boolean;
   skeleton: boolean;
   refreshing?: boolean;
+  /** All current-account coursework sources have previously returned a complete response. */
+  courseDataResolved?: boolean;
   classes: TodayClass[];
   todos: TodayTodo[];
   timetableStatus: TimetableStatus;
@@ -63,6 +80,7 @@ type Props = {
 };
 
 type BoundProps = {
+  platformSession?: ReminderSession;
   assistant?: ReactNode;
   workspaces?: ReactNode;
   agent?: ReactNode;
@@ -72,6 +90,7 @@ type BoundProps = {
   unsigned: boolean;
   skeleton: boolean;
   refreshing?: boolean;
+  courseDataResolved?: boolean;
   todos: TodayTodo[];
   todosError: string;
   lmsUnconnected: boolean;
@@ -89,12 +108,22 @@ export function StudentToday(props: Props) {
   const orderedTodos = primaryTodo
     ? [primaryTodo, ...todos.filter((item) => item.id !== primaryTodo.id)]
     : todos;
+  // Course loading publishes an empty task list before assignments arrive. Only
+  // offer setup after both sources have settled, without displacing known work.
+  const showSignedInSetup =
+    !props.unsigned &&
+    (!props.refreshing || props.courseDataResolved === true) &&
+    !props.todosError &&
+    props.classes.length === 0 &&
+    props.todos.length === 0 &&
+    (props.timetableStatus === 'empty' || props.timetableStatus === 'unsigned-scope');
   const showWelcome =
     !props.skeleton &&
-    props.unsigned &&
-    (props.timetableStatus === 'empty' ||
-      props.timetableStatus === 'unsigned-scope' ||
-      (props.timetableStatus === 'ready' && action.type !== 'class'));
+    (showSignedInSetup ||
+      (props.unsigned &&
+        (props.timetableStatus === 'empty' ||
+          props.timetableStatus === 'unsigned-scope' ||
+          (props.timetableStatus === 'ready' && action.type !== 'class'))));
   const showPlanner =
     !props.unsigned || !['empty', 'unsigned-scope'].includes(props.timetableStatus);
   const returnSearch =
@@ -130,6 +159,7 @@ export function StudentToday(props: Props) {
       primaryLabel={primaryLabel}
       unsigned={props.unsigned}
       error={props.todosError}
+      refreshing={props.refreshing}
       lmsUnconnected={props.lmsUnconnected}
       leavingTodoIds={props.leavingTodoIds}
       now={now}
@@ -144,16 +174,29 @@ export function StudentToday(props: Props) {
         <h1 className={styles.title}>今天</h1>
         <p className={styles.date}>{props.now ? formatTodayHeaderDate(props.now) : ''}</p>
       </header>
+      <div className={styles.assistance} data-testid="today-workspace-entry">
+        {props.assistant}
+      </div>
+      {props.conflict && !props.unsigned && !props.skeleton && props.timetableStatus === 'ready' ? (
+        <TodayClassCalendarConflict key={props.scopeKey} conflict={props.conflict} />
+      ) : null}
       {props.workspaces}
       {showWelcome && (
-        <TodayWelcome
-          importHref={props.importHref}
-          timetableHref={props.timetableHref}
-          hasTimetable={props.timetableStatus === 'ready'}
-          needsSchool={props.timetableStatus === 'unsigned-scope'}
-        />
+        <div data-testid={showSignedInSetup ? 'next-action' : undefined}>
+          <TodayWelcome
+            importHref={props.importHref}
+            timetableHref={props.timetableHref}
+            hasTimetable={props.timetableStatus === 'ready'}
+            needsSchool={props.timetableStatus === 'unsigned-scope'}
+            unsigned={props.unsigned}
+            needsCourse={props.lmsUnconnected}
+            campusSearch={returnSearch}
+          />
+        </div>
       )}
       {!props.skeleton &&
+        !showWelcome &&
+        (!props.refreshing || props.courseDataResolved === true) &&
         !props.unsigned &&
         (action.type === 'empty' || action.type === 'allDone') && (
           <div className={styles.dayStatus} data-testid={primaryTodo ? undefined : 'next-action'}>
@@ -167,11 +210,27 @@ export function StudentToday(props: Props) {
             />
           </div>
         )}
+      {props.now && isCurrentPriorityTerm(props.timetableTermKey, props.now) &&
+        !props.skeleton && !props.refreshing && !props.unsigned &&
+        props.timetableStatus === 'ready' && !props.todosError && !props.lmsUnconnected && (
+          <TodayDeadlineReminder
+            classes={props.classes}
+            todos={props.todos}
+            now={props.now}
+            scopeKey={props.scopeKey}
+            schoolId={props.timetableSchoolId}
+            search={returnSearch}
+            leavingTodoIds={props.leavingTodoIds}
+            platformSession={props.platformSession}
+          />
+        )}
       {props.skeleton ? (
         <TodaySkeleton />
       ) : showPlanner ? (
         <div className={styles.flow + ' ' + styles.planner} data-testid="today-unified-flow">
-          {props.unsigned ? schedule : primaryTodo ? [work, schedule] : [schedule, work]}
+          {showSignedInSetup
+            ? props.lmsUnconnected ? null : work
+            : props.unsigned ? schedule : primaryTodo ? [work, schedule] : [schedule, work]}
           {!props.unsigned && <TodayUnreadNotifications unsigned={false} />}
         </div>
       ) : null}
@@ -180,9 +239,11 @@ export function StudentToday(props: Props) {
           <Link href={loginHref(campusServiceHref('/', returnSearch))}>登入查看作業與通知</Link>
         </p>
       ) : null}
+      {!props.skeleton && !showWelcome ? (
+        <TodayServiceShortcuts campusSearch={returnSearch} standalone />
+      ) : null}
       <div className={styles.assistance} data-testid="today-assistance">
         {props.agent}
-        {props.assistant}
       </div>
       {props.personalization}
       {props.updatedAt || props.refreshing ? (
@@ -332,6 +393,7 @@ function TodoList({
   primaryLabel,
   unsigned,
   error,
+  refreshing,
   lmsUnconnected,
   leavingTodoIds,
   now,
@@ -343,6 +405,7 @@ function TodoList({
   primaryLabel: string;
   unsigned: boolean;
   error: string;
+  refreshing?: boolean;
   lmsUnconnected: boolean;
   leavingTodoIds?: readonly string[];
   now: Date;
@@ -380,7 +443,9 @@ function TodoList({
           </button>
         </>
       ) : null}
-      {!unsigned && lmsUnconnected && todos.length === 0 ? (
+      {!unsigned && !error && refreshing && todos.length === 0 ? (
+        <p className={styles.empty} role="status">正在確認作業與期限…</p>
+      ) : !unsigned && !error && lmsUnconnected && todos.length === 0 ? (
         <p className={styles.empty}>
           還沒有 nuni 課程資料。
           <Link href={campusServiceHref('/classroom', campusSearch)}>加入課程</Link>
@@ -468,10 +533,32 @@ export function StudentTodayPage(props: BoundProps) {
   const schedule = buildPersonalToday(timetableRecords, {
     schoolId,
     now,
+    termKey: currentTimetableTermKey(timetableRecords, schoolId, now),
   });
+  const conflictReady =
+    props.signedIn &&
+    !props.unsigned &&
+    !props.skeleton &&
+    !!props.now &&
+    scope.canPrepareSchoolDraft &&
+    scope.scope.owner !== 'guest' &&
+    timetableStatus === 'ready' &&
+    records.imported.ready &&
+    !records.imported.error;
+  let conflict: TodayClassCalendarConflictItem | null = null;
+  if (conflictReady) {
+    const { classes } = currentTermClassCalendarMeetings(timetableRecords, schoolId, now);
+    const overlap = findClassCalendarOverlaps(classes, records.imported.records, schoolId, now.getTime())
+      .find((item) => item.eventId.length <= PERSONAL_IMPORT_MAX_ID_LENGTH);
+    if (overlap) {
+      const query = new URLSearchParams({ campus: schoolId, eventId: overlap.eventId });
+      conflict = { ...overlap, href: `/calendar?${query}` };
+    }
+  }
   const classes = todayClassesFromSchedule(schedule.today, now);
   return (
     <StudentToday
+      platformSession={props.platformSession}
       assistant={props.assistant}
       workspaces={props.workspaces}
       agent={props.agent}
@@ -488,14 +575,17 @@ export function StudentTodayPage(props: BoundProps) {
           />
         ) : null
       }
+      conflict={conflict}
       scopeKey={records.scopeKey}
       timetableSchoolId={schoolId}
+      timetableTermKey={schedule.termKey}
       campusSearch={campusSearch}
       now={props.now}
       updatedAt={props.updatedAt}
       unsigned={props.unsigned}
       skeleton={props.skeleton}
       refreshing={props.refreshing}
+      courseDataResolved={props.courseDataResolved}
       classes={classes}
       todos={props.todos}
       timetableStatus={timetableStatus}

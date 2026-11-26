@@ -3,7 +3,7 @@
 import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvider';
 
 import Link from 'next/link';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import {
   forgetDirectorySearch,
@@ -34,7 +34,7 @@ import {
 } from '@campus/shared/src/assistantServices';
 import { AssistantServiceLinks } from './AssistantServiceLinks';
 import { useCampusFinderAccount, useCampusFinderDraftScope } from '@/lib/useCampusFinderAccount';
-import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
+import { AssistantLinkNavigation, useAssistantLinkNavigation } from './AssistantReplyLink';
 import styles from './QuickCampusEntry.module.css';
 
 type Analysis = {
@@ -50,10 +50,13 @@ export function QuickCampusEntry({
   onAsk,
   onNavigate,
   compact = false,
+  inlineDraft,
 }: {
   onAsk?: ((phrase: string) => void) | null;
   onNavigate?: (href: string) => void;
   compact?: boolean;
+  /** An in-memory workspace draft; never persisted as directory search history. */
+  inlineDraft?: { text: string; setText: Dispatch<SetStateAction<string>> };
 } = {}) {
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
@@ -86,7 +89,7 @@ export function QuickCampusEntry({
     Boolean(selection && !selection.loading && selection.catalogStatus === 'ready'),
   );
   const [draft, setDraft] = useState({ scope: draftScope, query: '', edited: false });
-  const query = draft.scope === draftScope ? draft.query : '';
+  const query = inlineDraft?.text ?? (draft.scope === draftScope ? draft.query : '');
   if (draft.scope !== draftScope) setDraft({ scope: draftScope, query: '', edited: false });
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const sequence = useRef(0);
@@ -104,7 +107,7 @@ export function QuickCampusEntry({
     };
   }, [scope]);
   useLayoutEffect(() => {
-    if (!canRemember || restoredScope.current === storageScope) return;
+    if (inlineDraft || !canRemember || restoredScope.current === storageScope) return;
     restoredScope.current = storageScope;
     // A deferred history restore must not replace text entered while campus resolution was pending.
     const snapshot = restoreDirectorySearch('quick', window.location.pathname || '/', storageScope);
@@ -112,7 +115,7 @@ export function QuickCampusEntry({
     // Restore the typed request after history navigation back to this page.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft({ scope: draftScope, query: snapshot.query.slice(0, 160), edited: false });
-  }, [canRemember, draftScope, storageScope, draft.edited]);
+  }, [canRemember, draftScope, storageScope, draft.edited, inlineDraft]);
   useEffect(
     () => () => {
       sequence.current += 1;
@@ -173,7 +176,8 @@ export function QuickCampusEntry({
     sequence.current += 1;
     controller.current?.abort();
     setAnalysis(null);
-    setDraft({ scope: draftScope, query: value.slice(0, 320), edited: true });
+    if (inlineDraft) inlineDraft.setText(value.slice(0, 1000));
+    else setDraft({ scope: draftScope, query: value.slice(0, 320), edited: true });
   }
 
   function startOver() {
@@ -183,7 +187,7 @@ export function QuickCampusEntry({
   }
 
   function rememberQuick(href: string) {
-    if (!canRemember) return;
+    if (inlineDraft || !canRemember) return;
     rememberDirectorySearch('quick', {
       path: window.location.pathname || '/',
       destination: href,
@@ -193,10 +197,12 @@ export function QuickCampusEntry({
     });
   }
 
-  function navigateQuick(event: MouseEvent<HTMLAnchorElement>, href: string) {
-    if (!isCurrentTabNavigationClick(event, event.currentTarget)) return;
-    rememberQuick(href);
-    onNavigate?.(href);
+  const panelNavigation = useContext(AssistantLinkNavigation);
+  const navigate = onNavigate ?? panelNavigation;
+  const notifyNavigation = useAssistantLinkNavigation(navigate);
+  function navigateQuick(event: React.MouseEvent<HTMLAnchorElement>) {
+    rememberQuick(event.currentTarget.getAttribute('href') ?? '');
+    notifyNavigation(event);
   }
 
   async function analyze(input: string) {
@@ -343,7 +349,7 @@ export function QuickCampusEntry({
         <Link
           className={styles.allServices}
           href={searchHref}
-          onClick={(event) => navigateQuick(event, searchHref)}
+          onClick={navigateQuick}
         >
           所有服務 <CampusIcon name="arrow" size={16} />
         </Link>
@@ -371,7 +377,7 @@ export function QuickCampusEntry({
             type="search"
             autoComplete="off"
             enterKeyHint="search"
-            maxLength={320}
+            maxLength={inlineDraft ? 1000 : 320}
             value={query}
             onChange={(event) => updateQuery(event.target.value)}
             onCompositionStart={() => {
@@ -416,7 +422,7 @@ export function QuickCampusEntry({
             <Link
               className={styles.analyzeButton}
               href={assistantHref}
-              onClick={(event) => navigateQuick(event, assistantHref)}
+              onClick={navigateQuick}
             >
               交給校園助理
             </Link>
@@ -449,11 +455,13 @@ export function QuickCampusEntry({
         >
           {publicIntent && analysisAction}
           {serviceIntent?.kind === 'catalog' && selectedSchoolId && (
-            <AssistantServiceLinks
-              serviceIds={ASSISTANT_SERVICES.map((service) => service.id)}
-              schoolId={selectedSchoolId}
-              audience={platformAudience ? 'platform' : 'school'}
-            />
+            <AssistantLinkNavigation.Provider value={navigate}>
+              <AssistantServiceLinks
+                serviceIds={ASSISTANT_SERVICES.map((service) => service.id)}
+                schoolId={selectedSchoolId}
+                audience={platformAudience ? 'platform' : 'school'}
+              />
+            </AssistantLinkNavigation.Provider>
           )}
           {serviceIntent?.kind === 'catalog' && !selectedSchoolId && (
             <p>先選擇學校，即可查看對應的服務入口。</p>
@@ -512,7 +520,7 @@ export function QuickCampusEntry({
                     key={action.href}
                     href={route(action.href, action.serviceId)}
                     className={styles.action}
-                    onClick={(event) => navigateQuick(event, route(action.href, action.serviceId))}
+                    onClick={navigateQuick}
                   >
                     <span>
                       <strong>{action.name}</strong>
@@ -543,7 +551,7 @@ export function QuickCampusEntry({
             <p className={styles.noMatch}>沒有找到明確入口，可以補充需求或詢問校園助理。</p>
           ) : null}
           <div className={styles.footerLinks}>
-            <Link href={searchHref} onClick={(event) => navigateQuick(event, searchHref)}>
+            <Link href={searchHref} onClick={navigateQuick}>
               搜尋更多服務
             </Link>
             {!primaryHandoff && onAsk && canUseAssistant ? (
@@ -554,7 +562,7 @@ export function QuickCampusEntry({
               onAsk === undefined &&
               campusReady &&
               (canUseAssistant || account.status === 'guest') ? (
-              <Link href={assistantHref} onClick={(event) => navigateQuick(event, assistantHref)}>
+              <Link href={assistantHref} onClick={navigateQuick}>
                 {account.status === 'guest' ? '登入後詢問助理' : '詢問校園助理'}
               </Link>
             ) : null}

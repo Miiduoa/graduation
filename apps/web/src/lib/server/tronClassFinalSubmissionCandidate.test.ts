@@ -4,7 +4,7 @@ import {
   createTronClassFinalSubmissionCandidate, type TronClassCandidateUploadedFile,
   type TronClassFinalCandidateAttempt, type TronClassFinalCandidateClaim, type TronClassFinalCandidateInput,
 } from './tronClassFinalSubmissionCandidate';
-import type { TronClassCandidateAuthorization } from './tronClassSubmissionCandidate';
+import { tronClassCandidateHeaders, type TronClassCandidateAuthorization } from './tronClassSubmissionCandidate';
 
 // Synthetic school responses and a shared atomic journal. No live account or request.
 const NOW = Date.parse('2026-11-17T08:00:00.000Z');
@@ -97,6 +97,22 @@ describe('controlled final POST and exact student readback', () => {
     expect(request).toMatchObject({ method: 'POST', redirect: 'manual', cache: 'no-store' });
     expect(new Headers(request.headers).get('X-XSRF-TOKEN')).toBe('synthetic-csrf');
     expect(s.claim.mock.calls[0][0]).not.toHaveProperty('cookies');
+  });
+
+  it('pins the revision for initial authorization and the session for fresh school checks and POST', async () => {
+    const s = setup();
+    const initial = structuredClone(s.auth);
+    s.authorize.mockResolvedValueOnce(initial).mockResolvedValueOnce({
+      ...initial, binding: { ...initial.binding, cookies: { ...initial.binding.cookies, session: 'replacement-fixture' } },
+    });
+    await expect(s.candidate.dispatch(OWNER, INPUT)).resolves.toMatchObject({ state: 'verified-new-version' });
+    const scope = { courseId: INPUT.courseId, homeworkId: INPUT.homeworkId };
+    expect(s.authorize).toHaveBeenNthCalledWith(1, OWNER, scope, expect.any(AbortSignal), INPUT.revision);
+    expect(s.authorize).toHaveBeenNthCalledWith(2, OWNER, scope, expect.any(AbortSignal), initial.binding);
+    const original = tronClassCandidateHeaders(initial.binding);
+    const [, init] = s.fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(new Headers(init?.headers).get('cookie')).toBe(new Headers(original).get('cookie'));
+    expect(s.readHistory).toHaveBeenCalledWith(initial.binding, scope, expect.any(AbortSignal));
   });
 
   it('supports attachment-only work without requiring text permission', async () => {

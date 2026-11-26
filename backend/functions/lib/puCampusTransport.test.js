@@ -358,3 +358,27 @@ test('env-based alt relay signs listed hosts to the alt URL and keeps others on 
   );
   info.mockRestore();
 });
+
+test('relay log masks path identifiers while preserving the signed target', async () => {
+  const path = '/api/course/123/student/456789/uploads/photo/Abc123xy/abcdefghijklmnop/abc123x/abcdefghijklmno/UPLOADS/key';
+  const target = `https://tronclass.pu.edu.tw${path}?token=private`;
+  const logs = [];
+  const info = jest.spyOn(console, 'info').mockImplementation((message) => logs.push(String(message)));
+  const relayFetch = createCjsRelayFetch(
+    { url: 'https://pu-edge-relay.example.workers.dev', secret: 'unit-test-secret' },
+    async (_url, init) => {
+      expect(new Headers(init.headers).get(RELAY_TARGET_HEADER)).toBe(target);
+      return new Response('ok');
+    },
+    () => 1_700_000_000_000,
+    () => 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  );
+  await sendWithCampusFetch({
+    url: target,
+    method: 'GET',
+    fetch: relayFetch,
+  });
+  const entry = JSON.parse(logs[0]);
+  expect(entry.path).toBe('/api/course/:id/student/:id/uploads/:id/:id/:id/abc123x/abcdefghijklmno/UPLOADS/:id');
+  info.mockRestore();
+});

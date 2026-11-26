@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { parsePersonalImport } from '@campus/shared/src/imports/parser';
+import { ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
 import type { PublicCatalogCourse } from '@campus/shared/src/publicCourseCatalog';
 import {
   MAX_PUBLIC_COURSE_BULK_SELECTION,
@@ -63,18 +64,37 @@ describe('multi-course public timetable review', () => {
     expect(mergePublicCourseTimetableCsv('nthu', [nthu, ncnu])).toBeNull();
   });
 
-  it('rejects duplicate NCNU class listings disguised by surrounding whitespace', () => {
+  it('requires credits for a batch while allowing blank credits in the single-course CSV', () => {
+    const missingCredits = { ...ncnu, code: '130021', credits: '' };
+    expect(ncnuTimetableImportCsv(missingCredits)).not.toBeNull();
+    expect(mergePublicCourseTimetableCsv('ncnu', [ncnu, missingCredits])).toBeNull();
+    expect(mergePublicCourseTimetableCsv('ncnu', [ncnu, { ...missingCredits, credits: '0' }])).not.toBeNull();
+  });
+
+  it('rejects duplicate NCNU class listings using the import parser’s normalization', () => {
     expect(mergePublicCourseTimetableCsv('ncnu', [
       ncnu, { ...ncnu, code: ' 005076 ', title: '同一門課的重複公告' },
     ])).toBeNull();
     expect(mergePublicCourseTimetableCsv('ncnu', [
       ncnu, { ...ncnu, section: ' a ', title: '同班別的重複公告' },
     ])).toBeNull();
+    expect(mergePublicCourseTimetableCsv('ncnu', [
+      ncnu, { ...ncnu, section: 'ａ' },
+    ])).toBeNull();
     // A genuinely different section is still a distinct course selection.
     expect(mergePublicCourseTimetableCsv('ncnu', [
       ncnu, { ...ncnu, section: 'b' },
     ])).not.toBeNull();
   });
+
+  it.each([{ teacher: '另一位老師' }, { time: '3cd' }])(
+    'rejects a case-only NCNU section duplicate with different listing details %j',
+    (details) => {
+      expect(mergePublicCourseTimetableCsv('ncnu', [
+        ncnu, { ...ncnu, ...details, section: 'A' },
+      ])).toBeNull();
+    },
+  );
 
   it('requires two through ten selected courses and never truncates the eleventh', () => {
     expect(mergePublicCourseTimetableCsv('ncnu', [])).toBeNull();

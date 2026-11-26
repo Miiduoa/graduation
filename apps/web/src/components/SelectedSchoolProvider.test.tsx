@@ -81,13 +81,16 @@ it('uses only the supplied directory, searches it, and treats selection as brows
   expect(screen.getByLabelText('瀏覽校園')).toBeTruthy();
   expect(screen.getByText(/不會更換帳號或取得校務資料權限/)).toBeTruthy();
   fireEvent.change(screen.getByLabelText('搜尋校園'), { target: { value: 'B' } });
-  expect(screen.queryByRole('option', { name: '甲校' })).toBeNull();
-  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  expect(screen.queryByRole('button', { name: /甲校/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /乙校/ }));
   expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
   expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({
     schoolId: 'school-b',
   });
-  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: '' } });
+  const all = screen.getByRole('button', { name: '不限校園' });
+  all.focus();
+  fireEvent.click(all);
+  expect(document.activeElement).toBe(screen.getByLabelText('搜尋校園'));
   expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
   expect(navigation.search).toBe('?campus=all');
 });
@@ -524,7 +527,8 @@ it('asks before switching schools when the current campus has an unsaved draft',
   );
   render(<DraftView />);
   fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '甲校未送文字' } });
-  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  fireEvent.change(screen.getByLabelText('搜尋校園'), { target: { value: '乙' } });
+  fireEvent.click(screen.getByRole('button', { name: /乙校/ }));
   expect(screen.getByRole('dialog')).toBeTruthy();
   expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
   expect(navigation.replace).not.toHaveBeenCalled();
@@ -535,7 +539,7 @@ it('asks before switching schools when the current campus has an unsaved draft',
   expect(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))).toBe(
     JSON.stringify({ schoolId: 'school-a' }),
   );
-  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  fireEvent.click(screen.getByRole('button', { name: /乙校/ }));
   fireEvent.click(screen.getByRole('button', { name: '捨棄草稿並切換' }));
   expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
   expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('');

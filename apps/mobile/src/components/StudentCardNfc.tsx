@@ -24,7 +24,11 @@ import {
   type StudentCardNfcCapabilities,
 } from '../services/studentCardNfc';
 import { theme } from '../ui/theme';
+import { pageTitleFont } from '../ui/styles';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+
+// The receipt mirrors the physical-card face; it stays fixed forest/ink in every theme.
+const CARD = { face: '#163D34', ink: '#FFFDF7', muted: '#CFE3D7', rule: '#74978A' };
 
 type Receipt = Awaited<ReturnType<typeof verifyStudentCardCode>>;
 type ReaderState =
@@ -86,16 +90,24 @@ export function StudentCardNfc({ onPresent }: { onPresent?: () => void }) {
   return (
     <View style={s.panel}>
       <View style={s.heading}>
-        <View style={s.smallIcon}>
-          <Ionicons accessible={false} name="radio-outline" size={23} color={theme.colors.text} />
-        </View>
+        <Ionicons accessible={false} name="radio-outline" size={24} color={theme.colors.text} />
         <View style={s.headingText}>
           <Text accessibilityRole="header" style={s.title}>
             NFC 感應
           </Text>
           <Text style={s.caption}>短效憑證 · 單次核對</Text>
         </View>
-        {ready && <Text style={s.status}>已就緒</Text>}
+        {ready && (
+          <View style={s.statusRow}>
+            <Ionicons
+              accessible={false}
+              name="checkmark-circle"
+              size={16}
+              color={theme.colors.success}
+            />
+            <Text style={s.status}>已就緒</Text>
+          </View>
+        )}
       </View>
       <Text style={s.body}>{description}</Text>
       {capabilityError && (
@@ -123,7 +135,7 @@ export function StudentCardNfc({ onPresent }: { onPresent?: () => void }) {
                 accessible={false}
                 name="phone-portrait-outline"
                 size={20}
-                color="#FFFFFF"
+                color={theme.colors.onAccent}
               />
               <Text style={s.primaryText}>感應出示</Text>
             </Pressable>
@@ -424,16 +436,27 @@ export function StudentCardReader({
     >
       <SafeAreaView style={s.reader} accessibilityViewIsModal onAccessibilityEscape={close}>
         <ScrollView contentContainerStyle={s.readerContent}>
-          <Text style={s.eyebrow}>CAMPUS ONE</Text>
           <Text style={s.readerLabel}>{fromQr ? '學生證核對' : 'NFC 感應核對'}</Text>
-          <View style={s.signalOuter} accessible={false}>
-            <View style={[s.signalInner, success && s.signalSuccess]}>
-              <Ionicons
-                name={success ? 'checkmark' : reading ? 'radio-outline' : 'document-text-outline'}
-                size={42}
-                color={success ? '#FFFFFF' : '#183F36'}
-              />
-            </View>
+          <View style={s.signal} accessible={false}>
+            <Ionicons
+              name={
+                success
+                  ? 'checkmark-circle'
+                  : state.kind === 'error'
+                    ? 'alert-circle-outline'
+                    : reading
+                      ? 'radio-outline'
+                      : 'document-text-outline'
+              }
+              size={56}
+              color={
+                success
+                  ? theme.colors.success
+                  : state.kind === 'error'
+                    ? theme.colors.danger
+                    : theme.colors.accent
+              }
+            />
           </View>
           <Text accessibilityRole="header" accessibilityLiveRegion="polite" style={s.readerTitle}>
             {title}
@@ -445,7 +468,7 @@ export function StudentCardReader({
             {description}
           </Text>
           {(reading || checking) && (
-            <ActivityIndicator color="#183F36" accessibilityLabel={title} />
+            <ActivityIndicator color={theme.colors.accent} accessibilityLabel={title} />
           )}
           {success && (
             <View style={s.receipt}>
@@ -454,8 +477,10 @@ export function StudentCardReader({
               <View style={s.divider} />
               <Text style={s.receiptLabel}>學號末碼</Text>
               <Text style={s.maskedId}>{state.receipt.maskedId}</Text>
-              <Text style={s.receiptNote}>憑證已使用 · 核對結果將自動收起</Text>
             </View>
+          )}
+          {success && (
+            <Text style={s.receiptNote}>憑證已使用 · 核對結果將自動收起</Text>
           )}
           {state.kind === 'ready' && (
             <Pressable
@@ -500,31 +525,22 @@ export function StudentCardReader({
 const createStyles = () =>
   StyleSheet.create({
     panel: {
-      gap: 16,
-      padding: 20,
-      borderRadius: 20,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.surface,
+      gap: 14,
+      paddingTop: 20,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
     },
     heading: { flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
-    smallIcon: {
-      width: 44,
-      height: 44,
-      borderRadius: 14,
-      backgroundColor: theme.colors.surface2,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
     headingText: { flex: 1, minWidth: 110, gap: 4 },
     title: { fontSize: 18, fontWeight: '700', color: theme.colors.text },
     caption: { fontSize: 12, color: theme.colors.textSecondary },
-    status: { fontSize: 12, color: theme.colors.success, fontWeight: '600' },
+    statusRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    status: { fontSize: 13, color: theme.colors.success, fontWeight: '600' },
     body: { fontSize: 14, lineHeight: 22, color: theme.colors.textSecondary },
     actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
     action: {
       minHeight: 50,
-      borderRadius: 13,
+      borderRadius: theme.radius.lg,
       padding: 12,
       gap: 8,
       flexDirection: 'row',
@@ -532,9 +548,9 @@ const createStyles = () =>
       justifyContent: 'center',
     },
     actionInRow: { flexGrow: 1, flexBasis: 120 },
-    primary: { backgroundColor: '#163D34' },
+    primary: { backgroundColor: theme.colors.accent },
     primaryText: {
-      color: '#FFFFFF',
+      color: theme.colors.onAccent,
       fontSize: 15,
       fontWeight: '600',
       flexShrink: 1,
@@ -542,12 +558,12 @@ const createStyles = () =>
     },
     secondary: {
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.bg,
+      borderColor: theme.colors.text,
+      backgroundColor: 'transparent',
     },
     actionText: { color: theme.colors.text, fontSize: 15, fontWeight: '600', flexShrink: 1 },
     pressed: { opacity: 0.75 },
-    reader: { flex: 1, backgroundColor: '#F8FAF5' },
+    reader: { flex: 1, backgroundColor: theme.colors.bg },
     readerContent: {
       flexGrow: 1,
       alignItems: 'center',
@@ -558,33 +574,19 @@ const createStyles = () =>
       maxWidth: 520,
       alignSelf: 'center',
     },
-    eyebrow: { color: '#416557', fontSize: 12, fontWeight: '700', letterSpacing: 2.5 },
-    readerLabel: { color: '#40574D', fontSize: 14 },
-    signalOuter: {
-      width: 132,
-      height: 132,
-      marginVertical: 16,
-      borderRadius: 66,
-      borderWidth: 1,
-      borderColor: '#CBDCCF',
-      alignItems: 'center',
-      justifyContent: 'center',
+    readerLabel: { color: theme.colors.textSecondary, fontSize: 14 },
+    signal: { marginVertical: 12, alignItems: 'center', justifyContent: 'center' },
+    readerTitle: { color: theme.colors.text, fontSize: 27, fontWeight: '700', textAlign: 'center' },
+    readerBody: {
+      color: theme.colors.textSecondary,
+      fontSize: 16,
+      lineHeight: 25,
+      textAlign: 'center',
     },
-    signalInner: {
-      width: 96,
-      height: 96,
-      borderRadius: 48,
-      backgroundColor: '#E3ECE2',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    signalSuccess: { backgroundColor: '#163D34' },
-    readerTitle: { color: '#102D24', fontSize: 27, fontWeight: '700', textAlign: 'center' },
-    readerBody: { color: '#40574D', fontSize: 16, lineHeight: 25, textAlign: 'center' },
     confirm: {
-      backgroundColor: '#163D34',
+      backgroundColor: theme.colors.accent,
       minHeight: 52,
-      borderRadius: 14,
+      borderRadius: theme.radius.lg,
       padding: 15,
       alignItems: 'center',
       justifyContent: 'center',
@@ -593,26 +595,33 @@ const createStyles = () =>
     },
     receipt: {
       width: '100%',
-      padding: 22,
-      borderWidth: 1,
-      borderColor: '#CDDCD0',
-      borderRadius: 18,
-      backgroundColor: '#FFFFFF',
-      gap: 8,
+      paddingHorizontal: 22,
+      paddingVertical: 20,
+      borderTopWidth: 4,
+      borderTopColor: theme.colors.gold,
+      borderRadius: theme.radius.lg,
+      backgroundColor: CARD.face,
+      gap: 6,
     },
-    receiptLabel: { color: '#587163', fontSize: 13 },
-    schoolName: { color: '#102D24', fontSize: 21, fontWeight: '600' },
-    divider: { height: StyleSheet.hairlineWidth, backgroundColor: '#CDDCD0', marginVertical: 6 },
+    receiptLabel: { color: CARD.muted, fontSize: 13 },
+    schoolName: {
+      color: CARD.ink,
+      fontFamily: pageTitleFont,
+      fontSize: 24,
+      lineHeight: 30,
+      fontWeight: '700',
+    },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: CARD.rule, marginVertical: 10 },
     maskedId: {
-      color: '#102D24',
+      color: CARD.ink,
       fontSize: 28,
       fontWeight: '700',
       letterSpacing: 2,
       fontVariant: ['tabular-nums'],
     },
-    receiptNote: { color: '#40574D', fontSize: 13, marginTop: 6 },
+    receiptNote: { color: theme.colors.textSecondary, fontSize: 13 },
     readerFootnote: {
-      color: '#587163',
+      color: theme.colors.textSecondary,
       fontSize: 12,
       lineHeight: 18,
       textAlign: 'center',
@@ -623,11 +632,11 @@ const createStyles = () =>
       marginHorizontal: 24,
       marginVertical: 12,
       padding: 14,
-      borderRadius: 14,
+      borderRadius: theme.radius.lg,
       borderWidth: 1,
-      borderColor: '#BACDBF',
+      borderColor: theme.colors.text,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    dismissText: { color: '#183F36', fontSize: 16, fontWeight: '600' },
+    dismissText: { color: theme.colors.text, fontSize: 16, fontWeight: '600' },
   });

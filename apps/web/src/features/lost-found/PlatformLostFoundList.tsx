@@ -7,6 +7,7 @@ import type { NuniLostFoundItem } from '@campus/shared/src/nuniLostFound';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { LostFoundItemTag } from '@/components/lost-found/LostFoundItemTag';
+import { LostFoundCategoryFilter } from '@/components/lost-found/LostFoundCategoryFilter';
 import { todayTaipeiCalendarDate } from '@/lib/lostFound';
 import {
   errorMessage,
@@ -232,6 +233,10 @@ export function PlatformLostFoundList({
             onChange={(event) =>
               setDraft({ ...draft, status: event.target.value as Filters['status'] })
             }
+          />
+          <LostFoundCategoryFilter
+            value={draft.category}
+            onChange={(category) => setDraft({ ...draft, category })}
           />
           <label>
             <input

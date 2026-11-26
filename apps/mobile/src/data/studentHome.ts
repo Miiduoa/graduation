@@ -8,7 +8,9 @@ export async function loadStudentHome(
 ) {
   if (!uid || isFirebaseMockMode()) throw new Error('請登入學校帳號後查看課程。');
   if (mode === 'today') {
-    return { courses: [], tasks: await listInboxTasks(uid, schoolId, 'today') };
+    let tasksComplete = false;
+    const tasks = await listInboxTasks(uid, schoolId, 'today', complete => { tasksComplete = complete; });
+    return { courses: [], tasks, tasksComplete };
   }
   const [courses, tasks] = await Promise.all([
     listCourseSpaces(uid, schoolId),

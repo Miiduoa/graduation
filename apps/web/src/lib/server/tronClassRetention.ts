@@ -1,6 +1,6 @@
 import 'server-only';
 import {
-  TRONCLASS_ACCOUNT_LOGIN_LIMIT, TRONCLASS_LOGIN_WINDOW_MS, TRONCLASS_OWNER_LOGIN_LIMIT,
+  TRONCLASS_ACCOUNT_LOGIN_LIMIT, TRONCLASS_LOGIN_WINDOW_MS, TRONCLASS_OWNER_LOGIN_LIMIT, TRONCLASS_TARGET_LOGIN_LIMIT, tronClassLoginAttemptTimestamp,
 } from './tronClassBinding';
 
 type Data = Record<string, unknown>;
@@ -22,7 +22,7 @@ export type TronClassRetentionStore = {
 };
 export type TronClassRetentionResult = { scanned: number; deleted: number; skipped: boolean };
 
-export const TRONCLASS_RETENTION_BATCH_SIZE = 50;
+export const TRONCLASS_RETENTION_BATCH_SIZE = 200;
 const COLLECTIONS = ['_tronClassBindings', '_tronClassLoginAttempts', '_tronClassSubmissionOperations'] as const;
 type Collection = typeof COLLECTIONS[number];
 const FAILURE = 'TronClass retention unavailable';
@@ -53,11 +53,12 @@ function canDelete(collection: Collection, row: Data | undefined, now: number): 
   }
   if (collection === '_tronClassLoginAttempts') {
     const maximum = row.scope === 'owner' ? TRONCLASS_OWNER_LOGIN_LIMIT
-      : row.scope === 'account' ? TRONCLASS_ACCOUNT_LOGIN_LIMIT : 0;
+      : row.scope === 'target-account' ? TRONCLASS_TARGET_LOGIN_LIMIT
+      : (row.scope === 'account' || row.scope === 'owner-account') ? TRONCLASS_ACCOUNT_LOGIN_LIMIT : 0;
     // A stale purgeAt must never reset a renewed school-account login budget.
-    return maximum > 0 && Array.isArray(row.timestamps) && row.timestamps.length > 0 &&
+    return maximum > 0 && Array.isArray(row.timestamps) &&
       row.timestamps.length <= maximum && row.timestamps.every(value =>
-        instant(value) && value <= now - TRONCLASS_LOGIN_WINDOW_MS);
+        tronClassLoginAttemptTimestamp(value) <= now - TRONCLASS_LOGIN_WINDOW_MS);
   }
   // v2 records, unknown results and in-flight submissions have no safe automatic
   // expiry. Retain them even if a malformed/older writer supplied a past date.
@@ -88,7 +89,7 @@ export function createTronClassRetentionWorker({ db, now = Date.now }: {
       for (let position = 0; position < COLLECTIONS.length; position += 1) {
         const index = (first + position) % COLLECTIONS.length;
         const collection = COLLECTIONS[index];
-        const budget = Math.floor((TRONCLASS_RETENTION_BATCH_SIZE - scanned) / (COLLECTIONS.length - position));
+        const budget = TRONCLASS_RETENTION_BATCH_SIZE;
         let query = db.collection(collection).where('purgeAt', '<=', new Date(at)).orderBy('purgeAt');
         const cursor = cursors[index];
         if (cursor) query = query.startAfter(cursor);

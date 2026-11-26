@@ -22,6 +22,15 @@ import { useSignInOptions } from '@/lib/signInOptions';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { CampusIcon } from '@/components/CampusIcon';
 import { resolveCampusActions, getQuickCampusActions } from '@/lib/quickCampusActions';
+import {
+  clearSearchResultReturn,
+  finishSearchFilterArrival,
+  getSearchHistoryEntryKey,
+  rememberSearchResultReturn,
+  replaceSearchHistoryQuery,
+  supersedeSearchResultReturn,
+  useSearchResultReturn,
+} from './searchResultReturn';
 import styles from './search.module.css';
 import {
   serviceAccessLabel,
@@ -55,7 +64,10 @@ function ServiceDirectory() {
   const canRemember = account.canRemember && campusReady;
   const searchInput = useRef<HTMLInputElement>(null);
   const resultsHeading = useRef<HTMLHeadingElement>(null);
-  const compositionScope = useRef<string | null>(null);
+  const composition = useRef<{
+    scope: string;
+    filters: ReturnType<typeof readCampusServiceFilters>;
+  } | null>(null);
   const directory = useRef<HTMLDivElement>(null);
   const [restoredExpanded, setRestoredExpanded] = useState<string[]>([]);
   const requestSequence = useRef(0);
@@ -66,7 +78,7 @@ function ServiceDirectory() {
     [],
   );
   const schoolSearch = useCampusNavigationSearch(params);
-  const options = useSignInOptions();
+  const options = useSignInOptions(undefined, true, 'school');
   const queryString = params.toString();
   const schoolParams = new URLSearchParams(schoolSearch);
   const requestedCampus = schoolParams.get('campus') || schoolParams.get('schoolId');
@@ -83,15 +95,18 @@ function ServiceDirectory() {
         : legacySchool;
   const storageScope = JSON.stringify([account.ownerScope, schoolSearch]);
   const draftScope = useCampusFinderDraftScope(account.ownerScope, campusReady ? campusId : null);
-  const [confirmedScope, setConfirmedScope] = useState<string | null>(
-    account.canRemember ? draftScope : null,
+  const [confirmedScope, setConfirmedScope] = useState(
+    account.canRemember ? { draftScope, ownerScope: account.ownerScope } : null,
   );
   const restoredFilters = useRef<{ scope: string; queryString: string } | null>(null);
   const editedFilters = useRef<{
     scope: string;
     queryString: string;
   } | null>(null);
-  const historyRestoration = useRef<{ scope: string; queryString: string } | null>(null);
+  const historyRestoration = useRef<{
+    queryString: string;
+    entryKey: string | null;
+  } | null>(null);
   const [filters, setFilters] = useState(() => ({
     scope: draftScope,
     ...readCampusServiceFilters(new URLSearchParams(queryString)),
@@ -100,28 +115,69 @@ function ServiceDirectory() {
     filters.scope === draftScope || confirmedScope === null
       ? filters
       : { query: '', category: 'all' as const };
+  const returnScope = JSON.stringify([account.ownerScope, schoolSearch, campusId]);
+  const filterArrival = useSearchResultReturn({
+    directory,
+    resultsHeading,
+    scope: returnScope,
+    ready: canRemember,
+    blocked:
+      account.status === 'error' ||
+      account.status === 'signing-out' ||
+      selection?.catalogStatus === 'error',
+    queryString,
+    query,
+    category,
+    composition,
+  });
+  const term = query.trim();
+  const semanticScope = JSON.stringify([
+    account.responseScope,
+    schoolSearch,
+    Boolean(selection?.loading),
+    selection?.catalogStatus,
+  ]);
+  const currentScope = useRef(semanticScope);
+  const [analysis, setAnalysis] = useState<{
+    scope: string;
+    term: string;
+    status: 'pending' | 'ready' | 'error';
+    result?: CampusSemanticResult;
+  } | null>(null);
   useLayoutEffect(() => {
     if (!account.canRemember) return;
-    const changedOwner = confirmedScope !== null && confirmedScope !== draftScope;
+    const changedScope = confirmedScope !== null && confirmedScope.draftScope !== draftScope;
+    const changedOwner = confirmedScope !== null && confirmedScope.ownerScope !== account.ownerScope;
+    const restoring = historyRestoration.current;
+    const isHistoryArrival =
+      restoring !== null &&
+      restoring.entryKey === getSearchHistoryEntryKey() &&
+      restoring.queryString === new URLSearchParams(window.location.search).toString();
     if (confirmedScope === null) {
       // Bind edits made during initial account resolution without treating them as an account switch.
       if (editedFilters.current) editedFilters.current.scope = draftScope;
-      if (compositionScope.current !== null) compositionScope.current = draftScope;
+      if (composition.current) composition.current.scope = draftScope;
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFilters((current) =>
         current.scope === draftScope ? current : { ...current, scope: draftScope },
       );
     }
-    setConfirmedScope(draftScope);
-    if (changedOwner) {
+    if (confirmedScope === null || changedScope) {
+      setConfirmedScope({ draftScope, ownerScope: account.ownerScope });
+    }
+    // On a campus traversal the browser already selected the arriving entry.
+    // Keep its saved return and restore its URL filters under the new draft scope.
+    if (changedScope && (changedOwner || !isHistoryArrival)) {
+      if (changedOwner) clearSearchResultReturn();
+      else supersedeSearchResultReturn();
       editedFilters.current = null;
       historyRestoration.current = null;
-      compositionScope.current = null;
+      composition.current = null;
       forgetDirectorySearch('search');
       const url = new URL(window.location.href);
       writeCampusServiceFilters(url.searchParams, '', 'all');
       try {
-        window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+        replaceSearchHistoryQuery(url);
       } catch {
         // The current input is still cleared when History access is unavailable.
       }
@@ -131,15 +187,35 @@ function ServiceDirectory() {
       return;
     }
     if (!campusReady) return;
-    const restoring = historyRestoration.current;
-    if (restoring?.scope === draftScope) {
-      // A real Back/Forward traversal wins over queued acknowledgements of earlier typing.
-      if (
-        new URLSearchParams(window.location.search).toString() === restoring.queryString &&
-        queryString !== restoring.queryString
-      )
-        return;
-      historyRestoration.current = null;
+    // A real Back/Forward traversal wins over queued acknowledgements of earlier typing.
+    if (isHistoryArrival && queryString !== restoring.queryString) return;
+    historyRestoration.current = null;
+    if (filterArrival) {
+      // An accepted filter arrival supersedes any draft, including an active
+      // composition whose end event may still arrive after this render.
+      restoredFilters.current = { scope: draftScope, queryString };
+      editedFilters.current = null;
+      composition.current = null;
+      const next =
+        filterArrival.saved?.filters ?? readCampusServiceFilters(new URLSearchParams(queryString));
+      const expanded = restoreDirectorySearch('search', '/search', storageScope)?.expanded ?? [];
+      if (filterArrival.explicitSync) {
+        requestSequence.current += 1;
+        setAnalysis(null);
+        // Persist the URL's filters, including an intentional empty query.
+        rememberDirectorySearch('search', {
+          path: '/search',
+          destination: '/search',
+          ...next,
+          open: false,
+          scope: storageScope,
+          expanded,
+        });
+      }
+      setFilters({ scope: draftScope, ...next });
+      setRestoredExpanded(expanded);
+      finishSearchFilterArrival(filterArrival);
+      return;
     }
     if (
       restoredFilters.current?.scope === draftScope &&
@@ -158,31 +234,25 @@ function ServiceDirectory() {
       return;
     editedFilters.current = null;
     // First arrival keeps an explicitly shared URL; later returns require the same account/campus.
-    const next = filtersFromUrlOrSession(
-      new URLSearchParams(queryString),
-      window.location.pathname || '/search',
-      storageScope,
-    );
+    const urlParams = new URLSearchParams(queryString);
+    const next = isHistoryArrival
+      ? readCampusServiceFilters(urlParams)
+      : filtersFromUrlOrSession(urlParams, window.location.pathname || '/search', storageScope);
     setFilters({ scope: draftScope, ...next });
     setRestoredExpanded(
       restoreDirectorySearch('search', window.location.pathname || '/search', storageScope)
         ?.expanded ?? [],
     );
-  }, [account.canRemember, campusReady, confirmedScope, draftScope, queryString, storageScope]);
-  const term = query.trim();
-  const semanticScope = JSON.stringify([
-    account.responseScope,
-    schoolSearch,
-    Boolean(selection?.loading),
-    selection?.catalogStatus,
+  }, [
+    account.canRemember,
+    account.ownerScope,
+    campusReady,
+    confirmedScope,
+    draftScope,
+    queryString,
+    filterArrival,
+    storageScope,
   ]);
-  const currentScope = useRef(semanticScope);
-  const [analysis, setAnalysis] = useState<{
-    scope: string;
-    term: string;
-    status: 'pending' | 'ready' | 'error';
-    result?: CampusSemanticResult;
-  } | null>(null);
   useLayoutEffect(() => {
     currentScope.current = semanticScope;
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -201,10 +271,13 @@ function ServiceDirectory() {
         ? (restoreDirectorySearch('search', '/search', storageScope)?.expanded ?? [])
         : [];
       requestSequence.current += 1;
-      compositionScope.current = null;
+      composition.current = null;
       setAnalysis(null);
       // An empty history entry is intentionally empty, even if a session draft exists.
-      historyRestoration.current = { scope: draftScope, queryString: source };
+      historyRestoration.current = {
+        queryString: source,
+        entryKey: getSearchHistoryEntryKey(),
+      };
       editedFilters.current = { scope: draftScope, queryString: source };
       setFilters({ scope: draftScope, ...next });
       setRestoredExpanded(expanded);
@@ -267,6 +340,7 @@ function ServiceDirectory() {
     next: { query: string; category: ServiceCategory | 'all' },
     persist = true,
   ) {
+    supersedeSearchResultReturn();
     requestSequence.current += 1;
     setAnalysis(null);
     setFilters({ scope: draftScope, ...next });
@@ -310,8 +384,17 @@ function ServiceDirectory() {
     updateFilters({ query: '', category: 'all' });
     searchInput.current?.focus();
   }
-  function rememberLeaving(href: string) {
+  function rememberLeaving(
+    href: string,
+    kind: 'service' | 'suggested' | 'assistant',
+  ) {
     if (!canRemember) return;
+    rememberSearchResultReturn({
+      scope: returnScope,
+      filters: { query, category },
+      href,
+      kind,
+    });
     rememberDirectorySearch('search', {
       path: '/search',
       destination: href,
@@ -328,7 +411,8 @@ function ServiceDirectory() {
         key={service.href}
         className={`${styles.service}${secondary ? ` ${styles.secondaryService}` : ''}`}
         href={campusServiceHref(service.href, schoolSearch)}
-        onClick={() => rememberLeaving(campusServiceHref(service.href, schoolSearch))}
+        data-search-return-kind="service"
+        onNavigate={() => rememberLeaving(campusServiceHref(service.href, schoolSearch), 'service')}
       >
         <div>
           <h3>{service.name}</h3>
@@ -360,7 +444,7 @@ function ServiceDirectory() {
     );
   }
   return (
-    <SiteShell title="所有服務" subtitle="先選常用服務，或直接搜尋你要做的事。">
+    <SiteShell title="所有服務">
       <div ref={directory} className={styles.directory}>
         <form
           className={styles.searchPanel}
@@ -368,7 +452,7 @@ function ServiceDirectory() {
           aria-label="尋找服務"
           onSubmit={(event) => {
             event.preventDefault();
-            if (compositionScope.current !== null) return;
+            if (composition.current !== null) return;
             resultsHeading.current?.focus();
           }}
         >
@@ -391,21 +475,21 @@ function ServiceDirectory() {
                 onChange={(event) =>
                   updateFilters(
                     { query: event.target.value, category },
-                    compositionScope.current === null,
+                    composition.current === null,
                   )
                 }
                 onCompositionStart={() => {
-                  compositionScope.current = draftScope;
+                  composition.current ??= { scope: draftScope, filters: { query, category } };
                 }}
                 onCompositionEnd={(event) => {
-                  const scope = compositionScope.current;
-                  compositionScope.current = null;
+                  const scope = composition.current?.scope;
+                  composition.current = null;
                   if (scope === draftScope)
                     updateFilters({ query: event.currentTarget.value, category });
                 }}
                 onKeyDown={(event) => {
                   const composing =
-                    event.nativeEvent.isComposing || compositionScope.current !== null;
+                    event.nativeEvent.isComposing || composition.current !== null;
                   if (event.key === 'Enter' && (composing || event.keyCode === 229)) {
                     event.preventDefault();
                   }
@@ -493,7 +577,8 @@ function ServiceDirectory() {
                 <Link
                   className={styles.assistantLink}
                   href={assistantHref}
-                  onClick={() => rememberLeaving(assistantHref)}
+                  data-search-return-kind="assistant"
+                  onNavigate={() => rememberLeaving(assistantHref, 'assistant')}
                 >
                   交給校園助理
                 </Link>
@@ -541,7 +626,10 @@ function ServiceDirectory() {
                     key={action.href}
                     href={campusServiceHref(action.href, schoolSearch)}
                     className={styles.smartAction}
-                    onClick={() => rememberLeaving(campusServiceHref(action.href, schoolSearch))}
+                    data-search-return-kind="suggested"
+                    onNavigate={() =>
+                      rememberLeaving(campusServiceHref(action.href, schoolSearch), 'suggested')
+                    }
                   >
                     <strong>{action.name}</strong>
                     <small>{action.text}</small>

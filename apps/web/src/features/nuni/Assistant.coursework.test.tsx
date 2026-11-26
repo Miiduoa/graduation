@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ReactNode } from 'react';
-import { Assistant } from './Assistant';
+import { useState, type ReactNode } from 'react';
+import { Assistant, Conversation } from './Assistant';
 import { answerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
 
 const state = vi.hoisted(() => ({ accountId: 'alice', context: 'a'.repeat(43), schoolId: 'pu' }));
@@ -79,6 +79,27 @@ async function readTasks() {
   await screen.findByRole('button', { name: '替資料庫管理的期末資料模型安排30分鐘' });
   return question;
 }
+
+function InlineAssistant() {
+  const [text, setText] = useState('');
+  return <Conversation context={state.context} accountId={state.accountId} schoolId={state.schoolId}
+    cloudEnabled={false} inlineDraft={{ text, setText }} />;
+}
+
+it.each(['standalone', 'inline'])('answers the today priority suggestion in %s without a provider or model consent', async mode => {
+  render(mode === 'standalone' ? <Assistant cloudEnabled={false} /> : <InlineAssistant />);
+  const suggestion = await screen.findByRole('button', { name: '今天先做什麼？' });
+  fireEvent.click(suggestion);
+  expect((screen.getByLabelText('問題') as HTMLTextAreaElement).value).toBe('今天先做什麼？');
+  expect(answerAssistantPersonalQuestion).not.toHaveBeenCalled();
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  await screen.findByRole('button', { name: '替資料庫管理的期末資料模型安排30分鐘' });
+  expect(answerAssistantPersonalQuestion).toHaveBeenCalledExactlyOnceWith(
+    '今天先做什麼？', { owner: 'platform:alice', schoolId: 'pu' },
+    expect.objectContaining({ context: state.context, fallbackOnMissing: false }),
+  );
+  expect(fetch).not.toHaveBeenCalled();
+});
 
 it('continues a verified task without a provider, model consent, or erasing the current draft', async () => {
   render(<Assistant />);

@@ -285,6 +285,7 @@ export async function fetchJson(
   url: string,
   init: RequestInit,
   responseLimit = 1024 * 1024,
+  options: { retry?: boolean } = {},
 ): Promise<unknown> {
   return withWakeRetry(
     async (signal) => {
@@ -318,7 +319,11 @@ export async function fetchJson(
         throw new NuniError(503, 'SERVICE_UNAVAILABLE');
       }
     },
-    { timeoutMs: WAKE_REQUEST_TIMEOUT_MS, externalSignal: init.signal ?? undefined },
+    {
+      timeoutMs: WAKE_REQUEST_TIMEOUT_MS,
+      externalSignal: init.signal ?? undefined,
+      ...(options.retry === false ? { retry: false } : {}),
+    },
   );
 }
 

@@ -2,6 +2,14 @@ import { doc, getDocFromServer, serverTimestamp, setDoc } from 'firebase/firesto
 import { getDb } from '../firebase';
 import { EMPTY_CREATOR_CARD, readCreatorCardFields, validateCreatorCard, type CreatorCard } from '@campus/shared/src/creatorCard';
 
+export function isCreatorCardAccessDenied(error: unknown): boolean {
+  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
+  const denied = /^(?:firestore\/)?(?:permission-denied|unauthenticated)$/;
+  return (typeof code === 'string' && denied.test(code)) ||
+    (typeof message === 'string' &&
+      (denied.test(message) || message === 'Missing or insufficient permissions.'));
+}
+
 function cardRef(schoolId: string, ownerUid: string) {
   if (!schoolId || !ownerUid || schoolId.includes('/') || ownerUid.includes('/')) {
     throw new Error('Invalid creator card scope');
@@ -10,8 +18,15 @@ function cardRef(schoolId: string, ownerUid: string) {
 }
 
 /** The school-owned directory stays read-only. Creator card fields are opt-in. */
-export async function readCreatorCard(schoolId: string, ownerUid: string): Promise<CreatorCard | null> {
+export async function readCreatorCard(
+  schoolId: string, ownerUid: string, { requireCommitted = false } = {},
+): Promise<CreatorCard | null> {
   const snapshot = await getDocFromServer(cardRef(schoolId, ownerUid));
+  // Only the save confirmation path should reject an uncommitted local overlay.
+  // Ordinary reads keep showing the server snapshot, including pending writes.
+  if (requireCommitted && snapshot.metadata?.hasPendingWrites) {
+    throw new Error('Creator card has pending writes');
+  }
   if (!snapshot.exists()) return null;
   const data = snapshot.data() as Record<string, unknown>;
   if (data.schoolId !== schoolId || data.ownerUid !== ownerUid) {
@@ -20,7 +35,7 @@ export async function readCreatorCard(schoolId: string, ownerUid: string): Promi
   return readCreatorCardFields(data);
 }
 
-/** Save a whole bounded public card and confirm it against the server. */
+/** Save a whole bounded public card and confirm the written values against the server. */
 export async function saveCreatorCard(
   schoolId: string, ownerUid: string, draft: CreatorCard,
 ): Promise<CreatorCard> {
@@ -28,7 +43,7 @@ export async function saveCreatorCard(
   await setDoc(cardRef(schoolId, ownerUid), {
     schoolId, ownerUid, ...normalized, updatedAt: serverTimestamp(),
   }, { merge: true });
-  const confirmed = await readCreatorCard(schoolId, ownerUid);
+  const confirmed = await readCreatorCard(schoolId, ownerUid, { requireCommitted: true });
   if (!confirmed ||
     confirmed.headline !== normalized.headline ||
     confirmed.bio !== normalized.bio ||

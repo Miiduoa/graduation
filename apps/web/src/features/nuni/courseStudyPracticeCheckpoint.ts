@@ -10,7 +10,6 @@ import {
 } from './courseStudyProgress';
 import {
   buildStudyPracticeDeck,
-  hasVisibleStudyAttempt,
   startStudyPracticeRound,
   type StudyPracticeResponse,
   type StudyPracticeRound,
@@ -83,12 +82,9 @@ function readRound(value: unknown, progress: CourseStudyProgressData): StudyPrac
       typeof response.answerVisible !== 'boolean' || typeof response.hintVisible !== 'boolean' ||
       ![null, 'again', 'understood', 'skipped'].includes(response.outcome as string | null)) invalid();
     const outcome = response.outcome as StudyPracticeResponse['outcome'];
-    const hasAnswer = hasVisibleStudyAttempt(response.attempt);
-    const answerVisible = response.answerVisible && hasAnswer;
-    // Older checkpoints used trim() as the attempt gate. Invisible-only drafts
-    // that passed that check must not block the rest of the file.
-    const passedLegacyAttemptGate = response.attempt.trim().length > 0;
-    if (((outcome === 'again' || outcome === 'understood') && !hasAnswer && !passedLegacyAttemptGate) ||
+    const answerVisible = response.answerVisible;
+    // The backup format accepts attempts that passed the original trim() gate.
+    if (((answerVisible || outcome === 'again' || outcome === 'understood') && !response.attempt.trim()) ||
       (outcome === 'skipped' && answerVisible)) invalid('練習的試答、揭答與自評狀態不一致，無法還原。');
     responses[card.id] = {
       attempt: response.attempt,
@@ -110,7 +106,7 @@ function readRound(value: unknown, progress: CourseStudyProgressData): StudyPrac
   return { ...restored, allCards: full.allCards, index, finished: data.finished as boolean, responses };
 }
 
-/** Self-contained backup: an existing v2 reading snapshot plus a separately validated round. */
+/** Self-contained reading snapshot and separately validated practice round. */
 export function serializeStudyPracticeCheckpoint(checkpoint: StudyPracticeCheckpoint): string {
   const progress = JSON.parse(serializeCourseStudyProgress(checkpoint.progress)) as unknown;
   const round = checkpoint.round;
@@ -147,7 +143,6 @@ export function parseStudyPracticeCheckpoint(
   if (envelope.format !== STUDY_PRACTICE_CHECKPOINT_FORMAT || envelope.version !== CHECKPOINT_VERSION) {
     invalid('這不是目前支援的逐題練習進度檔。');
   }
-  // Reuse the v1/v2 reader's source, quote, scope and passage-boundary checks.
   const progress = parseCourseStudyProgress(JSON.stringify(envelope.progress), expectedScope);
   return { progress, round: readRound(envelope.practice, progress) };
 }

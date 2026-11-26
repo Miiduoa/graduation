@@ -2,6 +2,7 @@ import { NuniError } from '@campus/shared/src/nuni';
 import { withWakeRetry } from '@campus/shared/src/wakeAwareRequest';
 import { getAuthInstance } from '../firebase';
 import { validTronClassUploadQuery } from './nuniClient';
+import { tronClassCredentialFetch } from './tronClassCredentialFetch';
 import type { TronClassUploadScope } from './tronClassIntegrationTypes';
 import {
   requestNativeTronClassDownload,
@@ -115,18 +116,26 @@ export async function nativeTronClassFirebaseRequest(
     async (attemptSignal) => {
       assertCurrent();
       try {
-        const response = await fetch(endpoint, {
-          method: upload ? 'PUT' : 'POST',
-          redirect: 'error',
-          cache: 'no-store',
-          signal: attemptSignal,
-          headers: {
-            Accept: 'application/json',
-            Authorization: `Bearer ${token}`,
-            'Content-Type': upload?.contentType ?? 'application/json',
-          },
-          body: upload ? (upload.bytes as unknown as BodyInit) : JSON.stringify(input),
-        });
+        const headers = {
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Content-Type': upload?.contentType ?? 'application/json',
+        };
+        // The school password leaves the device only through the redirect-safe native transport.
+        const response = !upload && action === 'connect'
+          ? await tronClassCredentialFetch(endpoint, {
+            signal: attemptSignal,
+            headers,
+            body: JSON.stringify(input),
+          })
+          : await fetch(endpoint, {
+            method: upload ? 'PUT' : 'POST',
+            redirect: 'error',
+            cache: 'no-store',
+            signal: attemptSignal,
+            headers,
+            body: upload ? (upload.bytes as unknown as BodyInit) : JSON.stringify(input),
+          });
         assertCurrent();
         const body = await response.text();
         assertCurrent();

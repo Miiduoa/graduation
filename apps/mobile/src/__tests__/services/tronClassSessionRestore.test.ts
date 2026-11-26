@@ -24,7 +24,7 @@ jest.mock('../../services/cloudFunctions', () => ({
   getFirebaseAuthHeaders: () => mockAuthHeaders(),
 }));
 
-const SESSION_KEY = '@pu_cache:tc_backend_session';
+const SESSION_KEY = 'campus.tronclass.backend-session.v1';
 const oldSession = JSON.stringify({ sessionId: 'old-session', userId: 17 });
 const nextSession = JSON.stringify({ sessionId: 'next-session', userId: 23 });
 let client: typeof import('../../services/tronClassClient');
@@ -48,12 +48,12 @@ beforeEach(() => {
   jest.resetModules();
   secureValue = null;
   legacyValue = null;
-  mockSecureGetItem.mockReset().mockImplementation(async () => secureValue);
+  mockSecureGetItem.mockReset().mockImplementation(async (key: string) => key === SESSION_KEY ? secureValue : null);
   mockSecureSetItem.mockReset().mockImplementation(async (_key: string, value: string) => {
     secureValue = value;
   });
-  mockSecureDeleteItem.mockReset().mockImplementation(async () => {
-    secureValue = null;
+  mockSecureDeleteItem.mockReset().mockImplementation(async (key: string) => {
+    if (key === SESSION_KEY) secureValue = null;
   });
   mockLegacyGetItem.mockReset().mockImplementation(async () => legacyValue);
   mockLegacyRemoveItem.mockReset().mockImplementation(async () => {
@@ -441,3 +441,24 @@ test.each(['fetch', 'body'] as const)(
     expect(secureValue).toBe(nextSession);
   },
 );
+
+test('a replaced session cancels a pending campus login form before it can submit credentials', async () => {
+  const page = deferred<Response>();
+  const started = deferred<void>();
+  mockFetch.mockResolvedValueOnce(response(503, {})).mockImplementationOnce(() => {
+    started.resolve();
+    return page.promise;
+  });
+  expectedRequests = 2;
+  const login = client.tcLogin('student', 'test-password');
+  await started.promise;
+  await client.setTCBackendSession('next-session', 23);
+  page.resolve({
+    url: 'https://identity.pu.edu.tw/login',
+    status: 200,
+    text: async () => '<form action="/login"></form>',
+  } as Response);
+
+  await expect(login).resolves.toMatchObject({ success: false, session: null });
+  await expect(client.getTCBackendSessionId()).resolves.toBe('next-session');
+});

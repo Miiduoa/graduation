@@ -23,7 +23,7 @@ import type {
 } from '../tronClassIntegrationTypes';
 import type { LmsReadOptions, LmsReadResult, LmsReadonlySource } from './tronClassLmsSource';
 import { tronClassLmsReadonlySource } from './tronClassLmsSource';
-import { createTronClassBindingService } from './tronClassBinding';
+import { createTronClassBindingService, type TronClassBoundSession } from './tronClassBinding';
 import { isTronClassSourceVisible } from './tronClassSourceVisibility';
 import { isTronClassMaterialDownloadAllowed, tronClassMaterialUploadKey } from './tronClassMaterialFile';
 
@@ -205,6 +205,7 @@ function visibleSourceRows(rows: unknown[]): unknown[] {
 async function readContents(
   source: Source, cookies: Record<string, string>, course: TronClassCourseSummary,
   check: () => Promise<void>, read: ReadStep,
+  include: { announcements?: boolean; materials?: boolean } = { announcements: true, materials: true },
 ): Promise<CourseContents> {
   await check();
   const load = async (request: (options: LmsReadOptions) => Promise<LmsReadResult<unknown[]>>) => {
@@ -215,16 +216,21 @@ async function readContents(
     }
     catch (error) { rethrowSession(error); return { ok: false as const, status: schoolHttpStatus(error) }; }
   };
+  const skipped = { ok: true as const, value: [] as unknown[] };
+  const needAnnouncements = include.announcements === true;
+  const needMaterials = include.materials === true;
+  // Activity announcements live on the course activity feed, so announcement
+  // reads still request it; courseware is only needed for materials.
   const [activities, courseware, notices] = await Promise.all([
-    load(options => source.fetchActivities(cookies, course.id, '', options)),
-    load(options => source.fetchActivities(cookies, course.id, 'type=courseware_activity', options)),
-    load(options => source.fetchCourseAnnouncements(cookies, course.id, options)),
+    needAnnouncements || needMaterials ? load(options => source.fetchActivities(cookies, course.id, '', options)) : skipped,
+    needMaterials ? load(options => source.fetchActivities(cookies, course.id, 'type=courseware_activity', options)) : skipped,
+    needAnnouncements ? load(options => source.fetchCourseAnnouncements(cookies, course.id, options)) : skipped,
   ]);
   await check();
   for (const response of [activities, courseware, notices]) if (!response.ok) requireAuthorized(response.status);
   const errors: TronClassSyncError[] = [];
-  if (!activities.ok || (!courseware.ok && courseware.status !== 404)) errors.push(courseError(course, 'materials'));
-  if (!notices.ok && notices.status !== 404) errors.push(courseError(course, 'announcements'));
+  if (needMaterials && (!activities.ok || (!courseware.ok && courseware.status !== 404))) errors.push(courseError(course, 'materials'));
+  if (needAnnouncements && (!activities.ok || (!notices.ok && notices.status !== 404))) errors.push(courseError(course, 'announcements'));
   for (const result of [activities, courseware, notices]) {
     if (result.ok && (!Array.isArray(result.value) || result.value.length > MAX_FEED_ITEMS)) {
       throw new NuniError(502, 'TRONCLASS_INVALID_SOURCE');
@@ -242,15 +248,20 @@ async function readContents(
   for (const raw of visibleSourceRows(notices.ok ? notices.value : [])) addAnnouncement(announcement(raw, course, 'course'));
   const activityRows = visibleSourceRows([...(activities.ok ? activities.value : []), ...(courseware.ok ? courseware.value : [])]);
   for (const raw of activityRows) {
-    const item = material(raw, course);
+    const item = needMaterials ? material(raw, course) : null;
     if (item && !seenMaterials.has(item.id)) { seenMaterials.add(item.id); materials.push(item); }
-    if (isAnnouncementActivityType(record(raw).type)) addAnnouncement(announcement(raw, course, 'activity'));
+    if (needAnnouncements && isAnnouncementActivityType(record(raw).type)) addAnnouncement(announcement(raw, course, 'activity'));
   }
   return { announcements, materials, errors };
 }
 
 export type TronClassReaderDependencies = {
   bindings?: BindingReader; source?: Source; now?: () => number; budgetMs?: number;
+};
+
+export type TronClassSnapshotAuthorization = {
+  binding: TronClassBoundSession;
+  assertGrant: () => Promise<void>;
 };
 
 type CourseReadContext = {
@@ -268,7 +279,8 @@ function createTronClassCourseOperation(dependencies: TronClassReaderDependencie
   const bindings = dependencies.bindings ?? createTronClassBindingService();
   const source = dependencies.source ?? tronClassLmsReadonlySource;
   const now = dependencies.now ?? Date.now;
-  return async <T>(ownerKey: string, readResult: (context: CourseReadContext) => Promise<T>, signal?: AbortSignal): Promise<T> => {
+  return async <T>(ownerKey: string, readResult: (context: CourseReadContext) => Promise<T>,
+    signal?: AbortSignal, authorization?: TronClassSnapshotAuthorization, revision?: string): Promise<T> => {
     const deadline = now() + (dependencies.budgetMs ?? READ_BUDGET_MS);
     const controller = new AbortController();
     let failure: NuniError | undefined;
@@ -288,8 +300,18 @@ function createTronClassCourseOperation(dependencies: TronClassReaderDependencie
       if (controller.signal.aborted) throw failure ?? timeout();
       if (now() >= deadline) throw stop(timeout());
     };
+    const checkBinding = async (revision: string) => {
+      active();
+      await bindings.assertCurrent(ownerKey, revision);
+      active();
+    };
     const read: ReadStep = async request => {
       active();
+      if (authorization) {
+        await authorization.assertGrant();
+        await checkBinding(authorization.binding.revision);
+        active();
+      }
       try {
         const result = await request({ signal: controller.signal, timeoutMs: Math.max(1, Math.ceil(deadline - now())) });
         active();
@@ -304,12 +326,9 @@ function createTronClassCourseOperation(dependencies: TronClassReaderDependencie
     const operation = async (): Promise<T> => {
       try {
         active();
-        const binding = await bindings.requireBinding(ownerKey);
-        const check = async () => {
-          active();
-          await bindings.assertCurrent(ownerKey, binding.revision);
-          active();
-        };
+        const binding = authorization?.binding ?? await bindings.requireBinding(ownerKey, revision);
+        if (revision !== undefined && binding.revision !== revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+        const check = () => checkBinding(binding.revision);
         await check();
         const courses = parseCourses(await read(readOptions => source.fetchCourses(binding.cookies, { userId: binding.userId, status: 'ongoing' }, readOptions)));
         const errors: TronClassCourseIndexError[] = [];
@@ -350,44 +369,90 @@ function createTronClassCourseOperation(dependencies: TronClassReaderDependencie
 /** Read only the verified owner's course picker; never starts a homework request. */
 export function createTronClassCourseIndexReader(dependencies: TronClassReaderDependencies = {}) {
   const operation = createTronClassCourseOperation(dependencies);
-  return (ownerKey: string, signal?: AbortSignal): Promise<TronClassCourseIndex> =>
+  return (ownerKey: string, signal?: AbortSignal, revision?: string): Promise<TronClassCourseIndex> =>
     operation(ownerKey, async ({ binding, courses, errors, now }) => ({
       kind: 'course-index' as const, revision: binding.revision,
       fetchedAt: new Date(now()).toISOString(), courses, errors, partial: errors.length > 0,
-    }), signal);
+    }), signal, undefined, revision);
+}
+
+export type TronClassSnapshotReadOptions = {
+  courseId?: number;
+  revision?: string;
+  requireCompleteCourses?: boolean;
+  acceptCourseIndex?: (index: Pick<TronClassSnapshot, 'courses' | 'errors' | 'partial'>) => boolean;
+  include?: {
+    homework?: boolean;
+    announcements?: boolean;
+    materials?: boolean;
+  };
+};
+
+/** When include is omitted, keep the existing sync shape: homework always, course contents only for a selected course. */
+export function resolveSnapshotInclude(options: TronClassSnapshotReadOptions): {
+  homework: boolean; announcements: boolean; materials: boolean;
+} {
+  if (options.include) {
+    return {
+      homework: options.include.homework === true,
+      announcements: options.include.announcements === true,
+      materials: options.include.materials === true,
+    };
+  }
+  return {
+    homework: true,
+    announcements: options.courseId !== undefined,
+    materials: options.courseId !== undefined,
+  };
 }
 
 export function createTronClassIntegrationReader(dependencies: TronClassReaderDependencies = {}) {
   const operation = createTronClassCourseOperation(dependencies);
-  return async (ownerKey: string, options: { courseId?: number } = {}, signal?: AbortSignal): Promise<TronClassSnapshot> => {
+  return async (ownerKey: string, options: TronClassSnapshotReadOptions = {}, signal?: AbortSignal,
+    authorization?: TronClassSnapshotAuthorization): Promise<TronClassSnapshot> => {
     if (options.courseId !== undefined && positiveId(options.courseId) !== options.courseId) {
       throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
     }
     return operation(ownerKey, async ({ binding, courses, errors: courseErrors, check, read, source, now }) => {
+      // Recheck automatic selection against the index used by this operation.
+      const index = { courses, errors: courseErrors, partial: courseErrors.length > 0 };
+      if ((options.requireCompleteCourses && courseErrors.some((error) => error.area === 'courses')) ||
+        options.acceptCourseIndex?.(index) === false) {
+        return {
+          revision: binding.revision, fetchedAt: new Date(now()).toISOString(),
+          homework: [], announcements: [], materials: [], ...index,
+        };
+      }
+      const include = resolveSnapshotInclude(options);
       const errors: TronClassSyncError[] = [...courseErrors];
       if (options.courseId && !courses.some((course) => course.id === options.courseId)) {
         throw new NuniError(403, 'TRONCLASS_COURSE_NOT_FOUND');
       }
       const selected = options.courseId
         ? courses.filter((course) => course.id === options.courseId) : courses.slice(0, MAX_OVERVIEW_COURSES);
-      if (!options.courseId && courses.length > MAX_OVERVIEW_COURSES) {
+      if (include.homework && !options.courseId && courses.length > MAX_OVERVIEW_COURSES) {
         errors.push({ courseId: null, area: 'homework', message: `這次整理前 ${MAX_OVERVIEW_COURSES} 門課的作業；選擇個別課程可讀取該課完整清單。` });
       }
       const homework: TronClassHomeworkItem[] = [];
-      let cursor = 0;
-      let stopped = false;
-      const worker = async () => {
-        try {
-          while (!stopped && cursor < selected.length) {
-            const course = selected[cursor++];
-            const result = await readHomework(source, binding.cookies, course, check, read);
-            homework.push(...result.homework);
-            errors.push(...result.errors);
-          }
-        } catch (error) { stopped = true; throw error; }
-      };
-      await Promise.all(Array.from({ length: Math.min(3, selected.length) }, worker));
-      const contents = options.courseId ? await readContents(source, binding.cookies, selected[0], check, read)
+      if (include.homework) {
+        let cursor = 0;
+        let stopped = false;
+        const worker = async () => {
+          try {
+            while (!stopped && cursor < selected.length) {
+              const course = selected[cursor++];
+              const result = await readHomework(source, binding.cookies, course, check, read);
+              homework.push(...result.homework);
+              errors.push(...result.errors);
+            }
+          } catch (error) { stopped = true; throw error; }
+        };
+        await Promise.all(Array.from({ length: Math.min(3, selected.length) }, worker));
+      }
+      const contents = (include.announcements || include.materials) && options.courseId
+        ? await readContents(source, binding.cookies, selected[0], check, read, {
+          announcements: include.announcements, materials: include.materials,
+        })
         : { announcements: [], materials: [], errors: [] };
       errors.push(...contents.errors);
       return {
@@ -396,6 +461,6 @@ export function createTronClassIntegrationReader(dependencies: TronClassReaderDe
         announcements: contents.announcements, materials: contents.materials,
         errors, partial: errors.length > 0,
       };
-    }, signal);
+    }, signal, authorization, options.revision);
   };
 }

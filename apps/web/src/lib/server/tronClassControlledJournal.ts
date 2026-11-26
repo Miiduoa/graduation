@@ -201,7 +201,7 @@ export function createTronClassControlledJournal({ db, bindings, now = Date.now 
     run: (tx: TronClassSubmissionTransaction, binding: BindingIdentity, at: number) => Promise<T>): Promise<T> {
     owner(ownerKey);
     try {
-      const raw = await bindings.requireBinding(ownerKey);
+      const raw = await bindings.requireBinding(ownerKey, expectedRevision);
       const binding: BindingIdentity = { schoolId: raw?.schoolId, revision: raw?.revision,
         userId: raw?.userId, expiresAt: Date.parse(raw?.expiresAt) };
       const at = timestamp(now);
@@ -238,7 +238,7 @@ export function createTronClassControlledJournal({ db, bindings, now = Date.now 
     contractVerified: false as const,
     async cancelPreparation(ownerKey: string, value: {
       operationId: string; revision: string; courseId: number; homeworkId: number;
-    }): Promise<TronClassPreparationCancellation> {
+    }, canCreateCancellation: () => boolean = () => true): Promise<TronClassPreparationCancellation> {
       owner(ownerKey);
       if (!object(value) || Object.keys(value).some(key => !['courseId', 'homeworkId', 'revision', 'operationId'].includes(key)) ||
         !positiveId(value.courseId) || !positiveId(value.homeworkId) ||
@@ -261,6 +261,7 @@ export function createTronClassControlledJournal({ db, bindings, now = Date.now 
         if (lock.exists) return result('unknown');
         if (operation?.state === 'cancelled') return result('cancelled');
         if (operation && operation.state !== 'preparing') return result('unknown');
+        if (!operation && !canCreateCancellation()) return result('cancelled');
         // The phone saves an ID before its first upload. A durable tombstone is
         // also required for a missing record: a delayed upload/final must not
         // create that operation after the UI has been told it can edit again.
@@ -378,10 +379,10 @@ export function createTronClassControlledJournal({ db, bindings, now = Date.now 
         tx.set(lock, { ...lockData, state: 'acknowledged', updatedAt: at, purgeAt: null });
       });
     },
-    async readAttempt(ownerKey: string, id: string): Promise<TronClassFinalCandidateAttempt | null> {
+    async readAttempt(ownerKey: string, id: string, expectedRevision?: string): Promise<TronClassFinalCandidateAttempt | null> {
       owner(ownerKey);
       operationId(id);
-      return current(ownerKey, undefined, async (tx, binding) => {
+      return current(ownerKey, expectedRevision, async (tx, binding) => {
         const operation = readOperation(await tx.get(operationRef(ownerKey, id)), ownerKey, id);
         if (!operation) return null;
         if (operation.studentId !== binding.userId) conflict();

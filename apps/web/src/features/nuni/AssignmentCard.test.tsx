@@ -103,6 +103,9 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
   document.body.style.removeProperty('overflow');
 });
+afterEach(() => {
+  document.documentElement.removeAttribute('data-reduced-motion');
+});
 async function openSubmissions() {
   fireEvent.click(screen.getByRole('button', { name: '查看繳交內容' }));
   await screen.findByRole('article', { name: '林同學的繳交' });
@@ -710,6 +713,7 @@ it('previews a photo and shows a late receipt after a confirmed file submit', as
   fireEvent.click(screen.getByRole('button', { name: '放大預覽 shot.jpg' }));
   expect(screen.getByRole('dialog', { name: 'shot.jpg' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '關閉預覽' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認附件清單' }));
   fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
   expect(await screen.findByText('上傳中 0/1，請保持網路連線。')).toBeTruthy();
   await act(async () => finishUpload(mine.files[0]));
@@ -726,9 +730,82 @@ it('previews a photo and shows a late receipt after a confirmed file submit', as
   expect(screen.getByRole('link', { name: '下載' }).getAttribute('href')).toContain('download=1');
 });
 
+it.each(['all valid', 'all rejected', 'partially rejected', 'duplicate'])(
+  'requires confirmation of the actual attachment list before form submission (%s)',
+  async (scenario) => {
+    state.fileSubmit = true;
+    const file = {
+      id: 'cwf_11111111-1111-4111-8111-111111111111',
+      originalName: 'accepted.pdf',
+      contentType: 'application/pdf',
+      byteSize: 3,
+      kind: 'file' as const,
+      uploadPath: 'upload',
+      downloadPath: 'download',
+      downloadExp: '1',
+      downloadSig: 'sig',
+    };
+    const files = scenario === 'all rejected' ? [] : [file];
+    if (scenario !== 'all rejected') {
+      state.request.mockResolvedValueOnce({ intents: [file] });
+      state.upload.mockResolvedValueOnce(file);
+    }
+    state.request.mockResolvedValueOnce({ ...assignment, mySubmission: { ...submission, body: '作業說明', files } });
+    const { container } = render(
+      <AssignmentCard item={assignment} workspace={{ ...workspace, memberRole: 'student' }} reload={reload} />,
+    );
+    const body = screen.getByLabelText('作業內容');
+    fireEvent.change(body, { target: { value: '作業說明' } });
+    const docs = container.querySelector<HTMLInputElement>('input[accept^=".pdf"]')!;
+    const valid = new File(['pdf'], 'accepted.pdf', { type: 'application/pdf' });
+    const missingType = new File(['pdf'], 'missing.pdf');
+    if (scenario === 'duplicate') {
+      fireEvent.change(docs, { target: { files: [valid] } });
+      fireEvent.click(screen.getByRole('button', { name: '確認附件清單' }));
+      fireEvent.change(docs, { target: { files: [valid] } });
+    } else if (scenario === 'all valid') {
+      fireEvent.change(docs, { target: { files: [valid] } });
+    } else {
+      fireEvent.change(docs, {
+        target: { files: scenario === 'all rejected' ? [missingType] : [missingType, valid] },
+      });
+    }
+    const submit = screen.getByRole<HTMLButtonElement>('button', { name: '繳交作業' });
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(submit);
+    fireEvent.submit(body.closest('form')!);
+    expect(state.request).not.toHaveBeenCalled();
+    const list = screen.queryByRole('list', { name: '即將繳交的檔案' });
+    if (scenario === 'all rejected') {
+      expect(list).toBeNull();
+      expect(screen.getByText('目前沒有待送出的附件。')).toBeTruthy();
+    } else {
+      expect(within(list!).getAllByRole('listitem')).toHaveLength(1);
+      expect(list!.textContent).toContain('accepted.pdf');
+    }
+    fireEvent.click(screen.getByRole('button', { name: '確認附件清單' }));
+    expect(submit.disabled).toBe(false);
+    await act(async () => fireEvent.click(submit));
+    if (scenario === 'all rejected') {
+      expect(state.request).toHaveBeenCalledTimes(1);
+      expect(state.request.mock.calls[0][0]).toContain('/submit-files');
+    } else {
+      expect(state.request).toHaveBeenCalledTimes(2);
+      expect(state.request.mock.calls[0][0]).toContain('/files/intents');
+      expect(state.request.mock.calls[1][0]).toContain('/submit-files');
+      expect(state.request.mock.calls[0][2].files).toEqual([
+        expect.objectContaining({ originalName: 'accepted.pdf', contentType: 'application/pdf' }),
+      ]);
+    }
+  },
+);
+
 it('keeps selected files and does not claim success when the network fails', async () => {
   state.fileSubmit = true;
-  state.request.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+  let fail!: (error: Error) => void;
+  state.request
+    .mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }))
+    .mockRejectedValueOnce(new TypeError('Failed to fetch'));
   render(
     <AssignmentCard
       item={assignment}
@@ -742,13 +819,24 @@ it('keeps selected files and does not claim success when the network fails', asy
   fireEvent.change(document.querySelector('input[capture="environment"]') as HTMLInputElement, {
     target: { files: [photo] },
   });
-  fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
+  fireEvent.click(screen.getByRole('button', { name: '確認附件清單' }));
+  const form = screen.getByLabelText('作業內容').closest('form')!;
+  fireEvent.submit(form);
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '處理中…' }).disabled).toBe(true);
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '檔案' }).disabled).toBe(true);
+  fireEvent.submit(form);
+  await waitFor(() => expect(state.request).toHaveBeenCalledTimes(1));
+  await act(async () => fail(new TypeError('Failed to fetch')));
   expect(await screen.findByRole('alert')).toBeTruthy();
   expect(screen.queryByText('繳交內容已儲存，老師現在可以查看。')).toBeNull();
   expect(screen.getByRole('list', { name: '即將繳交的檔案' }).textContent).toContain('keep.jpg');
+  expect(screen.queryByRole('button', { name: '確認附件清單' })).toBeNull();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '確認送出結果' })));
+  expect(state.request).toHaveBeenCalledTimes(2);
+  expect(state.request.mock.calls[1][2]).toEqual(state.request.mock.calls[0][2]);
 });
 
-it('lets a student delete or reorder selected photos before submit', () => {
+it('lets a student delete or reorder selected photos before submit', async () => {
   state.fileSubmit = true;
   render(
     <AssignmentCard
@@ -757,20 +845,38 @@ it('lets a student delete or reorder selected photos before submit', () => {
       reload={reload}
     />,
   );
+  state.request.mockResolvedValueOnce({ ...assignment, mySubmission: submission });
+  const confirm = () => fireEvent.click(screen.getByRole('button', { name: '確認附件清單' }));
+  const submit = screen.getByRole<HTMLButtonElement>('button', { name: '繳交作業' });
+  expect(submit.disabled).toBe(false);
   const camera = document.querySelector('input[capture="environment"]') as HTMLInputElement;
   fireEvent.change(camera, {
     target: { files: [new File([new Uint8Array([1])], 'first.jpg', { type: 'image/jpeg' })] },
   });
+  confirm();
   fireEvent.change(camera, {
     target: { files: [new File([new Uint8Array([2])], 'second.jpg', { type: 'image/jpeg' })] },
   });
   const preview = screen.getByRole('list', { name: '即將繳交的檔案' });
   expect(preview.textContent).toMatch(/first\.jpg[\s\S]*second\.jpg/);
+  expect(submit.disabled).toBe(true);
+  confirm();
   fireEvent.click(screen.getAllByRole('button', { name: '上移' })[1]!);
   expect(preview.textContent).toMatch(/second\.jpg[\s\S]*first\.jpg/);
+  expect(submit.disabled).toBe(true);
+  confirm();
   fireEvent.click(screen.getAllByRole('button', { name: '刪除' })[0]!);
   expect(preview.textContent).toContain('first.jpg');
   expect(preview.textContent).not.toContain('second.jpg');
+  expect(submit.disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '刪除' }));
+  expect(screen.queryByRole('button', { name: '確認附件清單' })).toBeNull();
+  expect(submit.disabled).toBe(false);
+  fireEvent.change(screen.getByLabelText('作業內容'), { target: { value: '純文字作業' } });
+  await act(async () => fireEvent.click(submit));
+  expect(state.request).toHaveBeenCalledTimes(1);
+  expect(state.request.mock.calls[0][0]).toContain('/submit-files');
+  expect(state.request.mock.calls[0][2]).toMatchObject({ body: '純文字作業', fileIds: [] });
 });
 
 it('keeps the original assignment submit key when SESSION_CHANGED leaves the result uncertain', async () => {
@@ -873,7 +979,7 @@ it('hides the file picker after the teacher stops accepting work', () => {
   expect(screen.getByText('已停止收件')).toBeTruthy();
 });
 
-it('saves feedback and opens the next awaiting receipt only after server success', async () => {
+it.each([false, true])('saves feedback and opens the next awaiting receipt only after server success (reduced motion: %s)', async (reduced) => {
   const peer = {
     ...submission,
     platformAccountId: 'pa_33333333-3333-4333-8333-333333333333',
@@ -887,6 +993,12 @@ it('saves feedback and opens the next awaiting receipt only after server success
   render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} />);
   const feedback = await openSubmissions();
   const firstReceipt = screen.getByRole('article', { name: '林同學的繳交' });
+  const scroll = vi.fn();
+  document.getElementById(
+    assignmentReceiptDomId(workspace.id, assignment.id, peer.platformAccountId),
+  )!.scrollIntoView = scroll;
+  // Read the current setting after the component mounted, when the action runs.
+  document.documentElement.dataset.reducedMotion = String(reduced);
   expect(within(firstReceipt).getByText('待回饋第 1／2 份')).toBeTruthy();
   fireEvent.change(feedback, { target: { value: '給林同學的回饋內容' } });
   fireEvent.click(within(firstReceipt).getByRole('button', { name: '儲存回饋並查看下一份' }));
@@ -896,6 +1008,8 @@ it('saves feedback and opens the next awaiting receipt only after server success
   expect(within(peerReceipt).getByText(/目前批改這一份/)).toBeTruthy();
   expect(within(peerReceipt).getByLabelText('給陳同學的回饋')).toBeTruthy();
   expect(within(peerReceipt).getByRole('button', { name: '儲存回饋' })).toBeTruthy();
+  expect(scroll).toHaveBeenLastCalledWith({ block: 'nearest', behavior: reduced ? 'instant' : 'smooth' });
+  expect(document.activeElement).toBe(within(peerReceipt).getByLabelText('給陳同學的回饋'));
 });
 
 it('keeps the draft and selected receipt when save-and-next fails', async () => {
@@ -1206,6 +1320,7 @@ it.each(['alignment', 'lost-response'])(
     fireEvent.change(document.querySelector('input[accept^=".pdf"]')!, {
       target: { files: [new File(['test'], 'repair.pdf', { type: 'application/pdf' })] },
     });
+    fireEvent.click(screen.getByRole('button', { name: '確認附件清單' }));
     fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
     await screen.findByRole('button', { name: '確認送出結果' });
     expect(state.upload).toHaveBeenCalledTimes(1);
@@ -1280,6 +1395,7 @@ it.each(['superseded'])(
     fireEvent.change(document.querySelector('input[accept^=".pdf"]')!, {
       target: { files: [new File(['test'], 'repair.pdf', { type: 'application/pdf' })] },
     });
+    fireEvent.click(screen.getByRole('button', { name: '確認附件清單' }));
     fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
     await screen.findByRole('button', { name: '確認送出結果' });
     expect(state.upload).toHaveBeenCalledTimes(1);

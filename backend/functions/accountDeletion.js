@@ -197,7 +197,13 @@ function createDeleteUserAccountHandler({
 
     // Independent LMS bindings use provider-qualified owners, not ownerUid.
     // Close their write barrier before erasing credentials and private ledgers.
-    await closeTronClassOwner({ db, ownerKey: `firebase:${uid}`, now: () => currentTime });
+    // 獨立綁定只會替符合 TronClass 擁有者格式的 UID 建立；其他 UID 不可能有綁定，
+    // 略過即可，避免原本合法的刪帳被這個步驟擋住。
+    if (
+      /^[^\s/]{1,128}$/.test(uid) &&
+      ![...uid].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+    )
+      await closeTronClassOwner({ db, ownerKey: `firebase:${uid}`, now: () => currentTime });
     // Isolated dorm cleanup: revoke dorm authority and erase new private records.
     await require('./dormAccountDeletion').clearDormAccountData({ db, uid, scanPages });
 

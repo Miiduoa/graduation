@@ -53,6 +53,7 @@ const MAX_BODY_BYTES = 64 * 1024;
 const DORM_MAX_BODY_BYTES = 8 * 1024 * 1024 + MAX_BODY_BYTES;
 
 export type FnRuntime = {
+  messaging?: Pick<import('firebase-admin/messaging').Messaging, 'sendEachForMulticast'>;
   db: import('./groupInviteHandlers').GroupFirestore;
   verifyIdToken: (
     token: string,
@@ -159,11 +160,9 @@ function mapThrownError(error: unknown): HttpsError {
 async function invokeHostedCallable(
   name: string,
   request: CallableRequest,
-  db: FnRuntime['db'],
-  academicFetchers?: AcademicFetchers,
-  lmsCoursesFetcher?: LmsCoursesFetcher,
-  lmsReadonlySource?: LmsReadonlySource,
+  runtime: FnRuntime,
 ): Promise<unknown> {
+  const { db, academicFetchers, lmsCoursesFetcher, lmsReadonlySource } = runtime;
   if (name === 'listGroupDiscussionPage') {
     const { createGroupDiscussionHandlers } = await import('./groupDiscussionHandlers');
     return createGroupDiscussionHandlers({ db: db as unknown as Firestore }).listGroupDiscussionPage(request);
@@ -183,7 +182,7 @@ async function invokeHostedCallable(
   if (name === 'dormWorkflow') {
     if (!request.auth) throw new HttpsError('unauthenticated', '請先登入');
     const { invokeDormWorkflow } = await import('./dormWorkflowHandler');
-    return invokeDormWorkflow(db, request);
+    return invokeDormWorkflow(db as unknown as Firestore, request, runtime.messaging);
   }
   if (name === 'prepareDmConversation' || name === 'sendDmText') {
     const { createDmConversations } = await import('./dmConversationsHandler');
@@ -304,7 +303,7 @@ export async function dispatchFnRequest(
       const { getFirebaseAdmin } = await import('./firebaseAdmin');
       const admin = await getFirebaseAdmin();
       resolved = admin
-        ? { db: admin.db as unknown as FnRuntime['db'], verifyIdToken: admin.verifyIdToken }
+        ? { ...admin, db: admin.db as unknown as FnRuntime['db'] }
         : null;
     } catch {
       resolved = null;
@@ -370,14 +369,7 @@ export async function dispatchFnRequest(
       data: (body as { data: unknown }).data,
       auth,
     };
-    const result = await invokeHostedCallable(
-      name,
-      callableRequest,
-      resolved.db,
-      resolved.academicFetchers,
-      resolved.lmsCoursesFetcher,
-      resolved.lmsReadonlySource,
-    );
+    const result = await invokeHostedCallable(name, callableRequest, resolved);
     return jsonResponse(200, { result }, cors);
   } catch (error) {
     const mapped = mapThrownError(error);

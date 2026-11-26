@@ -1,9 +1,12 @@
 // @vitest-environment node
 import * as planShift from '@/lib/assistantPlanShift';
+import { revisionDraftSource } from '@/lib/assistantPlanRevisionDraft';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { beginProposal, confirm, revoke, signCard } from './actions';
+import { beginProposal, confirm, revoke, signCard, verifyCard } from './actions';
 import { studyGuardForTask } from './courseworkStudy';
 import { directPlanRevision, selectPlanRevision, shiftPlanRevision } from './directPlanRevision';
+import { foodHref } from './food';
+import { foodPickupEvent, foodPickupGuardForSource } from './foodPickup';
 import { fixtureAdapter, fixtureBinding, FIXTURE_NOW, FIXTURE_SECRET as secret } from './fixtures';
 import type { Card, EventArgs } from './contracts';
 
@@ -11,6 +14,73 @@ let serial = 0;
 beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(FIXTURE_NOW));
 afterEach(() => vi.restoreAllMocks());
 const raw = (card: Card) => ({ token: card.token, args: card.args });
+
+it.each(['study', 'coursework-gap'] as const)(
+  'signs the coursework hint from the %s source guard without changing revision-draft compatibility', async policy => {
+    const f = fixtureAdapter();
+    const binding = { ...fixtureBinding, conversationId: 'coursework-hint-' + ++serial };
+    const guard = studyGuardForTask((await f.adapter.work('course-a'))[0], policy);
+    const event: EventArgs = {
+      title: '準備作業', date: '2026-11-04', allDay: false, startTime: '11:00', endTime: '11:30',
+    };
+    const sequence = beginProposal(binding, FIXTURE_NOW);
+    // Identical display text cannot turn an ordinary event into signed coursework.
+    const ordinary = signCard(binding, 'propose_personal_event', event,
+      f.snapshot().revision, secret, FIXTURE_NOW, sequence);
+    const study = signCard(binding, 'propose_personal_event', event,
+      f.snapshot().revision + 1, secret, FIXTURE_NOW, sequence, ordinary, guard);
+    expect(ordinary).toHaveProperty('coursework', false);
+    expect(study).toHaveProperty('coursework', true);
+    expect(verifyCard(binding, raw(ordinary), secret, FIXTURE_NOW).studyGuard).toBeUndefined();
+    expect(verifyCard(binding, raw(study), secret, FIXTURE_NOW).studyGuard).toEqual(guard);
+    expect(ordinary).not.toHaveProperty('sourceBound');
+    expect(study).not.toHaveProperty('sourceBound');
+
+    const cards = [ordinary, study];
+    const source = revisionDraftSource(cards);
+    expect(source).toEqual(revisionDraftSource(cards.map(({ mutationId, tool, schoolId, args }) => ({
+      mutationId, tool, schoolId, args,
+    }))));
+    expect(source.events).toEqual([event, event]);
+    expect(JSON.stringify(source)).not.toMatch(/coursework|token|studyGuard/);
+    expect(f.writes).toHaveLength(0);
+  },
+);
+
+it('omits the coursework hint from real page and food-order cards', () => {
+  const binding = { ...fixtureBinding, conversationId: 'non-coursework-hint-' + ++serial };
+  const page = signCard(binding, 'propose_open_page', { page: 'calendar' }, 0, secret, FIXTURE_NOW);
+  const cart = {
+    tenantId: 'fixture-realm', locationId: 'dining-a', requestedPickupAt: '2026-11-04T12:00:00+08:00',
+    items: [{ menuItemId: 'dish-a', quantity: 1, selectedOptionIds: [] }],
+  };
+  const food = signCard(binding, 'propose_food_order', {
+    cart, summary: {}, mode: 'page', href: foodHref(cart), reason: '開啟點餐頁確認',
+  }, 0, secret, FIXTURE_NOW);
+  expect(page).not.toHaveProperty('coursework');
+  expect(food).not.toHaveProperty('coursework');
+});
+
+it('marks pickup events as non-coursework while retaining their signed source-bound revision guard', async () => {
+  const f = fixtureAdapter();
+  const binding = { ...fixtureBinding, conversationId: 'pickup-hint-' + ++serial };
+  const source = {
+    tenantId: 'fixture-realm', orderId: 'order-a', locationId: 'dining-a',
+    location: '合成蔬食餐廳', requestedPickupAt: '2026-11-04T12:00:00+08:00',
+  };
+  const guard = foodPickupGuardForSource(source, 15);
+  const pickup = signCard(binding, 'propose_personal_event', foodPickupEvent(source, 15),
+    f.snapshot().revision, secret, FIXTURE_NOW, undefined, undefined, undefined, guard);
+  expect(pickup).toMatchObject({ sourceBound: 'food-pickup', coursework: false });
+  expect(verifyCard(binding, raw(pickup), secret, FIXTURE_NOW).pickupGuard).toEqual(guard);
+  await revoke(binding, raw(pickup), secret, FIXTURE_NOW, f.adapter);
+  const ledger = vi.spyOn(f.adapter, 'ledger');
+  await expect(shiftPlanRevision(binding, [raw(pickup)], {
+    mutationIds: [pickup.mutationId], protectedMutationIds: [], offsetMinutes: 30,
+  }, secret, f.adapter)).rejects.toMatchObject({ code: 'FOOD_PICKUP_SOURCE_BOUND' });
+  expect(ledger).not.toHaveBeenCalled();
+  expect(f.writes).toHaveLength(0);
+});
 
 const paths = ['precise', 'subset', 'shift'] as const;
 const failures = ['access', 'deadline', 'submitted', 'duration', 'gap', 'none'] as const;
@@ -33,6 +103,7 @@ it.each(paths.flatMap(path => failures.map(failure => ({ path, failure }))))(
     }, f.snapshot().revision, secret, FIXTURE_NOW, sequence)];
     old.push(signCard(binding, 'propose_personal_event', event,
       f.snapshot().revision + 1, secret, FIXTURE_NOW, sequence, old[0], guard));
+    expect(old.map(card => card.coursework)).toEqual([false, true]);
     for (const card of old) await revoke(binding, raw(card), secret, FIXTURE_NOW, f.adapter);
 
     if (failure === 'access') f.adapter.course = async () => null;
@@ -51,6 +122,7 @@ it.each(paths.flatMap(path => failures.map(failure => ({ path, failure }))))(
         mutationId: old[1].mutationId, ...change,
       }, secret, f.adapter);
       old = revised.cards;
+      expect(old.map(card => card.coursework)).toEqual([false, true]);
       for (const card of old) await revoke(binding, raw(card), secret, FIXTURE_NOW, f.adapter);
     }
     const reply = path === 'precise'
@@ -64,9 +136,11 @@ it.each(paths.flatMap(path => failures.map(failure => ({ path, failure }))))(
           offsetMinutes: failure === 'deadline' ? 1440 : failure === 'gap' ? 480 : 30,
         }, secret, f.adapter);
     const card = reply.cards.at(-1)!;
+    expect(card.coursework).toBe(true);
     const payload = JSON.parse(Buffer.from(card.token.split('.')[0], 'base64url').toString());
     expect(payload.studyGuard).toEqual(guard);
     if (reply.cards.length === 2) {
+      expect(reply.cards[0].coursework).toBe(false);
       const firstPayload = JSON.parse(Buffer.from(reply.cards[0].token.split('.')[0], 'base64url').toString());
       expect(firstPayload.studyGuard).toBeUndefined();
       await confirm(binding, raw(reply.cards[0]), secret, FIXTURE_NOW, f.adapter, true);

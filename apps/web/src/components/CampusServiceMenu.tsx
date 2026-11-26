@@ -5,8 +5,7 @@ import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvi
 import Link from 'next/link';
 import { CampusIcon } from './CampusIcon';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { sha256 } from 'js-sha256';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import {
   visibleCampusServices,
   SERVICE_CATEGORIES,
@@ -18,19 +17,13 @@ import {
   type CampusService,
   type ServiceCategory,
 } from '@/lib/campusServices';
-import { expandedDirectorySections } from '@/lib/campusDirectorySearch';
-import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
-import { useCampusFinderAccount } from '@/lib/useCampusFinderAccount';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
 import {
-  consumeMenuReturn,
-  discardMenuReturn,
-  getMenuReturn,
-  getServerMenuReturn,
-  rememberMenuReturn,
-  setMenuReturnScope,
-  subscribeMenuReturn,
-} from '@/lib/menuNavigationReturn';
+  forgetDirectorySearch,
+  rememberDirectorySearch,
+  restoreDirectorySearch,
+  expandedDirectorySections,
+} from '@/lib/campusDirectorySearch';
+import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
 import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import styles from './CampusServiceMenu.module.css';
 import {
@@ -95,18 +88,7 @@ export function CampusServiceMenu() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const pathname = usePathname();
   const params = useSearchParams();
-  const queryString = params?.toString() || '';
   const context = useCampusNavigationSearch(params);
-  const account = useCampusFinderAccount();
-  const campusId = resolveSchoolPageContext(
-    Object.fromEntries(new URLSearchParams(context)),
-  ).schoolId;
-  const returnScope = sha256(JSON.stringify([account.ownerScope, campusId]));
-  const historyReturn = useSyncExternalStore(
-    subscribeMenuReturn,
-    getMenuReturn,
-    getServerMenuReturn,
-  );
   const currentService = visibleCampusServices(schoolLmsEnabled)
     .filter((service) => campusServiceMatches(service.href, pathname, params))
     .sort((first, second) => second.href.length - first.href.length)[0]?.href;
@@ -135,26 +117,17 @@ export function CampusServiceMenu() {
     skipToggleSideEffects.current = false;
   }
   useLayoutEffect(() => {
-    setMenuReturnScope(account.canRemember ? returnScope : null);
-    assignMenuOpen(false);
-    composing.current = false;
-    setQuery('');
-    setCategory('all');
-    setRestoredExpanded([]);
-  }, [pathname, queryString, returnScope, account.canRemember]);
-  useLayoutEffect(() => {
-    if (!historyReturn || !account.canRemember) return;
-    // popstate can arrive before Next renders the original route. Ordinary
-    // navigation, a refresh, or a different campus/account cannot opt in.
-    if (
-      pathname !== window.location.pathname ||
-      queryString !== new URLSearchParams(window.location.search).toString()
-    )
+    const snapshot = restoreDirectorySearch('menu', pathname || '/');
+    if (!snapshot) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRestoredExpanded([]);
       return;
-    if (!consumeMenuReturn(historyReturn, returnScope)) return;
-    setQuery(historyReturn.query);
-    setCategory(historyReturn.category);
-    setRestoredExpanded(historyReturn.expanded);
+    }
+    // Restore filters after history navigation back to this page.
+    setQuery(snapshot.query.slice(0, 100));
+    setCategory(snapshot.category);
+    setRestoredExpanded(snapshot.expanded ?? []);
+    if (!snapshot.open) return;
     const previouslyFocused = document.activeElement;
     assignMenuOpen(true);
     if (
@@ -164,12 +137,12 @@ export function CampusServiceMenu() {
     ) {
       previouslyFocused.focus({ preventScroll: true });
     }
-  }, [historyReturn, pathname, queryString, returnScope, account.canRemember]);
+  }, [pathname]);
   useEffect(() => {
     function dismiss(event: PointerEvent) {
       const element = menu.current;
       if (element?.open && event.target instanceof Node && !element.contains(event.target)) {
-        discardMenuReturn();
+        forgetDirectorySearch('menu');
         element.open = false;
       }
     }
@@ -215,22 +188,22 @@ export function CampusServiceMenu() {
     menu.current.querySelector('summary')?.focus({ preventScroll: true });
   }
   function dismissMenu() {
-    discardMenuReturn();
+    forgetDirectorySearch('menu');
     closeMenu();
   }
   function persistAndClose(destination: string) {
-    if (account.canRemember) {
-      rememberMenuReturn(destination, {
-        scope: returnScope,
-        query,
-        category,
-        expanded: expandedDirectorySections(results.current),
-      });
-    }
+    rememberDirectorySearch('menu', {
+      path: pathname || '/',
+      destination,
+      query,
+      category,
+      open: true,
+      expanded: expandedDirectorySections(results.current),
+    });
     closeMenu();
   }
   function resetSearch() {
-    discardMenuReturn();
+    forgetDirectorySearch('menu');
     setQuery('');
     setCategory('all');
     setRestoredExpanded([]);
@@ -283,7 +256,7 @@ export function CampusServiceMenu() {
       ref={menu}
       name="campus-navigation-popover"
       className={styles.menu}
-      key={`${pathname}:${returnScope}`}
+      key={pathname}
       onToggle={(event) => {
         // Nested service disclosures must not reset the surrounding search or menu.
         if (event.target !== event.currentTarget) return;
@@ -323,7 +296,7 @@ export function CampusServiceMenu() {
         aria-keyshortcuts="Control+k Meta+k"
         aria-current={primaryNavigationSection(pathname) === 'more' ? 'page' : undefined}
         onClick={() => {
-          if (menu.current?.open) discardMenuReturn();
+          if (menu.current?.open) forgetDirectorySearch('menu');
         }}
       >
         <CampusIcon name="services" size={17} />
@@ -366,7 +339,7 @@ export function CampusServiceMenu() {
             onSubmit={(event) => {
               event.preventDefault();
               if (composing.current) return;
-              // Use the same Next link and guarded history handoff as touch or
+              // Use the same Next link as touch or
               // pointer selection, rather than introducing a second route path.
               directoryLink.current?.click();
             }}
@@ -423,7 +396,7 @@ export function CampusServiceMenu() {
                 <kbd className={styles.shortcut}>⌘ / Ctrl K</kbd>
               )}
             </div>
-            <button type="submit" className={styles.submitSearch} aria-label="查看完整搜尋結果">
+            <button type="submit" className={styles.submitSearch}>
               查看結果
             </button>
           </form>

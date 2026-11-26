@@ -20,18 +20,6 @@ jest.mock('../services/analytics', () => ({
   analytics: { logScreenView: jest.fn() },
 }));
 jest.mock('../ui/navigationTheme', () => ({ TAB_BAR_CONTENT_BOTTOM_PADDING: 80 }));
-jest.mock('../ui/theme', () => ({
-  theme: {
-    layout: { screenHorizontalPadding: 16 },
-    colors: {
-      text: '#202020',
-      muted: '#686868',
-      accent: '#08715a',
-      onAccent: '#ffffff',
-      danger: '#b91c1c',
-    },
-  },
-}));
 
 beforeEach(() => {
   jest.clearAllMocks();

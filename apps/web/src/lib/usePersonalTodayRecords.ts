@@ -1,11 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import {
-  withClassExceptions,
-  type ClassException,
-  type PersonalImportRecord,
-} from '@campus/shared';
+import type { ClassException, PersonalImportRecord } from '@campus/shared';
+import { withScopedClassExceptions } from '@campus/shared/src/timetable/scopedClassExceptions';
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import { useAuth } from '@/components/AuthGuard';
 import { loadPersonalTimetable, type StoredTimetable } from '@/lib/timetable/store';
@@ -61,7 +58,7 @@ export function usePersonalTodayRecords() {
           setManualState({
             key: scopeKey,
             attempt,
-            records: withClassExceptions(manualRecords(data), data.classExceptions),
+            records: withScopedClassExceptions(manualRecords(data), data.classExceptions ?? [], schoolId),
             exceptions: data.classExceptions,
             error: '',
           });
@@ -91,16 +88,14 @@ export function usePersonalTodayRecords() {
       document.removeEventListener('visibilitychange', visible);
     };
   }, [uid, owner, schoolId, scopeKey, context.loading, attempt]);
-  const visible =
-    !context.loading && manualState?.key === scopeKey && manualState.attempt === attempt
-      ? manualState
-      : null;
+  const visible = !context.loading && manualState?.key === scopeKey ? manualState : null;
   const manual = visible?.records ?? null;
-  const loaded = !imported.loading && visible !== null;
-  const error = imported.error || visible?.error || '';
+  const manualLoaded = visible?.attempt === attempt;
+  const loaded = !imported.loading && manualLoaded;
+  const error = imported.error || (manualLoaded ? visible?.error : '') || '';
   return {
     context,
-    imported: { ...imported, records: withClassExceptions(imported.records, visible?.exceptions) },
+    imported: { ...imported, records: withScopedClassExceptions(imported.records, visible?.exceptions ?? [], schoolId) },
     manual,
     retry,
     loaded,

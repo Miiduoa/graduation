@@ -9,10 +9,8 @@
   display: grid;
   gap: 14px;
   min-width: 0;
-  padding: 24px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  padding: 0 0 20px;
+  border-bottom: 1px solid var(--border-strong);
 }
 
 .searchPanel label {
@@ -36,8 +34,8 @@
   min-width: 0;
   padding: 4px 6px 4px 14px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--bg);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
 }
 
 .queryField > svg {
@@ -150,17 +148,16 @@
 .filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
+  gap: 0 16px;
+  padding-top: 4px;
 }
 
 .filters button {
   min-height: 44px;
   max-width: 100%;
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  padding: 8px 3px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
   font: inherit;
@@ -172,13 +169,14 @@
     background-color var(--motion-fast) var(--ease-out),
     border-color var(--motion-fast) var(--ease-out),
     color var(--motion-fast) var(--ease-out);
+  border-bottom: 2px solid transparent;
 }
 
 .filters button[aria-pressed='true'] {
   color: var(--brand);
-  background: var(--accent-soft);
-  border-color: var(--brand);
+  background: transparent;
   font-weight: 650;
+  border-bottom-color: currentColor;
 }
 
 .resultSummary {
@@ -202,6 +200,7 @@
   line-height: 1.4;
   font-weight: 650;
   scroll-margin-block-start: 16px;
+  font-family: var(--font-heading);
 }
 
 .resultSummary p {
@@ -229,10 +228,9 @@
   display: grid;
   gap: 12px;
   min-width: 0;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
+  padding: 16px 18px;
+  background: var(--panel);
+  border-inline-start: 3px solid var(--brand);
 }
 
 .smartResults h2 {
@@ -272,13 +270,11 @@
   display: grid;
   min-width: 0;
   gap: 5px;
-  padding: 16px 40px 16px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel);
+  padding: 12px 32px 12px 0;
   color: var(--text);
   text-decoration: none;
   overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
 }
 
 .smartAction strong {
@@ -304,18 +300,17 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   min-width: 0;
-  padding: 22px 24px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
+  padding: 18px 0 4px;
+  border-top: 1px solid var(--border-strong);
 }
 
 .categoryHeading h2,
 .empty h2 {
   margin: 0 0 6px;
-  font-size: calc(var(--font-body-size) + 0.125rem);
+  font-size: clamp(1.25rem, 2vw, 1.5rem);
   line-height: 1.5;
   font-weight: 650;
+  font-family: var(--font-heading);
 }
 
 .categoryHeading p,
@@ -392,7 +387,7 @@
   align-items: center;
   gap: 16px;
   min-width: 0;
-  padding: 18px 8px;
+  padding: 14px 6px;
   border-bottom: 1px solid var(--border);
   color: var(--text);
   text-decoration: none;
@@ -442,10 +437,8 @@
   justify-items: start;
   gap: 12px;
   min-width: 0;
-  padding: 28px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
+  padding: 24px 0;
+  border-top: 1px solid var(--border-strong);
 }
 
 .preview {
@@ -505,13 +498,16 @@
     gap: 22px;
   }
 
-  .searchPanel,
+  .searchPanel {
+    padding: 14px 0;
+  }
+
   .smartResults {
-    padding: 18px;
+    padding: 14px;
   }
 
   .category {
-    padding: 18px 18px 6px;
+    padding: 16px 0 4px;
   }
 
   .queryRow {
@@ -574,5 +570,16 @@
     outline: 2px solid Highlight;
     outline-offset: -3px;
     color: Highlight;
+  }
+}
+
+@media (min-width: 56rem) {
+  .category {
+    grid-template-columns: minmax(10rem, 1fr) minmax(0, 3fr);
+    gap: 24px;
+  }
+
+  .categoryHeading {
+    padding-top: 12px;
   }
 }

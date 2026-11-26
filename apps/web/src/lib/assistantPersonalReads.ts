@@ -6,7 +6,7 @@ import { manualClassRecords, withClassExceptions, classDate, validClassDate } fr
 import { parsePersonalImportSnapshot, personalImportRecordsEqual } from '@campus/shared/src/imports/sync';
 import type { PersonalImportRecord } from '@campus/shared/src/imports/types';
 import { resolveAssistantServiceIntent } from '@campus/shared/src/assistantServices';
-import { createNuniClasses, type NuniWorkspace } from '@campus/shared/src/nuni';
+import { createNuniClasses, NuniError, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { courseScope } from '@campus/shared/src/courseAccess';
 import { currentSemesterStartUtc, rocSchoolYear } from '@campus/shared/src/campusAnnouncementQuality';
 import { createCourseAccess } from '@campus/shared/src/courseAccessClient';
@@ -17,9 +17,10 @@ import { readPersonalImports, type PersonalImportScope } from './personalImports
 import { readPersonalTimetableOnDevice } from './timetable/store';
 import type { LocalAssistantResult } from './assistantLocalActions';
 import { parseAssistantCourseworkTargets } from './assistantCoursework';
+import { assistantTodayPriority } from './assistantTodayPriority';
 
 type ReadIntent = {
-  kind: 'schedule' | 'calendar' | 'coursework';
+  kind: 'schedule' | 'calendar' | 'coursework' | 'today-priority';
   next: boolean;
   current: boolean;
   submitted: boolean;
@@ -36,6 +37,10 @@ const clean = (value: string) => value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, 
 export function personalAssistantReadIntent(question: string, now = new Date()): ReadIntent | null {
   if (question.length > 500 || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(question) || !Number.isFinite(now.getTime())) return null;
   const text = question.normalize('NFKC').trim();
+  if (/^(?:請問)?我?(?:今天|今日|現在)我?(?:應該|該|要)?(?:優先|先)?(?:做|處理)(?:什麼|哪件事)[?。!]?$/u.test(text)) {
+    const today = classDate(now);
+    return { kind: 'today-priority', from: today, to: today, next: false, current: false, submitted: false };
+  }
   if (!text || resolveAssistantServiceIntent(text) ||
       /[「」『』“”"`]|不要|不用|不必|別查|不是要|假設|翻譯|新增|建立|刪除|修改|安排|幫我排|替我排|加入|送出|提交|提醒我|幫我(?:交|繳)|預約|下單|訂餐|順便|然後|並且|另外/.test(text)) return null;
   // Do not answer only one half of a question that also asks for another service.
@@ -105,11 +110,49 @@ const sessionFailure = (error: unknown) => {
   return value?.status === 401 || value?.code === 'SESSION_CHANGED';
 };
 
+type ReadOptions = { context: string; signal: AbortSignal; now?: Date; fallbackOnMissing?: boolean };
+
+async function readCoursework(scope: PersonalImportScope, options: ReadOptions, assertActive: () => void) {
+  const account = scope.owner.slice(9);
+  // A read may use POST for its scoped query, but only these read contracts are reachable.
+  const request = async (path: string, input?: Record<string, unknown>) => {
+    assertActive();
+    const value = await browserRequest(path, options.context, input);
+    assertActive();
+    return value;
+  };
+  const classes = createNuniClasses(request, account);
+  const access = createCourseAccess(request);
+  const memberships = (await classes.list()).filter((course) => course.state === 'active' && course.memberRole === 'student');
+  assertActive();
+  const eligible: NuniWorkspace[] = [];
+  let unchecked = Math.max(0, memberships.length - 12);
+  // Bound requests and retain uncertainty for courses whose campus binding is unavailable.
+  for (const workspace of memberships.slice(0, 12)) {
+    try {
+      const receipt = await access.workspace(workspace.id, scope.schoolId);
+      assertActive();
+      if (receipt.status === 'reviewed' && receipt.memberRole === 'student')
+        eligible.push({ ...workspace, title: receipt.course.title });
+      else unchecked++;
+    } catch (error) {
+      assertActive();
+      if (sessionFailure(error)) throw error;
+      unchecked++;
+    }
+  }
+  const agenda = await loadNuniStudyAgenda(classes, eligible, { cancelled: () => options.signal.aborted });
+  assertActive();
+  if (agenda === 'cancelled') throw new DOMException('已取消', 'AbortError');
+  const partial = unchecked + agenda.failedCourseIds.length + agenda.limitedCourseIds.length > 0;
+  return { agenda, partial, courseCount: eligible.length };
+}
+
 /** Uses the same account-scoped stores and API contracts as the destination screens. No model call or write. */
 export async function answerAssistantPersonalQuestion(
   question: string,
   scope: PersonalImportScope,
-  options: { context: string; signal: AbortSignal; now?: Date; fallbackOnMissing?: boolean },
+  options: ReadOptions,
 ): Promise<LocalAssistantResult | null> {
   const now = options.now ?? new Date();
   const intent = personalAssistantReadIntent(question, now);
@@ -122,39 +165,8 @@ export async function answerAssistantPersonalQuestion(
     kind: 'personal', content, serviceIds,
   });
   if (intent.kind === 'coursework') {
-    const account = scope.owner.slice(9);
-    // A read may use POST for its scoped query, but only these read contracts are reachable.
-    const request = async (path: string, input?: Record<string, unknown>) => {
-      assertActive();
-      const value = await browserRequest(path, options.context, input);
-      assertActive();
-      return value;
-    };
-    const classes = createNuniClasses(request, account);
-    const access = createCourseAccess(request);
     try {
-      const memberships = (await classes.list()).filter((course) => course.state === 'active' && course.memberRole === 'student');
-      assertActive();
-      const eligible: NuniWorkspace[] = [];
-      let unchecked = Math.max(0, memberships.length - 12);
-      // Bound requests and retain uncertainty for courses whose campus binding is unavailable.
-      for (const workspace of memberships.slice(0, 12)) {
-        try {
-          const receipt = await access.workspace(workspace.id, scope.schoolId);
-          assertActive();
-          if (receipt.status === 'reviewed' && receipt.memberRole === 'student')
-            eligible.push({ ...workspace, title: receipt.course.title });
-          else unchecked++;
-        } catch (error) {
-          assertActive();
-          if (sessionFailure(error)) throw error;
-          unchecked++;
-        }
-      }
-      const agenda = await loadNuniStudyAgenda(classes, eligible, { cancelled: () => options.signal.aborted });
-      assertActive();
-      if (agenda === 'cancelled') throw new DOMException('已取消', 'AbortError');
-      const partial = unchecked + agenda.failedCourseIds.length + agenda.limitedCourseIds.length > 0;
+      const { agenda, partial, courseCount } = await readCoursework(scope, options, assertActive);
       const tasks = sortStudyTasks(agenda.tasks, now).filter((task) => {
         const submitted = ['submitted', 'feedback'].includes(studyTaskStatus(task));
         const day = task.dueAt ? classDate(new Date(task.dueAt)) : null;
@@ -163,7 +175,7 @@ export async function answerAssistantPersonalQuestion(
       });
       const range = intent.from ? `${intent.from}${intent.to !== intent.from ? '～' + intent.to : ''} 截止的` : '';
       const heading = `${range}${intent.submitted ? '已繳交／作答' : '未繳交／作答'}項目`;
-      const lines = [`已查詢此帳號在所選校園可核對的 ${eligible.length} 門 nuni 課程。`];
+      const lines = [`已查詢此帳號在所選校園可核對的 ${courseCount} 門 nuni 課程。`];
       if (tasks.length) {
         lines.push(`${heading}共 ${tasks.length} 項：`);
         for (const task of tasks.slice(0, 12)) {
@@ -174,7 +186,7 @@ export async function answerAssistantPersonalQuestion(
         }
         if (tasks.length > 12) lines.push(`先列出 12 項，其餘 ${tasks.length - 12} 項可在課程與作業查看。`);
       } else if (partial) lines.push(`已取得的資料中沒有符合的${heading}；仍有課程未查完整，不能判定全部完成。`);
-      else if (!eligible.length) lines.push('目前沒有可核對的學生課程，請先加入或連結課程。');
+      else if (!courseCount) lines.push('目前沒有可核對的學生課程，請先加入或連結課程。');
       else lines.push(`這次查詢沒有符合的${heading}。`);
       if (partial && tasks.length) lines.push('部分課程的來源尚未查完整；以上只列已核對的項目。');
       if (intent.from && agenda.tasks.some((task) => !task.dueAt && !task.submittedAt))
@@ -257,8 +269,8 @@ export async function answerAssistantPersonalQuestion(
     assertActive();
     unavailable = true;
   }
-  const courses = imported.filter((row) => row.kind === 'timetable');
-  if (!courses.length && !unavailable && options.fallbackOnMissing) return null;
+  const courses = imported.filter((row) => row.kind === 'timetable' && row.schoolId === scope.schoolId);
+  if (intent.kind === 'schedule' && !courses.length && !unavailable && options.fallbackOnMissing) return null;
   const entries: ReturnType<typeof buildPersonalToday>['today'] = [];
   let unplaced = 0;
   let term = '';
@@ -288,6 +300,26 @@ export async function answerAssistantPersonalQuestion(
       entries.push(entry);
       seen.add(key);
     }
+  }
+  if (intent.kind === 'today-priority') {
+    let work: Awaited<ReturnType<typeof readCoursework>> | null = null;
+    try {
+      work = await readCoursework(scope, options, assertActive);
+    } catch (error) {
+      assertActive();
+      if (sessionFailure(error)) throw new Error('登入狀態已變更，請重新登入後再查詢。');
+      // Individual workspace denials are already isolated in readCoursework.
+      if (error instanceof NuniError && error.status === 403)
+        throw new Error('無法確認這個帳號的課程讀取權限，請重新確認帳號後再查詢。');
+    }
+    assertActive();
+    return assistantTodayPriority({
+      entries,
+      scheduleStatus: unavailable || unplaced > 0 ? 'partial' : courses.length ? 'ready' : 'missing',
+      tasks: work?.agenda.tasks ?? [],
+      courseworkStatus: !work || work.partial ? 'partial' : work.courseCount ? 'ready' : 'missing',
+      now,
+    });
   }
   const visible = intent.next ? entries.slice(0, 1) : entries.slice(0, 20);
   const lines = [`${intent.current ? '目前時段的課程' : intent.next ? '接下來的課程' : `${intent.from}${intent.to !== intent.from ? '～' + intent.to : ''} 的課表`}：`];

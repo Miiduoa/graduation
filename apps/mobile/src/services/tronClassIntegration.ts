@@ -31,7 +31,7 @@ import type {
 export type TronClassAccess = {
   owner: string;
   isCurrent(): boolean;
-  request(input: Record<string, unknown>): Promise<unknown>;
+  request(input: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;
   download?(input: NativeTronClassDownloadInput): Promise<NativeTronClassDownloadedFile>;
   downloadSubmissionAttachment?(input: NativeTronClassSubmissionDownloadInput, signal?: AbortSignal): Promise<NativeTronClassDownloadedFile>;
   upload(scope: TronClassUploadScope, bytes: Uint8Array, contentType: string): Promise<unknown>;
@@ -159,10 +159,17 @@ export function parseNativeTronClassSnapshot(value: unknown): TronClassSnapshot 
   const snapshot = value as TronClassSnapshot;
   const courses = new Set(snapshot.courses.map((course) => course.id));
   const homework = new Set(snapshot.homework.map((row) => `${row.courseId}:${row.id}`));
+  // A partial course sync can list errors for a missing course, but it must not
+  // display that course's private materials or announcements as usable data.
+  // Null is reserved for school-wide items without an assigned course.
+  const outsideCourseScope = (row: { courseId: number | null }) =>
+    row.courseId !== null && !courses.has(row.courseId);
   if (
     courses.size !== snapshot.courses.length ||
     homework.size !== snapshot.homework.length ||
-    snapshot.homework.some((row) => !courses.has(row.courseId))
+    snapshot.homework.some((row) => !courses.has(row.courseId)) ||
+    snapshot.announcements.some(outsideCourseScope) ||
+    snapshot.materials.some(outsideCourseScope)
   )
     return invalid();
   return snapshot;
@@ -322,14 +329,20 @@ export function createNativeTronClassClient(access: TronClassAccess) {
   const assertCurrent = () => {
     if (!access.isCurrent()) throw new NuniError(409, 'SESSION_CHANGED');
   };
-  async function request(action: string, input: Record<string, unknown> = {}): Promise<unknown> {
-    assertCurrent();
-    try {
-      const result = await access.request({ ...input, action });
+  async function request(action: string, input: Record<string, unknown> = {}, signal?: AbortSignal): Promise<unknown> {
+    const check = () => {
       assertCurrent();
+      if (signal?.aborted) throw new NuniError(499, 'REQUEST_CANCELLED');
+    };
+    check();
+    try {
+      const result = await (signal
+        ? access.request({ ...input, action }, signal)
+        : access.request({ ...input, action }));
+      check();
       return result;
     } catch (error) {
-      assertCurrent();
+      check();
       throw error;
     }
   }
@@ -367,7 +380,7 @@ export function createNativeTronClassClient(access: TronClassAccess) {
     async status() {
       return parseNativeTronClassConnection(await request('status'));
     },
-    async connect(account: string, password: string, expectedRevision: string | null) {
+    async connect(account: string, password: string, expectedRevision: string | null, signal?: AbortSignal) {
       if (
         !account.trim() ||
         account.length > 200 ||
@@ -382,7 +395,7 @@ export function createNativeTronClassClient(access: TronClassAccess) {
           account: account.trim(),
           password,
           expectedRevision,
-        }),
+        }, signal),
       );
       if (!result.connected) return invalid();
       return result;
@@ -396,14 +409,14 @@ export function createNativeTronClassClient(access: TronClassAccess) {
     },
     async courses(expectedRevision: string) {
       if (!revision(expectedRevision)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
-      return sameRevision(decodeTronClassCourseIndex(await request('courses')) ?? invalid(), expectedRevision);
+      return sameRevision(decodeTronClassCourseIndex(await request('courses', { revision: expectedRevision })) ?? invalid(), expectedRevision);
     },
     async sync(expectedRevision: string, courseId?: number) {
-      if (courseId !== undefined && !id(courseId))
+      if (!revision(expectedRevision) || (courseId !== undefined && !id(courseId)))
         throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
       const value = sameRevision(
         parseNativeTronClassSnapshot(
-          await request('sync', courseId === undefined ? {} : { courseId }),
+          await request('sync', { ...(courseId === undefined ? {} : { courseId }), revision: expectedRevision }),
         ),
         expectedRevision,
       );
@@ -426,9 +439,9 @@ export function createNativeTronClassClient(access: TronClassAccess) {
       return value;
     },
     async prepare(courseId: number, homeworkId: number, expectedRevision: string) {
-      if (!id(courseId) || !id(homeworkId)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+      if (!id(courseId) || !id(homeworkId) || !revision(expectedRevision)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
       return sameRevision(
-        parseNativeTronClassPreparation(await request('prepare', { courseId, homeworkId }), {
+        parseNativeTronClassPreparation(await request('prepare', { courseId, homeworkId, revision: expectedRevision }), {
           courseId,
           homeworkId,
         }),
@@ -564,6 +577,8 @@ export function nativeTronClassError(error: unknown): string {
     TRONCLASS_RECONNECT_REQUIRED: 'TronClass 登入已到期，請重新連接。',
     TRONCLASS_NOT_CONNECTED: '請先連接 TronClass 帳號。',
     TRONCLASS_LOGIN_FAILED: '無法登入 TronClass，請確認學校帳號與密碼。',
+    TRONCLASS_LOGIN_CANCELLED: '連接已中止，請重新確認目前的連接狀態。',
+    REQUEST_CANCELLED: '已停止等待，請重新確認目前的連接狀態。',
     TRONCLASS_INVALID_CREDENTIALS: '無法登入 TronClass，請確認學校帳號與密碼。',
     TRONCLASS_LOGIN_RATE_LIMITED: '登入嘗試過於頻繁，請於 15 分鐘後再試。',
     TRONCLASS_RATE_LIMITED: '操作較頻繁，請稍候再試。',

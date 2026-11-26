@@ -4,7 +4,7 @@ import { boundedBytes, boundedJson } from '../nuni/server';
 import { authenticateTronClassActor } from './tronClassIntegrationAuth';
 import { createTronClassBindingService } from './tronClassBinding';
 import { createTronClassCourseIndexReader, createTronClassIntegrationReader } from './tronClassIntegrationSource';
-import { getDefaultTronClassSubmissionService } from './tronClassSubmission';
+import { getDefaultTronClassSubmissionService, TRONCLASS_MAX_FILE_BYTES } from './tronClassSubmission';
 import type { TronClassPublicSubmissionService } from './tronClassPublicSubmissionService';
 import { createUidRateLimiter } from './uidRateLimit';
 
@@ -20,7 +20,8 @@ export type TronClassRouteDependencies = {
   rateLimit?: (ownerKey: string) => void;
 };
 
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_CONCURRENT_UPLOADS = 2;
+let activeUploads = 0;
 const ID = /^[A-Za-z0-9_-]{16,80}$/;
 // Leave room for four uploads, the final confirmation, and receipt reconciliation.
 // School login has its own durable owner/account limit in the binding service.
@@ -53,10 +54,13 @@ const ERROR_MESSAGES: Record<string, string> = {
   TRONCLASS_RATE_LIMITED: '連線嘗試過於頻繁，請稍後再試。',
   TRONCLASS_LOGIN_RATE_LIMITED: '連線嘗試過於頻繁，請於 15 分鐘後再試。',
   TRONCLASS_LOGIN_FAILED: '無法登入 TronClass，請確認學校帳號與密碼。',
+  TRONCLASS_LOGIN_CANCELLED: '已取消這次 TronClass 連接。',
   TRONCLASS_INVALID_CREDENTIALS: '無法登入 TronClass，請確認學校帳號與密碼。',
   TRONCLASS_LOGIN_UNAVAILABLE: 'TronClass 登入服務暫時無法回應，請稍後再試。',
   TRONCLASS_IDENTITY_UNVERIFIED: '這次登入尚未確認學校帳號身分，請重新連線。',
   TRONCLASS_CONFIGURATION_REQUIRED: 'TronClass 連線服務尚未完成設定。',
+  TRONCLASS_RETENTION_REQUIRED: 'TronClass 綁定暫停，因為校方登入資料的到期清理尚未就緒。',
+  TRONCLASS_UPLOAD_BUSY: '同時上傳的附件過多，請稍後再試。',
   TRONCLASS_UPLOAD_FAILED: '附件尚未全部上傳，作業沒有送出。',
   TRONCLASS_OPERATION_CONFLICT: '這筆操作內容已變更，請重新核對送出狀態。',
   BODY_TOO_LARGE: '檔案超過目前的大小上限，請改選較小的檔案。',
@@ -112,7 +116,7 @@ export async function handleTronClassIntegration(
   dependencies: TronClassRouteDependencies = {},
 ): Promise<Response> {
   try {
-    if (process.env.TRONCLASS_INTEGRATION_ENABLED === 'false') throw new NuniError(503, 'TRONCLASS_DISABLED');
+    if (process.env.TRONCLASS_INTEGRATION_ENABLED !== 'true') throw new NuniError(503, 'TRONCLASS_DISABLED');
     if (!['POST', 'PUT'].includes(request.method)) return response(405, { error: 'METHOD_NOT_ALLOWED' });
     const authenticate = dependencies.authenticate ?? authenticateTronClassActor;
     const actor = await authenticate(request);
@@ -135,11 +139,21 @@ export async function handleTronClassIntegration(
         revision: revision(query.get('revision')), operationId: operationId(query.get('operationId')),
         fileId: operationId(query.get('fileId')), name, contentType,
       };
-      // Check the binding before accepting a potentially large request body.
-      await bindings.assertCurrent(actor.ownerKey, scope.revision);
-      const bytes = await boundedBytes(request, MAX_FILE_BYTES);
-      if (bytes.byteLength === 0) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
-      result = await (await getSubmissions()).upload(actor.ownerKey, { ...scope, bytes }, request.signal);
+      if (Number(request.headers.get('content-length')) > TRONCLASS_MAX_FILE_BYTES) {
+        throw new NuniError(413, 'BODY_TOO_LARGE');
+      }
+      if (activeUploads >= MAX_CONCURRENT_UPLOADS) throw new NuniError(429, 'TRONCLASS_UPLOAD_BUSY');
+      activeUploads++;
+      try {
+        const submissions = await getSubmissions();
+        submissions.assertAttachmentWritesEnabled();
+        await bindings.assertCurrent(actor.ownerKey, scope.revision);
+        const bytes = await boundedBytes(request, TRONCLASS_MAX_FILE_BYTES);
+        if (bytes.byteLength === 0) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+        result = await submissions.upload(actor.ownerKey, { ...scope, bytes }, request.signal);
+      } finally {
+        activeUploads--;
+      }
     } else {
       if (request.nextUrl.search) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
       if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
@@ -159,26 +173,30 @@ export async function handleTronClassIntegration(
           result = await bindings.connect(actor.ownerKey, {
             schoolId: 'pu', account: input.account, password: input.password,
             expectedRevision: expectedRevision(input.expectedRevision),
-          });
+          }, request.signal);
           break;
         case 'disconnect':
           only(input, ['action', 'expectedRevision']);
           result = await bindings.disconnect(actor.ownerKey, expectedRevision(input.expectedRevision));
           break;
         case 'sync':
-          only(input, ['action', 'courseId']);
+          only(input, ['action', 'courseId', 'revision']);
           if (!dependencies.rateLimit) syncLimiter.check(actor.ownerKey);
           result = await (dependencies.read ?? createTronClassIntegrationReader({ bindings }))(actor.ownerKey,
-            input.courseId === undefined ? {} : { courseId: id(input.courseId) }, request.signal);
+            { ...(input.courseId === undefined ? {} : { courseId: id(input.courseId) }),
+              ...(input.courseId === undefined && input.revision === undefined ? {} : { revision: revision(input.revision) }) }, request.signal);
           break;
         case 'courses':
-          only(input, ['action']);
+          only(input, ['action', 'revision']);
           if (!dependencies.rateLimit) courseIndexLimiter.check(actor.ownerKey);
-          result = await (dependencies.courses ?? createTronClassCourseIndexReader({ bindings }))(actor.ownerKey, request.signal);
+          result = await (dependencies.courses ?? createTronClassCourseIndexReader({ bindings }))(actor.ownerKey, request.signal,
+            input.revision === undefined ? undefined : revision(input.revision));
           break;
         case 'prepare':
-          only(input, ['action', 'courseId', 'homeworkId']);
-          result = await (await getSubmissions()).prepare(actor.ownerKey, { courseId: id(input.courseId), homeworkId: id(input.homeworkId) }, request.signal);
+          only(input, ['action', 'courseId', 'homeworkId', 'revision']);
+          result = await (await getSubmissions()).prepare(actor.ownerKey, {
+            courseId: id(input.courseId), homeworkId: id(input.homeworkId), revision: revision(input.revision),
+          }, request.signal);
           break;
         case 'submit':
           only(input, ['action', 'courseId', 'homeworkId', 'revision', 'operationId', 'content', 'attachments', 'confirmed']);

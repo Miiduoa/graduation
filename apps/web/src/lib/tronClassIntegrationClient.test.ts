@@ -10,6 +10,32 @@ import type { TronClassAcknowledgedReadbackResult } from '@campus/shared/src/tro
 afterEach(() => vi.unstubAllGlobals());
 
 describe('TronClass client response boundary', () => {
+  it('does not acquire a token or dispatch a login after connection cancellation', async () => {
+    const getIdToken = vi.fn(async () => 'synthetic-token');
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(createTronClassClient({ kind: 'firebase', getIdToken })
+      .connect('student', 'synthetic-password', null, controller.signal)).rejects.toThrow();
+    expect(getIdToken).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not start an abandoned login after its Firebase token resolves', async () => {
+    let finish!: (value: string) => void;
+    const token = new Promise<string>(resolve => { finish = resolve; });
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const controller = new AbortController();
+    const pending = createTronClassClient({ kind: 'firebase', getIdToken: () => token })
+      .connect('student', 'synthetic-password', null, controller.signal);
+    controller.abort();
+    finish('synthetic-token');
+    await expect(pending).rejects.toThrow();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   const courseIndex = { kind: 'course-index', revision: 'a'.repeat(32), fetchedAt: '2026-11-18T00:00:00.000Z',
     courses: [{ id: 101, name: '程式設計', code: 'CS01', teachers: ['王老師'], semester: '115-1',
       status: 'ongoing', href: 'https://tronclass.pu.edu.tw/course/101/content' }], errors: [], partial: false };
@@ -24,6 +50,14 @@ describe('TronClass client response boundary', () => {
     expect(url).toBe('/api/tronclass');
     expect(JSON.parse(String(init.body))).toEqual({ action: 'courses' });
     expect(new Headers(init.headers).get('X-Campus-Session')).toBe('context-a');
+  });
+
+  it('sends the source binding revision for a scoped course index request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'TRONCLASS_BINDING_CHANGED' }), { status: 409 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(createTronClassClient({ kind: 'platform', context: 'context-a' }).courses(undefined, courseIndex.revision))
+      .rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual({ action: 'courses', revision: courseIndex.revision });
   });
 
   it.each([
@@ -44,6 +78,49 @@ describe('TronClass client response boundary', () => {
     expect(result).toEqual(value);
     expect(result.courses).not.toBe(value.courses);
     expect(result.courses[0].teachers).not.toBe(value.courses[0].teachers);
+  });
+
+  const snapshot = {
+    revision: courseIndex.revision,
+    fetchedAt: courseIndex.fetchedAt,
+    courses: courseIndex.courses,
+    homework: [{
+      id: 201, courseId: 101, courseName: '程式設計', title: '作業', deadline: null,
+      deadlineLabel: '', submitted: null, description: '', href: courseIndex.courses[0].href,
+    }],
+    announcements: [{
+      id: 301, courseId: 101, courseName: '程式設計', title: '公告', content: '',
+      publishedAt: null, source: 'course', href: courseIndex.courses[0].href,
+    }],
+    materials: [{
+      id: 401, courseId: 101, courseName: '程式設計', title: '教材',
+      type: 'material', files: [], href: courseIndex.courses[0].href,
+    }],
+    errors: [],
+    partial: false,
+  };
+
+  it.each([
+    { courses: [...snapshot.courses, ...snapshot.courses] },
+    { homework: [...snapshot.homework, ...snapshot.homework] },
+    { homework: [{ ...snapshot.homework[0], courseId: 999 }] },
+    { announcements: [{ ...snapshot.announcements[0], courseId: 999 }] },
+    { materials: [{ ...snapshot.materials[0], courseId: 999 }] },
+    { errors: [{ courseId: 101, area: ['homework'], message: '未完成' }], partial: true },
+  ])('rejects inconsistent or malformed sync scope: %j', change => {
+    expect(() => parseTronClassResult('sync', { ...snapshot, ...change }, {}))
+      .toThrowError('尚未收到可確認的回覆');
+  });
+
+  it('keeps school-wide rows and missing-course errors in a legitimate partial sync', () => {
+    const value = {
+      ...snapshot,
+      announcements: [...snapshot.announcements, { ...snapshot.announcements[0], id: 302, courseId: null }],
+      materials: [...snapshot.materials, { ...snapshot.materials[0], id: 402, courseId: null }],
+      errors: [{ courseId: 999, area: 'homework', message: '未完成' }],
+      partial: true,
+    };
+    expect(parseTronClassResult('sync', value, {})).toEqual(value);
   });
 
   it('does not start a cancelled course read after waiting for a Firebase token', async () => {
@@ -298,7 +375,7 @@ describe('TronClass client response boundary', () => {
         vi.fn(async () => new Response('{}')),
       );
       const client = createTronClassClient({ kind: 'platform', context: 'context' });
-      const result = action === 'prepare' ? client.prepare(1, 2) : client[action]();
+      const result = action === 'prepare' ? client.prepare(1, 2, preparation.revision) : client[action]();
       await expect(result).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
     },
   );

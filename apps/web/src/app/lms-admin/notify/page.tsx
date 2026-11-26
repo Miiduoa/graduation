@@ -76,8 +76,8 @@ export default function AdminNotifyPage() {
 
   return (
     <RequireAdmin>
-      <h1 style={{ marginTop: 0 }}>發送站內通知 / 公告</h1>
-      <p style={{ color: '#8E8E93', lineHeight: 1.6 }}>
+      <h2>發送站內通知 / 公告</h2>
+      <p style={{ color: 'var(--muted)', lineHeight: 1.6 }}>
         Notification 走 <code>notify_course_members</code> RPC（純文字）；公告寫入 <code>announcements</code>（含 body_html、排程、對象範圍）。
       </p>
 
@@ -90,9 +90,9 @@ export default function AdminNotifyPage() {
             style={{
               padding: '8px 16px',
               borderRadius: 8,
-              border: '1px solid #d1d5db',
-              background: mode === m ? 'var(--brand)' : '#fff',
-              color: mode === m ? '#fff' : '#1C1C1E',
+              border: '1px solid var(--border-strong)',
+              background: mode === m ? 'var(--brand)' : 'var(--surface)',
+              color: mode === m ? 'var(--on-brand)' : 'var(--text)',
               fontWeight: 700,
               cursor: 'pointer',
             }}>
@@ -155,7 +155,7 @@ export default function AdminNotifyPage() {
         )}
 
         {error ? <p style={{ color: 'var(--danger)', margin: 0 }}>{error}</p> : null}
-        {msg ? <p style={{ color: '#047857', margin: 0 }}>{msg}</p> : null}
+        {msg ? <p style={{ color: 'var(--success)', margin: 0 }}>{msg}</p> : null}
         <button type="submit" disabled={busy} style={submitBtn}>
           {busy ? '送出中…' : '送出'}
         </button>
@@ -174,10 +174,10 @@ const formStyle: React.CSSProperties = {
   flexDirection: 'column',
   gap: 12,
   maxWidth: 720,
-  background: '#fff',
+  background: 'var(--surface)',
   padding: 16,
   borderRadius: 12,
-  border: '1px solid #E5E5EA',
+  border: '1px solid var(--border)',
 };
 const fieldStyle: React.CSSProperties = {
   display: 'flex',
@@ -187,15 +187,15 @@ const fieldStyle: React.CSSProperties = {
 const inputStyle: React.CSSProperties = {
   padding: 10,
   borderRadius: 8,
-  border: '1px solid #d1d5db',
+  border: '1px solid var(--border-strong)',
   fontSize: 14,
 };
 const submitBtn: React.CSSProperties = {
   padding: '12px 16px',
   borderRadius: 10,
   border: 'none',
-  background: '#1C1C1E',
-  color: '#fff',
+  background: 'var(--text)',
+  color: 'var(--on-brand)',
   fontWeight: 700,
   cursor: 'pointer',
 };

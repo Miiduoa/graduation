@@ -74,6 +74,8 @@ it('returns an offline page on a failed navigation, even when cache is empty', a
 });
 it('purges legacy account and API caches when activating', async () => {
   cachesMock.keys.mockResolvedValue([
+    'campus-static-v4',
+    'campus-static-v3',
     'campus-static-v2',
     'campus-dynamic-v1.0.0',
     'campus-api-v1.0.0',
@@ -83,6 +85,8 @@ it('purges legacy account and API caches when activating', async () => {
   handlers.activate({ waitUntil });
   await waitUntil.mock.calls[0][0];
   expect(cachesMock.delete.mock.calls.map(([key]) => key)).toEqual([
+    'campus-static-v3',
+    'campus-static-v2',
     'campus-dynamic-v1.0.0',
     'campus-api-v1.0.0',
   ]);

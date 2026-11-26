@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { AppHeader } from '../../../apps/web/src/components/AppHeader';
 import { AcademicNavigation } from '../../../apps/web/src/components/academic/AcademicNavigation';
 import { StudentToday } from '../../../apps/web/src/components/today/StudentToday';
+import { todayTodosFromHomeTasks } from '../../../apps/web/src/lib/todayScreen';
 import { Button } from '../../../apps/web/src/components/ui/Button';
 import { ToastProvider, useToast } from '../../../apps/web/src/components/ui/Toast';
 import { Modal, ConfirmModal } from '../../../apps/web/src/components/ui/Modal';
@@ -10,7 +11,11 @@ import { Input, Textarea, Select } from '../../../apps/web/src/components/ui/Inp
 import { CampusIcon } from '../../../apps/web/src/components/CampusIcon';
 import { QuickCampusEntry } from '../../../apps/web/src/components/QuickCampusEntry';
 import { PageRecovery } from '../../../apps/web/src/components/PageRecovery';
+import { PageLoadingCard } from '../../../apps/web/src/components/PageLoadingCard';
 import { ServiceDirectory } from '../../../apps/web/src/components/ServiceDirectory';
+import { CourseEditing } from './course-editing';
+import { RecordEditing } from './record-editing';
+import SearchPage from '../../../apps/web/src/app/search/page';
 import {
   applyWebAppearancePreferences,
   defaultWebPreferences,
@@ -62,6 +67,13 @@ function Controls() {
         >
           查看課務分頁
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => navigate('/life?schoolId=pu&campus=pu')}
+        >
+          查看生活服務
+        </Button>
         <Button type="button" variant="ghost" onClick={() => navigate('/')}>
           返回今天
         </Button>
@@ -70,6 +82,9 @@ function Controls() {
         </Button>
         <Button type="button" variant="outline" onClick={() => navigate('/interface-feedback')}>
           檢查操作回饋
+        </Button>
+        <Button type="button" variant="outline" onClick={() => navigate('/interface-loading')}>
+          檢查載入狀態
         </Button>
         <Button
           type="button"
@@ -232,6 +247,18 @@ function ActionFeedback() {
 
 function Fixture() {
   const pathname = usePathname();
+  if (pathname === '/search') {
+    return (
+      <SchoolLmsReadonlyProvider enabled>
+        <ToastProvider position="bottom-right">
+          <SearchPage />
+          <div className={home.main}>
+            <Controls />
+          </div>
+        </ToastProvider>
+      </SchoolLmsReadonlyProvider>
+    );
+  }
   return (
     <SchoolLmsReadonlyProvider enabled>
       <ToastProvider position="bottom-right">
@@ -253,7 +280,7 @@ function Fixture() {
                           title: '資料結構',
                           location: '管理大樓 M302',
                           courseId: 'fixture-a',
-                          startAt: Date.parse('2026-11-18T10:10:00+08:00'),
+                          startAt: Date.parse('2026-11-18T10:00:00+08:00'),
                           endAt: Date.parse('2026-11-18T12:00:00+08:00'),
                         },
                         {
@@ -269,24 +296,24 @@ function Fixture() {
                 todos={
                   guest
                     ? []
-                    : [
+                    : todayTodosFromHomeTasks([
                         {
                           id: 'work-a',
-                          title: '小組專題進度紀錄',
+                          title: '資料處理練習',
                           courseName: '系統分析與設計',
                           courseId: 'fixture-c',
-                          dueAt: Date.parse('2026-11-18T23:59:00+08:00'),
-                          href: '/course/fixture-c#assignment-work-a',
+                          schoolId: 'pu',
+                          dueAt: '2026-11-18T23:59:00+08:00',
                         },
                         {
                           id: 'work-b',
                           title: '資料處理練習',
                           courseName: '大數據分析',
                           courseId: 'fixture-d',
-                          dueAt: Date.parse('2026-11-20T23:59:00+08:00'),
-                          href: '/course/fixture-d#assignment-work-b',
+                          schoolId: 'pu',
+                          dueAt: '2026-11-18T11:00:00+08:00',
                         },
-                      ]
+                      ])
                 }
                 timetableStatus={guest ? 'empty' : 'ready'}
                 todosError=""
@@ -297,6 +324,8 @@ function Fixture() {
                 weekHref="/timetable?schoolId=pu&campus=pu"
                 timetableHref="/timetable?schoolId=pu&campus=pu"
                 timetableSchoolId="pu"
+                timetableTermKey="115|1"
+                scopeKey={guest ? undefined : JSON.stringify(['school:fixture-user', 'pu', 'fixture-user'])}
               />
             ) : pathname === '/interface-quick' ? (
               <>
@@ -307,6 +336,17 @@ function Fixture() {
               </>
             ) : pathname === '/interface-feedback' ? (
               <ActionFeedback />
+            ) : pathname === '/interface-loading' ? (
+              <section id="interface-loading-samples" style={{ display: 'grid', gap: 24 }}>
+                <div className={home.heading}><h1>課程資料</h1></div>
+                <PageLoadingCard message="正在讀取課程內容…" />
+                <PageLoadingCard message="正在確認登入狀態…" compact />
+                <PageLoadingCard message="正在讀取跨領域人工智慧實務與應用專題課程的教材與作業資料…" />
+              </section>
+            ) : pathname === '/interface-course-editing' ? (
+              <CourseEditing />
+            ) : pathname === '/interface-record-editing' ? (
+              <RecordEditing />
             ) : pathname === '/life' || pathname === '/connect' ? (
               <>
                 <div className={home.heading}>

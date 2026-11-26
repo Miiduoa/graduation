@@ -103,14 +103,14 @@ function noWritesOrBuyerSubstitution(f: Fixture) {
 }
 
 describe('merchant execution and signed task continuations', () => {
-  it('issues a v3 identity-only proof after a real queue failure and rereads the original store after another store is inserted', async () => {
+  it('issues a v4 proof binding the context and identity after a real queue failure and rereads the original store after another store is inserted', async () => {
     const prepared = await prepare();
     const { f, merchantStep, credential } = prepared;
     expect(merchantStep.status).toBe('partial');
     expect(merchantStep.summary).toContain('待處理訂單來源暫時無法讀取');
     expect(prepared.taskPlan.steps.find(step => step.serviceId === 'cafeteria')?.status).toBe('completed');
     expect(credential?.stepIds).toEqual([merchantStep.id]);
-    expect(proof(credential!)).toMatchObject({ version: 3, eventMapSelections: {},
+    expect(proof(credential!)).toMatchObject({ version: 4, taskProfile: 'student', eventMapSelections: {},
       merchantSelections: { [merchantStep.id]: target } });
     expect(JSON.stringify(proof(credential!))).not.toMatch(/原授權餐坊|PRIVATE-PICKUP|private note|50000|menu-original/);
     expect(prepared.reply.cards).toEqual([]);

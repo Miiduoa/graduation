@@ -1,7 +1,58 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { StudySourceTables } from './StudySourceTables';
 import { extractStudySourceTables } from './studySourceTables';
+import { extractStudySourceTables as extractBaselineTables } from './__fixtures__/courseStudyMergeBase/studySourceTables';
+import { sourcePercentRows, sourceValueRows } from './__fixtures__/courseStudyMergeBase/chartRows';
+import styles from './CourseStudyPanel.module.css';
+
+it.each([
+  ['.sourceLineJump', 'normal'],
+  ['.sourceTableSelection .sourceExcerptWithHeader', 'pre-wrap'],
+])('constrains and wraps %s at narrow widths', (selector, whiteSpace) => {
+  const css = readFileSync(join(__dirname, 'CourseStudyPanel.module.css'), 'utf8');
+  const rule = css.split(`${selector} {`)[1]?.split('}')[0];
+  expect(rule).toMatch(/min-width:\s*0\s*;/);
+  expect(rule).toMatch(/max-width:\s*100%\s*;/);
+  expect(rule).toMatch(/overflow-wrap:\s*anywhere\s*;/);
+  expect(rule).toMatch(new RegExp(`white-space:\\s*${whiteSpace}\\s*;`));
+});
+
+it.each([
+  ['學習時數', ['3', '5', '7']],
+  ['出席率', ['30%', '50%', '70%']],
+])('keeps complete source button names in the %s comparison', (heading, values) => {
+  const labels = ['CODE1234'.repeat(25), '長教材列名'.repeat(40), `CODE-${'مرحبا'.repeat(40)}`];
+  const { container } = render(<StudySourceTables text={[
+    `| 項目 | ${heading} |`, '| --- | --- |',
+    ...labels.map((label, index) => `| ${label} | ${values[index]} |`),
+  ].join('\n')} />);
+  const comparison = container.querySelector('meter')?.closest('details');
+  expect(comparison).toBeInstanceOf(HTMLDetailsElement);
+  comparison?.setAttribute('open', '');
+
+  for (const label of labels) {
+    const name = `${label} · 回表格核對`;
+    const button = screen.getByRole('button', { name });
+    expect(button.getAttribute('aria-label')).toBe(name);
+    expect(button.classList.contains(styles.sourceLineJump)).toBe(true);
+  }
+});
+
+function expectBaselineMeters(container: HTMLElement, text: string) {
+  const expected = extractBaselineTables(text).flatMap((table) => {
+    const values = sourceValueRows(table) ?? [];
+    const max = Math.max(...values.map((row) => row.amount));
+    return [
+      ...values.map((row) => [row.amount, max]),
+      ...(sourcePercentRows(table) ?? []).map((row) => [row.amount, 100]),
+    ];
+  });
+  expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+    .toEqual(expected);
+}
 
 // A read-only source disclosure exists even when no chart is justified.
 // Identify only derived comparisons when asserting that no meter is shown.
@@ -549,24 +600,14 @@ it('shows the visible table after escaped preformatted HTML teaching code exampl
   }]);
 });
 
-it('keeps unpublished rows inside actual nested pre tags, even when one starts in prose', () => {
-  const content = [
-    '<pre class="lesson">',
-    '這行是未跳脫的 HTML：<pre> 會真的建立巢狀元素',
-    '</pre>',
-    '| 教師尚未公開 | 分數 |',
-    '| --- | --- |',
-    '| 答案 | 99 |',
-    '</pre>',
-    '| 正式課程 | 學分 |',
-    '| --- | --- |',
-    '| 資料庫 | 3 |',
-  ].join('\n');
-  expect(extractStudySourceTables(content)).toEqual([{
-    startLine: 8,
-    headers: ['正式課程', '學分'],
-    rows: [['資料庫', '3']],
-  }]);
+it('keeps a visible table selectable after a raw pre closing tag between backticks', () => {
+  const original = source.split('\n').slice(1).join('\n');
+  const view = render(<StudySourceTables text={['<pre>', '範例', '`</pre>`', '', original].join('\n')} />);
+  expect(view.container.querySelectorAll('table')).toHaveLength(1);
+  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+  fireEvent.click(screen.getByRole('button', { name: '全選第 1 張表格原文' }));
+  const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+  expect(field.value.slice(field.selectionStart, field.selectionEnd)).toBe(original);
 });
 
 it('omits hidden HTML template and noscript samples while keeping the following real table', () => {
@@ -641,7 +682,7 @@ it('offers an opt-in comparison with only exact, positive source table values', 
   expect(container.querySelector('meter')).toBeNull();
 });
 
-it('compares strict thousands-grouped lesson quantities while preserving exact source numerals', () => {
+it('keeps thousands-grouped quantities in the original table', () => {
   const markdown = [
     '| 項目 | 交易筆數 |',
     '| --- | --- |',
@@ -651,20 +692,10 @@ it('compares strict thousands-grouped lesson quantities while preserving exact s
   const { container } = render(<StudySourceTables text={markdown} />);
   expect(within(screen.getByRole('table')).getAllByRole('cell')
     .map((cell) => cell.textContent)).toEqual(['1,200', '2,450.50']);
-  expect(Array.from(container.querySelectorAll('meter')).map((bar) => ({
-    value: bar.getAttribute('value'),
-    max: bar.getAttribute('max'),
-    label: bar.getAttribute('aria-label'),
-    text: bar.getAttribute('aria-valuetext'),
-  }))).toEqual([
-    { value: '1200', max: '2450.5', label: '甲：1,200',
-      text: '1,200；本欄最大值 2,450.50' },
-    { value: '2450.5', max: '2450.5', label: '乙：2,450.50',
-      text: '2,450.50；本欄最大值 2,450.50' },
-  ]);
+  expectBaselineMeters(container, markdown);
 });
 
-it('compares large but safely representable grouped cents without altering the source numerals', () => {
+it('keeps large grouped cents in the original table', () => {
   const markdown = [
     '| 項目 | 金額 |', '| --- | --- |',
     '| 甲 | 1,234,567,890,123.45 |', '| 乙 | 1,234,567,890,123.46 |',
@@ -672,8 +703,7 @@ it('compares large but safely representable grouped cents without altering the s
   const { container } = render(<StudySourceTables text={markdown} />);
   expect(within(screen.getByRole('table')).getAllByRole('cell')
     .map((cell) => cell.textContent)).toEqual(['1,234,567,890,123.45', '1,234,567,890,123.46']);
-  expect(Array.from(container.querySelectorAll('meter')).map((meter) => meter.getAttribute('value')))
-    .toEqual(['1234567890123.45', '1234567890123.46']);
+  expectBaselineMeters(container, markdown);
 });
 
 it('never graphs grouped integers or fractional cents that JavaScript cannot represent exactly', () => {
@@ -740,14 +770,13 @@ it.each([
   '期中考排名', '期末考排名', '班級名次', '全校排名', '系所排名',
   'Class Rank', 'Exam Ranking', 'Overall Rank', 'Rank Position',
   'Position in Class', 'Place in School', 'Cohort Ranking',
-])('keeps academic rank positions as original text rather than ratio bars (%s)', (header) => {
+])('uses merge-base eligibility for academic ranks (%s)', (header) => {
   const material = ['| 學生 | ' + header + ' |', '| --- | --- |',
     '| 甲 | 1 |', '| 乙 | 4 |'].join('\n');
   const { container } = render(<StudySourceTables text={material} />);
   expect(within(screen.getByRole('table')).getAllByRole('cell')
     .map((cell) => cell.textContent)).toEqual(['1', '4']);
-  expect(comparisonSummaries(container)).toEqual([]);
-  expect(container.querySelector('meter')).toBeNull();
+  expectBaselineMeters(container, material);
 });
 
 it.each([
@@ -762,7 +791,7 @@ it.each([
     .toEqual([['2', '4'], ['4', '4']]);
 });
 
-it('does not turn ordinal priority, severity or difficulty levels into misleading bars', () => {
+it('uses merge-base eligibility for ordinal levels', () => {
   for (const header of [
     '優先級', '優先順序', '嚴重程度', '風險等級', '難度', '難度等級',
     '危險等級', '等級', 'Priority', 'Priority Level', 'Severity',
@@ -773,8 +802,7 @@ it('does not turn ordinal priority, severity or difficulty levels into misleadin
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell')
       .map((cell) => cell.textContent)).toEqual(['1', '4']);
-    expect(comparisonSummaries(container)).toEqual([]);
-    expect(container.querySelector('meter')).toBeNull();
+    expectBaselineMeters(container, material);
     unmount();
   }
 });
@@ -795,7 +823,7 @@ it('still compares explicit counts of ordinal categories', () => {
   }
 });
 
-it('does not compare numeric ordinals, class levels or pages as quantities', () => {
+it('uses merge-base eligibility for ordinals, class levels and pages', () => {
   for (const header of [
     '學年', '學年（民國）', '學期', '年級', '班級', '頁碼（PDF）', '頁次',
     '週次', '樓層', '排名', '名次', '月份', '民國年', '西元年',
@@ -809,12 +837,12 @@ it('does not compare numeric ordinals, class levels or pages as quantities', () 
       '| 甲 | 1 |', '| 乙 | 2 |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(screen.getByRole('table')).toBeTruthy();
-    expect(comparisonSummaries(container)).toEqual([]);
+    expectBaselineMeters(container, material);
     unmount();
   }
 });
 
-it('keeps software versions, editions and build identifiers as text, not misleading ratios', () => {
+it('uses merge-base eligibility for software versions, editions and builds', () => {
   for (const header of [
     '版本', '軟體版本', '版本號', '版次', '修訂版', '修訂號', '發行版', '發行號', '編譯號',
     'Version', 'Software Version', 'Version (major)', 'Revision', 'Revision No.',
@@ -827,8 +855,7 @@ it('keeps software versions, editions and build identifiers as text, not mislead
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
       .toEqual(['2', '4']);
-    expect(comparisonSummaries(container)).toEqual([]);
-    expect(container.querySelector('meter')).toBeNull();
+    expectBaselineMeters(container, material);
     unmount();
   }
 });
@@ -850,7 +877,7 @@ it('still compares explicit numbers of software releases rather than hiding real
   }
 });
 
-it('keeps binary state, access and completion codes as categories, not proportional bars', () => {
+it('uses merge-base eligibility for state, access and completion codes', () => {
   for (const header of [
     '是否完成', '是否通過', '啟用狀態', '有無繳交', '狀態', '狀況（0/1）',
     '完成與否', '通過與否', '布林值', '真假值', '開關狀態',
@@ -865,8 +892,7 @@ it('keeps binary state, access and completion codes as categories, not proportio
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell')
       .map((cell) => cell.textContent)).toEqual(['0', '1']);
-    expect(comparisonSummaries(container)).toEqual([]);
-    expect(container.querySelector('meter')).toBeNull();
+    expectBaselineMeters(container, material);
     unmount();
   }
 });
@@ -992,7 +1018,7 @@ it('does not turn numeric years or identifiers into misleading comparison bars',
   expect(container.querySelectorAll('meter')).toHaveLength(2);
 });
 
-it('keeps textbook chapter and lesson ordinals as source text, not quantity bars', () => {
+it('uses merge-base eligibility for textbook chapter and lesson ordinals', () => {
   // A lesson index or course week is an ordinal even when the cells contain
   // plain digits. Do not imply that the fourth lesson is twice the second.
   for (const header of [
@@ -1008,8 +1034,7 @@ it('keeps textbook chapter and lesson ordinals as source text, not quantity bars
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell').map(cell => cell.textContent))
       .toEqual(['2', '4']);
-    expect(comparisonSummaries(container)).toEqual([]);
-    expect(container.querySelector('meter')).toBeNull();
+    expectBaselineMeters(container, material);
     unmount();
   }
 });
@@ -1032,7 +1057,7 @@ it('still compares explicit numbers of weeks, chapters and learning units', () =
   }
 });
 
-it('keeps room and seat identifiers as locations, not ratio-style bars', () => {
+it('uses merge-base eligibility for room and seat identifiers', () => {
   for (const header of ['教室', '實驗室', '房號', '宿舍房號', '寢室', '座位',
     '位置', '地點', 'Room', 'Room Number', 'Room #', 'Classroom', 'Lab No.',
     'Building', 'Location', 'Seat Number']) {
@@ -1041,8 +1066,7 @@ it('keeps room and seat identifiers as locations, not ratio-style bars', () => {
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell')
       .map((cell) => cell.textContent)).toEqual(['301', '205']);
-    expect(comparisonSummaries(container)).toEqual([]);
-    expect(container.querySelector('meter')).toBeNull();
+    expectBaselineMeters(container, material);
     unmount();
   }
 
@@ -1059,7 +1083,43 @@ it('keeps room and seat identifiers as locations, not ratio-style bars', () => {
   }
 });
 
-it('keeps database keys and VLAN / ASN namespace identifiers as source values, not proportional bars', () => {
+it('uses merge-base eligibility for authentication-token headers', () => {
+  // These values are labels or secrets, not magnitudes; show the authorized
+  // source cells, not a misleading comparison of two access codes.
+  for (const header of [
+    '驗證碼', '登入碼', '動態密碼', '一次性密碼', '交易密碼',
+    '安全碼（銀行）', '取件碼', '核銷碼', 'OTP', 'TOTP', 'HOTP',
+    'PIN', 'PIN Number', 'CVV', 'CVC2', '2FA Code', 'MFA Code',
+    'SMS OTP', 'Email Verification Code', 'Card Security Code',
+    'One-Time Password', 'Verification Code (%)',
+  ]) {
+    const values = header.endsWith('(%)') ? ['50%', '75%'] : ['1234', '2468'];
+    const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | ' + values[0] + ' |', '| 乙 | ' + values[1] + ' |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map(cell => cell.textContent)).toEqual(values);
+    expectBaselineMeters(container, material);
+    unmount();
+  }
+});
+
+it('still compares real counts of authentication attempts and failures', () => {
+  for (const header of [
+    '驗證碼數量', '登入失敗次數', 'PIN Attempts', 'OTP Success Count',
+    'CVV Error Count', 'Security Code Count', '2FA Attempts',
+  ]) {
+    const material = ['| 範圍 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter'))
+      .map(bar => [bar.getAttribute('value'), bar.getAttribute('max')]))
+      .toEqual([['2', '4'], ['4', '4']]);
+    unmount();
+  }
+});
+
+it('uses merge-base eligibility for database keys and VLAN / ASN identifiers', () => {
   for (const header of [
     '主鍵', '外鍵', '候選鍵', '代理鍵', '主鍵值', '主鍵（資料庫）',
     'Primary Key', 'Foreign Key', 'Candidate Key', 'Surrogate Key',
@@ -1072,8 +1132,7 @@ it('keeps database keys and VLAN / ASN namespace identifiers as source values, n
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell')
       .map((cell) => cell.textContent)).toEqual(['100', '200']);
-    expect(comparisonSummaries(container)).toEqual([]);
-    expect(container.querySelector('meter')).toBeNull();
+    expectBaselineMeters(container, material);
     unmount();
   }
 });
@@ -1095,7 +1154,7 @@ it('still graphs genuine database-key counts and network amounts without guessin
   }
 });
 
-it('keeps network ports, radio channels and protocol layers as identifiers, not ratio bars', () => {
+it('uses merge-base eligibility for ports, channels and protocol layers', () => {
   for (const header of [
     'TCP 埠號', 'UDP 埠號', '來源埠', '目的埠', '連接埠', '服務埠',
     '埠號', '通訊埠', '無線頻道', 'Wi-Fi 頻道', '頻道編號', '通道號碼',
@@ -1110,13 +1169,12 @@ it('keeps network ports, radio channels and protocol layers as identifiers, not 
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell')
       .map((cell) => cell.textContent)).toEqual(['443', '80']);
-    expect(comparisonSummaries(container)).toEqual([]);
-    expect(container.querySelector('meter')).toBeNull();
+    expectBaselineMeters(container, material);
     unmount();
   }
 });
 
-it('continues to compare measured counts and throughput instead of hiding real network quantities', () => {
+it('uses merge-base eligibility for network counts and throughput', () => {
   for (const header of [
     '連接埠數', '開放埠數量', '埠號數量', '通道總數', '頻道數', '網路層數',
     'Port Count', 'Number of Ports', 'Open Port Count', 'Channel Count',
@@ -1128,9 +1186,7 @@ it('continues to compare measured counts and throughput instead of hiding real n
     const material = ['| 範圍 | ' + header + ' |', '| --- | --- |',
       '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
-    expect(Array.from(container.querySelectorAll('meter'))
-      .map((bar) => [bar.getAttribute('value'), bar.getAttribute('max')]))
-      .toEqual([['2', '4'], ['4', '4']]);
+    expectBaselineMeters(container, material);
     expect(within(screen.getByRole('table')).getAllByRole('cell')
       .map((cell) => cell.textContent)).toEqual(['2', '4']);
     unmount();
@@ -1156,6 +1212,46 @@ it('reads the exact source numeric spelling, rather than inferring a percentage'
   expect(Array.from(container.querySelectorAll('meter')).map((bar) => bar.getAttribute('aria-valuetext')))
     .toEqual(['3.00；本欄最大值 3.00', '2.50；本欄最大值 3.00']);
 });
+
+it.each([
+  '風險等級百分比', '風險等級（%）', '排名前十佔比', '班級名次前十名百分比',
+  '排名前１０名比例', '排名前十（%）', 'Top 10 Rank Share (%)',
+])('uses merge-base percentage eligibility for %s', (header) => {
+  const material = [`| 風險 | ${header} |`, '| --- | --- |', '| 低 | 25% |', '| 高 | 75% |'].join('\n');
+  const { container } = render(<StudySourceTables text={material} />);
+  expectBaselineMeters(container, material);
+});
+
+it.each(['全校排名（%）', '班級名次 %', 'Rank Position (%)', 'Position in Class (%)'])(
+  'keeps the baseline fixed percentage scale for %s', (header) => {
+    const material = [`| 分組 | ${header} |`, '| --- | --- |', '| 甲 | 25% |', '| 乙 | 75% |'].join('\n');
+    const { container } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('columnheader', { name: header })).toBeTruthy();
+    expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual([[25, 100], [75, 100]]);
+  },
+);
+
+it.each([
+  '完成狀況（%）', '各題號完成狀況（%）', '各題號的完成狀況及正答率（%）', '各題號正答率', '各題次正確率（％）',
+  'Completion status (%)', 'Accuracy by question number (%)', '依帳號完成狀況（%）', 'Coverage by student ID (%)',
+])(
+  'uses merge-base percentage eligibility for %s', (header) => {
+    const material = [`| 題目 | ${header} |`, '| --- | --- |', '| 甲 | 50% |', '| 乙 | 75% |'].join('\n');
+    const { container } = render(<StudySourceTables text={material} />);
+    expectBaselineMeters(container, material);
+  },
+);
+
+it.each(['題號 (%)', '各題號 (%)', '作業題號 (%)', 'Question Number (%)', '郵遞區號 (%)', '狀態 (%)'])(
+  'keeps the baseline fixed percentage scale for the explicit percent column %s', (header) => {
+    const material = [`| 名稱 | ${header} |`, '| --- | --- |', '| 甲 | 50% |', '| 乙 | 75% |'].join('\n');
+    const { container } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual([[50, 100], [75, 100]]);
+  },
+);
 
 it('visualizes exact source percentages on a fixed 100% scale without changing source cells', () => {
   const material = [
@@ -1184,17 +1280,15 @@ it('visualizes exact source percentages on a fixed 100% scale without changing s
 });
 
 it.each([
-  { name: 'regular space', values: ['75 %', '25 %'], amounts: ['75', '25'] },
-  { name: 'no-break space and fullwidth digits', values: ['７５\u00a0％', '２５\u00a0％'], amounts: ['75', '25'] },
-  { name: 'narrow no-break space and fullwidth decimals', values: ['７５．５０\u202f％', '２４．５０\u202f％'], amounts: ['75.5', '24.5'] },
-  { name: 'mixed spaced and unspaced fullwidth percentage rows', values: ['７５ ％', '５０％'], amounts: ['75', '50'] },
-])('compares percent signs separated by a single source space ($name), without rewriting evidence', ({ values, amounts }) => {
+  { name: 'regular space', values: ['75 %', '25 %'] },
+  { name: 'no-break space and fullwidth digits', values: ['７５\u00a0％', '２５\u00a0％'] },
+  { name: 'narrow no-break space and fullwidth decimals', values: ['７５．５０\u202f％', '２４．５０\u202f％'] },
+  { name: 'mixed spaced and unspaced fullwidth percentage rows', values: ['７５ ％', '５０％'] },
+])('keeps spaced percentages ($name) in the original table', ({ values }) => {
   const material = ['| 課程 | 完成率 |', '| --- | --- |',
     '| 資料庫 | ' + values[0] + ' |', '| 網路 | ' + values[1] + ' |'].join('\n');
   const { container } = render(<StudySourceTables text={material} />);
-  expect(Array.from(container.querySelectorAll('meter')).map((bar) =>
-    [bar.getAttribute('value'), bar.getAttribute('max'), bar.getAttribute('aria-valuetext')]))
-    .toEqual(amounts.map((amount, index) => [amount, '100', values[index] + '；滿格 100%']));
+  expectBaselineMeters(container, material);
   expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
     .toEqual(values);
 });
@@ -1222,21 +1316,11 @@ it('does not infer percentage charts from ambiguous headers or out-of-range sour
   }
 });
 
-it('keeps repeated percentage labels independently traceable to each original source row', () => {
+it('keeps repeated percentage labels in the original table', () => {
   const repeated = ['| 項目 | 完成率 |', '| --- | --- |',
     '| 甲 | 20% |', '| 甲 | 30% |'].join('\n');
   const { container } = render(<StudySourceTables text={repeated} />);
-  expect(comparisonSummaries(container)).toEqual([
-    '展開第 2 欄「完成率」的原文百分比（100% 滿格）',
-  ]);
-  expect(Array.from(container.querySelectorAll('meter')).map((bar) => ({
-    value: bar.getAttribute('value'),
-    max: bar.getAttribute('max'),
-    label: bar.getAttribute('aria-label'),
-  }))).toEqual([
-    { value: '20', max: '100', label: '甲：20%；教材原文第 3 行' },
-    { value: '30', max: '100', label: '甲：30%；教材原文第 4 行' },
-  ]);
+  expectBaselineMeters(container, repeated);
   expect(within(screen.getByRole('table')).getAllByRole('cell')
     .map((cell) => cell.textContent)).toEqual(['20%', '30%']);
 });
@@ -1270,13 +1354,13 @@ it.each([
   ['Access (0 or 1) (%)', '0%', '1%'],
   ['Build Number (Progress) (%)', '25%', '75%'],
 ])(
-  'keeps identifiers and binary codes in the source table (%s)', (header, first, second) => {
+  'preserves merge-base comparison scales for %s', (header, first, second) => {
     const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
       '| 甲 | ' + first + ' |', '| 乙 | ' + second + ' |'].join('\n');
     const { container } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell')
       .map((cell) => cell.textContent)).toEqual([first, second]);
-    expect(comparisonSummaries(container)).toEqual([]);
+    expectBaselineMeters(container, material);
   },
 );
 
@@ -1841,6 +1925,8 @@ it.each([
   { acknowledgement: null, label: 'null' },
   { acknowledgement: 'false', label: 'string false' },
   { acknowledgement: { success: false }, label: 'object failure' },
+  { acknowledgement: { success: true }, label: 'object success' },
+  { acknowledgement: 'ok', label: 'string ok' },
 ])('does not claim clipboard success for a WebView bridge returning $label', async ({ acknowledgement }) => {
   const copy = vi.fn(() => Promise.resolve(acknowledgement));
   await withSourceClipboard({ value: { writeText: copy } }, async () => {
@@ -1860,14 +1946,17 @@ it.each([
   });
 });
 
-it('accepts an explicit true acknowledgement without losing the manual source', async () => {
+it('does not claim a copy for a nonstandard true acknowledgement but retains manual source selection', async () => {
   await withSourceClipboard({ value: { writeText: () => Promise.resolve(true) } }, async () => {
     const view = render(<StudySourceTables text={source} />);
     fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
     fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格原文' }));
-    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('已接受複製指令'));
-    expect((screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement).value)
-      .toContain('| 資料庫 | 3 | 301 |');
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('未確認複製'));
+    expect(screen.getByRole('status').textContent).not.toContain('已接受複製指令');
+    const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+    expect(field.value).toContain('| 資料庫 | 3 | 301 |');
+    expect(field.selectionStart).toBe(0);
+    expect(field.selectionEnd).toBe(field.value.length);
     view.unmount();
   });
 });
@@ -1963,8 +2052,11 @@ it('repairs stale readonly WebView text before selecting and copying the authori
 });
 
 
-it('exports the exact authorized CRLF table or chosen row as a local TXT blob', () => {
-  const rawSource = source.replace(/\n/gu, '\r\n');
+it.each([
+  { prefix: '', context: 'ordinary prose' },
+  { prefix: '<pre>\r\n範例\r\n`</pre>`\r\n\r\n', context: 'a pre block' },
+])('exports the exact CRLF table or chosen row as TXT after $context', ({ prefix }) => {
+  const rawSource = prefix + source.replace(/\n/gu, '\r\n');
   const NativeBlob = Blob;
   const parts: BlobPart[][] = [];
   class TrackedBlob extends NativeBlob {
@@ -2117,36 +2209,6 @@ it.each([
 });
 
 
-it('shows the exact authorized source line beside each derived bar and updates it on lesson replacement', () => {
-  const numeric = [
-    '教材說明：這些數字均來自下表。',
-    '',
-    '| 課程 | 學分 |',
-    '| --- | --- |',
-    '| 資料庫 | 3 |',
-    '| 網路 | 2 |',
-  ].join('\n');
-  const view = render(<StudySourceTables text={numeric} />);
-  const valueMeters = Array.from(view.container.querySelectorAll('meter'));
-  expect(valueMeters).toHaveLength(2);
-  expect(valueMeters[0].closest('li')?.textContent).toContain('資料庫3原文第 5 行');
-  expect(valueMeters[1].closest('li')?.textContent).toContain('網路2原文第 6 行');
-
-  const percentages = [
-    '另一份教材',
-    '| 課程 | 完成率 |',
-    '| --- | --- |',
-    '| 資料庫 | 75% |',
-    '| 網路 | 50% |',
-  ].join('\n');
-  view.rerender(<StudySourceTables text={percentages} />);
-  const percentMeters = Array.from(view.container.querySelectorAll('meter'));
-  expect(percentMeters).toHaveLength(2);
-  expect(percentMeters[0].closest('li')?.textContent).toContain('資料庫75%原文第 4 行');
-  expect(percentMeters[1].closest('li')?.textContent).toContain('網路50%原文第 5 行');
-  expect(screen.queryByText('原文第 6 行')).toBeNull();
-});
-
 it('returns from numeric and percentage bars to the exact original row with keyboard focus', () => {
   const numeric = [
     '教材段落', '| 課程 | 學分 |', '| --- | --- |',
@@ -2161,9 +2223,9 @@ it('returns from numeric and percentage bars to the exact original row with keyb
   };
   const originalRows = () => Array.from(view.container.querySelectorAll('tbody tr'));
   const sourceBefore = originalRows().map((row) => row.textContent);
-  fireEvent.click(jump('原文第 4 行 · 回表格核對'));
+  fireEvent.click(jump('資料庫 · 回表格核對'));
   expect(document.activeElement).toBe(originalRows()[0]);
-  fireEvent.click(jump('原文第 5 行 · 回表格核對'));
+  fireEvent.click(jump('網路 · 回表格核對'));
   expect(document.activeElement).toBe(originalRows()[1]);
   expect(originalRows().map((row) => row.textContent)).toEqual(sourceBefore);
 
@@ -2172,7 +2234,7 @@ it('returns from numeric and percentage bars to the exact original row with keyb
     '| 新資料 | 80% |', '| 新網路 | 50% |',
   ].join('\n');
   view.rerender(<StudySourceTables text={percentages} />);
-  fireEvent.click(jump('原文第 6 行 · 回表格核對'));
+  fireEvent.click(jump('新網路 · 回表格核對'));
   expect(document.activeElement).toBe(originalRows()[1]);
   expect(document.activeElement?.textContent).toContain('新網路50%');
   expect(view.container.textContent).not.toContain('資料庫');
@@ -2187,17 +2249,17 @@ it('returns keyboard focus to the exact comparison button after inspecting a sou
   ].join('\n');
   const view = render(<StudySourceTables text={material} />);
   fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
-  const jump = screen.getByRole('button', { name: '原文第 4 行 · 回表格核對' });
+  const jump = screen.getByRole('button', { name: '資料庫 · 回表格核對' });
   const firstRow = view.container.querySelector('tbody tr');
   expect(firstRow).not.toBeNull();
   fireEvent.click(jump);
   expect(document.activeElement).toBe(firstRow);
-  const back = screen.getByRole('button', { name: '返回原文第 4 行的圖表' });
+  const back = screen.getByRole('button', { name: '返回圖表' });
   if (!firstRow) throw new Error('Expected a source row for chart focus navigation');
   expect(firstRow.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   fireEvent.click(back);
   expect(document.activeElement).toBe(jump);
-  expect(screen.queryByRole('button', { name: '返回原文第 4 行的圖表' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '返回圖表' })).toBeNull();
 });
 
 it('falls back to the first source cell when a mobile WebView cannot focus a table row', () => {
@@ -2211,12 +2273,12 @@ it('falls back to the first source cell when a mobile WebView cannot focus a tab
   if (!firstRow) return;
   Object.defineProperty(firstRow, 'focus', { configurable: true, value: () => {} });
   fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
-  fireEvent.click(screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' }));
+  fireEvent.click(screen.getByRole('button', { name: '資料庫 · 回表格核對' }));
   const firstCell = firstRow.querySelector('th');
   expect(firstCell?.tabIndex).toBe(-1);
   expect(document.activeElement).toBe(firstCell);
-  fireEvent.click(screen.getByRole('button', { name: '返回原文第 3 行的圖表' }));
-  expect(document.activeElement?.textContent).toContain('原文第 3 行 · 回表格核對');
+  fireEvent.click(screen.getByRole('button', { name: '返回圖表' }));
+  expect(document.activeElement?.textContent).toContain('資料庫 · 回表格核對');
 });
 
 it('focuses the original table region when a WebView silently ignores row and cell focus', () => {
@@ -2232,12 +2294,12 @@ it('focuses the original table region when a WebView silently ignores row and ce
   Object.defineProperty(sourceRow, 'focus', { configurable: true, value: () => {} });
   Object.defineProperty(sourceCell, 'focus', { configurable: true, value: () => {} });
   fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
-  const jump = screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' });
+  const jump = screen.getByRole('button', { name: '資料庫 · 回表格核對' });
   fireEvent.click(jump);
   expect(document.activeElement).toBe(region);
   expect(region.getAttribute('aria-label')).toContain('原文表格 1');
   expect(sourceRow.textContent).toBe('資料庫3');
-  fireEvent.click(screen.getByRole('button', { name: '返回原文第 3 行的圖表' }));
+  fireEvent.click(screen.getByRole('button', { name: '返回圖表' }));
   expect(document.activeElement).toBe(jump);
 });
 
@@ -2258,11 +2320,11 @@ it('keeps the source and return action when row, cell and region focus all fail'
     });
   }
   fireEvent.click(screen.getByText('展開第 2 欄「完成率」的原文百分比（100% 滿格）'));
-  const jump = screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' });
+  const jump = screen.getByRole('button', { name: '資料庫 · 回表格核對' });
   expect(() => fireEvent.click(jump)).not.toThrow();
   expect(sourceRow.textContent).toBe('資料庫75%');
-  expect(screen.getByRole('button', { name: '返回原文第 3 行的圖表' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '返回原文第 3 行的圖表' }));
+  expect(screen.getByRole('button', { name: '返回圖表' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '返回圖表' }));
   expect(document.activeElement).toBe(jump);
 });
 
@@ -2277,16 +2339,16 @@ it('reopens a collapsed comparison to return from its exact authorized source ro
   expect(disclosure).not.toBeNull();
   if (!disclosure) throw new Error('Expected a comparison disclosure');
   disclosure.open = true;
-  const jump = screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' });
+  const jump = screen.getByRole('button', { name: '資料庫 · 回表格核對' });
   fireEvent.click(jump);
   const sourceRow = view.container.querySelector('tbody tr');
   expect(document.activeElement).toBe(sourceRow);
   // The user may close this disclosure while studying the original row.
   disclosure.open = false;
-  fireEvent.click(screen.getByRole('button', { name: '返回原文第 3 行的圖表' }));
+  fireEvent.click(screen.getByRole('button', { name: '返回圖表' }));
   expect(disclosure.open).toBe(true);
   expect(document.activeElement).toBe(jump);
-  expect(screen.queryByRole('button', { name: '返回原文第 3 行的圖表' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '返回圖表' })).toBeNull();
   expect(sourceRow?.textContent).toBe('資料庫3');
 });
 
@@ -2302,12 +2364,12 @@ it('falls back to a comparison summary when a WebView rejects chart button focus
   if (!disclosure) throw new Error('Expected a percentage disclosure');
   disclosure.open = true;
   summary.setAttribute('tabindex', '0');
-  const jump = screen.getByRole('button', { name: '原文第 4 行 · 回表格核對' });
+  const jump = screen.getByRole('button', { name: '網路 · 回表格核對' });
   fireEvent.click(jump);
   expect(document.activeElement).toBe(view.container.querySelectorAll('tbody tr')[1]);
   Object.defineProperty(jump, 'focus', { configurable: true, value: () => { throw new Error('WebView focus refused'); } });
   disclosure.open = false;
-  fireEvent.click(screen.getByRole('button', { name: '返回原文第 4 行的圖表' }));
+  fireEvent.click(screen.getByRole('button', { name: '返回圖表' }));
   expect(disclosure.open).toBe(true);
   expect(document.activeElement).toBe(summary);
   expect(view.container.querySelectorAll('tbody tr')[1]?.textContent).toBe('網路50%');
@@ -2323,11 +2385,11 @@ it('retains the return control when a WebView refuses both chart and summary foc
   const disclosure = summary.closest('details');
   if (!disclosure) throw new Error('Expected comparison disclosure');
   disclosure.open = true;
-  const jump = screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' });
+  const jump = screen.getByRole('button', { name: '資料庫 · 回表格核對' });
   fireEvent.click(jump);
   const sourceRow = view.container.querySelector('tbody tr');
   expect(document.activeElement).toBe(sourceRow);
-  const back = screen.getByRole('button', { name: '返回原文第 3 行的圖表' });
+  const back = screen.getByRole('button', { name: '返回圖表' });
   Object.defineProperty(jump, 'focus', { configurable: true, value: () => { throw new Error('chart focus blocked'); } });
   Object.defineProperty(summary, 'focus', { configurable: true, value: () => { throw new Error('summary focus blocked'); } });
   const scrollChart = vi.fn();
@@ -2342,14 +2404,14 @@ it('retains the return control when a WebView refuses both chart and summary foc
   expect(document.activeElement).toBe(sourceRow);
   // The student must not lose the only working return action after the focus
   // attempt fails. Native keyboard navigation can still reach this button.
-  expect(screen.getByRole('button', { name: '返回原文第 3 行的圖表' })).toBe(back);
+  expect(screen.getByRole('button', { name: '返回圖表' })).toBe(back);
   expect(view.container.querySelector('tbody tr')?.textContent).toBe('資料庫3');
   Reflect.deleteProperty(jump, 'focus');
   Reflect.deleteProperty(summary, 'focus');
   fireEvent.click(back);
   expect(document.activeElement).toBe(jump);
   expect(scrollChart).toHaveBeenCalledOnce();
-  expect(screen.queryByRole('button', { name: '返回原文第 3 行的圖表' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '返回圖表' })).toBeNull();
 });
 
 it('never shows a stale return-to-chart control after the authorized source changes', () => {
@@ -2363,20 +2425,20 @@ it('never shows a stale return-to-chart control after the authorized source chan
   ].join('\n');
   const view = render(<StudySourceTables text={oldMaterial} />);
   fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
-  fireEvent.click(screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' }));
-  expect(screen.getByRole('button', { name: '返回原文第 3 行的圖表' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '舊課程一 · 回表格核對' }));
+  expect(screen.getByRole('button', { name: '返回圖表' })).toBeTruthy();
   view.rerender(<StudySourceTables text={newMaterial} />);
-  expect(screen.queryByRole('button', { name: /返回原文第 .* 行的圖表/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: '返回圖表' })).toBeNull();
   fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
-  fireEvent.click(screen.getByRole('button', { name: '原文第 4 行 · 回表格核對' }));
+  fireEvent.click(screen.getByRole('button', { name: '新課程一 · 回表格核對' }));
   expect(document.activeElement?.textContent).toContain('新課程一4');
-  expect(screen.getByRole('button', { name: '返回原文第 4 行的圖表' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '返回圖表' })).toBeTruthy();
 });
 
 it.each([
   { header: '學分', values: ['3', '2'] },
   { header: '完成率', values: ['75%', '50%'] },
-])('keeps same-named source rows separately navigable in the $header chart', ({ header, values }) => {
+])('keeps same-named rows in the $header source table', ({ header, values }) => {
   const material = [
     '教材說明',
     '| 分類 | ' + header + ' |',
@@ -2385,30 +2447,14 @@ it.each([
     '| 必修 | ' + values[1] + ' |',
   ].join('\n');
   const view = render(<StudySourceTables text={material} />);
-  const meters = Array.from(view.container.querySelectorAll('meter'));
-  expect(meters).toHaveLength(2);
-  expect(meters.map((bar) => bar.getAttribute('aria-label'))).toEqual([
-    '必修：' + values[0] + '；教材原文第 4 行',
-    '必修：' + values[1] + '；教材原文第 5 行',
-  ]);
-  // Row identity is the exact source line, not the repeated text label.
-  expect(meters.map((bar) => bar.closest('li')?.textContent)).toEqual([
-    '必修' + values[0] + '原文第 4 行 · 回表格核對',
-    '必修' + values[1] + '原文第 5 行 · 回表格核對',
-  ]);
-  fireEvent.click(screen.getByText(/展開第 2 欄/));
-  const jump = screen.getByRole('button', { name: '原文第 5 行 · 回表格核對' });
-  fireEvent.click(jump);
-  expect(document.activeElement).toBe(view.container.querySelectorAll('tbody tr')[1]);
-  fireEvent.click(screen.getByRole('button', { name: '返回原文第 5 行的圖表' }));
-  expect(document.activeElement).toBe(jump);
+  expectBaselineMeters(view.container, material);
   // The two original source rows remain separate and unchanged.
   expect(Array.from(view.container.querySelectorAll('tbody tr')).map((row) => row.textContent))
     .toEqual(['必修' + values[0], '必修' + values[1]]);
   view.unmount();
 });
 
-it('compares English network transfer speeds without treating their rate unit as a percentage', () => {
+it('uses merge-base eligibility for English network transfer rates', () => {
   for (const header of [
     'Data Rate', 'Bit Rate', 'Transfer Rate', 'Transmission Rate',
     'Download Rate', 'Upload Rate', 'Network Rate', 'Link Rate',
@@ -2417,15 +2463,7 @@ it('compares English network transfer speeds without treating their rate unit as
     const original = ['| 連線 | ' + header + ' |', '| --- | --- |',
       '| 甲 | 2.50 |', '| 乙 | 4.00 |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={original} />);
-    expect(comparisonSummaries(container)).toEqual([
-      '展開第 2 欄「' + header + '」的原文數值比較',
-    ]);
-    expect(Array.from(container.querySelectorAll('meter')).map(bar => [
-      bar.getAttribute('value'), bar.getAttribute('max'), bar.getAttribute('aria-valuetext'),
-    ])).toEqual([
-      ['2.5', '4', '2.50；本欄最大值 4.00'],
-      ['4', '4', '4.00；本欄最大值 4.00'],
-    ]);
+    expectBaselineMeters(container, original);
     expect(within(screen.getByRole('table')).getAllByRole('cell').map(cell => cell.textContent))
       .toEqual(['2.50', '4.00']);
     unmount();
@@ -2456,7 +2494,7 @@ it('does not treat English business rates or explicit percent-unit speed rates a
     .toEqual([['20', '100'], ['40', '100']]);
 });
 
-it('keeps fiscal quarter positions as source-only ordinals', () => {
+it('uses merge-base eligibility for fiscal quarters', () => {
   for (const header of [
     '季度', '季別', '季次', '第幾季', '第幾季度', '季度序號',
     '財務季度', '會計季度', '季度編號', '季度代碼',
@@ -2468,8 +2506,7 @@ it('keeps fiscal quarter positions as source-only ordinals', () => {
       '| 經濟學 | 1 |', '| 管理學 | 4 |',
     ].join('\n');
     const view = render(<StudySourceTables text={original} />);
-    expect(comparisonSummaries(view.container)).toEqual([]);
-    expect(view.container.querySelector('meter')).toBeNull();
+    expectBaselineMeters(view.container, original);
     expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
       .toEqual(['1', '4']);
     view.unmount();
@@ -2497,7 +2534,7 @@ it('still compares actual counts of quarters and quarterly quantities', () => {
   }
 });
 
-it('does not draw ratio bars from numeric weekdays in class schedules', () => {
+it('uses merge-base eligibility for numeric weekdays', () => {
   for (const header of [
     '星期', '星期幾', '禮拜幾', '上課星期', '開課週別', '週幾', '周序號',
     '考試星期', 'Weekday', 'Weekday Number', 'Week Day',
@@ -2508,8 +2545,7 @@ it('does not draw ratio bars from numeric weekdays in class schedules', () => {
       '| 資料庫 | 1 |', '| 網路概論 | 5 |',
     ].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
-    expect(comparisonSummaries(container)).toEqual([]);
-    expect(container.querySelector('meter')).toBeNull();
+    expectBaselineMeters(container, material);
     expect(within(screen.getByRole('table')).getAllByRole('cell').map(cell => cell.textContent))
       .toEqual(['1', '5']);
     unmount();
@@ -2537,7 +2573,7 @@ it('retains real weekday counts and study-hour quantities as source comparisons'
 });
 
 
-it('keeps the original table but omits derived bars for invisible row labels', () => {
+it('uses merge-base eligibility for invisible row labels', () => {
   for (const label of ['\u200b', '\u2800', '\u0301', '\u200e\u200f']) {
     for (const [heading, first, second] of [
       ['學習時數', '3', '5'],
@@ -2549,8 +2585,8 @@ it('keeps the original table but omits derived bars for invisible row labels', (
       ].join('\n');
       const view = render(<StudySourceTables text={markdown} />);
       expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(3);
-      expect(comparisonSummaries(view.container)).toEqual([]);
-      expect(screen.getByText(second)).toBeTruthy();
+      expectBaselineMeters(view.container, markdown);
+      expect(within(screen.getByRole('table')).getByText(second)).toBeTruthy();
       view.unmount();
     }
   }
@@ -2575,7 +2611,7 @@ it('keeps comparisons for visible CJK, emoji, math and Braille row labels', () =
 });
 
 
-it('does not derive numeric or percentage charts from visually reordered Unicode labels', () => {
+it('uses merge-base eligibility for labels with direction controls', () => {
   // These controls can reverse a displayed label even when its raw source
   // contains meaningful letters. The verbatim table must remain available.
   const controls = ['\u061c', '\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e', '\u2066', '\u2067', '\u2068', '\u2069'];
@@ -2598,7 +2634,7 @@ it('does not derive numeric or percentage charts from visually reordered Unicode
         expect(within(table).getByText(firstLabel)).toBeTruthy();
         expect(within(table).getByText(values[0])).toBeTruthy();
         expect(within(table).getByText(values[1])).toBeTruthy();
-        expect(comparisonSummaries(view.container)).toEqual([]);
+        expectBaselineMeters(view.container, text);
         view.unmount();
       }
     }
@@ -2624,7 +2660,7 @@ it('still allows charts for readable RTL names, ordinary Chinese and complete em
 });
 
 
-it('announces exact original lines for full-table, chosen row, and row plus headers', () => {
+it('announces the selected scope without source line numbers for full-table, chosen row, and row plus headers', () => {
   const lesson = [
     '前言', '| 科目 | 學分 |', '| --- | --- |',
     '| 資料庫 | 3 |', '| 網路 | 2 |', '後記',
@@ -2633,18 +2669,18 @@ it('announces exact original lines for full-table, chosen row, and row plus head
   fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
   const message = view.container.querySelector('[aria-live="polite"][aria-atomic="true"]');
   expect(message?.textContent?.trim()).toBe(
-    '目前選取整張表格：原文第 2 至 5 行，包含欄名、分隔列與全部資料列。',
+    '目前選取整張表格：包含欄名、分隔列與全部資料列。',
   );
   fireEvent.change(screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }),
     { target: { value: '1' } });
   expect(message?.textContent?.trim()).toBe(
-    '目前只選取第 2 列：原文第 5 行資料列，未包含欄名與分隔列。',
+    '目前只選取第 2 列：未包含欄名與分隔列。',
   );
   const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
   expect(field.value).toBe('| 網路 | 2 |');
   fireEvent.click(screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }));
   expect(message?.textContent?.trim()).toBe(
-    '目前選取第 2 列：原文第 2、3 行欄名與分隔列，以及第 5 行資料列；不包含其他資料列。',
+    '目前選取第 2 列：包含欄名、分隔列與所選資料列；不包含其他資料列。',
   );
   expect(field.value).toBe(['| 科目 | 學分 |', '| --- | --- |', '| 網路 | 2 |'].join('\n'));
   expect(field.value).not.toContain('| 資料庫 | 3 |');
@@ -2654,12 +2690,12 @@ it('announces exact original lines for full-table, chosen row, and row plus head
     ['新教材', '| 科目 | 次數 |', '| --- | --- |', '| 新課 | 8 |'].join('\n')
   } />);
   expect(message?.textContent?.trim()).toBe(
-    '目前選取整張表格：原文第 2 至 4 行，包含欄名、分隔列與全部資料列。',
+    '目前選取整張表格：包含欄名、分隔列與全部資料列。',
   );
   expect(field.value).toBe(['| 科目 | 次數 |', '| --- | --- |', '| 新課 | 8 |'].join('\n'));
 });
 
-it('makes each numeric and percentage meter announce its precise original source-line action', () => {
+it('makes each numeric and percentage meter describe its corresponding source-row action', () => {
   // A screen reader jumping directly between meter controls otherwise misses
   // the provenance button, particularly for unique row labels.
   for (const [heading, first, second] of [
@@ -2682,12 +2718,12 @@ it('makes each numeric and percentage meter announce its precise original source
     for (const [index, meter] of meters.entries()) {
       const sourceButton = Array.from(view.container.querySelectorAll('button'))
         .find((button) => button.id === meter.getAttribute('aria-describedby'));
-      expect(sourceButton?.textContent?.trim()).toBe('原文第 ' + (index + 4) + ' 行 · 回表格核對');
+      expect(sourceButton?.textContent?.trim()).toBe((index === 0 ? '資料庫' : '網路') + ' · 回表格核對');
       expect(meter.getAttribute('aria-label')).toContain(index === 0 ? first : second);
     }
 
     // Rerendering a different authorized lesson must not leave accessible
-    // descriptions pointing to the previous lesson's line numbers.
+    // descriptions pointing to the previous lesson's buttons.
     view.rerender(<StudySourceTables text={[
       '新的教材前言', '第二行', '第三行',
       '| 項目 | ' + heading + ' |', '| --- | --- |',
@@ -2698,7 +2734,7 @@ it('makes each numeric and percentage meter announce its precise original source
     for (const [index, meter] of revisedMeters.entries()) {
       const sourceButton = Array.from(view.container.querySelectorAll('button'))
         .find((button) => button.id === meter.getAttribute('aria-describedby'));
-      expect(sourceButton?.textContent?.trim()).toBe('原文第 ' + (index + 6) + ' 行 · 回表格核對');
+      expect(sourceButton?.textContent?.trim()).toBe((index === 0 ? '資料庫' : '網路') + ' · 回表格核對');
       expect(meter.getAttribute('aria-describedby')).toBeTruthy();
     }
     view.unmount();
@@ -2706,7 +2742,7 @@ it('makes each numeric and percentage meter announce its precise original source
 });
 
 
-it('adds optional non-contiguous source-line evidence to copied study excerpts without unrelated rows', async () => {
+it('copies an excerpt with headers and the selected row verbatim', async () => {
   const lesson = [
     '本週課程',
     '| 課程 | 學分 |',
@@ -2721,15 +2757,15 @@ it('adds optional non-contiguous source-line evidence to copied study excerpts w
     fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
     fireEvent.change(screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }),
       { target: { value: '2' } });
+    const field = screen.getByRole<HTMLTextAreaElement>('textbox', { name: '原文表格 1 的可選取文字' });
+    expect(field.classList.contains(styles.sourceExcerptWithHeader)).toBe(false);
     fireEvent.click(screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: '摘錄開頭加上教材原文行號（註記非原文）' }));
     const expected = [
-      '[教材原文第 2、3、6 行（非連續）]',
       '| 課程 | 學分 |',
       '| :--- | ---: |',
       '| 網路 | 1 |',
     ].join('\r\n');
-    const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+    expect(field.classList.contains(styles.sourceExcerptWithHeader)).toBe(true);
     expect(field.value).toBe(expected.replace(/\r\n/gu, '\n'));
     expect(field.value).not.toContain('| 統計 | 2 |');
     fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格第 3 列原文' }));
@@ -2739,50 +2775,19 @@ it('adds optional non-contiguous source-line evidence to copied study excerpts w
   });
 });
 
-it('switches citation between full table, adjacent first row and exact single row, resetting on source replacement', () => {
-  const lesson = ['| 科目 | 學分 |', '| --- | --- |', '| A | 3 |', '| B | 2 |'].join('\n');
-  const view = render(<StudySourceTables text={lesson} />);
-  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
-  const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
-  const citation = screen.getByRole('checkbox', { name: '摘錄開頭加上教材原文行號（註記非原文）' });
-  const range = screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' });
-  expect(field.value).toBe(lesson);
-  fireEvent.click(citation);
-  expect(field.value).toBe('[教材原文第 1 至 4 行]\n' + lesson);
-  fireEvent.change(range, { target: { value: '0' } });
-  expect(field.value).toBe('[教材原文第 3 行]\n| A | 3 |');
-  fireEvent.click(screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }));
-  expect(field.value).toBe('[教材原文第 1 至 3 行]\n| 科目 | 學分 |\n| --- | --- |\n| A | 3 |');
-  fireEvent.change(range, { target: { value: '1' } });
-  expect(field.value).toBe('[教材原文第 4 行]\n| B | 2 |');
-  fireEvent.click(citation);
-  expect(field.value).toBe('| B | 2 |');
-  view.rerender(<StudySourceTables text={lesson.replace('| A | 3 |', '| C | 4 |')} />);
-  expect((screen.getByRole('checkbox', { name: '摘錄開頭加上教材原文行號（註記非原文）' }) as HTMLInputElement).checked).toBe(false);
-  expect(field.value).toContain('| C | 4 |');
-  view.unmount();
-});
-
-
 it.each([
-  { header: '完成率', values: ['７５％', '２５％'], expected: ['75', '25'] },
-  { header: '正確率', values: ['７５．５０％', '０％'], expected: ['75.5', '0'] },
-  { header: 'Completion Rate', values: ['１００．００%', '９９．５％'], expected: ['100', '99.5'] },
-])('keeps fullwidth percentage source bytes while comparing against a fixed 100% ($header)', ({ header, values, expected }) => {
+  { header: '完成率', values: ['７５％', '２５％'] },
+  { header: '正確率', values: ['７５．５０％', '０％'] },
+  { header: 'Completion Rate', values: ['１００．００%', '９９．５％'] },
+])('keeps fullwidth percentage digits in the selectable original source ($header)', ({ header, values }) => {
   const material = ['| 科目 | ' + header + ' |', '| --- | --- |',
     '| 資料庫 | ' + values[0] + ' |', '| 網路 | ' + values[1] + ' |'].join('\n');
   const view = render(<StudySourceTables text={material} />);
-  const meters = Array.from(view.container.querySelectorAll('meter'));
-  expect(meters.map((bar) => bar.getAttribute('value'))).toEqual(expected);
-  expect(meters.map((bar) => bar.getAttribute('max'))).toEqual(['100', '100']);
-  expect(meters.map((bar) => bar.getAttribute('aria-valuetext'))).toEqual(
-    values.map((source) => source + '；滿格 100%'),
-  );
+  expectBaselineMeters(view.container, material);
   expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(values);
   fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
   expect((screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement).value)
     .toBe(material);
-  expect(meters[0].getAttribute('aria-describedby')).toBeTruthy();
   view.unmount();
 });
 
@@ -2793,7 +2798,7 @@ it.each([
   ['７5％', '５０％'], // Mixed digits within one value
   ['７５％', '25%'], // Mixed digit formats in one table
   ['７５％', '５０．１２３％'], // Unsupported precision
-  ['７５  ％', '５０％'], // Two inserted spaces remain ambiguous; one is intentionally supported
+  ['７５  ％', '５０％'], // Spaces before the percent sign
 ])('retains invalid or ambiguous fullwidth percentage source without derived meters (%s, %s)', (first, second) => {
   const material = ['| 科目 | 完成率 |', '| --- | --- |',
     '| 資料庫 | ' + first + ' |', '| 網路 | ' + second + ' |'].join('\n');
@@ -2806,7 +2811,7 @@ it.each([
   view.unmount();
 });
 
-it('does not depict source line, data row or procedural step positions as magnitudes', () => {
+it('uses merge-base eligibility for document positions', () => {
   const positionHeaders = [
     '行號', '列號', '資料行號', '原始碼行號', '操作步驟', '步驟編號', '步序號',
     'Line Number', 'Source Line', 'Row No.', 'Record Number',
@@ -2820,8 +2825,7 @@ it('does not depict source line, data row or procedural step positions as magnit
     const { container, unmount } = render(<StudySourceTables text={lesson} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell')
       .map((cell) => cell.textContent)).toEqual(['2', '4']);
-    expect(container.querySelectorAll('meter')).toHaveLength(0);
-    expect(comparisonSummaries(container)).toEqual([]);
+    expectBaselineMeters(container, lesson);
     unmount();
   }
 });
@@ -2843,13 +2847,287 @@ it.each([
 });
 
 it.each(['Course Code', 'Verification Code', 'Code', 'Student ID'])
-  ('keeps identifiers as source text without derived quantity bars (%s)', (header) => {
+  ('uses merge-base eligibility for identifier headers (%s)', (header) => {
     const lesson = [
       '| 教材 | ' + header + ' |', '| --- | --- |',
       '| 資料庫 | 2 |', '| 網路 | 4 |',
     ].join('\n');
     const { container, unmount } = render(<StudySourceTables text={lesson} />);
     expect(screen.getByRole('table')).toBeTruthy();
-    expect(container.querySelector('meter')).toBeNull();
+    expectBaselineMeters(container, lesson);
     unmount();
   });
+
+it.each([
+  '郵遞區碼', '郵遞編碼', '郵政區碼', '郵政編碼', '郵編', '郵遞區碼（臺灣）',
+  'Postcode', 'Post Code', 'Post-Code', 'ZIP', 'ZIP Code', 'ZIP (US)',
+])('uses merge-base eligibility for postal identifiers (%s)', (header) => {
+  // Numeric 100 and 200 would produce a false 2x meter without the guard.
+  const lesson = [
+    '| 收件區域 | ' + header + ' |', '| --- | --- |',
+    '| 甲區 | 100 |', '| 乙區 | 200 |',
+  ].join('\n');
+  const { container, unmount } = render(<StudySourceTables text={lesson} />);
+  expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+    .toEqual(['100', '200']);
+  expectBaselineMeters(container, lesson);
+  unmount();
+});
+
+it.each([
+  'Serial Number', 'Serial No.', 'Invoice Number', 'Order No.', 'Order Number (ERP)',
+  'Transaction ID', 'Receipt #', 'Tracking Number', 'Reference Number',
+  '發票號碼', '訂單號', '交易號碼', '收據號', '流水號', '物流單號',
+])('uses merge-base eligibility for document and purchase identifiers (%s)', (header) => {
+  const source = [
+    '| 項目 | ' + header + ' |', '| --- | --- |',
+    '| 甲 | 100 |', '| 乙 | 200 |',
+  ].join('\n');
+  const { container, unmount } = render(<StudySourceTables text={source} />);
+  expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+    .toEqual(['100', '200']);
+  expectBaselineMeters(container, source);
+  unmount();
+});
+
+it.each([
+  'Order Count', 'Number of Orders', 'Invoice Count', 'Transaction Total',
+  '訂單數量', '發票張數', '交易筆數', 'Invoice Amount',
+])('still permits genuine counts and amounts beside document identifiers (%s)', (header) => {
+  const source = [
+    '| 組別 | ' + header + ' |', '| --- | --- |',
+    '| 甲 | 100 |', '| 乙 | 200 |',
+  ].join('\n');
+  const { container, unmount } = render(<StudySourceTables text={source} />);
+  expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+    .toEqual([[100, 200], [200, 200]]);
+  unmount();
+});
+
+it.each(['寄送件數', '郵件件數', 'Parcel Count'])(
+  'still compares genuine delivered-item quantities (%s)', (header) => {
+    const lesson = [
+      '| 區域 | ' + header + ' |', '| --- | --- |',
+      '| 甲區 | 100 |', '| 乙區 | 200 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={lesson} />);
+    expect(Array.from(container.querySelectorAll('meter')).map((meter) =>
+      [meter.getAttribute('value'), meter.getAttribute('max')]))
+      .toEqual([['100', '200'], ['200', '200']]);
+    unmount();
+  },
+);
+
+it.each([
+  '滿意度（%）', '完成狀況（%）', '服務等級佔比', '評級百分比', 'Satisfaction (%)',
+  'Percentage by Risk Level', 'Rating (%)', '風險等級（％）',
+])('charts the measured percentage on a fixed scale (%s)', (header) => {
+  const material = ['| 組別 | ' + header + ' |', '| --- | --- |',
+    '| 甲 | 25% |', '| 乙 | 75% |'].join('\n');
+  const view = render(<StudySourceTables text={material} />);
+  expect(Array.from(view.container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+    .toEqual([[25, 100], [75, 100]]);
+  view.unmount();
+});
+
+it.each(['文件編號（%）', '訂單編號（%）', 'Serial Number (%)', 'Order Number (ERP) (%)'])(
+  'keeps the baseline fixed scale when the identifier header and values use percent signs (%s)', (header) => {
+    const material = ['| 組別 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 25% |', '| 乙 | 75% |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+      .toEqual(['25%', '75%']);
+    expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual([[25, 100], [75, 100]]);
+    unmount();
+  },
+);
+
+it.each([
+  ['百分位', ['25', '75']],
+  ['第 75 百分位數', ['25', '75']],
+  ['百分等級', ['25', '75']],
+  ['Percentile Rank', ['25', '75']],
+  ['Percentile Score', ['25', '75']],
+])('uses merge-base eligibility for %s percentiles', (header, values) => {
+  const material = ['| 學生 | ' + header + ' |', '| --- | --- |',
+    '| 甲 | ' + values[0] + ' |', '| 乙 | ' + values[1] + ' |'].join('\n');
+  const view = render(<StudySourceTables text={material} />);
+  expect(within(screen.getByRole('table')).getAllByRole('cell')
+    .map((cell) => cell.textContent)).toEqual(values);
+  expectBaselineMeters(view.container, material);
+  view.unmount();
+});
+
+it.each(['百分位 (%)', 'Percentile (%)', '百分等級完成率', 'Percentile Count (%)'])(
+  'keeps the original 100 percent scale for %s', (header) => {
+    const material = ['| 組別 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 25% |', '| 乙 | 75% |'].join('\n');
+    const { container } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual([[25, 100], [75, 100]]);
+  },
+);
+
+it.each(['百分位人數', '百分等級的總數', 'Percentile Count', 'Percentile Rank Count', 'Number of Percentiles'])(
+  'keeps explicit counts comparable even when the header mentions percentiles (%s)', (header) => {
+    const material = ['| 組別 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 20 |', '| 乙 | 40 |'].join('\n');
+    const view = render(<StudySourceTables text={material} />);
+    expect(Array.from(view.container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual([[20, 40], [40, 40]]);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual(['20', '40']);
+    view.unmount();
+  },
+);
+
+it.each([
+  '提交日期別完成率', '依截止日期統計完成率', '按繳交期間統計完成率',
+  '開課週別通過率', '到期日別達成率', '截止時間別完成率',
+  'Pass Rate by Due Date', 'Pass Rate per Reporting Period',
+  'Completion Rate each Week', 'Completion Rate by Day of Month',
+  'Pass Rate per Timestamp Window',
+])('matches merge-base 100%% meters for grouped percentages in %s', (header) => {
+  const table = (values: string[]) => [
+    '| 組別 | ' + header + ' |', '| --- | --- |',
+    '| 甲 | ' + values[0] + ' |', '| 乙 | ' + values[1] + ' |',
+  ].join('\n');
+  const { container, rerender } = render(<StudySourceTables text={table(['25%', '75%'])} />);
+  expect(Array.from(container.querySelectorAll('meter')).map((meter) => [meter.value, meter.max]))
+    .toEqual([[25, 100], [75, 100]]);
+  for (const values of [['2026-11-19', '2026-11-20'], ['11/19', '11/20'], ['第 2 週', '第 4 週']]) {
+    rerender(<StudySourceTables text={table(values)} />);
+    expect(container.querySelector('meter')).toBeNull();
+    expect(screen.getByRole('table').textContent).toContain(values[0]);
+  }
+});
+
+
+it('uses merge-base eligibility for corrupt Unicode or control-code labels', () => {
+  // Derived charts require stable labels. Original licensed text stays intact.
+  const unsafeLabels = [
+    '班級\uD800A', '班級\uDC00A', '\uD800班級',
+    '班級\u0000A', '班級\u001BA', '班級\u007FA',
+  ];
+  for (const label of unsafeLabels) {
+    for (const [metric, first, second] of [
+      ['學習時數', '3', '5'],
+      ['完成率', '30%', '50%'],
+    ]) {
+      for (const inHeader of [false, true]) {
+        const heading = inHeader ? metric + label : metric;
+        const row = inHeader ? '班級A' : label;
+        const text = [
+          '| 組別 | ' + heading + ' |', '| --- | --- |',
+          '| ' + row + ' | ' + first + ' |', '| 班級B | ' + second + ' |',
+        ].join('\n');
+        const view = render(<StudySourceTables text={text} />);
+        const table = screen.getByRole('table');
+        expect(table.textContent).toContain(heading);
+        expect(table.textContent).toContain(row);
+        expect(table.textContent).toContain(first);
+        expect(table.textContent).toContain(second);
+        expectBaselineMeters(view.container, text);
+        view.unmount();
+      }
+    }
+  }
+});
+
+it('keeps intact emoji, RTL text and combining accents in chart labels', () => {
+  for (const label of ['👩‍💻', '🇹🇼', 'עברית', 'e\u0301', '⠁']) {
+    const text = [
+      '| 組別 | 學習時數 |', '| --- | --- |',
+      '| ' + label + ' | 3 |', '| 對照 | 5 |',
+    ].join('\n');
+    const view = render(<StudySourceTables text={text} />);
+    expect(comparisonSummaries(view.container)).toHaveLength(1);
+    expect(Array.from(view.container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual([[3, 5], [5, 5]]);
+    view.unmount();
+  }
+});
+
+
+// Expected meter values and maxima were checked against merge-base 2232ee5c9.
+const catalogMetersByScale: Record<string, number[][]> = {
+  quantity: [[100, 200], [200, 200]],
+  percent: [[25, 100], [75, 100]],
+  none: [],
+};
+const catalogChartFormats = [
+  { format: 'literal percent', values: ['25%', '75%'], scale: 'percent' },
+  { format: 'plain number', values: ['100', '200'], scale: 'quantity' },
+  { format: 'grouped number', values: ['1,000', '2,000'], scale: 'none' },
+  { format: 'leading zeros', values: ['0100', '0200'], scale: 'none' },
+  { format: 'written multiple', values: ['1倍', '2倍'], scale: 'none' },
+  { format: 'multiplication sign', values: ['1×', '2×'], scale: 'none' },
+];
+
+const catalogHeaderCases = [
+  ...[
+    '貨號', '品號', '料號', '商品貨號', '產品條碼', '商品條碼', '商品貨號（ERP）', '零件料號',
+    'SKU', 'SKU ID', 'ASIN', 'ISBN', 'ISBN-13', 'ISSN', 'EAN-13', 'UPC-A', 'GTIN-14',
+  ].map((header) => ({ header, baselineScale: 'quantity' })),
+  { header: '物料編號', baselineScale: 'none' },
+  ...['SKU (%)', 'ISBN-13 (%)', '商品條碼（%）']
+    .map((header) => ({ header, baselineScale: 'percent' })),
+];
+
+it.each(catalogHeaderCases.flatMap((headerCase) =>
+  catalogChartFormats.map((formatCase) => ({ ...headerCase, ...formatCase })),
+))('matches merge-base for catalogue header $header with $format', ({ header, baselineScale, values, scale }) => {
+  const source = [`| 品項 | ${header} |`, '| --- | --- |',
+    `| 甲 | ${values[0]} |`, `| 乙 | ${values[1]} |`].join('\n');
+  const { container } = render(<StudySourceTables text={source} />);
+  expect(within(screen.getByRole('table')).getAllByRole('cell')
+    .map((cell) => cell.textContent)).toEqual(values);
+  const expected = scale === baselineScale ? catalogMetersByScale[scale] : [];
+  expect(Array.from(container.querySelectorAll('meter'), ({ value, max }) => [value, max]))
+    .toEqual(expected);
+  if (expected.length === 0) expect(comparisonSummaries(container)).toEqual([]);
+});
+
+it.each(['數值', '數值 (%)'].flatMap((header) =>
+  catalogChartFormats.filter(({ format }) => format !== 'grouped number').map((formatCase) => ({ header, ...formatCase })),
+))('matches merge-base for catalogue row labels with $header and $format', ({ header, values, scale }) => {
+  const rowLabels = ['SKU (%)', 'ISBN-13', '商品條碼（%）'];
+  const source = [`| 品項 | ${header} |`, '| --- | --- |', ...rowLabels.map(
+    (label, index) => `| ${label} | ${values[index % values.length]} |`,
+  )].join('\n');
+  const { container } = render(<StudySourceTables text={source} />);
+  expect(within(screen.getByRole('table')).getAllByRole('rowheader')
+    .map((cell) => cell.textContent)).toEqual(rowLabels);
+  const baselineScale = header === '數值' ? 'quantity' : 'percent';
+  const meters = scale === baselineScale ? catalogMetersByScale[scale] : [];
+  expect(Array.from(container.querySelectorAll('meter'), ({ value, max }) => [value, max]))
+    .toEqual(meters.length ? [...meters, meters[0]] : []);
+});
+
+it.each(['SKU Count', 'Number of SKUs', '商品貨號數量', '商品總數', '產品數量', 'Book Count', '零件數量'])(
+  'keeps genuine item-count charts available despite identifier examples (%s)', (header) => {
+    const source = ['| 分組 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 100 |', '| 乙 | 200 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={source} />);
+    expect(Array.from(container.querySelectorAll('meter'))
+      .map((bar) => [bar.getAttribute('value'), bar.getAttribute('max')]))
+      .toEqual([['100', '200'], ['200', '200']]);
+    unmount();
+  },
+);
+
+it.each([
+  ['OTP', '甲', ['1,234', '2,468']],
+  ['Verification Code (%)', '甲', ['５０％', '７５％']],
+  ['ISBN', '甲', ['1,200', '2,400']],
+  ['版本', '甲', ['1,200', '2,400']],
+  ['金額', '\u200e甲', ['1,200', '2,400']],
+  ['完成率', '\u200e甲', ['２５％', '７５％']],
+])('keeps the chart guard for new formats under %s', (header, label, values) => {
+  const text = [`| 項目 | ${header} |`, '| --- | --- |',
+    `| ${label} | ${values[0]} |`, `| 乙 | ${values[1]} |`].join('\n');
+  const { container } = render(<StudySourceTables text={text} />);
+  expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(values);
+  expect(container.querySelectorAll('meter')).toHaveLength(0);
+});

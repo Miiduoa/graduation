@@ -3,8 +3,7 @@
 // Read-only checks from the managed daemon's own network context. This script
 // never authenticates, sends cookies, or calls the TronClass integration API.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const { writeRuntimeReport } = require('./write-runtime-report.cjs');
 
 const origin = process.env.WEB_PUBLIC_ORIGIN;
 assert.match(origin || '', /^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/);
@@ -39,7 +38,7 @@ async function main() {
       { method: 'GET', path: '/login', status: 200 }],
     authenticated: false, bindingApiCalled: false };
   if (process.env.TRONCLASS_RUNTIME_DIR) {
-    fs.writeFileSync(path.join(process.env.TRONCLASS_RUNTIME_DIR, 'health.json'), JSON.stringify(report, null, 2));
+    writeRuntimeReport(Number(process.env.TRONCLASS_REPORT_DIR_FD), 'health.json', report);
   }
   console.log(JSON.stringify(report));
 }

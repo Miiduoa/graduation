@@ -1,9 +1,13 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyTronClassAgentPermissions } from '@campus/shared/src/tronClassAgentPermissions';
 import { createTronClassBindingService, type TronClassBindingStore } from './tronClassBinding';
 import { createTronClassAgentGrantService } from './tronClassAgentGrants';
+vi.mock('server-only', () => ({}));
+
+vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerReady: () => true, waitForTronClassRetentionFirstSweep: async () => undefined }));
+vi.mock('./tronClassPlatformClosureScheduler', () => ({ isTronClassPlatformClosureSchedulerReady: () => true, waitForTronClassPlatformClosureFirstBatch: async () => undefined }));
 
 const OWNER = 'platform:pa_grant_fixture';
 const NOW = Date.parse('2026-11-13T09:00:00Z');
@@ -40,6 +44,13 @@ async function setup() {
   return { rows, clock, hooks, bindings, grants, db, revision: linked.revision! };
 }
 
+beforeEach(() => {
+  vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true');
+  vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED', 'true');
+  vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL', 'postgresql://synthetic:synthetic@127.0.0.1:5432/synthetic');
+});
+afterEach(() => vi.unstubAllEnvs());
+
 describe('TronClass Agent grants', () => {
   it('requires separate consent and never returns school credentials or account fields', async () => {
     const { grants, revision } = await setup();
@@ -49,6 +60,22 @@ describe('TronClass Agent grants', () => {
       await expect(grants.require(OWNER, scope)).rejects.toMatchObject({ status: 403, code: 'TRONCLASS_AGENT_PERMISSION_REQUIRED' });
     }
     expect(JSON.stringify(result)).not.toMatch(/cookie|410123456|private-password|測試同學/);
+  });
+
+  it('rejects stale status, scopes and writes when the replacement has its own active grant', async () => {
+    const { grants, bindings, revision } = await setup();
+    const replacement = await bindings.connect(OWNER, {
+      schoolId: 'pu', account: '410123457', password: 'synthetic-password', expectedRevision: revision,
+    });
+    const current = await grants.set(OWNER, { revision: replacement.revision!, expectedVersion: null, permissions: ALL });
+    for (const read of [
+      () => grants.get(OWNER, revision),
+      () => grants.require(OWNER, 'readCourseData', revision),
+      () => grants.set(OWNER, { revision, expectedVersion: null, permissions: NONE }),
+    ]) {
+      await expect(read()).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    }
+    expect(await grants.get(OWNER)).toEqual(current);
   });
 
   it('preserves encrypted login and expiry while saving exactly the allowed capabilities', async () => {

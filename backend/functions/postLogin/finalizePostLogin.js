@@ -60,7 +60,7 @@ async function pruneOldPostLoginRuns(userRef) {
   }
 }
 
-async function runFinalizePostLogin(request) {
+async function runFinalizePostLogin(request, { includeCourseRosters = true } = {}) {
   const uid = request.auth?.uid;
   if (!uid) {
     throw new HttpsError('unauthenticated', 'Must be logged in');
@@ -188,8 +188,10 @@ async function runFinalizePostLogin(request) {
     .filter((id) => Number.isFinite(id) && id > 0)
     .slice(0, MAX_MEMBER_COURSES);
 
+  const readRosters = includeCourseRosters &&
+    Boolean(tronData?.cookies && teachingCourseIds.length);
   const rosterSummaries = [];
-  if (tronData?.cookies && teachingCourseIds.length) {
+  if (readRosters) {
     const settled = await Promise.allSettled(
       teachingCourseIds.map(async (courseId) => {
         const members = await tcFetchCourseMembers(tronData.cookies, courseId);
@@ -252,7 +254,7 @@ async function runFinalizePostLogin(request) {
     pu: true,
     tronCourses: !!(tronData?.cookies),
     tronProfile: !!(tronData?.cookies),
-    rosters: !!(tronData?.cookies && teachingCourseIds.length > 0),
+    rosters: readRosters,
   };
 
   const externalIds = {
@@ -384,6 +386,11 @@ async function runFinalizePostLogin(request) {
   };
 }
 
+function runFinalizePersonalSchoolLogin(request) {
+  return runFinalizePostLogin(request, { includeCourseRosters: false });
+}
+
 module.exports = {
+  runFinalizePersonalSchoolLogin,
   runFinalizePostLogin,
 };

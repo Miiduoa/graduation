@@ -16,6 +16,7 @@ import {
   Platform,
   Share,
   ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -23,6 +24,8 @@ import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { useAsyncStorage } from '../hooks/useStorage';
 import { getScopedStorageKey } from '../services/scopedStorage';
+import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 
 type RouteProps = {
   route?: {
@@ -42,6 +45,7 @@ interface CourseNote {
 }
 
 export default function CourseNotesScreen(props: RouteProps) {
+  useThemeVersion();
   const auth = useAuth();
   const { school } = useSchool();
   const courseId = props.route?.params?.courseId ?? 'default';
@@ -147,138 +151,262 @@ export default function CourseNotesScreen(props: RouteProps) {
     }
   };
 
+  const canSave = Boolean(draft.trim()) && !notesLoading;
+
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
+      style={{ flex: 1, backgroundColor: theme.colors.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View
         style={{
-          padding: 14,
-          backgroundColor: '#003F8A',
+          paddingHorizontal: theme.layout.screenHorizontalPadding,
+          paddingVertical: 12,
+          backgroundColor: theme.colors.surface,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.separator,
           flexDirection: 'row',
           justifyContent: 'space-between',
           alignItems: 'center',
+          gap: 12,
         }}
       >
-        <View>
-          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>{courseName}</Text>
-          <Text style={{ color: '#E5F2FF', fontSize: 12, marginTop: 2 }}>
+        <View style={{ flex: 1 }}>
+          <Text
+            accessibilityRole="header"
+            style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700', lineHeight: 24 }}
+            numberOfLines={1}
+          >
+            {courseName}
+          </Text>
+          <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
             {notesLoading ? '載入中…' : `${notes.length} 則筆記 · 僅存裝置`}
           </Text>
         </View>
-        <Pressable onPress={handleExport} hitSlop={8} disabled={notesLoading}>
-          <Ionicons name="share-outline" size={22} color="#fff" />
+        <Pressable
+          onPress={handleExport}
+          hitSlop={8}
+          disabled={notesLoading}
+          accessibilityRole="button"
+          accessibilityLabel="匯出筆記"
+          style={({ pressed }) => ({
+            minWidth: 44,
+            minHeight: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed || notesLoading ? 0.6 : 1,
+          })}
+        >
+          <Ionicons name="share-outline" size={22} color={theme.colors.accent} />
         </Pressable>
       </View>
 
       {notesLoading ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" color="#003F8A" />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.bg }}>
+          <ActivityIndicator size="large" color={theme.colors.accent} />
         </View>
       ) : (
         <>
           {tags.length > 0 && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ padding: 12, gap: 8 }}
+            <View
+              style={{
+                borderBottomWidth: StyleSheet.hairlineWidth,
+                borderBottomColor: theme.colors.separator,
+                backgroundColor: theme.colors.bg,
+              }}
             >
-              <Pressable
-                onPress={() => setFilterTag(null)}
-                style={{
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  borderRadius: 999,
-                  backgroundColor: !filterTag ? '#003F8A' : '#fff',
-                  borderWidth: 1,
-                  borderColor: !filterTag ? '#003F8A' : '#E5E5EA',
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{
+                  paddingHorizontal: theme.layout.screenHorizontalPadding,
+                  paddingVertical: 10,
+                  gap: 8,
                 }}
               >
-                <Text style={{ color: !filterTag ? '#fff' : '#1C1C1E', fontSize: 12 }}>全部</Text>
-              </Pressable>
-              {tags.map((t) => (
                 <Pressable
-                  key={t}
-                  onPress={() => setFilterTag(filterTag === t ? null : t)}
+                  onPress={() => setFilterTag(null)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: !filterTag }}
+                  hitSlop={4}
                   style={{
-                    paddingHorizontal: 12,
-                    paddingVertical: 6,
-                    borderRadius: 999,
-                    backgroundColor: filterTag === t ? '#003F8A' : '#fff',
+                    paddingHorizontal: 14,
+                    minHeight: 36,
+                    justifyContent: 'center',
+                    borderRadius: theme.radius.md,
+                    backgroundColor: !filterTag ? theme.colors.accent : theme.colors.surface,
                     borderWidth: 1,
-                    borderColor: filterTag === t ? '#003F8A' : '#E5E5EA',
+                    borderColor: !filterTag ? theme.colors.accent : theme.colors.border,
                   }}
                 >
-                  <Text style={{ color: filterTag === t ? '#fff' : '#1C1C1E', fontSize: 12 }}>
-                    #{t}
+                  <Text
+                    style={{
+                      color: !filterTag ? theme.colors.onAccent : theme.colors.text,
+                      fontSize: 13,
+                      fontWeight: !filterTag ? '700' : '500',
+                    }}
+                  >
+                    全部
                   </Text>
                 </Pressable>
-              ))}
-            </ScrollView>
+                {tags.map((t) => {
+                  const active = filterTag === t;
+                  return (
+                    <Pressable
+                      key={t}
+                      onPress={() => setFilterTag(active ? null : t)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      hitSlop={4}
+                      style={{
+                        paddingHorizontal: 14,
+                        minHeight: 36,
+                        justifyContent: 'center',
+                        borderRadius: theme.radius.md,
+                        backgroundColor: active ? theme.colors.accent : theme.colors.surface,
+                        borderWidth: 1,
+                        borderColor: active ? theme.colors.accent : theme.colors.border,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: active ? theme.colors.onAccent : theme.colors.text,
+                          fontSize: 13,
+                          fontWeight: active ? '700' : '500',
+                        }}
+                      >
+                        #{t}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
           )}
 
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 200 }}>
+          <ScrollView
+            contentContainerStyle={{
+              paddingHorizontal: theme.layout.screenHorizontalPadding,
+              paddingTop: 16,
+              paddingBottom: 200,
+            }}
+          >
             {filteredNotes.length === 0 ? (
-              <View style={{ alignItems: 'center', padding: 24, gap: 8 }}>
-                <Text style={{ fontSize: 48 }}>📓</Text>
-                <Text style={{ color: '#8E8E93', fontSize: 14 }}>
+              <View
+                style={{
+                  paddingVertical: 32,
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                <Ionicons name="document-text-outline" size={32} color={theme.colors.muted} />
+                <Text
+                  style={{
+                    color: theme.colors.textSecondary,
+                    fontSize: 14,
+                    textAlign: 'center',
+                    lineHeight: 20,
+                  }}
+                >
                   還沒有筆記。在下方輸入框寫第一則吧！
                 </Text>
-                <Text style={{ color: '#AEAEB2', fontSize: 11 }}>
+                <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: 'center' }}>
                   提示：用 #標籤 可以分類，例如 #期中、#重點
                 </Text>
               </View>
             ) : (
-              filteredNotes.map((n) => (
-                <View
-                  key={n.id}
+              <View style={{ gap: 8 }}>
+                <Text
+                  accessibilityRole="header"
                   style={{
-                    marginBottom: 10,
-                    backgroundColor: '#fff',
-                    borderRadius: 12,
-                    padding: 12,
-                    borderWidth: 1,
-                    borderColor: '#E5E5EA',
+                    color: theme.colors.textSecondary,
+                    fontSize: 12,
+                    fontWeight: '600',
+                    letterSpacing: 0.4,
                   }}
                 >
-                  <Text style={{ fontSize: 14, color: '#1C1C1E', lineHeight: 20 }}>{n.text}</Text>
-                  {n.tags.length > 0 && (
-                    <View style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>
-                      {n.tags.map((t) => (
-                        <Text
-                          key={t}
-                          style={{
-                            fontSize: 11,
-                            color: '#003F8A',
-                            backgroundColor: '#003F8A14',
-                            paddingHorizontal: 6,
-                            paddingVertical: 2,
-                            borderRadius: 6,
-                          }}
-                        >
-                          #{t}
+                  {filterTag ? `#${filterTag} · ${filteredNotes.length} 則` : `所有筆記（${filteredNotes.length}）`}
+                </Text>
+                <View
+                  style={{
+                    backgroundColor: theme.colors.surface,
+                    borderRadius: theme.radius.lg,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                    overflow: 'hidden',
+                  }}
+                >
+                  {filteredNotes.map((n, idx) => (
+                    <View
+                      key={n.id}
+                      style={{
+                        padding: 14,
+                        borderTopWidth: idx === 0 ? 0 : StyleSheet.hairlineWidth,
+                        borderTopColor: theme.colors.separator,
+                      }}
+                    >
+                      <Text style={{ fontSize: 14, color: theme.colors.text, lineHeight: 21 }}>
+                        {n.text}
+                      </Text>
+                      {n.tags.length > 0 && (
+                        <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                          {n.tags.map((t) => (
+                            <Text
+                              key={t}
+                              style={{
+                                fontSize: 11,
+                                fontWeight: '600',
+                                color: theme.colors.accent,
+                                backgroundColor: theme.colors.accentSoft,
+                                paddingHorizontal: 8,
+                                paddingVertical: 3,
+                                borderRadius: theme.radius.sm,
+                                overflow: 'hidden',
+                              }}
+                            >
+                              #{t}
+                            </Text>
+                          ))}
+                        </View>
+                      )}
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginTop: 10,
+                        }}
+                      >
+                        <Text style={{ fontSize: 11, color: theme.colors.muted }}>
+                          {new Date(n.updatedAt).toLocaleString('zh-TW')}
                         </Text>
-                      ))}
+                        <View style={{ flexDirection: 'row', gap: 16 }}>
+                          <Pressable
+                            onPress={() => handleEdit(n)}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            style={{ minHeight: 28, justifyContent: 'center' }}
+                          >
+                            <Text style={{ fontSize: 13, fontWeight: '600', color: theme.colors.accent }}>
+                              編輯
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => handleDelete(n.id)}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            style={{ minHeight: 28, justifyContent: 'center' }}
+                          >
+                            <Text style={{ fontSize: 13, fontWeight: '600', color: theme.colors.danger }}>
+                              刪除
+                            </Text>
+                          </Pressable>
+                        </View>
+                      </View>
                     </View>
-                  )}
-                  <View
-                    style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}
-                  >
-                    <Text style={{ fontSize: 11, color: '#AEAEB2' }}>
-                      {new Date(n.updatedAt).toLocaleString('zh-TW')}
-                    </Text>
-                    <View style={{ flexDirection: 'row', gap: 12 }}>
-                      <Pressable onPress={() => handleEdit(n)} hitSlop={8}>
-                        <Text style={{ fontSize: 12, color: '#003F8A' }}>編輯</Text>
-                      </Pressable>
-                      <Pressable onPress={() => handleDelete(n.id)} hitSlop={8}>
-                        <Text style={{ fontSize: 12, color: '#D70015' }}>刪除</Text>
-                      </Pressable>
-                    </View>
-                  </View>
+                  ))}
                 </View>
-              ))
+              </View>
             )}
           </ScrollView>
         </>
@@ -290,44 +418,83 @@ export default function CourseNotesScreen(props: RouteProps) {
           bottom: 0,
           left: 0,
           right: 0,
-          backgroundColor: '#fff',
-          padding: 12,
-          borderTopWidth: 1,
-          borderTopColor: '#E5E5EA',
+          backgroundColor: theme.colors.surface,
+          paddingHorizontal: theme.layout.screenHorizontalPadding,
+          paddingVertical: 12,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.colors.separator,
         }}
       >
         <TextInput
           value={draft}
           onChangeText={setDraft}
           placeholder="寫筆記... 可用 #標籤"
+          placeholderTextColor={theme.colors.muted}
           multiline
           editable={!notesLoading}
           style={{
-            backgroundColor: '#F2F2F7',
-            borderRadius: 8,
+            backgroundColor: theme.colors.bg,
+            borderRadius: theme.radius.md,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
             padding: 10,
             fontSize: 14,
-            color: '#1C1C1E',
+            color: theme.colors.text,
             minHeight: 50,
             maxHeight: 120,
             textAlignVertical: 'top',
           }}
         />
-        <Pressable
-          onPress={handleSave}
-          disabled={!draft.trim() || notesLoading}
-          style={{
-            marginTop: 8,
-            padding: 10,
-            borderRadius: 8,
-            backgroundColor: draft.trim() && !notesLoading ? '#003F8A' : '#AEAEB2',
-            alignItems: 'center',
-          }}
-        >
-          <Text style={{ color: '#fff', fontWeight: '700' }}>
-            {editingId ? '更新筆記' : '加入筆記'}
-          </Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+          {editingId ? (
+            <Pressable
+              onPress={() => {
+                setEditingId(null);
+                setDraft('');
+              }}
+              accessibilityRole="button"
+              style={({ pressed }) => ({
+                minHeight: 44,
+                paddingHorizontal: 14,
+                borderRadius: theme.radius.md,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                backgroundColor: theme.colors.surface,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <Text style={{ color: theme.colors.textSecondary, fontWeight: '600', fontSize: 14 }}>
+                取消
+              </Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            onPress={handleSave}
+            disabled={!canSave}
+            accessibilityRole="button"
+            style={({ pressed }) => ({
+              flex: 1,
+              minHeight: 44,
+              borderRadius: theme.radius.md,
+              backgroundColor: canSave ? theme.colors.accent : theme.colors.disabledBg,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed && canSave ? 0.85 : 1,
+            })}
+          >
+            <Text
+              style={{
+                color: canSave ? theme.colors.onAccent : theme.colors.disabledText,
+                fontWeight: '700',
+                fontSize: 14,
+              }}
+            >
+              {editingId ? '更新筆記' : '加入筆記'}
+            </Text>
+          </Pressable>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );

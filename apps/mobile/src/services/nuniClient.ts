@@ -2,6 +2,7 @@ import { NuniError, nuniRecord, parseNuniPrincipal } from '@campus/shared/src/nu
 import { WAKE_REQUEST_TIMEOUT_MS, withWakeRetry } from '@campus/shared/src/wakeAwareRequest';
 
 import { PERSONAL_IMPORT_SYNC_BODY_LIMIT } from '@campus/shared/src/imports/sync';
+import { tronClassCredentialFetch } from './tronClassCredentialFetch';
 
 const API = 'https://api.nuni.tw/v1/auth/platform/';
 const PUBLIC_API = 'https://api.nuni.tw/v1/public/';
@@ -176,6 +177,19 @@ export async function nuniBffRequest(
     async (attemptSignal) => {
       try {
         const endpoint = tronClass ? 'https://nuni.tw/api/tronclass' : `https://nuni.tw/api/nuni/${path}`;
+        if (tronClass && input?.action === 'connect') {
+          // The school password leaves the device only through the redirect-safe native transport.
+          const response = await tronClassCredentialFetch(endpoint, {
+            signal: attemptSignal,
+            headers: {
+              Accept: 'application/json',
+              Authorization: `Platform ${handle}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(input),
+          });
+          return await parseNuniBffJson(response as unknown as Response);
+        }
         const response = await fetch(endpoint, {
           method: input ? 'POST' : 'GET',
           redirect: 'error',

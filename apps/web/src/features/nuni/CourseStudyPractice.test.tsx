@@ -69,14 +69,13 @@ beforeEach(() => { vi.clearAllMocks(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 
-it('explains unreadable AI practice questions and answers while preserving hint, skip and answer privacy', () => {
+it('preserves original practice questions and answers while preserving hint, skip and answer privacy', () => {
   const invisible = '\u200b\u2060\u0301';
   const hiddenAnswer = '\u2800\ufe0f';
   const malformed = [{ ...cards[0], question: invisible, answer: hiddenAnswer }];
   const handlers = callbacks();
   render(<Controller deck={malformed} handlers={handlers} />);
-  expect(screen.getByText('AI 未提供可讀題目，請對照本段原文自行練習；也可以略過這題。')).toBeTruthy();
-  expect(screen.queryByText(invisible)).toBeNull();
+  expect(screen.getByText(invisible)).toBeTruthy();
   expect(screen.queryByText(hiddenAnswer)).toBeNull();
   expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '查看原文提示' }));
@@ -84,8 +83,7 @@ it('explains unreadable AI practice questions and answers while preserving hint,
   writeAnswer('我先試答，還需要核對教材');
   revealAnswer();
   const answerRegion = screen.getByRole('region', { name: '本題參考回答' });
-  expect(answerRegion.textContent).toContain('AI 未提供可讀參考回答，請對照本段原文自行核對。');
-  expect(answerRegion.textContent).not.toContain(hiddenAnswer);
+  expect(answerRegion.textContent).toContain(hiddenAnswer);
   expect(screen.getByRole('button', { name: '略過這題' })).toBeTruthy();
   skip();
   expect(screen.getByRole('heading', { name: '本輪練習摘要' })).toBeTruthy();

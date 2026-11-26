@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
+import { createTronClassAgentService } from './tronClassAgent';
 import { createTronClassCourseIndexReader, createTronClassIntegrationReader } from './tronClassIntegrationSource';
 import type { LmsHomeworkPage, LmsReadOptions, LmsReadResult, LmsReadonlySource } from './tronClassLmsSource';
 
@@ -27,6 +28,75 @@ beforeEach(() => vi.restoreAllMocks());
 afterEach(() => vi.useRealTimers());
 
 describe('independent TronClass source', () => {
+  describe('reads with an authorized Agent binding snapshot', () => {
+    const owner = 'platform:pa_fixture';
+    const replacement = { ...binding, revision: 'revision_9876543210', cookies: { session: 'replacement-fixture' } };
+    const grant = { revision: binding.revision, version: 'a'.repeat(32), updatedAt: null,
+      permissions: { readCourseData: true, downloadMaterials: true, prepareHomework: false } };
+    const grants = { get: vi.fn(async () => grant), require: vi.fn(async () => grant), assertCurrent: vi.fn(async () => {}) };
+    function setupAgent(beforeRead?: (attempt: number) => void) {
+      const { reader, bindings, source } = setup();
+      let attempts = 0;
+      const service = createTronClassAgentService({ grants, bindings, read: (...args) => {
+        beforeRead?.(++attempts);
+        return reader(...args);
+      } });
+      return { service, bindings, source };
+    }
+
+    it.each(['查玩課雲作業', '查玩課雲公告', '查玩課雲教材', '下載玩課雲教材'])(
+      'rejects a replacement loaded after grant verification for explicit course reads of %s', async question => {
+        const { service, bindings, source } = setupAgent();
+        bindings.requireBinding.mockResolvedValue(replacement);
+        await expect(service.ask(owner, { question, courseId: course.id, revision: binding.revision })).rejects.toMatchObject({
+          code: 'TRONCLASS_BINDING_CHANGED',
+        });
+        expect(source.fetchCourses).not.toHaveBeenCalled();
+        expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+        expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+        expect(source.fetchActivities).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['explicit', { courseId: course.id, revision: binding.revision }, 1, 0],
+      ['automatic before the final index', {}, 3, 4],
+      ['automatic before private feeds', {}, null, 6],
+    ] as const)('rejects a stale %s read before the next school request', async (_stage, selection, changeOnRead, expectedCalls) => {
+      let current = binding;
+      const { service, bindings, source } = setupAgent(attempt => {
+        if (attempt === changeOnRead) current = replacement;
+      });
+      bindings.requireBinding.mockImplementation(async () => current);
+      bindings.assertCurrent.mockImplementation(async (_owner, revision) => {
+        if (revision !== current.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+      });
+      let calls = 0;
+      vi.mocked(source.fetchCourses).mockImplementation(async (_cookies, options) => {
+        if (++calls === expectedCalls && changeOnRead === null) current = replacement;
+        return options.status === 'ongoing' ? [course] : [];
+      });
+      await expect(service.ask(owner, { question: '查玩課雲『資料庫管理』公告', ...selection }))
+        .rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+      expect(bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(owner, binding.revision);
+      expect(source.fetchCourses).toHaveBeenCalledTimes(expectedCalls);
+      for (const [cookies] of vi.mocked(source.fetchCourses).mock.calls) expect(cookies).toBe(binding.cookies);
+      expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+      expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+      expect(source.fetchActivities).not.toHaveBeenCalled();
+    });
+
+    it('uses the same authorized session for a valid explicit course read', async () => {
+      const { service, bindings, source } = setupAgent();
+      bindings.requireBinding.mockResolvedValueOnce(binding).mockResolvedValue(replacement);
+      await expect(service.ask(owner, { question: '查玩課雲公告', courseId: course.id, revision: binding.revision })).resolves.toMatchObject({
+        intent: 'announcements', selection: null, revision: binding.revision,
+      });
+      expect(bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(owner, binding.revision);
+      expect(source.fetchCourseAnnouncements).toHaveBeenCalledExactlyOnceWith(binding.cookies, course.id, expect.anything());
+    });
+  });
+
   it('returns a separate course index while an overview homework request is still waiting', async () => {
     const { reader, source, bindings } = setup();
     let finish!: (value: LmsReadResult<LmsHomeworkPage>) => void;
@@ -56,6 +126,42 @@ describe('independent TronClass source', () => {
     expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
   });
 
+  it('stops a guarded scoped read before contacting any private data feeds when the index becomes partial', async () => {
+    const { reader, source } = setup();
+    let upcomingReads = 0;
+    vi.mocked(source.fetchCourses).mockImplementation(async (_cookies, query) => {
+      if (query.status === 'ongoing') return [course];
+      if (++upcomingReads === 1) return [];
+      throw new Error('temporary school failure');
+    });
+    const index = await reader('platform:pa_fixture', { include: {} });
+    expect(index).toMatchObject({ partial: false, courses: [{ id: 101 }] });
+
+    const result = await reader('platform:pa_fixture', { courseId: 101, requireCompleteCourses: true,
+      include: { homework: true, announcements: true, materials: true } });
+    expect(result).toMatchObject({ partial: true, courses: [{ id: 101 }], errors: [{ area: 'courses' }],
+      homework: [], announcements: [], materials: [] });
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+    expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
+  });
+
+  it('does not contact private data feeds when the current complete index fails the selection check', async () => {
+    const { reader, source } = setup();
+    const acceptCourseIndex = vi.fn(() => false);
+    const result = await reader('platform:pa_fixture', { courseId: 101, requireCompleteCourses: true, acceptCourseIndex,
+      include: { homework: true, announcements: true, materials: true } });
+    expect(acceptCourseIndex).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      courses: expect.arrayContaining([expect.objectContaining({ id: 101 })]), partial: false, errors: [],
+    }));
+    expect(result).toMatchObject({ partial: false, homework: [], announcements: [], materials: [] });
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+    expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
+  });
+
   it('rejects a course index if the school binding changes during its course reads', async () => {
     const { source, bindings } = setup();
     bindings.assertCurrent.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined)
@@ -80,7 +186,7 @@ describe('independent TronClass source', () => {
   it('uses the verified binding without a school portal and never exposes its cookies', async () => {
     const { reader, bindings, source } = setup();
     const result = await reader('platform:pa_fixture');
-    expect(bindings.requireBinding).toHaveBeenCalledWith('platform:pa_fixture');
+    expect(bindings.requireBinding).toHaveBeenCalledWith('platform:pa_fixture', undefined);
     expect(source.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 12, status: 'ongoing' },
       { signal: expect.any(AbortSignal), timeoutMs: expect.any(Number) });
     expect(result).toMatchObject({ revision: binding.revision, partial: false, homework: [{ id: 201, submitted: false, description: '請上傳報告' }] });
@@ -429,5 +535,74 @@ describe('independent TronClass source', () => {
     finish(binding);
     await vi.advanceTimersByTimeAsync(0);
     expect(source.fetchCourses).not.toHaveBeenCalled();
+  });
+
+  it('does not dispatch homework when only announcements are requested', async () => {
+    const { reader, source } = setup();
+    const result = await reader('platform:pa_fixture', { courseId: 101, include: { announcements: true } });
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).toHaveBeenCalled();
+    expect(source.fetchActivities).toHaveBeenCalled();
+    expect(vi.mocked(source.fetchActivities).mock.calls.every((call) => call[2] === '')).toBe(true);
+    expect(result.homework).toEqual([]);
+  });
+
+  it('keeps course notices and reports incomplete announcements when the activity feed is unavailable', async () => {
+    const { reader, source } = setup();
+    vi.mocked(source.fetchActivities).mockResolvedValue({ ok: false, status: 503 });
+    vi.mocked(source.fetchCourseAnnouncements).mockResolvedValue({ ok: true, value: [
+      { id: 501, course_id: 101, title: '課程公告' },
+    ] });
+    const result = await reader('platform:pa_fixture', { courseId: 101, include: { announcements: true } });
+    expect(result).toMatchObject({
+      partial: true, errors: [{ courseId: 101, area: 'announcements' }],
+      announcements: [{ title: '課程公告' }], materials: [],
+    });
+  });
+
+  it.each(['announcements', 'materials'] as const)('only projects %s from a mixed activity feed', async (area) => {
+    const { reader, source } = setup();
+    vi.mocked(source.fetchActivities).mockImplementation(async (_cookie, _course, query) => ({
+      ok: true, value: query ? [] : [
+        { id: 301, course_id: 101, title: '講義', type: 'material' },
+        { id: 401, course_id: 101, title: '活動公告', type: 'announcement' },
+      ],
+    }));
+    const result = await reader('platform:pa_fixture', { courseId: 101, include: { [area]: true } });
+    expect(result).toMatchObject({
+      partial: false, errors: [],
+      announcements: area === 'announcements' ? [{ title: '活動公告' }] : [],
+      materials: area === 'materials' ? [{ title: '講義' }] : [],
+    });
+  });
+
+  it('does not dispatch homework when only materials are requested', async () => {
+    const { reader, source } = setup();
+    const result = await reader('platform:pa_fixture', { courseId: 101, include: { materials: true } });
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchActivities).toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+    expect(result.homework).toEqual([]);
+  });
+
+  it('still reads homework when the homework area is requested', async () => {
+    const { reader, source } = setup();
+    const result = await reader('platform:pa_fixture', { include: { homework: true } });
+    expect(source.fetchHomeworkPage).toHaveBeenCalled();
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+    expect(result.homework).toHaveLength(1);
+  });
+
+  it('does not dispatch homework or contents for a courses-only include', async () => {
+    const { reader, source } = setup();
+    const result = await reader('platform:pa_fixture', { include: {} });
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+    expect(result.homework).toEqual([]);
+    expect(result.announcements).toEqual([]);
+    expect(result.materials).toEqual([]);
+    expect(result.courses).toHaveLength(1);
   });
 });

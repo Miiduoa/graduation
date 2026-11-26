@@ -2,17 +2,23 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#314d40" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#faf8f2" />
     <title>離線 · nuni</title>
     <script>
       try {
         var preferences = JSON.parse(localStorage.getItem('campus-web-preferences') || 'null');
-        var selectedTheme = preferences && preferences.appearance && preferences.appearance.theme;
+        var appearance = (preferences && preferences.appearance) || {};
+        var selectedTheme = appearance.theme;
+        if (appearance.fontSize === 'small' || appearance.fontSize === 'large') {
+          document.documentElement.dataset.font = appearance.fontSize;
+        }
+        if (appearance.animations === false)
+          document.documentElement.dataset.reducedMotion = 'true';
         var dark =
           selectedTheme === 'dark' ||
           (selectedTheme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
-        document.querySelector('meta[name="theme-color"]').content = dark ? '#000000' : '#f6f7f5';
+        document.querySelector('meta[name="theme-color"]').content = dark ? '#000000' : '#faf8f2';
         if (selectedTheme === 'light' || selectedTheme === 'dark') {
           document.documentElement.setAttribute('data-theme', selectedTheme);
         }
@@ -23,12 +29,11 @@
     <style>
       :root {
         color-scheme: light;
-        --bg: #f6f7f5;
-        --surface: #ffffff;
-        --text: #243b35;
-        --muted: #626e67;
-        --border: #dddeda;
-        --brand: #314d40;
+        --bg: #faf8f2;
+        --text: #24251f;
+        --muted: #5e6057;
+        --border: #dedbd0;
+        --brand: #214c3d;
         --on-brand: #ffffff;
         --focus-ring: #bd581f;
       }
@@ -36,11 +41,10 @@
         :root:not([data-theme='light']) {
           color-scheme: dark;
           --bg: #000000;
-          --surface: #111111;
-          --text: #f2f3f1;
-          --muted: #a5aaa7;
-          --border: #2b2b2b;
-          --brand: #a9c6a3;
+          --text: #f2f0e8;
+          --muted: #b0b2a8;
+          --border: #34362f;
+          --brand: #b6d0b9;
           --on-brand: #0b140e;
           --focus-ring: #d6b16a;
         }
@@ -48,13 +52,24 @@
       :root[data-theme='dark'] {
         color-scheme: dark;
         --bg: #000000;
-        --surface: #111111;
-        --text: #f2f3f1;
-        --muted: #a5aaa7;
-        --border: #2b2b2b;
-        --brand: #a9c6a3;
+        --text: #f2f0e8;
+        --muted: #b0b2a8;
+        --border: #34362f;
+        --brand: #b6d0b9;
         --on-brand: #0b140e;
         --focus-ring: #d6b16a;
+      }
+      :root {
+        --body-size: 0.9375rem;
+        --title-size: 2rem;
+      }
+      :root[data-font='small'] {
+        --body-size: 0.875rem;
+        --title-size: 1.75rem;
+      }
+      :root[data-font='large'] {
+        --body-size: 1.0625rem;
+        --title-size: 2.25rem;
       }
       * {
         box-sizing: border-box;
@@ -64,55 +79,77 @@
         min-height: 100svh;
         display: grid;
         place-items: center;
-        padding: 24px 20px;
+        padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right))
+          max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
         background: var(--bg);
         color: var(--text);
-        font-family: system-ui, sans-serif;
-        line-height: 1.7;
+        font:
+          var(--body-size) / 1.65 system-ui,
+          sans-serif;
       }
       main {
-        width: 100%;
-        max-width: 560px;
+        width: min(100%, 29rem);
+        min-width: 0;
       }
       .brand {
-        margin-bottom: 24px;
-        font-size: 19px;
+        margin: 0 0 20px;
         font-weight: 700;
-        letter-spacing: -0.6px;
+        letter-spacing: -0.03em;
       }
       section {
-        padding: clamp(22px, 5vw, 36px);
-        border: 1px solid var(--border);
-        border-top: 3px solid var(--brand);
-        border-radius: 8px;
-        background: var(--surface);
+        padding-block: clamp(22px, 5vw, 36px);
+        border-top: 2px solid var(--brand);
+        overflow-wrap: anywhere;
       }
       h1 {
-        font-size: clamp(24px, 5vw, 30px);
-        font-weight: 600;
+        font-family: "Songti TC", "Noto Serif TC", PMingLiU, serif;
+        font-size: var(--title-size);
+        font-weight: 650;
         line-height: 1.4;
-        margin: 0 0 16px;
+        margin: 0 0 8px;
       }
       p {
         margin: 0;
         color: var(--muted);
-        overflow-wrap: anywhere;
       }
-      button {
-        margin-top: 24px;
+      #submission-note {
+        border-top: 1px solid var(--border);
+        margin-top: 20px;
+        padding-top: 14px;
+      }
+      .action {
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
         min-height: 44px;
+        max-width: 100%;
+        margin-top: 20px;
         padding: 10px 20px;
-        border: 0;
+        border: 1px solid transparent;
         border-radius: 6px;
         background: var(--brand);
         color: var(--on-brand);
         font: inherit;
         font-weight: 600;
+        text-decoration: none;
         cursor: pointer;
       }
-      button:focus-visible {
+      .action:focus-visible {
         outline: 3px solid var(--focus-ring);
         outline-offset: 4px;
+      }
+      .action:active {
+        opacity: 0.85;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        :root:not([data-reduced-motion='true']) .action {
+          transition: opacity 120ms ease-out;
+        }
+      }
+      @media (max-width: 400px) {
+        .action {
+          width: 100%;
+        }
       }
     </style>
   </head>
@@ -120,12 +157,40 @@
     <main>
       <div class="brand">nuni</div>
       <section aria-labelledby="offline-title">
-        <h1 id="offline-title">目前沒有網路連線。</h1>
-        <p>
-          請確認 Wi-Fi 或行動網路，再重新載入頁面。若剛才正在繳交作業，請在恢復連線後確認繳交紀錄。
-        </p>
-        <button type="button" onclick="window.location.reload()">重新載入</button>
+        <h1 id="offline-title">暫時無法開啟頁面</h1>
+        <p id="connection" role="status">請檢查網路連線後再試一次。</p>
+        <p id="submission-note" hidden>如果剛才送出了作業，請先查看繳交紀錄，再決定是否重送。</p>
+        <a class="action" id="retry" href="/">返回首頁</a>
       </section>
     </main>
+    <script>
+      var connection = document.getElementById('connection');
+      var retry = document.getElementById('retry');
+      var directVisit = window.location.pathname === '/offline.html';
+      if (!directVisit) {
+        retry.textContent = '重新載入此頁';
+        retry.href = window.location.href;
+        retry.addEventListener('click', function (event) {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          window.location.reload();
+        });
+        if (/^\/(?:course|classroom|tronclass|school-lms)(?:\/|$)/.test(location.pathname)) {
+          document.getElementById('submission-note').hidden = false;
+        }
+      }
+
+      function showOffline() {
+        connection.textContent = '目前沒有網路連線。請檢查 Wi-Fi 或行動網路。';
+      }
+      function showReconnected() {
+        connection.textContent = directVisit
+          ? '已重新連上網路，可以返回首頁。'
+          : '已重新連上網路，可以再試一次。';
+      }
+      if (!navigator.onLine) showOffline();
+      window.addEventListener('offline', showOffline);
+      window.addEventListener('online', showReconnected);
+    </script>
   </body>
 </html>

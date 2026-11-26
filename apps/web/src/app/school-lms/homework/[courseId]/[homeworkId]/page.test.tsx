@@ -41,7 +41,7 @@ vi.mock('@/lib/academicClient', () => ({
 
 function snapshot(): LmsReadonlySnapshot {
   return {
-    success: true, ownerUid: 'one', schoolId: 'pu', source: 'pu-tronclass',
+    schemaVersion: 2, success: true, ownerUid: 'one', schoolId: 'pu', source: 'pu-tronclass',
     fetchedAt: '2026-05-29T04:00:00.000Z', cache: { hit: true, expiresAt: '2026-05-29T04:10:00.000Z' },
     courses: [{ id: 10001, name: '資料庫系統' }], contentsLoadedFor: [],
     homework: [{
@@ -60,6 +60,16 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
+});
+
+it('shows an unconfirmed submission with the school deadline and detail', async () => {
+  const data = snapshot();
+  data.homework[0].submitted = null;
+  vi.mocked(loadTronClassLms).mockResolvedValueOnce(data);
+  render(<HomeworkDetailPage />);
+  expect(await screen.findByText(/繳交狀態待確認/)).toBeTruthy();
+  expect(screen.getByText(/繳交狀態待確認/).textContent).toContain('2026/5/29');
+  expect(screen.getByText('請上傳提案 PDF')).toBeTruthy();
 });
 
 it('shows 正在連線玩課雲 instead of an error while the LMS session is still hanging', async () => {

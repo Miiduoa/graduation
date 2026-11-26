@@ -43,35 +43,35 @@ export default function AuditLogsPage() {
 
   return (
     <RequireAdmin>
-      <h1 style={{ marginTop: 0 }}>稽核紀錄</h1>
-      <p style={{ color: '#3C3C43', fontSize: 14 }}>
+      <h2>稽核紀錄</h2>
+      <p style={{ color: 'var(--muted)', fontSize: 14 }}>
         敏感資料僅記錄摘要（forum_posts、grade_scores）。僅 platform admin 可讀。
       </p>
       {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
       <div style={{ overflowX: 'auto', marginTop: 16 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ background: '#F2F2F7', textAlign: 'left' }}>
-              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>時間</th>
-              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>動作</th>
-              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>實體</th>
-              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>actor</th>
-              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>payload</th>
+            <tr style={{ background: 'var(--bg-soft)', textAlign: 'left' }}>
+              <th style={{ padding: 8, border: '1px solid var(--border)' }}>時間</th>
+              <th style={{ padding: 8, border: '1px solid var(--border)' }}>動作</th>
+              <th style={{ padding: 8, border: '1px solid var(--border)' }}>實體</th>
+              <th style={{ padding: 8, border: '1px solid var(--border)' }}>actor</th>
+              <th style={{ padding: 8, border: '1px solid var(--border)' }}>payload</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
-                <td style={{ padding: 8, border: '1px solid #eee', whiteSpace: 'nowrap' }}>
+                <td style={{ padding: 8, border: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
                   {new Date(r.created_at).toLocaleString()}
                 </td>
-                <td style={{ padding: 8, border: '1px solid #eee' }}>{r.action}</td>
-                <td style={{ padding: 8, border: '1px solid #eee' }}>
+                <td style={{ padding: 8, border: '1px solid var(--border)' }}>{r.action}</td>
+                <td style={{ padding: 8, border: '1px solid var(--border)' }}>
                   {r.entity_type}
-                  <div style={{ fontSize: 11, color: '#8E8E93' }}>{r.entity_id ?? ''}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.entity_id ?? ''}</div>
                 </td>
-                <td style={{ padding: 8, border: '1px solid #eee', wordBreak: 'break-all' }}>{r.actor_id ?? ''}</td>
-                <td style={{ padding: 8, border: '1px solid #eee', maxWidth: 360, wordBreak: 'break-word', fontFamily: 'monospace', fontSize: 11 }}>
+                <td style={{ padding: 8, border: '1px solid var(--border)', wordBreak: 'break-all' }}>{r.actor_id ?? ''}</td>
+                <td style={{ padding: 8, border: '1px solid var(--border)', maxWidth: 360, wordBreak: 'break-word', fontFamily: 'monospace', fontSize: 11 }}>
                   {JSON.stringify(r.payload)}
                 </td>
               </tr>
@@ -79,7 +79,7 @@ export default function AuditLogsPage() {
           </tbody>
         </table>
       </div>
-      {rows.length === 0 && !error ? <p style={{ color: '#8E8E93' }}>尚無紀錄。</p> : null}
+      {rows.length === 0 && !error ? <p style={{ color: 'var(--muted)' }}>尚無紀錄。</p> : null}
     </RequireAdmin>
   );
 }

@@ -1,6 +1,6 @@
 import { courseStudyBackupFilenameStem } from './courseStudyBackupFilename';
 import {
-  parseTutorExplanation,
+  parseSavedTutorExplanation,
   splitStudySection,
   STUDY_TUTOR_LIMITS,
   type StudyMode,
@@ -8,7 +8,7 @@ import {
   type StudySource,
   type TutorExplanation,
 } from '@/lib/studyTutor';
-import { STUDY_SESSION_LIMITS, hasVisibleStudyAttempt, type StudyLesson, type StudyModeMemory, type StudyPassageMemory } from './courseStudySession';
+import { hasRevealedStudyAnswer, STUDY_SESSION_LIMITS, type StudyLesson, type StudyModeMemory, type StudyPassageMemory } from './courseStudySession';
 
 const FORMAT = 'campus-one-study-progress';
 const VERSION = 2;
@@ -109,8 +109,9 @@ function readMode(value: unknown, passage: StudyPassage, version: ProgressVersio
     previousId = id;
     const parentId = lesson.previousLessonId === null ? null : integer(lesson.previousLessonId, 1, id - 1);
     const attempt = text(lesson.attempt, STUDY_SESSION_LIMITS.attemptCharacters);
-    // Older backups could reveal the answer for an invisible draft. Preserve the draft.
-    const answerVisible = boolean(lesson.answerVisible) && hasVisibleStudyAttempt(attempt);
+    const answerVisible = boolean(lesson.answerVisible);
+    if (answerVisible && !hasRevealedStudyAnswer({ attempt, answerVisible }))
+      invalid('進度檔的試答與參考回答狀態不一致，無法還原。');
     let response: TutorExplanation;
     try {
       // A matching quote confirms a relationship to this copy, not its authenticity or teaching quality.
@@ -119,11 +120,12 @@ function readMode(value: unknown, passage: StudyPassage, version: ProgressVersio
       // Version 1 stays a five-field format even after the tutor learns new fields.
       if (version === 2 && Object.hasOwn(savedResponse, 'steps')) responseFields.push('steps');
       exactObject(savedResponse, responseFields);
-      response = parseTutorExplanation(JSON.stringify(savedResponse), passage);
+      response = parseSavedTutorExplanation(JSON.stringify(savedResponse), passage);
     } catch {
       invalid('進度檔中的講解無法對照該段原文，請重新選擇完整的進度檔。');
     }
-    return { id, previousLessonId: parentId, question: text(lesson.question, STUDY_TUTOR_LIMITS.questionCharacters), response, attempt, answerVisible };
+    return { id, previousLessonId: parentId, question: text(lesson.question, STUDY_TUTOR_LIMITS.questionCharacters),
+      response, attempt, answerVisible };
   });
   const ids = new Set(lessons.map((lesson) => lesson.id));
   for (const lesson of lessons) {

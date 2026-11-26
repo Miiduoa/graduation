@@ -65,7 +65,7 @@ describe('own historical submission attachment download', () => {
       expect(calls[0]).toBeLessThan(binaryOrder);
       expect(calls.at(-1)).toBeGreaterThan(binaryOrder);
     }
-    expect(f.bindings.requireBinding.mock.calls.every(([key]) => key === owner)).toBe(true);
+    expect(f.bindings.requireBinding).toHaveBeenCalledExactlyOnceWith(owner, input.revision);
     expect(f.bindings.assertCurrent).toHaveBeenLastCalledWith(owner, input.revision);
   });
 
@@ -213,7 +213,7 @@ describe('own historical submission attachment download', () => {
   it('checks for a replaced binding again after reading history and before fetching any file', async () => {
     const f = fixture();
     vi.mocked(f.source.fetchStudentSubmissionList!).mockImplementation(async () => {
-      f.bindings.requireBinding.mockResolvedValue({ ...binding, revision: 'b'.repeat(32) });
+      f.bindings.assertCurrent.mockRejectedValue(new NuniError(409, 'TRONCLASS_BINDING_CHANGED'));
       return { ok: true, value: f.state.history };
     });
     await expect(f.download(owner, input)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });

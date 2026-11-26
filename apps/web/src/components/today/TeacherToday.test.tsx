@@ -17,7 +17,7 @@ const state = vi.hoisted(() => ({
     loaded: true,
     error: '',
     imported: { records: [] as PersonalImportRecord[] },
-    manual: [] as PersonalImportRecord[],
+    manual: [] as PersonalImportRecord[] | null,
     retry: vi.fn(),
   },
 }));
@@ -36,6 +36,22 @@ const klass: TodayClass = {
 };
 const course = { id: 'teach-1', name: '教學實習', role: 'owner-teacher', unreadCount: 0 };
 
+const importedClass: PersonalImportRecord = {
+  id: 'imported-class',
+  kind: 'timetable',
+  title: '已匯入授課',
+  schoolId: 'ntu',
+  academicYear: '115',
+  semester: '1',
+  dayOfWeek: 1,
+  startTime: '10:10',
+  endTime: '12:00',
+  location: '教育館 101',
+  batchId: 'batch-a',
+  importedAt: now.toISOString(),
+  source: { type: 'paste', line: 1, rawText: '' },
+};
+
 function today(overrides: Partial<ComponentProps<typeof TeacherToday>> = {}) {
   return (
     <TeacherToday
@@ -46,6 +62,7 @@ function today(overrides: Partial<ComponentProps<typeof TeacherToday>> = {}) {
       timetableSchoolId="ntu"
       onRetryTimetable={vi.fn()}
       teachingCourses={[course]}
+      upcomingTodos={[]}
       coursesLoading={false}
       coursesError=""
       onRetryCourses={vi.fn()}
@@ -62,6 +79,7 @@ function boundToday() {
       now={now}
       unsigned={false}
       teachingCourses={[course]}
+      upcomingTodos={[]}
       coursesLoading={false}
       coursesError=""
       onRetryCourses={vi.fn()}
@@ -142,11 +160,10 @@ it('opens the teacher workspace with the existing school query and keeps nuni co
 
 it.each([
   ['loading', '正在確認今天的課表…'],
-  ['error', '暫時讀不到課表'],
   ['unsigned-scope', '先選擇校園'],
   ['empty', '還沒有課表'],
 ] as const)('does not claim there are no classes while the timetable is %s', (status, message) => {
-  render(today({ timetableStatus: status, classes: [klass] }));
+  render(today({ timetableStatus: status, classes: status === 'loading' ? [] : [klass] }));
   const timetable = screen.getByRole('region', { name: TODAY_FLOW_CLASS_TITLE });
   expect(within(timetable).getByText(new RegExp(message))).toBeTruthy();
   expect(within(timetable).queryByText(/今天沒有排課/)).toBeNull();
@@ -231,24 +248,47 @@ it('maps real loading, failure, missing timetable and unselected campus into dis
   );
 });
 
+it('shows personal classes even when no campus is selected', () => {
+  state.scope.scope.schoolId = 'personal';
+  state.records.schoolId = 'personal';
+  state.records.scopeKey = 'platform:teacher:personal';
+  state.records.imported.records = [{ ...importedClass, schoolId: 'personal' }];
+
+  render(boundToday());
+
+  const timetable = within(screen.getByRole('region', { name: TODAY_FLOW_CLASS_TITLE }));
+  expect(timetable.getByText('已匯入授課')).toBeTruthy();
+  expect(timetable.queryByText(/先選擇校園/)).toBeNull();
+});
+
+it.each(['ntu', 'personal'])('shows imported classes and retries when the %s manual timetable fails',
+  (schoolId) => {
+    state.scope.scope.schoolId = schoolId;
+    state.records.schoolId = schoolId;
+    state.records.scopeKey = `platform:teacher:${schoolId}`;
+    state.records.imported.records = [{ ...importedClass, schoolId }];
+    state.records.manual = null;
+    state.records.error = '手動課表暫時讀不到。';
+
+    const view = render(boundToday());
+
+    const timetable = within(screen.getByRole('region', { name: TODAY_FLOW_CLASS_TITLE }));
+    expect(timetable.getByText('已匯入授課')).toBeTruthy();
+    expect(timetable.getByRole('alert').textContent).toBe('暫時讀不到課表');
+    expect(timetable.queryByText(/今天沒有排課/)).toBeNull();
+    fireEvent.click(timetable.getByRole('button', { name: '重新讀取課表' }));
+    expect(state.records.retry).toHaveBeenCalledTimes(1);
+
+    state.records.loaded = false;
+    state.records.error = '';
+    view.rerender(boundToday());
+    expect(timetable.getByRole('status').textContent).toBe('正在確認今天的課表…');
+    expect(timetable.getByText('已匯入授課')).toBeTruthy();
+  },
+);
+
 it('keeps classroom navigation scoped to the actual timetable and hides it during a campus change', () => {
-  state.records.imported.records = [
-    {
-      id: 'imported-class',
-      kind: 'timetable',
-      title: '已匯入授課',
-      schoolId: 'ntu',
-      academicYear: '115',
-      semester: '1',
-      dayOfWeek: 1,
-      startTime: '10:10',
-      endTime: '12:00',
-      location: '教育館 101',
-      batchId: 'batch-a',
-      importedAt: now.toISOString(),
-      source: { type: 'paste', line: 1, rawText: '' },
-    },
-  ];
+  state.records.imported.records = [importedClass];
   const view = render(boundToday());
   const destination = new URL(
     screen.getByRole('link', { name: '找教室：教育館 101' }).getAttribute('href')!,
@@ -264,4 +304,17 @@ it('keeps classroom navigation scoped to the actual timetable and hides it durin
   expect(screen.getByText('正在確認今天的課表…')).toBeTruthy();
   expect(screen.queryByRole('link', { name: /^找教室/ })).toBeNull();
   expect(screen.queryByText('已匯入授課')).toBeNull();
+});
+
+it('shows today’s imported classes as soon as they arrive while the manual source is pending', () => {
+  state.records.loaded = false;
+  state.records.manual = null;
+  state.records.imported.records = [importedClass];
+
+  render(boundToday());
+
+  const timetable = within(screen.getByRole('region', { name: TODAY_FLOW_CLASS_TITLE }));
+  expect(timetable.getByRole('status').textContent).toBe('正在確認今天的課表…');
+  expect(timetable.getByText('已匯入授課')).toBeTruthy();
+  expect(timetable.queryByText(/今天沒有排課/)).toBeNull();
 });

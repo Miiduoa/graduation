@@ -33,7 +33,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { getCloudFunctionUrl, getFirebaseAuthHeaders } from './cloudFunctions';
 import { loadTronClassBackendCourses } from './ownedTronClassCourses';
-import { secureDeleteItem, secureDeleteMany, secureGetItem, secureSetItem } from './secureStorage';
+import { secureDeleteItem, secureGetItem, secureSetItem } from './secureStorage';
 import {
   TRONCLASS_DATA_DISABLED_MESSAGE,
   isTronClassBackendMutation,
@@ -45,7 +45,8 @@ import { isHomeworkSubmitted, isMaterialActivityType, isMobileUploadDownloadable
 // ─── Constants ───────────────────────────────────────────
 
 const TC_BASE = 'https://tronclass.pu.edu.tw';
-const TC_BACKEND_SESSION_KEY = '@pu_cache:tc_backend_session';
+const TC_BACKEND_SESSION_KEY = 'campus.tronclass.backend-session.v1';
+const TC_LEGACY_SESSION_KEY = '@pu_cache:tc_backend_session';
 const TC_SESSION_CHANGED_MESSAGE = '課程連線已變更，請重新讀取課程。';
 
 class TCSessionChangedError extends Error {
@@ -376,6 +377,19 @@ function updateBackendSessionStorage(revision: number, update: () => Promise<voi
   return _tcBackendSessionStorage;
 }
 
+// Current Expo SecureStore rejects the old key syntax before accessing native storage.
+function ignoreUnsupportedLegacyKey(error: unknown): null {
+  if (error instanceof Error && error.message.startsWith('Invalid key provided to SecureStore.')) return null;
+  throw error;
+}
+
+async function clearLegacyTCSessionStorage(): Promise<void> {
+  await Promise.all([
+    secureDeleteItem(TC_LEGACY_SESSION_KEY).catch(ignoreUnsupportedLegacyKey),
+    AsyncStorage.removeItem(TC_LEGACY_SESSION_KEY),
+  ]);
+}
+
 async function ensureBackendSessionLoaded(): Promise<void> {
   if (_tcBackendSessionLoaded) return;
   if (_tcBackendSessionLoading) return _tcBackendSessionLoading;
@@ -383,13 +397,14 @@ async function ensureBackendSessionLoaded(): Promise<void> {
 
   const loading = (async () => {
     try {
-      let raw = await secureGetItem(TC_BACKEND_SESSION_KEY);
+      const current = await secureGetItem(TC_BACKEND_SESSION_KEY);
       if (revision !== _tcBackendSessionRevision) return;
-      let migrate = false;
+      let raw = current;
       if (!raw) {
-        raw = await AsyncStorage.getItem(TC_BACKEND_SESSION_KEY);
+        raw = await secureGetItem(TC_LEGACY_SESSION_KEY).catch(ignoreUnsupportedLegacyKey);
         if (revision !== _tcBackendSessionRevision) return;
-        migrate = !!raw;
+        raw ??= await AsyncStorage.getItem(TC_LEGACY_SESSION_KEY);
+        if (revision !== _tcBackendSessionRevision) return;
       }
 
       if (raw) {
@@ -398,14 +413,12 @@ async function ensureBackendSessionLoaded(): Promise<void> {
           _tcBackendSessionId = parsed.sessionId.trim();
           _tcUserId = typeof parsed.userId === 'number' && Number.isFinite(parsed.userId)
             ? parsed.userId : null;
-          if (migrate) {
-            const payload = raw;
-            await updateBackendSessionStorage(revision, async () => {
-              await secureSetItem(TC_BACKEND_SESSION_KEY, payload);
-              // Retain the legacy copy if the secure write fails.
-              await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY);
-            });
-          }
+          const payload = raw;
+          await updateBackendSessionStorage(revision, async () => {
+            if (!current) await secureSetItem(TC_BACKEND_SESSION_KEY, payload);
+            // Only retire the legacy copy once the active session is in secure storage.
+            await clearLegacyTCSessionStorage();
+          });
         }
       }
       if (revision === _tcBackendSessionRevision) _tcBackendSessionLoaded = true;
@@ -442,7 +455,7 @@ export async function setTCBackendSession(
   const payload = JSON.stringify({ sessionId: normalized, userId: _tcUserId });
   await updateBackendSessionStorage(revision, async () => {
     await secureSetItem(TC_BACKEND_SESSION_KEY, payload);
-    await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY);
+    await clearLegacyTCSessionStorage();
   });
 }
 
@@ -454,113 +467,18 @@ export async function clearTCSession(): Promise<void> {
   _tcBackendSessionLoaded = true;
   await updateBackendSessionStorage(revision, async () => {
     await secureDeleteItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
-    await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
+    await clearLegacyTCSessionStorage().catch(() => undefined);
   });
-  // 注意：不清除 credentials — 讓使用者登出時才清除
 }
 
-/** 登出時完全清除（含存儲的密碼） */
-export async function clearTCSessionFull(): Promise<void> {
-  await clearTCSession();
-  await AsyncStorage.removeItem(TC_CREDENTIALS_KEY).catch(() => undefined);
-}
-
-/** 儲存 TronClass 憑證（登入後呼叫） */
-async function saveTCCredentials(uid: string, password: string): Promise<void> {
-  try {
-    // 簡易編碼 — 不是加密，但至少不是明文存放
-    const encoded = btoa(encodeURIComponent(`${uid}:${password}`));
-    await AsyncStorage.setItem(TC_CREDENTIALS_KEY, encoded);
-    console.log("[TronClass] Credentials saved for auto re-login");
-  } catch (err) {
-    console.warn("[TronClass] Failed to save credentials:", err);
-  }
-}
-
-/** 讀取儲存的 TronClass 憑證 */
-async function loadTCCredentials(): Promise<{ uid: string; password: string } | null> {
-  try {
-    const encoded = await AsyncStorage.getItem(TC_CREDENTIALS_KEY);
-    if (!encoded) return null;
-    const decoded = decodeURIComponent(atob(encoded));
-    const colonIdx = decoded.indexOf(":");
-    if (colonIdx <= 0) return null;
-    return {
-      uid: decoded.substring(0, colonIdx),
-      password: decoded.substring(colonIdx + 1),
-    };
-  } catch (err) {
-    console.warn("[TronClass] Failed to load credentials:", err);
-    return null;
-  }
-}
-
-/**
- * 嘗試透過 CAS SSO 重新登入 TronClass（不需要密碼）
- * 如果 cookie jar 裡的 Keycloak session cookie 仍有效，這會自動取得新的 TronClass session
- */
-async function tcReLoginViaCAS(): Promise<boolean> {
-  try {
-    console.log("[TronClass] Attempting CAS SSO re-login (using cookie jar)…");
-    const serviceUrl = TC_LOGIN_SERVICE_URL;
-    const casUrl =
-      `${IDENTITY_BASE}${CAS_LOGIN_PATH}` +
-      `?ui_locales=zh-TW&service=${encodeURIComponent(serviceUrl)}&locale=zh_TW`;
-    const result = await tcFetchFollowRedirects(casUrl, { accept: "text/html" });
-    if (result.url.includes("identity.pu.edu.tw")) return false;
-    const verifyResult = await _verifyTCSession("sso");
-    return verifyResult.success;
-  } catch (err) {
-    console.warn("[TronClass] CAS SSO re-login error:", err);
-    return false;
-  }
-}
-
-/**
- * 嘗試自動重新登入 TronClass
- * 優先順序：1. CAS SSO（無需密碼） 2. 儲存的憑證
- * 返回 true 表示重新登入成功
- */
-async function autoReLogin(): Promise<boolean> {
-  // 避免多次同時重新登入
-  if (_tcReLoginInProgress) {
-    return _tcReLoginInProgress;
-  }
-
-  _tcReLoginInProgress = (async () => {
-    try {
-      // 策略 1: 嘗試 CAS SSO（不需要密碼，利用 Keycloak 既有 session cookie）
-      const ssoOk = await tcReLoginViaCAS();
-      if (ssoOk) return true;
-
-      // 策略 2: 嘗試使用儲存的憑證
-      const creds = await loadTCCredentials();
-      if (!creds) {
-        console.warn("[TronClass] No saved credentials, cannot auto re-login");
-        return false;
-      }
-
-      console.log("[TronClass] Auto re-login: attempting with saved credentials…");
-      const result = await tcLogin(creds.uid, creds.password);
-      if (result.success) {
-        console.log("[TronClass] Auto re-login with credentials successful!");
-        _tcSessionValid = true;
-        return true;
-      }
-
-      console.warn("[TronClass] Auto re-login failed:", result.error);
-      // 密碼可能已變更 → 清除儲存的憑證
-      await AsyncStorage.removeItem(TC_CREDENTIALS_KEY).catch(() => undefined);
-      return false;
-    } catch (err) {
-      console.warn("[TronClass] Auto re-login error:", err);
-      return false;
-    } finally {
-      _tcReLoginInProgress = null;
-    }
-  })();
-
-  return _tcReLoginInProgress;
+/** 移除舊版保存的可重複使用帳密。有效的授權工作階段由既有機制還原及遷移。 */
+export async function purgeLegacyTCSensitiveStorage(): Promise<void> {
+  await Promise.all([
+    secureDeleteItem('@pu_tc_cred').catch(ignoreUnsupportedLegacyKey),
+    AsyncStorage.removeItem('@pu_tc_cred_fb'),
+    AsyncStorage.removeItem('@pu_cache:tc_credentials'),
+    ensureBackendSessionLoaded(),
+  ]);
 }
 
 /** 檢查是否有 TronClass session（不驗證有效性，只檢查是否存在） */
@@ -600,7 +518,7 @@ export async function validateTCSession(): Promise<boolean> {
 export async function refreshTCBackendSession(
   studentId: string,
   password: string,
-): Promise<{ success: boolean; error?: string; cancelled?: boolean }> {
+): Promise<{ success: boolean; error?: string; cancelled?: boolean; proxyUnavailable?: boolean }> {
   let revision = _tcBackendSessionRevision;
   const cancelled = { success: false, error: TC_SESSION_CHANGED_MESSAGE, cancelled: true };
   try {
@@ -641,7 +559,11 @@ export async function refreshTCBackendSession(
     }
 
     if (!response.ok || !data?.success || !data?.tronClassSessionId) {
-      return { success: false, error: data?.error || 'TronClass session 刷新失敗' };
+      return {
+        success: false,
+        error: data?.error || 'TronClass session 刷新失敗',
+        proxyUnavailable: response.status === 404 || response.status === 503,
+      };
     }
 
     const saving = setTCBackendSession(data.tronClassSessionId, data.tronClassUserId ?? null);
@@ -768,25 +690,6 @@ async function fetchTronClassBackend<T>(
   if (!response.ok || data?.success !== true) {
     const isSessionExpired = response.status === 401 || response.status === 403;
 
-    // Session 過期 → 嘗試自動刷新一次
-    if (isSessionExpired && _savedCredentials) {
-      console.log('[TronClass] session expired, attempting auto-refresh…');
-      const refreshed = await autoRefreshTCSession();
-      if (refreshed) {
-        // 刷新成功 → 重試原始請求（遞迴，但 auto-refresh 只會觸發一次）
-        const savedCreds = _savedCredentials;
-        _savedCredentials = null; // 防止無限遞迴
-        try {
-          const retryResult = await fetchTronClassBackend<T>(dataType, extra);
-          _savedCredentials = savedCreds; // 還原
-          return retryResult;
-        } catch (retryErr) {
-          _savedCredentials = savedCreds; // 還原
-          throw retryErr;
-        }
-      }
-    }
-
     const errorMessage =
       data?.error ||
       (isSessionExpired
@@ -862,86 +765,6 @@ async function tcFetch(
   }
 }
 
-/**
- * 手動跟隨 redirect，確保每一步的 cookies 都正確保存
- * React Native 的 fetch redirect:"follow" 有時不會正確處理跨域 cookie
- */
-async function tcFetchFollowRedirects(
-  url: string,
-  options: {
-    method?: string;
-    body?: string;
-    contentType?: string;
-    accept?: string;
-  } = {},
-  maxRedirects = 10,
-): Promise<{ body: string; status: number; url: string }> {
-  let currentUrl = url;
-  let currentMethod = options.method ?? "GET";
-  let currentBody = options.body;
-  let currentContentType = options.contentType;
-
-  for (let i = 0; i < maxRedirects; i++) {
-    let result: { body: string; status: number; url: string; redirectUrl?: string };
-    try {
-      result = await tcFetch(currentUrl, {
-        method: currentMethod,
-        body: currentBody,
-        contentType: currentContentType,
-        accept: options.accept,
-        redirect: "manual",
-      });
-    } catch {
-      // React Native 某些版本不支援 redirect:"manual" → fallback 用 follow
-      console.warn("[TronClass] redirect:manual failed, falling back to follow");
-      return tcFetch(url, { ...options, redirect: "follow" });
-    }
-
-    // 不是 redirect → 回傳結果
-    // 注意：React Native redirect:manual 可能回傳 status=0（opaque redirect）
-    if (result.status === 0 && result.body === "" && result.url !== currentUrl) {
-      // Opaque redirect — URL 已變更，繼續用 GET 請求新 URL
-      console.log(`[TronClass] Opaque redirect → ${result.url}`);
-      currentUrl = result.url;
-      currentMethod = "GET";
-      currentBody = undefined;
-      currentContentType = undefined;
-      continue;
-    }
-
-    if (result.status < 300 || result.status >= 400) {
-      return { body: result.body, status: result.status, url: currentUrl };
-    }
-
-    // 是 redirect → 跟隨
-    const location = result.redirectUrl;
-    if (!location) {
-      console.warn("[TronClass] Redirect without Location header at", currentUrl);
-      return { body: result.body, status: result.status, url: currentUrl };
-    }
-
-    // 解析 redirect URL（可能是相對路徑）
-    try {
-      const base = new URL(currentUrl);
-      currentUrl = new URL(location, base).toString();
-    } catch {
-      currentUrl = location;
-    }
-
-    console.log(`[TronClass] Following redirect #${i + 1} → ${currentUrl}`);
-
-    // Redirect 後改用 GET（除非是 307/308）
-    if (result.status !== 307 && result.status !== 308) {
-      currentMethod = "GET";
-      currentBody = undefined;
-      currentContentType = undefined;
-    }
-  }
-
-  console.warn("[TronClass] Too many redirects");
-  return { body: "", status: 0, url: currentUrl };
-}
-
 async function tcFetchJSON<T>(
   url: string,
   options?: { method?: string; body?: string; contentType?: string },
@@ -993,7 +816,7 @@ export async function tcLogin(
   try {
     console.log('[TronClass] Trying backend proxy login…');
     const backendResult = await refreshTCBackendSession(uid, password);
-    if (backendResult.cancelled) {
+    if (!backendResult.success && !backendResult.proxyUnavailable) {
       return { success: false, session: null, error: backendResult.error };
     }
     if (backendResult.success) {
@@ -1015,15 +838,24 @@ export async function tcLogin(
     }
     console.warn('[TronClass] Backend proxy failed:', backendResult.error);
   } catch (err) {
-    if (err instanceof TCSessionChangedError) {
-      return { success: false, session: null, error: err.message };
-    }
-    console.warn('[TronClass] Backend proxy error:', err);
+    return { success: false, session: null, error: err instanceof Error ? err.message : '課程平台連線失敗' };
   }
 
   // 直連成功後的請求必須使用原生 Cookie，不能繼續送往剛失效的後端 session。
-  await clearTCSession();
-  return await tcLoginDirectCAS(uid, password);
+  const clearing = clearTCSession();
+  const revision = _tcBackendSessionRevision;
+  await clearing;
+  if (revision !== _tcBackendSessionRevision) {
+    return { success: false, session: null, error: TC_SESSION_CHANGED_MESSAGE };
+  }
+  return await tcLoginDirectCAS(uid, password, revision);
+}
+
+function puLmsLoginKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const local = value.trim().toLowerCase().replace(/@pu\.edu\.tw$/, '');
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(local)) return null;
+  return local.replace(/^s(\d{7,10})$/, '$1');
 }
 
 /**
@@ -1036,7 +868,11 @@ export async function tcLogin(
 async function tcLoginDirectCAS(
   uid: string,
   password: string,
+  revision: number,
 ): Promise<{ success: boolean; session: TCSession | null; error?: string }> {
+  const assertCurrent = () => {
+    if (revision !== _tcBackendSessionRevision) throw new TCSessionChangedError();
+  };
   try {
     // 清除之前的 X-SESSION-ID，避免 tcFetch 跳過 cookie（CAS 靠 cookie 運作）
     _tcXSessionId = null;
@@ -1047,7 +883,10 @@ async function tcLoginDirectCAS(
     // Step 1: GET CAS login page
     console.log('[TronClass] Direct CAS Step 1: GET CAS login page…');
     const loginPage = await tcFetch(casUrl, { accept: 'text/html', timeoutMs: 12000 });
-    console.log('[TronClass] CAS page status:', loginPage.status);
+    assertCurrent();
+    if (loginPage.status < 200 || loginPage.status >= 300) {
+      throw new Error(`無法開啟學校登入頁面（HTTP ${loginPage.status}）`);
+    }
 
     // 解析 form action URL
     const formActionMatch = loginPage.body.match(/<form[^>]+action=["']([^"']+)["']/i);
@@ -1087,8 +926,10 @@ async function tcLoginDirectCAS(
       accept: 'text/html',
       timeoutMs: 12000,
     });
-    console.log('[TronClass] POST status:', loginResult.status);
-    console.log('[TronClass] Landed on:', loginResult.url);
+    assertCurrent();
+    if (loginResult.status < 200 || loginResult.status >= 300) {
+      throw new Error(`學校未完成登入（HTTP ${loginResult.status}）`);
+    }
 
     // Step 3: 驗證登入 — 先檢查帳密是否錯誤
     if (
@@ -1102,92 +943,25 @@ async function tcLoginDirectCAS(
 
     // Step 4: 驗證 session — 用 /api/profile
     console.log('[TronClass] Direct CAS Step 4: verifying session via /api/profile…');
-    const profile = await tcFetchJSON<TCUserProfile>(`${TC_BASE}/api/profile`);
-
-    if (profile?.id) {
-      _tcUserId = profile.id;
-      console.log('[TronClass] Login success! User:', profile.name, 'ID:', profile.id);
-      return {
-        success: true,
-        session: { loggedIn: true, userId: profile.id, userName: profile.name },
-      };
+    const profile = await tcFetchJSON<{ id?: number; name?: string; login_name?: string; user_no?: string }>(
+      `${TC_BASE}/api/profile`,
+    );
+    assertCurrent();
+    const accountKey = puLmsLoginKey(uid);
+    const subject = puLmsLoginKey(profile?.login_name || profile?.user_no);
+    if (!accountKey || subject !== accountKey || !Number.isSafeInteger(profile?.id) || profile.id <= 0) {
+      return { success: false, session: null, error: '無法確認這次登入的玩課雲帳號，請重新連線。' };
     }
-
-    // /api/profile 也失敗的話，嘗試 /api/my-departments 確認是否有 session
-    console.log('[TronClass] /api/profile failed, trying /api/my-departments…');
-    const depts = await tcFetchJSON<{ departments?: unknown[] }>(`${TC_BASE}/api/my-departments`);
-    if (depts?.departments) {
-      console.log('[TronClass] Login success (verified via my-departments)!');
-      return { success: true, session: { loggedIn: true, userId: null, userName: null } };
-    }
-
+    _tcUserId = profile.id;
     return {
-      success: false,
-      session: null,
-      error: 'TronClass 登入失敗，無法取得使用者資料',
+      success: true,
+      session: { loggedIn: true, userId: profile.id, userName: typeof profile.name === 'string' ? profile.name : null },
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : '連線失敗';
     console.warn('[TronClass] Direct CAS login error:', err);
     return { success: false, session: null, error: `TronClass 直連登入失敗：${msg}` };
   }
-}
-
-/**
- * 驗證 TronClass session 是否有效，並取得 userId
- */
-async function _verifyTCSession(
-  uid: string,
-  password?: string,
-): Promise<{ success: boolean; session: TCSession | null; error?: string }> {
-  console.log("[TronClass] Verifying session via /user/index…");
-  const indexPage = await tcFetch(`${TC_BASE}/user/index`, { accept: "text/html" });
-  console.log("[TronClass] /user/index status:", indexPage.status, "url:", indexPage.url);
-
-  // 如果被 redirect 回登入頁面，代表沒有 session
-  if (indexPage.url.includes("/login") || indexPage.url.includes("identity.pu.edu.tw")) {
-    console.warn("[TronClass] Session verification failed — redirected to login");
-    return { success: false, session: null, error: "TronClass 登入後 session 未建立，請稍後再試" };
-  }
-
-  // 從 HTML 找 userId hidden input
-  const userIdMatch =
-    indexPage.body.match(/id=["']userId["'][^>]*value=["'](\d+)["']/i) ??
-    indexPage.body.match(/value=["'](\d+)["'][^>]*id=["']userId["']/i) ??
-    indexPage.body.match(/userId["']?\s*[:=]\s*["']?(\d+)/i) ??
-    indexPage.body.match(/"id"\s*:\s*(\d+)/);
-
-  if (!userIdMatch?.[1]) {
-    console.warn("[TronClass] Could not extract userId from /user/index");
-    console.log("[TronClass] Page preview:", indexPage.body.substring(0, 300));
-    return { success: false, session: null, error: "登入似乎成功但無法取得使用者資訊，請再試一次" };
-  }
-
-  const userId = parseInt(userIdMatch[1], 10);
-  _tcUserId = userId;
-
-  // 嘗試取得使用者名稱
-  const nameMatch =
-    indexPage.body.match(/class=["']user-?name["'][^>]*>([^<]+)</i) ??
-    indexPage.body.match(/"name"\s*:\s*"([^"]+)"/);
-  const userName = nameMatch?.[1]?.trim() ?? uid;
-
-  console.log("[TronClass] Login success! User:", userName, "ID:", userId);
-  _tcSessionValid = true;
-
-  // 儲存憑證以支持自動重新登入
-  if (password) {
-    await saveTCCredentials(uid, password);
-  }
-
-  return {
-    success: true,
-    session: {
-      loggedIn: true,
-      userId,
-      userName,
-    },
-  };
 }
 
 // ─── API Endpoints ───────────────────────────────────────
@@ -1222,104 +996,6 @@ async function ensureUserId(): Promise<number | null> {
   }
 
   return _tcUserId;
-}
-
-// ─── 帳密保存在 secureStorage，供 auto-refresh 使用 ──
-const TC_CRED_KEY = '@pu_tc_cred';
-const TC_CRED_ASYNC_KEY = '@pu_tc_cred_fb';
-let _savedCredentials: { studentId: string; password: string } | null = null;
-let _savedCredentialsLoaded = false;
-
-export async function setTCSavedCredentials(studentId: string, password: string): Promise<void> {
-  _savedCredentials = { studentId, password };
-  _savedCredentialsLoaded = true;
-  const payload = JSON.stringify({ studentId, password });
-  // 寫入 secureStorage（Keychain），清理舊的 AsyncStorage fallback
-  await secureSetItem(TC_CRED_KEY, payload).catch(() => undefined);
-  await AsyncStorage.removeItem(TC_CRED_ASYNC_KEY).catch(() => undefined);
-}
-
-export async function clearTCSavedCredentials(): Promise<void> {
-  _savedCredentials = null;
-  _savedCredentialsLoaded = true;
-  await secureDeleteItem(TC_CRED_KEY).catch(() => undefined);
-  await AsyncStorage.removeItem(TC_CRED_ASYNC_KEY).catch(() => undefined);
-}
-
-export async function purgeLegacyTCSensitiveStorage(): Promise<void> {
-  await Promise.all([
-    secureDeleteItem(TC_CRED_KEY).catch(() => undefined),
-    AsyncStorage.removeItem(TC_CRED_ASYNC_KEY).catch(() => undefined),
-    AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY).catch(() => undefined),
-  ]);
-}
-
-async function loadSavedCredentials(): Promise<{ studentId: string; password: string } | null> {
-  if (_savedCredentialsLoaded) return _savedCredentials;
-  _savedCredentialsLoaded = true;
-
-  // 從 secureStorage 讀取
-  try {
-    const raw = await secureGetItem(TC_CRED_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as { studentId?: string; password?: string };
-      if (parsed.studentId && parsed.password) {
-        _savedCredentials = { studentId: parsed.studentId, password: parsed.password };
-        return _savedCredentials;
-      }
-    }
-  } catch { /* ignore */ }
-
-  // Fallback: 從舊 AsyncStorage 遷移
-  try {
-    const raw = await AsyncStorage.getItem(TC_CRED_ASYNC_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as { studentId?: string; password?: string };
-      if (parsed.studentId && parsed.password) {
-        _savedCredentials = { studentId: parsed.studentId, password: parsed.password };
-        // 遷移到 secureStorage
-        await secureSetItem(TC_CRED_KEY, raw).catch(() => undefined);
-        await AsyncStorage.removeItem(TC_CRED_ASYNC_KEY).catch(() => undefined);
-      }
-    }
-  } catch { /* ignore */ }
-
-  return _savedCredentials;
-}
-
-function readOptionalString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value : null;
-}
-
-/**
- * 自動刷新 TronClass session。
- *
- * 策略：
- *   1. 後端代理（Cloud Functions，穩定）
- *   2. 手機直連 CAS（可能因網路問題失敗）
- * 若沒有儲存的帳密，回傳 false（需要使用者重新登入）。
- */
-export async function autoRefreshTCSession(): Promise<boolean> {
-  if (!isTronClassDataFetchEnabled()) return false;
-
-  const creds = await loadSavedCredentials();
-  if (!creds) {
-    console.log('[TronClass] auto-refresh: no saved credentials');
-    return false;
-  }
-
-  const { studentId, password } = creds;
-
-  // tcLogin 內部已有 backend-first → direct CAS fallback 邏輯
-  console.log('[TronClass] auto-refresh: calling tcLogin…');
-  const result = await tcLogin(studentId, password);
-  if (result.success) {
-    console.log('[TronClass] auto-refresh succeeded');
-    return true;
-  }
-
-  console.warn('[TronClass] auto-refresh failed:', result.error);
-  return false;
 }
 
 /** 分頁取得所有資料 */
@@ -1361,21 +1037,25 @@ export async function tcFetchCourses(
 ): Promise<TCCourse[]> {
   if (!isTronClassDataFetchEnabled()) return [];
 
+  const revision = _tcBackendSessionRevision;
   await ensureBackendSessionLoaded();
+  if (revision !== _tcBackendSessionRevision) throw new TCSessionChangedError();
   if (shouldUseBackendSession()) {
     const sessionId = _tcBackendSessionId;
     const courses = await loadTronClassBackendCourses(sessionId, status);
-    if (_tcBackendSessionId !== sessionId) throw new Error('課程連線已變更，請重新讀取課程。');
+    if (revision !== _tcBackendSessionRevision) throw new TCSessionChangedError();
     return courses;
   }
 
   // 玩課雲用 POST /api/my-courses，不是 GET /api/users/{id}/courses
   console.log('[TronClass] Fetching courses via POST /api/my-courses…');
   const allCourses: TCCourse[] = [];
-  let page = 1;
+  const seen = new Set<number>();
   const pageSize = 50;
+  const maxPages = 100;
+  let expectedPages: number | undefined;
 
-  while (true) {
+  for (let page = 1; page <= maxPages; page++) {
     const result = await tcFetch(`${TC_BASE}/api/my-courses`, {
       method: 'POST',
       body: JSON.stringify({
@@ -1387,6 +1067,7 @@ export async function tcFetchCourses(
       accept: 'application/json',
     });
 
+    if (revision !== _tcBackendSessionRevision) throw new TCSessionChangedError();
     if (result.status !== 200) {
       throw new Error(`課程讀取未完成（HTTP ${result.status}），請重新連線課程平台`);
     }
@@ -1410,7 +1091,8 @@ export async function tcFetchCourses(
         course_attributes?: { student_count?: number };
         classroom_schedule?: unknown;
       }>;
-      paging?: { pages?: number };
+      pages?: number | string;
+      paging?: { pages?: number | string };
     };
     try {
       data = JSON.parse(result.body);
@@ -1422,11 +1104,33 @@ export async function tcFetchCourses(
       throw new Error('課程平台回應缺少課程清單，請稍後重試');
     }
     const courses = data.courses;
-    if (courses.length === 0) break;
+    const reported = data.paging?.pages ?? data.pages;
+    if (reported != null) {
+      const count = Number(reported);
+      if ((typeof reported !== 'number' && typeof reported !== 'string') ||
+          !/^\d+$/.test(String(reported)) || !Number.isSafeInteger(count) || count > maxPages ||
+          (expectedPages !== undefined && count !== expectedPages)) {
+        throw new Error('課程平台的分頁資訊異常，請稍後重試');
+      }
+      expectedPages = count;
+    }
+    if (courses.length > pageSize ||
+        (expectedPages !== undefined &&
+          ((courses.length === 0 && (page > 1 || expectedPages > 1)) ||
+           (courses.length > 0 && page > expectedPages)))) {
+      throw new Error('課程清單分頁不完整，請稍後重試');
+    }
 
     for (const c of courses) {
+      const id = Number(c?.id);
+      if ((typeof c?.id !== 'number' && typeof c?.id !== 'string') ||
+          !/^[1-9]\d*$/.test(String(c.id)) || !Number.isSafeInteger(id) ||
+          typeof c?.name !== 'string' || !c.name.trim() || seen.has(id)) {
+        throw new Error('課程清單資料不完整或重複，請稍後重試');
+      }
+      seen.add(id);
       allCourses.push({
-        id: c.id,
+        id,
         name: c.name,
         course_code: c.course_code ?? '',
         department: c.department ?? null,
@@ -1445,16 +1149,11 @@ export async function tcFetchCourses(
       });
     }
 
-    const totalPages = data.paging?.pages ?? 1;
-    if (!Number.isSafeInteger(totalPages) || totalPages < 1 || totalPages > 100) {
-      throw new Error('課程平台的分頁資訊異常，請稍後重試');
+    if (expectedPages !== undefined ? page >= expectedPages : courses.length < pageSize) {
+      return allCourses;
     }
-    if (page >= totalPages) break;
-    page++;
   }
-
-  console.log(`[TronClass] Fetched ${allCourses.length} courses`);
-  return allCourses;
+  throw new Error('課程平台的分頁超出讀取範圍，請稍後重試');
 }
 
 /** 取得課程的模組（週次/單元）*/
@@ -2794,40 +2493,86 @@ export type TCWriteResult = {
   error?: string;
 };
 
-function legacyTronClassWriteUnavailable(): TCWriteResult {
+/** 在課程討論區建立新討論串 */
+export async function tcPostDiscussion(
+  courseId: number,
+  input: { title: string; content?: string },
+): Promise<TCWriteResult> {
   if (!isTronClassDataFetchEnabled()) {
     return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
   }
-  // These legacy writers have no verified school contract or receipt reader.
-  // Enabling reads must never enable guessed POST endpoints or POST retries.
-  return {
-    success: false,
-    error: '此學校目前尚未開放此項站內操作，請至 TronClass 完成操作並確認紀錄。',
-  };
-}
-
-/** 在課程討論區建立新討論串 */
-export async function tcPostDiscussion(
-  _courseId: number,
-  _input: { title: string; content?: string },
-): Promise<TCWriteResult> {
-  return legacyTronClassWriteUnavailable();
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCWriteResult>('postDiscussion', { courseId, input });
+  }
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/discussions`,
+    `${TC_BASE}/api/courses/${courseId}/forums`,
+  ];
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: input.title, content: input.content ?? '' }),
+      });
+      if (res.ok) {
+        const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        return { success: true, id: (data.id as number | string | undefined) };
+      }
+    } catch {
+      /* try next endpoint */
+    }
+  }
+  return { success: false, error: '無法建立討論（連線或權限失敗）' };
 }
 
 /** 在討論串底下回覆 */
 export async function tcPostDiscussionReply(
-  _courseId: number,
-  _discussionId: number,
-  _content: string,
+  courseId: number,
+  discussionId: number,
+  content: string,
 ): Promise<TCWriteResult> {
-  return legacyTronClassWriteUnavailable();
+  if (!isTronClassDataFetchEnabled()) {
+    return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
+  }
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCWriteResult>('postDiscussionReply', {
+      courseId,
+      discussionId,
+      content,
+    });
+  }
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/discussions/${discussionId}/posts`,
+    `${TC_BASE}/api/courses/${courseId}/forums/${discussionId}/posts`,
+  ];
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      if (res.ok) {
+        const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        return { success: true, id: (data.id as number | string | undefined) };
+      }
+    } catch {
+      /* try next */
+    }
+  }
+  return { success: false, error: '回覆失敗' };
 }
 
 /** 繳交作業 */
 export async function tcSubmitHomework(
-  _courseId: number,
-  _hwId: number,
-  _input: {
+  courseId: number,
+  hwId: number,
+  input: {
     content?: string;
     /** 附件 URI 列表，會分別上傳 */
     attachments?: Array<{ uri: string; name: string; type?: string }>;
@@ -2836,13 +2581,57 @@ export async function tcSubmitHomework(
   if (!isTronClassDataFetchEnabled()) {
     return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
   }
-  // This legacy path has no implemented backend writer and its direct POST
-  // never verified a school receipt. Do not revive it by enabling the read
-  // switch: native submission must use the scoped server operation workflow.
-  return {
-    success: false,
-    error: '此學校目前尚未開放站內作業繳交，請至 TronClass 作業頁完成繳交並確認紀錄。',
-  };
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCWriteResult>('submitHomework', {
+      courseId,
+      hwId,
+      input,
+    });
+  }
+  try {
+    // 1. 先把附件上傳（multipart）
+    const uploadedKeys: string[] = [];
+    for (const att of input.attachments ?? []) {
+      const form = new FormData();
+      form.append('file', {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        uri: att.uri,
+        name: att.name,
+        type: att.type ?? 'application/octet-stream',
+      } as any);
+      const upRes = await fetch(`${TC_BASE}/api/uploads`, {
+        method: 'POST',
+        credentials: 'include',
+        body: form as unknown as BodyInit,
+      });
+      if (upRes.ok) {
+        const upData = (await upRes.json().catch(() => ({}))) as Record<string, unknown>;
+        const key = String(upData.key ?? upData.id ?? '');
+        if (key) uploadedKeys.push(key);
+      }
+    }
+    // 2. 建立繳交紀錄
+    const res = await fetch(
+      `${TC_BASE}/api/courses/${courseId}/homework/${hwId}/submissions`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: input.content ?? '',
+          upload_keys: uploadedKeys,
+        }),
+      },
+    );
+    if (res.ok) {
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      return { success: true, id: (data.id as number | string | undefined) };
+    }
+    return { success: false, error: `送出失敗 (${res.status})` };
+  } catch (e) {
+    return { success: false, error: String((e as Error)?.message ?? e) };
+  }
 }
 
 /** 取得課程問卷列表（TronClass survey endpoint，可能未公開；回傳空陣列代表沒有） */
@@ -2877,11 +2666,35 @@ export async function tcFetchSurveys(courseId: number): Promise<
 
 /** 送出問卷答案 */
 export async function tcSubmitSurvey(
-  _courseId: number,
-  _surveyId: number,
-  _answers: Record<string, unknown>,
+  courseId: number,
+  surveyId: number,
+  answers: Record<string, unknown>,
 ): Promise<TCWriteResult> {
-  return legacyTronClassWriteUnavailable();
+  if (!isTronClassDataFetchEnabled()) {
+    return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
+  }
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCWriteResult>('submitSurvey', {
+      courseId,
+      surveyId,
+      answers,
+    });
+  }
+  try {
+    const res = await fetch(
+      `${TC_BASE}/api/courses/${courseId}/surveys/${surveyId}/responses`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers }),
+      },
+    );
+    return { success: res.ok };
+  } catch (e) {
+    return { success: false, error: String((e as Error)?.message ?? e) };
+  }
 }
 
 /** 取得同儕互評任務 */
@@ -2918,16 +2731,40 @@ export async function tcFetchPeerReviews(courseId: number): Promise<
 
 /** 送出同儕互評 */
 export async function tcSubmitPeerReview(
-  _courseId: number,
-  _reviewId: number,
-  _payload: {
+  courseId: number,
+  reviewId: number,
+  payload: {
     scores: Record<string, string>;
     comments?: Record<string, string>;
     overallFeedback?: string;
     totalScore?: number;
   },
 ): Promise<TCWriteResult> {
-  return legacyTronClassWriteUnavailable();
+  if (!isTronClassDataFetchEnabled()) {
+    return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
+  }
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCWriteResult>('submitPeerReview', {
+      courseId,
+      reviewId,
+      payload,
+    });
+  }
+  try {
+    const res = await fetch(
+      `${TC_BASE}/api/courses/${courseId}/peer_reviews/${reviewId}/submissions`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+    );
+    return { success: res.ok };
+  } catch (e) {
+    return { success: false, error: String((e as Error)?.message ?? e) };
+  }
 }
 
 /** 構建教材檔案的下載/檢視 URL */

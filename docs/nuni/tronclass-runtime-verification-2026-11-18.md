@@ -12,9 +12,11 @@ TRONCLASS_VERIFY_RUNTIME=1 pnpm test-env:tronclass
 
 開啟 launcher 印出的完整 Web 登入 URL，按「使用本機測試學生甲」。這個入口只在 development、明確啟用的 demo Firebase emulator 中出現，使用 repository 既有的公開 seed 帳號，經過真正的 Firebase email/password 登入及伺服器 ID token 驗證。正式版不提供此入口。
 
-登入後前往 `/tronclass`，再由使用者在正常綁定表單輸入本人的學校帳密。測試學生帳號只提供本機 nuni 身分；不代表已登入學校，不授予其他帳號的課程權限。不要把校方密碼、Cookie、簽章 URL、HAR 或私人作業存入 Git 或測試 fixture。
+真人校方帳號綁定僅限本機單人使用。登入後前往 `/tronclass`，在正常綁定表單輸入本人的學校帳密。公開測試學生的 UID 是共用的，多人若進入同一套環境，就可能存取該 UID 已保存的校方 session。啟用真人綁定的本機服務請勿透過轉發、隧道或反向代理分享。測試學生帳號只提供本機 nuni 身分；不代表已登入學校，不授予其他帳號的課程權限。不要把校方密碼、Cookie、簽章 URL、HAR 或私人作業存入 Git 或測試 fixture。
 
-在 managed preview 中，使用既有 preview daemon 啟動此 launcher；它須設定 `TRONCLASS_MANAGED_PREVIEW=1`，並讓 daemon 提供 `PORT`。Auth、Firestore 與 Next 必須在同一個 preview 程序環境；瀏覽器使用 CLI 回傳的原始 URL。
+Next 與 Firebase emulators 固定監聽 `127.0.0.1`。若 `TEST_HOST` 或 `HOST` 指定了 `127.0.0.1`、`localhost` 以外的位址，或偵測到 CI 或 managed preview 標記，launcher 會關閉 TronClass 整合，只能使用合成 fixture。
+
+在 managed preview 中，由既有 preview daemon 設定 `TRONCLASS_MANAGED_PREVIEW=1` 並提供 `PORT`。Auth、Firestore 與 Next 必須在同一個 preview 程序環境。瀏覽器使用 CLI 回傳的原始 URL。需要 TronClass API 的 `TRONCLASS_VERIFY_RUNTIME=1` 驗證只在本機整合啟用時執行。
 
 ## 已驗證的範圍
 

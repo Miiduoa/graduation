@@ -8,17 +8,20 @@ export function LoginLink({
   liveReturnPath,
   className,
   children,
+  onNavigateClick,
 }: {
   returnPath: string;
   liveReturnPath?: () => string;
   className?: string;
   children: ReactNode;
+  onNavigateClick?: (event: MouseEvent<HTMLAnchorElement>) => boolean;
 }) {
   return (
     <a
       className={className}
       href={loginHref(returnPath)}
       onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+        if (onNavigateClick && !onNavigateClick(event)) return;
         followLoginHref(event, liveReturnPath ? liveReturnPath() : returnPath);
       }}
     >

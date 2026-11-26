@@ -656,7 +656,27 @@ async def desktop(page, requests, resources):
     graphics = await assert_webgl(page)
     layout = await assert_layout(page)
     await page.screenshot(path=str(OUT / "desktop-overview.png"))
+    search = dialog.get_by_role("searchbox", name="搜尋導覽地點", exact=True)
+    clear_search = dialog.get_by_role("button", name="清除地點搜尋", exact=True)
+    await expect(clear_search).to_be_disabled()
+    await search.fill(LIBRARY["name"])
+    await expect(selector_for(page)).to_have_value("")
+    await expect(selector_for(page).locator(f'option[value="{LIBRARY["id"]}"]')).to_have_count(1)
+    await expect(selector_for(page).locator(f'option[value="{ZHUGU["id"]}"]')).to_have_count(0)
+    await expect(dialog.get_by_role("link", name="開啟步行導航", exact=True)).to_have_count(0)
     await selector_for(page).select_option(LIBRARY["id"])
+    await search.fill("不存在的合成測試地點")
+    await expect(dialog.get_by_text("沒有符合的地點，請調整關鍵字。", exact=False)).to_be_visible()
+    await expect(selector_for(page)).to_have_value(LIBRARY["id"])
+    await assert_navigation(page)
+    await expect(clear_search).to_be_enabled()
+    await clear_search.click()
+    await expect(search).to_have_value("")
+    await expect(search).to_be_focused()
+    await expect(clear_search).to_be_disabled()
+    await expect(selector_for(page).locator(f'option[value="{ZHUGU["id"]}"]')).to_have_count(1)
+    await expect(selector_for(page)).to_have_value(LIBRARY["id"])
+    await assert_navigation(page)
     await assert_layout(page)
     last = dialog.get_by_role("link", name="查看地點資料來源 ↗", exact=True)
     await last.focus()
@@ -667,7 +687,12 @@ async def desktop(page, requests, resources):
     await page.wait_for_timeout(650)
     marker = page.locator("[data-spatial-marker]:visible").first
     marker_id = await marker.get_attribute("data-spatial-marker")
-    marker_name = await marker.inner_text()
+    # Same-name markers include category/ordinal labels; the detail heading
+    # must still match the raw name of the exact selected fixture ID.
+    marker_name = await page.evaluate(
+        "id => window.__campusSpatialFixturePlaceNames?.[id] ?? null", marker_id
+    )
+    assert isinstance(marker_name, str) and marker_name, f"Unknown fixture marker: {marker_id!r}"
     await marker.click()
     await expect(selector_for(page)).to_have_value(marker_id)
     await expect(dialog.get_by_role("heading", name=marker_name, exact=True)).to_be_visible()

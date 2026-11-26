@@ -166,7 +166,7 @@ export function createTronClassSubmissionAvailabilityReader({
 }: Dependencies) {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) fail(400, 'TRONCLASS_INVALID_INPUT');
   return async function readAvailability(
-    ownerKey: string, input: TronClassHomeworkScope, expectedRevision: string, signal?: AbortSignal,
+    ownerKey: string, input: TronClassHomeworkScope, expectedRevision: string, signal?: AbortSignal, suppliedBinding?: TronClassSubmissionBinding,
   ): Promise<TronClassSubmissionAvailability> {
     if (typeof ownerKey !== 'string' || !ownerKey || ownerKey.length > 200 || !revision(expectedRevision) ||
       !input || !positiveId(input.courseId) || !positiveId(input.homeworkId)) fail(400, 'TRONCLASS_INVALID_INPUT');
@@ -197,19 +197,18 @@ export function createTronClassSubmissionAvailabilityReader({
       check();
       return result;
     };
-    let userId: number | undefined;
+    let snapshot: TronClassSubmissionBinding | undefined;
     const current = async (): Promise<TronClassSubmissionBinding> => {
-      const binding = await guarded(() => bindings.requireBinding(ownerKey));
-      if (!binding || binding.revision !== expectedRevision ||
-        (userId !== undefined && binding.userId !== userId)) fail(409, 'TRONCLASS_BINDING_CHANGED');
+      const binding = snapshot ?? suppliedBinding ?? await guarded(() => bindings.requireBinding(ownerKey, expectedRevision));
+      if (!binding || binding.revision !== expectedRevision) fail(409, 'TRONCLASS_BINDING_CHANGED');
       if (binding.schoolId !== 'pu' || !positiveId(binding.userId) ||
         typeof binding.expiresAt !== 'string' || !Number.isFinite(Date.parse(binding.expiresAt)) ||
         Date.parse(binding.expiresAt) <= checkedNow(now) || !record(binding.cookies) ||
         Object.values(binding.cookies).some(value => typeof value !== 'string')) fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
-      userId ??= binding.userId;
+      snapshot ??= { ...binding, cookies: Object.freeze({ ...binding.cookies }) };
       await guarded(() => bindings.assertCurrent(ownerKey, expectedRevision));
       if (Date.parse(binding.expiresAt) <= checkedNow(now)) fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
-      return { ...binding, cookies: Object.freeze({ ...binding.cookies }) };
+      return snapshot;
     };
     const read = async (run: () => Promise<LmsReadResult<unknown>>, activity = false, optional = false): Promise<unknown> => {
       try {
@@ -232,8 +231,8 @@ export function createTronClassSubmissionAvailabilityReader({
       }
     };
     const operation = async () => {
-      const binding = await current();
       const source = suppliedSource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
+      const binding = await current();
       check();
       if (!source.fetchHomeworkActivity || !source.fetchCoursePage || !source.fetchStudentSubmissionList) unavailable();
       const assignmentSource: LmsReadonlySource = {

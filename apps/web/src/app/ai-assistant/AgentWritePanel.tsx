@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { useEffect, useRef, useState } from 'react';
 import {
   ASSISTANT_PERMISSIONS_SETTINGS_HREF,
@@ -181,13 +181,13 @@ function ScopedAgentWritePanel({ proposal, userId, schoolId, groupId, onComplete
               <strong>{isRepair ? DORM_REPAIR_COPY.assistantWriteSuccess : isWashingCancellation ? '洗衣預約已取消' : '伺服器已確認執行成功'}</strong>
               {reference && <p>紀錄編號：{reference}</p>}
               {isRepair && <p>{DORM_REPAIR_COPY.assistantSavedMemo}</p>}
-              {path && <Link href={path}>前往服務頁面核對紀錄</Link>}
+              {path && <AssistantReplyLink href={path}>前往服務頁面核對紀錄</AssistantReplyLink>}
             </div>
           ) : permissionDenied ? (
             <div className={styles.actionWarning} role="alert">
               <strong>設定已關閉此寫入動作</strong>
               <p style={{ whiteSpace: 'pre-line' }}>{permissionDenied}</p>
-              <Link href={ASSISTANT_PERMISSIONS_SETTINGS_HREF}>前往設定</Link>
+              <AssistantReplyLink href={ASSISTANT_PERMISSIONS_SETTINGS_HREF}>前往設定</AssistantReplyLink>
             </div>
           ) : result || uncertain ? (
             <div className={styles.actionWarning} role="alert">
@@ -198,7 +198,7 @@ function ScopedAgentWritePanel({ proposal, userId, schoolId, groupId, onComplete
                   : isWashingCancellation ? '請重新查詢洗衣預約，或到宿舍頁核對紀錄，避免重複送出。'
                     : '請先到對應服務頁面查核，避免重複送出。'}
               </p>
-              {path && <Link href={path}>查看服務紀錄</Link>}
+              {path && <AssistantReplyLink href={path}>查看服務紀錄</AssistantReplyLink>}
             </div>
           ) : (
             <div className={styles.actionControls}>

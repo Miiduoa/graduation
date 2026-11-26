@@ -1,7 +1,7 @@
 .screen {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: clamp(20px, 3vw, 32px);
   width: 100%;
   min-width: 0;
 }
@@ -13,17 +13,15 @@
   flex-wrap: wrap;
   gap: 8px 16px;
   margin-bottom: 0;
-  padding-block: 4px 8px;
+  padding-block: 4px 14px;
+  border-bottom: 1px solid var(--border);
 }
 
 .title {
   margin: 0;
   color: var(--text);
-  /* Apply the app's heading preference after the responsive size, including its fluid range. */
-  font-size: calc(clamp(1.75rem, 3vw, 2.25rem) + var(--font-h1-size) - 1.5rem);
-  line-height: 1.2;
-  font-weight: 700;
-  letter-spacing: -0.035em;
+  font: 600 var(--page-title-size) / 1.2 var(--font-heading);
+  letter-spacing: -0.025em;
 }
 
 .date,
@@ -61,10 +59,8 @@
   color: var(--muted);
   font-size: var(--font-body-size);
   line-height: 1.7;
-  padding: 16px 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
+  padding-block: 10px;
+  border-bottom: 1px solid var(--border);
 }
 
 .dayStatus p {
@@ -78,10 +74,113 @@
   color: var(--brand);
 }
 
+.reminder {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 20px;
+  border-inline-start: 3px solid var(--brand);
+  background: var(--bg-soft);
+  font-size: var(--font-body-size);
+}
+
+.reminderKind {
+  margin: 0;
+  color: var(--brand);
+  font-size: calc(var(--font-body-sm-size) - 0.0625rem);
+  line-height: 1.5;
+  font-weight: 650;
+}
+
+.reminderTitle,
+.reminderReason {
+  margin: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.reminderTitle {
+  color: var(--text);
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.reminderReason {
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+  line-height: 1.6;
+}
+
+.reminderLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding-block: 8px;
+  color: var(--brand);
+  font-size: var(--font-body-sm-size);
+  font-weight: 600;
+  text-underline-offset: 4px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reminderLink:hover {
+    text-decoration: underline;
+  }
+}
+
+@media (max-width: 600px) {
+  .reminder {
+    padding: 12px 18px;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .reminder {
+    border-color: var(--border-strong);
+  }
+}
+
+@media (forced-colors: active) {
+  .reminder {
+    border-color: CanvasText;
+    border-inline-start-color: Highlight;
+  }
+}
+
+.conflict {
+  display: grid;
+  gap: 6px;
+  padding: 16px 20px;
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  font-size: var(--font-body-size);
+}
+
+.conflict p {
+  margin: 0;
+}
+
+.conflictSource {
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+}
+
+.conflictLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
 .flow {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 32px;
   width: 100%;
   min-width: 0;
 }
@@ -101,12 +200,10 @@
   container-type: inline-size;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
-  padding: 18px 24px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
+  padding-block: 8px 18px;
+  border-top: 1px solid var(--border-strong);
   font-size: var(--font-body-size);
 }
 
@@ -124,9 +221,9 @@
   min-height: 44px;
   margin: 0;
   color: var(--text);
-  font-size: var(--font-body-size);
-  line-height: 1.5;
-  font-weight: 650;
+  font-size: var(--font-h2-size);
+  line-height: 1.4;
+  font-weight: 600;
 }
 
 .sectionLink {
@@ -138,10 +235,9 @@
 }
 
 .list {
-  margin: 0 -12px;
+  margin: 0;
   padding: 0;
   list-style: none;
-  border-top: 0;
 }
 
 .list > li + li {
@@ -156,7 +252,7 @@
   min-width: 0;
   width: 100%;
   padding: 16px 12px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-xs);
   color: inherit;
   background: transparent;
   text-decoration: none;
@@ -271,8 +367,9 @@
 }
 
 .priority {
+  border-inline-start: 3px solid var(--brand);
+  border-radius: 0;
   background: var(--accent-soft);
-  border-radius: var(--radius);
 }
 
 .list > li.priority + li,
@@ -442,7 +539,7 @@
     display: grid;
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
     align-items: start;
-    column-gap: 20px;
+    column-gap: clamp(32px, 5vw, 76px);
   }
 
   .notifications {
@@ -461,10 +558,10 @@
     gap: 20px;
   }
   .section {
-    padding: 12px 18px;
+    padding-block: 6px 10px;
   }
   .flow {
-    gap: 14px;
+    gap: 20px;
   }
 }
 

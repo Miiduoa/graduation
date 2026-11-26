@@ -1,15 +1,17 @@
 import React from 'react';
-import { AccessibilityInfo, Linking } from 'react-native';
+import { AccessibilityInfo, Appearance, Linking, Text } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ThemeProvider } from '../state/theme';
+import { ThemeProvider, useThemeMode } from '../state/theme';
 import { ThemePreviewScreen } from '../screens/ThemePreviewScreen';
 import { AccessibilitySettingsScreen } from '../screens/AccessibilitySettingsScreen';
 import { HelpScreen } from '../screens/HelpScreen';
 import { LanguageSettingsScreen } from '../screens/LanguageSettingsScreen';
 import { I18nProvider } from '../i18n';
-import { applyTheme } from '../ui/theme';
+import { PreferencesProvider, usePreferences } from '../state/preferences';
+import { applyTheme, getCurrentTheme } from '../ui/theme';
 
+jest.unmock('react-native/Libraries/Utilities/useColorScheme');
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
 jest.mock('../services/release', () => ({ getLegalUrl: () => null }));
@@ -35,23 +37,129 @@ beforeEach(async () => {
 });
 afterEach(() => jest.restoreAllMocks());
 
-test('appearance changes the real theme and restores the saved choice on the next visit', async () => {
+function deviceMode(initial: 'light' | 'dark') {
+  let current = initial;
+  const listeners = new Set<(event: { colorScheme: 'light' | 'dark' }) => void>();
+  jest.spyOn(Appearance, 'getColorScheme').mockImplementation(() => current);
+  jest.spyOn(Appearance, 'addChangeListener').mockImplementation((listener) => {
+    listeners.add(listener);
+    return {
+      remove: () => {
+        listeners.delete(listener);
+      },
+    };
+  });
+  return (next: 'light' | 'dark') =>
+    act(() => {
+      current = next;
+      listeners.forEach((notify) => notify({ colorScheme: next }));
+    });
+}
+
+test('fresh appearance follows the system without saving the resolved color; manual choices persist', async () => {
+  const changeDevice = deviceMode('dark');
+  const view = render(wrap(<ThemePreviewScreen navigation={navigation} />));
+  await act(async () => {});
+  const radio = (name: string) => view.getByRole('radio', { name });
+  expect(radio('跟隨系統')).toHaveAccessibilityState({ checked: true });
+  expect(getCurrentTheme().mode).toBe('dark');
+  changeDevice('light');
+  expect(getCurrentTheme().mode).toBe('light');
+  expect(await AsyncStorage.getItem('campus.themeMode.v2')).toBeNull();
+  fireEvent.press(radio('深色'));
+  changeDevice('dark');
+  changeDevice('light');
+  expect(getCurrentTheme().mode).toBe('dark');
+  expect(radio('深色')).toHaveAccessibilityState({ checked: true });
+  view.unmount();
+
+  const restored = render(wrap(<ThemePreviewScreen navigation={navigation} />));
+  await waitFor(() =>
+    expect(restored.getByRole('radio', { name: '深色' })).toHaveAccessibilityState({
+      checked: true,
+    }),
+  );
+  fireEvent.press(restored.getByRole('radio', { name: '跟隨系統' }));
+  expect(getCurrentTheme().mode).toBe('light');
+  changeDevice('dark');
+  expect(getCurrentTheme().mode).toBe('dark');
+  await waitFor(() =>
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith('campus.themeMode.v2', 'system'),
+  );
+});
+
+test('legacy light takes priority over general preferences; import, export and reset share the active mode', async () => {
+  deviceMode('dark');
+  await AsyncStorage.setItem('@user_preferences', JSON.stringify({ appearanceMode: 'dark' }));
+  await AsyncStorage.setItem('campus.themeMode.v2', 'light');
+  let prefs!: ReturnType<typeof usePreferences>;
+  function Probe() {
+    prefs = usePreferences();
+    const { mode, appearanceMode } = useThemeMode();
+    return <Text>{[mode, appearanceMode, prefs.preferences.appearanceMode].join('/')}</Text>;
+  }
+  const view = render(
+    wrap(
+      <PreferencesProvider>
+        <Probe />
+      </PreferencesProvider>,
+    ),
+  );
+  await waitFor(() => expect(view.getByText('light/light/light')).toBeTruthy());
+  expect(JSON.parse(await prefs.exportPreferences()).appearanceMode).toBe('light');
+  await act(() => prefs.importPreferences(JSON.stringify({ appearanceMode: 'dark' })));
+  expect(view.getByText('dark/dark/dark')).toBeTruthy();
+  await act(() => prefs.resetToDefaults());
+  expect(view.getByText('dark/system/system')).toBeTruthy();
+  expect(JSON.parse(await prefs.exportPreferences()).appearanceMode).toBe('system');
+});
+
+test('a general preference from an older settings export is honored if the standalone key is absent', async () => {
+  deviceMode('dark');
+  await AsyncStorage.setItem('@user_preferences', JSON.stringify({ appearanceMode: 'light' }));
   const view = render(wrap(<ThemePreviewScreen navigation={navigation} />));
   await waitFor(() =>
-    expect(AsyncStorage.setItem).toHaveBeenCalledWith('campus.themeMode.v2', 'light'),
+    expect(view.getByRole('radio', { name: '淺色' })).toHaveAccessibilityState({ checked: true }),
   );
+  expect(getCurrentTheme().mode).toBe('light');
+  expect(await AsyncStorage.getItem('campus.themeMode.v2')).toBeNull();
+});
+
+test('a late storage read cannot revert a selection made in the open settings screen', async () => {
+  deviceMode('light');
+  const pending = deferred<string | null>();
+  jest.spyOn(AsyncStorage, 'getItem').mockImplementationOnce(() => pending.promise);
+  const view = render(wrap(<ThemePreviewScreen navigation={navigation} />));
+  await act(async () => {});
   fireEvent.press(view.getByRole('radio', { name: '深色' }));
+  await act(async () => {
+    pending.resolve('light');
+  });
   expect(view.getByRole('radio', { name: '深色' })).toHaveAccessibilityState({ checked: true });
-  await waitFor(() =>
-    expect(AsyncStorage.setItem).toHaveBeenCalledWith('campus.themeMode.v2', 'dark'),
-  );
+  expect(getCurrentTheme().mode).toBe('dark');
+});
+
+test('serializes rapid selections so remounting cannot restore the slower write', async () => {
+  deviceMode('light');
+  const view = render(wrap(<ThemePreviewScreen navigation={navigation} />));
+  await act(async () => {});
+  const first = deferred<void>();
+  jest.mocked(AsyncStorage.setItem).mockImplementationOnce(() => first.promise);
+  fireEvent.press(view.getByRole('radio', { name: '深色' }));
+  fireEvent.press(view.getByRole('radio', { name: '跟隨系統' }));
   view.unmount();
-  applyTheme('light');
-  const next = render(wrap(<ThemePreviewScreen navigation={navigation} />));
-  await waitFor(() =>
-    expect(next.getByRole('radio', { name: '深色' })).toHaveAccessibilityState({ checked: true }),
-  );
-  expect(next.queryByText(/HEX|元件預覽|學校 ID|mock/)).toBeNull();
+
+  const restored = render(wrap(<ThemePreviewScreen navigation={navigation} />));
+  await act(async () => {});
+  expect(AsyncStorage.setItem).toHaveBeenCalledWith('campus.themeMode.v2', 'dark');
+  expect(AsyncStorage.setItem).not.toHaveBeenCalledWith('campus.themeMode.v2', 'system');
+  await act(async () => {
+    first.resolve();
+  });
+  expect(await AsyncStorage.getItem('campus.themeMode.v2')).toBe('system');
+  expect(restored.getByRole('radio', { name: '跟隨系統' })).toHaveAccessibilityState({
+    checked: true,
+  });
 });
 
 test('help uses actual version and feedback route, with searchable answers and no invented support details', async () => {

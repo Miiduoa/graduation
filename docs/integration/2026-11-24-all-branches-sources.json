@@ -1,0 +1,124 @@
+{
+  "repository": "Miiduoa/graduation",
+  "captured_at": "2026-11-24T01:55:02Z",
+  "captured_at_taipei": "2026-11-24T09:55:02+08:00",
+  "base_main": "15bdca30796646d93263ddf8442eca248aa196b4",
+  "previous_integration": "370fc7b4acdb90ad4a1590a1f66ee657822899f5",
+  "branches": [
+    {
+      "branch": "dependabot/npm_and_yarn/backend/functions/functions-patch-minor-fb4b230888",
+      "sha": "1ba40c96fcc8f3f1f036c2de74fc336355e76811",
+      "pull_request": 746
+    },
+    {
+      "branch": "dependabot/pip/backend/ai-server/ai-server-pip-patch-minor-db01d85267",
+      "sha": "1445008c13c617e886f4329794c4e357c4d0ce96",
+      "pull_request": 747
+    },
+    {
+      "branch": "dependabot/pip/backend/ai-server/numpy-gte-2.5.5",
+      "sha": "cceb31073a6fa9b548e6f9459cf37abcd22c5008",
+      "pull_request": 748
+    },
+    {
+      "branch": "feat/agent-role-orchestration-20261123",
+      "sha": "29eb04f58238c388123d3408cd8250cb7270e719",
+      "pull_request": 751
+    },
+    {
+      "branch": "feat/agent-washing-cancellation-cloud-20261117",
+      "sha": "3205c5a88bfe6f4f325a8a7b2b994cec637eea8a",
+      "pull_request": 703
+    },
+    {
+      "branch": "feat/calendar-day-flow-20261123",
+      "sha": "5646e7197e40fe19ece15e016282bcda506d726a",
+      "pull_request": 752
+    },
+    {
+      "branch": "feat/merchant-workspace-continuity-20261123",
+      "sha": "d45d0405e8b2295a80b6bceb529f63ad4bcada40",
+      "pull_request": 750
+    },
+    {
+      "branch": "feat/mobile-coursework-review-20261124",
+      "sha": "b87d54a47ff0806aca14ddcaec57dc98393e069e",
+      "pull_request": 760
+    },
+    {
+      "branch": "feat/nuni-course-continuity-20261123",
+      "sha": "f19e329bb80fd708d4af0eac9fc1f1c0f24d996c",
+      "pull_request": 755
+    },
+    {
+      "branch": "feat/nuni-first-value-20261123",
+      "sha": "96e84d857cf9598ee959f8a736e7a788bedcca7e",
+      "pull_request": 757
+    },
+    {
+      "branch": "feat/nuni-interaction-continuity-20261123",
+      "sha": "7ca15911ee11899efea147843d9984af5197e6de",
+      "pull_request": 756
+    },
+    {
+      "branch": "feat/nuni-system-experience-20261123",
+      "sha": "21547d426144311ba8babc5828f26bff484b8205",
+      "pull_request": 754
+    },
+    {
+      "branch": "feat/nuni-task-flow-20261121",
+      "sha": "04aaccd2cfe6e9966bf8f1e071cb9c0c4ba9dcd1",
+      "pull_request": 739
+    },
+    {
+      "branch": "feat/tronclass-native-submit-20261113",
+      "sha": "5f8c016cffcb60cbc0d6d7ff3782577d5778fcf4",
+      "pull_request": 616
+    },
+    {
+      "branch": "fix/campus-spatial-offscreen-webgl-start-20261119",
+      "sha": "319df2f48bcd81afaa6f3bb510dbb94737108192",
+      "pull_request": 722
+    },
+    {
+      "branch": "fix/mobile-agent-exact-homework-handoff-20261122",
+      "sha": "a926543cca8d1e61a9d1c1920b5b6bca9f715d71",
+      "pull_request": 741
+    },
+    {
+      "branch": "fix/mobile-board-subscribe-pending-20261120",
+      "sha": "0759938b30860382073b33904255b6c125720d35",
+      "pull_request": 729
+    },
+    {
+      "branch": "fix/multi-school-web-catalog-freshness-20261123",
+      "sha": "8aefa6f4850f06648544cdf0d5500c10adeded3f",
+      "pull_request": 749
+    },
+    {
+      "branch": "fix/providence-classroom-bilingual-catalog-20261124",
+      "sha": "b46782fd23226758b92cce056641bc7e5981aef1",
+      "pull_request": 758
+    },
+    {
+      "branch": "integration/all-branches-20261121",
+      "sha": "a3447cb016b7180d976884468e1c497a0cbfa7ff",
+      "pull_request": 738
+    },
+    {
+      "branch": "integration/all-branches-20261123",
+      "sha": "370fc7b4acdb90ad4a1590a1f66ee657822899f5",
+      "pull_request": 753
+    },
+    {
+      "branch": "integration/campus-services-20261106",
+      "sha": "8e07b78a90c751cc616c761a19580f86a0e44775",
+      "pull_request": 515
+    },
+    {
+      "branch": "main",
+      "sha": "15bdca30796646d93263ddf8442eca248aa196b4",
+      "pull_request": null
+    }
+  ]
+}

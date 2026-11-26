@@ -190,11 +190,70 @@ describe('mobile navigation inset', () => {
     vi.stubGlobal('matchMedia', undefined);
     vi.stubGlobal('innerWidth', 760);
     const nav = measuredNavigation(100);
-    start(nav.element);
+    const remove = vi.spyOn(window, 'removeEventListener');
+    const add = vi.spyOn(window, 'addEventListener');
+    const release = start(nav.element);
     expect(value()).toBe('100px');
     vi.stubGlobal('innerWidth', 761);
     window.dispatchEvent(new Event('resize'));
     expect(value()).toBe('');
+    release();
+    expect(remove).toHaveBeenCalledWith('resize', add.mock.calls[0][1]);
+  });
+
+  it('tracks breakpoint changes through the legacy media listener and removes it', () => {
+    const addListener = vi.fn<(listener: () => void) => void>();
+    const removeListener = vi.fn();
+    vi.stubGlobal('matchMedia', () => ({
+      get matches() {
+        return mobile;
+      },
+      addListener,
+      removeListener,
+    }));
+    const nav = measuredNavigation(100);
+    const release = start(nav.element);
+    expect(value()).toBe('100px');
+    const [change] = addListener.mock.calls[0];
+    mobile = false;
+    change();
+    expect(value()).toBe('');
+    release();
+    expect(removeListener).toHaveBeenCalledWith(change);
+  });
+
+  it('uses window resize when the media listener cannot be removed', () => {
+    const addListener = vi.fn();
+    vi.stubGlobal('matchMedia', () => ({ matches: true, addListener }));
+    const add = vi.spyOn(window, 'addEventListener');
+    const remove = vi.spyOn(window, 'removeEventListener');
+    const nav = measuredNavigation(100);
+    const release = start(nav.element);
+    expect(addListener).not.toHaveBeenCalled();
+    nav.resize(120);
+    window.dispatchEvent(new Event('resize'));
+    expect(value()).toBe('120px');
+    release();
+    expect(remove).toHaveBeenCalledWith('resize', add.mock.calls[0][1]);
+    expect(value()).toBe('');
+  });
+
+  it('rolls back all registrations when a media subscription fails', () => {
+    const addListener = vi.fn(() => {
+      throw new TypeError('Media subscription failed');
+    });
+    const removeListener = vi.fn();
+    vi.stubGlobal('matchMedia', () => ({ matches: true, addListener, removeListener }));
+    const add = vi.spyOn(window, 'addEventListener');
+    const remove = vi.spyOn(window, 'removeEventListener');
+    const nav = measuredNavigation(100);
+    const release = start(nav.element);
+    expect(removeListener).toHaveBeenCalledWith(add.mock.calls[0][1]);
+    expect(remove).toHaveBeenCalledWith('resize', add.mock.calls[0][1]);
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(value()).toBe('');
+    release();
+    expect(disconnect).toHaveBeenCalledOnce();
   });
 
   it('ignores queued resize and media events after release', () => {

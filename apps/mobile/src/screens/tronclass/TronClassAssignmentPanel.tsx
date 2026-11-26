@@ -68,6 +68,7 @@ export function TronClassAssignmentPanel({
   client,
   fileCache,
   revision,
+  studentKey,
   homework,
   initialDraft,
   onDraftChange,
@@ -80,6 +81,7 @@ export function TronClassAssignmentPanel({
   client: NativeTronClassClient;
   fileCache: NativeTronClassFileCache;
   revision: string;
+  studentKey: string | null;
   homework: TronClassHomework;
   initialDraft?: TronClassLocalDraft;
   onDraftChange(draft: TronClassLocalDraft | null): void;
@@ -115,7 +117,7 @@ export function TronClassAssignmentPanel({
   };
   const limits = nativeTronClassLimits(preparation);
   const canSubmit =
-    preparation?.canSubmit === true && limits.confirmed && !prepareError && journalReady;
+    !!studentKey && preparation?.canSubmit === true && limits.confirmed && !prepareError && journalReady;
   const remember = (nextContent: string, nextFiles: TronClassLocalFile[]) => {
     callbacks.current.onDraftChange(
       nextContent || nextFiles.length
@@ -150,7 +152,7 @@ export function TronClassAssignmentPanel({
     callbacks.current.onSubmitted();
     setError('');
     try {
-      await clearNativeTronClassPending(client.owner, homework.courseId, homework.id, value.operationId);
+      await clearNativeTronClassPending(client.owner, studentKey, homework.courseId, homework.id, value.operationId);
     } catch {
       if (current())
         setNotice('校方結果已確認；裝置上的操作編號尚未清除，再次開啟時仍會核對原紀錄。');
@@ -171,7 +173,7 @@ export function TronClassAssignmentPanel({
       if (failure instanceof NuniError && failure.code === 'TRONCLASS_SUBMISSION_NOT_STARTED') {
         // Only an explicit server verdict can release an uncertain operation.
         try {
-          await clearNativeTronClassPending(client.owner, homework.courseId, homework.id, operationId);
+          await clearNativeTronClassPending(client.owner, studentKey, homework.courseId, homework.id, operationId);
         } catch {
           setError('已確認未送出，但無法更新裝置紀錄。請再次查詢後再編輯。');
           return;
@@ -194,11 +196,10 @@ export function TronClassAssignmentPanel({
     setJournalReady(false);
     try {
       try {
-        operation.current = await readNativeTronClassPending(
-          client.owner,
-          homework.courseId,
-          homework.id,
-        );
+        // Older connections can still preview, but submission requires a verified student key.
+        operation.current = studentKey
+          ? await readNativeTronClassPending(client.owner, studentKey, homework.courseId, homework.id)
+          : null;
         if (!current()) return;
         setJournalReady(true);
         if (operation.current) setPhase('unknown');
@@ -378,7 +379,7 @@ export function TronClassAssignmentPanel({
       }
       const operationId = Crypto.randomUUID();
       try {
-        await saveNativeTronClassPending(client.owner, homework.courseId, homework.id, operationId);
+        await saveNativeTronClassPending(client.owner, studentKey, homework.courseId, homework.id, operationId);
       } catch {
         setJournalReady(false);
         setError('無法保留送出查證編號，這次尚未送出。請重新讀取作業後再試。');
@@ -480,7 +481,7 @@ export function TronClassAssignmentPanel({
         return;
       }
       try {
-        await clearNativeTronClassPending(client.owner, homework.courseId, homework.id, operationId);
+        await clearNativeTronClassPending(client.owner, studentKey, homework.courseId, homework.id, operationId);
       } catch (failure) {
         if (matches()) setError(failure instanceof Error && failure.message === 'PENDING_OPERATION_CONFLICT'
           ? '裝置已有另一筆待查操作，請返回作業清單再開啟，先查證該筆紀錄。'

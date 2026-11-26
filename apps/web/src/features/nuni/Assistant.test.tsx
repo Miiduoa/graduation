@@ -940,6 +940,9 @@ it('saves a scoped recovery card before dispatch and resumes a reload with the o
       reconciliations.push(body);
       return json(receiptFor(card, true));
     }
+    if (url.endsWith('followup')) return json({ version: 1, operation: 'coursework.followup',
+      schoolId: card.schoolId, mutationId: card.mutationId, checkedAt: '2026-11-07T11:00:00.000Z',
+      status: 'not_coursework', calendar: 'unavailable', task: null, source: null, event: card.args });
     return json({ answer: '請核對安排', steps: [], cards: [card] });
   }));
   const first = render(<Assistant />);

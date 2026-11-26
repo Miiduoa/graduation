@@ -27,6 +27,7 @@ import {
 import { clearAllFoodPendingForAccount } from '../state/foodPersistence';
 import { getGoogleCredentialCapability } from '../services/nuniGoogle';
 import { theme } from '../ui/theme';
+import { pageTitleFont } from '../ui/styles';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import type { PreAuthStackParamList } from './preAuthTypes';
 import { NuniCourses } from './nuni/NuniCourses';
@@ -341,8 +342,15 @@ function SignedInWorkspace({
           </Pressable>
         ))}
       </View>
+      {navigation ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="探索這個工作區的 nuni 用法"
+          onPress={() => safeNavigate(navigation, 'Explore', { workContext: tab === 'merchant' ? 'merchant' : 'student' })}
+          style={s.exploreEntry}>
+          <Text style={s.exploreEntryText}>探索更多用法</Text>
+        </Pressable>
+      ) : null}
       {tab === 'food' ? <NuniFood /> : null}
-      {tab === 'courses' ? <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
+      {tab === 'courses' ? <View style={s.courseAction}>
         <Action label="連接 TronClass 與查看校方作業" onPress={() => safeNavigate(navigation, 'TronClassWorkspace')} />
       </View> : null}
       <View
@@ -544,7 +552,6 @@ export function NuniWorkspaceScreen({
   const capability = getGoogleCredentialCapability();
   return (
     <ScrollView testID="nuni-workspace" contentContainerStyle={s.content}>
-      <Text style={s.eyebrow}>nuni</Text>
       <Text accessibilityRole="header" style={s.heading}>
         登入或建立帳號
       </Text>
@@ -585,9 +592,11 @@ export function NuniWorkspaceScreen({
 
 const createStyles = () =>
   StyleSheet.create({
+    exploreEntry: { minHeight: 44, paddingHorizontal: 20, paddingVertical: 10, alignSelf: 'flex-end', justifyContent: 'center' },
+    exploreEntryText: { color: theme.colors.accent, fontSize: 14, lineHeight: 22 },
     page: { flex: 1, backgroundColor: theme.colors.bg },
     content: { flexGrow: 1, padding: 24, gap: 18, paddingBottom: 48 },
-    scopeNotice: { paddingHorizontal: 20, paddingTop: 8, color: theme.colors.text },
+    scopeNotice: { paddingHorizontal: 20, paddingTop: 8, color: theme.colors.text, fontSize: 14, lineHeight: 22 },
     center: {
       flex: 1,
       backgroundColor: theme.colors.bg,
@@ -595,29 +604,26 @@ const createStyles = () =>
       padding: 28,
       gap: 18,
     },
-    heading: { color: theme.colors.text, fontSize: 26, lineHeight: 36, fontWeight: '600' },
+    heading: { fontFamily: pageTitleFont, color: theme.colors.text, fontSize: 26, lineHeight: 36, fontWeight: '600' },
     title: { color: theme.colors.text, fontSize: 17, lineHeight: 25, fontWeight: '600' },
-    eyebrow: { color: theme.colors.muted, fontSize: 12, letterSpacing: 2 },
-    body: { color: theme.colors.textSecondary, fontSize: 15, lineHeight: 25 },
+    body: { color: theme.colors.textSecondary, fontSize: 15, lineHeight: 24 },
     note: { color: theme.colors.muted, fontSize: 13, lineHeight: 22 },
     error: { color: theme.colors.danger, fontSize: 15, lineHeight: 24 },
     input: {
       minHeight: 48,
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: 5,
+      borderColor: theme.colors.muted,
+      borderRadius: 8,
       padding: 12,
       color: theme.colors.text,
       backgroundColor: theme.colors.bg,
       fontSize: 16,
     },
     panel: {
-      padding: 20,
-      gap: 16,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: 8,
-      backgroundColor: theme.colors.focusSurface,
+      paddingTop: 16,
+      gap: 14,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
     },
     membership: {
       gap: 4,
@@ -630,27 +636,28 @@ const createStyles = () =>
       justifyContent: 'center',
       alignItems: 'center',
       backgroundColor: theme.colors.accent,
-      borderRadius: 5,
+      borderRadius: 8,
       padding: 14,
     },
     buttonText: { color: theme.colors.onAccent, fontSize: 15, fontWeight: '600' },
     disabled: { opacity: 0.5 },
     tabs: {
       flexDirection: 'row',
-      padding: 12,
-      gap: 8,
+      paddingHorizontal: 12,
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.border,
     },
     tab: {
       flex: 1,
-      minHeight: 46,
+      minHeight: 48,
       justifyContent: 'center',
       alignItems: 'center',
-      borderRadius: 5,
+      borderBottomWidth: 2,
+      borderBottomColor: 'transparent',
     },
-    selectedTab: { backgroundColor: theme.colors.accent },
-    tabText: { color: theme.colors.text, fontSize: 15 },
-    selectedTabText: { color: theme.colors.onAccent, fontWeight: '600' },
+    selectedTab: { borderBottomColor: theme.colors.accent },
+    tabText: { color: theme.colors.textSecondary, fontSize: 15 },
+    selectedTabText: { color: theme.colors.text, fontWeight: '600' },
+    courseAction: { paddingHorizontal: 16, paddingVertical: 8 },
     hidden: { display: 'none' },
   });

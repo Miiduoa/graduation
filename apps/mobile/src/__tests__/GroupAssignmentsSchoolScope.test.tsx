@@ -38,11 +38,16 @@ jest.mock('../ui/navigationTheme', () => ({
 
 const courses = [{ id: 101, name: '靜宜個人課程' }] as TCCourse[];
 beforeEach(() => {
-  jest.resetAllMocks();
+  // Reset this suite's service responses without erasing native API contracts
+  // such as AccessibilityInfo's Promise and subscription return values.
+  jest.clearAllMocks();
+  jest.mocked(getAnyCachedTCCourses).mockReset();
+  jest.mocked(refreshTCCourses).mockReset();
+  jest.mocked(tcFetchHomeworkActivities).mockReset();
+  jest.mocked(webBrowserOpenWithPuTronClassGate).mockReset().mockResolvedValue(true);
   mockAuth.profile = { uid: 'alice', schoolId: 'pu' };
   mockSchool = { id: 'pu', name: '靜宜大學' };
   mockSelected = 'pu';
-  jest.mocked(webBrowserOpenWithPuTronClassGate).mockResolvedValue(true);
 });
 
 test('other campuses open their own LMS and never read the device-wide Providence course cache', async () => {

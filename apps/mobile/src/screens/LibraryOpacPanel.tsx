@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -19,6 +20,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { PuWebView } from '../ui/PuWebView';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import { Button } from '../ui/components';
@@ -218,7 +220,9 @@ function DetailFieldRow(props: { field: OpacBookDetailField }) {
 
   if (!field.url) return content;
   return (
-    <Pressable onPress={() => void webBrowserOpenWithPuTronClassGate(field.url!)}>{content}</Pressable>
+    <Pressable onPress={() => void webBrowserOpenWithPuTronClassGate(field.url!)}>
+      {content}
+    </Pressable>
   );
 }
 
@@ -234,12 +238,13 @@ function DetailModal(props: {
 }) {
   const { item, detail, loading, onClose, onOpenOfficial, onBorrow, isBorrowed, borrowDisabled } =
     props;
+  const reducedMotion = useReducedMotion();
   const current = detail ?? item;
   const borrowed = item && isBorrowed ? isBorrowed(item) : false;
   return (
     <Modal
       visible={!!item}
-      animationType="slide"
+      animationType={reducedMotion ? 'none' : 'slide'}
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
@@ -259,7 +264,12 @@ function DetailModal(props: {
           <Text style={{ flex: 1, color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
             館藏書目
           </Text>
-          <Pressable onPress={onClose} hitSlop={10}>
+          <Pressable
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="關閉館藏書目"
+            style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
+          >
             <Ionicons name="close" size={24} color={theme.colors.text} />
           </Pressable>
         </View>
@@ -391,6 +401,7 @@ export type LibraryOpacPanelProps = {
   variant: 'embedded' | 'fullscreen';
   /** 全螢幕進入時預填 */
   initialQuery?: string;
+  autoSearch?: boolean;
   /** 內嵌時可由父層控制輸入框文字 */
   query?: string;
   onQueryChange?: (q: string) => void;
@@ -407,6 +418,7 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
   const {
     variant,
     initialQuery = '',
+    autoSearch = false,
     query: controlledQuery,
     onQueryChange,
     bottomInset = 0,
@@ -417,9 +429,7 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
   } = props;
 
   const [internalQuery, setInternalQuery] = useState(initialQuery);
-  useEffect(() => {
-    if (variant === 'fullscreen' && initialQuery) setInternalQuery(initialQuery);
-  }, [variant, initialQuery]);
+  const [viewportHeight, setViewportHeight] = useState(0);
 
   const keyword = controlledQuery !== undefined ? controlledQuery : internalQuery;
   const setKeyword = (t: string) => {
@@ -428,6 +438,14 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
   };
 
   const [field, setField] = useState<OpacSearchFieldKey>('FullText');
+  const activeSearch = React.useRef<{
+    query: string;
+    field: OpacSearchFieldKey;
+    controller: AbortController;
+  } | null>(null);
+  const [submitted, setSubmitted] = useState<{ query: string; field: OpacSearchFieldKey } | null>(
+    null,
+  );
   const [loading, setLoading] = useState(false);
   const [reachable, setReachable] = useState<boolean | null>(null);
   const [hits, setHits] = useState<OpacSearchHit[]>([]);
@@ -457,14 +475,30 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
     };
   }, []);
 
-  const runSearch = useCallback(async () => {
+  const runSearch = useCallback(async (value: string, searchField: OpacSearchFieldKey) => {
+    const query = value.trim();
+    if (!query) return;
+    const previous = activeSearch.current;
+    if (
+      previous?.query === query &&
+      previous.field === searchField &&
+      !previous.controller.signal.aborted
+    )
+      return;
+    previous?.controller.abort();
+    const request = new AbortController();
+    activeSearch.current = { query, field: searchField, controller: request };
+    detailRequestId.current += 1;
+    setSubmitted({ query, field: searchField });
+    setHits([]);
     setLoading(true);
     setHint(null);
     setWebFallbackUri(null);
     setSelectedHit(null);
     setSelectedDetail(null);
     try {
-      const res = await searchOpacBiblios(keyword, field);
+      const res = await searchOpacBiblios(query, searchField, { signal: request.signal });
+      if (request.signal.aborted) return;
       setHits(res.hits);
       const msg = res.error ?? null;
       const blocked =
@@ -475,18 +509,42 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
           msg.includes('502') ||
           msg.includes('503') ||
           msg.includes('504'));
-      if (blocked && keyword.trim()) {
-        setWebFallbackUri(buildExternalFallbackUrl(keyword, field));
-        setHint(
-          '館藏 API 暫時無法回應，已於下方載入官方 WebPac 搜尋頁。請先在站內頁面查看結果；App 會在 API 恢復後顯示可借書的原生結果。',
-        );
+      if (blocked) {
+        setWebFallbackUri(buildExternalFallbackUrl(query, searchField));
+        setHint('暫時無法取得館藏資料，可在下方的圖書館官方頁面繼續查詢。');
       } else {
         setHint(msg);
       }
+    } catch {
+      if (!request.signal.aborted) setHint('館藏查詢暫時無法連線，請再試一次。');
     } finally {
-      setLoading(false);
+      if (!request.signal.aborted) {
+        activeSearch.current = null;
+        setLoading(false);
+      }
     }
-  }, [keyword, field]);
+  }, []);
+
+  useEffect(() => {
+    if (variant === 'fullscreen' && autoSearch && initialQuery.trim()) {
+      void runSearch(initialQuery, 'FullText');
+    }
+    return () => {
+      activeSearch.current?.controller.abort();
+      detailRequestId.current += 1;
+    };
+  }, [autoSearch, initialQuery, runSearch, variant]);
+
+  const currentPending =
+    loading && submitted?.query === keyword.trim() && submitted.field === field;
+  const searchDisabled = !keyword.trim() || currentPending;
+  const submit = () => {
+    if (searchDisabled) return;
+    Keyboard.dismiss();
+    void runSearch(keyword, field);
+  };
+  const submittedLabel = OPAC_SEARCH_FIELDS.find((f) => f.key === submitted?.field)?.label;
+  const resultTitle = submitted ? `${submittedLabel}「${submitted.query}」` : '';
 
   const fieldLabel = useMemo(
     () => OPAC_SEARCH_FIELDS.find((f) => f.key === field)?.label ?? field,
@@ -515,33 +573,21 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
     }
   }, []);
 
+  // Recovery actions belong to the displayed result while another query is being edited.
+  const fallbackQuery = hint && submitted ? submitted.query : keyword.trim();
+  const fallbackField = hint && submitted ? submitted.field : field;
+  const fallbackUrl = () => buildExternalFallbackUrl(fallbackQuery, fallbackField);
   const openFallbackSearch = () => {
-    void webBrowserOpenWithPuTronClassGate(buildExternalFallbackUrl(keyword, field));
+    void webBrowserOpenWithPuTronClassGate(fallbackUrl());
   };
 
   const openHome = () => {
     void webBrowserOpenWithPuTronClassGate(buildLibraryOpacHomeUrl());
   };
 
-  return (
-    <View style={{ flex: variant === 'fullscreen' ? 1 : undefined, gap: 8 }}>
-      <DetailModal
-        item={selectedHit}
-        detail={selectedDetail}
-        loading={detailLoading}
-        onClose={() => {
-          detailRequestId.current += 1;
-          setSelectedHit(null);
-          setSelectedDetail(null);
-          setDetailLoading(false);
-        }}
-        onOpenOfficial={openOfficialDetail}
-        onBorrow={onBorrowHit}
-        isBorrowed={isBorrowed}
-        borrowDisabled={borrowDisabled}
-      />
-
-      {reachable === false ? (
+  const searchHeader = (
+    <View style={{ gap: 8 }}>
+      {reachable === false && !submitted ? (
         <View
           style={{
             padding: 10,
@@ -552,7 +598,7 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
           }}
         >
           <Text style={{ color: theme.colors.text, fontSize: 12, lineHeight: 18 }}>
-            目前無法連到圖書館站台（HEAD 檢查失敗）。仍可嘗試查詢，或直接改以瀏覽器開啟 WebPac。
+            目前無法連到圖書館網站。你仍可以查詢館藏，或稍後再試。
           </Text>
         </View>
       ) : null}
@@ -560,14 +606,15 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
       <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
         <TextInput
           value={keyword}
+          accessibilityLabel="館藏關鍵字"
           onChangeText={setKeyword}
           placeholder={`${fieldLabel}搜尋`}
           placeholderTextColor={theme.colors.muted}
           returnKeyType="search"
-          onSubmitEditing={() => void runSearch()}
+          onSubmitEditing={submit}
           style={{
             flex: 1,
-            height: 44,
+            minHeight: 44,
             borderWidth: 1,
             borderColor: theme.colors.border,
             borderRadius: 11,
@@ -578,24 +625,29 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
           }}
         />
         <Pressable
-          disabled={loading}
-          onPress={() => void runSearch()}
+          disabled={searchDisabled}
+          accessibilityState={{ disabled: searchDisabled, busy: currentPending }}
+          onPress={submit}
           accessibilityRole="button"
           accessibilityLabel="查詢館藏"
           style={({ pressed }) => ({
             width: 44,
             height: 44,
             borderRadius: 11,
-            backgroundColor: loading ? theme.colors.disabledBg : theme.colors.accent,
+            backgroundColor: searchDisabled ? theme.colors.disabledBg : theme.colors.accent,
             alignItems: 'center',
             justifyContent: 'center',
-            opacity: pressed && !loading ? 0.86 : 1,
+            opacity: pressed && !searchDisabled ? 0.86 : 1,
           })}
         >
-          {loading ? (
+          {currentPending ? (
             <ActivityIndicator size="small" color={theme.colors.muted} />
           ) : (
-            <Ionicons name="search" size={20} color="#FFFFFF" />
+            <Ionicons
+              name="search"
+              size={20}
+              color={searchDisabled ? theme.colors.disabledText : theme.colors.onAccent}
+            />
           )}
         </Pressable>
         {variant === 'embedded' && onRequestFullscreen ? (
@@ -618,7 +670,12 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
         ) : null}
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 34 }}>
+      <ScrollView
+        horizontal
+        keyboardShouldPersistTaps="handled"
+        showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0, flexShrink: 0 }}
+      >
         <View style={{ flexDirection: 'row', gap: 8, paddingVertical: 2 }}>
           {OPAC_SEARCH_FIELDS.map((f) => {
             const active = field === f.key;
@@ -626,13 +683,17 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
               <Pressable
                 key={f.key}
                 onPress={() => setField(f.key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
                 style={{
-                  paddingHorizontal: 10,
+                  minHeight: 44,
+                  justifyContent: 'center',
+                  paddingHorizontal: 14,
                   paddingVertical: 6,
                   borderRadius: 999,
                   borderWidth: 1,
                   borderColor: active ? theme.colors.accent : theme.colors.border,
-                  backgroundColor: active ? theme.colors.accent + '18' : theme.colors.surface,
+                  backgroundColor: active ? theme.colors.accentSoft : theme.colors.surface,
                 }}
               >
                 <Text
@@ -651,18 +712,21 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
       </ScrollView>
 
       {variant === 'embedded' || hint || webFallbackUri ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 36 }}>
+        <ScrollView
+          horizontal
+          keyboardShouldPersistTaps="handled"
+          showsHorizontalScrollIndicator={false}
+          style={{ flexGrow: 0, flexShrink: 0 }}
+        >
           <View style={{ flexDirection: 'row', gap: 8, paddingVertical: 2 }}>
             <Pressable
-              onPress={() =>
-                keyword.trim()
-                  ? setWebFallbackUri(buildExternalFallbackUrl(keyword, field))
-                  : openHome()
-              }
+              accessibilityRole="button"
+              onPress={() => (fallbackQuery ? setWebFallbackUri(fallbackUrl()) : openHome())}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 6,
+                minHeight: 44,
                 paddingVertical: 8,
                 paddingHorizontal: 10,
                 borderRadius: theme.radius.full,
@@ -675,11 +739,13 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
               </Text>
             </Pressable>
             <Pressable
+              accessibilityRole="link"
               onPress={openFallbackSearch}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 6,
+                minHeight: 44,
                 paddingVertical: 8,
                 paddingHorizontal: 10,
                 borderRadius: theme.radius.full,
@@ -688,15 +754,17 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
             >
               <Ionicons name="open-outline" size={16} color={theme.colors.accent} />
               <Text style={{ color: theme.colors.accent, fontWeight: '600', fontSize: 12 }}>
-                瀏覽器
+                在瀏覽器查看
               </Text>
             </Pressable>
             <Pressable
+              accessibilityRole="link"
               onPress={openHome}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 6,
+                minHeight: 44,
                 paddingVertical: 8,
                 paddingHorizontal: 10,
                 borderRadius: theme.radius.full,
@@ -705,13 +773,22 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
             >
               <Ionicons name="home-outline" size={16} color={theme.colors.muted} />
               <Text style={{ color: theme.colors.muted, fontWeight: '600', fontSize: 12 }}>
-                首頁
+                館藏首頁
               </Text>
             </Pressable>
           </View>
         </ScrollView>
       ) : null}
 
+      {loading ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          numberOfLines={2}
+          style={{ color: theme.colors.muted }}
+        >
+          正在查詢{resultTitle}…
+        </Text>
+      ) : null}
       {hint ? (
         <View
           style={{
@@ -722,7 +799,15 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
             borderColor: theme.colors.border,
           }}
         >
-          <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>{hint}</Text>
+          <Text numberOfLines={2} style={{ color: theme.colors.text, fontWeight: '700' }}>
+            {resultTitle}
+          </Text>
+          <Text
+            accessibilityLiveRegion="polite"
+            style={{ color: theme.colors.text, lineHeight: 21 }}
+          >
+            {hint}
+          </Text>
         </View>
       ) : null}
 
@@ -734,65 +819,84 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
             overflow: 'hidden',
             borderWidth: 1,
             borderColor: theme.colors.border,
-            flex: variant === 'fullscreen' ? 1 : undefined,
-            minHeight: variant === 'fullscreen' ? 260 : undefined,
-            height: variant === 'fullscreen' ? undefined : 400,
+            height:
+              variant === 'fullscreen' && viewportHeight > 0
+                ? Math.round(viewportHeight * 0.75)
+                : 400,
           }}
         >
           <PuWebView
             source={{ uri: webFallbackUri }}
             style={{ flex: 1, backgroundColor: theme.colors.surface }}
             sharedCookiesEnabled
+            nestedScrollEnabled
             {...(Platform.OS === 'android' ? { thirdPartyCookiesEnabled: true } : {})}
           />
         </View>
       ) : null}
 
       {!loading && hits.length > 0 ? (
-        <View
-          style={{
-            flex: variant === 'fullscreen' ? 1 : undefined,
-            minHeight: variant === 'embedded' ? 120 : undefined,
-          }}
+        <Text
+          accessibilityRole="header"
+          accessibilityLiveRegion="polite"
+          numberOfLines={2}
+          style={{ fontWeight: '700', fontSize: 15, color: theme.colors.text, marginBottom: 8 }}
         >
-          <Text
-            style={{ fontWeight: '700', fontSize: 13, color: theme.colors.text, marginBottom: 8 }}
-          >
-            結果（{hits.length} 筆）
-          </Text>
-          {variant === 'fullscreen' ? (
-            <FlatList
-              data={hits}
-              keyExtractor={(item) => item.sid}
-              style={{ flex: 1 }}
-              contentContainerStyle={{ paddingBottom: bottomInset + 8, gap: 10 }}
-              keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => (
-                <HitRow
-                  item={item}
-                  onOpen={() => void openInAppDetail(item)}
-                  onBorrow={onBorrowHit ? () => onBorrowHit(item) : undefined}
-                  borrowed={isBorrowed(item)}
-                  borrowDisabled={borrowDisabled}
-                />
-              )}
-            />
-          ) : (
-            <View style={{ gap: 10, paddingBottom: 8 }}>
-              {hits.map((item) => (
-                <HitRow
-                  key={item.sid}
-                  item={item}
-                  onOpen={() => void openInAppDetail(item)}
-                  onBorrow={onBorrowHit ? () => onBorrowHit(item) : undefined}
-                  borrowed={isBorrowed(item)}
-                  borrowDisabled={borrowDisabled}
-                />
-              ))}
-            </View>
-          )}
-        </View>
+          {resultTitle} · 顯示 {hits.length} 筆
+        </Text>
       ) : null}
+    </View>
+  );
+
+  const renderHit = (item: OpacSearchHit) => (
+    <HitRow
+      key={item.sid}
+      item={item}
+      onOpen={() => void openInAppDetail(item)}
+      onBorrow={onBorrowHit ? () => onBorrowHit(item) : undefined}
+      borrowed={isBorrowed(item)}
+      borrowDisabled={borrowDisabled}
+    />
+  );
+
+  return (
+    <View style={{ flex: variant === 'fullscreen' ? 1 : undefined, gap: 8 }}>
+      <DetailModal
+        item={selectedHit}
+        detail={selectedDetail}
+        loading={detailLoading}
+        onClose={() => {
+          detailRequestId.current += 1;
+          setSelectedHit(null);
+          setSelectedDetail(null);
+          setDetailLoading(false);
+        }}
+        onOpenOfficial={openOfficialDetail}
+        onBorrow={onBorrowHit}
+        isBorrowed={isBorrowed}
+        borrowDisabled={borrowDisabled}
+      />
+      {variant === 'fullscreen' ? (
+        <FlatList
+          data={hits}
+          keyExtractor={(item) => item.sid}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: bottomInset + 8, gap: 10 }}
+          onLayout={(event) => setViewportHeight(event.nativeEvent.layout.height)}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          ListHeaderComponent={searchHeader}
+          renderItem={({ item }) => renderHit(item)}
+        />
+      ) : (
+        <>
+          {searchHeader}
+          {hits.length > 0 ? (
+            <View style={{ gap: 10, minHeight: 120, paddingBottom: 8 }}>{hits.map(renderHit)}</View>
+          ) : null}
+        </>
+      )}
     </View>
   );
 }

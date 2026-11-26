@@ -272,6 +272,20 @@ describe('tronClassScraper', () => {
     expect(https.request).toHaveBeenCalledTimes(2);
   });
 
+  test('legacy homework page keeps HTTP 200 when the activities array is missing', async () => {
+    mockHttpsResponse({ status: 200, body: JSON.stringify({ total: 1 }) });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1)).rejects.toMatchObject({
+      status: 200,
+    });
+  });
+
+  test('integration homework page rejects a 200 body without an activities array', async () => {
+    mockHttpsResponse({ status: 200, body: JSON.stringify({ total: 1 }) });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1, 50, {})).rejects.toMatchObject({
+      code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
+    });
+  });
+
   test('reads a homework page without inventing rows', async () => {
     mockHttpsResponse({
       body: JSON.stringify({
@@ -291,7 +305,7 @@ describe('tronClassScraper', () => {
   test.each([false, true, [], [1], {}, '', ' ', '1e2', '0x10', '-1', '1.5', 'invalid', -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
     'rejects malformed homework totals instead of converting a short page into a complete list: %p', async total => {
       mockHttpsResponse({ body: JSON.stringify({ homework_activities: [], total }) });
-      await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).rejects.toMatchObject({
+      await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, {})).rejects.toMatchObject({
         code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
       });
       expect(https.request).toHaveBeenCalledTimes(1);
@@ -303,32 +317,64 @@ describe('tronClassScraper', () => {
     { page_size: 20 }, { page_size: '20' }, { page_size: false }, { page_size: [50] },
   ])('rejects mismatched homework page metadata before returning its rows: %p', async metadata => {
     mockHttpsResponse({ body: JSON.stringify({ homework_activities: [{ id: 20001 }], total: 1, ...metadata }) });
-    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).rejects.toMatchObject({
+    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, {})).rejects.toMatchObject({
       code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
     });
     expect(https.request).toHaveBeenCalledTimes(1);
   });
 
-  test.each([
-    { homework_activities: [{ id: 20001 }], total: 0 },
-    { homework_activities: Array.from({ length: 51 }, (_, index) => ({ id: 20001 + index })), total: 51 },
-  ])('rejects contradictory or oversized homework pages: %p', async response => {
-    mockHttpsResponse({ body: JSON.stringify(response) });
-    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).rejects.toMatchObject({
+  test('integration rejects a homework page longer than the requested page size', async () => {
+    const homework = Array.from({ length: 51 }, (_, index) => ({ id: 20001 + index }));
+    mockHttpsResponse({ body: JSON.stringify({ homework_activities: homework, total: 51 }) });
+    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, {})).rejects.toMatchObject({
+      code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
+    });
+  });
+
+  test('integration homework page rejects an array longer than the reported total', async () => {
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: [{ id: 20001 }], total: 0, page: 1, page_size: 50 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1, 50, {})).rejects.toMatchObject({
+      code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
+    });
+  });
+
+  test('integration homework page rejects a school page number that differs from the request', async () => {
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: [{ id: 20001 }], total: 1, page: 1, page_size: 50 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 2, 50, {})).rejects.toMatchObject({
       code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
     });
   });
 
   test.each([
-    [{ total: '1', page: '1', page_size: '50' }, 1],
-    [{ total: 1, page: 1, page_size: 50 }, 1],
-    [{}, null],
-    [{ total: null, page: null, page_size: null }, null],
-  ])('preserves supported numeric and absent homework pagination metadata: %p', async (metadata, total) => {
+    [{ total: '1', page: '1', page_size: '50' }, 1, '1', '50'],
+    [{ total: '002', page: '1', page_size: '50' }, 2, '1', '50'],
+    [{ total: '', page: '1', page_size: '50' }, 0, '1', '50'],
+    [{ total: '  ', page: '1', page_size: '50' }, 0, '1', '50'],
+    [{ total: false, page: '1', page_size: '50' }, 0, '1', '50'],
+    [{ total: [], page: '1', page_size: '50' }, 0, '1', '50'],
+    [{ total: [50], page: '1', page_size: '50' }, 50, '1', '50'],
+    [{ total: [[50]], page: '1', page_size: '50' }, 50, '1', '50'],
+    [{ total: 1, page: 1, page_size: 50 }, 1, 1, 50],
+    [{}, null, 1, 50],
+    [{ total: null, page: null, page_size: null }, null, 1, 50],
+  ])('preserves supported numeric and absent homework pagination metadata: %p', async (metadata, total, page, pageSize) => {
     const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
     mockHttpsResponse({ body: JSON.stringify({ homework_activities: homework, ...metadata }) });
     await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).resolves.toEqual({
-      homework_activities: homework, total, page: 1, page_size: 50,
+      homework_activities: homework, total, page, page_size: pageSize,
+    });
+  });
+
+  test('integration homework page still rejects a padded numeric string total', async () => {
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: [{ id: 20001 }], total: '002', page: 1, page_size: 50 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, {})).rejects.toMatchObject({
+      code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
     });
   });
 
@@ -415,7 +461,7 @@ describe('tronClassScraper', () => {
 
     test('bounds a homework page response before JSON parsing', async () => {
       mockHttpsResponse({ body: 'x'.repeat(2 * 1024 * 1024 + 1) });
-      await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).rejects.toThrow('response is too large');
+      await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, {})).rejects.toThrow('response is too large');
       expect(https.request.mock.results[0].value.destroy).toHaveBeenCalledTimes(1);
     });
 
@@ -512,6 +558,160 @@ describe('tronClassScraper', () => {
       { id: 30001, title: '講義', type: 'material' },
     ]);
     expect(https.request.mock.calls[0][0].path).toBe('/api/courses/10001/activities');
+  });
+
+
+  test('legacy homework page keeps rows within the requested page size when school page_size is smaller', async () => {
+    const homework = [{ id: 20001 }, { id: 20002 }];
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: homework, total: 2, page: 1, page_size: 1 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1, 50)).resolves.toEqual({
+      homework_activities: homework, total: 2, page: 1, page_size: 1,
+    });
+  });
+
+  test('legacy homework page still accepts more rows than a downsized school page_size when within the request', async () => {
+    const homework = Array.from({ length: 21 }, (_, index) => ({ id: 20001 + index }));
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: homework, total: 21, page: 1, page_size: 20 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, '1', 50)).resolves.toEqual({
+      homework_activities: homework, total: 21, page: 1, page_size: 20,
+    });
+  });
+
+  test.each([2, '2'])('legacy homework page truncates an oversized response to the requested size %s', async (pageSize) => {
+    const homework = [{ id: 20001 }, { id: 20002 }, { id: 20003 }];
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: homework, total: 5, page: 2, page_size: 3 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 2, pageSize)).resolves.toEqual({
+      homework_activities: homework.slice(0, 2), total: 5, page: 2, page_size: 3,
+    });
+  });
+
+  test('integration homework page still rejects a school page_size that does not match the request', async () => {
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: [{ id: 20001 }, { id: 20002 }], total: 2, page: 1, page_size: 1 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, {})).rejects.toMatchObject({
+      code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
+    });
+  });
+
+  test('legacy homework page keeps a valid array when the school page number differs from the request', async () => {
+    const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: homework, total: 1, page: 1, page_size: 50 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 2, 50)).resolves.toEqual({
+      homework_activities: homework, total: 1, page: 1, page_size: 50,
+    });
+  });
+
+  test('legacy homework page keeps a valid array longer than the reported total', async () => {
+    const homework = [{ id: 20001 }, { id: 20002 }];
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: homework, total: 1, page: 1, page_size: 50 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1, 50)).resolves.toEqual({
+      homework_activities: homework, total: 1, page: 1, page_size: 50,
+    });
+  });
+
+  test('legacy homework page accepts a numeric school page when the caller passed a decimal string', async () => {
+    const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: homework, total: 1, page: 1, page_size: 50 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, '1')).resolves.toEqual({
+      homework_activities: homework, total: 1, page: 1, page_size: 50,
+    });
+  });
+
+  test('legacy homework page accepts a school page_size below the requested size when the array is valid', async () => {
+    const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: homework, total: 1, page: 1, page_size: 20 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1)).resolves.toEqual({
+      homework_activities: homework, total: 1, page: 1, page_size: 20,
+    });
+  });
+
+  test('legacy homework page keeps an object page value instead of throwing', async () => {
+    const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
+    const page = { toString: null };
+    mockHttpsResponse({ body: JSON.stringify({ homework_activities: homework, total: 1, page, page_size: 50 }) });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1)).resolves.toEqual({
+      homework_activities: homework, total: 1, page, page_size: 50,
+    });
+  });
+
+  test('legacy homework page keeps an array page whose toString would throw', async () => {
+    const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
+    const page = [{ toString: null }];
+    mockHttpsResponse({ body: JSON.stringify({ homework_activities: homework, total: 1, page, page_size: 50 }) });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1)).resolves.toEqual({
+      homework_activities: homework, total: 1, page, page_size: 50,
+    });
+  });
+
+  test.each(['invalid', {}, { toString: null }, [{ toString: null }], [[{ toString: null }]]].map(total => [total]))(
+    'legacy homework page treats an unusable total as absent instead of rejecting a valid array: %p',
+    async total => {
+      const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
+      mockHttpsResponse({ body: JSON.stringify({ homework_activities: homework, total, page: 1, page_size: 50 }) });
+      await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1)).resolves.toEqual({
+        homework_activities: homework, total: null, page: 1, page_size: 50,
+      });
+    },
+  );
+
+  test('keeps the legacy homework page free of the new 8 second and 2 MiB limits', async () => {
+    jest.useFakeTimers();
+    https.request.mockImplementation(() => {
+      const request = new EventEmitter();
+      request.write = jest.fn(); request.end = jest.fn(); request.destroy = jest.fn();
+      return request;
+    });
+    const pending = tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1);
+    pending.catch(() => {});
+    await jest.advanceTimersByTimeAsync(9_000);
+    expect(https.request).toHaveBeenCalledTimes(1);
+    expect(https.request.mock.results[0].value.destroy).not.toHaveBeenCalled();
+    jest.useRealTimers();
+  });
+
+  test('keeps the legacy course activity read free of the new 8 second deadline', async () => {
+    jest.useFakeTimers();
+    https.request.mockImplementation(() => {
+      const request = new EventEmitter();
+      request.write = jest.fn(); request.end = jest.fn(); request.destroy = jest.fn();
+      return request;
+    });
+    const pending = tcFetchActivitiesRaw({ session: 'cookie' }, 10001, '');
+    pending.catch(() => {});
+    await jest.advanceTimersByTimeAsync(9_000);
+    expect(https.request).toHaveBeenCalledTimes(1);
+    expect(https.request.mock.results[0].value.destroy).not.toHaveBeenCalled();
+    jest.useRealTimers();
+  });
+
+  test('keeps the legacy site announcement read free of the new 8 second deadline', async () => {
+    jest.useFakeTimers();
+    https.request.mockImplementation(() => {
+      const request = new EventEmitter();
+      request.write = jest.fn(); request.end = jest.fn(); request.destroy = jest.fn();
+      return request;
+    });
+    const pending = tcFetchAnnouncementsStrict({ session: 'cookie' });
+    pending.catch(() => {});
+    await jest.advanceTimersByTimeAsync(9_000);
+    expect(https.request).toHaveBeenCalledTimes(1);
+    expect(https.request.mock.results[0].value.destroy).not.toHaveBeenCalled();
+    jest.useRealTimers();
   });
 
   test('does not treat course announcement 404 as an empty success', async () => {

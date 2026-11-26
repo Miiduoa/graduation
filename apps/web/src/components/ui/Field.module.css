@@ -24,7 +24,7 @@
   min-width: 0;
   min-height: 44px;
   padding: 10px 14px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);

@@ -1,3 +1,4 @@
+import { createTronClassBindingConsent, type TronClassBindingConsent } from '@campus/shared/src/tronClassBindingConsent';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Linking, Pressable, Text, TextInput, View } from 'react-native';
 import { NavigationContext } from '@react-navigation/native';
@@ -31,6 +32,7 @@ import {
   TronClassAssignmentPanel,
   tronClassNativeTime,
 } from './tronclass/TronClassAssignmentPanel';
+import { isTronClassDataFetchEnabled } from '../services/tronClassDataEnabled';
 import { safeNavigate } from '../utils/safeNavigate';
 import {
   NativeTronClassFileCache,
@@ -71,8 +73,31 @@ function homeworkOrder(left: TronClassHomework, right: TronClassHomework): numbe
   return leftDeadline === rightDeadline ? 0 : leftDeadline < rightDeadline ? -1 : 1;
 }
 
-/** One independently verified BFF owner, with platform-session precedence over Firebase. */
 export function TronClassWorkspaceScreen() {
+  const navigation = React.useContext(NavigationContext);
+  if (isTronClassDataFetchEnabled()) return <EnabledTronClassWorkspace />;
+
+  return (
+    <AIScreen>
+      <AICard>
+        <Text accessibilityRole="alert" style={copy}>此功能目前未開放</Text>
+        <AIButton label="返回" onPress={() => {
+          if (!navigation) return;
+          if (navigation.canGoBack()) {
+            navigation.goBack();
+            return;
+          }
+          const home = navigation.getState().routeNames.includes('LoginLanding') ? 'LoginLanding' : 'LearnHome';
+          safeNavigate(navigation, home);
+        }} />
+      </AICard>
+    </AIScreen>
+  );
+}
+
+/** One independently verified BFF owner, with platform-session precedence over Firebase. */
+function EnabledTronClassWorkspace() {
+  const [bindingConsent] = useState(createTronClassBindingConsent);
   const platform = useNuniSession();
   const school = useAuth();
   const navigation = React.useContext(NavigationContext);
@@ -89,6 +114,7 @@ export function TronClassWorkspaceScreen() {
     !school.user.uid.startsWith('demo_')
       ? school.user.uid
       : null;
+  const owner = platformSession ? `platform:${platformSession.platformAccountId}` : `firebase:${schoolUid}`;
   const scope = platformSession
     ? `platform:${platformSession.platformAccountId}:${platformSession.context}`
     : schoolUid
@@ -116,7 +142,9 @@ export function TronClassWorkspaceScreen() {
         client: createNativeTronClassClient({
           owner: `platform:${platformAccountId}`,
           isCurrent,
-          request: (input) => latest.current.platform.bffRequest('tronclass', context, input),
+          request: (input, signal) => latest.current.platform.bffRequest(
+            'tronclass', context, input, undefined, undefined, signal ?? controller.signal,
+          ),
           download: (input) => latest.current.platform.tronClassDownload(input, context),
           downloadSubmissionAttachment: typeof platform.tronClassSubmissionDownload === 'function'
             ? (input, signal) => latest.current.platform.tronClassSubmissionDownload(input, context, signal)
@@ -152,8 +180,8 @@ export function TronClassWorkspaceScreen() {
       client: createNativeTronClassClient({
         owner: `firebase:${uid}`,
         isCurrent,
-        request: (input) =>
-          nativeTronClassFirebaseRequest(uid, isCurrent, input, controller.signal),
+        request: (input, signal) =>
+          nativeTronClassFirebaseRequest(uid, isCurrent, input, signal ?? controller.signal),
         download: (input) =>
           nativeTronClassFirebaseDownload(uid, isCurrent, input, controller.signal),
         downloadSubmissionAttachment: (input, signal) =>
@@ -207,10 +235,15 @@ export function TronClassWorkspaceScreen() {
         </AICard>
       </AIScreen>
     );
-  return <NativeTronClassWorkspace key={scope} client={access.client} />;
+  return <NativeTronClassWorkspace key={scope} client={access.client} owner={owner} bindingConsent={bindingConsent} />;
 }
 
-function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient }) {
+function NativeTronClassWorkspace({ client, owner, bindingConsent }: {
+  client: NativeTronClassClient;
+  owner: string;
+  bindingConsent: TronClassBindingConsent;
+}) {
+  const navigation = React.useContext(NavigationContext);
   const [connection, setConnection] = useState<TronClassConnection | null>(null);
   const [snapshot, setSnapshot] = useState<TronClassSnapshot | null>(null);
   const [courseIndex, setCourseIndex] = useState<TronClassCourseIndex | null>(null);
@@ -220,6 +253,7 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState('正在讀取連接狀態…');
   const [error, setError] = useState('');
+  const [awaitingBindingConsent, setAwaitingBindingConsent] = useState(false);
   const [statusKnown, setStatusKnown] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -242,6 +276,7 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
   const rememberedKey = useRef<string | null>(null);
   const mounted = useRef(false);
   const lock = useRef(false);
+  const connectController = useRef<AbortController | null>(null);
   const current = () => mounted.current && client.isCurrent();
   const clearDrafts = () => {
     retainedDrafts.current = [];
@@ -272,6 +307,8 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     latestConnection.current = value;
     setConnection(value);
     setStatusKnown(true);
+    setAwaitingBindingConsent(false);
+    if (value.connected) bindingConsent.accept(owner, value.revision);
     setAccount(value.account || '');
     setReconnecting(!value.connected);
   }
@@ -332,6 +369,8 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     } finally { if (matches()) setCourseLoading(false); }
   }
   function lost(failure: unknown) {
+    if (failure instanceof NuniError && failure.code === 'TRONCLASS_BINDING_CHANGED')
+      bindingConsent.changed(owner, latestConnection.current?.revision ?? null);
     ++courseRequest.current;
     ++indexRequest.current;
     setCourseIndex(null);
@@ -372,6 +411,16 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     try {
       const value = await client.status();
       if (!current()) return;
+      if (value.connected && !bindingConsent.permits(owner, value.revision)) {
+        setConnection(value);
+        latestConnection.current = value;
+        setAccount(value.account ?? '');
+        setAwaitingBindingConsent(true);
+        setStatusKnown(true);
+        setReconnecting(false);
+        setError('TronClass 連接已變更。請確認目前的學校帳號，再繼續讀取課程。');
+        return;
+      }
       acceptConnection(value);
       synchronize(value);
     } catch (failure) {
@@ -389,18 +438,25 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     purgeAbandonedNativeTronClassFiles();
     void load();
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') setPassword('');
+      if (state !== 'active') {
+        setPassword('');
+        cancelConnect(false);
+      }
     });
+    const unsubscribeBlur = navigation?.addListener('blur', () => cancelConnect(false));
     return () => {
       mounted.current = false;
+      connectController.current?.abort();
+      connectController.current = null;
       rememberedKey.current = null;
       draftIdentity.current = null;
       fileCache.dispose();
       subscription.remove();
+      unsubscribeBlur?.();
     };
     // The enclosing route remounts this workspace synchronously on owner/context changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client]);
+  }, [client, navigation]);
   async function connect() {
     if (
       lock.current ||
@@ -414,6 +470,9 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     const secret = password;
     setPassword('');
     lock.current = true;
+    const controller = new AbortController();
+    connectController.current = controller;
+    const matches = () => current() && connectController.current === controller && !controller.signal.aborted;
     ++courseRequest.current;
     ++indexRequest.current;
     setCourseIndex(null);
@@ -426,13 +485,13 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     setSnapshot(null);
     setCourseId(null);
     try {
-      const value = await client.connect(account, secret, connection?.revision ?? null);
-      if (!current()) return;
+      const value = await client.connect(account, secret, connection?.revision ?? null, controller.signal);
+      if (!matches()) return;
       acceptConnection(value);
       setReconnecting(false);
       synchronize(value);
     } catch (failure) {
-      if (!current()) return;
+      if (!matches()) return;
       // A lost reply may have changed the binding. A status read must precede another attempt.
       setConnection(null);
       rememberedKey.current = null;
@@ -440,9 +499,30 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
       setReconnecting(true);
       setError(nativeTronClassError(failure));
     } finally {
-      lock.current = false;
-      if (current()) setBusy('');
+      if (connectController.current === controller) {
+        connectController.current = null;
+        lock.current = false;
+        if (current()) setBusy('');
+      }
     }
+  }
+  function cancelConnect(refreshStatus = true) {
+    const controller = connectController.current;
+    if (!controller) return;
+    connectController.current = null;
+    controller.abort();
+    lock.current = false;
+    if (!current()) return;
+    setBusy('');
+    setPassword('');
+    setConnection(null);
+    latestConnection.current = null;
+    rememberedKey.current = null;
+    setStatusKnown(false);
+    setReconnecting(true);
+    // The request may have committed before cancellation. Do not reuse its old
+    // revision or automatically retry the login; first fetch the current state.
+    if (refreshStatus) void load();
   }
   async function disconnect() {
     if (lock.current || assignmentBusy || !current() || !statusKnown || !connection) return;
@@ -464,7 +544,10 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     setDisconnecting(false);
     try {
       const value = await client.disconnect(connection.revision);
-      if (current()) acceptConnection(value);
+      if (current()) {
+        bindingConsent.accept(owner, value.revision);
+        acceptConnection(value);
+      }
     } catch (failure) {
       if (current()) {
         setConnection(null);
@@ -654,10 +737,16 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
           </View>
         ) : null}
         <AIButton
-          label={statusKnown ? '重新整理課務資料' : '重新讀取連接狀態'}
+          label={awaitingBindingConsent ? '繼續讀取目前帳號的課程' : statusKnown ? '重新整理課務資料' : '重新讀取連接狀態'}
           variant="ghost"
           disabled={!!busy || assignmentBusy}
-          onPress={() => void load()}
+          onPress={() => {
+            if (awaitingBindingConsent && connection?.connected && current()) {
+              acceptConnection(connection);
+              setError('');
+              synchronize(connection);
+            } else void load();
+          }}
         />
       </AICard>
       {busy ? (
@@ -666,6 +755,9 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
           <Text accessibilityLiveRegion="polite" style={copy}>
             {busy}
           </Text>
+          {connectController.current && (
+            <AIButton label="取消連接" variant="ghost" onPress={() => cancelConnect()} />
+          )}
         </AICard>
       ) : null}
       {error ? (
@@ -685,10 +777,11 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
       ) : null}
       {ready && selected ? (
         <TronClassAssignmentPanel
-          key={`${connection.revision}:${selected.courseId}:${selected.id}`}
+          key={`${connection.revision}:${connection.studentKey ?? ''}:${selected.courseId}:${selected.id}`}
           client={client}
           fileCache={fileCache}
           revision={connection.revision!}
+          studentKey={rememberedKey.current}
           homework={selected}
           initialDraft={draftIdentity.current === connection.studentKey
             ? drafts.find((item) => item.courseId === selected.courseId && item.homeworkId === selected.id)
@@ -698,6 +791,7 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
           isBindingCurrent={() => {
             const binding = latestConnection.current;
             return current() && binding?.connected === true && binding.revision === connection.revision &&
+              binding.studentKey === connection.studentKey &&
               typeof binding.expiresAt === 'string' && Number.isFinite(Date.parse(binding.expiresAt)) &&
               new Date(binding.expiresAt).toISOString() === binding.expiresAt && Date.parse(binding.expiresAt) > Date.now();
           }}

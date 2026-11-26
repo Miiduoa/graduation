@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { fetchRecentCampusPosts, listActiveStoriesForSchool, listSubscribedBoardIds, markStoryViewed, peersAtPoi } from './firestore';
+import { fetchRecentCampusPosts, listActiveStoriesForSchool, listCourseReviews, listSubscribedBoardIds, markStoryViewed, peersAtPoi } from './firestore';
 
 const mocks = vi.hoisted(() => ({ getDoc: vi.fn(), setDoc: vi.fn(), getDocs: vi.fn(), query: vi.fn((...parts: unknown[]) => parts), where: vi.fn((...parts: unknown[]) => parts) }));
 vi.mock('@/lib/firebase', () => ({ getDb: () => ({}) }));
@@ -109,4 +109,11 @@ it('propagates a repeated permission-denied without further queries', async () =
     expect(parts).toContainEqual(['schoolId', '==', 'pu']);
     expect(parts).toContainEqual(['expiresAt', '>', expect.any(Number)]);
   }
+});
+
+it.each(['permission-denied', 'unauthenticated'])('propagates a %s review read without falling back to a second query', async (code) => {
+  const failure = Object.assign(new Error(code), { code });
+  mocks.getDocs.mockRejectedValueOnce(failure).mockResolvedValue({ docs: [] });
+  await expect(listCourseReviews('pu')).rejects.toBe(failure);
+  expect(mocks.getDocs).toHaveBeenCalledOnce();
 });

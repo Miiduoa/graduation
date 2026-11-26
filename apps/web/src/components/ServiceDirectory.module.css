@@ -1,7 +1,9 @@
 .directory {
+  container: service-directory / inline-size;
   display: grid;
-  gap: 24px;
+  gap: 20px;
   min-width: 0;
+  font-size: var(--font-body-size);
 }
 .introduction {
   margin: 0;
@@ -11,26 +13,62 @@
   line-height: 1.75;
 }
 .finder {
+  container: service-directory-finder / inline-size;
   display: grid;
-  gap: 14px;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--font-body-size);
 }
+/* The label stays the field's accessible name; the icon and placeholder
+   carry the visible cue so the first service starts higher on phones. */
 .searchLabel {
-  display: block;
-  margin-bottom: 8px;
-  color: var(--text);
-  font-size: var(--font-label-size);
-  font-weight: 600;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.searchRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  min-width: 0;
 }
 .searchField {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 52px;
-  padding-left: 16px;
+  gap: 10px;
+  min-width: 0;
+  min-height: 48px;
+  padding-left: 14px;
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   color: var(--muted);
+}
+.searchSubmit {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px 18px;
+  color: var(--on-brand);
+  background: var(--brand);
+  border: 1px solid var(--brand);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: var(--font-label-size);
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+.searchSubmit > svg {
+  display: none;
 }
 .searchField > svg {
   flex-shrink: 0;
@@ -39,11 +77,12 @@
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
-.searchField input[type='search'] {
+/* The enclosing field owns the surface and rounded corners. */
+.directory .searchField input[type='search'] {
   flex: 1;
   min-width: 0;
   width: 100%;
-  padding: 13px 10px 13px 0;
+  padding: 12px 8px 12px 0;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -58,17 +97,19 @@
 .searchField input::-webkit-search-cancel-button {
   -webkit-appearance: none;
 }
+/* Sits inside the field's border, so a tap on it reads as part of the input. */
 .clearSearch {
   flex-shrink: 0;
-  min-width: 52px;
+  min-width: 48px;
   min-height: 44px;
-  margin-right: 4px;
-  padding: 10px;
+  margin-right: 1px;
+  padding: 10px 8px;
   border: 0;
   background: transparent;
   color: var(--muted);
   font-size: var(--font-label-size);
   border-radius: var(--radius-sm);
+  touch-action: manipulation;
   transition:
     background-color var(--motion-fast) var(--ease-out),
     color var(--motion-fast) var(--ease-out);
@@ -78,32 +119,62 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px 20px;
+  gap: 0 20px;
+  min-width: 0;
 }
+/* Categories read as one tab rail: a single 44px line that scrolls sideways
+   instead of wrapping into extra rows on narrow phones. */
 .categories {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex: 0 1 auto;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--border);
+}
+.categories::-webkit-scrollbar {
+  display: none;
 }
 .categories button {
+  position: relative;
+  flex: none;
   min-height: 44px;
-  padding: 9px 13px;
+  padding: 0 12px;
   color: var(--muted);
   background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   font-size: var(--font-label-size);
   line-height: 1.5;
+  white-space: nowrap;
+  scroll-snap-align: start;
+  touch-action: manipulation;
   transition:
     background-color var(--motion-fast) var(--ease-out),
-    border-color var(--motion-fast) var(--ease-out),
     color var(--motion-fast) var(--ease-out);
+}
+/* Selection indicator: grows from the centre only when the choice changes. */
+.categories button::after {
+  content: '';
+  position: absolute;
+  inset-inline: 12px;
+  bottom: 0;
+  height: 3px;
+  background: var(--brand);
+  border-radius: 3px 3px 0 0;
+  transform: scaleX(0);
+  transition: transform var(--motion-fast) var(--ease-out);
 }
 .categories button[aria-pressed='true'] {
   color: var(--text);
-  background: var(--surface-strong);
-  border-color: var(--text);
   font-weight: 600;
+}
+.categories button[aria-pressed='true']::after {
+  transform: scaleX(1);
 }
 .resultCount {
   margin: 0;
@@ -111,84 +182,136 @@
   font-size: var(--font-label-sm-size);
   line-height: 1.5;
 }
+.resultsSummary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  min-width: 0;
+}
+.resultsTitle {
+  scroll-margin-block: 16px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+.resultsTitle:focus {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 4px;
+}
 .publicFilter {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-height: 44px;
+  padding-inline: 2px;
   color: var(--muted);
   font-size: var(--font-label-size);
   cursor: pointer;
 }
 .publicFilter input {
-  width: 18px;
-  height: 18px;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
   accent-color: var(--brand);
 }
 .groups {
   display: grid;
-  gap: 30px;
+  gap: 32px;
+}
+.group {
+  display: grid;
+  grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr);
+  column-gap: 32px;
+  align-items: start;
+  padding-top: 12px;
+  border-top: 2px solid var(--text);
+}
+.group > .sectionHeading {
+  margin: 0;
+}
+.group > .serviceList {
+  border-top: 0;
+}
+.group > .serviceList > .serviceRow:first-child {
+  border-top: 0;
 }
 .sectionHeading {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px 20px;
-  margin-bottom: 12px;
+  gap: 4px 20px;
+  margin-bottom: 8px;
 }
-.sectionHeading h2 {
+.sectionHeading :is(h2, h3) {
   margin: 0;
+  overflow-wrap: anywhere;
   font-size: var(--font-h3-size);
   font-weight: 650;
 }
+.sectionHeading .resultCount {
+  margin: 0;
+  font-size: var(--font-label-sm-size);
+}
 .sectionHeading p {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--muted);
   font-size: var(--font-body-sm-size);
   line-height: 1.6;
 }
+.resultsHeading {
+  align-items: center;
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+/* A service index: one ruled row per entry with name, summary and access
+   state held in fixed columns so the list scans like a printed table. */
 .serviceList {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
   list-style: none;
   padding: 0;
   margin: 0;
+  border-top: 1px solid var(--border-strong);
 }
 .serviceRow {
   min-width: 0;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.serviceRow[data-recommended] {
-  border-color: var(--border-strong);
+  border-bottom: 1px solid var(--border);
 }
 .service {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: 2rem minmax(0, 1fr) minmax(5.5rem, 9.5rem) 1.125rem;
+  grid-template-areas: 'icon body access go';
   align-items: start;
-  gap: 14px;
-  min-height: 116px;
-  padding: 18px;
-  border-radius: var(--radius);
+  column-gap: 16px;
+  min-height: 72px;
+  padding: 14px 8px;
+  border-radius: 0;
   transition: background-color var(--motion-fast) var(--ease-out);
 }
+.service > .icon { grid-area: icon; }
+.service > .serviceBody { grid-area: body; }
+.service > .access { grid-area: access; }
+.service > svg { grid-area: go; margin-top: 3px; }
 .service > svg {
-  margin-top: 10px;
   color: var(--muted);
   flex-shrink: 0;
 }
 .icon {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
+  justify-content: flex-start;
+  width: 2rem;
+  height: 1.5em;
   color: var(--brand);
-  background: var(--accent-soft);
-  border-radius: var(--radius-sm);
+}
+/* The suggested starting point carries a rule beside its row as well as text. */
+.serviceRow[data-recommended] {
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+.serviceRow[data-recommended] .service {
+  padding-inline-start: 14px;
 }
 .serviceBody {
   min-width: 0;
@@ -196,10 +319,10 @@
 .serviceTitle {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 5px 10px;
+  align-items: baseline;
+  gap: 0 10px;
 }
-.serviceTitle h3 {
+.serviceTitle :is(h3, h4) {
   margin: 0;
   color: var(--text);
   font-size: var(--font-body-size);
@@ -207,30 +330,33 @@
   font-weight: 650;
 }
 .serviceBody p {
-  margin: 5px 0 8px;
+  margin: 1px 0 0;
   color: var(--muted);
   font-size: var(--font-body-sm-size);
-  line-height: 1.65;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 .access {
-  display: block;
+  min-width: 0;
+  padding-inline-start: 12px;
+  border-inline-start: 1px solid var(--border);
   color: var(--muted);
   font-size: var(--font-label-sm-size);
-  line-height: 1.5;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 .recommended {
   color: var(--brand);
   font-size: var(--font-label-sm-size);
+  font-weight: 600;
   line-height: 1.5;
 }
 .related {
-  margin: 0 18px;
-  border-top: 1px solid var(--border);
+  margin: -6px 8px 0 calc(2rem + 16px + 8px);
 }
 .related summary {
   min-height: 44px;
-  padding: 12px 0;
+  padding: 10px 0;
   color: var(--muted);
   font-size: var(--font-label-size);
   line-height: 1.5;
@@ -243,19 +369,20 @@
 }
 .related ul {
   list-style: none;
-  padding: 0 0 8px;
+  padding: 0 0 6px;
   margin: 0;
 }
 .related a {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 10px;
+  gap: 2px 10px;
   min-height: 44px;
-  padding: 10px 0;
+  padding: 8px 0;
   color: var(--text);
   font-size: var(--font-label-size);
-  border-radius: var(--radius-sm);
+  border-top: 1px solid var(--border);
+  border-radius: 0;
   transition:
     background-color var(--motion-fast) var(--ease-out),
     color var(--motion-fast) var(--ease-out);
@@ -274,6 +401,14 @@
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
+/* The rail clips overflow, so its focus ring is drawn inside the button. */
+.directory .categories button:focus-visible {
+  outline-offset: -3px;
+}
+/* Rows sit flush in the list; keep the ring inside so it is not clipped. */
+.directory .service:focus-visible {
+  outline-offset: -3px;
+}
 .resetFilters {
   min-height: 44px;
   padding: 8px 0;
@@ -283,13 +418,13 @@
   font-size: var(--font-label-size);
   text-decoration: underline;
   text-underline-offset: 4px;
+  touch-action: manipulation;
 }
 .emptyResults {
-  padding: 28px 22px;
+  padding: 24px 4px;
   color: var(--muted);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 .emptyResults h3 {
   margin: 12px 0 8px;
@@ -303,9 +438,15 @@
   line-height: 1.75;
 }
 @media (hover: hover) and (pointer: fine) {
+  .searchSubmit:hover {
+    background: var(--brand2);
+  }
   .service:hover,
-  .categories button:hover,
   .clearSearch:hover {
+    background: var(--bg-soft);
+  }
+  .categories button:hover {
+    color: var(--text);
     background: var(--bg-soft);
   }
   .related a:hover,
@@ -313,11 +454,13 @@
     color: var(--brand);
   }
 }
+.searchSubmit:active {
+  background: var(--brand2);
+}
 .service:active,
 .categories button:active,
 .clearSearch:active,
 .resetFilters:active,
-.related a:active,
 .related summary:active {
   background: var(--panel2);
 }
@@ -325,48 +468,164 @@
 .related summary:active {
   color: var(--brand);
 }
-.categories button[aria-pressed='true']:is(:hover, :active) {
-  color: var(--text);
-  background: var(--surface-strong);
-  border-color: var(--text);
-}
-@media (max-width: 700px) {
-  .serviceList {
-    grid-template-columns: 1fr;
-    gap: 8px;
+@container service-directory (max-width: 56em) {
+  .group {
+    grid-template-columns: minmax(0, 1fr);
   }
+  .group > .sectionHeading {
+    margin-bottom: 4px;
+  }
+}
+/* Match the service columns to available content and text size, including
+   desktop sidebars and enlarged type. Keep the access label with its row. */
+@container service-directory (max-width: 38em) {
   .service {
-    min-height: 96px;
-    gap: 12px;
-    padding: 16px;
+    grid-template-columns: 1.75rem minmax(0, 1fr) 1.125rem;
+    grid-template-areas:
+      'icon body go'
+      '. access .';
+    column-gap: 12px;
+    row-gap: 2px;
+  }
+  .icon {
+    width: 1.75rem;
+  }
+  .access {
+    padding-inline-start: 0;
+    border-inline-start: 0;
   }
   .related {
-    margin-inline: 16px;
+    margin-left: calc(1.75rem + 12px + 8px);
+  }
+}
+@media (max-width: 700px) {
+  .directory {
+    gap: 14px;
+  }
+  .filterBar {
+    display: grid;
+    gap: 0;
+  }
+  .categories {
+    max-width: none;
+  }
+  .service {
+    grid-template-columns: 1.75rem minmax(0, 1fr) 1.125rem;
+    grid-template-areas:
+      'icon body go'
+      '. access .';
+    min-height: 64px;
+    column-gap: 12px;
+    row-gap: 2px;
+    padding: 10px 4px;
+  }
+  .icon {
+    width: 1.75rem;
+  }
+  .access {
+    padding-inline-start: 0;
+    border-inline-start: 0;
+  }
+  .related {
+    margin-left: calc(1.75rem + 12px + 4px);
+    margin-right: 4px;
   }
   .groups {
-    gap: 26px;
+    gap: 16px;
+  }
+  .group {
+    grid-template-columns: minmax(0, 1fr);
+    padding-top: 8px;
+  }
+  /* Keep the category heading compact so the first service remains visible. */
+  .groupHeading {
+    margin-bottom: 0;
+  }
+  .groupHeading h3 {
+    color: var(--muted);
+    font-size: var(--font-label-size);
+    font-weight: 600;
+    line-height: 1.5;
+    padding-bottom: 4px;
   }
 }
 @media (max-width: 380px) {
+  .directory { gap: 4px; }
+  .resultsHeading { margin-block: 0; }
   .service {
-    gap: 10px;
-    padding: 14px;
+    min-height: 60px;
+    column-gap: 10px;
+    padding-inline: 2px;
   }
   .icon {
-    width: 32px;
-    height: 32px;
+    width: 1.5rem;
+  }
+  .service {
+    grid-template-columns: 1.5rem minmax(0, 1fr) 1.125rem;
+  }
+  .related {
+    margin-left: calc(1.5rem + 10px + 2px);
+    margin-right: 2px;
   }
   .categories button {
     padding-inline: 10px;
   }
+  .categories button::after {
+    inset-inline: 10px;
+  }
+}
+/* Use a single search row on compact phones. At larger text sizes, give
+   the input its own line again once even the icon action would crowd it. */
+@container service-directory-finder (max-width: 21em) {
+  .searchSubmit {
+    display: grid;
+    place-items: center;
+    min-width: 48px;
+    padding: 0 10px;
+  }
+  .searchSubmit > svg { display: block; }
+  .searchSubmit > span,
+  .searchField > svg { display: none; }
+  .searchField { padding-left: 12px; }
+}
+@container service-directory-finder (max-width: 14em) {
+  .searchRow { grid-template-columns: minmax(0, 1fr); }
+  .searchSubmit > svg { display: none; }
+  .searchSubmit > span { display: inline; }
+}
+/* Selection stays distinguishable without colour in Windows high contrast. */
+@media (forced-colors: active) {
+  .categories button::after {
+    background: Highlight;
+  }
+  .categories button[aria-pressed='true'] {
+    color: Highlight;
+  }
+  .serviceRow[data-recommended] {
+    box-shadow: none;
+    border-inline-start: 3px solid Highlight;
+  }
+  .group {
+    border-top-color: CanvasText;
+  }
+  .searchField:focus-within,
+  .resultsTitle:focus {
+    outline-color: Highlight;
+  }
 }
 :global([data-reduced-motion='true'])
   .directory
-  :is(.service, .categories button, .clearSearch, .related a, .related summary) {
+  :is(.service, .categories button, .clearSearch, .searchSubmit, .related a, .related summary),
+:global([data-reduced-motion='true']) .directory .categories button::after {
   transition: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .directory :is(.service, .categories button, .clearSearch, .related a, .related summary) {
+  .directory
+    :is(.service, .categories button, .clearSearch, .searchSubmit, .related a, .related summary),
+  .directory .categories button::after {
     transition: none;
+  }
+  .categories {
+    scroll-behavior: auto;
   }
 }

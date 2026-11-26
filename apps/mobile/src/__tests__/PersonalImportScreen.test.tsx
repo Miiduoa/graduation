@@ -54,11 +54,15 @@ jest.mock('../services/personalImportBackupSharing', () => ({
   sharePersonalImportBackup: jest.fn(),
 }));
 jest.mock('expo-file-system', () => ({
+  Paths: { document: 'file:///mock/documents' },
   File: class {
     size = 1000;
     uri: string;
     constructor(value: string) {
       this.uri = value;
+    }
+    info() {
+      return { exists: false };
     }
     async text() {
       return mockFileText();
@@ -322,7 +326,7 @@ test('reads the ledger once per confirmed scope and ignores an earlier read fail
   });
   try {
     const view = render(<PersonalImportScreen />);
-    expect(reads).toBe(1);
+    await waitFor(() => expect(reads).toBe(1));
 
     mockScope = null;
     mockPlatform = { ...mockPlatform, loading: true };

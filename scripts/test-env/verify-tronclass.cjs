@@ -4,8 +4,7 @@
 // mocked fetch. Only public emulator fixture identities are used here.
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
-const fs = require('node:fs');
-const path = require('node:path');
+const { writeRuntimeReport } = require('./write-runtime-report.cjs');
 
 const projectId = process.env.TEST_PROJECT_ID;
 const origin = process.env.WEB_PUBLIC_ORIGIN;
@@ -15,7 +14,7 @@ assert.equal(process.env.FIREBASE_AUTH_EMULATOR_HOST, '127.0.0.1:19291');
 assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:18291');
 assert.equal(process.env.NODE_ENV, 'development');
 assert.equal(process.env.FIREBASE_SERVICE_ACCOUNT_JSON, undefined);
-assert.equal(process.env.TRONCLASS_RETENTION_ENABLED, 'false');
+assert.equal(process.env.TRONCLASS_RETENTION_ENABLED, 'true');
 assert.equal(process.env.TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED, 'false');
 for (const name of ['TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL', 'FILE_STORAGE_BACKEND',
   'NEXT_PUBLIC_FILE_STORAGE_BACKEND', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY',
@@ -95,7 +94,7 @@ async function main() {
       accountIsolationVerified: true, productionWorkersDisabled: true,
       productionStoresAbsent: true, schoolLoginPerformed: false, schoolWritesPerformed: false };
     if (process.env.TRONCLASS_RUNTIME_DIR) {
-      fs.writeFileSync(path.join(process.env.TRONCLASS_RUNTIME_DIR, 'acceptance.json'), JSON.stringify(report, null, 2));
+      writeRuntimeReport(Number(process.env.TRONCLASS_REPORT_DIR_FD), 'acceptance.json', report);
     }
     console.log(JSON.stringify(report));
   } finally {

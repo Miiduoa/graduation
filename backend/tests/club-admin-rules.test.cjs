@@ -25,8 +25,6 @@ before(async () => {
       ['moderator', 'moderator'],
       ['instructor', 'instructor'],
     ]) {
-      // A current staff member must have a server-issued canonical campus binding.
-      await db.doc(`users/${uid}`).set({ status: 'active', schoolId: 'school', primarySchoolId: 'school' });
       await db.doc(`schools/school/members/${uid}`).set({ status: 'active' });
       await db
         .doc(`groups/club/members/${uid}`)
@@ -72,6 +70,39 @@ test('既有教師與管理員保留管理權，但不能直接調整角色', as
     await assertFails(db.doc('groups/club/members/student').update({ role: 'owner' }));
     await assertSucceeds(db.doc('groups/club/members/removable').delete());
   }
+});
+
+test('社員管理沿用目標學校的有效資格與角色', async () => {
+  const db = env.authenticatedContext('officer').firestore();
+  const club = db.doc('groups/club');
+  const roster = db.doc('groups/club/members/student');
+  for (const profile of [
+    null,
+    { status: 'active' },
+    { status: 'active', primarySchoolId: 'school' },
+    { status: 'active', primarySchoolId: 'school', schoolId: 'other' },
+    { status: 'active', primarySchoolId: 'other', schoolId: 'other' },
+  ]) {
+    await env.withSecurityRulesDisabled(async (context) => {
+      const user = context.firestore().doc('users/officer');
+      if (profile === null) await user.delete();
+      else await user.set(profile);
+    });
+    await assertSucceeds(club.update({ name: '社團名稱' }));
+    await assertSucceeds(roster.update({ phone: '0911111111' }));
+  }
+  await env.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await db.doc('schools/other/members/officer').set({ status: 'active' });
+    await db.doc('schools/school/members/officer').delete();
+  });
+  await assertFails(club.update({ name: '社團名稱' }));
+  await assertFails(roster.update({ phone: '0911111111' }));
+  await env.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await db.doc('schools/school/members/officer').set({ status: 'active' });
+    await db.doc('users/officer').delete();
+  });
 });
 
 test('所有客戶端均不可繞過伺服器讀寫活動、報名及簽到', async () => {
@@ -191,4 +222,29 @@ test('所有既有社團在試辦關閉時仍可取得安全名單，拒絕跨�
   } finally {
     await db.terminate();
   }
+});
+
+test('舊社團封存貼文、留言與按讚收據只供有效社員讀取', async () => {
+  await env.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await db.doc('groupPosts/club-archive').set({ groupId: 'club', status: 'archived' });
+    await db.doc('comments/club-archive').set({ postId: 'club-archive' });
+    await db.doc('postLikes/club-archive').set({ postId: 'club-archive', userId: 'president' });
+    await db.doc('schools/school/members/former').set({ status: 'active' });
+    await db.doc('groups/club/members/former').set({ status: 'removed', role: 'member' });
+  });
+
+  for (const [uid, check] of [
+    ['student', assertSucceeds], ['former', assertFails], ['outsider', assertFails],
+  ]) {
+    const db = env.authenticatedContext(uid).firestore();
+    for (const collection of ['groupPosts', 'comments', 'postLikes']) {
+      await check(db.doc(`${collection}/club-archive`).get({ source: 'server' }));
+    }
+    await check(db.collection('comments').where('postId', '==', 'club-archive').get({ source: 'server' }));
+  }
+
+  const student = env.authenticatedContext('student').firestore();
+  await assertFails(student.collection('postLikes').where('postId', '==', 'club-archive').get({ source: 'server' }));
+  await assertFails(student.doc('postLikes/club-archive').delete());
 });

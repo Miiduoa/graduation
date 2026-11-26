@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, Keyboard, Linking, Pressable, Text, TextInput, View } from 'react-native';
+import { FlatList, Keyboard, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { resolveOfficialCourseQueryLink } from '@campus/shared/src/courseCatalogCapability';
 import { exceedsPublicCourseResponseByteLimit, isPublicCourseResponseUrl } from '@campus/shared/src/publicCourseAssistantClient';
@@ -8,8 +8,9 @@ import { nthuCourseMeetings, nthuTimetableImportCsv } from '@campus/shared/src/n
 import { formatPublicCatalogFetchedAt, isPublicCourseCatalog, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import { hasPublicCourseFilters, parsePublicCourseFilterParams, parsePublicCourseFilters, publicCourseFilterLabel, type PublicCourseFilters } from '@campus/shared/src/publicCourseFilters';
 import { isPublicCourseOperationQuery } from '@campus/shared/src/publicCourseOperations';
-import { Button, Card, Screen } from '../ui/components';
+import { Button, Screen } from '../ui/components';
 import { theme } from '../ui/theme';
+import { TextAction } from '../ui/interactive/TextAction';
 import { safeNavigate } from '../utils/safeNavigate';
 import { parsePersonalImport } from '@campus/shared/src/imports/parser';
 import { usePersonalImportScope } from '../state/personalImportScope';
@@ -19,6 +20,7 @@ import { hasPersonalImportDraft } from '../services/imports/personalImportDraft'
 
 import { PublicCourseImportAction } from '../components/PublicCourseImportAction';
 import { queuePublicCourseClipboardCopy } from '../services/publicCourseClipboardQueue';
+import { publicCourseImportSource, type PublicCourseSourceEvidence } from '../services/publicCourseTimetableImport';
 
 type Result = { filters: PublicCourseFilters } & (
   | { status: 'loading' | 'error'; query: string }
@@ -59,12 +61,30 @@ type Props = {
   navigation?: Parameters<typeof safeNavigate>[0];
 };
 
-function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedback, onCopy }: Props & {
+// Flat catalog styling: hairline-divided rows, graphite titles, subordinate metadata,
+// and forest only for the primary action and selected filters.
+const hairline = StyleSheet.hairlineWidth;
+const ui = {
+  get meta() { return { color: theme.colors.muted, fontSize: 14, lineHeight: 21 }; },
+  get detail() { return { color: theme.colors.textSecondary, fontSize: 15, lineHeight: 22 }; },
+  get fieldLabel() { return { color: theme.colors.textSecondary, fontSize: 13, fontWeight: '600' as const, letterSpacing: 0.3 }; },
+  get input() {
+    return {
+      minHeight: 48, borderRadius: theme.radius.sm, borderWidth: 1, borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface, color: theme.colors.text, paddingHorizontal: 12,
+    };
+  },
+  get divider() { return { borderTopWidth: hairline, borderTopColor: theme.colors.separator }; },
+};
+
+
+function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedback, onCopy, sourceEvidence }: Props & {
   course: PublicCatalogCourse;
   cardId: string;
   rowNumber: number;
   copyFeedback: ClipboardFeedback | null;
   onCopy: (csv: string, cardId: string) => void;
+  sourceEvidence?: PublicCourseSourceEvidence;
 }) {
   const scope = usePersonalImportScope();
   const scopeRef = useRef(scope);
@@ -100,7 +120,7 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
       if (!text) return;
       const academicYear = course.semester.slice(0, -1);
       const semester = course.semester.slice(-1);
-      const source = { type: 'paste' as const, name: schoolId === 'nthu' ? '清華大學本學期開設課程' : '暨南大學本學期開設課程' };
+      const source = publicCourseImportSource(schoolId, course.semester, sourceEvidence);
       const { rows, issues } = parsePersonalImport(text, { kind: 'timetable', schoolId, academicYear, semester, source });
       if (!rows.length || issues.some(issue => issue.severity === 'error')) {
         setNotice('課表資料需要手動核對，請前往匯入我的資料。');
@@ -128,7 +148,7 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
   // official feed. Include the visible row position so VoiceOver/TalkBack users
   // know which course will be copied or added to their import review.
   const spokenCourse = `第${rowNumber}筆，${course.title}，課號${course.code}，班別${course.section || '未提供'}，${course.department || '未提供系所'}`;
-  const body = { color: theme.colors.textSecondary, lineHeight: 22 };
+  const body = ui.detail;
   // Show copy feedback only on the last tapped row, even when two cross-listed
   // cards produce identical CSV. Keeping this in the list parent also clears
   // an earlier success as soon as another card starts a copy.
@@ -136,9 +156,9 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
   const manualCopy = copyFeedback?.cardId === cardId && copyFeedback.csv === csv && copyFeedback.status === 'manual';
   // Keep the title separate: grouping the whole Card as an accessible header
   // prevents VoiceOver from reaching its nested review and copy controls.
-  return <Card>
+  return <View style={{ ...ui.divider, paddingVertical: 16, gap: 4 }}>
     <Text accessibilityRole="header" style={{ ...theme.typography.h3, color: theme.colors.text }}>{course.title}</Text>
-    <Text style={body}>{`課號 ${course.code} · 班別 ${course.section || '未提供'}`}</Text>
+    <Text style={ui.meta}>{`課號 ${course.code} · 班別 ${course.section || '未提供'}`}</Text>
     <Text style={body}>{[course.department, course.teacher, course.credits && course.credits + ' 學分'].filter(Boolean).join(' · ')}</Text>
     {meetings ? meetings.map((meeting, index) => <Text key={index} style={body}>
       {meeting.label}{meeting.room ? ' · ' + meeting.room : ''}
@@ -146,21 +166,21 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
       {meeting.time ? '校方節次 ' + meeting.time : '上課時間未提供'}{meeting.room ? ' · ' + meeting.room : ''}
     </Text>)}
     {!meetings && rawMeetings.length === 0 && <Text style={body}>上課時間未提供</Text>}
-    <Text style={body}>{course.semester.replace(/^(\d{3})([12])$/, '$1 學年度第 $2 學期').replace(/^(\d{3})3$/, '$1 學年度暑期')}</Text>
-    {!csv && <Text style={body}>校方課號或上課節次尚無法安全匯入（可能缺漏或重複），請先開啟官方課程目錄核對。</Text>}
-    {csv && <View style={{ gap: 8, marginTop: 8 }}>
+    <Text style={ui.meta}>{course.semester.replace(/^(\d{3})([12])$/, '$1 學年度第 $2 學期').replace(/^(\d{3})3$/, '$1 學年度暑期')}</Text>
+    {!csv && <Text style={ui.meta}>校方課號或上課節次尚無法安全匯入（可能缺漏或重複），請先開啟官方課程目錄核對。</Text>}
+    {csv && <View style={{ gap: 4, marginTop: 10 }}>
       <Button text="帶入課表核對" accessibilityLabel={`帶入課表核對：${spokenCourse}`} kind="primary" onPress={() => { void review(course); }} />
-      {notice ? <Text accessibilityRole="alert" style={body}>{notice}</Text> : null}
-      <PublicCourseImportAction course={course} schoolId={schoolId} navigation={navigation} />
-      <Button text="複製課表匯入資料" accessibilityLabel={`複製課表匯入資料：${spokenCourse}`} kind="ghost" onPress={() => onCopy(csv, cardId)} />
-      {copied && <Text accessibilityLiveRegion="polite" style={body}>已複製，請到匯入頁貼上並核對上課時間。</Text>}
+      {notice ? <Text accessibilityRole="alert" style={ui.meta}>{notice}</Text> : null}
+      <PublicCourseImportAction course={course} schoolId={schoolId} navigation={navigation} evidence={sourceEvidence} />
+      <TextAction label="複製課表匯入資料" accessibilityLabel={`複製課表匯入資料：${spokenCourse}`} onPress={() => onCopy(csv, cardId)} />
+      {copied && <Text accessibilityLiveRegion="polite" style={ui.meta}>已複製，請到匯入頁貼上並核對上課時間。</Text>}
       {manualCopy && <>
-        <Text style={body}>請選取下方資料複製，再到匯入頁貼上。</Text>
+        <Text style={ui.meta}>請選取下方資料複製，再到匯入頁貼上。</Text>
         <Text accessibilityLabel="可複製的課表資料" selectable style={body}>{csv}</Text>
       </>}
-      {(copied || manualCopy) && <Button text="前往課表匯入" accessibilityLabel={`前往課表匯入：${spokenCourse}`} kind="primary" onPress={() => { safeNavigate(navigation, 'PersonalImport'); }} />}
+      {(copied || manualCopy) && <TextAction label="前往課表匯入" accessibilityLabel={`前往課表匯入：${spokenCourse}`} onPress={() => { safeNavigate(navigation, 'PersonalImport'); }} />}
     </View>}
-  </Card>;
+  </View>;
 }
 
 export function PublicCourseCatalogScreen(props: Props) {
@@ -306,7 +326,8 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
   // An impossible future server timestamp cannot establish freshness. Allow a
   // small device clock skew, but direct students to the authoritative catalog.
   const fetchIsFuture = fetchAgeMs !== null && fetchAgeMs < -5 * 60 * 1000;
-  const body = { color: theme.colors.textSecondary, lineHeight: 22 };
+  const body = ui.meta;
+  const weekdays = [undefined, 1, 2, 3, 4, 5, 6, 7];
   return (
     <Screen title={schoolName + '開課查詢'} subtitle={fullSchoolName + ' · 本學期公開課程'}>
       <FlatList
@@ -314,10 +335,10 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
         data={result?.status === 'ready' ? result.data.courses : []}
         keyExtractor={publicCourseCardKey}
         extraData={copyFeedback}
-        contentContainerStyle={{ gap: 12, paddingBottom: 24 }}
-        ListHeaderComponent={<View style={{ gap: 10 }}>
+        contentContainerStyle={{ paddingBottom: 24 }}
+        ListHeaderComponent={<View style={{ gap: 12, paddingBottom: 16 }}>
           {currentSchoolName && <Text style={body}>正在瀏覽{fullSchoolName}的公開課程；目前選校仍為{currentSchoolName}。</Text>}
-          {requestedSemester && <Text accessibilityRole="alert" style={body}>
+          {requestedSemester && <Text accessibilityRole="alert" style={{ ...body, color: theme.colors.textSecondary }}>
             連結指定{requestedSemester.slice(0, 3)}學年度第{requestedSemester.slice(-1)}學期，目前僅能查校方最新公開開課，無法按指定學期篩選。
           </Text>}
           <Text style={body}>依課名、課號、系所或老師搜尋，也可加上星期與學分；關鍵字留白可依條件瀏覽。</Text>
@@ -331,64 +352,69 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
             }} maxLength={160}
             placeholder="例如：資料庫" placeholderTextColor={theme.colors.muted} returnKeyType="search"
             onSubmitEditing={requestedSemester ? undefined : submit}
-            style={{ minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border, color: theme.colors.text, paddingHorizontal: 12 }}
+            style={ui.input}
           />
-          <Text accessibilityRole="header" style={body}>星期</Text>
+          <Text accessibilityRole="header" style={ui.fieldLabel}>星期</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {[undefined, 1, 2, 3, 4, 5, 6, 7].map(day => <Pressable
-              key={day ?? 'all'} accessibilityRole="button"
-              accessibilityLabel={day === undefined ? '星期不限' : '星期' + '一二三四五六日'[day - 1]}
-              accessibilityState={{ selected: weekday === day }}
-              onPress={() => {
-                if (weekday === day) return;
-                invalidateSearch();
-                setWeekday(day);
-              }}
-              style={{ minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 12,
-                borderWidth: 1, borderRadius: 12, borderColor: weekday === day ? theme.colors.accent : theme.colors.border,
-                backgroundColor: weekday === day ? theme.colors.accentSoft : theme.colors.surface }}>
-              <Text style={{ color: theme.colors.text }}>{day === undefined ? '不限' : '週' + '一二三四五六日'[day - 1]}</Text>
-            </Pressable>)}
+            {weekdays.map(day => {
+              const selected = weekday === day;
+              return <Pressable
+                key={day ?? 'all'} accessibilityRole="button"
+                accessibilityLabel={day === undefined ? '星期不限' : '星期' + '一二三四五六日'[day - 1]}
+                accessibilityState={{ selected }}
+                onPress={() => {
+                  if (weekday === day) return;
+                  invalidateSearch();
+                  setWeekday(day);
+                }}
+                style={{ minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 12,
+                  borderWidth: 1, borderRadius: theme.radius.sm, borderColor: selected ? theme.colors.accent : theme.colors.border,
+                  backgroundColor: selected ? theme.colors.accent : 'transparent' }}>
+                <Text style={{ color: selected ? theme.colors.onAccent : theme.colors.text, fontWeight: selected ? '700' : '400' }}>{day === undefined ? '不限' : '週' + '一二三四五六日'[day - 1]}</Text>
+              </Pressable>;
+            })}
           </View>
           <Text style={body}>星期條件表示當天有課，同一門課也可能在其他天上課。</Text>
-          <Text accessibilityRole="header" style={body}>學分（完全符合）</Text>
+          <Text accessibilityRole="header" style={ui.fieldLabel}>學分（完全符合）</Text>
           <TextInput accessibilityLabel="課程學分" value={credits}
             onChangeText={value => { invalidateSearch(); setCredits(value); }}
             keyboardType="decimal-pad" placeholder="不限（0–40，最多 2 位小數）"
             placeholderTextColor={theme.colors.muted} onSubmitEditing={requestedSemester ? undefined : submit}
-            style={{ minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border, color: theme.colors.text, paddingHorizontal: 12 }} />
-          <Button text="清除星期與學分" kind="ghost" onPress={() => {
+            style={ui.input} />
+          <TextAction label="清除星期與學分" tone="neutral" onPress={() => {
             invalidateSearch();
             setWeekday(undefined);
             setCredits('');
           }} />
-          {inputError && <Text accessibilityRole="alert" style={body}>{inputError}</Text>}
+          {inputError && <Text accessibilityRole="alert" style={{ ...body, color: theme.colors.danger }}>{inputError}</Text>}
           <Button text={requestedSemester ? '查詢最新公開課程' : result?.status === 'error' ? '重新查詢' : '查詢課程'} kind="primary"
             disabled={result?.status === 'loading'} onPress={submit} />
-          <Button text={'開啟' + schoolName + '官方課程目錄'} kind="ghost" onPress={() => {
-            setLinkError(false);
-            void Linking.openURL(catalogUrl).catch(() => setLinkError(true));
-          }} />
-          <Button text="查看我的課表" kind="ghost" onPress={() => { safeNavigate(navigation, 'PersonalTimetable'); }} />
-          <Button text="匯入我的資料" kind="ghost" onPress={() => { safeNavigate(navigation, 'PersonalImport'); }} />
-          {linkError && <Text accessibilityRole="alert" style={body}>無法開啟校方網站，請稍後再試。</Text>}
+          <View style={{ ...ui.divider, flexDirection: 'row', flexWrap: 'wrap', columnGap: 20 }}>
+            <TextAction label={'開啟' + schoolName + '官方課程目錄'} onPress={() => {
+              setLinkError(false);
+              void Linking.openURL(catalogUrl).catch(() => setLinkError(true));
+            }} />
+            <TextAction label="查看我的課表" onPress={() => { safeNavigate(navigation, 'PersonalTimetable'); }} />
+            <TextAction label="匯入我的資料" onPress={() => { safeNavigate(navigation, 'PersonalImport'); }} />
+          </View>
+          {linkError && <Text accessibilityRole="alert" style={{ ...body, color: theme.colors.danger }}>無法開啟校方網站，請稍後再試。</Text>}
           {filterLabel && <Text style={body}>本次查詢條件：{filterLabel}</Text>}
           {result?.status === 'loading' && <Text accessibilityLiveRegion="polite" style={body}>正在查詢{label}…</Text>}
-          {result?.status === 'error' && <Text accessibilityRole="alert" style={body}>暫時無法讀取{schoolName}課程，請重試或查看官方課程目錄。</Text>}
-          {result?.status === 'ready' && <Text accessibilityLiveRegion="polite" style={body}>
+          {result?.status === 'error' && <Text accessibilityRole="alert" style={{ ...body, color: theme.colors.danger }}>暫時無法讀取{schoolName}課程，請重試或查看官方課程目錄。</Text>}
+          {result?.status === 'ready' && <Text accessibilityLiveRegion="polite" style={{ ...ui.detail, color: theme.colors.text, fontWeight: '600' }}>
             {result.data.courses.length === 0 ? '找不到' + label + '的開課資料。' :
               result.data.truncated ? '顯示前 50 筆，輸入更明確的關鍵字可縮小範圍。' : '找到 ' + result.data.courses.length + ' 筆' + label + '開課資料。'}
           </Text>}
           {result?.status === 'ready' && fetchedAt && <Text style={body}>
             校方資料擷取：{formatPublicCatalogFetchedAt(fetchedAt)}（台灣時間；非校方更新時間）
           </Text>}
-          {result?.status === 'ready' && !fetchedAt && <Text accessibilityRole="alert" style={body}>
+          {result?.status === 'ready' && !fetchedAt && <Text accessibilityRole="alert" style={{ ...body, color: theme.colors.warning }}>
             目前沒有校方資料的擷取時間。加入個人課表前，請先至官方課程目錄核對。
           </Text>}
-          {result?.status === 'ready' && fetchIsOld && <Text accessibilityRole="alert" style={body}>
+          {result?.status === 'ready' && fetchIsOld && <Text accessibilityRole="alert" style={{ ...body, color: theme.colors.warning }}>
             距離伺服器上次取得校方資料已超過 24 小時，課程與教室可能變動。加入前請先查看官方課程目錄。
           </Text>}
-          {result?.status === 'ready' && fetchIsFuture && <Text accessibilityRole="alert" style={body}>
+          {result?.status === 'ready' && fetchIsFuture && <Text accessibilityRole="alert" style={{ ...body, color: theme.colors.warning }}>
             伺服器提供的擷取時間比此裝置時間晚超過 5 分鐘，無法確認課程資料時效。加入前請先查看官方課程目錄。
           </Text>}
           {result?.status === 'ready' && (result.data.unresolvedCount ?? 0) > 0 && <Text style={body}>
@@ -396,6 +422,7 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
           </Text>}
         </View>}
         renderItem={({ item, index }) => <CourseCard course={item} schoolId={schoolId} navigation={navigation}
+          sourceEvidence={result?.status === 'ready' ? result.data : undefined}
           cardId={publicCourseCardKey(item, index)} rowNumber={index + 1}
           copyFeedback={copyFeedback} onCopy={copyCourse} />}
       />

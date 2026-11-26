@@ -1,6 +1,8 @@
 import React from 'react';
+import { ScrollView } from 'react-native';
 import { fireEvent, render } from '@testing-library/react-native';
 import { GradesScreen } from '../screens/GradesScreen';
+import { theme } from '../ui/theme';
 const mockListGrades = jest.fn();
 const mockGetGPA = jest.fn().mockResolvedValue(null);
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: { uid: 'student-a' } }) }));
@@ -11,13 +13,13 @@ jest.mock('../services/analytics', () => ({ analytics: { logScreenView: jest.fn(
 jest.mock('../components/PersonalImportSummary', () => ({ PersonalImportSummary: () => null }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../ui/components', () => {
-  const { Text, View, Pressable } = require('react-native');
+  const { Text, View } = require('react-native');
   const Container = ({ children, title, subtitle }: { children?: React.ReactNode; title?: string; subtitle?: string }) => <View><Text>{title}</Text><Text>{subtitle}</Text>{children}</View>;
   return {
     Screen: Container, Card: Container, AnimatedCard: Container,
     Pill: ({ text }: { text: string }) => <Text>{text}</Text>,
     SectionTitle: ({ text }: { text: string }) => <Text>{text}</Text>,
-    SegmentedControl: ({ options, onChange }: { options: string[]; onChange(index: number): void }) => <View>{options.map((text: string, index: number) => <Pressable key={text} onPress={() => onChange(index)}><Text>{text}</Text></Pressable>)}</View>,
+    SegmentedControl: jest.requireActual('../ui/components').SegmentedControl,
     ProgressRing: () => null, Spinner: () => null,
     Button: ({ text }: { text: string }) => <Text>{text}</Text>,
   };
@@ -29,7 +31,11 @@ test('missing grade points stay visible and are excluded from the reference GPA'
   ]);
   const view = render(<GradesScreen />);
   await view.findByText('GPA: 3.00');
-  fireEvent.press(view.getByText('歷史成績'));
+  const scrollTo = jest.spyOn(view.UNSAFE_getByType(ScrollView).instance, 'scrollTo');
+  expect(view.getByRole('tab', { name: '本學期' })).toHaveAccessibilityState({ selected: true });
+  fireEvent.press(view.getByRole('tab', { name: '歷史成績' }));
+  expect(view.getByRole('tab', { name: '歷史成績' })).toHaveAccessibilityState({ selected: true });
+  expect(scrollTo).toHaveBeenCalledWith({ y: 0, animated: false });
   await view.findByText('未提供績點');
   expect(view.queryByText('GPA: 1.50')).toBeNull();
   expect(view.getAllByText(/來源：校方正式/).length).toBe(2);
@@ -57,4 +63,14 @@ test.each([[[]], [[{ id: 'a', courseName: '缺績點', courseId: 'a', credits: 3
   await view.findByText('累積 GPA');
   expect(view.getAllByText('未知').length).toBeGreaterThan(0);
   expect(view.queryByText('0.00')).toBeNull();
+});
+
+test('keeps pending school grades neutral and makes the source readable with the course link', async () => {
+  mockListGrades.mockResolvedValue([
+    { id: 'pending', courseId: 'c1', courseName: '專題討論', credits: 2, semester: '115_1',
+      letterGrade: '成績處理中', gradeSource: 'school-official' },
+  ]);
+  const view = render(<GradesScreen />);
+  expect(await view.findByText('成績處理中')).toHaveStyle({ color: theme.colors.muted });
+  expect(view.getByRole('link')).toHaveAccessibleName(/專題討論[\s\S]*校方正式[\s\S]*成績處理中/);
 });

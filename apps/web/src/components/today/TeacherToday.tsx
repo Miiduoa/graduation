@@ -7,14 +7,17 @@ import { buildPersonalToday } from '@campus/shared';
 import {
   formatTodayHeaderDate,
   TODAY_COPY,
+  formatTodoDueLine,
   sortTodayClasses,
+  sortTodayTodos,
   type TodayClass,
+  type TodayTodo,
 } from '@campus/shared/src/pickNextAction';
 import type { HomeCourse } from '@/lib/homeOverview';
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
-import { TODAY_FLOW_CLASS_TITLE } from '@/lib/todayCourseWork';
-import { courseWeekHref, todayClassesFromSchedule } from '@/lib/todayScreen';
+import { TEACHER_TODAY_DUE_TITLE, TODAY_FLOW_CLASS_TITLE } from '@/lib/todayCourseWork';
+import { assignmentHref, courseWeekHref, todayClassesFromSchedule } from '@/lib/todayScreen';
 import styles from './StudentToday.module.css';
 
 const TEACHING_ROLES = new Set(['owner', 'instructor', 'moderator', 'owner-teacher', 'co-teacher']);
@@ -34,6 +37,7 @@ type Props = {
   timetableScopeKey?: string;
   onRetryTimetable: () => void;
   teachingCourses: readonly HomeCourse[];
+  upcomingTodos: TodayTodo[];
   coursesLoading: boolean;
   coursesError: string;
   onRetryCourses: () => void;
@@ -41,7 +45,7 @@ type Props = {
   importHref: string;
 };
 
-/** Course membership is known here; grading and student deadlines are read in each workspace. */
+/** Teacher-facing timetable, course workspaces, and upcoming assignments. */
 export function TeacherToday({
   assistant,
   workspaces,
@@ -53,6 +57,7 @@ export function TeacherToday({
   timetableScopeKey,
   onRetryTimetable,
   teachingCourses,
+  upcomingTodos = [],
   coursesLoading,
   coursesError,
   onRetryCourses,
@@ -61,6 +66,7 @@ export function TeacherToday({
 }: Props) {
   const sortedClasses = sortTodayClasses(classes, now);
   const courses = teachingCourses.filter(isTeachingCourse);
+  const todos = sortTodayTodos(upcomingTodos).slice(0, 5);
 
   return (
     <div className={styles.screen} data-testid="teacher-today">
@@ -68,11 +74,11 @@ export function TeacherToday({
         <h1 className={styles.title}>今天</h1>
         <p className={styles.date}>{formatTodayHeaderDate(now)}</p>
       </header>
+      {assistant}
       {workspaces}
       {unsigned ? (
         <>
           <p className={styles.empty}>登入後，接續你的課表與已獲授權的授課課程。</p>
-          {assistant}
         </>
       ) : (
         <div className={styles.flow}>
@@ -89,11 +95,7 @@ export function TeacherToday({
                 {TODAY_COPY.viewFullTimetable}
               </Link>
             </div>
-            {timetableStatus === 'loading' ? (
-              <p className={styles.empty} role="status">
-                正在確認今天的課表…
-              </p>
-            ) : timetableStatus === 'error' ? (
+            {timetableStatus === 'error' && (
               <>
                 <p className={styles.empty} role="alert">
                   {TODAY_COPY.timetableUnavailable}
@@ -102,7 +104,13 @@ export function TeacherToday({
                   重新讀取課表
                 </button>
               </>
-            ) : timetableStatus === 'unsigned-scope' ? (
+            )}
+            {timetableStatus === 'loading' && (
+              <p className={styles.empty} role="status">
+                正在確認今天的課表…
+              </p>
+            )}
+            {timetableStatus === 'unsigned-scope' ? (
               <>
                 <p className={styles.empty}>先選擇校園，就能查看或建立這所學校的課表。</p>
                 <Link className={styles.import} href={timetableHref}>
@@ -116,13 +124,7 @@ export function TeacherToday({
                   匯入我的課表
                 </Link>
               </>
-            ) : sortedClasses.length === 0 ? (
-              <p className={styles.empty}>
-                今天沒有排課。 <Link href={timetableHref}>查看課表</Link>
-                {' · '}
-                <Link href={importHref}>整理課表</Link>
-              </p>
-            ) : (
+            ) : sortedClasses.length > 0 ? (
               <TodayClassRows
                 key={timetableScopeKey ?? timetableSchoolId}
                 classes={sortedClasses}
@@ -130,7 +132,13 @@ export function TeacherToday({
                 timetableHref={timetableHref}
                 timetableSchoolId={timetableSchoolId}
               />
-            )}
+            ) : timetableStatus === 'ready' ? (
+              <p className={styles.empty}>
+                今天沒有排課。 <Link href={timetableHref}>查看課表</Link>
+                {' · '}
+                <Link href={importHref}>整理課表</Link>
+              </p>
+            ) : null}
           </section>
 
           <section
@@ -189,7 +197,27 @@ export function TeacherToday({
             )}
           </section>
 
-          {assistant}
+          {todos.length > 0 && (
+            <section className={styles.section} aria-labelledby="teacher-due-title">
+              <h2 id="teacher-due-title" className={styles.sectionTitle}>
+                {TEACHER_TODAY_DUE_TITLE}
+              </h2>
+              <ul className={styles.list}>
+                {todos.map((item) => (
+                  <li key={item.id}>
+                    <Link href={assignmentHref(item)} className={styles.row}>
+                      <span className={styles.rowBody}>
+                        <span className={styles.rowTitle}>{item.title}</span>
+                        <span className={styles.rowMeta}>
+                          {item.courseName} · {formatTodoDueLine(item, now)}
+                        </span>
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
       )}
     </div>
@@ -202,6 +230,7 @@ type BoundProps = {
   now: Date | null;
   unsigned: boolean;
   teachingCourses: readonly HomeCourse[];
+  upcomingTodos: TodayTodo[];
   coursesLoading: boolean;
   coursesError: string;
   onRetryCourses: () => void;
@@ -219,22 +248,21 @@ export function TeacherTodayPage(props: BoundProps) {
   const timetableRecords = [...records.imported.records, ...(records.manual ?? [])].filter(
     (row) => row.kind === 'timetable' && row.schoolId === schoolId,
   );
-  const timetableStatus: Props['timetableStatus'] = scope.loading
-    ? 'loading'
-    : scope.scope.schoolId === 'personal'
-      ? 'unsigned-scope'
-      : !records.loaded
-        ? 'loading'
-        : records.error
-          ? 'error'
-          : timetableRecords.length === 0
-            ? 'empty'
-            : 'ready';
   const schedule = buildPersonalToday(timetableRecords, {
     schoolId,
     now,
   });
-  const classes = todayClassesFromSchedule(schedule.today, now);
+  const classes = scope.loading ? [] : todayClassesFromSchedule(schedule.today, now);
+  const timetableStatus: Props['timetableStatus'] =
+    scope.loading || !records.loaded
+      ? 'loading'
+      : records.error
+        ? 'error'
+        : scope.scope.schoolId === 'personal' && classes.length === 0
+          ? 'unsigned-scope'
+          : timetableRecords.length === 0
+            ? 'empty'
+            : 'ready';
   return (
     <TeacherToday
       assistant={props.assistant}
@@ -247,6 +275,7 @@ export function TeacherTodayPage(props: BoundProps) {
       timetableScopeKey={records.scopeKey}
       onRetryTimetable={records.retry}
       teachingCourses={props.teachingCourses}
+      upcomingTodos={props.upcomingTodos}
       coursesLoading={props.coursesLoading}
       coursesError={props.coursesError}
       onRetryCourses={props.onRetryCourses}

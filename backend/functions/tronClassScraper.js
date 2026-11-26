@@ -1009,8 +1009,22 @@ function httpError(status) {
   return error;
 }
 
-function homeworkPaginationNumber(value) {
+function isLegacyPaginationNumberInput(value) {
+  if (Array.isArray(value)) return value.every(isLegacyPaginationNumberInput);
+  return value == null || ['number', 'string', 'boolean', 'bigint'].includes(typeof value);
+}
+
+function homeworkPaginationNumber(value, required = true) {
   if (value === undefined || value === null) return null;
+  if (!required) {
+    try {
+      if (!isLegacyPaginationNumberInput(value)) return null;
+      const parsed = Number(value);
+      return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
   const parsed = typeof value === 'number' ? value
     : typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : NaN;
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
@@ -1019,40 +1033,53 @@ function homeworkPaginationNumber(value) {
   return parsed;
 }
 
-/** @param {TronClassReadOptions} readOptions */
-async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize = 50, readOptions = {}) {
+/** @param {TronClassReadOptions=} readOptions */
+async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize = 50, readOptions) {
+  const strict = readOptions !== undefined;
   const data = await tcFetchJson(
     `${TC_BASE}/api/courses/${courseId}/homework-activities?page=${page}&page_size=${pageSize}`,
     cookies,
-    { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 },
+    strict
+      ? { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 }
+      : {},
   );
   if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.homework_activities)) {
-    throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
+    // Legacy callers (no readOptions) keep merge-base behaviour: a 200 body
+    // without an activities array is still reported as HTTP 200.
+    throw strict ? homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502) : httpError(200);
   }
-  // Invalid metadata is not an absent total: treating it as null can make a
-  // short or empty response appear complete and hide remaining assignments.
-  const total = homeworkPaginationNumber(data.total);
-  const sourcePage = homeworkPaginationNumber(data.page);
-  const sourcePageSize = homeworkPaginationNumber(data.page_size);
-  if ((sourcePage !== null && sourcePage !== page) ||
-    (sourcePageSize !== null && sourcePageSize !== pageSize) ||
-    data.homework_activities.length > pageSize ||
-    (total !== null && data.homework_activities.length > total)) {
+  // On the integration path, invalid metadata is not an absent total: treating it
+  // as null can make a short or empty response appear complete and hide remaining
+  // assignments. Legacy callers keep the older missing-total compatibility.
+  const total = homeworkPaginationNumber(data.total, strict);
+  const sourcePage = strict ? homeworkPaginationNumber(data.page, true) : null;
+  const sourcePageSize = strict ? homeworkPaginationNumber(data.page_size, true) : null;
+  const requestedPage = homeworkPaginationNumber(page, false);
+  const requestedPageSize = homeworkPaginationNumber(pageSize, false);
+  // Use the requested limit even when the school reports a different page size.
+  const pageLimit = requestedPageSize ?? 50;
+  // Compare numerically so a legacy string page still matches a numeric school page.
+  if ((strict && sourcePage !== null && requestedPage !== null && sourcePage !== requestedPage) ||
+    (strict && sourcePageSize !== null && requestedPageSize !== null && sourcePageSize !== requestedPageSize) ||
+    (strict && data.homework_activities.length > pageLimit) ||
+    (strict && total !== null && data.homework_activities.length > total)) {
     throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
   }
   return {
-    homework_activities: data.homework_activities,
+    homework_activities: strict ? data.homework_activities : data.homework_activities.slice(0, pageLimit),
     total,
-    page: sourcePage ?? page,
-    page_size: sourcePageSize ?? pageSize,
+    page: strict ? (sourcePage ?? requestedPage ?? page) : (data.page ?? page),
+    page_size: strict ? (sourcePageSize ?? requestedPageSize ?? pageSize) : (data.page_size ?? pageSize),
   };
 }
 
-/** @param {TronClassReadOptions} readOptions */
-async function tcFetchActivitiesRaw(cookies, courseId, query = '', readOptions = {}) {
+/** @param {TronClassReadOptions=} readOptions */
+async function tcFetchActivitiesRaw(cookies, courseId, query = '', readOptions) {
   const suffix = query ? `?${query}` : '';
   const data = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/activities${suffix}`, cookies,
-    { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 });
+    readOptions !== undefined
+      ? { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 }
+      : {});
   const activities = data?.activities;
   if (!Array.isArray(activities)) {
     throw httpError(200);
@@ -1226,19 +1253,22 @@ async function tcFetchAnnouncements(cookies) {
   }
 }
 
-/** @param {TronClassReadOptions} readOptions */
-async function tcFetchAnnouncementsStrict(cookies, readOptions = {}) {
+/** @param {TronClassReadOptions=} readOptions */
+async function tcFetchAnnouncementsStrict(cookies, readOptions) {
+  // 未帶讀取選項的舊呼叫端維持原本行為，不套用新的逾時與大小上限。
   const data = await tcFetchJson(`${TC_BASE}/api/announcement`, cookies,
-    { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 });
+    readOptions === undefined ? {}
+      : { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 });
   const items = data?.announcements;
   if (!Array.isArray(items)) throw httpError(200);
   return items;
 }
 
-/** @param {TronClassReadOptions} readOptions */
-async function tcFetchCourseAnnouncementsStrict(cookies, courseId, readOptions = {}) {
+/** @param {TronClassReadOptions=} readOptions */
+async function tcFetchCourseAnnouncementsStrict(cookies, courseId, readOptions) {
   const data = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/announcements`, cookies,
-    { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 });
+    readOptions === undefined ? {}
+      : { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 });
   const items =
     data?.announcements ??
     data?.notifications ??

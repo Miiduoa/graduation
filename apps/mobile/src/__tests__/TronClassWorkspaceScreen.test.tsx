@@ -1,7 +1,10 @@
 import React from 'react';
+import { AppState, Linking } from 'react-native';
+import { NavigationContext } from '@react-navigation/native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NuniError } from '@campus/shared/src/nuni';
+import { isTronClassDataFetchEnabled } from '../services/tronClassDataEnabled';
 import { TronClassWorkspaceScreen } from '../screens/TronClassWorkspaceScreen';
 import {
   saveNativeTronClassPending,
@@ -47,6 +50,10 @@ let mockConnection = connection;
 let mockSnapshot = snapshot;
 let mockId = 0;
 let mockSubmissionDownloadEnabled = true;
+
+jest.mock('../services/tronClassDataEnabled', () => ({
+  isTronClassDataFetchEnabled: jest.fn(),
+}));
 
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
@@ -168,6 +175,7 @@ async function defaultRequest(_path: string, _context: string, input: Record<str
 beforeEach(async () => {
   await AsyncStorage.clear();
   jest.clearAllMocks();
+  jest.mocked(isTronClassDataFetchEnabled).mockReturnValue(true);
   mockAuth = {
     session: { platformAccountId: accountA, context: 'context-a' },
     loading: false,
@@ -228,6 +236,30 @@ async function confirmAndSend(view: ReturnType<typeof render>) {
   fireEvent(view.getByLabelText('我已確認要把這份作業送至校方'), 'valueChange', true);
   fireEvent.press(view.getByRole('button', { name: '確認並繳交至 TronClass' }));
 }
+
+it('blocks the workspace before contacting the BFF and returns to the previous screen', async () => {
+  jest.mocked(isTronClassDataFetchEnabled).mockReturnValue(false);
+  const goBack = jest.fn();
+  const navigation = { canGoBack: () => true, goBack } as unknown as React.ContextType<typeof NavigationContext>;
+  const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  try {
+    const view = render(
+      <NavigationContext.Provider value={navigation}>
+        <TronClassWorkspaceScreen />
+      </NavigationContext.Provider>,
+    );
+    expect(view.getByRole('alert')).toHaveTextContent('此功能目前未開放');
+    expect(view.getAllByRole('button')).toHaveLength(1);
+    await act(async () => {
+      fireEvent.press(view.getByRole('button', { name: '返回' }));
+    });
+    expect(goBack).toHaveBeenCalledTimes(1);
+    expect(mockBffRequest).not.toHaveBeenCalled();
+    expect(openURL).not.toHaveBeenCalled();
+  } finally {
+    openURL.mockRestore();
+  }
+});
 
 it('shows personal school windows and drafts without enabling the native writer', async () => {
   mockPreparation = { ...preparation, availability };
@@ -338,7 +370,7 @@ it.each(['submit', 'reconcile'] as const)(
     const pending = new Promise((resolve) => { resolveOperation = resolve; });
     mockBffRequest.mockImplementation((path, context, input) =>
       input.action === action ? pending : defaultRequest(path, context, input));
-    if (action === 'reconcile') await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+    if (action === 'reconcile') await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
     const view = render(<TronClassWorkspaceScreen />);
     if (action === 'submit') {
       await openAssignment(view);
@@ -358,7 +390,7 @@ it.each(['submit', 'reconcile'] as const)(
     fireEvent.press(view.getByRole('button', { name: '返回作業清單' }));
     expect(view.getByRole('button', { name: '已繳交，0 份' })).toBeTruthy();
     expect(view.getByRole('button', { name: '待繳交，1 份' })).toBeTruthy();
-    expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(input.operationId);
+    expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(input.operationId);
   },
 );
 
@@ -392,7 +424,7 @@ it('performs fresh preparation after preview and confirmation, then shows acknow
   });
   expect(view.getByText('來源紀錄時間：未提供')).toBeTruthy();
   expect(view.queryByText(/^繳交時間：/)).toBeNull();
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBeNull();
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBeNull();
 });
 it('selects native files, freezes bytes for preview, uploads once and submits only the returned verified ID', async () => {
   mockPreparation = { ...preparation, canSubmit: true, blockedReason: null };
@@ -427,7 +459,7 @@ it('selects native files, freezes bytes for preview, uploads once and submits on
   expect(actions('submit')[0].attachments).toEqual([mockUpload.mock.calls[0][4].fileId]);
   expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
   expect(AsyncStorage.setItem).toHaveBeenCalledWith(
-    expect.stringContaining('pending.v1:'),
+    expect.stringContaining('pending.v2:'),
     actions('submit')[0].operationId,
   );
 });
@@ -482,7 +514,7 @@ it('never resends a lost submit reply and only queries the original operation', 
   await confirmAndSend(view);
   await view.findByText('前次送出結果待確認');
   const pending = actions('submit')[0].operationId;
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(pending);
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(pending);
   fireEvent.press(view.getByRole('button', { name: '查詢原送出結果' }));
   await waitFor(() => expect(actions('reconcile')).toHaveLength(1));
   expect(actions('reconcile')[0]).toEqual({ action: 'reconcile', operationId: pending, revision });
@@ -490,7 +522,7 @@ it('never resends a lost submit reply and only queries the original operation', 
   expect(view.queryByRole('button', { name: '確認並繳交至 TronClass' })).toBeNull();
 });
 it('restores a pending operation as read-only reconciliation before any editor can send', async () => {
-  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
   const view = render(<TronClassWorkspaceScreen />);
   fireEvent.press(await view.findByRole('button', { name: homework.title }));
   await view.findByText('前次送出結果待確認');
@@ -498,8 +530,34 @@ it('restores a pending operation as read-only reconciliation before any editor c
   expect(actions('submit')).toHaveLength(0);
   expect(view.queryByLabelText('作業內容')).toBeNull();
 });
+it.each([studentKey, 'f'.repeat(64)])(
+  'reconciles a pending operation after reconnect only for the same student: %s',
+  async (key) => {
+    await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
+    mockConnection = { ...connection, connected: false, studentKey: null };
+    const view = render(<TronClassWorkspaceScreen />);
+    const passwordInput = await view.findByLabelText('TronClass 密碼');
+    mockConnection = { ...connection, revision: nextRevision, studentKey: key };
+    mockSnapshot = { ...snapshot, revision: nextRevision };
+    mockPreparation = { ...preparation, revision: nextRevision };
+    fireEvent.changeText(passwordInput, 'fixture-input');
+    fireEvent.press(view.getByRole('button', { name: '驗證並連接 TronClass' }));
+    if (key === studentKey) {
+      fireEvent.press(await view.findByRole('button', { name: homework.title }));
+      await view.findByText('前次送出結果待確認');
+      await waitFor(() => expect(actions('reconcile')).toEqual([
+        { action: 'reconcile', operationId, revision: nextRevision },
+      ]));
+    } else {
+      await openAssignment(view);
+      expect(view.queryByText('前次送出結果待確認')).toBeNull();
+      expect(actions('reconcile')).toHaveLength(0);
+    }
+    expect(actions('submit')).toHaveLength(0);
+  },
+);
 it('unlocks editing only after the server explicitly proves that the final submission was not started', async () => {
-  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
   mockBffRequest.mockImplementation((path, context, input) =>
     input.action === 'reconcile'
       ? Promise.reject(new NuniError(409, 'TRONCLASS_SUBMISSION_NOT_STARTED'))
@@ -508,7 +566,7 @@ it('unlocks editing only after the server explicitly proves that the final submi
   const view = render(<TronClassWorkspaceScreen />);
   await openAssignment(view);
   await view.findByText('已確認這次作業未送出，請重新預覽與確認後再繳交。');
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBeNull();
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBeNull();
   expect(actions('submit')).toHaveLength(0);
 });
 it('explicitly stops a failed upload preparation, keeps text and files, and requires a fresh preview before a new operation', async () => {
@@ -529,14 +587,14 @@ it('explicitly stops a failed upload preparation, keeps text and files, and requ
   await confirmAndSend(view);
   await view.findByText('前次送出結果待確認');
   const firstOperation = mockUpload.mock.calls[0][4].operationId;
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(firstOperation);
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(firstOperation);
   expect(actions('cancel-preparation')).toHaveLength(0);
   expect(actions('submit')).toHaveLength(0);
   fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
   await view.findByText('已停止尚未送出的準備，文字與附件已保留。請重新預覽與確認後再繳交。');
   expect(actions('cancel-preparation')).toEqual([{ action: 'cancel-preparation',
     courseId: 10, homeworkId: 20, revision, operationId: firstOperation }]);
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBeNull();
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBeNull();
   expect(view.getByLabelText('作業內容').props.value).toBe('保留原本整理的答案');
   expect(view.getByText('答案.pdf · 3 B')).toBeTruthy();
   expect(view.queryByRole('button', { name: '確認並繳交至 TronClass' })).toBeNull();
@@ -555,7 +613,7 @@ it('explicitly stops a failed upload preparation, keeps text and files, and requ
 });
 it.each(['unknown', 'malformed', 'network'])(
   'keeps the pending operation and disables editing after a %s cancellation outcome', async (outcome) => {
-    await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+    await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
     mockBffRequest.mockImplementation((path, context, input) => {
       if (input.action !== 'cancel-preparation') return defaultRequest(path, context, input);
       if (outcome === 'network') return Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
@@ -568,7 +626,7 @@ it.each(['unknown', 'malformed', 'network'])(
     fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
     await waitFor(() => expect(actions('cancel-preparation')).toHaveLength(1));
     await waitFor(() => expect(view.getByRole('button', { name: '停止準備並返回編輯' })).not.toBeDisabled());
-    expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(operationId);
+    expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(operationId);
     expect(view.getByText('前次送出結果待確認')).toBeTruthy();
     expect(view.queryByLabelText('作業內容')).toBeNull();
     expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
@@ -577,7 +635,7 @@ it.each(['unknown', 'malformed', 'network'])(
   },
 );
 it('keeps a cancelled operation pending when device storage removal fails and allows explicit retry', async () => {
-  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
   mockBffRequest.mockImplementation((path, context, input) => input.action === 'cancel-preparation'
     ? Promise.resolve({ status: 'cancelled', operationId, courseId: 10, homeworkId: 20 })
     : defaultRequest(path, context, input));
@@ -588,15 +646,15 @@ it('keeps a cancelled operation pending when device storage removal fails and al
   fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
   await view.findByText('已停止準備，但無法更新裝置紀錄。請再次停止準備後再編輯。');
   expect(view.queryByLabelText('作業內容')).toBeNull();
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(operationId);
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(operationId);
   fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
   await view.findByLabelText('作業內容');
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBeNull();
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBeNull();
   expect(actions('cancel-preparation')).toHaveLength(2);
   expect(actions('submit')).toHaveLength(0);
 });
 it('preserves a newer same-owner pending operation when an earlier cancellation response arrives', async () => {
-  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
   let finish: (value: unknown) => void = () => undefined;
   mockBffRequest.mockImplementation((path, context, input) => input.action === 'cancel-preparation'
     ? new Promise(resolve => { finish = resolve; })
@@ -609,12 +667,12 @@ it('preserves a newer same-owner pending operation when an earlier cancellation 
   // Another screen has independently resolved the old operation and started a
   // new one while this screen is still waiting for its original cancellation.
   const newer = '22222222-2222-4222-8222-222222222222';
-  await clearNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
-  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, newer);
+  await clearNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
+  await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, newer);
   const removals = jest.mocked(AsyncStorage.removeItem).mock.calls.length;
   await act(async () => { finish({ status: 'cancelled', operationId, courseId: 10, homeworkId: 20 }); });
   await view.findByText('裝置已有另一筆待查操作，請返回作業清單再開啟，先查證該筆紀錄。');
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(newer);
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(newer);
   expect(AsyncStorage.removeItem).toHaveBeenCalledTimes(removals);
   expect(view.getByText('前次送出結果待確認')).toBeTruthy();
   expect(view.queryByLabelText('作業內容')).toBeNull();
@@ -623,7 +681,7 @@ it('preserves a newer same-owner pending operation when an earlier cancellation 
 });
 it.each(['owner', 'session', 'unmount', 'expired-binding'])(
   'does not clear a pending operation for a delayed cancellation after %s changes', async (change) => {
-    await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+    await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
     let finish: (value: unknown) => void = () => undefined;
     mockBffRequest.mockImplementation((path, context, input) => input.action === 'cancel-preparation'
       ? new Promise(resolve => { finish = resolve; })
@@ -646,7 +704,7 @@ it.each(['owner', 'session', 'unmount', 'expired-binding'])(
       view.rerender(<TronClassWorkspaceScreen />);
     }
     await act(async () => { finish({ status: 'cancelled', operationId, courseId: 10, homeworkId: 20 }); });
-    expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(operationId);
+    expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(operationId);
     expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
     expect(actions('submit')).toHaveLength(0);
     if (change !== 'unmount') expect(view.queryByLabelText('作業內容')).toBeNull();
@@ -714,6 +772,108 @@ it('drops a delayed previous-owner response after account switching', async () =
   });
   expect(view.queryByText('已連接 同學 A')).toBeNull();
   expect(actions('sync')).toHaveLength(0);
+});
+it('aborts native login, verifies the binding before retry, and ignores the old attempt while a new login is pending', async () => {
+  mockConnection = { ...disconnected };
+  let finishFirst!: (value: unknown) => void;
+  let finishSecond!: (value: unknown) => void;
+  let finishStatus!: (value: unknown) => void;
+  const first = new Promise(resolve => { finishFirst = resolve; });
+  const second = new Promise(resolve => { finishSecond = resolve; });
+  const status = new Promise(resolve => { finishStatus = resolve; });
+  let statusCount = 0;
+  let connectCount = 0;
+  mockBffRequest.mockImplementation((path, context, input) => {
+    if (input.action === 'status') return ++statusCount === 1 ? Promise.resolve(disconnected) : status;
+    if (input.action === 'connect') return ++connectCount === 1 ? first : second;
+    return defaultRequest(path, context, input);
+  });
+  const view = render(<TronClassWorkspaceScreen />);
+  fireEvent.changeText(await view.findByLabelText('TronClass 帳號'), 'student-a');
+  fireEvent.changeText(view.getByLabelText('TronClass 密碼'), 'synthetic-password');
+  fireEvent.press(view.getByRole('button', { name: '驗證並連接 TronClass' }));
+  await waitFor(() => expect(actions('connect')).toHaveLength(1));
+  const firstSignal = mockBffRequest.mock.calls.find(call => call[2].action === 'connect')![5] as AbortSignal;
+  expect(firstSignal.aborted).toBe(false);
+  fireEvent.press(view.getByRole('button', { name: '取消連接' }));
+  expect(firstSignal.aborted).toBe(true);
+  await waitFor(() => expect(actions('status')).toHaveLength(2));
+  expect(view.queryByLabelText('TronClass 密碼')).toBeNull();
+  const fresh = { ...disconnected, revision: nextRevision, account: 'student-a' };
+  await act(async () => finishStatus(fresh));
+  fireEvent.changeText(await view.findByLabelText('TronClass 密碼'), 'new-password');
+  fireEvent.press(view.getByRole('button', { name: '驗證並連接 TronClass' }));
+  await waitFor(() => expect(actions('connect')).toHaveLength(2));
+  expect(actions('connect')[1].expectedRevision).toBe(nextRevision);
+  await act(async () => finishFirst(connection));
+  expect(view.getByRole('button', { name: '驗證並連接 TronClass' })).toBeDisabled();
+  expect(view.queryByText('已連接 同學 A')).toBeNull();
+  expect(actions('sync')).toHaveLength(0);
+  mockConnection = { ...connection };
+  await act(async () => finishSecond(connection));
+  expect(await view.findByText('已連接 同學 A')).toBeTruthy();
+});
+
+it.each(['unmount', 'owner', 'context', 'background'] as const)(
+  'aborts a pending native login on %s and discards a late connection response', async change => {
+    mockConnection = { ...disconnected };
+    let finish!: (value: unknown) => void;
+    const pending = new Promise(resolve => { finish = resolve; });
+    mockBffRequest.mockImplementation((path, context, input) => input.action === 'connect'
+      ? pending : defaultRequest(path, context, input));
+    const appState = jest.spyOn(AppState, 'addEventListener');
+    const view = render(<TronClassWorkspaceScreen />);
+    fireEvent.changeText(await view.findByLabelText('TronClass 帳號'), 'student-a');
+    fireEvent.changeText(view.getByLabelText('TronClass 密碼'), 'synthetic-password');
+    fireEvent.press(view.getByRole('button', { name: '驗證並連接 TronClass' }));
+    await waitFor(() => expect(actions('connect')).toHaveLength(1));
+    const signal = mockBffRequest.mock.calls.find(call => call[2].action === 'connect')![5] as AbortSignal;
+    if (change === 'unmount') view.unmount();
+    else if (change === 'background') {
+      act(() => appState.mock.calls.find(([event]) => event === 'change')![1]('background'));
+      expect(view.queryByLabelText('TronClass 密碼')).toBeNull();
+      expect(view.getByRole('button', { name: '重新讀取連接狀態' })).not.toBeDisabled();
+    } else {
+      mockAuth = { ...mockAuth, session: { platformAccountId: change === 'owner' ? accountB : accountA, context: 'context-next' } };
+      view.rerender(<TronClassWorkspaceScreen />);
+      await view.findByLabelText('TronClass 帳號');
+    }
+    expect(signal.aborted).toBe(true);
+    await act(async () => finish(connection));
+    expect(actions('sync')).toHaveLength(0);
+    expect(actions('courses')).toHaveLength(0);
+    if (change !== 'unmount') expect(view.queryByText('已連接 同學 A')).toBeNull();
+  },
+);
+it('cancels login when the native route loses focus even if the screen stays mounted', async () => {
+  mockConnection = { ...disconnected };
+  let finish!: (value: unknown) => void;
+  const pending = new Promise(resolve => { finish = resolve; });
+  mockBffRequest.mockImplementation((path, context, input) => input.action === 'connect'
+    ? pending : defaultRequest(path, context, input));
+  let blur!: () => void;
+  const removeBlur = jest.fn();
+  const navigation = { addListener: jest.fn((_event: string, listener: () => void) => {
+    blur = listener;
+    return removeBlur;
+  }) } as unknown as React.ContextType<typeof NavigationContext>;
+  const view = render(<NavigationContext.Provider value={navigation}>
+    <TronClassWorkspaceScreen />
+  </NavigationContext.Provider>);
+  fireEvent.changeText(await view.findByLabelText('TronClass 帳號'), 'student-a');
+  fireEvent.changeText(view.getByLabelText('TronClass 密碼'), 'synthetic-password');
+  fireEvent.press(view.getByRole('button', { name: '驗證並連接 TronClass' }));
+  await waitFor(() => expect(actions('connect')).toHaveLength(1));
+  const signal = mockBffRequest.mock.calls.find(call => call[2].action === 'connect')![5] as AbortSignal;
+  act(() => blur());
+  expect(signal.aborted).toBe(true);
+  expect(view.getByRole('button', { name: '重新讀取連接狀態' })).not.toBeDisabled();
+  expect(view.queryByLabelText('TronClass 密碼')).toBeNull();
+  await act(async () => finish(connection));
+  expect(actions('sync')).toHaveLength(0);
+  expect(view.queryByText('已連接 同學 A')).toBeNull();
+  view.unmount();
+  expect(removeBlur).toHaveBeenCalledTimes(1);
 });
 it('requires confirmed rules even if an older prepare response says canSubmit', async () => {
   mockPreparation = { ...preparation, canSubmit: true, rules: undefined };
@@ -859,7 +1019,7 @@ it.each(['no-descriptor', 'no-capability'] as const)('keeps history attachment n
 it('keeps a denied history download out of the native share sheet without altering the pending operation', async () => {
   mockPreparation = { ...preparation, history: submissionHistory };
   mockSubmissionDownload.mockRejectedValueOnce(new NuniError(403, 'TRONCLASS_SUBMISSION_ATTACHMENT_DENIED'));
-  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
   const view = render(<TronClassWorkspaceScreen />);
   fireEvent.press(await view.findByRole('button', { name: homework.title }));
   const download = await view.findByRole('button', { name: '下載並分享作業附件：先前答案.pdf' });
@@ -867,7 +1027,7 @@ it('keeps a denied history download out of the native share sheet without alteri
   fireEvent.press(download);
   await view.findByText('校方尚未允許下載這份作業附件，請重新讀取作業紀錄。');
   expect(mockShare).not.toHaveBeenCalled();
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(operationId);
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(operationId);
   expect(actions('submit')).toHaveLength(0);
   expect(actions('reconcile')).toHaveLength(1);
   expect(view.getByText('前次送出結果待確認')).toBeTruthy();
@@ -1228,4 +1388,87 @@ it('rejects a file selection in a second draft without deleting the first draft 
   fireEvent.press(view.getByRole('button', { name: '預覽並重新核對' }));
   await view.findByText('確認這次作業內容');
   expect(mockUpload).not.toHaveBeenCalled();
+});
+
+it.each([
+  'initial courses', 'retry courses', 'initial sync', 'retry sync', 'course sync',
+  'prepare', 'session refresh after lost', 'new context after lost', 'new context before detection',
+])('clears the workspace and stops after a binding change during %s', async (stage) => {
+  const replacementRevision = 'b'.repeat(32);
+  let refreshStarted = false;
+  const schoolReads = jest.fn();
+  function rebind() {
+    mockConnection = { ...connection, revision: replacementRevision, account: 'student-b' };
+    mockPreparation = { ...preparation, revision: replacementRevision };
+    mockSnapshot = { ...snapshot, revision: replacementRevision,
+      homework: [{ ...homework, title: '新帳號的私人作業' }] };
+  }
+  mockBffRequest.mockImplementation((path, context, input) => {
+    if (input.action === 'courses' || input.action === 'sync' || input.action === 'prepare') {
+      if ((stage === 'initial courses' && input.action === 'courses') ||
+          ((stage === 'initial sync' || (stage === 'retry sync' && refreshStarted)) && input.action === 'sync' &&
+            mockConnection.revision === revision)) rebind();
+      if (input.revision !== mockConnection.revision) return Promise.reject(new NuniError(409, 'TRONCLASS_BINDING_CHANGED'));
+      schoolReads(input.revision);
+      if (stage === 'retry courses' && mockConnection.revision === revision)
+        return Promise.reject(new NuniError(504, 'TRONCLASS_TIMEOUT'));
+    }
+    return defaultRequest(path, context, input);
+  });
+  const view = render(<TronClassWorkspaceScreen />);
+  if (stage === 'retry courses') {
+    const retry = await view.findByRole('button', { name: '重新讀取課程清單' });
+    rebind();
+    fireEvent.press(retry);
+  } else if (stage === 'retry sync' || stage === 'course sync') {
+    await view.findByRole('button', { name: homework.title });
+    if (stage === 'retry sync') refreshStarted = true;
+    else rebind();
+    fireEvent.press(view.getByRole('button', { name: stage === 'course sync' ? '程式設計' : '重新整理課務資料' }));
+  }
+
+  if (stage === 'prepare') {
+    await view.findByRole('button', { name: homework.title });
+    rebind();
+    fireEvent.press(view.getByRole('button', { name: homework.title }));
+  }
+  const remounts = stage.includes('context') || stage.includes('session refresh');
+  if (remounts) {
+    await view.findByRole('button', { name: homework.title });
+    rebind();
+    if (stage !== 'new context before detection') {
+      fireEvent.press(view.getByRole('button', { name: '程式設計' }));
+      await view.findByText('TronClass 連接已變更，請重新讀取狀態。');
+    }
+    mockAuth = { ...mockAuth, loading: true };
+    view.rerender(<TronClassWorkspaceScreen />);
+    mockAuth = { ...mockAuth, loading: false, session: {
+      platformAccountId: accountA, context: stage.includes('context') ? 'context-new' : 'context-a',
+    } };
+    view.rerender(<TronClassWorkspaceScreen />);
+    await view.findByRole('button', { name: '繼續讀取目前帳號的課程' });
+  } else await view.findByText('TronClass 連接已變更，請重新讀取狀態。');
+  expect(view.queryByRole('button', { name: homework.title })).toBeNull();
+  expect(view.queryByRole('button', { name: '程式設計' })).toBeNull();
+  expect(view.queryByRole('button', { name: '新帳號的私人作業' })).toBeNull();
+  // The next status would return connected B, but Mobile waits for a new action.
+  expect(actions('status')).toHaveLength(stage === 'retry sync' || remounts ? 2 : 1);
+  for (const input of [...actions('courses'), ...actions('sync')]) expect(input.revision).toBe(revision);
+  if (stage === 'course sync') expect(actions('sync').at(-1)?.courseId).toBe(10);
+  expect(schoolReads).not.toHaveBeenCalledWith(replacementRevision);
+
+  for (const input of actions('prepare')) expect(input.revision).toBe(revision);
+  if (!remounts) {
+    fireEvent.press(view.getByRole('button', { name: '重新讀取連接狀態' }));
+    await view.findByRole('button', { name: '繼續讀取目前帳號的課程' });
+    expect(view.getByText(/帳號：student-b/)).toBeTruthy();
+    expect(actions('status')).toHaveLength(stage === 'retry sync' ? 3 : 2);
+    expect(view.queryByRole('button', { name: '新帳號的私人作業' })).toBeNull();
+    for (const input of [...actions('courses'), ...actions('sync')]) expect(input.revision).toBe(revision);
+    expect(schoolReads).not.toHaveBeenCalledWith(replacementRevision);
+  }
+  fireEvent.press(view.getByRole('button', { name: '繼續讀取目前帳號的課程' }));
+  await view.findByRole('button', { name: '新帳號的私人作業' });
+  expect(actions('courses').at(-1)?.revision).toBe(replacementRevision);
+  expect(actions('sync').at(-1)?.revision).toBe(replacementRevision);
 });

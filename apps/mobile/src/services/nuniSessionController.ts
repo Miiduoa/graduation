@@ -25,6 +25,8 @@ import {
 
 export type NativeNuniSession = NuniPrincipal & { context: string; expiresAt: number };
 export type NativeNuniState = {
+  /** Changes only after a successful interactive sign-in. */
+  signInGeneration?: number;
   session: NativeNuniSession | null;
   loading: boolean;
   error: string;
@@ -103,8 +105,10 @@ export class NuniSessionController {
     };
   };
   private update(next: NativeNuniState) {
-    this.state = next;
-    if (!this.disposed) for (const listener of this.listeners) listener(next);
+    const signInGeneration = next.signInGeneration ?? this.state.signInGeneration;
+    const state = signInGeneration === undefined ? next : { ...next, signInGeneration };
+    this.state = state;
+    if (!this.disposed) for (const listener of this.listeners) listener(state);
   }
   private invalidate() {
     ++this.generation;
@@ -401,6 +405,7 @@ export class NuniSessionController {
       this.localDraftsRevoked = false;
       this.update({
         session: { ...principal, context: `native-${this.now()}-${run}`, expiresAt: this.record.expiresAt },
+        signInGeneration: run,
         loading: false,
         error: '',
         pendingLogout: false,
@@ -560,7 +565,9 @@ export class NuniSessionController {
     input?: Record<string, unknown>,
     _method?: 'PUT',
     _query?: Record<string, string>,
+    signal?: AbortSignal,
   ): Promise<unknown> => {
+    if (signal?.aborted) throw new NuniError(499, 'REQUEST_CANCELLED');
     const session = this.state.session;
     if (
       !session ||
@@ -578,6 +585,8 @@ export class NuniSessionController {
     const run = this.generation;
     try {
       const controller = new AbortController();
+      const abort = () => controller.abort();
+      signal?.addEventListener('abort', abort, { once: true });
       this.controllers.add(controller);
       try {
         const result = await nuniBffRequest(
@@ -588,12 +597,15 @@ export class NuniSessionController {
         );
         if (!this.current(run) || this.state.session?.context !== expectedContext)
           throw new NuniError(409, 'SESSION_CHANGED');
+        if (controller.signal.aborted) throw new NuniError(499, 'REQUEST_CANCELLED');
         return result;
       } finally {
+        signal?.removeEventListener('abort', abort);
         this.controllers.delete(controller);
       }
     } catch (error) {
       if (!this.current(run)) throw new NuniError(409, 'SESSION_CHANGED');
+      if (signal?.aborted) throw new NuniError(499, 'REQUEST_CANCELLED');
       if (error instanceof NuniError && error.status === 401) await this.refresh();
       throw error;
     }

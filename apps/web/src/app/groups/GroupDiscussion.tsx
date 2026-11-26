@@ -638,8 +638,8 @@ function DiscussionBoard({
                 <>
                   <h2>{post.title}</h2>
                   <p className={styles.description}>{post.body}</p>
-                  {post.attachments?.map((path) => (
-                    <PrivateAttachment key={path} path={path} />
+                  {post.attachments?.map((path, index) => (
+                    <PrivateAttachment key={path} path={path} ordinal={index + 1} />
                   ))}
                   {canEditPost(group.role, post.authorId, uid) && (
                     <div className={styles.actions}>

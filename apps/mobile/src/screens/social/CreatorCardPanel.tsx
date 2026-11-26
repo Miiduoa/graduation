@@ -1,20 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   CREATOR_CARD_LIMITS, EMPTY_CREATOR_CARD, validateCreatorCard, type CreatorCard,
 } from '@campus/shared/src/creatorCard';
-import { readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
+import { isCreatorCardAccessDenied, readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 
-const CREATOR_CARD_SAVE_TIMEOUT_MS = 15_000;
-const CREATOR_CARD_CONFIRM_TIMEOUT_MS = 15_000;
-const CREATOR_CARD_READ_TIMEOUT_MS = 15_000;
-const CREATOR_CARD_LINK_TIMEOUT_MS = 15_000;
-
 type CardState =
   | { status: 'loading' }
-  | { status: 'error'; timedOut: boolean }
+  | { status: 'error' }
   | { status: 'ready'; value: CreatorCard | null };
 
 function CardButton({ label, onPress, disabled = false, primary = false, busy = false }: {
@@ -65,9 +60,11 @@ function ScopedCreatorCardPanel({
   // resolves the uncertain write. The ref also guards stale button callbacks.
   const pendingWrite = useRef<{ draft: CreatorCard; expected: CreatorCard } | null>(null);
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
-  const savingFlight = useRef(false);
+  const savingFlight = useRef<object | null>(null);
+  const readBlocked = useRef(false);
+  const cardVersion = useRef(0);
   const [openingLink, setOpeningLink] = useState(false);
-  const openingLinkFlight = useRef<{ url: string } | null>(null);
+  const openingLinkFlight = useRef(false);
   const [linkError, setLinkError] = useState('');
   // A pending OS handoff belongs to the URL visible when it was pressed.
   // A later edit may replace that URL before the old handoff rejects.
@@ -76,49 +73,50 @@ function ScopedCreatorCardPanel({
   const [feedback, setFeedback] = useState('');
   currentPortfolioLink.current = state.status === 'ready' ? state.value?.linkUrl ?? '' : '';
 
-  const acceptSavedPortfolioLink = (url: string) => {
-    if (currentPortfolioLink.current !== url) {
-      // A handoff for a replaced URL no longer owns the visible link's busy
-      // state. The OS Promise can still resolve, but it must not touch this UI.
-      openingLinkFlight.current = null;
-      setOpeningLink(false);
-    }
-    currentPortfolioLink.current = url;
-    setLinkError('');
-  };
-
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
 
+  const blockDeniedRead = useCallback((error: unknown) => {
+    const invalidScope = error instanceof Error && error.message === 'Creator card scope mismatch';
+    if (!isCreatorCardAccessDenied(error) && !invalidScope) return false;
+    readBlocked.current = true;
+    currentPortfolioLink.current = '';
+    setLinkError('');
+    if (pendingWrite.current) setNeedsConfirmation(true);
+    setState({ status: 'error' });
+    return true;
+  }, []);
+
+  const acceptCard = useCallback((value: CreatorCard | null) => {
+    if (readBlocked.current) return;
+    cardVersion.current += 1;
+    currentPortfolioLink.current = value?.linkUrl ?? '';
+    setLinkError('');
+    setState({ status: 'ready', value });
+  }, []);
+
   useEffect(() => {
     let live = true;
+    const version = cardVersion.current;
     setState({ status: 'loading' });
-    // A server-only read can remain pending indefinitely on a bad connection.
-    // Give the student a retry instead of trapping the profile in loading.
-    // The SDK call is not cancelled; late replies cannot replace a new read.
-    const timeout = setTimeout(() => {
-      if (!live) return;
-      live = false;
-      setState({ status: 'error', timedOut: true });
-    }, CREATOR_CARD_READ_TIMEOUT_MS);
     void readCreatorCard(schoolId, ownerUid).then((value) => {
+      if (!live || cardVersion.current !== version) return;
+      // An explicit fresh display read can restore access. Its contents never
+      // settle the separate pending write, even when they match the draft.
+      readBlocked.current = false;
+      acceptCard(value);
+    }).catch((error: unknown) => {
       if (!live) return;
-      live = false;
-      clearTimeout(timeout);
-      setState({ status: 'ready', value });
-    }).catch(() => {
-      if (!live) return;
-      live = false;
-      clearTimeout(timeout);
-      setState({ status: 'error', timedOut: false });
+      if (blockDeniedRead(error) || cardVersion.current !== version) return;
+      setState({ status: 'error' });
     });
-    return () => { live = false; clearTimeout(timeout); };
-  }, [schoolId, ownerUid, attempt]);
+    return () => { live = false; };
+  }, [schoolId, ownerUid, attempt, acceptCard, blockDeniedRead]);
 
   const beginEdit = () => {
-    if (!own || savingFlight.current || state.status !== 'ready') return;
+    if (!own || readBlocked.current || savingFlight.current || state.status !== 'ready') return;
     if (!pendingWrite.current) {
       replaceDraft(state.value ?? EMPTY_CREATOR_CARD);
       setFeedback('');
@@ -139,44 +137,29 @@ function ScopedCreatorCardPanel({
 
   const confirmPreviousSave = async () => {
     const submitted = pendingWrite.current;
-    if (!mounted.current || !own || !submitted || savingFlight.current || state.status !== 'ready') return;
-    savingFlight.current = true;
+    if (!mounted.current || !own || !submitted || readBlocked.current || savingFlight.current || state.status !== 'ready') return;
+    const operation = {};
+    savingFlight.current = operation;
     setSaving(true);
     setFeedback('');
     let latest: CreatorCard | null;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    let timedOut = false;
     try {
-      // Bound only the UI wait, not the SDK network request. Promise.race
-      // discards late replies after a timeout; a new explicit tap performs
-      // another server read without ever resending the uncertain write.
-      latest = await Promise.race([
-        readCreatorCard(schoolId, ownerUid),
-        new Promise<never>((_, reject) => {
-          timeout = setTimeout(() => {
-            timedOut = true;
-            reject(new Error('Creator card confirmation timed out'));
-          }, CREATOR_CARD_CONFIRM_TIMEOUT_MS);
-        }),
-      ]);
-    } catch {
-      if (mounted.current) {
-        setFeedback(timedOut
-          ? '核對等待逾時，草稿已保留，請重新核對；不會自動再次儲存。'
-          : '仍無法核對伺服器資料，草稿已保留，請稍後重試核對。');
+      latest = await readCreatorCard(schoolId, ownerUid, { requireCommitted: true });
+    } catch (error) {
+      if (mounted.current && pendingWrite.current === submitted && savingFlight.current === operation) {
+        blockDeniedRead(error);
+        setFeedback('仍無法核對伺服器資料，草稿已保留，請稍後重試核對。');
       }
       return;
     } finally {
-      if (timeout !== undefined) clearTimeout(timeout);
-      if (mounted.current) {
-        savingFlight.current = false;
+      if (mounted.current && savingFlight.current === operation) {
+        savingFlight.current = null;
         setSaving(false);
       }
     }
-    if (!mounted.current) return;
+    if (!mounted.current || pendingWrite.current !== submitted || readBlocked.current) return;
 
-    acceptSavedPortfolioLink(latest?.linkUrl ?? '');
-    setState({ status: 'ready', value: latest });
+    acceptCard(latest);
     pendingWrite.current = null;
     setNeedsConfirmation(false);
     const { expected } = submitted;
@@ -198,7 +181,7 @@ function ScopedCreatorCardPanel({
   };
 
   const submit = async () => {
-    if (!mounted.current || !own || pendingWrite.current || savingFlight.current || state.status !== 'ready') return;
+    if (!mounted.current || !own || readBlocked.current || pendingWrite.current || savingFlight.current || state.status !== 'ready') return;
     const submittedDraft = currentDraft.current;
     let expected: CreatorCard;
     try {
@@ -208,75 +191,50 @@ function ScopedCreatorCardPanel({
       return;
     }
 
-    savingFlight.current = true;
+    const submitted = { draft: submittedDraft, expected };
+    const operation = {};
+    // Own this write before sending it, including the time its Promise has
+    // not settled. Tab changes and ordinary reads cannot release this ticket.
+    pendingWrite.current = submitted;
+    savingFlight.current = operation;
     setSaving(true);
     setFeedback('');
-    let saveTimeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      // Firestore may leave a write pending when the connection is lost.
-      // Release the UI after a bounded wait, but treat the write as uncertain:
-      // never resubmit it without an explicit server-only confirmation.
-      // This timeout does not cancel the underlying SDK write.
-      const confirmed = await Promise.race([
-        saveCreatorCard(schoolId, ownerUid, submittedDraft),
-        new Promise<never>((_, reject) => {
-          saveTimeout = setTimeout(() => {
-            reject(new Error('Creator card save timed out'));
-          }, CREATOR_CARD_SAVE_TIMEOUT_MS);
-        }),
-      ]);
-      if (!mounted.current) return;
-      acceptSavedPortfolioLink(confirmed.linkUrl);
-      setState({ status: 'ready', value: confirmed });
+      const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft);
+      if (!mounted.current || pendingWrite.current !== submitted || readBlocked.current) return;
+      acceptCard(confirmed);
+      pendingWrite.current = null;
+      setNeedsConfirmation(false);
       finishSave(submittedDraft);
-    } catch {
-      if (!mounted.current) return;
-      pendingWrite.current = { draft: submittedDraft, expected };
+    } catch (error) {
+      if (!mounted.current || pendingWrite.current !== submitted || savingFlight.current !== operation) return;
+      blockDeniedRead(error);
       setNeedsConfirmation(true);
       setFeedback('無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
     } finally {
-      if (saveTimeout !== undefined) clearTimeout(saveTimeout);
-      if (mounted.current) {
-        savingFlight.current = false;
+      if (mounted.current && savingFlight.current === operation) {
+        savingFlight.current = null;
         setSaving(false);
       }
     }
   };
 
   const openPortfolioLink = async (url: string) => {
-    // One handoff per currently visible URL. When a newly saved URL replaces
-    // it, the old unresolved OS Promise loses ownership of the busy state.
-    if (openingLinkFlight.current) return;
-    const handoff = { url };
-    openingLinkFlight.current = handoff;
+    // Linking is an OS handoff: even a valid HTTPS URL may be rejected. Prevent
+    // a second tap from launching another handoff while the first is pending.
+    if (!mounted.current || readBlocked.current || currentPortfolioLink.current !== url || openingLinkFlight.current) return;
+    openingLinkFlight.current = true;
     setOpeningLink(true);
     setLinkError('');
-    let openTimeout: ReturnType<typeof setTimeout> | undefined;
-    let timedOut = false;
     try {
-      // The OS may never settle this handoff. Bound only the visible busy
-      // state: timeout does not cancel openURL or prove the browser stayed
-      // closed. The student must explicitly decide whether to try again.
-      await Promise.race([
-        Linking.openURL(url),
-        new Promise<never>((_, reject) => {
-          openTimeout = setTimeout(() => {
-            timedOut = true;
-            reject(new Error('Creator portfolio link handoff timed out'));
-          }, CREATOR_CARD_LINK_TIMEOUT_MS);
-        }),
-      ]);
+      await Linking.openURL(url);
     } catch {
-      if (mounted.current && openingLinkFlight.current === handoff &&
-        currentPortfolioLink.current === url) {
-        setLinkError(timedOut
-          ? '開啟作品連結等待逾時，請先確認瀏覽器是否已開啟，再決定是否重試。'
-          : '無法開啟作品連結，請稍後再試。');
+      if (mounted.current && currentPortfolioLink.current === url) {
+        setLinkError('無法開啟作品連結，請稍後再試。');
       }
     } finally {
-      if (openTimeout !== undefined) clearTimeout(openTimeout);
-      if (mounted.current && openingLinkFlight.current === handoff) {
-        openingLinkFlight.current = null;
+      if (mounted.current) {
+        openingLinkFlight.current = false;
         setOpeningLink(false);
       }
     }
@@ -289,9 +247,7 @@ function ScopedCreatorCardPanel({
   );
   if (state.status === 'error') return (
     <View style={styles.container}>
-      <Text accessibilityRole="alert" style={styles.note}>{state.timedOut
-        ? '讀取社群簡介逾時，請重新讀取。'
-        : '社群簡介暫時無法讀取。'}</Text>
+      <Text accessibilityRole="alert" style={styles.note}>社群簡介暫時無法讀取。</Text>
       <CardButton label="重新讀取社群簡介" onPress={() => setAttempt((n) => n + 1)} />
     </View>
   );

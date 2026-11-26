@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { inAppHref, pathButtonLabel } from './copy';
 import { extractDueItems, parseBlocks, type Inline } from './markdown';
 import styles from './AssistantReply.module.css';
@@ -24,9 +24,9 @@ function InlineView({ nodes }: { nodes: Inline[] }) {
     const label = node.label || (href ? pathButtonLabel(href) : node.href);
     if (href)
       return (
-        <Link key={i} href={href} className={styles.path}>
+        <AssistantReplyLink key={i} href={href} className={styles.path}>
           {label}
-        </Link>
+        </AssistantReplyLink>
       );
     return <span key={i}>{label}</span>;
   });

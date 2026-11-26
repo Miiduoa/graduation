@@ -55,6 +55,7 @@ export const arrayRemove = unexpectedReadOrWrite;
 export const deleteDoc = unexpectedReadOrWrite;
 export const getDoc = unexpectedReadOrWrite;
 export const getDocFromServer = unexpectedReadOrWrite;
+export const getDocsFromServer = unexpectedReadOrWrite;
 export const increment = unexpectedReadOrWrite;
 export const runTransaction = unexpectedReadOrWrite;
 export const setDoc = unexpectedReadOrWrite;

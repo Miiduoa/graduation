@@ -31,9 +31,9 @@ function locationFixture() {
   return fixture;
 }
 
-async function ask(question: string, fixture = locationFixture()) {
+async function ask(question: string, fixture = locationFixture(), taskProfile?: RunInput['taskProfile']) {
   const model = vi.fn<RunInput['model']>().mockRejectedValue(new Error('Explicit map tasks must not call a model'));
-  const reply = await run({ question, history: [], binding, adapter: fixture.adapter, model, secret, now,
+  const reply = await run({ question, taskProfile, history: [], binding, adapter: fixture.adapter, model, secret, now,
     writes: true, signal: new AbortController().signal, log: () => {} });
   expect(model).not.toHaveBeenCalled();
   expect(reply).toMatchObject({ version: 2, modelCalls: 0, dataRead: true, cards: [] });
@@ -45,6 +45,42 @@ async function ask(question: string, fixture = locationFixture()) {
 }
 
 describe('cross-service classroom location execution', () => {
+  it.each(['teacher', 'merchant', 'club', 'school', 'platform'] as const)(
+    '%s reads its own next classroom alongside public information without student coursework', async taskProfile => {
+      const fixture = locationFixture();
+      const ledger = vi.spyOn(fixture.adapter, 'ledger');
+      const courses = vi.spyOn(fixture.adapter, 'courses');
+      const work = vi.spyOn(fixture.adapter, 'work');
+      const { reply, plan } = await ask('查下一堂課，教室在哪裡，查學校電話', fixture, taskProfile);
+      expect(reply).not.toHaveProperty('roleGuide');
+      expect(ledger).toHaveBeenCalledOnce();
+      expect(fixture.adapter.campusMap).toHaveBeenCalledExactlyOnceWith({ query: '資訊202', limit: 5 });
+      expect(plan.steps.map(step => step.serviceId)).toEqual(['timetable', 'map', 'school-info']);
+      // The synthetic fixture school is absent from the bundled public
+      // directory. Its missing phone source cannot be reported as completed.
+      expect(plan.steps.map(step => step.status)).toEqual(['completed', 'completed', 'blocked']);
+      expect(reply.stopReason).toBe('TASKS_INCOMPLETE');
+      expect(plan.steps[1].dependsOn).toEqual([plan.steps[0].id]);
+      expect(courses).not.toHaveBeenCalled();
+      expect(work).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['teacher', 'merchant', 'club', 'school', 'platform'] as const)(
+    '%s can read a named map location without accessing any personal or student source', async taskProfile => {
+      const fixture = locationFixture();
+      const ledger = vi.spyOn(fixture.adapter, 'ledger');
+      const courses = vi.spyOn(fixture.adapter, 'courses');
+      const work = vi.spyOn(fixture.adapter, 'work');
+      const { plan } = await ask('學生活動中心在哪裡', fixture, taskProfile);
+      expect(plan.steps[0]).toMatchObject({ serviceId: 'map', status: 'completed' });
+      expect(fixture.adapter.campusMap).toHaveBeenCalledExactlyOnceWith({ query: '學生活動中心', limit: 5 });
+      expect(ledger).not.toHaveBeenCalled();
+      expect(courses).not.toHaveBeenCalled();
+      expect(work).not.toHaveBeenCalled();
+    },
+  );
+
   it('reads the next class, uses its exact classroom and completes independent dining', async () => {
     const fixture = locationFixture();
     const ledger = vi.spyOn(fixture.adapter, 'ledger');
