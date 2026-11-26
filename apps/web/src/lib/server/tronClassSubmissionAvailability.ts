@@ -82,7 +82,12 @@ function specialWindow(
   if ((prototype === Object.prototype || prototype === null) && Reflect.ownKeys(envelope).length === 0) {
     return { state: 'none', updatedAt: null };
   }
-  if (!own(envelope, key)) return { state: 'unknown', updatedAt: null };
+  // Only the observed empty envelope or a single explicit record is evidence.
+  // A mixed error/record envelope must not report an open or absent window.
+  if ((prototype !== Object.prototype && prototype !== null) ||
+    Reflect.ownKeys(envelope).length !== 1 || !own(envelope, key)) {
+    return { state: 'unknown', updatedAt: null };
+  }
   if (envelope[key] === null) return { state: 'none', updatedAt: null };
   const row = record(envelope[key]);
   if (!row) return { state: 'unknown', updatedAt: null };
@@ -130,10 +135,14 @@ export function normalizeTronClassSubmissionAvailability(
   const countAgrees = used !== null && markedCountKnown && rows.filter(row => row.marked_submitted === true).length === used;
   const unlimited = activity.non_submit_times === true && activity.submit_times === null;
   const limited = activity.non_submit_times === false && limit !== null;
-  const attemptsKnown = countAgrees && duplicateSettingsAgree && (unlimited || limited);
+  // A draft cannot itself be a marked formal submission. Unknown history or
+  // contradictory draft flags cannot establish an open window or attempt count.
+  const knownHistory = history.entries.every(entry => entry.state !== 'unknown') &&
+    rows.every(row => row.is_draft !== true || (row.marked_submitted === false &&
+      row.is_redo === false && row.submit_by_instructor === false));
+  const attemptsKnown = knownHistory && countAgrees && duplicateSettingsAgree && (unlimited || limited);
   const remainingAttempts = attemptsKnown && limited ? Math.max(0, limit! - used!) : null;
-  const knownHistory = history.entries.every(entry => entry.state !== 'unknown');
-  const kind = !knownHistory || used === null ? 'unknown'
+  const kind = !knownHistory || !countAgrees || !duplicateSettingsAgree || used === null ? 'unknown'
     : used > 0 || history.entries.some(entry => entry.state !== 'draft') ? 'repeat' : 'first';
   let ordinary: TronClassSubmissionAvailability['ordinary']['state'] = 'unknown';
   if (activity.is_closed === true) ordinary = 'closed';
@@ -146,7 +155,8 @@ export function normalizeTronClassSubmissionAvailability(
   // Missing flags never prove that there is no school draft. A returned version
   // can prefill a new POST in the school UI, but is not a draft to update by PUT.
   if (rows.every(row => typeof row.is_draft === 'boolean' && typeof row.is_redo === 'boolean' &&
-    typeof row.submit_by_instructor === 'boolean' && !(row.is_draft && (row.is_redo || row.submit_by_instructor)))) {
+    typeof row.submit_by_instructor === 'boolean' &&
+    (!row.is_draft || (row.marked_submitted === false && !row.is_redo && !row.submit_by_instructor)))) {
     const drafts = rows.filter(row => row.is_draft === true);
     draft = drafts.length === 0 ? { state: 'none', submissionId: null, count: 0 }
       : drafts.length === 1 ? { state: 'available', submissionId: String(drafts[0].id), count: 1 }
