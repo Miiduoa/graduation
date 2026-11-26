@@ -46,6 +46,11 @@ describe('local schedule questions', () => {
     ['請問2026-11-13有課嗎？', 'classes'], ['下一堂課在哪裡？', 'next-class'],
     ['告訴我下一堂課的教室', 'next-class'], ['我今天有什麼行程', 'events'],
     ['查看明天下午的行事曆', 'events'],
+    ['今天的課表和行程有衝突嗎？', 'conflicts'], ['我的行程跟上課時間會不會撞期？', 'conflicts'],
+    ['幫我查一下今天有沒有行程和課表重疊', 'conflicts'], ['今天行程會跟上課撞到嗎', 'conflicts'],
+    ['可以幫我看看今天行程有沒有撞課？', 'conflicts'], ['今天有沒有跟課表衝突的行程', 'conflicts'],
+    ['我今天有行程撞課嗎？', 'conflicts'], ['今天有沒有行程跟課撞到？', 'conflicts'],
+    ['今天哪些行程會撞到上課時間？', 'conflicts'], ['我今天上課會不會撞到行程？', 'conflicts'],
   ])('accepts a complete information request: %s', (question, kind) => {
     expect(parseLocalScheduleIntent(question)?.kind).toBe(kind);
     expect(canAnswerAssistantLocally(question)).toBe(true);
@@ -56,6 +61,9 @@ describe('local schedule questions', () => {
     '明天新增一個行程', '今天還有什麼作業沒交', '今天有哪些活動',
     '不要查看今天的課表', '翻譯「我今天有什麼課」', '2026-02-30的課表',
     '今天的課表\n幫我新增行程', '開啟課表',
+    '有衝突嗎？', '今天有撞課嗎？', '今天的行程撞了什麼？', '今天的課表和行程有衝突嗎？順便取消行程', '改掉跟上課撞期的行程',
+    '明天的課表和行程有衝突嗎', '昨天的行程跟上課有撞期嗎', '今天幫同學查行程與課表衝突',
+    '翻譯「今天的行程和課表有重疊嗎」', '今天課表和行程有衝\u200b突嗎',
   ])('does not swallow a mutation, other domain or ambiguous date: %s', (question) => {
     expect(parseLocalScheduleIntent(question)).toBeNull();
   });
@@ -125,6 +133,38 @@ describe('local schedule questions', () => {
     localStorage.setItem(deviceKey(), JSON.stringify(timetable()));
     expect(answerAssistantLocally('我今天有什麼課', scope, { deferMissingSchedule: true })?.content).toContain('資料庫管理');
     expect(answerAssistantLocally('我今天有什麼課', scope, { preferCampusReads: true })).toBeNull();
+  });
+
+  it('returns local uncertainty for incomplete or unreadable overlap data even when cloud reads are available', () => {
+    const question = '今天的課表和行程有衝突嗎？';
+    const options = { preferCampusReads: true, deferMissingSchedule: true };
+    const old = timetable();
+    old.meta.year = '114';
+    localStorage.setItem(deviceKey(), JSON.stringify(old));
+    saveImports([event('會議', { startTime: '08:20', endTime: '09:00' })]);
+    const priorTerm = answerAssistantLocally(question, scope, options);
+    expect(priorTerm?.content).toContain('本學期');
+    expect(priorTerm?.content).not.toContain('資料庫管理');
+    expect(priorTerm?.calendarEvents ?? []).toEqual([]);
+    localStorage.setItem(deviceKey(), '{invalid');
+    expect(answerAssistantLocally(question, scope, options)?.content).toContain('暫時讀不到');
+  });
+
+  it('honors a manual cancellation when the same imported meeting uses another spelling of the current term', () => {
+    const saved = timetable();
+    const original = manualClassRecords(saved)[0];
+    const imported = { ...original, id: 'imported-db', academicYear: '2026', semester: '上學期' };
+    saveImports([imported, event('讀書會', { startTime: '08:15', endTime: '08:45' })]);
+    localStorage.setItem(deviceKey(), JSON.stringify(saved));
+    const question = '我今天有行程撞課嗎？';
+    expect(answer(question).calendarEvents).toEqual([{ id: '讀書會', title: '讀書會' }]);
+
+    saved.classExceptions = [{ id: 'cancel-db', courseKey: classMeetingKey(original), original,
+      kind: 'cancel', originalDate: '2026-11-12', createdAt: saved.updatedAt }];
+    localStorage.setItem(deviceKey(), JSON.stringify(saved));
+    expect(answer(question).calendarEvents).toEqual([]);
+    expect(answer(question).content).toContain('沒有重疊');
+    expect(JSON.parse(localStorage.getItem(deviceKey())!).classExceptions).toEqual(saved.classExceptions);
   });
 
   it('does not mistake a timetable-only import for complete personal-event coverage', () => {

@@ -1,10 +1,23 @@
 'use client';
 
+import { PERSONAL_IMPORT_MAX_ID_LENGTH } from '@campus/shared/src/imports/types';
 import { MonthCalendar } from './MonthCalendar';
+import {
+  focusWhenRevealed,
+  focusWhenVisible,
+  isHorizontallyVisible,
+  isVisible,
+  measureStickyInsets,
+  onFocusRetryOpportunity,
+  onVisibleViewportChange,
+  revealForFocus,
+  scrollVerticallyIntoView,
+} from './calendarScroll';
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -18,6 +31,7 @@ import {
   personalEventsOnDate,
   shiftCalendarMonth,
   isCalendarMonth,
+  isPersonalImportDate,
   draftFromPersonalEvent,
   emptyPersonalEventDraft,
   filterPersonalEvents,
@@ -30,6 +44,7 @@ import {
   personalImportSavedNotice,
   type PersonalEventDraft,
   type PersonalImportRecord,
+  type PersonalImportRow,
 } from '@campus/shared';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
@@ -200,12 +215,14 @@ function downloadIcs(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+
 export function PersonalCalendar() {
   const context = usePersonalImportScope();
   const auth = useAuth();
   const nuni = useOptionalNuniSession();
   const school = useOptionalSelectedSchool();
   const params = useSearchParams();
+  const workspaceBoundary = useRef<HTMLDivElement>(null);
   const explicitSchool =
     params?.get('campus')?.trim() ||
     params?.get('schoolId')?.trim() ||
@@ -296,12 +313,14 @@ export function PersonalCalendar() {
         <p role="status">正在確認個人行程的儲存位置…</p>
       ) : null}
       {visible && (
-        <div hidden={paused}>
+        <div ref={workspaceBoundary} hidden={paused}>
           <PersonalCalendarWorkspace
             key={visible.scopeKey}
             context={visible}
             paused={paused}
+            workspaceBoundary={workspaceBoundary}
             requestedEventId={params?.get('eventId') ?? null}
+            requestedDate={explicitSchool === visible.scope.schoolId ? params?.get('date') ?? null : null}
           />
         </div>
       )}
@@ -309,14 +328,30 @@ export function PersonalCalendar() {
   );
 }
 
+type LinkedFocusOrigin = {
+  element: Element | null;
+  state: 'focused' | 'detaching' | 'unavailable';
+};
+
+function ownsLinkedFocus(origin: LinkedFocusOrigin) {
+  return (
+    document.activeElement === origin.element ||
+    (origin.state === 'unavailable' && document.activeElement === document.body)
+  );
+}
+
 function PersonalCalendarWorkspace({
   context,
   paused,
+  workspaceBoundary,
   requestedEventId,
+  requestedDate,
 }: {
   context: ReturnType<typeof usePersonalImportScope>;
   paused: boolean;
+  workspaceBoundary: RefObject<HTMLDivElement | null>;
   requestedEventId: string | null;
+  requestedDate: string | null;
 }) {
   const { user, loading: authLoading } = useAuth();
   const nuni = useOptionalNuniSession();
@@ -334,9 +369,14 @@ function PersonalCalendarWorkspace({
   const importHref = campusServiceHref('/import?kind=events', schoolSearch);
   const todayHref = campusServiceHref('/', schoolSearch);
   const ledger = usePersonalImports(scope, !paused);
-  const [month, setMonth] = useState(() => emptyPersonalEventDraft().date.slice(0, 7));
-  const [calendarView, setCalendarView] = useState<'month' | 'list'>('month');
-  const [selectedDate, setSelectedDate] = useState('');
+  const [navigation, setNavigation] = useState(() => ({
+    month: emptyPersonalEventDraft().date.slice(0, 7),
+    calendarView: 'month' as 'month' | 'list',
+    selectedDate: '',
+    revision: 0,
+  }));
+  const { month, calendarView, selectedDate } = navigation;
+  const [dateSelectionRevision, setDateSelectionRevision] = useState(0);
   const [dues, setDues] = useState<{
     uid: string | null;
     items: CalendarCourseDeadline[];
@@ -345,11 +385,6 @@ function PersonalCalendarWorkspace({
   const dueUid = user?.uid ?? null;
   const dueStatus = dues.uid === dueUid ? dues.status : 'idle';
   const [dueRetry, setDueRetry] = useState(0);
-  const changeMonth = (value: string) => {
-    setMonth(value);
-    setSelectedDate('');
-  };
-
   useEffect(() => {
     if (authLoading || nuniLoading || (!user?.uid && !nuniAccountId)) return;
     let active = true;
@@ -399,11 +434,6 @@ function PersonalCalendarWorkspace({
       active = false;
     };
   }, [authLoading, nuniLoading, user?.uid, nuniAccountId, nuniContext, dueRetry]);
-  const goToday = () => {
-    const today = emptyPersonalEventDraft().date;
-    setMonth(today.slice(0, 7));
-    setSelectedDate(today);
-  };
   const [mode, setMode] = useState<'idle' | 'create' | 'edit'>('idle');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<PersonalEventDraft>(() => emptyPersonalEventDraft());
@@ -412,8 +442,17 @@ function PersonalCalendarWorkspace({
   const titleRef = useRef<HTMLInputElement | null>(null);
   const createButtonRef = useRef<HTMLButtonElement | null>(null);
   const dayHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const daySummaryRef = useRef<HTMLDivElement | null>(null);
+  const monthAgendaRef = useRef<HTMLDivElement | null>(null);
+  const monthListRef = useRef<HTMLUListElement | null>(null);
+  const pendingDayReveal = useRef<string | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
-  const pendingFocus = useRef<'editor' | 'return' | 'saved' | null>(null);
+  const pendingFocus = useRef<'editor' | 'return' | 'saved' | 'monthList' | null>(null);
+  const pendingWriteFocus = useRef<{
+    target: 'return' | 'saved';
+    canHandoff: () => boolean;
+    stop: () => void;
+  } | null>(null);
   const [editorRevision, setEditorRevision] = useState(0);
   const [baseline, setBaseline] = useState<PersonalImportRecord | null>(null);
   const [saving, setSaving] = useState(false);
@@ -425,71 +464,285 @@ function PersonalCalendarWorkspace({
   const suspended = useRef(paused);
   const writing = useRef(false);
   const requestId = useRef(0);
+  const viewRevision = useRef(0);
   const locatedRequest = useRef<string | null>(null);
-  const focusedRequest = useRef<string | null>(null);
+  const linkedFocusOrigin = useRef<LinkedFocusOrigin | null>(null);
+  const attachMonthList = useCallback((list: HTMLUListElement | null) => {
+    const origin = linkedFocusOrigin.current;
+    if (!list && origin?.state === 'focused' && monthListRef.current?.contains(origin.element)) {
+      // Removal can emit focusout before the commit finishes.
+      origin.state = 'detaching';
+    }
+    monthListRef.current = list;
+  }, []);
+  const stopLinkedFocusRetry = useRef<(() => void) | null>(null);
+  const settledFocusRequest = useRef<string | null>(null);
   const linkedEventElement = useRef<HTMLLIElement | null>(null);
   // The URL selects an existing row in this owner's ledger. It never supplies event contents.
   const linkedEvent =
-    !paused && ledger.ready && requestedEventId && requestedEventId.length <= 200
+    !paused &&
+    ledger.ready &&
+    requestedEventId &&
+    requestedEventId.length <= PERSONAL_IMPORT_MAX_ID_LENGTH
       ? ledger.records.find(
           (row) =>
             row.id === requestedEventId && row.kind === 'events' && row.schoolId === scope.schoolId,
         )
       : undefined;
   const linkedEventDate = linkedEvent?.date;
+  const dayToShow = requestedEventId ? linkedEventDate
+    : requestedDate && isPersonalImportDate(requestedDate) ? requestedDate : null;
+  const calendarRequest = requestedEventId ? `event:${requestedEventId}`
+    : dayToShow ? `date:${dayToShow}` : null;
+
+  const cancelLinkedFocus = useCallback(() => {
+    settledFocusRequest.current = requestedEventId;
+    linkedFocusOrigin.current = null;
+    stopLinkedFocusRetry.current?.();
+    stopLinkedFocusRetry.current = null;
+  }, [requestedEventId]);
+
+  const navigate = useCallback((next: Omit<typeof navigation, 'revision'>) => {
+    const revision = ++viewRevision.current;
+    setNavigation({ ...next, revision });
+  }, []);
+
+  const changeMonth = (value: string) => {
+    cancelLinkedFocus();
+    navigate({ month: value, selectedDate: '', calendarView });
+  };
+
+  const selectDate = (date: string) => {
+    cancelLinkedFocus();
+    // Reselecting the current day also supersedes navigation after a pending save.
+    navigate({ month: date.slice(0, 7), selectedDate: date, calendarView });
+    setDateSelectionRevision((revision) => revision + 1);
+  };
+
+  const goToday = () => {
+    const today = emptyPersonalEventDraft().date;
+    selectDate(today);
+  };
 
   useEffect(() => {
     locatedRequest.current = null;
-    focusedRequest.current = null;
-  }, [requestedEventId]);
+  }, [calendarRequest]);
 
   useEffect(() => {
-    if (paused || !ledger.ready || !requestedEventId || !linkedEventDate) return;
-    if (locatedRequest.current === requestedEventId) return;
-    locatedRequest.current = requestedEventId;
-    setMonth(linkedEventDate.slice(0, 7));
-    setSelectedDate(linkedEventDate);
-    setCalendarView('list');
-  }, [paused, ledger.ready, requestedEventId, linkedEventDate]);
+    settledFocusRequest.current = null;
+    linkedFocusOrigin.current = null;
+    if (!requestedEventId) return;
+
+    // The focus origin belongs to the URL request and survives workspace suspension.
+    const checkFocus = () => {
+      const origin = linkedFocusOrigin.current;
+      if (!origin) return;
+      if (document.activeElement === origin.element) origin.state = 'focused';
+      else if (!ownsLinkedFocus(origin)) cancelLinkedFocus();
+    };
+    const recordBlur = (event: FocusEvent) => {
+      const origin = linkedFocusOrigin.current;
+      if (origin?.state !== 'focused' || event.target !== origin.element) return;
+      const boundary = workspaceBoundary.current;
+      if (boundary?.hidden && boundary.contains(origin.element)) {
+        origin.state = 'unavailable';
+      } else {
+        // End the request before a later unmount can make body a fallback.
+        cancelLinkedFocus();
+      }
+    };
+    const cancelOnOutsidePointerDown = (event: PointerEvent) => {
+      if (!linkedFocusOrigin.current) return;
+      const boundary = workspaceBoundary.current;
+      if (boundary && !event.composedPath().includes(boundary)) {
+        // An outside press can leave focus on body without emitting a focus event.
+        cancelLinkedFocus();
+      }
+    };
+    document.addEventListener('focusin', checkFocus, true);
+    document.addEventListener('focusout', recordBlur, true);
+    document.addEventListener('pointerdown', cancelOnOutsidePointerDown, true);
+    return () => {
+      document.removeEventListener('focusin', checkFocus, true);
+      document.removeEventListener('focusout', recordBlur, true);
+      document.removeEventListener('pointerdown', cancelOnOutsidePointerDown, true);
+    };
+  }, [requestedEventId, cancelLinkedFocus, workspaceBoundary]);
+
+  useEffect(() => {
+    if (paused || !ledger.ready || !calendarRequest || !dayToShow) return;
+    if (locatedRequest.current === calendarRequest) return;
+    locatedRequest.current = calendarRequest;
+    navigate({
+      month: dayToShow.slice(0, 7),
+      selectedDate: dayToShow,
+      calendarView: 'list',
+    });
+  }, [paused, ledger.ready, calendarRequest, dayToShow, navigate]);
 
   useEffect(() => {
     if (
       paused ||
       !requestedEventId ||
-      focusedRequest.current === requestedEventId ||
+      settledFocusRequest.current === requestedEventId ||
       calendarView !== 'list' ||
-      selectedDate !== linkedEventDate ||
-      !linkedEventElement.current
+      selectedDate !== linkedEventDate
     )
       return;
-    focusedRequest.current = requestedEventId;
-    linkedEventElement.current.focus({ preventScroll: true });
-    linkedEventElement.current.scrollIntoView?.({ block: 'nearest' });
-  }, [paused, requestedEventId, linkedEventDate, calendarView, selectedDate]);
+    const row = linkedEventElement.current;
+    if (!row) return;
+
+    if (mode !== 'idle') {
+      cancelLinkedFocus();
+      return;
+    }
+    const previousOrigin = linkedFocusOrigin.current;
+    const origin = (linkedFocusOrigin.current ??= {
+      element: document.activeElement,
+      state: 'focused',
+    });
+    const revealLinkedEvent = (mode: 'reveal' | 'visible') => {
+      if (suspended.current) return;
+      if (!ownsLinkedFocus(origin)) {
+        cancelLinkedFocus();
+        return;
+      }
+      const focused = mode === 'visible' ? focusWhenVisible(row) : focusWhenRevealed(row);
+      if (focused) cancelLinkedFocus();
+    };
+
+    // A resumed request must preserve the user's pan, including on later resizes.
+    const resizeMode = previousOrigin ? 'visible' : 'reveal';
+    revealLinkedEvent(resizeMode);
+    if (settledFocusRequest.current === requestedEventId) return;
+    stopLinkedFocusRetry.current = onFocusRetryOpportunity(revealLinkedEvent, resizeMode);
+    return () => {
+      stopLinkedFocusRetry.current?.();
+      stopLinkedFocusRetry.current = null;
+    };
+  }, [
+    paused,
+    ledger.loading,
+    requestedEventId,
+    linkedEventDate,
+    calendarView,
+    selectedDate,
+    mode,
+    cancelLinkedFocus,
+  ]);
 
   useLayoutEffect(() => {
     active.current = true;
     return () => {
       active.current = false;
+      pendingWriteFocus.current?.stop();
+      pendingWriteFocus.current = null;
     };
   }, []);
   useLayoutEffect(() => {
     suspended.current = paused;
-    if (paused) pendingFocus.current = null;
-  }, [paused]);
+    if (paused) {
+      pendingFocus.current = null;
+      pendingWriteFocus.current?.stop();
+      pendingWriteFocus.current = null;
+    }
+    const origin = linkedFocusOrigin.current;
+    if (!origin) return;
+    // Revalidation can hide the workspace or remove the focused list control.
+    if (document.activeElement === origin.element) {
+      origin.state = 'focused';
+    } else if (
+      paused &&
+      (origin.state === 'detaching' || workspaceBoundary.current?.contains(origin.element)) &&
+      document.activeElement === document.body
+    ) {
+      origin.state = 'unavailable';
+    } else if (origin.state === 'detaching') {
+      cancelLinkedFocus();
+    }
+  });
 
   useLayoutEffect(() => {
-    if (paused || !pendingFocus.current) return;
-    const target = pendingFocus.current;
+    const element = linkedFocusOrigin.current?.element;
+    if (
+      !paused ||
+      !(element instanceof HTMLElement) ||
+      document.activeElement !== element ||
+      !workspaceBoundary.current?.contains(element)
+    ) {
+      return;
+    }
+    // A browser-driven blur after hiding can emit the same events as blur().
+    // Observe the explicit call at its source, only on the suspended focus origin.
+    const originalBlur = element.blur;
+    const ownBlur = Object.getOwnPropertyDescriptor(element, 'blur');
+    const observedBlur = function (this: HTMLElement) {
+      if (this === element && document.activeElement === element) cancelLinkedFocus();
+      originalBlur.call(this);
+    };
+    Object.defineProperty(element, 'blur', {
+      configurable: true,
+      writable: true,
+      value: observedBlur,
+    });
+    return () => {
+      if (element.blur !== observedBlur) return;
+      if (ownBlur) Object.defineProperty(element, 'blur', ownBlur);
+      else Reflect.deleteProperty(element, 'blur');
+    };
+  }, [paused, cancelLinkedFocus, workspaceBoundary]);
+
+  const focusEditorTitle = () => {
+    const title = titleRef.current;
+    if (!title) return;
+    title.focus({ preventScroll: true });
+    revealForFocus(title, undefined, { revealInlineStart: true });
+  };
+
+  useEffect(() => {
+    if (paused || mode === 'idle') return;
+    const revealFocusedEditorTitle = () => {
+      const title = titleRef.current;
+      if (!suspended.current && title && document.activeElement === title) {
+        revealForFocus(title, undefined, { revealInlineStart: true });
+      }
+    };
+    const editor = editorRef.current;
+    const onEditorAnimationEnd = (event: AnimationEvent) => {
+      if (event.target === editor) revealFocusedEditorTitle();
+    };
+    editor?.addEventListener('animationend', onEditorAnimationEnd);
+    const unsubscribeViewport = onVisibleViewportChange(revealFocusedEditorTitle);
+    return () => {
+      editor?.removeEventListener('animationend', onEditorAnimationEnd);
+      unsubscribeViewport();
+    };
+  }, [paused, mode, editorRevision]);
+
+  useLayoutEffect(() => {
+    if (paused) return;
+    let target = pendingFocus.current;
     pendingFocus.current = null;
+    const writeFocus = pendingWriteFocus.current;
+    if (writeFocus && (mode === 'idle' || target)) {
+      pendingWriteFocus.current = null;
+      // The editor may have been detached by this commit. Keep tracking through
+      // the commit so a late focus move also invalidates the body fallback.
+      if (!target && writeFocus.canHandoff()) target = writeFocus.target;
+      writeFocus.stop();
+    }
+    if (!target) return;
     if (target === 'editor' && mode !== 'idle') {
-      titleRef.current?.focus();
+      focusEditorTitle();
+      return;
+    }
+    if (target === 'monthList') {
+      (monthListRef.current ?? monthAgendaRef.current)?.focus();
       return;
     }
     if (mode !== 'idle') return;
     if (target === 'saved') {
-      dayHeadingRef.current?.focus({ preventScroll: true });
-      dayHeadingRef.current?.scrollIntoView?.({ block: 'nearest' });
+      if (dayHeadingRef.current) focusWhenRevealed(dayHeadingRef.current);
       return;
     }
     const trigger = returnFocusRef.current;
@@ -499,14 +752,47 @@ function PersonalCalendarWorkspace({
       trigger?.isConnected &&
       !trigger.closest('[hidden]') &&
       !trigger.matches(':disabled') &&
-      window.getComputedStyle(trigger).display !== 'none'
+      window.getComputedStyle(trigger).visibility === 'visible' &&
+      isHorizontallyVisible(trigger) &&
+      focusWhenRevealed(trigger)
     ) {
-      trigger.focus({ preventScroll: true });
-      trigger.scrollIntoView?.({ block: 'nearest' });
-    } else {
-      createButtonRef.current?.focus({ preventScroll: true });
+      return;
     }
+    const fallback = createButtonRef.current;
+    if (fallback) focusWhenRevealed(fallback);
   }, [paused, mode, editorRevision, month, selectedDate]);
+
+  const revealDayAgenda = useCallback(() => {
+    const summary = daySummaryRef.current;
+    if (!summary) return;
+
+    const insets = measureStickyInsets();
+    scrollVerticallyIntoView(summary, { align: 'start', insets });
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused !== document.body && isVisible(focused)) {
+      return;
+    }
+    const heading = dayHeadingRef.current;
+    if (heading) focusWhenRevealed(heading);
+  }, []);
+
+  useLayoutEffect(() => {
+    const requestedDate = pendingDayReveal.current;
+    pendingDayReveal.current = null;
+    if (requestedDate && requestedDate === selectedDate && !paused) {
+      revealDayAgenda();
+    }
+  }, [paused, revealDayAgenda, selectedDate, dateSelectionRevision]);
+
+  const selectMonthDay = (date: string) => {
+    pendingDayReveal.current = date;
+    selectDate(date);
+  };
+
+  const showMonthList = () => {
+    cancelLinkedFocus();
+    navigate({ month, selectedDate: '', calendarView: 'list' });
+  };
 
   const monthEvents = useMemo(
     () => filterPersonalEvents(ledger.records, month),
@@ -542,6 +828,7 @@ function PersonalCalendarWorkspace({
     if (!mayDiscardDraft()) return;
     const next = emptyPersonalEventDraft();
     next.date = selectedDate || (next.date.startsWith(month) ? next.date : `${month}-01`);
+    if (linkedFocusOrigin.current) cancelLinkedFocus();
     setInitialDraft(next);
     returnFocusRef.current = trigger ?? createButtonRef.current;
     pendingFocus.current = 'editor';
@@ -556,12 +843,17 @@ function PersonalCalendarWorkspace({
 
   const openEdit = (row: PersonalImportRecord, trigger?: HTMLElement) => {
     if (suspended.current || writing.current) return;
-    if (mode === 'edit' && selectedId === row.id) {
-      titleRef.current?.focus();
+    if (
+      mode === 'edit' &&
+      baseline?.id === row.id &&
+      JSON.stringify(baseline) === JSON.stringify(row)
+    ) {
+      focusEditorTitle();
       return;
     }
     if (!mayDiscardDraft()) return;
     const next = draftFromPersonalEvent(row);
+    if (linkedFocusOrigin.current) cancelLinkedFocus();
     setInitialDraft(next);
     returnFocusRef.current =
       trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
@@ -586,7 +878,56 @@ function PersonalCalendarWorkspace({
     setFormError('');
   };
 
-  const runSave = async (action: () => Promise<void>, success: string) => {
+  const trackWriteFocus = () => {
+    const startedFromView = viewRevision.current;
+    const editor = editorRef.current;
+    let pressedOutsideEditor = false;
+    let canUseBodyFallback =
+      document.activeElement === document.body || Boolean(editor?.contains(document.activeElement));
+    const onFocusIn = (event: FocusEvent) => {
+      if (event.target instanceof Node && !editor?.contains(event.target)) {
+        canUseBodyFallback = false;
+      }
+    };
+    const onFocusOut = (event: FocusEvent) => {
+      const control = event.target;
+      if (
+        control instanceof HTMLElement &&
+        // React clears the editor ref before removal can emit a native focusout.
+        editorRef.current === editor &&
+        editor?.contains(control) &&
+        control.isConnected &&
+        !control.closest('[hidden]') &&
+        !control.matches(':disabled') &&
+        (event.relatedTarget === null || event.relatedTarget === document.body)
+      ) {
+        canUseBodyFallback = false;
+      }
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (editor && !event.composedPath().includes(editor)) pressedOutsideEditor = true;
+    };
+    // Relinquishing a usable control can leave focus on the body without a focusin.
+    // Hiding or disabling a control during the write can also trigger a browser blur.
+    document.addEventListener('focusin', onFocusIn, true);
+    document.addEventListener('focusout', onFocusOut, true);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return {
+      canHandoff: () =>
+        !suspended.current &&
+        !pressedOutsideEditor &&
+        startedFromView === viewRevision.current &&
+        (editor?.contains(document.activeElement) ||
+          (canUseBodyFallback && document.activeElement === document.body)),
+      stop: () => {
+        document.removeEventListener('focusin', onFocusIn, true);
+        document.removeEventListener('focusout', onFocusOut, true);
+        document.removeEventListener('pointerdown', onPointerDown, true);
+      },
+    };
+  };
+
+  const runSave = async (action: (row: PersonalImportRow) => Promise<void>, success: string) => {
     if (!active.current || suspended.current || writing.current) return;
     if (!canMutate || draftIssues.length) {
       setFormError(draftIssues[0]?.message || '請先確認行程內容。');
@@ -594,24 +935,41 @@ function PersonalCalendarWorkspace({
     }
     const ticket = ++requestId.current;
     const scoped = { ...scope };
+    const savedFromView = viewRevision.current;
+    const savedDate = draft.date;
+    const savedMonth = savedDate.slice(0, 7);
+    const monthList = calendarView === 'list' && !selectedDate;
+    const writeFocus = trackWriteFocus();
+    let focusQueued = false;
     writing.current = true;
     setSaving(true);
     setFormError('');
     setNotice('');
     try {
-      await action();
+      const row = personalEventRowFromDraft(draft, scoped.schoolId, baseline);
+      const followSavedDate =
+        !baseline ||
+        (monthList
+          ? monthEvents.some((event) => event.id === baseline.id) &&
+            filterPersonalEvents([row], month).length === 0
+          : savedDate !== baseline.date);
+      await action(row);
       if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
-      // Reveal the saved day only while the user is still editing. Changing the
-      // month after they moved elsewhere would also remove its focused date.
-      // A receipt during identity revalidation still completes the hidden form.
-      const continueEditingContext =
-        suspended.current ||
-        editorRef.current?.contains(document.activeElement) ||
-        document.activeElement === document.body;
-      if (continueEditingContext) {
-        setMonth(draft.date.slice(0, 7));
-        setSelectedDate(draft.date);
-        if (!suspended.current) pendingFocus.current = 'saved';
+      if (savedFromView === viewRevision.current) {
+        if (followSavedDate) {
+          // A newer navigation can run before this update or replace it in the same batch.
+          setNavigation((current) =>
+            current.revision === savedFromView
+              ? { ...current, month: savedMonth, selectedDate: savedDate }
+              : current,
+          );
+        }
+        pendingWriteFocus.current?.stop();
+        pendingWriteFocus.current = {
+          ...writeFocus,
+          target: followSavedDate || selectedDate ? 'saved' : 'return',
+        };
+        focusQueued = true;
       }
       setInitialDraft(null);
       setNotice(success);
@@ -623,6 +981,7 @@ function PersonalCalendarWorkspace({
       if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
       setFormError(personalEventSaveError(error));
     } finally {
+      if (!focusQueued) writeFocus.stop();
       if (active.current && ticket === requestId.current) {
         writing.current = false;
         setSaving(false);
@@ -633,8 +992,7 @@ function PersonalCalendarWorkspace({
   const saveCreate = () => {
     const scoped = { ...scope };
     void runSave(
-      async () => {
-        const row = personalEventRowFromDraft(draft, scoped.schoolId, null);
+      async (row) => {
         await savePersonalImportBatch(
           scoped,
           [row],
@@ -649,8 +1007,7 @@ function PersonalCalendarWorkspace({
     if (!baseline) return;
     const scoped = { ...scope };
     const original = baseline;
-    void runSave(async () => {
-      const row = personalEventRowFromDraft(draft, scoped.schoolId, original);
+    void runSave(async (row) => {
       await changePersonalImport(
         scoped,
         original,
@@ -666,6 +1023,8 @@ function PersonalCalendarWorkspace({
     const ticket = ++requestId.current;
     const scoped = { ...scope };
     const original = baseline;
+    const writeFocus = trackWriteFocus();
+    let focusQueued = false;
     writing.current = true;
     setSaving(true);
     setFormError('');
@@ -678,12 +1037,9 @@ function PersonalCalendarWorkspace({
     )
       .then(() => {
         if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
-        if (
-          !suspended.current &&
-          (editorRef.current?.contains(document.activeElement) ||
-            document.activeElement === document.body)
-        )
-          pendingFocus.current = 'return';
+        pendingWriteFocus.current?.stop();
+        pendingWriteFocus.current = { ...writeFocus, target: 'return' };
+        focusQueued = true;
         setInitialDraft(null);
         setNotice('已刪除這筆個人行程。');
         setMode('idle');
@@ -696,6 +1052,7 @@ function PersonalCalendarWorkspace({
         setFormError(personalEventSaveError(error));
       })
       .finally(() => {
+        if (!focusQueued) writeFocus.stop();
         if (active.current && ticket === requestId.current) {
           writing.current = false;
           setSaving(false);
@@ -819,7 +1176,10 @@ function PersonalCalendarWorkspace({
               type="button"
               className="btn"
               aria-pressed={calendarView === 'month'}
-              onClick={() => setCalendarView('month')}
+              onClick={() => {
+                cancelLinkedFocus();
+                navigate({ month, selectedDate, calendarView: 'month' });
+              }}
             >
               月格
             </button>
@@ -827,9 +1187,7 @@ function PersonalCalendarWorkspace({
               type="button"
               className="btn"
               aria-pressed={calendarView === 'list'}
-              onClick={() => {
-                setCalendarView('list');
-              }}
+              onClick={showMonthList}
             >
               列表
             </button>
@@ -840,33 +1198,13 @@ function PersonalCalendarWorkspace({
             records={monthEvents}
             month={month}
             selectedDate={selectedDate}
-            onDate={setSelectedDate}
+            dateSelectionRevision={dateSelectionRevision}
+            workspaceBoundary={workspaceBoundary}
+            onDate={selectMonthDay}
             onMonthChange={changeMonth}
             onEdit={openEdit}
             disabled={!canMutate}
           />
-        )}
-        {selectedDate && (
-          <div className={workspaceStyles.daySummary}>
-            <div>
-              <h3 ref={dayHeadingRef} tabIndex={-1}>
-                {selectedDate} 的行程
-              </h3>
-              {ledger.ready && (
-                <p>{events.length ? `${events.length} 筆個人行程` : '尚無個人行程'}</p>
-              )}
-            </div>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                setSelectedDate('');
-                setCalendarView('list');
-              }}
-            >
-              查看整月列表
-            </button>
-          </div>
         )}
         {ledger.error && (
           <p role="alert">
@@ -891,13 +1229,14 @@ function PersonalCalendarWorkspace({
                 if (!suspended.current && !writing.current) setDraft(next);
               }}
             />
-            {draftIssues.length > 0 && JSON.stringify(draft) !== JSON.stringify(initialDraft) && (
-              <ul className={styles.issues}>
-                {draftIssues.map((issue) => (
-                  <li key={`${issue.code}-${issue.field}`}>{issue.message}</li>
-                ))}
-              </ul>
-            )}
+            {draftIssues.length > 0 &&
+              (mode === 'edit' || JSON.stringify(draft) !== JSON.stringify(initialDraft)) && (
+                <ul className={styles.issues}>
+                  {draftIssues.map((issue) => (
+                    <li key={`${issue.code}-${issue.field}`}>{issue.message}</li>
+                  ))}
+                </ul>
+              )}
             {formError && (
               <p id={formErrorId} role="alert">
                 {formError}
@@ -954,57 +1293,86 @@ function PersonalCalendarWorkspace({
           </section>
         )}
 
-        {paused || ledger.loading ? (
-          <p role="status">正在讀取行程…</p>
-        ) : ledger.error ? null : !events.length ? (
-          <p className={styles.empty}>
-            {selectedDate
-              ? visibleDues.length
-                ? '這一天還沒有行程；下方仍可查看作業截止。'
-                : CALENDAR_DUE_EMPTY_DAY
-              : '這個月還沒有行程。'}
-            {!selectedDate && (
-              <>
-                按「新增行程」直接建立，或<Link href={importHref}>從截圖或檔案匯入</Link>。
-              </>
-            )}
-          </p>
-        ) : calendarView === 'list' || selectedDate ? (
-          <ul className={`${styles.saved} ${workspaceStyles.agenda}`} aria-label="個人行程列表">
-            {events.map((event) => (
-              <li
-                key={event.id}
-                ref={event.id === requestedEventId ? linkedEventElement : undefined}
-                tabIndex={event.id === requestedEventId ? -1 : undefined}
-                aria-current={event.id === requestedEventId ? 'true' : undefined}
+        <div ref={monthAgendaRef} role="region" aria-label="行程明細" tabIndex={-1}>
+          {selectedDate && (
+            <div className={workspaceStyles.daySummary} ref={daySummaryRef}>
+              <div>
+                <h3 ref={dayHeadingRef} tabIndex={-1}>
+                  {selectedDate} 的行程
+                </h3>
+                {ledger.ready && (
+                  <p>{events.length ? `${events.length} 筆個人行程` : '尚無個人行程'}</p>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  pendingFocus.current = 'monthList';
+                  showMonthList();
+                }}
               >
-                <div>
-                  <time dateTime={event.date}>
-                    {event.date}
-                    {event.endDate && event.endDate !== event.date
-                      ? ` 至 ${event.endDate}${event.allDay ? '（不含結束日）' : ''}`
-                      : ''}
-                  </time>
-                  <h3>{event.title}</h3>
-                  <p>
-                    {event.allDay ? '全天' : `${event.startTime}–${event.endTime}`} ·{' '}
-                    {event.location || '地點未填'}
-                  </p>
-                  <small>{personalEventSourceLabel(event)}</small>
-                </div>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={!ledger.ready || saving}
-                  aria-pressed={selectedId === event.id && mode === 'edit'}
-                  onClick={(click) => openEdit(event, click.currentTarget)}
+                查看整月列表
+              </button>
+            </div>
+          )}
+          {paused || ledger.loading ? (
+            <p role="status">正在讀取行程…</p>
+          ) : ledger.error ? null : !events.length ? (
+            <p className={styles.empty}>
+              {selectedDate
+                ? visibleDues.length
+                  ? '這一天還沒有行程；下方仍可查看作業截止。'
+                  : CALENDAR_DUE_EMPTY_DAY
+                : '這個月還沒有行程。'}
+              {!selectedDate && (
+                <>
+                  按「新增行程」直接建立，或<Link href={importHref}>從截圖或檔案匯入</Link>。
+                </>
+              )}
+            </p>
+          ) : calendarView === 'list' || selectedDate ? (
+            <ul
+              ref={attachMonthList}
+              tabIndex={-1}
+              className={`${styles.saved} ${workspaceStyles.agenda}`}
+              aria-label="個人行程列表"
+            >
+              {events.map((event) => (
+                <li
+                  key={event.id}
+                  ref={event.id === requestedEventId ? linkedEventElement : undefined}
+                  tabIndex={event.id === requestedEventId ? -1 : undefined}
+                  aria-current={event.id === requestedEventId ? 'true' : undefined}
                 >
-                  編輯
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+                  <div>
+                    <time dateTime={event.date}>
+                      {event.date}
+                      {event.endDate && event.endDate !== event.date
+                        ? ` 至 ${event.endDate}${event.allDay ? '（不含結束日）' : ''}`
+                        : ''}
+                    </time>
+                    <h3>{event.title}</h3>
+                    <p>
+                      {event.allDay ? '全天' : `${event.startTime}–${event.endTime}`} ·{' '}
+                      {event.location || '地點未填'}
+                    </p>
+                    <small>{personalEventSourceLabel(event)}</small>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={!ledger.ready || saving}
+                    aria-pressed={selectedId === event.id && mode === 'edit'}
+                    onClick={(click) => openEdit(event, click.currentTarget)}
+                  >
+                    編輯
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       </section>
 
       <section

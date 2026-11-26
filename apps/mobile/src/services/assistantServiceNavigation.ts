@@ -56,6 +56,7 @@ export function mobileAssistantServiceDestination(
   audience: MobileAssistantAudience,
   navigation: Navigation,
   importKind?: 'grades',
+  schoolId?: string | null,
 ): MobileAssistantDestination | null {
   const service = getAssistantService(serviceId);
   if (!service) return null;
@@ -80,13 +81,14 @@ export function mobileAssistantServiceDestination(
     }
   }
   // Only fixed catalog links are used. No prompt text, session or identity is
-  // placed in the URL; the website establishes its own account/school scope.
+  // placed in the URL. The selected campus is a browsing hint; the website
+  // still establishes its own account and authorization.
   if (target?.route === 'PersonalImport' && service.id === 'import' && importKind === 'grades')
     return { ...target, params: { kind: 'grades' } };
   if (target) return target;
   const href = assistantServiceHref(
     service.id,
-    undefined,
+    schoolId,
     audience === 'platform' ? 'platform' : 'school',
   );
   return href ? { kind: 'web', url: `https://nuni.tw${href}` } : null;
@@ -97,12 +99,14 @@ export function navigateMobileAssistantService(
   audience: MobileAssistantAudience,
   navigation: Navigation,
   importKind?: 'grades',
+  schoolId?: string | null,
 ): boolean {
   const destination = mobileAssistantServiceDestination(
     serviceId,
     audience,
     navigation,
     importKind,
+    schoolId,
   );
   return destination?.kind === 'native'
     ? safeNavigate(navigation, destination.route, destination.params, { fallbackMessage: null })

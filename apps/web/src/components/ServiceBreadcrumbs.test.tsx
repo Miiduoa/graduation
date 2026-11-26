@@ -16,8 +16,8 @@ beforeEach(() => {
 it('offers a direct return to life from a service while preserving only campus context', () => {
   render(<ServiceBreadcrumbs title="點餐與取餐" />);
   const nav = screen.getByRole('navigation', { name: '目前位置' });
-  expect(within(nav).getByRole('link', { name: '生活' }).getAttribute('href')).toBe(
-    '/life?campus=nthu',
+  expect(within(nav).getByRole('link', { name: '探索' }).getAttribute('href')).toBe(
+    '/explore?campus=nthu',
   );
   expect(nav.querySelector('[aria-current="page"]')?.textContent).toBe('點餐與取餐');
   expect(within(nav).getAllByRole('link')).toHaveLength(1);
@@ -40,11 +40,11 @@ it.each(['/social', '/community/post/topic-1', '/dms/chat-1', '/messages'])(
     expect(screen.getByRole('link', { name: '交流' }).getAttribute('href')).toBe(
       '/connect?campus=nthu',
     );
-    expect(screen.queryByRole('link', { name: '生活' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '探索' })).toBeNull();
   },
 );
 
-it.each(['/', '/life', '/connect', '/profile', '/timetable', '/login', '/unknown'])(
+it.each(['/', '/explore', '/connect', '/profile', '/timetable', '/login', '/unknown'])(
   'does not repeat the main navigation on %s',
   (pathname) => {
     navigation.pathname = pathname;
@@ -66,8 +66,8 @@ it('keeps career in campus life and returns with the selected school', () => {
   navigation.search = 'schoolId=pu&campus=pu&session=private';
   render(<ServiceBreadcrumbs title="職涯" />);
   const nav = screen.getByRole('navigation', { name: '目前位置' });
-  expect(within(nav).getByRole('link', { name: '生活' }).getAttribute('href')).toBe(
-    '/life?schoolId=pu&campus=pu',
+  expect(within(nav).getByRole('link', { name: '探索' }).getAttribute('href')).toBe(
+    '/explore?schoolId=pu&campus=pu',
   );
   expect(within(nav).getAllByRole('link')).toHaveLength(1);
   expect(within(nav).getByText('職涯').getAttribute('aria-current')).toBe('page');
@@ -84,9 +84,9 @@ it.each(['/groups/club-1/club', '/groups/club-1/club/overview', '/groups/club-1/
       within(nav)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['生活', '社團活動']);
-    expect(within(nav).getByRole('link', { name: '生活' }).getAttribute('href')).toBe(
-      '/life?school=PU&schoolId=pu&campus=pu',
+    ).toEqual(['探索', '社團活動']);
+    expect(within(nav).getByRole('link', { name: '探索' }).getAttribute('href')).toBe(
+      '/explore?school=PU&schoolId=pu&campus=pu',
     );
     expect(within(nav).getByRole('link', { name: '社團活動' }).getAttribute('href')).toBe(
       '/clubs?school=PU&schoolId=pu&campus=pu',

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useSyncExternalStore, type MouseEvent } from 'r
 import { usePathname, useSearchParams } from 'next/navigation';
 import { isCurrentTabNavigationClick } from './currentTabNavigation';
 import {
+  merchantApplicationsHref,
+  merchantLocationsHref,
   merchantWorkspaceHref,
   readMerchantWorkspaceLocation,
   type MerchantWorkspaceLocation,
@@ -20,6 +22,8 @@ const subscribe = (onChange: () => void) => {
 };
 const snapshot = () => `${window.location.pathname}${window.location.search}`;
 const serverSnapshot = () => null;
+const isApplicationsView = (params: URLSearchParams | null) =>
+  params?.get('view') === 'applications';
 
 /** The URL selects a workspace; the authenticated API still decides access. */
 export function useMerchantWorkspaceRoute(enabled: boolean) {
@@ -30,26 +34,35 @@ export function useMerchantWorkspaceRoute(enabled: boolean) {
     window.dispatchEvent(new Event(CHANGE_EVENT));
   }, [routerPathname, routerSearch]);
   const url = useSyncExternalStore(subscribe, snapshot, serverSnapshot);
-  const location: MerchantWorkspaceLocation =
-    enabled && url
-      ? readMerchantWorkspaceLocation(new URL(url, 'https://nuni.local').searchParams)
-      : { status: 'list' };
+  const params = enabled && url ? new URL(url, 'https://nuni.local').searchParams : null;
+  const location: MerchantWorkspaceLocation = params
+    ? readMerchantWorkspaceLocation(params)
+    : { status: 'list' };
+  const showApplications = location.status === 'list' && isApplicationsView(params);
+  const showLocations = location.status === 'list' && params?.get('view') === 'locations';
   const navigate = useCallback((event: MouseEvent<HTMLAnchorElement>) => {
     if (!isCurrentTabNavigationClick(event, event.currentTarget)) return;
     const destination = new URL(event.currentTarget.href);
-    // Let Next handle an actual route change. Within this page, keep the same
-    // account-owned draft caches while giving Back and Forward real entries.
-    if (
-      destination.origin !== window.location.origin ||
-      destination.pathname !== '/merchant/workspace' ||
-      window.location.pathname !== destination.pathname
-    )
-      return;
+    if (destination.origin !== window.location.origin) return;
+    const source = window.location.pathname;
     const target = readMerchantWorkspaceLocation(destination.searchParams);
-    const href =
-      target.status === 'selected' ? merchantWorkspaceHref(target) : '/merchant/workspace';
+    const toWorkspace = destination.pathname === '/merchant/workspace';
+    const withinWorkspace = source === '/merchant/workspace' && toWorkspace;
+    const fromOverview = source === '/merchant' && toWorkspace && target.status === 'selected';
+    const toOverview = source === '/merchant/workspace' && destination.pathname === '/merchant';
+    if (!withinWorkspace && !fromOverview && !toOverview) return;
+    // Keep the mounted account workspace across the overview and store views.
+    const href = toOverview
+      ? '/merchant'
+      : target.status === 'selected'
+        ? merchantWorkspaceHref(target)
+        : isApplicationsView(destination.searchParams)
+          ? merchantApplicationsHref
+          : destination.searchParams.get('view') === 'locations'
+            ? merchantLocationsHref
+            : '/merchant/workspace';
     try {
-      if (`${window.location.pathname}${window.location.search}` !== href) {
+      if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== href) {
         const state = { ...window.history.state };
         // Next skips synchronization for router-owned writes. Its patched
         // History API copies current internals; retain unrelated state only.
@@ -64,5 +77,5 @@ export function useMerchantWorkspaceRoute(enabled: boolean) {
       // A real link remains usable when the browser denies History access.
     }
   }, []);
-  return { location, hydrated: url !== null, navigate };
+  return { location, showApplications, showLocations, hydrated: url !== null, navigate };
 }

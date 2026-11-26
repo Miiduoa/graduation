@@ -30,7 +30,7 @@ jest.mock('../services/schoolDirectory', () => ({
   ]),
 }));
 jest.mock('../state/theme', () => ({
-  useThemeMode: () => ({ mode: mockMode, setMode: mockSetMode }),
+  useThemeMode: () => ({ mode: mockMode, appearanceMode: mockMode, setMode: mockSetMode }),
 }));
 jest.mock('../services/release', () => ({
   getLegalUrl: (kind: string) => (mockLegalBase ? `${mockLegalBase}/${kind}` : null),
@@ -68,13 +68,14 @@ test('settings shows real account and version without fabricated permissions, de
   expect(view.getByText('陳同學')).toBeTruthy();
   expect(view.getByText('student-a@example.edu')).toBeTruthy();
   expect(view.getByText('2.3.4')).toBeTruthy();
-  expect(
-    view.queryByText(/AI 控制|GDPR|32 MB|09:43|2 台|Google · 已連結|跟隨系統|清空 AI/),
-  ).toBeNull();
+  expect(view.queryByText(/AI 控制|GDPR|32 MB|09:43|2 台|Google · 已連結|清空 AI/)).toBeNull();
   fireEvent.press(view.getByText('通知設定'));
   expect(navigation.navigate).toHaveBeenCalledWith('NotificationSettings');
   fireEvent.press(view.getByText('助理權限'));
   expect(navigation.navigate).toHaveBeenCalledWith('AssistantPermissions');
+  expect(view.getByRole('tab', { name: '淺色' })).toHaveAccessibilityState({ selected: true });
+  fireEvent.press(view.getByRole('tab', { name: '跟隨系統' }));
+  expect(mockSetMode).toHaveBeenCalledWith('system');
   fireEvent.press(view.getByText('深色'));
   expect(mockSetMode).toHaveBeenCalledWith('dark');
   mockMode = 'dark';

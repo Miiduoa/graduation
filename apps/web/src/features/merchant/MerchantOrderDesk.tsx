@@ -22,6 +22,7 @@ import {
   useFoodDraft,
   useFoodMutation,
   useFoodRead,
+  type FoodReadFlight,
   type FoodDraftCache,
   type FoodIntent,
 } from '@/features/food/foodState';
@@ -55,6 +56,13 @@ export function MerchantOrderDesk({
   tenantId,
   locationId,
   cache,
+  canSend,
+  captureSession,
+  accessConfirmed = true,
+  beginRead,
+  readFlight,
+  suspended = false,
+  readWhileSuspended = false,
   queue: controlledQueue,
   onQueueChange,
   queueHref,
@@ -63,6 +71,13 @@ export function MerchantOrderDesk({
   tenantId: string;
   locationId: string;
   cache: FoodDraftCache;
+  canSend?: () => boolean;
+  captureSession?: () => () => boolean;
+  accessConfirmed?: boolean;
+  beginRead?: () => { confirm(): void; reject(failure: unknown): void; settle(): void } | null;
+  readFlight?: () => FoodReadFlight;
+  suspended?: boolean;
+  readWhileSuspended?: boolean;
   queue?: MerchantWorkspaceQueue;
   onQueueChange?: (event: MouseEvent<HTMLAnchorElement>, queue: MerchantWorkspaceQueue) => void;
   queueHref?: (queue: MerchantWorkspaceQueue) => string;
@@ -83,21 +98,41 @@ export function MerchantOrderDesk({
   const previousQueue = useRef(currentQueue);
   const queueHintId = useId();
   const load = useCallback(async () => {
-    const [queue, shift] = await Promise.all([
-      client.listMerchantOrders(tenantId, locationId, { limit: 50, cursor }),
-      client.getShift(tenantId, locationId).catch((error: unknown) => {
-        if (
-          error instanceof NuniError &&
-          error.status === 404 &&
-          error.code === 'FOOD_SHIFT_NOT_FOUND'
-        )
-          return null;
-        throw error;
-      }),
-    ]);
-    return { queue, shift };
-  }, [client, tenantId, locationId, cursor]);
-  const data = useFoodRead(load, { pollMs: FOOD_POLL_MS });
+    const observation = beginRead?.();
+    if (observation === null) throw new NuniError(409, 'SESSION_CHANGED');
+    // Each request can invalidate the workspace even after its sibling fails.
+    const reject = (failure: unknown): never => {
+      observation?.reject(failure);
+      throw failure;
+    };
+    try {
+      // Keep the poll in flight until both observations have settled.
+      const [queue, shift] = await Promise.allSettled([
+        client.listMerchantOrders(tenantId, locationId, { limit: 50, cursor }).catch(reject),
+        client.getShift(tenantId, locationId).catch((error: unknown) => {
+          if (
+            error instanceof NuniError &&
+            error.status === 404 &&
+            error.code === 'FOOD_SHIFT_NOT_FOUND'
+          )
+            return null;
+          return reject(error);
+        }),
+      ]);
+      if (queue.status === 'rejected') throw queue.reason;
+      if (shift.status === 'rejected') throw shift.reason;
+      observation?.confirm();
+      return { queue: queue.value, shift: shift.value };
+    } finally {
+      observation?.settle();
+    }
+  }, [beginRead, client, tenantId, locationId, cursor]);
+  const data = useFoodRead(load, {
+    pollMs: FOOD_POLL_MS,
+    paused: suspended && !readWhileSuspended,
+    serializeReads: !readFlight,
+    readFlight,
+  });
   const [opening, setOpening] = useFoodDraft(cache, `${scope}:opening`, '0');
   const [counted, setCounted] = useFoodDraft(cache, `${scope}:counted`, '');
   const [openNext, setOpenNext] = useFoodDraft(cache, `${scope}:open-next`, false);
@@ -116,6 +151,15 @@ export function MerchantOrderDesk({
   const [confirmed, setConfirmed] = useState(false);
   const [receipt, setReceipt] = useState('');
   const [shiftOpen, setShiftOpen] = useState(true);
+  const [wasSuspended, setWasSuspended] = useState(suspended);
+  if (suspended !== wasSuspended) {
+    setWasSuspended(suspended);
+    if (suspended) {
+      setSelected(null);
+      setConfirmed(false);
+      setConfirmedShift(null);
+    }
+  }
   const execute = (intent: FoodIntent) => {
     const args = [tenantId, locationId] as const;
     switch (intent.action) {
@@ -143,11 +187,18 @@ export function MerchantOrderDesk({
         throw new Error('Unsupported action');
     }
   };
+  // A remounted desk must load its own queue and shift before sending, even
+  // when the workspace detail is already confirmed and an old round is draining.
+  const canSubmit = !suspended && accessConfirmed && !!data.data;
+  const hasSubmitAccess = () => canSubmit && (canSend?.() ?? true);
   const task = useFoodMutation({
     cache,
     scope,
     accountId,
-    enabled: !!data.data,
+    settleAfterUnmount: true,
+    captureSession,
+    enabled: canSubmit,
+    canSend: hasSubmitAccess,
     execute,
     reload: data.reload,
     onSuccess(result, intent) {
@@ -172,7 +223,10 @@ export function MerchantOrderDesk({
       }
     },
   });
-  const locked = !data.data || task.busy || !!task.pending || task.storageBlocked;
+  function sendOrderIntent(intent: FoodIntent) {
+    void task.send(intent);
+  }
+  const locked = !canSubmit || task.busy || !!task.pending || task.storageBlocked;
   const incomingOrders = useMemo(
     () =>
       (data.data?.queue.orders ?? []).filter((order) => merchantOrderBucket(order) === 'incoming'),
@@ -270,7 +324,7 @@ export function MerchantOrderDesk({
       (reasonRequired && form.reason === 'other' && form.detail.trim().length < 3)
     )
       return;
-    void task.send({
+    sendOrderIntent({
       action: selected.action,
       orderId: selected.orderId,
       input: {
@@ -285,6 +339,7 @@ export function MerchantOrderDesk({
       },
     });
   }
+  if (suspended) return null;
   return (
     <section className={styles.panel} aria-label="門市訂單工作台">
       <div className={styles.bar}>
@@ -321,7 +376,7 @@ export function MerchantOrderDesk({
           )}
         </div>
       )}
-      <FoodMutationStatus task={task} />
+      <FoodMutationStatus task={task} retryDisabled={!canSubmit} />
       {receipt && <p role="status">{receipt}</p>}
       {data.data && (
         <div className={styles.stack}>
@@ -356,7 +411,7 @@ export function MerchantOrderDesk({
                   disabled={locked || !shiftConfirm || !cashValid(opening)}
                   onClick={() => {
                     if (!shiftConfirm || locked || !cashValid(opening)) return;
-                    void task.send({
+                    sendOrderIntent({
                       action: 'open-shift',
                       input: { openingCashMinor: Number(opening), idempotencyKey: foodKey() },
                     });
@@ -436,7 +491,7 @@ export function MerchantOrderDesk({
                       setConfirmed(false);
                     }}
                     onTicket={(action, ticketId) =>
-                      void task.send({
+                      sendOrderIntent({
                         action,
                         orderId: order.id,
                         ticketId,
@@ -463,7 +518,7 @@ export function MerchantOrderDesk({
                       setConfirmed(false);
                     }}
                     onTicket={(action, ticketId) =>
-                      void task.send({
+                      sendOrderIntent({
                         action,
                         orderId: order.id,
                         ticketId,
@@ -579,7 +634,7 @@ export function MerchantOrderDesk({
                         (openNext && !cashValid(nextCash))
                       )
                         return;
-                      void task.send({
+                      sendOrderIntent({
                         action: 'handover',
                         input: {
                           countedCashMinor: Number(counted),

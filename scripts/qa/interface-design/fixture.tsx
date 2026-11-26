@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { AppHeader } from '../../../apps/web/src/components/AppHeader';
 import { AcademicNavigation } from '../../../apps/web/src/components/academic/AcademicNavigation';
 import { StudentToday } from '../../../apps/web/src/components/today/StudentToday';
+import { todayTodosFromHomeTasks } from '../../../apps/web/src/lib/todayScreen';
 import { Button } from '../../../apps/web/src/components/ui/Button';
 import { ToastProvider, useToast } from '../../../apps/web/src/components/ui/Toast';
 import { Modal, ConfirmModal } from '../../../apps/web/src/components/ui/Modal';
@@ -65,6 +66,13 @@ function Controls() {
           onClick={() => navigate('/school-lms?schoolId=pu&campus=pu')}
         >
           查看課務分頁
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => navigate('/life?schoolId=pu&campus=pu')}
+        >
+          查看生活服務
         </Button>
         <Button type="button" variant="ghost" onClick={() => navigate('/')}>
           返回今天
@@ -272,7 +280,7 @@ function Fixture() {
                           title: '資料結構',
                           location: '管理大樓 M302',
                           courseId: 'fixture-a',
-                          startAt: Date.parse('2026-11-18T10:10:00+08:00'),
+                          startAt: Date.parse('2026-11-18T10:00:00+08:00'),
                           endAt: Date.parse('2026-11-18T12:00:00+08:00'),
                         },
                         {
@@ -288,24 +296,24 @@ function Fixture() {
                 todos={
                   guest
                     ? []
-                    : [
+                    : todayTodosFromHomeTasks([
                         {
                           id: 'work-a',
-                          title: '小組專題進度紀錄',
+                          title: '資料處理練習',
                           courseName: '系統分析與設計',
                           courseId: 'fixture-c',
-                          dueAt: Date.parse('2026-11-18T23:59:00+08:00'),
-                          href: '/course/fixture-c#assignment-work-a',
+                          schoolId: 'pu',
+                          dueAt: '2026-11-18T23:59:00+08:00',
                         },
                         {
                           id: 'work-b',
                           title: '資料處理練習',
                           courseName: '大數據分析',
                           courseId: 'fixture-d',
-                          dueAt: Date.parse('2026-11-20T23:59:00+08:00'),
-                          href: '/course/fixture-d#assignment-work-b',
+                          schoolId: 'pu',
+                          dueAt: '2026-11-18T11:00:00+08:00',
                         },
-                      ]
+                      ])
                 }
                 timetableStatus={guest ? 'empty' : 'ready'}
                 todosError=""
@@ -316,6 +324,8 @@ function Fixture() {
                 weekHref="/timetable?schoolId=pu&campus=pu"
                 timetableHref="/timetable?schoolId=pu&campus=pu"
                 timetableSchoolId="pu"
+                timetableTermKey="115|1"
+                scopeKey={guest ? undefined : JSON.stringify(['school:fixture-user', 'pu', 'fixture-user'])}
               />
             ) : pathname === '/interface-quick' ? (
               <>

@@ -13,6 +13,7 @@ export type TronClassFileDownloadRouteDependencies<Input extends { revision: str
   download?: (ownerKey: string, input: Input, signal?: AbortSignal) => Promise<{
     bytes: Uint8Array; name: string; contentType: string;
   }>;
+  authorize?: (ownerKey: string, input: Input) => Promise<void>;
   rateLimit?: (ownerKey: string) => void;
   acquireSlot?: () => () => void;
 };
@@ -130,6 +131,7 @@ export async function handleTronClassFileDownload<Input extends { revision: stri
     }
     const input = parse(await boundedJson(request, 8 * 1024));
     if (request.signal.aborted) throw new NuniError(504, 'TRONCLASS_DOWNLOAD_TIMEOUT');
+    await dependencies.authorize?.(actor.ownerKey, input);
     release = (dependencies.acquireSlot ?? acquireDownloadSlot)();
     const bindings = dependencies.bindings ?? createTronClassBindingService();
     await bindings.assertCurrent(actor.ownerKey, input.revision);

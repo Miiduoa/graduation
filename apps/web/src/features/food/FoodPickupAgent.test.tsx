@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
@@ -7,7 +7,7 @@ import type { V2Card } from '@/features/nuni/assistant/types';
 import { FoodPickupAgent } from './FoodPickupAgent';
 import { FoodOrderDetail } from './FoodOrders';
 import type { FoodClient } from './FoodWorkspace';
-import { orderFixture } from './foodTestFixtures';
+import { orderFixture, readyOrder } from './foodTestFixtures';
 import { matchesFoodPickupTarget, parseFoodPickupReply } from './foodPickupEvidence';
 
 const environment = vi.hoisted(() => ({ schoolId: 'pu', enabled: true }));
@@ -16,7 +16,7 @@ vi.mock('@/lib/useCampusBrowseContext', () => ({
 }));
 vi.mock('@/components/AssistantEnabledProvider', () => ({ useAssistantEnabled: () => environment.enabled }));
 const context = 'a'.repeat(43);
-const props = { context, accountId: 'alice', tenantId: 'campus-a', orderId: 'order-1', available: true };
+const props = { context, accountId: 'alice', tenantId: 'campus-a', orderId: 'order-1', available: true, suggestion: '這筆訂單下午取餐，可以預覽行程。' };
 const scope = { owner: 'platform:alice', schoolId: 'pu' };
 const journalScope = { ...scope, context };
 const target = { tenantId: props.tenantId, orderId: props.orderId, durationMinutes: 15 };
@@ -338,10 +338,87 @@ it('uses the actual selected order detail as the cross-feature entry point', asy
   const { calls } = api();
   render(<FoodOrderDetail client={client} cache={new Map()} accountId={props.accountId} context={context}
     tenantId={props.tenantId} orderId={props.orderId} onChange={async () => {}} onBack={() => {}} />);
-  await preview();
+  const suggestion = await screen.findByRole('region', { name: 'nuni 建議' });
+  expect(suggestion.textContent).toContain(order.locationName);
+  expect(suggestion.textContent).toContain('20:00');
+  fireEvent.click(within(suggestion).getByRole('button', { name: '預覽這筆取餐安排' }));
+  await screen.findByRole('button', { name: '確認' });
   expect(client.getOrder).toHaveBeenCalledWith(props.tenantId, props.orderId);
   expect(calls.filter(call => call.action === 'pickup-plan')).toHaveLength(2);
   expect(calls.at(-1)?.body.target).toEqual(target);
   expect(screen.getByRole('region', { name: '訂單詳情' })).toBeTruthy();
   expect(screen.getByRole('article', { name: '行程確認卡' })).toBeTruthy();
+});
+
+it('uses the ready order suggestion to show its valid credential locally in a single click', async () => {
+  environment.enabled = false;
+  const order = readyOrder();
+  const client = { getOrder: vi.fn().mockResolvedValue(order) } as unknown as FoodClient;
+  const { actions } = api();
+  render(<FoodOrderDetail client={client} cache={new Map()} accountId={props.accountId} context={context}
+    tenantId={props.tenantId} orderId={order.id} onChange={async () => {}} onBack={() => {}} />);
+
+  const suggestion = await screen.findByRole('region', { name: 'nuni 建議' });
+  expect(suggestion.textContent).toContain(order.locationName);
+  expect(screen.queryByText(order.pickup.credential!.token)).toBeNull();
+  expect(screen.queryByRole('button', { name: '預覽這筆取餐安排' })).toBeNull();
+  expect(screen.getAllByRole('button', { name: '出示取餐憑證' })).toHaveLength(1);
+  fireEvent.click(within(suggestion).getByRole('button', { name: '出示取餐憑證' }));
+  expect(within(suggestion).getByLabelText('一次性取餐憑證').textContent).toBe(order.pickup.credential!.token);
+  expect(actions()).toEqual([]);
+});
+
+it('refreshes the same ready order in place when its credential has expired', async () => {
+  const order = readyOrder();
+  const expired = { ...order, pickup: { ...order.pickup, credential: { ...order.pickup.credential!, expiresAt: new Date(NOW).toISOString() } } };
+  const getOrder = vi.fn().mockResolvedValueOnce(expired).mockResolvedValueOnce(order);
+  const client = { getOrder } as unknown as FoodClient;
+  api();
+  render(<FoodOrderDetail client={client} cache={new Map()} accountId={props.accountId} context={context}
+    tenantId={props.tenantId} orderId={order.id} onChange={async () => {}} onBack={() => {}} />);
+
+  const suggestion = await screen.findByRole('region', { name: 'nuni 建議' });
+  expect(screen.queryByRole('button', { name: '出示取餐憑證' })).toBeNull();
+  expect(screen.getAllByRole('button', { name: '更新這筆訂單' })).toHaveLength(1);
+  fireEvent.click(within(suggestion).getByRole('button', { name: '更新這筆訂單' }));
+  await screen.findByRole('button', { name: '出示取餐憑證' });
+  expect(getOrder.mock.calls).toEqual([[props.tenantId, order.id], [props.tenantId, order.id]]);
+  expect(screen.queryByText(order.pickup.credential!.token)).toBeNull();
+});
+
+it.each(['past', 'fulfilled', 'disabled'] as const)('omits the schedule suggestion when %s', async kind => {
+  environment.enabled = kind !== 'disabled';
+  const order = { ...orderFixture(), state: kind === 'fulfilled' ? 'fulfilled' : 'accepted',
+    requestedPickupAt: kind === 'past' ? new Date(NOW - 1).toISOString() : orderFixture().requestedPickupAt };
+  const client = { getOrder: vi.fn().mockResolvedValue(order) } as unknown as FoodClient;
+  api();
+  render(<FoodOrderDetail client={client} cache={new Map()} accountId={props.accountId} context={context}
+    tenantId={props.tenantId} orderId={order.id} onChange={async () => {}} onBack={() => {}} />);
+
+  await screen.findByRole('heading', { name: /米飯店 ·/ });
+  expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '預覽這筆取餐安排' })).toBeNull();
+});
+
+it('replaces the planning suggestion with pickup when the selected order becomes ready', async () => {
+  const initial = { ...orderFixture(), state: 'preparing' };
+  const getOrder = vi.fn().mockResolvedValueOnce(initial).mockResolvedValue(readyOrder());
+  const client = { getOrder } as unknown as FoodClient;
+  const { actions } = api();
+  render(<FoodOrderDetail client={client} cache={new Map()} accountId={props.accountId} context={context}
+    tenantId={props.tenantId} orderId={initial.id} onChange={async () => {}} onBack={() => {}} />);
+  const first = await screen.findByRole('region', { name: 'nuni 建議' });
+  expect(within(first).getByRole('button', { name: '預覽這筆取餐安排' })).toBeTruthy();
+
+  fireEvent(document, new Event('visibilitychange'));
+  await screen.findByRole('button', { name: '出示取餐憑證' });
+  const suggestion = screen.getByRole('region', { name: 'nuni 建議' });
+  expect(within(suggestion).getAllByRole('button').map(button => button.textContent)).toEqual(['出示取餐憑證']);
+  const optionalPlan = screen.getByText('安排稍後取餐的時間').closest('details')!;
+  expect(optionalPlan.open).toBe(false);
+  fireEvent.click(within(optionalPlan).getByText('安排稍後取餐的時間'));
+  expect(optionalPlan.open).toBe(true);
+  fireEvent.click(within(optionalPlan).getByRole('button', { name: '預覽這筆取餐安排' }));
+  await screen.findByRole('button', { name: '確認' });
+  expect(actions()).toEqual(['capability', 'pickup-plan', 'pickup-plan']);
 });

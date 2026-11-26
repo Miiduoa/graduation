@@ -631,7 +631,7 @@ function TronClassEntry({ context }: { context: string }) {
   );
 }
 
-function NuniContent() {
+function NuniContent({ googleLinkEnabled }: { googleLinkEnabled: boolean }) {
   const pathname = usePathname() || '/';
   const campusSearch = useCampusNavigationSearch(useSearchParams());
   const hydrated = useClientHydrated();
@@ -649,6 +649,11 @@ function NuniContent() {
         <Link className={styles.button} href={campusServiceHref('/classroom', campusSearch)}>
           前往我的課程
         </Link>
+        {googleLinkEnabled && !loading && !error && !pendingLogout && (
+          <Link className={styles.button} href="/auth/platform/link/google">
+            管理登入方式
+          </Link>
+        )}
         {!error && !pendingLogout && (
           <AccountMembershipEntry
             key={`${session.platformAccountId}:${session.context}`}
@@ -700,10 +705,10 @@ function NuniContent() {
   );
 }
 
-export function NuniApp() {
+export function NuniApp({ googleLinkEnabled = false }: { googleLinkEnabled?: boolean } = {}) {
   return (
     <Suspense fallback={<PageLoadingCard message="載入中…" />}>
-      <NuniContent />
+      <NuniContent googleLinkEnabled={googleLinkEnabled} />
     </Suspense>
   );
 }

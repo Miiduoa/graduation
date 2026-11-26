@@ -40,6 +40,7 @@ it('uses the actual Admin SDK for an isolated local project without reading a se
   const admin = await getFirebaseAdmin(env);
   expect(getApps().find((app) => app.name === 'campus-one-web-emulator')?.options.projectId).toBe('demo-campus-one');
   if (!admin) throw new Error('Local Admin runtime was not initialized.');
+  expect(admin.messaging).toBeUndefined();
   await expect(admin.verifyIdToken('not-an-issued-token', true)).rejects.toThrow();
 });
 

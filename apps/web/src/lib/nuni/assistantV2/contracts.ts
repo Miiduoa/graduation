@@ -142,6 +142,8 @@ export type Card = {
   destination: string;
   /** Presentation hint only; the signed source guard is the execution authority. */
   sourceBound?: 'food-pickup';
+  /** Read-continuation hint only. Follow-up authenticates the signed study guard. */
+  coursework?: boolean;
 };
 export type Step = { name: string; status: 'ok' | 'error' | 'cached'; summary: string };
 export type Message = {

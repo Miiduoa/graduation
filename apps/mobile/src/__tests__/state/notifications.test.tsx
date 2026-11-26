@@ -85,6 +85,15 @@ beforeEach(() => {
   mockCommit.mockResolvedValue(undefined);
 });
 
+test('preserves the Firestore envelope and nested school for the destination check', async () => {
+  jest.mocked(getDocs).mockResolvedValueOnce({ docs: [{
+    id: 'scope', data: () => ({ title: '校園通知', schoolId: 'nthu', data: { schoolId: 'pu' } }),
+  }] } as never);
+  const view = render(tree());
+  await view.findByText('校園通知');
+  expect(latest.notifications[0]).toMatchObject({ schoolId: 'nthu', data: { schoolId: 'pu' } });
+});
+
 test('every B render hides A rows and unread count while B loads, fails, then retries', async () => {
   const b = deferred<ReturnType<typeof snapshot>>();
   jest

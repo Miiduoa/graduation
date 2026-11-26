@@ -1389,3 +1389,86 @@ it('rejects a file selection in a second draft without deleting the first draft 
   await view.findByText('確認這次作業內容');
   expect(mockUpload).not.toHaveBeenCalled();
 });
+
+it.each([
+  'initial courses', 'retry courses', 'initial sync', 'retry sync', 'course sync',
+  'prepare', 'session refresh after lost', 'new context after lost', 'new context before detection',
+])('clears the workspace and stops after a binding change during %s', async (stage) => {
+  const replacementRevision = 'b'.repeat(32);
+  let refreshStarted = false;
+  const schoolReads = jest.fn();
+  function rebind() {
+    mockConnection = { ...connection, revision: replacementRevision, account: 'student-b' };
+    mockPreparation = { ...preparation, revision: replacementRevision };
+    mockSnapshot = { ...snapshot, revision: replacementRevision,
+      homework: [{ ...homework, title: '新帳號的私人作業' }] };
+  }
+  mockBffRequest.mockImplementation((path, context, input) => {
+    if (input.action === 'courses' || input.action === 'sync' || input.action === 'prepare') {
+      if ((stage === 'initial courses' && input.action === 'courses') ||
+          ((stage === 'initial sync' || (stage === 'retry sync' && refreshStarted)) && input.action === 'sync' &&
+            mockConnection.revision === revision)) rebind();
+      if (input.revision !== mockConnection.revision) return Promise.reject(new NuniError(409, 'TRONCLASS_BINDING_CHANGED'));
+      schoolReads(input.revision);
+      if (stage === 'retry courses' && mockConnection.revision === revision)
+        return Promise.reject(new NuniError(504, 'TRONCLASS_TIMEOUT'));
+    }
+    return defaultRequest(path, context, input);
+  });
+  const view = render(<TronClassWorkspaceScreen />);
+  if (stage === 'retry courses') {
+    const retry = await view.findByRole('button', { name: '重新讀取課程清單' });
+    rebind();
+    fireEvent.press(retry);
+  } else if (stage === 'retry sync' || stage === 'course sync') {
+    await view.findByRole('button', { name: homework.title });
+    if (stage === 'retry sync') refreshStarted = true;
+    else rebind();
+    fireEvent.press(view.getByRole('button', { name: stage === 'course sync' ? '程式設計' : '重新整理課務資料' }));
+  }
+
+  if (stage === 'prepare') {
+    await view.findByRole('button', { name: homework.title });
+    rebind();
+    fireEvent.press(view.getByRole('button', { name: homework.title }));
+  }
+  const remounts = stage.includes('context') || stage.includes('session refresh');
+  if (remounts) {
+    await view.findByRole('button', { name: homework.title });
+    rebind();
+    if (stage !== 'new context before detection') {
+      fireEvent.press(view.getByRole('button', { name: '程式設計' }));
+      await view.findByText('TronClass 連接已變更，請重新讀取狀態。');
+    }
+    mockAuth = { ...mockAuth, loading: true };
+    view.rerender(<TronClassWorkspaceScreen />);
+    mockAuth = { ...mockAuth, loading: false, session: {
+      platformAccountId: accountA, context: stage.includes('context') ? 'context-new' : 'context-a',
+    } };
+    view.rerender(<TronClassWorkspaceScreen />);
+    await view.findByRole('button', { name: '繼續讀取目前帳號的課程' });
+  } else await view.findByText('TronClass 連接已變更，請重新讀取狀態。');
+  expect(view.queryByRole('button', { name: homework.title })).toBeNull();
+  expect(view.queryByRole('button', { name: '程式設計' })).toBeNull();
+  expect(view.queryByRole('button', { name: '新帳號的私人作業' })).toBeNull();
+  // The next status would return connected B, but Mobile waits for a new action.
+  expect(actions('status')).toHaveLength(stage === 'retry sync' || remounts ? 2 : 1);
+  for (const input of [...actions('courses'), ...actions('sync')]) expect(input.revision).toBe(revision);
+  if (stage === 'course sync') expect(actions('sync').at(-1)?.courseId).toBe(10);
+  expect(schoolReads).not.toHaveBeenCalledWith(replacementRevision);
+
+  for (const input of actions('prepare')) expect(input.revision).toBe(revision);
+  if (!remounts) {
+    fireEvent.press(view.getByRole('button', { name: '重新讀取連接狀態' }));
+    await view.findByRole('button', { name: '繼續讀取目前帳號的課程' });
+    expect(view.getByText(/帳號：student-b/)).toBeTruthy();
+    expect(actions('status')).toHaveLength(stage === 'retry sync' ? 3 : 2);
+    expect(view.queryByRole('button', { name: '新帳號的私人作業' })).toBeNull();
+    for (const input of [...actions('courses'), ...actions('sync')]) expect(input.revision).toBe(revision);
+    expect(schoolReads).not.toHaveBeenCalledWith(replacementRevision);
+  }
+  fireEvent.press(view.getByRole('button', { name: '繼續讀取目前帳號的課程' }));
+  await view.findByRole('button', { name: '新帳號的私人作業' });
+  expect(actions('courses').at(-1)?.revision).toBe(replacementRevision);
+  expect(actions('sync').at(-1)?.revision).toBe(replacementRevision);
+});

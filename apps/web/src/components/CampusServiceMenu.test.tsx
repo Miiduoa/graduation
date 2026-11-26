@@ -324,17 +324,17 @@ it('identifies a nested service without selecting a route with only a matching p
   expect(screen.getByRole('link', { name: '公告' }).getAttribute('aria-current')).toBeNull();
 });
 
-it('marks 生活 active for campus event list and detail without replacing 社團活動', () => {
+it('marks 探索 active for campus event list and detail without replacing 社團活動', () => {
   navigation.pathname = '/events';
   const { rerender } = render(<AppHeader />);
-  expect(screen.getByRole('link', { name: '生活' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: '探索' }).getAttribute('aria-current')).toBe('page');
   fireEvent.click(screen.getByText('所有服務'));
   expect(screen.getByRole('link', { name: '校園活動' }).getAttribute('href')).toBe('/events');
   expect(screen.getByRole('link', { name: '社團活動' }).getAttribute('href')).toBe('/clubs');
   navigation.pathname = '/events/talk-1';
   navigation.search = 'schoolId=nthu&source=school-club-events';
   rerender(<AppHeader />);
-  expect(screen.getByRole('link', { name: '生活' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: '探索' }).getAttribute('aria-current')).toBe('page');
 });
 
 it('selects only the specific account service and closes its overview link on the current page', () => {
@@ -408,16 +408,16 @@ it('opens service search with the keyboard shortcut without taking over text edi
 });
 
 it.each([
-  ['/cafeteria/restaurant-1', '生活'],
-  ['/bus/registered', '生活'],
-  ['/library', '生活'],
+  ['/cafeteria/restaurant-1', '探索'],
+  ['/bus/registered', '探索'],
+  ['/library', '探索'],
   ['/grades', '課務'],
   ['/credit-planner', '課務'],
   ['/classroom/grades', '課務'],
   ['/settings', '我的'],
   ['/classroom/account', '我的'],
-  ['/orders/order-1', '生活'],
-  ['/school-info', '生活'],
+  ['/orders/order-1', '探索'],
+  ['/school-info', '探索'],
   ['/community/post/topic-1', '交流'],
   ['/social', '交流'],
   ['/dms/chat-1', '交流'],
@@ -775,7 +775,10 @@ it('keeps exactly five primary destinations and moves service search out of the 
   render(<AppHeader />);
   const nav = screen.getByRole('navigation', { name: '主要導覽' });
   const links = Array.from(nav.querySelectorAll('a'));
-  expect(links.map((link) => link.textContent)).toEqual(['今天', '課務', '生活', '交流', '我的']);
+  expect(links.map((link) => link.textContent)).toEqual(['今天', '探索', '課務', '交流', '我的']);
+  expect(links.map((link) => new URL(link.href).pathname)).toEqual([
+    '/', '/explore', '/timetable', '/connect', '/profile',
+  ]);
   for (const link of links) {
     const destination = new URL(link.href);
     expect(destination.searchParams.get('schoolId')).toBe('nthu');

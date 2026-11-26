@@ -1,7 +1,7 @@
 import React from 'react';
 import { Text, View } from 'react-native';
 import { Button } from '../../ui/components';
-import { adminWorkbenchStyles as styles } from './adminWorkbenchStyles';
+import { useAdminWorkbenchStyles } from './adminWorkbenchStyles';
 
 export function AdminSurface(props: {
   title: string;
@@ -9,6 +9,7 @@ export function AdminSurface(props: {
   children?: React.ReactNode;
   testID?: string;
 }) {
+  const styles = useAdminWorkbenchStyles();
   return (
     <View style={styles.surface} testID={props.testID} accessibilityLabel={props.title}>
       <View>
@@ -30,10 +31,11 @@ export function AdminDataStatusRow(props: {
   isLast?: boolean;
   onPressLabel?: () => void;
 }) {
+  const styles = useAdminWorkbenchStyles();
   return (
     <View style={[styles.statusRow, props.isLast ? styles.statusRowLast : null]}>
       <Text style={styles.statusLabel}>{props.label}</Text>
-      <View style={{ flex: 1, minWidth: 0, alignItems: 'flex-end', gap: 6 }}>
+      <View style={styles.statusValueWrap}>
         <Text
           style={[styles.statusValue, props.isError ? styles.statusValueError : null]}
           accessibilityLabel={`${props.label} ${props.value}`}
@@ -56,12 +58,13 @@ export function AdminListFeedback(props: {
   onRetry: () => void;
   children?: React.ReactNode;
 }) {
+  const styles = useAdminWorkbenchStyles();
   if (props.loading) {
     return <Text style={styles.mutedNote}>載入中…</Text>;
   }
   if (props.error) {
     return (
-      <View style={{ gap: 10 }}>
+      <View style={styles.feedbackStack}>
         <Text style={styles.inlineError} accessibilityLabel={`載入失敗 ${props.error}`}>
           載入失敗，請重試。
         </Text>

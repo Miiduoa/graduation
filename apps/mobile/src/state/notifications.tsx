@@ -37,6 +37,7 @@ export type NotificationType =
 
 export type Notification = {
   id: string;
+  schoolId?: unknown;
   type: NotificationType;
   title: string;
   body: string;
@@ -79,6 +80,7 @@ function mapNotificationDoc(d: QueryDocumentSnapshot<DocumentData>): Notificatio
   const data = d.data();
   return {
     id: d.id,
+    schoolId: data.schoolId,
     type: data.type ?? 'system',
     title: data.title ?? '',
     body: data.body ?? '',

@@ -8,6 +8,7 @@ import {
   type StoreIdentity,
   type TeachingIdentity,
 } from '@/lib/accountIdentity';
+import { merchantApplicationsHref } from '@/lib/merchantWorkspaceNavigation';
 import styles from './AccountWorkspaces.module.css';
 
 type Props = {
@@ -134,10 +135,7 @@ export function AccountWorkspaces({
               </details>
             )}
             {applications.length > 0 && (
-              <Link
-                className={styles.action}
-                href="/merchant/workspace#merchant-applications-title"
-              >
+              <Link className={styles.action} href={merchantApplicationsHref}>
                 查看申請進度（{applications.length}）
               </Link>
             )}

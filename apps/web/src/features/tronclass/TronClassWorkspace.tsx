@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { createTronClassBindingConsent, type TronClassBindingConsent } from '@campus/shared/src/tronClassBindingConsent';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
@@ -63,6 +64,7 @@ function verifiedStudentKey(connection: TronClassConnection | null): string | nu
 }
 
 export function TronClassWorkspace() {
+  const [bindingConsent] = useState(createTronClassBindingConsent);
   const platform = useOptionalNuniSession();
   const firebase = useAuth();
   const platformSession = platform?.session;
@@ -103,7 +105,6 @@ export function TronClassWorkspace() {
   return (
     <SiteShell
       title="TronClass"
-      subtitle="課程、作業與教材，在同一個地方處理。"
       schoolName="靜宜大學"
     >
       <div className={styles.workspace}>
@@ -142,35 +143,37 @@ export function TronClassWorkspace() {
           </section>
         )}
         {(ready || retainDuringPlatformRefresh) && (
-          <AccountDraftRetention key={workspaceKey} identity={identity!} owner={owner!} active={!!ready} />
+          <AccountDraftRetention key={workspaceKey} identity={identity!} owner={owner!} active={!!ready} bindingConsent={bindingConsent} />
         )}
       </div>
     </SiteShell>
   );
 }
 
-function AccountDraftRetention({ identity, owner, active }: {
-  identity: TronClassIdentity; owner: string; active: boolean;
+function AccountDraftRetention({ identity, owner, active, bindingConsent }: {
+  identity: TronClassIdentity; owner: string; active: boolean; bindingConsent: TronClassBindingConsent;
 }) {
   const [recoveryDrafts, setRecoveryDrafts] = useState<SchoolDraft[]>([]);
   // No hidden editor/DOM remains during verification. Remounting the account
   // requires a fresh school status; recovery still requires the same studentKey
   // and a fresh prepare before the retained text or File handles become visible.
   return active ? <AccountWorkspace identity={identity} owner={owner}
-    recoveryDrafts={recoveryDrafts} setRecoveryDrafts={setRecoveryDrafts} /> : null;
+    recoveryDrafts={recoveryDrafts} setRecoveryDrafts={setRecoveryDrafts} bindingConsent={bindingConsent} /> : null;
 }
 
-function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }: {
+function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts, bindingConsent }: {
   identity: TronClassIdentity;
   owner: string;
   recoveryDrafts: SchoolDraft[];
   setRecoveryDrafts: Dispatch<SetStateAction<SchoolDraft[]>>;
+  bindingConsent: TronClassBindingConsent;
 }) {
   const client = useMemo(() => createTronClassClient(identity), [identity]);
   const agentClient = useMemo(() => createTronClassAgentClient(identity), [identity]);
   const [connection, setConnection] = useState<TronClassConnection | null>(null);
   const [loading, setLoading] = useState(true);
   const [epoch, setEpoch] = useState(0);
+  const [awaitingBindingConsent, setAwaitingBindingConsent] = useState(false);
   const [error, setError] = useState('');
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
@@ -189,8 +192,10 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
     if (value.connected || !value.account) {
       setRecoveryDrafts((drafts) => studentKey ? drafts.filter((draft) => draft.studentKey === studentKey) : []);
     }
+    if (value.connected) bindingConsent.accept(owner, value.revision);
+    setAwaitingBindingConsent(false);
     setConnection(value);
-  }, [setRecoveryDrafts]);
+  }, [bindingConsent, owner, setRecoveryDrafts]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -208,10 +213,15 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
       (value) => {
         if (!current || request !== connectionRequest.current) return;
         setBusy(false);
-        acceptConnection(value);
+        const pause = value.connected && !bindingConsent.permits(owner, value.revision);
+        if (pause) {
+          setAwaitingBindingConsent(true);
+          setConnection(value);
+        } else acceptConnection(value);
         setEditing(!value.connected);
         setAccount(value.account ?? '');
-        setError(!value.connected && value.account ? 'TronClass 登入已失效，請重新連接後繼續。' : '');
+        setError(pause ? 'TronClass 連接已變更。請確認目前的學校帳號，再繼續讀取課程。' :
+          !value.connected && value.account ? 'TronClass 登入已失效，請重新連接後繼續。' : '');
         setLoading(false);
       },
       (reason) => {
@@ -224,7 +234,7 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
     return () => {
       current = false;
     };
-  }, [client, epoch, acceptConnection]);
+  }, [client, epoch, acceptConnection, bindingConsent, owner]);
 
   function suspendDraft() {
     // Keep page-memory drafts sealed until the same school identity is verified.
@@ -246,11 +256,13 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
     });
   }
 
-  function reloadStatus(reason?: unknown) {
+  function reloadStatus(sourceRevision?: string | null, reason?: unknown) {
     ++connectionRequest.current;
     suspendDraft();
     setPassword('');
     setDisconnecting(false);
+    if (reason instanceof TronClassRequestError && reason.code === 'TRONCLASS_BINDING_CHANGED')
+      bindingConsent.changed(owner, sourceRevision ?? null);
     if (reason instanceof TronClassRequestError && reason.code === 'TRONCLASS_RECONNECT_REQUIRED') {
       // The local binding TTL may still be valid after the school has rejected
       // its session. Keep the CAS revision, but retire every dependent view.
@@ -264,6 +276,12 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
     setLoading(true);
     setError('');
     setEpoch((value) => value + 1);
+  }
+
+  function onWorkspaceConnectionChanged(reason?: unknown) {
+    // A refresh from a revision-scoped view can discover a replacement binding.
+    // Keep that status separate from accepting it for coursework and Agent access.
+    reloadStatus(connection?.revision, reason);
   }
 
   async function connect(event: React.FormEvent<HTMLFormElement>) {
@@ -290,8 +308,8 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
       setDisconnecting(false);
     } catch (reason) {
       if (!alive.current || controller.signal.aborted || request !== connectionRequest.current) return;
-      if (reason instanceof TronClassRequestError && reason.code.includes('BINDING_CHANGED'))
-        reloadStatus();
+      if (reason instanceof TronClassRequestError && reason.code === 'TRONCLASS_BINDING_CHANGED')
+        reloadStatus(expectedRevision, reason);
       else setError(tronClassErrorMessage(reason));
     } finally {
       // A late response from a canceled attempt must not unlock a newer one.
@@ -328,6 +346,7 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
     try {
       const value = await client.disconnect(connection.revision);
       if (!alive.current) return;
+      bindingConsent.accept(owner, value.revision);
       acceptConnection(value);
       setAccount('');
       setPassword('');
@@ -335,7 +354,8 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
       setDisconnecting(false);
     } catch (reason) {
       if (alive.current) {
-        reloadStatus();
+        reloadStatus(connection.revision, reason instanceof TronClassRequestError &&
+          reason.code === 'TRONCLASS_BINDING_CHANGED' ? reason : undefined);
         setError(tronClassErrorMessage(reason));
       }
     } finally {
@@ -374,8 +394,16 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
           </button>
         </div>}
         {!loading && !connection && (
-          <button className="btn" onClick={reloadStatus}>
+          <button className="btn" onClick={() => reloadStatus()}>
             重新確認連接
+          </button>
+        )}
+        {awaitingBindingConsent && connection?.connected && !editing && !disconnecting && (
+          <button className="btn" onClick={() => {
+            acceptConnection(connection);
+            setError('');
+          }}>
+            繼續讀取目前帳號的課程
           </button>
         )}
         {connection && editing && (
@@ -482,17 +510,17 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
           </div>
         )}
       </section>
-      {connection?.connected && connection.revision && (
+      {connection?.connected && connection.revision && !awaitingBindingConsent && (
         <TronClassAgentAccess key={`agent:${connection.revision}`} client={agentClient}
-          revision={connection.revision} onConnectionChanged={reloadStatus} />
+          revision={connection.revision} onConnectionChanged={onWorkspaceConnectionChanged} />
       )}
-      {connection?.connected && connection.revision && (
+      {connection?.connected && connection.revision && !awaitingBindingConsent && (
         <ConnectedWorkspace
           key={connection.revision}
           client={client}
           revision={connection.revision}
           owner={owner}
-          onConnectionChanged={reloadStatus}
+          onConnectionChanged={onWorkspaceConnectionChanged}
           onSubmissionBusy={setSubmissionBusy}
           recoveryDrafts={recoveryDrafts.filter((value) => value.studentKey === verifiedStudentKey(connection))
             .map((value) => value.draft)}
@@ -560,7 +588,7 @@ function ConnectedWorkspace({
     setError('');
     if (replace) setSnapshot(null);
     try {
-      const value = await client.sync(scope === 'all' ? undefined : Number(scope), controller.signal);
+      const value = await client.sync(scope === 'all' ? undefined : Number(scope), controller.signal, courseIndex?.revision ?? snapshot?.revision ?? revision);
       if (!alive.current || request !== generation.current) return;
       if (value.revision !== revision) {
         ++generation.current;
@@ -599,7 +627,7 @@ function ConnectedWorkspace({
     setIndexLoading(true);
     setIndexError('');
     try {
-      const value = await client.courses(controller.signal);
+      const value = await client.courses(controller.signal, courseIndex?.revision ?? snapshot?.revision ?? revision);
       if (!alive.current || request !== indexGeneration.current) return;
       if (value.revision !== revision) { currentConnectionChanged.current(); return; }
       if (directoryOrder >= acceptedDirectorySequence.current) {

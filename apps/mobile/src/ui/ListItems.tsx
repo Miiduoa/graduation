@@ -33,66 +33,58 @@ export const AnnouncementItem = memo(
       <Pressable
         onPress={handlePress}
         style={({ pressed }) => ({
-          borderRadius: theme.radius.lg,
           backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
-          borderWidth: 1,
-          borderColor: pressed ? theme.colors.accent : theme.colors.border,
-          padding: 18,
-          gap: 10,
-          transform: [{ scale: pressed ? 0.985 : 1 }],
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.separator,
+          paddingVertical: 14,
+          paddingHorizontal: 16,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
         })}
         accessible
         accessibilityRole="button"
         accessibilityLabel={`查看公告：${title}`}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {source && (
-            <View
-              style={{
-                paddingHorizontal: 8,
-                paddingVertical: 3,
-                borderRadius: theme.radius.full,
-                backgroundColor: theme.colors.accentSoft,
-              }}
-            >
-              <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: '600' }}>
+        <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {source ? (
+              <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}>
                 {source}
               </Text>
-            </View>
-          )}
-          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-            {formatDateTime(publishedAt)}
+            ) : null}
+            {source ? <Text style={{ color: theme.colors.muted, fontSize: 12 }}>·</Text> : null}
+            <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+              {formatDateTime(publishedAt)}
+            </Text>
+          </View>
+
+          <Text
+            style={{
+              fontSize: theme.typography.h3.fontSize,
+              fontWeight: '600',
+              color: theme.colors.text,
+              letterSpacing: theme.typography.h3.letterSpacing,
+              lineHeight: theme.typography.h3.lineHeight,
+            }}
+            numberOfLines={2}
+          >
+            {title}
+          </Text>
+
+          <Text
+            style={{
+              color: theme.colors.textSecondary,
+              lineHeight: theme.typography.bodySmall.lineHeight,
+              fontSize: theme.typography.bodySmall.fontSize,
+            }}
+            numberOfLines={2}
+          >
+            {body}
           </Text>
         </View>
 
-        <Text
-          style={{
-            fontSize: 16,
-            fontWeight: '700',
-            color: theme.colors.text,
-            letterSpacing: -0.2,
-            lineHeight: 23,
-          }}
-          numberOfLines={2}
-        >
-          {title}
-        </Text>
-
-        <Text style={{ color: theme.colors.muted, lineHeight: 21, fontSize: 14 }} numberOfLines={2}>
-          {body}
-        </Text>
-
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-          <Text style={{ color: theme.colors.accent, fontWeight: '600', fontSize: 13 }}>
-            查看詳情
-          </Text>
-          <Ionicons
-            name="chevron-forward"
-            size={14}
-            color={theme.colors.accent}
-            style={{ marginLeft: 2 }}
-          />
-        </View>
+        <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
       </Pressable>
     );
   },
@@ -145,12 +137,12 @@ export const EventItem = memo(
     const range = `${formatDateTime(startsAt)} ~ ${formatDateTime(endsAt)}`;
     const handlePress = useCallback(() => onPress(id), [id, onPress]);
 
-    const statusColor =
-      status === 'ongoing'
-        ? theme.colors.success
-        : status === 'upcoming'
-          ? theme.colors.accent
-          : theme.colors.muted;
+    const isFull = Boolean(capacity && (registeredCount ?? 0) >= capacity);
+    const capacityText = capacity
+      ? `${registeredCount ?? 0}/${capacity} 人報名`
+      : registeredCount
+        ? `${registeredCount} 人報名`
+        : '名額不限';
 
     if (viewMode === 'card') {
       return (
@@ -161,93 +153,75 @@ export const EventItem = memo(
             backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
             borderWidth: 1,
             borderColor: theme.colors.border,
-            overflow: 'hidden',
-            transform: [{ scale: pressed ? 0.97 : 1 }],
+            padding: 14,
+            gap: 8,
           })}
+          accessible
+          accessibilityRole="button"
+          accessibilityLabel={`查看活動：${title}`}
         >
           <View
             style={{
-              height: 90,
-              backgroundColor: `${statusColor}08`,
+              flexDirection: 'row',
               alignItems: 'center',
-              justifyContent: 'center',
-              borderBottomWidth: 1,
-              borderBottomColor: theme.colors.border,
+              justifyContent: 'space-between',
+              gap: 8,
             }}
           >
-            <View
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 16,
-                backgroundColor: `${statusColor}15`,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Ionicons name="calendar" size={24} color={statusColor} />
-            </View>
-            {status === 'ongoing' && (
-              <View
-                style={{
-                  position: 'absolute',
-                  top: 10,
-                  right: 10,
-                  paddingHorizontal: 10,
-                  paddingVertical: 4,
-                  borderRadius: theme.radius.full,
-                  backgroundColor: theme.colors.success,
-                }}
-              >
-                <Text style={{ color: theme.colors.onSuccess, fontSize: 11, fontWeight: '700' }}>
-                  進行中
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+              {status === 'ongoing' ? (
+                <StatusBadge status="open" text="進行中" />
+              ) : status === 'ended' ? (
+                <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: '600' }}>
+                  已結束
                 </Text>
-              </View>
-            )}
-            {isFavorite && (
-              <View style={{ position: 'absolute', top: 10, left: 10 }}>
-                <Ionicons name="heart" size={20} color={theme.colors.danger} />
-              </View>
-            )}
+              ) : (
+                <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}>
+                  {startDate ? formatRelativeTime(startDate) : formatDateTime(startsAt)}
+                </Text>
+              )}
+            </View>
+            {isFavorite && <Ionicons name="heart" size={16} color={theme.colors.danger} />}
           </View>
-          <View style={{ padding: 16, gap: 8 }}>
-            <Text
-              style={{
-                color: theme.colors.text,
-                fontWeight: '700',
-                fontSize: 15,
-                letterSpacing: -0.2,
-              }}
-              numberOfLines={2}
-            >
-              {title}
-            </Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Ionicons name="time-outline" size={13} color={theme.colors.muted} />
-              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                {startDate ? formatRelativeTime(startDate) : formatDateTime(startsAt)}
+
+          <Text
+            style={{
+              color: theme.colors.text,
+              fontWeight: '600',
+              fontSize: theme.typography.h3.fontSize,
+              lineHeight: theme.typography.h3.lineHeight,
+              letterSpacing: theme.typography.h3.letterSpacing,
+            }}
+            numberOfLines={2}
+          >
+            {title}
+          </Text>
+
+          {location && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              <Ionicons name="location-outline" size={13} color={theme.colors.muted} />
+              <Text style={{ color: theme.colors.muted, fontSize: 12 }} numberOfLines={1}>
+                {location}
               </Text>
             </View>
-            {location && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Ionicons name="location-outline" size={13} color={theme.colors.muted} />
-                <Text style={{ color: theme.colors.muted, fontSize: 12 }} numberOfLines={1}>
-                  {location}
-                </Text>
-              </View>
+          )}
+
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingTop: 6,
+              borderTopWidth: StyleSheet.hairlineWidth,
+              borderTopColor: theme.colors.separator,
+            }}
+          >
+            {isFull ? (
+              <Pill text={`${registeredCount ?? 0}/${capacity} 人已滿`} kind="danger" size="sm" />
+            ) : (
+              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{capacityText}</Text>
             )}
-            <View style={{ flexDirection: 'row', gap: 6, marginTop: 2 }}>
-              {capacity ? (
-                <Pill
-                  text={`${registeredCount ?? 0}/${capacity} 人`}
-                  kind={(registeredCount ?? 0) >= capacity ? 'danger' : 'accent'}
-                  size="sm"
-                />
-              ) : (
-                <Pill text={registeredCount ? `${registeredCount} 人報名` : '不限人數'} size="sm" />
-              )}
-              {status === 'ended' && <Pill text="已結束" kind="muted" size="sm" />}
-            </View>
+            <Ionicons name="chevron-forward" size={14} color={theme.colors.muted} />
           </View>
         </Pressable>
       );
@@ -257,68 +231,68 @@ export const EventItem = memo(
       <Pressable
         onPress={handlePress}
         style={({ pressed }) => ({
-          borderRadius: theme.radius.lg,
           backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
-          borderWidth: 1,
-          borderColor: pressed ? theme.colors.accent : theme.colors.border,
-          padding: 18,
-          gap: 10,
-          transform: [{ scale: pressed ? 0.985 : 1 }],
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.separator,
+          paddingVertical: 14,
+          paddingHorizontal: 16,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
         })}
         accessible
         accessibilityRole="button"
         accessibilityLabel={`查看活動：${title}`}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {status === 'ongoing' && <StatusBadge status="open" text="進行中" />}
-          {status === 'upcoming' && startDate && (
-            <Pill text={formatRelativeTime(startDate)} kind="accent" size="sm" />
-          )}
-          {status === 'ended' && <StatusBadge status="closed" text="已結束" />}
-          {isFavorite && <Ionicons name="heart" size={16} color={theme.colors.danger} />}
-        </View>
+        <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {status === 'ongoing' && <StatusBadge status="open" text="進行中" />}
+            {status === 'upcoming' && startDate && (
+              <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}>
+                {formatRelativeTime(startDate)}
+              </Text>
+            )}
+            {status === 'ended' && (
+              <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: '600' }}>
+                已結束
+              </Text>
+            )}
+            {isFull && <Pill text="額滿" kind="danger" size="sm" />}
+            {isFavorite && <Ionicons name="heart" size={14} color={theme.colors.danger} />}
+          </View>
 
-        <Text
-          style={{
-            fontSize: 16,
-            fontWeight: '700',
-            color: theme.colors.text,
-            letterSpacing: -0.2,
-            lineHeight: 23,
-          }}
-          numberOfLines={2}
-        >
-          {title}
-        </Text>
-
-        <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 19 }}>
-          {`${range}${location ? ` · ${location}` : ''}`}
-        </Text>
-
-        {description && (
           <Text
-            style={{ color: theme.colors.textSecondary, lineHeight: 21, fontSize: 14 }}
+            style={{
+              fontSize: theme.typography.h3.fontSize,
+              fontWeight: '600',
+              color: theme.colors.text,
+              letterSpacing: theme.typography.h3.letterSpacing,
+              lineHeight: theme.typography.h3.lineHeight,
+            }}
             numberOfLines={2}
           >
-            {description}
+            {title}
           </Text>
-        )}
 
-        <View style={{ marginTop: 4, flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-          {capacity ? (
-            <Pill
-              text={`${registeredCount ?? 0}/${capacity} 人報名`}
-              kind={(registeredCount ?? 0) >= capacity ? 'danger' : 'accent'}
-              size="sm"
-            />
-          ) : (
-            <Pill
-              text={registeredCount ? `${registeredCount} 人報名` : '名額不限'}
-              kind="accent"
-              size="sm"
-            />
+          <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 17 }}>
+            {`${range}${location ? ` · ${location}` : ''} · ${capacityText}`}
+          </Text>
+
+          {description && (
+            <Text
+              style={{
+                color: theme.colors.textSecondary,
+                lineHeight: theme.typography.bodySmall.lineHeight,
+                fontSize: theme.typography.bodySmall.fontSize,
+              }}
+              numberOfLines={2}
+            >
+              {description}
+            </Text>
           )}
         </View>
+
+        <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
       </Pressable>
     );
   },
@@ -370,45 +344,45 @@ export const MenuItem = memo(
         style={({ pressed }) => ({
           flexDirection: 'row',
           alignItems: 'center',
-          padding: 16,
-          borderRadius: theme.radius.lg,
+          paddingVertical: 13,
+          paddingHorizontal: 16,
           backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          opacity: isAvailable ? 1 : 0.45,
-          gap: 14,
-          transform: [{ scale: pressed ? 0.985 : 1 }],
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.separator,
+          opacity: isAvailable ? 1 : 0.48,
+          gap: 12,
         })}
       >
-        <View
-          style={{
-            width: 42,
-            height: 42,
-            borderRadius: 12,
-            backgroundColor: theme.colors.accentSoft,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Ionicons name="restaurant-outline" size={20} color={theme.colors.accent} />
+        <View style={{ width: 22, alignItems: 'center' }}>
+          <Ionicons name="restaurant-outline" size={17} color={theme.colors.muted} />
         </View>
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            style={{
+              color: theme.colors.text,
+              fontWeight: '600',
+              fontSize: theme.typography.h3.fontSize,
+              lineHeight: theme.typography.h3.lineHeight,
+            }}
+            numberOfLines={1}
+          >
+            {name}
+          </Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+            {cafeteria}
+          </Text>
+        </View>
+        {!isAvailable ? (
+          <Pill text="已售完" kind="danger" size="sm" />
+        ) : price !== undefined ? (
           <Text
             style={{
               color: theme.colors.text,
               fontWeight: '600',
               fontSize: 15,
-              letterSpacing: -0.1,
+              fontVariant: ['tabular-nums'],
             }}
           >
-            {name}
-          </Text>
-          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 3 }}>{cafeteria}</Text>
-        </View>
-        {!isAvailable ? (
-          <Pill text="已售完" kind="danger" size="sm" />
-        ) : price !== undefined ? (
-          <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 17 }}>
             ${price}
           </Text>
         ) : null}

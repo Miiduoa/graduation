@@ -13,6 +13,8 @@ import { randomUUID } from 'expo-crypto';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { sendStoryReply } from '../../services/storyReply';
 import type { CampusStoryDoc } from '../../services/stories';
+import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 
 const MAX_LENGTH = 500;
 
@@ -37,6 +39,7 @@ export function StoryReplyPanel({
   const sending = useRef(false);
   const attempt = useRef<{ content: string; id: string } | null>(null);
   const mounted = useRef(false);
+  const styles = useThemeStyleSheet(createStyles);
   const insets = useSafeAreaInsets();
   useLayoutEffect(() => {
     mounted.current = true;
@@ -117,7 +120,7 @@ export function StoryReplyPanel({
             editable={!pending}
             accessibilityLabel="私訊回覆內容"
             placeholder="想跟對方說什麼？"
-            placeholderTextColor="#a5b1ab"
+            placeholderTextColor={theme.colors.muted}
             value={draft}
             style={styles.field}
             onChangeText={(value) => {
@@ -152,50 +155,52 @@ export function StoryReplyPanel({
   );
 }
 
-const styles = StyleSheet.create({
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.62)' },
-  container: { flexGrow: 1, justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: '#18201d',
-    paddingHorizontal: 18,
-    paddingTop: 8,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    gap: 8,
-  },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  title: { color: '#fff', fontSize: 21, fontWeight: '700', flexShrink: 1 },
-  back: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
-  backText: { color: '#d6f4e7', fontSize: 16 },
-  subtitle: { color: '#c2cbc8', fontSize: 14 },
-  field: {
-    minHeight: 84,
-    maxHeight: 144,
-    textAlignVertical: 'top',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#81958b',
-    padding: 12,
-    backgroundColor: '#101613',
-    color: '#fff',
-    fontSize: 16,
-  },
-  footer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  send: {
-    minHeight: 44,
-    paddingHorizontal: 18,
-    borderRadius: 22,
-    backgroundColor: '#b8e7d4',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendText: { fontSize: 16, fontWeight: '700', color: '#10221b' },
-  disabled: { opacity: 0.5 },
-  error: { fontSize: 14, color: '#ffcebb' },
-});
+const createStyles = () =>
+  StyleSheet.create({
+    // The scrim sits over fullscreen media, so it stays black in every theme.
+    overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.62)' },
+    container: { flexGrow: 1, justifyContent: 'flex-end' },
+    sheet: {
+      backgroundColor: theme.colors.surfaceElevated,
+      paddingHorizontal: 18,
+      paddingTop: 8,
+      borderTopLeftRadius: theme.radius.lg,
+      borderTopRightRadius: theme.radius.lg,
+      gap: 8,
+    },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    title: { color: theme.colors.text, fontSize: 21, fontWeight: '700', flexShrink: 1 },
+    back: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
+    backText: { color: theme.colors.accent, fontSize: 16, fontWeight: '600' },
+    subtitle: { color: theme.colors.textSecondary, fontSize: 14 },
+    field: {
+      minHeight: 84,
+      maxHeight: 144,
+      textAlignVertical: 'top',
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      padding: 12,
+      backgroundColor: theme.colors.surface,
+      color: theme.colors.text,
+      fontSize: 16,
+    },
+    footer: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    send: {
+      minHeight: 44,
+      paddingHorizontal: 18,
+      borderRadius: theme.radius.md,
+      backgroundColor: theme.colors.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sendText: { fontSize: 16, fontWeight: '700', color: theme.colors.onAccent },
+    disabled: { opacity: 0.5 },
+    error: { fontSize: 14, color: theme.colors.danger },
+  });

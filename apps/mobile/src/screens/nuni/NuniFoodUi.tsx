@@ -104,14 +104,14 @@ export function FoodButton({
         paddingHorizontal: 14,
         borderRadius: 8,
         borderWidth: primary ? 0 : 1,
-        borderColor: selected ? theme.colors.accent : theme.colors.border,
+        borderColor: selected ? theme.colors.accent : theme.colors.muted,
         backgroundColor: primary
           ? disabled
             ? theme.colors.disabledBg
             : theme.colors.accent
           : selected
             ? theme.colors.accentSoft
-            : theme.colors.surface,
+            : theme.colors.background,
         opacity: disabled && !primary ? 0.5 : 1,
       }}
     >
@@ -124,7 +124,7 @@ export function FoodButton({
             : theme.colors.text,
           fontSize: 16,
           lineHeight: 24,
-          fontWeight: primary || selected ? '600' : '400',
+          fontWeight: primary || selected ? '600' : '500',
         }}
       >
         {children}
@@ -165,8 +165,8 @@ export function FoodField({
           padding: 12,
           borderWidth: 1,
           borderRadius: 8,
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.surface,
+          borderColor: theme.colors.muted,
+          backgroundColor: theme.colors.background,
           color: theme.colors.text,
           fontSize: 16,
         }}
@@ -209,8 +209,8 @@ export function FoodQuantityStepper({
             justifyContent: 'center',
             borderWidth: 1,
             borderRadius: 8,
-            borderColor: theme.colors.border,
-            backgroundColor: theme.colors.surface,
+            borderColor: theme.colors.muted,
+            backgroundColor: theme.colors.background,
             opacity: disabled || parsed <= min ? 0.45 : 1,
           }}
         >
@@ -229,8 +229,8 @@ export function FoodQuantityStepper({
             textAlign: 'center',
             borderWidth: 1,
             borderRadius: 8,
-            borderColor: theme.colors.border,
-            backgroundColor: theme.colors.surface,
+            borderColor: theme.colors.muted,
+            backgroundColor: theme.colors.background,
             color: theme.colors.text,
             fontSize: 18,
             fontWeight: '600',
@@ -249,8 +249,8 @@ export function FoodQuantityStepper({
             justifyContent: 'center',
             borderWidth: 1,
             borderRadius: 8,
-            borderColor: theme.colors.border,
-            backgroundColor: theme.colors.surface,
+            borderColor: theme.colors.muted,
+            backgroundColor: theme.colors.background,
             opacity: disabled || parsed >= max ? 0.45 : 1,
           }}
         >
@@ -267,7 +267,7 @@ export function FoodCard({ children }: { children: React.ReactNode }) {
       style={{
         borderTopWidth: 1,
         borderColor: theme.colors.border,
-        paddingTop: 18,
+        paddingTop: 16,
         gap: 12,
         backgroundColor: theme.colors.background,
       }}

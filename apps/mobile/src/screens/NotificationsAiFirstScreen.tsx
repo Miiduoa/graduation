@@ -4,11 +4,12 @@ import {
   notificationCampusLabel,
   type NotificationListMode,
 } from '@campus/shared/src/notificationListFilter';
-import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Text, View, Pressable, ScrollView } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { AIButton, AIDetailScreen, AIEmptyState, AISection, aiTokens } from '../ui/aiFirst';
+import { AIDetailScreen } from '../ui/aiFirst';
+import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useAuth } from '../state/auth';
 import { useNotifications } from '../state/notifications';
 import { applyNotificationDestination } from '../utils/applyNotificationDestination';
@@ -24,6 +25,7 @@ function createdLabel(value: unknown): string {
 }
 
 export default function NotificationsAiFirstScreen() {
+  const s = useThemeStyleSheet(createStyles);
   const navigation = useNavigation<{
     navigate: (route: string, params?: unknown) => void;
     goBack?: () => void;
@@ -149,18 +151,6 @@ export default function NotificationsAiFirstScreen() {
       mounted.current &&
       currentSession.current === session &&
       focusGeneration.current === generation;
-    const sourceSchool = row.data?.schoolId;
-    if (
-      typeof sourceSchool === 'string' &&
-      sourceSchool.trim() &&
-      toPublicSchoolId(sourceSchool.trim()) !== toPublicSchoolId(schoolId)
-    ) {
-      setBlockedNotice({
-        id,
-        reason: '這則通知屬於其他學校，請切換到對應學校後再開啟。未讀狀態已保留。',
-      });
-      return;
-    }
     const destination = resolveNotificationRow(row, { schoolId, role: auth.profile?.role });
     if (destination.ok === false) {
       setBlockedNotice({ id, reason: destination.reason });
@@ -211,6 +201,8 @@ export default function NotificationsAiFirstScreen() {
     update(session.generation);
   };
 
+  const anyPending = batchPending || [...reads.values()].some((result) => result.pending);
+
   return (
     <AIDetailScreen
       scrollRef={scrollRef}
@@ -225,180 +217,582 @@ export default function NotificationsAiFirstScreen() {
       }
       onBack={() => navigation?.goBack?.()}
     >
-      <View
-        accessibilityRole="radiogroup"
-        accessibilityLabel="通知篩選"
-        style={{ padding: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}
-      >
-        {(['all', 'unread'] as const).map((mode) => (
-          <Pressable
-            key={mode}
-            accessibilityRole="radio"
-            accessibilityState={{ checked: filter === mode }}
-            accessibilityLabel={mode === 'all' ? '顯示全部通知' : '顯示未讀通知'}
-            onPress={() => selectFilter(mode)}
-            style={{
-              minHeight: 48,
-              padding: 12,
-              borderWidth: 1,
-              borderColor: aiTokens.border,
-              borderRadius: 12,
-              backgroundColor: filter === mode ? aiTokens.aiSoft : aiTokens.panel,
-            }}
+      <View style={s.container}>
+        <View style={s.filterBar}>
+          <View
+            accessibilityRole="radiogroup"
+            accessibilityLabel="通知篩選"
+            style={s.filterTabs}
           >
-            <Text style={{ color: aiTokens.text }}>
-              {mode === 'all' ? '全部' : `未讀（${visibleUnreadCount}）`}
-            </Text>
-          </Pressable>
-        ))}
-        {visibleUnreadCount > 0 ? (
-          <AIButton
-            label="全部已讀"
-            variant="ghost"
-            size="sm"
-            disabled={batchPending || [...reads.values()].some((result) => result.pending)}
-            onPress={() => void markAllExplicit()}
-          />
-        ) : undefined}
-      </View>
-      {hasMore ? (
-        <Text style={{ paddingHorizontal: 16, color: aiTokens.text }}>
-          只含已載入的通知，可繼續載入更早的通知。
-        </Text>
-      ) : null}
-      {loading ? (
-        <View style={{ padding: 24, alignItems: 'center' }}>
-          <ActivityIndicator color={aiTokens.ai} accessibilityLabel="讀取通知" />
-        </View>
-      ) : error ? (
-        <AISection title="通知資料">
-          <View accessibilityRole="alert" style={{ padding: 16, gap: 12 }}>
-            <Text style={{ color: aiTokens.text, lineHeight: 22 }}>{error}</Text>
-            <AIButton label="重新讀取" onPress={reload} />
+            {(['all', 'unread'] as const).map((mode) => {
+              const active = filter === mode;
+              return (
+                <Pressable
+                  key={mode}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: active }}
+                  accessibilityLabel={mode === 'all' ? '顯示全部通知' : '顯示未讀通知'}
+                  onPress={() => selectFilter(mode)}
+                  style={({ pressed }) => [
+                    s.filterTab,
+                    active && s.filterTabActive,
+                    pressed && s.rowPressed,
+                  ]}
+                >
+                  <Text style={[s.filterTabText, active && s.filterTabTextActive]}>
+                    {mode === 'all' ? '全部' : `未讀（${visibleUnreadCount}）`}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
-        </AISection>
-      ) : notifications.length === 0 ? (
-        <View>
-          <AIEmptyState
-            title="目前沒有通知"
-            subtitle="有新的作業、成績或系統訊息時會顯示在這裡。"
-          />
-          <AIButton label="重新讀取通知" onPress={reload} />
-        </View>
-      ) : (
-        <AISection
-          title={filter === 'all' ? '全部' : '未讀通知'}
-          subtitle={`${notifications.length} 則已載入`}
-        >
-          {blockedNotice ? (
-            <View
-              accessibilityRole="alert"
-              style={{
-                padding: 16,
-                gap: 12,
-                borderBottomWidth: 1,
-                borderBottomColor: aiTokens.border,
-              }}
+          {visibleUnreadCount > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: anyPending }}
+              disabled={anyPending}
+              onPress={() => void markAllExplicit()}
+              style={({ pressed }) => [
+                s.markAllButton,
+                anyPending && s.disabled,
+                pressed && !anyPending && s.rowPressed,
+              ]}
             >
-              <Text style={{ color: aiTokens.text, lineHeight: 22 }}>{blockedNotice.reason}</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                <AIButton
-                  label="標成已讀"
-                  disabled={!!reads.get(blockedNotice.id)?.pending || batchPending}
-                  size="sm"
-                  onPress={() => void markOneExplicit(blockedNotice.id)}
-                />
-                <AIButton
-                  label="關閉說明"
-                  variant="ghost"
-                  size="sm"
-                  onPress={() => setBlockedNotice(null)}
-                />
-              </View>
-            </View>
+              <Text style={s.markAllText}>全部已讀</Text>
+            </Pressable>
           ) : null}
-          {filteredRows.length === 0 ? (
-            <View style={{ padding: 16, gap: 12 }}>
-              <Text style={{ color: aiTokens.text }}>
-                {hasMore ? '已載入的通知都已讀，較早的通知尚未載入。' : '目前沒有未讀通知。'}
-              </Text>
-              <AIButton label="查看全部通知" onPress={() => selectFilter('all')} />
-            </View>
-          ) : null}
-          {filteredRows.map((row) => {
-            const when = createdLabel(row.createdAt);
-            const result = reads.get(row.id);
-            const pending = !!result?.pending;
-            return (
-              <View
-                key={row.id}
-                accessibilityState={{ busy: pending, disabled: pending || batchPending }}
+        </View>
+
+        {hasMore ? (
+          <Text style={s.scopeNote}>只含已載入的通知，可繼續載入更早的通知。</Text>
+        ) : null}
+
+        {loading ? (
+          <View style={s.centerState}>
+            <ActivityIndicator color={theme.colors.accent} accessibilityLabel="讀取通知" />
+          </View>
+        ) : error ? (
+          <View style={s.stateBlock}>
+            <Text accessibilityRole="header" style={s.sectionTitle}>通知資料</Text>
+            <View accessibilityRole="alert" style={s.errorNotice}>
+              <Text style={s.errorText}>{error}</Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={reload}
+                style={({ pressed }) => [s.primaryButton, pressed && s.primaryButtonPressed]}
               >
+                <Text style={s.primaryButtonText}>重新讀取</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : notifications.length === 0 ? (
+          <View style={s.emptyBlock}>
+            <Text style={s.emptyTitle}>目前沒有通知</Text>
+            <Text style={s.emptySubtitle}>有新的作業、成績或系統訊息時會顯示在這裡。</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={reload}
+              style={({ pressed }) => [s.secondaryButton, pressed && s.rowPressed]}
+            >
+              <Text style={s.secondaryButtonText}>重新讀取通知</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={s.ledger}>
+            <View style={s.ledgerHeader}>
+              <Text accessibilityRole="header" style={s.sectionTitle}>
+                {filter === 'all' ? '全部' : '未讀通知'}
+              </Text>
+              <Text style={s.loadedCount}>{`${notifications.length} 則已載入`}</Text>
+            </View>
+
+            {blockedNotice ? (
+              <View accessibilityRole="alert" style={s.blockedNotice}>
+                <Text style={s.blockedText}>{blockedNotice.reason}</Text>
+                <View style={s.inlineActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{
+                      disabled: !!reads.get(blockedNotice.id)?.pending || batchPending,
+                    }}
+                    disabled={!!reads.get(blockedNotice.id)?.pending || batchPending}
+                    onPress={() => void markOneExplicit(blockedNotice.id)}
+                    style={({ pressed }) => [
+                      s.compactPrimaryButton,
+                      (!!reads.get(blockedNotice.id)?.pending || batchPending) && s.disabled,
+                      pressed && s.primaryButtonPressed,
+                    ]}
+                  >
+                    <Text style={s.compactPrimaryText}>標成已讀</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setBlockedNotice(null)}
+                    style={({ pressed }) => [s.compactGhostButton, pressed && s.rowPressed]}
+                  >
+                    <Text style={s.compactGhostText}>關閉說明</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+
+            {filteredRows.length === 0 ? (
+              <View style={s.filteredEmpty}>
+                <Text style={s.emptySubtitle}>
+                  {hasMore ? '已載入的通知都已讀，較早的通知尚未載入。' : '目前沒有未讀通知。'}
+                </Text>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={[
-                    row.title || '通知',
-                    notificationTypeLabel(row.type),
-                    notificationCampusLabel(row.data),
-                    row.body,
-                    when,
-                    row.read && !result?.unconfirmed ? '已讀' : '未讀',
-                  ]
-                    .filter(Boolean)
-                    .join('，')}
-                  accessibilityState={{ disabled: pending || batchPending }}
-                  disabled={pending || batchPending}
-                  onPress={() => void openNotification(row.id)}
-                  style={{ padding: 16, gap: 8, minHeight: 48 }}
+                  onPress={() => selectFilter('all')}
+                  style={({ pressed }) => [s.secondaryButton, pressed && s.rowPressed]}
                 >
-                  <Text style={{ color: aiTokens.text, fontSize: 17 }}>{row.title || '通知'}</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    <Text style={{ color: aiTokens.text, maxWidth: '100%' }}>
-                      {notificationTypeLabel(row.type)}
-                    </Text>
-                    <Text style={{ color: aiTokens.text, maxWidth: '100%' }}>
-                      {notificationCampusLabel(row.data)}
-                    </Text>
-                    {row.read && !result?.unconfirmed ? null : (
-                      <Text style={{ color: aiTokens.text }}>未讀</Text>
-                    )}
-                  </View>
-                  {row.body ? <Text style={{ color: aiTokens.text }}>{row.body}</Text> : null}
-                  {when ? <Text style={{ color: aiTokens.text }}>{when}</Text> : null}
+                  <Text style={s.secondaryButtonText}>查看全部通知</Text>
                 </Pressable>
-                {pending ? (
-                  <ActivityIndicator
-                    accessibilityLabel={`正在同步已讀：${row.title || row.id}`}
-                    accessibilityState={{ busy: true, disabled: true }}
-                    color={aiTokens.ai}
-                  />
-                ) : null}
-                {focused && result?.error ? (
-                  <View accessibilityRole="alert" style={{ padding: 16, gap: 8 }}>
-                    <Text style={{ color: aiTokens.text }}>{result.error}</Text>
-                    {result.unconfirmed ? (
-                      <AIButton
-                        label={`重試已讀同步：${row.title || row.id}`}
-                        disabled={pending || batchPending}
-                        onPress={() => void markOneExplicit(row.id)}
-                      />
-                    ) : null}
-                  </View>
-                ) : null}
               </View>
-            );
-          })}
-          {hasMore ? (
-            <View style={{ padding: 16 }}>
-              {loadingMore ? (
-                <ActivityIndicator color={aiTokens.ai} accessibilityLabel="載入更多通知" />
-              ) : (
-                <AIButton label="載入更早的通知" onPress={() => void loadMore()} />
-              )}
-            </View>
-          ) : null}
-        </AISection>
-      )}
+            ) : (
+              <View style={s.list}>
+                {filteredRows.map((row, index) => {
+                  const when = createdLabel(row.createdAt);
+                  const campusLabel = notificationCampusLabel({
+                    schoolId: row.data?.schoolId || row.schoolId,
+                  });
+                  const result = reads.get(row.id);
+                  const pending = !!result?.pending;
+                  const isUnread = !row.read || !!result?.unconfirmed;
+                  return (
+                    <View
+                      key={row.id}
+                      accessibilityState={{ busy: pending, disabled: pending || batchPending }}
+                      style={[index > 0 && s.rowDivider]}
+                    >
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={[
+                          row.title || '通知',
+                          notificationTypeLabel(row.type),
+                          campusLabel,
+                          row.body,
+                          when,
+                          isUnread ? '未讀' : '已讀',
+                        ]
+                          .filter(Boolean)
+                          .join('，')}
+                        accessibilityState={{ disabled: pending || batchPending }}
+                        disabled={pending || batchPending}
+                        onPress={() => void openNotification(row.id)}
+                        style={({ pressed }) => [
+                          s.row,
+                          (pending || batchPending) && s.rowMuted,
+                          pressed && !(pending || batchPending) && s.rowPressed,
+                        ]}
+                      >
+                        <View style={s.gutter} accessibilityElementsHidden>
+                          {isUnread ? <View style={s.unreadDot} /> : null}
+                        </View>
+                        <View style={s.rowContent}>
+                          <View style={s.metaLine}>
+                            <Text style={s.metaType}>{notificationTypeLabel(row.type)}</Text>
+                            <Text style={s.metaCampus}>{campusLabel}</Text>
+                            {isUnread ? <Text style={s.metaUnread}>未讀</Text> : null}
+                          </View>
+                          <Text style={[s.rowTitle, !isUnread && s.rowTitleRead]}>
+                            {row.title || '通知'}
+                          </Text>
+                          {row.body ? <Text style={s.rowBody}>{row.body}</Text> : null}
+                          {when ? <Text style={s.rowTime}>{when}</Text> : null}
+                        </View>
+                      </Pressable>
+                      {pending ? (
+                        <View style={s.pendingRow}>
+                          <ActivityIndicator
+                            accessibilityLabel={`正在同步已讀：${row.title || row.id}`}
+                            accessibilityState={{ busy: true, disabled: true }}
+                            color={theme.colors.accent}
+                          />
+                        </View>
+                      ) : null}
+                      {focused && result?.error ? (
+                        <View accessibilityRole="alert" style={s.rowError}>
+                          <Text style={s.rowErrorText}>{result.error}</Text>
+                          {result.unconfirmed ? (
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityState={{ disabled: pending || batchPending }}
+                              disabled={pending || batchPending}
+                              onPress={() => void markOneExplicit(row.id)}
+                              style={({ pressed }) => [
+                                s.secondaryButton,
+                                (pending || batchPending) && s.disabled,
+                                pressed && s.rowPressed,
+                              ]}
+                            >
+                              <Text style={s.secondaryButtonText}>
+                                {`重試已讀同步：${row.title || row.id}`}
+                              </Text>
+                            </Pressable>
+                          ) : null}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            {hasMore ? (
+              <View style={s.loadMoreWrap}>
+                {loadingMore ? (
+                  <ActivityIndicator color={theme.colors.accent} accessibilityLabel="載入更多通知" />
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void loadMore()}
+                    style={({ pressed }) => [s.loadMoreButton, pressed && s.rowPressed]}
+                  >
+                    <Text style={s.secondaryButtonText}>載入更早的通知</Text>
+                  </Pressable>
+                )}
+              </View>
+            ) : null}
+          </View>
+        )}
+      </View>
     </AIDetailScreen>
   );
 }
+
+const createStyles = () =>
+  StyleSheet.create({
+    container: {
+      width: '100%',
+      maxWidth: 680,
+      alignSelf: 'center',
+      paddingHorizontal: 22,
+    },
+    filterBar: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+      paddingTop: 8,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
+    },
+    filterTabs: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+    },
+    filterTab: {
+      minHeight: 44,
+      justifyContent: 'center',
+      paddingHorizontal: 2,
+      paddingVertical: 10,
+      borderBottomWidth: 2,
+      borderBottomColor: 'transparent',
+    },
+    filterTabActive: {
+      borderBottomColor: theme.colors.accent,
+    },
+    filterTabText: {
+      color: theme.colors.muted,
+      fontSize: 14,
+      lineHeight: 20,
+      fontWeight: '500',
+      fontVariant: ['tabular-nums'],
+    },
+    filterTabTextActive: {
+      color: theme.colors.text,
+      fontWeight: '700',
+    },
+    markAllButton: {
+      minHeight: 44,
+      justifyContent: 'center',
+      paddingHorizontal: 6,
+    },
+    markAllText: {
+      color: theme.colors.accent,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    scopeNote: {
+      color: theme.colors.muted,
+      fontSize: 12,
+      lineHeight: 19,
+      paddingTop: 10,
+    },
+    centerState: {
+      paddingVertical: 40,
+      alignItems: 'center',
+    },
+    stateBlock: {
+      paddingTop: 22,
+      gap: 12,
+    },
+    errorNotice: {
+      paddingLeft: 14,
+      paddingVertical: 8,
+      borderLeftWidth: 3,
+      borderLeftColor: theme.colors.danger,
+      gap: 12,
+    },
+    errorText: {
+      color: theme.colors.text,
+      fontSize: 14,
+      lineHeight: 22,
+    },
+    emptyBlock: {
+      paddingVertical: 40,
+      alignItems: 'flex-start',
+      gap: 8,
+    },
+    emptyTitle: {
+      color: theme.colors.text,
+      fontSize: 18,
+      lineHeight: 26,
+      fontWeight: '700',
+    },
+    emptySubtitle: {
+      color: theme.colors.muted,
+      fontSize: 14,
+      lineHeight: 22,
+    },
+    ledger: {
+      paddingTop: 18,
+    },
+    ledgerHeader: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      gap: 8,
+      paddingBottom: 10,
+    },
+    sectionTitle: {
+      color: theme.colors.textSecondary,
+      fontSize: 13,
+      lineHeight: 19,
+      fontWeight: '600',
+    },
+    loadedCount: {
+      color: theme.colors.muted,
+      fontSize: 12,
+      lineHeight: 18,
+      fontVariant: ['tabular-nums'],
+    },
+    blockedNotice: {
+      marginBottom: 14,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderLeftWidth: 3,
+      borderLeftColor: theme.colors.warning,
+      borderRadius: 8,
+      backgroundColor: theme.colors.surface,
+      gap: 10,
+    },
+    blockedText: {
+      color: theme.colors.text,
+      fontSize: 14,
+      lineHeight: 21,
+    },
+    inlineActions: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    filteredEmpty: {
+      paddingVertical: 28,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+      gap: 12,
+      alignItems: 'flex-start',
+    },
+    list: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
+    },
+    rowDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+    },
+    row: {
+      minHeight: 68,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+      paddingVertical: 14,
+      paddingHorizontal: 2,
+    },
+    rowMuted: {
+      opacity: 0.6,
+    },
+    gutter: {
+      width: 10,
+      paddingTop: 7,
+      alignItems: 'center',
+    },
+    unreadDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: theme.colors.accent,
+    },
+    rowContent: {
+      flex: 1,
+      minWidth: 0,
+      gap: 4,
+    },
+    metaLine: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: 8,
+    },
+    metaType: {
+      color: theme.colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: '600',
+      maxWidth: '100%',
+    },
+    metaCampus: {
+      color: theme.colors.muted,
+      fontSize: 12,
+      lineHeight: 17,
+      maxWidth: '100%',
+    },
+    metaUnread: {
+      color: theme.colors.accent,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: '600',
+    },
+    rowTitle: {
+      color: theme.colors.text,
+      fontSize: 16,
+      lineHeight: 23,
+      fontWeight: '600',
+    },
+    rowTitleRead: {
+      fontWeight: '500',
+    },
+    rowBody: {
+      color: theme.colors.textSecondary,
+      fontSize: 14,
+      lineHeight: 21,
+    },
+    rowTime: {
+      color: theme.colors.muted,
+      fontSize: 12,
+      lineHeight: 18,
+      fontVariant: ['tabular-nums'],
+      marginTop: 2,
+    },
+    pendingRow: {
+      paddingBottom: 12,
+      paddingLeft: 20,
+      alignItems: 'flex-start',
+    },
+    rowError: {
+      marginLeft: 20,
+      marginBottom: 14,
+      paddingLeft: 12,
+      paddingVertical: 6,
+      borderLeftWidth: 3,
+      borderLeftColor: theme.colors.danger,
+      gap: 8,
+      alignItems: 'flex-start',
+    },
+    rowErrorText: {
+      color: theme.colors.danger,
+      fontSize: 13,
+      lineHeight: 20,
+    },
+    primaryButton: {
+      minHeight: 44,
+      alignSelf: 'flex-start',
+      justifyContent: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 8,
+      backgroundColor: theme.colors.accent,
+    },
+    primaryButtonPressed: {
+      backgroundColor: theme.colors.accentHover,
+    },
+    primaryButtonText: {
+      color: theme.colors.onAccent,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    secondaryButton: {
+      minHeight: 44,
+      alignSelf: 'flex-start',
+      justifyContent: 'center',
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+    },
+    secondaryButtonText: {
+      color: theme.colors.accent,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    compactPrimaryButton: {
+      minHeight: 44,
+      justifyContent: 'center',
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: theme.colors.accent,
+    },
+    compactPrimaryText: {
+      color: theme.colors.onAccent,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    compactGhostButton: {
+      minHeight: 44,
+      justifyContent: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+    },
+    compactGhostText: {
+      color: theme.colors.textSecondary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    loadMoreWrap: {
+      paddingVertical: 18,
+      alignItems: 'center',
+    },
+    loadMoreButton: {
+      minHeight: 46,
+      alignSelf: 'stretch',
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 11,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+    },
+    disabled: {
+      opacity: 0.45,
+    },
+    rowPressed: {
+      backgroundColor: theme.colors.surfaceInteractive,
+    },
+  });

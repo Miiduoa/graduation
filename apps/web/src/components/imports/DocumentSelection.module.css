@@ -1,4 +1,4 @@
-.root { min-width: 0; display: grid; gap: 20px; padding: 24px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
+.root { min-width: 0; display: grid; gap: 20px; padding-block: 24px; color: var(--text); border-top: 2px solid var(--brand); }
 .heading, .toolbar, .sectionHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .heading h3 { margin: 5px 0 0; font-size: 22px; line-height: 1.5; overflow-wrap: anywhere; }
 .heading > div { min-width: 0; }
@@ -51,7 +51,7 @@
 .footer strong { font-size: 16px; font-variant-numeric: tabular-nums; }
 .footer p { font-size: 13px; line-height: 1.8; color: var(--muted); margin: 6px 0 0; }
 @media (max-width: 760px) {
-  .root { padding: 16px; gap: 16px; }
+  .root { padding-block: 16px; gap: 16px; }
   .heading h3 { font-size: 18px; }
   .headerControl, .previewGrid { grid-template-columns: minmax(0, 1fr); }
   .sectionBody { padding: 12px; }

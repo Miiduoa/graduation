@@ -18,6 +18,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   View,
   Alert,
@@ -26,9 +27,8 @@ import {
 import { AppActionIcon } from '../ui/AppActionIcon';
 import type { GeneratedButtonIconId } from '../ui/generatedButtonIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { theme, softShadowStyle } from '../ui/theme';
-import { BrandFluxImageHeader } from '../ui/BrandFluxImageHeader';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 import { useAuth } from '../state/auth';
 import { useNotifications } from '../state/notifications';
 import { usePermissions } from '../hooks/usePermissions';
@@ -81,6 +81,7 @@ type CloseRequest = { revision: number; account: string };
 
 // ─── 抽屜本體 ────────────────────────────────────────────
 export function HeaderDrawerHost() {
+  useThemeVersion();
   const { visible, revision } = useSyncExternalStore(
     subscribeDrawer,
     getDrawerState,
@@ -94,7 +95,6 @@ export function HeaderDrawerHost() {
   const notifs = useNotifications();
   const {
     displayName: roleDisplayName,
-    badgeColor,
     can,
     isTeacher,
     isStaff,
@@ -277,12 +277,13 @@ export function HeaderDrawerHost() {
             }}
           >
             {/* ─── 頭部：身分卡 ─── */}
-            <BrandFluxImageHeader
-              variant="drawer"
-              paddingTop={insets.top + theme.layout.cardPadding}
-              paddingBottom={theme.layout.sectionGapLarge}
+            <View
               style={{
-                paddingHorizontal: theme.layout.screenHorizontalPadding,
+                paddingTop: insets.top + 12,
+                paddingBottom: 20,
+                marginHorizontal: theme.layout.screenHorizontalPadding,
+                borderBottomWidth: StyleSheet.hairlineWidth,
+                borderBottomColor: theme.colors.border,
               }}
             >
               <View
@@ -290,7 +291,7 @@ export function HeaderDrawerHost() {
                   flexDirection: 'row',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  marginBottom: theme.layout.sectionGapLarge,
+                  marginBottom: 12,
                 }}
               >
                 <Pressable
@@ -301,18 +302,18 @@ export function HeaderDrawerHost() {
                   disabled={closing}
                   style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
                 >
-                  <LinearGradient
-                    colors={[...theme.gradients.avatar]}
+                  <View
                     style={{
-                      width: 56,
-                      height: 56,
-                      borderRadius: 28,
+                      width: 48,
+                      height: 48,
+                      borderRadius: 24,
+                      backgroundColor: theme.colors.surface2,
                       alignItems: 'center',
                       justifyContent: 'center',
                     }}
                   >
-                    <AppActionIcon name="ic_profile" size={26} />
-                  </LinearGradient>
+                    <AppActionIcon name="ic_profile" fallback="ionicon" size={24} color={theme.colors.text} />
+                  </View>
                 </Pressable>
                 <Pressable
                   onPress={handleClose}
@@ -326,14 +327,14 @@ export function HeaderDrawerHost() {
                     opacity: pressed ? 0.5 : 1,
                   })}
                 >
-                  <AppActionIcon name="ic_close" size={22} />
+                  <AppActionIcon name="ic_close" fallback="ionicon" size={22} />
                 </Pressable>
               </View>
 
               <Text
                 style={{
                   color: theme.colors.text,
-                  fontSize: 18,
+                  fontSize: 26,
                   fontWeight: '700',
                   letterSpacing: -0.3,
                 }}
@@ -351,19 +352,9 @@ export function HeaderDrawerHost() {
                     marginTop: 6,
                   }}
                 >
-                  <View
-                    style={{
-                      backgroundColor: badgeColor,
-                      paddingHorizontal: 10,
-                      paddingVertical: 3,
-                      borderRadius: 999,
-                      maxWidth: '100%',
-                    }}
-                  >
-                    <Text style={{ color: theme.colors.onAccent, fontSize: 11, fontWeight: '700' }}>
-                      {roleDisplayName}
-                    </Text>
-                  </View>
+                  <Text style={{ color: theme.colors.textSecondary, fontSize: 14, fontWeight: '600' }}>
+                    {roleDisplayName}
+                  </Text>
                   {auth.profile?.department ? (
                     <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
                       {auth.profile.department}
@@ -410,7 +401,7 @@ export function HeaderDrawerHost() {
                   </Text>
                 </Pressable>
               ) : null}
-            </BrandFluxImageHeader>
+            </View>
 
             {/* ─── 校園連結（跨 Tab） ─── */}
             <DrawerSection title="校園連結">
@@ -418,7 +409,7 @@ export function HeaderDrawerHost() {
                 disabled={closing}
                 icon="ic_globe_social"
                 label="校園社群 · 動態／看板／即時／學伴"
-                tint={theme.colors.social}
+
                 onPress={() => requestClose(() => rootNavigateCampusCommunity())}
               />
             </DrawerSection>
@@ -442,7 +433,7 @@ export function HeaderDrawerHost() {
                   disabled={closing}
                   icon="ic_trophy"
                   label="成就與積分"
-                  tint={theme.colors.achievement}
+
                   onPress={() => go('Achievements')}
                 />
               ) : null}
@@ -451,7 +442,7 @@ export function HeaderDrawerHost() {
                   disabled={closing}
                   icon="ic_school"
                   label="學分與畢業規劃"
-                  tint={theme.colors.roleTeacher}
+
                   onPress={() => go('CreditAuditStack')}
                 />
               ) : null}
@@ -464,7 +455,7 @@ export function HeaderDrawerHost() {
                 icon="ic_notifications"
                 label="通知中心"
                 badge={notifs.unreadCount > 0 ? `${notifs.unreadCount}` : undefined}
-                tint={theme.colors.warning}
+
                 onPress={() => requestClose(() => rootNavigateNested('訊息', 'Notifications'))}
               />
               <DrawerRow
@@ -492,7 +483,7 @@ export function HeaderDrawerHost() {
                 disabled={closing}
                 icon="ic_tab_study"
                 label="我的課表"
-                tint={theme.colors.roleTeacher}
+
                 onPress={() => requestClose(() => rootNavigateNested('學習', 'PersonalTimetable'))}
               />
               <DrawerRow
@@ -525,7 +516,7 @@ export function HeaderDrawerHost() {
                     disabled={closing}
                     icon="ic_school"
                     label="我的教學課程"
-                    tint={theme.colors.roleTeacher}
+
                     onPress={() => requestClose(() => rootNavigate('學習'))}
                   />
                 )}
@@ -535,14 +526,14 @@ export function HeaderDrawerHost() {
                       disabled={closing}
                       icon="ic_admin_shield"
                       label="管理員控制台"
-                      tint={theme.colors.roleAdmin}
+
                       onPress={() => go('AdminDashboard')}
                     />
                     <DrawerRow
                       disabled={closing}
                       icon="ic_verify"
                       label="課程驗證管理"
-                      tint={theme.colors.urgent}
+
                       onPress={() => go('AdminCourseVerify')}
                     />
                   </>
@@ -552,7 +543,7 @@ export function HeaderDrawerHost() {
                     disabled={closing}
                     icon="ic_analytics_chart"
                     label="系所審核與數據"
-                    tint={theme.colors.calm}
+
                     onPress={() => requestClose(() => rootNavigate('學習'))}
                   />
                 )}
@@ -561,7 +552,7 @@ export function HeaderDrawerHost() {
                     disabled={closing}
                     icon="ic_facilities_wrench"
                     label="設施與工單（工作首頁）"
-                    tint={theme.colors.warning}
+
                     onPress={() => requestClose(() => rootNavigate('學習'))}
                   />
                 )}
@@ -570,7 +561,7 @@ export function HeaderDrawerHost() {
                     disabled={closing}
                     icon="ic_store_merchant"
                     label="商家接單"
-                    tint={theme.colors.accent}
+
                     onPress={() => go('MerchantHub')}
                   />
                 )}
@@ -589,7 +580,7 @@ export function HeaderDrawerHost() {
                 disabled={closing}
                 icon="ic_trash_delete"
                 label="刪除帳號"
-                tint={theme.colors.danger}
+
                 onPress={() => go('AccountDeletion')}
               />
             </DrawerSection>
@@ -627,8 +618,8 @@ export function HeaderDrawerHost() {
                   marginHorizontal: 18,
                   paddingVertical: 13,
                   minHeight: 44,
-                  borderRadius: 14,
-                  backgroundColor: theme.colors.dangerSoft,
+                  borderTopWidth: StyleSheet.hairlineWidth,
+                  borderTopColor: theme.colors.border,
                   alignItems: 'center',
                   opacity: pressed ? 0.85 : 1,
                 })}
@@ -672,31 +663,19 @@ export function HeaderDrawerHost() {
 // ─── 內部小元件 ────────────────────────────────────────
 function DrawerSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <View style={{ marginTop: 18 }}>
+    <View style={{ marginTop: 24, marginHorizontal: theme.layout.screenHorizontalPadding }}>
       <Text
         accessibilityRole="header"
         style={{
-          color: theme.colors.textSecondary,
-          fontSize: 11,
+          color: theme.colors.text,
+          fontSize: 18,
           fontWeight: '700',
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
-          paddingHorizontal: 18,
-          marginBottom: 6,
+          marginBottom: 4,
         }}
       >
         {title}
       </Text>
-      <View
-        style={{
-          marginHorizontal: 12,
-          borderRadius: 14,
-          backgroundColor: theme.colors.surface,
-          overflow: 'hidden',
-        }}
-      >
-        {children}
-      </View>
+      {children}
     </View>
   );
 }
@@ -704,19 +683,16 @@ function DrawerSection({ title, children }: { title: string; children: React.Rea
 function DrawerRow({
   icon,
   label,
-  tint,
   badge,
   onPress,
   disabled = false,
 }: {
   icon: GeneratedButtonIconId;
   label: string;
-  tint?: string;
   badge?: string;
   onPress: () => void;
   disabled?: boolean;
 }) {
-  const color = tint ?? theme.colors.accent;
   return (
     <Pressable
       onPress={onPress}
@@ -729,23 +705,13 @@ function DrawerRow({
         alignItems: 'center',
         gap: 12,
         paddingVertical: 12,
-        paddingHorizontal: 14,
         minHeight: 48,
-        opacity: pressed ? 0.6 : 1,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: theme.colors.border,
+        backgroundColor: pressed ? theme.colors.surfaceInteractive : 'transparent',
       })}
     >
-      <View
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: 9,
-          backgroundColor: color + '1A',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <AppActionIcon name={icon} size={16} />
-      </View>
+      <AppActionIcon name={icon} fallback="ionicon" color={theme.colors.textSecondary} size={19} />
       <Text
         style={{
           color: theme.colors.text,
@@ -773,7 +739,7 @@ function DrawerRow({
           </Text>
         </View>
       ) : null}
-      <AppActionIcon name="ic_chevron_forward" size={14} style={{ opacity: 0.7 }} />
+      <AppActionIcon name="ic_chevron_forward" fallback="ionicon" size={14} color={theme.colors.muted} />
     </Pressable>
   );
 }

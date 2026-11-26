@@ -4,6 +4,8 @@ import { StyleSheet, TextInput, View } from 'react-native';
 import { Button, FilterChip, Badge, SearchBar, SegmentedControl } from '../../ui/components';
 import { ConfidenceBadge, HeroActionCard } from '../../ui/campusOs';
 import { AnnouncementItem } from '../../ui/ListItems';
+import { AdminDataStatusRow } from '../../screens/admin/AdminSurface';
+import { AdminTabBar } from '../../screens/admin/AdminTabBar';
 import { CourseChipEmpty } from '../../ui/courseChipShell';
 import { CockpitAccentCard, CockpitHero } from '../../ui/cockpitShell';
 import { applyTheme, clearSchoolTheme, createDarkTheme, createLightTheme } from '../../ui/theme';
@@ -79,6 +81,23 @@ test('mounted buttons, selected filters and count badges switch their foreground
   expect(view.getByRole('button', { name: '本週' })).toHaveAccessibilityState({ selected: true });
 });
 
+test('open administrator tabs and status rows update when the app theme changes', () => {
+  const view = render(
+    <>
+      <AdminTabBar active="overview" onChange={jest.fn()} />
+      <AdminDataStatusRow label="公告" value="已同步" />
+    </>,
+  );
+  for (const mode of ['dark', 'light'] as const) {
+    act(() => applyTheme(mode));
+    const { colors } = mode === 'dark' ? createDarkTheme() : createLightTheme();
+    expect(view.getByRole('tab', { name: '總覽' })).toHaveAccessibilityState({ selected: true });
+    expect(view.getByRole('tab', { name: '總覽' })).toHaveStyle({ borderBottomColor: colors.accent });
+    expect(view.getByText('總覽')).toHaveStyle({ color: colors.text });
+    expect(view.getByText('已同步')).toHaveStyle({ color: colors.textSecondary });
+  }
+});
+
 test('live badges keep a distinct readable background in both themes', () => {
   const view = render(<ConfidenceBadge state="live" label="更新中" />);
   for (const mode of ['light', 'dark'] as const) {
@@ -127,8 +146,8 @@ test('role workspaces retain readable accent cards after a live theme change', (
       <CockpitAccentCard title="繼續閱讀" meta="第一章" ctaLabel="開啟教材" onPress={jest.fn()} />
     </>,
   );
-  expect(view.getByText('nuni')).toBeTruthy();
-  expect(view.getByText('接下來')).toBeTruthy();
+  expect(view.getByRole('header', { name: '今天的安排' })).toBeTruthy();
+  expect(view.getByText('課程')).toBeTruthy();
   expect(view.queryByText(/first 工作台/i)).toBeNull();
   act(() => applyTheme('dark'));
   const { colors } = createDarkTheme();

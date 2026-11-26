@@ -50,6 +50,10 @@ export async function puCacheSet<T>(
   await AsyncStorage.setItem(PU_CACHE_PREFIX + key, JSON.stringify(entry));
 }
 
+export function puCacheDelete(key: PuCacheKey): Promise<void> {
+  return AsyncStorage.removeItem(PU_CACHE_PREFIX + key);
+}
+
 export async function puCacheGet<T>(
   key: PuCacheKey,
   opts: { allowStale?: boolean } = {},

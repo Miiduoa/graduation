@@ -14,9 +14,13 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+
+import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 
 type SurveyQuestionType = 'single' | 'multi' | 'text' | 'scale';
 
@@ -78,6 +82,7 @@ const SAMPLE_QUESTIONS: SurveyQuestion[] = [
 ];
 
 export default function SurveyScreen(props: RouteProps) {
+  useThemeVersion();
   const navigation = useNavigation<any>();
   const title = props.route?.params?.title ?? '課程問卷';
   const courseName = props.route?.params?.courseName;
@@ -140,107 +145,153 @@ export default function SurveyScreen(props: RouteProps) {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
+      style={{ flex: 1, backgroundColor: theme.colors.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
-        <Text style={{ fontSize: 22, fontWeight: '700', color: '#1C1C1E' }}>{title}</Text>
-        {courseName ? (
-          <Text style={{ color: '#8E8E93', marginTop: 4 }}>{courseName}</Text>
-        ) : null}
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: theme.layout.screenHorizontalPadding,
+          paddingTop: 16,
+          paddingBottom: 80,
+        }}
+      >
+        <View
+          style={{
+            paddingBottom: 16,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.colors.separator,
+          }}
+        >
+          <Text
+            accessibilityRole="header"
+            style={{ fontSize: 22, fontWeight: '700', color: theme.colors.text, lineHeight: 28 }}
+          >
+            {title}
+          </Text>
+          {courseName ? (
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 13, marginTop: 4 }}>
+              {courseName}
+            </Text>
+          ) : null}
+        </View>
 
         {questions.map((q, idx) => (
           <View
             key={q.id}
             style={{
-              marginTop: 16,
-              backgroundColor: '#fff',
-              borderRadius: 12,
-              padding: 14,
-              borderWidth: 1,
-              borderColor: '#E5E5EA',
+              paddingVertical: 18,
+              borderBottomWidth: StyleSheet.hairlineWidth,
+              borderBottomColor: theme.colors.separator,
             }}
           >
-            <Text style={{ fontSize: 15, fontWeight: '600', color: '#1C1C1E' }}>
-              {idx + 1}. {q.prompt} {q.required ? <Text style={{ color: '#D70015' }}>*</Text> : null}
+            <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.text, lineHeight: 22 }}>
+              {idx + 1}. {q.prompt}{' '}
+              {q.required ? <Text style={{ color: theme.colors.danger }}>*</Text> : null}
             </Text>
 
-            {q.type === 'single' &&
-              q.options?.map((opt) => (
-                <Pressable
-                  key={opt.id}
-                  onPress={() => !submitted && updateSingle(q.id, opt.id)}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: 10,
-                    marginTop: 6,
-                    borderRadius: 8,
-                    backgroundColor: answers[q.id] === opt.id ? '#003F8A14' : '#F2F2F7',
-                    borderWidth: 1,
-                    borderColor: answers[q.id] === opt.id ? '#003F8A' : '#E5E5EA',
-                  }}
-                >
-                  <Ionicons
-                    name={answers[q.id] === opt.id ? 'radio-button-on' : 'radio-button-off'}
-                    size={18}
-                    color={answers[q.id] === opt.id ? '#003F8A' : '#8E8E93'}
-                  />
-                  <Text style={{ fontSize: 14, color: '#1C1C1E' }}>{opt.label}</Text>
-                </Pressable>
-              ))}
+            {q.type === 'single' && (
+              <View style={{ gap: 8, marginTop: 10 }}>
+                {q.options?.map((opt) => {
+                  const selected = answers[q.id] === opt.id;
+                  return (
+                    <Pressable
+                      key={opt.id}
+                      onPress={() => !submitted && updateSingle(q.id, opt.id)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected, disabled: submitted }}
+                      style={({ pressed }) => ({
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 10,
+                        minHeight: 44,
+                        paddingHorizontal: 12,
+                        paddingVertical: 10,
+                        borderRadius: theme.radius.md,
+                        backgroundColor: selected ? theme.colors.accentSoft : theme.colors.surface,
+                        borderWidth: 1,
+                        borderColor: selected ? theme.colors.accent : theme.colors.border,
+                        opacity: pressed && !submitted ? 0.85 : 1,
+                      })}
+                    >
+                      <Ionicons
+                        name={selected ? 'radio-button-on' : 'radio-button-off'}
+                        size={18}
+                        color={selected ? theme.colors.accent : theme.colors.muted}
+                      />
+                      <Text style={{ fontSize: 14, color: theme.colors.text, flex: 1 }}>
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
 
-            {q.type === 'multi' &&
-              q.options?.map((opt) => {
-                const checked = Array.isArray(answers[q.id])
-                  ? (answers[q.id] as string[]).includes(opt.id)
-                  : false;
-                return (
-                  <Pressable
-                    key={opt.id}
-                    onPress={() => !submitted && updateMulti(q.id, opt.id)}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: 10,
-                      marginTop: 6,
-                      borderRadius: 8,
-                      backgroundColor: checked ? '#003F8A14' : '#F2F2F7',
-                      borderWidth: 1,
-                      borderColor: checked ? '#003F8A' : '#E5E5EA',
-                    }}
-                  >
-                    <Ionicons
-                      name={checked ? 'checkbox' : 'square-outline'}
-                      size={18}
-                      color={checked ? '#003F8A' : '#8E8E93'}
-                    />
-                    <Text style={{ fontSize: 14, color: '#1C1C1E' }}>{opt.label}</Text>
-                  </Pressable>
-                );
-              })}
+            {q.type === 'multi' && (
+              <View style={{ gap: 8, marginTop: 10 }}>
+                {q.options?.map((opt) => {
+                  const checked = Array.isArray(answers[q.id])
+                    ? (answers[q.id] as string[]).includes(opt.id)
+                    : false;
+                  return (
+                    <Pressable
+                      key={opt.id}
+                      onPress={() => !submitted && updateMulti(q.id, opt.id)}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked, disabled: submitted }}
+                      style={({ pressed }) => ({
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 10,
+                        minHeight: 44,
+                        paddingHorizontal: 12,
+                        paddingVertical: 10,
+                        borderRadius: theme.radius.md,
+                        backgroundColor: checked ? theme.colors.accentSoft : theme.colors.surface,
+                        borderWidth: 1,
+                        borderColor: checked ? theme.colors.accent : theme.colors.border,
+                        opacity: pressed && !submitted ? 0.85 : 1,
+                      })}
+                    >
+                      <Ionicons
+                        name={checked ? 'checkbox' : 'square-outline'}
+                        size={18}
+                        color={checked ? theme.colors.accent : theme.colors.muted}
+                      />
+                      <Text style={{ fontSize: 14, color: theme.colors.text, flex: 1 }}>
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
 
             {q.type === 'scale' && (
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
                 {[1, 2, 3, 4, 5].map((n) => {
                   const selected = answers[q.id] === n;
                   return (
                     <Pressable
                       key={n}
                       onPress={() => !submitted && updateScale(q.id, n)}
-                      style={{
+                      accessibilityRole="button"
+                      accessibilityState={{ selected, disabled: submitted }}
+                      style={({ pressed }) => ({
                         flex: 1,
-                        padding: 12,
-                        borderRadius: 8,
-                        backgroundColor: selected ? '#003F8A' : '#F2F2F7',
+                        minHeight: 44,
+                        justifyContent: 'center',
                         alignItems: 'center',
-                      }}
+                        borderRadius: theme.radius.md,
+                        borderWidth: 1,
+                        borderColor: selected ? theme.colors.accent : theme.colors.border,
+                        backgroundColor: selected ? theme.colors.accent : theme.colors.surface,
+                        opacity: pressed && !submitted ? 0.85 : 1,
+                      })}
                     >
                       <Text
                         style={{
-                          color: selected ? '#fff' : '#1C1C1E',
+                          color: selected ? theme.colors.onAccent : theme.colors.text,
                           fontWeight: '700',
                           fontSize: 16,
                         }}
@@ -261,15 +312,17 @@ export default function SurveyScreen(props: RouteProps) {
                 multiline
                 numberOfLines={4}
                 placeholder="自由作答（可空白）"
+                placeholderTextColor={theme.colors.muted}
                 style={{
-                  marginTop: 8,
-                  backgroundColor: '#F2F2F7',
-                  borderRadius: 8,
-                  padding: 10,
+                  marginTop: 10,
+                  backgroundColor: theme.colors.surface,
+                  borderRadius: theme.radius.md,
+                  padding: 12,
                   fontSize: 14,
+                  color: theme.colors.text,
                   borderWidth: 1,
-                  borderColor: '#E5E5EA',
-                  minHeight: 80,
+                  borderColor: theme.colors.border,
+                  minHeight: 88,
                   textAlignVertical: 'top',
                 }}
               />
@@ -281,24 +334,40 @@ export default function SurveyScreen(props: RouteProps) {
           <Pressable
             onPress={handleSubmit}
             disabled={submitting}
-            style={{
+            accessibilityRole="button"
+            style={({ pressed }) => ({
               marginTop: 24,
-              padding: 14,
-              borderRadius: 12,
-              backgroundColor: '#003F8A',
+              minHeight: 48,
+              justifyContent: 'center',
               alignItems: 'center',
-              opacity: submitting ? 0.6 : 1,
-            }}
+              borderRadius: theme.radius.md,
+              backgroundColor: theme.colors.accent,
+              opacity: submitting || pressed ? 0.7 : 1,
+            })}
           >
-            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>
+            <Text style={{ color: theme.colors.onAccent, fontSize: 16, fontWeight: '700' }}>
               {submitting ? '送出中⋯⋯' : '送出問卷'}
             </Text>
           </Pressable>
         )}
         {submitted && (
-          <View style={{ marginTop: 24, padding: 14, backgroundColor: '#dcfce7', borderRadius: 12 }}>
-            <Text style={{ color: '#166534', fontSize: 14, fontWeight: '600', textAlign: 'center' }}>
-              ✅ 已提交，謝謝你的回饋
+          <View
+            style={{
+              marginTop: 24,
+              padding: 14,
+              backgroundColor: theme.colors.successSoft,
+              borderRadius: theme.radius.md,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+            }}
+          >
+            <Ionicons name="checkmark-circle-outline" size={18} color={theme.colors.success} />
+            <Text style={{ color: theme.colors.success, fontSize: 14, fontWeight: '600' }}>
+              已提交，謝謝你的回饋
             </Text>
           </View>
         )}

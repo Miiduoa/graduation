@@ -57,7 +57,6 @@ export function PlatformLostFound({
   return (
     <SiteShell
       title="失物招領"
-      subtitle="找回遺失的物品，或替拾獲物尋找主人。"
       schoolName={context.schoolName}
     >
       {!context.ready ? (

@@ -33,13 +33,17 @@ async function setup(acknowledged = true) {
       return result;
     },
   };
+  const unsealSession = vi.fn((data: Record<string, unknown>) => ({
+    schoolId: 'pu' as const, revision: data.revision as string, userId: data.userId as number,
+    account: 'synthetic-account', userName: null, cookies: { session: 'private-cookie' },
+    expiresAt: new Date(data.expiresAt as number).toISOString(),
+  }));
   const bindings: TronClassSubmissionBindings = {
-    async requireBinding(owner) {
+    async requireBinding(owner, expectedRevision) {
       const data = rows.get(bindingPath)!;
       if (owner !== OWNER || data.state !== 'connected') throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED');
-      return { schoolId: 'pu', revision: data.revision as string, userId: data.userId as number,
-        account: 'synthetic-account', userName: null, cookies: { session: 'private-cookie' },
-        expiresAt: new Date(data.expiresAt as number).toISOString() };
+      if (expectedRevision !== undefined && expectedRevision !== data.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
+      return unsealSession(data);
     },
     async assertCurrent(owner, revision) {
       const data = rows.get(bindingPath)!;
@@ -57,7 +61,7 @@ async function setup(acknowledged = true) {
   const readHistory = vi.fn(async () => ({ list: [row] } as unknown));
   const legacyReconcile = vi.fn(async (): Promise<TronClassSubmissionResult> => ({ status: 'unknown', operationId: OPERATION, receipt: null }));
   const reconcile = createTronClassOperationReconciler({ db, bindings, readHistory, legacyReconcile, now: () => NOW });
-  return { rows, db, bindings, journal, claim, readHistory, legacyReconcile, reconcile,
+  return { rows, db, bindings, journal, claim, readHistory, legacyReconcile, reconcile, unsealSession,
     rebind(change: Record<string, unknown>) { rows.set(bindingPath, { ...rows.get(bindingPath)!, ...change }); } };
 }
 const input = { operationId: OPERATION, revision: REVISION };
@@ -117,6 +121,22 @@ describe('public v1/v2 read-only reconciliation', () => {
     expect(s.rows.get(operationPath())?.revision).toBe(REVISION);
   });
 
+  it('rejects a connected rebind to the same student between the public binding check and journal read', async () => {
+    const s = await setup();
+    s.unsealSession.mockClear();
+    const assertCurrent = s.bindings.assertCurrent;
+    let checks = 0;
+    vi.spyOn(s.bindings, 'assertCurrent').mockImplementation(async (owner, revision) => {
+      await assertCurrent(owner, revision);
+      if (++checks === 2) s.rebind({ revision: 'b'.repeat(32) });
+    });
+
+    await expect(s.reconcile(OWNER, input)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    expect(s.unsealSession.mock.results.map(({ value }) => value.revision)).toEqual([REVISION]);
+    expect(s.readHistory).not.toHaveBeenCalled();
+    expect(s.legacyReconcile).not.toHaveBeenCalled();
+  });
+
   it('rejects the same owner rebound to another school student', async () => {
     const s = await setup();
     s.rebind({ revision: 'b'.repeat(32), userId: 404 });
@@ -151,7 +171,7 @@ describe('public v1/v2 read-only reconciliation', () => {
     const s = await setup();
     s.rows.set(operationPath(), { version: 1 });
     await s.reconcile(OWNER, input);
-    expect(s.legacyReconcile).toHaveBeenCalledExactlyOnceWith(OWNER, input);
+    expect(s.legacyReconcile).toHaveBeenCalledExactlyOnceWith(OWNER, input, expect.objectContaining({ revision: input.revision }));
     s.rows.delete(operationPath());
     s.legacyReconcile.mockRejectedValue(new NuniError(404, 'TRONCLASS_SUBMISSION_NOT_FOUND'));
     await expect(s.reconcile(OWNER, input)).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_NOT_FOUND' });

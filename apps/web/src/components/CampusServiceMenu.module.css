@@ -10,15 +10,15 @@
   gap: 7px;
   min-height: 44px;
   padding: 10px 12px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   color: var(--muted);
   font-size: var(--font-body-sm-size);
   line-height: 1.5;
   white-space: nowrap;
   list-style: none;
   cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid transparent;
+  background: transparent;
   transition:
     color var(--motion-fast) var(--ease-out),
     background-color var(--motion-fast) var(--ease-out);
@@ -77,7 +77,7 @@
   );
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--surface);
   font-size: var(--font-body-sm-size);
   box-shadow: var(--shadow-lg);
@@ -131,7 +131,7 @@
   min-height: 48px;
   padding: 0 12px;
   border: 1px solid var(--border-strong);
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
 }
 
@@ -162,7 +162,7 @@
   min-height: 48px;
   padding: 10px 12px;
   border: 1px solid var(--brand);
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: var(--brand);
   color: var(--on-brand);
   font: inherit;
@@ -210,8 +210,9 @@
   flex: 1 0 auto;
   min-height: 44px;
   padding: 8px 10px;
-  border: 1px solid transparent;
-  border-radius: 7px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
   font: inherit;
@@ -223,8 +224,7 @@
 }
 
 .filters button[aria-pressed='true'] {
-  border-color: var(--border);
-  background: var(--accent-soft);
+  border-bottom-color: var(--brand);
   color: var(--brand);
   font-weight: 600;
 }
@@ -305,10 +305,9 @@
   justify-content: space-between;
   gap: 12px;
   min-height: 48px;
-  margin: -8px -8px 0;
-  padding: 12px 14px;
-  border-radius: 7px;
-  background: var(--accent-soft);
+  padding-block: 12px;
+  border-bottom: 1px solid var(--border-strong);
+  color: var(--brand);
   font-size: var(--font-body-sm-size);
   font-weight: 600;
 }
@@ -493,7 +492,7 @@
         )
       )
     );
-    border-radius: 16px;
+    border-radius: var(--radius);
     animation-name: reveal;
   }
 

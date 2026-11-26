@@ -89,6 +89,9 @@
   font-size: 22px;
 }
 .addSlot:hover { background: var(--bg-soft); border-color: var(--border-strong); }
+@media (hover: hover) and (pointer: fine) {
+  .addSlot:not(:hover):not(:focus-visible) > span { opacity: 0; }
+}
 .course:hover { border-color: var(--brand); }
 .gridViewport:focus-visible,
 .course:focus-visible,

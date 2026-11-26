@@ -78,6 +78,7 @@ export type PersonalImportCatalogCourse = {
   verified: boolean;
 };
 
+export const PERSONAL_IMPORT_MAX_ID_LENGTH = 300;
 export const PERSONAL_IMPORT_MAX_ROWS = 500;
 export const PERSONAL_IMPORT_MAX_TEXT_LENGTH = 200_000;
 

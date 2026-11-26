@@ -464,47 +464,14 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
     <div className={styles.feedColumn}>
       {error && <CommunityLoadError message={error} retry={refresh} />}
       {/* ── Story strip ── */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 14,
-          overflowX: 'auto',
-          padding: '4px 4px 14px',
-          borderBottom: '1px solid var(--border)',
-          marginBottom: 14,
-        }}
-      >
+      <div className={styles.storyStrip}>
         <Link
           href={`/community/story/new?schoolId=${encodeURIComponent(schoolId)}`}
           aria-label="發布限時動態"
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            textDecoration: 'none',
-            color: 'var(--text)',
-            minWidth: 68,
-          }}
+          className={styles.storyAddLink}
         >
-          <div
-            style={{
-              width: 60,
-              height: 60,
-              borderRadius: '50%',
-              border: '2px dashed var(--border)',
-              padding: 3,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'var(--surface)',
-              fontSize: 24,
-              color: 'var(--brand)',
-              fontWeight: 700,
-            }}
-          >
-            ＋
-          </div>
-          <span style={{ marginTop: 4, fontSize: 11, color: 'var(--muted)' }}>新增</span>
+          <div className={styles.storyAddRing}>＋</div>
+          <span className={styles.storyLabel}>新增</span>
         </Link>
         {shelf.groups.map((g) => {
             const name = g.isMine ? '我的動態' : (nameByUid[g.authorUid] || '同學');
@@ -515,41 +482,20 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                 key={g.authorUid}
                 type="button"
                 onClick={() => shelf.open(g)}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  minWidth: 68,
-                }}
+                className={styles.storyAuthorButton}
                 aria-label={`${name}的限時動態，${seen ? '已看過' : '有新動態'}`}
               >
                 <div
-                  style={{
-                    width: 60,
-                    height: 60,
-                    borderRadius: '50%',
-                    border: seen ? '2px solid var(--border)' : '2px solid var(--brand)',
-                    boxShadow: 'inset 0 0 0 3px var(--surface)',
-                    padding: 3,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: av ? '#fff' : 'var(--brand)',
-                    color: 'var(--on-brand)',
-                    overflow: 'hidden',
-                    fontSize: 20,
-                    fontWeight: 700,
-                  }}
+                  className={styles.storyRing}
+                  data-seen={seen || undefined}
+                  data-has-avatar={av ? 'true' : undefined}
                 >
                   {av ? (
                     <Image
                       src={av}
                       alt=""
-                      width={52}
-                      height={52}
+                      width={48}
+                      height={48}
                       style={{ borderRadius: '50%' }}
                       unoptimized
                     />
@@ -557,19 +503,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                     (nameByUid[g.authorUid] ?? '?').slice(0, 1)
                   )}
                 </div>
-                <span
-                  style={{
-                    marginTop: 4,
-                    fontSize: 11,
-                    color: 'var(--muted)',
-                    maxWidth: 64,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {name}
-                </span>
+                <span className={styles.storyLabel}>{name}</span>
               </button>
             );
           })}
@@ -579,61 +513,43 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
         author={shelf.viewer.group.isMine ? '我的動態' : (nameByUid[shelf.viewer.group.authorUid] || '同學')}
         avatar={avatarByUid[shelf.viewer.group.authorUid]} />}
 
-      {/* ── Filter chips ── */}
-      <div className={styles.toolbar}>
-        {FILTERS.map((f) => {
-          const active = filter === f.key;
-          return (
-            <button
-              key={f.key}
-              type="button"
-              aria-pressed={active}
-              onClick={() => {
-                if (f.key === 'saved' && filter !== 'saved') setBookmarksLoading(true);
-                setFilter(f.key);
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '7px 14px',
-                borderRadius: 'var(--radius)',
-                border: active ? '1px solid var(--brand)' : '1px solid var(--border)',
-                background: active ? 'var(--brand)' : 'var(--surface)',
-                color: active ? 'var(--on-brand)' : 'var(--text)',
-                cursor: 'pointer',
-                fontSize: 13,
-                fontWeight: 600,
-              }}
-            >
-              <span>{f.label}</span>
-            </button>
-          );
-        })}
-        <div style={{ flex: 1 }} />
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={refreshing}
-          style={{
-            padding: '7px 14px',
-            borderRadius: 'var(--radius)',
-            border: '1px solid var(--border)',
-            background: 'var(--surface)',
-            color: 'var(--muted)',
-            cursor: 'pointer',
-            fontSize: 12,
-          }}
-        >
-          {refreshing ? '更新中…' : '重新整理'}
-        </button>
-        <Link
-          href={`/community/post/new?schoolId=${encodeURIComponent(schoolId)}`}
-          className="btn primary"
-          style={{ fontSize: 13, padding: '7px 14px', borderRadius: 'var(--radius)' }}
-        >
-          ＋ 發文
-        </Link>
+      {/* ── Filter bar ── */}
+      <div className={styles.feedFilterBar}>
+        <div className={styles.feedFilterList}>
+          {FILTERS.map((f) => {
+            const active = filter === f.key;
+            return (
+              <button
+                key={f.key}
+                type="button"
+                aria-pressed={active}
+                onClick={() => {
+                  if (f.key === 'saved' && filter !== 'saved') setBookmarksLoading(true);
+                  setFilter(f.key);
+                }}
+                className={styles.feedFilterButton}
+              >
+                <span>{f.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className={styles.feedBarActions}>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshing}
+            className={styles.feedRefreshButton}
+          >
+            {refreshing ? '更新中…' : '重新整理'}
+          </button>
+          <Link
+            href={`/community/post/new?schoolId=${encodeURIComponent(schoolId)}`}
+            className={styles.primaryLink}
+          >
+            ＋ 發文
+          </Link>
+        </div>
       </div>
 
       <div className={styles.feedDiscovery}>
@@ -700,11 +616,11 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
 
       {/* ── Posts ── */}
       {selectedFeedLoading ? (
-        <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }} role="status">
+        <div className={styles.feedStateBox} role="status">
           {savedView ? '正在讀取收藏…' : followingView ? '正在讀取追蹤動態…' : '載入中…'}
         </div>
       ) : selectedFeedError ? null : visible.length === 0 && !(savedView && bookmarkUnavailable) ? (
-        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
+        <div className={styles.feedStateBox}>
           {search.trim()
             ? '找不到符合的貼文'
             : filter === 'following'
@@ -744,29 +660,11 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
             const board = boardNameById[item.boardId] ?? item.boardId;
             const av = !item.anonymous && item.authorUid ? avatarByUid[item.authorUid] : undefined;
             return (
-              <article key={item.id} className={`card ${styles.feedCard}`} style={{ padding: 16 }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    alignItems: 'center',
-                    gap: 10,
-                    marginBottom: 10,
-                  }}
-                >
+              <article key={item.id} className={styles.feedCard}>
+                <div className={styles.postByline}>
                   <div
-                    style={{
-                      width: 38,
-                      height: 38,
-                      borderRadius: '50%',
-                      background: item.anonymous ? 'var(--panel2)' : 'var(--brand)',
-                      color: 'var(--on-brand)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 700,
-                      overflow: 'hidden',
-                    }}
+                    className={styles.postAvatar}
+                    data-anonymous={item.anonymous || undefined}
                   >
                     {item.anonymous ? (
                       '🎭'
@@ -774,8 +672,8 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                       <Image
                         src={av}
                         alt=""
-                        width={38}
-                        height={38}
+                        width={36}
+                        height={36}
                         style={{ borderRadius: '50%' }}
                         unoptimized
                       />
@@ -783,29 +681,24 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                       authorLine(item).slice(0, 1)
                     )}
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+                  <div className={styles.postAuthorMeta}>
+                    <div className={styles.postAuthorLine}>
                       {!item.anonymous && item.authorUid ? (
                         <Link
                           href={`/community/member/${encodeURIComponent(item.authorUid)}?schoolId=${encodeURIComponent(schoolId)}`}
                           aria-label={`查看 ${authorLine(item)} 的個人頁`}
-                          style={{ color: 'inherit', textDecoration: 'none' }}
+                          className={styles.postAuthorLink}
                         >
                           {authorLine(item)}
                         </Link>
                       ) : authorLine(item)}
-                      <span style={{ color: 'var(--muted)', fontWeight: 500, marginLeft: 6 }}>
+                      <span className={styles.postTimestamp}>
                         · {formatTs(item.createdAt)}
                       </span>
                     </div>
                     <Link
                       href={`/community/board/${item.boardId}?schoolId=${encodeURIComponent(schoolId)}`}
-                      style={{
-                        fontSize: 12,
-                        color: 'var(--brand)',
-                        fontWeight: 700,
-                        textDecoration: 'none',
-                      }}
+                      className={styles.postBoardLink}
                     >
                       ＃{board}
                     </Link>
@@ -831,20 +724,12 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
 
                 <Link
                   href={`/community/post/${item.id}?schoolId=${encodeURIComponent(schoolId)}`}
-                  style={{ textDecoration: 'none', color: 'var(--text)', display: 'block' }}
+                  className={styles.postBodyLink}
                 >
-                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{item.title}</h3>
+                  <h3 className={styles.postTitle}>{item.title}</h3>
                   <p
-                    style={{
-                      margin: '6px 0 0',
-                      fontSize: 14,
-                      color: 'var(--muted)',
-                      lineHeight: 1.5,
-                      display: '-webkit-box',
-                      WebkitLineClamp: media.length > 0 ? 3 : 5,
-                      WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden',
-                    }}
+                    className={styles.postExcerpt}
+                    style={{ WebkitLineClamp: media.length > 0 ? 3 : 5 }}
                   >
                     {item.content}
                   </p>
@@ -853,19 +738,9 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                 {media.length > 0 && <MediaGrid uris={media.slice(0, 4)} postId={item.id} schoolId={schoolId} />}
 
                 {(item.tags ?? []).length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                  <div className={styles.postTags}>
                     {(item.tags ?? []).slice(0, 4).map((t) => (
-                      <span
-                        key={t}
-                        style={{
-                          fontSize: 11,
-                          color: 'var(--brand)',
-                          background: 'var(--accent-soft)',
-                          padding: '2px 8px',
-                          borderRadius: 999,
-                          fontWeight: 700,
-                        }}
-                      >
+                      <span key={t} className={styles.postTag}>
                         #{t}
                       </span>
                     ))}
@@ -883,37 +758,13 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                       e.stopPropagation();
                       void onToggleLike(item);
                     }}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      flexWrap: 'nowrap',
-                      alignItems: 'center',
-                      flexShrink: 0,
-                      gap: 5,
-                      fontSize: 13,
-                      fontWeight: 700,
-                      color: liked ? 'var(--danger, var(--danger))' : 'var(--muted)',
-                      whiteSpace: 'nowrap',
-                    }}
+                    className={styles.postMetricButton}
                   >
                     {liked ? '❤️' : '🤍'} {likesOf(item)}
                   </button>
                   <Link
                     href={`/community/post/${item.id}?schoolId=${encodeURIComponent(schoolId)}`}
-                    style={{
-                      display: 'inline-flex',
-                      flexWrap: 'nowrap',
-                      alignItems: 'center',
-                      flexShrink: 0,
-                      gap: 5,
-                      fontSize: 13,
-                      fontWeight: 700,
-                      color: 'var(--muted)',
-                      textDecoration: 'none',
-                      whiteSpace: 'nowrap',
-                    }}
+                    className={styles.postMetricLink}
                   >
                     💬 {typeof item.commentCount === 'number' ? item.commentCount : 0}
                   </Link>

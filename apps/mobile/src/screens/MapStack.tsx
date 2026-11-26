@@ -2,6 +2,7 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { CampusHubScreen } from './CampusHubScreen';
+import { ExploreScreen } from './ExploreScreen';
 import { ARNavigationScreen } from './ARNavigationScreen';
 import { AccessibleRouteScreen } from './AccessibleRouteScreen';
 import { OnBusModeScreen } from './OnBusModeScreen';
@@ -17,7 +18,7 @@ import BusAiFirstScreen from './BusAiFirstScreen';
 import MenuDetailAiFirstScreen from './MenuDetailAiFirstScreen';
 import LibraryAiFirstScreen from './LibraryAiFirstScreen';
 import SchoolInfoScreen from './SchoolInfoScreen';
-import { DormitoryScreen } from './DormitoryScreen';
+import { DormitoryScreen, dormNotificationView } from './DormitoryScreen';
 import { CareerScreen } from './CareerScreen';
 import { GroupsScreen } from './GroupsScreen';
 import { ClubDetailScreen } from './ClubDetailScreen';
@@ -44,9 +45,10 @@ export function MapStack() {
   return (
     <Stack.Navigator
       id={undefined}
-      initialRouteName="CampusHome"
+      initialRouteName="Explore"
       screenOptions={createStackScreenOptions()}
     >
+      <Stack.Screen name="Explore" component={ExploreScreen} options={{ title: '探索', headerShown: false }} />
       <Stack.Screen
         name="CampusHome"
         component={CampusHubScreen}
@@ -157,6 +159,7 @@ export function MapStack() {
       <Stack.Screen
         name="Dormitory"
         component={DormitoryScreen}
+        getId={({ params }) => dormNotificationView(params?.notificationView) ? 'resident-notification' : 'workspace'}
         options={{ title: '宿舍', headerShown: false }}
       />
       <Stack.Screen

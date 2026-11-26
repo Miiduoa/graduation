@@ -19,12 +19,14 @@ jest.mock('firebase/firestore', () => ({
   getDocs: jest.fn(),
   getDoc: jest.fn(),
 }));
+const fresh = { fromCache: false, hasPendingWrites: false, isEqual: jest.fn() };
 const row = (id: string, value: Record<string, unknown>) => ({ id, data: () => value });
 beforeEach(() => {
   jest.clearAllMocks();
-  jest
-    .mocked(listCourseMemberships)
-    .mockResolvedValue([{ groupId: 'course', name: 'Course', role: 'member' }] as never);
+  jest.mocked(listCourseMemberships).mockImplementation(async (_db, _uid, _school, onSnapshot) => {
+    onSnapshot?.(fresh);
+    return [{ id: 'course', groupId: 'course', name: 'Course', role: 'member' }];
+  });
 });
 test('submitted and unpublished assignments do not remain in the student inbox', async () => {
   jest
@@ -160,7 +162,7 @@ test.each([0, 14])('Today keeps an imminent quiz ahead of later assignments with
     row(`late-${i}`, { dueAt: due(-48 + i), allowLateSubmission: true }),
   );
   jest.mocked(getDocs).mockImplementation(async (path) => ({
-    empty: true,
+    metadata: fresh, empty: true,
     docs: String(path).endsWith('/assignments') ? [
       ...later, ...late, row('quiz', { type: 'quiz', dueAt: due(1) }),
       row('submitted', { dueAt: due(0.2) }), row('locked', { dueAt: due(-1) }),
@@ -170,7 +172,7 @@ test.each([0, 14])('Today keeps an imminent quiz ahead of later assignments with
     ] : [],
   }) as never);
   jest.mocked(getDoc).mockImplementation(async (path) => ({
-    exists: () => String(path).includes('/submitted/'), data: () => ({ submittedAt: new Date(now) }),
+    metadata: fresh, exists: () => String(path).includes('/submitted/'), data: () => ({ submittedAt: new Date(now) }),
   }) as never);
 
   const today = await listInboxTasks('alice', 'school-a', 'today');
@@ -178,23 +180,31 @@ test.each([0, 14])('Today keeps an imminent quiz ahead of later assignments with
   expect(today[0]).toMatchObject({ kind: 'quiz', assignmentId: 'quiz', groupId: 'course' });
   expect(today[1]?.assignmentId).toBe(lateCount ? 'late-0' : 'later-0');
   expect(today[13]?.assignmentId).toBe(lateCount ? 'late-12' : 'later-12');
+  const home = await loadStudentHome('alice', 'school-a', 'today');
+  expect(home.tasks).toEqual(today);
+  expect(home.tasksComplete).toBe(false);
   const submissionPaths = jest.mocked(getDoc).mock.calls.map(([path]) => String(path));
   expect(submissionPaths.filter((path) => /\/(?:locked|closed|too-old|undated|far)\//.test(path))).toEqual([]);
   expect(listCourseMemberships).toHaveBeenCalledWith(expect.anything(), 'alice', 'school-a');
 });
 
 test('Today reads only student coursework, even when the same user manages another course', async () => {
-  jest.mocked(listCourseMemberships).mockResolvedValue([
-    { id: 'study', groupId: 'study', name: '修習課程', role: 'member', unreadCount: 3 },
-    { id: 'teach', groupId: 'teach', name: '助教課程', role: 'moderator', unreadCount: 1 },
-  ]);
+  jest.mocked(listCourseMemberships).mockImplementation(async (_db, _uid, _school, onSnapshot) => {
+    onSnapshot?.(fresh);
+    return [
+      { id: 'study', groupId: 'study', name: '修習課程', role: 'member', unreadCount: 3 },
+      { id: 'teach', groupId: 'teach', name: '助教課程', role: 'moderator', unreadCount: 1 },
+    ];
+  });
   jest.mocked(getDocs).mockImplementation(async (path) => {
     expect(path).toBe('groups/study/assignments');
-    return { docs: [row('task', { dueAt: new Date(Date.now() + 60000).toISOString() })] } as never;
+    return { metadata: fresh,
+      docs: [row('task', { dueAt: new Date(Date.now() + 60000).toISOString() })] } as never;
   });
-  jest.mocked(getDoc).mockResolvedValue({ exists: () => false } as never);
+  jest.mocked(getDoc).mockResolvedValue({ metadata: fresh, exists: () => false } as never);
 
-  const { tasks } = await loadStudentHome('alice', 'school-a', 'today');
+  const { tasks, tasksComplete } = await loadStudentHome('alice', 'school-a', 'today');
+  expect(tasksComplete).toBe(true);
   expect(tasks.map((task) => task.id)).toEqual(['assignment-study-task']);
   expect(getDocs).toHaveBeenCalledTimes(1);
   expect(getDoc).toHaveBeenCalledTimes(1);
@@ -213,4 +223,32 @@ test('Today has no coursework reads before a school is selected or without a stu
   await expect(listInboxTasks('alice', 'school-a', 'today')).resolves.toEqual([]);
   expect(getDocs).not.toHaveBeenCalled();
   expect(getDoc).not.toHaveBeenCalled();
+});
+
+describe('server-confirmed coverage for the Today reminder', () => {
+  const cases = (['membership', 'assignment', 'submission'] as const).flatMap(source =>
+    (['cached', 'pending', 'missing', 'fresh'] as const).map(state => [source, state] as const));
+  test.each(cases)('%s is %s', async (affected, state) => {
+    const metadata = (source: typeof affected) => {
+      if (source === affected && state === 'missing') return undefined;
+      return { fromCache: source === affected && state === 'cached', hasPendingWrites: source === affected && state === 'pending' };
+    };
+    // Read all three snapshots through the production membership and inbox readers.
+    const workspace = jest.requireActual<typeof import('../services/courseWorkspace')>('../services/courseWorkspace');
+    jest.mocked(listCourseMemberships).mockImplementation(workspace.listCourseMemberships);
+    jest.mocked(getDocs).mockImplementation(async path => {
+      if (String(path) === 'users/alice/groups') return { metadata: metadata('membership'),
+        docs: [row('course', { name: '修習課程', schoolId: 'school-a', type: 'course', role: 'member', status: 'active' })] } as never;
+      expect(path).toBe('groups/course/assignments');
+      return { metadata: metadata('assignment'),
+        docs: [row('task', { title: '素描', dueAt: new Date(Date.now() + 60000).toISOString() })] } as never;
+    });
+    jest.mocked(getDoc).mockResolvedValue({ metadata: metadata('submission'), exists: () => false } as never);
+    const home = await loadStudentHome('alice', 'school-a', 'today');
+    expect(home.tasks.map(task => task.title)).toEqual(['素描']);
+    expect(home.tasksComplete).toBe(state === 'fresh');
+    expect(getDocs).toHaveBeenCalledTimes(2);
+    expect(getDoc).toHaveBeenCalledTimes(1);
+    expect(getDoc).toHaveBeenCalledWith('groups/course/assignments/task/submissions/alice');
+  });
 });

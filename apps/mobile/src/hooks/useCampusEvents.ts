@@ -18,7 +18,7 @@ type State = {
   failedAction: 'refresh' | 'more';
 };
 
-export function useCampusEvents() {
+export function useCampusEvents(browseOpened = true) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user } = useAuth();
   const { school } = useSchool();
@@ -109,12 +109,12 @@ export function useCampusEvents() {
 
   useEffect(() => {
     mounted.current = true;
-    void load('refresh');
+    if (browseOpened) void load('refresh');
     return () => {
       mounted.current = false;
       if (activeRequest.current?.scope === scope) activeRequest.current = null;
     };
-  }, [scope, load]);
+  }, [scope, load, browseOpened]);
 
   const visibleState =
     state.scope === scope

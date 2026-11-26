@@ -37,12 +37,17 @@ function unavailable(
 
 /** Local azimuthal projection in meters: east is +x and north is -z. */
 export function buildCampusSpatialModel(locations: readonly MapLocation[]): CampusSpatialModel {
-  const seen = new Set<string>();
+  // Never choose an arbitrary first record for an ambiguous POI identity.
+  // Count before validation so an invalid duplicate cannot hide the conflict.
+  const counts = new Map<string, number>();
+  for (const location of locations) {
+    counts.set(location.id, (counts.get(location.id) ?? 0) + 1);
+  }
   const valid: MapLocation[] = [];
   let excludedCount = 0;
   for (const location of locations) {
     if (
-      typeof location.id !== 'string' || !location.id.trim() || seen.has(location.id) ||
+      typeof location.id !== 'string' || !location.id.trim() || counts.get(location.id) !== 1 ||
       typeof location.name !== 'string' || !location.name.trim() ||
       !Number.isFinite(location.lat) || Math.abs(location.lat) > 90 ||
       !Number.isFinite(location.lng) || Math.abs(location.lng) > 180 ||
@@ -53,7 +58,6 @@ export function buildCampusSpatialModel(locations: readonly MapLocation[]): Camp
       excludedCount += 1;
       continue;
     }
-    seen.add(location.id);
     valid.push(location);
   }
   if (!valid.length) return unavailable('no-locations', excludedCount);

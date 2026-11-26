@@ -6,11 +6,9 @@
 }
 .panel {
   min-width: 0;
-  padding: clamp(20px, 3vw, 32px);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 18px 0;
   overflow-wrap: anywhere;
+  border-top: 1px solid var(--border-strong);
 }
 .accountStack {
   display: grid;
@@ -31,6 +29,7 @@
 .sectionTitle {
   margin: 0;
   font-size: var(--font-h2-size);
+  font-family: var(--font-heading);
 }
 .sectionDescription {
   margin: 0;
@@ -68,11 +67,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 20px 24px;
+  padding: 14px 0;
   margin-bottom: 32px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  border-block: 1px solid var(--border-strong);
 }
 .studentCard:hover {
   border-color: var(--border-strong);
@@ -182,9 +179,11 @@
   margin-top: 6px;
 }
 .settings {
-  display: inline-block;
+  display: inline-flex;
   margin-top: 24px;
   color: var(--brand);
+  align-items: center;
+  min-height: 44px;
 }
 @media (max-width: 760px) {
   .layout {
@@ -193,6 +192,6 @@
   }
 }
 
-.socialAccess { padding: clamp(20px, 3vw, 32px); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.socialAccess { padding: 18px 0; border-top: 1px solid var(--border-strong); }
 .socialAccess h3 { margin: 0 0 8px; }
 .socialAccess p { color: var(--muted); margin: 0 0 16px; line-height: 1.7; }

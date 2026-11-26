@@ -261,6 +261,8 @@ test('my account uses the signed-in profile without invented grades, identity or
   expect(view.queryByText('開啟課表助理')).toBeNull();
   expect(view.queryByText(/王小明|3\.63|61%|78|明年 6 月|seed|示範工具|12 場/)).toBeNull();
   expect(view.queryByText('課程與成績')).toBeNull();
+  fireEvent.press(view.getByText('收藏的活動'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, '活動總覽', { saved: '1' });
   fireEvent.press(view.getByText('使用設定'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Settings');
   fireEvent.press(view.getByText('個人資料'));

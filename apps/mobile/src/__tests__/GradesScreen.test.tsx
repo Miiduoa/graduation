@@ -2,6 +2,7 @@ import React from 'react';
 import { ScrollView } from 'react-native';
 import { fireEvent, render } from '@testing-library/react-native';
 import { GradesScreen } from '../screens/GradesScreen';
+import { theme } from '../ui/theme';
 const mockListGrades = jest.fn();
 const mockGetGPA = jest.fn().mockResolvedValue(null);
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: { uid: 'student-a' } }) }));
@@ -62,4 +63,14 @@ test.each([[[]], [[{ id: 'a', courseName: '缺績點', courseId: 'a', credits: 3
   await view.findByText('累積 GPA');
   expect(view.getAllByText('未知').length).toBeGreaterThan(0);
   expect(view.queryByText('0.00')).toBeNull();
+});
+
+test('keeps pending school grades neutral and makes the source readable with the course link', async () => {
+  mockListGrades.mockResolvedValue([
+    { id: 'pending', courseId: 'c1', courseName: '專題討論', credits: 2, semester: '115_1',
+      letterGrade: '成績處理中', gradeSource: 'school-official' },
+  ]);
+  const view = render(<GradesScreen />);
+  expect(await view.findByText('成績處理中')).toHaveStyle({ color: theme.colors.muted });
+  expect(view.getByRole('link')).toHaveAccessibleName(/專題討論[\s\S]*校方正式[\s\S]*成績處理中/);
 });

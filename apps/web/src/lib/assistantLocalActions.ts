@@ -17,6 +17,7 @@ export type LocalAssistantResult = {
   kind: 'services' | 'academics' | 'personal' | 'schedule';
   content: string;
   serviceIds: AssistantServiceId[];
+  calendarEvents?: Array<{ id: string; title: string }>;
   courseworkTargets?: import('./assistantCoursework').AssistantCourseworkTarget[];
 };
 
@@ -47,10 +48,11 @@ export function answerAssistantLocally(
   }
   const schedule = parseLocalScheduleIntent(question);
   if (schedule) {
-    if (options.preferCampusReads) return null;
+    if (schedule.kind !== 'conflicts' && options.preferCampusReads) return null;
     const result = answerLocalSchedule(schedule, scope);
-    if (options.deferMissingSchedule && result.availability === 'missing') return null;
-    return { kind: 'schedule', content: result.content, serviceIds: result.serviceIds };
+    if (schedule.kind !== 'conflicts' && options.deferMissingSchedule && result.availability === 'missing') return null;
+    return { kind: 'schedule', content: result.content, serviceIds: result.serviceIds,
+      ...(result.calendarEvents ? { calendarEvents: result.calendarEvents } : {}) };
   }
   const academic = parseImportedAcademicIntent(question);
   if (!academic) return null;

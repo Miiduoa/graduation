@@ -11,6 +11,8 @@ import {
   type AcademicTransaction,
   type SchoolDataSnapshot,
 } from './academicRecordsHandlers';
+import { decodeLmsSubmissions, encodeLmsSnapshot } from '../tronClassLmsSnapshot';
+import { LMS_SNAPSHOT_VERSION } from '../tronClassLmsTypes';
 import type { LmsReadonlySource } from './tronClassLmsSource';
 import type {
   LmsAnnouncementItem,
@@ -34,7 +36,6 @@ import {
   homeworkDescriptionText,
   homeworkPageAdvance,
   isAnnouncementActivityType,
-  isHomeworkSubmitted,
   isMaterialActivityType,
   isUploadDownloadable,
   tronClassActivityHref,
@@ -147,7 +148,7 @@ function parseHomework(
     title,
     deadline,
     deadlineLabel: formatHomeworkDeadlineTaipei(deadline),
-    submitted: isHomeworkSubmitted(row),
+    submitted: typeof row.submitted === 'boolean' ? row.submitted : null,
     description: homeworkDescriptionText(data.description ?? row.description),
     href: tronClassActivityHref(course.id, id),
   };
@@ -474,7 +475,8 @@ function publicSnapshot(value: unknown, uid: string, nowMs: number): LmsReadonly
   const cache = record(row.cache);
   // An old or partial cache document must not make the course page fail with a
   // server error. Treat it as a miss so the live session can fetch fresh data.
-  if (row.success !== true || row.ownerUid !== uid || row.schoolId !== 'pu' || row.source !== 'pu-tronclass' ||
+  if (row.schemaVersion !== LMS_SNAPSHOT_VERSION || row.success !== true || row.ownerUid !== uid ||
+    row.schoolId !== 'pu' || row.source !== 'pu-tronclass' ||
     typeof row.fetchedAt !== 'string' || !Number.isFinite(Date.parse(row.fetchedAt)) ||
     typeof cache.hit !== 'boolean' ||
     typeof cache.expiresAt !== 'string' || !cacheStillFresh(cache.expiresAt, nowMs) ||
@@ -508,7 +510,11 @@ function publicSnapshot(value: unknown, uid: string, nowMs: number): LmsReadonly
     row.courseErrors as LmsCourseError[],
     row.upcomingCoursesError as LmsReadonlySnapshot['upcomingCoursesError'],
   ) <= nowMs) return null;
-  return { ...row, courses } as LmsReadonlySnapshot;
+  try {
+    return { ...row, ...decodeLmsSubmissions(row), courses } as LmsReadonlySnapshot;
+  } catch {
+    return null;
+  }
 }
 
 // A 401 can be returned as a per-feed failure rather than a thrown session error.
@@ -575,7 +581,7 @@ export function createTronClassLmsHandler({
   source: LmsReadonlySource;
   now?: () => number;
 }) {
-  return async (request: CallableRequest): Promise<LmsReadonlySnapshot> => {
+  return async (request: CallableRequest) => {
     if (!isSchoolLmsReadonlyEnabled()) {
       throw new HttpsError('not-found', '玩課雲唯讀功能未啟用。');
     }
@@ -673,7 +679,7 @@ export function createTronClassLmsHandler({
               fetchedAt: snapshot.fetchedAt,
               expiresAt: preserveExisting
                 ? new Date(now() + PARTIAL_COURSE_RETRY_MS) : new Date(snapshot.cache.expiresAt),
-              snapshot,
+              snapshot: encodeLmsSnapshot(snapshot),
               extras,
             });
           });
@@ -706,10 +712,10 @@ export function createTronClassLmsHandler({
           await saveCache(cachedHomework);
           await verifyLinkedSession();
         }
-        return {
+        return encodeLmsSnapshot({
           ...mergeExtras(cachedHomework, extras),
           cache: { hit: true, expiresAt: cachedHomework.cache.expiresAt },
-        };
+        });
       }
 
       let snapshot = cachedHomework;
@@ -753,6 +759,7 @@ export function createTronClassLmsHandler({
           courseErrors, upcomingCoursesError,
         )).toISOString();
         snapshot = {
+          schemaVersion: LMS_SNAPSHOT_VERSION,
           success: true,
           ownerUid: uid,
           schoolId: 'pu',
@@ -796,7 +803,7 @@ export function createTronClassLmsHandler({
       }
       // Do not return the old session's data if the user relinked during the write.
       await verifyLinkedSession();
-      return merged;
+      return encodeLmsSnapshot(merged);
     } catch (error) {
       if (error instanceof HttpsError) throw error;
       // Some adapters throw raw HTTP errors instead of returning { ok: false }.

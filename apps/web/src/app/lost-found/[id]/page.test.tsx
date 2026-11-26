@@ -111,8 +111,12 @@ it('opens with the campus photo and waits for a click before connecting to an ex
 it('shows owner edit and confirm-resolve, and confirms authoritative resolve receipt', async () => {
   await renderDetail();
   expect(await screen.findByText('黑色雨傘')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '查看同類拾獲物' }).getAttribute('href')).toBe(
+    '/lost-found?schoolId=pu&source=school&type=found&category=other&status=open',
+  );
   expect(screen.getByText(/聯絡方式會顯示給所有已登入使用者/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '編輯' }));
+  expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
   expect(screen.getByTestId('lost-found-tag').contains(screen.getByLabelText('標題'))).toBe(false);
   fireEvent.change(screen.getByLabelText('標題'), { target: { value: '黑色折疊傘' } });
   vi.mocked(updateLostFoundItem).mockResolvedValueOnce({
@@ -148,6 +152,7 @@ it('shows owner edit and confirm-resolve, and confirms authoritative resolve rec
     expect(resolveLostFoundItem).toHaveBeenCalledWith('item-1', 'pu', '2026-10-20T03:00:00.000Z'),
   );
   expect(await screen.findByText('已確認結案。')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
 });
 
 it('keeps legacy reporterId-only records read-only without owner controls', async () => {
@@ -206,6 +211,7 @@ it('hides owner actions for another account and ignores late loads after switch'
     finishBob(owned);
   });
   expect(await screen.findByText('黑色雨傘')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: 'nuni 建議' })).toBeNull();
   expect(screen.queryByRole('button', { name: '編輯' })).toBeNull();
 });
 

@@ -104,7 +104,7 @@ async def scenario(page, name):
 
 async def check_journey(page, config, report):
     product = page.locator('[data-product="first-value"]')
-    welcome = product.get_by_role('heading', name='先把課表放進來。', exact=True)
+    welcome = product.get_by_role('heading', name='建立第一份課表', exact=True)
     starter = product.get_by_role('link', name='匯入我的課表', exact=True)
     await expect(welcome).to_be_visible()
     await expect(starter).to_have_count(1)
@@ -288,7 +288,7 @@ async def check_journey(page, config, report):
     report['checks'].append('Product rows and destinations update after synthetic account/campus changes; old classes, work and notifications disappear')
 
     await scenario(page, '未選校園')
-    await expect(product.get_by_role('heading', name='先選擇你的校園。', exact=True)).to_be_visible()
+    await expect(product.get_by_role('heading', name='選擇課表所屬校園', exact=True)).to_be_visible()
     await expect(product.get_by_role('link', name='選校園、整理課表', exact=True)).to_have_attribute('href', '/timetable?campus=all')
     await expect(product.get_by_role('link', name='登入查看作業與通知')).to_have_count(0)
     await shortcuts(page, 'all', report)

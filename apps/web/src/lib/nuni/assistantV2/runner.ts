@@ -12,6 +12,7 @@ import { formatPublicCampusRead } from './publicCampus';
 import { formatCampusMapRead, parseCampusMapArguments, parseCampusMapResult } from './campusMap';
 import { formatPublicSocialRead, parsePublicSocialResult } from './publicSocial';
 import { formatSchoolInfoRead, parseSchoolInfoResult } from './schoolInfo';
+import { formatLibraryCatalogRead, parseLibraryCatalogResult } from './libraryCatalog';
 import { isRoleWorkspaceTool, parseRoleWorkspaceResult, formatRoleWorkspaceResult,
   roleWorkspaceModelSummary, roleWorkspaceGuidance, ROLE_WORKSPACE_TIMEOUT_MS } from './roleWorkspaceReads';
 import { connectedServiceClauses, connectedServiceRead, connectedServiceReadKey, connectedServiceReads, publicPostActionRequested } from './connectedServiceReads';
@@ -251,7 +252,10 @@ export async function run(input: RunInput) {
   const requiredReads = !input.planRevision && !hasPublicClause && !hasConnectedReads && !reads.length && !writeIntent(executionQuestion) && !personalSlotSelect(executionQuestion)
     ? informationReads(executionQuestion, now).filter(read => allowed(read.name)) : [];
   const informationResults: InformationResult[] = [];
-  const campusPrelude = input.planRevision ? null : campusInfoPrelude(executionQuestion);
+  const preludeKind = input.planRevision ? null : campusInfoPrelude(executionQuestion);
+  // The exact library directory read replaces the generic library shortcut; a route request keeps its own prelude.
+  const campusPrelude = preludeKind === 'library' && requestedConnectedReads.some(read => read.tool === 'get_library_catalog')
+    ? null : preludeKind;
   const signal = AbortSignal.any([
     input.signal,
     AbortSignal.timeout(input.previewDeadlineMs ?? 55000),
@@ -450,6 +454,7 @@ export async function run(input: RunInput) {
         try {
           if (isRoleWorkspaceTool(tool)) parseRoleWorkspaceResult(tool, result, input.binding.schoolId, request.args);
           else if (tool === 'get_public_social') parsePublicSocialResult(result, input.binding.schoolId, request.args);
+          else if (tool === 'get_library_catalog') parseLibraryCatalogResult(result, input.binding.schoolId, request.args);
           else parseSchoolInfoResult(result, input.binding.schoolId, request.args);
           return true;
         } catch { return false; }
@@ -1257,6 +1262,15 @@ export function partialAnswer(
           : formatSchoolInfoRead(read as ReturnType<typeof parseSchoolInfoResult>));
         pages.add(read.href);
       } catch { /* Unverified public content cannot contribute facts or links. */ }
+      continue;
+    }
+    if (e.tool === 'get_library_catalog') {
+      try {
+        const schoolId = typeof result.schoolId === 'string' ? result.schoolId : '';
+        const read = parseLibraryCatalogResult(result, schoolId, result.query);
+        lines.push(formatLibraryCatalogRead(read));
+        pages.add(read.href);
+      } catch { /* An unverified library payload cannot contribute names or URLs. */ }
       continue;
     }
     if (e.tool === 'get_public_courses') {
