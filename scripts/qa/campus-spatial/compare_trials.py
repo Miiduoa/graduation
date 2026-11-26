@@ -180,6 +180,13 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
         else:
             grouped[values][int(repeat)] = records
 
+    # A scenario represents one fixed set of conditions across all repeats.
+    # Do not publish a three-repeat subset if a later complete repeat used a
+    # different device, task, source or other cohort condition.
+    cohort_counts: dict[str, int] = defaultdict(int)
+    for metadata in grouped:
+        cohort_counts[metadata[0]] += 1
+
     ready: list[dict] = []
     for metadata, repeats in sorted(grouped.items()):
         if metadata[0] in blocked_scenarios:
@@ -187,6 +194,10 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
             # an earlier subset already passed the minimum sample count.
             pending.append({"scenario_id": metadata[0], "repeats": sorted(repeats),
                             "reasons": ["another repeat in this scenario is incomplete or invalid; no partial-cohort metrics"]})
+            continue
+        if cohort_counts[metadata[0]] > 1:
+            pending.append({"scenario_id": metadata[0], "repeats": sorted(repeats),
+                            "reasons": ["scenario conditions changed across repeats; no partial-cohort metrics"]})
             continue
         if len(repeats) < MIN_REPEATS:
             pending.append({"scenario_id": metadata[0], "repeats": sorted(repeats),
