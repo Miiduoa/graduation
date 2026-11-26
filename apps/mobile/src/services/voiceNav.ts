@@ -20,22 +20,31 @@ const REPLAY_GUARD_MS = 8000;
 
 type SpeechModule = {
   speak?: (text: string, options?: any) => void;
-  stop?: () => void;
+  stop?: () => void | Promise<void>;
 };
 
 let _muted = false;
 let _muteLoaded = false;
+let _muteLoad: Promise<void> | null = null;
+let _muteWrite: Promise<void> = Promise.resolve();
 let _lastSpoken: { text: string; at: number } | null = null;
 
-async function ensureMuteLoaded() {
+async function ensureMuteLoaded(): Promise<void> {
   if (_muteLoaded) return;
-  try {
-    const v = await AsyncStorage.getItem(MUTE_KEY);
-    _muted = v === '1';
-  } catch {
-    _muted = false;
+  // Share the first disk read and never overwrite a newer user choice.
+  if (!_muteLoad) {
+    _muteLoad = (async () => {
+      try {
+        const value = await AsyncStorage.getItem(MUTE_KEY);
+        if (!_muteLoaded) _muted = value === '1';
+      } catch {
+        // Keep the current in-memory preference if storage is unavailable.
+      } finally {
+        _muteLoaded = true;
+      }
+    })();
   }
-  _muteLoaded = true;
+  await _muteLoad;
 }
 
 function loadSpeech(): SpeechModule | null {
@@ -55,18 +64,23 @@ export async function isMuted(): Promise<boolean> {
 export async function setMuted(value: boolean): Promise<void> {
   _muted = value;
   _muteLoaded = true;
-  try {
-    await AsyncStorage.setItem(MUTE_KEY, value ? '1' : '0');
-  } catch {}
-  if (value) {
-    loadSpeech()?.stop?.();
-  }
+  // Serialize writes so a slow earlier choice cannot become the final saved value.
+  _muteWrite = _muteWrite
+    .then(() => AsyncStorage.setItem(MUTE_KEY, value ? '1' : '0'))
+    .catch(() => {
+      // Storage failure must not undo the live preference or block future writes.
+    });
+  const write = _muteWrite;
+  // Stop immediately, rather than waiting for storage (which may be slow).
+  if (value) stop();
+  await write;
 }
 
 export async function toggleMute(): Promise<boolean> {
   await ensureMuteLoaded();
-  await setMuted(!_muted);
-  return _muted;
+  const next = !_muted;
+  await setMuted(next);
+  return next;
 }
 
 /**
@@ -88,7 +102,7 @@ export async function speak(text: string, opts?: { force?: boolean }): Promise<v
     return;
   }
   try {
-    Speech.stop?.();
+    void Promise.resolve(Speech.stop?.()).catch(() => {});
     Speech.speak(text, { language: 'zh-TW', pitch: 1.0, rate: 1.0 });
   } catch (err) {
     if (__DEV__) console.warn('[voiceNav] speak failed', err);
@@ -96,7 +110,12 @@ export async function speak(text: string, opts?: { force?: boolean }): Promise<v
 }
 
 export function stop(): void {
-  loadSpeech()?.stop?.();
+  try {
+    // Native stop may reject asynchronously; it must not break mute persistence.
+    void Promise.resolve(loadSpeech()?.stop?.()).catch(() => {});
+  } catch {
+    // Speech may be unavailable on this runtime.
+  }
 }
 
 // ═════════════════════════════════════════════════════
