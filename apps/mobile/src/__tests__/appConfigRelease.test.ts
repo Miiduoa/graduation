@@ -154,4 +154,14 @@ describe('Android activity recognition and versionCode', () => {
       'ANDROID_VERSION_CODE must be greater than 8',
     );
   });
+
+  it('keeps campus navigation motion sensors without Pedometer', () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, '../screens/ARNavigationScreen.tsx'),
+      'utf8',
+    );
+    expect(source).toMatch(/import \{ Magnetometer, Accelerometer \} from 'expo-sensors'/);
+    expect(source).not.toMatch(/\bPedometer\b/);
+    expect(source).not.toMatch(/\bDeviceMotion\b/);
+  });
 });
