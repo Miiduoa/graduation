@@ -181,6 +181,33 @@ describe('read-only student submission history', () => {
     expect(() => normalize([submission], metadata)).toThrow();
   });
 
+  it.each([
+    { error: 'synthetic-error' }, { errors: [] }, { success: false },
+    { status: 401 }, { unknown: null },
+  ])('rejects mixed or unknown history envelopes rather than reporting an empty or complete history: %j', extras => {
+    for (const rows of [[], [submission]]) {
+      expect(() => normalize(rows, extras)).toThrowError('TRONCLASS_HISTORY_UNAVAILABLE');
+    }
+  });
+
+  it('accepts only consistent known completeness fields', () => {
+    expect(normalize([], { total: 0, has_next: false, next_page: null }))
+      .toEqual(normalize([]));
+    expect(normalize([submission], { total: 1, has_next: false, next_page: null }))
+      .toEqual(normalize([submission]));
+  });
+
+  it('rejects an inherited history list and hidden or symbolic envelope fields', () => {
+    for (const value of [
+      Object.create({ list: [] }),
+      Object.defineProperty({ list: [] }, 'hidden', { value: true }),
+      { list: [], [Symbol('synthetic')]: true },
+    ]) {
+      expect(() => normalizeTronClassSubmissionHistory(value, binding, scope, now))
+        .toThrowError('TRONCLASS_HISTORY_UNAVAILABLE');
+    }
+  });
+
   it('bounds result size and does not silently truncate a longer history', () => {
     expect(() => normalize(Array.from({ length: 101 }, (_, i) => ({ ...submission, id: i + 1, is_latest_version: false })))).toThrow();
   });
