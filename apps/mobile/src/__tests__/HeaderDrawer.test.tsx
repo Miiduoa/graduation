@@ -119,7 +119,10 @@ test('waits for the close animation, then performs only the first selected desti
   const panel = view.getByTestId('header-drawer-panel');
   expect(panel).toBeTruthy();
   expect(panel.props.collapsable).toBe(false);
-  expect(panel.props.style).toEqual(expect.objectContaining({ flex: 1 }));
+  expect(panel.props.style).toEqual(expect.objectContaining({ flex: 1, flexDirection: 'row' }));
+  const sheet = view.getByTestId('header-drawer-sheet');
+  expect(sheet.props.collapsable).toBe(false);
+  expect(sheet.props.style).toEqual(expect.objectContaining({ flex: 1 }));
   const identity = view.getByTestId('header-drawer-identity');
   expect(identity.props.accessible).toBe(true);
   expect(identity.props.accessibilityLabel).toBe('測試同學');
@@ -256,15 +259,15 @@ test('enabling reduced motion during a close settles the selected action once an
 
 test('rotation and split view resize the drawer and preserve exactly one pending destination', () => {
   const view = openDrawer();
-  expect(view.getByTestId('header-drawer-panel')).toHaveStyle({ width: 331.5 });
+  expect(view.getByTestId('header-drawer-sheet')).toHaveStyle({ width: 331.5 });
   dimensions = { ...dimensions, width: 320, fontScale: 2 };
   view.rerender(<HeaderDrawerHost />);
-  expect(view.getByTestId('header-drawer-panel')).toHaveStyle({ width: 272 });
+  expect(view.getByTestId('header-drawer-sheet')).toHaveStyle({ width: 272 });
   fireEvent.press(view.getByRole('button', { name: '一般設定' }));
   const staleExit = latestTransition();
   dimensions = { ...dimensions, width: 844, height: 390 };
   view.rerender(<HeaderDrawerHost />);
-  expect(view.getByTestId('header-drawer-panel')).toHaveStyle({ width: 360 });
+  expect(view.getByTestId('header-drawer-sheet')).toHaveStyle({ width: 360 });
   act(() => staleExit.complete());
   expectNoNavigation();
   act(() => latestTransition().complete());

@@ -252,7 +252,14 @@ export function HeaderDrawerHost() {
       onRequestClose={handleClose}
       statusBarTranslucent
     >
-      <View style={{ flex: 1, flexDirection: 'row' }}>
+      {/* testID must sit on a non-animated, non-transformed View. Maestro's iOS
+          id query skips Animated.View (and its descendants) inside Modal even
+          though the debug dump still lists header-drawer-panel. */}
+      <View
+        testID="header-drawer-panel"
+        collapsable={false}
+        style={{ flex: 1, flexDirection: 'row' }}
+      >
         {/* 抽屜本體 */}
         <Animated.View
           collapsable={false}
@@ -271,9 +278,7 @@ export function HeaderDrawerHost() {
             }),
           }}
         >
-          {/* testID must sit on a non-animated View. Maestro's iOS id query skips
-              Animated.View inside Modal even though the debug dump still lists it. */}
-          <View testID="header-drawer-panel" collapsable={false} style={{ flex: 1, width: drawerWidth }}>
+          <View testID="header-drawer-sheet" collapsable={false} style={{ flex: 1, width: drawerWidth }}>
           <ScrollView
             contentContainerStyle={{
               paddingBottom: insets.bottom + theme.space.section,
