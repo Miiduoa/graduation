@@ -31,7 +31,7 @@ import {
   providencePlaceSourceUrl,
   walkingEstimateLabel,
   withProvidenceCampusPlaces,
-} from '@campus/shared/src/providenceCampus';
+} from '@campus/shared/src/providenceCampusMap';
 import {
   buildCampusMapHtml,
   buildWalkingDirectionsUrl,

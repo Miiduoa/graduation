@@ -3,7 +3,7 @@ import {
   PROVIDENCE_CAMPUS_PLACES,
   providencePlaceSourceUrl,
   type CampusMapPlaceLike,
-} from './providenceCampus';
+} from './providenceCampusMap';
 
 export const MAX_CAMPUS_CLASSROOM_QUERY_LENGTH = 120;
 /** Category labels may carry long parenthetical annotations; do not reuse the
