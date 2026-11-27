@@ -142,9 +142,8 @@ export function AIScreen({
   useVisualTheme();
   const defaultPadding = useTabBarContentBottomPadding();
   const insets = useSafeAreaInsets();
-  const tabBarPadding = bottomPadding ?? defaultPadding;
   return (
-    <View style={{ flex: 1, backgroundColor: aiTokens.bg, paddingBottom: tabBarPadding }}>
+    <View style={{ flex: 1, backgroundColor: aiTokens.bg }}>
       <ScrollView
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
@@ -153,7 +152,7 @@ export function AIScreen({
         keyboardDismissMode={keyboardDismissMode}
         automaticallyAdjustKeyboardInsets={automaticallyAdjustKeyboardInsets}
         contentContainerStyle={[
-          { paddingTop: insets.top, paddingBottom: 24 },
+          { paddingTop: insets.top, paddingBottom: bottomPadding ?? defaultPadding },
           contentContainerStyle,
         ]}
       >
@@ -247,6 +246,7 @@ export function AISection({
 // ──────────────────────────────────────────────
 export function AICard({
   title,
+  titleTestID,
   icon,
   badge,
   badgeTone = 'ai',
@@ -259,6 +259,7 @@ export function AICard({
   style,
 }: {
   title?: string;
+  titleTestID?: string;
   icon?: string;
   badge?: string;
   badgeTone?: 'ai' | 'success' | 'warning' | 'danger' | 'muted';
@@ -292,7 +293,18 @@ export function AICard({
               <Text style={{ fontSize: 15 }}>{icon}</Text>
             </View>
           ) : null}
-          {title ? <Text style={styles.cardTitle}>{title}</Text> : <View style={{ flex: 1 }} />}
+          {title ? (
+            <Text
+              testID={titleTestID}
+              accessibilityRole="header"
+              accessibilityLabel={title}
+              style={styles.cardTitle}
+            >
+              {title}
+            </Text>
+          ) : (
+            <View style={{ flex: 1 }} />
+          )}
           {badge ? (
             badgeStyle.isStatus ? (
               <View style={[styles.cardBadge, { backgroundColor: badgeStyle.bg }]}>

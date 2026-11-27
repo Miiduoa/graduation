@@ -18,13 +18,15 @@ type ListRowProps = {
   subtitle?: string;
   onPress?: () => void;
   first?: boolean;
+  testID?: string;
   styles: ReturnType<typeof createStyles>;
 };
 
-function AccountRow({ title, subtitle, onPress, first, styles: s }: ListRowProps) {
+function AccountRow({ title, subtitle, onPress, first, testID, styles: s }: ListRowProps) {
   return (
     <Pressable
       accessible
+      testID={testID}
       accessibilityRole="button"
       accessibilityLabel={title}
       accessibilityHint={subtitle}
@@ -209,6 +211,7 @@ export default function MeAiFirstScreen() {
         <View style={s.list}>
           <AccountRow
             first
+            testID="me-open-settings"
             title="使用設定"
             subtitle="外觀、通知、助理權限與資料管理"
             onPress={go('Settings')}

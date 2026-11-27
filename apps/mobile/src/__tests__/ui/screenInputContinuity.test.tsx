@@ -75,8 +75,7 @@ test('caller keyboard policies and bottom spacing survive the shared defaults', 
   const [landing, detail] = view.UNSAFE_getAllByType(ScrollView);
   expect(landing.props.keyboardShouldPersistTaps).toBe('never');
   expect(landing.props.keyboardDismissMode).toBe('none');
-  expect(StyleSheet.flatten(landing.props.contentContainerStyle).paddingBottom).toBe(24);
-  expect(StyleSheet.flatten(landing.parent?.props.style).paddingBottom).toBe(140);
+  expect(StyleSheet.flatten(landing.props.contentContainerStyle).paddingBottom).toBe(140);
   expect(detail.props.keyboardShouldPersistTaps).toBe('always');
   expect(detail.props.keyboardDismissMode).toBe('on-drag');
   expect(detail.props.contentContainerStyle.paddingBottom).toBe(160);

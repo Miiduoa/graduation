@@ -85,7 +85,10 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
       keyboardShouldPersistTaps="handled"
       onBack={() => navigation?.goBack?.()}
     >
-      <AICard title={uid ? '目前登入帳號' : '尚未登入'}>
+      <AICard
+        title={uid ? '目前登入帳號' : '尚未登入'}
+        titleTestID="settings-current-account"
+      >
         <View style={{ gap: 8 }}>
           <Text style={{ color: aiTokens.text, fontSize: 17, fontWeight: '600' }}>
             {uid

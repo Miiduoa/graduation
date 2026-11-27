@@ -7,13 +7,17 @@ tags: [smoke, settings]
     id: tab-我的
 - scrollUntilVisible:
     element:
-      text: '使用設定'
+      id: me-open-settings
     direction: DOWN
+    centerElement: true
     timeout: 20000
-- tapOn: '使用設定'
+- tapOn:
+    id: me-open-settings
 - extendedWaitUntil:
-    visible: '目前登入帳號'
+    visible:
+      id: settings-current-account
     timeout: 15000
+- assertVisible: '目前登入帳號'
 - assertVisible: '測試學生甲'
 - scrollUntilVisible:
     element:
