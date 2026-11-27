@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
-from playwright.async_api import async_playwright, expect
+from playwright.async_api import Error as PlaywrightError, async_playwright, expect
 
 ROOT = Path(__file__).resolve().parents[3]
 OUTPUT = ROOT / 'artifacts' / 'first-value'
@@ -115,7 +115,7 @@ async def check_journey(page, config, report):
     await expect(page.get_by_test_id('today-notifications')).to_contain_text('alpha 的 ntu 合成通知')
     await shortcuts(page, 'ntu', report)
     await geometry(page, report, 'signed-in-setup')
-    await page.screenshot(path=str(OUTPUT / f"{config['name']}-setup.png"), full_page=True)
+    await capture_evidence(page, OUTPUT / f"{config['name']}-setup.png")
     report['checks'].append('Confirmed empty setup gives one primary action, hides duplicate empty sections and retains actual notification UI')
 
     # Native Tab movement verifies order and focus visibility without clicks.
@@ -198,7 +198,7 @@ async def check_journey(page, config, report):
     await expect(draft).to_have_value('合成草稿：等等再整理明天的安排。')
     await shortcuts(page, 'ntu', report)
     await geometry(page, report, 'known-work-first')
-    await page.screenshot(path=str(OUTPUT / f"{config['name']}-known-work.png"), full_page=True)
+    await capture_evidence(page, OUTPUT / f"{config['name']}-known-work.png")
     report['checks'].append('Known assignment stays first with its actual submission destination and persistent public services')
 
     await scenario(page, '已有作業背景更新')
@@ -320,6 +320,17 @@ async def check_journey(page, config, report):
     assert state['navigations'][-1] == href, state
     assert not state['requests'], state
     report['checks'].append('Keyboard activation follows the rendered campus-scoped href without external data requests')
+
+
+async def capture_evidence(page, path):
+    # Chromium can fail a capture even after the layout assertion succeeds.
+    # Require the same full-page evidence; retry only this protocol error once.
+    try:
+        await page.screenshot(path=str(path), full_page=True)
+    except PlaywrightError as error:
+        if 'Page.captureScreenshot' not in str(error) or 'Unable to capture screenshot' not in str(error):
+            raise
+        await page.screenshot(path=str(path), full_page=True)
 
 
 async def capture_failure(page, config, report, error):
