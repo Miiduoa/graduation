@@ -106,12 +106,19 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       return;
     }
 
-    const timer = setTimeout(resolve, ms);
-
-    signal?.addEventListener('abort', () => {
+    const onAbort = () => {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       reject(new Error('Aborted'));
-    });
+    };
+
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+
+    signal?.addEventListener('abort', onAbort);
+    if (signal?.aborted) onAbort();
   });
 }
 
