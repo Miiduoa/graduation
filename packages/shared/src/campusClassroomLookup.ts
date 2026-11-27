@@ -546,9 +546,13 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     // A public name can claim the full query even when its place is ineligible
     // for classroom navigation. Catalog-only names and codes yield to that name.
     const publicNameQuery = comparablePublicName(rawQuery);
+    // Only names from the same bound school can veto a classroom fallback.
+    // An unreadable public-name batch cannot establish that the alias is unique.
     if (
+      !Array.isArray(publicNameLocations) ||
       publicNameLocations.some((location) =>
         location && typeof location === 'object' && location.id !== match.id &&
+        isCandidateInSchoolScope(location, school) &&
         comparablePublicName(location.name) === publicNameQuery
       )
     ) {
