@@ -133,6 +133,12 @@ export function createCampusSpatialScene(
   model: CampusSpatialModel,
   options: Options,
 ): CampusSpatialScene {
+  // Empty/oversized models have no anchor. Reject them before allocating scene
+  // resources or reading model.points[0], and let the caller keep its 2D fallback.
+  if (!model.points.length || model.unavailableReason) {
+    options.onError();
+    return { setView: () => {}, setActive: () => {}, dispose: () => {} };
+  }
   const root = document.createElement('div');
   Object.assign(root.style, { position: 'absolute', inset: '0', overflow: 'hidden' });
   const canvas = document.createElement('canvas');
@@ -627,10 +633,6 @@ export function createCampusSpatialScene(
   }
 
   try {
-    if (!model.points.length || model.unavailableReason) {
-      fail();
-      return { setView, setActive, dispose };
-    }
     renderer = new WebGLRenderer({ canvas, antialias: true, powerPreference: 'low-power' });
     const onContextLost = (event: Event) => { event.preventDefault(); fail(); };
     canvas.addEventListener('webglcontextlost', onContextLost);
