@@ -285,7 +285,9 @@ test('logout rejection remains on settings with retry and does not pretend to si
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
   fireEvent.press(view.getByText('登出學校帳號'));
   await act(async () => alert.mock.calls[0][2]?.find((item) => item.text === '確定登出')?.onPress?.());
+  expect(view.getByTestId('settings-logout-error').props.accessibilityRole).toBe('alert');
   expect(view.getByText('無法登出，請稍後重試。')).toBeTruthy();
+  expect(view.queryByTestId('settings-legal-error')).toBeNull();
   expect(view.getByText('登出學校帳號')).toBeTruthy();
   expect(navigation.navigate).not.toHaveBeenCalled();
 });
@@ -295,7 +297,36 @@ test('legal entries open configured documents and report opening failures', asyn
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
   await act(async () => fireEvent.press(view.getByText('隱私政策')));
   expect(open).toHaveBeenCalledWith('https://nuni.tw/privacy');
+  expect(view.getByTestId('settings-legal-error').props.accessibilityRole).toBe('alert');
   expect(view.getByText('無法開啟網頁，請確認網路連線後重試。')).toBeTruthy();
+  expect(view.queryByTestId('settings-logout-error')).toBeNull();
+});
+
+test('returning to the same school UID invalidates an earlier logout confirmation', async () => {
+  const alert = jest.spyOn(Alert, 'alert');
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  fireEvent.press(view.getByText('登出學校帳號'));
+  const previous = mockAuth.user;
+  mockAuth.user = { uid: 'student-b', email: 'student-b@example.edu' };
+  view.rerender(<SettingsAiFirstScreen navigation={navigation} />);
+  mockAuth.user = previous;
+  view.rerender(<SettingsAiFirstScreen navigation={navigation} />);
+  await act(async () => alert.mock.calls[0][2]?.find((item) => item.text === '確定登出')?.onPress?.());
+  expect(mockAuth.signOutWithWarning).not.toHaveBeenCalled();
+});
+
+test('late legal link rejection cannot reappear after switching away and returning to the same UID', async () => {
+  const pending = deferred<void>();
+  jest.spyOn(Linking, 'openURL').mockReturnValue(pending.promise);
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  fireEvent.press(view.getByText('隱私政策'));
+  const previous = mockAuth.user;
+  mockAuth.user = { uid: 'student-b', email: 'student-b@example.edu' };
+  view.rerender(<SettingsAiFirstScreen navigation={navigation} />);
+  mockAuth.user = previous;
+  view.rerender(<SettingsAiFirstScreen navigation={navigation} />);
+  await act(async () => pending.reject(new Error('offline')));
+  expect(view.queryByTestId('settings-legal-error')).toBeNull();
 });
 
 test('missing legal configuration is unavailable and signed-out users see no account actions', () => {
