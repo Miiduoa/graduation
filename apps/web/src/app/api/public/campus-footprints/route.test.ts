@@ -2372,4 +2372,54 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+
+  it.each([
+    { ageOffsetSeconds: -1, expectedStatus: 200 },
+    { ageOffsetSeconds: 0, expectedStatus: 503 },
+    { ageOffsetSeconds: 1, expectedStatus: 503 },
+  ])('honours provider backoff at the 48-hour replication boundary ($ageOffsetSeconds seconds)', async ({
+    ageOffsetSeconds, expectedStatus,
+  }) => {
+    const start = Date.parse('2026-11-27T12:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const timestamp = new Date(start - 48 * 60 * 60_000 - ageOffsetSeconds * 1000)
+        .toISOString().replace('.000Z', 'Z');
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(jsonResponse(JSON.stringify({
+          ...JSON.parse(osmPayload),
+          osm3s: { timestamp_osm_base: timestamp },
+        }), { status: 200, headers: { 'Retry-After': '3600' } }))
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+
+      const response = await GET();
+      expect(response.status).toBe(expectedStatus);
+      if (expectedStatus === 200) {
+        expect(response.headers.get('Cache-Control')).toBe('public, max-age=0, s-maxage=1');
+        expect(await response.json()).toMatchObject({ stale: false, osmBaseAt: timestamp });
+        expect(upstream).toHaveBeenCalledOnce();
+        return;
+      }
+
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(response.headers.get('Retry-After')).toBe('3600');
+      clock.mockReturnValue(start + 11 * 60_000);
+      const cooling = await GET();
+      expect(cooling.status).toBe(503);
+      expect(cooling.headers.get('Retry-After')).toBe('2940');
+      expect(upstream).toHaveBeenCalledOnce();
+
+      clock.mockReturnValue(start + 3601 * 1000);
+      const recovered = await GET();
+      expect(recovered.status).toBe(200);
+      expect((await recovered.json()).buildings).toHaveLength(1);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+
 });
