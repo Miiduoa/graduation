@@ -318,6 +318,9 @@ test('school success separates E-campus data from the TronClass course list', as
 
 test('guest landing exposes stable native smoke targets and follows shared light/dark colors', () => {
   const view = render(<LoginLandingScreen />);
+  const heading = view.getByRole('header', { name: 'Google 帳號' });
+  expect(heading.props.testID).toBe('login-google-account');
+  expect(heading).toHaveTextContent('Google 帳號');
   expect(view.getByTestId('login-landing')).toHaveStyle({
     backgroundColor: createLightTheme().colors.bg,
   });
@@ -472,6 +475,9 @@ test('an already displayed success dialog cannot navigate after its screen unmou
 test('a restored platform account has a return entry rather than another registration prompt', () => {
   mockPlatformAuth.session = { platformAccountId: 'pa-restored' };
   const view = render(<LoginLandingScreen />);
+  const heading = view.getByRole('header', { name: '我的 nuni' });
+  expect(heading.props.testID).toBe('login-google-account');
+  expect(heading).toHaveTextContent('我的 nuni');
   expect(view.getByRole('button', { name: '回到我的課程' })).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '開啟課表助理' }));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniTimetableAssistant');
