@@ -63,6 +63,18 @@ beforeEach(() => {
 });
 afterEach(() => jest.restoreAllMocks());
 
+test('settings rows keep their titles as native labels so the visible copy is findable', () => {
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  const accessibility = view.getByLabelText('無障礙設定');
+  expect(accessibility.props.testID).toBe('settings-accessibility');
+  expect(accessibility.props.accessibilityHint).toBe('查看裝置輔助功能與閱讀設定');
+  expect(view.getByText('無障礙設定')).toBeTruthy();
+  expect(view.getByLabelText('介面語言').props.testID).toBe('settings-language');
+  expect(view.getByLabelText('匯出我的資料').props.testID).toBe('settings-export-data');
+  fireEvent.press(accessibility);
+  expect(navigation.navigate).toHaveBeenCalledWith('AccessibilitySettings');
+});
+
 test('settings shows real account and version without fabricated permissions, devices or sync state', () => {
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
   expect(view.getByText('陳同學')).toBeTruthy();

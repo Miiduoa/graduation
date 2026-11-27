@@ -30,10 +30,15 @@ tags: [smoke, settings]
 - assertVisible: '目前使用淺色模式。'
 - scrollUntilVisible:
     element:
-      text: '無障礙設定'
+      id: settings-accessibility
     direction: DOWN
+    centerElement: true
     timeout: 20000
-- tapOn: '無障礙設定'
+- assertVisible:
+    id: settings-accessibility
+- assertVisible: '無障礙設定'
+- tapOn:
+    id: settings-accessibility
 - extendedWaitUntil:
     visible: '閱讀與操作'
     timeout: 10000
@@ -42,10 +47,15 @@ tags: [smoke, settings]
 - tapOn: '返回'
 - scrollUntilVisible:
     element:
-      text: '^介面語言$'
+      id: settings-language
     direction: DOWN
+    centerElement: true
     timeout: 20000
-- tapOn: '^介面語言$'
+- assertVisible:
+    id: settings-language
+- assertVisible: '介面語言'
+- tapOn:
+    id: settings-language
 - extendedWaitUntil:
     visible: 'English'
     timeout: 10000
@@ -55,10 +65,15 @@ tags: [smoke, settings]
 - tapOn: '返回'
 - scrollUntilVisible:
     element:
-      text: '匯出我的資料'
+      id: settings-export-data
     direction: DOWN
+    centerElement: true
     timeout: 20000
-- tapOn: '匯出我的資料'
+- assertVisible:
+    id: settings-export-data
+- assertVisible: '匯出我的資料'
+- tapOn:
+    id: settings-export-data
 - extendedWaitUntil:
     visible: '選擇內容，將資料保存到自己的裝置。'
     timeout: 10000
