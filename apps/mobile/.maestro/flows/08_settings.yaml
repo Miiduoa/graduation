@@ -78,10 +78,16 @@ tags: [smoke, settings]
     timeout: 20000
 - assertVisible:
     id: settings-export-data
+    enabled: true
 - assertVisible: '匯出我的資料'
 - tapOn:
     id: settings-export-data
+    enabled: true
 - extendedWaitUntil:
-    visible: '選擇內容，將資料保存到自己的裝置。'
+    visible:
+      id: data-export-scope
     timeout: 10000
+- assertVisible: '選擇內容，將資料保存到自己的裝置。'
+- assertNotVisible:
+    id: settings-export-data
 - takeScreenshot: data_export
