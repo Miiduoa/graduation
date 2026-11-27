@@ -91,7 +91,7 @@ const ALIGNMENT_MIN_DISTANCE_METRES = 0.5;
  */
 export function suggestBuildingPlanFloorAlignment(anchors: BuildingPlanFloorAlignmentAnchors): BuildingPlanFloorAlignmentResult {
   const points = [anchors.referenceA, anchors.referenceB, anchors.incomingA, anchors.incomingB];
-  if (!points.every(point => point && point.length === 2 && point.every(Number.isFinite))) {
+  if (!points.every(point => Array.isArray(point) && point.length === 2 && Number.isFinite(point[0]) && Number.isFinite(point[1]))) {
     return { ok: false, message: '請在兩份圖面各選兩個有效的對應角點。' };
   }
   const { referenceA, referenceB, incomingA, incomingB } = anchors as {
@@ -99,6 +99,9 @@ export function suggestBuildingPlanFloorAlignment(anchors: BuildingPlanFloorAlig
   };
   const referenceDistance = Math.hypot(referenceB[0] - referenceA[0], referenceB[1] - referenceA[1]);
   const incomingDistance = Math.hypot(incomingB[0] - incomingA[0], incomingB[1] - incomingA[1]);
+  if (!Number.isFinite(referenceDistance) || !Number.isFinite(incomingDistance)) {
+    return { ok: false, message: '對位點距離超出可計算範圍，請重新選擇角點。' };
+  }
   if (Math.min(referenceDistance, incomingDistance) < ALIGNMENT_MIN_DISTANCE_METRES) {
     return { ok: false, message: '每份圖面的 A、B 對位點至少要相距 0.5 公尺，請選不同且較遠的角點。' };
   }
@@ -114,9 +117,12 @@ export function suggestBuildingPlanFloorAlignment(anchors: BuildingPlanFloorAlig
     const errorMetres = Math.hypot(b[0] + offsetX - referenceB[0], b[1] + offsetY - referenceB[1]);
     return { rotationDegrees, offsetX, offsetY, errorMetres };
   });
-  options.sort((a, b) => a.errorMetres - b.errorMetres);
-  const best = options[0];
-  if (best.errorMetres > ALIGNMENT_TOLERANCE_METRES) {
+  const finiteOptions = options.filter(option =>
+    Number.isFinite(option.offsetX) && Number.isFinite(option.offsetY) && Number.isFinite(option.errorMetres),
+  );
+  finiteOptions.sort((a, b) => a.errorMetres - b.errorMetres);
+  const best = finiteOptions[0];
+  if (!best || best.errorMetres > ALIGNMENT_TOLERANCE_METRES) {
     return { ok: false, message: '兩組對位點無法以 90° 的倍數旋轉對齊（誤差超過 0.25 公尺）。請確認角點或改用手動位移與旋轉。' };
   }
   return { ok: true, ...best };
