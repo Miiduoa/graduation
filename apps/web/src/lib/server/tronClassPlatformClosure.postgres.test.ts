@@ -49,7 +49,7 @@ describe.skipIf(!port)('real PostgreSQL platform closure outbox', () => {
     control = await connect('tc_setup');
     await control.query(`CREATE SCHEMA ${schema}; CREATE TABLE ${schema}.platform_accounts (id text PRIMARY KEY, state text NOT NULL)`);
     await control.query("INSERT INTO platform_accounts (id, state) VALUES ($1,'active'),($2,'closed')", [a, c]);
-    const migration = await readFile(path.resolve(process.cwd(), '../../deploy/nuni-api/tronclass-account-closure/001_tronclass_account_closure_outbox.sql'), 'utf8');
+    const migration = await readFile(path.resolve(process.cwd(), '../../deploy/nuni-api/tronclass-account-closure/284_tronclass_account_closure_outbox.sql'), 'utf8');
     await control.query('BEGIN');
     try { await control.query(migration); await control.query('COMMIT'); }
     catch (error) { await control.query('ROLLBACK'); throw error; }

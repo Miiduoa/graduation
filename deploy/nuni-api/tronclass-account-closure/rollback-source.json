@@ -1,0 +1,14 @@
+{
+  "schema": "campus.tronclass-account-closure-compatible-rollback/v1",
+  "baseImageRegistry": "registry.fly.io/nuni-api",
+  "baseImageRevisionPrefix": "2e7cc189",
+  "digestBuildArg": "NUNI_API_PRODUCTION_DIGEST",
+  "forbiddenBaseDigests": [
+    "sha256:be815455fbb2ccce844b69f004e416e44465e3421f9da654d0cd5db8379c3dc2"
+  ],
+  "staleRollbackDockerfile": "deploy/nuni-api/composed/Dockerfile.rollback",
+  "migrations": {
+    "deploy/nuni-api/tronclass-account-closure/284_tronclass_account_closure_outbox.sql": "9c5057739cf89222bc69ee2bcbfffbf74b0705d522d4478f75fc01a2d826381a"
+  },
+  "behavior": "緊急相容回滾：現況正式映像加上相同 284 SQL；資料庫不倒退。不使用 be815455 或 composed/Dockerfile.rollback。"
+}
