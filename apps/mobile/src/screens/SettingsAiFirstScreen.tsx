@@ -58,12 +58,14 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
           ? '請確認連線，並前往 Google 帳號與連線管理登入狀態。'
           : '登入後管理個人資料';
   const profile = auth.profile?.uid === uid ? auth.profile : null;
-  const currentUid = useRef(uid);
-  currentUid.current = uid;
+  // A return to the same UID is still a new identity scope after a switch.
+  const identity = useRef({ uid });
+  if (identity.current.uid !== uid) identity.current = { uid };
+  const scope = identity.current;
   const mounted = useRef(true);
   const signingOut = useRef(false);
   const [busyUid, setBusyUid] = useState<string | null>(null);
-  const [error, setError] = useState<{ uid: string | undefined; message: string } | null>(null);
+  const [error, setError] = useState<{ scope: typeof scope; source: 'legal' | 'logout'; message: string } | null>(null);
   const busy = Boolean(uid && busyUid === uid);
   const version = Constants.expoConfig?.version;
   const privacyUrl = getLegalUrl('privacy');
@@ -85,13 +87,13 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
   };
   const openLegal = async (url: string | null) => {
     if (!url) return;
-    const requestedUid = uid;
+    const requestedScope = scope;
     setError(null);
     try {
       await Linking.openURL(url);
     } catch {
-      if (mounted.current && currentUid.current === requestedUid) {
-        setError({ uid: requestedUid, message: '無法開啟網頁，請確認網路連線後重試。' });
+      if (mounted.current && identity.current === requestedScope) {
+        setError({ scope: requestedScope, source: 'legal', message: '無法開啟網頁，請確認網路連線後重試。' });
       }
     }
   };
@@ -99,21 +101,22 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
   const confirmLogout = () => {
     if (!uid || signingOut.current) return;
     const requestedUid = uid;
+    const requestedScope = scope;
     Alert.alert('登出學校帳號', '確定要登出學校帳號嗎？不會登出 Google 帳號。', [
       { text: '取消', style: 'cancel' },
       {
         text: '確定登出',
         style: 'destructive',
         onPress: async () => {
-          if (!mounted.current || currentUid.current !== requestedUid || signingOut.current) return;
+          if (!mounted.current || identity.current !== requestedScope || signingOut.current) return;
           signingOut.current = true;
           setBusyUid(requestedUid);
           setError(null);
           try {
             await auth.signOutWithWarning();
           } catch {
-            if (mounted.current && currentUid.current === requestedUid) {
-              setError({ uid: requestedUid, message: '無法登出，請稍後重試。' });
+            if (mounted.current && identity.current === requestedScope) {
+              setError({ scope: requestedScope, source: 'logout', message: '無法登出，請稍後重試。' });
             }
           } finally {
             signingOut.current = false;
@@ -259,6 +262,11 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
           disabled={!privacyUrl}
           onPress={() => void openLegal(privacyUrl)}
         />
+        {error?.scope === scope && error.source === 'legal' ? (
+          <Text testID="settings-legal-error" accessibilityRole="alert" style={{ color: aiTokens.danger, padding: 12 }}>
+            {error.message}
+          </Text>
+        ) : null}
         <AIRow title="意見回饋" onPress={go('Feedback')} />
       </AISection>
 
@@ -270,6 +278,11 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
             disabled={busy}
             onPress={confirmLogout}
           />
+          {error?.scope === scope && error.source === 'logout' ? (
+            <Text testID="settings-logout-error" accessibilityRole="alert" style={{ color: aiTokens.danger, padding: 12 }}>
+              {error.message}
+            </Text>
+          ) : null}
           <AIRow
             title="刪除帳號"
             subtitle="先查看刪除範圍與確認步驟"
@@ -277,13 +290,6 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
             onPress={go('AccountDeletion')}
           />
         </AISection>
-      ) : null}
-      {error && error.uid === uid ? (
-        <AICard>
-          <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
-            {error.message}
-          </Text>
-        </AICard>
       ) : null}
     </AIDetailScreen>
   );
