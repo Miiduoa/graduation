@@ -76,26 +76,25 @@ tags: [smoke, settings]
 - waitForAnimationToEnd:
     timeout: 5000
 - tapOn: '返回'
-# Language return often leaves Settings on the lower rows. Scroll back to the
-# account heading so 目前登入帳號 is still required, then continue to export.
+# Language return keeps the previous Settings scroll offset. The account card
+# is then off-screen and omitted from the iOS tree, so identify the settings
+# shell first and scroll up until 目前登入帳號 is on screen again.
 - waitForAnimationToEnd:
     timeout: 5000
-- retry:
-    maxRetries: 8
-    commands:
-      - runFlow:
-          when:
-            notVisible:
-              id: settings-current-account
-          commands:
-            - swipe:
-                from:
-                  id: settings-accessibility
-                direction: DOWN
-                duration: 400
-      - assertVisible:
-          id: settings-current-account
+- extendedWaitUntil:
+    visible:
+      id: settings-screen
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      id: settings-current-account
+    direction: UP
+    centerElement: true
+    timeout: 20000
+- assertVisible:
+    id: settings-current-account
 - assertVisible: '目前登入帳號'
+- assertVisible: '測試學生甲'
 - retry:
     maxRetries: 2
     commands:

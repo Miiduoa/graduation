@@ -65,6 +65,7 @@ afterEach(() => jest.restoreAllMocks());
 
 test('settings rows keep their titles as native labels so the visible copy is findable', () => {
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  expect(view.getByTestId('settings-screen')).toBeTruthy();
   const accessibility = view.getByLabelText('無障礙設定');
   expect(accessibility.props.testID).toBe('settings-accessibility');
   expect(accessibility.props.accessibilityHint).toBe('查看裝置輔助功能與閱讀設定');
