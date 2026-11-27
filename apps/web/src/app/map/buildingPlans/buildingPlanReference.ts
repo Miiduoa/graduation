@@ -6,6 +6,34 @@ function requireActive(signal: AbortSignal): void {
   if (signal.aborted) throw new DOMException('已取消讀取', 'AbortError');
 }
 
+/** Cancel the caller's wait without assuming the browser can abort its decoder.
+ * A bitmap that arrives after cancellation is still owned and closed here.
+ */
+function decodeReferenceBitmap(blob: Blob, signal: AbortSignal): Promise<ImageBitmap> {
+  requireActive(signal);
+  const decoding = createImageBitmap(blob);
+  return new Promise<ImageBitmap>((resolve, reject) => {
+    const abort = () => {
+      signal.removeEventListener('abort', abort);
+      reject(new DOMException('已取消讀取', 'AbortError'));
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    void decoding.then(bitmap => {
+      signal.removeEventListener('abort', abort);
+      if (signal.aborted) {
+        bitmap.close();
+        abort();
+      } else {
+        resolve(bitmap);
+      }
+    }, error => {
+      signal.removeEventListener('abort', abort);
+      reject(error);
+    });
+  });
+}
+
 /** Re-encode accepted raster pixels before exposing a reference; callers own object URLs. */
 export async function prepareBuildingPlanReference(
   file: File,
@@ -19,7 +47,7 @@ export async function prepareBuildingPlanReference(
 
   let bitmap: ImageBitmap;
   try {
-    bitmap = await createImageBitmap(blob);
+    bitmap = await decodeReferenceBitmap(blob, activeSignal);
   } catch {
     requireActive(activeSignal);
     throw new Error('無法讀取圖面圖片，請重新選擇 PNG、JPEG 或 WebP 圖片。');
