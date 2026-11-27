@@ -116,6 +116,9 @@ function expectNoNavigation() {
 
 test('waits for the close animation, then performs only the first selected destination once', () => {
   const view = openDrawer();
+  expect(view.getByTestId('header-drawer-panel')).toBeTruthy();
+  expect(view.getByTestId('drawer-section-個人')).toBeTruthy();
+  expect(view.getByLabelText('個人')).toBeTruthy();
   const profile = view.getByRole('button', { name: '個人資料' });
   const timetable = view.getByRole('button', { name: '我的課表' });
   act(() => {

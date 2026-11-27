@@ -415,7 +415,7 @@ export function HeaderDrawerHost() {
             </DrawerSection>
 
             {/* ─── 個人 ─── */}
-            <DrawerSection title="個人">
+            <DrawerSection testID="drawer-section-個人" title="個人">
               <DrawerRow
                 disabled={closing}
                 icon="ic_profile"
@@ -661,11 +661,24 @@ export function HeaderDrawerHost() {
 }
 
 // ─── 內部小元件 ────────────────────────────────────────
-function DrawerSection({ title, children }: { title: string; children: React.ReactNode }) {
+function DrawerSection({
+  title,
+  children,
+  testID,
+}: {
+  title: string;
+  children: React.ReactNode;
+  testID?: string;
+}) {
   return (
-    <View style={{ marginTop: 24, marginHorizontal: theme.layout.screenHorizontalPadding }}>
+    <View
+      testID={testID}
+      collapsable={false}
+      style={{ marginTop: 24, marginHorizontal: theme.layout.screenHorizontalPadding }}
+    >
       <Text
         accessibilityRole="header"
+        accessibilityLabel={title}
         style={{
           color: theme.colors.text,
           fontSize: 18,

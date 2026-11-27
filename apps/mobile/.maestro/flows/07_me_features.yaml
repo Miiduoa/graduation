@@ -27,9 +27,16 @@ tags:
 - tapOn:
     id: 'header-avatar-button'
 
+# The section title "個人" is a short header. Maestro's text matcher treats it as
+# a full-string regex and then rejects the 21px header as not visible, even
+# though the drawer is open. Identify the drawer panel and the section itself.
 - extendedWaitUntil:
-    visible: '個人'
+    visible:
+      id: header-drawer-panel
     timeout: 8000
+- assertVisible:
+    id: drawer-section-個人
+- assertVisible: '個人資料'
 
 - takeScreenshot: drawer_open
 
