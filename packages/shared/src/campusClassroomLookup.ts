@@ -498,7 +498,17 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
       (isExplicitNonClassroomCategory(published.category) ||
         (!isSourcedBuildingLabel(school, published, location.name) &&
           !aliases?.some((name) => campusPlaceNameMatchesQuery(name, location.name))) ||
-        !providencePlaceSourceUrl(school, { ...location, name: published.name }))
+        !providencePlaceSourceUrl(school, {
+          ...location,
+          name: published.name,
+          // A verified bilingual building label describes this same outdoor
+          // POI for classroom lookup only. Keep floor and all other fields
+          // intact, and never change the original marker's attribution.
+          building: isSourcedBuildingLabel(school, published, location.building) ||
+            aliases?.some((name) => comparisonText(name) === comparisonText(location.building))
+            ? published.building
+            : location.building,
+        }))
     ) continue;
     // A nearby transit stop can be named after a hall or carry its building
     // field in Firestore. Never promote that stop into a classroom destination.
