@@ -24,12 +24,24 @@ tags:
 - waitForAnimationToEnd:
     timeout: 1500
 
-- tapOn:
-    id: 'header-avatar-button'
-
-- extendedWaitUntil:
-    visible: '個人'
-    timeout: 8000
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: 'header-avatar-button'
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - extendedWaitUntil:
+          visible:
+            id: header-drawer-panel
+          timeout: 8000
+- assertVisible:
+    id: header-drawer-panel
+- assertVisible:
+    id: header-drawer-identity
+- assertVisible:
+    id: drawer-section-個人
+- assertVisible: '個人資料'
 
 - takeScreenshot: drawer_open
 
@@ -53,8 +65,21 @@ tags:
 - tapOn:
     id: tab-校園
 
-- tapOn:
-    id: 'header-avatar-button'
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: 'header-avatar-button'
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - extendedWaitUntil:
+          visible:
+            id: header-drawer-panel
+          timeout: 8000
+- assertVisible:
+    id: header-drawer-panel
+- assertVisible:
+    id: header-drawer-identity
 
 - scrollUntilVisible:
     element:

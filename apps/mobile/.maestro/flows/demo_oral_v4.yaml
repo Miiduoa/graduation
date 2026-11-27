@@ -35,7 +35,14 @@ tags: [demo, oral, regression]
     timeout: 20000
 - tapOn:
     id: oral-exam-check-in
-- tapOn: '送出病假'
+- tapOn:
+    id: oral-exam-request-leave
+- scrollUntilVisible:
+    element:
+      id: oral-exam-leave-status
+    direction: DOWN
+    timeout: 20000
+- assertVisible: '.*待審.*'
 - scrollUntilVisible:
     element:
       id: oral-exam-role-teacher
@@ -52,10 +59,13 @@ tags: [demo, oral, regression]
     id: oral-exam-publish-grade
 - scrollUntilVisible:
     element:
-      text: '核准病假'
+      id: oral-exam-approve-leave
     direction: DOWN
     timeout: 20000
-- tapOn: '核准病假'
+- tapOn:
+    id: oral-exam-approve-leave
+    enabled: true
+- assertVisible: '.*已核准.*'
 - scrollUntilVisible:
     element:
       id: oral-exam-role-merchant
@@ -85,6 +95,11 @@ tags: [demo, oral, regression]
 - scrollUntilVisible:
     element:
       text: '.*已簽到.*'
+    direction: DOWN
+    timeout: 20000
+- scrollUntilVisible:
+    element:
+      id: oral-exam-leave-status
     direction: DOWN
     timeout: 20000
 - assertVisible: '.*已核准.*'

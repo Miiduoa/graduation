@@ -116,6 +116,21 @@ function expectNoNavigation() {
 
 test('waits for the close animation, then performs only the first selected destination once', () => {
   const view = openDrawer();
+  const panel = view.getByTestId('header-drawer-panel');
+  expect(panel).toBeTruthy();
+  expect(panel.props.collapsable).toBe(false);
+  expect(panel.props.style).toEqual(expect.objectContaining({ flex: 1, flexDirection: 'row' }));
+  const sheet = view.getByTestId('header-drawer-sheet');
+  expect(sheet.props.collapsable).toBe(false);
+  expect(sheet.props.style).toEqual(expect.objectContaining({ flex: 1 }));
+  const identity = view.getByTestId('header-drawer-identity');
+  expect(identity.props.accessible).toBe(true);
+  expect(identity.props.accessibilityLabel).toBe('測試同學');
+  expect(view.getByLabelText('測試同學')).toBe(identity);
+  const personalSection = view.getByTestId('drawer-section-個人');
+  expect(personalSection.props.accessible).toBe(true);
+  expect(personalSection.props.accessibilityLabel).toBe('個人');
+  expect(view.getByLabelText('個人')).toBe(personalSection);
   const profile = view.getByRole('button', { name: '個人資料' });
   const timetable = view.getByRole('button', { name: '我的課表' });
   act(() => {
@@ -244,15 +259,15 @@ test('enabling reduced motion during a close settles the selected action once an
 
 test('rotation and split view resize the drawer and preserve exactly one pending destination', () => {
   const view = openDrawer();
-  expect(view.getByTestId('header-drawer-panel')).toHaveStyle({ width: 331.5 });
+  expect(view.getByTestId('header-drawer-sheet')).toHaveStyle({ width: 331.5 });
   dimensions = { ...dimensions, width: 320, fontScale: 2 };
   view.rerender(<HeaderDrawerHost />);
-  expect(view.getByTestId('header-drawer-panel')).toHaveStyle({ width: 272 });
+  expect(view.getByTestId('header-drawer-sheet')).toHaveStyle({ width: 272 });
   fireEvent.press(view.getByRole('button', { name: '一般設定' }));
   const staleExit = latestTransition();
   dimensions = { ...dimensions, width: 844, height: 390 };
   view.rerender(<HeaderDrawerHost />);
-  expect(view.getByTestId('header-drawer-panel')).toHaveStyle({ width: 360 });
+  expect(view.getByTestId('header-drawer-sheet')).toHaveStyle({ width: 360 });
   act(() => staleExit.complete());
   expectNoNavigation();
   act(() => latestTransition().complete());
@@ -270,6 +285,7 @@ test('every entry exposes its full name and the close and avatar controls have u
   expect(view.getByRole('button', { name: '通知中心，3 則未讀通知' })).toBeTruthy();
   expect(view.getByText('校園社群 · 動態／看板／即時／學伴').props.numberOfLines).toBeUndefined();
   expect(view.getByText('測試同學').props.numberOfLines).toBeUndefined();
+  expect(view.getByTestId('header-drawer-identity').props.accessibilityLabel).toBe('測試同學');
   expect(view.queryByText(/Claims|後端／帳號系統/)).toBeNull();
 });
 

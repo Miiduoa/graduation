@@ -172,7 +172,7 @@ function StudentBlocks({ play, update, styles: s }: BlockProps) {
         <Text style={s.body}>
           {ORAL_EXAM_ATTENDANCE.sessionTitle}：{play.attendanceCheckedIn ? '已簽到' : '尚未簽到'}
         </Text>
-        <Text style={s.body}>
+        <Text testID="oral-exam-leave-status" style={s.body}>
           {ORAL_EXAM_LEAVE.date}病假：{play.leaveApproved ? '已核准' : play.leaveRequested ? '待審' : '未送出'}
         </Text>
         <Pressable
@@ -185,6 +185,7 @@ function StudentBlocks({ play, update, styles: s }: BlockProps) {
           <Text style={s.buttonText}>簽到</Text>
         </Pressable>
         <Pressable
+          testID="oral-exam-request-leave"
           accessibilityRole="button"
           disabled={play.leaveRequested || play.leaveApproved}
           onPress={() => update({ leaveRequested: true })}
@@ -230,7 +231,11 @@ function TeacherBlocks({ play, update, styles: s }: BlockProps) {
       <View style={s.card}>
         <Text style={s.cardTitle}>請假審核</Text>
         <Text style={s.body}>{ORAL_EXAM_LEAVE.reason}</Text>
+        <Text testID="oral-exam-leave-status" style={s.body}>
+          {play.leaveApproved ? '已核准' : play.leaveRequested ? '待審' : '未送出'}
+        </Text>
         <Pressable
+          testID="oral-exam-approve-leave"
           accessibilityRole="button"
           disabled={play.leaveApproved || !play.leaveRequested}
           onPress={() => update({ leaveApproved: true })}

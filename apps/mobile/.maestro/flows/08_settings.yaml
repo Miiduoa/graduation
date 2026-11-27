@@ -95,22 +95,37 @@ tags: [smoke, settings]
     element:
       id: settings-current-account
     direction: UP
-    centerElement: true
     timeout: 20000
 - assertVisible:
     id: settings-current-account
 - assertVisible: '目前登入帳號'
 - assertVisible: '測試學生甲'
+# Do not center the export row: centering parks it under the sticky header
+# (tap 200,108 hits「設定」) or overscrolls to the page bottom. If a previous
+# attempt left the list at the end, search upward as well.
 - retry:
     maxRetries: 2
     commands:
-      - scrollUntilVisible:
-          element:
-            id: settings-export-data
-          direction: DOWN
-          centerElement: true
-          waitToSettleTimeoutMs: 3000
-          timeout: 20000
+      - runFlow:
+          when:
+            notVisible:
+              id: settings-export-data
+          commands:
+            - scrollUntilVisible:
+                element:
+                  id: settings-export-data
+                direction: DOWN
+                timeout: 12000
+      - runFlow:
+          when:
+            notVisible:
+              id: settings-export-data
+          commands:
+            - scrollUntilVisible:
+                element:
+                  id: settings-export-data
+                direction: UP
+                timeout: 12000
       - assertVisible:
           id: settings-export-data
       - assertVisible: '匯出我的資料'

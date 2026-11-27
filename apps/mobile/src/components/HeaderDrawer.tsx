@@ -252,10 +252,17 @@ export function HeaderDrawerHost() {
       onRequestClose={handleClose}
       statusBarTranslucent
     >
-      <View style={{ flex: 1, flexDirection: 'row' }}>
+      {/* testID must sit on a non-animated, non-transformed View. Maestro's iOS
+          id query skips Animated.View (and its descendants) inside Modal even
+          though the debug dump still lists header-drawer-panel. */}
+      <View
+        testID="header-drawer-panel"
+        collapsable={false}
+        style={{ flex: 1, flexDirection: 'row' }}
+      >
         {/* 抽屜本體 */}
         <Animated.View
-          testID="header-drawer-panel"
+          collapsable={false}
           accessibilityViewIsModal
           onAccessibilityEscape={handleClose}
           style={{
@@ -271,6 +278,7 @@ export function HeaderDrawerHost() {
             }),
           }}
         >
+          <View testID="header-drawer-sheet" collapsable={false} style={{ flex: 1, width: drawerWidth }}>
           <ScrollView
             contentContainerStyle={{
               paddingBottom: insets.bottom + theme.space.section,
@@ -331,17 +339,25 @@ export function HeaderDrawerHost() {
                 </Pressable>
               </View>
 
-              <Text
-                style={{
-                  color: theme.colors.text,
-                  fontSize: 26,
-                  fontWeight: '700',
-                  letterSpacing: -0.3,
-                }}
+              <View
+                testID="header-drawer-identity"
+                collapsable={false}
+                accessible
                 accessibilityRole="header"
+                accessibilityLabel={identity}
               >
-                {identity}
-              </Text>
+                <Text
+                  accessible={false}
+                  style={{
+                    color: theme.colors.text,
+                    fontSize: 26,
+                    fontWeight: '700',
+                    letterSpacing: -0.3,
+                  }}
+                >
+                  {identity}
+                </Text>
+              </View>
               {auth.user ? (
                 <View
                   style={{
@@ -415,7 +431,7 @@ export function HeaderDrawerHost() {
             </DrawerSection>
 
             {/* ─── 個人 ─── */}
-            <DrawerSection title="個人">
+            <DrawerSection testID="drawer-section-個人" title="個人">
               <DrawerRow
                 disabled={closing}
                 icon="ic_profile"
@@ -636,6 +652,7 @@ export function HeaderDrawerHost() {
               </Pressable>
             )}
           </ScrollView>
+          </View>
         </Animated.View>
 
         {/* 半透明遮罩 */}
@@ -661,20 +678,36 @@ export function HeaderDrawerHost() {
 }
 
 // ─── 內部小元件 ────────────────────────────────────────
-function DrawerSection({ title, children }: { title: string; children: React.ReactNode }) {
+function DrawerSection({
+  title,
+  children,
+  testID,
+}: {
+  title: string;
+  children: React.ReactNode;
+  testID?: string;
+}) {
   return (
     <View style={{ marginTop: 24, marginHorizontal: theme.layout.screenHorizontalPadding }}>
-      <Text
+      <View
+        testID={testID}
+        collapsable={false}
+        accessible
         accessibilityRole="header"
-        style={{
-          color: theme.colors.text,
-          fontSize: 18,
-          fontWeight: '700',
-          marginBottom: 4,
-        }}
+        accessibilityLabel={title}
       >
-        {title}
-      </Text>
+        <Text
+          accessible={false}
+          style={{
+            color: theme.colors.text,
+            fontSize: 18,
+            fontWeight: '700',
+            marginBottom: 4,
+          }}
+        >
+          {title}
+        </Text>
+      </View>
       {children}
     </View>
   );
