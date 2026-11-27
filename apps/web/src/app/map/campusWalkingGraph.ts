@@ -65,15 +65,37 @@ export function osmSnapshotIsFresh(osmBaseAt: string | undefined, now: number) {
   return Number.isFinite(now) && Number.isFinite(base) && base <= now + MAX_CLOCK_SKEW_MS && now - base <= MAX_OSM_LAG_MS;
 }
 
-/** Recheck a cached route before use or after resume in a school-scoped UI.
- * Freshness only, not a substitute for trusted source/audit validation.
+/** Reject malformed cached route geometry before a school-scoped UI resumes it.
+ * Shape and freshness checks do not establish actual access or trusted provenance.
  */
 export function isCampusWalkingRouteCurrent(
   route: CampusWalkingRoute, schoolId: string, now: number = Date.now(),
 ): boolean {
-  return !!schoolId && !!route && route.schoolId === schoolId && Number.isFinite(now) &&
-    osmSnapshotIsFresh(route.osmBaseAt, now) &&
-    Number.isFinite(route.reviewExpiresAtMs) && now < route.reviewExpiresAtMs;
+  if (!schoolId || !route || route.schoolId !== schoolId ||
+      !osmSnapshotIsFresh(route.osmBaseAt, now) ||
+      !Number.isFinite(route.reviewExpiresAtMs) || now >= route.reviewExpiresAtMs ||
+      route.attribution !== 'https://www.openstreetmap.org/copyright' ||
+      !Array.isArray(route.nodes) || route.nodes.length < 1 || route.nodes.length > 2000 ||
+      !Array.isArray(route.osmWayIds) || route.osmWayIds.length !== route.nodes.length - 1 ||
+      !Number.isFinite(route.distanceMeters) || route.distanceMeters < 0) return false;
+
+  const ids = new Set<number>();
+  let distance = 0;
+  for (let i = 0; i < route.nodes.length; i++) {
+    const node = route.nodes[i];
+    if (!node || typeof node !== 'object' || !validId(node.id) || ids.has(node.id) ||
+        !Number.isFinite(node.lat) || Math.abs(node.lat) > 90 ||
+        !Number.isFinite(node.lng) || Math.abs(node.lng) > 180) return false;
+    ids.add(node.id);
+    if (i === 0) continue;
+    if (!validId(route.osmWayIds[i - 1])) return false;
+    const meters = segmentMeters(route.nodes[i - 1], node);
+    if (!Number.isFinite(meters) || meters <= 0) return false;
+    distance += meters;
+  }
+  // The solver sums the same segments in traversal order. Allow tiny
+  // floating-point differences after serialization, not a different distance.
+  return Math.abs(route.distanceMeters - distance) <= Math.max(1e-6, distance * 1e-12);
 }
 
 function reviewedOpenExpiry(edge: WalkingEdge, now: number): number | null {
