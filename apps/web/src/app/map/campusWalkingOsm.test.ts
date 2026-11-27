@@ -228,35 +228,37 @@ describe('OSM campus walking discovery (not routing approval)', () => {
     ] })?.graph.edges[0].access).toBe('unknown');
   });
 
-  it.each([
-    'foot:forward:conditional', 'foot:backward:conditional',
-    'access:forward:conditional', 'access:backward:conditional',
-    'oneway:foot:conditional', 'oneway:conditional',
-    'foot:conditional', 'access:conditional',
-  ])('marks %s restrictions on the way and both endpoints', key => {
-    const conditional = { [key]: 'no @ (Su)' };
-    for (const source of ['way', 'from', 'to']) {
-      const data = parse({ ...payload(), elements: [
-        node(1, 10.001, 20.001, source === 'from' ? conditional : {}),
-        node(2, 10.001, 20.002, source === 'to' ? conditional : {}),
-        way(101, [1, 2], source === 'way' ? conditional : {}),
-      ] })!;
-      expect(data.graph.edges[0]?.access, source).toBe('restricted');
-      expect(findCampusWalkingRoute(data.graph, 'fixture', bounds, 1, 2, now)).toBeNull();
-    }
+  it.each(['', 'yes', 'unknown'])('excludes ambiguous or area ways (%s)', area => {
+    const data = parse({ ...payload(), elements: [
+      node(1, 10.001, 20.001), node(2, 10.001, 20.002),
+      way(101, [1, 2], { area }),
+    ] })!;
+    expect(data.graph.edges).toEqual([]);
   });
 
-  it.each(['bicycle:conditional', 'maxspeed:conditional'])(
-    'retains an unknown (not approved) candidate for unrelated %s', key => {
-      const data = parse({ ...payload(), elements: [
-        node(1, 10.001, 20.001, { foot: 'yes' }),
-        node(2, 10.001, 20.002),
-        way(101, [1, 2], { [key]: 'no @ (Su)', 'oneway:foot': 'no' }),
-      ] })!;
-      expect(data.graph.edges[0]?.access).toBe('unknown');
-      expect(findCampusWalkingRoute(data.graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+  it.each([{ barrier: '' }, { barrier: 'gate' }, { 'barrier:conditional': '' },
+    { barrier: 'no', 'barrier:conditional': 'gate @ (Su)' }])(
+    'marks ambiguous or conditional barriers on any segment member (%j)', tags => {
+      for (const source of ['way', 'from', 'to']) {
+        const data = parse({ ...payload(), elements: [
+          node(1, 10.001, 20.001, source === 'from' ? tags : {}),
+          node(2, 10.001, 20.002, source === 'to' ? tags : {}),
+          way(101, [1, 2], source === 'way' ? tags : {}),
+        ] })!;
+        expect(data.graph.edges[0]?.access, source).toBe('restricted');
+        expect(findCampusWalkingRoute(data.graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+      }
     },
   );
+
+  it('retains a non-approved candidate when area and barrier are explicitly absent or negative', () => {
+    const data = parse({ ...payload(), elements: [
+      node(1, 10.001, 20.001, { barrier: 'no' }), node(2, 10.001, 20.002),
+      way(101, [1, 2], { area: 'no', barrier: 'no' }),
+    ] })!;
+    expect(data.graph.edges[0]?.access).toBe('unknown');
+    expect(findCampusWalkingRoute(data.graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+  });
 
   it('keeps the sidepath as a candidate and excludes the original way', () => {
     const input = { ...payload(), elements: [...payload().elements,
