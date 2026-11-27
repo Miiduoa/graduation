@@ -55,11 +55,21 @@ function findBundledProvidencePlace(location: CampusMapPlaceLike): ProvidencePla
   return allBundledProvidencePlaces().find((entry) => samePlaceIdentity(entry, location));
 }
 
-function samePlace(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boolean {
-  // Server-bundled stop deduplication uses the same metre-based tolerance as
-  // provenance matching; two 53m-diagonal stops must not be collapsed.
-  return a.category === '公車站' && b.category === '公車站' &&
-    a.name === b.name && samePlaceCoordinates(a, b);
+function samePlace(a: CampusMapPlaceLike, b: ProvidencePlace): boolean {
+  // Nearby same-name stops may serve different directions. When the live
+  // record declares stop IDs, it must cover every bundled ID before hiding
+  // that marker. Keep the old proximity fallback only for legacy records
+  // without stop metadata.
+  if (a.category !== '公車站' || b.category !== '公車站' ||
+      a.name !== b.name || !samePlaceCoordinates(a, b)) return false;
+  if (!Object.prototype.hasOwnProperty.call(a, 'transitStopIds')) return true;
+  const ids = (a as CampusMapPlaceLike & { transitStopIds?: unknown }).transitStopIds;
+  if (!Array.isArray(ids) || ids.length === 0 ||
+      !ids.every((id: unknown) => typeof id === 'string' && id.trim() === id && id.length > 0)) {
+    return false;
+  }
+  return Boolean(b.transitStopIds?.length &&
+    b.transitStopIds.every((id) => ids.includes(id)));
 }
 
 /**

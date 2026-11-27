@@ -281,3 +281,25 @@ it('treats blank building and floor labels as absent for outdoor provenance', ()
   expect(providencePlaceSourceUrl('pu', { ...library, building: '', floor: '' })).toBe(library.sourceUrl);
   expect(providencePlaceSourceUrl('pu', { ...library, building: '  ', floor: '\t' })).toBe(library.sourceUrl);
 });
+
+it('retains nearby bundled stops when declared transit IDs do not cover all directions', () => {
+  const stop = PROVIDENCE_BUS_STOPS.find((place) => place.id === 'pu-bus-zhugu')!;
+  const ids = stop.transitStopIds!;
+  const server = { ...stop, id: 'server-zhugu-stop' };
+  for (const transitStopIds of [
+    ['synthetic-other-stop'], [ids[0]], [], null, 'invalid', [ids[0], null],
+  ]) {
+    const live = { ...server, transitStopIds };
+    const merged = withProvidenceCampusPlaces('pu', [live]);
+    expect(merged.find((place) => place.id === live.id)).toEqual(live);
+    expect(merged.find((place) => place.id === stop.id)).toEqual(stop);
+  }
+  const covered = { ...server, transitStopIds: [...ids, 'synthetic-extra-stop'] };
+  expect(withProvidenceCampusPlaces('pu', [covered]).some((place) => place.id === stop.id)).toBe(false);
+  const legacy: MapLocation = {
+    id: server.id, name: server.name, category: server.category,
+    description: server.description, lat: server.lat, lng: server.lng,
+  };
+  expect(withProvidenceCampusPlaces('pu', [legacy]).some((place) => place.id === stop.id)).toBe(false);
+  expect(withProvidenceCampusPlaces('nthu', [covered])).toEqual([covered]);
+});
