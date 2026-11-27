@@ -13,7 +13,7 @@
     ".github/workflows/campus-spatial-benchmark.yml": "81d2cc42e770c1d64398424f8323922a40ff1387",
     ".github/workflows/campus-spatial-browser.yml": "6f04ba0b69d5fc28a7967af46bba71d57b8cab32",
     ".github/workflows/chroma-local-compat.yml": "f1b7b6bcd68819868652903acf49f727aabd0e7d",
-    ".github/workflows/ci.yml": "4a0ba3c1a16e6db6ee37fe970719865cf07bd117",
+    ".github/workflows/ci.yml": "012c699fd0975374ae425bf7d10433d0a6ea369c",
     ".github/workflows/codeql.yml": "b4ef1b9b6dc09d4038e12a926e0de01266da6d37",
     ".github/workflows/competition-official-documents.yml": "2f20ba50c55c7878318b0f7b92f34b455ae58103",
     ".github/workflows/course-access-review.yml": "11d270b1acd222b158b2a182e46d7ccb3c3aa099",
