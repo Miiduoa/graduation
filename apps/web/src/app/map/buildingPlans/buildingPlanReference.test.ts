@@ -163,6 +163,41 @@ describe('reference cancellation and late decoding', () => {
     expect(preview.close).toHaveBeenCalledOnce();
   });
 
+
+  it('rejects cancellation before the second decoder settles and closes a late bitmap', async () => {
+    let finish!: (value: ImageBitmap) => void;
+    vi.mocked(createImageBitmap)
+      .mockResolvedValueOnce(source as unknown as ImageBitmap)
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const controller = new AbortController();
+    const pending = prepareBuildingPlanReference(imageFile(), controller.signal);
+    const rejection = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    controller.abort();
+    await rejection;
+    expect(preview.close).not.toHaveBeenCalled();
+    finish(preview as unknown as ImageBitmap);
+    await vi.waitFor(() => expect(preview.close).toHaveBeenCalledOnce());
+    expect(source.close).toHaveBeenCalledOnce();
+  });
+
+  it('consumes a late decoder failure after cancellation has already settled', async () => {
+    let reject!: (reason: unknown) => void;
+    vi.mocked(createImageBitmap)
+      .mockResolvedValueOnce(source as unknown as ImageBitmap)
+      .mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const controller = new AbortController();
+    const pending = prepareBuildingPlanReference(imageFile(), controller.signal);
+    const rejection = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.waitFor(() => expect(reject).toBeTypeOf('function'));
+    controller.abort();
+    await rejection;
+    reject(new Error('late decode failure'));
+    await Promise.resolve();
+    expect(source.close).toHaveBeenCalledOnce();
+    expect(preview.close).not.toHaveBeenCalled();
+  });
+
   it('preserves AbortError if the pending second decode rejects after cancellation', async () => {
     let reject!: (reason: unknown) => void;
     vi.mocked(createImageBitmap)
