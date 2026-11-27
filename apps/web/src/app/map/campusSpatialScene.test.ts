@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BufferGeometry, Camera, ExtrudeGeometry, InstancedMesh, Material, Matrix4, Mesh, MeshStandardMaterial, PlaneGeometry, Scene, Vector3 } from 'three';
-import { buildCampusSpatialModel } from './campusSpatialModel';
+import { buildCampusSpatialModel, type CampusSpatialModel } from './campusSpatialModel';
 import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
 import { parseProvidenceOsmFootprints, parseProvidenceFootprintResponse, type ProvidenceFootprint } from './providenceFootprints';
 import { createCampusSpatialScene, type CampusSpatialScene, type CampusSpatialView } from './campusSpatialScene';
@@ -179,7 +179,7 @@ describe('optional spatial canvas lifecycle', () => {
     ])],
     ['inconsistent empty model', { ...model, points: [] }],
     ['unavailable model with points', { ...model, unavailableReason: 'area-too-large' as const }],
-  ] as const)('falls back safely before allocating WebGL for %s', (_label, source) => {
+  ] satisfies [string, CampusSpatialModel][])('falls back safely before allocating WebGL for %s', (_label, source) => {
     const { scene, container, onError, onSelect } = setup(source);
     expect(onError).toHaveBeenCalledTimes(1);
     expect(container.childElementCount).toBe(0);
