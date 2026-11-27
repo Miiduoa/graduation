@@ -28,6 +28,15 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
           ? 'ready'
           : 'guest';
   const hasPlatformSession = platformAccountStatus === 'ready';
+  const platformAccountSubtitle = platformAccountStatus === 'ready'
+    ? '已登入 nuni 帳號；管理學校資格與連線狀態'
+    : platformAccountStatus === 'logout-pending'
+      ? '登出尚未完成；前往帳號管理重試'
+      : platformAccountStatus === 'checking'
+        ? '正在確認登入狀態'
+        : platformAccountStatus === 'unverified'
+          ? '無法確認登入狀態；前往帳號管理重試'
+          : '登入 nuni 帳號或管理學校資格';
   const accountHeading = uid
     ? '目前登入帳號'
     : platformAccountStatus === 'logout-pending'
@@ -90,10 +99,10 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
   const confirmLogout = () => {
     if (!uid || signingOut.current) return;
     const requestedUid = uid;
-    Alert.alert('登出', '確定要登出這個帳號嗎？', [
+    Alert.alert('登出學校帳號', '確定要登出學校帳號嗎？不會登出 Google 帳號。', [
       { text: '取消', style: 'cancel' },
       {
-        text: '登出',
+        text: '確定登出',
         style: 'destructive',
         onPress: async () => {
           if (!mounted.current || currentUid.current !== requestedUid || signingOut.current) return;
@@ -154,7 +163,7 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
         <AIRow
           testID="settings-google-account"
           title="Google 帳號與連線"
-          subtitle="登入或管理 nuni 帳號、學校資格與連線狀態"
+          subtitle={platformAccountSubtitle}
           onPress={go('NuniWorkspace', { tab: 'account' })}
         />
       ) : null}
@@ -255,7 +264,12 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
 
       {uid ? (
         <AISection title="帳號管理">
-          <AIRow title={busy ? '正在登出…' : '登出'} disabled={busy} onPress={confirmLogout} />
+          <AIRow
+            title={busy ? '正在登出…' : '登出學校帳號'}
+            subtitle="Google 帳號須另外管理"
+            disabled={busy}
+            onPress={confirmLogout}
+          />
           <AIRow
             title="刪除帳號"
             subtitle="先查看刪除範圍與確認步驟"

@@ -216,13 +216,47 @@ test('dual account settings retain one assistant permissions entry', () => {
   expect(view.getByText('通知設定')).toBeTruthy();
 });
 
+test.each([
+  [{ session: null }, '登入 nuni 帳號或管理學校資格'],
+  [{ session: null, loading: true }, '正在確認登入狀態'],
+  [{ session: null, error: 'offline' }, '無法確認登入狀態；前往帳號管理重試'],
+  [{ session: null, pendingLogout: true }, '登出尚未完成；前往帳號管理重試'],
+  [{ session: { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111' } }, '已登入 nuni 帳號；管理學校資格與連線狀態'],
+] as const)('school sign-in does not mask independent platform status %j', (platform, subtitle) => {
+  mockPlatform = platform;
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  expect(view.getByTestId('settings-current-account').props.accessibilityLabel).toBe('目前登入帳號');
+  expect(view.getByLabelText('Google 帳號與連線').props.accessibilityHint).toBe(subtitle);
+  expect(view.getByText(subtitle)).toBeTruthy();
+  expect(view.getAllByText('助理權限')).toHaveLength(1);
+});
+
+test('school logout clearly scopes the action and leaves the platform account independently visible', async () => {
+  mockPlatform = { session: { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111' } };
+  const alert = jest.spyOn(Alert, 'alert');
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  fireEvent.press(view.getByLabelText('登出學校帳號'));
+  expect(alert.mock.calls[0][0]).toBe('登出學校帳號');
+  expect(alert.mock.calls[0][1]).toBe('確定要登出學校帳號嗎？不會登出 Google 帳號。');
+  expect(mockAuth.signOutWithWarning).not.toHaveBeenCalled();
+  await act(async () => alert.mock.calls[0][2]?.find((item) => item.text === '確定登出')?.onPress?.());
+  expect(mockAuth.signOutWithWarning).toHaveBeenCalledTimes(1);
+  mockAuth.user = null;
+  mockAuth.profile = null;
+  view.rerender(<SettingsAiFirstScreen navigation={navigation} />);
+  expect(view.getByTestId('settings-current-account').props.accessibilityLabel).toBe('nuni 帳號已登入');
+  expect(view.queryByLabelText('登出學校帳號')).toBeNull();
+  expect(view.getByLabelText('Google 帳號與連線')).toBeTruthy();
+  expect(view.getByText('助理權限')).toBeTruthy();
+});
+
 test('logout invokes real auth once, and cancellation never changes navigation', async () => {
   const pending = deferred<boolean>();
   mockAuth.signOutWithWarning.mockReturnValue(pending.promise);
   const alert = jest.spyOn(Alert, 'alert');
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
-  fireEvent.press(view.getByText('登出'));
-  const confirm = alert.mock.calls[0][2]?.find((item) => item.text === '登出')?.onPress;
+  fireEvent.press(view.getByText('登出學校帳號'));
+  const confirm = alert.mock.calls[0][2]?.find((item) => item.text === '確定登出')?.onPress;
   act(() => {
     void confirm?.();
     void confirm?.();
@@ -230,18 +264,18 @@ test('logout invokes real auth once, and cancellation never changes navigation',
   expect(mockAuth.signOutWithWarning).toHaveBeenCalledTimes(1);
   expect(view.getByText('正在登出…')).toBeTruthy();
   await act(async () => pending.resolve(false));
-  expect(view.getByText('登出')).toBeTruthy();
+  expect(view.getByText('登出學校帳號')).toBeTruthy();
   expect(navigation.navigate).not.toHaveBeenCalled();
 });
 
 test('a stale logout confirmation cannot sign out a newly selected account', async () => {
   const alert = jest.spyOn(Alert, 'alert');
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
-  fireEvent.press(view.getByText('登出'));
+  fireEvent.press(view.getByText('登出學校帳號'));
   mockAuth.user = { uid: 'student-b', email: 'student-b@example.edu' };
   view.rerender(<SettingsAiFirstScreen navigation={navigation} />);
   expect(view.queryByText('陳同學')).toBeNull();
-  await act(async () => alert.mock.calls[0][2]?.find((item) => item.text === '登出')?.onPress?.());
+  await act(async () => alert.mock.calls[0][2]?.find((item) => item.text === '確定登出')?.onPress?.());
   expect(mockAuth.signOutWithWarning).not.toHaveBeenCalled();
 });
 
@@ -249,10 +283,10 @@ test('logout rejection remains on settings with retry and does not pretend to si
   mockAuth.signOutWithWarning.mockRejectedValue(new Error('offline'));
   const alert = jest.spyOn(Alert, 'alert');
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
-  fireEvent.press(view.getByText('登出'));
-  await act(async () => alert.mock.calls[0][2]?.find((item) => item.text === '登出')?.onPress?.());
+  fireEvent.press(view.getByText('登出學校帳號'));
+  await act(async () => alert.mock.calls[0][2]?.find((item) => item.text === '確定登出')?.onPress?.());
   expect(view.getByText('無法登出，請稍後重試。')).toBeTruthy();
-  expect(view.getByText('登出')).toBeTruthy();
+  expect(view.getByText('登出學校帳號')).toBeTruthy();
   expect(navigation.navigate).not.toHaveBeenCalled();
 });
 
@@ -273,7 +307,7 @@ test('missing legal configuration is unavailable and signed-out users see no acc
   fireEvent.press(view.getByText('隱私政策'));
   expect(open).not.toHaveBeenCalled();
   expect(view.queryByText('陳同學')).toBeNull();
-  expect(view.queryByText('登出')).toBeNull();
+  expect(view.queryByText('登出學校帳號')).toBeNull();
   expect(view.queryByText('匯出我的資料')).toBeNull();
   fireEvent.press(view.getByText('學校登入'));
   expect(navigation.navigate).toHaveBeenCalledWith('SSOLogin');
