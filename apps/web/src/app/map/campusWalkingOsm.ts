@@ -131,7 +131,10 @@ const restrictsWalking = (tags: Tags) =>
   // https://wiki.openstreetmap.org/wiki/Key:access
   tags['open:conditional'] !== undefined ||
   ['date_on', 'date_off', 'day_on', 'day_off', 'hour_on', 'hour_off'].some(key => tags[key] !== undefined) ||
-  tags['access:conditional'] !== undefined || tags['foot:conditional'] !== undefined ||
+  // Match the audit bridge's conditional-key policy on both ways and nodes.
+  // The current routing model cannot evaluate time/direction-dependent access.
+  // https://wiki.openstreetmap.org/wiki/Conditional_restrictions
+  Object.keys(tags).some(key => /^(?:foot|access|oneway)(?::[^:]+)*:conditional$/.test(key)) ||
   tags.opening_hours !== undefined;
 
 export function hasWalkingRestriction(way: Tags, from: Tags, to: Tags): boolean {
