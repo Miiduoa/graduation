@@ -24,16 +24,21 @@ tags:
 - waitForAnimationToEnd:
     timeout: 1500
 
-- tapOn:
-    id: 'header-avatar-button'
-
-# The section title "個人" is a short header. Maestro's text matcher treats it as
-# a full-string regex and then rejects the 21px header as not visible, even
-# though the drawer is open. Identify the drawer panel and the section itself.
-- extendedWaitUntil:
-    visible:
-      id: header-drawer-panel
-    timeout: 8000
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: 'header-avatar-button'
+      - waitForAnimationToEnd:
+          timeout: 1500
+      # iOS XCUITest 只找得到 accessible 節點。抽屜本體是容器，層級 dump
+      # 看得到 resource-id，id 查詢卻會失敗。改對身分標題，仍檢查個人區塊。
+      - extendedWaitUntil:
+          visible:
+            id: header-drawer-identity
+          timeout: 8000
+- assertVisible:
+    id: header-drawer-identity
 - assertVisible:
     id: drawer-section-個人
 - assertVisible: '個人資料'
@@ -60,8 +65,19 @@ tags:
 - tapOn:
     id: tab-校園
 
-- tapOn:
-    id: 'header-avatar-button'
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: 'header-avatar-button'
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - extendedWaitUntil:
+          visible:
+            id: header-drawer-identity
+          timeout: 8000
+- assertVisible:
+    id: header-drawer-identity
 
 - scrollUntilVisible:
     element:

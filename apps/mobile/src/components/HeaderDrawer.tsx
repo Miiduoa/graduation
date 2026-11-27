@@ -256,6 +256,7 @@ export function HeaderDrawerHost() {
         {/* 抽屜本體 */}
         <Animated.View
           testID="header-drawer-panel"
+          collapsable={false}
           accessibilityViewIsModal
           onAccessibilityEscape={handleClose}
           style={{
@@ -331,17 +332,25 @@ export function HeaderDrawerHost() {
                 </Pressable>
               </View>
 
-              <Text
-                style={{
-                  color: theme.colors.text,
-                  fontSize: 26,
-                  fontWeight: '700',
-                  letterSpacing: -0.3,
-                }}
+              <View
+                testID="header-drawer-identity"
+                collapsable={false}
+                accessible
                 accessibilityRole="header"
+                accessibilityLabel={identity}
               >
-                {identity}
-              </Text>
+                <Text
+                  accessible={false}
+                  style={{
+                    color: theme.colors.text,
+                    fontSize: 26,
+                    fontWeight: '700',
+                    letterSpacing: -0.3,
+                  }}
+                >
+                  {identity}
+                </Text>
+              </View>
               {auth.user ? (
                 <View
                   style={{
@@ -671,23 +680,26 @@ function DrawerSection({
   testID?: string;
 }) {
   return (
-    <View
-      testID={testID}
-      collapsable={false}
-      style={{ marginTop: 24, marginHorizontal: theme.layout.screenHorizontalPadding }}
-    >
-      <Text
+    <View style={{ marginTop: 24, marginHorizontal: theme.layout.screenHorizontalPadding }}>
+      <View
+        testID={testID}
+        collapsable={false}
+        accessible
         accessibilityRole="header"
         accessibilityLabel={title}
-        style={{
-          color: theme.colors.text,
-          fontSize: 18,
-          fontWeight: '700',
-          marginBottom: 4,
-        }}
       >
-        {title}
-      </Text>
+        <Text
+          accessible={false}
+          style={{
+            color: theme.colors.text,
+            fontSize: 18,
+            fontWeight: '700',
+            marginBottom: 4,
+          }}
+        >
+          {title}
+        </Text>
+      </View>
       {children}
     </View>
   );
