@@ -6,6 +6,7 @@ import { parseCampusMapRecord } from '@campus/shared/src/campusMapRecords';
 import {
   PROVIDENCE_BUS_STOPS,
   PROVIDENCE_CAMPUS_PLACES,
+  providencePlaceSourceUrl,
   type CampusMapPlaceLike,
 } from '@campus/shared/src/providenceCampus';
 
@@ -303,6 +304,27 @@ describe('published building identity cannot drift into a classroom destination'
     expect(resolveCampusClassroom({
       schoolId: 'pu', query: '主顧樓303', locations: [withChineseLabel],
     }).matches).toEqual([withChineseLabel]);
+  });
+
+  it('accepts a verified bilingual building label only for lookup, not outdoor attribution', () => {
+    const imported = { ...sourcedHall!, name: 'Providence Hall', building: '主顧樓' };
+    const result = resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [imported],
+    });
+    expect(result.matches).toEqual([imported]);
+    expect(result.matches[0]).toBe(imported);
+    expect(providencePlaceSourceUrl('pu', { ...imported, name: '主顧樓' })).toBeNull();
+
+    for (const invalid of [
+      { ...imported, floor: '3F' },
+      { ...imported, building: '無關建築' },
+      { ...imported, category: '公車站' },
+      { ...imported, lat: imported.lat + 0.007 },
+    ]) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [invalid],
+      }).status).toBe('unmatched');
+    }
   });
 
   it('keeps identity, category, transit and duplicate safeguards for an English-named published building', () => {
