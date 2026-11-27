@@ -71,6 +71,28 @@ describe('reviewed outdoor entrance route handoff', () => {
     expect(isCampusEntranceRouteCurrent(plan([review], []), data, 'fixture', bounds, 1, destination, [review], [segment], now)).toBe(false);
   });
 
+  it('rejects malformed cached handoffs without interrupting recovery', () => {
+    const data = candidates();
+    const result = plan();
+    if (result.status !== 'ready') throw new Error('missing route');
+    const invalid: unknown[] = [
+      null, {}, { status: 'ready' }, { ...result, route: null },
+      { ...result, route: { ...result.route, nodes: null } },
+      { ...result, route: { ...result.route, nodes: undefined } },
+      { ...result, route: { ...result.route, nodes: [null] } },
+      { ...result, route: { ...result.route, osmWayIds: null } },
+      { ...result, destination: null },
+      { ...result, destination: undefined },
+      { ...result, destination: 'fixture-building' },
+      { ...result, entranceEvidenceUrl: 'https://example.invalid/changed' },
+    ];
+    const current = (cached: unknown) => isCampusEntranceRouteCurrent(
+      cached as typeof result, data, 'fixture', bounds, 1, destination, [review], [segment], now);
+    for (const cached of invalid) expect(current(cached)).toBe(false);
+    expect(current(JSON.parse(JSON.stringify(result)))).toBe(true);
+    expect(current(result)).toBe(true);
+  });
+
   it('invalidates previously ready routes when trusted reviews change without an OSM update', () => {
     const data = candidates();
     const result = plan();
