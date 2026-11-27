@@ -96,13 +96,28 @@ export function routeToCampusEntrance(
       bounds.south >= bounds.north || bounds.west >= bounds.east ||
       destination.lat < bounds.south || destination.lat > bounds.north ||
       destination.lng < bounds.west || destination.lng > bounds.east ||
-      entranceReviews.length > 2000) {
+      !Array.isArray(entranceReviews) || entranceReviews.length > 2000 ||
+      !Array.isArray(candidates.nodes) || candidates.nodes.length > 2000) {
     return { status: 'unverified-entrance' };
   }
-  const matches = entranceReviews.filter(review =>
-    review.schoolId === schoolId && review.destination.id === destination.id);
-  if (matches.length !== 1) return { status: 'unverified-entrance' };
-  const review = matches[0];
+  // A malformed catalogue row must not throw or silently hide a competing
+  // review. A clearly foreign-school row cannot affect this school's route.
+  let review: CampusEntranceReview | undefined;
+  for (const entry of entranceReviews) {
+    if (!entry || typeof entry !== 'object' ||
+        typeof entry.schoolId !== 'string' || !entry.schoolId ||
+        entry.schoolId.trim() !== entry.schoolId) return { status: 'unverified-entrance' };
+    if (entry.schoolId !== schoolId) continue;
+    if (!entry.destination || typeof entry.destination !== 'object' ||
+        typeof entry.destination.id !== 'string' || !entry.destination.id ||
+        entry.destination.id.trim() !== entry.destination.id) return { status: 'unverified-entrance' };
+    if (entry.destination.id !== destination.id) continue;
+    if (review) return { status: 'unverified-entrance' };
+    review = entry;
+  }
+  if (!review || !review.entrance || typeof review.entrance !== 'object') {
+    return { status: 'unverified-entrance' };
+  }
   const place = review.destination;
   if (!sameDestination(place, destination)) {
     return { status: 'unverified-entrance' };
