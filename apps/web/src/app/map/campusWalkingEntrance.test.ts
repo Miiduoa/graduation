@@ -131,6 +131,35 @@ describe('reviewed outdoor entrance route handoff', () => {
     ]) expect(resolve(destination, extent).status).toBe('unverified-entrance');
   });
 
+
+  it('fails closed for malformed entrance catalogue rows without breaking route recovery', () => {
+    const data = candidates();
+    const result = plan();
+    expect(result.status).toBe('ready');
+    const badCatalogues: unknown[] = [
+      null,
+      {},
+      [review, null],
+      Object.assign(new Array<unknown>(2), { 0: review }),
+      [review, { schoolId: 'fixture' }],
+      [review, { schoolId: 'fixture', destination: { id: 2 } }],
+      [review, { schoolId: 'fixture', destination: { id: ' fixture-building ' } }],
+      [review, { ...review, schoolId: ' fixture ' }],
+      [{ ...review, entrance: null }],
+      [{ ...review, entrance: '2' }],
+    ];
+    for (const raw of badCatalogues) {
+      const reviews = raw as CampusEntranceReview[];
+      expect(routeToCampusEntrance(data, 'fixture', bounds, 1, destination,
+        reviews, [segment], now).status).toBe('unverified-entrance');
+      expect(isCampusEntranceRouteCurrent(result, data, 'fixture', bounds, 1, destination,
+        reviews, [segment], now)).toBe(false);
+    }
+    const foreign = { schoolId: 'other', destination: null } as unknown as CampusEntranceReview;
+    expect(plan([foreign, review]).status).toBe('ready');
+    expect(plan().status).toBe('ready');
+  });
+
   it('requires matching destination identity and a current exact source revision', () => {
     for (const changed of [
       { ...destination, name: 'Other' }, { ...destination, category: 'Other' },

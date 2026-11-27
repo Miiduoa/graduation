@@ -25,8 +25,8 @@ type ListRowProps = {
 function AccountRow({ title, subtitle, onPress, first, testID, styles: s }: ListRowProps) {
   return (
     <Pressable
-      testID={testID}
       accessible
+      testID={testID}
       accessibilityRole="button"
       accessibilityLabel={title}
       accessibilityHint={subtitle}

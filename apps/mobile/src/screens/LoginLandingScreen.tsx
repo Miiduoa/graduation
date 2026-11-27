@@ -318,9 +318,15 @@ export default function LoginLandingScreen() {
 
         <View style={s.accountCard}>
           <View style={s.accountCardBody}>
-            <Text accessibilityRole="header" style={s.cardHeading}>
-              {platformReady ? '我的 nuni' : 'Google 帳號'}
-            </Text>
+            <View testID="login-google-account" collapsable={false}>
+              <Text
+                accessibilityRole="header"
+                accessibilityLabel={platformReady ? '我的 nuni' : 'Google 帳號'}
+                style={s.cardHeading}
+              >
+                {platformReady ? '我的 nuni' : 'Google 帳號'}
+              </Text>
+            </View>
             {!platformReady ? (
               <>
                 <Text style={s.body}>

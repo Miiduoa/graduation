@@ -142,9 +142,8 @@ export function AIScreen({
   useVisualTheme();
   const defaultPadding = useTabBarContentBottomPadding();
   const insets = useSafeAreaInsets();
-  const tabBarPadding = bottomPadding ?? defaultPadding;
   return (
-    <View style={{ flex: 1, backgroundColor: aiTokens.bg, paddingBottom: tabBarPadding }}>
+    <View style={{ flex: 1, backgroundColor: aiTokens.bg }}>
       <ScrollView
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
@@ -153,7 +152,7 @@ export function AIScreen({
         keyboardDismissMode={keyboardDismissMode}
         automaticallyAdjustKeyboardInsets={automaticallyAdjustKeyboardInsets}
         contentContainerStyle={[
-          { paddingTop: insets.top, paddingBottom: 24 },
+          { paddingTop: insets.top, paddingBottom: bottomPadding ?? defaultPadding },
           contentContainerStyle,
         ]}
       >
@@ -247,6 +246,7 @@ export function AISection({
 // ──────────────────────────────────────────────
 export function AICard({
   title,
+  titleTestID,
   icon,
   badge,
   badgeTone = 'ai',
@@ -259,6 +259,7 @@ export function AICard({
   style,
 }: {
   title?: string;
+  titleTestID?: string;
   icon?: string;
   badge?: string;
   badgeTone?: 'ai' | 'success' | 'warning' | 'danger' | 'muted';
@@ -292,7 +293,18 @@ export function AICard({
               <Text style={{ fontSize: 15 }}>{icon}</Text>
             </View>
           ) : null}
-          {title ? <Text style={styles.cardTitle}>{title}</Text> : <View style={{ flex: 1 }} />}
+          {title ? (
+            <Text
+              testID={titleTestID}
+              accessibilityRole="header"
+              accessibilityLabel={title}
+              style={styles.cardTitle}
+            >
+              {title}
+            </Text>
+          ) : (
+            <View style={{ flex: 1 }} />
+          )}
           {badge ? (
             badgeStyle.isStatus ? (
               <View style={[styles.cardBadge, { backgroundColor: badgeStyle.bg }]}>
@@ -338,6 +350,7 @@ export function AIRow({
   onPress,
   static: isStatic = false,
   disabled = false,
+  testID,
 }: {
   icon?: string;
   title: string;
@@ -348,6 +361,7 @@ export function AIRow({
   onPress?: () => void;
   static?: boolean;
   disabled?: boolean;
+  testID?: string;
 }) {
   const styles = useVisualStyles();
   const tagMap = {
@@ -383,19 +397,27 @@ export function AIRow({
 
   return (
     <TouchableOpacity
+      testID={testID}
+      accessible
       activeOpacity={interactive ? 0.65 : 1}
       onPress={interactive ? onPress : undefined}
       disabled={!interactive}
       accessibilityRole={interactive ? 'button' : undefined}
       accessibilityState={disabled ? { disabled: true } : undefined}
+      accessibilityLabel={title}
+      accessibilityHint={subtitle}
       style={[styles.row, groupedStyle, disabled && { opacity: 0.52 }]}
     >
       {icon ? (
-        <View style={{ width: 24, marginRight: 10, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ fontSize: 16 }}>{icon}</Text>
+        <View
+          accessible={false}
+          style={{ width: 24, marginRight: 10, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Text accessible={false} style={{ fontSize: 16 }}>{icon}</Text>
         </View>
       ) : null}
       <View
+        accessible={false}
         style={{
           flex: 1,
           minWidth: 0,
@@ -406,23 +428,23 @@ export function AIRow({
           borderTopColor: aiTokens.border,
         }}
       >
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.rowTitle} numberOfLines={1}>
+        <View accessible={false} style={{ flex: 1, minWidth: 0 }}>
+          <Text accessible={false} style={styles.rowTitle} numberOfLines={1}>
             {title}
           </Text>
           {subtitle ? (
-            <Text style={styles.rowSub} numberOfLines={1}>
+            <Text accessible={false} style={styles.rowSub} numberOfLines={1}>
               {subtitle}
             </Text>
           ) : null}
         </View>
         {tag ? (
           tagStyle.isStatus ? (
-            <View style={[styles.rowTag, { backgroundColor: tagStyle.bg }]}>
-              <Text style={[styles.rowTagText, { color: tagStyle.color }]}>{tag}</Text>
+            <View accessible={false} style={[styles.rowTag, { backgroundColor: tagStyle.bg }]}>
+              <Text accessible={false} style={[styles.rowTagText, { color: tagStyle.color }]}>{tag}</Text>
             </View>
           ) : (
-            <Text style={[styles.rowTagText, { color: tagStyle.color, marginLeft: 8 }]}>{tag}</Text>
+            <Text accessible={false} style={[styles.rowTagText, { color: tagStyle.color, marginLeft: 8 }]}>{tag}</Text>
           )
         ) : null}
         {right ?? null}
@@ -431,6 +453,8 @@ export function AIRow({
             name="chevron-forward"
             size={15}
             color={aiTokens.muted}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
             style={{ marginLeft: 6 }}
           />
         ) : null}

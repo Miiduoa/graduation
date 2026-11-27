@@ -85,7 +85,10 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
       keyboardShouldPersistTaps="handled"
       onBack={() => navigation?.goBack?.()}
     >
-      <AICard title={uid ? '目前登入帳號' : '尚未登入'}>
+      <AICard
+        title={uid ? '目前登入帳號' : '尚未登入'}
+        titleTestID="settings-current-account"
+      >
         <View style={{ gap: 8 }}>
           <Text style={{ color: aiTokens.text, fontSize: 17, fontWeight: '600' }}>
             {uid
@@ -128,11 +131,13 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
           </View>
         </AICard>
         <AIRow
+          testID="settings-accessibility"
           title="無障礙設定"
           subtitle="查看裝置輔助功能與閱讀設定"
           onPress={go('AccessibilitySettings')}
         />
         <AIRow
+          testID="settings-language"
           title="介面語言"
           subtitle="選擇已提供翻譯的介面語言"
           onPress={go('LanguageSettings')}
@@ -163,6 +168,7 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
               onPress={go('ProfileEdit')}
             />
             <AIRow
+              testID="settings-export-data"
               title="匯出我的資料"
               subtitle="選擇要匯出的資料範圍"
               onPress={go('DataExport')}

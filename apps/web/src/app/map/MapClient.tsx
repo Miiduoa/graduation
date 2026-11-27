@@ -351,7 +351,7 @@ function MapContent({
   const schoolLoginHref = `/login?reconnect=school&returnUrl=${returnUrl}`;
 
   const pendingRoutePlaces = routeLocations?.filter((place) => isProvidencePendingVerification(publicSchool, place)) ?? [];
-  const selectLocation = useCallback((location: MapLocation) => setSelection({ ...location }), []);
+  const selectLocation = useCallback((location: MapLocation) => setSelection({ ...location }), [setSelection]);
   const walkFrom = myLocation ?? (bundled ? PROVIDENCE_WALK_ORIGIN : null);
 
   const walkFromGate = Boolean(walkFrom && !myLocation);
