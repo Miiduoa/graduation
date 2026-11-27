@@ -1,9 +1,9 @@
 {
   "schema": "campus.tronclass-account-closure-source/v1",
   "baseManifestSha256": "8e0877e879c00830611cd2bfd7eb86986f02448c384b799dba7c6c1996471004",
-  "composedManifestSha256": "ec988e40163fcc194d2555b7ad79bc16a54bfc87b5858b8cb012ebb9ad9c97c1",
-  "lostFoundManifestSha256": "94c75d70f5eb0364498fb01b9a2a295846514c8e2f63098f9cf9834159b12a0b",
-  "assistantPermissionsManifestSha256": "a2a057a9b5f0c9c0396c06d88bc0ee26edadc3984c6ac1209f9d6927fa74e3cd",
+  "composedManifestSha256": "abfc0a4f033f24cea87e95454a9ed6f588911caaa5ba36ef884c72da9df87381",
+  "lostFoundManifestSha256": "e920e737e21ed5bd4b79e9140bd4e37534277b013f7b6e09280140d07ea614c6",
+  "assistantPermissionsManifestSha256": "315ee56ab71b14729cbbd0146582c482b1333c2356a767d6e2f0a42d6cfb3862",
   "adapterSha256": "bfca29b89d9096db0bc75f826dd8642e94bf5c43e4e7d226ecd5f2fccd98a382",
   "sourceFiles": {
     "apps/api/src/migrations/284_tronclass_account_closure_outbox.sql": {
