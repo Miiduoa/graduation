@@ -9,7 +9,12 @@ let mockAuth: {
   signOutWithWarning: jest.Mock;
 };
 let mockMode: 'light' | 'dark' = 'light';
-let mockPlatform: { session: { platformAccountId: string } | null } | null = null;
+let mockPlatform: {
+  session: { platformAccountId: string } | null;
+  loading?: boolean;
+  error?: string;
+  pendingLogout?: boolean;
+} | null = null;
 let mockLegalBase: string | null = 'https://nuni.tw';
 const mockSetMode = jest.fn();
 const mockSelectSchool = jest.fn();
@@ -149,6 +154,29 @@ test('Google-only accounts can open assistant permissions while school account a
   expect(view.getByTestId('settings-current-account').props.accessibilityLabel).toBe('尚未登入');
   expect(view.queryByText('nuni 帳號已登入')).toBeNull();
   expect(view.queryByText('尚未登入學校帳號')).toBeNull();
+});
+
+test.each([
+  [{ loading: true }, '正在確認 nuni 帳號'],
+  [{ error: 'offline' }, '無法確認 nuni 帳號'],
+  [{ pendingLogout: true, loading: true }, 'nuni 帳號登出處理中'],
+] as const)('unverified platform session %j does not advertise signed-in assistant access', (status, heading) => {
+  mockAuth.user = null;
+  const session = { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111' };
+  mockPlatform = { session, ...status };
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  expect(view.getByTestId('settings-current-account').props.accessibilityLabel).toBe(heading);
+  expect(view.queryByText('nuni 帳號已登入')).toBeNull();
+  expect(view.queryByText('助理權限')).toBeNull();
+  expect(view.queryByText('陳同學')).toBeNull();
+  fireEvent.press(view.getByText('學校登入'));
+  expect(navigation.navigate).toHaveBeenCalledWith('SSOLogin');
+
+  mockPlatform = { session, loading: false, error: '', pendingLogout: false };
+  view.rerender(<SettingsAiFirstScreen navigation={navigation} />);
+  expect(view.getByTestId('settings-current-account').props.accessibilityLabel).toBe('nuni 帳號已登入');
+  fireEvent.press(view.getByText('助理權限'));
+  expect(navigation.navigate).toHaveBeenCalledWith('AssistantPermissions');
 });
 
 test('dual account settings retain one assistant permissions entry', () => {

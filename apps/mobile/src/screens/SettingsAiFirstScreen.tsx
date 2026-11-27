@@ -17,7 +17,37 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
   const platform = useOptionalNuniSession();
   const { mode, appearanceMode, setMode } = useThemeMode();
   const uid = auth.user?.uid;
-  const hasPlatformSession = Boolean(platform?.session);
+  // A cached session is not authority while refresh or logout is unresolved.
+  const platformAccountStatus = platform?.pendingLogout
+    ? 'logout-pending'
+    : platform?.loading
+      ? 'checking'
+      : platform?.error
+        ? 'unverified'
+        : platform?.session
+          ? 'ready'
+          : 'guest';
+  const hasPlatformSession = platformAccountStatus === 'ready';
+  const accountHeading = uid
+    ? '目前登入帳號'
+    : platformAccountStatus === 'logout-pending'
+      ? 'nuni 帳號登出處理中'
+      : platformAccountStatus === 'checking'
+        ? '正在確認 nuni 帳號'
+        : platformAccountStatus === 'unverified'
+          ? '無法確認 nuni 帳號'
+          : hasPlatformSession
+            ? 'nuni 帳號已登入'
+            : '尚未登入';
+  const accountDescription = hasPlatformSession
+    ? '尚未登入學校帳號'
+    : platformAccountStatus === 'logout-pending'
+      ? '請完成 nuni 帳號登出後再使用助理權限。'
+      : platformAccountStatus === 'checking'
+        ? '正在確認登入狀態，學校登入仍可使用。'
+        : platformAccountStatus === 'unverified'
+          ? '請確認連線，並前往 Google 帳號與連線管理登入狀態。'
+          : '登入後管理個人資料';
   const profile = auth.profile?.uid === uid ? auth.profile : null;
   const currentUid = useRef(uid);
   currentUid.current = uid;
@@ -93,16 +123,14 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
       onBack={() => navigation?.goBack?.()}
     >
       <AICard
-        title={uid ? '目前登入帳號' : hasPlatformSession ? 'nuni 帳號已登入' : '尚未登入'}
+        title={accountHeading}
         titleTestID="settings-current-account"
       >
         <View style={{ gap: 8 }}>
           <Text style={{ color: aiTokens.text, fontSize: 17, fontWeight: '600' }}>
             {uid
               ? profile?.displayName?.trim() || auth.user?.displayName?.trim() || '我的帳號'
-              : hasPlatformSession
-                ? '尚未登入學校帳號'
-                : '登入後管理個人資料'}
+              : accountDescription}
           </Text>
           {uid ? (
             <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
