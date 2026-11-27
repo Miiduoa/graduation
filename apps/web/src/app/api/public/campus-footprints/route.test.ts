@@ -971,6 +971,54 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+  it.each(['older', 'undated'] as const)('preserves the dated snapshot on an %s replication refresh and recovers', async (kind) => {
+    const hour = 60 * 60 * 1000;
+    const start = Math.floor(Date.now() / 1000) * 1000;
+    const stamp = (ms: number) => new Date(ms).toISOString().replace('.000Z', 'Z');
+    const initialBase = stamp(start - 60_000);
+    const refreshedAt = start + 25 * hour;
+    const nextBase = stamp(refreshedAt);
+    const geometry = JSON.parse(osmPayload);
+    const initial = JSON.stringify({ ...geometry, osm3s: { timestamp_osm_base: initialBase } });
+    const downgraded = JSON.stringify({
+      ...geometry,
+      ...(kind === 'older' ? { osm3s: { timestamp_osm_base: stamp(start - 120_000) } } : {}),
+    });
+    const recovered = JSON.stringify({ ...geometry, osm3s: { timestamp_osm_base: nextBase } });
+    const upstream = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(initial))
+      .mockResolvedValueOnce(jsonResponse(downgraded, { headers: { 'Retry-After': '3600' } }))
+      .mockResolvedValueOnce(jsonResponse(recovered));
+    vi.stubGlobal('fetch', upstream);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const { GET } = await import('./route');
+      const first = await GET();
+      expect(first.status).toBe(200);
+      const firstBody = await first.json();
+      expect(firstBody.osmBaseAt).toBe(initialBase);
+      expect(firstBody.stale).toBe(false);
+
+      clock.mockReturnValue(refreshedAt);
+      const fallback = await GET();
+      expect(fallback.status).toBe(200);
+      expect(fallback.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(fallback.headers.get('Retry-After')).toBe('3600');
+      expect(await fallback.json()).toEqual({ ...firstBody, stale: true });
+      expect(upstream).toHaveBeenCalledTimes(2);
+      await GET();
+      expect(upstream).toHaveBeenCalledTimes(2);
+
+      clock.mockReturnValue(refreshedAt + hour);
+      const fresh = await GET();
+      expect(fresh.status).toBe(200);
+      expect(await fresh.json()).toMatchObject({ stale: false, osmBaseAt: nextBase });
+      expect(upstream).toHaveBeenCalledTimes(3);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('does not promote a days-old Overpass database state into a new fresh snapshot', async () => {
     const baseTime = new Date(Math.floor(Date.now() / 1000) * 1000 - 3 * 24 * 60 * 60 * 1000)
       .toISOString().replace('.000Z', 'Z');
