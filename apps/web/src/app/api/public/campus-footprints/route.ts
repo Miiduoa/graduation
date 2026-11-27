@@ -55,7 +55,7 @@ function verifyOverpassReplicationTime(payload: unknown, now: number, previousTi
   }
   const baseMs = Date.parse(timestamp);
   if (!Number.isFinite(baseMs) || new Date(baseMs).toISOString().replace('.000Z', 'Z') !== timestamp ||
-      baseMs > now + 5 * 60 * 1000 || now - baseMs > MAX_OVERPASS_REPLICATION_LAG_MS) {
+      baseMs > now + 5 * 60 * 1000 || now - baseMs >= MAX_OVERPASS_REPLICATION_LAG_MS) {
     throw new Error('Overpass replication timestamp is not recent');
   }
   // A lagging replica or intermediary must not replace a newer checked map
