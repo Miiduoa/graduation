@@ -125,3 +125,86 @@ describe('useAsyncList request ownership', () => {
     expect(view.result.current.lastRefreshError).toBeNull();
   });
 });
+
+describe('useAsyncList retry timer lifecycle', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  it('clears the pending retry timer when the list unmounts', async () => {
+    const initial = deferred<string[]>();
+    const load = jest.fn().mockReturnValue(initial.promise);
+    const schedule = jest.spyOn(global, 'setTimeout');
+    const clear = jest.spyOn(global, 'clearTimeout');
+    const view = renderHook(() =>
+      useAsyncList<string>(load, [], { retryCount: 1, retryDelay: 12345 }),
+    );
+
+    await act(async () => initial.reject(new Error('temporary failure')));
+    const index = schedule.mock.calls.findIndex(([, delay]) => delay === 12345);
+    expect(index).toBeGreaterThanOrEqual(0);
+    const timer = schedule.mock.results[index].value;
+
+    view.unmount();
+    expect(clear).toHaveBeenCalledWith(timer);
+    await act(async () => jest.advanceTimersByTime(12345));
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not schedule a retry for a request rejected after unmount', async () => {
+    const initial = deferred<string[]>();
+    const load = jest.fn().mockReturnValue(initial.promise);
+    const schedule = jest.spyOn(global, 'setTimeout');
+    const view = renderHook(() =>
+      useAsyncList<string>(load, [], { retryCount: 1, retryDelay: 12345 }),
+    );
+
+    view.unmount();
+    await act(async () => initial.reject(new Error('late failure')));
+    expect(schedule.mock.calls.some(([, delay]) => delay === 12345)).toBe(false);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the old retry timer when a refresh takes ownership', async () => {
+    const initial = deferred<string[]>();
+    const load = jest.fn().mockReturnValueOnce(initial.promise).mockResolvedValueOnce(['fresh']);
+    const schedule = jest.spyOn(global, 'setTimeout');
+    const clear = jest.spyOn(global, 'clearTimeout');
+    const view = renderHook(() =>
+      useAsyncList<string>(load, [], { retryCount: 1, retryDelay: 12345 }),
+    );
+
+    await act(async () => initial.reject(new Error('temporary failure')));
+    const index = schedule.mock.calls.findIndex(([, delay]) => delay === 12345);
+    expect(index).toBeGreaterThanOrEqual(0);
+    const timer = schedule.mock.results[index].value;
+
+    await act(() => view.result.current.refresh());
+    expect(clear).toHaveBeenCalledWith(timer);
+    await act(async () => jest.advanceTimersByTime(12345));
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(view.result.current.items).toEqual(['fresh']);
+    expect(view.result.current.loading).toBe(false);
+  });
+
+  it('still retries an active request after the configured delay', async () => {
+    const initial = deferred<string[]>();
+    const load = jest.fn().mockReturnValueOnce(initial.promise).mockResolvedValueOnce(['retry']);
+    const view = renderHook(() =>
+      useAsyncList<string>(load, [], { retryCount: 1, retryDelay: 12345 }),
+    );
+
+    await act(async () => initial.reject(new Error('temporary failure')));
+    await act(async () => jest.advanceTimersByTime(12344));
+    expect(load).toHaveBeenCalledTimes(1);
+    await act(async () => jest.advanceTimersByTime(1));
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(view.result.current.items).toEqual(['retry']);
+    expect(view.result.current.loading).toBe(false);
+  });
+});
