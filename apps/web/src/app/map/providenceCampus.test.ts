@@ -240,3 +240,16 @@ it('retains a public bus stop beside a same-name non-stop marker', () => {
   expect(merged.filter((place) => place.name === stop.name)).toHaveLength(2);
   expect(new Set(merged.map((place) => place.id)).size).toBe(merged.length);
 });
+
+
+it('does not lend an outdoor source to a marker with unverified building or floor metadata', () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  for (const changed of [{ ...library, floor: '3F' }, { ...library, building: 'other' }]) {
+    expect(providencePlaceSourceUrl('pu', changed)).toBeNull();
+  }
+  const gate = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  expect(providencePlaceSourceUrl('pu', { ...gate, floor: '1F' })).toBeNull();
+  expect(isProvidencePendingVerification('pu', { ...gate, floor: '1F' })).toBe(false);
+  expect(providencePlaceSourceUrl('pu', library)).toBe(library.sourceUrl);
+  expect(isProvidencePendingVerification('pu', gate)).toBe(true);
+});
