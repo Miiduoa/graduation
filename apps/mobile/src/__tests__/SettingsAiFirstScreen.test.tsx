@@ -179,6 +179,34 @@ test.each([
   expect(navigation.navigate).toHaveBeenCalledWith('AssistantPermissions');
 });
 
+test.each([
+  { session: null },
+  { session: null, loading: true },
+  { session: null, error: 'offline' },
+  { session: null, pendingLogout: true },
+  { session: { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111' } },
+])('platform account recovery is directly reachable from settings in state %j', (platform) => {
+  mockAuth.user = null;
+  mockAuth.profile = null;
+  mockPlatform = platform;
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  const entry = view.getByLabelText('Google 帳號與連線');
+  expect(entry.props.testID).toBe('settings-google-account');
+  expect(entry).toBeEnabled();
+  fireEvent.press(entry);
+  expect(navigation.navigate).toHaveBeenCalledTimes(1);
+  expect(navigation.navigate).toHaveBeenCalledWith('NuniWorkspace', { tab: 'account' });
+  expect(mockAuth.signOutWithWarning).not.toHaveBeenCalled();
+  expect(view.queryByText('匯出我的資料')).toBeNull();
+  expect(view.queryByText('刪除帳號')).toBeNull();
+});
+
+test('settings does not offer platform account navigation without a platform provider', () => {
+  mockPlatform = null;
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  expect(view.queryByTestId('settings-google-account')).toBeNull();
+});
+
 test('dual account settings retain one assistant permissions entry', () => {
   mockPlatform = { session: { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111' } };
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
