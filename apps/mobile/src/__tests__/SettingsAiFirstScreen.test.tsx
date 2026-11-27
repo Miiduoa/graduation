@@ -130,6 +130,13 @@ test('Google-only accounts can open assistant permissions while school account a
   mockPlatform = { session: { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111' } };
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
   expect(view.getByText('AI 助理')).toBeTruthy();
+  expect(view.getByTestId('settings-current-account').props.accessibilityLabel).toBe('nuni 帳號已登入');
+  expect(view.getByText('尚未登入學校帳號')).toBeTruthy();
+  expect(view.getByText('仍可管理助理權限；登入學校帳號後可管理校園個人資料。')).toBeTruthy();
+  expect(view.queryByText('陳同學')).toBeNull();
+  expect(view.queryByText('尚未登入')).toBeNull();
+  fireEvent.press(view.getByText('學校登入'));
+  expect(navigation.navigate).toHaveBeenCalledWith('SSOLogin');
   fireEvent.press(view.getByText('助理權限'));
   expect(navigation.navigate).toHaveBeenCalledWith('AssistantPermissions');
   expect(view.queryByText('通知設定')).toBeNull();
@@ -139,12 +146,17 @@ test('Google-only accounts can open assistant permissions while school account a
   mockPlatform = { session: null };
   view.rerender(<SettingsAiFirstScreen navigation={navigation} />);
   expect(view.queryByText('助理權限')).toBeNull();
+  expect(view.getByTestId('settings-current-account').props.accessibilityLabel).toBe('尚未登入');
+  expect(view.queryByText('nuni 帳號已登入')).toBeNull();
+  expect(view.queryByText('尚未登入學校帳號')).toBeNull();
 });
 
 test('dual account settings retain one assistant permissions entry', () => {
   mockPlatform = { session: { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111' } };
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
   expect(view.getAllByText('助理權限')).toHaveLength(1);
+  expect(view.getByTestId('settings-current-account').props.accessibilityLabel).toBe('目前登入帳號');
+  expect(view.queryByText('尚未登入學校帳號')).toBeNull();
   expect(view.getByText('通知設定')).toBeTruthy();
 });
 

@@ -17,6 +17,7 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
   const platform = useOptionalNuniSession();
   const { mode, appearanceMode, setMode } = useThemeMode();
   const uid = auth.user?.uid;
+  const hasPlatformSession = Boolean(platform?.session);
   const profile = auth.profile?.uid === uid ? auth.profile : null;
   const currentUid = useRef(uid);
   currentUid.current = uid;
@@ -92,21 +93,30 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
       onBack={() => navigation?.goBack?.()}
     >
       <AICard
-        title={uid ? '目前登入帳號' : '尚未登入'}
+        title={uid ? '目前登入帳號' : hasPlatformSession ? 'nuni 帳號已登入' : '尚未登入'}
         titleTestID="settings-current-account"
       >
         <View style={{ gap: 8 }}>
           <Text style={{ color: aiTokens.text, fontSize: 17, fontWeight: '600' }}>
             {uid
               ? profile?.displayName?.trim() || auth.user?.displayName?.trim() || '我的帳號'
-              : '登入後管理個人資料'}
+              : hasPlatformSession
+                ? '尚未登入學校帳號'
+                : '登入後管理個人資料'}
           </Text>
           {uid ? (
             <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
               {auth.user?.email || profile?.email || '尚未提供電子郵件'}
             </Text>
           ) : (
-            <AIButton label="學校登入" onPress={go('SSOLogin')} />
+            <>
+              {hasPlatformSession ? (
+                <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+                  仍可管理助理權限；登入學校帳號後可管理校園個人資料。
+                </Text>
+              ) : null}
+              <AIButton label="學校登入" onPress={go('SSOLogin')} />
+            </>
           )}
         </View>
       </AICard>
@@ -150,7 +160,7 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
         />
       </AISection>
 
-      {uid || platform?.session ? (
+      {uid || hasPlatformSession ? (
         <AISection title="AI 助理">
           <AIRow
             title="助理權限"
