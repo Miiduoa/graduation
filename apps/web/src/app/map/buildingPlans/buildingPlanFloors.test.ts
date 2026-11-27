@@ -460,7 +460,7 @@ describe('two-point floor alignment suggestions', () => {
 describe('invalid alignment coordinates', () => {
   it.each([
     ['sparse pair', Array<number>(2)],
-    ['missing second coordinate', [0, ,]],
+    ['missing second coordinate', Object.assign(Array<number>(2), { 0: 0 })],
     ['array-like object', { 0: 0, 1: 0, length: 2 }],
     ['nonfinite coordinate', [0, Infinity]],
   ])('rejects %s without throwing or suggesting a transform', (_, point) => {
