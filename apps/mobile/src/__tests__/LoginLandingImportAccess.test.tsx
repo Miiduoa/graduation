@@ -252,6 +252,9 @@ it.each([false, true])('opens the platform without selecting or verifying a scho
   const sessionBeforeNavigation = mockAuth.session;
   const view = await landing();
   expect(view.getByText(signedIn ? '回到我的課程' : '登入或建立帳號')).toBeTruthy();
+  expect(view.getByTestId('login-start').props.accessibilityLabel).toBe(
+    signedIn ? '回到我的課程' : '登入或建立帳號',
+  );
   if (!signedIn) {
     const googleHeading = view.getByTestId('login-google-account');
     expect(googleHeading.props.accessible).toBe(true);

@@ -63,6 +63,15 @@ export default function LoginLandingScreen() {
   const schoolLoginState = hasSchool ? getSchoolLoginAvailabilityState(school.id) : 'unavailable';
   const checkingSchoolLogin = schoolLoginState === 'unknown' || schoolLoginState === 'loading';
   const platformReady = !!auth.session && !auth.loading && !auth.error && !auth.pendingLogout;
+  const accountActionLabel = platformReady
+    ? '回到我的課程'
+    : auth.loading
+      ? '確認 Google 帳號'
+      : auth.pendingLogout
+        ? '處理未完成的登出'
+        : auth.error
+          ? '查看登入問題'
+          : '登入或建立帳號';
   // Do not displace an existing session or a pending platform recovery with school setup.
   const schoolFirst = schoolEntry && !auth.session && !auth.loading && !auth.error && !auth.pendingLogout;
   const schoolSignIn = (
@@ -361,6 +370,7 @@ export default function LoginLandingScreen() {
             <Pressable
               testID="login-start"
               accessibilityRole="button"
+              accessibilityLabel={accountActionLabel}
               style={({ pressed }) => [s.primaryButton, pressed && s.primaryButtonPressed]}
               onPress={() =>
                 platformReady
@@ -368,16 +378,8 @@ export default function LoginLandingScreen() {
                   : safeNavigate(navigation, 'NuniWorkspace')
               }
             >
-              <Text style={s.primaryButtonText}>
-                {platformReady
-                  ? '回到我的課程'
-                  : auth.loading
-                    ? '確認 Google 帳號'
-                    : auth.pendingLogout
-                      ? '處理未完成的登出'
-                      : auth.error
-                        ? '查看登入問題'
-                        : '登入或建立帳號'}
+              <Text accessible={false} style={s.primaryButtonText}>
+                {accountActionLabel}
               </Text>
             </Pressable>
             {platformReady ? (
@@ -578,7 +580,7 @@ const createStyles = () =>
     content: {
       paddingHorizontal: 22,
       paddingTop: 12,
-      paddingBottom: 24,
+      paddingBottom: 96,
       flexGrow: 1,
       width: '100%',
       maxWidth: 640,

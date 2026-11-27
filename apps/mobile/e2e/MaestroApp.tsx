@@ -100,7 +100,7 @@ function MaestroHarness() {
         accessibilityLabel="開啟模擬器測試登入"
         collapsable={false}
         onPress={openHarness}
-        style={[styles.trigger, { bottom: Math.max(insets.bottom, 8) + 12 }]}
+        style={[styles.trigger, { top: Math.max(insets.top, 8) + 52 }]}
       >
         <Text style={styles.triggerLabel}>測試登入</Text>
       </Pressable>

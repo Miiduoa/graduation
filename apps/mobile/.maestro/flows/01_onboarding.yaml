@@ -39,13 +39,13 @@ tags:
       - assertVisible:
           id: login-google-account
 - assertVisible: 'Google 帳號'
+# The heading can sit on screen while the action is still under the test-login overlay.
 - retry:
-    maxRetries: 6
+    maxRetries: 8
     commands:
       - runFlow:
           when:
-            notVisible:
-              id: login-start
+            notVisible: '登入或建立帳號|確認 Google 帳號|處理未完成的登出|查看登入問題'
           commands:
             - swipe:
                 from:
@@ -53,7 +53,11 @@ tags:
                 direction: UP
                 duration: 400
       - assertVisible:
-          id: login-start
+          id: '^login-start$'
+          enabled: true
+      - assertVisible:
+          text: '登入或建立帳號|確認 Google 帳號|處理未完成的登出|查看登入問題'
+          enabled: true
 # Assert the visible terminal state rather than a non-interactive page container.
 # A remote session failure is not a successful login; recovery must remain usable.
 # The first iOS tap can report a hierarchy change while still on the landing page.
@@ -67,11 +71,11 @@ tags:
               id: login-landing
           commands:
             - assertVisible:
-                id: login-start
+                id: '^login-start$'
                 enabled: true
             - waitForAnimationToEnd
             - tapOn:
-                id: login-start
+                id: '^login-start$'
                 enabled: true
                 retryTapIfNoChange: true
       - extendedWaitUntil:
