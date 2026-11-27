@@ -3,7 +3,7 @@ import {
   PROVIDENCE_CAMPUS_PLACES,
   providencePlaceSourceUrl,
   type CampusMapPlaceLike,
-} from './providenceCampus';
+} from './providenceCampusMap';
 
 export const MAX_CAMPUS_CLASSROOM_QUERY_LENGTH = 120;
 /** Category labels may carry long parenthetical annotations; do not reuse the
@@ -498,7 +498,20 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
       (isExplicitNonClassroomCategory(published.category) ||
         (!isSourcedBuildingLabel(school, published, location.name) &&
           !aliases?.some((name) => campusPlaceNameMatchesQuery(name, location.name))) ||
-        !providencePlaceSourceUrl(school, { ...location, name: published.name }))
+        !providencePlaceSourceUrl(school, {
+          ...location,
+          name: published.name,
+          // A verified bilingual building label describes this same outdoor
+          // POI for classroom lookup only. Never change the original marker.
+          building: isSourcedBuildingLabel(school, published, location.building) ||
+            aliases?.some((name) => comparisonText(name) === comparisonText(location.building))
+            ? published.building
+            : location.building,
+          // A floor annotation on this same outdoor POI is also lookup-only.
+          // It does not verify an indoor destination and must not block a
+          // classroom query that already matched before floor entered identity.
+          floor: published.floor,
+        }))
     ) continue;
     // A nearby transit stop can be named after a hall or carry its building
     // field in Firestore. Never promote that stop into a classroom destination.
