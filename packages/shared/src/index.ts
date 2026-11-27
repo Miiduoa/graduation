@@ -108,7 +108,7 @@ export * from './wakeAwareRequest';
 export * from './foodPageCopy';
 export * from './signedInSocialReads';
 export * from './imports';
-export * from './providenceCampus';
+export * from './providenceCampusMap';
 export * from './puLmsReadonly';
 export * from './academicSections';
 export * from './privateFileAccess';
