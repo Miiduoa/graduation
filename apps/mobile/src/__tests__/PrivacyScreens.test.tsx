@@ -108,6 +108,9 @@ beforeEach(() => {
 
 test('export uses selected categories and preserves every returned field without claiming saved', async () => {
   const view = render(<DataExportScreen navigation={navigation} />);
+  expect(view.getByTestId('data-export-instructions').props.children).toBe(
+    '選擇內容，將資料保存到自己的裝置。',
+  );
   fireEvent.press(view.getByLabelText('校園紀錄'));
   await act(async () => fireEvent.press(view.getByText('匯出 7 項資料')));
   expect(exportData.mock.calls[0][0]).toEqual(
