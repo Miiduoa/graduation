@@ -108,6 +108,8 @@ beforeEach(() => {
 
 test('export uses selected categories and preserves every returned field without claiming saved', async () => {
   const view = render(<DataExportScreen navigation={navigation} />);
+  expect(view.getByTestId('data-export-screen')).toBeTruthy();
+  expect(view.getByLabelText('選擇內容，將資料保存到自己的裝置。')).toBeTruthy();
   expect(view.getByTestId('data-export-instructions').props.children).toBe(
     '選擇內容，將資料保存到自己的裝置。',
   );

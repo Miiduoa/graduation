@@ -166,6 +166,7 @@ function ExportEditor({
   const busy = Boolean(progress);
   return (
     <AIDetailScreen
+      testID="data-export-screen"
       title="匯出我的資料"
       subtitle="選擇內容，將資料保存到自己的裝置。"
       onBack={() => navigation?.goBack?.()}
