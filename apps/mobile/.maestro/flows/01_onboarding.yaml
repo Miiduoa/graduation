@@ -25,9 +25,11 @@ tags:
 # Stop when each target is fully visible, without an extra centering swipe.
 - scrollUntilVisible:
     element:
-      text: 'Google 帳號'
+      id: login-google-account
     direction: DOWN
     centerElement: false
+- assertVisible:
+    id: login-google-account
 - assertVisible: 'Google 帳號'
 - scrollUntilVisible:
     element:

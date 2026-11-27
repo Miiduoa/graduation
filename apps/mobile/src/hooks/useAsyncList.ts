@@ -25,16 +25,37 @@ const DEFAULT_OPTIONS: UseAsyncListOptions = {
   retryDelay: 1000,
 };
 
+function waitForRetry(delay: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error('Aborted'));
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', cancel);
+      resolve();
+    }, delay);
+    const cancel = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', cancel);
+      reject(new Error('Aborted'));
+    };
+    signal.addEventListener('abort', cancel, { once: true });
+    if (signal.aborted) cancel();
+  });
+}
+
 async function fetchWithRetry<T>(
   load: () => Promise<T>,
   retryCount: number,
   retryDelay: number,
-  signal?: AbortSignal,
+  signal: AbortSignal,
 ): Promise<T> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= retryCount; attempt++) {
-    if (signal?.aborted) {
+    if (signal.aborted) {
       throw new Error('Aborted');
     }
 
@@ -44,7 +65,7 @@ async function fetchWithRetry<T>(
       lastError = e;
 
       if (attempt < retryCount) {
-        await new Promise((resolve) => setTimeout(resolve, retryDelay * (attempt + 1)));
+        await waitForRetry(retryDelay * (attempt + 1), signal);
       }
     }
   }

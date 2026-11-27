@@ -25,6 +25,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import { useThemeVersion } from './src/ui/useThemeStyleSheet';
 import { theme, softShadowStyle } from './src/ui/theme';
+import { TAB_BAR_SCROLL_BOTTOM_PADDING } from './src/ui/navigationTheme';
 import { SchoolProvider, useSchool } from './src/state/school';
 import { FavoritesProvider } from './src/state/favorites';
 import { DemoProvider } from './src/state/demo';
@@ -563,7 +564,12 @@ function AppTabNavigator() {
       tabBar={(props) => <CampusTabBar {...props} />}
       screenOptions={() => ({
         headerShown: false,
-        sceneStyle: { backgroundColor: theme.colors.bg },
+        sceneStyle: {
+          backgroundColor: theme.colors.bg,
+          // Custom tab bar is overlaid; keep tab scenes above it so bottom
+          // rows like「使用設定」receive the tap instead of the 課務 tab.
+          paddingBottom: TAB_BAR_SCROLL_BOTTOM_PADDING,
+        },
       })}
     >
       <Tab.Screen name="Today" component={HomeStack} />

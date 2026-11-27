@@ -62,7 +62,7 @@ function utcMillis(value: string | undefined) {
 
 export function osmSnapshotIsFresh(osmBaseAt: string | undefined, now: number) {
   const base = utcMillis(osmBaseAt);
-  return Number.isFinite(base) && base <= now + MAX_CLOCK_SKEW_MS && now - base <= MAX_OSM_LAG_MS;
+  return Number.isFinite(now) && Number.isFinite(base) && base <= now + MAX_CLOCK_SKEW_MS && now - base <= MAX_OSM_LAG_MS;
 }
 
 /** Recheck a cached route before use or after resume in a school-scoped UI.
@@ -71,7 +71,7 @@ export function osmSnapshotIsFresh(osmBaseAt: string | undefined, now: number) {
 export function isCampusWalkingRouteCurrent(
   route: CampusWalkingRoute, schoolId: string, now: number = Date.now(),
 ): boolean {
-  return !!schoolId && route.schoolId === schoolId && Number.isFinite(now) &&
+  return !!schoolId && !!route && route.schoolId === schoolId && Number.isFinite(now) &&
     osmSnapshotIsFresh(route.osmBaseAt, now) &&
     Number.isFinite(route.reviewExpiresAtMs) && now < route.reviewExpiresAtMs;
 }
@@ -86,7 +86,8 @@ export function findCampusWalkingRoute(
   graph: CampusWalkingGraph, schoolId: string, bounds: CampusWalkingBounds,
   start: number, end: number, now: number = Date.now(),
 ): CampusWalkingRoute | null {
-  if (!schoolId || graph.schoolId !== schoolId || !validId(start) || !validId(end) ||
+  if (!schoolId || !graph || !bounds || graph.schoolId !== schoolId || !validId(start) || !validId(end) ||
+      !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) ||
       graph.nodes.length > 2000 || graph.edges.length > 4000 ||
       !Number.isFinite(now) ||
       !osmSnapshotIsFresh(graph.osmBaseAt, now) ||
@@ -96,7 +97,7 @@ export function findCampusWalkingRoute(
 
   const nodes = new Map<number, WalkingNode>();
   for (const node of graph.nodes) {
-    if (!validId(node.id) || nodes.has(node.id) ||
+    if (!node || typeof node !== 'object' || !validId(node.id) || nodes.has(node.id) ||
         !Number.isFinite(node.lat) || !Number.isFinite(node.lng) ||
         node.lat < bounds.south || node.lat > bounds.north ||
         node.lng < bounds.west || node.lng > bounds.east) return null;
@@ -114,6 +115,7 @@ export function findCampusWalkingRoute(
   const seen = new Set<string>();
   let sameNodeReviewExpiry = -Infinity;
   for (const edge of graph.edges) {
+    if (!edge || typeof edge !== 'object') return null;
     const a = nodes.get(edge.from);
     const b = nodes.get(edge.to);
     if (!a || !b || a.id === b.id || !validId(edge.osmWayId) ||

@@ -246,6 +246,7 @@ export function AISection({
 // ──────────────────────────────────────────────
 export function AICard({
   title,
+  titleTestID,
   icon,
   badge,
   badgeTone = 'ai',
@@ -258,6 +259,7 @@ export function AICard({
   style,
 }: {
   title?: string;
+  titleTestID?: string;
   icon?: string;
   badge?: string;
   badgeTone?: 'ai' | 'success' | 'warning' | 'danger' | 'muted';
@@ -291,7 +293,18 @@ export function AICard({
               <Text style={{ fontSize: 15 }}>{icon}</Text>
             </View>
           ) : null}
-          {title ? <Text style={styles.cardTitle}>{title}</Text> : <View style={{ flex: 1 }} />}
+          {title ? (
+            <Text
+              testID={titleTestID}
+              accessibilityRole="header"
+              accessibilityLabel={title}
+              style={styles.cardTitle}
+            >
+              {title}
+            </Text>
+          ) : (
+            <View style={{ flex: 1 }} />
+          )}
           {badge ? (
             badgeStyle.isStatus ? (
               <View style={[styles.cardBadge, { backgroundColor: badgeStyle.bg }]}>

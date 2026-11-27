@@ -181,6 +181,8 @@ function MapContent({
   const initialQuery = normalizeCampusClassroomQuery(query);
   const [search, setSearch] = useState(initialQuery);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const routeHeadingRef = useRef<HTMLHeadingElement>(null);
+  const classroomRouteFocusPending = useRef(false);
   const routeNoteId = useId();
   const detailNoteId = useId();
   const classroomNoteId = useId();
@@ -310,7 +312,9 @@ function MapContent({
     const to = confirmedRoutePlace(locations, locations.find((location) => location.id === ids[1]) ?? null);
     return from && to ? [from, to] : null;
   }, [route, locations, placeState.source]);
-  const routeStart = confirmedRoutePlace(locations, routeDraft?.from ?? null);
+  // A resolved shared route is editable just like a manually planned route.
+  // Pending or invalid shared links must never supply an origin.
+  const routeStart = routeDraft === null ? deepLinkRoute?.[0] ?? null : confirmedRoutePlace(locations, routeDraft.from);
   const routeEnd = confirmedRoutePlace(locations, routeDraft?.to ?? null);
   const routeNeedsConfirmation = Boolean(
     (routeDraft?.from && !routeStart) || (routeDraft?.to && !routeEnd),
@@ -319,6 +323,13 @@ function MapContent({
     if (routeDraft === null) return deepLinkRoute;
     return routeStart && routeEnd && routeStart.id !== routeEnd.id ? [routeStart, routeEnd] : null;
   }, [deepLinkRoute, routeDraft, routeStart, routeEnd]);
+  // Only a user-initiated classroom route edit moves focus. Loading a shared
+  // route or refreshing the catalogue must not interrupt keyboard navigation.
+  useEffect(() => {
+    if (!classroomRouteFocusPending.current) return;
+    classroomRouteFocusPending.current = false;
+    if (routeLocations) routeHeadingRef.current?.focus();
+  }, [routeLocations]);
   const returnParams = new URLSearchParams({ schoolId: school });
   // Preserve the currently confirmed route, not the original link after a manual change.
   // A pending source can still resolve an untouched deep link. Never serialize GPS.
@@ -340,7 +351,7 @@ function MapContent({
   const schoolLoginHref = `/login?reconnect=school&returnUrl=${returnUrl}`;
 
   const pendingRoutePlaces = routeLocations?.filter((place) => isProvidencePendingVerification(publicSchool, place)) ?? [];
-  const selectLocation = useCallback((location: MapLocation) => setSelection({ ...location }), []);
+  const selectLocation = useCallback((location: MapLocation) => setSelection({ ...location }), [setSelection]);
   const walkFrom = myLocation ?? (bundled ? PROVIDENCE_WALK_ORIGIN : null);
 
   const walkFromGate = Boolean(walkFrom && !myLocation);
@@ -556,7 +567,7 @@ function MapContent({
         <section className={`card ${styles.route}`} aria-label="步行導航">
           <div>
             <p className={styles.eyebrow}>前往目的地</p>
-            <h2 aria-live="polite" aria-atomic="true">
+            <h2 ref={routeHeadingRef} tabIndex={-1} aria-live="polite" aria-atomic="true">
               {routeLocations[0].name} → {routeLocations[1].name}
             </h2>
             <p>
@@ -645,7 +656,7 @@ function MapContent({
             <p>可對應「{classroomPlace.name}」的位置。抵達後請依課表與現場標示確認教室。</p>
             <p id={classroomNoteId}>
               導航終點是建築地點標記，並非已核實的入口或室內教室；路線由第三方地圖規劃。
-              {isProvidencePendingVerification(school, classroomPlace) && (
+              {isProvidencePendingVerification(publicSchool, classroomPlace) && (
                 <strong>這個地點只有單一資料來源，位置待再次確認。</strong>
               )}
             </p>
@@ -658,6 +669,16 @@ function MapContent({
                 aria-describedby={classroomNoteId} target="_blank" rel="noopener noreferrer">
                 使用 Apple 地圖前往{classroomPlace.name}
               </a>
+              {routeStart && !routeNeedsConfirmation && routeStart.id !== classroomPlace.id && (
+                <button className="btn" type="button" aria-describedby={classroomNoteId}
+                  onClick={() => {
+                    classroomRouteFocusPending.current = true;
+                    setRouteDraft({ from: { ...routeStart }, to: { ...classroomPlace } });
+                    setNotice('');
+                  }}>
+                  將{classroomPlace.name}設為終點
+                </button>
+              )}
               {selected?.id !== classroomPlace.id && (
                 <button className="btn" type="button" onClick={() => selectLocation(classroomPlace)}>
                   定位{classroomPlace.name}
