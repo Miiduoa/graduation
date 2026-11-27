@@ -84,6 +84,10 @@ test('export does not swallow a missing navigator', () => {
 
 test('settings shows real account and version without fabricated permissions, devices or sync state', () => {
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  const accountHeading = view.getByTestId('settings-current-account');
+  expect(accountHeading.props.accessible).toBe(true);
+  expect(accountHeading.props.accessibilityLabel).toBe('目前登入帳號');
+  expect(view.getByTestId('settings-screen')).toBeTruthy();
   expect(view.getByText('陳同學')).toBeTruthy();
   expect(view.getByText('student-a@example.edu')).toBeTruthy();
   expect(view.getByText('2.3.4')).toBeTruthy();

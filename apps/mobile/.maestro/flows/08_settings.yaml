@@ -76,14 +76,26 @@ tags: [smoke, settings]
 - waitForAnimationToEnd:
     timeout: 5000
 - tapOn: '返回'
-# Language reload can restore Settings at the top. Require the account card
-# before scrolling to export, and wait until the export screen itself is open.
+# Language return often leaves Settings on the lower rows. Scroll back to the
+# account heading so 目前登入帳號 is still required, then continue to export.
 - waitForAnimationToEnd:
     timeout: 5000
-- extendedWaitUntil:
-    visible:
-      id: settings-current-account
-    timeout: 15000
+- retry:
+    maxRetries: 8
+    commands:
+      - runFlow:
+          when:
+            notVisible:
+              id: settings-current-account
+          commands:
+            - swipe:
+                from:
+                  id: settings-accessibility
+                direction: DOWN
+                duration: 400
+      - assertVisible:
+          id: settings-current-account
+- assertVisible: '目前登入帳號'
 - retry:
     maxRetries: 2
     commands:

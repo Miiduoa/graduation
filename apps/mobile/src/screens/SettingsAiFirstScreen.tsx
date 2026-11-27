@@ -85,6 +85,7 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
 
   return (
     <AIDetailScreen
+      testID="settings-screen"
       title="設定"
       subtitle="管理帳號與調整閱讀方式。"
       keyboardShouldPersistTaps="handled"

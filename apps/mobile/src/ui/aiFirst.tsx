@@ -294,14 +294,18 @@ export function AICard({
             </View>
           ) : null}
           {title ? (
-            <Text
+            <View
               testID={titleTestID}
+              collapsable={false}
+              accessible
               accessibilityRole="header"
               accessibilityLabel={title}
-              style={styles.cardTitle}
+              style={{ flex: 1 }}
             >
-              {title}
-            </Text>
+              <Text accessible={false} style={styles.cardTitle}>
+                {title}
+              </Text>
+            </View>
           ) : (
             <View style={{ flex: 1 }} />
           )}
