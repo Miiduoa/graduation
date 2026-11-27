@@ -8,6 +8,11 @@ jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 const navigation = { navigate: jest.fn() };
 beforeEach(() => jest.clearAllMocks());
 
+test('the composer does not become a nested vertical scroller', () => {
+  const view = render(<WorkspaceStart navigation={navigation} scope="student-a:pu" />);
+  expect(view.getByLabelText('想交給 nuni 的事').props.scrollEnabled).toBe(false);
+});
+
 test('choosing an example only fills the draft until the user continues', () => {
   const view = render(<WorkspaceStart navigation={navigation} scope="student-a:pu" />);
   fireEvent.press(view.getByLabelText('填入問題：下一堂課在哪裡'));

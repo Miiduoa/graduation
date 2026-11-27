@@ -20,22 +20,40 @@ tags:
 - takeScreenshot: guest_startup
 
 # Google is the primary entry before school import and the public-service directory.
-# Scroll to the account itself; the optional school-provider hint is farther down.
+# Scroll the landing page itself; a nested composer field must not steal the swipe.
 # Check the heading before scrolling to its action; they need not share a viewport.
-# Stop when each target is fully visible, without an extra centering swipe.
-- scrollUntilVisible:
-    element:
-      id: login-google-account
-    direction: DOWN
-    centerElement: false
-- assertVisible:
-    id: login-google-account
+- hideKeyboard
+- retry:
+    maxRetries: 8
+    commands:
+      - runFlow:
+          when:
+            notVisible:
+              id: login-google-account
+          commands:
+            - swipe:
+                from:
+                  id: login-landing
+                direction: UP
+                duration: 500
+      - assertVisible:
+          id: login-google-account
 - assertVisible: 'Google 帳號'
-- scrollUntilVisible:
-    element:
-      id: login-start
-    direction: DOWN
-    centerElement: false
+- retry:
+    maxRetries: 6
+    commands:
+      - runFlow:
+          when:
+            notVisible:
+              id: login-start
+          commands:
+            - swipe:
+                from:
+                  id: login-landing
+                direction: UP
+                duration: 400
+      - assertVisible:
+          id: login-start
 # Assert the visible terminal state rather than a non-interactive page container.
 # A remote session failure is not a successful login; recovery must remain usable.
 # The first iOS tap can report a hierarchy change while still on the landing page.

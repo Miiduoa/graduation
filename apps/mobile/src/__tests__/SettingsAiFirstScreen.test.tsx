@@ -65,6 +65,7 @@ afterEach(() => jest.restoreAllMocks());
 
 test('settings rows keep their titles as native labels so the visible copy is findable', () => {
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  expect(view.getByTestId('settings-screen')).toBeTruthy();
   const accessibility = view.getByLabelText('無障礙設定');
   expect(accessibility.props.testID).toBe('settings-accessibility');
   expect(accessibility.props.accessibilityHint).toBe('查看裝置輔助功能與閱讀設定');
@@ -93,6 +94,7 @@ test('account heading has a stable native accessibility target across identity c
   expect(view.getByText('陳同學')).toBeTruthy();
 
   mockAuth.user = null;
+  mockAuth.profile = null;
   view.rerender(<SettingsAiFirstScreen navigation={navigation} />);
   expect(view.getByTestId('settings-current-account').props.accessibilityLabel).toBe('尚未登入');
   expect(view.getByText('尚未登入')).toBeTruthy();
@@ -101,6 +103,10 @@ test('account heading has a stable native accessibility target across identity c
 
 test('settings shows real account and version without fabricated permissions, devices or sync state', () => {
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  const accountHeading = view.getByTestId('settings-current-account');
+  expect(accountHeading.props.accessible).toBe(true);
+  expect(accountHeading.props.accessibilityLabel).toBe('目前登入帳號');
+  expect(view.getByTestId('settings-screen')).toBeTruthy();
   expect(view.getByText('陳同學')).toBeTruthy();
   expect(view.getByText('student-a@example.edu')).toBeTruthy();
   expect(view.getByText('2.3.4')).toBeTruthy();
