@@ -82,6 +82,23 @@ test('export does not swallow a missing navigator', () => {
   expect(() => fireEvent.press(view.getByLabelText('匯出我的資料'))).toThrow('DataExport');
 });
 
+test('account heading has a stable native accessibility target across identity changes', () => {
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  const heading = view.getByTestId('settings-current-account');
+  expect(heading.props.collapsable).toBe(false);
+  expect(heading.props.accessible).toBe(true);
+  expect(heading.props.accessibilityRole).toBe('header');
+  expect(heading.props.accessibilityLabel).toBe('目前登入帳號');
+  expect(view.getByText('目前登入帳號')).toBeTruthy();
+  expect(view.getByText('陳同學')).toBeTruthy();
+
+  mockAuth.user = null;
+  view.rerender(<SettingsAiFirstScreen navigation={navigation} />);
+  expect(view.getByTestId('settings-current-account').props.accessibilityLabel).toBe('尚未登入');
+  expect(view.getByText('尚未登入')).toBeTruthy();
+  expect(view.queryByText('陳同學')).toBeNull();
+});
+
 test('settings shows real account and version without fabricated permissions, devices or sync state', () => {
   const view = render(<SettingsAiFirstScreen navigation={navigation} />);
   expect(view.getByText('陳同學')).toBeTruthy();
