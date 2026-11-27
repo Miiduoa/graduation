@@ -4,11 +4,11 @@
   "composedManifestSha256": "ec988e40163fcc194d2555b7ad79bc16a54bfc87b5858b8cb012ebb9ad9c97c1",
   "lostFoundManifestSha256": "94c75d70f5eb0364498fb01b9a2a295846514c8e2f63098f9cf9834159b12a0b",
   "assistantPermissionsManifestSha256": "a2a057a9b5f0c9c0396c06d88bc0ee26edadc3984c6ac1209f9d6927fa74e3cd",
-  "adapterSha256": "bfca29b89d9096db0bc75f826dd8642e94bf5c43e4e7d226ecd5f2fccd98a382",
+  "adapterSha256": "5652578216f3fda101ced8aae6cac89909653688f50ff32847c4d2bba8f074a7",
   "sourceFiles": {
     "apps/api/src/migrations/284_tronclass_account_closure_outbox.sql": {
       "source": "deploy/nuni-api/tronclass-account-closure/284_tronclass_account_closure_outbox.sql",
-      "sha256": "9c5057739cf89222bc69ee2bcbfffbf74b0705d522d4478f75fc01a2d826381a"
+      "sha256": "915ada63acd28f1ddd78d81395d27dffed3ce193064a12b4718afc1a7af102d7"
     }
   },
   "migration": "284_tronclass_account_closure_outbox",
