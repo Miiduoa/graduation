@@ -106,6 +106,24 @@ beforeEach(() => {
   remove.mockResolvedValue({ success: true, userId: 'u1' });
 });
 
+test('export scope guidance and sensitive conversation choices are accessible before any export', () => {
+  const view = render(<DataExportScreen navigation={navigation} />);
+  expect(view.getByTestId('data-export-scope')).toBeTruthy();
+  expect(view.getByText('選擇內容，將資料保存到自己的裝置。')).toBeTruthy();
+  const messages = view.getByRole('checkbox', { name: '對話紀錄' });
+  expect(messages.props.accessibilityHint).toBe(
+    '目前學校與未指定學校的對話，包含對方傳送的訊息',
+  );
+  expect(messages).toHaveAccessibilityState({ checked: false });
+  fireEvent.press(messages);
+  expect(view.getByRole('checkbox', { name: '對話紀錄' })).toHaveAccessibilityState({
+    checked: true,
+  });
+  expect(view.getByText('匯出 9 項資料')).toBeTruthy();
+  expect(exportData).not.toHaveBeenCalled();
+  expect(share).not.toHaveBeenCalled();
+});
+
 test('export uses selected categories and preserves every returned field without claiming saved', async () => {
   const view = render(<DataExportScreen navigation={navigation} />);
   fireEvent.press(view.getByLabelText('校園紀錄'));
