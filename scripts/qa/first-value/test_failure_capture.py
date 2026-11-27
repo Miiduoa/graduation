@@ -1,7 +1,9 @@
 import unittest
 from unittest.mock import AsyncMock
 
-from check import capture_failure
+from playwright.async_api import Error as PlaywrightError
+
+from check import capture_evidence, capture_failure
 
 
 class FailureCaptureTests(unittest.IsolatedAsyncioTestCase):
@@ -47,6 +49,33 @@ class FailureCaptureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report['failure'], repr(original))
         self.assertFalse(report['passed'])
         self.assertNotIn('diagnosticErrors', report)
+
+
+class EvidenceCaptureTests(unittest.IsolatedAsyncioTestCase):
+    async def test_retry_only_protocol_error_with_same_required_artifact(self):
+        page = AsyncMock()
+        page.screenshot.side_effect = [
+            PlaywrightError('Page.captureScreenshot: Unable to capture screenshot'),
+            None,
+        ]
+        await capture_evidence(page, 'setup.png')
+        self.assertEqual(page.screenshot.await_count, 2)
+        self.assertEqual(page.screenshot.await_args_list[0], page.screenshot.await_args_list[1])
+        self.assertTrue(page.screenshot.await_args.kwargs['full_page'])
+
+    async def test_second_failure_still_fails_the_journey(self):
+        page = AsyncMock()
+        page.screenshot.side_effect = PlaywrightError('Page.captureScreenshot: Unable to capture screenshot')
+        with self.assertRaises(PlaywrightError):
+            await capture_evidence(page, 'setup.png')
+        self.assertEqual(page.screenshot.await_count, 2)
+
+    async def test_unrelated_failure_is_not_retried(self):
+        page = AsyncMock()
+        page.screenshot.side_effect = PlaywrightError('Page closed')
+        with self.assertRaisesRegex(PlaywrightError, 'Page closed'):
+            await capture_evidence(page, 'setup.png')
+        self.assertEqual(page.screenshot.await_count, 1)
 
 
 if __name__ == '__main__':
