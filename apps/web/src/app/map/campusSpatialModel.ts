@@ -49,6 +49,14 @@ export function buildCampusSpatialModel(locations: readonly MapLocation[]): Camp
     if (
       typeof location.id !== 'string' || !location.id.trim() || counts.get(location.id) !== 1 ||
       typeof location.name !== 'string' || !location.name.trim() ||
+      // These values feed React text, search and room context directly.
+      // An invalid marker must not prevent the remaining campus from opening.
+      typeof location.category !== 'string' ||
+      typeof location.description !== 'string' ||
+      (location.building !== undefined && typeof location.building !== 'string') ||
+      (location.floor !== undefined && typeof location.floor !== 'string') ||
+      (location.facilities !== undefined &&
+        (!Array.isArray(location.facilities) || location.facilities.some((facility) => typeof facility !== 'string'))) ||
       !Number.isFinite(location.lat) || Math.abs(location.lat) > 90 ||
       !Number.isFinite(location.lng) || Math.abs(location.lng) > 180 ||
       // (0, 0) is the common missing-GPS sentinel (Null Island), not a
