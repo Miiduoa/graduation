@@ -313,7 +313,11 @@ describe('published building identity cannot drift into a classroom destination'
     });
     expect(result.matches).toEqual([imported]);
     expect(result.matches[0]).toBe(imported);
+    // Map clients use the strict source rules, not the separately reviewed Agent module.
+    expect(providencePlaceSourceUrl('pu', sourcedHall!)).toBe(sourcedHall!.sourceUrl);
+    expect(providencePlaceSourceUrl('pu', imported)).toBeNull();
     expect(providencePlaceSourceUrl('pu', { ...imported, name: '主顧樓' })).toBeNull();
+    expect(providencePlaceSourceUrl('other-school', sourcedHall!)).toBeNull();
 
     for (const invalid of [
       { ...imported, building: '無關建築' },
