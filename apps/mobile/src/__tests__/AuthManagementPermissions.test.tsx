@@ -236,6 +236,38 @@ test.each(['schools', 'schools/pu/cafeterias', 'schools/pu/cafeterias/cafe/opera
   },
 );
 
+test('school profile is ready before merchant assignment fan-out finishes', async () => {
+  records.set('schools/pu', {});
+  records.set('schools/pu/cafeterias/cafe', { name: '餐廳' });
+  let release!: (value: unknown) => void;
+  const pending = new Promise((resolve) => { release = resolve; });
+  jest.mocked(getDoc).mockImplementation(async (ref) => {
+    if (ref.path === 'schools/pu/cafeterias/cafe/operators/u1') return (await pending) as never;
+    return snapshot(records.get(ref.path)) as never;
+  });
+  mountProvider();
+  const user = firebaseUser();
+  mockFirebaseAuth.currentUser = user;
+  let finished!: Promise<void>;
+  await act(async () => {
+    finished = mockAuthCallback!(user);
+  });
+  await waitFor(() => {
+    expect(auth.loading).toBe(false);
+    expect(auth.profileLoading).toBe(false);
+    expect(auth.profile).toMatchObject({ uid: 'u1', schoolId: 'pu', merchantAssignments: [] });
+  });
+  await act(async () => {
+    release(snapshot({ status: 'active', role: 'staff' }));
+    await finished;
+  });
+  expect(auth.profile).toMatchObject({
+    uid: 'u1',
+    merchantAssignments: [{ cafeteriaId: 'cafe', status: 'active' }],
+    merchantAssignmentsError: null,
+  });
+});
+
 test('late merchant reads cannot restore assignments after an account switch', async () => {
   records.set('schools/pu', {});
   records.set('schools/pu/cafeterias/cafe', { name: '餐廳' });
