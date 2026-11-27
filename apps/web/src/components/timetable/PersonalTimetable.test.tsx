@@ -565,9 +565,14 @@ describe('personal timetable data retention', () => {
     expect((screen.getByLabelText('顯示自行匯入的學期') as HTMLSelectElement).value).toBe('115|1');
     const editor = addCourse('剛新增的統計學');
     fireEvent.click(editor.getByRole('button', { name: '儲存' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect((screen.getByLabelText('顯示自行匯入的學期') as HTMLSelectElement).value).toBe('manual');
-    expect(document.activeElement).toBe(screen.getAllByRole('button', { name: /編輯 剛新增的統計學/ })[0]);
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(document.body.style.overflow).not.toBe('hidden');
+      expect((screen.getByLabelText('顯示自行匯入的學期') as HTMLSelectElement).value).toBe('manual');
+      const saved = screen.getAllByRole('button', { name: /編輯 剛新增的統計學/ })[0];
+      expect((saved as HTMLButtonElement).disabled).toBe(false);
+      expect(document.activeElement).toBe(saved);
+    });
     const savedNotice = screen.getByText(/已切換至手動課表/);
     expect(savedNotice.getAttribute('role')).toBe('status');
     expect(savedNotice.textContent).toContain('課程已更新。');
@@ -590,7 +595,14 @@ describe('personal timetable data retention', () => {
     );
     expect(editor.getByRole('status').textContent).toContain('無法確認儲存結果');
     fireEvent.click(editor.getByRole('button', { name: '儲存' }));
-    await waitFor(() => expect(screen.queryByRole('region', { name: '編輯課程' })).toBeNull());
+    await waitFor(() => {
+      expect(screen.queryByRole('region', { name: '編輯課程' })).toBeNull();
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(document.body.style.overflow).not.toBe('hidden');
+      const saved = screen.getAllByRole('button', { name: /編輯 不能消失的草稿/ })[0];
+      expect((saved as HTMLButtonElement).disabled).toBe(false);
+      expect(document.activeElement).toBe(saved);
+    });
     expect(mocks.save).toHaveBeenCalledTimes(2);
   });
 
