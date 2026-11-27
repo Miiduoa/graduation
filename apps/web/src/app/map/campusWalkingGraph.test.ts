@@ -67,6 +67,34 @@ describe('audited outdoor campus walking graph', () => {
     expect(route({ ...graph, nodes: graph.nodes.map(n => n.id === 4 ? { ...n, lat: NaN } : n) })).toBeNull();
   });
 
+  it('rejects malformed graph containers and rows without throwing or using partial routes', () => {
+    const malformed: unknown[] = [
+      null, undefined,
+      { ...graph, nodes: null }, { ...graph, nodes: {} },
+      { ...graph, edges: null }, { ...graph, edges: {} },
+      { ...graph, nodes: [...graph.nodes, null] },
+      { ...graph, nodes: [...graph.nodes, undefined] },
+      { ...graph, nodes: [...graph.nodes, 1] },
+      { ...graph, edges: [...graph.edges, null] },
+      { ...graph, edges: [...graph.edges, undefined] },
+      { ...graph, edges: [...graph.edges, 1] },
+    ];
+    for (const value of malformed) {
+      expect(route(value as CampusWalkingGraph)).toBeNull();
+      expect(route(value as CampusWalkingGraph, 1, 1)).toBeNull();
+    }
+    expect(findCampusWalkingRoute(graph, 'fixture', null as unknown as typeof bounds, 1, 3, now)).toBeNull();
+    expect(route(graph)?.nodes.map(node => node.id)).toEqual([1, 2, 3]);
+  });
+
+  it('does not resume a missing cached route', () => {
+    const result = route(graph)!;
+    for (const missing of [null, undefined]) {
+      expect(isCampusWalkingRouteCurrent(missing as unknown as typeof result, 'fixture', now)).toBe(false);
+    }
+    expect(isCampusWalkingRouteCurrent(result, 'fixture', now)).toBe(true);
+  });
+
   it('rejects dangling, zero-length or contradictory segments', () => {
     expect(route({ ...graph, edges: [...graph.edges, { ...graph.edges[0], to: 999 }] })).toBeNull();
     expect(route({ ...graph, edges: [...graph.edges, { ...graph.edges[0], from: 2, to: 5 }] })).toBeNull();
