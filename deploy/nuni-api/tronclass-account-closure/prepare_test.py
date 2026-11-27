@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 HERE = Path(__file__).resolve().parent
-SQL_SHA256 = '9c5057739cf89222bc69ee2bcbfffbf74b0705d522d4478f75fc01a2d826381a'
+SQL_SHA256 = '915ada63acd28f1ddd78d81395d27dffed3ce193064a12b4718afc1a7af102d7'
 STALE_DIGEST = 'be815455fbb2ccce844b69f004e416e44465e3421f9da654d0cd5db8379c3dc2'
 
 
@@ -77,6 +77,11 @@ class PackagingTests(unittest.TestCase):
         self.assertNotIn('CREATE ROLE', sql)
         self.assertNotIn('GRANT ', sql)
         self.assertNotIn('001_tronclass_account_closure_outbox', sql)
+        self.assertEqual(sql.count('CREATE TRIGGER'), 2)
+        self.assertIn('CREATE TRIGGER tronclass_account_closed AFTER INSERT OR UPDATE OF state ON platform_accounts', sql)
+        self.assertIn('CREATE TRIGGER tronclass_account_deleted AFTER DELETE ON platform_accounts', sql)
+        self.assertNotIn('FROM platform_accounts', sql)
+        self.assertNotRegex(sql, r'(?im)^(SELECT|INSERT INTO|UPDATE|DELETE FROM)\b')
 
     def test_source_drift_stops_before_clone_or_build(self):
         changed = {**prepare.metadata(), 'baseManifestSha256': '0' * 64}
