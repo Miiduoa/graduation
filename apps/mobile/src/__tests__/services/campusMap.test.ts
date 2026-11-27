@@ -15,7 +15,7 @@ import {
   providencePlaceSourceUrl,
   isProvidencePendingVerification,
   locationMatchesSearch,
-} from '@campus/shared/src/providenceCampus';
+} from '@campus/shared/src/providenceCampusMap';
 jest.mock('../../firebase', () => ({
   getDb: () => 'db',
   isFirebaseMockMode: jest.fn(() => false),
@@ -282,4 +282,22 @@ test('static facilities search only hits cross-checked buildings', () => {
   expect(
     PROVIDENCE_CAMPUS_PLACES.some((place) => place.facilities?.includes('廁所')),
   ).toBe(false);
+});
+
+
+test('map clients do not inherit outdoor provenance for unverified building or floor metadata', () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  expect(providencePlaceSourceUrl('pu', library)).toBe(library.sourceUrl);
+  expect(providencePlaceSourceUrl('pu', { ...library, building: '另一棟' })).toBeNull();
+  expect(providencePlaceSourceUrl('pu', { ...library, floor: '3F' })).toBeNull();
+  expect(providencePlaceSourceUrl('pu', { ...library, building: '', floor: '' })).toBe(library.sourceUrl);
+});
+
+test('native map keeps a sourced bus stop beside a same-name non-transit marker', () => {
+  const stop = PROVIDENCE_BUS_STOPS[0]!;
+  const nonStop = { ...stop, id: 'fixture-building', category: '教學', facilities: [] };
+  const merged = mergeCampusMapPlaces('pu', [nonStop]);
+  expect(merged.some((place) => place.id === nonStop.id)).toBe(true);
+  expect(merged.some((place) => place.id === stop.id)).toBe(true);
+  expect(mergeCampusMapPlaces('nthu', [nonStop])).toEqual([expect.objectContaining({ id: nonStop.id })]);
 });

@@ -249,7 +249,14 @@ it.each([false, true])('opens the platform without selecting or verifying a scho
   const sessionBeforeNavigation = mockAuth.session;
   const view = await landing();
   expect(view.getByText(signedIn ? '回到我的課程' : '登入或建立帳號')).toBeTruthy();
-  if (!signedIn) expect(view.getByText('用 Google 帳號修課、交作業及查看訂單。網頁與 App 使用同一個帳號。')).toBeTruthy();
+  if (!signedIn) {
+    const googleHeading = view.getByTestId('login-google-account');
+    expect(googleHeading.props.accessible).toBe(true);
+    expect(googleHeading.props.accessibilityLabel).toBe('Google 帳號');
+    expect(view.getByLabelText('Google 帳號')).toBe(googleHeading);
+    expect(view.getByText('Google 帳號')).toBeTruthy();
+    expect(view.getByText('用 Google 帳號修課、交作業及查看訂單。網頁與 App 使用同一個帳號。')).toBeTruthy();
+  }
   await fireEventAsync.press(view.getByTestId('login-start'));
   expect(safeNavigate).toHaveBeenCalledTimes(1);
   if (signedIn) expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace', { tab: 'courses' });

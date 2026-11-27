@@ -18,7 +18,98 @@ tags: [smoke, settings]
     id: me-open-settings
     enabled: true
 - extendedWaitUntil:
-    visible: '^設定$'
+    visible: '^設定- extendedWaitUntil:
+    visible:
+      id: settings-current-account
+    timeout: 15000
+- assertVisible: '目前登入帳號'
+- assertVisible: '測試學生甲'
+- scrollUntilVisible:
+    element:
+      text: '^深色$'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '^深色$'
+- assertVisible: '目前使用深色模式。'
+- tapOn: '^淺色$'
+- assertVisible: '目前使用淺色模式。'
+- scrollUntilVisible:
+    element:
+      id: settings-accessibility
+    direction: DOWN
+    centerElement: true
+    timeout: 20000
+- assertVisible:
+    id: settings-accessibility
+- assertVisible: '無障礙設定'
+- tapOn:
+    id: settings-accessibility
+- extendedWaitUntil:
+    visible: '閱讀與操作'
+    timeout: 10000
+- assertVisible: 'VoiceOver 螢幕閱讀器'
+- takeScreenshot: accessibility_settings
+- tapOn: '返回'
+- scrollUntilVisible:
+    element:
+      id: settings-language
+    direction: DOWN
+    centerElement: true
+    timeout: 20000
+- assertVisible:
+    id: settings-language
+- assertVisible: '介面語言'
+- tapOn:
+    id: settings-language
+- extendedWaitUntil:
+    visible: 'English'
+    timeout: 10000
+- tapOn: 'English'
+- takeScreenshot: settings_english
+- tapOn: '繁體中文'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn: '返回'
+# Language reload can restore Settings at the top. Require the account card
+# before scrolling to export, and wait until the export screen itself is open.
+- waitForAnimationToEnd:
+    timeout: 5000
+- extendedWaitUntil:
+    visible:
+      id: settings-current-account
+    timeout: 15000
+- retry:
+    maxRetries: 2
+    commands:
+      - scrollUntilVisible:
+          element:
+            id: settings-export-data
+          direction: DOWN
+          centerElement: true
+          waitToSettleTimeoutMs: 3000
+          timeout: 20000
+      - assertVisible:
+          id: settings-export-data
+      - assertVisible: '匯出我的資料'
+      - waitForAnimationToEnd
+      - tapOn:
+          id: settings-export-data
+          retryTapIfNoChange: true
+      - extendedWaitUntil:
+          visible:
+            id: data-export-screen
+          timeout: 15000
+- assertVisible:
+    id: data-export-screen
+- assertVisible:
+    id: data-export-instructions
+- assertVisible: '選擇內容，將資料保存到自己的裝置。'
+- assertVisible:
+    id: data-export-scope
+- assertNotVisible:
+    id: settings-export-data
+- takeScreenshot: data_export
+
     timeout: 15000
 - extendedWaitUntil:
     visible:
@@ -69,25 +160,41 @@ tags: [smoke, settings]
 - tapOn: 'English'
 - takeScreenshot: settings_english
 - tapOn: '繁體中文'
+- waitForAnimationToEnd:
+    timeout: 5000
 - tapOn: '返回'
-- scrollUntilVisible:
-    element:
-      id: settings-export-data
-    direction: DOWN
-    centerElement: true
-    timeout: 20000
-- assertVisible:
-    id: settings-export-data
-    enabled: true
-- assertVisible: '匯出我的資料'
-- tapOn:
-    id: settings-export-data
-    enabled: true
+# Language reload can restore Settings at the top. Require the account card
+# before scrolling to export, and wait until the export screen itself is open.
+- waitForAnimationToEnd:
+    timeout: 5000
 - extendedWaitUntil:
     visible:
-      id: data-export-scope
-    timeout: 10000
+      id: settings-current-account
+    timeout: 15000
+- retry:
+    maxRetries: 2
+    commands:
+      - scrollUntilVisible:
+          element:
+            id: settings-export-data
+          direction: DOWN
+          centerElement: true
+          waitToSettleTimeoutMs: 3000
+          timeout: 20000
+      - assertVisible:
+          id: settings-export-data
+      - assertVisible: '匯出我的資料'
+      - waitForAnimationToEnd
+      - tapOn:
+          id: settings-export-data
+          retryTapIfNoChange: true
+      - extendedWaitUntil:
+          visible:
+            id: data-export-screen
+          timeout: 15000
+- assertVisible:
+    id: data-export-screen
+- assertVisible:
+    id: data-export-instructions
 - assertVisible: '選擇內容，將資料保存到自己的裝置。'
-- assertNotVisible:
-    id: settings-export-data
 - takeScreenshot: data_export

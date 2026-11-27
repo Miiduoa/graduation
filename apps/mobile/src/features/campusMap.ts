@@ -2,8 +2,8 @@ import { collection, getDocsFromServer, query, where } from 'firebase/firestore'
 import { getDb, isFirebaseMockMode } from '../firebase';
 import type { CampusCoordinate } from '@campus/shared/src/campusGeo';
 import { parseCampusMapRecord } from '@campus/shared/src/campusMapRecords';
-import type { CampusMapPlaceLike } from '@campus/shared/src/providenceCampus';
-import { withProvidenceCampusPlaces } from '@campus/shared/src/providenceCampus';
+import type { CampusMapPlaceLike } from '@campus/shared/src/providenceCampusMap';
+import { withProvidenceCampusPlaces } from '@campus/shared/src/providenceCampusMap';
 
 export type CampusMapPlace = {
   id: string;

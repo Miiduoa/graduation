@@ -62,11 +62,13 @@ async def geometry(page, report, stage):
         return s.animationName !== 'none' && seconds(s.animationDuration) > .01
           ? [{name:s.animationName,duration:s.animationDuration}] : [];
       });
-      return {viewport:innerWidth,pageWidth:document.documentElement.scrollWidth,left:rect.left,right:rect.right,
+      return {viewport:innerWidth,pageWidth:document.documentElement.scrollWidth,
+        contentHeight:document.documentElement.scrollHeight,left:rect.left,right:rect.right,
         shortTargets:targets.filter(t=>t.height<43.5 || t.width<43.5),targets:targets.length,overflow,activeAnimations,
         rootFontSize:getComputedStyle(document.documentElement).fontSize};
     }''')
     assert measurements['pageWidth'] <= measurements['viewport'] + 1, (stage, measurements)
+    assert measurements['contentHeight'] <= 16384, ('Page is taller than Chromium can capture', stage, measurements)
     assert not measurements['overflow'], (stage, measurements['overflow'])
     assert not measurements['shortTargets'], (stage, measurements['shortTargets'])
     if report['config'].get('system_motion') == 'reduce' or report['config'].get('motion') == 'reduce':
@@ -74,6 +76,35 @@ async def geometry(page, report, stage):
     if report['config'].get('text') == '200':
         assert measurements['rootFontSize'] == '32px', measurements
     report['geometry'].append({'stage': stage, **measurements})
+
+
+async def capture(page, path, full_page=True):
+    async def paint_ready():
+        await page.evaluate('''async () => {
+          await document.fonts.ready;
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }''')
+
+    previous = await page.evaluate('''() => {
+      const html = document.documentElement;
+      const value = html.style.scrollBehavior;
+      html.style.scrollBehavior = 'auto';
+      return value;
+    }''')
+    try:
+        await paint_ready()
+        try:
+            await page.screenshot(path=path, full_page=full_page, animations='disabled')
+        except Exception as error:
+            # Chromium can reject the first surface capture, especially at 200%
+            # text with CJK fonts. Retry only that protocol error, once, with
+            # the exact same capture extent; never substitute a smaller image.
+            if 'Page.captureScreenshot' not in str(error) or 'Unable to capture screenshot' not in str(error):
+                raise
+            await paint_ready()
+            await page.screenshot(path=path, full_page=full_page, animations='disabled')
+    finally:
+        await page.evaluate('(value) => { document.documentElement.style.scrollBehavior = value; }', previous)
 
 
 async def shortcuts(page, campus, report):
@@ -115,7 +146,7 @@ async def check_journey(page, config, report):
     await expect(page.get_by_test_id('today-notifications')).to_contain_text('alpha 的 ntu 合成通知')
     await shortcuts(page, 'ntu', report)
     await geometry(page, report, 'signed-in-setup')
-    await page.screenshot(path=str(OUTPUT / f"{config['name']}-setup.png"), full_page=True)
+    await capture(page, str(OUTPUT / f"{config['name']}-setup.png"))
     report['checks'].append('Confirmed empty setup gives one primary action, hides duplicate empty sections and retains actual notification UI')
 
     # Native Tab movement verifies order and focus visibility without clicks.
@@ -198,7 +229,7 @@ async def check_journey(page, config, report):
     await expect(draft).to_have_value('合成草稿：等等再整理明天的安排。')
     await shortcuts(page, 'ntu', report)
     await geometry(page, report, 'known-work-first')
-    await page.screenshot(path=str(OUTPUT / f"{config['name']}-known-work.png"), full_page=True)
+    await capture(page, str(OUTPUT / f"{config['name']}-known-work.png"))
     report['checks'].append('Known assignment stays first with its actual submission destination and persistent public services')
 
     await scenario(page, '已有作業背景更新')
@@ -365,8 +396,11 @@ async def run():
                     print(f"PASS {config['name']}: {len(report['checks'])} journey checks, {len(report['geometry'])} geometry states", flush=True)
                 except Exception as error:
                     report['failure'] = repr(error)
-                    await page.screenshot(path=str(OUTPUT / f"{config['name']}-failure-viewport.png"))
-                    await page.screenshot(path=str(OUTPUT / f"{config['name']}-failure.png"), full_page=True)
+                    try:
+                        await capture(page, str(OUTPUT / f"{config['name']}-failure-viewport.png"), full_page=False)
+                        await capture(page, str(OUTPUT / f"{config['name']}-failure.png"))
+                    except Exception as screenshot_error:
+                        report['screenshotFailure'] = repr(screenshot_error)
                     failure = error
                     break
                 finally:

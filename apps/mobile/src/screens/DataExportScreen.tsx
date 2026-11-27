@@ -166,11 +166,16 @@ function ExportEditor({
   const busy = Boolean(progress);
   return (
     <AIDetailScreen
+      testID="data-export-screen"
       title="匯出我的資料"
       onBack={() => navigation?.goBack?.()}
     >
       <AICard title="這次匯出的範圍" titleTestID="data-export-scope">
-        <Text style={{ color: aiTokens.text, fontSize: 16, lineHeight: 24 }}>
+        <Text
+          testID="data-export-instructions"
+          accessibilityLabel="選擇內容，將資料保存到自己的裝置。"
+          style={{ color: aiTokens.text, fontSize: 16, lineHeight: 24, marginBottom: 12 }}
+        >
           選擇內容，將資料保存到自己的裝置。
         </Text>
         <Text style={{ color: aiTokens.muted, lineHeight: 23 }}>

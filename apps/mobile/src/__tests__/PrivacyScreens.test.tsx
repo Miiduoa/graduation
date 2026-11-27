@@ -109,7 +109,7 @@ beforeEach(() => {
 test('export scope guidance and sensitive conversation choices are accessible before any export', () => {
   const view = render(<DataExportScreen navigation={navigation} />);
   expect(view.getByTestId('data-export-scope')).toBeTruthy();
-  expect(view.getByText('選擇內容，將資料保存到自己的裝置。')).toBeTruthy();
+  expect(view.getAllByText('選擇內容，將資料保存到自己的裝置。')).toHaveLength(1);
   const messages = view.getByRole('checkbox', { name: '對話紀錄' });
   expect(messages.props.accessibilityHint).toBe(
     '目前學校與未指定學校的對話，包含對方傳送的訊息',
@@ -126,6 +126,11 @@ test('export scope guidance and sensitive conversation choices are accessible be
 
 test('export uses selected categories and preserves every returned field without claiming saved', async () => {
   const view = render(<DataExportScreen navigation={navigation} />);
+  expect(view.getByTestId('data-export-screen')).toBeTruthy();
+  expect(view.getByLabelText('選擇內容，將資料保存到自己的裝置。')).toBeTruthy();
+  expect(view.getByTestId('data-export-instructions').props.children).toBe(
+    '選擇內容，將資料保存到自己的裝置。',
+  );
   fireEvent.press(view.getByLabelText('校園紀錄'));
   await act(async () => fireEvent.press(view.getByText('匯出 7 項資料')));
   expect(exportData.mock.calls[0][0]).toEqual(
