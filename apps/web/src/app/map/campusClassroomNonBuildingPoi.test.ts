@@ -8,7 +8,7 @@ import {
   PROVIDENCE_CAMPUS_PLACES,
   providencePlaceSourceUrl,
   type CampusMapPlaceLike,
-} from '@campus/shared/src/providenceCampus';
+} from '@campus/shared/src/providenceCampusMap';
 
 // Synthetic colliding POI labels: NOT a claim about the physical location of
 // any classroom, entrance, road, or building floor.
@@ -316,7 +316,6 @@ describe('published building identity cannot drift into a classroom destination'
     expect(providencePlaceSourceUrl('pu', { ...imported, name: '主顧樓' })).toBeNull();
 
     for (const invalid of [
-      { ...imported, floor: '3F' },
       { ...imported, building: '無關建築' },
       { ...imported, category: '公車站' },
       { ...imported, lat: imported.lat + 0.007 },
@@ -325,6 +324,21 @@ describe('published building identity cannot drift into a classroom destination'
         schoolId: 'pu', query: 'PH303', locations: [invalid],
       }).status).toBe('unmatched');
     }
+  });
+
+  it('resolves PH303 when the same outdoor hall only adds a floor label', () => {
+    const withFloor = { ...sourcedHall!, floor: '3F' };
+    const bilingualFloor = { ...sourcedHall!, name: 'Providence Hall', building: '主顧樓', floor: '3F' };
+    for (const imported of [withFloor, bilingualFloor]) {
+      const result = resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [imported],
+      });
+      expect(result.status).toBe('matched');
+      expect(result.matches).toEqual([imported]);
+      expect(result.matches[0]).toBe(imported);
+      expect(providencePlaceSourceUrl('pu', imported)).toBeNull();
+    }
+    expect(providencePlaceSourceUrl('pu', { ...bilingualFloor, name: '主顧樓' })).toBeNull();
   });
 
   it('keeps identity, category, transit and duplicate safeguards for an English-named published building', () => {

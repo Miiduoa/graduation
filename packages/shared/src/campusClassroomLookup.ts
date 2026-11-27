@@ -502,12 +502,15 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
           ...location,
           name: published.name,
           // A verified bilingual building label describes this same outdoor
-          // POI for classroom lookup only. Keep floor and all other fields
-          // intact, and never change the original marker's attribution.
+          // POI for classroom lookup only. Never change the original marker.
           building: isSourcedBuildingLabel(school, published, location.building) ||
             aliases?.some((name) => comparisonText(name) === comparisonText(location.building))
             ? published.building
             : location.building,
+          // A floor annotation on this same outdoor POI is also lookup-only.
+          // It does not verify an indoor destination and must not block a
+          // classroom query that already matched before floor entered identity.
+          floor: published.floor,
         }))
     ) continue;
     // A nearby transit stop can be named after a hall or carry its building
