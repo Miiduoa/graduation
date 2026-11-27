@@ -1,4 +1,4 @@
-import { withRetry } from '../../utils/retry';
+import { withConcurrencyLimit, withRetry } from '../../utils/retry';
 
 describe('withRetry abort listener lifecycle', () => {
   beforeEach(() => {
@@ -78,5 +78,78 @@ describe('withRetry abort listener lifecycle', () => {
     await jest.advanceTimersByTimeAsync(100);
     await expect(result).resolves.toBe('ok');
     expect(fn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('withConcurrencyLimit settlement tracking', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: Error) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  it('keeps the actual pending tasks within the limit and returns results in input order', async () => {
+    const tasks = Array.from({ length: 5 }, () => deferred<number>());
+    const run = jest.fn((index: number) => tasks[index].promise);
+    const result = withConcurrencyLimit([0, 1, 2, 3, 4], run, 2);
+
+    await flush();
+    expect(run.mock.calls.map(([index]) => index)).toEqual([0, 1]);
+
+    tasks[0].resolve(10);
+    await flush();
+    expect(run.mock.calls.map(([index]) => index)).toEqual([0, 1, 2]);
+
+    tasks[2].resolve(30);
+    await flush();
+    expect(run.mock.calls.map(([index]) => index)).toEqual([0, 1, 2, 3]);
+
+    tasks[3].resolve(40);
+    await flush();
+    expect(run.mock.calls.map(([index]) => index)).toEqual([0, 1, 2, 3, 4]);
+
+    tasks[4].resolve(50);
+    tasks[1].resolve(20);
+    await expect(result).resolves.toEqual([10, 20, 30, 40, 50]);
+  });
+
+  it('does not resolve while an earlier, slower task is still pending', async () => {
+    const tasks = Array.from({ length: 3 }, () => deferred<number>());
+    let finished = false;
+    const result = withConcurrencyLimit([0, 1, 2], (index) => tasks[index].promise, 2)
+      .then((values) => {
+        finished = true;
+        return values;
+      });
+
+    await flush();
+    tasks[0].resolve(10);
+    await flush();
+    tasks[2].resolve(30);
+    await flush();
+    expect(finished).toBe(false);
+
+    tasks[1].resolve(20);
+    await expect(result).resolves.toEqual([10, 20, 30]);
+  });
+
+  it('propagates a rejection from a slower task instead of losing it', async () => {
+    const tasks = Array.from({ length: 3 }, () => deferred<number>());
+    const error = new Error('slow task failed');
+    const result = withConcurrencyLimit([0, 1, 2], (index) => tasks[index].promise, 2);
+    const assertion = expect(result).rejects.toBe(error);
+
+    await flush();
+    tasks[0].resolve(10);
+    await flush();
+    tasks[1].reject(error);
+    tasks[2].resolve(30);
+    await assertion;
   });
 });

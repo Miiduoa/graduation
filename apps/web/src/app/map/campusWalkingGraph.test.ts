@@ -95,6 +95,32 @@ describe('audited outdoor campus walking graph', () => {
     expect(isCampusWalkingRouteCurrent(result, 'fixture', now)).toBe(true);
   });
 
+  it('rejects corrupted cached route geometry without claiming that shape proves access', () => {
+    const result = route(graph)!;
+    const invalid: unknown[] = [
+      { ...result, nodes: null },
+      { ...result, nodes: [] },
+      { ...result, nodes: [...result.nodes, null] },
+      { ...result, nodes: [result.nodes[0], result.nodes[0], result.nodes[2]] },
+      { ...result, nodes: [result.nodes[0], { ...result.nodes[1], lat: 91 }, result.nodes[2]] },
+      { ...result, nodes: [result.nodes[0], { ...result.nodes[1], lng: NaN }, result.nodes[2]] },
+      { ...result, nodes: [result.nodes[0], { ...result.nodes[0], id: 99 }, result.nodes[2]] },
+      { ...result, osmWayIds: null },
+      { ...result, osmWayIds: [101] },
+      { ...result, osmWayIds: [101, 0] },
+      { ...result, distanceMeters: NaN },
+      { ...result, distanceMeters: -1 },
+      { ...result, distanceMeters: result.distanceMeters + 1 },
+      { ...result, attribution: '' },
+    ];
+    for (const value of invalid) {
+      expect(isCampusWalkingRouteCurrent(value as typeof result, 'fixture', now)).toBe(false);
+    }
+    expect(isCampusWalkingRouteCurrent(JSON.parse(JSON.stringify(result)), 'fixture', now)).toBe(true);
+    expect(isCampusWalkingRouteCurrent(route(graph, 3, 1)!, 'fixture', now)).toBe(true);
+    expect(isCampusWalkingRouteCurrent(route(graph, 1, 1)!, 'fixture', now)).toBe(true);
+  });
+
   it('rejects dangling, zero-length or contradictory segments', () => {
     expect(route({ ...graph, edges: [...graph.edges, { ...graph.edges[0], to: 999 }] })).toBeNull();
     expect(route({ ...graph, edges: [...graph.edges, { ...graph.edges[0], from: 2, to: 5 }] })).toBeNull();
