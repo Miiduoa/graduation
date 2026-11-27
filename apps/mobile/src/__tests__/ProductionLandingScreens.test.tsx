@@ -255,6 +255,7 @@ test('my account shows the shared load-failure copy when the signed-in profile c
 
 test('my account uses the signed-in profile without invented grades, identity or demo tools', () => {
   const view = render(<MeAiFirstScreen />);
+  expect(view.getByTestId('me-home').props.accessibilityLabel).toBe('陳同學');
   expect(view.getByText('陳同學')).toBeTruthy();
   expect(view.getByText('資訊系 · 學號 A123')).toBeTruthy();
   expect(view.getByText('student-a@example.edu')).toBeTruthy();

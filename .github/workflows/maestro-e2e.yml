@@ -215,23 +215,6 @@ jobs:
             --output .maestro/results/smoke-campus-map.xml \
             --env APP_ID="$APP_ID"
 
-      - name: Reset simulator before the full suite
-        if: (github.event_name == 'pull_request' && github.base_ref == 'main') || github.event.inputs.test_suite == 'full'
-        run: |
-          set -euo pipefail
-          # Smoke's map flow leaves WKWebView / Safari in the simulator. The next
-          # Maestro hierarchy dump then times out on the StatusBar query, the
-          # XCTest driver exits, and 01_onboarding fails as DeviceUnreachable
-          # while the same flow yaml already passed on a cold simulator.
-          test -n "$SIMULATOR_UDID"
-          test -d "$APP_PATH"
-          test -n "$APP_ID"
-          xcrun simctl shutdown "$SIMULATOR_UDID"
-          xcrun simctl boot "$SIMULATOR_UDID"
-          xcrun simctl bootstatus "$SIMULATOR_UDID" -b
-          xcrun simctl install "$SIMULATOR_UDID" "$APP_PATH"
-          xcrun simctl get_app_container "$SIMULATOR_UDID" "$APP_ID" app
-
       - name: Run Full Test Suite
         if: (github.event_name == 'pull_request' && github.base_ref == 'main') || github.event.inputs.test_suite == 'full'
         working-directory: apps/mobile
