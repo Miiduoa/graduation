@@ -10,7 +10,7 @@ import { useThemeMode } from '../state/theme';
 import { getLegalUrl } from '../services/release';
 import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
 
-type Navigation = { goBack?: () => void; navigate?: (screen: string) => void };
+type Navigation = { goBack?: () => void; navigate?: (screen: string, params?: Record<string, unknown>) => void };
 
 export default function SettingsAiFirstScreen({ navigation }: { navigation?: Navigation }) {
   const auth = useAuth();
@@ -67,11 +67,12 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
     };
   }, []);
 
-  const go = (screen: string) => () => {
+  const go = (screen: string, params?: Record<string, unknown>) => () => {
     if (typeof navigation?.navigate !== 'function') {
       throw new Error(`設定頁無法開啟「${screen}」。`);
     }
-    navigation.navigate(screen);
+    if (params) navigation.navigate(screen, params);
+    else navigation.navigate(screen);
   };
   const openLegal = async (url: string | null) => {
     if (!url) return;
@@ -148,6 +149,15 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
           )}
         </View>
       </AICard>
+
+      {platform ? (
+        <AIRow
+          testID="settings-google-account"
+          title="Google 帳號與連線"
+          subtitle="登入或管理 nuni 帳號、學校資格與連線狀態"
+          onPress={go('NuniWorkspace', { tab: 'account' })}
+        />
+      ) : null}
 
       {uid && Constants.expoConfig?.extra?.release?.features?.widgets === true ? (
         <NextClassLiveActivitySetting />
