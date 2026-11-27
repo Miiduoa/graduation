@@ -185,8 +185,13 @@ export default function BuildingPlanFloorImporter({ plan, disabled = false, onCh
           <div className={styles.field}><label htmlFor={`${fileId}-floor`}>加入哪一層</label><select id={`${fileId}-floor`} value={sourceFloorId} onChange={event => {
             const floor = incoming.floors.find(item => item.id === event.target.value);
             if (!floor) return;
+            if (floor.id === sourceFloorId) return;
             setSourceFloorId(floor.id); setLabel(floor.label);
+            // Placement describes one specific storey, not the entire source file.
+            setElevation(''); setOffsetX('0'); setOffsetY('0'); setRotation(0);
+            setReferenceA(0); setReferenceB(1);
             setIncomingA(0); setIncomingB(1); invalidatePreview();
+            setNotice('已切換來源樓層，請重新設定標高與位置，再預覽核對。');
           }}>{incoming.floors.map(floor => <option key={floor.id} value={floor.id}>{floor.label}</option>)}</select></div>
           <p className={styles.hint}>此層來源：{source?.url
             ? <a href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>
