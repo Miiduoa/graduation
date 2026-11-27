@@ -290,6 +290,7 @@ test('map clients do not inherit outdoor provenance for unverified building or f
   expect(providencePlaceSourceUrl('pu', library)).toBe(library.sourceUrl);
   expect(providencePlaceSourceUrl('pu', { ...library, building: '另一棟' })).toBeNull();
   expect(providencePlaceSourceUrl('pu', { ...library, floor: '3F' })).toBeNull();
+  expect(providencePlaceSourceUrl('pu', { ...library, building: '', floor: '' })).toBe(library.sourceUrl);
 });
 
 test('native map keeps a sourced bus stop beside a same-name non-transit marker', () => {

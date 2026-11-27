@@ -28,11 +28,22 @@ function samePlaceCoordinates(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boo
     Math.hypot(northMeters, eastMeters) <= MAX_PLACE_IDENTITY_DISPLACEMENT_METERS;
 }
 
+function sameOptionalPlaceField(a: string | undefined, b: string | undefined): boolean {
+  const label = (value: string | undefined) => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : null;
+  };
+  return label(a) === label(b);
+}
+
 function samePlaceIdentity(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boolean {
   // Only provenance is withheld when a marker's identity, category or location
-  // differs; the marker itself stays visible.
+  // differs; the marker itself stays visible. Blank building/floor labels are
+  // the same as omitted fields.
   return a.id === b.id && a.name === b.name && a.category === b.category &&
-    (a.building ?? null) === (b.building ?? null) && (a.floor ?? null) === (b.floor ?? null) &&
+    sameOptionalPlaceField(a.building, b.building) &&
+    sameOptionalPlaceField(a.floor, b.floor) &&
     samePlaceCoordinates(a, b);
 }
 

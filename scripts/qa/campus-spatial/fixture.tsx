@@ -1,11 +1,24 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import CampusSpatialExplorer from '../../../apps/web/src/app/map/CampusSpatialExplorer';
-import { withProvidenceCampusPlaces } from '../../../packages/shared/src/providenceCampus';
+import {
+  PROVIDENCE_BUS_STOPS,
+  withProvidenceCampusPlaces,
+} from '../../../packages/shared/src/providenceCampusMap';
 import type { MapLocation } from '../../../apps/web/src/app/map/mapService';
 import '../../../apps/web/src/app/globals.css';
 
-const places = withProvidenceCampusPlaces('pu', []);
+const catalog = withProvidenceCampusPlaces('pu', []);
+const stop = PROVIDENCE_BUS_STOPS.find((place) => place.id === 'pu-bus-zhugu')!;
+const sameNameNonStop: MapLocation = {
+  id: 'fixture-zhugu-landmark',
+  name: stop.name,
+  category: '教學',
+  description: '合成同名非站牌，確認站牌仍顯示',
+  lat: stop.lat,
+  lng: stop.lng,
+};
+const places = withProvidenceCampusPlaces('pu', [...catalog, sameNameNonStop]);
 function Fixture() {
   const [selected, setSelected] = useState<MapLocation | null>(null);
   return (

@@ -1,5 +1,9 @@
 import { expect, it } from 'vitest';
 import {
+  providencePlaceSourceUrl as sharedPackageSourceUrl,
+  withProvidenceCampusPlaces as sharedPackageMerge,
+} from '@campus/shared';
+import {
   isProvidencePendingVerification,
   locationMatchesSearch,
   PROVIDENCE_BUS_STOPS,
@@ -241,6 +245,24 @@ it('retains a public bus stop beside a same-name non-stop marker', () => {
   expect(new Set(merged.map((place) => place.id)).size).toBe(merged.length);
 });
 
+it('exposes the same map identity rules from the shared package entry', () => {
+  const stop = PROVIDENCE_BUS_STOPS.find((place) => place.id === 'pu-bus-zhugu')!;
+  const building: MapLocation = {
+    id: 'custom-zhugu-landmark',
+    name: stop.name,
+    category: '教學',
+    description: 'Synthetic colliding name; not an audited campus building',
+    lat: stop.lat,
+    lng: stop.lng,
+  };
+  const merged = sharedPackageMerge('pu', [building]);
+  expect(merged.some((place) => place.id === building.id)).toBe(true);
+  expect(merged.some((place) => place.id === stop.id)).toBe(true);
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  expect(sharedPackageSourceUrl('pu', { ...library, building: '', floor: '' })).toBe(library.sourceUrl);
+  expect(sharedPackageSourceUrl('pu', { ...library, floor: '3F' })).toBeNull();
+});
+
 
 it('does not lend an outdoor source to a marker with unverified building or floor metadata', () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
@@ -252,4 +274,10 @@ it('does not lend an outdoor source to a marker with unverified building or floo
   expect(isProvidencePendingVerification('pu', { ...gate, floor: '1F' })).toBe(false);
   expect(providencePlaceSourceUrl('pu', library)).toBe(library.sourceUrl);
   expect(isProvidencePendingVerification('pu', gate)).toBe(true);
+});
+
+it('treats blank building and floor labels as absent for outdoor provenance', () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  expect(providencePlaceSourceUrl('pu', { ...library, building: '', floor: '' })).toBe(library.sourceUrl);
+  expect(providencePlaceSourceUrl('pu', { ...library, building: '  ', floor: '\t' })).toBe(library.sourceUrl);
 });
