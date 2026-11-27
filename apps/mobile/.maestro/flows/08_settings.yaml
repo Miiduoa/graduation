@@ -19,8 +19,8 @@ tags: [smoke, settings]
     direction: DOWN
     centerElement: true
     timeout: 20000
-# Centering extra-swipes leave the list still moving. A press highlight then
-# counts as a UI change, so a single tap is swallowed without opening Settings.
+# The row sits under the tab bar until centered. Extra centering swipes leave
+# it moving, so wait then retry the tap until 目前登入帳號 is on screen.
 - waitForAnimationToEnd:
     timeout: 5000
 - assertVisible:
