@@ -69,6 +69,39 @@ describe('campus spatial coordinates', () => {
     }
   });
 
+  it('keeps malformed display fields out of the spatial scene without moving valid places', () => {
+    const valid = [place('a', 24, 120), place('b', 24.001, 120.001)];
+    const badFields = [
+      { category: {} }, { category: undefined }, { description: {} },
+      { building: 12 }, { floor: [] }, { facilities: '列印' },
+      { facilities: ['列印', {}] },
+    ];
+    const malformed = badFields.map((fields, index) => ({
+      ...place(`invalid-${index}`, 25, 121), ...fields,
+    }) as unknown as MapLocation);
+    const original = buildCampusSpatialModel(valid);
+    const result = buildCampusSpatialModel([...malformed, ...valid]);
+    expect(result).toEqual({ ...original, excludedCount: malformed.length });
+    expect(buildCampusSpatialModel(malformed).unavailableReason).toBe('no-locations');
+  });
+
+  it('does not allow a malformed duplicate to authorize the other record', () => {
+    const valid = place('duplicate', 24, 120);
+    const malformed = { ...valid, building: 12 } as unknown as MapLocation;
+    const other = place('other', 24.001, 120.001);
+    for (const records of [[valid, malformed, other], [malformed, valid, other]]) {
+      const result = buildCampusSpatialModel(records);
+      expect(result.points.map((point) => point.id)).toEqual(['other']);
+      expect(result.excludedCount).toBe(2);
+    }
+  });
+
+  it('preserves valid optional display fields and empty text fallbacks', () => {
+    const record = { ...place('valid', 24, 120), category: '', description: '',
+      building: '教學樓', floor: '2', facilities: ['列印'] };
+    expect(buildCampusSpatialModel([record]).points[0].location).toBe(record);
+  });
+
   it('ignores a zero-origin placeholder without hiding real campus places', () => {
     const nearby = [
       place('library', 24.226282, 120.581377),
