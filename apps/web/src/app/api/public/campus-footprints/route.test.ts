@@ -1285,6 +1285,51 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(2);
   });
 
+  it.each([true, false])(
+    'discards late Overpass headers without starting a body read (stream: %s)',
+    async (stream) => {
+      vi.useFakeTimers();
+      let resolveHeaders!: (response: Response) => void;
+      const cancel = vi.fn(() => new Promise<void>(() => {}));
+      const getReader = vi.fn(() => ({
+        read: vi.fn(async () => ({ done: true, value: undefined })),
+        cancel,
+        releaseLock: vi.fn(),
+      }));
+      const text = vi.fn(async () => osmPayload);
+      const upstream = vi.fn()
+        .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveHeaders = resolve; }))
+        .mockImplementationOnce(async () => jsonResponse(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const pending = GET();
+      await vi.advanceTimersByTimeAsync(12_000);
+      expect((await pending).status).toBe(503);
+      expect(upstream.mock.calls[0][1].signal.aborted).toBe(true);
+
+      // A bridge ignoring AbortSignal can still deliver headers after timeout.
+      // Cancel its unused body without waiting for an uncooperative cancel().
+      resolveHeaders({
+        status: 200,
+        headers: new Headers({ 'Content-Type': 'application/json' }),
+        body: stream ? { cancel, getReader } : null,
+        text,
+      } as unknown as Response);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getReader).not.toHaveBeenCalled();
+      expect(text).not.toHaveBeenCalled();
+      expect(cancel).toHaveBeenCalledTimes(stream ? 1 : 0);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000 + 1);
+      const recovered = await GET();
+      expect(recovered.status).toBe(200);
+      expect((await recovered.json()).buildings).toHaveLength(1);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it('ends an unresponsive streamed response body after the server deadline', async () => {
     vi.useFakeTimers();
     // Headers arrive, but reading the body never completes and the mock ignores abort.
