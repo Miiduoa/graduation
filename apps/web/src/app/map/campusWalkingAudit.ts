@@ -83,7 +83,7 @@ export function applyCampusWalkingSegmentAudits(
       !Number.isFinite(base) || base > now + 5 * 60 * 1000 || now - base > 2 * DAY_MS ||
       candidates.graph.nodes.length > 2000 || candidates.graph.edges.length > 4000 ||
       candidates.nodes.length > 2000 || candidates.ways.length > 4000 ||
-      audits.length > 4000) return null;
+      !Array.isArray(audits) || audits.length > 4000) return null;
   // A serialized candidate may have bypassed discovery's tag validation.
   // Reject the snapshot rather than interpreting missing or malformed tags as open.
   if (candidates.nodes.some(n => !validWalkingSourceTags(n.tags)) ||
@@ -137,7 +137,16 @@ export function applyCampusWalkingSegmentAudits(
   const seenReviews = new Set<string>();
   const duplicates = new Set<string>();
   for (const audit of audits) {
+    // A row without an unambiguous school/segment identity could hide a
+    // competing audit. Fail closed rather than throw or approve another row.
+    if (!audit || typeof audit !== 'object' || Array.isArray(audit) ||
+        typeof audit.schoolId !== 'string' || !audit.schoolId ||
+        audit.schoolId.trim() !== audit.schoolId) return null;
     if (audit.schoolId !== schoolId) continue;
+    if (!validRevision(audit.osmWayId) ||
+        !audit.from || typeof audit.from !== 'object' || Array.isArray(audit.from) ||
+        !audit.to || typeof audit.to !== 'object' || Array.isArray(audit.to) ||
+        !validRevision(audit.from.id) || !validRevision(audit.to.id)) return null;
     const segment = key(audit.osmWayId, audit.from.id, audit.to.id);
     const physicalSegment = unorderedKey(audit.osmWayId, audit.from.id, audit.to.id);
     if (seenReviews.has(physicalSegment)) duplicates.add(physicalSegment);
