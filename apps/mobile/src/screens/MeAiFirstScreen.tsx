@@ -101,7 +101,12 @@ export default function MeAiFirstScreen() {
             <Text style={s.monogramText}>{monogram}</Text>
           </View>
           <View style={s.identityCopy}>
-            <Text accessibilityRole="header" style={s.displayName}>
+            <Text
+              testID="me-home"
+              accessibilityRole="header"
+              accessibilityLabel={displayName}
+              style={s.displayName}
+            >
               {displayName}
             </Text>
             <Text style={s.details}>

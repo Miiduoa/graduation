@@ -3,8 +3,16 @@ name: Authenticated settings, theme, accessibility and language
 tags: [smoke, settings]
 ---
 - runFlow: ../helpers/sign-in-student.yaml
-- tapOn:
-    id: tab-我的
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: tab-我的
+      - waitForAnimationToEnd
+      - extendedWaitUntil:
+          visible:
+            id: me-home
+          timeout: 10000
 - scrollUntilVisible:
     element:
       id: me-open-settings
@@ -14,6 +22,7 @@ tags: [smoke, settings]
 - assertVisible:
     id: me-open-settings
     enabled: true
+- assertVisible: '使用設定'
 - tapOn:
     id: me-open-settings
     enabled: true

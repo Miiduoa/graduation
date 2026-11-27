@@ -808,6 +808,7 @@ test('the school-account settings shortcut precedes personal content and opens t
   mockAuthUser = { uid: 'firebase-a', displayName: '同學' };
   mockAuthProfile = { uid: 'firebase-a', displayName: '同學' };
   const view = render(<MeAiFirstScreen />);
+  expect(view.getByTestId('me-home').props.accessibilityLabel).toBe('同學');
   const settings = view.getByRole('button', { name: '使用設定' });
   expect(settings.props.testID).toBe('me-open-settings');
   expect(view.getAllByRole('button', { name: '使用設定' })).toHaveLength(1);

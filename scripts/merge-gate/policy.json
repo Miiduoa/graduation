@@ -24,7 +24,7 @@
     ".github/workflows/firestore-rules.yml": "f13ee753bc9d1448764092f3e0828ca3e66cc359",
     ".github/workflows/first-value-browser.yml": "5d465e23aa9d90f8da034716edfe8c9af0558deb",
     ".github/workflows/interface-design-browser.yml": "c763583f4d9a4aa9d15438aea563f2f665ded6b8",
-    ".github/workflows/maestro-e2e.yml": "fe181417ba31ecd277dd07369a67872ecf018de2",
+    ".github/workflows/maestro-e2e.yml": "0a2af76e200e27e09a95bb4f40690bfa17f677b2",
     ".github/workflows/merchant-workspace-browser.yml": "39e43045a35f30f2ab801d1e2ce31bfe4913b000",
     ".github/workflows/mlx-arm64-compat.yml": "fa4b30f848f274dbbf86e88f3cb963c9c930ef76",
     ".github/workflows/mobile-agent-regression.yml": "1ec544726e088516dfd4d45b7e3f0527787390f1",
