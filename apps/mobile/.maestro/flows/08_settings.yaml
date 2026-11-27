@@ -19,15 +19,26 @@ tags: [smoke, settings]
     direction: DOWN
     centerElement: true
     timeout: 20000
+# Centering extra-swipes leave the list still moving. A press highlight then
+# counts as a UI change, so a single tap is swallowed without opening Settings.
+- waitForAnimationToEnd:
+    timeout: 5000
 - assertVisible:
     id: me-open-settings
 - assertVisible: '使用設定'
-- tapOn:
-    id: me-open-settings
-- extendedWaitUntil:
-    visible:
-      id: settings-current-account
-    timeout: 15000
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: me-open-settings
+          retryTapIfNoChange: true
+      - waitForAnimationToEnd
+      - extendedWaitUntil:
+          visible:
+            id: settings-current-account
+          timeout: 15000
+- assertVisible:
+    id: settings-current-account
 - assertVisible: '目前登入帳號'
 - assertVisible: '測試學生甲'
 - scrollUntilVisible:

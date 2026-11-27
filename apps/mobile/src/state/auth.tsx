@@ -190,7 +190,31 @@ async function loadMerchantAssignments(uid: string): Promise<MerchantAssignment[
     });
 }
 
-async function loadProfile(u: User | null): Promise<UserProfile | null> {
+function schoolIdFromAssignments(assignments: MerchantAssignment[]): string | null {
+  return (
+    assignments.find((assignment) => assignment.status === 'active')?.schoolId ??
+    assignments[0]?.schoolId ??
+    null
+  );
+}
+
+function withMerchantAssignments(
+  profile: UserProfile,
+  assignments: MerchantAssignment[],
+  merchantAssignmentsError: string | null,
+): UserProfile {
+  const schoolId = profile.schoolId ?? schoolIdFromAssignments(assignments) ?? profile.primarySchoolId ?? null;
+  return {
+    ...profile,
+    schoolId,
+    primarySchoolId: schoolId,
+    merchantAssignments: assignments,
+    merchantAssignmentsError,
+  };
+}
+
+/** 先讀使用者與學校成員資料。門市指派另外補上，避免擋住已登入分頁。 */
+async function loadCoreProfile(u: User | null): Promise<UserProfile | null> {
   if (!u) return null;
 
   // demo 帳號（mockAuth）uid 以 'demo_' 開頭，這些 uid 不在 Firestore；
@@ -205,21 +229,9 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
     const ref = doc(db, 'users', u.uid);
     const snap = await getDoc(ref);
     const data = snap.exists() ? (snap.data() as Record<string, unknown>) : {};
-    let merchantAssignments: MerchantAssignment[] = [];
-    let merchantAssignmentsError: string | null = null;
-    try {
-      merchantAssignments = await loadMerchantAssignments(u.uid);
-    } catch {
-      merchantAssignmentsError = '目前無法確認門市指派，請重新載入。';
-    }
-    const assignmentSchoolId =
-      merchantAssignments.find((assignment) => assignment.status === 'active')?.schoolId ??
-      merchantAssignments[0]?.schoolId ??
-      null;
     const schoolId =
       (data.primarySchoolId as string | undefined) ??
       (data.schoolId as string | undefined) ??
-      assignmentSchoolId ??
       resolveSchoolByEmail(u.email)?.id ??
       null;
     let schoolMembershipRole: string | null = null;
@@ -298,12 +310,35 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       isPublicProfile: (data.isPublicProfile as boolean) ?? null,
       roleGroup,
       serviceRoles,
-      merchantAssignments,
-      merchantAssignmentsError,
+      merchantAssignments: [],
+      merchantAssignmentsError: null,
     };
   } catch (error) {
     console.error('[auth] Failed to load profile:', error);
     throw error;
+  }
+}
+
+async function hydrateMerchantAssignments(
+  uid: string,
+  shouldApply: () => boolean,
+  apply: (updater: (current: UserProfile | null) => UserProfile | null) => void,
+): Promise<void> {
+  try {
+    const assignments = await loadMerchantAssignments(uid);
+    if (!shouldApply()) return;
+    apply((current) => (current?.uid === uid ? withMerchantAssignments(current, assignments, null) : current));
+  } catch {
+    if (!shouldApply()) return;
+    apply((current) =>
+      current?.uid === uid
+        ? {
+            ...current,
+            merchantAssignments: current.merchantAssignments ?? [],
+            merchantAssignmentsError: '目前無法確認門市指派，請重新載入。',
+          }
+        : current,
+    );
   }
 }
 
@@ -599,11 +634,16 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       // 這解決了 SSO 登入後立即呼叫 refreshProfile 時可能拿到舊資料的問題
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      const p = await loadProfile(currentUser);
-      if (requestIdRef.current === currentRequestId) {
-        setProfile(p);
-        setError(null);
-      }
+      const p = await loadCoreProfile(currentUser);
+      if (requestIdRef.current !== currentRequestId) return;
+      setProfile(p);
+      setError(null);
+      setProfileLoading(false);
+      await hydrateMerchantAssignments(
+        currentUser.uid,
+        () => requestIdRef.current === currentRequestId,
+        (updater) => setProfile(updater),
+      );
     } catch (e) {
       if (requestIdRef.current === currentRequestId) {
         console.error('[auth] refreshProfile failed:', e);
@@ -620,9 +660,6 @@ export function AuthProvider(props: { children: React.ReactNode }) {
               }
             : null,
         );
-      }
-    } finally {
-      if (requestIdRef.current === currentRequestId) {
         setProfileLoading(false);
       }
     }
@@ -729,18 +766,21 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       setError(null);
 
       try {
-        const p = await loadProfile(u);
-        if (!isCancelled && requestIdRef.current === currentRequestId) {
-          setProfile(p);
-        }
+        const p = await loadCoreProfile(u);
+        if (isCancelled || requestIdRef.current !== currentRequestId) return;
+        setProfile(p);
+        setLoading(false);
+        setProfileLoading(false);
+        await hydrateMerchantAssignments(
+          u.uid,
+          () => !isCancelled && requestIdRef.current === currentRequestId,
+          (updater) => setProfile(updater),
+        );
       } catch (e) {
         if (!isCancelled && requestIdRef.current === currentRequestId) {
           console.error('[auth] onAuthStateChanged profile load failed:', e);
           setError(loadFailureCopy(e));
           setProfile(null);
-        }
-      } finally {
-        if (!isCancelled && requestIdRef.current === currentRequestId) {
           setLoading(false);
           setProfileLoading(false);
         }

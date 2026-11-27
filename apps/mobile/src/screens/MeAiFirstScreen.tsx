@@ -90,7 +90,7 @@ export default function MeAiFirstScreen() {
   }, [uid, signOutWithWarning]);
 
   return (
-    <AIScreen contentContainerStyle={s.content}>
+    <AIScreen contentContainerStyle={s.content} delayContentTouches={false}>
       <View style={s.identityBlock}>
         <View style={s.identityHeader}>
           <View
