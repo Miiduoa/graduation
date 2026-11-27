@@ -65,7 +65,9 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
   const mounted = useRef(true);
   const signingOut = useRef(false);
   const [busyUid, setBusyUid] = useState<string | null>(null);
-  const [error, setError] = useState<{ scope: typeof scope; source: 'legal' | 'logout'; message: string } | null>(null);
+  const legalRequest = useRef(0);
+  const [legalError, setLegalError] = useState<{ scope: typeof scope; message: string } | null>(null);
+  const [logoutError, setLogoutError] = useState<{ scope: typeof scope; message: string } | null>(null);
   const busy = Boolean(uid && busyUid === uid);
   const version = Constants.expoConfig?.version;
   const privacyUrl = getLegalUrl('privacy');
@@ -88,12 +90,13 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
   const openLegal = async (url: string | null) => {
     if (!url) return;
     const requestedScope = scope;
-    setError(null);
+    const request = ++legalRequest.current;
+    setLegalError(null);
     try {
       await Linking.openURL(url);
     } catch {
-      if (mounted.current && identity.current === requestedScope) {
-        setError({ scope: requestedScope, source: 'legal', message: '無法開啟網頁，請確認網路連線後重試。' });
+      if (mounted.current && identity.current === requestedScope && legalRequest.current === request) {
+        setLegalError({ scope: requestedScope, message: '無法開啟網頁，請確認網路連線後重試。' });
       }
     }
   };
@@ -111,12 +114,12 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
           if (!mounted.current || identity.current !== requestedScope || signingOut.current) return;
           signingOut.current = true;
           setBusyUid(requestedUid);
-          setError(null);
+          setLogoutError(null);
           try {
             await auth.signOutWithWarning();
           } catch {
             if (mounted.current && identity.current === requestedScope) {
-              setError({ scope: requestedScope, source: 'logout', message: '無法登出，請稍後重試。' });
+              setLogoutError({ scope: requestedScope, message: '無法登出，請稍後重試。' });
             }
           } finally {
             signingOut.current = false;
@@ -262,9 +265,9 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
           disabled={!privacyUrl}
           onPress={() => void openLegal(privacyUrl)}
         />
-        {error?.scope === scope && error.source === 'legal' ? (
+        {legalError?.scope === scope ? (
           <Text testID="settings-legal-error" accessibilityRole="alert" style={{ color: aiTokens.danger, padding: 12 }}>
-            {error.message}
+            {legalError.message}
           </Text>
         ) : null}
         <AIRow title="意見回饋" onPress={go('Feedback')} />
@@ -278,9 +281,9 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
             disabled={busy}
             onPress={confirmLogout}
           />
-          {error?.scope === scope && error.source === 'logout' ? (
+          {logoutError?.scope === scope ? (
             <Text testID="settings-logout-error" accessibilityRole="alert" style={{ color: aiTokens.danger, padding: 12 }}>
-              {error.message}
+              {logoutError.message}
             </Text>
           ) : null}
           <AIRow

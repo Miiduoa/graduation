@@ -329,6 +329,37 @@ test('late legal link rejection cannot reappear after switching away and returni
   expect(view.queryByTestId('settings-legal-error')).toBeNull();
 });
 
+test('a late legal failure cannot replace the outcome of a newer link request', async () => {
+  const first = deferred<void>();
+  const open = jest.spyOn(Linking, 'openURL')
+    .mockReturnValueOnce(first.promise)
+    .mockResolvedValueOnce(undefined);
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  fireEvent.press(view.getByText('隱私政策'));
+  await act(async () => fireEvent.press(view.getByText('服務條款')));
+  expect(open).toHaveBeenNthCalledWith(2, 'https://nuni.tw/terms');
+  await act(async () => first.reject(new Error('offline')));
+  expect(view.queryByTestId('settings-legal-error')).toBeNull();
+});
+
+test('legal and logout errors remain independently recoverable', async () => {
+  const open = jest.spyOn(Linking, 'openURL')
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce(undefined);
+  mockAuth.signOutWithWarning.mockRejectedValue(new Error('offline'));
+  const alert = jest.spyOn(Alert, 'alert');
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  await act(async () => fireEvent.press(view.getByText('隱私政策')));
+  fireEvent.press(view.getByText('登出學校帳號'));
+  await act(async () => alert.mock.calls[0][2]?.find((item) => item.text === '確定登出')?.onPress?.());
+  expect(view.getByTestId('settings-legal-error')).toBeTruthy();
+  expect(view.getByTestId('settings-logout-error')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByText('隱私政策')));
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(view.queryByTestId('settings-legal-error')).toBeNull();
+  expect(view.getByTestId('settings-logout-error')).toBeTruthy();
+});
+
 test('missing legal configuration is unavailable and signed-out users see no account actions', () => {
   mockLegalBase = null;
   mockAuth.user = null;
