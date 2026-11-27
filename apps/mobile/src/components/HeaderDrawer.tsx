@@ -255,7 +255,6 @@ export function HeaderDrawerHost() {
       <View style={{ flex: 1, flexDirection: 'row' }}>
         {/* 抽屜本體 */}
         <Animated.View
-          testID="header-drawer-panel"
           collapsable={false}
           accessibilityViewIsModal
           onAccessibilityEscape={handleClose}
@@ -272,6 +271,9 @@ export function HeaderDrawerHost() {
             }),
           }}
         >
+          {/* testID must sit on a non-animated View. Maestro's iOS id query skips
+              Animated.View inside Modal even though the debug dump still lists it. */}
+          <View testID="header-drawer-panel" collapsable={false} style={{ flex: 1, width: drawerWidth }}>
           <ScrollView
             contentContainerStyle={{
               paddingBottom: insets.bottom + theme.space.section,
@@ -645,6 +647,7 @@ export function HeaderDrawerHost() {
               </Pressable>
             )}
           </ScrollView>
+          </View>
         </Animated.View>
 
         {/* 半透明遮罩 */}

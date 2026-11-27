@@ -116,7 +116,10 @@ function expectNoNavigation() {
 
 test('waits for the close animation, then performs only the first selected destination once', () => {
   const view = openDrawer();
-  expect(view.getByTestId('header-drawer-panel')).toBeTruthy();
+  const panel = view.getByTestId('header-drawer-panel');
+  expect(panel).toBeTruthy();
+  expect(panel.props.collapsable).toBe(false);
+  expect(panel.props.style).toEqual(expect.objectContaining({ flex: 1 }));
   const identity = view.getByTestId('header-drawer-identity');
   expect(identity.props.accessible).toBe(true);
   expect(identity.props.accessibilityLabel).toBe('測試同學');
