@@ -63,18 +63,28 @@ tags: [smoke, settings]
 - takeScreenshot: settings_english
 - tapOn: '繁體中文'
 - tapOn: '返回'
-- scrollUntilVisible:
-    element:
-      id: settings-export-data
-    direction: DOWN
-    centerElement: true
-    timeout: 20000
+- retry:
+    maxRetries: 2
+    commands:
+      - scrollUntilVisible:
+          element:
+            id: settings-export-data
+          direction: DOWN
+          centerElement: true
+          waitToSettleTimeoutMs: 3000
+          timeout: 20000
+      - assertVisible:
+          id: settings-export-data
+      - assertVisible: '匯出我的資料'
+      - waitForAnimationToEnd
+      - tapOn:
+          id: settings-export-data
+          retryTapIfNoChange: true
+      - extendedWaitUntil:
+          visible:
+            id: data-export-screen
+          timeout: 8000
 - assertVisible:
-    id: settings-export-data
-- assertVisible: '匯出我的資料'
-- tapOn:
-    id: settings-export-data
-- extendedWaitUntil:
-    visible: '選擇內容，將資料保存到自己的裝置。'
-    timeout: 10000
+    id: data-export-screen
+- assertVisible: '選擇內容，將資料保存到自己的裝置。'
 - takeScreenshot: data_export
