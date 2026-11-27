@@ -5,7 +5,7 @@ import {
   normalizeCampusClassroomQuery,
   resolveCampusClassroom,
 } from '@campus/shared/src/campusClassroomLookup';
-import type { CampusMapPlaceLike } from '@campus/shared/src/providenceCampus';
+import { PROVIDENCE_CAMPUS_PLACES, type CampusMapPlaceLike } from '@campus/shared/src/providenceCampus';
 
 const hall: CampusMapPlaceLike = {
   id: 'school-a-hall',
@@ -223,3 +223,19 @@ it.each([
     ).toBe(status);
   },
 );
+
+it('only lets same-school public names veto a sourced classroom code', () => {
+  const renyuan = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-renyuan')!;
+  const stop = { ...hall, id: 'code-stop', name: 'AK303', category: '公車站' };
+  const resolve = (publicNameLocations: readonly CampusMapPlaceLike[]) =>
+    resolveCampusClassroom({
+      schoolId: 'pu', query: 'AK303', locations: [renyuan], publicNameLocations,
+    });
+  expect(resolve([renyuan]).matches).toEqual([renyuan]);
+  expect(resolve([renyuan, { ...stop, schoolId: 'other-school' } as CampusMapPlaceLike]).matches).toEqual([renyuan]);
+  expect(resolve([renyuan, { ...stop, schoolId: 42 } as unknown as CampusMapPlaceLike]).matches).toEqual([renyuan]);
+  expect(resolve([renyuan, { ...stop, schoolId: ' pu ' } as CampusMapPlaceLike]).status).toBe('unmatched');
+  expect(resolve([renyuan, stop]).status).toBe('unmatched');
+  expect(resolve(null as unknown as CampusMapPlaceLike[]).status).toBe('unmatched');
+  expect(resolve({} as unknown as CampusMapPlaceLike[]).status).toBe('unmatched');
+});
