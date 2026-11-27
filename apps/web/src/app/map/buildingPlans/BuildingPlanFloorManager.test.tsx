@@ -292,3 +292,57 @@ it('keeps editing active while disabled and releases the latest listener on exte
   expect(latestListener.mock.calls).toEqual([[false], [true], [false]]);
   expect(originalListener.mock.calls).toEqual([[true]]);
 });
+
+it('does not resurrect an edit when an earlier plan object returns after replacement', () => {
+  const plan = example();
+  const replacement = example();
+  const changed = vi.fn();
+  const editingChanged = vi.fn();
+  const content = (drawing: BuildingPlan) => <BuildingPlanFloorManager plan={drawing} onChange={changed} onEditingChange={editingChanged} />;
+  const view = render(content(plan));
+  openManager();
+  startEditing();
+  fireEvent.change(input('樓層名稱'), { target: { value: '舊圖面的未完成修改' } });
+  view.rerender(content(replacement));
+  expect(screen.queryByRole('textbox', { name: '樓層名稱' })).toBeNull();
+  view.rerender(content(plan));
+  expect(screen.queryByRole('textbox', { name: '樓層名稱' })).toBeNull();
+  expect(editingChanged.mock.calls).toEqual([[true], [false]]);
+  expect(changed).not.toHaveBeenCalled();
+  startEditing();
+  expect(input('樓層名稱').value).toBe('1F');
+});
+
+it('does not resurrect an old removal confirmation when an earlier plan object returns', () => {
+  const plan = example();
+  const changed = vi.fn();
+  const editingChanged = vi.fn();
+  const content = (drawing: BuildingPlan) => <BuildingPlanFloorManager plan={drawing} onChange={changed} onEditingChange={editingChanged} />;
+  const view = render(content(plan));
+  openManager();
+  fireEvent.click(floor('1F').getByRole('button', { name: '移除樓層' }));
+  view.rerender(content(example()));
+  view.rerender(content(plan));
+  expect(screen.queryByRole('button', { name: '確認移除' })).toBeNull();
+  expect(editingChanged.mock.calls).toEqual([[true], [false]]);
+  expect(changed).not.toHaveBeenCalled();
+  fireEvent.click(floor('1F').getByRole('button', { name: '移除樓層' }));
+  expect(screen.getByRole('button', { name: '確認移除' })).toBeTruthy();
+});
+
+it('does not resurrect a success notice for a previously replaced plan', () => {
+  const plan = example();
+  const changed = vi.fn();
+  const content = (drawing: BuildingPlan) => <BuildingPlanFloorManager plan={drawing} onChange={changed} />;
+  const view = render(content(plan));
+  openManager();
+  startEditing();
+  fireEvent.change(input('樓層名稱'), { target: { value: '地面層' } });
+  fireEvent.click(screen.getByRole('button', { name: '套用樓層設定' }));
+  const updated: BuildingPlan = changed.mock.calls[0][0];
+  view.rerender(content(updated));
+  expect(screen.getByRole('status').textContent).toBe('地面層 的設定已套用。');
+  view.rerender(content(plan));
+  view.rerender(content(updated));
+  expect(screen.queryByRole('status')).toBeNull();
+});
