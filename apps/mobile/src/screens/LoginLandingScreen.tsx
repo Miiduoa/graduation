@@ -185,7 +185,13 @@ export default function LoginLandingScreen() {
   ) : null;
   return (
     <SafeAreaView testID="login-landing" style={s.page}>
-      <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        testID="login-landing-scroll"
+        contentContainerStyle={s.content}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        nestedScrollEnabled={false}
+      >
         <View style={s.masthead}>
           <Text style={s.brand}>nuni</Text>
           <View style={s.mastheadActions}>

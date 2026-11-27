@@ -106,7 +106,10 @@ it('offers a retry after a failed availability check without claiming the school
 it('lets the school picker handle the first result tap while its keyboard is open', async () => {
   const view = await landing();
   // Modal touches still pass through the landing ScrollView's responder capture.
-  expect(view.UNSAFE_getByType(ScrollView).props.keyboardShouldPersistTaps).toBe('handled');
+  const pageScroll = view.getByTestId('login-landing-scroll');
+  expect(pageScroll.props.keyboardShouldPersistTaps).toBe('handled');
+  expect(pageScroll.props.nestedScrollEnabled).toBe(false);
+  expect(view.getByLabelText('想交給 nuni 的事').props.scrollEnabled).toBe(false);
 });
 
 it('offers guest shortcuts before account setup and keeps school imports after the account entry', async () => {
