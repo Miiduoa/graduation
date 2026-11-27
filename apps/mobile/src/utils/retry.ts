@@ -225,24 +225,25 @@ export async function withConcurrencyLimit<T, R>(
   concurrency = 5,
 ): Promise<R[]> {
   const results: R[] = [];
-  const executing: Promise<void>[] = [];
+  const executing = new Map<number, Promise<number>>();
 
   for (let i = 0; i < items.length; i++) {
-    const promise = fn(items[i], i).then((result) => {
-      results[i] = result;
-    });
+    const promise = Promise.resolve()
+      .then(() => fn(items[i], i))
+      .then((result) => {
+        results[i] = result;
+        return i;
+      });
 
-    executing.push(promise);
+    executing.set(i, promise);
 
-    if (executing.length >= concurrency) {
-      await Promise.race(executing);
-      executing.splice(
-        executing.findIndex((p) => p === promise),
-        1,
-      );
+    if (executing.size >= concurrency) {
+      // Free the slot that actually finished, not the most recently started one.
+      const completedIndex = await Promise.race(executing.values());
+      executing.delete(completedIndex);
     }
   }
 
-  await Promise.all(executing);
+  await Promise.all(executing.values());
   return results;
 }
