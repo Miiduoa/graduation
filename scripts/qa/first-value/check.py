@@ -322,6 +322,24 @@ async def check_journey(page, config, report):
     report['checks'].append('Keyboard activation follows the rendered campus-scoped href without external data requests')
 
 
+async def capture_failure(page, config, report, error):
+    # Screenshot collection is diagnostic only: it must not replace the
+    # failing journey assertion or turn a failed scenario into a pass.
+    report['failure'] = repr(error)
+    for suffix, full_page in (('failure-viewport', False), ('failure', True)):
+        try:
+            await page.screenshot(
+                path=str(OUTPUT / f"{config['name']}-{suffix}.png"),
+                full_page=full_page,
+                timeout=5000,
+            )
+        except Exception as capture_error:
+            report.setdefault('diagnosticErrors', []).append({
+                'artifact': suffix,
+                'error': repr(capture_error),
+            })
+
+
 async def run():
     evidence = validate_sources()
     handler = functools.partial(QuietHandler, directory=str(OUTPUT))
@@ -364,10 +382,8 @@ async def run():
                     report['passed'] = True
                     print(f"PASS {config['name']}: {len(report['checks'])} journey checks, {len(report['geometry'])} geometry states", flush=True)
                 except Exception as error:
-                    report['failure'] = repr(error)
-                    await page.screenshot(path=str(OUTPUT / f"{config['name']}-failure-viewport.png"))
-                    await page.screenshot(path=str(OUTPUT / f"{config['name']}-failure.png"), full_page=True)
                     failure = error
+                    await capture_failure(page, config, report, error)
                     break
                 finally:
                     await context.close()
@@ -376,7 +392,8 @@ async def run():
         if failure is None:
             validate_sources()
     except Exception as error:
-        failure = error
+        if failure is None:
+            failure = error
     finally:
         server.shutdown()
         server.server_close()
