@@ -73,6 +73,13 @@ test('settings rows keep their titles as native labels so the visible copy is fi
   expect(view.getByLabelText('匯出我的資料').props.testID).toBe('settings-export-data');
   fireEvent.press(accessibility);
   expect(navigation.navigate).toHaveBeenCalledWith('AccessibilitySettings');
+  fireEvent.press(view.getByLabelText('匯出我的資料'));
+  expect(navigation.navigate).toHaveBeenCalledWith('DataExport');
+});
+
+test('export does not swallow a missing navigator', () => {
+  const view = render(<SettingsAiFirstScreen />);
+  expect(() => fireEvent.press(view.getByLabelText('匯出我的資料'))).toThrow('DataExport');
 });
 
 test('settings shows real account and version without fabricated permissions, devices or sync state', () => {

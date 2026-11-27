@@ -36,7 +36,12 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
     };
   }, []);
 
-  const go = (screen: string) => () => navigation?.navigate?.(screen);
+  const go = (screen: string) => () => {
+    if (typeof navigation?.navigate !== 'function') {
+      throw new Error(`設定頁無法開啟「${screen}」。`);
+    }
+    navigation.navigate(screen);
+  };
   const openLegal = async (url: string | null) => {
     if (!url) return;
     const requestedUid = uid;

@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
-from playwright.async_api import Error as PlaywrightError, async_playwright, expect
+from playwright.async_api import async_playwright, expect
 
 ROOT = Path(__file__).resolve().parents[3]
 OUTPUT = ROOT / 'artifacts' / 'first-value'
@@ -62,11 +62,13 @@ async def geometry(page, report, stage):
         return s.animationName !== 'none' && seconds(s.animationDuration) > .01
           ? [{name:s.animationName,duration:s.animationDuration}] : [];
       });
-      return {viewport:innerWidth,pageWidth:document.documentElement.scrollWidth,left:rect.left,right:rect.right,
+      return {viewport:innerWidth,pageWidth:document.documentElement.scrollWidth,
+        contentHeight:document.documentElement.scrollHeight,left:rect.left,right:rect.right,
         shortTargets:targets.filter(t=>t.height<43.5 || t.width<43.5),targets:targets.length,overflow,activeAnimations,
         rootFontSize:getComputedStyle(document.documentElement).fontSize};
     }''')
     assert measurements['pageWidth'] <= measurements['viewport'] + 1, (stage, measurements)
+    assert measurements['contentHeight'] <= 16384, ('Page is taller than Chromium can capture', stage, measurements)
     assert not measurements['overflow'], (stage, measurements['overflow'])
     assert not measurements['shortTargets'], (stage, measurements['shortTargets'])
     if report['config'].get('system_motion') == 'reduce' or report['config'].get('motion') == 'reduce':
@@ -74,6 +76,35 @@ async def geometry(page, report, stage):
     if report['config'].get('text') == '200':
         assert measurements['rootFontSize'] == '32px', measurements
     report['geometry'].append({'stage': stage, **measurements})
+
+
+async def capture(page, path, full_page=True):
+    async def paint_ready():
+        await page.evaluate('''async () => {
+          await document.fonts.ready;
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }''')
+
+    previous = await page.evaluate('''() => {
+      const html = document.documentElement;
+      const value = html.style.scrollBehavior;
+      html.style.scrollBehavior = 'auto';
+      return value;
+    }''')
+    try:
+        await paint_ready()
+        try:
+            await page.screenshot(path=path, full_page=full_page, animations='disabled')
+        except Exception as error:
+            # Chromium can reject the first surface capture, especially at 200%
+            # text with CJK fonts. Retry only that protocol error, once, with
+            # the exact same capture extent; never substitute a smaller image.
+            if 'Page.captureScreenshot' not in str(error) or 'Unable to capture screenshot' not in str(error):
+                raise
+            await paint_ready()
+            await page.screenshot(path=path, full_page=full_page, animations='disabled')
+    finally:
+        await page.evaluate('(value) => { document.documentElement.style.scrollBehavior = value; }', previous)
 
 
 async def shortcuts(page, campus, report):
@@ -115,7 +146,7 @@ async def check_journey(page, config, report):
     await expect(page.get_by_test_id('today-notifications')).to_contain_text('alpha 的 ntu 合成通知')
     await shortcuts(page, 'ntu', report)
     await geometry(page, report, 'signed-in-setup')
-    await capture_evidence(page, OUTPUT / f"{config['name']}-setup.png")
+    await capture(page, str(OUTPUT / f"{config['name']}-setup.png"))
     report['checks'].append('Confirmed empty setup gives one primary action, hides duplicate empty sections and retains actual notification UI')
 
     # Native Tab movement verifies order and focus visibility without clicks.
@@ -198,7 +229,7 @@ async def check_journey(page, config, report):
     await expect(draft).to_have_value('合成草稿：等等再整理明天的安排。')
     await shortcuts(page, 'ntu', report)
     await geometry(page, report, 'known-work-first')
-    await capture_evidence(page, OUTPUT / f"{config['name']}-known-work.png")
+    await capture(page, str(OUTPUT / f"{config['name']}-known-work.png"))
     report['checks'].append('Known assignment stays first with its actual submission destination and persistent public services')
 
     await scenario(page, '已有作業背景更新')
@@ -322,29 +353,20 @@ async def check_journey(page, config, report):
     report['checks'].append('Keyboard activation follows the rendered campus-scoped href without external data requests')
 
 
-async def capture_evidence(page, path):
-    # Chromium can fail a capture even after the layout assertion succeeds.
-    # Require the same full-page evidence; retry only this protocol error once.
-    try:
-        await page.screenshot(path=str(path), full_page=True)
-    except PlaywrightError as error:
-        if 'Page.captureScreenshot' not in str(error) or 'Unable to capture screenshot' not in str(error):
-            raise
-        await page.screenshot(path=str(path), full_page=True)
-
-
 async def capture_failure(page, config, report, error):
-    # Screenshot collection is diagnostic only: it must not replace the
-    # failing journey assertion or turn a failed scenario into a pass.
+    # Diagnostic captures must not mask the original failure or prevent the
+    # second artifact from being attempted. Bound each independent capture.
     report['failure'] = repr(error)
     for suffix, full_page in (('failure-viewport', False), ('failure', True)):
         try:
             await page.screenshot(
                 path=str(OUTPUT / f"{config['name']}-{suffix}.png"),
                 full_page=full_page,
+                animations='disabled',
                 timeout=5000,
             )
         except Exception as capture_error:
+            report.setdefault('screenshotFailure', repr(capture_error))
             report.setdefault('diagnosticErrors', []).append({
                 'artifact': suffix,
                 'error': repr(capture_error),

@@ -166,11 +166,18 @@ function ExportEditor({
   const busy = Boolean(progress);
   return (
     <AIDetailScreen
+      testID="data-export-screen"
       title="匯出我的資料"
       subtitle="選擇內容，將資料保存到自己的裝置。"
       onBack={() => navigation?.goBack?.()}
     >
       <AICard title="這次匯出的範圍">
+        <Text
+          testID="data-export-instructions"
+          style={{ color: aiTokens.text, lineHeight: 23, marginBottom: 12 }}
+        >
+          選擇內容，將資料保存到自己的裝置。
+        </Text>
         <Text style={{ color: aiTokens.muted, lineHeight: 23 }}>
           目前學校：{schoolName}
           。個人資料、群組與作業等帳號紀錄可能跨越學校；校園紀錄與失物招領限目前學校。

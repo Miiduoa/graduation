@@ -787,7 +787,7 @@ export function AIDetailHeader({
             </Text>
           ) : null}
           {!hideHeading && subtitle ? (
-            <Text style={detailStyles.subtitle} numberOfLines={2}>
+            <Text accessibilityLabel={subtitle} style={detailStyles.subtitle} numberOfLines={2}>
               {subtitle}
             </Text>
           ) : null}
@@ -815,6 +815,7 @@ export function AIDetailScreen({
   bottomPadding,
   scrollRef,
   onScroll,
+  testID,
   keyboardShouldPersistTaps = 'handled',
   keyboardDismissMode = Platform.OS === 'ios' ? 'interactive' : 'on-drag',
   automaticallyAdjustKeyboardInsets = Platform.OS === 'ios',
@@ -827,6 +828,7 @@ export function AIDetailScreen({
   bottomPadding?: number;
   scrollRef?: React.Ref<ScrollView>;
   onScroll?: ScrollViewProps['onScroll'];
+  testID?: string;
   keyboardShouldPersistTaps?: ScrollViewProps['keyboardShouldPersistTaps'];
   keyboardDismissMode?: ScrollViewProps['keyboardDismissMode'];
   automaticallyAdjustKeyboardInsets?: ScrollViewProps['automaticallyAdjustKeyboardInsets'];
@@ -840,7 +842,7 @@ export function AIDetailScreen({
   const headingInContent =
     width / fontScale < 360 || title.length > 24 || (subtitle?.length ?? 0) > 40;
   return (
-    <View style={{ flex: 1, backgroundColor: aiTokens.bg }}>
+    <View testID={testID} collapsable={false} style={{ flex: 1, backgroundColor: aiTokens.bg }}>
       <AIDetailHeader
         title={title}
         subtitle={subtitle}
@@ -864,7 +866,11 @@ export function AIDetailScreen({
             <Text style={detailStyles.title} accessibilityRole="header">
               {title}
             </Text>
-            {subtitle ? <Text style={detailStyles.subtitle}>{subtitle}</Text> : null}
+            {subtitle ? (
+              <Text accessibilityLabel={subtitle} style={detailStyles.subtitle}>
+                {subtitle}
+              </Text>
+            ) : null}
           </View>
         ) : null}
         {children}
