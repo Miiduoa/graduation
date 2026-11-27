@@ -139,6 +139,53 @@ describe('building plan import boundary', () => {
 });
 
 describe('building geometry validation', () => {
+
+  it.each([false, true])('normalizes exactly closed outline and room rings (reverse=%s)', (reverse) => {
+    const plan = drawing();
+    const current = plan.floors[0];
+    if (reverse) {
+      current.outline.reverse();
+      current.rooms[0].polygon.reverse();
+    }
+    const expected = parse(plan);
+    current.outline.push([...current.outline[0]]);
+    current.rooms[0].polygon.push([...current.rooms[0].polygon[0]]);
+    const result = parse(plan);
+    expect(result.ok).toBe(true);
+    expect(result).toEqual(expected);
+    if (result.ok) expect(parse(result.plan)).toEqual(result);
+  });
+
+  it('allows exactly 64 distinct vertices plus a closing coordinate, not 65 distinct vertices', () => {
+    const plan = drawing();
+    plan.floors[0].rooms = [];
+    plan.floors[0].walls = [];
+    const circle = (count: number): PlanPoint[] => Array.from({ length: count }, (_, index) => {
+      const angle = index / count * 2 * Math.PI;
+      return [6 + 4 * Math.cos(angle), 5 + 4 * Math.sin(angle)];
+    });
+    const outline = circle(64);
+    plan.floors[0].outline = [...outline, [...outline[0]]];
+    const result = parse(plan);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.plan.floors[0].outline).toEqual(outline);
+    const oversized = circle(65);
+    plan.floors[0].outline = [...oversized, [...oversized[0]]];
+    expectRejected(plan, /3 到 64 個頂點/);
+  });
+
+  it.each([
+    { outline: [[0, 0], [12, 0], [12, 10], [0, 10], [0, 0], [0, 0]] },
+    { outline: [[0, 0], [12, 0], [12, 10], [0, 10], [0.001, 0]] },
+    { outline: [[0, 0], [12, 0], [0, 0]] },
+    { outline: [[1, 1], [8, 7], [1, 8], [6, 1], [1, 1]] },
+  ] as { outline: PlanPoint[] }[])('does not hide malformed closed geometry: %j', ({ outline }) => {
+    const plan = drawing();
+    plan.floors[0].rooms = [];
+    plan.floors[0].walls = [];
+    plan.floors[0].outline = outline;
+    expect(parse(plan).ok).toBe(false);
+  });
   it.each(['outline', 'room'] as const)('rejects a self-crossing %s with nonzero signed area', (target) => {
     const plan = drawing();
     const crossing: PlanPoint[] = [[1, 1], [8, 7], [1, 8], [6, 1]];
