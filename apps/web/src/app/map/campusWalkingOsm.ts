@@ -90,7 +90,8 @@ export const excludesWalkingWay = (tags: Tags) =>
   // Cached source tags must still match the same discovery allowlist.
   !HIGHWAYS.includes(tags.highway) ||
   tags.foot === 'use_sidepath' ||
-  !!(tags.area && tags.area !== 'no') ||
+  // An explicitly empty area tag is ambiguous, not proof of a linear path.
+  (tags.area !== undefined && tags.area !== 'no') ||
   nonOutdoor(tags);
 
 // Product policy: an unrecognised or purpose-limited access value needs
@@ -116,7 +117,10 @@ const restrictsWalking = (tags: Tags) =>
   // https://wiki.openstreetmap.org/wiki/Lifecycle_prefix
   ['construction', 'disused', 'abandoned'].some(key =>
     tags[key] !== undefined && !['no', 'false', '0'].includes(tags[key])) ||
-  !!(tags.barrier && tags.barrier !== 'no') ||
+  // An unknown barrier is not evidence of an unobstructed segment.
+  // https://wiki.openstreetmap.org/wiki/Barriers
+  (tags.barrier !== undefined && tags.barrier !== 'no') ||
+  tags['barrier:conditional'] !== undefined ||
   // Locked gates/doors may lack a separate barrier tag. A conditional lock
   // or malformed access schedule is not a verified all-hours passage.
   // Explicit negatives match motorroad and lifecycle so locked=false/0
@@ -131,10 +135,7 @@ const restrictsWalking = (tags: Tags) =>
   // https://wiki.openstreetmap.org/wiki/Key:access
   tags['open:conditional'] !== undefined ||
   ['date_on', 'date_off', 'day_on', 'day_off', 'hour_on', 'hour_off'].some(key => tags[key] !== undefined) ||
-  // Match the audit bridge's conditional-key policy on both ways and nodes.
-  // The current routing model cannot evaluate time/direction-dependent access.
-  // https://wiki.openstreetmap.org/wiki/Conditional_restrictions
-  Object.keys(tags).some(key => /^(?:foot|access|oneway)(?::[^:]+)*:conditional$/.test(key)) ||
+  tags['access:conditional'] !== undefined || tags['foot:conditional'] !== undefined ||
   tags.opening_hours !== undefined;
 
 export function hasWalkingRestriction(way: Tags, from: Tags, to: Tags): boolean {
