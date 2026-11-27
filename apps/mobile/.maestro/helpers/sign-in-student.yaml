@@ -7,13 +7,39 @@ appId: ${APP_ID}
 - inputText: 'campus-test-1234' # gitleaks:allow public loopback emulator fixture
 # Password keyboard on iOS has Return/Go, not a hide-keyboard control. The
 # sign-in button sits above the keyboard; tapping it is the real submit.
-- tapOn:
-    id: maestro-sign-in
-    enabled: true
-- extendedWaitUntil:
-    visible:
-      id: tab-Today
-    timeout: 90000
+# Overlay dismiss without auth leaves login-landing (校園服務) with no tabs.
+# Retry: reopen the emulator login if the sheet closed, then tap sign-in again.
+- retry:
+    maxRetries: 2
+    commands:
+      - runFlow:
+          when:
+            notVisible:
+              id: maestro-sign-in
+          commands:
+            - tapOn:
+                id: maestro-open-emulator-login
+                enabled: true
+            - extendedWaitUntil:
+                visible:
+                  id: maestro-emulator-login
+                timeout: 15000
+            - tapOn:
+                id: maestro-email
+            - eraseText: 80
+            - inputText: 's0000001@test.campus-one.local'
+            - tapOn:
+                id: maestro-password
+            - eraseText: 40
+            - inputText: 'campus-test-1234' # gitleaks:allow public loopback emulator fixture
+      - tapOn:
+          id: maestro-sign-in
+          enabled: true
+          retryTapIfNoChange: true
+      - extendedWaitUntil:
+          visible:
+            id: tab-Today
+          timeout: 40000
 - assertNotVisible:
     id: login-landing
 - assertNotVisible:

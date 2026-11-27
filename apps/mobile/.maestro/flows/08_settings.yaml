@@ -17,17 +17,25 @@ tags: [smoke, settings]
     element:
       id: me-open-settings
     direction: DOWN
-    centerElement: true
     timeout: 20000
 - assertVisible:
     id: me-open-settings
 - assertVisible: '使用設定'
-- tapOn:
-    id: me-open-settings
-- extendedWaitUntil:
-    visible:
-      id: settings-current-account
-    timeout: 15000
+# Do not center this row: extra swipes leave it moving, so the tap paints
+# pressed state without opening Settings. Retry until 目前登入帳號 is on screen.
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: me-open-settings
+          retryTapIfNoChange: true
+      - waitForAnimationToEnd
+      - extendedWaitUntil:
+          visible:
+            id: settings-current-account
+          timeout: 12000
+- assertVisible:
+    id: settings-current-account
 - assertVisible: '目前登入帳號'
 - assertVisible: '測試學生甲'
 - scrollUntilVisible:
