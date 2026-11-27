@@ -1,80 +1,85 @@
-# 平台帳號關閉後清除 TronClass 資料
+# 官方 284：TronClass 平台帳號關閉 outbox
 
-本目錄提供 **尚未部署的 SQL 候選**。Web 的 server-only worker 已接入 `instrumentation.register()`，預設不啟用；不會在啟動或 HTTP request 中建立資料表、套用 migration，亦沒有讓 HTTP caller 指定 owner 的清理端點。外部 nuni-api 的正式 source、migration manifest 及 image 未由本目錄修改。
+本目錄把已審查的候選 SQL 封成 nuni-api 官方 migration `284_tronclass_account_closure_outbox`。內容與審查候選位元組相同（SHA-256 `9c5057739cf89222bc69ee2bcbfffbf74b0705d522d4478f75fc01a2d826381a`）。**本輪不連正式庫、不跑 migration、不部署、不開 worker、不建 `tronclass_closure_worker`、不補 GRANT。** 旗標維持關閉。
 
-## 事件與清除流程
+graduation 因 `pnpm-workspace.yaml` 的 `apps/*` 不能放 nuni-api 套件。權威 SQL 在本檔 `284_tronclass_account_closure_outbox.sql`；`prepare.py` 只把它寫進授權生產 API checkout 的 `apps/api/src/migrations/284_tronclass_account_closure_outbox.sql`。映像 build 再抄到 `dist/migrations/`。禁止任何 `001_…` 檔名進入該目錄。
 
-`platform_accounts` 的 `state` 改為 `closed`／`deleted`，或帳號硬刪除時，PostgreSQL trigger 在**同一交易**建立 outbox 事件。交易 rollback 不會留下事件；未 commit 的事件不能被 worker 領取。migration 也會將資料庫中明確已是 closed／deleted 的列放入 outbox。暫停帳號不觸發清除。
+`inputTree` 必須是現況正式 tree `2e7cc189…`，不可用舊 283 候選 `2d7a325c5d4cd185d0ba32c6603a1e703684199b`。
 
-事件只包含經平台帳號列確認的 account ID、原因與重試／租約資訊，不包含學校帳號、密碼、cookie、作業或檔案。outbox 刻意沒有指向帳號的外鍵，讓硬刪帳號後仍保留可處理的關帳證據。每個 account ID 同時至多一筆待處理事件。
-
-worker 用 `FOR UPDATE SKIP LOCKED` 與隨機 lease token 原子領取事件，再呼叫既有 `backend/functions/tronClassAccountLifecycle.js` 的 `closeTronClassOwner()`。該 hook 先建立永久、無憑證的 Firestore 關帳 barrier，才清除本人操作與登入資料；可能已送出的校方作業鎖保留匿名阻擋狀態，不因關帳解除防重送。
-
-只有 hook 成功後，worker 才以原事件 ID **及相同 lease token** 刪除 outbox 列，同時移除已無用途的 platform ID。沒有無限期保留帳號 ID 的 completed 表。若程序在 Firestore 清完、SQL 刪除前中斷，租約到期後會重試同一個冪等 hook。關帳與後續硬刪除可能產生兩次合法事件；重複清理同一 owner 仍安全。
-
-本流程不掃描所有 Firestore owner，不因查不到平台帳號就推論已關帳。**migration 前已硬刪，且沒有可追溯關帳事件的帳號，不能由本流程猜測處理**；這類歷史資料仍需平台的權威關帳紀錄。
-
-## 明確啟用及執行時設定
-
-只讀取以下兩項專用設定：
-
-```dotenv
-TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED=true
-TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL=postgresql://<dedicated-worker-role>:<secret>@<nuni-postgres>/<database>
-```
-
-必須同時明確設定，且 Next.js 執行於 Node runtime；不接受 `TRUE`／`1` 等替代旗標。**不會 fallback 到 `DATABASE_URL`、`ASSIGNMENT_FILE_DATABASE_URL` 或 `PLATFORM_ASSISTANT_DATABASE_URL`。** 不使用瀏覽器輸入的連線字串，不把連線設定或原始例外寫入 log。
-
-`ENABLED=true` 但 URL 缺少／格式錯誤時，不建立連線，並發出固定的設定錯誤訊息；其他初始化及執行失敗也只有固定訊息。應由既有 server log／錯誤監控監看這些訊息與待處理事件數，不公開事件內容。
-
-- 啟動後立即執行首次檢查，此後每次完成再等待 60–65 秒，單一程序不重疊執行。
-- 每輪預設至多 10 件，程式允許的上限為 20 件。
-- 租約 5 分鐘；程序中斷後其他 instance 可在租約到期重新領取。
-- 清理失敗保留事件，只存固定 `cleanup_failed`，退避從 30 秒倍增，最高 30 分鐘。
-- 專用 PostgreSQL pool 最多 2 條連線，連線逾時 5 秒、client query 與 server `statement_timeout` 均為 10 秒。server 會取消逾時 SQL，失敗的 pool client 會被移除；不使用只有停止等待、卻讓 SQL 無期限執行的 `Promise.race`。
-- SQL 故障不刪除事件；若尚持有租約，留待到期恢復。舊 lease token 不能完成或延後新 worker 領取的事件。
-
-私人檔案清理、平台關帳清理、TronClass retention 各自在獨立 `try/catch` 啟動；其中一個初始化失敗不阻擋另外兩個。此 worker 不依賴 Firestore TTL，也不假設已開啟需要帳務支援的 TTL delete。
-
-## Schema、角色與最小權限
-
-SQL 以 nuni PostgreSQL 既有的 `platform_accounts(id, state)` 為來源。正式部署使用受信任角色擁有的 `public` schema；一般 API 與 worker 角色不得在此 schema 建立／替換資料表、function 或 trigger。測試使用隨機獨立 schema，與正式資料完全分開。
-
-trigger function 使用 `SECURITY DEFINER`、固定 `search_path = pg_catalog, pg_temp`，並以 `TG_TABLE_SCHEMA` 明確限定 outbox 表名。建立 function 與 `REVOKE ... FROM PUBLIC` 必須包含在同一 migration 交易，不能把中間狀態對其他連線開放。worker／一般 API role 不取得該 function 的直接 EXECUTE 權限；trigger 在帳號交易內執行。
-
-**worker 必須使用專用的非 owner、非 superuser 角色**，不能有 `CREATEDB`、`CREATEROLE` 或 schema `CREATE`，不能繼承具有上述權限的角色。依平台的憑證管理流程配置登入角色與 DB CONNECT；不要將真實密碼加入此檔案。對已建立的角色，最小物件權限為：
-
-```sql
-GRANT USAGE ON SCHEMA public TO tronclass_closure_worker;
-GRANT SELECT, DELETE ON public.tronclass_account_closure_outbox TO tronclass_closure_worker;
-GRANT UPDATE (attempts, next_attempt_at, lease_token, lease_expires_at, last_failure)
-  ON public.tronclass_account_closure_outbox TO tronclass_closure_worker;
-```
-
-worker 不需要 `platform_accounts` 的 SELECT、UPDATE 或 DELETE；**不可授予 outbox INSERT、修改 `platform_account_id`／`id`／`reason`，或 sequence 使用權**。正常 worker SQL 只刪除自己持有 token 的事件。專用 pool 固定連線 search path 為 `pg_catalog, public, pg_temp`；禁止一般角色在這些受信任 schema 建立物件。專用 URL 必須指定角色，允許 TLS 參數；拒絕 `options`、`statement_timeout`、`query_timeout`、`connectionTimeoutMillis`、`connect_timeout` 等可能覆寫 trusted schema／逾時設定的參數。
-
-平台既有關帳 API role 仍只操作經驗證帳號的 `platform_accounts`，不直接寫 outbox，也不取得 outbox SELECT／INSERT。trigger 的受信任 owner 必須能寫入 outbox 與 identity sequence。migration role 負責建表、function、trigger 與授權，相關能力不交給 Web worker。
-
-## 發布順序
-
-1. 核對實際 nuni-api immutable image、來源 tree、`platform_accounts` schema、account ID 格式與已套用 migration。`001` 是本目錄候選檔名，不是已登錄的外部 API migration 編號。
-2. 將 SQL 整合進**該實際來源**的既有 migration runner，分配正確新編號、登錄 checksum，驗證完整 image 及既有 API 回歸。不可直接用舊候選來源覆蓋正式 API，也不可讓 Web 裸跑 SQL 規避 manifest。
-3. 以受信任 schema/search path，在同一 migration 交易套用候選及 PUBLIC 撤權，核對 trigger、歷史 closed/deleted 事件與最小角色權限。正常 API role 必須能關帳，但不能直接建立任意清理事件。
-4. 先保持 worker 旗標關閉發布相容 Web；migration 與專用角色驗收完成後，再設定專用 DB URL 及精確啟用旗標，重啟 Node instance。
-5. 以受控平台帳號驗證關帳事件、Firestore barrier／私人紀錄清理、outbox 成功刪除及故障後重試。此驗收不需要寫入校方作業。
-
-Web 端平台帳號的新綁定除了檢查 worker 旗標與專用 DB URL 皆已設定，還要求本 instance 的 worker 在 10 分鐘內完成過一次全部成功的批次。批次結束時 outbox 若仍有清理失敗事件（含退避中尚未到期者），worker 不會更新就緒時間；但這不會立即撤銷上一次成功批次的就緒狀態，新綁定仍可在該次成功後的 10 分鐘有效期內被接受，期限過後才會因就緒時間過舊而被拒絕；每次批次開始前，worker 會以專用角色確認 outbox 與 `platform_accounts` 存在、具備 outbox SELECT／DELETE 權限，以及 `attempts`、`next_attempt_at`、`lease_token`、`lease_expires_at`、`last_failure` 五個欄位各自的 UPDATE 權限，且 `tronclass_account_closed`、`tronclass_account_deleted` 兩個 trigger 皆以一般交易會觸發的模式啟用（停用或 replica-only 都不算）。首次批次在啟動時立即執行，綁定最多等待 3 秒。任何一項未通過都回覆 `TRONCLASS_RETENTION_REQUIRED` 且不保存校方 session；因此步驟 4 的 migration 驗收完成前，平台帳號無法新綁定。
-
-回滾 worker 時可關閉旗標並保留 outbox／trigger，事件會等待恢復；不能刪除 Firestore 永久關帳 barrier 或不確定的校方作業鎖。
-
-## 隔離測試
-
-測試只接受明確 `NUNI_TEST_POSTGRES_PORT`，固定連到 `127.0.0.1`、測試帳號 `box`、資料庫 `postgres`、合成測試密碼；不讀取任何產品 DB URL。每次使用隨機 schema 和測試角色，完成後刪除。
+## 建置候選與相容回滾
 
 ```sh
-NUNI_TEST_POSTGRES_PORT=<disposable-loopback-port> \
-  pnpm --filter web exec vitest run \
-  src/lib/server/tronClassPlatformClosure.postgres.test.ts
+python3 deploy/nuni-api/tronclass-account-closure/prepare.py --verify-only
+python3 deploy/nuni-api/build.py --tronclass-account-closure-candidate \
+  --tronclass-account-closure-source /absolute/path/to/authorized-production-api \
+  --prepare-only --output-dir /tmp/new-tronclass-closure-context
 ```
 
-SQL 只使用 PostgreSQL 15 已支援的功能；CI Web Tests 的 PostgreSQL 15 service 可直接執行。測試涵蓋真正的 trigger、transaction rollback、硬刪後事件存活、worker 故障退避、程序重建、雙連線競爭、租約到期／舊 token、最低 ACL 及完成後移除 platform ID。worker／scheduler 與 `instrumentation` 另有單元與接線回歸。
+授權來源的 `git write-tree` 必須以 `2e7cc189` 開頭。省略來源、或來源是 283 候選 tree，都會失敗。
+
+相容回滾映像**不要**用 `deploy/nuni-api/composed/Dockerfile.rollback`（那是過期 digest `be815455`＋278／279／281）。改用本目錄 `Dockerfile.rollback`：以現況正式 `nuni-api` digest 為 `FROM`，只 COPY 284 SQL。建置時提供 64 位 hex digest（不要 `sha256:` 前綴）：
+
+```sh
+export NUNI_API_PRODUCTION_DIGEST=<現況正式映像 64 hex>
+python3 deploy/nuni-api/build.py --tronclass-account-closure-compatible-rollback \
+  --prepare-only --output-dir /tmp/new-tronclass-closure-rollback
+# 實際 docker build 時同一支 Dockerfile 只 COPY 284；digest 由 NUNI_API_PRODUCTION_DIGEST 注入。
+```
+
+284 只加 SQL，候選（現況 tree＋284）與相容回滾（現況 digest＋COPY 284）對 runner 等價。發布時仍建議用「FROM 現況 digest COPY 284」，避免重建時浮動 base。
+
+## 套用前核對（必須為 0）
+
+帳號 ID 必須符合 outbox CHECK。不符的列會讓 backfill 整筆失敗並回滾：
+
+```sql
+SELECT count(*) AS invalid_platform_account_ids
+FROM public.platform_accounts
+WHERE id !~ '^pa_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+-- 必須為 0，否則停止。
+
+SELECT id FROM public.schema_migrations ORDER BY applied_at DESC LIMIT 1;
+-- 必須為 283_platform_assistant_permissions。
+```
+
+## Neon pre-284 備份
+
+在 **migrate 之前**對正式庫建立 Neon branch（名稱例如 `pre-284-tronclass-outbox`）當還原點。不要在該 branch 上當正式套用。本包裝不建立、不連線該 branch。
+
+## Fly one-off（nrt）
+
+唯一套用路徑是候選／相容回滾映像內的 runner，不是 psql、不是 Web。nrt 開一次性 machine：
+
+```sh
+export EXPO_NO_DOTENV=1
+# init.cmd: ["node", "/opt/release/fly-migrate.mjs"]
+# 注入 deploy/nuni-api/composed/fly-migrate.mjs 與 verify-migration-session.mjs
+# env: lock 5s、statement 60s、query 70s、idle-in-tx 90s；DATABASE_POOL_MAX=1
+fly machine wait "$MIGRATION_ID" -a nuni-api --state stopped --wait-timeout 300s
+```
+
+工作程序上限 **300s**。成功必須同時具備：
+
+- `migration.session_timeouts_verified`
+- `database.migrate.completed`
+- latest = `284_tronclass_account_closure_outbox`
+- checksum = `9c5057739cf89222bc69ee2bcbfffbf74b0705d522d4478f75fc01a2d826381a`
+
+缺事件、非零退出、逾時或 checksum 不符：不切 serving，只停本次 machine。
+
+## 立刻切映像
+
+284 一登記，舊映像重啟會因 manifest 不符而失敗。migration 成功後立刻把 nuni-api serving 切到含 284 的 digest；失敗則不要切。
+
+## 相容回滾映像用法
+
+緊急回滾切到「現況正式 digest + 同一份 284 SQL」的相容映像。資料庫**不倒退**、不刪 `schema_migrations`、不 DROP outbox／trigger。不可切回不認識 284 的舊映像。
+
+## 本輪明確不做
+
+- 不設 `TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED`、不設專用 DB URL
+- 不 `CREATE ROLE tronclass_closure_worker`
+- 不 GRANT outbox 給任何 API／BFF／worker 角色
+- 不啟用 Web worker
+
+Trigger 仍會在關帳／刪帳時寫 outbox；事件會等待之後另一步才開的 worker。誤開 worker 且沒有 GRANT 時，就緒檢查會失敗並關閉，不會清資料。

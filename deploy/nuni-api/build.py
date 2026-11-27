@@ -2,11 +2,13 @@
 """Rebuild the deployed Nuni API from its pinned source and reviewed patches."""
 import argparse
 import contextlib
-import shutil
-import importlib.util
 import hashlib
+import importlib.util
 import json
+import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import tempfile
 
@@ -26,9 +28,12 @@ def parse_args(argv=None):
     extensions.add_argument('--lost-found-candidate', action='store_true', help='Build the opt-in platform lost-found overlay on the exact composed API; never deploy or migrate')
     extensions.add_argument('--lost-found-compatible-rollback', action='store_true', help='Build the parent composed API with the same lost-found migration manifest; never roll back data')
     extensions.add_argument('--security-candidate', action='store_true', help='Build the production-bound runtime dependency security image (deploy/nuni-api/security); never deploy, migrate, or alter default overlays')
+    extensions.add_argument('--tronclass-account-closure-candidate', action='store_true', help='Add the TronClass closure outbox migration to the current production API tree; never deploy or migrate')
+    extensions.add_argument('--tronclass-account-closure-compatible-rollback', action='store_true', help='Build the current production nuni-api image plus the same 284 SQL; never roll back data')
     parser.add_argument('--assistant-source', type=Path, help='Local archived source for the assistant candidate')
     parser.add_argument('--assistant-permissions-source', type=Path, help='Local authorized archived source for the assistant-permissions candidate')
     parser.add_argument('--lost-found-source', type=Path, help='Local authorized archived source for a lost-found candidate or compatible rollback')
+    parser.add_argument('--tronclass-account-closure-source', type=Path, help='Local authorized production API checkout for the TronClass closure candidate')
     parser.add_argument('--prepare-only', action='store_true', help='Write verified build context without building, pushing, deploying or migrating')
     parser.add_argument('--output-dir', type=Path, help='New directory for --prepare-only build context')
     args = parser.parse_args(argv)
@@ -40,8 +45,12 @@ def parse_args(argv=None):
         parser.error('--assistant-permissions-source requires --assistant-permissions-candidate')
     if args.lost_found_source and not (args.lost_found_candidate or args.lost_found_compatible_rollback):
         parser.error('--lost-found-source requires a lost-found candidate or compatible rollback')
-    if args.prepare_only and not (args.imports_candidate or args.imports_compatible_rollback or args.assistant_candidate or args.assistant_permissions_candidate or args.lost_found_candidate or args.lost_found_compatible_rollback):
-        parser.error('--prepare-only requires an imports, assistant, assistant-permissions or lost-found candidate, or compatible rollback')
+    if args.tronclass_account_closure_source and not args.tronclass_account_closure_candidate:
+        parser.error('--tronclass-account-closure-source requires --tronclass-account-closure-candidate')
+    if args.tronclass_account_closure_candidate and not args.tronclass_account_closure_source:
+        parser.error('--tronclass-account-closure-candidate requires --tronclass-account-closure-source')
+    if args.prepare_only and not (args.imports_candidate or args.imports_compatible_rollback or args.assistant_candidate or args.assistant_permissions_candidate or args.lost_found_candidate or args.lost_found_compatible_rollback or args.tronclass_account_closure_candidate or args.tronclass_account_closure_compatible_rollback):
+        parser.error('--prepare-only requires an imports, assistant, assistant-permissions, lost-found or TronClass closure candidate, or compatible rollback')
     return args
 
 
@@ -50,6 +59,59 @@ def build(args):
         args.output_dir = args.output_dir.resolve()
         if args.output_dir.exists():
             raise SystemExit('Output directory must not exist')
+    if args.tronclass_account_closure_candidate:
+        spec = importlib.util.spec_from_file_location(
+            'tronclass_account_closure_prepare', root / 'tronclass-account-closure/prepare.py')
+        extension = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(extension)
+        context = contextlib.nullcontext(None) if args.prepare_only else tempfile.TemporaryDirectory(prefix='campus-tronclass-closure-build-')
+        with context as scratch:
+            checkout = args.output_dir if args.prepare_only else Path(scratch) / 'source'
+            tree = extension.prepare(checkout, args.tronclass_account_closure_source)
+            print(json.dumps({'candidateTree': tree, 'buildsImage': not args.prepare_only,
+                              'deploys': False, 'runsMigrations': False}))
+            if not args.prepare_only:
+                subprocess.run(['docker', 'build', '--platform', 'linux/amd64', '-f', 'apps/api/Dockerfile',
+                                '--label', 'org.opencontainers.image.revision=' + tree,
+                                '-t', 'nuni-api:tronclass-account-closure-candidate', '.'], cwd=checkout, check=True)
+        return
+    if args.tronclass_account_closure_compatible_rollback:
+        rollback = json.loads((root / 'tronclass-account-closure/rollback-source.json').read_text())
+        project = root.parents[1]
+        dockerfile = root / 'tronclass-account-closure/Dockerfile.rollback'
+        text = dockerfile.read_text()
+        if 'be815455' in text or rollback['staleRollbackDockerfile'] in text:
+            raise SystemExit('Rollback Dockerfile must not reuse the stale be815455 image')
+        if text.count('COPY ') != 1:
+            raise SystemExit('Rollback image must COPY only the 284 SQL')
+        sql_copy = (
+            'COPY deploy/nuni-api/tronclass-account-closure/284_tronclass_account_closure_outbox.sql '
+            '/app/apps/api/dist/migrations/284_tronclass_account_closure_outbox.sql'
+        )
+        if sql_copy not in text or 'ARG NUNI_API_PRODUCTION_DIGEST' not in text:
+            raise SystemExit('Rollback Dockerfile must FROM the live digest ARG and COPY only 284')
+        for name, checksum in rollback['migrations'].items():
+            if hashlib.sha256((project / name).read_bytes()).hexdigest() != checksum:
+                raise SystemExit('Rollback migration checksum mismatch')
+        if args.prepare_only:
+            args.output_dir.mkdir(parents=True)
+            for name in rollback['migrations']:
+                destination = args.output_dir / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(project / name, destination)
+            shutil.copyfile(dockerfile, args.output_dir / 'Dockerfile')
+            (args.output_dir / 'release-source.json').write_text(json.dumps(rollback, indent=2) + '\n')
+            return
+        digest = os.environ.get('NUNI_API_PRODUCTION_DIGEST', '')
+        if not re.fullmatch('[a-f0-9]{64}', digest):
+            raise SystemExit('NUNI_API_PRODUCTION_DIGEST must be the current production nuni-api image digest (64 hex, no sha256: prefix)')
+        if digest == 'be815455fbb2ccce844b69f004e416e44465e3421f9da654d0cd5db8379c3dc2':
+            raise SystemExit('Refusing stale imports rollback digest be815455')
+        subprocess.run(['docker', 'build', '--platform', 'linux/amd64', '-f', str(dockerfile),
+                        '--build-arg', 'NUNI_API_PRODUCTION_DIGEST=' + digest,
+                        '--label', 'org.opencontainers.image.base.digest=sha256:' + digest,
+                        '-t', 'nuni-api:tronclass-account-closure-compatible-rollback', str(project)], check=True)
+        return
     if args.assistant_permissions_candidate:
         spec = importlib.util.spec_from_file_location('assistant_permissions_prepare', root / 'assistant-permissions/prepare.py')
         extension = importlib.util.module_from_spec(spec)
