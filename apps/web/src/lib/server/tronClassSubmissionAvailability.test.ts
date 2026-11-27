@@ -319,6 +319,16 @@ describe('availability reader ownership and freshness', () => {
     expect(s.source.fetchCourses).not.toHaveBeenCalled();
   });
 
+  it.each([{ rows: [] }, { rows: [SUBMISSION] }])('stops before special-record reads on mixed history evidence: %j', async ({ rows }) => {
+    const s = setup();
+    s.setHistory({ list: rows, error: 'synthetic-error' });
+    await expect(s.reader(OWNER, SCOPE, REVISION)).rejects.toMatchObject({
+      status: 502, code: 'TRONCLASS_AVAILABILITY_UNAVAILABLE',
+    });
+    expect(s.source.fetchStudentMakeUpRecord).not.toHaveBeenCalled();
+    expect(s.source.fetchStudentResubmitRecord).not.toHaveBeenCalled();
+  });
+
   it('stops before the next student read when history delivery changes the bound account', async () => {
     const s = setup();
     vi.mocked(s.source.fetchStudentSubmissionList!).mockImplementationOnce(async () => {
