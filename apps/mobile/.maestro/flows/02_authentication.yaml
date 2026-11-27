@@ -45,9 +45,7 @@ tags: [smoke, auth]
     visible: '確定要登出學校帳號嗎？Google 帳號會保留登入。'
     timeout: 10000
 - tapOn:
-    text: '^登出學校帳號$'
-    below:
-      text: '確定要登出學校帳號嗎？Google 帳號會保留登入。'
+    text: '^確定登出$'
 - extendedWaitUntil:
     visible:
       id: login-landing

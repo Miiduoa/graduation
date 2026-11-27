@@ -274,7 +274,7 @@ test('confirming logout calls the real sign-out flow without navigating to a fak
   const view = render(<MeAiFirstScreen />);
   fireEvent.press(view.getByText('登出學校帳號'));
   await act(async () =>
-    alert.mock.calls[0][2]?.find((item) => item.text === '登出學校帳號')?.onPress?.(),
+    alert.mock.calls[0][2]?.find((item) => item.text === '確定登出')?.onPress?.(),
   );
   expect(mockAuth.signOutWithWarning).toHaveBeenCalledTimes(1);
   expect(mockNavigation.navigate).not.toHaveBeenCalled();
@@ -285,7 +285,7 @@ test('a logout confirmation belonging to an old account cannot sign out the new 
   const alert = jest.spyOn(Alert, 'alert');
   const view = render(<MeAiFirstScreen />);
   fireEvent.press(view.getByText('登出學校帳號'));
-  const confirm = alert.mock.calls[0][2]?.find((item) => item.text === '登出學校帳號')?.onPress;
+  const confirm = alert.mock.calls[0][2]?.find((item) => item.text === '確定登出')?.onPress;
   mockAuth.user = { uid: 'student-b', email: 'student-b@example.edu' };
   view.rerender(<MeAiFirstScreen />);
   expect(view.queryByText('陳同學')).toBeNull();
@@ -300,7 +300,7 @@ test('a rejected sign-out stays on the account page and reports the failure', as
   const view = render(<MeAiFirstScreen />);
   fireEvent.press(view.getByText('登出學校帳號'));
   await act(async () =>
-    alert.mock.calls[0][2]?.find((item) => item.text === '登出學校帳號')?.onPress?.(),
+    alert.mock.calls[0][2]?.find((item) => item.text === '確定登出')?.onPress?.(),
   );
   expect(alert).toHaveBeenLastCalledWith('無法登出', '請稍後重試。');
   expect(view.getByText('陳同學')).toBeTruthy();

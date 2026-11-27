@@ -125,7 +125,7 @@ test('waits for the close animation, then performs only the first selected desti
   expect(profile).toBeDisabled();
   expect(timetable).toBeDisabled();
   for (const button of view.getAllByRole('button')) {
-    if (button.props.accessibilityLabel === '關閉個人選單') continue;
+    if (button.props.accessibilityLabel === '關閉抽屜') continue;
     expect(button).toBeDisabled();
     expect(button).toHaveAccessibilityState({ disabled: true });
   }
@@ -263,7 +263,7 @@ test('every entry exposes its full name and the close and avatar controls have u
   dimensions = { ...dimensions, width: 320, fontScale: 2 };
   const view = openDrawer();
   expect(view.getByRole('button', { name: '編輯個人資料' })).toBeTruthy();
-  expect(view.getByRole('button', { name: '關閉個人選單' })).toHaveStyle({
+  expect(view.getByRole('button', { name: '關閉抽屜' })).toHaveStyle({
     minWidth: 44,
     minHeight: 44,
   });

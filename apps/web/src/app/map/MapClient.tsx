@@ -656,7 +656,7 @@ function MapContent({
             <p>可對應「{classroomPlace.name}」的位置。抵達後請依課表與現場標示確認教室。</p>
             <p id={classroomNoteId}>
               導航終點是建築地點標記，並非已核實的入口或室內教室；路線由第三方地圖規劃。
-              {isProvidencePendingVerification(school, classroomPlace) && (
+              {isProvidencePendingVerification(publicSchool, classroomPlace) && (
                 <strong>這個地點只有單一資料來源，位置待再次確認。</strong>
               )}
             </p>

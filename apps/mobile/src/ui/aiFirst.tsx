@@ -142,8 +142,9 @@ export function AIScreen({
   useVisualTheme();
   const defaultPadding = useTabBarContentBottomPadding();
   const insets = useSafeAreaInsets();
+  const tabBarPadding = bottomPadding ?? defaultPadding;
   return (
-    <View style={{ flex: 1, backgroundColor: aiTokens.bg }}>
+    <View style={{ flex: 1, backgroundColor: aiTokens.bg, paddingBottom: tabBarPadding }}>
       <ScrollView
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
@@ -152,7 +153,7 @@ export function AIScreen({
         keyboardDismissMode={keyboardDismissMode}
         automaticallyAdjustKeyboardInsets={automaticallyAdjustKeyboardInsets}
         contentContainerStyle={[
-          { paddingTop: insets.top, paddingBottom: bottomPadding ?? defaultPadding },
+          { paddingTop: insets.top, paddingBottom: 24 },
           contentContainerStyle,
         ]}
       >

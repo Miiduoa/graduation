@@ -1234,8 +1234,18 @@ function ScopedCampusEventDetail({ navigation, route, publicBrowse }: Props) {
                 {dateLabel(event.startsAt)}
                 {event.endsAt ? ` 至 ${dateLabel(event.endsAt)}` : ''}
               </Text>
-              <Text style={{ color: aiTokens.muted }}>地點：{event.location || '尚未公布'}</Text>
-              <Text style={{ color: aiTokens.muted }}>主辦：{event.organizer || '尚未公布'}</Text>
+              <Text
+                accessibilityLabel={event.location || '尚未公布'}
+                style={{ color: aiTokens.muted }}
+              >
+                地點：{event.location || '尚未公布'}
+              </Text>
+              <Text
+                accessibilityLabel={event.organizer || '尚未公布'}
+                style={{ color: aiTokens.muted }}
+              >
+                主辦：{event.organizer || '尚未公布'}
+              </Text>
               {event.fee != null ? (
                 <Text style={{ color: aiTokens.muted }}>
                   費用：{event.fee === 0 ? '免費' : `NT$ ${event.fee}`}

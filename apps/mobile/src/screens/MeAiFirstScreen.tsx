@@ -68,7 +68,7 @@ export default function MeAiFirstScreen() {
     Alert.alert('登出學校帳號', '確定要登出學校帳號嗎？Google 帳號會保留登入。', [
       { text: '取消', style: 'cancel' },
       {
-        text: '登出學校帳號',
+        text: '確定登出',
         style: 'destructive',
         onPress: async () => {
           if (currentUid.current !== requestedUid || signingOut.current) return;

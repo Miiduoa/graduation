@@ -318,7 +318,7 @@ export function HeaderDrawerHost() {
                 <Pressable
                   onPress={handleClose}
                   accessibilityRole="button"
-                  accessibilityLabel="關閉個人選單"
+                  accessibilityLabel="關閉抽屜"
                   style={({ pressed }) => ({
                     minWidth: 44,
                     minHeight: 44,
