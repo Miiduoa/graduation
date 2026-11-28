@@ -2,7 +2,7 @@ name: Today Agent Browser
 
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, integration/all-branches-20261124-final]
     paths:
       - 'apps/web/src/app/page*'
       - 'apps/web/src/components/today/**'

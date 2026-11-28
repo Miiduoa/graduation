@@ -593,6 +593,40 @@ it('waits for the browsing campus before mounting an input or assistant and focu
   expect(callCampusAssistant).not.toHaveBeenCalled();
 });
 
+it.each([true, false])(
+  'does not steal a new focus when the opener is removed while the assistant loads (new focus: %s)',
+  async (moveFocus) => {
+    state.campusLoading = true;
+    const ask = vi.fn(() => reply('不應自動送出'));
+    mockNuniAsk(ask);
+    const content = (showOpener: boolean, focusRequest: number) => (
+      <AssistantEnabledProvider enabled>
+        {showOpener && <button key="opener">開啟助理</button>}
+        <button key="outside">其他服務</button>
+        <TodayCampusEntry key="entry" focusRequest={focusRequest} />
+      </AssistantEnabledProvider>
+    );
+    const view = render(content(true, 0));
+    const opener = screen.getByRole('button', { name: '開啟助理' });
+    opener.focus();
+    view.rerender(content(true, 1));
+    expect(document.activeElement).toBe(opener);
+    view.rerender(content(false, 1));
+    expect(opener.isConnected).toBe(false);
+    const outside = screen.getByRole('button', { name: '其他服務' });
+    if (moveFocus) outside.focus();
+    expect(document.activeElement).toBe(moveFocus ? outside : document.body);
+
+    state.campusLoading = false;
+    view.rerender(content(false, 1));
+    const field = await screen.findByRole('textbox', { name: '問題' });
+    await act(async () => {});
+    await waitFor(() => expect(document.activeElement).toBe(moveFocus ? outside : field));
+    expect(ask).not.toHaveBeenCalled();
+    expect(callCampusAssistant).not.toHaveBeenCalled();
+  },
+);
+
 it('keeps the public-service picker and local question field usable when cloud free-form questions are unavailable', async () => {
   const fetch = vi.fn().mockResolvedValue(Response.json({ enabled: true, ready: true }));
   vi.stubGlobal('fetch', fetch);
