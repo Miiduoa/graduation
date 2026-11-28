@@ -357,8 +357,10 @@ function MapContent({
   }, [routeLocations]);
   const returnParams = new URLSearchParams({ schoolId: school });
   // Preserve the currently confirmed route, not the original link after a manual change.
+  // Manual provisional markers must not become ID-only links across a login remount:
+  // the published source may move or replace the same IDs before the user returns.
   // A pending source can still resolve an untouched deep link. Never serialize GPS.
-  if (routeLocations) {
+  if (routeLocations && placeState.source === 'ready') {
     const ids = routeLocations.map((place) => place.id);
     if (ids.every((id) => id && id.trim() === id && !id.includes(',')))
       returnParams.set('route', ids.join(','));
@@ -671,6 +673,9 @@ function MapContent({
             </p>
             <p id={routeNoteId}>
               起點與終點均為地點標記，不代表已核實的建築入口、可通行道路或無障礙動線。
+              {placeState.source !== 'ready' && (
+                <strong>校方地點資料尚未同步完成；若登入或重新連結帳號，需重新選擇路線。</strong>
+              )}
               {pendingRoutePlaces.length > 0 && (
                 <strong>「{pendingRoutePlaces.map((place) => place.name).join('」、「')}」只有單一資料來源，位置待再次確認。</strong>
               )}

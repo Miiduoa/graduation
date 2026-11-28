@@ -1219,6 +1219,10 @@ it.each(['origin', 'destination', 'origin-building', 'destination-floor', 'uncha
   fireEvent.click(screen.getByRole('button', { name: '設為終點' }));
   expect(screen.getByRole('region', { name: '步行導航' })).toBeTruthy();
 
+  const provisionalLogin = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
+  expect(new URL(provisionalLogin.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('route')).toBeNull();
+  expect(screen.getByText(/若登入或重新連結帳號，需重新選擇路線/)).toBeTruthy();
+
   await act(async () => source.resolve([
     { ...origin, lat: origin.lat + (changed === 'origin' ? 0.002 : 0),
       ...(changed === 'origin-building' ? { building: '測試用變更建築' } : {}) },
@@ -1838,4 +1842,28 @@ it('shows each school its own official map rather than reusing Providence', asyn
   await screen.findByRole('button', { name: '查看蓋夏圖書館' });
   expect(screen.queryByRole('link', { name: '校方校區平面圖' })).toBeNull();
   expect(screen.queryByRole('link', { name: '查看校方校區平面圖' })).toBeNull();
+});
+
+it('does not restore a manually chosen provisional route across login after source failure', async () => {
+  state.user = null;
+  const origin = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  const destination = PROVIDENCE_CAMPUS_PLACES.find((place) => place.name === '蓋夏圖書館')!;
+  vi.mocked(loadMapLocations).mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce([origin, destination]);
+  render(<MapClient school="pu" focus={origin.id} />);
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋地點' }), { target: { value: destination.name } });
+  fireEvent.click(screen.getByRole('button', { name: '查看' + destination.name }));
+  fireEvent.click(screen.getByRole('button', { name: '設為終點' }));
+  await sourceSettled();
+  const returnRoutes = () => ['用 Google 帳號收藏', '查看學校帳號的既有收藏'].map(name => {
+    const link = new URL(screen.getByRole('link', { name }).getAttribute('href')!, window.location.origin);
+    return new URL(link.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('route');
+  });
+  expect(screen.getByRole('region', { name: '步行導航' })).toBeTruthy();
+  expect(returnRoutes()).toEqual([null, null]);
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取地點資料' }));
+  await sourceSettled();
+  expect(returnRoutes()).toEqual([origin.id + ',' + destination.id, origin.id + ',' + destination.id]);
+  expect(screen.queryByText(/若登入或重新連結帳號，需重新選擇路線/)).toBeNull();
 });

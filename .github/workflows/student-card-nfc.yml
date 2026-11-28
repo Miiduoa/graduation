@@ -39,6 +39,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Check native configuration
         run: node --test apps/mobile/modules/campus-student-card-nfc/native-config.test.cjs
+      - name: Test bounded Gradle retry
+        run: node --test apps/mobile/modules/campus-student-card-nfc/run-gradle-with-rate-limit-retry.test.cjs
       - name: Prepare Android SDK
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"'
       - name: Generate the Android project
@@ -47,6 +49,7 @@ jobs:
       - name: Compile the native bridge and run APDU regressions
         working-directory: apps/mobile/android
         run: >-
+          bash ../modules/campus-student-card-nfc/run-gradle-with-rate-limit-retry.sh
           ./gradlew :campus-student-card-nfc:compileDebugKotlin
           :campus-student-card-nfc:testDebugUnitTest
           --no-daemon --max-workers=2
