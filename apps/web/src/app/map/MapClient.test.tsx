@@ -284,6 +284,38 @@ it('does not replace an existing route when an ambiguous classroom candidate is 
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route.map((place: MapLocation) => place.id)).toEqual(['gate', 'library']);
 });
 
+it.each([true, false])('uses a confirmed ambiguous classroom candidate with an existing origin (shared=%s)', async (shared) => {
+  const candidates = [
+    { ...library, id: 'east', name: '教學大樓', description: '東側', lat: 25.01 },
+    { ...library, id: 'west', name: '教學大樓', description: '西側', lat: 25.02 },
+  ];
+  vi.mocked(loadMapLocations).mockResolvedValue([...candidates, gate, library]);
+  render(<MapClient school="another-school" query="教學101" focus="gate"
+    route={shared ? 'gate,library' : undefined} />);
+  const result = within(await screen.findByRole('region', { name: '教室定位結果' }));
+  if (!shared) fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  const action = () => result.queryByRole('button', { name: '將教學大樓設為終點' });
+  expect(action()).toBeNull();
+  fireEvent.click(result.getByRole('button', { name: '選擇候選 2：教學大樓' }));
+  const map = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(map().route?.map((place: MapLocation) => place.id) ?? null)
+    .toEqual(shared ? ['gate', 'library'] : null);
+  const button = result.getByRole('button', { name: '將教學大樓設為終點' });
+  expect(document.getElementById(button.getAttribute('aria-describedby')!)?.textContent)
+    .toContain('並非已核實的入口或室內教室');
+  button.focus();
+  fireEvent.click(button);
+  const route = within(screen.getByRole('region', { name: '步行導航' }));
+  expect(document.activeElement).toBe(route.getByRole('heading', { name: '正門 → 教學大樓' }));
+  expect(map().route.map((place: MapLocation) => place.id)).toEqual(['gate', 'west']);
+  const google = new URL(route.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  const apple = new URL(route.getByRole('link', { name: '使用 Apple 地圖規劃路線' }).getAttribute('href')!);
+  expect(google.searchParams.get('origin')).toBe(`${gate.lat},${gate.lng}`);
+  expect(google.searchParams.get('destination')).toBe(`${candidates[1].lat},${candidates[1].lng}`);
+  expect(apple.searchParams.get('saddr')).toBe(google.searchParams.get('origin'));
+  expect(apple.searchParams.get('daddr')).toBe(google.searchParams.get('destination'));
+});
+
 it('does not guess unknown building codes and preserves the classroom through an account reconnect', async () => {
   state.user = null;
   vi.mocked(loadMapLocations).mockResolvedValue([]);
