@@ -582,6 +582,55 @@ async def classroom_verified_code(page, _requests, _resources):
             "navigationHref": href}
 
 
+async def classroom_destination_first(page, _requests, _resources):
+    result = await open_map_fixture(page, "pu", "PH303")
+    search = page.get_by_role("searchbox", name="搜尋地點", exact=True)
+    await result.get_by_role("button", name="選擇步行起點", exact=True).click()
+    await expect(search).to_have_value("")
+    await expect(search).to_be_focused()
+    pending = page.get_by_role("region", name="已選擇步行終點", exact=True)
+    details = page.get_by_role("region", name="地點詳情", exact=True)
+    route_card = page.get_by_role("region", name="步行導航", exact=True)
+    await expect(pending).to_contain_text("已設定「主顧樓」為終點")
+    await expect(route_card).to_have_count(0)
+    await expect(details.get_by_role("button", name="設為起點", exact=True)).to_be_disabled()
+    google = await assert_walking_link(
+        pending.get_by_role("link", name="在 Google 地圖選擇起點", exact=True), ZHUGU
+    )
+    apple_link = pending.get_by_role("link", name="在 Apple 地圖選擇起點", exact=True)
+    apple = await apple_link.get_attribute("href")
+    parsed = urlparse(apple)
+    params = parse_qs(parsed.query)
+    assert (parsed.scheme, parsed.netloc, parsed.path) == ("https", "maps.apple.com", "/"), apple
+    assert params.get("dirflg") == ["w"] and "saddr" not in params, apple
+    assert [float(v) for v in params["daddr"][0].split(",")] == [ZHUGU["lat"], ZHUGU["lng"]], apple
+    await expect(apple_link).to_have_attribute("target", "_blank")
+    assert {"noopener", "noreferrer"} <= set((await apple_link.get_attribute("rel")).split())
+    await search.fill(LIBRARY["name"])
+    await expect(pending).to_contain_text("已設定「主顧樓」為終點")
+    await page.screenshot(path=str(OUT / "map-classroom-destination-first.png"), full_page=True)
+    await page.get_by_role("button", name="查看蓋夏圖書館", exact=True).click()
+    await details.get_by_role("button", name="設為起點", exact=True).click()
+    await expect(pending).to_have_count(0)
+    heading = route_card.get_by_role("heading", name="蓋夏圖書館 → 主顧樓", exact=True)
+    await expect(heading).to_be_focused()
+    route_href = await route_card.get_by_role("link", name="開啟步行導航", exact=True).get_attribute("href")
+    route_params = parse_qs(urlparse(route_href).query)
+    assert route_params.get("travelmode") == ["walking"], route_href
+    assert [float(v) for v in route_params["origin"][0].split(",")] == [LIBRARY["lat"], LIBRARY["lng"]], route_href
+    assert [float(v) for v in route_params["destination"][0].split(",")] == [ZHUGU["lat"], ZHUGU["lng"]], route_href
+    await expect(route_card).to_contain_text("直線距離")
+    await expect(route_card).to_contain_text("不代表已核實的建築入口")
+    await page.screenshot(path=str(OUT / "map-classroom-confirmed-route.png"), full_page=True)
+    await route_card.get_by_role("button", name="清除路線", exact=True).click()
+    await expect(route_card).to_have_count(0)
+    await expect(search).to_be_focused()
+    assert not await page.evaluate("document.documentElement.scrollWidth > innerWidth + 1")
+    return {"query": "PH303", "destination": ZHUGU["id"], "origin": LIBRARY["id"],
+            "pendingGoogleHref": google, "pendingAppleHref": apple, "confirmedGoogleHref": route_href,
+            "sameEndpointBlocked": True, "focusRestored": True, "externalServiceOpened": False}
+
+
 async def classroom_ambiguous(page, _requests, _resources):
     result = await open_map_fixture(page, "qa-campus", "測試教學101")
     await expect(result).to_contain_text("有多個相符地點，請核對位置後選擇。")
@@ -1094,6 +1143,7 @@ async def main():
                     ("context-loss", {"width": 1440, "height": 1000}, context_loss),
                     ("map-classroom-unique", {"width": 390, "height": 844}, classroom_unique),
                     ("map-classroom-verified-code", {"width": 390, "height": 844}, classroom_verified_code),
+                    ("map-classroom-destination-first", {"width": 390, "height": 844}, classroom_destination_first),
                     ("map-classroom-ambiguous", {"width": 390, "height": 844}, classroom_ambiguous),
                     ("map-classroom-unknown", {"width": 320, "height": 568}, classroom_unknown),
                 ]
