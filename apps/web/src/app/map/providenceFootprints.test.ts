@@ -31,6 +31,22 @@ describe('Providence OSM building outlines', () => {
     expect(PROVIDENCE_OSM_BUILDING_WAY_IDS).toContain(255784049);
   });
 
+  it('does not render deleted or ambiguously visible OSM ways', () => {
+    // Synthetic metadata drift: a retained ID and valid polygon do not
+    // establish a standing building if the source marks the way invisible.
+    for (const visible of [false, null, 'false', 'true', 0, 1]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [{ ...way(255784049), visible }],
+      }), JSON.stringify(visible)).toEqual([]);
+    }
+    // Overpass may omit visibility; explicit boolean true is also valid.
+    for (const visible of [undefined, true]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [{ ...way(255784049), visible }],
+      })).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+  });
+
   it('does not attach an audited campus POI name to a renamed OSM building', () => {
     // Synthetic source drift: the way ID and geometry remain valid, but OSM
     // now explicitly names a different place. Keep the point marker; omit
