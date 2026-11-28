@@ -244,6 +244,46 @@ it('requires a choice between ambiguous same-school buildings and never selects 
   expect(screen.queryByText('主顧樓')).toBeNull();
 });
 
+it('plans from an explicitly chosen ambiguous classroom candidate without guessing a building', async () => {
+  const candidates = [
+    { ...library, id: 'east', name: '教學大樓', description: '東側', lat: 25.01 },
+    { ...library, id: 'west', name: '教學大樓', description: '西側', lat: 25.02 },
+  ];
+  vi.mocked(loadMapLocations).mockResolvedValue([...candidates, gate]);
+  render(<MapClient school="another-school" query="教學101" focus="east" />);
+  const result = within(await screen.findByRole('region', { name: '教室定位結果' }));
+  // A deep-linked marker is not an explicit confirmation of an ambiguous room.
+  expect(result.queryByRole('button', { name: '選擇步行起點' })).toBeNull();
+  fireEvent.click(result.getByRole('button', { name: '選擇候選 2：教學大樓' }));
+  const start = result.getByRole('button', { name: '選擇步行起點' });
+  expect(document.getElementById(start.getAttribute('aria-describedby')!)?.textContent).toContain('並非已核實的入口或室內教室');
+  fireEvent.click(start);
+  expect(screen.getByText(/已設定「教學大樓」為終點/)).toBeTruthy();
+  expect((screen.getByRole('button', { name: '設為起點' }) as HTMLButtonElement).disabled).toBe(true);
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' }) as HTMLInputElement;
+  expect(search.value).toBe('');
+  expect(document.activeElement).toBe(search);
+  fireEvent.change(search, { target: { value: gate.name } });
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  const route = within(screen.getByRole('region', { name: '步行導航' }));
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route.map((place: MapLocation) => place.id)).toEqual(['gate', 'west']);
+  expect(new URL(route.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!).searchParams.get('destination')).toBe(`${candidates[1].lat},${candidates[1].lng}`);
+});
+
+it('does not replace an existing route when an ambiguous classroom candidate is selected', async () => {
+  const candidates = [
+    { ...library, id: 'east', name: '教學大樓', lat: 25.01 },
+    { ...library, id: 'west', name: '教學大樓', lat: 25.02 },
+  ];
+  vi.mocked(loadMapLocations).mockResolvedValue([...candidates, gate, library]);
+  render(<MapClient school="another-school" query="教學101" route="gate,library" />);
+  const result = within(await screen.findByRole('region', { name: '教室定位結果' }));
+  fireEvent.click(result.getByRole('button', { name: '選擇候選 2：教學大樓' }));
+  expect(result.queryByRole('button', { name: '選擇步行起點' })).toBeNull();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route.map((place: MapLocation) => place.id)).toEqual(['gate', 'library']);
+});
+
 it('does not guess unknown building codes and preserves the classroom through an account reconnect', async () => {
   state.user = null;
   vi.mocked(loadMapLocations).mockResolvedValue([]);
