@@ -186,7 +186,7 @@ function MapContent({
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [nearbyOnly, setNearbyOnly] = useState(false);
   const [myLocation, setMyLocation] = useState<MapCoordinate | null>(null);
-  const [positionStatus, setPositionStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [positionStatus, setPositionStatus] = useState<'idle' | 'loading' | 'error' | 'cancelled'>('idle');
   const [positionError, setPositionError] = useState('');
   const [routeDraft, setRouteDraft] = useState<RouteDraft | null>(null);
   function clearRoute() {
@@ -363,6 +363,14 @@ function MapContent({
       ].map((location) => [location.id, location] as const),
     ).values(),
   ];
+
+  function cancelLocate() {
+    // getCurrentPosition has no cancellation handle. Revoke its callbacks instead;
+    // a late fix must not change the map or become a navigation origin.
+    positionGeneration.current += 1;
+    setPositionStatus('cancelled');
+    setPositionError('');
+  }
 
   function locate() {
     const request = ++positionGeneration.current;
@@ -630,13 +638,15 @@ function MapContent({
           </label>
           <button
             className="btn"
-            onClick={locate}
-            disabled={positionStatus === 'loading'}
-            aria-label={myLocation ? '更新我的位置' : '查看我的位置'}
+            type="button"
+            onClick={positionStatus === 'loading' ? cancelLocate : locate}
+            aria-label={positionStatus === 'loading' ? '取消定位' : myLocation ? '更新我的位置' : '查看我的位置'}
           >
-            {positionStatus === 'loading' ? '定位中…' : myLocation ? '更新定位' : '定位'}
+            {positionStatus === 'loading' ? '取消定位' : myLocation ? '更新定位' : '定位'}
           </button>
         </div>
+        {positionStatus === 'loading' && <p className={styles.note} role="status">正在取得位置，你也可以取消等待並手動選擇起點。</p>}
+        {positionStatus === 'cancelled' && <p className={styles.note} role="status">已停止等待定位。你仍可從地點列表指定步行起點。</p>}
         {positionError && <p className={styles.notice} role="alert">{positionError}</p>}
         {myLocation && (
           <p className={styles.note} role="status">
