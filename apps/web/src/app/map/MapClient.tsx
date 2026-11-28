@@ -315,6 +315,7 @@ function MapContent({
   const routeNeedsConfirmation = Boolean(
     (routeDraft?.from && !routeStart) || (routeDraft?.to && !routeEnd),
   );
+  const awaitingOrigin = !routeNeedsConfirmation && !routeStart && Boolean(routeEnd);
   const routeLocations = useMemo<[MapLocation, MapLocation] | null>(() => {
     if (routeDraft === null) return deepLinkRoute;
     return routeStart && routeEnd && routeStart.id !== routeEnd.id ? [routeStart, routeEnd] : null;
@@ -357,6 +358,7 @@ function MapContent({
         ...filtered,
         ...(routeLocations ?? []),
         ...(routeStart ? [routeStart] : []),
+        ...(routeEnd ? [routeEnd] : []),
         ...(selected ? [selected] : []),
       ].map((location) => [location.id, location] as const),
     ).values(),
@@ -543,6 +545,14 @@ function MapContent({
           </button>
         </div>
       )}
+      {awaitingOrigin && routeEnd && (
+        <div className={styles.notice}>
+          <p role="status">已設定「{routeEnd.name}」為終點。請選擇其他地點，再按「設為起點」。</p>
+          <button className="btn" type="button" onClick={clearRoute}>
+            取消終點
+          </button>
+        </div>
+      )}
       {placeState.source !== 'ready' && route && routeDraft === null && (
         <div className={styles.notice}>
           <p role="status">{sourcePending
@@ -659,6 +669,21 @@ function MapContent({
                 aria-describedby={classroomNoteId} target="_blank" rel="noopener noreferrer">
                 使用 Apple 地圖前往{classroomPlace.name}
               </a>
+              {!routeStart && !routeEnd && !routeNeedsConfirmation && (!route || routeDraft !== null) && (
+                <button className="btn" type="button" aria-describedby={classroomNoteId}
+                  onClick={() => {
+                    setRouteDraft({ from: null, to: { ...classroomPlace } });
+                    selectLocation(classroomPlace);
+                    setSearch('');
+                    setCategory('全部');
+                    setNearbyOnly(false);
+                    setOnlyFavorites(false);
+                    setNotice('');
+                    searchInputRef.current?.focus();
+                  }}>
+                  選擇步行起點
+                </button>
+              )}
               {routeStart && !routeNeedsConfirmation && routeStart.id !== classroomPlace.id && (
                 <button className="btn" type="button" aria-describedby={classroomNoteId}
                   onClick={() => {
@@ -915,8 +940,15 @@ function MapContent({
               )}
               <button
                 className="btn"
+                disabled={awaitingOrigin && routeEnd?.id === selected.id}
                 onClick={() => {
-                  setRouteDraft({ from: selected, to: null });
+                  if (awaitingOrigin && routeEnd) {
+                    if (routeEnd.id === selected.id) return;
+                    classroomRouteFocusPending.current = true;
+                    setRouteDraft({ from: { ...selected }, to: { ...routeEnd } });
+                  } else {
+                    setRouteDraft({ from: selected, to: null });
+                  }
                   setNotice('');
                 }}
               >
