@@ -1,8 +1,11 @@
 appId: ${APP_ID}
 ---
-# iOS 18+ asks "Open in nuni?" when simctl opens a custom scheme. Dismiss that
-# system confirmation so the already-installed app receives the deep link.
+# iOS 18+ asks "Open in nuni?" when XCTest/simctl opens a custom scheme. That
+# confirmation can make openLink itself time out (NSPOSIXErrorDomain 60) after
+# the app has already opened the destination. Keep destination assertions in
+# the caller; do not treat the driver timeout as a failed navigation.
 - openLink: ${CAMPUS_LINK}
+  optional: true
 - tapOn:
     text: '^Open$'
     optional: true

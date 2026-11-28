@@ -13,11 +13,14 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import Constants from 'expo-constants';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { getAuthInstance } from '../src/firebase';
+import { waitForSchoolSessionReady } from '../src/app/SchoolSessionBoundary';
 import {
   assertMaestroEmulatorConfig,
   MAESTRO_STUDENT_EMAIL,
   MAESTRO_STUDENT_UID,
 } from './emulatorConfig';
+
+const SCHOOL_SESSION_READY_TIMEOUT_MS = 25_000;
 
 const extra = Constants.expoConfig?.extra ?? {};
 assertMaestroEmulatorConfig({
@@ -83,6 +86,12 @@ function MaestroHarness() {
         throw new Error('Unexpected fixture identity');
       }
       await result.user.getIdToken(true);
+      // Closing the overlay before the school session is mounted leaves the
+      // guest landing on screen. Maestro then waits for tab-Today on the
+      // public shell even though Firebase Auth already succeeded.
+      if (!(await waitForSchoolSessionReady(SCHOOL_SESSION_READY_TIMEOUT_MS))) {
+        throw new Error('School session did not become ready');
+      }
       setPassword('');
       setVisible(false);
     } catch {
