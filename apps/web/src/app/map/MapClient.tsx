@@ -178,6 +178,7 @@ function MapContent({
   const [search, setSearch] = useState(initialQuery);
   const [classroomRequest, setClassroomRequest] = useState(initialQuery);
   const [editingClassroom, setEditingClassroom] = useState(false);
+  const [activeFocus, setActiveFocus] = useState(focus);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const routeHeadingRef = useRef<HTMLHeadingElement>(null);
   const classroomRouteFocusPending = useRef(false);
@@ -275,6 +276,12 @@ function MapContent({
   const correctedClassroomQuery = normalizeCampusClassroomQuery(search);
   function finishClassroomCorrection() {
     if (!correctedClassroomQuery) return;
+    // A changed classroom request supersedes the old marker, including a URL focus.
+    // An existing confirmed route is independent and must not be silently replaced.
+    if (correctedClassroomQuery !== classroomRequest) {
+      setActiveFocus(undefined);
+      setSelection(null);
+    }
     setClassroomRequest(correctedClassroomQuery);
     setSearch(correctedClassroomQuery);
     setEditingClassroom(false);
@@ -300,14 +307,14 @@ function MapContent({
       matched.sort((a, b) => distanceMeters(myLocation, a) - distanceMeters(myLocation, b));
     return matched;
   }, [locations, ambiguousPlaceIds, category, search, classroomIds, onlyFavorites, favorites, nearbyOnly, myLocation]);
-  const focusedPlace = locations.find((location) => location.id === focus);
+  const focusedPlace = locations.find((location) => location.id === activeFocus);
   // Explicit selections (including closing a detail) and focus links take priority.
   // A missing explicit destination must not silently turn into another building.
   // A later source update can make a room ambiguous; derive this instead of retaining a guess.
   const classroomPlace = classroomLinkActive && classroom.status === 'matched'
     ? confirmedRoutePlace(locations, classroom.matches[0] ?? null) : null;
   const automaticClassroomId = placeState.source === 'ready' ? classroomPlace?.id : undefined;
-  const automaticPlace = focus ? focusedPlace : locations.find((location) => location.id === automaticClassroomId);
+  const automaticPlace = activeFocus ? focusedPlace : locations.find((location) => location.id === automaticClassroomId);
   const selected = typeof selection === 'object' && selection !== null
     ? confirmedRoutePlace(locations, selection)
     : selection === null ? confirmedRoutePlace(locations, automaticPlace ?? null) : null;
@@ -354,7 +361,7 @@ function MapContent({
     // in login return URLs so it can be restored if the source later recovers.
     returnParams.set('route', route);
   }
-  const returnFocus = selection === null ? focus ?? selectedId : selectedId;
+  const returnFocus = selection === null ? activeFocus ?? selectedId : selectedId;
   if (returnFocus) returnParams.set('focus', returnFocus);
   const returnQuery = normalizeCampusClassroomQuery(search);
   if (returnQuery) returnParams.set('query', returnQuery);
@@ -834,10 +841,10 @@ function MapContent({
           先前選擇的地點已變更或無法唯一確認，已停用地點導航。請重新選擇地點。
         </p>
       )}
-      {!sourcePending && focus && selection === null && !selected && (
+      {!sourcePending && activeFocus && selection === null && !selected && (
         <div className={styles.notice}>
           <p role="status">
-            {ambiguousPlaceIds.has(focus)
+            {ambiguousPlaceIds.has(activeFocus)
               ? '連結指定的地點識別碼重複，無法確認位置。'
               : '找不到連結指定的地點，請搜尋地點名稱。'}
           </p>
