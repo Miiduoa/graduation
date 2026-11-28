@@ -239,6 +239,14 @@ describe('read-only personal submission windows', () => {
     expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
   });
 
+  it.each([true, false])('does not infer a draft selector from unknown history (draft=%s)', isDraft => {
+    const result = project({ history: { list: [{ ...SUBMISSION, is_draft: isDraft,
+      marked_submitted: false, is_latest_version: 'true' }] } });
+    expect(result.draft).toEqual({ state: 'unknown', count: null, submissionId: null });
+    expect(result.ordinary).toEqual({ state: 'unknown', kind: 'unknown', remainingAttempts: null });
+    expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
+  });
+
   it('does not select a draft arbitrarily when there are several or flags are incomplete', () => {
     const draft = { ...SUBMISSION, is_draft: true, marked_submitted: false, is_latest_version: false };
     expect(project({ history: { list: [draft, { ...draft, id: 402 }] } }).draft)
@@ -317,6 +325,16 @@ describe('availability reader ownership and freshness', () => {
     s.changeBinding({ revision: 'b'.repeat(32) });
     await expect(s.reader(OWNER, SCOPE, REVISION)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
     expect(s.source.fetchCourses).not.toHaveBeenCalled();
+  });
+
+  it.each([{ rows: [] }, { rows: [SUBMISSION] }])('stops before special-record reads on mixed history evidence: %j', async ({ rows }) => {
+    const s = setup();
+    s.setHistory({ list: rows, error: 'synthetic-error' });
+    await expect(s.reader(OWNER, SCOPE, REVISION)).rejects.toMatchObject({
+      status: 502, code: 'TRONCLASS_AVAILABILITY_UNAVAILABLE',
+    });
+    expect(s.source.fetchStudentMakeUpRecord).not.toHaveBeenCalled();
+    expect(s.source.fetchStudentResubmitRecord).not.toHaveBeenCalled();
   });
 
   it('stops before the next student read when history delivery changes the bound account', async () => {

@@ -24,8 +24,11 @@ function createdAt(value: unknown, now: number): string | null {
   return instant !== null && instant <= now + 60_000 ? new Date(instant).toISOString() : null;
 }
 function stateOf(row: Record<string, unknown>): TronClassSubmissionHistoryEntry['state'] {
-  if (row.is_draft === true && row.is_redo === true) return 'unknown';
-  if (row.is_draft === true) return 'draft';
+  if (row.is_draft === true) {
+    // A draft must not simultaneously be a formal, returned or teacher-created record.
+    return row.is_redo === false && row.marked_submitted === false &&
+      row.submit_by_instructor === false ? 'draft' : 'unknown';
+  }
   if (row.is_redo === true) return 'returned';
   // Never repeat the upstream client's !undefined -> submitted inference.
   if (row.is_draft !== false || row.is_redo !== false) return 'unknown';
@@ -57,13 +60,18 @@ export function normalizeTronClassSubmissionHistory(
   if (!id(binding.userId) || !id(scope.courseId) || !id(scope.homeworkId) || !Number.isFinite(now)) return invalid();
   const envelope = object(value);
   if (!Array.isArray(envelope.list) || envelope.list.length > TRONCLASS_HISTORY_MAX_ENTRIES) return invalid();
-  // The public client does not document pagination. Explicit incomplete metadata
-  // must not be silently discarded if a tenant starts returning it.
-  if ((envelope.total !== undefined && envelope.total !== envelope.list.length) ||
+  // The observed history contract is a list, optionally accompanied by
+  // explicit completeness metadata. A mixed error/list response (even an
+  // empty list) is not evidence of the student's current history. Fail closed
+  // on unknown envelope fields until the tenant contract is verified.
+  const prototype = Object.getPrototypeOf(envelope);
+  if ((prototype !== Object.prototype && prototype !== null) ||
+    !Object.prototype.hasOwnProperty.call(envelope, 'list') ||
+    Reflect.ownKeys(envelope).some(key =>
+      typeof key !== 'string' || !['list', 'total', 'has_next', 'next_page'].includes(key)) ||
+    (envelope.total !== undefined && envelope.total !== envelope.list.length) ||
     (envelope.has_next !== undefined && envelope.has_next !== false) ||
-    (envelope.next_page !== undefined && envelope.next_page !== null) ||
-    ['paging', 'pagination', 'page', 'pages', 'page_size', 'page_count', 'total_pages', 'total_count',
-      'next', 'next_cursor', 'cursor', 'has_more'].some(key => Object.prototype.hasOwnProperty.call(envelope, key))) return invalid();
+    (envelope.next_page !== undefined && envelope.next_page !== null)) return invalid();
   const ids = new Set<number>();
   let latestId: string | null = null;
   const entries = envelope.list.map((value): TronClassSubmissionHistoryEntry => {

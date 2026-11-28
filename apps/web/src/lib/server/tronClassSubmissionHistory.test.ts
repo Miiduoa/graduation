@@ -88,6 +88,20 @@ describe('read-only student submission history', () => {
     expect(result.entries[0].attachments[0]).not.toHaveProperty('download');
   });
 
+  it.each([
+    { marked_submitted: true }, { marked_submitted: undefined },
+    { is_redo: undefined }, { submit_by_instructor: undefined },
+    { submit_by_instructor: true },
+  ])('does not label a contradictory draft or grant an attachment download: %j', change => {
+    const result = normalize([{ ...submission, is_draft: true,
+      uploads: [{ ...submission.uploads[0], allow_download: true }], ...change }]);
+    expect(result.entries[0].state).toBe('unknown');
+    for (const attachment of result.entries[0].attachments) {
+      expect(attachment).not.toHaveProperty('download');
+    }
+    expect(isTronClassSubmissionHistory(result, scope)).toBe(true);
+  });
+
   it('does not guess a latest version from order, dates or identifiers', () => {
     const result = normalize([{ ...submission, is_latest_version: undefined },
       { ...submission, id: 502, created_at: '2026-11-16T11:00:00Z', is_latest_version: false }]);
@@ -179,6 +193,33 @@ describe('read-only student submission history', () => {
   it.each([{ total: 2 }, { has_next: true }, { next_page: 2 }, { paging: { pages: 2 } },
     { pagination: { has_next: true } }, { pages: 2 }, { page: 2 }, { next_cursor: 'next-page' }])('does not hide incomplete source metadata: %j', metadata => {
     expect(() => normalize([submission], metadata)).toThrow();
+  });
+
+  it.each([
+    { error: 'synthetic-error' }, { errors: [] }, { success: false },
+    { status: 401 }, { unknown: null },
+  ])('rejects mixed or unknown history envelopes rather than reporting an empty or complete history: %j', extras => {
+    for (const rows of [[], [submission]]) {
+      expect(() => normalize(rows, extras)).toThrowError('TRONCLASS_HISTORY_UNAVAILABLE');
+    }
+  });
+
+  it('accepts only consistent known completeness fields', () => {
+    expect(normalize([], { total: 0, has_next: false, next_page: null }))
+      .toEqual(normalize([]));
+    expect(normalize([submission], { total: 1, has_next: false, next_page: null }))
+      .toEqual(normalize([submission]));
+  });
+
+  it('rejects an inherited history list and hidden or symbolic envelope fields', () => {
+    for (const value of [
+      Object.create({ list: [] }),
+      Object.defineProperty({ list: [] }, 'hidden', { value: true }),
+      { list: [], [Symbol('synthetic')]: true },
+    ]) {
+      expect(() => normalizeTronClassSubmissionHistory(value, binding, scope, now))
+        .toThrowError('TRONCLASS_HISTORY_UNAVAILABLE');
+    }
   });
 
   it('bounds result size and does not silently truncate a longer history', () => {
