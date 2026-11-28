@@ -971,6 +971,54 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+  it.each(['older', 'undated'] as const)('preserves the dated snapshot on an %s replication refresh and recovers', async (kind) => {
+    const hour = 60 * 60 * 1000;
+    const start = Math.floor(Date.now() / 1000) * 1000;
+    const stamp = (ms: number) => new Date(ms).toISOString().replace('.000Z', 'Z');
+    const initialBase = stamp(start - 60_000);
+    const refreshedAt = start + 25 * hour;
+    const nextBase = stamp(refreshedAt);
+    const geometry = JSON.parse(osmPayload);
+    const initial = JSON.stringify({ ...geometry, osm3s: { timestamp_osm_base: initialBase } });
+    const downgraded = JSON.stringify({
+      ...geometry,
+      ...(kind === 'older' ? { osm3s: { timestamp_osm_base: stamp(start - 120_000) } } : {}),
+    });
+    const recovered = JSON.stringify({ ...geometry, osm3s: { timestamp_osm_base: nextBase } });
+    const upstream = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(initial))
+      .mockResolvedValueOnce(jsonResponse(downgraded, { headers: { 'Retry-After': '3600' } }))
+      .mockResolvedValueOnce(jsonResponse(recovered));
+    vi.stubGlobal('fetch', upstream);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const { GET } = await import('./route');
+      const first = await GET();
+      expect(first.status).toBe(200);
+      const firstBody = await first.json();
+      expect(firstBody.osmBaseAt).toBe(initialBase);
+      expect(firstBody.stale).toBe(false);
+
+      clock.mockReturnValue(refreshedAt);
+      const fallback = await GET();
+      expect(fallback.status).toBe(200);
+      expect(fallback.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(fallback.headers.get('Retry-After')).toBe('3600');
+      expect(await fallback.json()).toEqual({ ...firstBody, stale: true });
+      expect(upstream).toHaveBeenCalledTimes(2);
+      await GET();
+      expect(upstream).toHaveBeenCalledTimes(2);
+
+      clock.mockReturnValue(refreshedAt + hour);
+      const fresh = await GET();
+      expect(fresh.status).toBe(200);
+      expect(await fresh.json()).toMatchObject({ stale: false, osmBaseAt: nextBase });
+      expect(upstream).toHaveBeenCalledTimes(3);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('does not promote a days-old Overpass database state into a new fresh snapshot', async () => {
     const baseTime = new Date(Math.floor(Date.now() / 1000) * 1000 - 3 * 24 * 60 * 60 * 1000)
       .toISOString().replace('.000Z', 'Z');
@@ -2323,5 +2371,55 @@ describe('public Providence building geometry route', () => {
       clock.mockRestore();
     }
   });
+
+
+  it.each([
+    { ageOffsetSeconds: -1, expectedStatus: 200 },
+    { ageOffsetSeconds: 0, expectedStatus: 503 },
+    { ageOffsetSeconds: 1, expectedStatus: 503 },
+  ])('honours provider backoff at the 48-hour replication boundary ($ageOffsetSeconds seconds)', async ({
+    ageOffsetSeconds, expectedStatus,
+  }) => {
+    const start = Date.parse('2026-11-27T12:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const timestamp = new Date(start - 48 * 60 * 60_000 - ageOffsetSeconds * 1000)
+        .toISOString().replace('.000Z', 'Z');
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(jsonResponse(JSON.stringify({
+          ...JSON.parse(osmPayload),
+          osm3s: { timestamp_osm_base: timestamp },
+        }), { status: 200, headers: { 'Retry-After': '3600' } }))
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+
+      const response = await GET();
+      expect(response.status).toBe(expectedStatus);
+      if (expectedStatus === 200) {
+        expect(response.headers.get('Cache-Control')).toBe('public, max-age=0, s-maxage=1');
+        expect(await response.json()).toMatchObject({ stale: false, osmBaseAt: timestamp });
+        expect(upstream).toHaveBeenCalledOnce();
+        return;
+      }
+
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(response.headers.get('Retry-After')).toBe('3600');
+      clock.mockReturnValue(start + 11 * 60_000);
+      const cooling = await GET();
+      expect(cooling.status).toBe(503);
+      expect(cooling.headers.get('Retry-After')).toBe('2940');
+      expect(upstream).toHaveBeenCalledOnce();
+
+      clock.mockReturnValue(start + 3601 * 1000);
+      const recovered = await GET();
+      expect(recovered.status).toBe(200);
+      expect((await recovered.json()).buildings).toHaveLength(1);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
 
 });

@@ -113,9 +113,36 @@ describe('joining completed floor files', () => {
     fireEvent.change(screen.getByLabelText('加入哪一層'), { target: { value: 'example-2' } });
     expect((screen.getByLabelText('新增樓層名稱') as HTMLInputElement).value).toBe('2F');
     expect(screen.getByRole('link', { name: '二樓測繪 ↗' }).getAttribute('href')).toBe('https://example.com/floor-two');
+    fireEvent.change(screen.getByLabelText('樓底標高（公尺）'), { target: { value: '4' } });
     preview(); fireEvent.click(screen.getByRole('button', { name: '加入這個樓層' }));
     expect(onChange.mock.calls[0][0].floors).toHaveLength(2);
     expect(onChange.mock.calls[0][0].floors[1].source.label).toBe('二樓測繪');
+  });
+
+  it('requires fresh placement after switching the selected source floor', async () => {
+    const { onChange } = setup();
+    await candidate(createExampleBuildingPlan(scope));
+    fireEvent.change(screen.getByLabelText('水平位移（公尺）'), { target: { value: '6' } });
+    fireEvent.change(screen.getByLabelText('垂直位移（公尺）'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('圖面旋轉'), { target: { value: '90' } });
+    preview();
+    expect(screen.getByRole('button', { name: '加入這個樓層' })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('加入哪一層'), { target: { value: 'example-2' } });
+    expect((screen.getByLabelText('樓底標高（公尺）') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('水平位移（公尺）') as HTMLInputElement).value).toBe('0');
+    expect((screen.getByLabelText('垂直位移（公尺）') as HTMLInputElement).value).toBe('0');
+    expect((screen.getByLabelText('圖面旋轉') as HTMLSelectElement).value).toBe('0');
+    expect(screen.queryByRole('button', { name: '加入這個樓層' })).toBeNull();
+    preview();
+    expect(screen.getByRole('alert').textContent).toContain('請填寫樓底標高');
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('樓底標高（公尺）'), { target: { value: '8' } });
+    preview();
+    fireEvent.click(screen.getByRole('button', { name: '加入這個樓層' }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0].floors[1]).toMatchObject({
+      label: '2F', elevation: 8, outline: createExampleBuildingPlan(scope).floors[1].outline,
+    });
   });
 
   it('requires an explicit storey elevation and rejects overlap without changing the plan', async () => {
