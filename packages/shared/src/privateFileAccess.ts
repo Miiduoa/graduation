@@ -213,7 +213,7 @@ export function isAllowedPrivateFileContentType(kind: PrivateFileKind, contentTy
 export function parsePrivateFilePath(value: unknown): PrivateFileScope | null {
   if (typeof value !== 'string' || utf8ByteLength(value) > 1024) return null;
   const parts = value.split('/');
-  if (!parts.slice(0, -1).every(validPrivateFileSegment) || !validPrivateFileName(parts.at(-1))) return null;
+  if (!parts.slice(0, -1).every(validPrivateFileSegment) || !validPrivateFileName(parts[parts.length - 1])) return null;
   const common = { path: value, filename: parts[parts.length - 1] };
   if (parts[0] === 'groups' && parts.length === 3) {
     return {
