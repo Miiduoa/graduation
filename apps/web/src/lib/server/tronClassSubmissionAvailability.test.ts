@@ -239,6 +239,14 @@ describe('read-only personal submission windows', () => {
     expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
   });
 
+  it.each([true, false])('does not infer a draft selector from unknown history (draft=%s)', isDraft => {
+    const result = project({ history: { list: [{ ...SUBMISSION, is_draft: isDraft,
+      marked_submitted: false, is_latest_version: 'true' }] } });
+    expect(result.draft).toEqual({ state: 'unknown', count: null, submissionId: null });
+    expect(result.ordinary).toEqual({ state: 'unknown', kind: 'unknown', remainingAttempts: null });
+    expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
+  });
+
   it('does not select a draft arbitrarily when there are several or flags are incomplete', () => {
     const draft = { ...SUBMISSION, is_draft: true, marked_submitted: false, is_latest_version: false };
     expect(project({ history: { list: [draft, { ...draft, id: 402 }] } }).draft)
