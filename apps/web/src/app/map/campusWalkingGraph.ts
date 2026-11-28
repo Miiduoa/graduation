@@ -34,7 +34,17 @@ function validId(id: number) {
   return Number.isSafeInteger(id) && id > 0;
 }
 
+function usableNodeCoordinate(node: WalkingNode): boolean {
+  return Number.isFinite(node.lat) && Math.abs(node.lat) <= 90 &&
+    Number.isFinite(node.lng) && Math.abs(node.lng) <= 180 &&
+    !(node.lat === 0 && node.lng === 0);
+}
+
 function segmentMeters(a: WalkingNode, b: WalkingNode): number {
+  // At either pole all longitudes identify the same point. Likewise +180
+  // and -180 represent the same meridian. Do not turn roundoff into an edge.
+  if (a.lat === b.lat && (a.lng === b.lng || Math.abs(a.lng - b.lng) === 360 ||
+      Math.abs(a.lat) === 90)) return 0;
   const rad = Math.PI / 180;
   const dLat = (b.lat - a.lat) * rad;
   const dLng = (b.lng - a.lng) * rad;
@@ -84,8 +94,7 @@ export function isCampusWalkingRouteCurrent(
   for (let i = 0; i < route.nodes.length; i++) {
     const node = route.nodes[i];
     if (!node || typeof node !== 'object' || !validId(node.id) || ids.has(node.id) ||
-        !Number.isFinite(node.lat) || Math.abs(node.lat) > 90 ||
-        !Number.isFinite(node.lng) || Math.abs(node.lng) > 180) return false;
+        !usableNodeCoordinate(node)) return false;
     ids.add(node.id);
     if (i === 0) continue;
     if (!validId(route.osmWayIds[i - 1])) return false;
@@ -120,7 +129,7 @@ export function findCampusWalkingRoute(
   const nodes = new Map<number, WalkingNode>();
   for (const node of graph.nodes) {
     if (!node || typeof node !== 'object' || !validId(node.id) || nodes.has(node.id) ||
-        !Number.isFinite(node.lat) || !Number.isFinite(node.lng) ||
+        !usableNodeCoordinate(node) ||
         node.lat < bounds.south || node.lat > bounds.north ||
         node.lng < bounds.west || node.lng > bounds.east) return null;
     nodes.set(node.id, node);
@@ -238,7 +247,8 @@ export function findCampusWalkingRoute(
   for (;;) {
     const node = nodes.get(current);
     if (!node) return null;
-    routeNodes.push({ ...node });
+    // Return only the routing contract; do not propagate arbitrary upstream metadata.
+    routeNodes.push({ id: node.id, lat: node.lat, lng: node.lng });
     if (current === start) break;
     const step = previous.get(current);
     if (!step) return null;
