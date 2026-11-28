@@ -209,6 +209,30 @@ const STANDING_BUILDING_CONDITIONS = new Set([
   'good', 'preserved', 'renovated', 'reconstructed',
 ]);
 
+// Official English building names, checked 2026-11-29 against the university's
+// Shalu campus map: https://c067.pu.edu.tw/p/412-1121-4218.php
+// Names only; no coordinates, imagery, heights or access claims are imported.
+// Keep the existing audited way-ID and geometry checks independently required.
+const officialEnglishNameToChinese = new Map([
+  ['Providence Hall', '主顧樓'],
+  ['Anthony Kuo Hall', '任垣樓'],
+  ['St. Peter Hall', '伯鐸樓'],
+  ['Bishop Kupfer Hall', '文興樓'],
+  ['Theodore Guerin Hall', '格倫樓'],
+  ['St. Francis Hall', '方濟樓'],
+  ['Si Yuan Hall', '思源樓'],
+  ['Jing An Hall', '靜安樓'],
+  ['Zhi Shan Hall', '至善樓'],
+  ['Luking Library', '蓋夏圖書館'],
+  ['Our Lady of Providence Chapel', '主顧聖母堂'],
+  ['Our Lady of Providence Convent', '修院'],
+  ['Jing Yuan Cafeteria', '靜園餐廳'],
+  ['Yi Yuan Cafeteria', '宜園餐廳'],
+  ['St. Bosco Hall', '思高學苑'],
+  ['John Paul II Sports Hall', '若望保祿二世體育館'],
+  ['Indoor Swimming Pool', '溫水游泳池'],
+].map(([english, chinese]) => [english.toLowerCase(), chinese] as const));
+
 /** An audited OSM ID is not enough to inherit a campus building's old name.
  * If a mapper explicitly names a different building, do not attach the verified
  * POI identity to its volume until that name/source change is reviewed. A
@@ -220,6 +244,17 @@ function matchesAuditedOsmName(tags: unknown, expectedName: string): boolean {
   if (!record) return false;
   const primary = record.name;
   if (primary !== undefined && (typeof primary !== 'string' || !primary.trim())) return false;
+  // A known official English name can anchor identity without name:zh.
+  // Conversely, an English name of another audited building is contradictory,
+  // even if a Chinese locale still carries the former building's name.
+  const english = record['name:en'];
+  if (english !== undefined && (typeof english !== 'string' || !english.trim())) return false;
+  const primaryAlias = typeof primary === 'string'
+    ? officialEnglishNameToChinese.get(primary.trim().toLowerCase()) : undefined;
+  const englishAlias = typeof english === 'string'
+    ? officialEnglishNameToChinese.get(english.trim().toLowerCase()) : undefined;
+  if ((primaryAlias !== undefined && primaryAlias !== expectedName) ||
+      (englishAlias !== undefined && englishAlias !== expectedName)) return false;
   // OSM may supply a traditional/Taiwanese name without the generic
   // name:zh key. All present Chinese identity claims must agree with the
   // audited campus POI: a matching generic label cannot override an explicit
@@ -240,7 +275,10 @@ function matchesAuditedOsmName(tags: unknown, expectedName: string): boolean {
         primary.trim() !== expectedName) return false;
     return true;
   }
-  return primary === undefined || primary.trim() === expectedName;
+  if (primary !== undefined) return primary.trim() === expectedName || primaryAlias === expectedName;
+  // Unnamed OSM ways remain supported, but an explicit English-only name
+  // needs to be one of the independently checked official names.
+  return english === undefined || englishAlias === expectedName;
 }
 
 function isStandingBuilding(value: unknown): boolean {

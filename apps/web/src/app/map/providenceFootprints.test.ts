@@ -95,6 +95,40 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('recognizes official English building names without accepting contradictory identities', () => {
+    // Synthetic OSM tags on the existing synthetic library polygon; the
+    // official campus page verifies names, not these geometry/height fixtures.
+    for (const tags of [
+      { name: 'Luking Library' },
+      { name: ' LUKING LIBRARY ' },
+      { 'name:en': 'Luking Library' },
+      { name: '蓋夏圖書館', 'name:en': 'Luking Library' },
+      { name: 'Guixa Library', 'name:zh': '蓋夏圖書館' },
+      {},
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', ...tags })],
+      }), JSON.stringify(tags)).toMatchObject([{
+        poiId: 'pu-library', name: '蓋夏圖書館', heightBasis: 'illustrative',
+      }]);
+    }
+    for (const tags of [
+      { name: 'Providence Hall' },
+      { name: 'Providence Hall', 'name:zh': '蓋夏圖書館' },
+      { name: 'Luking Library', 'name:zh': '主顧樓' },
+      { name: '蓋夏圖書館', 'name:en': 'Providence Hall' },
+      { 'name:en': 'Other Library' },
+      { 'name:en': 'Providence Hall' },
+      { 'name:en': '' },
+      { 'name:en': null },
+      { name: 'Other Library', 'name:en': 'Luking Library' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', ...tags })],
+      }), JSON.stringify(tags)).toEqual([]);
+    }
+  });
+
   it('uses localized traditional Chinese OSM names without allowing conflicting POI identities', () => {
     // Synthetic OSM tag drift: a matching name:zh is not enough when an
     // explicit Taiwanese/traditional name identifies a different building.
