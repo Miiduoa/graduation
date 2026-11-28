@@ -154,6 +154,9 @@ export async function withRetry<T>(fn: () => Promise<T>, config: RetryConfig = {
     try {
       return await fn();
     } catch (error) {
+      // A request may reject after its caller has already cancelled retries.
+      // Do not evaluate retry policy or emit retry callbacks for that request.
+      if (signal?.aborted) throw new Error('Aborted');
       lastError = error instanceof Error ? error : new Error(String(error));
       attempt++;
 
