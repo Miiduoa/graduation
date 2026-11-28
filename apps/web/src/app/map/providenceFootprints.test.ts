@@ -47,6 +47,21 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('does not promote an indoor room or floor outline into a whole-building volume', () => {
+    // Synthetic source drift; no assertion about actual campus floor geometry.
+    for (const indoor of ['room', 'area', 'corridor', 'level', 'wall', 'yes',
+      ' ROOM ', 'unknown', '', null, true]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'yes', indoor })],
+      }), JSON.stringify(indoor)).toEqual([]);
+    }
+    for (const indoor of [undefined, 'no', 'false', '0', ' NO ']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'yes', indoor })],
+      }), JSON.stringify(indoor)).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+  });
+
   it('does not attach an audited campus POI name to a renamed OSM building', () => {
     // Synthetic source drift: the way ID and geometry remain valid, but OSM
     // now explicitly names a different place. Keep the point marker; omit
