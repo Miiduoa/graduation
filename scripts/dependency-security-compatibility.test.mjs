@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { URL, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
+import './preview-deploy-workflow.test.mjs';
 import { createRequire } from 'node:module';
 
 // Resolve through Expo so these checks exercise the same dependencies as mobile builds.
