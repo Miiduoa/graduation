@@ -130,6 +130,12 @@ it.each(['coordinates', 'building', 'floor', 'unchanged'] as const)('revalidates
   const apple = () => screen.queryByRole('link', { name: '使用 Apple 地圖從目前位置導航' });
   expect(google()).toBeTruthy();
   expect(apple()).toBeTruthy();
+  const loginFocus = (name: string) => {
+    const link = new URL(screen.getByRole('link', { name }).getAttribute('href')!, window.location.origin);
+    return new URL(link.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('focus');
+  };
+  expect(loginFocus('用 Google 帳號收藏')).toBeNull();
+  expect(loginFocus('查看學校帳號的既有收藏')).toBeNull();
   const replacement = { ...original,
     ...(change === 'coordinates' ? { lat: original.lat + 0.002 } : {}),
     ...(change === 'building' ? { building: '測試用變更建築' } : {}),
@@ -147,6 +153,8 @@ it.each(['coordinates', 'building', 'floor', 'unchanged'] as const)('revalidates
   expect(screen.queryByText(/已停用地點導航/)).toBeNull();
   expect(new URL(google()!.getAttribute('href')!).searchParams.get('destination')).toBe(replacement.lat + ',' + replacement.lng);
   expect(new URL(apple()!.getAttribute('href')!).searchParams.get('daddr')).toBe(replacement.lat + ',' + replacement.lng);
+  expect(loginFocus('用 Google 帳號收藏')).toBe(replacement.id);
+  expect(loginFocus('查看學校帳號的既有收藏')).toBe(replacement.id);
 });
 
 it('keeps a confirmed selected marker visible across filters until the detail is closed', async () => {
@@ -244,6 +252,92 @@ it('requires a choice between ambiguous same-school buildings and never selects 
   expect(screen.queryByText('主顧樓')).toBeNull();
 });
 
+it('plans from an explicitly chosen ambiguous classroom candidate without guessing a building', async () => {
+  const candidates = [
+    { ...library, id: 'east', name: '教學大樓', description: '東側', lat: 25.01 },
+    { ...library, id: 'west', name: '教學大樓', description: '西側', lat: 25.02 },
+  ];
+  vi.mocked(loadMapLocations).mockResolvedValue([...candidates, gate]);
+  render(<MapClient school="another-school" query="教學101" focus="east" />);
+  const result = within(await screen.findByRole('region', { name: '教室定位結果' }));
+  // A deep-linked marker is not an explicit confirmation of an ambiguous room.
+  expect(result.queryByRole('button', { name: '選擇步行起點' })).toBeNull();
+  fireEvent.click(result.getByRole('button', { name: '選擇候選 2：教學大樓' }));
+  const start = result.getByRole('button', { name: '選擇步行起點' });
+  expect(document.getElementById(start.getAttribute('aria-describedby')!)?.textContent).toContain('並非已核實的入口或室內教室');
+  fireEvent.click(start);
+  expect(screen.getByText(/已設定「教學大樓」為終點/)).toBeTruthy();
+  const pending = within(screen.getByRole('region', { name: '已選擇步行終點' }));
+  const providerGoogle = pending.getByRole('link', { name: '在 Google 地圖選擇起點' });
+  const providerApple = pending.getByRole('link', { name: '在 Apple 地圖選擇起點' });
+  const googleUrl = new URL(providerGoogle.getAttribute('href')!);
+  const appleUrl = new URL(providerApple.getAttribute('href')!);
+  expect(googleUrl.searchParams.get('destination')).toBe(`${candidates[1].lat},${candidates[1].lng}`);
+  expect(appleUrl.searchParams.get('daddr')).toBe(googleUrl.searchParams.get('destination'));
+  expect(googleUrl.searchParams.has('origin')).toBe(false);
+  expect(appleUrl.searchParams.has('saddr')).toBe(false);
+  expect(googleUrl.searchParams.get('travelmode')).toBe('walking');
+  expect(appleUrl.searchParams.get('dirflg')).toBe('w');
+  expect(document.getElementById(providerGoogle.getAttribute('aria-describedby')!)?.textContent)
+    .toContain('並非已核實的入口或室內教室');
+  expect(providerApple.getAttribute('aria-describedby')).toBe(providerGoogle.getAttribute('aria-describedby'));
+  expect((screen.getByRole('button', { name: '設為起點' }) as HTMLButtonElement).disabled).toBe(true);
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' }) as HTMLInputElement;
+  expect(search.value).toBe('');
+  expect(document.activeElement).toBe(search);
+  fireEvent.change(search, { target: { value: gate.name } });
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  const route = within(screen.getByRole('region', { name: '步行導航' }));
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route.map((place: MapLocation) => place.id)).toEqual(['gate', 'west']);
+  expect(new URL(route.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!).searchParams.get('destination')).toBe(`${candidates[1].lat},${candidates[1].lng}`);
+});
+
+it('does not replace an existing route when an ambiguous classroom candidate is selected', async () => {
+  const candidates = [
+    { ...library, id: 'east', name: '教學大樓', lat: 25.01 },
+    { ...library, id: 'west', name: '教學大樓', lat: 25.02 },
+  ];
+  vi.mocked(loadMapLocations).mockResolvedValue([...candidates, gate, library]);
+  render(<MapClient school="another-school" query="教學101" route="gate,library" />);
+  const result = within(await screen.findByRole('region', { name: '教室定位結果' }));
+  fireEvent.click(result.getByRole('button', { name: '選擇候選 2：教學大樓' }));
+  expect(result.queryByRole('button', { name: '選擇步行起點' })).toBeNull();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route.map((place: MapLocation) => place.id)).toEqual(['gate', 'library']);
+});
+
+it.each([true, false])('uses a confirmed ambiguous classroom candidate with an existing origin (shared=%s)', async (shared) => {
+  const candidates = [
+    { ...library, id: 'east', name: '教學大樓', description: '東側', lat: 25.01 },
+    { ...library, id: 'west', name: '教學大樓', description: '西側', lat: 25.02 },
+  ];
+  vi.mocked(loadMapLocations).mockResolvedValue([...candidates, gate, library]);
+  render(<MapClient school="another-school" query="教學101" focus="gate"
+    route={shared ? 'gate,library' : undefined} />);
+  const result = within(await screen.findByRole('region', { name: '教室定位結果' }));
+  if (!shared) fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  const action = () => result.queryByRole('button', { name: '將教學大樓設為終點' });
+  expect(action()).toBeNull();
+  fireEvent.click(result.getByRole('button', { name: '選擇候選 2：教學大樓' }));
+  const map = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(map().route?.map((place: MapLocation) => place.id) ?? null)
+    .toEqual(shared ? ['gate', 'library'] : null);
+  const button = result.getByRole('button', { name: '將教學大樓設為終點' });
+  expect(document.getElementById(button.getAttribute('aria-describedby')!)?.textContent)
+    .toContain('並非已核實的入口或室內教室');
+  button.focus();
+  fireEvent.click(button);
+  const route = within(screen.getByRole('region', { name: '步行導航' }));
+  expect(document.activeElement).toBe(route.getByRole('heading', { name: '正門 → 教學大樓' }));
+  expect(map().route.map((place: MapLocation) => place.id)).toEqual(['gate', 'west']);
+  const google = new URL(route.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  const apple = new URL(route.getByRole('link', { name: '使用 Apple 地圖規劃路線' }).getAttribute('href')!);
+  expect(google.searchParams.get('origin')).toBe(`${gate.lat},${gate.lng}`);
+  expect(google.searchParams.get('destination')).toBe(`${candidates[1].lat},${candidates[1].lng}`);
+  expect(apple.searchParams.get('saddr')).toBe(google.searchParams.get('origin'));
+  expect(apple.searchParams.get('daddr')).toBe(google.searchParams.get('destination'));
+});
+
 it('does not guess unknown building codes and preserves the classroom through an account reconnect', async () => {
   state.user = null;
   vi.mocked(loadMapLocations).mockResolvedValue([]);
@@ -271,6 +365,91 @@ it('puts unknown-room recovery above the map and selects the query to edit', asy
   const input = screen.getByRole('searchbox', { name: '搜尋地點' }) as HTMLInputElement;
   expect(document.activeElement).toBe(input);
   expect([input.selectionStart, input.selectionEnd]).toEqual([0, 'ZZ303'.length]);
+});
+
+it.each(['button', 'enter'] as const)('rechecks a corrected classroom without leaving the map (%s)', async (method) => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="pu" query="ZZ303" />);
+  await sourceSettled();
+  fireEvent.click(screen.getByRole('button', { name: '修改教室名稱' }));
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' }) as HTMLInputElement;
+  fireEvent.change(search, { target: { value: '   ' } });
+  expect((screen.getByRole('button', { name: '確認教室名稱' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(search, { target: { value: ' PH303 ' } });
+  expect(screen.queryByRole('region', { name: '教室定位結果' })).toBeNull();
+  if (method === 'enter') fireEvent.keyDown(search, { key: 'Enter' });
+  else fireEvent.click(screen.getByRole('button', { name: '確認教室名稱' }));
+  const result = within(screen.getByRole('region', { name: '教室定位結果' }));
+  expect(result.getByRole('heading', { name: 'PH303' })).toBeTruthy();
+  expect(result.getByRole('button', { name: '選擇步行起點' })).toBeTruthy();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-zhugu');
+  expect(search.value).toBe('PH303');
+  expect(document.activeElement).toBe(search);
+  fireEvent.change(search, { target: { value: '圖書館' } });
+  expect(screen.queryByRole('region', { name: '教室定位結果' })).toBeNull();
+});
+
+it('cancels an unconfirmed classroom correction and restores the original request', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="pu" query="ZZ303" />);
+  await sourceSettled();
+  fireEvent.click(screen.getByRole('button', { name: '修改教室名稱' }));
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' }) as HTMLInputElement;
+  fireEvent.change(search, { target: { value: 'PH303' } });
+  fireEvent.click(screen.getByRole('button', { name: '取消修改教室' }));
+  expect(search.value).toBe('ZZ303');
+  expect(document.activeElement).toBe(search);
+  expect(screen.getByRole('heading', { name: 'ZZ303' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '使用 Google 地圖前往主顧樓' })).toBeNull();
+});
+
+it('supersedes the previous URL focus when a corrected classroom is confirmed, without changing a shared route', async () => {
+  state.user = null;
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="pu" query="ZZ303" focus="pu-library" route="pu-library,pu-zhugu" />);
+  await sourceSettled();
+  const map = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(map().selected.id).toBe('pu-library');
+  expect(map().route.map((place: MapLocation) => place.id)).toEqual(['pu-library', 'pu-zhugu']);
+  fireEvent.click(screen.getByRole('button', { name: '修改教室名稱' }));
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' });
+  fireEvent.change(search, { target: { value: 'PH303' } });
+  fireEvent.click(screen.getByRole('button', { name: '取消修改教室' }));
+  expect(map().selected.id).toBe('pu-library');
+  fireEvent.click(screen.getByRole('button', { name: '修改教室名稱' }));
+  fireEvent.change(search, { target: { value: 'PH303' } });
+  fireEvent.click(screen.getByRole('button', { name: '確認教室名稱' }));
+  expect(map().selected.id).toBe('pu-zhugu');
+  expect(map().route.map((place: MapLocation) => place.id)).toEqual(['pu-library', 'pu-zhugu']);
+  const detail = within(screen.getByRole('region', { name: '地點詳情' }));
+  expect(new URL(detail.getByRole('link', { name: '從目前位置導航' }).getAttribute('href')!).searchParams.get('destination'))
+    .toBe(`${map().selected.lat},${map().selected.lng}`);
+  const login = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
+  const back = new URL(login.searchParams.get('returnUrl')!, window.location.origin);
+  expect(back.searchParams.get('query')).toBe('PH303');
+  expect(back.searchParams.get('focus')).toBe('pu-zhugu');
+  expect(back.searchParams.get('route')).toBe('pu-library,pu-zhugu');
+});
+
+it('clears a prior explicit candidate when a changed classroom is still unresolved', async () => {
+  const candidates = [
+    { ...library, id: 'east', name: '教學大樓', lat: 25.01 },
+    { ...library, id: 'west', name: '教學大樓', lat: 25.02 },
+  ];
+  vi.mocked(loadMapLocations).mockResolvedValue(candidates);
+  render(<MapClient school="another-school" query="教學101" focus="east" />);
+  const result = within(await screen.findByRole('region', { name: '教室定位結果' }));
+  fireEvent.click(result.getByRole('button', { name: '選擇候選 2：教學大樓' }));
+  const map = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(map().selected.id).toBe('west');
+  fireEvent.click(result.getByRole('button', { name: '修改教室名稱' }));
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' });
+  fireEvent.change(search, { target: { value: 'ZZ303' } });
+  fireEvent.keyDown(search, { key: 'Enter' });
+  expect(screen.getByRole('heading', { name: 'ZZ303' })).toBeTruthy();
+  expect(map().selected).toBeNull();
+  expect(screen.queryByRole('link', { name: '從目前位置導航' })).toBeNull();
+  expect(screen.queryByText(/找不到連結指定的地點/)).toBeNull();
 });
 
 it('honors explicit focus over a resolved classroom and resets the request when URL query changes', async () => {
@@ -343,6 +522,103 @@ it.each([true, false])('plans a classroom destination using an existing origin (
   fireEvent.click(routeCard.getByRole('button', { name: '清除路線' }));
   expect(action()).toBeNull();
   expect(document.activeElement).toBe(search);
+});
+
+it('lets a classroom-first student choose an explicit walking origin without losing the destination', async () => {
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  render(<MapClient school="pu" query="PH303" />);
+  const card = within(screen.getByRole('region', { name: '教室定位結果' }));
+  expect(card.queryByRole('button', { name: '選擇步行起點' })).toBeNull();
+  await act(async () => source.resolve([library, gate, classroom]));
+  fireEvent.click(card.getByRole('button', { name: '選擇步行起點' }));
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' }) as HTMLInputElement;
+  expect(search.value).toBe('');
+  expect(document.activeElement).toBe(search);
+  expect(screen.getByText(/已設定「主顧樓」為終點/)).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  expect((screen.getByRole('button', { name: '設為起點' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(search, { target: { value: '正門' } });
+  const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(mapState().locations.some((place: MapLocation) => place.id === classroom.id)).toBe(true);
+  const pending = within(screen.getByRole('region', { name: '已選擇步行終點' }));
+  const pendingGoogle = new URL(pending.getByRole('link', { name: '在 Google 地圖選擇起點' }).getAttribute('href')!);
+  expect(pendingGoogle.searchParams.get('destination')).toBe(`${classroom.lat},${classroom.lng}`);
+  expect(pendingGoogle.searchParams.has('origin')).toBe(false);
+  expect(mapState().route).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  const routeCard = within(screen.getByRole('region', { name: '步行導航' }));
+  expect(document.activeElement).toBe(routeCard.getByRole('heading', { name: '正門 → 主顧樓' }));
+  expect(mapState().route.map((place: MapLocation) => place.id)).toEqual(['gate', classroom.id]);
+  const google = new URL(routeCard.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  expect(google.searchParams.get('origin')).toBe(`${gate.lat},${gate.lng}`);
+  expect(google.searchParams.get('destination')).toBe(`${classroom.lat},${classroom.lng}`);
+});
+
+it('delegates the starting point to the provider even when nuni has a previous GPS fix', async () => {
+  const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  vi.mocked(loadMapLocations).mockResolvedValue([library, gate, classroom]);
+  const original = Object.getOwnPropertyDescriptor(navigator, 'geolocation');
+  Object.defineProperty(navigator, 'geolocation', {
+    configurable: true,
+    value: { getCurrentPosition: (success: PositionCallback) => {
+      success({ coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition);
+    } },
+  });
+  try {
+    render(<MapClient school="pu" query="PH303" />);
+    await sourceSettled();
+    fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+    const map = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+    expect(map().myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
+    const direct = within(screen.getByRole('region', { name: '教室定位結果' }));
+    const directGoogle = new URL(direct.getByRole('link', { name: '使用 Google 地圖前往主顧樓' }).getAttribute('href')!);
+    const directApple = new URL(direct.getByRole('link', { name: '使用 Apple 地圖前往主顧樓' }).getAttribute('href')!);
+    const detailGoogle = new URL(screen.getByRole('link', { name: '從目前位置導航' }).getAttribute('href')!);
+    const detailApple = new URL(screen.getByRole('link', { name: '使用 Apple 地圖從目前位置導航' }).getAttribute('href')!);
+    for (const link of [directGoogle, detailGoogle]) {
+      expect(link.searchParams.get('destination')).toBe(`${classroom.lat},${classroom.lng}`);
+      expect(link.searchParams.get('travelmode')).toBe('walking');
+      expect(link.searchParams.has('origin')).toBe(false);
+    }
+    for (const link of [directApple, detailApple]) {
+      expect(link.searchParams.get('daddr')).toBe(`${classroom.lat},${classroom.lng}`);
+      expect(link.searchParams.get('dirflg')).toBe('w');
+      expect(link.searchParams.has('saddr')).toBe(false);
+    }
+    fireEvent.click(screen.getByRole('button', { name: '選擇步行起點' }));
+    const pending = within(screen.getByRole('region', { name: '已選擇步行終點' }));
+    const google = new URL(pending.getByRole('link', { name: '在 Google 地圖選擇起點' }).getAttribute('href')!);
+    const apple = new URL(pending.getByRole('link', { name: '在 Apple 地圖選擇起點' }).getAttribute('href')!);
+    expect(google.searchParams.get('destination')).toBe(`${classroom.lat},${classroom.lng}`);
+    expect(apple.searchParams.get('daddr')).toBe(google.searchParams.get('destination'));
+    expect(google.searchParams.has('origin')).toBe(false);
+    expect(apple.searchParams.has('saddr')).toBe(false);
+    expect(map().route).toBeNull();
+  } finally {
+    if (original) Object.defineProperty(navigator, 'geolocation', original);
+    else Reflect.deleteProperty(navigator, 'geolocation');
+  }
+});
+
+it('can cancel a classroom-first destination and return to ordinary origin-first planning', async () => {
+  const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  vi.mocked(loadMapLocations).mockResolvedValue([library, gate, classroom]);
+  render(<MapClient school="pu" query="PH303" />);
+  await sourceSettled();
+  fireEvent.click(screen.getByRole('button', { name: '選擇步行起點' }));
+  fireEvent.click(screen.getByRole('button', { name: '取消終點' }));
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
+  expect(screen.queryByText(/已設定「主顧樓」為終點/)).toBeNull();
+  expect(screen.queryByRole('region', { name: '已選擇步行終點' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '在 Google 地圖選擇起點' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '在 Apple 地圖選擇起點' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  expect(screen.getByText(/已設定「正門」為起點/)).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
 });
 
 it('does not restore an origin from an invalid shared route for classroom planning', async () => {
@@ -799,6 +1075,40 @@ it('keeps a place card mounted for the same selection and replaces it for a diff
   expect(screen.getByRole('heading', { name: '正門' })).toBeTruthy();
 });
 
+it.each(['origin', 'destination'] as const)('warns before login would discard a partial walking draft (%s)', async (endpoint) => {
+  state.user = null;
+  const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  vi.mocked(loadMapLocations).mockResolvedValue([library, gate, classroom]);
+  render(<MapClient school="pu" focus={endpoint === 'origin' ? 'gate' : undefined}
+    query={endpoint === 'destination' ? 'PH303' : undefined} />);
+  await sourceSettled();
+  const loginLinks = () => [
+    screen.getByRole('link', { name: '用 Google 帳號收藏' }),
+    screen.getByRole('link', { name: '查看學校帳號的既有收藏' }),
+  ];
+  const notice = () => screen.queryByText(/目前的步行規劃無法保留至登入後/);
+  expect(notice()).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: endpoint === 'origin' ? '設為起點' : '選擇步行起點' }));
+  expect(notice()).toBeTruthy();
+  for (const link of loginLinks()) {
+    expect(document.getElementById(link.getAttribute('aria-describedby')!)).toBe(notice());
+    const login = new URL(link.getAttribute('href')!, window.location.origin);
+    expect(new URL(login.searchParams.get('returnUrl')!, window.location.origin).searchParams.has('route')).toBe(false);
+  }
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  fireEvent.click(screen.getByRole('button', { name: endpoint === 'origin' ? '設為終點' : '設為起點' }));
+  expect(screen.getByRole('region', { name: '步行導航' })).toBeTruthy();
+  expect(notice()).toBeNull();
+  for (const link of loginLinks()) {
+    expect(link.hasAttribute('aria-describedby')).toBe(false);
+    const login = new URL(link.getAttribute('href')!, window.location.origin);
+    expect(new URL(login.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('route'))
+      .toBe(endpoint === 'origin' ? 'gate,library' : 'library,pu-zhugu');
+  }
+  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  expect(notice()).toBeNull();
+});
+
 it('offers Google favorites and keeps an explicit school flow for existing cloud favorites', async () => {
   state.user = null;
   window.history.replaceState({}, '', '/map?schoolId=pu&route=gate%2Clibrary#directions');
@@ -951,6 +1261,10 @@ it.each(['origin', 'destination', 'origin-building', 'destination-floor', 'uncha
   fireEvent.click(screen.getByRole('button', { name: '設為終點' }));
   expect(screen.getByRole('region', { name: '步行導航' })).toBeTruthy();
 
+  const provisionalLogin = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
+  expect(new URL(provisionalLogin.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('route')).toBeNull();
+  expect(screen.getByText(/若登入或重新連結帳號，需重新選擇路線/)).toBeTruthy();
+
   await act(async () => source.resolve([
     { ...origin, lat: origin.lat + (changed === 'origin' ? 0.002 : 0),
       ...(changed === 'origin-building' ? { building: '測試用變更建築' } : {}) },
@@ -973,6 +1287,63 @@ it.each(['origin', 'destination', 'origin-building', 'destination-floor', 'uncha
     expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
     expect(screen.queryByText(/原先選擇的地點已變更或無法確認/)).toBeNull();
   }
+});
+
+it.each([
+  ['identical pair', { lat: gate.lat, lng: gate.lng }, { lat: gate.lat, lng: gate.lng }],
+  ['antimeridian aliases', { lat: 10, lng: -180 }, { lat: 10, lng: 180 }],
+  ['north pole', { lat: 90, lng: 10 }, { lat: 90, lng: 20 }],
+  ['south pole', { lat: -90, lng: 10 }, { lat: -90, lng: 20 }],
+] as const)('rejects a shared and manual walking route between physically identical points (%s)', async (_label, startCoordinate, endCoordinate) => {
+  const start = { ...gate, ...startCoordinate };
+  const alias = { ...gate, ...endCoordinate, id: 'same-position', name: '同座標測試點' };
+  vi.mocked(loadMapLocations).mockResolvedValue([start, alias, library]);
+  render(<MapClient school="other-school" route="gate,same-position" />);
+  await screen.findByRole('button', { name: '查看同座標測試點' });
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route).toBeNull();
+  expect(screen.getByText(/無法確認兩個不同的有效位置/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看同座標測試點' }));
+  expect(screen.queryByRole('button', { name: '設為終點' })).toBeNull();
+  expect(screen.getByText(/起點與終點必須為不同位置/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為終點' }));
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route.map((place: MapLocation) => place.id))
+    .toEqual(['gate', 'library']);
+});
+
+it('keeps a confirmed classroom destination when a co-located origin is selected', async () => {
+  const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  const alias = { ...gate, id: 'same-position', name: '同座標測試點', lat: classroom.lat, lng: classroom.lng };
+  vi.mocked(loadMapLocations).mockResolvedValue([classroom, alias, library]);
+  render(<MapClient school="pu" query="PH303" />);
+  await sourceSettled();
+  fireEvent.click(screen.getByRole('button', { name: '選擇步行起點' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看同座標測試點' }));
+  expect((screen.getByRole('button', { name: '設為起點' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/起點與終點必須為不同位置/)).toBeTruthy();
+  expect(screen.getByRole('region', { name: '已選擇步行終點' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route.map((place: MapLocation) => place.id))
+    .toEqual(['library', classroom.id]);
+});
+
+it('does not offer a classroom route shortcut from a co-located marker', async () => {
+  const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  const alias = { ...gate, id: 'same-position', name: '同座標測試點', lat: classroom.lat, lng: classroom.lng };
+  vi.mocked(loadMapLocations).mockResolvedValue([classroom, alias, library]);
+  render(<MapClient school="pu" query="PH303" focus={alias.id} />);
+  await sourceSettled();
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  const card = within(screen.getByRole('region', { name: '教室定位結果' }));
+  expect(card.queryByRole('button', { name: '將主顧樓設為終點' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  expect(card.getByRole('link', { name: '使用 Google 地圖前往主顧樓' })).toBeTruthy();
 });
 
 it('does not resolve a shared route with duplicate endpoint IDs', async () => {
@@ -1207,6 +1578,47 @@ it.each([101, 1000, -1, NaN, Infinity, undefined])(
     }
   },
 );
+
+it('lets a student stop waiting for GPS, ignores late callbacks and retries without losing a planned route', async () => {
+  state.user = null;
+  const callbacks: { success: PositionCallback; failure: PositionErrorCallback }[] = [];
+  const original = Object.getOwnPropertyDescriptor(navigator, 'geolocation');
+  Object.defineProperty(navigator, 'geolocation', {
+    configurable: true,
+    value: { getCurrentPosition: (success: PositionCallback, failure: PositionErrorCallback) => {
+      callbacks.push({ success, failure });
+    } },
+  });
+  try {
+    render(<MapClient school="pu" route="gate,library" focus="library" />);
+    await sourceSettled();
+    const map = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+    const button = screen.getByRole('button', { name: '查看我的位置' });
+    button.focus();
+    fireEvent.click(button);
+    expect(screen.getByRole('button', { name: '取消定位' })).toBe(button);
+    expect(button.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(button);
+    expect(document.activeElement).toBe(button);
+    expect(screen.getByText(/已停止等待定位/)).toBeTruthy();
+    const position = { coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition;
+    act(() => callbacks[0].success(position));
+    expect(map().myLocation).toBeNull();
+    expect(map().route.map((place: MapLocation) => place.id)).toEqual(['gate', 'library']);
+    const link = screen.getByRole('link', { name: '從目前位置導航' });
+    expect(new URL(link.getAttribute('href')!).searchParams.has('origin')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+    act(() => callbacks[0].failure({ code: 1 } as GeolocationPositionError));
+    expect(screen.getByRole('button', { name: '取消定位' })).toBeTruthy();
+    act(() => callbacks[1].success(position));
+    expect(map().myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
+    expect(screen.queryByText(/已停止等待定位/)).toBeNull();
+    expect(map().route.map((place: MapLocation) => place.id)).toEqual(['gate', 'library']);
+  } finally {
+    if (original) Object.defineProperty(navigator, 'geolocation', original);
+    else Reflect.deleteProperty(navigator, 'geolocation');
+  }
+});
 
 it('recovers when geolocation throws synchronously and ignores callbacks from the failed request', async () => {
   state.user = null;
@@ -1478,4 +1890,34 @@ it('shows each school its own official map rather than reusing Providence', asyn
   await screen.findByRole('button', { name: '查看蓋夏圖書館' });
   expect(screen.queryByRole('link', { name: '校方校區平面圖' })).toBeNull();
   expect(screen.queryByRole('link', { name: '查看校方校區平面圖' })).toBeNull();
+});
+
+it('does not restore a manually chosen provisional route across login after source failure', async () => {
+  state.user = null;
+  const origin = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  const destination = PROVIDENCE_CAMPUS_PLACES.find((place) => place.name === '蓋夏圖書館')!;
+  vi.mocked(loadMapLocations).mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce([origin, destination]);
+  render(<MapClient school="pu" focus={origin.id} />);
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋地點' }), { target: { value: destination.name } });
+  fireEvent.click(screen.getByRole('button', { name: '查看' + destination.name }));
+  fireEvent.click(screen.getByRole('button', { name: '設為終點' }));
+  await sourceSettled();
+  const returnRoutes = () => ['用 Google 帳號收藏', '查看學校帳號的既有收藏'].map(name => {
+    const link = new URL(screen.getByRole('link', { name }).getAttribute('href')!, window.location.origin);
+    return new URL(link.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('route');
+  });
+  expect(screen.getByRole('region', { name: '步行導航' })).toBeTruthy();
+  expect(returnRoutes()).toEqual([null, null]);
+  const returnFocuses = () => ['用 Google 帳號收藏', '查看學校帳號的既有收藏'].map(name => {
+    const link = new URL(screen.getByRole('link', { name }).getAttribute('href')!, window.location.origin);
+    return new URL(link.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('focus');
+  });
+  expect(returnFocuses()).toEqual([null, null]);
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取地點資料' }));
+  await sourceSettled();
+  expect(returnRoutes()).toEqual([origin.id + ',' + destination.id, origin.id + ',' + destination.id]);
+  expect(returnFocuses()).toEqual([destination.id, destination.id]);
+  expect(screen.queryByText(/若登入或重新連結帳號，需重新選擇路線/)).toBeNull();
 });
