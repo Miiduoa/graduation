@@ -1251,6 +1251,47 @@ it.each([101, 1000, -1, NaN, Infinity, undefined])(
   },
 );
 
+it('lets a student stop waiting for GPS, ignores late callbacks and retries without losing a planned route', async () => {
+  state.user = null;
+  const callbacks: { success: PositionCallback; failure: PositionErrorCallback }[] = [];
+  const original = Object.getOwnPropertyDescriptor(navigator, 'geolocation');
+  Object.defineProperty(navigator, 'geolocation', {
+    configurable: true,
+    value: { getCurrentPosition: (success: PositionCallback, failure: PositionErrorCallback) => {
+      callbacks.push({ success, failure });
+    } },
+  });
+  try {
+    render(<MapClient school="pu" route="gate,library" focus="library" />);
+    await sourceSettled();
+    const map = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+    const button = screen.getByRole('button', { name: '查看我的位置' });
+    button.focus();
+    fireEvent.click(button);
+    expect(screen.getByRole('button', { name: '取消定位' })).toBe(button);
+    expect(button.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(button);
+    expect(document.activeElement).toBe(button);
+    expect(screen.getByText(/已停止等待定位/)).toBeTruthy();
+    const position = { coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition;
+    act(() => callbacks[0].success(position));
+    expect(map().myLocation).toBeNull();
+    expect(map().route.map((place: MapLocation) => place.id)).toEqual(['gate', 'library']);
+    const link = screen.getByRole('link', { name: '從目前位置導航' });
+    expect(new URL(link.getAttribute('href')!).searchParams.has('origin')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+    act(() => callbacks[0].failure({ code: 1 } as GeolocationPositionError));
+    expect(screen.getByRole('button', { name: '取消定位' })).toBeTruthy();
+    act(() => callbacks[1].success(position));
+    expect(map().myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
+    expect(screen.queryByText(/已停止等待定位/)).toBeNull();
+    expect(map().route.map((place: MapLocation) => place.id)).toEqual(['gate', 'library']);
+  } finally {
+    if (original) Object.defineProperty(navigator, 'geolocation', original);
+    else Reflect.deleteProperty(navigator, 'geolocation');
+  }
+});
+
 it('recovers when geolocation throws synchronously and ignores callbacks from the failed request', async () => {
   state.user = null;
   const callbacks: PositionCallback[] = [];
