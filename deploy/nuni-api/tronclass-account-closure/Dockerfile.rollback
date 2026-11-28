@@ -1,0 +1,6 @@
+# Compatible rollback: current production nuni-api plus 284 SQL only.
+# Supply NUNI_API_PRODUCTION_DIGEST at build time (64 hex, no sha256: prefix).
+# Do not reuse the stale imports rollback Dockerfile or its pinned digest.
+ARG NUNI_API_PRODUCTION_DIGEST
+FROM registry.fly.io/nuni-api@sha256:${NUNI_API_PRODUCTION_DIGEST}
+COPY deploy/nuni-api/tronclass-account-closure/284_tronclass_account_closure_outbox.sql /app/apps/api/dist/migrations/284_tronclass_account_closure_outbox.sql
