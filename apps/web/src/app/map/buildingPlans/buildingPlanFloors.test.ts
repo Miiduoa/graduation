@@ -456,3 +456,34 @@ describe('two-point floor alignment suggestions', () => {
     })).toEqual({ ok: false, message: expect.stringMatching(/有效/) });
   });
 });
+
+describe('invalid alignment coordinates', () => {
+  it.each([
+    ['sparse pair', Array<number>(2)],
+    ['missing second coordinate', Object.assign(Array<number>(2), { 0: 0 })],
+    ['array-like object', { 0: 0, 1: 0, length: 2 }],
+    ['nonfinite coordinate', [0, Infinity]],
+  ])('rejects %s without throwing or suggesting a transform', (_, point) => {
+    expect(suggestBuildingPlanFloorAlignment({
+      referenceA: [0, 0], referenceB: [10, 0],
+      incomingA: point as PlanPoint, incomingB: [10, 0],
+    })).toEqual({ ok: false, message: expect.stringMatching(/有效/) });
+  });
+
+  it('rejects overflowing anchor distances rather than treating NaN as a passing error', () => {
+    const max = Number.MAX_VALUE;
+    expect(suggestBuildingPlanFloorAlignment({
+      referenceA: [-max, 0], referenceB: [max, 0],
+      incomingA: [-max, 0], incomingB: [max, 0],
+    }).ok).toBe(false);
+  });
+
+  it('ignores overflowing rotations when a finite matching transform exists', () => {
+    const max = Number.MAX_VALUE;
+    const result = suggestBuildingPlanFloorAlignment({
+      referenceA: [max, 0], referenceB: [max, 10],
+      incomingA: [-max, 0], incomingB: [-max, -10],
+    });
+    expect(result).toEqual({ ok: true, rotationDegrees: 180, offsetX: 0, offsetY: 0, errorMetres: 0 });
+  });
+});
