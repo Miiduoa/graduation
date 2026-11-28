@@ -30,7 +30,7 @@
     ".github/workflows/mobile-agent-regression.yml": "1ec544726e088516dfd4d45b7e3f0527787390f1",
     ".github/workflows/neon-migration-tools.yml": "b4d525eaf10035a4e792b31e6b667c53264ccd22",
     ".github/workflows/platform-lost-found.yml": "383b8144a9ba3b701e12a2bc0f51605c7c34e7ec",
-    ".github/workflows/preview-deploy.yml": "2cbb00747d36eeb2ab837b082393d8e8cc84108a",
+    ".github/workflows/preview-deploy.yml": "6ae63b52b974d71dc0a4a8ffd2bee42875fb300c",
     ".github/workflows/python-ai-server-security.yml": "01e1a993fb90bf4ab1fdd1f5eefba8b340518397",
     ".github/workflows/release.yml": "a2568167d4aeb27b1d9580a3b7d2905697ed54b9",
     ".github/workflows/role-workflows-browser.yml": "b6099797d5ce8f4765552ebcf65f91eaa7247137",
