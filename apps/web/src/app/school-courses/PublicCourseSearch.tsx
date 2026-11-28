@@ -23,7 +23,7 @@ import courseStyles from './schoolCourses.module.css';
 
 type CourseSearch = { query: string; filters?: PublicCourseFilters };
 type SearchResult = CourseSearch & (
-  | { status: 'loading' | 'error' }
+  | { status: 'loading' | 'error' | 'cancelled' }
   | { status: 'ready'; courses: PublicCatalogCourse[]; truncated: boolean; sourceUrl: string; fetchedAt?: string; checkedAt: number; unresolvedCount?: number }
 );
 
@@ -247,6 +247,7 @@ function PublicCourseSearchForm({
   // A pending queued copy belongs to the visible search, never a departed page.
   useEffect(() => () => { copyAttempt.current += 1; }, []);
   const pending = useRef<{ controller: AbortController; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const submitButton = useRef<HTMLButtonElement>(null);
   const router = useRouter();
   const context = usePersonalImportScope();
   const importHref = campusServiceHref('/import?kind=timetable', schoolSearch);
@@ -323,6 +324,19 @@ function PublicCourseSearchForm({
     pending.current = null;
   }, []);
   const catalog = resolveOfficialCourseQueryLink(schoolId);
+
+  function cancelCurrentSearch() {
+    cancelSearch();
+    setResult(current => current?.status === 'loading' ? { ...current, status: 'cancelled' } : current);
+  }
+
+  // The cancel control disappears after cancellation. Return keyboard focus
+  // to the retry action, but never override focus the user has moved elsewhere.
+  useEffect(() => {
+    if (result?.status === 'cancelled' && document.activeElement === document.body) {
+      submitButton.current?.focus();
+    }
+  }, [result?.status]);
 
   const searchCourses = useCallback(async (search: CourseSearch) => {
     cancelSearch();
@@ -530,9 +544,12 @@ function PublicCourseSearchForm({
             }} />
         </label>
         <div className={courseStyles.searchActions}>
-          <button type="submit" className="btn primary" disabled={result?.status === 'loading' && isCurrentSearch}>
-            {result?.status === 'error' && isCurrentSearch ? '重新查詢' : '查詢課程'}
+          <button ref={submitButton} type="submit" className="btn primary" disabled={result?.status === 'loading' && isCurrentSearch}>
+            {(result?.status === 'error' || result?.status === 'cancelled') && isCurrentSearch ? '重新查詢' : '查詢課程'}
           </button>
+          {result?.status === 'loading' && (
+            <button type="button" className="btn" onClick={cancelCurrentSearch}>取消查詢</button>
+          )}
           <button type="button" className="btn" onClick={clearFilters}
             disabled={!weekday && !credits && !invalidLinkedFields.weekday && !invalidLinkedFields.credits}>清除篩選</button>
         </div>
@@ -548,6 +565,7 @@ function PublicCourseSearchForm({
         {appliedFilters ? ` · ${appliedFilters}` : ' · 星期與學分不限'}
       </p>}
       {result?.status === 'loading' && <p role="status">正在查詢{term}開課資料…</p>}
+      {result?.status === 'cancelled' && <p role="status">已取消查詢，搜尋條件已保留，可重新查詢。</p>}
       {result?.status === 'error' && (
         <p role="alert">暫時無法取得校方課程資料，請重新查詢{catalog && <>或前往<a href={catalog.url} target="_blank" rel="noopener noreferrer">校方課程目錄</a></>}。</p>
       )}
