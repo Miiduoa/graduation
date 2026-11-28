@@ -369,7 +369,11 @@ function MapContent({
     // in login return URLs so it can be restored if the source later recovers.
     returnParams.set('route', route);
   }
-  const returnFocus = selection === null ? activeFocus ?? selectedId : selectedId;
+  // An untouched URL focus is a request, not a manual confirmation. A provisional
+  // manual selection must not become an ID-only focus across a login remount.
+  const returnFocus = selection === null
+    ? activeFocus ?? (placeState.source === 'ready' ? selectedId : undefined)
+    : placeState.source === 'ready' ? selectedId : undefined;
   if (returnFocus) returnParams.set('focus', returnFocus);
   const returnQuery = normalizeCampusClassroomQuery(search);
   if (returnQuery) returnParams.set('query', returnQuery);

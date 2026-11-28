@@ -130,6 +130,12 @@ it.each(['coordinates', 'building', 'floor', 'unchanged'] as const)('revalidates
   const apple = () => screen.queryByRole('link', { name: '使用 Apple 地圖從目前位置導航' });
   expect(google()).toBeTruthy();
   expect(apple()).toBeTruthy();
+  const loginFocus = (name: string) => {
+    const link = new URL(screen.getByRole('link', { name }).getAttribute('href')!, window.location.origin);
+    return new URL(link.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('focus');
+  };
+  expect(loginFocus('用 Google 帳號收藏')).toBeNull();
+  expect(loginFocus('查看學校帳號的既有收藏')).toBeNull();
   const replacement = { ...original,
     ...(change === 'coordinates' ? { lat: original.lat + 0.002 } : {}),
     ...(change === 'building' ? { building: '測試用變更建築' } : {}),
@@ -147,6 +153,8 @@ it.each(['coordinates', 'building', 'floor', 'unchanged'] as const)('revalidates
   expect(screen.queryByText(/已停用地點導航/)).toBeNull();
   expect(new URL(google()!.getAttribute('href')!).searchParams.get('destination')).toBe(replacement.lat + ',' + replacement.lng);
   expect(new URL(apple()!.getAttribute('href')!).searchParams.get('daddr')).toBe(replacement.lat + ',' + replacement.lng);
+  expect(loginFocus('用 Google 帳號收藏')).toBe(replacement.id);
+  expect(loginFocus('查看學校帳號的既有收藏')).toBe(replacement.id);
 });
 
 it('keeps a confirmed selected marker visible across filters until the detail is closed', async () => {
@@ -1862,8 +1870,14 @@ it('does not restore a manually chosen provisional route across login after sour
   });
   expect(screen.getByRole('region', { name: '步行導航' })).toBeTruthy();
   expect(returnRoutes()).toEqual([null, null]);
+  const returnFocuses = () => ['用 Google 帳號收藏', '查看學校帳號的既有收藏'].map(name => {
+    const link = new URL(screen.getByRole('link', { name }).getAttribute('href')!, window.location.origin);
+    return new URL(link.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('focus');
+  });
+  expect(returnFocuses()).toEqual([null, null]);
   fireEvent.click(screen.getByRole('button', { name: '重新讀取地點資料' }));
   await sourceSettled();
   expect(returnRoutes()).toEqual([origin.id + ',' + destination.id, origin.id + ',' + destination.id]);
+  expect(returnFocuses()).toEqual([destination.id, destination.id]);
   expect(screen.queryByText(/若登入或重新連結帳號，需重新選擇路線/)).toBeNull();
 });
