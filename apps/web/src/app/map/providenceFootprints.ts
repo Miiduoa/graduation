@@ -419,7 +419,9 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
     const element = object(value);
     if (element?.type !== 'way' || typeof element.id !== 'number' || !Number.isSafeInteger(element.id)) continue;
     const place = knownWays.get(element.id);
-    if (!place || seen.has(element.id) || !hasConsistentOsmWayNodes(element) ||
+    if (!place || seen.has(element.id) ||
+        (element.visible !== undefined && element.visible !== true) ||
+        !hasConsistentOsmWayNodes(element) ||
         !isStandingBuilding(element.tags) ||
         !matchesAuditedOsmName(element.tags, place.name)) continue;
     const outline = safeOutline(element.geometry);
