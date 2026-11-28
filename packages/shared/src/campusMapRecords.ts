@@ -115,7 +115,8 @@ export function parseCampusMapRecord(
   return {
     id,
     name,
-    category: CATEGORY_LABELS[category] ?? (category || '其他'),
+    category: Object.prototype.hasOwnProperty.call(CATEGORY_LABELS, category)
+      ? CATEGORY_LABELS[category] : (category || '其他'),
     description: trimmedText(data.description),
     ...position,
     building,

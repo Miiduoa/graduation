@@ -109,6 +109,23 @@ it('accepts only actual valid coordinates and normalizes category labels', async
   expect(getDocsFromServer).toHaveBeenCalledTimes(1);
 });
 
+it.each([
+  ['constructor', 'constructor'],
+  ['toString', 'toString'],
+  ['__proto__', '__proto__'],
+  ['hasOwnProperty', 'hasOwnProperty'],
+  ['library', '圖書館'],
+  ['custom-category', 'custom-category'],
+  ['', '其他'],
+])('keeps category %s a display string in shared parsing and Web map loading', async (category, expected) => {
+  const raw = { ...location, category };
+  expect(parseCampusMapRecord('library', raw, 'pu')?.category).toBe(expected);
+  respond(snapshot(entry('library', raw)));
+  const [loaded] = await loadMapLocations('pu');
+  expect(loaded.category).toBe(expected);
+  expect(typeof loaded.category).toBe('string');
+});
+
 it('uses school-filtered legacy data only after a confirmed empty canonical source', async () => {
   respond(snapshot());
   respond(snapshot(entry('library', { ...location, schoolId: 'pu' })));
