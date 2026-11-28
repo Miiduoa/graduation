@@ -614,12 +614,33 @@ function MapContent({
         </div>
       )}
       {awaitingOrigin && routeEnd && (
-        <div className={styles.notice}>
+        <section className={styles.notice} aria-label="已選擇步行終點">
           <p role="status">已設定「{routeEnd.name}」為終點。請選擇其他地點，再按「設為起點」。</p>
+          {placeState.source === 'ready' && (
+            <>
+              <p id={routeNoteId}>
+                也可以直接在地圖服務選擇起點；不會使用 nuni 先前取得的定位。
+                終點為地點標記，並非已核實的入口或室內教室；實際路線由第三方地圖規劃。
+                {isProvidencePendingVerification(school, routeEnd) && (
+                  <strong>這個地點只有單一資料來源，位置待再次確認。</strong>
+                )}
+              </p>
+              <div className={styles.actions}>
+                <a className="btn primary" href={walkingDirectionsUrl(routeEnd)}
+                  aria-describedby={routeNoteId} target="_blank" rel="noopener noreferrer">
+                  在 Google 地圖選擇起點
+                </a>
+                <a className="btn" href={appleWalkingDirectionsUrl(routeEnd)}
+                  aria-describedby={routeNoteId} target="_blank" rel="noopener noreferrer">
+                  在 Apple 地圖選擇起點
+                </a>
+              </div>
+            </>
+          )}
           <button className="btn" type="button" onClick={clearRoute}>
             取消終點
           </button>
-        </div>
+        </section>
       )}
       {placeState.source !== 'ready' && route && routeDraft === null && (
         <div className={styles.notice}>

@@ -259,6 +259,20 @@ it('plans from an explicitly chosen ambiguous classroom candidate without guessi
   expect(document.getElementById(start.getAttribute('aria-describedby')!)?.textContent).toContain('並非已核實的入口或室內教室');
   fireEvent.click(start);
   expect(screen.getByText(/已設定「教學大樓」為終點/)).toBeTruthy();
+  const pending = within(screen.getByRole('region', { name: '已選擇步行終點' }));
+  const providerGoogle = pending.getByRole('link', { name: '在 Google 地圖選擇起點' });
+  const providerApple = pending.getByRole('link', { name: '在 Apple 地圖選擇起點' });
+  const googleUrl = new URL(providerGoogle.getAttribute('href')!);
+  const appleUrl = new URL(providerApple.getAttribute('href')!);
+  expect(googleUrl.searchParams.get('destination')).toBe(`${candidates[1].lat},${candidates[1].lng}`);
+  expect(appleUrl.searchParams.get('daddr')).toBe(googleUrl.searchParams.get('destination'));
+  expect(googleUrl.searchParams.has('origin')).toBe(false);
+  expect(appleUrl.searchParams.has('saddr')).toBe(false);
+  expect(googleUrl.searchParams.get('travelmode')).toBe('walking');
+  expect(appleUrl.searchParams.get('dirflg')).toBe('w');
+  expect(document.getElementById(providerGoogle.getAttribute('aria-describedby')!)?.textContent)
+    .toContain('並非已核實的入口或室內教室');
+  expect(providerApple.getAttribute('aria-describedby')).toBe(providerGoogle.getAttribute('aria-describedby'));
   expect((screen.getByRole('button', { name: '設為起點' }) as HTMLButtonElement).disabled).toBe(true);
   const search = screen.getByRole('searchbox', { name: '搜尋地點' }) as HTMLInputElement;
   expect(search.value).toBe('');
@@ -520,6 +534,11 @@ it('lets a classroom-first student choose an explicit walking origin without los
   fireEvent.change(search, { target: { value: '正門' } });
   const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
   expect(mapState().locations.some((place: MapLocation) => place.id === classroom.id)).toBe(true);
+  const pending = within(screen.getByRole('region', { name: '已選擇步行終點' }));
+  const pendingGoogle = new URL(pending.getByRole('link', { name: '在 Google 地圖選擇起點' }).getAttribute('href')!);
+  expect(pendingGoogle.searchParams.get('destination')).toBe(`${classroom.lat},${classroom.lng}`);
+  expect(pendingGoogle.searchParams.has('origin')).toBe(false);
+  expect(mapState().route).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
   fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
   const routeCard = within(screen.getByRole('region', { name: '步行導航' }));
@@ -528,6 +547,37 @@ it('lets a classroom-first student choose an explicit walking origin without los
   const google = new URL(routeCard.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
   expect(google.searchParams.get('origin')).toBe(`${gate.lat},${gate.lng}`);
   expect(google.searchParams.get('destination')).toBe(`${classroom.lat},${classroom.lng}`);
+});
+
+it('delegates the starting point to the provider even when nuni has a previous GPS fix', async () => {
+  const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  vi.mocked(loadMapLocations).mockResolvedValue([library, gate, classroom]);
+  const original = Object.getOwnPropertyDescriptor(navigator, 'geolocation');
+  Object.defineProperty(navigator, 'geolocation', {
+    configurable: true,
+    value: { getCurrentPosition: (success: PositionCallback) => {
+      success({ coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition);
+    } },
+  });
+  try {
+    render(<MapClient school="pu" query="PH303" />);
+    await sourceSettled();
+    fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+    const map = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+    expect(map().myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
+    fireEvent.click(screen.getByRole('button', { name: '選擇步行起點' }));
+    const pending = within(screen.getByRole('region', { name: '已選擇步行終點' }));
+    const google = new URL(pending.getByRole('link', { name: '在 Google 地圖選擇起點' }).getAttribute('href')!);
+    const apple = new URL(pending.getByRole('link', { name: '在 Apple 地圖選擇起點' }).getAttribute('href')!);
+    expect(google.searchParams.get('destination')).toBe(`${classroom.lat},${classroom.lng}`);
+    expect(apple.searchParams.get('daddr')).toBe(google.searchParams.get('destination'));
+    expect(google.searchParams.has('origin')).toBe(false);
+    expect(apple.searchParams.has('saddr')).toBe(false);
+    expect(map().route).toBeNull();
+  } finally {
+    if (original) Object.defineProperty(navigator, 'geolocation', original);
+    else Reflect.deleteProperty(navigator, 'geolocation');
+  }
 });
 
 it('can cancel a classroom-first destination and return to ordinary origin-first planning', async () => {
@@ -539,6 +589,9 @@ it('can cancel a classroom-first destination and return to ordinary origin-first
   fireEvent.click(screen.getByRole('button', { name: '取消終點' }));
   expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
   expect(screen.queryByText(/已設定「主顧樓」為終點/)).toBeNull();
+  expect(screen.queryByRole('region', { name: '已選擇步行終點' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '在 Google 地圖選擇起點' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '在 Apple 地圖選擇起點' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
   fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
   expect(screen.getByText(/已設定「正門」為起點/)).toBeTruthy();
