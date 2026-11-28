@@ -1255,9 +1255,15 @@ it.each(['origin', 'destination', 'origin-building', 'destination-floor', 'uncha
   }
 });
 
-it('rejects a shared walking route between distinct IDs at the same coordinates', async () => {
-  const alias = { ...gate, id: 'same-position', name: '同座標測試點' };
-  vi.mocked(loadMapLocations).mockResolvedValue([gate, alias, library]);
+it.each([
+  ['identical pair', { lat: gate.lat, lng: gate.lng }, { lat: gate.lat, lng: gate.lng }],
+  ['antimeridian aliases', { lat: 10, lng: -180 }, { lat: 10, lng: 180 }],
+  ['north pole', { lat: 90, lng: 10 }, { lat: 90, lng: 20 }],
+  ['south pole', { lat: -90, lng: 10 }, { lat: -90, lng: 20 }],
+] as const)('rejects a shared and manual walking route between physically identical points (%s)', async (_label, startCoordinate, endCoordinate) => {
+  const start = { ...gate, ...startCoordinate };
+  const alias = { ...gate, ...endCoordinate, id: 'same-position', name: '同座標測試點' };
+  vi.mocked(loadMapLocations).mockResolvedValue([start, alias, library]);
   render(<MapClient school="other-school" route="gate,same-position" />);
   await screen.findByRole('button', { name: '查看同座標測試點' });
   expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();

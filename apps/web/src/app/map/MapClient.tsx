@@ -78,7 +78,12 @@ function confirmedRoutePlace(locations: readonly MapLocation[], chosen: MapLocat
 // Distinct catalogue IDs can refer to the same outdoor marker (e.g. different floors).
 // Do not offer a zero-distance walking route or infer an indoor connection.
 function distinctWalkingPlaces(from: MapLocation, to: MapLocation): boolean {
-  return from.id !== to.id && (from.lat !== to.lat || from.lng !== to.lng);
+  // Match the audited outdoor graph: longitude aliases and poles describe
+  // the same physical point, even though their raw coordinate pairs differ.
+  const samePoint = from.lat === to.lat && (
+    from.lng === to.lng || Math.abs(from.lng - to.lng) === 360 || Math.abs(from.lat) === 90
+  );
+  return from.id !== to.id && !samePoint;
 }
 
 export default function MapClient(props: MapProps) {
