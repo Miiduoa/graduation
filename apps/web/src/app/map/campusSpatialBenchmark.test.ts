@@ -272,6 +272,45 @@ describe('campus spatial benchmark evidence gate', () => {
     expect(validateCampusSpatialBenchmarkRows(visual).issues.join(' ')).toContain('measured FPS');
   });
 
+  it('rejects visual scores based on different rubrics in the same paired trial', () => {
+    const rows = fixture('visual-1').map((row) => ({
+      ...row, task: 'visual-performance' as const,
+      fpsP50: 60, visualScore: 4, visualRubric: 'shared-rubric-v1',
+    }));
+    rows[4].visualRubric = 'different-rubric';
+    const result = validateCampusSpatialBenchmarkRows(rows);
+    expect(result.valid).toBe(false);
+    expect(result.issues.join(' ')).toContain('mismatched visualRubric');
+    expect(result.completeTrials).toBe(0);
+    expect(result.reviewableTasks).toEqual([]);
+
+    rows[4].visualRubric = 'shared-rubric-v1';
+    expect(validateCampusSpatialBenchmarkRows(rows).completeTrials).toBe(1);
+  });
+
+  it('keeps repeated visual trials with different rubrics in separate cohorts', () => {
+    const rows = ['visual-1', 'visual-2', 'visual-3'].flatMap((id) =>
+      fixture(id).map((row) => ({
+        ...row, task: 'visual-performance' as const,
+        fpsP50: 60, visualScore: 4,
+        visualRubric: id === 'visual-3' ? 'shared-rubric-v2' : 'shared-rubric-v1',
+      })),
+    );
+    const mixed = validateCampusSpatialBenchmarkRows(rows);
+    expect(mixed.valid).toBe(true);
+    expect(mixed.completeTrials).toBe(3);
+    expect(mixed.reviewableTasks).toEqual([]);
+
+    for (const row of rows) row.visualRubric = 'shared-rubric-v1';
+    expect(validateCampusSpatialBenchmarkRows(rows).reviewableTasks).toEqual(['visual-performance']);
+
+    rows[0].outcome = 'unverified';
+    const unverified = validateCampusSpatialBenchmarkRows(rows);
+    expect(unverified.valid).toBe(true);
+    expect(unverified.completeTrials).toBe(2);
+    expect(unverified.reviewableTasks).toEqual([]);
+  });
+
   it('does not count copied video links or timestamps as independent paired trials', () => {
     const rows = [
       ...fixture('synthetic-1'), ...fixture('synthetic-2'), ...fixture('synthetic-3'),
