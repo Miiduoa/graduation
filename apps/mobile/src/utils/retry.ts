@@ -225,25 +225,29 @@ export async function withConcurrencyLimit<T, R>(
   concurrency = 5,
 ): Promise<R[]> {
   const results: R[] = [];
-  const executing = new Map<number, Promise<number>>();
+  // Preserve the previous numeric limit behavior (including fractional limits).
+  const workerCount = Math.min(
+    items.length,
+    Number.isNaN(concurrency) ? items.length : Math.max(1, Math.ceil(concurrency)),
+  );
+  let nextIndex = 0;
+  let stopped = false;
 
-  for (let i = 0; i < items.length; i++) {
-    const promise = Promise.resolve()
-      .then(() => fn(items[i], i))
-      .then((result) => {
-        results[i] = result;
-        return i;
-      });
-
-    executing.set(i, promise);
-
-    if (executing.size >= concurrency) {
-      // Free the slot that actually finished, not the most recently started one.
-      const completedIndex = await Promise.race(executing.values());
-      executing.delete(completedIndex);
+  const worker = async () => {
+    while (!stopped && nextIndex < items.length) {
+      const index = nextIndex++;
+      try {
+        results[index] = await fn(items[index], index);
+      } catch (error) {
+        stopped = true;
+        throw error;
+      }
     }
-  }
+  };
 
-  await Promise.all(executing.values());
+  // A worker awaits each task once. Repeated Promise.race calls would attach
+  // additional reactions to a slow pending task every time another task ends.
+  // Promise.all observes every worker, including failures after the first one.
+  await Promise.all(Array.from({ length: workerCount }, () => Promise.resolve().then(worker)));
   return results;
 }
