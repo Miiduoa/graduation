@@ -31,6 +31,37 @@ describe('Providence OSM building outlines', () => {
     expect(PROVIDENCE_OSM_BUILDING_WAY_IDS).toContain(255784049);
   });
 
+  it('does not render deleted or ambiguously visible OSM ways', () => {
+    // Synthetic metadata drift: a retained ID and valid polygon do not
+    // establish a standing building if the source marks the way invisible.
+    for (const visible of [false, null, 'false', 'true', 0, 1]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [{ ...way(255784049), visible }],
+      }), JSON.stringify(visible)).toEqual([]);
+    }
+    // Overpass may omit visibility; explicit boolean true is also valid.
+    for (const visible of [undefined, true]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [{ ...way(255784049), visible }],
+      })).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+  });
+
+  it('does not promote an indoor room or floor outline into a whole-building volume', () => {
+    // Synthetic source drift; no assertion about actual campus floor geometry.
+    for (const indoor of ['room', 'area', 'corridor', 'level', 'wall', 'yes',
+      ' ROOM ', 'unknown', '', null, true]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'yes', indoor })],
+      }), JSON.stringify(indoor)).toEqual([]);
+    }
+    for (const indoor of [undefined, 'no', 'false', '0', ' NO ']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'yes', indoor })],
+      }), JSON.stringify(indoor)).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+  });
+
   it('does not attach an audited campus POI name to a renamed OSM building', () => {
     // Synthetic source drift: the way ID and geometry remain valid, but OSM
     // now explicitly names a different place. Keep the point marker; omit
@@ -60,6 +91,40 @@ describe('Providence OSM building outlines', () => {
     ]) {
       expect(parseProvidenceOsmFootprints({
         elements: [way(255784049, library, tags)],
+      }), JSON.stringify(tags)).toEqual([]);
+    }
+  });
+
+  it('recognizes official English building names without accepting contradictory identities', () => {
+    // Synthetic OSM tags on the existing synthetic library polygon; the
+    // official campus page verifies names, not these geometry/height fixtures.
+    for (const tags of [
+      { name: 'Luking Library' },
+      { name: ' LUKING LIBRARY ' },
+      { 'name:en': 'Luking Library' },
+      { name: '蓋夏圖書館', 'name:en': 'Luking Library' },
+      { name: 'Guixa Library', 'name:zh': '蓋夏圖書館' },
+      {},
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', ...tags })],
+      }), JSON.stringify(tags)).toMatchObject([{
+        poiId: 'pu-library', name: '蓋夏圖書館', heightBasis: 'illustrative',
+      }]);
+    }
+    for (const tags of [
+      { name: 'Providence Hall' },
+      { name: 'Providence Hall', 'name:zh': '蓋夏圖書館' },
+      { name: 'Luking Library', 'name:zh': '主顧樓' },
+      { name: '蓋夏圖書館', 'name:en': 'Providence Hall' },
+      { 'name:en': 'Other Library' },
+      { 'name:en': 'Providence Hall' },
+      { 'name:en': '' },
+      { 'name:en': null },
+      { name: 'Other Library', 'name:en': 'Luking Library' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', ...tags })],
       }), JSON.stringify(tags)).toEqual([]);
     }
   });
@@ -251,6 +316,7 @@ describe('Providence OSM building outlines', () => {
       { building: '0' }, { building: 'none' }, { building: 'unknown' },
       { building: 'construction' }, { building: 'proposed' },
       { building: 'demolished' }, { building: 'roof' }, { building: 'ruins' },
+      { building: 'removed' }, { building: 'razed' }, { building: ' RAZED ' },
       { building: 'maybe' }, { building: '   ' }, { building: 1 },
     ]) {
       expect(parseProvidenceOsmFootprints({
@@ -783,6 +849,26 @@ describe('Providence footprint API snapshot freshness', () => {
     }, now)?.buildings[0]).toMatchObject({
       osmVersion: 13, osmEditedAt: '2026-11-09T09:04:00Z',
     });
+  });
+
+  it('does not accumulate clock skew across fetch and OSM replication timestamps', () => {
+    const fetchedAt = new Date(now + 4 * 60 * 1000).toISOString();
+    const osmBaseAt = (seconds: number) =>
+      new Date(now + seconds * 1000).toISOString().replace('.000Z', 'Z');
+    // Both clocks must be within the same five-minute tolerance of the device.
+    // A future fetch timestamp must not grant a second five-minute allowance.
+    for (const seconds of [301, 480, 540]) {
+      expect(parseProvidenceFootprintSnapshot({
+        ...response, fetchedAt, osmBaseAt: osmBaseAt(seconds),
+      }, now)).toBeNull();
+    }
+    for (const seconds of [0, 240, 300]) {
+      expect(parseProvidenceFootprintSnapshot({
+        ...response, fetchedAt, osmBaseAt: osmBaseAt(seconds),
+      }, now)).toMatchObject({ osmBaseAt: osmBaseAt(seconds), buildings: [footprint] });
+    }
+    expect(parseProvidenceFootprintSnapshot({ ...response, fetchedAt }, now))
+      .toMatchObject({ osmBaseAt: null, buildings: [footprint] });
   });
 
   it('rejects fabricated OSM replication metadata while keeping legacy snapshots', () => {
