@@ -152,4 +152,47 @@ describe('withConcurrencyLimit settlement tracking', () => {
     tasks[2].resolve(30);
     await assertion;
   });
+
+  it('does not repeatedly race a slow pending task as fast tasks complete', async () => {
+    const slow = deferred<number>();
+    const items = Array.from({ length: 128 }, (_, index) => index);
+    const run = jest.fn((index: number) => index === 0 ? slow.promise : Promise.resolve(index));
+    const race = jest.spyOn(Promise, 'race');
+
+    try {
+      const result = withConcurrencyLimit(items, run, 2);
+      await flush();
+      const raceCalls = race.mock.calls.length;
+      slow.resolve(0);
+      await expect(result).resolves.toEqual(items);
+      expect(run).toHaveBeenCalledTimes(items.length);
+      expect(raceCalls).toBe(0);
+    } finally {
+      slow.resolve(0);
+      race.mockRestore();
+    }
+  });
+
+  it('rejects promptly, observes late failures and stops dispatching queued work', async () => {
+    const slow = deferred<number>();
+    const failure = deferred<number>();
+    const error = new Error('first failure');
+    const run = jest.fn((index: number) => index === 0 ? slow.promise : failure.promise);
+    const result = withConcurrencyLimit([0, 1, 2, 3], run, 2);
+    const assertion = expect(result).rejects.toBe(error);
+
+    await flush();
+    failure.reject(error);
+    await assertion;
+    slow.reject(new Error('late failure'));
+    await flush();
+
+    expect(run.mock.calls.map(([index]) => index)).toEqual([0, 1]);
+  });
+
+  it('returns an empty list without starting any work', async () => {
+    const run = jest.fn();
+    await expect(withConcurrencyLimit([], run)).resolves.toEqual([]);
+    expect(run).not.toHaveBeenCalled();
+  });
 });
