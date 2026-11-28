@@ -22,8 +22,11 @@ tags: [smoke, auth]
     id: maestro-emulator-login
 - tapOn:
     id: maestro-password
-- eraseText: 80
+- clearText
 - inputText: 'campus-test-1234' # gitleaks:allow public loopback emulator fixture
+- assertVisible:
+    id: maestro-password
+    text: '^campus-test-1234$'
 - tapOn:
     id: maestro-sign-in
     enabled: true

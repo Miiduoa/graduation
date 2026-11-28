@@ -44,3 +44,33 @@ test('Maestro entrypoint registers the overlay harness instead of a native modal
   assert.doesNotMatch(loginFlow, /openLink/);
   assert.match(linking, /campus:\/\/maestro\/sign-in/);
 });
+
+test('campus link helper confirms iOS custom-scheme sheets and re-opens after the sheet', () => {
+  const helper = readFileSync('apps/mobile/.maestro/helpers/open-campus-link.yaml', 'utf8');
+  const exact = /^(Open|打開|開啟)$/;
+  const title = /^Open in nuni/;
+  assert.match(helper, /openLink:/);
+  assert.match(helper, /text: '\^\(Open\|打開\|開啟\)\$'/);
+  assert.match(helper, /text: '\^Open in nuni'/);
+  assert.equal((helper.match(/openLink:/g) || []).length, 2);
+  assert.match(helper, /waitForAnimationToEnd/);
+  for (const label of ['Open', '打開', '開啟']) assert.match(label, exact);
+  assert.doesNotMatch('Open in nuni?', exact);
+  assert.match('Open in nuni?', title);
+  assert.doesNotMatch('Cancel', exact);
+  assert.doesNotMatch('取消', exact);
+});
+
+test('authentication retry asserts the replacement fixture before the second submit', () => {
+  const flow = readFileSync('apps/mobile/.maestro/flows/02_authentication.yaml', 'utf8');
+  assert.match(flow, /clearText/);
+  assert.match(flow, /id: maestro-password[\s\S]*text: '\^campus-test-1234\$'/);
+  assert.match(flow, /id: tab-Today/);
+});
+
+test('announcements flow still requires the public bulletin copy after the campus link', () => {
+  const flow = readFileSync('apps/mobile/.maestro/flows/03_announcements.yaml', 'utf8');
+  assert.match(flow, /CAMPUS_LINK: campus:\/\/announcements/);
+  assert.match(flow, /公開處室公告的摘要與原文連結。一般帳號即可查看。/);
+  assert.match(flow, /waitForAnimationToEnd/);
+});
