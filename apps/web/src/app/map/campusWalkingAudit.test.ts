@@ -31,6 +31,32 @@ const apply = (audits: readonly CampusWalkingSegmentAudit[]) =>
   applyCampusWalkingSegmentAudits(candidates(), 'fixture', audits, now)!;
 
 describe('trusted OSM walking segment audit bridge', () => {
+  it('fails closed for malformed audit identities without hiding a competing review', () => {
+    const valid = audit();
+    const sparse = new Array<unknown>(2);
+    sparse[0] = valid;
+    const invalid: unknown[] = [
+      null, {}, [valid, null], sparse, [valid, {}],
+      [valid, { ...valid, schoolId: ' fixture ' }],
+      [valid, { ...valid, from: null }],
+      [valid, { ...valid, to: undefined }],
+      [valid, { ...valid, osmWayId: '101' }],
+      [valid, { ...valid, from: { ...valid.from, id: '1' } }],
+    ];
+    for (const catalogue of invalid) {
+      expect(applyCampusWalkingSegmentAudits(
+        candidates(), 'fixture', catalogue as CampusWalkingSegmentAudit[], now,
+      )).toBeNull();
+    }
+
+    // A clearly foreign-school audit cannot suppress a valid local review.
+    const foreign = { schoolId: 'other', from: null } as unknown as CampusWalkingSegmentAudit;
+    const graph = apply([valid, foreign]);
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).not.toBeNull();
+    expect(findCampusWalkingRoute(apply([valid, valid]), 'fixture', bounds, 1, 2, now)).toBeNull();
+    expect(findCampusWalkingRoute(apply([]), 'fixture', bounds, 1, 2, now)).toBeNull();
+  });
+
   it('only enables the exact audited segments and honors audited direction', () => {
     const graph = apply([audit(), audit(2, 3, { direction: 'forward' })]);
     expect(graph.edges.map(e => e.access)).toEqual(['reviewed-open', 'reviewed-open', 'restricted']);
