@@ -38,6 +38,15 @@ export default function BuildingPlanFloorManager({ plan, disabled = false, onCha
   const focusedFloor = useRef<string | null>(null);
   const editingListener = useRef(onEditingChange);
   const reportedEditing = useRef(false);
+  // Invalidate state, not just its visibility: a previously used plan object
+  // can return after an external replacement (for example, undo or cached data).
+  if (editing && editing.plan !== plan) setEditing(null);
+  if (removing && removing.plan !== plan) setRemoving(null);
+  const [previousPlan, setPreviousPlan] = useState(plan);
+  if (previousPlan !== plan) {
+    setPreviousPlan(plan);
+    if (notice && notice.plan !== plan) setNotice(null);
+  }
   const draft = editing?.plan === plan ? editing : null;
   const removal = removing?.plan === plan ? removing : null;
   const editingActive = Boolean(draft || removal);
