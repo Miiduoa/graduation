@@ -353,6 +353,26 @@ async def check_journey(page, config, report):
     report['checks'].append('Keyboard activation follows the rendered campus-scoped href without external data requests')
 
 
+async def capture_failure(page, config, report, error):
+    # Diagnostic captures must not mask the original failure or prevent the
+    # second artifact from being attempted. Bound each independent capture.
+    report['failure'] = repr(error)
+    for suffix, full_page in (('failure-viewport', False), ('failure', True)):
+        try:
+            await page.screenshot(
+                path=str(OUTPUT / f"{config['name']}-{suffix}.png"),
+                full_page=full_page,
+                animations='disabled',
+                timeout=5000,
+            )
+        except Exception as capture_error:
+            report.setdefault('screenshotFailure', repr(capture_error))
+            report.setdefault('diagnosticErrors', []).append({
+                'artifact': suffix,
+                'error': repr(capture_error),
+            })
+
+
 async def run():
     evidence = validate_sources()
     handler = functools.partial(QuietHandler, directory=str(OUTPUT))
@@ -395,13 +415,8 @@ async def run():
                     report['passed'] = True
                     print(f"PASS {config['name']}: {len(report['checks'])} journey checks, {len(report['geometry'])} geometry states", flush=True)
                 except Exception as error:
-                    report['failure'] = repr(error)
-                    try:
-                        await capture(page, str(OUTPUT / f"{config['name']}-failure-viewport.png"), full_page=False)
-                        await capture(page, str(OUTPUT / f"{config['name']}-failure.png"))
-                    except Exception as screenshot_error:
-                        report['screenshotFailure'] = repr(screenshot_error)
                     failure = error
+                    await capture_failure(page, config, report, error)
                     break
                 finally:
                     await context.close()
@@ -410,7 +425,8 @@ async def run():
         if failure is None:
             validate_sources()
     except Exception as error:
-        failure = error
+        if failure is None:
+            failure = error
     finally:
         server.shutdown()
         server.server_close()
