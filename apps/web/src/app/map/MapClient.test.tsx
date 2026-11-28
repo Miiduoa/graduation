@@ -273,6 +273,42 @@ it('puts unknown-room recovery above the map and selects the query to edit', asy
   expect([input.selectionStart, input.selectionEnd]).toEqual([0, 'ZZ303'.length]);
 });
 
+it.each(['button', 'enter'] as const)('rechecks a corrected classroom without leaving the map (%s)', async (method) => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="pu" query="ZZ303" />);
+  await sourceSettled();
+  fireEvent.click(screen.getByRole('button', { name: '修改教室名稱' }));
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' }) as HTMLInputElement;
+  fireEvent.change(search, { target: { value: '   ' } });
+  expect((screen.getByRole('button', { name: '確認教室名稱' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(search, { target: { value: ' PH303 ' } });
+  expect(screen.queryByRole('region', { name: '教室定位結果' })).toBeNull();
+  if (method === 'enter') fireEvent.keyDown(search, { key: 'Enter' });
+  else fireEvent.click(screen.getByRole('button', { name: '確認教室名稱' }));
+  const result = within(screen.getByRole('region', { name: '教室定位結果' }));
+  expect(result.getByRole('heading', { name: 'PH303' })).toBeTruthy();
+  expect(result.getByRole('button', { name: '選擇步行起點' })).toBeTruthy();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-zhugu');
+  expect(search.value).toBe('PH303');
+  expect(document.activeElement).toBe(search);
+  fireEvent.change(search, { target: { value: '圖書館' } });
+  expect(screen.queryByRole('region', { name: '教室定位結果' })).toBeNull();
+});
+
+it('cancels an unconfirmed classroom correction and restores the original request', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="pu" query="ZZ303" />);
+  await sourceSettled();
+  fireEvent.click(screen.getByRole('button', { name: '修改教室名稱' }));
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' }) as HTMLInputElement;
+  fireEvent.change(search, { target: { value: 'PH303' } });
+  fireEvent.click(screen.getByRole('button', { name: '取消修改教室' }));
+  expect(search.value).toBe('ZZ303');
+  expect(document.activeElement).toBe(search);
+  expect(screen.getByRole('heading', { name: 'ZZ303' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '使用 Google 地圖前往主顧樓' })).toBeNull();
+});
+
 it('honors explicit focus over a resolved classroom and resets the request when URL query changes', async () => {
   vi.mocked(loadMapLocations).mockResolvedValue([]);
   const view = render(<MapClient school="pu" query="主顧303" focus="pu-library" />);
