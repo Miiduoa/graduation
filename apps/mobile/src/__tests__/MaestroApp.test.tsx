@@ -71,6 +71,9 @@ test('opens the emulator login overlay in the same window after tapping the cont
   expect(view.getByTestId('maestro-email')).toBeTruthy();
   expect(view.getByTestId('maestro-password')).toBeTruthy();
   expect(view.getByTestId('maestro-password').props.secureTextEntry).toBe(false);
+  expect(view.getByTestId('maestro-password').props.selectTextOnFocus).toBe(true);
+  expect(view.getByTestId('maestro-password').props.autoComplete).toBe('off');
+  expect(view.getByTestId('maestro-password').props.textContentType).toBe('none');
   expect(view.getByTestId('maestro-sign-in')).toBeTruthy();
   expect(view.queryByTestId('maestro-open-emulator-login')).toBeNull();
 });
@@ -157,5 +160,35 @@ test('tapping sign-in while the password field is focused still submits', async 
   await waitFor(() => expect(view.getByTestId('maestro-login-error')).toBeTruthy());
   expect(dismiss).toHaveBeenCalled();
   expect(view.getByTestId('maestro-sign-in')).toBeTruthy();
+  expect(view.getByTestId('maestro-password').props.value).toBe('');
   dismiss.mockRestore();
+});
+
+test('retry after a rejected password submits only the replacement fixture', async () => {
+  const getIdToken = jest.fn().mockResolvedValue('token');
+  jest.mocked(signInWithEmailAndPassword)
+    .mockRejectedValueOnce(new Error('wrong password'))
+    .mockImplementation(async () => {
+      queueMicrotask(() => publishSchoolSessionReady(true));
+      return { user: { uid: 'test-student-a', getIdToken } } as never;
+    });
+
+  const view = openLogin();
+  fireEvent.changeText(view.getByTestId('maestro-email'), 's0000001@test.campus-one.local');
+  fireEvent.changeText(view.getByTestId('maestro-password'), 'incorrect-emulator-fixture-password');
+  fireEvent.press(view.getByTestId('maestro-sign-in'));
+  await waitFor(() => expect(view.getByTestId('maestro-login-error')).toBeTruthy());
+  expect(view.getByTestId('maestro-password').props.value).toBe('');
+
+  fireEvent.changeText(view.getByTestId('maestro-password'), 'campus-test-1234');
+  fireEvent.press(view.getByTestId('maestro-sign-in'));
+
+  await waitFor(() =>
+    expect(signInWithEmailAndPassword).toHaveBeenLastCalledWith(
+      emulatorAuth,
+      's0000001@test.campus-one.local',
+      'campus-test-1234',
+    ),
+  );
+  await waitFor(() => expect(view.queryByTestId('maestro-emulator-login')).toBeNull());
 });

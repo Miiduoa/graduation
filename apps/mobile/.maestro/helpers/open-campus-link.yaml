@@ -1,12 +1,21 @@
 appId: ${APP_ID}
 ---
-# iOS 18+ asks "Open in nuni?" when XCTest/simctl opens a custom scheme. That
-# confirmation can make openLink itself time out (NSPOSIXErrorDomain 60) after
-# the app has already opened the destination. Keep destination assertions in
-# the caller; do not treat the driver timeout as a failed navigation.
+# iOS 18+ shows "Open in nuni?" / 「要使用 nuni 來開啟嗎？」 for campus://.
+# The confirm control is "Open", 「打開」, 「開啟」, or the whole title string.
+# XCTest openLink can time out (NSPOSIXErrorDomain 60) while that sheet is up;
+# the URL is delivered only after the confirm tap. Open the same link again
+# once the sheet is gone. Callers still assert the destination.
 - openLink:
     link: ${CAMPUS_LINK}
     optional: true
 - tapOn:
-    text: '^Open$'
+    text: '^(Open|打開|開啟)$'
+    optional: true
+- tapOn:
+    text: '^Open in nuni'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- openLink:
+    link: ${CAMPUS_LINK}
     optional: true
