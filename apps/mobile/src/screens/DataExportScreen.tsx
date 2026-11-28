@@ -116,7 +116,7 @@ function ExportEditor({
         typeof data.coverage.truncated !== 'boolean' ||
         !Array.isArray(data.coverage.categories) ||
         data.coverage.categories.length !== selected.length ||
-        data.coverage.categories.some((category) => !selected.includes(category))
+        selected.some((category) => !data.coverage.categories.includes(category))
       ) {
         throw new Error('Unconfirmed export scope');
       }

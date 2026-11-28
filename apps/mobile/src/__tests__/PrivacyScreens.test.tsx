@@ -192,6 +192,42 @@ test('a different account payload and unconfirmed coverage cannot be shared', as
   expect(mockWrite).not.toHaveBeenCalled();
   expect(view.getByText(/無法完成資料匯出/)).toBeTruthy();
 });
+test('duplicate coverage cannot masquerade as a complete export and retry accepts reordered categories', async () => {
+  exportData.mockImplementationOnce(async (request) => ({
+    userId: request.expectedUserId,
+    schoolId: request.schoolId,
+    exportedAt: '',
+    coverage: {
+      truncated: false,
+      truncatedSections: [],
+      scope: 'selected-categories',
+      categories: [request.categories[0], ...request.categories.slice(0, -1)],
+    },
+  }));
+  const view = render(<DataExportScreen />);
+  await act(async () => fireEvent.press(view.getByText('匯出 8 項資料')));
+  expect(mockNewFile).not.toHaveBeenCalled();
+  expect(mockWrite).not.toHaveBeenCalled();
+  expect(share).not.toHaveBeenCalled();
+  expect(view.getByText(/無法完成資料匯出/)).toBeTruthy();
+
+  exportData.mockImplementationOnce(async (request) => ({
+    userId: request.expectedUserId,
+    schoolId: request.schoolId,
+    exportedAt: '',
+    coverage: {
+      truncated: false,
+      truncatedSections: [],
+      scope: 'selected-categories',
+      categories: [...request.categories].reverse(),
+    },
+  }));
+  await act(async () => fireEvent.press(view.getByText('匯出 8 項資料')));
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+  expect(share).toHaveBeenCalledTimes(1);
+  expect(view.queryByText(/無法完成資料匯出/)).toBeNull();
+  expect(view.getByText(/分享選單已關閉/)).toBeTruthy();
+});
 test('export lock rejects rapid duplicate actions and reports partial records', async () => {
   const pending = deferred<void>();
   share.mockReturnValue(pending.promise);
