@@ -265,6 +265,14 @@ function isStandingBuilding(value: unknown): boolean {
   if (buildingPart !== undefined &&
       (typeof buildingPart !== 'string' ||
         !['no', 'false', '0'].includes(buildingPart.trim().toLowerCase()))) return false;
+  // Simple Indoor Tagging describes rooms, corridors and floor outlines, not
+  // the external whole-building geometry. A retained audited way ID plus
+  // building=yes must not promote a repurposed indoor feature into a full
+  // campus building. Keep the POI marker and require source review instead.
+  // https://wiki.openstreetmap.org/wiki/Simple_Indoor_Tagging
+  const indoor = tags?.indoor;
+  if (indoor !== undefined && (typeof indoor !== 'string' ||
+      !['no', 'false', '0'].includes(indoor.trim().toLowerCase()))) return false;
   // A raised building part cannot be drawn as a ground-to-roof extrusion.
   // We do not yet have verified floor/base elevations for elevated OSM ways.
   // Unknown units or ambiguous offset values must not become a fictitious wall.
