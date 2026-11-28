@@ -167,7 +167,9 @@ function MaestroHarness() {
             value={password}
             onChangeText={setPasswordField}
             onChange={(event) => setPasswordField(event.nativeEvent.text)}
-            secureTextEntry
+            // XCTest typeText does not deliver characters to iOS secureTextEntry;
+            // this overlay exists only in index.maestro.ts.
+            secureTextEntry={false}
             autoCapitalize="none"
             autoCorrect={false}
             returnKeyType="go"

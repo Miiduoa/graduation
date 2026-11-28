@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { blobSha, parseFingerprint, summarizeFindings, validateAliases, verifyAliases, verifyPublicWorkflowReference } from './verify-gitleaks-history.mjs';
+import { blobSha, controlMarker, parseFingerprint, summarizeFindings, validateAliases, verifyAliases, verifyPublicWorkflowReference } from './verify-gitleaks-history.mjs';
 
 const oldCommit = 'a'.repeat(40), newCommit = 'b'.repeat(40);
 const reviewed = `${oldCommit}:fixtures/example.txt:generic-api-key:17`;
@@ -127,6 +127,18 @@ test('deduplicates blob reads without weakening per-finding verification', async
   const aliases = [...manifest().aliases, { reviewed: reviewed.replace(':17', ':18'), observed: observed.replace(':17', ':18') }];
   assert.equal((await verifyAliases(aliases, async () => { calls++; return 'c'.repeat(40); })).length, 2);
   assert.equal(calls, 2);
+});
+test('positive-control markers stay deterministic and do not reuse one value across positions', () => {
+  const gcp = controlMarker('gcp-api-key', 'apps/mobile/eas.json', 55);
+  const lockA = controlMarker('generic-api-key', 'apps/mobile/ios/Podfile.lock', 2526);
+  const lockB = controlMarker('generic-api-key', 'apps/mobile/ios/Podfile.lock', 2573);
+  assert.equal(gcp, controlMarker('gcp-api-key', 'apps/mobile/eas.json', 55));
+  assert.equal(lockA, controlMarker('generic-api-key', 'apps/mobile/ios/Podfile.lock', 2526));
+  assert.match(gcp, /^AIza[A-Za-z0-9_-]{35}$/);
+  assert.match(lockA, /^[A-Za-z0-9_-]{43}$/);
+  assert.notEqual(lockA, lockB);
+  assert.notEqual(gcp.slice(4), lockA);
+  assert.throws(() => controlMarker('generic-api-key', 'apps/mobile/ios/Podfile.lock', 0));
 });
 test('public scan summaries never include the match, secret or unknown fields', () => {
   const report = summarizeFindings([{ RuleID: 'test', File: 'file', StartLine: 1, Commit: oldCommit, Secret: 'not-for-output', Match: 'not-for-output', extra: 'not-for-output' }]);
