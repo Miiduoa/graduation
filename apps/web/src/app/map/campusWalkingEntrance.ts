@@ -33,11 +33,14 @@ export function isCampusEntranceRouteCurrent(
   ...args: Parameters<typeof routeToCampusEntrance>
 ): boolean {
   const [candidates, schoolId, , originNodeId, destination, , , now] = args;
-  if (result.status !== 'ready' ||
+  // Cached handoff data may be incomplete after serialization or migration.
+  // Validate the route shape before dereferencing its nodes and destination.
+  if (!result || result.status !== 'ready' ||
+      !isCampusWalkingRouteCurrent(result.route, schoolId, now) ||
+      !result.destination || typeof result.destination !== 'object' ||
       result.route.nodes[0]?.id !== originNodeId ||
       result.route.osmBaseAt !== candidates.osmBaseAt ||
-      !sameDestination(result.destination, destination) ||
-      !isCampusWalkingRouteCurrent(result.route, schoolId, now)) return false;
+      !sameDestination(result.destination, destination)) return false;
 
   const refreshed = routeToCampusEntrance(...args);
   if (refreshed.status !== 'ready') return false;
