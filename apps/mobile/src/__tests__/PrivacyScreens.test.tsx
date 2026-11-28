@@ -228,6 +228,38 @@ test('duplicate coverage cannot masquerade as a complete export and retry accept
   expect(view.queryByText(/無法完成資料匯出/)).toBeNull();
   expect(view.getByText(/分享選單已關閉/)).toBeTruthy();
 });
+test.each([
+  { truncated: false, truncatedSections: ['groups'] },
+  { truncated: true, truncatedSections: [] },
+  { truncated: true, truncatedSections: [''] },
+  { truncated: false, truncatedSections: null },
+])('inconsistent truncation metadata cannot be shared: %j', async (coverage) => {
+  exportData.mockImplementationOnce(
+    async (request) =>
+      ({
+        userId: request.expectedUserId,
+        schoolId: request.schoolId,
+        exportedAt: '',
+        coverage: {
+          scope: 'selected-categories',
+          categories: request.categories,
+          ...coverage,
+        },
+      }) as Awaited<ReturnType<typeof exportUserData>>,
+  );
+  const view = render(<DataExportScreen />);
+  await act(async () => fireEvent.press(view.getByText('匯出 8 項資料')));
+  expect(mockNewFile).not.toHaveBeenCalled();
+  expect(mockWrite).not.toHaveBeenCalled();
+  expect(share).not.toHaveBeenCalled();
+  expect(view.getByText(/無法完成資料匯出/)).toBeTruthy();
+
+  await act(async () => fireEvent.press(view.getByText('匯出 8 項資料')));
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+  expect(share).toHaveBeenCalledTimes(1);
+  expect(view.queryByText(/無法完成資料匯出/)).toBeNull();
+});
+
 test('export lock rejects rapid duplicate actions and reports partial records', async () => {
   const pending = deferred<void>();
   share.mockReturnValue(pending.promise);

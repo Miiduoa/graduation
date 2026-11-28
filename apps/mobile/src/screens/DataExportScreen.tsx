@@ -114,6 +114,11 @@ function ExportEditor({
         !data.coverage ||
         data.coverage.scope !== 'selected-categories' ||
         typeof data.coverage.truncated !== 'boolean' ||
+        !Array.isArray(data.coverage.truncatedSections) ||
+        data.coverage.truncatedSections.some(
+          (section) => typeof section !== 'string' || !section.trim(),
+        ) ||
+        data.coverage.truncated !== (data.coverage.truncatedSections.length > 0) ||
         !Array.isArray(data.coverage.categories) ||
         data.coverage.categories.length !== selected.length ||
         selected.some((category) => !data.coverage.categories.includes(category))
