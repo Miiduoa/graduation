@@ -104,6 +104,7 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
   }>();
   const taintedTrials = new Set<string>();
   const captureTimesByTrial = new Map<string, number[]>();
+  const visualRubricsByTrial = new Map<string, string>();
   // Detect replayed captures within the same scenario/product across different trial IDs.
   // A shared cross-product video is allowed; recycled runs from one product are not.
   const observedCaptures = new Map<string, string>();
@@ -198,6 +199,17 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
     }
     const id = row.trialId;
     if (!text(id)) return;
+    // Visual scores are comparable only under the same named rubric.
+    // Unrated/unverified rows remain recordable but cannot complete a trial.
+    if (row.task === 'visual-performance' && typeof row.visualScore === 'number' && text(row.visualRubric)) {
+      const rubric = row.visualRubric as string;
+      const prior = visualRubricsByTrial.get(id as string);
+      if (prior !== undefined && prior !== rubric) {
+        issues.push(`${prefix}: mismatched visualRubric in trial ${id}`);
+      } else {
+        visualRubricsByTrial.set(id as string, rubric);
+      }
+    }
     if (timestamp(row.testedAt)) {
       const times = captureTimesByTrial.get(id as string) ?? [];
       times.push(Date.parse(row.testedAt as string));
@@ -262,6 +274,7 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
       const key = JSON.stringify([
         CONDITIONS.map((field) => trial.baseline[field]),
         CAMPUS_SPATIAL_PRODUCTS.map((product) => trial.appVersions.get(product)),
+        trial.baseline.task === 'visual-performance' ? visualRubricsByTrial.get(id) : null,
       ]);
       const scenario = countsByScenario.get(key);
       if (scenario) scenario.count += 1;
