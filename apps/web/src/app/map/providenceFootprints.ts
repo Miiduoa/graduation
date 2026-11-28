@@ -529,6 +529,7 @@ export function parseProvidenceFootprintSnapshot(value: unknown, now = Date.now(
     if (!Number.isFinite(baseMs) ||
         new Date(baseMs).toISOString().replace('.000Z', 'Z') !== osmBaseAt ||
         baseMs > fetchedAtMs + 5 * 60 * 1000 ||
+        baseMs > now + 5 * 60 * 1000 ||
         fetchedAtMs - baseMs > 48 * 60 * 60 * 1000) return null;
   }
   const ageMs = now - fetchedAtMs;
