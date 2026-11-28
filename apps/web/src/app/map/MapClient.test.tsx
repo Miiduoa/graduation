@@ -565,6 +565,21 @@ it('delegates the starting point to the provider even when nuni has a previous G
     fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
     const map = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
     expect(map().myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
+    const direct = within(screen.getByRole('region', { name: '教室定位結果' }));
+    const directGoogle = new URL(direct.getByRole('link', { name: '使用 Google 地圖前往主顧樓' }).getAttribute('href')!);
+    const directApple = new URL(direct.getByRole('link', { name: '使用 Apple 地圖前往主顧樓' }).getAttribute('href')!);
+    const detailGoogle = new URL(screen.getByRole('link', { name: '從目前位置導航' }).getAttribute('href')!);
+    const detailApple = new URL(screen.getByRole('link', { name: '使用 Apple 地圖從目前位置導航' }).getAttribute('href')!);
+    for (const link of [directGoogle, detailGoogle]) {
+      expect(link.searchParams.get('destination')).toBe(`${classroom.lat},${classroom.lng}`);
+      expect(link.searchParams.get('travelmode')).toBe('walking');
+      expect(link.searchParams.has('origin')).toBe(false);
+    }
+    for (const link of [directApple, detailApple]) {
+      expect(link.searchParams.get('daddr')).toBe(`${classroom.lat},${classroom.lng}`);
+      expect(link.searchParams.get('dirflg')).toBe('w');
+      expect(link.searchParams.has('saddr')).toBe(false);
+    }
     fireEvent.click(screen.getByRole('button', { name: '選擇步行起點' }));
     const pending = within(screen.getByRole('region', { name: '已選擇步行終點' }));
     const google = new URL(pending.getByRole('link', { name: '在 Google 地圖選擇起點' }).getAttribute('href')!);
