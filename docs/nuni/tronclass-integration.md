@@ -452,7 +452,7 @@ Firebase 既有 `accountDeletion` 在標記關帳後，會呼叫 server-only 的
 
 所有 ledger 變更的 transaction 也會讀取關閉標記，防止清理完成後被尚未結束的請求重新建立。已確認收據的 ledger 日後到期清除，仍會保留作業鎖；重放同一 operation ID 也不能重新送交。
 
-**平台帳號（Google／nuni）關帳接線：**本分支新增 PostgreSQL 的帳號狀態／刪除 trigger，與真實 `platform_accounts` 關帳交易一同寫入 durable outbox。背景 worker 以 lease token 領取並呼叫同一 `closeTronClassOwner()`，成功才刪除事件及其 platform ID；失敗固定錯誤碼、退避重試，程序中斷後可重新領取。worker 只讀明確關帳事件，不掃不存在的帳號猜測關帳，也沒有讓客戶端任意傳 owner 的 HTTP 端點。專用資料庫設定、最小權限、候選 migration 與啟用順序見 [平台關帳部署說明](../../deploy/nuni-api/tronclass-account-closure/README.md)。本輪未套用正式 PostgreSQL migration，因此不能宣稱 production 平台關帳已啟用自動清理。
+**平台帳號（Google／nuni）關帳接線：**本分支新增 PostgreSQL 的帳號狀態／刪除 trigger，與真實 `platform_accounts` 關帳交易一同寫入 durable outbox。背景 worker 以 lease token 領取並呼叫同一 `closeTronClassOwner()`，成功才刪除事件及其 platform ID；失敗固定錯誤碼、退避重試，程序中斷後可重新領取。worker 只讀明確關帳事件，不掃不存在的帳號猜測關帳，也沒有讓客戶端任意傳 owner 的 HTTP 端點。專用資料庫設定、官方 284 migration 與啟用順序見 [平台關帳部署說明](../../deploy/nuni-api/tronclass-account-closure/README.md)。本輪未套用正式 PostgreSQL migration，因此不能宣稱 production 平台關帳已啟用自動清理。
 
 **到期清理：**`TRONCLASS_RETENTION_ENABLED=true` 會在 Node.js Web 程序啟用背景 worker，啟動時立即非同步執行第一輪，每輪結束後等待 4 分鐘加未滿 60 秒的隨機延遲。三個固定集合各自最多掃描 200 筆，每輪合計最多 600 筆。掃描失敗後仍會排定下一輪。新綁定要求目前程序在最近 30 分鐘內至少完整清理成功一輪。若啟動的第一輪仍在進行，新綁定最多等 3 秒再檢查。未曾成功或距上次成功超過 30 分鐘時，綁定會回傳 HTTP 503（`TRONCLASS_RETENTION_REQUIRED`）。失敗或略過的批次不會更新成功時間，重新成功後即恢復接受綁定。同一程序不重疊，跨程序由 Firestore transaction 重讀目前期限及狀態後決定是否刪除。換綁、配額續期或 draft 轉成 unknown 時不會被舊查詢結果刪除。游標與輪換順序避免不應刪除的紀錄堵住其他已到期資料。這個方式保留 Spark 部署相容性，不依賴付費 TTL；仍受實際服務運作與 Firestore 配額影響，不承諾到期瞬間刪除。
 
