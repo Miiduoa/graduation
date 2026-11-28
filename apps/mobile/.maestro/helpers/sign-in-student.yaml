@@ -4,6 +4,9 @@ appId: ${APP_ID}
 # role switch is installed. The existing scripts/test-env/seed.cjs owns this
 # public, non-production fixture password; the test entrypoint pins loopback.
 - runFlow: open-emulator-login.yaml
+- tapOn:
+    id: maestro-password
+- eraseText: 80
 - inputText: 'campus-test-1234' # gitleaks:allow public loopback emulator fixture
 # Password keyboard on iOS has Return/Go, not a hide-keyboard control. The
 # sign-in button sits above the keyboard; tapping it is the real submit.

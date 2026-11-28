@@ -101,6 +101,30 @@ test('password return key dismisses the keyboard and signs in the seeded fixture
   dismiss.mockRestore();
 });
 
+test('iOS native typing updates the password used for emulator sign-in', async () => {
+  const getIdToken = jest.fn().mockResolvedValue('token');
+  jest.mocked(signInWithEmailAndPassword).mockImplementation(async () => {
+    queueMicrotask(() => publishSchoolSessionReady(true));
+    return { user: { uid: 'test-student-a', getIdToken } } as never;
+  });
+
+  const view = openLogin();
+  fireEvent.changeText(view.getByTestId('maestro-email'), 's0000001@test.campus-one.local');
+  fireEvent(view.getByTestId('maestro-password'), 'change', {
+    nativeEvent: { text: 'campus-test-1234' },
+  });
+  fireEvent.press(view.getByTestId('maestro-sign-in'));
+
+  await waitFor(() =>
+    expect(signInWithEmailAndPassword).toHaveBeenCalledWith(
+      emulatorAuth,
+      's0000001@test.campus-one.local',
+      'campus-test-1234',
+    ),
+  );
+  await waitFor(() => expect(view.queryByTestId('maestro-emulator-login')).toBeNull());
+});
+
 test('keeps the overlay until the school session is ready after Firebase Auth succeeds', async () => {
   const getIdToken = jest.fn().mockResolvedValue('token');
   jest.mocked(signInWithEmailAndPassword).mockResolvedValue({
