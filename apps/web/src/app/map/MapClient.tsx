@@ -763,17 +763,17 @@ function MapContent({
           ) : classroom.status === 'matched' && classroomPlace ? <>
             <p>可對應「{classroomPlace.name}」的位置。抵達後請依課表與現場標示確認教室。</p>
             <p id={classroomNoteId}>
-              導航終點是建築地點標記，並非已核實的入口或室內教室；路線由第三方地圖規劃。
+              導航終點是建築地點標記，並非已核實的入口或室內教室；路線由第三方地圖規劃，起點由地圖服務確認。
               {isProvidencePendingVerification(school, classroomPlace) && (
                 <strong>這個地點只有單一資料來源，位置待再次確認。</strong>
               )}
             </p>
             <div className={styles.actions}>
-              <a className="btn primary" href={walkingDirectionsUrl(classroomPlace, myLocation ?? undefined)}
+              <a className="btn primary" href={walkingDirectionsUrl(classroomPlace)}
                 aria-describedby={classroomNoteId} target="_blank" rel="noopener noreferrer">
                 使用 Google 地圖前往{classroomPlace.name}
               </a>
-              <a className="btn" href={appleWalkingDirectionsUrl(classroomPlace, myLocation ?? undefined)}
+              <a className="btn" href={appleWalkingDirectionsUrl(classroomPlace)}
                 aria-describedby={classroomNoteId} target="_blank" rel="noopener noreferrer">
                 使用 Apple 地圖前往{classroomPlace.name}
               </a>
@@ -1000,7 +1000,7 @@ function MapContent({
               </p>
             )}
             <p id={detailNoteId}>
-              導航目的地為地點標記，並非已核實的校舍入口或室內教室；請依現場指標確認。
+              導航目的地為地點標記，並非已核實的校舍入口或室內教室；請依現場指標確認。從目前位置導航時，起點由地圖服務確認。
               {isProvidencePendingVerification(school, selected) && (
                 <strong>這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。</strong>
               )}
@@ -1009,7 +1009,7 @@ function MapContent({
               <a
                 className="btn"
                 aria-describedby={detailNoteId}
-                href={walkingDirectionsUrl(selected, myLocation ?? undefined)}
+                href={walkingDirectionsUrl(selected)}
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -1018,7 +1018,7 @@ function MapContent({
               <a
                 className="btn"
                 aria-describedby={detailNoteId}
-                href={appleWalkingDirectionsUrl(selected, myLocation ?? undefined)}
+                href={appleWalkingDirectionsUrl(selected)}
                 target="_blank"
                 rel="noopener noreferrer"
               >
