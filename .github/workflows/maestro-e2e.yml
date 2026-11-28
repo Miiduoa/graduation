@@ -253,9 +253,18 @@ jobs:
               suite_status=1
               # DeviceUnreachable leaves XCTest dead; the next isolated flow then
               # exits in a few seconds with no JUnit. Reboot the same simulator.
-              xcrun simctl shutdown "$SIMULATOR_UDID" >/dev/null 2>&1 || true
-              xcrun simctl boot "$SIMULATOR_UDID" >/dev/null 2>&1 || true
-              xcrun simctl bootstatus "$SIMULATOR_UDID" -b >/dev/null 2>&1 || true
+              if command -v xcrun >/dev/null 2>&1; then
+                killall maestro-driver-iosUITests-Runner 2>/dev/null || true
+                xcrun simctl shutdown "$SIMULATOR_UDID" >/dev/null 2>&1 || true
+                xcrun simctl boot "$SIMULATOR_UDID" >/dev/null 2>&1 || true
+                if ! xcrun simctl bootstatus "$SIMULATOR_UDID" -b >/dev/null 2>&1; then
+                  xcrun simctl boot "$SIMULATOR_UDID" >/dev/null 2>&1 || true
+                  xcrun simctl bootstatus "$SIMULATOR_UDID" -b >/dev/null 2>&1 || true
+                fi
+                if [ -n "${APP_PATH:-}" ] && [ -d "$APP_PATH" ]; then
+                  xcrun simctl install "$SIMULATOR_UDID" "$APP_PATH" >/dev/null 2>&1 || true
+                fi
+              fi
             fi
             
             # Small delay between tests

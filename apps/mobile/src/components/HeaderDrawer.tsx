@@ -252,17 +252,23 @@ export function HeaderDrawerHost() {
       onRequestClose={handleClose}
       statusBarTranslucent
     >
-      {/* testID and accessibilityViewIsModal must sit on the same non-animated
-          Modal root. Maestro's iOS id query skips Animated.View descendants
-          and also skips a parent identifier when only the child is modal,
-          even though the debug dump still lists header-drawer-panel. */}
+      {/* Modal flag and testID must not share a node: a modal accessibility
+          element hides its children from Maestro text queries (個人 stays on
+          screen but is not found). Keep both off Animated.View so the iOS
+          id query can still see header-drawer-panel. */}
       <View
-        testID="header-drawer-panel"
+        testID="header-drawer-modal"
         collapsable={false}
         accessibilityViewIsModal
         onAccessibilityEscape={handleClose}
-        style={{ flex: 1, flexDirection: 'row' }}
+        style={{ flex: 1 }}
       >
+        <View
+          testID="header-drawer-panel"
+          collapsable={false}
+          accessible={false}
+          style={{ flex: 1, flexDirection: 'row' }}
+        >
         {/* 抽屜本體 */}
         <Animated.View
           collapsable={false}
@@ -673,6 +679,7 @@ export function HeaderDrawerHost() {
             accessible={false}
           />
         </Animated.View>
+        </View>
       </View>
     </Modal>
   );
