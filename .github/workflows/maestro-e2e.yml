@@ -243,24 +243,12 @@ jobs:
               echo "Passed: $flow_name"
             else
               echo "Failed: $flow_name" >&2
-              python3 - "$flow_name" <<'PYTHON'
-import sys
-import xml.etree.ElementTree as ET
-from pathlib import Path
-name = sys.argv[1]
-xml_path = Path('.maestro/results') / f'{name}-results.xml'
-if xml_path.exists():
-    root = ET.parse(xml_path).getroot()
-    for element in root.iter():
-        if element.tag in {'failure', 'error'}:
-            message = (element.get('message') or '') + '\n' + (element.text or '')
-            print(message.strip()[:4000])
-for base in (Path('.maestro/screenshots') / name, Path('.maestro/results/debug') / name):
-    for log in sorted(base.rglob('maestro.log')):
-        for line in log.read_text(errors='replace').splitlines():
-            if 'CommandFailed' in line or ' [ERROR] ' in line:
-                print(line[:500])
-PYTHON
+              # Keep this step a plain shell so the merge-gate suite extractor
+              # still runs every remaining flow after a failure.
+              { grep -R -E '<(failure|error)[ >]|CommandFailed| \[ERROR\] ' \
+                  ".maestro/results/${flow_name}-results.xml" \
+                  ".maestro/screenshots/${flow_name}" \
+                  ".maestro/results/debug/${flow_name}" 2>/dev/null || true; } | head -n 40
               suite_status=1
             fi
             
