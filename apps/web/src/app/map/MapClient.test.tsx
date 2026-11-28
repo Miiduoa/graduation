@@ -349,6 +349,55 @@ it('cancels an unconfirmed classroom correction and restores the original reques
   expect(screen.queryByRole('link', { name: '使用 Google 地圖前往主顧樓' })).toBeNull();
 });
 
+it('supersedes the previous URL focus when a corrected classroom is confirmed, without changing a shared route', async () => {
+  state.user = null;
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="pu" query="ZZ303" focus="pu-library" route="pu-library,pu-zhugu" />);
+  await sourceSettled();
+  const map = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(map().selected.id).toBe('pu-library');
+  expect(map().route.map((place: MapLocation) => place.id)).toEqual(['pu-library', 'pu-zhugu']);
+  fireEvent.click(screen.getByRole('button', { name: '修改教室名稱' }));
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' });
+  fireEvent.change(search, { target: { value: 'PH303' } });
+  fireEvent.click(screen.getByRole('button', { name: '取消修改教室' }));
+  expect(map().selected.id).toBe('pu-library');
+  fireEvent.click(screen.getByRole('button', { name: '修改教室名稱' }));
+  fireEvent.change(search, { target: { value: 'PH303' } });
+  fireEvent.click(screen.getByRole('button', { name: '確認教室名稱' }));
+  expect(map().selected.id).toBe('pu-zhugu');
+  expect(map().route.map((place: MapLocation) => place.id)).toEqual(['pu-library', 'pu-zhugu']);
+  const detail = within(screen.getByRole('region', { name: '地點詳情' }));
+  expect(new URL(detail.getByRole('link', { name: '從目前位置導航' }).getAttribute('href')!).searchParams.get('destination'))
+    .toBe(`${map().selected.lat},${map().selected.lng}`);
+  const login = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
+  const back = new URL(login.searchParams.get('returnUrl')!, window.location.origin);
+  expect(back.searchParams.get('query')).toBe('PH303');
+  expect(back.searchParams.get('focus')).toBe('pu-zhugu');
+  expect(back.searchParams.get('route')).toBe('pu-library,pu-zhugu');
+});
+
+it('clears a prior explicit candidate when a changed classroom is still unresolved', async () => {
+  const candidates = [
+    { ...library, id: 'east', name: '教學大樓', lat: 25.01 },
+    { ...library, id: 'west', name: '教學大樓', lat: 25.02 },
+  ];
+  vi.mocked(loadMapLocations).mockResolvedValue(candidates);
+  render(<MapClient school="another-school" query="教學101" focus="east" />);
+  const result = within(await screen.findByRole('region', { name: '教室定位結果' }));
+  fireEvent.click(result.getByRole('button', { name: '選擇候選 2：教學大樓' }));
+  const map = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(map().selected.id).toBe('west');
+  fireEvent.click(result.getByRole('button', { name: '修改教室名稱' }));
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' });
+  fireEvent.change(search, { target: { value: 'ZZ303' } });
+  fireEvent.keyDown(search, { key: 'Enter' });
+  expect(screen.getByRole('heading', { name: 'ZZ303' })).toBeTruthy();
+  expect(map().selected).toBeNull();
+  expect(screen.queryByRole('link', { name: '從目前位置導航' })).toBeNull();
+  expect(screen.queryByText(/找不到連結指定的地點/)).toBeNull();
+});
+
 it('honors explicit focus over a resolved classroom and resets the request when URL query changes', async () => {
   vi.mocked(loadMapLocations).mockResolvedValue([]);
   const view = render(<MapClient school="pu" query="主顧303" focus="pu-library" />);
