@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BufferGeometry, Camera, ExtrudeGeometry, InstancedMesh, Material, Matrix4, Mesh, MeshStandardMaterial, PlaneGeometry, Scene, Vector3 } from 'three';
-import { buildCampusSpatialModel } from './campusSpatialModel';
+import { buildCampusSpatialModel, type CampusSpatialModel } from './campusSpatialModel';
 import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
 import { parseProvidenceOsmFootprints, parseProvidenceFootprintResponse, type ProvidenceFootprint } from './providenceFootprints';
 import { createCampusSpatialScene, type CampusSpatialScene, type CampusSpatialView } from './campusSpatialScene';
@@ -172,6 +172,32 @@ function focusOnGround(camera: Camera) {
 }
 
 describe('optional spatial canvas lifecycle', () => {
+  it.each([
+    ['no locations', buildCampusSpatialModel([])],
+    ['oversized area', buildCampusSpatialModel([
+      locations[0], { ...locations[1], lat: 25, lng: 121 },
+    ])],
+    ['inconsistent empty model', { ...model, points: [] }],
+    ['unavailable model with points', { ...model, unavailableReason: 'area-too-large' as const }],
+  ] satisfies [string, CampusSpatialModel][])('falls back safely before allocating WebGL for %s', (_label, source) => {
+    const { scene, container, onError, onSelect } = setup(source);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(container.childElementCount).toBe(0);
+    expect(webgl.renderers).toHaveLength(0);
+    expect(observers).toHaveLength(0);
+    expect(frames.size).toBe(0);
+    scene.setView({ selectedId: 'hall', overhead: true, motion: true, dark: true });
+    scene.setActive(false);
+    scene.setActive(true);
+    scene.dispose();
+    scene.dispose();
+    drawFrame();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(frames.size).toBe(0);
+    expect(container.childElementCount).toBe(0);
+  });
+
   it('renders once on arrival and leaves no idle animation loop', () => {
     const { scene, renderer } = setup();
     expect(frames.size).toBe(1);
