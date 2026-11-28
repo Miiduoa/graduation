@@ -56,6 +56,7 @@ function MaestroHarness() {
   const [offerTrigger, setOfferTrigger] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordGeneration, setPasswordGeneration] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   // This component is registered only by index.maestro.ts. Keep the control
@@ -109,6 +110,11 @@ function MaestroHarness() {
       setVisible(false);
     } catch {
       // Do not include credentials, tokens, or backend responses in screenshots.
+      // Remount an empty field so a retry cannot submit leftover native text.
+      // iOS places the caret on a hyphen boundary, so backspace-only erase
+      // left "-password" after the next typed fixture.
+      setPasswordField('');
+      setPasswordGeneration((generation) => generation + 1);
       setError('模擬器登入失敗，請確認測試帳號與密碼');
     } finally { setBusy(false); }
   };
@@ -161,6 +167,7 @@ function MaestroHarness() {
             style={styles.field}
           />
           <TextInput
+            key={`maestro-password-${passwordGeneration}`}
             ref={passwordInputRef}
             testID="maestro-password"
             accessibilityLabel="測試密碼"
@@ -170,8 +177,11 @@ function MaestroHarness() {
             // XCTest typeText does not deliver characters to iOS secureTextEntry;
             // this overlay exists only in index.maestro.ts.
             secureTextEntry={false}
+            selectTextOnFocus
             autoCapitalize="none"
             autoCorrect={false}
+            autoComplete="off"
+            textContentType="none"
             returnKeyType="go"
             blurOnSubmit
             enablesReturnKeyAutomatically

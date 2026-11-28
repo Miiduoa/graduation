@@ -3,6 +3,8 @@ name: Authenticated announcement search and detail
 tags: [smoke, announcements]
 ---
 - runFlow: ../helpers/sign-in-student.yaml
+- waitForAnimationToEnd:
+    timeout: 2500
 - runFlow:
     file: ../helpers/open-campus-link.yaml
     env:
