@@ -389,6 +389,24 @@ function MapContent({
   const canChooseClassroomOrigin = placeState.source === 'ready' &&
     !routeStart && !routeEnd && !routeNeedsConfirmation && (!route || routeDraft !== null);
 
+  function classroomDestinationWithOrigin(candidate: MapLocation) {
+    if (!classroomLinkActive || placeState.source !== 'ready' || !routeStart ||
+        routeNeedsConfirmation || !classroomIds.has(candidate.id) || routeStart.id === candidate.id) return null;
+    const destination = confirmedRoutePlace(locations, candidate);
+    if (!destination) return null;
+    if (classroom.status === 'ambiguous' &&
+        (typeof selection !== 'object' || selection === null || selected?.id !== destination.id)) return null;
+    return { from: routeStart, to: destination };
+  }
+
+  function chooseClassroomDestination(candidate: MapLocation) {
+    const endpoints = classroomDestinationWithOrigin(candidate);
+    if (!endpoints) return;
+    classroomRouteFocusPending.current = true;
+    setRouteDraft({ from: { ...endpoints.from }, to: { ...endpoints.to } });
+    setNotice('');
+  }
+
   function chooseClassroomOrigin(candidate: MapLocation) {
     if (!classroomLinkActive || !canChooseClassroomOrigin || !classroomIds.has(candidate.id)) return;
     const destination = confirmedRoutePlace(locations, candidate);
@@ -744,13 +762,9 @@ function MapContent({
                   選擇步行起點
                 </button>
               )}
-              {routeStart && !routeNeedsConfirmation && routeStart.id !== classroomPlace.id && (
+              {classroomDestinationWithOrigin(classroomPlace) && (
                 <button className="btn" type="button" aria-describedby={classroomNoteId}
-                  onClick={() => {
-                    classroomRouteFocusPending.current = true;
-                    setRouteDraft({ from: { ...routeStart }, to: { ...classroomPlace } });
-                    setNotice('');
-                  }}>
+                  onClick={() => chooseClassroomDestination(classroomPlace)}>
                   將{classroomPlace.name}設為終點
                 </button>
               )}
@@ -776,6 +790,12 @@ function MapContent({
                     <button className="btn" type="button" aria-describedby={classroomNoteId}
                       onClick={() => chooseClassroomOrigin(place)}>
                       選擇步行起點
+                    </button>
+                  )}
+                  {classroomDestinationWithOrigin(place) && (
+                    <button className="btn" type="button" aria-describedby={classroomNoteId}
+                      onClick={() => chooseClassroomDestination(place)}>
+                      將{place.name}設為終點
                     </button>
                   )}
                 </li>
