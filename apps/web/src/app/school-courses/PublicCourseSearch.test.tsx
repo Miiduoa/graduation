@@ -646,6 +646,52 @@ it('keeps only the latest result, including when the previous response arrives l
 });
 
 
+it('lets a student cancel a slow lookup and retry with the original query without accepting a late reply', async () => {
+  let finishOld!: (reply: Response) => void;
+  const lateText = vi.fn().mockResolvedValue(await response([course]).text());
+  const fetcher = vi.fn()
+    .mockReturnValueOnce(new Promise<Response>((resolve) => { finishOld = resolve; }))
+    .mockResolvedValueOnce(response([]));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} />);
+  submit('005076');
+  const cancel = screen.getByRole('button', { name: '取消查詢' });
+  cancel.focus();
+  fireEvent.click(cancel);
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  expect(screen.getByRole('status').textContent).toContain('已取消查詢');
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByRole('button', { name: '取消查詢' })).toBeNull();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('005076');
+  const retry = screen.getByRole('button', { name: '重新查詢' });
+  expect(document.activeElement).toBe(retry);
+  await act(async () => {
+    finishOld({ ok: true, headers: new Headers(), text: lateText } as unknown as Response);
+  });
+  expect(lateText).not.toHaveBeenCalled();
+  expect(screen.getByRole('status').textContent).toContain('已取消查詢');
+  fireEvent.click(retry);
+  await screen.findByText(/沒有找到「005076」課程/);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls[1][0]).toBe(fetcher.mock.calls[0][0]);
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+it('cancels a linked query without clearing its campus, weekday or credits', async () => {
+  const fetcher = vi.fn()
+    .mockImplementationOnce(() => new Promise<Response>(() => {}))
+    .mockResolvedValueOnce(filteredResponse([], { weekday: 5, credits: 3 }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} weekdayParameters={['5']} creditsParameters={['3']} />);
+  fireEvent.click(screen.getByRole('button', { name: '取消查詢' }));
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('5');
+  expect((screen.getByLabelText('學分（完全符合）') as HTMLInputElement).value).toBe('3');
+  fireEvent.click(screen.getByRole('button', { name: '重新查詢' }));
+  await screen.findByText(/沒有找到「005076」課程/);
+  expect(fetcher.mock.calls[1][0]).toBe(fetcher.mock.calls[0][0]);
+});
+
 it('does not consume a late cancelled fetch reply even without a readable stream', async () => {
   let finishOld!: (reply: Response) => void;
   const lateText = vi.fn().mockResolvedValue(await response([course]).text());
