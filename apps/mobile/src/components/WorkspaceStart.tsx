@@ -61,6 +61,7 @@ function WorkspaceComposer({ navigation, workContext = 'student', assistantRoute
           onChangeText={setDraft}
           maxLength={1000}
           multiline
+          scrollEnabled={false}
           textAlignVertical="top"
           style={s.input}
         />

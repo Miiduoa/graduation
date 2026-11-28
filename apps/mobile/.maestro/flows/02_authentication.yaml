@@ -15,8 +15,33 @@ tags: [smoke, auth]
     timeout: 20000
 - assertNotVisible:
     id: tab-Today
-# Start a separate successful attempt with the seeded Firebase identity.
-- runFlow: ../helpers/sign-in-student.yaml
+# Recover from the rejected password in the same visible form. Relaunching
+# here depends on the test-only trigger being recreated after a failed login
+# and never exercises the user's actual retry path.
+- assertVisible:
+    id: maestro-emulator-login
+- tapOn:
+    id: maestro-password
+- eraseText: 80
+- inputText: 'campus-test-1234' # gitleaks:allow public loopback emulator fixture
+- tapOn:
+    id: maestro-sign-in
+    enabled: true
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible:
+      id: tab-Today
+    timeout: 40000
+- assertNotVisible:
+    id: login-landing
+- assertNotVisible:
+    id: maestro-emulator-login
+- assertNotVisible:
+    id: maestro-login-error
+- extendedWaitUntil:
+    visible:
+      id: student-today
+    timeout: 30000
 - tapOn:
     id: tab-我的
 - extendedWaitUntil:

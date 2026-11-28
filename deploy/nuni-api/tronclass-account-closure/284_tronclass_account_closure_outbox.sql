@@ -51,9 +51,3 @@ CREATE TRIGGER tronclass_account_closed AFTER INSERT OR UPDATE OF state ON platf
   FOR EACH ROW EXECUTE FUNCTION enqueue_tronclass_account_closure();
 CREATE TRIGGER tronclass_account_deleted AFTER DELETE ON platform_accounts
   FOR EACH ROW EXECUTE FUNCTION enqueue_tronclass_account_closure();
-
--- Existing authoritative closed/deleted rows are evidence too. Never infer a
--- closure merely because an account is absent, and never scan Firestore owners.
-INSERT INTO tronclass_account_closure_outbox (platform_account_id, reason)
-  SELECT id, state FROM platform_accounts WHERE state IN ('closed', 'deleted')
-  ON CONFLICT (platform_account_id) DO NOTHING;

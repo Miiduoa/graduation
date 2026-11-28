@@ -169,6 +169,25 @@ it.each(['coordinates', 'building', 'floor', 'unchanged'] as const)('revalidates
 });
 
 
+it('allows a fresh explicit place selection after the old marker was revoked', async () => {
+  state.user = null;
+  const original = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" />);
+  fireEvent.click(screen.getByRole('button', { name: '查看' + original.name }));
+  const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(mapState().selected.id).toBe(original.id);
+  await act(async () => source.resolve([library, gate]));
+  expect(mapState().selected).toBeNull();
+  expect(screen.getByText(/已停用地點導航/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '查看' + library.name }));
+  expect(mapState().selected).toEqual(library);
+  expect(screen.queryByText(/已停用地點導航/)).toBeNull();
+  expect(new URL(screen.getByRole('link', { name: '從目前位置導航' }).getAttribute('href')!).searchParams.get('destination'))
+    .toBe(library.lat + ',' + library.lng);
+});
+
 it('keeps a confirmed selected marker visible across filters until the detail is closed', async () => {
   render(<MapClient school="other-school" focus={gate.id} />);
   await screen.findByRole('button', { name: '查看' + gate.name });

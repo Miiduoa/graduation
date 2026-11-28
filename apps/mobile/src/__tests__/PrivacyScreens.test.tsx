@@ -106,6 +106,24 @@ beforeEach(() => {
   remove.mockResolvedValue({ success: true, userId: 'u1' });
 });
 
+test('export scope guidance and sensitive conversation choices are accessible before any export', () => {
+  const view = render(<DataExportScreen navigation={navigation} />);
+  expect(view.getByTestId('data-export-scope')).toBeTruthy();
+  expect(view.getAllByText('選擇內容，將資料保存到自己的裝置。')).toHaveLength(1);
+  const messages = view.getByRole('checkbox', { name: '對話紀錄' });
+  expect(messages.props.accessibilityHint).toBe(
+    '目前學校與未指定學校的對話，包含對方傳送的訊息',
+  );
+  expect(messages).toHaveAccessibilityState({ checked: false });
+  fireEvent.press(messages);
+  expect(view.getByRole('checkbox', { name: '對話紀錄' })).toHaveAccessibilityState({
+    checked: true,
+  });
+  expect(view.getByText('匯出 9 項資料')).toBeTruthy();
+  expect(exportData).not.toHaveBeenCalled();
+  expect(share).not.toHaveBeenCalled();
+});
+
 test('export uses selected categories and preserves every returned field without claiming saved', async () => {
   const view = render(<DataExportScreen navigation={navigation} />);
   expect(view.getByTestId('data-export-screen')).toBeTruthy();
@@ -174,6 +192,74 @@ test('a different account payload and unconfirmed coverage cannot be shared', as
   expect(mockWrite).not.toHaveBeenCalled();
   expect(view.getByText(/無法完成資料匯出/)).toBeTruthy();
 });
+test('duplicate coverage cannot masquerade as a complete export and retry accepts reordered categories', async () => {
+  exportData.mockImplementationOnce(async (request) => ({
+    userId: request.expectedUserId,
+    schoolId: request.schoolId,
+    exportedAt: '',
+    coverage: {
+      truncated: false,
+      truncatedSections: [],
+      scope: 'selected-categories',
+      categories: [request.categories[0], ...request.categories.slice(0, -1)],
+    },
+  }));
+  const view = render(<DataExportScreen />);
+  await act(async () => fireEvent.press(view.getByText('匯出 8 項資料')));
+  expect(mockNewFile).not.toHaveBeenCalled();
+  expect(mockWrite).not.toHaveBeenCalled();
+  expect(share).not.toHaveBeenCalled();
+  expect(view.getByText(/無法完成資料匯出/)).toBeTruthy();
+
+  exportData.mockImplementationOnce(async (request) => ({
+    userId: request.expectedUserId,
+    schoolId: request.schoolId,
+    exportedAt: '',
+    coverage: {
+      truncated: false,
+      truncatedSections: [],
+      scope: 'selected-categories',
+      categories: [...request.categories].reverse(),
+    },
+  }));
+  await act(async () => fireEvent.press(view.getByText('匯出 8 項資料')));
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+  expect(share).toHaveBeenCalledTimes(1);
+  expect(view.queryByText(/無法完成資料匯出/)).toBeNull();
+  expect(view.getByText(/分享選單已關閉/)).toBeTruthy();
+});
+test.each([
+  { truncated: false, truncatedSections: ['groups'] },
+  { truncated: true, truncatedSections: [] },
+  { truncated: true, truncatedSections: [''] },
+  { truncated: false, truncatedSections: null },
+])('inconsistent truncation metadata cannot be shared: %j', async (coverage) => {
+  exportData.mockImplementationOnce(
+    async (request) =>
+      ({
+        userId: request.expectedUserId,
+        schoolId: request.schoolId,
+        exportedAt: '',
+        coverage: {
+          scope: 'selected-categories',
+          categories: request.categories,
+          ...coverage,
+        },
+      }) as Awaited<ReturnType<typeof exportUserData>>,
+  );
+  const view = render(<DataExportScreen />);
+  await act(async () => fireEvent.press(view.getByText('匯出 8 項資料')));
+  expect(mockNewFile).not.toHaveBeenCalled();
+  expect(mockWrite).not.toHaveBeenCalled();
+  expect(share).not.toHaveBeenCalled();
+  expect(view.getByText(/無法完成資料匯出/)).toBeTruthy();
+
+  await act(async () => fireEvent.press(view.getByText('匯出 8 項資料')));
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+  expect(share).toHaveBeenCalledTimes(1);
+  expect(view.queryByText(/無法完成資料匯出/)).toBeNull();
+});
+
 test('export lock rejects rapid duplicate actions and reports partial records', async () => {
   const pending = deferred<void>();
   share.mockReturnValue(pending.promise);

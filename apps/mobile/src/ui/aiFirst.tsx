@@ -134,10 +134,13 @@ export function AIScreen({
   keyboardShouldPersistTaps = 'handled',
   keyboardDismissMode = Platform.OS === 'ios' ? 'interactive' : 'on-drag',
   automaticallyAdjustKeyboardInsets = Platform.OS === 'ios',
+  delayContentTouches,
   ...rest
 }: {
   children: React.ReactNode;
   bottomPadding?: number;
+  // iOS UIScrollView; RN's ScrollViewProps currently omit this.
+  delayContentTouches?: boolean;
 } & ScrollViewProps) {
   useVisualTheme();
   const defaultPadding = useTabBarContentBottomPadding();
@@ -148,6 +151,7 @@ export function AIScreen({
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
         {...rest}
+        {...(delayContentTouches === undefined ? null : { delayContentTouches })}
         keyboardShouldPersistTaps={keyboardShouldPersistTaps}
         keyboardDismissMode={keyboardDismissMode}
         automaticallyAdjustKeyboardInsets={automaticallyAdjustKeyboardInsets}
@@ -294,14 +298,18 @@ export function AICard({
             </View>
           ) : null}
           {title ? (
-            <Text
+            <View
               testID={titleTestID}
+              collapsable={false}
+              accessible
               accessibilityRole="header"
               accessibilityLabel={title}
-              style={styles.cardTitle}
+              style={{ flex: 1 }}
             >
-              {title}
-            </Text>
+              <Text accessible={false} style={[styles.cardTitle, titleTestID ? { flex: 0 } : undefined]}>
+                {title}
+              </Text>
+            </View>
           ) : (
             <View style={{ flex: 1 }} />
           )}

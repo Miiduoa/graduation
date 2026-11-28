@@ -47,6 +47,20 @@ test('student can submit homework and check in on labelled demo data', () => {
   expect(view.getAllByText(/已簽到/).length).toBeGreaterThan(0);
 });
 
+test('teacher approval is visible on the student leave status after the role round-trip', () => {
+  const view = render(<OralExamDemoScreen />);
+  fireEvent.press(view.getByTestId('oral-exam-request-leave'));
+  expect(view.getByTestId('oral-exam-leave-status')).toBeTruthy();
+  expect(view.getByText(/待審/)).toBeTruthy();
+  fireEvent.press(view.getByTestId('oral-exam-role-teacher'));
+  expect(view.getByText('待審')).toBeTruthy();
+  fireEvent.press(view.getByTestId('oral-exam-approve-leave'));
+  expect(view.getByText('已核准')).toBeTruthy();
+  fireEvent.press(view.getByTestId('oral-exam-role-student'));
+  expect(view.getByTestId('oral-exam-leave-status')).toBeTruthy();
+  expect(view.getAllByText(/已核准/).length).toBeGreaterThan(0);
+});
+
 test('teacher and merchant roles stay on the demo tenant', () => {
   const view = render(<OralExamDemoScreen />);
   fireEvent.press(view.getByTestId('oral-exam-role-teacher'));

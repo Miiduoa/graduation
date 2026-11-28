@@ -10,20 +10,64 @@ import { useThemeMode } from '../state/theme';
 import { getLegalUrl } from '../services/release';
 import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
 
-type Navigation = { goBack?: () => void; navigate?: (screen: string) => void };
+type Navigation = { goBack?: () => void; navigate?: (screen: string, params?: Record<string, unknown>) => void };
 
 export default function SettingsAiFirstScreen({ navigation }: { navigation?: Navigation }) {
   const auth = useAuth();
   const platform = useOptionalNuniSession();
   const { mode, appearanceMode, setMode } = useThemeMode();
   const uid = auth.user?.uid;
+  // A cached session is not authority while refresh or logout is unresolved.
+  const platformAccountStatus = platform?.pendingLogout
+    ? 'logout-pending'
+    : platform?.loading
+      ? 'checking'
+      : platform?.error
+        ? 'unverified'
+        : platform?.session
+          ? 'ready'
+          : 'guest';
+  const hasPlatformSession = platformAccountStatus === 'ready';
+  const platformAccountSubtitle = platformAccountStatus === 'ready'
+    ? '已登入 nuni 帳號；管理學校資格與連線狀態'
+    : platformAccountStatus === 'logout-pending'
+      ? '登出尚未完成；前往帳號管理重試'
+      : platformAccountStatus === 'checking'
+        ? '正在確認登入狀態'
+        : platformAccountStatus === 'unverified'
+          ? '無法確認登入狀態；前往帳號管理重試'
+          : '登入 nuni 帳號或管理學校資格';
+  const accountHeading = uid
+    ? '目前登入帳號'
+    : platformAccountStatus === 'logout-pending'
+      ? 'nuni 帳號登出處理中'
+      : platformAccountStatus === 'checking'
+        ? '正在確認 nuni 帳號'
+        : platformAccountStatus === 'unverified'
+          ? '無法確認 nuni 帳號'
+          : hasPlatformSession
+            ? 'nuni 帳號已登入'
+            : '尚未登入';
+  const accountDescription = hasPlatformSession
+    ? '尚未登入學校帳號'
+    : platformAccountStatus === 'logout-pending'
+      ? '請完成 nuni 帳號登出後再使用助理權限。'
+      : platformAccountStatus === 'checking'
+        ? '正在確認登入狀態，學校登入仍可使用。'
+        : platformAccountStatus === 'unverified'
+          ? '請確認連線，並前往 Google 帳號與連線管理登入狀態。'
+          : '登入後管理個人資料';
   const profile = auth.profile?.uid === uid ? auth.profile : null;
-  const currentUid = useRef(uid);
-  currentUid.current = uid;
+  // A return to the same UID is still a new identity scope after a switch.
+  const identity = useRef({ uid });
+  if (identity.current.uid !== uid) identity.current = { uid };
+  const scope = identity.current;
   const mounted = useRef(true);
   const signingOut = useRef(false);
   const [busyUid, setBusyUid] = useState<string | null>(null);
-  const [error, setError] = useState<{ uid: string | undefined; message: string } | null>(null);
+  const legalRequest = useRef(0);
+  const [legalError, setLegalError] = useState<{ scope: typeof scope; message: string } | null>(null);
+  const [logoutError, setLogoutError] = useState<{ scope: typeof scope; message: string } | null>(null);
   const busy = Boolean(uid && busyUid === uid);
   const version = Constants.expoConfig?.version;
   const privacyUrl = getLegalUrl('privacy');
@@ -36,21 +80,23 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
     };
   }, []);
 
-  const go = (screen: string) => () => {
+  const go = (screen: string, params?: Record<string, unknown>) => () => {
     if (typeof navigation?.navigate !== 'function') {
       throw new Error(`設定頁無法開啟「${screen}」。`);
     }
-    navigation.navigate(screen);
+    if (params) navigation.navigate(screen, params);
+    else navigation.navigate(screen);
   };
   const openLegal = async (url: string | null) => {
     if (!url) return;
-    const requestedUid = uid;
-    setError(null);
+    const requestedScope = scope;
+    const request = ++legalRequest.current;
+    setLegalError(null);
     try {
       await Linking.openURL(url);
     } catch {
-      if (mounted.current && currentUid.current === requestedUid) {
-        setError({ uid: requestedUid, message: '無法開啟網頁，請確認網路連線後重試。' });
+      if (mounted.current && identity.current === requestedScope && legalRequest.current === request) {
+        setLegalError({ scope: requestedScope, message: '無法開啟網頁，請確認網路連線後重試。' });
       }
     }
   };
@@ -58,21 +104,22 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
   const confirmLogout = () => {
     if (!uid || signingOut.current) return;
     const requestedUid = uid;
-    Alert.alert('登出', '確定要登出這個帳號嗎？', [
+    const requestedScope = scope;
+    Alert.alert('登出學校帳號', '確定要登出學校帳號嗎？不會登出 Google 帳號。', [
       { text: '取消', style: 'cancel' },
       {
-        text: '登出',
+        text: '確定登出',
         style: 'destructive',
         onPress: async () => {
-          if (!mounted.current || currentUid.current !== requestedUid || signingOut.current) return;
+          if (!mounted.current || identity.current !== requestedScope || signingOut.current) return;
           signingOut.current = true;
           setBusyUid(requestedUid);
-          setError(null);
+          setLogoutError(null);
           try {
             await auth.signOutWithWarning();
           } catch {
-            if (mounted.current && currentUid.current === requestedUid) {
-              setError({ uid: requestedUid, message: '無法登出，請稍後重試。' });
+            if (mounted.current && identity.current === requestedScope) {
+              setLogoutError({ scope: requestedScope, message: '無法登出，請稍後重試。' });
             }
           } finally {
             signingOut.current = false;
@@ -85,30 +132,47 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
 
   return (
     <AIDetailScreen
+      testID="settings-screen"
       title="設定"
       subtitle="管理帳號與調整閱讀方式。"
       keyboardShouldPersistTaps="handled"
       onBack={() => navigation?.goBack?.()}
     >
       <AICard
-        title={uid ? '目前登入帳號' : '尚未登入'}
+        title={accountHeading}
         titleTestID="settings-current-account"
       >
         <View style={{ gap: 8 }}>
           <Text style={{ color: aiTokens.text, fontSize: 17, fontWeight: '600' }}>
             {uid
               ? profile?.displayName?.trim() || auth.user?.displayName?.trim() || '我的帳號'
-              : '登入後管理個人資料'}
+              : accountDescription}
           </Text>
           {uid ? (
             <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
               {auth.user?.email || profile?.email || '尚未提供電子郵件'}
             </Text>
           ) : (
-            <AIButton label="學校登入" onPress={go('SSOLogin')} />
+            <>
+              {hasPlatformSession ? (
+                <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
+                  仍可管理助理權限；登入學校帳號後可管理校園個人資料。
+                </Text>
+              ) : null}
+              <AIButton label="學校登入" onPress={go('SSOLogin')} />
+            </>
           )}
         </View>
       </AICard>
+
+      {platform ? (
+        <AIRow
+          testID="settings-google-account"
+          title="Google 帳號與連線"
+          subtitle={platformAccountSubtitle}
+          onPress={go('NuniWorkspace', { tab: 'account' })}
+        />
+      ) : null}
 
       {uid && Constants.expoConfig?.extra?.release?.features?.widgets === true ? (
         <NextClassLiveActivitySetting />
@@ -149,7 +213,7 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
         />
       </AISection>
 
-      {uid || platform?.session ? (
+      {uid || hasPlatformSession ? (
         <AISection title="AI 助理">
           <AIRow
             title="助理權限"
@@ -201,12 +265,27 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
           disabled={!privacyUrl}
           onPress={() => void openLegal(privacyUrl)}
         />
+        {legalError?.scope === scope ? (
+          <Text testID="settings-legal-error" accessibilityRole="alert" style={{ color: aiTokens.danger, padding: 12 }}>
+            {legalError.message}
+          </Text>
+        ) : null}
         <AIRow title="意見回饋" onPress={go('Feedback')} />
       </AISection>
 
       {uid ? (
         <AISection title="帳號管理">
-          <AIRow title={busy ? '正在登出…' : '登出'} disabled={busy} onPress={confirmLogout} />
+          <AIRow
+            title={busy ? '正在登出…' : '登出學校帳號'}
+            subtitle="Google 帳號須另外管理"
+            disabled={busy}
+            onPress={confirmLogout}
+          />
+          {logoutError?.scope === scope ? (
+            <Text testID="settings-logout-error" accessibilityRole="alert" style={{ color: aiTokens.danger, padding: 12 }}>
+              {logoutError.message}
+            </Text>
+          ) : null}
           <AIRow
             title="刪除帳號"
             subtitle="先查看刪除範圍與確認步驟"
@@ -214,13 +293,6 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
             onPress={go('AccountDeletion')}
           />
         </AISection>
-      ) : null}
-      {error && error.uid === uid ? (
-        <AICard>
-          <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
-            {error.message}
-          </Text>
-        </AICard>
       ) : null}
     </AIDetailScreen>
   );
