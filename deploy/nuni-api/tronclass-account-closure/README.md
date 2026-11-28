@@ -1,6 +1,6 @@
 # 官方 284：TronClass 平台帳號關閉 outbox
 
-本目錄把已審查的候選 SQL 封成 nuni-api 官方 migration `284_tronclass_account_closure_outbox`。內容與審查候選位元組相同（SHA-256 `9c5057739cf89222bc69ee2bcbfffbf74b0705d522d4478f75fc01a2d826381a`）。**本輪不連正式庫、不跑 migration、不部署、不開 worker、不建 `tronclass_closure_worker`、不補 GRANT。** 旗標維持關閉。
+本目錄把已審查的候選 SQL 封成 nuni-api 官方 migration `284_tronclass_account_closure_outbox`。內容不含既有 `closed`／`deleted` 列的 backfill（SHA-256 `915ada63acd28f1ddd78d81395d27dffed3ce193064a12b4718afc1a7af102d7`）。284 尚未在正式庫登記，改 SQL 位元組不會與已套用 checksum 衝突。**本輪不連正式庫、不跑 migration、不部署、不開 worker、不建 `tronclass_closure_worker`、不補 GRANT。** 旗標維持關閉。
 
 graduation 因 `pnpm-workspace.yaml` 的 `apps/*` 不能放 nuni-api 套件。權威 SQL 在本檔 `284_tronclass_account_closure_outbox.sql`；`prepare.py` 只把它寫進授權生產 API checkout 的 `apps/api/src/migrations/284_tronclass_account_closure_outbox.sql`。映像 build 再抄到 `dist/migrations/`。禁止任何 `001_…` 檔名進入該目錄。
 
@@ -30,13 +30,13 @@ python3 deploy/nuni-api/build.py --tronclass-account-closure-compatible-rollback
 
 ## 套用前核對（必須為 0）
 
-帳號 ID 必須符合 outbox CHECK。不符的列會讓 backfill 整筆失敗並回滾：
+284 **不含**對既有 `closed`／`deleted` 列的 backfill。正式 migrator 對 `platform_accounts` 僅有 TRIGGER、REFERENCES，沒有 SELECT；本 SQL 也不要求、不補 GRANT。套用前必須確認沒有既有關閉帳號：
 
 ```sql
-SELECT count(*) AS invalid_platform_account_ids
+SELECT count(*) AS closed_or_deleted_accounts
 FROM public.platform_accounts
-WHERE id !~ '^pa_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
--- 必須為 0，否則停止。
+WHERE state IN ('closed', 'deleted');
+-- 必須為 0，否則停止。不要補 GRANT、不要讓 migrator SELECT。
 
 SELECT id FROM public.schema_migrations ORDER BY applied_at DESC LIMIT 1;
 -- 必須為 283_platform_assistant_permissions。
@@ -63,7 +63,7 @@ fly machine wait "$MIGRATION_ID" -a nuni-api --state stopped --wait-timeout 300s
 - `migration.session_timeouts_verified`
 - `database.migrate.completed`
 - latest = `284_tronclass_account_closure_outbox`
-- checksum = `9c5057739cf89222bc69ee2bcbfffbf74b0705d522d4478f75fc01a2d826381a`
+- checksum = `915ada63acd28f1ddd78d81395d27dffed3ce193064a12b4718afc1a7af102d7`
 
 缺事件、非零退出、逾時或 checksum 不符：不切 serving，只停本次 machine。
 
