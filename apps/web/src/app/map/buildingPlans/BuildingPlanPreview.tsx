@@ -43,6 +43,7 @@ function PlanCanvas({ plan, view, onSelect }: { plan: BuildingPlan; view: Buildi
     const fail = () => {
       if (!alive) return;
       alive = false;
+      stopWatching();
       scene?.dispose();
       scene = null;
       runtime.current = null;
@@ -56,6 +57,16 @@ function PlanCanvas({ plan, view, onSelect }: { plan: BuildingPlan; view: Buildi
     });
     observer?.observe(host);
     document.addEventListener('visibilitychange', syncActive);
+    // The flat plan stays mounted after a graphics error. Release the
+    // failed attempt's timer and observers immediately, not on the next retry.
+    let watching = true;
+    function stopWatching() {
+      if (!watching) return;
+      watching = false;
+      window.clearTimeout(timeout);
+      observer?.disconnect();
+      document.removeEventListener('visibilitychange', syncActive);
+    }
     void import('./buildingPlanScene').then(module => {
       if (!alive) return;
       scene = module.createBuildingPlanScene(host, plan, {
@@ -76,9 +87,7 @@ function PlanCanvas({ plan, view, onSelect }: { plan: BuildingPlan; view: Buildi
     }).catch(fail);
     return () => {
       alive = false;
-      window.clearTimeout(timeout);
-      observer?.disconnect();
-      document.removeEventListener('visibilitychange', syncActive);
+      stopWatching();
       scene?.dispose();
       runtime.current = null;
     };
