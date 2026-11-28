@@ -13,11 +13,14 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import Constants from 'expo-constants';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { getAuthInstance } from '../src/firebase';
+import { waitForSchoolSessionReady } from '../src/app/SchoolSessionBoundary';
 import {
   assertMaestroEmulatorConfig,
   MAESTRO_STUDENT_EMAIL,
   MAESTRO_STUDENT_UID,
 } from './emulatorConfig';
+
+const SCHOOL_SESSION_READY_TIMEOUT_MS = 25_000;
 
 const extra = Constants.expoConfig?.extra ?? {};
 assertMaestroEmulatorConfig({
@@ -46,7 +49,9 @@ export function MaestroApp() {
 
 function MaestroHarness() {
   const insets = useSafeAreaInsets();
-  const passwordRef = useRef<TextInput>(null);
+  const passwordInputRef = useRef<TextInput>(null);
+  const emailValue = useRef('');
+  const passwordValue = useRef('');
   const [visible, setVisible] = useState(false);
   const [offerTrigger, setOfferTrigger] = useState(true);
   const [email, setEmail] = useState('');
@@ -57,10 +62,19 @@ function MaestroHarness() {
   // off the navigation header so iOS BackButton stays tappable. Production
   // index.ts never imports this file, and campus://maestro/sign-in cannot open it.
 
+  const setEmailField = (text: string) => {
+    emailValue.current = text;
+    setEmail(text);
+  };
+  const setPasswordField = (text: string) => {
+    passwordValue.current = text;
+    setPassword(text);
+  };
+
   const openHarness = () => {
     setError('');
-    setEmail('');
-    setPassword('');
+    setEmailField('');
+    setPasswordField('');
     setOfferTrigger(false);
     setVisible(true);
   };
@@ -71,19 +85,27 @@ function MaestroHarness() {
     setBusy(true);
     setError('');
     try {
-      if (email !== MAESTRO_STUDENT_EMAIL) throw new Error('Not the seeded fixture');
+      // iOS XCTest typeText can fill a secure field without onChangeText.
+      // Read the native event value so login does not submit an empty password.
+      if (emailValue.current !== MAESTRO_STUDENT_EMAIL) throw new Error('Not the seeded fixture');
       const auth = getAuthInstance();
       if (auth.app.options.projectId !== 'demo-campus-one' ||
           auth.emulatorConfig?.host !== '127.0.0.1' || auth.emulatorConfig.port !== 19291) {
         throw new Error('Auth is not connected to the configured local emulator');
       }
-      const result = await signInWithEmailAndPassword(auth, email, password);
+      const result = await signInWithEmailAndPassword(auth, emailValue.current, passwordValue.current);
       if (result.user.uid !== MAESTRO_STUDENT_UID) {
         await signOut(auth);
         throw new Error('Unexpected fixture identity');
       }
       await result.user.getIdToken(true);
-      setPassword('');
+      // Closing the overlay before the school session is mounted leaves the
+      // guest landing on screen. Maestro then waits for tab-Today on the
+      // public shell even though Firebase Auth already succeeded.
+      if (!(await waitForSchoolSessionReady(SCHOOL_SESSION_READY_TIMEOUT_MS))) {
+        throw new Error('School session did not become ready');
+      }
+      setPasswordField('');
       setVisible(false);
     } catch {
       // Do not include credentials, tokens, or backend responses in screenshots.
@@ -128,21 +150,23 @@ function MaestroHarness() {
             testID="maestro-email"
             accessibilityLabel="測試帳號"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={setEmailField}
+            onChange={(event) => setEmailField(event.nativeEvent.text)}
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="email-address"
             returnKeyType="next"
             blurOnSubmit={false}
-            onSubmitEditing={() => passwordRef.current?.focus()}
+            onSubmitEditing={() => passwordInputRef.current?.focus()}
             style={styles.field}
           />
           <TextInput
-            ref={passwordRef}
+            ref={passwordInputRef}
             testID="maestro-password"
             accessibilityLabel="測試密碼"
             value={password}
-            onChangeText={setPassword}
+            onChangeText={setPasswordField}
+            onChange={(event) => setPasswordField(event.nativeEvent.text)}
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}

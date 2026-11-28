@@ -9,6 +9,48 @@ type SchoolSession = Pick<
   'user' | 'profile' | 'loading' | 'profileLoading' | 'tokenExpired'
 >;
 
+type SchoolSessionReadyListener = (ready: boolean) => void;
+
+const schoolSessionReadyListeners = new Set<SchoolSessionReadyListener>();
+let schoolSessionReady = false;
+
+export function isSchoolSessionReady(): boolean {
+  return schoolSessionReady;
+}
+
+export function subscribeSchoolSessionReady(listener: SchoolSessionReadyListener): () => void {
+  schoolSessionReadyListeners.add(listener);
+  listener(schoolSessionReady);
+  return () => {
+    schoolSessionReadyListeners.delete(listener);
+  };
+}
+
+export function publishSchoolSessionReady(ready: boolean): void {
+  if (schoolSessionReady === ready) return;
+  schoolSessionReady = ready;
+  schoolSessionReadyListeners.forEach((listener) => listener(ready));
+}
+
+export function waitForSchoolSessionReady(timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (schoolSessionReady) {
+      resolve(true);
+      return;
+    }
+    const timer = setTimeout(() => {
+      unsubscribe();
+      resolve(false);
+    }, timeoutMs);
+    const unsubscribe = subscribeSchoolSessionReady((ready) => {
+      if (!ready) return;
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(true);
+    });
+  });
+}
+
 export function hasReadySchoolSession(auth: SchoolSession, browsingSchoolId: string | null): boolean {
   if (
     auth.loading ||

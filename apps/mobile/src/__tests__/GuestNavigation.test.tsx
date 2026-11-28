@@ -4,7 +4,13 @@ import { createNavigationContainerRef, NavigationContainer } from '@react-naviga
 import { PreAuthStack } from '../screens/PreAuthStack';
 import { Text } from 'react-native';
 import Constants from 'expo-constants';
-import { SchoolSessionBoundary, hasReadySchoolSession } from '../app/SchoolSessionBoundary';
+import {
+  SchoolSessionBoundary,
+  hasReadySchoolSession,
+  isSchoolSessionReady,
+  publishSchoolSessionReady,
+  waitForSchoolSessionReady,
+} from '../app/SchoolSessionBoundary';
 import { preAuthLinking } from '../app/preAuthLinking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { dormStorageKey } from '@campus/shared/src/dormitory';
@@ -78,6 +84,7 @@ beforeEach(() => {
   mockLinkListener = undefined;
   mockRemoveLinkListener.mockClear();
   setSchoolLoginProviderKinds(['school-issued']);
+  publishSchoolSessionReady(false);
 });
 afterEach(() => {
   Object.assign(Constants.expoConfig!, { extra: originalExtra });
@@ -679,6 +686,23 @@ test('browsing another school unmounts private school screens and restores them 
   view.rerender(content());
   expect(view.getByTestId('private-school')).toBeTruthy();
   expect(mounts).toHaveBeenCalledTimes(2);
+});
+
+test('school session ready wait resolves only after a ready school session is published', async () => {
+  publishSchoolSessionReady(false);
+  expect(isSchoolSessionReady()).toBe(false);
+  const pending = waitForSchoolSessionReady(1000);
+  expect(isSchoolSessionReady()).toBe(false);
+  publishSchoolSessionReady(true);
+  await expect(pending).resolves.toBe(true);
+  expect(isSchoolSessionReady()).toBe(true);
+  publishSchoolSessionReady(false);
+});
+
+test('school session ready wait times out when a ready session is never published', async () => {
+  publishSchoolSessionReady(false);
+  await expect(waitForSchoolSessionReady(50)).resolves.toBe(false);
+  expect(isSchoolSessionReady()).toBe(false);
 });
 
 test('school aliases do not bypass cross-campus isolation', () => {
