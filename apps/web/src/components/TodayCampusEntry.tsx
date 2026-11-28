@@ -189,8 +189,7 @@ export function TodayCampusEntry({
       // already moved to another control or returned to the underlying page.
       if (
         document.activeElement !== initialFocus &&
-        document.activeElement !== document.body &&
-        initialFocus?.isConnected
+        document.activeElement !== document.body
       ) {
         completedFocusRequest.current = focusRequest;
         observer.disconnect();
