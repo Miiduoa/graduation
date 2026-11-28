@@ -74,9 +74,15 @@ function intersects(a: PlanPoint, b: PlanPoint, c: PlanPoint, d: PlanPoint): boo
 }
 
 function polygon(value: unknown, label: string): PlanPoint[] {
-  requireValue(Array.isArray(value) && value.length >= 3 && value.length <= 64,
+  // GIS exports often repeat the first coordinate to close the ring. The
+  // renderer closes it itself, so remove exactly one identical closing point.
+  // Keep all other geometry and complexity checks; never snap near vertices.
+  requireValue(Array.isArray(value) && value.length >= 3 && value.length <= 65,
     `${label}需要 3 到 64 個頂點。`);
   const points = value.map(point);
+  const first = points[0], last = points[points.length - 1];
+  if (first[0] === last[0] && first[1] === last[1]) points.pop();
+  requireValue(points.length >= 3 && points.length <= 64, `${label}需要 3 到 64 個頂點。`);
   let area = 0;
   for (let i = 0; i < points.length; i++) {
     const a = points[i], b = points[(i + 1) % points.length];
