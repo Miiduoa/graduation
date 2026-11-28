@@ -70,6 +70,7 @@ test('opens the emulator login overlay in the same window after tapping the cont
   expect(view.getByTestId('maestro-emulator-login')).toBeTruthy();
   expect(view.getByTestId('maestro-email')).toBeTruthy();
   expect(view.getByTestId('maestro-password')).toBeTruthy();
+  expect(view.getByTestId('maestro-password').props.secureTextEntry).toBe(false);
   expect(view.getByTestId('maestro-sign-in')).toBeTruthy();
   expect(view.queryByTestId('maestro-open-emulator-login')).toBeNull();
 });
