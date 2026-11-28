@@ -288,7 +288,10 @@ export function createCampusSpatialScene(
   }
   function onPointerMove(event: PointerEvent) {
     if (disposed || !active || !drag || drag.pointerId !== event.pointerId) return;
-    if (event.type === 'pointermove' && event.pointerType === 'mouse' && event.buttons === 0) {
+    // Mouse pointerup fires only when the last held button is released. Stop
+    // rotating as soon as the primary button is no longer held, even if a
+    // secondary button keeps the pointer active.
+    if (event.type === 'pointermove' && event.pointerType === 'mouse' && (event.buttons & 1) === 0) {
       cancelDrag();
       return;
     }
@@ -313,7 +316,8 @@ export function createCampusSpatialScene(
   function onPointerUp(event: PointerEvent) {
     if (drag?.pointerId !== event.pointerId) return;
     // The final position can differ from the most recently delivered pointermove.
-    if (drag.claimed) onPointerMove(event);
+    // A secondary-button release must not extend a primary-button drag.
+    if (drag.claimed && (event.pointerType !== 'mouse' || event.button === 0)) onPointerMove(event);
     cancelDrag();
   }
   function onPointerCancel(event: PointerEvent) {

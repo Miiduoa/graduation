@@ -698,6 +698,37 @@ describe('controlled spatial camera input', () => {
     expect(onCameraChange).toHaveBeenCalledTimes(2);
   });
 
+  it.each([2, 4])('ends a primary mouse drag when only button mask %s remains', (buttons) => {
+    const { container, onCameraChange, captured, releasePointerCapture } = setupControlled();
+    drawFrame();
+    pointer(container, 'pointerdown', { pointerType: 'mouse' });
+    pointer(container, 'pointermove', { pointerType: 'mouse', clientX: 300 });
+    expect(onCameraChange).toHaveBeenCalledTimes(1);
+    expect(captured.has(1)).toBe(true);
+
+    // Pointer Events can keep the pointer active after the primary button is
+    // released, while another button is held.
+    expect(pointer(container, 'pointermove', {
+      pointerType: 'mouse', buttons, button: -1, clientX: 500,
+    }).defaultPrevented).toBe(false);
+    expect(onCameraChange).toHaveBeenCalledTimes(1);
+    expect(releasePointerCapture).toHaveBeenCalledWith(1);
+    expect(captured.size).toBe(0);
+    pointer(container, 'pointerup', { pointerType: 'mouse', buttons: 0, button: buttons === 2 ? 2 : 1, clientX: 700 });
+    expect(onCameraChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not apply the final secondary mouse-up position to a primary drag', () => {
+    const { container, onCameraChange, captured } = setupControlled();
+    drawFrame();
+    pointer(container, 'pointerdown', { pointerType: 'mouse' });
+    pointer(container, 'pointermove', { pointerType: 'mouse', clientX: 300, buttons: 3 });
+    expect(onCameraChange).toHaveBeenCalledTimes(1);
+    pointer(container, 'pointerup', { pointerType: 'mouse', button: 2, buttons: 0, clientX: 700 });
+    expect(onCameraChange).toHaveBeenCalledTimes(1);
+    expect(captured.size).toBe(0);
+  });
+
   it('allows vertical scrolling, browser pinch zoom and wheel input without camera changes', () => {
     const { container, onCameraChange, setPointerCapture } = setupControlled();
     drawFrame();
