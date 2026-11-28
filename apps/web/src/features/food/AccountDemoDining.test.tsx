@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -198,9 +198,14 @@ describe('account-owned dining inside the original feature pages', () => {
     expect(within(progress).getByRole('heading', { name: '真實餐坊／學生餐廳' })).toBeTruthy();
     expect(within(progress).getByText(/待補件/)).toBeTruthy();
     expect(within(progress).getByText(/請補上營業地址/)).toBeTruthy();
-    expect(document.activeElement).toBe(
-      within(progress).getByRole('heading', { name: '申請進度' }),
-    );
+    // The region can become observable before the passive focus-restoration effect runs.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        within(screen.getByRole('region', { name: '申請進度' })).getByRole('heading', {
+          name: '申請進度',
+        }),
+      );
+    });
   });
 
   it('keeps the original merchant overview linked to the existing workspace', async () => {
