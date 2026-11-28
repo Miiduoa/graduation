@@ -785,6 +785,26 @@ describe('Providence footprint API snapshot freshness', () => {
     });
   });
 
+  it('does not accumulate clock skew across fetch and OSM replication timestamps', () => {
+    const fetchedAt = new Date(now + 4 * 60 * 1000).toISOString();
+    const osmBaseAt = (seconds: number) =>
+      new Date(now + seconds * 1000).toISOString().replace('.000Z', 'Z');
+    // Both clocks must be within the same five-minute tolerance of the device.
+    // A future fetch timestamp must not grant a second five-minute allowance.
+    for (const seconds of [301, 480, 540]) {
+      expect(parseProvidenceFootprintSnapshot({
+        ...response, fetchedAt, osmBaseAt: osmBaseAt(seconds),
+      }, now)).toBeNull();
+    }
+    for (const seconds of [0, 240, 300]) {
+      expect(parseProvidenceFootprintSnapshot({
+        ...response, fetchedAt, osmBaseAt: osmBaseAt(seconds),
+      }, now)).toMatchObject({ osmBaseAt: osmBaseAt(seconds), buildings: [footprint] });
+    }
+    expect(parseProvidenceFootprintSnapshot({ ...response, fetchedAt }, now))
+      .toMatchObject({ osmBaseAt: null, buildings: [footprint] });
+  });
+
   it('rejects fabricated OSM replication metadata while keeping legacy snapshots', () => {
     for (const osmBaseAt of [
       '2099-01-01T00:00:00Z',
