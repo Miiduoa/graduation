@@ -88,6 +88,20 @@ describe('read-only student submission history', () => {
     expect(result.entries[0].attachments[0]).not.toHaveProperty('download');
   });
 
+  it.each([
+    { marked_submitted: true }, { marked_submitted: undefined },
+    { is_redo: undefined }, { submit_by_instructor: undefined },
+    { submit_by_instructor: true },
+  ])('does not label a contradictory draft or grant an attachment download: %j', change => {
+    const result = normalize([{ ...submission, is_draft: true,
+      uploads: [{ ...submission.uploads[0], allow_download: true }], ...change }]);
+    expect(result.entries[0].state).toBe('unknown');
+    for (const attachment of result.entries[0].attachments) {
+      expect(attachment).not.toHaveProperty('download');
+    }
+    expect(isTronClassSubmissionHistory(result, scope)).toBe(true);
+  });
+
   it('does not guess a latest version from order, dates or identifiers', () => {
     const result = normalize([{ ...submission, is_latest_version: undefined },
       { ...submission, id: 502, created_at: '2026-11-16T11:00:00Z', is_latest_version: false }]);
