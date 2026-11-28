@@ -31,12 +31,15 @@ const OVERPASS_REQUEST_DEADLINE_MS = 12_000;
 // time. A freshly fetched HTTP response can still contain days-old map state.
 const MAX_OVERPASS_REPLICATION_LAG_MS = 48 * 60 * 60 * 1000;
 
-function verifyOverpassReplicationTime(payload: unknown, now: number): string | null {
+function verifyOverpassReplicationTime(payload: unknown, now: number, previousTimestamp: string | null): string | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
   const metadata = (payload as Record<string, unknown>).osm3s;
-  // Older/mock-compatible replies without replication metadata still follow the
-  // existing whitelist/geometry rules. Validate the timestamp whenever supplied.
-  if (metadata === undefined) return null;
+  // Legacy replies may lack metadata initially, but once a dated snapshot is
+  // known, an undated response cannot supersede its checked freshness clock.
+  if (metadata === undefined) {
+    if (previousTimestamp !== null) throw new Error('Missing previously available Overpass replication metadata');
+    return null;
+  }
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     throw new Error('Invalid Overpass replication metadata');
   }
@@ -52,8 +55,13 @@ function verifyOverpassReplicationTime(payload: unknown, now: number): string | 
   }
   const baseMs = Date.parse(timestamp);
   if (!Number.isFinite(baseMs) || new Date(baseMs).toISOString().replace('.000Z', 'Z') !== timestamp ||
-      baseMs > now + 5 * 60 * 1000 || now - baseMs > MAX_OVERPASS_REPLICATION_LAG_MS) {
+      baseMs > now + 5 * 60 * 1000 || now - baseMs >= MAX_OVERPASS_REPLICATION_LAG_MS) {
     throw new Error('Overpass replication timestamp is not recent');
+  }
+  // A lagging replica or intermediary must not replace a newer checked map
+  // with an older one, or reset the freshness clock by omitting its metadata.
+  if (previousTimestamp !== null && baseMs < Date.parse(previousTimestamp)) {
+    throw new Error('Overpass replication timestamp moved backwards');
   }
   return timestamp;
 }
@@ -420,7 +428,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   let osmBaseAt: string | null;
   let buildings: ProvidenceFootprint[];
   try {
-    osmBaseAt = verifyOverpassReplicationTime(payload, now);
+    osmBaseAt = verifyOverpassReplicationTime(payload, now, cache?.osmBaseAt ?? null);
     // A way's edit timestamp cannot be newer than the Overpass replication
     // snapshot that contains it. Preserve checked geometry, but drop any
     // contradictory revision label rather than advertising false provenance.

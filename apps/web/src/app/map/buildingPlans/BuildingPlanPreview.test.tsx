@@ -437,9 +437,15 @@ it('controls the existing scene, resolves scene room picks to floors and keeps t
 
 it('retains an operable floor plan after graphics failure and retries with the latest room selection', async () => {
   scene.create.mockImplementationOnce(() => { throw new Error('WebGL unavailable'); });
-  render(<BuildingPlanPreview {...props} />);
+  const view = render(<BuildingPlanPreview {...props} />);
+  const added = vi.spyOn(document, 'addEventListener');
+  const removed = vi.spyOn(document, 'removeEventListener');
   await open3d();
   expect(await screen.findByText(/目前無法顯示立體圖面/)).toBeTruthy();
+  const firstListener = added.mock.calls.find(([type]) => type === 'visibilitychange')?.[1];
+  expect(firstListener).toBeDefined();
+  expect(removed).toHaveBeenCalledWith('visibilitychange', firstListener);
+  expect(disconnect).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button', { name: '平面圖 1F 範例教室 101' }));
   fireEvent.click(screen.getByRole('button', { name: '重試立體預覽' }));
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
@@ -448,6 +454,13 @@ it('retains an operable floor plan after graphics failure and retries with the l
   act(() => scene.create.mock.calls[1][2].onError());
   expect(scene.dispose).toHaveBeenCalledTimes(1);
   expect(screen.getByText('已選取：1F · 範例教室 101')).toBeTruthy();
+  const listeners = added.mock.calls.filter(([type]) => type === 'visibilitychange');
+  expect(listeners).toHaveLength(2);
+  expect(removed).toHaveBeenCalledWith('visibilitychange', listeners[1][1]);
+  expect(disconnect).toHaveBeenCalledTimes(2);
+  view.unmount();
+  expect(disconnect).toHaveBeenCalledTimes(2);
+  expect(scene.dispose).toHaveBeenCalledTimes(1);
 });
 
 it('disposes a scene that reports failure while being constructed exactly once', async () => {

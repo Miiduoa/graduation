@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -184,13 +184,24 @@ export function summarizeFindings(findings) {
   assert.ok(Array.isArray(findings), 'Invalid scanner report');
   return { count: findings.length, findings: findings.map((finding) => ({ rule: finding.RuleID, file: finding.File, line: finding.StartLine, commit: finding.Commit })) };
 }
+// Deterministic high-entropy stand-ins. Raw 32-byte random values sometimes fall
+// below generic-api-key entropy on Podfile.lock, so a new commit at a reviewed
+// lockfile line would be missed even though the ignore list must not hide it.
+export function controlMarker(rule, path, line) {
+  assert.ok(typeof rule === 'string' && rule.length > 0, 'Marker rule is required');
+  assert.ok(typeof path === 'string' && path.length > 0, 'Marker path is required');
+  assert.ok(Number.isInteger(line) && line > 0, 'Marker line is required');
+  const digest = createHash('sha256').update(`campus.positive-control:${rule}:${path}:${line}`).digest('base64url');
+  if (rule === 'gcp-api-key') return `AIza${digest.slice(0, 35)}`;
+  return digest;
+}
 function positiveControl() {
   const root = mkdtempSync(join(tmpdir(), 'campus-secret-scan-control-'));
   try {
     mkdirSync(join(root, 'apps/mobile'), { recursive: true });
     writeFileSync(join(root, '.gitleaksignore'), readFileSync('.gitleaksignore'));
     // Generated, nonfunctional test marker. Never print or upload its value.
-    const marker = ['AIza', randomBytes(32).toString('base64url').slice(0, 35)].join('');
+    const marker = controlMarker('gcp-api-key', 'apps/mobile/eas.json', 55);
     writeFileSync(join(root, 'apps/mobile/eas.json'), ['{', ...Array(53).fill(''), `"apiKey": "${marker}"`, '}'].join('\n'));
     const { reviewedTestFixtures, reviewedTronclassEmulatorFixture: emulatorFixture, publicWorkflowReference } = JSON.parse(readFileSync('scripts/security/gitleaks-history-aliases.json', 'utf8'));
     const fixturePositions = reviewedTestFixtures.map(({ observed }) => parseFingerprint(observed));
@@ -199,9 +210,9 @@ function positiveControl() {
     const positions = [...fixturePositions, ...podPositions];
     if (publicWorkflowReference) positions.push(parseFingerprint(publicWorkflowReference.fingerprint));
     const files = new Map();
-    for (const { path, line } of positions) {
+    for (const { path, rule, line } of positions) {
       if (!files.has(path)) files.set(path, []);
-      files.get(path)[line - 1] = `const secret = '${randomBytes(32).toString('base64url')}';`;
+      files.get(path)[line - 1] = `const secret = '${controlMarker(rule, path, line)}';`;
     }
     for (const [path, lines] of files) {
       const file = join(root, path);

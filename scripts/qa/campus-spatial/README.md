@@ -84,6 +84,14 @@ python scripts/qa/campus-spatial/check.py
 
 結果與截圖儲存在 CI 的 `campus-spatial-browser` artifact：`results.json`、桌面斜視總覽與俯視、視角操作、觸控、兩種手機寬度、深色大字級、繪圖失敗備援、教室唯一命中與未知案例。失敗案例另存 trace 與無障礙樹；結果保留實際 GPU／context／RAF 計數。沒有成功的 run 與對應 SHA 前，不能宣稱瀏覽器驗收通過。
 
+### 3D 備援畫面的大字級回歸（獨立 CSS fixture）
+
+```sh
+python scripts/qa/campus-spatial/test_recovery_layout.py
+```
+
+讀取正式 CSS，使用四種備援訊息、320×568／320×480（200% 根字級）與 390×844（100%）的 Chromium 版面，檢查文字起點、橫向溢出、捲動後按鈕完整可見、44px 觸控目標、實際點擊及恢復後的示意標籤。這是獨立 fixture，不取代正式 Modal、WebGL 或實機驗收；目前需另外執行，尚未接入既有 workflow。
+
 ### 這些驗收不涵蓋
 
 - 實機 iPhone／Android 的 GPU 效能、耗電與 Safari 相容性。
