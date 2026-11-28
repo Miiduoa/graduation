@@ -345,6 +345,49 @@ it.each([true, false])('plans a classroom destination using an existing origin (
   expect(document.activeElement).toBe(search);
 });
 
+it('lets a classroom-first student choose an explicit walking origin without losing the destination', async () => {
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  render(<MapClient school="pu" query="PH303" />);
+  const card = within(screen.getByRole('region', { name: '教室定位結果' }));
+  expect(card.queryByRole('button', { name: '選擇步行起點' })).toBeNull();
+  await act(async () => source.resolve([library, gate, classroom]));
+  fireEvent.click(card.getByRole('button', { name: '選擇步行起點' }));
+  const search = screen.getByRole('searchbox', { name: '搜尋地點' }) as HTMLInputElement;
+  expect(search.value).toBe('');
+  expect(document.activeElement).toBe(search);
+  expect(screen.getByText(/已設定「主顧樓」為終點/)).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  expect((screen.getByRole('button', { name: '設為起點' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(search, { target: { value: '正門' } });
+  const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(mapState().locations.some((place: MapLocation) => place.id === classroom.id)).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  const routeCard = within(screen.getByRole('region', { name: '步行導航' }));
+  expect(document.activeElement).toBe(routeCard.getByRole('heading', { name: '正門 → 主顧樓' }));
+  expect(mapState().route.map((place: MapLocation) => place.id)).toEqual(['gate', classroom.id]);
+  const google = new URL(routeCard.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  expect(google.searchParams.get('origin')).toBe(`${gate.lat},${gate.lng}`);
+  expect(google.searchParams.get('destination')).toBe(`${classroom.lat},${classroom.lng}`);
+});
+
+it('can cancel a classroom-first destination and return to ordinary origin-first planning', async () => {
+  const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  vi.mocked(loadMapLocations).mockResolvedValue([library, gate, classroom]);
+  render(<MapClient school="pu" query="PH303" />);
+  await sourceSettled();
+  fireEvent.click(screen.getByRole('button', { name: '選擇步行起點' }));
+  fireEvent.click(screen.getByRole('button', { name: '取消終點' }));
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋地點' }));
+  expect(screen.queryByText(/已設定「主顧樓」為終點/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  expect(screen.getByText(/已設定「正門」為起點/)).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+});
+
 it('does not restore an origin from an invalid shared route for classroom planning', async () => {
   vi.mocked(loadMapLocations).mockResolvedValue([]);
   render(<MapClient school="pu" query="PH303" route="missing-origin,library" />);
