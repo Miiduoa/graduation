@@ -20,6 +20,7 @@ jest.mock('expo-notifications', () => ({
   getExpoPushTokenAsync: jest.fn(),
   setNotificationHandler: jest.fn(),
   setNotificationChannelAsync: jest.fn(),
+  getNotificationChannelsAsync: jest.fn().mockResolvedValue([]),
   AndroidImportance: { MAX: 5, HIGH: 4, DEFAULT: 3 },
 }));
 jest.mock('../../firebase', () => ({
@@ -318,6 +319,28 @@ test('Android creates notification channels before requesting permission and obt
     });
     expect(order.indexOf('channel')).toBeLessThan(order.indexOf('permission'));
     expect(order.indexOf('prompt')).toBeLessThan(order.indexOf('token'));
+    for (const id of ['assignments', 'grades', 'orders', 'print', 'bus']) {
+      expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith(id, expect.any(Object));
+    }
+    expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith('dormitory', expect.objectContaining({
+      name: '宿舍通知', importance: Notifications.AndroidImportance.DEFAULT,
+    }));
+  } finally {
+    Object.defineProperty(Platform, 'OS', { value: previous, configurable: true });
+  }
+});
+
+test('refreshing an Android push token preserves muted dormitory and coursework channels', async () => {
+  const previous = Platform.OS;
+  Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+  (Notifications.getNotificationChannelsAsync as jest.Mock).mockResolvedValueOnce([
+    { id: 'dormitory', importance: 0 }, { id: 'assignments', importance: 0 },
+  ]);
+  try {
+    await syncPushTokenForUser('u1');
+    expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith('grades', expect.any(Object));
+    expect(Notifications.setNotificationChannelAsync).not.toHaveBeenCalledWith('dormitory', expect.anything());
+    expect(Notifications.setNotificationChannelAsync).not.toHaveBeenCalledWith('assignments', expect.anything());
   } finally {
     Object.defineProperty(Platform, 'OS', { value: previous, configurable: true });
   }

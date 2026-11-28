@@ -192,3 +192,15 @@ test('rechecking a completed card keeps its original proof and timestamp when re
   expect(after.receipt).toEqual(before.receipt);
   expect(ledgerWrites()).toHaveLength(1);
 });
+
+test('the preview describes renewed timetable and permission checks only for an attached availability check', () => {
+  const ordinary = createAssistantCalendarTask(event, context);
+  const view = render(<AssistantCalendarAction task={ordinary} context={context} navigation={navigation()}
+    disabled={false} onChange={jest.fn()} />);
+  expect(view.queryByText(/確認時會重新核對權限/)).toBeNull();
+  const checked = createAssistantCalendarTask(event, context, undefined, { availabilityCheck: jest.fn() });
+  view.rerender(<AssistantCalendarAction task={checked} context={context} navigation={navigation()}
+    disabled={false} onChange={jest.fn()} />);
+  expect(view.getByText(/確認時會重新核對權限/)).toBeTruthy();
+  expect(ledgerWrites()).toHaveLength(0);
+});

@@ -89,7 +89,11 @@ const capabilityDescriptions = {
     summary: '可讀取所選校園公開活動；明確選取後重新核對完整且尚未開始的活動時間，準備待確認的個人行程卡。資料分頁或缺漏會標示，建立行程不代表活動報名。',
     tools: ['get_campus_events', 'propose_personal_event'],
   },
-  library: handoff('可提供圖書館服務與官方來源入口；此工具不會查借閱紀錄、續借或預約座位。'),
+  library: {
+    modes: ['read', 'handoff'],
+    summary: '可查所選學校圖書館的官方名稱、公開館藏目錄網址與已列出的官網、開館資訊頁；不查書目、館藏狀態、借閱紀錄、實際開館時間，也不能續借或預約座位，需要時可開啟圖書館服務。',
+    tools: ['get_library_catalog', 'list_campus_services', 'propose_open_page'],
+  },
   map: {
     modes: ['read'],
     summary: '可查所選校園的地點、已有來源的樓層與設施，並由下一堂課的教室接續查位置；同名、缺漏及預載資料會分別標示，路線需在地圖核對。',

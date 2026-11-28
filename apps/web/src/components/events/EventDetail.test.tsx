@@ -1,4 +1,6 @@
+import '@/test/campusEventShortlistLocks';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { campusEventShortlistKey, createCampusEventShortlistStore } from '@campus/shared/src/campusEventShortlist';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { EventDetail } from './EventDetail';
 import type { CampusEvent } from '@/lib/campusEvents';
@@ -10,6 +12,11 @@ vi.mock('@/lib/campusEventCalendar', async (importOriginal) => {
 });
 
 const loadCampusEvent = vi.hoisted(() => vi.fn());
+const auth = vi.hoisted(() => ({ user: null as null | { uid: string }, loading: false }));
+
+vi.mock('@/components/AuthGuard', () => ({
+  useAuth: () => ({ user: auth.user, loading: auth.loading }),
+}));
 
 vi.mock('@/lib/campusEvents', async () => {
   const actual = await vi.importActual<typeof import('@/lib/campusEvents')>('@/lib/campusEvents');
@@ -37,6 +44,8 @@ function event(partial: Partial<CampusEvent> & Pick<CampusEvent, 'id' | 'title' 
 
 beforeEach(() => {
   loadCampusEvent.mockReset();
+  auth.user = null;
+  auth.loading = false;
 });
 
 it('keeps list filters for back and login while sharing only the event identity', async () => {
@@ -342,3 +351,89 @@ it.each(['school-club-events', 'school-events', 'legacy-events'] as const)(
     }
   },
 );
+
+// Each test uses its own school because the saved-event store caches by scope for the whole module.
+let detailRun = 0;
+function detailSchool() {
+  return `detail-school-${++detailRun}`;
+}
+const detailStorage = {
+  getItem: (key: string) => window.localStorage.getItem(key),
+  setItem: (key: string, value: string) => window.localStorage.setItem(key, value),
+};
+
+it('saves from the detail page with identity and title only, and returns to the saved view', async () => {
+  const schoolId = detailSchool();
+  loadCampusEvent.mockResolvedValue(event({
+    id: 'talk', schoolId, title: '校園講座', description: '不應被收藏的長說明', location: '大講堂', source: 'school-events',
+  }));
+  render(<EventDetail schoolId={schoolId} schoolSearch={`?schoolId=${schoolId}&campus=${schoolId}`} eventId="talk"
+    sourceParam="school-events" listFilters={{ q: '', view: 'all', saved: true }} />);
+  await screen.findByRole('heading', { name: '校園講座' });
+  const back = new URL(screen.getByRole('link', { name: '回到收藏活動' }).getAttribute('href')!, 'https://campus.example');
+  expect(Object.fromEntries(back.searchParams)).toEqual({ schoolId, campus: schoolId, saved: '1' });
+  expect(screen.getByTestId('registration-panel').getAttribute('data-return-path')).toContain('saved=1');
+  const save = screen.getByRole('button', { name: '收藏「校園講座」' });
+  await waitFor(() => expect(save.getAttribute('aria-disabled')).toBeNull());
+  fireEvent.click(save);
+  expect(await screen.findByText('已收藏「校園講座」。')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '取消收藏「校園講座」' })).toBeTruthy();
+  const stored = JSON.parse(window.localStorage.getItem(campusEventShortlistKey(schoolId, null))!);
+  expect(stored.items).toEqual([{ schoolId, id: 'talk', source: 'school-events', title: '校園講座' }]);
+  expect(screen.getByRole('button', { name: '加入行事曆' })).toBeTruthy();
+});
+
+it('does not claim a detail save when storage fails, and recovers on retry', async () => {
+  const schoolId = detailSchool();
+  loadCampusEvent.mockResolvedValue(event({ id: 'talk', schoolId, title: '校園講座', source: 'school-events' }));
+  const setItem = vi.spyOn(Object.hasOwn(localStorage, 'setItem') ? localStorage : Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+  try {
+    render(<EventDetail schoolId={schoolId} schoolSearch={`?schoolId=${schoolId}`} eventId="talk" sourceParam="school-events" />);
+    await screen.findByRole('heading', { name: '校園講座' });
+    const save = screen.getByRole('button', { name: '收藏「校園講座」' });
+    await waitFor(() => expect(save.getAttribute('aria-disabled')).toBeNull());
+    fireEvent.click(save);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('無法儲存變更');
+    expect(screen.queryByText('已收藏「校園講座」。')).toBeNull();
+    expect(screen.getByRole('button', { name: '收藏「校園講座」' })).toBeTruthy();
+    setItem.mockRestore();
+    fireEvent.click(screen.getByRole('button', { name: '重試' }));
+    expect(await screen.findByText('已收藏「校園講座」。')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  } finally {
+    setItem.mockRestore();
+  }
+});
+
+it('keeps saving unavailable while sign-in is unresolved', async () => {
+  const schoolId = detailSchool();
+  auth.loading = true;
+  loadCampusEvent.mockResolvedValue(event({ id: 'talk', schoolId, title: '校園講座', source: 'school-events' }));
+  render(<EventDetail schoolId={schoolId} schoolSearch={`?schoolId=${schoolId}`} eventId="talk" sourceParam="school-events" />);
+  const save = await screen.findByRole('button', { name: '收藏「校園講座」' });
+  expect(save.getAttribute('aria-disabled')).toBe('true');
+  expect(screen.getByText(/正在確認登入狀態/)).toBeTruthy();
+  fireEvent.click(save);
+  expect(window.localStorage.getItem(campusEventShortlistKey(schoolId, null))).toBeNull();
+  expect(screen.getByRole('heading', { name: '校園講座' })).toBeTruthy();
+});
+
+it('lets a student remove a saved event whose live record is gone', async () => {
+  const schoolId = detailSchool();
+  await createCampusEventShortlistStore(detailStorage).setSaved(
+    campusEventShortlistKey(schoolId, null),
+    { schoolId, id: 'deleted', source: 'school-club-events', title: '已刪除的社團活動' },
+    true,
+  );
+  loadCampusEvent.mockResolvedValue(null);
+  render(<EventDetail schoolId={schoolId} schoolSearch={`?schoolId=${schoolId}`} eventId="deleted"
+    sourceParam="school-club-events" listFilters={{ q: '', view: 'all', saved: true }} />);
+  expect(await screen.findByRole('heading', { name: '找不到這場活動' })).toBeTruthy();
+  const remove = await screen.findByRole('button', { name: '取消收藏「已刪除的社團活動」' });
+  fireEvent.click(remove);
+  expect(await screen.findByText('已取消收藏「已刪除的社團活動」。')).toBeTruthy();
+  const back = screen.getByRole('link', { name: '回到收藏活動' });
+  await waitFor(() => expect(document.activeElement).toBe(back));
+  expect(screen.queryByRole('button', { name: /取消收藏/ })).toBeNull();
+});

@@ -27,6 +27,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { AccountMemberships } from '@/components/AccountMemberships';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { SiteShell } from '@/components/SiteShell';
+import { PageLoadingCard } from '@/components/PageLoadingCard';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { createTronClassClient, TronClassRequestError } from '@/lib/tronClassIntegrationClient';
 import { useClientNow } from '@/lib/useMaterialClientState';
@@ -244,7 +245,7 @@ function Workspace({ id }: { id: string }) {
         </button>
       </div>
     );
-  if (!data) return <p role="status">正在讀取課程內容…</p>;
+  if (!data) return <PageLoadingCard message="正在讀取課程內容…" />;
   const teacher = data.workspace.memberRole !== 'student';
   const tab = requestedTab === 'members' && !teacher ? 'assignments' : requestedTab;
   const tabs: Array<[CoursePanel, string]> = [
@@ -630,13 +631,13 @@ function TronClassEntry({ context }: { context: string }) {
   );
 }
 
-function NuniContent() {
+function NuniContent({ googleLinkEnabled }: { googleLinkEnabled: boolean }) {
   const pathname = usePathname() || '/';
   const campusSearch = useCampusNavigationSearch(useSearchParams());
   const hydrated = useClientHydrated();
   const { session, loading, error, refresh, pendingLogout, logout } = useNuniSession();
   let content: ReactNode;
-  if (!hydrated || (loading && !session)) content = <p role="status">正在確認登入狀態…</p>;
+  if (!hydrated || (loading && !session)) content = <PageLoadingCard message="正在確認登入狀態…" />;
   else if (!session || pathname === '/classroom/login') content = <Login />;
   else if (pathname === '/classroom/account')
     content = (
@@ -648,6 +649,11 @@ function NuniContent() {
         <Link className={styles.button} href={campusServiceHref('/classroom', campusSearch)}>
           前往我的課程
         </Link>
+        {googleLinkEnabled && !loading && !error && !pendingLogout && (
+          <Link className={styles.button} href="/auth/platform/link/google">
+            管理登入方式
+          </Link>
+        )}
         {!error && !pendingLogout && (
           <AccountMembershipEntry
             key={`${session.platformAccountId}:${session.context}`}
@@ -691,7 +697,7 @@ function NuniContent() {
           </button>
         </div>
       )}
-      {loading && session && <p role="status">正在確認登入狀態…</p>}
+      {loading && session && <PageLoadingCard message="正在確認登入狀態…" compact />}
       <div hidden={loading && !!session} inert={loading && !!session}>
         {content}
       </div>
@@ -699,10 +705,10 @@ function NuniContent() {
   );
 }
 
-export function NuniApp() {
+export function NuniApp({ googleLinkEnabled = false }: { googleLinkEnabled?: boolean } = {}) {
   return (
-    <Suspense fallback={<p role="status">載入中…</p>}>
-      <NuniContent />
+    <Suspense fallback={<PageLoadingCard message="載入中…" />}>
+      <NuniContent googleLinkEnabled={googleLinkEnabled} />
     </Suspense>
   );
 }

@@ -1,60 +1,34 @@
-# 03_announcements.yaml
-# Today 儀表捲動至「學校公告」捷徑（需 Metro 載入目前 SmartDashboard；載入逾時 25s 會強制結束佔位畫面）
-
 appId: ${APP_ID}
-name: Announcements Flow
-tags:
-  - smoke
-  - announcements
-
+name: Authenticated announcement search and detail
+tags: [smoke, announcements]
 ---
-- launchApp
-
-- extendedWaitUntil:
-    visible:
-      id: 'tab-Today'
-    timeout: 45000
-
+- runFlow: ../helpers/sign-in-student.yaml
 - waitForAnimationToEnd:
     timeout: 2500
-
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://announcements
+- extendedWaitUntil:
+    visible: '公開處室公告的摘要與原文連結。一般帳號即可查看。'
+    timeout: 20000
 - scrollUntilVisible:
     element:
-      text: '學校公告'
+      id: announcement-search
     direction: DOWN
-    timeout: 120000
-
+    timeout: 30000
 - tapOn:
-    text: '學校公告'
-
-- extendedWaitUntil:
-    visible:
-      id: 'e2e-announcements-screen'
+    id: announcement-search
+- inputText: 'Maestro'
+# Search already dismisses on Return; scrolling the results is the real next action.
+- scrollUntilVisible:
+    element:
+      text: 'Maestro 選課測試公告'
+    direction: DOWN
     timeout: 20000
-
-- takeScreenshot: announcements_list
-
-- tapOn:
-    text: '搜尋公告（標題/內文/來源）'
-
-- inputText: '選課'
-
+- tapOn: 'Maestro 選課測試公告'
 - extendedWaitUntil:
-    visible: '選課'
-    timeout: 8000
-    optional: true
-
-- takeScreenshot: announcements_search_result
-
-- tapOn:
-    index: 1
-    optional: true
-
-- extendedWaitUntil:
-    visible: '收藏'
-    timeout: 8000
-    optional: true
-
-- takeScreenshot: announcement_detail_optional
-
-- back
+    visible: '公告詳情'
+    timeout: 15000
+- assertVisible: '本機模擬器選課公告內容。'
+- takeScreenshot: announcement_seeded_detail

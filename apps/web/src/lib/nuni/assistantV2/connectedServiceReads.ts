@@ -1,15 +1,16 @@
 import { connectedServiceClauses } from '@campus/shared/src/assistantRoleReadIntent';
 export { connectedServiceClauses } from '@campus/shared/src/assistantRoleReadIntent';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
+import { parseLibraryCatalogRead } from '@campus/shared/src/assistantLibraryCatalog';
 import { canonical, type Obj } from './contracts';
 import { parsePublicSocialArguments, parsePublicSocialRead } from './publicSocial';
 import { parseSchoolInfoArguments, parseSchoolInfoRead } from './schoolInfo';
 import { roleWorkspaceRead } from './roleWorkspaceReads';
 
 export type ConnectedServiceRead = {
-  tool: 'get_public_social' | 'get_school_info' | 'get_teaching_overview' | 'get_merchant_overview';
+  tool: 'get_public_social' | 'get_school_info' | 'get_library_catalog' | 'get_teaching_overview' | 'get_merchant_overview';
   args: Obj;
-  serviceId: 'public-social' | 'school-info' | 'classroom' | 'merchant';
+  serviceId: 'public-social' | 'school-info' | 'library' | 'classroom' | 'merchant';
   label: string;
 };
 
@@ -17,6 +18,9 @@ export function connectedServiceRead(question: string): ConnectedServiceRead | n
   const clause = question.trim().replace(/^先(?=查|看|幫我)/, '');
   const workspace = roleWorkspaceRead(clause);
   if (workspace) return workspace;
+  // A fixed no-argument directory read; named schools and other requests stay unconsumed.
+  if (parseLibraryCatalogRead(clause)) return { tool: 'get_library_catalog', args: {},
+    serviceId: 'library', label: '查本校圖書館館藏入口' };
   const social = parsePublicSocialRead(clause);
   if (social) return { tool: social.tool, args: { ...parsePublicSocialArguments(social.args) },
     serviceId: 'public-social', label: '查公開交流動態' };

@@ -118,6 +118,102 @@ it.each([
 });
 
 
+it('keeps freshness tied to its accepted search, rechecks later searches, and preserves source provenance', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  const fetchedAt = '2026-11-22T04:01:00.000Z';
+  const oldWarning = /距離伺服器上次取得校方資料已超過 24 小時/;
+  const fetcher = vi.fn().mockImplementation(() => Promise.resolve(response([course], { fetchedAt })));
+  try {
+    vi.stubGlobal('fetch', fetcher);
+    render(<PublicCourseSearch {...props} />);
+    submit('005076');
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(oldWarning)).toBeNull();
+
+    now.mockReturnValue(Date.parse('2026-11-23T04:02:00.000Z'));
+    fireEvent.click(screen.getByRole('checkbox', { name: /選入批次核對/ }));
+    expect(screen.getByRole('status', { name: '選取課程' }).textContent).toContain('已選 1 門課');
+    expect(screen.queryByText(oldWarning)).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    fireEvent.submit(screen.getByRole('search', { name: '搜尋校方開課資料' }));
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.getByText(oldWarning)).toBeTruthy();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('校方資料擷取：2026-11-22 12:01（台灣時間；非校方更新時間）')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '帶入課表核對' }));
+    const draft = readPersonalImportDraft(importContext.scope);
+    expect(draft?.source.name).toContain('來源：https://ccweb6.ncnu.edu.tw/');
+    expect(draft?.source.name).toContain('資料擷取：2026-11-22 12:01（台灣時間；非校方更新時間）');
+    expect(draft?.source.name).not.toContain('2026-11-23 12:02');
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it.each(['focus', 'visibilitychange'])('rechecks displayed freshness on %s without requerying or altering the source', async (event) => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  const fetcher = vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-22T04:01:00.000Z' }));
+  try {
+    vi.stubGlobal('fetch', fetcher);
+    render(<PublicCourseSearch {...props} />);
+    await act(async () => { submit('005076'); });
+    expect(screen.getByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
+    now.mockReturnValue(Date.parse('2026-11-23T04:02:00.000Z'));
+    await act(async () => {
+      (event === 'focus' ? window : document).dispatchEvent(new Event(event));
+    });
+    expect(screen.getByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeTruthy();
+    expect(screen.getByText('校方資料擷取：2026-11-22 12:01（台灣時間；非校方更新時間）')).toBeTruthy();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it('refreshes freshness while the result stays open and releases its clock when unmounted', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-23T04:00:00.000Z'));
+  const fetcher = vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-22T04:00:30.000Z' }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<PublicCourseSearch {...props} />);
+  await act(async () => { submit('005076'); });
+  expect(screen.getByRole('heading', { name: course.title })).toBeTruthy();
+  expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
+  expect(vi.getTimerCount()).toBe(1);
+  fireEvent.click(screen.getByRole('checkbox', { name: /選入批次核對/ }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  expect(screen.getByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeTruthy();
+  expect(screen.getByRole('status', { name: '選取課程' }).textContent).toContain('已選 1 門課');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: '帶入課表核對' }));
+  const draft = readPersonalImportDraft(importContext.scope);
+  expect(draft?.source.name).toContain('來源：https://ccweb6.ncnu.edu.tw/');
+  expect(draft?.source.name).toContain('資料擷取：2026-11-22 12:00（台灣時間；非校方更新時間）');
+  // jsdom schedules the draft storage event separately; settle only that
+  // immediate task, leaving the next freshness interval pending.
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(vi.getTimerCount()).toBe(1);
+  await act(async () => { view.unmount(); });
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('uses the newly accepted response time before the next minute tick', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  try {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-23T04:05:58.000Z' })));
+    render(<PublicCourseSearch {...props} />);
+    now.mockReturnValue(Date.parse('2026-11-23T04:00:59.000Z'));
+    submit('005076');
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(/伺服器提供的擷取時間比此裝置時間晚超過 5 分鐘/)).toBeNull();
+  } finally {
+    now.mockRestore();
+  }
+});
+
 it('carries linked weekday and credits into a verified search and imports every meeting of a matching course', async () => {
   const multiDay = { ...course, time: '3cd4i' };
   const fetcher = vi.fn().mockResolvedValue(filteredResponse([multiDay], { weekday: 3, credits: 3 }, { unresolvedCount: 2 }));
@@ -772,6 +868,7 @@ it.each(['fetch', 'body'])('times out a stalled %s, retries the same query and i
   await act(async () => { finish(); });
   expect(screen.queryByText(course.title)).toBeNull();
   expect(screen.getByRole('status').textContent).toContain('沒有找到「005076」課程');
+  // The request deadline is released; only the accepted result's clock remains.
   expect(vi.getTimerCount()).toBe(1);
 });
 
@@ -781,7 +878,7 @@ it('clears the request deadline when a pending search is unmounted', async () =>
   vi.stubGlobal('fetch', fetcher);
   const view = render(<PublicCourseSearch {...props} />);
   await act(async () => { submit('005076'); });
-  expect(vi.getTimerCount()).toBe(2);
+  expect(vi.getTimerCount()).toBe(1);
   view.unmount();
   expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
   expect(vi.getTimerCount()).toBe(0);

@@ -1,6 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { parseSignInOptions, STUDENT_ID_PREPARING_COPY, useSignInOptions } from './signInOptions';
+import {
+  parseSignInOptions,
+  STUDENT_ID_PREPARING_COPY,
+  useSignInOptions,
+  type SignInOptionsScope,
+} from './signInOptions';
 import { hasUsableSchoolLoginProvider } from '@campus/shared/src/schoolLogin';
 
 const request = vi.fn();
@@ -35,6 +40,70 @@ it('requests sign-in options for the selected school', async () => {
     { schoolId: 'ntu' },
   );
   expect(result.current.studentId).toBe(false);
+});
+
+it('checks school capability without requiring or inferring a Google result', async () => {
+  request.mockResolvedValueOnce({ studentId: true });
+  const { result } = renderHook(() => useSignInOptions('pu', true, 'school'));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(request).toHaveBeenCalledWith(
+    'sign-in-options', undefined, undefined, undefined, { scope: 'school', schoolId: 'pu' },
+  );
+  expect(result.current).toMatchObject({ studentId: true, google: false, error: false });
+});
+
+it('preserves the default school lookup without a selected campus and never enables it from Google', async () => {
+  request.mockResolvedValueOnce({ studentId: false, google: true });
+  const { result } = renderHook(() => useSignInOptions(undefined, true, 'school'));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(request).toHaveBeenCalledWith(
+    'sign-in-options', undefined, undefined, undefined, { scope: 'school' },
+  );
+  expect(result.current).toMatchObject({ studentId: false, google: false, error: false });
+});
+
+it.each([null, {}, { google: true }, { studentId: 'true' }, []])(
+  'requires an explicit boolean school capability even without Google: %j',
+  async (value) => {
+    request.mockResolvedValueOnce(value);
+    const { result } = renderHook(() => useSignInOptions('pu', true, 'school'));
+    await waitFor(() => expect(result.current.error).toBe(true));
+    expect(result.current).toMatchObject({ studentId: false, google: false, loading: false });
+  },
+);
+
+it('invalidates a previous combined lookup immediately and ignores it after switching to school-only', async () => {
+  const pending: Array<(value: unknown) => void> = [];
+  request.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+  const view = renderHook(
+    ({ scope }: { scope: SignInOptionsScope }) => useSignInOptions('pu', true, scope),
+    { initialProps: { scope: 'all' as SignInOptionsScope } },
+  );
+  view.rerender({ scope: 'school' });
+  expect(view.result.current).toMatchObject({ studentId: false, google: false, loading: true });
+  await act(async () => pending[1]({ studentId: true }));
+  await act(async () => pending[0]({ google: true, studentId: false }));
+  expect(view.result.current).toMatchObject({ studentId: true, google: false, error: false, loading: false });
+});
+
+it('keeps school retry results isolated from a previous campus response', async () => {
+  const pending: Array<(value: unknown) => void> = [];
+  request.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+  const view = renderHook(
+    ({ schoolId }) => useSignInOptions(schoolId, true, 'school'),
+    { initialProps: { schoolId: 'pu' } },
+  );
+  view.rerender({ schoolId: 'ntu' });
+  await act(async () => pending[1]({ studentId: false }));
+  await act(async () => pending[0]({ studentId: true }));
+  expect(view.result.current).toMatchObject({ studentId: false, loading: false, error: false });
+  act(() => view.result.current.retry());
+  expect(view.result.current.loading).toBe(true);
+  await act(async () => pending[2]({ studentId: false }));
+  expect(view.result.current).toMatchObject({ studentId: false, loading: false, error: false });
+  expect(request).toHaveBeenLastCalledWith(
+    'sign-in-options', undefined, undefined, undefined, { scope: 'school', schoolId: 'ntu' },
+  );
 });
 
 it('treats student ID as unavailable unless the backend says it is available', () => {

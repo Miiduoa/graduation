@@ -5,7 +5,6 @@ import {
   cleanCourse,
   courseTimeLabel,
   periodCount,
-  periodDisplayLabel,
   periodLabelAt,
   periodSlots,
   WEEKDAY_LABELS,
@@ -51,6 +50,12 @@ export function TimetableGrid({
   const preview = current && target
     ? moveCourseToSlot(current.course, target.day, target.period - current.offset, periodTotal, WEEKDAY_LABELS.length)
     : null;
+  // Native drag startup is cancelled if its source moves during dragstart. Keep
+  // the existing flow content unchanged, including when an invalid target wraps.
+  const visibleMessage = !dragged && preview && !preview.ok ? preview.message : message;
+  const dragMessage = dragged
+    ? preview && !preview.ok ? preview.message : `正在移動「${dragged.course.name}」，放開後會開啟確認視窗。`
+    : '';
 
   function cancelMove() {
     setChoosing(false);
@@ -107,11 +112,15 @@ export function TimetableGrid({
         </label>
         <p>選課程 → 選新時段 → 確認儲存。連續節次會一起移動，按 Escape 可取消。</p>
       </div>}
-      {(preview && !preview.ok ? preview.message : message) && (
-        <p role="status" aria-live="polite" aria-atomic="true" className={movement.status}>
-          {preview && !preview.ok ? preview.message : message}
+      {visibleMessage && (
+        <p role="status" aria-live="polite" aria-atomic="true" aria-hidden={dragged ? true : undefined}
+          className={`${movement.status} ${dragged ? movement.reservedStatus : ''}`}>
+          {visibleMessage}
         </p>
       )}
+      {dragMessage && <p role="status" aria-live="polite" aria-atomic="true" className={`${movement.status} ${movement.dragStatus}`}>
+        {dragMessage}
+      </p>}
       <div className={styles.gridViewport} role="region" aria-label="課表捲動區" aria-describedby={hintId} tabIndex={0}
         onKeyDown={(event) => { if (event.key === 'Escape' && (choosing || dragged)) { event.preventDefault(); cancelMove(); } }}
         onPointerLeave={() => setTarget(null)}>
@@ -125,7 +134,11 @@ export function TimetableGrid({
               const period = slot.index;
               return (
                 <tr key={period}>
-                  <th scope="row" className={styles.period}><strong>{periodDisplayLabel(period, periodProfile)}</strong><span>{slot.start}</span><span>{slot.end}</span></th>
+                  <th scope="row" className={styles.period}>
+                    <strong>{periodProfile === 'ncku' ? `${slot.label} 節` : `第 ${slot.label} 節`}</strong>
+                    <span>{slot.start}</span>
+                    <span>–{slot.end}</span>
+                  </th>
                   {WEEKDAY_LABELS.map((label, dayIndex) => {
                     const day = dayIndex + 1;
                     const entries = coursesAtSlot(courses, day, period, periodTotal, WEEKDAY_LABELS.length);
@@ -150,6 +163,7 @@ export function TimetableGrid({
                             : <button type="button" key={course.id}
                                 className={`${styles.course} ${period > course.start ? styles.continuation : ''} ${movement.draggable}`}
                                 disabled={disabled} draggable={!disabled && !choosing && !imported}
+                                data-course-focus-id={period === course.start ? course.id : undefined}
                                 aria-label={`${imported ? '檢視匯入紀錄' : '編輯'} ${course.name}，${label}第 ${periodLabelAt(period, periodProfile)} 節${period > course.start ? '，續堂' : ''}`}
                                 onClick={() => onEdit(course)}
                                 onDragStart={(event) => {
@@ -157,7 +171,6 @@ export function TimetableGrid({
                                   event.dataTransfer.effectAllowed = 'move';
                                   event.dataTransfer.setData('text/plain', course.id);
                                   setDragged({ course: { ...course }, offset: period - course.start });
-                                  setMessage(`正在移動「${course.name}」，放開後會開啟確認視窗。`);
                                 }}
                                 onDragEnd={() => { setDragged(null); setTarget(null); }}>
                                 {content}
@@ -202,7 +215,7 @@ export function UnscheduledCourses({
       <p className={styles.hint}>這些課程仍保留在課表中。補齊時間後，才能可靠計算空堂或安排邀約。</p>
       <div className={styles.pendingList}>
         {pending.map((course) => (
-          <button type="button" key={course.id} className={styles.course} disabled={disabled} onClick={() => onEdit(course)}>
+          <button type="button" key={course.id} className={styles.course} disabled={disabled} data-course-focus-id={course.id} onClick={() => onEdit(course)}>
             <strong>{course.name}</strong><span>{course.teacher || '教師未填'} · {course.room || '教室未填'}</span><span>安排時間</span>
           </button>
         ))}

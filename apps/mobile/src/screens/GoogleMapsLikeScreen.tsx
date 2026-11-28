@@ -1,19 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import type { WebView } from 'react-native-webview';
 import { centerOfCoordinates, distanceMeters, formatDistance } from '@campus/shared/src/campusGeo';
 import { PuWebView } from '../ui/PuWebView';
-import {
-  AIDetailScreen,
-  AICard,
-  AISection,
-  AIRow,
-  AIButton,
-  AIChip,
-  AIEmptyState,
-} from '../ui/aiFirst';
+import { AIDetailScreen, AIButton } from '../ui/aiFirst';
 import { useTheme } from '../state/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
@@ -351,12 +352,8 @@ function CampusMapContent({
   };
 
   const officialPlanAction = officialMapUrl ? (
-    <View style={{ gap: theme.space.sm }}>
-      <AIButton
-        label="查看校方校區平面圖"
-        variant="ghost"
-        onPress={() => void openOfficialMap()}
-      />
+    <View>
+      <QuietAction label="查看校方校區平面圖" onPress={() => void openOfficialMap()} />
       {officialMapError ? (
         <Text accessibilityRole="alert" style={{ ...theme.typography.bodySmall, color: theme.colors.danger }}>
           {officialMapError}
@@ -366,6 +363,11 @@ function CampusMapContent({
   ) : null;
 
   const textStyle = { ...theme.typography.bodySmall, color: theme.colors.muted };
+  const clearSelection = () => {
+    setSelectedId(null);
+    setDirectionsError('');
+    setSourceLinkError('');
+  };
 
   return (
     <AIDetailScreen
@@ -375,27 +377,26 @@ function CampusMapContent({
       onBack={() => navigation.goBack?.()}
     >
       {loading ? (
-        <AICard>
+        <MapBlock>
           <ActivityIndicator accessibilityLabel="讀取校園地點" color={theme.colors.accent} />
           {officialPlanAction}
-        </AICard>
+        </MapBlock>
       ) : loadError ? (
-        <AICard title="目前無法讀取校園地點">
+        <MapBlock title="目前無法讀取校園地點">
           <Text accessibilityRole="alert" style={textStyle}>
             請確認登入狀態與網路連線後重試。
           </Text>
           <AIButton label="重新讀取地點" onPress={retryPlaces} />
           {officialPlanAction}
-        </AICard>
+        </MapBlock>
       ) : catalog.length === 0 ? (
-        <AICard title="尚未提供校園地點">
+        <MapBlock title="尚未提供校園地點">
           <Text style={textStyle}>目前沒有可顯示的地點資料，不會改用其他學校的建築或導航位置。</Text>
           {officialPlanAction}
           {mapSearchUrl ? (
             <>
-              <AIButton
+              <QuietAction
                 label={`在 Google 地圖搜尋${schoolName}`}
-                variant="ghost"
                 onPress={() => {
                   if (!mounted.current) return;
                   setDirectionsError('');
@@ -413,82 +414,78 @@ function CampusMapContent({
               {directionsError}
             </Text>
           ) : null}
-          <AIButton label="重新讀取地點" variant="ghost" onPress={retryPlaces} />
-        </AICard>
+          <QuietAction label="重新讀取地點" onPress={retryPlaces} />
+        </MapBlock>
       ) : (
         <>
           {sourceFailed && bundled ? (
-            <AICard title="校方地點資料暫時讀不到">
+            <MapBlock title="校方地點資料暫時讀不到">
               <Text accessibilityRole="alert" style={textStyle}>
                 先顯示目前可用的靜宜地點，收藏與部分地點可能缺少。
               </Text>
-              <AIButton label="重新讀取地點資料" onPress={retryPlaces} />
+              <QuietAction label="重新讀取地點資料" onPress={retryPlaces} />
               {officialPlanAction}
-            </AICard>
+            </MapBlock>
           ) : null}
           {sourcePending && bundled ? (
-            <AICard>
+            <MapBlock>
               <Text style={textStyle}>
                 正在同步校方地點資料，已先顯示靜宜的預載地點。
               </Text>
               {officialPlanAction}
-            </AICard>
+            </MapBlock>
           ) : null}
           {missingDeepLink ? (
-            <AICard title="找不到連結指定的地點">
+            <MapBlock title="找不到連結指定的地點">
               <Text style={textStyle}>這個地點不在目前學校的資料中，請從下方清單重新選擇。</Text>
-            </AICard>
+            </MapBlock>
           ) : null}
-          <AICard>
-            <View style={{ gap: theme.space.md }}>
-              <TextInput
-                accessibilityLabel="搜尋校園地點"
-                placeholder="大樓、系所或設施名稱"
-                placeholderTextColor={theme.colors.muted}
-                value={query}
-                onChangeText={setQuery}
-                maxLength={120}
-                returnKeyType="search"
-                style={{
-                  ...theme.typography.body,
-                  minHeight: 48,
-                  color: theme.colors.text,
-                  padding: theme.space.sm,
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                  borderRadius: theme.radius.md,
-                }}
-              />
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.xs }}>
-                <AIChip
-                  label="全部"
-                  active={category === 'all'}
-                  onPress={() => setCategory('all')}
+          <MapBlock>
+            <TextInput
+              accessibilityLabel="搜尋校園地點"
+              placeholder="大樓、系所或設施名稱"
+              placeholderTextColor={theme.colors.muted}
+              value={query}
+              onChangeText={setQuery}
+              maxLength={120}
+              returnKeyType="search"
+              style={{
+                ...theme.typography.body,
+                minHeight: 48,
+                color: theme.colors.text,
+                padding: theme.space.sm,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                borderRadius: theme.radius.md,
+              }}
+            />
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.xs }}>
+              <MapChip label="全部" active={category === 'all'} onPress={() => setCategory('all')} />
+              {categories.map((value) => (
+                <MapChip
+                  key={value}
+                  label={value}
+                  active={category === value}
+                  onPress={() => setCategory(value)}
                 />
-                {categories.map((value) => (
-                  <AIChip
-                    key={value}
-                    label={value}
-                    active={category === value}
-                    onPress={() => setCategory(value)}
-                  />
-                ))}
-                {location ? (
-                  <AIChip
-                    label="附近 1 公里"
-                    active={nearbyOnly}
-                    onPress={() => setNearbyOnly((value) => !value)}
-                  />
-                ) : null}
-              </View>
+              ))}
+              {location ? (
+                <MapChip
+                  label="附近 1 公里"
+                  active={nearbyOnly}
+                  onPress={() => setNearbyOnly((value) => !value)}
+                />
+              ) : null}
             </View>
-          </AICard>
-          <AICard title="校區位置">
+          </MapBlock>
+          <MapBlock title="校區位置">
             <View
               style={{
                 height: 280,
                 overflow: 'hidden',
                 borderRadius: theme.radius.md,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.colors.border,
                 backgroundColor: theme.colors.surfaceMuted,
               }}
             >
@@ -533,15 +530,14 @@ function CampusMapContent({
                     flex: 1,
                     justifyContent: 'center',
                     padding: theme.space.lg,
-                    gap: theme.space.md,
+                    gap: theme.space.sm,
                   }}
                 >
                   <Text accessibilityRole="alert" style={textStyle}>
                     地圖目前無法載入。仍可從下方清單選擇地點並開啟路線。
                   </Text>
-                  <AIButton
+                  <QuietAction
                     label="重新載入地圖"
-                    variant="ghost"
                     onPress={() => {
                       setReady(false);
                       setMapFailed(false);
@@ -567,156 +563,123 @@ function CampusMapContent({
                 </View>
               ) : null}
             </View>
-            <View style={{ gap: theme.space.sm, marginTop: theme.space.md }}>
-              <AIButton
-                label={locating ? '正在定位…' : '查看目前位置'}
-                disabled={locating}
-                variant="ghost"
-                onPress={() => void locate()}
-              />
-              {locationError ? (
-                <Text accessibilityRole="alert" style={textStyle}>
-                  {locationError}
-                </Text>
-              ) : null}
-              <Text style={textStyle}>
-                依目前校園地點資料顯示。開放時間與出入口請以現場公告為準。
+            <QuietAction
+              label={locating ? '正在定位…' : '查看目前位置'}
+              disabled={locating}
+              onPress={() => void locate()}
+            />
+            {locationError ? (
+              <Text accessibilityRole="alert" style={textStyle}>
+                {locationError}
               </Text>
-              {!sourcePending && !sourceFailed ? officialPlanAction : null}
-            </View>
-          </AICard>
-          {schoolId === 'pu' ? (
-            <AICard title="靜宜地圖資料來源與步行分鐘算法">
-              <Text style={textStyle}>
-                預載目錄中的建築與設施位置取自 OpenStreetMap 貢獻者資料（查詢日期{' '}
-                {PROVIDENCE_CAMPUS_SOURCE.retrievedAt}），並與校方校園地圖實境導覽交叉核對名稱。預載公車站牌取自臺中市公車站牌資料（快照{' '}
-                {PROVIDENCE_CAMPUS_SOURCE.transitCatalogDate}）。步行分鐘是直線公尺 ÷ 每分鐘 80 公尺後四捨五入，不是導航路線時間。
-              </Text>
-              <AIButton
-                label="OpenStreetMap 著作權與授權"
-                variant="ghost"
-                onPress={() => {
-                  const actionSchoolId = schoolId;
-                  void Linking.openURL(PROVIDENCE_CAMPUS_SOURCE.mapDataUrl).catch(() => {
-                    if (!mounted.current || schoolIdRef.current !== actionSchoolId) return;
-                    setDirectionsError('無法開啟地圖服務，請確認網路連線後重試。');
-                  });
-                }}
-              />
-            </AICard>
-          ) : null}
+            ) : null}
+            <Text style={textStyle}>
+              依目前校園地點資料顯示。開放時間與出入口請以現場公告為準。
+            </Text>
+            {!sourcePending && !sourceFailed ? officialPlanAction : null}
+          </MapBlock>
           {selected ? (
             <View
               onLayout={(event) =>
                 scrollRef.current?.scrollTo({ y: event.nativeEvent.layout.y, animated: false })
               }
             >
-              <AICard title={selected.name}>
-                <View style={{ gap: theme.space.md }}>
-                  <Text style={textStyle}>
-                    {[
-                      selected.category,
-                      selected.building,
-                      selected.floor ? `樓層：${selected.floor}` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
+              <MapBlock title={selected.name} heading>
+                <Text style={textStyle}>
+                  {[
+                    selected.category,
+                    selected.building,
+                    selected.floor ? `樓層：${selected.floor}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </Text>
+                {selected.description ? (
+                  <Text style={{ ...theme.typography.body, color: theme.colors.text }}>
+                    {selected.description}
                   </Text>
-                  {selected.description ? (
-                    <Text style={{ ...theme.typography.body, color: theme.colors.text }}>
-                      {selected.description}
-                    </Text>
-                  ) : null}
-                  {selected.facilities.length > 0 ? (
-                    <Text style={textStyle}>設施：{selected.facilities.join('、')}</Text>
-                  ) : null}
-                  {location ? (
-                    <Text style={textStyle}>
-                      與目前位置直線相距約 {formatDistance(distanceMeters(location, selected))}。
-                      {walkingEstimateLabel(distanceMeters(location, selected))}
-                    </Text>
-                  ) : null}
-                  {origin && origin.id !== selected.id ? (
-                    <Text style={textStyle}>
-                      從{origin.name}出發；兩地直線距離約 {formatDistance(distanceMeters(origin, selected))}（地圖虛線僅為位置示意）。
-                      {walkingEstimateLabel(distanceMeters(origin, selected))}
-                    </Text>
-                  ) : null}
-                  {isProvidencePendingVerification(schoolId, selected) ? (
-                    <Text style={textStyle}>
-                      這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。
-                    </Text>
-                  ) : null}
+                ) : null}
+                {selected.facilities.length > 0 ? (
+                  <Text style={textStyle}>設施：{selected.facilities.join('、')}</Text>
+                ) : null}
+                {location ? (
                   <Text style={textStyle}>
-                    將開啟 Google 地圖確認實際步行路線與所需時間。
+                    與目前位置直線相距約 {formatDistance(distanceMeters(location, selected))}。
+                    {walkingEstimateLabel(distanceMeters(location, selected))}
                   </Text>
-                  <AIButton label="查看步行路線" onPress={() => void openDirections()} />
+                ) : null}
+                {origin && origin.id !== selected.id ? (
+                  <Text style={textStyle}>
+                    從{origin.name}出發；兩地直線距離約 {formatDistance(distanceMeters(origin, selected))}（地圖虛線僅為位置示意）。
+                    {walkingEstimateLabel(distanceMeters(origin, selected))}
+                  </Text>
+                ) : null}
+                {isProvidencePendingVerification(schoolId, selected) ? (
+                  <Text style={textStyle}>
+                    這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。
+                  </Text>
+                ) : null}
+                <Text style={textStyle}>
+                  將開啟 Google 地圖確認實際步行路線與所需時間。
+                </Text>
+                <AIButton label="查看步行路線" onPress={() => void openDirections()} />
+                {directionsError ? (
+                  <Text
+                    accessibilityRole="alert"
+                    style={{ ...textStyle, color: theme.colors.danger }}
+                  >
+                    {directionsError}
+                  </Text>
+                ) : null}
+                {sourceLinkError ? (
+                  <Text
+                    accessibilityRole="alert"
+                    style={{ ...textStyle, color: theme.colors.danger }}
+                  >
+                    {sourceLinkError}
+                  </Text>
+                ) : null}
+                <View>
                   {selectedSourceUrl ? (
-                    <AIButton
-                      label="查看地點來源"
-                      variant="ghost"
-                      onPress={() => void openSelectedSource()}
-                    />
+                    <MapLinkRow label="查看地點來源" onPress={() => void openSelectedSource()} />
                   ) : null}
                   {hasOfficialProvidenceLibraryGuide(schoolId, selected) ? (
-                    <AIButton
+                    <MapLinkRow
                       label="查看校方樓層導覽"
-                      variant="ghost"
                       onPress={() => safeNavigate(navigation, 'IndoorFloorMap', { poiId: 'pu-library' })}
                     />
                   ) : null}
-                  <AIButton
+                  <MapLinkRow
                     label={originId === selected.id ? '已設為起點' : '設為步行起點'}
-                    variant="ghost"
                     onPress={() => {
                       setOriginId(selected.id);
                       setDirectionsError('');
                     }}
                   />
                   {origin ? (
-                    <AIButton
+                    <MapLinkRow
                       label="清除步行起點"
-                      variant="ghost"
-                      onPress={() => { setOriginId(null); setDirectionsError(""); }}
+                      onPress={() => {
+                        setOriginId(null);
+                        setDirectionsError('');
+                      }}
                     />
                   ) : null}
-                  {directionsError ? (
-                    <Text
-                      accessibilityRole="alert"
-                      style={{ ...textStyle, color: theme.colors.danger }}
-                    >
-                      {directionsError}
-                    </Text>
-                  ) : null}
-                  {sourceLinkError ? (
-                    <Text
-                      accessibilityRole="alert"
-                      style={{ ...textStyle, color: theme.colors.danger }}
-                    >
-                      {sourceLinkError}
-                    </Text>
-                  ) : null}
-                  <AIButton
-                    label="關閉地點資訊"
-                    variant="ghost"
-                    onPress={() => {
-                      setSelectedId(null);
-                      setDirectionsError('');
-                      setSourceLinkError('');
-                    }}
-                  />
+                  <MapLinkRow label="關閉地點資訊" neutral onPress={clearSelection} />
                 </View>
-              </AICard>
+              </MapBlock>
             </View>
           ) : null}
-          <AISection
+          <MapBlock
             title="地點清單"
             subtitle={location ? `${places.length} 個地點，依直線距離排序` : `${places.length} 個地點`}
+            list
           >
             {places.map((place) => (
-              <AIRow
+              <PlaceRow
                 key={place.id}
                 title={place.name}
+                selected={place.id === selectedId}
                 subtitle={[
                   place.category,
                   place.building,
@@ -730,26 +693,249 @@ function CampusMapContent({
                 }}
               />
             ))}
-          </AISection>
+          </MapBlock>
           {places.length === 0 ? (
-            <AICard>
-              <AIEmptyState
-                title="找不到符合的地點"
-                subtitle="換個關鍵字，或清除篩選條件再找一次。"
-              />
-              <AIButton
+            <MapBlock>
+              <Text accessibilityRole="header" style={{ ...theme.typography.h3, color: theme.colors.text }}>
+                找不到符合的地點
+              </Text>
+              <Text style={textStyle}>換個關鍵字，或清除篩選條件再找一次。</Text>
+              <QuietAction
                 label="清除篩選條件"
-                variant="ghost"
                 onPress={() => {
                   setQuery('');
                   setCategory('all');
                   setNearbyOnly(false);
                 }}
               />
-            </AICard>
+            </MapBlock>
+          ) : null}
+          {schoolId === 'pu' ? (
+            <MapBlock title="靜宜地圖資料來源與步行分鐘算法">
+              <Text style={textStyle}>
+                預載目錄中的建築與設施位置取自 OpenStreetMap 貢獻者資料（查詢日期{' '}
+                {PROVIDENCE_CAMPUS_SOURCE.retrievedAt}），並與校方校園地圖實境導覽交叉核對名稱。預載公車站牌取自臺中市公車站牌資料（快照{' '}
+                {PROVIDENCE_CAMPUS_SOURCE.transitCatalogDate}）。步行分鐘是直線公尺 ÷ 每分鐘 80 公尺後四捨五入，不是導航路線時間。
+              </Text>
+              <QuietAction
+                label="OpenStreetMap 著作權與授權"
+                onPress={() => {
+                  const actionSchoolId = schoolId;
+                  void Linking.openURL(PROVIDENCE_CAMPUS_SOURCE.mapDataUrl).catch(() => {
+                    if (!mounted.current || schoolIdRef.current !== actionSchoolId) return;
+                    setDirectionsError('無法開啟地圖服務，請確認網路連線後重試。');
+                  });
+                }}
+              />
+            </MapBlock>
           ) : null}
         </>
       )}
     </AIDetailScreen>
+  );
+}
+
+// ── Flat campus-guide primitives (local to this screen) ─────────────────────
+
+/** Hairline-separated section: label over content, no nested panel or tint. */
+function MapBlock({
+  title,
+  subtitle,
+  heading = false,
+  list = false,
+  children,
+}: {
+  title?: string;
+  subtitle?: string;
+  heading?: boolean;
+  list?: boolean;
+  children?: React.ReactNode;
+}) {
+  const theme = useTheme();
+  return (
+    <View
+      style={{
+        paddingHorizontal: theme.layout.screenHorizontalPadding,
+        paddingTop: theme.space.lg,
+        paddingBottom: theme.space.xs,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: theme.colors.separator,
+      }}
+    >
+      {title ? (
+        <Text
+          accessibilityRole="header"
+          style={
+            heading
+              ? { ...theme.typography.h2, color: theme.colors.text }
+              : {
+                  fontSize: 13,
+                  fontWeight: '600',
+                  letterSpacing: 0.4,
+                  color: theme.colors.textSecondary,
+                }
+          }
+        >
+          {title}
+        </Text>
+      ) : null}
+      {subtitle ? (
+        <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted, marginTop: 2 }}>
+          {subtitle}
+        </Text>
+      ) : null}
+      <View style={{ gap: list ? 0 : theme.space.md, marginTop: title ? theme.space.sm : 0, alignItems: 'stretch' }}>
+        {children}
+      </View>
+    </View>
+  );
+}
+
+/** Filter chip: forest fill only when selected. */
+function MapChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={{
+        minHeight: 44,
+        justifyContent: 'center',
+        paddingHorizontal: 14,
+        borderRadius: theme.radius.md,
+        borderWidth: 1,
+        borderColor: active ? theme.colors.accent : theme.colors.border,
+        backgroundColor: active ? theme.colors.accent : 'transparent',
+      }}
+    >
+      <Text
+        style={{
+          fontSize: 14,
+          fontWeight: active ? '700' : '400',
+          color: active ? theme.colors.onAccent : theme.colors.text,
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** Secondary action: a forest text action instead of another bordered button. */
+function QuietAction({
+  label,
+  onPress,
+  disabled = false,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={disabled ? { disabled: true } : undefined}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        minHeight: 44,
+        justifyContent: 'center',
+        alignSelf: 'flex-start',
+        opacity: disabled ? 0.5 : pressed ? 0.6 : 1,
+      })}
+    >
+      <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.accent }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/** Hairline-divided action row for place-level secondary actions. */
+function MapLinkRow({
+  label,
+  onPress,
+  neutral = false,
+}: {
+  label: string;
+  onPress: () => void;
+  neutral?: boolean;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => ({
+        minHeight: 48,
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: theme.colors.separator,
+        backgroundColor: pressed ? theme.colors.surfaceMuted : 'transparent',
+      })}
+    >
+      <Text
+        style={{
+          flex: 1,
+          fontSize: 16,
+          fontWeight: '600',
+          color: neutral ? theme.colors.textSecondary : theme.colors.accent,
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** Flat place result: title first, category/building/distance subordinate. */
+function PlaceRow({
+  title,
+  subtitle,
+  selected,
+  onPress,
+}: {
+  title: string;
+  subtitle: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        minHeight: 56,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 12,
+        paddingLeft: selected ? 10 : 0,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: theme.colors.separator,
+        borderLeftWidth: selected ? 3 : 0,
+        borderLeftColor: theme.colors.accent,
+        backgroundColor: pressed ? theme.colors.surfaceMuted : 'transparent',
+      })}
+    >
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          numberOfLines={1}
+          style={{ fontSize: 16, fontWeight: '600', color: theme.colors.text }}
+        >
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text numberOfLines={1} style={{ fontSize: 13, marginTop: 2, color: theme.colors.muted }}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+      <Text accessible={false} importantForAccessibility="no" style={{ fontSize: 18, color: theme.colors.muted, marginLeft: 8 }}>
+        ›
+      </Text>
+    </Pressable>
   );
 }

@@ -99,6 +99,77 @@ it('retries a 429 school catalog once and becomes ready', async () => {
   expect(directoryCalls).toBe(2);
 });
 
+it('searches the live directory by bundled shorthand and preserves live names, status and hints', async () => {
+  fetcher.mockImplementation((url: string) =>
+    Promise.resolve(
+      response(
+        url === '/api/schools'
+          ? {
+              schools: [
+                { id: 'nthu', name: '國立清華大學', status: 'not-open' },
+                { id: 'nchu', name: '國立中興大學', status: 'open' },
+                { id: 'nycu', name: '國立陽明交通大學', status: 'open' },
+                {
+                  id: 'ntu',
+                  name: '校園目錄名稱',
+                  status: 'not-open',
+                  shortName: '目錄簡稱',
+                  code: 'ACTUAL',
+                  aliases: ['目錄別名'],
+                  domains: ['catalog.example.edu'],
+                },
+              ],
+            }
+          : { authenticated: false },
+      ),
+    ),
+  );
+  render(
+    <CampusProviders>
+      <View />
+    </CampusProviders>,
+  );
+  const field = await screen.findByRole('searchbox');
+  for (const query of ['清大', 'nthu.edu.tw']) {
+    fireEvent.change(field, { target: { value: query } });
+    expect(screen.getByRole('button', { name: /國立清華大學.*NTHU.*校務尚未開通/ })).toBeTruthy();
+  }
+  fireEvent.change(field, { target: { value: '中興' } });
+  expect(screen.getByRole('button', { name: /國立中興大學.*NCHU/ })).toBeTruthy();
+  fireEvent.change(field, { target: { value: '交大' } });
+  expect(screen.getByRole('button', { name: /國立陽明交通大學/ })).toBeTruthy();
+  for (const query of ['目錄簡稱', 'ACTUAL', '目錄別名', 'catalog.example.edu']) {
+    fireEvent.change(field, { target: { value: query } });
+    expect(screen.getByRole('button', { name: /校園目錄名稱.*ACTUAL.*校務尚未開通/ })).toBeTruthy();
+  }
+  fireEvent.change(field, { target: { value: '靜宜' } });
+  expect(screen.getByRole('status', { name: '校園搜尋結果' }).textContent).toContain('找不到符合');
+  expect(screen.queryByRole('button', { name: /靜宜/ })).toBeNull();
+});
+
+it('uses bundled ambiguous codes only as search hints until a campus is chosen', async () => {
+  navigation.search = '?school=TCU';
+  fetcher.mockImplementation((url: string) =>
+    Promise.resolve(
+      response(
+        url === '/api/schools'
+          ? { schools: [{ id: 'tw-taichung-uni-a', name: '校園甲', status: 'not-open' }] }
+          : { authenticated: false },
+      ),
+    ),
+  );
+  render(
+    <CampusProviders>
+      <View />
+    </CampusProviders>,
+  );
+  const field = await screen.findByRole('searchbox');
+  expect(screen.getByRole('combobox', { name: '瀏覽校園' })).toHaveProperty('value', '');
+  fireEvent.change(field, { target: { value: 'TCU' } });
+  expect(screen.getByRole('button', { name: /校園甲.*TCU/ })).toBeTruthy();
+  expect(screen.getByText('目前瀏覽：不限校園')).toBeTruthy();
+});
+
 it('uses real directory state and does not transfer an account school choice to another account', async () => {
   fetcher.mockImplementation((url: string) =>
     Promise.resolve(

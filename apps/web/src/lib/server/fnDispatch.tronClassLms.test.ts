@@ -789,6 +789,46 @@ it('serves a fresh cache within TTL and bypasses it on refresh', async () => {
   expect(source.fetchHomeworkPage).toHaveBeenCalled();
 });
 
+it('refetches unversioned flags and provides boolean rows and a partial warning to legacy readers, including on rollback', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const oldSnapshot = store.docs.get(CACHE)!.snapshot as Record<string, unknown>;
+  delete oldSnapshot.schemaVersion;
+  const { submitted, ...missingStatus } = LMS_FIXTURE_HOMEWORK_OPEN;
+  expect(submitted).toBe(false);
+  vi.mocked(source.fetchHomeworkPage).mockClear().mockResolvedValue({
+    ok: true,
+    value: {
+      homework_activities: [
+        missingStatus,
+        LMS_FIXTURE_HOMEWORK_DONE,
+        { ...missingStatus, id: 20009, submitted: 'false' },
+        { ...missingStatus, id: 20010, submitted: false },
+      ],
+      total: 4,
+    },
+  });
+
+  for (const hit of [false, true]) {
+    const result = (await (await request()).json()).result;
+    expect(result.cache.hit).toBe(hit);
+    expect(result.schemaVersion).toBe(2);
+    // bff32be0's readHomework rejects the entire response on a single non-boolean.
+    // Its server also serves the original snapshot.homework / courseErrors fields on a cache hit.
+    for (const snapshot of [result, store.docs.get(CACHE)!.snapshot]) {
+      expect(snapshot.homework.map((row: { submitted: unknown }) => row.submitted)).toEqual([true, false]);
+      expect(snapshot.courseErrors).toEqual([expect.objectContaining({
+        courseId: LMS_FIXTURE_COURSE.id, area: 'homework', status: null,
+      })]);
+      expect(snapshot.unconfirmedHomework).toEqual([
+        { index: 0, item: expect.objectContaining({ id: missingStatus.id, submitted: null }) },
+        { index: 2, item: expect.objectContaining({ id: 20009, submitted: null }) },
+      ]);
+    }
+  }
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+});
+
 it('does not reuse an expired cache document and overwrites it', async () => {
   const { request, source, store } = setup();
   store.docs.set(CACHE, {
@@ -1321,6 +1361,44 @@ it.each([
     .toMatch(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T/);
 });
 
+it('uses one validated snapshot when its nested TTL expires during cache handling', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const expiresAt = Date.now() + 1_000;
+  const nestedExpiresAt = new Date(expiresAt).toISOString();
+  const snapshot = store.docs.get(CACHE)!.snapshot as { cache: { expiresAt: string } };
+  snapshot.cache.expiresAt = nestedExpiresAt;
+  vi.mocked(source.fetchCourses).mockClear();
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(expiresAt - 1);
+  const parseDate = Date.parse;
+  const parse = vi.spyOn(Date, 'parse').mockImplementation((value) => {
+    const timestamp = parseDate(value);
+    // Cross the deadline after validating the nested TTL, before using the snapshot.
+    if (value === nestedExpiresAt) clock.mockReturnValue(expiresAt);
+    return timestamp;
+  });
+  try {
+    const cachedResponse = await request();
+    expect(cachedResponse.status).toBe(200);
+    const cachedBody = await cachedResponse.json();
+    expect(cachedBody.result.cache.hit).toBe(true);
+    expect(cachedBody.result.homework).toHaveLength(2);
+    expect(Date.now()).toBe(expiresAt);
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+
+    const refreshedResponse = await request();
+    expect(refreshedResponse.status).toBe(200);
+    expect((await refreshedResponse.json()).result.cache.hit).toBe(false);
+    expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+    expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  } finally {
+    parse.mockRestore();
+    clock.mockRestore();
+  }
+});
+
 it.each([
   { cookies: { session: 'new-cookie' }, userId: 10 },
   { cookies: { session: 'lms-secret' }, userId: 11 },
@@ -1617,6 +1695,9 @@ it.each([
   { path: PORTAL, change: { tronClassSessionId: 'c'.repeat(32) }, status: 'FAILED_PRECONDITION' },
   { path: LMS, change: { ownerUid: 'another-owner' }, status: 'FAILED_PRECONDITION' },
   { path: `users/${UID}`, change: { accountDeletionInProgress: true }, status: 'PERMISSION_DENIED' },
+  ...['deleted', 'disabled', 'suspended', 'inactive'].map((accountStatus) => ({
+    path: `users/${UID}`, change: { status: accountStatus }, status: 'PERMISSION_DENIED',
+  })),
   { path: `schools/pu/members/${UID}`, change: { status: 'inactive' }, status: 'PERMISSION_DENIED' },
 ])('rejects access revoked at $path just before the cache transaction', async ({ path, change, status }) => {
   const { request, store } = setup();
@@ -1627,6 +1708,7 @@ it.each([
   });
 
   const response = await request();
+  expect(response.ok).toBe(false);
   expect((await response.json()).error.status).toBe(status);
   expect(store.docs.has(CACHE)).toBe(false);
 });
@@ -1701,12 +1783,15 @@ it('drops cached contents for courses absent from the linked session course list
   for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
 });
 
-it('serves legacy cached homework and valid course extras alongside malformed course rows', async () => {
+it.each(['malformed', 'duplicate'] as const)('refetches legacy cached homework when its course list is %s', async (scenario) => {
   const { request, source, store } = setup();
   expect((await request({ courseId: 10001 })).status).toBe(200);
   const snapshot = store.docs.get(CACHE)!.snapshot as Record<string, unknown>;
   const courses = snapshot.courses as unknown[];
-  snapshot.courses = [null, 'broken', 42, { name: '沒有課程編號' }, { id: -1 }, { id: 10002, name: ' ' }, ...courses];
+  snapshot.courses = scenario === 'malformed'
+    ? [null, 'broken', 42, { name: '沒有課程編號' }, { id: -1 }, { id: 10002, name: ' ' }, ...courses]
+    : [...courses, ...courses];
+  (snapshot.homework as Array<{ title: string }>)[0].title = '未通過課程核對的舊快取作業';
   const extras = store.docs.get(CACHE)!.extras as Record<string, {
     announcements: LmsReadonlySnapshot['announcements'];
     materials: LmsReadonlySnapshot['materials'];
@@ -1715,6 +1800,22 @@ it('serves legacy cached homework and valid course extras alongside malformed co
   extras['10002'].announcements[0].courseId = 10002;
   extras['10002'].materials[0].courseId = 10002;
   extras['10002'].materials[0].title = '缺少有效課程資料的教材';
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  // Course identity is part of the cache's trust boundary. A malformed list
+  // must be refetched, not reused just because another row has a valid ID.
+  const refreshedResponse = await request({ courseId: 10001 });
+  expect(refreshedResponse.status).toBe(200);
+  const refreshed = await refreshedResponse.json();
+  expect(refreshed.result.cache.hit).toBe(false);
+  expect(refreshed.result.courses).toEqual([{ id: 10001, name: '資料庫系統' }]);
+  expect(refreshed.result.homework).toHaveLength(2);
+  expect(refreshed.result.contentsLoadedFor).toEqual([10001]);
+  expect(refreshed.result.materials).toHaveLength(1);
+  expect(JSON.stringify(refreshed)).not.toContain('未通過課程核對的舊快取作業');
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
   for (const method of Object.values(source)) vi.mocked(method).mockClear();
 
   for (const data of [{}, { courseId: 10001 }]) {
@@ -1742,6 +1843,31 @@ it('serves legacy cached homework and valid course extras alongside malformed co
   expect(body.result.cache.hit).toBe(false);
   expect(body.result.materials).toHaveLength(1);
   expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+});
+
+it.each(['malformed', 'duplicate'] as const)('does not serve an invalid %s course cache when fresh course verification fails', async (scenario) => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const snapshot = store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot;
+  const originalCourses = structuredClone(snapshot.courses);
+  (snapshot as unknown as Record<string, unknown>).courses = scenario === 'malformed'
+    ? [null, ...originalCourses]
+    : [...originalCourses, ...originalCourses];
+  snapshot.homework[0].title = '不可當作備援回傳的舊快取作業';
+  const before = structuredClone(store.docs.get(CACHE));
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+  vi.mocked(source.fetchCourses).mockRejectedValueOnce(new Error('upstream unavailable'));
+
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(503);
+  const body = await response.json();
+  expect(body.result).toBeUndefined();
+  expect(body.error.status).toBe('UNAVAILABLE');
+  expect(JSON.stringify(body)).not.toContain('不可當作備援回傳的舊快取作業');
+  expect(source.fetchCourses).toHaveBeenCalledTimes(1);
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)).toEqual(before);
 });
 
 it.each([
@@ -1874,6 +2000,23 @@ it('refetches same-session cached courseware with a legacy 401 error rather than
   expect(source.fetchActivities).toHaveBeenCalledTimes(2);
   expect((store.docs.get(CACHE)!.extras as typeof extras)['10001'].errors).toEqual([]);
 });
+it.each(['deleted', 'disabled', 'suspended', 'inactive'])(
+  'rejects account status %s before any LMS source or cache write',
+  async (status) => {
+    const { request, source, store } = setup();
+    store.docs.get(`users/${UID}`)!.status = status;
+
+    const response = await request({ courseId: 10001 });
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.status).toBe('PERMISSION_DENIED');
+    expect(source.fetchCourses).not.toHaveBeenCalled();
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+    expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
+    expect(store.docs.has(CACHE)).toBe(false);
+  },
+);
 
 it.each(['homework', 'materials', 'announcements'] as const)(
   'rejects a same-session base cache carrying an old %s HTTP 401 error',
@@ -1981,4 +2124,37 @@ it.each([{ refresh: 'yes' }, { sessionId: LMS_ID }, { status: 'ongoing' }, { cou
   const { request, source } = setup();
   expect((await request(data)).status).toBe(400);
   expect(source.fetchCourses).not.toHaveBeenCalled();
+});
+
+
+it('refetches a decoded unconfirmed submission belonging to a foreign cached course', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const cached = store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot & {
+    unconfirmedHomework: { index: number; item: LmsReadonlySnapshot['homework'][number] }[];
+  };
+  const foreign = { ...cached.homework.shift()!, courseId: 99999, title: '其他課程的未確認作業', submitted: null };
+  cached.unconfirmedHomework = [{ index: 0, item: foreign }];
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+  const body = await (await request()).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(JSON.stringify(body)).not.toContain('其他課程的未確認作業');
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+});
+
+it('uses the complete cache TTL after decoding submission-only compatibility warnings', async () => {
+  const { request, source, store } = setup();
+  const { submitted, ...missingStatus } = LMS_FIXTURE_HOMEWORK_OPEN;
+  expect(submitted).toBe(false);
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValue({
+    ok: true, value: { homework_activities: [missingStatus, LMS_FIXTURE_HOMEWORK_DONE], total: 2 },
+  });
+  expect((await request()).status).toBe(200);
+  const snapshot = store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot;
+  snapshot.fetchedAt = new Date(Date.now() - 61_000).toISOString();
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+  const body = await (await request()).json();
+  expect(body.result.cache.hit).toBe(true);
+  expect(body.result.unconfirmedHomework).toHaveLength(1);
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
 });

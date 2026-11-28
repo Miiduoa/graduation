@@ -6,6 +6,7 @@
  */
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { theme } from '../../ui/theme';
+import { pageTitleFont } from '../../ui/styles';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { View, Text, ActivityIndicator, ScrollView, StyleSheet, Pressable, RefreshControl } from 'react-native';
 import { useRoute, useNavigation, type RouteProp } from '@react-navigation/native';
@@ -43,7 +44,7 @@ export function CourseV2Header({
   return (
     <View style={styles.header}>
       <View style={{ flex: 1 }}>
-        <Text style={styles.headerTitle} numberOfLines={1}>
+        <Text accessibilityRole="header" style={styles.headerTitle}>
           {title}
         </Text>
         {subtitle ? <Text style={styles.headerSubtitle}>{subtitle}</Text> : null}
@@ -230,14 +231,15 @@ const createStyles = () => StyleSheet.create({
   list: { flex: 1, backgroundColor: theme.colors.bg },
   header: {
     paddingHorizontal: theme.layout.screenPadding,
-    paddingVertical: 12,
-    backgroundColor: theme.colors.surface,
+    paddingVertical: 16,
+    gap: 12,
+    backgroundColor: theme.colors.bg,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.colors.border,
     flexDirection: 'row',
     alignItems: 'center',
   },
-  headerTitle: { color: theme.colors.text, fontSize: 18, fontWeight: '600' },
+  headerTitle: { color: theme.colors.text, fontFamily: pageTitleFont, fontSize: 23, fontWeight: '600' },
   headerSubtitle: { fontSize: 12, color: theme.colors.muted, marginTop: 2 },
   headerBtn: {
     minHeight: 44,
@@ -269,24 +271,22 @@ const createStyles = () => StyleSheet.create({
   },
   btnLabel: { color: theme.colors.onAccent, fontWeight: '600' },
   card: {
-    marginHorizontal: theme.layout.screenPadding,
-    marginVertical: 6,
-    padding: 14,
-    borderRadius: theme.radius.lg,
+    paddingHorizontal: theme.layout.screenPadding,
+    paddingVertical: 15,
+    minHeight: 52,
     backgroundColor: theme.colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
   cardTitle: { color: theme.colors.text, fontSize: 15, fontWeight: '600' },
-  cardSubtitle: { fontSize: 12, color: theme.colors.muted, marginTop: 2 },
+  cardSubtitle: { fontSize: 13, color: theme.colors.textSecondary, marginTop: 3 },
   badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: theme.colors.accentSoft,
-    borderRadius: 6,
+    flexShrink: 1,
+    maxWidth: '45%',
+    paddingVertical: 3,
   },
-  badgeLabel: { fontSize: 11, color: theme.colors.accent, fontWeight: '600' },
+  badgeLabel: { fontSize: 12, color: theme.colors.textSecondary, fontWeight: '600' },
 });

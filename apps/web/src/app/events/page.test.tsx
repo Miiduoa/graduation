@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import type { CampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import CampusEventsPage from './page';
 
@@ -21,6 +21,8 @@ vi.mock('@/components/SiteShell', () => ({
     </main>
   ),
 }));
+
+vi.mock('@/components/AuthGuard', () => ({ useAuth: () => ({ user: null, loading: false }) }));
 
 vi.mock('@/lib/useCampusBrowseContext', () => ({
   useCampusBrowseContext: () => browse(),
@@ -48,4 +50,22 @@ it('renders the school-scoped list when browse context is ready', () => {
   render(<CampusEventsPage />);
   expect(screen.getByRole('heading', { name: '校園活動' })).toBeTruthy();
   expect(screen.getByTestId('event-list').textContent).toBe('nthu');
+});
+
+beforeEach(() => {
+  window.history.replaceState(null, '', '/events?schoolId=nthu');
+});
+
+it('opens the saved view from saved=1 without waiting for or fetching the browse list', async () => {
+  window.history.replaceState(null, '', '/events?schoolId=nthu&campus=nthu&saved=1');
+  await act(async () => {
+    render(<CampusEventsPage searchParams={Promise.resolve({ schoolId: 'nthu', campus: 'nthu', saved: '1' })} />);
+  });
+  expect(screen.getByRole('region', { name: '我的收藏活動' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: /我的收藏/ }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.queryByTestId('event-list')).toBeNull();
+  fireEvent.click(within(screen.getByRole('group', { name: '活動檢視' })).getByRole('button', { name: '瀏覽活動' }));
+  expect(screen.getByTestId('event-list').textContent).toBe('nthu');
+  expect(new URLSearchParams(window.location.search).has('saved')).toBe(false);
+  expect(new URLSearchParams(window.location.search).get('campus')).toBe('nthu');
 });

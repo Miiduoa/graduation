@@ -7,7 +7,9 @@ import { loadCampusEvent, type CampusEvent, type CampusEventSource } from '@/lib
 import { buildCampusEventCalendar, canExportCampusEvent } from '@/lib/campusEventCalendar';
 import { campusEventPhase, campusEventPhaseLabel } from '@campus/shared/src/campusEventTime';
 import { campusEventDetailPath } from '@campus/shared/src/campusEventLinks';
+import { useCampusEventShortlist, toSavedCampusEvent } from '@/lib/campusEventShortlist';
 import { useEventClock } from './useEventClock';
+import { CampusEventSaveButton, CampusEventShortlistFeedback } from './CampusEventSaveButton';
 import { EventRegistrationPanel } from './EventRegistrationPanel';
 import {
   buildCampusEventDetailHref,
@@ -78,6 +80,9 @@ export function EventDetail({
   const loadedEvent = view.status === 'ready' ? view.event : null;
   const now = useEventClock(loadedEvent?.calendarTime ?? loadedEvent ?? undefined, EVENT_ARRIVAL_WINDOW_MS);
   const listHref = buildCampusEventListHref(schoolSearch, listFilters);
+  const listLabel = listFilters?.saved ? '回到收藏活動' : '回到活動列表';
+  const shortlist = useCampusEventShortlist(schoolId);
+  const backLink = useRef<HTMLAnchorElement>(null);
   const returnPath = source
     ? buildCampusEventDetailHref(eventId, source, schoolSearch, listFilters)
     : listHref;
@@ -170,7 +175,7 @@ export function EventDetail({
         <h2>無法開啟此活動</h2>
         <p>請返回活動列表，重新選擇活動。</p>
         <Link className="btn" href={listHref}>
-          回到活動列表
+          {listLabel}
         </Link>
       </section>
     );
@@ -193,19 +198,36 @@ export function EventDetail({
           重新讀取
         </button>
         <Link className="btn" href={listHref}>
-          回到活動列表
+          {listLabel}
         </Link>
       </section>
     );
   }
 
   if (!view.event) {
+    const stored = shortlist.items.find((item) => item.id === eventId && item.source === source);
+    const savedCopy = stored ? toSavedCampusEvent(stored) : null;
     return (
       <section className={styles.status}>
         <h2>找不到這場活動</h2>
         <p>活動可能已移除，或不屬於目前查看的學校與來源。</p>
-        <Link className="btn" href={listHref}>
-          回到活動列表
+        {savedCopy ? (
+          <>
+            <p>此活動仍在這個裝置的收藏中，可先移除。</p>
+            <button type="button" className="btn" aria-disabled={shortlist.isBusy(savedCopy) ? 'true' : undefined}
+              onClick={() => {
+                if (shortlist.isBusy(savedCopy)) return;
+                void shortlist.toggle(savedCopy, false).then((result) => {
+                  if (result === 'done') backLink.current?.focus();
+                });
+              }}>
+              取消收藏<span className={styles.srOnly}>「{savedCopy.title}」</span>
+            </button>
+          </>
+        ) : null}
+        <CampusEventShortlistFeedback shortlist={shortlist} />
+        <Link ref={backLink} className="btn" href={listHref}>
+          {listLabel}
         </Link>
       </section>
     );
@@ -240,8 +262,9 @@ export function EventDetail({
       {event.description ? <p className={styles.body}>{event.description}</p> : null}
       <div className={styles.detailActions}>
         <Link className="btn" href={listHref}>
-          回到活動列表
+          {listLabel}
         </Link>
+        <CampusEventSaveButton event={event} shortlist={shortlist} showHint />
         <button type="button" className="btn" onClick={() => void copyLink()}>
           複製連結
         </button>
@@ -253,6 +276,7 @@ export function EventDetail({
           重新讀取
         </button>
       </div>
+      <CampusEventShortlistFeedback shortlist={shortlist} />
       <p id="event-calendar-note" className={styles.notice}>
         {canExportCampusEvent(event)
           ? '下載活動行事曆檔案後，可加入你慣用的行事曆。時間異動請回到此頁確認。'

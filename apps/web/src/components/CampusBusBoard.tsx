@@ -176,7 +176,6 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
         <div className={css.boardHeadCopy}>
           {selection ? <SchoolSelector compact variant="name" /> : <p className={css.boardSchool}>{schoolName}</p>}
           <h1 id="campus-bus-title" className={css.boardTitle}>公車</h1>
-          <p className={css.boardLabel} aria-hidden="true">BUS STOP</p>
         </div>
         <button
           type="button"

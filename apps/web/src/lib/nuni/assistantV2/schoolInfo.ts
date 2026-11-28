@@ -6,6 +6,7 @@ import {
   PUBLIC_SCHOOL_INFO_SOURCE_URL,
 } from '@campus/shared/src/publicSchoolInfo';
 import { V2Error } from './contracts';
+import { directorySchoolScope, ownFields } from './directoryFields';
 
 export type SchoolInfoField = 'overview' | 'address' | 'phone' | 'website';
 export type SchoolInfoArguments = { field?: SchoolInfoField };
@@ -38,27 +39,8 @@ const RESULT_KEYS = ['version', 'source', 'schoolId', 'query', 'checkedAt', 'sna
   'href', 'status', 'info', 'unavailable'];
 const invalid = (): never => { throw new V2Error(422, 'INVALID_INPUT'); };
 
-/** Reject accessors and unexpected fields before reading any caller values. */
-function record(raw: unknown, keys: readonly string[]): Record<string, unknown> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw) ||
-      ![null, Object.prototype].includes(Object.getPrototypeOf(raw))) return invalid();
-  const out: Record<string, unknown> = Object.create(null);
-  for (const key of Reflect.ownKeys(raw)) {
-    if (typeof key !== 'string' || !keys.includes(key)) return invalid();
-    const descriptor = Object.getOwnPropertyDescriptor(raw, key)!;
-    if (!descriptor.enumerable || !('value' in descriptor) || descriptor.value === undefined) return invalid();
-    out[key] = descriptor.value;
-  }
-  return out;
-}
-
-function schoolScope(raw: unknown): string {
-  if (typeof raw !== 'string' || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(raw)) return invalid();
-  return raw;
-}
-
 export function parseSchoolInfoArguments(raw: unknown): SchoolInfoQuery {
-  const value = record(raw, ['field']);
+  const value = ownFields(raw, ['field']);
   if (value.field !== undefined && !FIELDS.includes(value.field as SchoolInfoField)) return invalid();
   return { field: (value.field as SchoolInfoField | undefined) ?? 'overview' };
 }
@@ -90,7 +72,7 @@ function contact(schoolId: string): SchoolInfoContact | null {
 /** Read a versioned local public source. checkedAt is when this snapshot was
  * read, not a claim that the university's contacts were checked live. */
 export function readSchoolInfo(schoolId: string, args: unknown = {}, now = Date.now()): SchoolInfoRead {
-  const school = schoolScope(schoolId);
+  const school = directorySchoolScope(schoolId);
   const query = parseSchoolInfoArguments(args);
   if (!Number.isFinite(now) || !Number.isFinite(new Date(now).getTime())) return invalid();
   const info = contact(school);
@@ -113,9 +95,9 @@ export function readSchoolInfo(schoolId: string, args: unknown = {}, now = Date.
  * at the tool/answer boundary. URLs and contact details never come from a model. */
 export function parseSchoolInfoResult(raw: unknown, schoolId: string, args: unknown = {}): SchoolInfoRead {
   try {
-    const school = schoolScope(schoolId);
+    const school = directorySchoolScope(schoolId);
     const query = parseSchoolInfoArguments(args);
-    const value = record(raw, RESULT_KEYS);
+    const value = ownFields(raw, RESULT_KEYS);
     const returnedQuery = parseSchoolInfoArguments(value.query);
     if (value.version !== 1 || value.source !== 'bundled-moe-school-info' || value.schoolId !== school ||
         returnedQuery.field !== query.field || value.snapshotDate !== PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE ||
@@ -125,7 +107,7 @@ export function parseSchoolInfoResult(raw: unknown, schoolId: string, args: unkn
     const expected = contact(school);
     if (expected) {
       if (value.status !== 'ready' || value.unavailable !== undefined) return invalid();
-      const info = record(value.info, CONTACT_KEYS);
+      const info = ownFields(value.info, CONTACT_KEYS);
       if (CONTACT_KEYS.some(key => info[key] !== expected[key])) return invalid();
     } else if (value.status !== 'unavailable' || value.info !== null || value.unavailable !== 'NOT_LISTED') return invalid();
     return {
@@ -140,18 +122,7 @@ export function parseSchoolInfoResult(raw: unknown, schoolId: string, args: unkn
 
 /** Whole-clause grammar only: a named campus, department, person, live status,
  * route, or extra operation must remain with the conversational planner. */
-export function parseSchoolInfoRead(question: string): { tool: 'get_school_info'; args: SchoolInfoArguments } | null {
-  if (typeof question !== 'string' || !question.trim() || question.length > 160 ||
-      /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(question)) return null;
-  let value = question.normalize('NFKC').trim().replace(/[。！？!?]+$/, '').trim();
-  value = value.replace(/^(?:(?:請問|麻煩你|麻煩|請|幫我|替我|我想)\s*)+/, '');
-  value = value.replace(/^(?:(?:查詢|查看|查一下|看一下|看看|列出|顯示|查|看)\s*)+/, '');
-  const match = /^(?:(?:我|我們)的)?(?:學校|本校|目前學校|所選學校)(?:的)?(資訊|基本資料|聯絡資訊|地址|電話|總機|總機電話|官網|官方網站)(?:(?:是|有)?(?:什麼|多少|哪個)|在哪裡|在哪|為何)?(?:嗎|呢)?$/.exec(value);
-  if (!match) return null;
-  const field: SchoolInfoField = /地址/.test(match[1]) ? 'address'
-    : /電話|總機/.test(match[1]) ? 'phone' : /官網|官方網站/.test(match[1]) ? 'website' : 'overview';
-  return { tool: 'get_school_info', args: { field } };
-}
+export { parseSchoolInfoRead } from '@campus/shared/src/assistantPublicReadIntent';
 
 export function formatSchoolInfoRead(read: SchoolInfoRead): string {
   const lines: string[] = [];

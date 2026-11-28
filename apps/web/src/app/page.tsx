@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
+import { toCampusRole } from '@campus/shared/src/roles';
 import { AppHeader } from '@/components/AppHeader';
+import { AppFrame } from '@/components/AppFrame';
 import { StudentCardEntry } from '@/components/StudentCardEntry';
 import { TodayAssistantDisclosure, type TodayAssistantHandle } from '@/components/TodayCampusEntry';
 import { SiteFooter } from '@/components/SiteFooter';
@@ -273,192 +275,221 @@ export default function HomePage() {
     const timer = window.setTimeout(() => setLeavingTodoIds([]), 200);
     return () => window.clearTimeout(timer);
   }, [todos]);
+  // Partial course callbacks do not set updatedAt. Keep a confirmed snapshot
+  // actionable during same-account refreshes without treating the first partial
+  // response as a complete empty account.
+  const courseDataResolved =
+    sources.length > 0 && sources.every((source) => !!rows[source]?.updatedAt);
   const lmsUnconnected =
-    signedIn && !!data && !error && !loading && !failed && data.courses.length === 0;
+    signedIn && !!data && !error && !failed && courseDataResolved && data.courses.length === 0;
 
   const assistant = (
     <TodayAssistantDisclosure
       key={`assistant:${assistantScope}`}
-      preferredWorkContext={teacherOnly ? 'teacher' : undefined}
+      preferredWorkContext={
+        !sessionLoading && !blocked && nuni.session?.isPlatformOperator
+          ? 'operator'
+          : teacherOnly
+            ? 'teacher'
+            : uid && ['staff', 'department_head', 'principal', 'admin'].includes(toCampusRole(role) ?? '')
+              ? 'staff'
+              : undefined
+      }
       ref={assistantEntry}
       onOpenChange={handleAssistantToggle}
     />
   );
-  const agent = context && accountId && !sessionLoading && !blocked && !nuni.error ? (
-    <TodayAgent
-      key={JSON.stringify(['agent', owner, school?.selectedSchoolId, blocked])}
-      compact
-      context={context}
-      accountId={accountId}
-      tasks={rows.nuni?.data?.tasks ?? []}
-      now={now}
-      loading={!rows.nuni || rows.nuni.loading}
-      error={rows.nuni?.error || rows.nuni?.data?.tasksError || ''}
-      onRetry={() => void readSource('nuni', generation.current)}
-    />
-  ) : null;
-  const teachingIdentity: IdentityPart<TeachingIdentity[]> = teaching.length || (!busy && !failed) ? {
-    status: 'ok',
-    items: teaching.map((course) => ({
-      id: course.id,
-      name: course.name,
-      role: course.role === 'co-teacher' ? '協同教師' : course.role === 'moderator' ? '教學協作' : '負責老師',
-      href: courseHref(course),
-    })),
-  } : { status: 'pending' };
-  const workspaces = signedIn && context && accountId && !sessionLoading && !nuni.error ? (
-    <AccountIdentity
-      context={context}
-      accountId={accountId}
-      variant="home"
-      isPlatformOperator={nuni.session?.isPlatformOperator === true}
-      includeTeaching={!teacherOnly}
-      teaching={teachingIdentity}
-    />
-  ) : signedIn && !sessionLoading && !teacherOnly && teaching.length ? (
-    <AccountWorkspaces
-      data={{ teaching: teachingIdentity, stores: { status: 'ok', items: [] }, applications: { status: 'ok', items: [] } }}
-      isPlatformOperator={false}
-      loading={false}
-      onRetry={() => void refresh()}
-    />
-  ) : null;
-  return (
-    <div className={styles.page + ' ' + styles.todayPage}>
-      <a href="#today-content" className={styles.skip}>
-        跳到主要內容
-      </a>
-      <AppHeader
-        onOpenAssistant={() => assistantEntry.current?.openAssistant()}
-        assistantExpanded={openAssistantScope === assistantScope}
+  const agent =
+    context && accountId && !sessionLoading && !blocked && !nuni.error ? (
+      <TodayAgent
+        key={JSON.stringify(['agent', owner, school?.selectedSchoolId, blocked])}
+        compact
+        context={context}
+        accountId={accountId}
+        tasks={rows.nuni?.data?.tasks ?? []}
+        now={now}
+        loading={!rows.nuni || rows.nuni.loading}
+        error={rows.nuni?.error || rows.nuni?.data?.tasksError || ''}
+        onRetry={() => void readSource('nuni', generation.current)}
       />
-      <main id="today-content" className={styles.main} tabIndex={-1}>
-        {blocked ? (
-          <section className={styles.focus} aria-labelledby="session-title">
-            <h2 id="session-title">
-              {nuni.pendingLogout ? '登出尚未完成' : '暫時無法確認 Google 帳號'}
-            </h2>
-            <p role="alert">{nuni.error || '請重試登出，再切換帳號。'}</p>
-            <div className={styles.focusActions}>
-              <button
-                type="button"
-                className={styles.primary}
-                onClick={() => void (nuni.pendingLogout ? nuni.logout() : nuni.refresh())}
-                disabled={sessionLoading}
-              >
-                {nuni.pendingLogout ? '重試登出' : '重新確認登入'}
-              </button>
-            </div>
-          </section>
-        ) : teacherOnly ? (
-          <TeacherTodayPage
-            assistant={assistant}
-            workspaces={workspaces}
-            now={now}
-            unsigned={!signedIn}
-            teachingCourses={teaching}
-            upcomingTodos={todos}
-          />
-        ) : (
-          <StudentTodayPage
-            assistant={assistant}
-            agent={agent}
-            workspaces={workspaces}
-            now={now}
-            updatedAt={updatedAt}
-            signedIn={signedIn}
-            unsigned={!signedIn}
-            skeleton={busy}
-            refreshing={loading && !!data}
-            todos={todos}
-            todosError={error || data?.tasksError || ''}
-            lmsUnconnected={lmsUnconnected}
-            leavingTodoIds={leavingTodoIds}
-            onRetryTodos={() => {
-              const incomplete = Object.entries(rows).filter(
-                ([, row]) => !row.loading && (row.error || row.data?.tasksError),
-              );
-              incomplete.forEach(
-                ([source]) => void readSource(source as Source, generation.current),
-              );
-            }}
-          />
-        )}
-        {blocked && assistant}
-        {!sessionLoading && uid && !context ? (
-          <p className={styles.notice}>
-            E 校園資料擷取暫停。可獨立連接靜宜 TronClass，查看課程、作業、公告與教材。{' '}
-            <Link href="/tronclass">連接 TronClass</Link> · <Link href="/classroom">前往 nuni 課程</Link>
-          </p>
-        ) : null}
-        {isTeacherRole(role) && (
-          <p className={styles.notice}>
-            <Link href="/teacher">課務申訴審核 →</Link> 看學生送來的課程申訴。
-          </p>
-        )}
-        {signedIn ? (
-          <div className={styles.sourceStatuses} aria-label="課程來源狀態">
-            {(['nuni', 'school'] as const)
-              .filter((source) => (source === 'nuni' ? context && accountId : uid))
-              .map((source) => {
-                const row = rows[source];
-                return (
-                  <section
-                    key={source}
-                    className={styles.sourceStatus}
-                    aria-label={source === 'nuni' ? 'nuni 課程讀取狀態' : '校園課程讀取狀態'}
-                    aria-busy={row?.loading ?? true}
-                  >
-                    <div aria-live="polite">
-                      {!row || row.loading ? (
-                        <>
-                          <p>
-                            {source === 'nuni' ? 'nuni' : '校園'}課程還在讀取，其他內容可以先看。
-                          </p>
-                        </>
-                      ) : row.error ? (
-                        <>
-                          <p>{row.error}</p>
-                          <button
-                            type="button"
-                            onClick={() => void readSource(source, generation.current)}
-                          >
-                            重試{source === 'nuni' ? ' nuni ' : '校園'}課程
-                          </button>
-                        </>
-                      ) : (
-                        <p className={styles.loadedStatus}>
-                          {source === 'nuni' ? 'nuni 課程已更新。' : '校園課程已更新。'}
-                        </p>
-                      )}
-                    </div>
-                  </section>
-                );
-              })}
+    ) : null;
+  const teachingIdentity: IdentityPart<TeachingIdentity[]> =
+    teaching.length || (!busy && !failed)
+      ? {
+          status: 'ok',
+          items: teaching.map((course) => ({
+            id: course.id,
+            name: course.name,
+            role:
+              course.role === 'co-teacher'
+                ? '協同教師'
+                : course.role === 'moderator'
+                  ? '教學協作'
+                  : '負責老師',
+            href: courseHref(course),
+          })),
+        }
+      : { status: 'pending' };
+  const workspaces =
+    signedIn && context && accountId && !sessionLoading && !nuni.error ? (
+      <AccountIdentity
+        context={context}
+        accountId={accountId}
+        variant="home"
+        isPlatformOperator={nuni.session?.isPlatformOperator === true}
+        includeTeaching={!teacherOnly}
+        teaching={teachingIdentity}
+      />
+    ) : signedIn && !sessionLoading && !teacherOnly && teaching.length ? (
+      <AccountWorkspaces
+        data={{
+          teaching: teachingIdentity,
+          stores: { status: 'ok', items: [] },
+          applications: { status: 'ok', items: [] },
+        }}
+        isPlatformOperator={false}
+        loading={false}
+        onRetry={() => void refresh()}
+      />
+    ) : null;
+  return (
+    <AppFrame
+      contentId="today-content"
+      pageClassName={styles.todayPage}
+      header={
+        <AppHeader
+          onOpenAssistant={() => assistantEntry.current?.openAssistant()}
+          assistantExpanded={openAssistantScope === assistantScope}
+        />
+      }
+    >
+      {blocked ? (
+        <section className={styles.focus} aria-labelledby="session-title">
+          <h2 id="session-title">
+            {nuni.pendingLogout ? '登出尚未完成' : '暫時無法確認 Google 帳號'}
+          </h2>
+          <p role="alert">{nuni.error || '請重試登出，再切換帳號。'}</p>
+          <div className={styles.focusActions}>
+            <button
+              type="button"
+              className={styles.primary}
+              onClick={() => void (nuni.pendingLogout ? nuni.logout() : nuni.refresh())}
+              disabled={sessionLoading}
+            >
+              {nuni.pendingLogout ? '重試登出' : '重新確認登入'}
+            </button>
           </div>
-        ) : null}
-        {data?.recentFeedback?.length ? (
-          <section className={styles.section} aria-labelledby="feedback-title">
-            <h2 id="feedback-title">最近公布的成績與回饋</h2>
-            {data.recentFeedback.map((item) => (
-              <Link key={item.href} href={item.href} className={styles.course}>
-                <span>
-                  {item.courseName} · {item.title}
-                </span>
-                {item.score !== null ? <span>成績：{item.score}</span> : null}
-                {item.feedback ? <span>老師評語：{item.feedback}</span> : null}
-              </Link>
-            ))}
-          </section>
-        ) : null}
-        <div className={styles.personalTools}>
-          <StudentCardEntry />
+        </section>
+      ) : teacherOnly ? (
+        <TeacherTodayPage
+          assistant={assistant}
+          workspaces={workspaces}
+          now={now}
+          unsigned={!signedIn}
+          teachingCourses={teaching}
+          upcomingTodos={todos}
+          coursesLoading={loading}
+          coursesError={error}
+          onRetryCourses={() => void refresh()}
+        />
+      ) : (
+        <StudentTodayPage
+          platformSession={context && accountId && !sessionLoading && !blocked && !nuni.error
+            ? { accountId, context } : undefined}
+          assistant={assistant}
+          agent={agent}
+          workspaces={workspaces}
+          now={now}
+          updatedAt={updatedAt}
+          signedIn={signedIn}
+          unsigned={!signedIn}
+          skeleton={busy}
+          refreshing={loading && !!data}
+          courseDataResolved={courseDataResolved}
+          todos={todos}
+          todosError={error || data?.tasksError || ''}
+          lmsUnconnected={lmsUnconnected}
+          leavingTodoIds={leavingTodoIds}
+          onRetryTodos={() => {
+            const incomplete = Object.entries(rows).filter(
+              ([, row]) => !row.loading && (row.error || row.data?.tasksError),
+            );
+            incomplete.forEach(([source]) => void readSource(source as Source, generation.current));
+          }}
+        />
+      )}
+      {blocked && assistant}
+      {!sessionLoading && uid && !context ? (
+        <p className={styles.notice}>
+          E 校園資料擷取暫停。可獨立連接靜宜 TronClass，查看課程、作業、公告與教材。{' '}
+          <Link href="/tronclass">連接 TronClass</Link> · <Link href="/classroom">前往 nuni 課程</Link>
+        </p>
+      ) : null}
+      {isTeacherRole(role) && (
+        <p className={styles.notice}>
+          <Link href="/teacher">課務申訴審核 →</Link> 看學生送來的課程申訴。
+        </p>
+      )}
+      {signedIn ? (
+        <div className={styles.sourceStatuses} aria-label="課程來源狀態">
+          {(['nuni', 'school'] as const)
+            .filter((source) => (source === 'nuni' ? context && accountId : uid))
+            .map((source) => {
+              const row = rows[source];
+              return (
+                <section
+                  key={source}
+                  className={styles.sourceStatus}
+                  aria-label={source === 'nuni' ? 'nuni 課程讀取狀態' : '校園課程讀取狀態'}
+                  aria-busy={row?.loading ?? true}
+                >
+                  <div aria-live="polite">
+                    {!row || row.loading ? (
+                      <>
+                        <p>{source === 'nuni' ? 'nuni' : '校園'}課程還在讀取，其他內容可以先看。</p>
+                      </>
+                    ) : row.error ? (
+                      <>
+                        <p>{row.error}</p>
+                        <button
+                          type="button"
+                          onClick={() => void readSource(source, generation.current)}
+                        >
+                          重試{source === 'nuni' ? ' nuni ' : '校園'}課程
+                        </button>
+                      </>
+                    ) : (
+                      <p className={styles.loadedStatus}>
+                        {source === 'nuni' ? 'nuni 課程已更新。' : '校園課程已更新。'}
+                      </p>
+                    )}
+                  </div>
+                </section>
+              );
+            })}
         </div>
-        <details className={styles.siteInformation}>
-          <summary>關於 nuni</summary>
-          <SiteFooter />
-        </details>
-      </main>
-    </div>
+      ) : null}
+      {data?.recentFeedback?.length ? (
+        <section className={styles.section} aria-labelledby="feedback-title">
+          <h2 id="feedback-title">最近公布的成績與回饋</h2>
+          {data.recentFeedback.map((item) => (
+            <Link key={item.href} href={item.href} className={styles.course}>
+              <span>
+                {item.courseName} · {item.title}
+              </span>
+              {item.score !== null ? <span>成績：{item.score}</span> : null}
+              {item.feedback ? <span>老師評語：{item.feedback}</span> : null}
+            </Link>
+          ))}
+        </section>
+      ) : null}
+      <div className={styles.personalTools}>
+        <StudentCardEntry />
+      </div>
+      <details className={styles.siteInformation}>
+        <summary>關於 nuni</summary>
+        <SiteFooter />
+      </details>
+    </AppFrame>
   );
 }

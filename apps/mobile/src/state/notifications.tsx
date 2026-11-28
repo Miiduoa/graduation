@@ -37,6 +37,7 @@ export type NotificationType =
 
 export type Notification = {
   id: string;
+  schoolId?: unknown;
   type: NotificationType;
   title: string;
   body: string;
@@ -79,6 +80,7 @@ function mapNotificationDoc(d: QueryDocumentSnapshot<DocumentData>): Notificatio
   const data = d.data();
   return {
     id: d.id,
+    schoolId: data.schoolId,
     type: data.type ?? 'system',
     title: data.title ?? '',
     body: data.body ?? '',
@@ -422,8 +424,12 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
   );
 }
 
+export function useOptionalNotifications() {
+  return useContext(NotificationsContext);
+}
+
 export function useNotifications() {
-  const ctx = useContext(NotificationsContext);
+  const ctx = useOptionalNotifications();
   if (!ctx) throw new Error('useNotifications must be used within NotificationsProvider');
   return ctx;
 }

@@ -65,7 +65,7 @@ def main() -> None:
         }
         print(json.dumps({"versions": versions, "device": str(mx.default_device())}))
         assert versions["mlx-lm"] == "0.32.2", versions
-        assert versions["numpy"] == "2.5.4", versions
+        assert versions["numpy"] == "2.5.5", versions
         mx.random.seed(17)
         np.random.seed(17)
 

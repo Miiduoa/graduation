@@ -45,14 +45,21 @@ function assertPrivateDirectory(directory) {
 }
 
 test('rejects repository output including through an alias', () => {
-  for (const outDir of [root, path.join(root, 'backend/firestore')]) {
-    assert.throws(() => prepareTronClassTtlProfile({ outDir }), /outside the repository/);
-  }
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'tronclass-ttl-safe-'));
   try {
+    // Isolate repository containment from the checkout host's ancestor ownership.
+    const fixtureRoot = path.join(parent, 'repository');
+    for (const relative of ['firebase.json', 'backend/firestore/firestore.indexes.json', 'deploy/tronclass/firestore-ttl-policy.json']) {
+      const destination = path.join(fixtureRoot, relative);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.copyFileSync(path.join(root, relative), destination);
+    }
+    for (const outDir of [fixtureRoot, path.join(fixtureRoot, 'backend/firestore')]) {
+      assert.throws(() => prepareTronClassTtlProfile({ root: fixtureRoot, outDir }), /outside the repository/);
+    }
     const alias = path.join(parent, 'repo-link');
-    fs.symlinkSync(root, alias, 'dir');
-    assert.throws(() => prepareTronClassTtlProfile({ outDir: path.join(alias, 'profile') }), /outside the repository/);
+    fs.symlinkSync(fixtureRoot, alias, 'dir');
+    assert.throws(() => prepareTronClassTtlProfile({ root: fixtureRoot, outDir: path.join(alias, 'profile') }), /outside the repository/);
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }
 });
 

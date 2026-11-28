@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import CampusSpatialExplorer from './CampusSpatialExplorer';
 import type { MapLocation } from './mapService';
 import { PROVIDENCE_BUS_STOPS, PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
-import { MAX_VERTICES, MAX_WAYS, parseProvidenceFootprintSnapshot, parseProvidenceOsmFootprints } from './providenceFootprints';
+import { MAX_VERTICES, parseProvidenceFootprintSnapshot, parseProvidenceOsmFootprints } from './providenceFootprints';
 import { DEFAULT_SPATIAL_BEARING, MAX_SPATIAL_ZOOM, MIN_SPATIAL_ZOOM } from './campusSpatialCamera';
 
 const scene = vi.hoisted(() => ({
@@ -350,12 +350,14 @@ it('preserves the flat-map route origin only for the matching spatial destinatio
   expect(origin()).toEqual([null, null]);
   expect(dialog.queryByText(/沿用平面地圖設定的起點/)).toBeNull();
 
+
   view.rerender(<CampusSpatialExplorer {...props} mapRoute={[
     { ...places[0], lat: 0, lng: 0 },
     places[1],
   ]} />);
   expect(origin()).toEqual([null, null]);
   expect(dialog.queryByText(/沿用平面地圖設定的起點/)).toBeNull();
+
 
   view.rerender(<CampusSpatialExplorer {...props} mapRoute={null} />);
   expect(origin()).toEqual([null, null]);
@@ -558,10 +560,8 @@ it('uses observer visibility when host edges contradict its dimensions', async (
     // entry itself must satisfy the complete browser type contract.
     act(() => intersection?.([{
       isIntersecting: true, target: graphics, time: 1,
-      intersectionRect: { width: 280, height: 160 } as DOMRect,
-      boundingClientRect: validRect,
-      rootBounds: validRect,
-      intersectionRatio: 1,
+      intersectionRect: { ...validRect, width: 280, right: 292 },
+      boundingClientRect: validRect, intersectionRatio: 280 / 300, rootBounds: null,
     } satisfies IntersectionObserverEntry], {} as IntersectionObserver));
     await waitFor(() => expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready'));
 
@@ -669,6 +669,9 @@ it('uses the latest matching observation in one rapid-scroll batch', async () =>
       observerEntry(host, true, undefined, 10),
     ], {} as IntersectionObserver));
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    fireEvent.scroll(dialog);
+    fireEvent.resize(window);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
     expect(scene.create).toHaveBeenCalledTimes(1);
   } finally {
     bounds.mockRestore();
@@ -715,16 +718,20 @@ it('does not allocate offscreen WebGL or start its deadline until the canvas ent
   }
 });
 
-it('uses the last matching observer entry at viewport boundaries and keeps rendering without a later entry', async () => {
+it('does not start or resume WebGL when the canvas only touches the viewport edge', async () => {
+  // IntersectionObserver may report isIntersecting=true on an edge-adjacent
+  // target even when its intersection rectangle has zero visible area.
+  // This synthetic case checks GPU activation boundaries, not phone FPS.
+  let observedHost: Element | null = null;
   let options: IntersectionObserverInit | undefined;
-  const offscreen = new DOMRect(0, window.innerHeight, 320, 180);
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback, init?: IntersectionObserverInit) {
       intersection = callback;
       options = init;
     }
     observe(target: Element) {
-      vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(offscreen);
+      observedHost = target;
+      vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, window.innerHeight, 320, 180));
     }
     disconnect = disconnect;
   });
@@ -732,60 +739,191 @@ it('uses the last matching observer entry at viewport boundaries and keeps rende
     selected={places[0]} onSelect={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
   const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
-  const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
-  const bounds = vi.mocked(host.getBoundingClientRect);
-  expect(options).toBeUndefined();
-  expect(host.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  expect(observedHost).toBe(graphics);
+  expect(scene.create).not.toHaveBeenCalled();
 
-  const notify = (...entries: IntersectionObserverEntry[]) => act(() =>
-    intersection?.(entries, {} as IntersectionObserver));
-  const edgeTouch = { ...observerEntry(host, true, new DOMRect(0, offscreen.top, 320, 0)),
-    intersectionRatio: 0 };
-  notify(edgeTouch);
-  await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+  const notify = (time: number, width: number, height: number, coordinates: Record<string, number | undefined> = {}) => {
+    const entries = [{
+      isIntersecting: true, target: graphics, time,
+      intersectionRect: { width, height, ...coordinates },
+    }] as unknown as IntersectionObserverEntry[];
+    act(() => intersection?.(entries, {} as IntersectionObserver));
+  };
+  const notifyThrowingRect = (time: number) => {
+    const entries = [{
+      isIntersecting: true, target: graphics, time,
+      intersectionRect: {
+        width: 280, height: 160,
+        get left() { throw new Error('WebView DOMRect coordinate unavailable'); },
+      },
+    }] as unknown as IntersectionObserverEntry[];
+    act(() => intersection?.(entries, {} as IntersectionObserver));
+  };
+  notify(100, 0, 160);
+  expect(scene.create).not.toHaveBeenCalled();
+  expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+  // W3C IO §3.2.8: an edge touch and a positive-area intersection can both
+  // have isIntersecting=true, so a positive threshold must trigger recovery.
+  expect(options?.threshold).toEqual([0, 1e-9, 0.01]);
 
-  const sliver = { ...observerEntry(host, true, new DOMRect(0, offscreen.top, 320, 0.001)),
-    intersectionRatio: 0.001 / 180, rootBounds: new DOMRect() };
-  notify(sliver);
-  expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  notify({
-    ...edgeTouch,
-    get intersectionRect(): DOMRectReadOnly { throw new Error('intersection rectangle unavailable'); },
-  });
+  // A broken rectangle getter leaves the legacy positive flag usable.
+  vi.mocked(graphics.getBoundingClientRect).mockReturnValue(new DOMRect(0, 40, 320, 180));
+  notifyThrowingRect(101);
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
 
-  notify(edgeTouch);
+  notify(120, 280, 0);
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  for (const [index, width] of [Number.NaN, Number.POSITIVE_INFINITY, -2].entries()) {
+    notify(121 + index, width, 160);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  }
+  for (const [index, coordinate] of [
+    { x: Number.NaN }, { y: Number.POSITIVE_INFINITY },
+    { left: Number.NaN }, { top: Number.POSITIVE_INFINITY },
+    { right: Number.NEGATIVE_INFINITY }, { bottom: Number.NaN },
+  ].entries()) {
+    notify(124 + index, 280, 160, coordinate);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  }
+  notify(129.1, 280, 160, { left: 20, right: 20 });
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  notify(129.2, 280, 160, { top: 30, bottom: 10 });
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  bounds.mockReturnValue(new DOMRect(0, 40, 320, 180));
-  fireEvent.scroll(dialog);
+  notify(130, 280, 160);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  fireEvent.resize(window);
-  expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
   expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
   // An empty callback is not an offscreen entry. A WebView that delivers []
   // must not pause a still-visible map or open its focus-stealing recovery UI.
   const activeCallsBeforeEmpty = scene.setActive.mock.calls.length;
-  notify();
+  act(() => intersection?.([], {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenCalledTimes(activeCallsBeforeEmpty);
   expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
 
-  const offscreenEntry = observerEntry(host, false);
-  notify(offscreenEntry, sliver);
+  const offscreenEntry = observerEntry(graphics, false);
+  const sliver = observerEntry(graphics, true, new DOMRect(0, 40, 280, 160));
+  act(() => intersection?.([offscreenEntry, sliver], {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   // Scrolling or resizing without a newer observer event must not override
   // the last verified host visibility state.
   fireEvent.scroll(dialog);
   fireEvent.resize(window);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  notify(sliver, offscreenEntry);
+  act(() => intersection?.([sliver, offscreenEntry], {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  notify();
+  act(() => intersection?.([], {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
 });
 
-it('honors host entries across layout changes and ignores foreign targets', async () => {
+it('requests a callback between an edge touch and any visible sliver of the canvas', async () => {
+  // IntersectionObserver only notifies when isIntersecting or the threshold
+  // index changes. Edge touch (ratio 0) and a 0.5% sliver are both
+  // intersecting, so the thresholds must place them at different indexes in
+  // both directions. Mirrors the spec's threshold-index rule (W3C IO §3.2.8).
+  let options: IntersectionObserverInit | undefined;
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(_callback: IntersectionObserverCallback, init?: IntersectionObserverInit) { options = init; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const thresholds = options?.threshold as number[];
+  const index = (ratio: number) => {
+    const found = thresholds.findIndex((value) => value > ratio);
+    return found === -1 ? thresholds.length : found;
+  };
+  // One CSS pixel row of a 2000×2000 canvas is still a visible sliver.
+  for (const sliver of [0.005, 1 / (2000 * 2000), 0.009]) {
+    expect(index(sliver)).not.toBe(index(0));
+  }
+  // float32 storage in browser engines must not round the tiny step to 0.
+  expect(Math.fround(thresholds[1])).toBeGreaterThan(0);
+});
+
+it('uses the latest viewport state when a fast mobile scroll batches observer entries', async () => {
+  // A queued offscreen state followed by onscreen in one callback must start
+  // WebGL once. The inverse order must suspend it, not keep rendering offscreen.
+  // These are synthetic browser callbacks, not measurements from a phone.
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe(target: Element) {
+      vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, window.innerHeight + 10, 320, 180));
+    }
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+  expect(scene.create).not.toHaveBeenCalled();
+
+  vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 40, 320, 180));
+
+  act(() => intersection?.([
+    observerEntry(graphics, true, new DOMRect(0, 40, 320, 180), 100),
+  ], {} as IntersectionObserver));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+  // W3C IO §3.2.5–3.2.6 append transitions to a queue before delivery.
+  // A later hidden host entry must suspend an already-running renderer.
+  const visibleEntry = observerEntry(graphics, true, new DOMRect(0, 40, 320, 180), 110);
+  vi.mocked(graphics.getBoundingClientRect).mockReturnValue(new DOMRect(0, window.innerHeight + 10, 320, 180));
+  const hiddenEntry = observerEntry(graphics, false, undefined, 120);
+  act(() => intersection?.([visibleEntry, hiddenEntry], {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  // An empty callback is not evidence that the canvas became visible.
+  const callsBeforeEmpty = scene.setActive.mock.calls.length;
+  act(() => intersection?.([] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  expect(scene.setActive.mock.calls.length).toBe(callsBeforeEmpty);
+
+  vi.mocked(graphics.getBoundingClientRect).mockReturnValue(new DOMRect(0, 40, 320, 180));
+  act(() => intersection?.([
+    { ...hiddenEntry, time: 130 }, observerEntry(graphics, true, new DOMRect(0, 40, 320, 180), 140),
+  ], {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(scene.create).toHaveBeenCalledTimes(1);
+
+  // A WebView may round two transitions within one callback to the same
+  // timestamp. Prefer the final queued transition, not the first one.
+  const tiedOffscreen = [
+    { isIntersecting: true, time: 300 },
+    { isIntersecting: false, time: 300 },
+  ] as unknown as IntersectionObserverEntry[];
+  act(() => intersection?.(tiedOffscreen, {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+  const tiedOnscreen = [
+    { isIntersecting: false, time: 310 },
+    { isIntersecting: true, time: 310 },
+  ] as unknown as IntersectionObserverEntry[];
+  act(() => intersection?.(tiedOnscreen, {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+  // Separate callbacks can share a rounded timestamp in either direction.
+  const notify = (isIntersecting: boolean) => act(() =>
+    intersection?.([observerEntry(graphics, isIntersecting, new DOMRect(0, 40, 320, 180), 310)], {} as IntersectionObserver));
+  notify(false);
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  notify(true);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  notify(false);
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  notify(true);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('honors the latest host entry across layout changes and ignores foreign targets', async () => {
   let observedHost: Element | null = null;
   let top = window.innerHeight + 10;
   vi.stubGlobal('IntersectionObserver', class {
@@ -874,7 +1012,9 @@ it('offers an accessible way to recover a suspended scene when mobile visibility
     act(() => intersection?.(entries, {} as IntersectionObserver));
   };
 
+
   // Wait for React to commit the focusable host and ready state, not just the scene factory.
+
   // A slow worker may observe create() before React commits the ready UI.
   await waitFor(() => expect(host.tabIndex).toBe(0));
   // Keyboard focus was on the active 3D host when it suspended.
@@ -1015,27 +1155,45 @@ it('recovers focus blurred by scene deactivation without overriding a deliberate
   const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
   const directions = within(dialog).getByRole('link', { name: '開啟步行導航' });
   await waitFor(() => expect(host.tabIndex).toBe(0));
+
+  // JSDOM has no layout: give observerEntry an actual visible rectangle so
+  // its positive entry does not describe a zero-area, still-hidden canvas.
+  const hostBounds = vi.spyOn(host, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(8, 40, 280, 160));
+
   const notify = (visible: boolean) => act(() => intersection?.([
     observerEntry(host, visible),
   ], {} as IntersectionObserver));
 
-  act(() => host.focus());
-  expect(document.activeElement).toBe(host);
-  // Some browsers synchronously blur a marker when WebGL deactivates it.
-  scene.setActive.mockImplementationOnce(() => host.blur());
-  notify(false);
-  expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '重新啟動立體畫面' }));
-  notify(true);
-  expect(document.activeElement).toBe(host);
 
-  // A focus move during deactivation must take precedence over stale intent.
-  scene.setActive.mockImplementationOnce(() => directions.focus());
-  notify(false);
-  expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
-  expect(document.activeElement).toBe(directions);
-  notify(true);
-  expect(document.activeElement).toBe(directions);
-  expect(scene.create).toHaveBeenCalledTimes(1);
+  try {
+    act(() => host.focus());
+    expect(document.activeElement).toBe(host);
+    // Some browsers synchronously blur a marker when WebGL deactivates it.
+    scene.setActive.mockImplementationOnce(() => host.blur());
+    notify(false);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(host.tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '重新啟動立體畫面' }));
+    notify(true);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(host.tabIndex).toBe(0);
+    expect(document.activeElement).toBe(host);
+
+    // A focus move during deactivation must take precedence over stale intent.
+    scene.setActive.mockImplementationOnce(() => directions.focus());
+    notify(false);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+    expect(document.activeElement).toBe(directions);
+    notify(true);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(document.activeElement).toBe(directions);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+  } finally {
+    hostBounds.mockRestore();
+  }
+
 });
 
 it('moves focus from the restart button into the scene when auto-resume removes it', async () => {
@@ -1098,6 +1256,8 @@ it('uses the last matching entry even when it has no timestamp', async () => {
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
   notify([{ isIntersecting: false }]);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  notify([{ isIntersecting: true }]);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
@@ -1305,7 +1465,7 @@ it.each(['outside the viewport', 'clipped by the dialog'])('scrolls before resta
 
 it('remeasures layout on manual restart after an offscreen observer result', async () => {
   const viewport = Object.assign(new EventTarget(), {
-    width: 800, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
+    width: 800, height: 200, offsetLeft: 0, offsetTop: 0,
   });
   vi.stubGlobal('visualViewport', viewport);
   vi.stubGlobal('IntersectionObserver', class {
@@ -1317,11 +1477,16 @@ it('remeasures layout on manual restart after an offscreen observer result', asy
   const dialog = await open();
   const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
   const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 400, 320, 180));
+  // Manual restart scrolls the canvas back into the smaller visual viewport.
+  // Model that browser movement instead of leaving the host behind the keyboard.
+  const scrollToCanvas = vi.fn(() => bounds.mockReturnValue(new DOMRect(0, 20, 320, 180)));
+  Object.defineProperty(graphics, 'scrollIntoView', { configurable: true, value: scrollToCanvas });
   act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
 
   bounds.mockClear();
   await act(async () => fireEvent.click(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })));
+  expect(scrollToCanvas).toHaveBeenCalledOnce();
   expect(bounds).toHaveBeenCalled();
   expect(scene.create).toHaveBeenCalledTimes(2);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
@@ -1375,8 +1540,7 @@ it('keeps automatic WebGL deferred when the canvas is clipped and the observer i
 it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'zero-area', 'positive'] as const)(
   'checks dialog clipping after manual startup with a %s observer',
   async (mode) => {
-    const blocksVisibility = mode === 'negative';
-    const reportsVisibility = mode === 'positive' || mode === 'zero-area' || blocksVisibility;
+    const blocksVisibility = mode === 'negative' || mode === 'zero-area';
     const viewport = Object.assign(new EventTarget(), {
       width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
     });
@@ -1428,17 +1592,30 @@ it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'zero-area',
       const notify = (visible: boolean) => act(() =>
         intersection?.([observerEntry(host, visible || mode === 'zero-area',
           !visible && mode === 'zero-area' ? new DOMRect(0, 110, 320, 0) : undefined)], {} as IntersectionObserver));
-      if (reportsVisibility) notify(true);
+      if (mode === 'positive' || blocksVisibility) notify(true);
 
       top = 59;
       fireEvent.scroll(dialog);
-      if (mode === 'zero-area' || blocksVisibility) notify(false);
-      // The dialog scrollport now measurably clips the canvas, so even a stale
-      // positive observer entry must keep the WebGL scene paused.
+      if (blocksVisibility) notify(false);
+      // A measured dialog scrollport clips even a stale positive observer.
+      // Viewport recovery must still prove a visible dialog intersection.
       expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      for (const event of ['resize', 'scroll']) {
+        act(() => viewport.dispatchEvent(new Event(event)));
+        expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      }
       top = 120;
-      fireEvent.resize(window);
-      expect(scene.setActive).toHaveBeenLastCalledWith(!blocksVisibility);
+      // Ordinary window events do not clear a hidden/zero-area observation.
+      // Only visualViewport's verified recovery path may reset stale hidden state.
+      for (const event of ['resize', 'focus', 'scroll']) {
+        fireEvent(window, new Event(event));
+        expect(scene.setActive).toHaveBeenLastCalledWith(!blocksVisibility);
+      }
+      // The viewport signature still matches manual startup. Ignoring its
+      // stale occlusion must not discard a verified dialog-visible recovery.
+      act(() => viewport.dispatchEvent(new Event('resize')));
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
+      expect(scene.create).toHaveBeenCalledTimes(1);
       top = 59;
       await act(async () => view.rerender(<CampusSpatialExplorer {...props} locations={places.slice(0, -1)} />));
       expect(scene.dispose).toHaveBeenCalledTimes(1);
@@ -1455,7 +1632,7 @@ it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'zero-area',
       const updates = scene.setActive.mock.calls.length;
       top = 120;
       fireEvent.scroll(window);
-      if (reportsVisibility) notify(true);
+      if (mode === 'positive' || blocksVisibility) notify(true);
       expect(scene.setActive).toHaveBeenCalledTimes(updates);
       expect(scene.create).toHaveBeenCalledTimes(2);
       expect(scene.dispose).toHaveBeenCalledTimes(2);
@@ -2239,7 +2416,12 @@ it('leaves focus alone when automatic startup removes the manual-open button but
   }
 });
 
-it('keeps rendering when the observer is visible and keyboard bounds shrink or stay stale', async () => {
+it.each([
+  { position: 'visible', top: 20, height: 120, shouldRender: true },
+  { position: 'keyboard-obscured', top: 400, height: 180, shouldRender: false },
+])('respects visual viewport visibility for a $position canvas through window events', async ({
+  top, height, shouldRender,
+}) => {
   const viewport = Object.assign(new EventTarget(), {
     width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
   });
@@ -2247,17 +2429,34 @@ it('keeps rendering when the observer is visible and keyboard bounds shrink or s
   render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
   const dialog = await open();
   const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
-  // Inside the shrunk (200px) visual viewport, so only stale bounds change.
-  const rect = new DOMRect(0, 20, 320, 120);
+  const rect = new DOMRect(0, top, 320, height);
   vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(rect);
   act(() => intersection?.([observerEntry(graphics, true, rect)], {} as IntersectionObserver));
 
+  showKeyboard();
   viewport.height = 200;
   act(() => viewport.dispatchEvent(new Event('resize')));
+  expect(scene.setActive).toHaveBeenLastCalledWith(shouldRender);
+  if (shouldRender) {
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+  } else {
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+  }
+  // Viewport changes keep visible pixels active and covered pixels paused,
+  // regardless of whether a window or visual viewport event follows.
   fireEvent.resize(window);
+  expect(scene.setActive).toHaveBeenLastCalledWith(shouldRender);
   fireEvent.focus(window);
+  expect(scene.setActive).toHaveBeenLastCalledWith(shouldRender);
   act(() => viewport.dispatchEvent(new Event('scroll')));
-  expect(scene.setActive).not.toHaveBeenCalledWith(false);
+  expect(scene.setActive).toHaveBeenLastCalledWith(shouldRender);
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(scene.dispose).not.toHaveBeenCalled();
+
+  viewport.height = window.innerHeight;
+  hideKeyboard();
+  act(() => viewport.dispatchEvent(new Event('resize')));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
   expect(scene.dispose).not.toHaveBeenCalled();
   expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
@@ -2415,8 +2614,8 @@ it.each(visibilityTransitions.flatMap(({ event, startup, running }) =>
       switch (event) {
         case 'observer visible': notify(true); break;
         case 'observer hidden': notify(false); break;
-        case 'observer empty': intersection?.([], {} as IntersectionObserver); break;
-        case 'observer silent': break;
+        case 'observer empty':
+        case 'observer silent': intersection?.([], {} as IntersectionObserver); break;
         case 'layout visible':
         case 'layout offscreen':
         case 'layout invalid':
@@ -3986,7 +4185,9 @@ it('drops a building preview when its selected campus location is withdrawn', as
   expect(screen.queryByRole('button', { name: '平面圖建模預覽' })).toBeNull();
 });
 
+
 it.each([true, false])('revokes navigation and isolates unsaved editor changes after a same-ID update (preview open: %s)', async (previewOpen) => {
+
   const props = { school: 'other-school', onSelect: vi.fn() };
   const view = render(<CampusSpatialExplorer {...props} locations={places} selected={places[0]} />);
   const dialog = await open();
@@ -4005,9 +4206,11 @@ it.each([true, false])('revokes navigation and isolates unsaved editor changes a
   const moved = { ...places[0], name: '更新後的圖書館', category: '學習', lat: places[0].lat + 0.002 };
   view.rerender(<CampusSpatialExplorer {...props} locations={[moved, ...places.slice(1)]} selected={moved} />);
   if (previewOpen) {
-    // Never relabel the existing editor or transfer unsaved edits to a replacement marker.
+
     expect(screen.queryByRole('dialog', { name: '平面圖建模預覽' })).toBeNull();
     expect(screen.getByText(/原圖面地點已變更或無法唯一確認/)).toBeTruthy();
+    expect(screen.queryByRole('group', { name: '未匯出的樓層名稱 樓層設定' })).toBeNull();
+
   }
   const tour = within(screen.getByRole('dialog', { name: '校園空間導覽' }));
   expect(screen.queryByRole('dialog', { name: '平面圖建模預覽' })).toBeNull();
@@ -4026,10 +4229,12 @@ it.each([true, false])('revokes navigation and isolates unsaved editor changes a
   expect(google.searchParams.get('destination')).toBe(`${places[1].lat},${places[1].lng}`);
   expect(apple.searchParams.get('daddr')).toBe(`${places[1].lat},${places[1].lng}`);
   fireEvent.click(tour.getByRole('button', { name: '平面圖建模預覽' }));
+
   const nextPreview = await screen.findByRole('dialog', { name: '平面圖建模預覽' });
   expect(nextPreview.textContent).toContain(places[1].name);
   expect(nextPreview.textContent).not.toContain('未匯出的樓層名稱');
   expect(within(nextPreview).queryByRole('group', { name: '未匯出的樓層名稱 樓層設定' })).toBeNull();
+
 });
 
 it('adds source-checked Providence building shapes without changing navigation or hiding source dates', async () => {
@@ -4348,20 +4553,29 @@ it.each(['ASCII', 'UTF-8'] as const)(
   },
 );
 
-it.each([null, '100'])('installs valid JSON-only OSM bodies (Content-Length %s)', async (length) => {
-  const { library, body, buildings } = sourcedLibraryFootprintFixture();
-  const json = vi.fn(async () => JSON.parse(body));
-  const headers = new Headers();
-  if (length !== null) headers.set('Content-Length', length);
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers, json }));
-  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-  const dialog = await open();
-  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
-  expect(json).toHaveBeenCalledTimes(1);
-  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
-});
+// An OSM snapshot is optional. A JSON-only fetch bridge cannot prove the
+// decoded size or the declared Content-Length, so it must not parse and install
+// geometry even when it advertises a plausible small response.
+it.each([null, '100', '2000001'])(
+  'rejects uninspectable JSON-only OSM bodies (Content-Length %s)',
+  async (length) => {
+    const { library, body } = sourcedLibraryFootprintFixture();
+    const json = vi.fn(async () => JSON.parse(body));
+    const headers = new Headers();
+    if (length !== null) headers.set('Content-Length', length);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers, json }));
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(json).not.toHaveBeenCalled();
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  },
+);
 
-it('accepts a JSON-only OSM outline with 160 coordinate pairs', async () => {
+it('accepts a byte-verified OSM outline with 160 coordinate pairs', async () => {
   const { library, body, buildings: [building] } = sourcedLibraryFootprintFixture();
   const segmentsPerEdge = MAX_VERTICES / building.outline.length;
   const outline = building.outline.flatMap(([lon, lat], index) => {
@@ -4373,53 +4587,11 @@ it('accepts a JSON-only OSM outline with 160 coordinate pairs', async () => {
   });
   expect(outline).toHaveLength(160);
   const buildings = [{ ...building, outline }];
-  const json = vi.fn(async () => ({ ...JSON.parse(body), buildings }));
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers: new Headers(), json }));
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(JSON.stringify({ ...JSON.parse(body), buildings }))));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
   expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
   await waitFor(() => expect(scene.create.mock.lastCall?.[2].footprints).toEqual(buildings));
-});
-
-it.each([
-  'oversized Content-Length', 'oversized padding', 'oversized UTF-8 padding', 'oversized escaped padding',
-  'too many buildings', 'too many coordinates', 'invalid buildings', 'invalid building',
-  'non-finite coordinate', 'wrong coordinate type', 'non-object root', 'excessive nesting',
-] as const)('rejects JSON-only OSM bodies with %s', async (invalid) => {
-  const { library, body, buildings: [building] } = sourcedLibraryFootprintFixture();
-  const snapshot = JSON.parse(body) as Record<string, unknown>;
-  const invalidOutline = (outline: unknown[]) => ({
-    ...snapshot, buildings: [building, { ...building, poiId: 'unknown-building', outline }],
-  });
-  const payload = () => {
-    switch (invalid) {
-      case 'oversized padding': return { ...snapshot, padding: 'x'.repeat(2_000_001) };
-      case 'oversized UTF-8 padding': return { ...snapshot, padding: '中'.repeat(700_000) };
-      case 'oversized escaped padding': return { ...snapshot, padding: '\u0000'.repeat(350_000) };
-      case 'too many buildings': return { ...snapshot, buildings: Array(MAX_WAYS + 1).fill(building) };
-      case 'too many coordinates': return invalidOutline(Array(MAX_VERTICES + 1).fill(building.outline[0]));
-      case 'invalid buildings': return { ...snapshot, buildings: building };
-      case 'invalid building': return { ...snapshot, buildings: [building, null] };
-      case 'non-finite coordinate': return invalidOutline([[Infinity, 24], ...building.outline]);
-      case 'wrong coordinate type': return invalidOutline([[120, '24'], ...building.outline]);
-      case 'non-object root': return [snapshot];
-      case 'excessive nesting': return { ...snapshot, extra: [[[[[[]]]]]] };
-      case 'oversized Content-Length': return snapshot;
-    }
-  };
-  const json = vi.fn(async () => payload());
-  const headers = new Headers();
-  if (invalid === 'oversized Content-Length') headers.set('Content-Length', '2000001');
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers, json }));
-  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-  const dialog = await open();
-  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(json).toHaveBeenCalledTimes(invalid === 'oversized Content-Length' ? 0 : 1);
-  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
-  const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
-  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
-  expect(within(dialog).getByRole('heading', { name: library.name })).toBeTruthy();
-  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
 // text() is still a supported legacy path, but identity framing must agree

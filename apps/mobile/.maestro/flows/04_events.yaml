@@ -1,73 +1,34 @@
-# 04_events.yaml
-# campus://home/events → 活動總覽
-
 appId: ${APP_ID}
-name: Events Flow
-tags:
-  - smoke
-  - events
-
+name: Authenticated event filters and detail
+tags: [smoke, events]
 ---
-- launchApp
-
+- runFlow: ../helpers/sign-in-student.yaml
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://events
 - extendedWaitUntil:
-    visible:
-      id: 'tab-Today'
-    timeout: 45000
-
-- waitForAnimationToEnd:
-    timeout: 2500
-
-- openLink: campus://home/events
-
-- extendedWaitUntil:
-    visible: '活動'
+    visible: '查看時間、地點與主辦單位資訊。'
     timeout: 20000
-
-- takeScreenshot: events_list
-
-- tapOn:
-    text: '今日'
-    optional: true
-
-- takeScreenshot: events_today
-
-- tapOn:
-    text: '本週'
-    optional: true
-
-- takeScreenshot: events_this_week
-
-- tapOn:
-    text: '本月'
-    optional: true
-
-- takeScreenshot: events_this_month
-
-- tapOn:
-    text: '全部'
-    optional: true
-
-- tapOn:
-    index: 0
-    below:
-      text: '活動'
-    optional: true
-
+- scrollUntilVisible:
+    element:
+      text: '未來活動'
+    direction: DOWN
+    timeout: 30000
+- tapOn: '未來活動'
+- scrollUntilVisible:
+    element:
+      text: 'Maestro 校園測試活動'
+    direction: DOWN
+    timeout: 20000
+- tapOn: 'Maestro 校園測試活動'
 - extendedWaitUntil:
-    visible: '報名'
-    timeout: 8000
-    optional: true
-
-- takeScreenshot: event_detail
-
-- tapOn:
-    text: '設定提醒'
-    optional: true
-
-- tapOn:
-    text: '報名'
-    optional: true
-
-- back
-    
+    visible: '活動詳情'
+    timeout: 15000
+- assertVisible: '測試教室'
+- scrollUntilVisible:
+    element:
+      text: '本機模擬器活動內容。'
+    direction: DOWN
+    timeout: 15000
+- takeScreenshot: event_seeded_detail

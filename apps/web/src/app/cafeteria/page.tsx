@@ -149,7 +149,6 @@ function CafeteriaContent({ schoolId, schoolName }: { schoolId: string; schoolNa
   return (
     <SiteShell
       title="餐廳"
-      subtitle="找一家店，看看今天想吃什麼。"
       schoolName={schoolName}
       compactHeading
     >

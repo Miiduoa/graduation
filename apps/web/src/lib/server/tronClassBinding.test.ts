@@ -105,6 +105,7 @@ describe('independent TronClass binding', () => {
     const target = rows.find((row) => row.scope === 'target-account');
     expect(target).toMatchObject(budget);
     expect(target).not.toHaveProperty('ownerKey');
+    expect(rows.some((row) => row.scope === 'account')).toBe(false);
   });
 
   it('keeps provider owners isolated even when their account id text is the same', async () => {

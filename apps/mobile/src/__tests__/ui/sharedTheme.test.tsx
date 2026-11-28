@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, render } from '@testing-library/react-native';
 import { Text } from 'react-native';
-import { AIButton, AICard, AIHero, aiTokens } from '../../ui/aiFirst';
+import { AIButton, AICard, AIChip, AIHero, aiTokens } from '../../ui/aiFirst';
 import { CourseV2Card, CourseV2Header } from '../../screens/lmsV2/_courseV2Shell';
 import {
   applyTheme,
@@ -67,6 +67,20 @@ test('mounted shared primitives follow the current theme instead of retaining a 
   expect(view.getByRole('button')).toHaveStyle({
     backgroundColor: createDarkTheme().colors.accent,
   });
+});
+
+test('interactive filter chips expose their selected state and a full touch target', () => {
+  const view = render(
+    <>
+      <AIChip label="300 公尺" active={false} onPress={jest.fn()} />
+      <AIChip label="600 公尺" active onPress={jest.fn()} />
+    </>,
+  );
+  for (const [label, selected] of [['300 公尺', false], ['600 公尺', true]] as const) {
+    const button = view.getByRole('button', { name: label });
+    expect(button).toHaveAccessibilityState({ selected });
+    expect(button).toHaveStyle({ minHeight: 44, minWidth: 44 });
+  }
 });
 
 test('a confidence hint is never promoted to a verified claim', () => {

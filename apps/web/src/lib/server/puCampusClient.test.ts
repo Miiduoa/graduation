@@ -465,6 +465,254 @@ it('keeps profile-rotated session and XSRF cookies for the next course request',
   expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/api/login'))).toHaveLength(1);
 });
 
+it('collects strict native profile evidence only in the explicit student candidate mode', async () => {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url.endsWith('/api/login')) return jsonResponse(200, { id: 999 }, { 'set-cookie': 'session=old; Path=/' });
+    if (url.endsWith('/api/profile')) return jsonResponse(200, {
+      id: 44, login_name: 's1234567', role: 'teacher',
+    }, { 'set-cookie': 'session=rotated; Path=/' });
+    throw new Error('unexpected URL');
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  const result = await gateway.loginTronClass('s1234567', SECRET, { route: 'student', requireStudentIdentityEvidence: true });
+  expect(result).toMatchObject({
+    userId: 44, role: '', cookies: { session: 'rotated' },
+    identityEvidence: { schoolId: 'pu', issuer: 'https://tronclass.pu.edu.tw', source: 'authenticated-profile', subject: '44' },
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(await gateway.loginTronClass('s1234567', SECRET, { route: 'student' })).not.toHaveProperty('identityEvidence');
+});
+
+it.each([
+  { id: undefined, login_name: 's1234567' },
+  { id: '44', login_name: 's1234567' },
+  { id: 44, login_name: 's1234568' },
+  { id: 44, email: 's1234567@pu.edu.tw' },
+])('does not substitute login JSON or email for strict profile evidence (%o)', async (profile) => {
+  const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+    ? jsonResponse(200, { id: 44 }, { 'set-cookie': 'session=old; Path=/' })
+    : jsonResponse(200, profile));
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true,
+  })).rejects.toMatchObject({ kind: 'unverified' });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('rejects non-JSON profile content and a revoked profile cookie in strict mode', async () => {
+  for (const profile of [
+    htmlResponse(200, JSON.stringify({ id: 44, login_name: 's1234567' })),
+    jsonResponse(200, { id: 44, login_name: 's1234567' }, { 'set-cookie': 'session=; Max-Age=0; Path=/' }),
+    jsonResponse(200, { id: 44, login_name: 's1234567' }, { 'set-cookie': 'SESSION=ambiguous; Path=/' }),
+  ]) {
+    const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+      ? jsonResponse(200, { id: 44 }, { 'set-cookie': 'session=old; Path=/' }) : profile);
+    await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+      route: 'student', requireStudentIdentityEvidence: true,
+    })).rejects.toMatchObject({ kind: 'unverified' });
+  }
+});
+
+it.each([
+  'session=nonempty; Max-Age=0; Path=/',
+  'session=nonempty; Max-Age=-1; Path=/',
+  'session=nonempty; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/',
+  'session=nonempty; Domain=other.example; Path=/',
+  'session=nonempty; Domain=pu.edu.tw; Path=/',
+  'session=nonempty; Path=/api/private',
+  'session=nonempty; Path=/api/profi',
+  'session=nonempty; Path=relative',
+  'session=nonempty; Max-Age=bad; Path=/',
+  'session=nonempty; Expires=invalid; Path=/',
+  'session=nonempty; Path=/; Path=/api',
+  'session="ambiguous"; Path=/',
+])('rejects deleted, invalid or incorrectly scoped strict session cookies (%s)', async (setCookie) => {
+  for (const phase of ['login', 'profile']) {
+    const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+      ? jsonResponse(200, {}, { 'set-cookie': phase === 'login' ? setCookie : 'session=old; Path=/' })
+      : jsonResponse(200, { id: 44, login_name: 's1234567' }, { 'set-cookie': setCookie }));
+    await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+      route: 'student', requireStudentIdentityEvidence: true,
+    })).rejects.toMatchObject({ kind: 'unverified', code: 'IDENTITY_EVIDENCE_UNAVAILABLE' });
+    expect(fetchMock).toHaveBeenCalledTimes(phase === 'login' ? 1 : 2);
+  }
+});
+
+it('rejects multiple strict session updates instead of silently selecting one', async () => {
+  const profile = jsonResponse(200, { id: 44, login_name: 's1234567' });
+  profile.headers.append('set-cookie', 'session=one; Path=/');
+  profile.headers.append('set-cookie', 'session=two; Path=/api');
+  const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+    ? jsonResponse(200, {}, { 'set-cookie': 'session=old; Path=/' }) : profile);
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true,
+  })).rejects.toMatchObject({ kind: 'unverified' });
+});
+
+it.each([
+  'misc=value, session=deleted; Max-Age=0; Path=/',
+  'misc=value; Path=/, session=; Max-Age=0; Path=/',
+  'misc=value; Expires=Thu, 01 Jan 1970 00:00:00 GMT, session=deleted; Max-Age=0; Path=/',
+  'misc=value, session=rotated; Path=/',
+])('rejects a folded profile cookie update after an unrelated first cookie (%s)', async (setCookie) => {
+  const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+    ? jsonResponse(200, {}, { 'set-cookie': 'session=old; Path=/' })
+    : jsonResponse(200, { id: 44, login_name: 's1234567' }, { 'set-cookie': setCookie }));
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true,
+  })).rejects.toMatchObject({ kind: 'unverified', stage: 'verify', code: 'IDENTITY_EVIDENCE_UNAVAILABLE' });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('accepts normal Expires date commas during strict session rotation', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+  const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+    ? jsonResponse(200, {}, { 'set-cookie': 'session=old; Expires=Tue, 01 Jan 2030 00:00:00 GMT; Path=/' })
+    : jsonResponse(200, { id: 44, login_name: 's1234567' }, {
+      'set-cookie': 'session=rotated; Expires=Tue, 01 Jan 2030 00:00:00 GMT; Path=/',
+    }));
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true,
+  })).resolves.toMatchObject({ cookies: { session: 'rotated' }, identityEvidence: { subject: '44' } });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('rejects a second live session scope introduced by the profile response', async () => {
+  const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+    ? jsonResponse(200, {}, { 'set-cookie': 'session=old; Path=/' })
+    : jsonResponse(200, { id: 44, login_name: 's1234567' }, { 'set-cookie': 'session=new; Path=/api' }));
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true,
+  })).rejects.toMatchObject({ kind: 'unverified' });
+});
+
+it('honors strict cookie scope and Max-Age precedence while keeping valid session rotation', async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/api/login')) {
+      const response = jsonResponse(200, {});
+      response.headers.append('set-cookie', 'session=old; Domain=.TronClass.PU.edu.tw; Max-Age=60; Expires=Thu, 01 Jan 1970 00:00:00 GMT');
+      response.headers.append('set-cookie', 'foreign=secret; Domain=other.example; Path=/');
+      response.headers.append('set-cookie', 'private=secret; Path=/api/private');
+      return response;
+    }
+    expect(new Headers(init?.headers).get('Cookie')).toBe('session=old');
+    return jsonResponse(200, { id: 44, login_name: 's1234567' }, { 'set-cookie': 'session=rotated; Path=/api; Max-Age=60' });
+  });
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true,
+  })).resolves.toMatchObject({ cookies: { session: 'rotated' }, identityEvidence: { subject: '44' } });
+});
+
+it('does not return strict evidence if the session expires while reading the profile body', async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url.endsWith('/api/login')) return jsonResponse(200, {}, { 'set-cookie': 'session=short; Max-Age=1; Path=/' });
+    const response = jsonResponse(200, {});
+    response.text = async () => {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      return JSON.stringify({ id: 44, login_name: 's1234567' });
+    };
+    return response;
+  });
+  const checked = expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true, timeoutMs: 5000,
+  })).rejects.toMatchObject({ kind: 'unverified' });
+  await vi.advanceTimersByTimeAsync(1500);
+  await checked;
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('starts Max-Age at receipt of headers so a delayed login body cannot extend the session', async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async () => {
+    const response = jsonResponse(200, {}, { 'set-cookie': 'session=short; Max-Age=1; Path=/' });
+    response.text = async () => {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      return '{}';
+    };
+    return response;
+  });
+  const checked = expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true, timeoutMs: 5000,
+  })).rejects.toMatchObject({ kind: 'unverified' });
+  await vi.advanceTimersByTimeAsync(1500);
+  await checked;
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it.each([
+  ['login', 'fetch', 'submit'], ['profile', 'fetch', 'verify'],
+  ['login', 'body', 'submit'], ['profile', 'body', 'verify'],
+] as const)('settles the strict %s %s deadline even when transport ignores abort', async (phase, operation, stage) => {
+  vi.useFakeTimers();
+  let release: (() => void) | undefined;
+  let stalledSignal: AbortSignal | null | undefined;
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const isLogin = url.endsWith('/api/login');
+    const response = isLogin
+      ? jsonResponse(200, {}, { 'set-cookie': 'session=valid; Path=/' })
+      : jsonResponse(200, { id: 44, login_name: 's1234567' });
+    if ((isLogin ? 'login' : 'profile') === phase) {
+      stalledSignal = init?.signal;
+      const stalled = new Promise<void>(resolve => { release = resolve; });
+      if (operation === 'fetch') await stalled;
+      else {
+        const text = response.text.bind(response);
+        response.text = async () => { await stalled; return text(); };
+      }
+    }
+    return response;
+  });
+  const checked = expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true, timeoutMs: 1000, hopTimeoutMs: 50,
+  })).rejects.toMatchObject({ kind: 'timeout', route: 'student', stage, code: 'DEADLINE' });
+  await vi.advanceTimersByTimeAsync(50);
+  await checked;
+  expect(stalledSignal?.aborted).toBe(true);
+  expect(fetchMock).toHaveBeenCalledTimes(phase === 'login' ? 1 : 2);
+  release?.();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fetchMock).toHaveBeenCalledTimes(phase === 'login' ? 1 : 2);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('shares the strict total deadline across login and profile hops', async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async (url: string) => {
+    await new Promise(resolve => setTimeout(resolve, 80));
+    return url.endsWith('/api/login')
+      ? jsonResponse(200, {}, { 'set-cookie': 'session=valid; Path=/' })
+      : jsonResponse(200, { id: 44, login_name: 's1234567' });
+  });
+  const checked = expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true, timeoutMs: 150, hopTimeoutMs: 100,
+  })).rejects.toMatchObject({ kind: 'timeout', route: 'student', stage: 'verify', code: 'DEADLINE' });
+  await vi.advanceTimersByTimeAsync(150);
+  await checked;
+  await vi.advanceTimersByTimeAsync(10);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('does not enter the legacy CAS fallback or send credentials to a substituted origin for identity evidence', async () => {
+  const fetchMock = vi.fn(async () => jsonResponse(400, { error: 'native not available' }));
+  const options = { route: 'student' as const, requireStudentIdentityEvidence: true };
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, options))
+    .rejects.toMatchObject({ kind: 'unverified', code: 'IDENTITY_EVIDENCE_UNAVAILABLE' });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  fetchMock.mockClear();
+  await expect(createPuCampusGateway({ fetch: fetchMock, lmsOrigin: 'https://other.example' }).loginTronClass('s1234567', SECRET, options))
+    .rejects.toMatchObject({ kind: 'unverified' });
+  expect(fetchMock).not.toHaveBeenCalled();
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('teacher', SECRET, options))
+    .rejects.toMatchObject({ kind: 'unverified' });
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', '', options))
+    .rejects.toMatchObject({ kind: 'unverified' });
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
 it('reads student info even if the portal HTML still has a maintenance comment', async () => {
   const gateway = createPuCampusGateway({
     fetch: async () =>
@@ -1173,12 +1421,14 @@ function delayedCampusResponse(response: Response, delay: number, signal?: Abort
   });
 }
 
-it('does not send school credentials when the TronClass caller is already canceled', async () => {
+it.each([false, true])('does not send school credentials when the TronClass caller is already canceled (strict=%s)', async (strict) => {
   const controller = new AbortController();
   controller.abort(new Error(SECRET));
   const fetchMock = vi.fn();
   const gateway = createPuCampusGateway({ fetch: fetchMock });
-  await expect(gateway.loginTronClass(STUDENT, SECRET, { route: 'student', signal: controller.signal }))
+  await expect(gateway.loginTronClass(STUDENT, SECRET, {
+    route: 'student', signal: controller.signal, requireStudentIdentityEvidence: strict,
+  }))
     .rejects.toMatchObject({ kind: 'unavailable', code: 'CANCELLED', message: '學校登入已取消' });
   expect(fetchMock).not.toHaveBeenCalled();
 });
@@ -1225,7 +1475,7 @@ it.each([
   expect(remove.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(add.mock.calls.length);
 });
 
-it('cancels an authenticated profile body that ignores abort and cannot accept its late session', async () => {
+it.each([false, true])('cancels an authenticated profile body that ignores abort and cannot accept its late session (strict=%s)', async (strict) => {
   const controller = new AbortController();
   let finish!: (value: string) => void;
   const profile = jsonResponse(200, {});
@@ -1233,7 +1483,9 @@ it('cancels an authenticated profile body that ignores abort and cannot accept i
   const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
     ? jsonResponse(200, { id: 57 }, { 'set-cookie': 'session=fixture; Path=/' }) : profile);
   const gateway = createPuCampusGateway({ fetch: fetchMock });
-  const pending = gateway.loginTronClass(STUDENT, SECRET, { route: 'student', signal: controller.signal });
+  const pending = gateway.loginTronClass(STUDENT, SECRET, {
+    route: 'student', signal: controller.signal, requireStudentIdentityEvidence: strict,
+  });
   const rejected = expect(pending).rejects.toMatchObject({ code: 'CANCELLED', stage: 'verify' });
   await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
   controller.abort();
@@ -1243,7 +1495,7 @@ it('cancels an authenticated profile body that ignores abort and cannot accept i
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
-it('cleans up caller cancellation after a successful TronClass profile verification', async () => {
+it.each([false, true])('cleans up caller cancellation after a successful TronClass profile verification (strict=%s)', async (strict) => {
   const controller = new AbortController();
   const add = vi.spyOn(controller.signal, 'addEventListener');
   const remove = vi.spyOn(controller.signal, 'removeEventListener');
@@ -1254,7 +1506,9 @@ it('cleans up caller cancellation after a successful TronClass profile verificat
       : jsonResponse(200, { id: 57, login_name: STUDENT }, { 'set-cookie': 'session=rotated-fixture; Path=/' });
   });
   const gateway = createPuCampusGateway({ fetch: fetchMock });
-  await expect(gateway.loginTronClass(STUDENT, SECRET, { route: 'student', signal: controller.signal }))
+  await expect(gateway.loginTronClass(STUDENT, SECRET, {
+    route: 'student', signal: controller.signal, requireStudentIdentityEvidence: strict,
+  }))
     .resolves.toMatchObject({ userId: 57, cookies: { session: 'rotated-fixture' } });
   expect(remove.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(add.mock.calls.length);
   controller.abort();

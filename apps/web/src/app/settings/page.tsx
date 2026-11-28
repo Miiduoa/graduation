@@ -17,13 +17,17 @@ import { doc, getDocFromServer } from 'firebase/firestore';
 import { useAuth } from '@/components/AuthGuard';
 import {
   defaultNotificationPreferences,
-  normalizeNotificationPreferences,
+  confirmsNotificationPreferences,
+  pickNotificationPreferences,
+  quietHoursTimeKeys,
+  prepareNotificationPreferencesForSave,
   ASSISTANT_PERMISSIONS_DOC_ID,
   ASSISTANT_WRITE_PERMISSION_DEFINITIONS,
   createDefaultAssistantWritePermissions,
   normalizeAssistantWritePermissions,
   type AssistantWritePermissionKey,
   type AssistantWritePermissions,
+  type QuietHoursTimeKey,
 } from '@campus/shared/src';
 import {
   AGENT_DELETE_MODEL_ACTION,
@@ -34,6 +38,7 @@ import {
 import { deleteTodaySenseModelCache } from '@/lib/todaySenseAgentRuntime';
 
 import { AccountDemoSettings } from '@/components/AccountDemoSettings';
+import { PWAInstallSettings } from '@/components/PWAInstallSettings';
 import { SiteShell } from '@/components/SiteShell';
 import { NuniAccountPanel } from '@/components/NuniAccountPanel';
 import { useNuniSession } from '@/features/nuni/Session';
@@ -82,6 +87,11 @@ type NotificationToggleKey =
   | 'assignments'
   | 'grades'
   | 'messages';
+
+const QUIET_HOURS_FIELDS: Record<QuietHoursTimeKey, { label: string; error: string }> = {
+  quietHoursStart: { label: '開始時間', error: '請輸入完整的勿擾開始時間，例如 22:30。' },
+  quietHoursEnd: { label: '結束時間', error: '請輸入完整的勿擾結束時間，例如 08:00。' },
+};
 
 type ProfileFormState = {
   displayName: string;
@@ -233,7 +243,7 @@ function SettingsContent({
   const schoolReady = !selection || (
     !selection.loading && selection.catalogStatus === 'ready' && Boolean(selection.selectedSchoolId)
   );
-  const schoolLoginReady = useSignInOptions(selection?.selectedSchoolId ?? null, schoolReady).studentId;
+  const schoolLoginReady = useSignInOptions(selection?.selectedSchoolId ?? null, schoolReady, 'school').studentId;
   const mounted = useRef(true);
   const profileLock = useRef(false);
   const notificationLock = useRef(false);
@@ -285,6 +295,12 @@ function SettingsContent({
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(
     defaultNotificationPreferences,
   );
+  const notificationBaseline = useRef<NotificationPreferences>(defaultNotificationPreferences);
+  const quietHoursInputs = useRef<Record<QuietHoursTimeKey, HTMLInputElement | null>>({
+    quietHoursStart: null,
+    quietHoursEnd: null,
+  });
+  const [invalidTimes, setInvalidTimes] = useState<QuietHoursTimeKey[]>([]);
   const [assistantWritePrefs, setAssistantWritePrefs] = useState<AssistantWritePermissions>(
     createDefaultAssistantWritePermissions(),
   );
@@ -368,6 +384,8 @@ function SettingsContent({
         }
 
         setProfileForm(emptyProfileForm(null));
+        notificationBaseline.current = defaultNotificationPreferences;
+        setInvalidTimes([]);
         setNotificationPrefs(defaultNotificationPreferences);
         setAssistantWritePrefs(createDefaultAssistantWritePermissions());
         setLoadingProfile(false);
@@ -389,11 +407,12 @@ function SettingsContent({
         if (!active || !isCurrent()) return;
         if (!profileDoc.exists()) throw new Error('Account profile is missing');
         setProfileForm(emptyProfileForm(user, profileDoc.data() as UserProfile));
-        setNotificationPrefs(
-          normalizeNotificationPreferences(
-            prefsDoc.exists() ? prefsDoc.data() : defaultNotificationPreferences,
-          ),
+        const loadedPrefs = pickNotificationPreferences(
+          prefsDoc.exists() ? prefsDoc.data() : defaultNotificationPreferences,
         );
+        notificationBaseline.current = loadedPrefs;
+        setInvalidTimes([]);
+        setNotificationPrefs(loadedPrefs);
         setAssistantWritePrefs(
           normalizeAssistantWritePermissions(assistantDoc.exists() ? assistantDoc.data() : null),
         );
@@ -405,6 +424,8 @@ function SettingsContent({
         console.error('Failed to load settings data:', loadError);
         setProfileLoadError('暫時無法讀取帳號設定。重新讀取成功後才能儲存變更。');
         setProfileForm(emptyProfileForm(user));
+        notificationBaseline.current = defaultNotificationPreferences;
+        setInvalidTimes([]);
         setNotificationPrefs(defaultNotificationPreferences);
         setAssistantWritePrefs(createDefaultAssistantWritePermissions());
       } finally {
@@ -458,8 +479,18 @@ function SettingsContent({
       signOutLock.current
     )
       return;
+    const prepared = prepareNotificationPreferencesForSave(
+      notificationPrefs,
+      notificationBaseline.current,
+    );
+    if (!prepared.ok) {
+      setInvalidTimes(prepared.invalidTimes);
+      quietHoursInputs.current[prepared.invalidTimes[0]]?.focus();
+      return;
+    }
     notificationLock.current = true;
-    const expected = notificationPrefs;
+    const expected = prepared.preferences;
+    setInvalidTimes([]);
     setSavingNotifications(true);
 
     try {
@@ -469,12 +500,11 @@ function SettingsContent({
         doc(getDb(), 'users', user.uid, 'settings', 'notifications'),
       );
       if (!isCurrent()) return;
-      const actual = saved.exists() ? normalizeNotificationPreferences(saved.data()) : null;
-      if (
-        !actual ||
-        JSON.stringify(actual) !== JSON.stringify(normalizeNotificationPreferences(expected))
-      )
+      const receipt = saved.exists() ? saved.data() : null;
+      if (!confirmsNotificationPreferences(receipt, expected))
         throw new Error('Notification settings were not confirmed');
+      notificationBaseline.current = expected;
+      setNotificationPrefs(expected);
       success('通知設定已同步');
     } catch (saveError) {
       console.error('Failed to save notification settings:', saveError);
@@ -642,6 +672,7 @@ function SettingsContent({
             </button>
           </SettingRow>
         </section>
+        <PWAInstallSettings />
         <section aria-labelledby="service-information">
           <h3 className={styles.groupHeading} id="service-information">
             服務資訊
@@ -742,7 +773,10 @@ function SettingsContent({
               label="推播通知"
               disabled={!cloudEnabled || savingNotifications}
               value={notificationPrefs.enabled}
-              onChange={(enabled) => setNotificationPrefs((prev) => ({ ...prev, enabled }))}
+              onChange={(enabled) => {
+                setInvalidTimes([]);
+                setNotificationPrefs((prev) => ({ ...prev, enabled }));
+              }}
             />
           </SettingRow>
         </div>
@@ -773,46 +807,53 @@ function SettingsContent({
                   label="勿擾時段"
                   disabled={!cloudEnabled || savingNotifications}
                   value={notificationPrefs.quietHoursEnabled}
-                  onChange={(quietHoursEnabled) =>
-                    setNotificationPrefs((prev) => ({ ...prev, quietHoursEnabled }))
-                  }
+                  onChange={(quietHoursEnabled) => {
+                    setInvalidTimes([]);
+                    setNotificationPrefs((prev) => ({ ...prev, quietHoursEnabled }));
+                  }}
                 />
               </SettingRow>
               <div className={styles.timeFields}>
-                <label className={styles.field}>
-                  <span>開始時間</span>
-                  <input
-                    className="input"
-                    type="time"
-                    value={notificationPrefs.quietHoursStart}
-                    disabled={
-                      !cloudEnabled || savingNotifications || !notificationPrefs.quietHoursEnabled
-                    }
-                    onChange={(event) =>
-                      setNotificationPrefs((prev) => ({
-                        ...prev,
-                        quietHoursStart: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <label className={styles.field}>
-                  <span>結束時間</span>
-                  <input
-                    className="input"
-                    type="time"
-                    value={notificationPrefs.quietHoursEnd}
-                    disabled={
-                      !cloudEnabled || savingNotifications || !notificationPrefs.quietHoursEnabled
-                    }
-                    onChange={(event) =>
-                      setNotificationPrefs((prev) => ({
-                        ...prev,
-                        quietHoursEnd: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
+                {quietHoursTimeKeys.map((key) => {
+                  const fieldError = invalidTimes.includes(key)
+                    ? QUIET_HOURS_FIELDS[key].error
+                    : undefined;
+                  return (
+                    <label key={key} className={styles.field}>
+                      <span>{QUIET_HOURS_FIELDS[key].label}</span>
+                      <input
+                        ref={(node) => {
+                          quietHoursInputs.current[key] = node;
+                        }}
+                        className="input"
+                        type="time"
+                        aria-label={QUIET_HOURS_FIELDS[key].label}
+                        value={notificationPrefs[key]}
+                        aria-invalid={fieldError ? true : undefined}
+                        aria-describedby={fieldError ? `quiet-hours-error-${key}` : undefined}
+                        disabled={
+                          !cloudEnabled ||
+                          savingNotifications ||
+                          !notificationPrefs.quietHoursEnabled
+                        }
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setInvalidTimes((fields) => fields.filter((field) => field !== key));
+                          setNotificationPrefs((prev) => ({ ...prev, [key]: value }));
+                        }}
+                      />
+                      {fieldError && (
+                        <span
+                          id={`quiet-hours-error-${key}`}
+                          role="alert"
+                          style={{ color: 'var(--danger)' }}
+                        >
+                          {fieldError}
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
               </div>
               <p className={styles.groupNote}>依通知服務使用的台北時間（UTC+8）計算。</p>
             </section>
@@ -1278,7 +1319,7 @@ function SettingsContent({
   };
 
   return (
-    <SiteShell title="設定" subtitle="讓校園生活，照你的習慣安排。">
+    <SiteShell title="設定">
       <div className={styles.layout}>
         <aside className={styles.sidebar}>
           <nav

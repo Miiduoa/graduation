@@ -40,16 +40,21 @@ function fixture() {
     writes: [] as Array<{ table: string; payload: any; options?: unknown }>,
     calls: [] as string[],
   };
+  const startWithHeader = jest.fn(async (_name: string, _value: string) => {
+    if (state.rpcError) return { data: null, error: state.rpcError };
+    state.attempts = [{ ...current }];
+    return { data: attemptId, error: null };
+  });
   const sb = {
     auth: {
       getUser: jest.fn().mockResolvedValue({ data: { user: { id: userId } }, error: null }),
+      getSession: jest.fn().mockResolvedValue({
+        data: { session: { user: { id: userId }, access_token: 'quiz-test-token' } }, error: null,
+      }),
     },
-    rpc: jest.fn(async (name: string, args: Record<string, string>) => {
+    rpc: jest.fn((name: string, args: Record<string, string>) => {
+      if (name === 'start_quiz_attempt') return { setHeader: startWithHeader };
       if (state.rpcError) return { data: null, error: state.rpcError };
-      if (name === 'start_quiz_attempt') {
-        state.attempts = [{ ...current }];
-        return { data: attemptId, error: null };
-      }
       if (name === 'submit_quiz_attempt') {
         state.attempts = state.attempts.map((a) =>
           a.id === args.p_attempt_id
@@ -126,7 +131,7 @@ function fixture() {
     }),
   };
   jest.mocked(getSupabaseClient).mockReturnValue(sb as any);
-  return { state, sb, current };
+  return { state, sb, current, startWithHeader };
 }
 
 beforeEach(() => {
@@ -144,10 +149,11 @@ test('opening a quiz reads metadata without creating an attempt or exposing ques
 });
 
 test('the start button uses RPC and resumes an existing attempt without consuming another', async () => {
-  const { sb, state } = fixture();
+  const { sb, state, startWithHeader } = fixture();
   const started = await beginLmsQuizAttempt({ courseId, quizId });
   expect(started.success).toBe(true);
   expect(sb.rpc).toHaveBeenCalledWith('start_quiz_attempt', { p_quiz_id: quizId });
+  expect(startWithHeader).toHaveBeenCalledWith('Authorization', 'Bearer quiz-test-token');
   const reopened = await beginLmsQuizAttempt({ courseId, quizId });
   expect(reopened.success).toBe(true);
   expect(state.attempts).toHaveLength(1);
@@ -200,4 +206,24 @@ test('server failure and incomplete receipt never create a fake successful attem
   state.attempts = [{ ...current }];
   state.refuseReceipt = true;
   expect((await finishLmsQuizAttempt({ attemptId })).success).toBe(false);
+});
+
+test('changing the authenticated student during start preflight cannot consume an attempt', async () => {
+  const { sb, state } = fixture();
+  sb.auth.getSession.mockResolvedValue({
+    data: { session: { user: { id: otherId }, access_token: 'other-test-token' } }, error: null,
+  });
+  const result = await beginLmsQuizAttempt({ courseId, quizId });
+  expect(result).toMatchObject({ success: false, errorCode: 'no_user' });
+  expect(sb.rpc).not.toHaveBeenCalled();
+  expect(state.attempts).toHaveLength(0);
+});
+
+test('a superseded screen cannot consume an attempt after authenticating the RPC', async () => {
+  const { sb } = fixture();
+  const isCurrent = jest.fn().mockReturnValueOnce(true).mockReturnValue(false);
+  const result = await beginLmsQuizAttempt({ courseId, quizId }, isCurrent);
+  expect(sb.auth.getUser).toHaveBeenCalledWith('quiz-test-token');
+  expect(result.success).toBe(false);
+  expect(sb.rpc).not.toHaveBeenCalled();
 });

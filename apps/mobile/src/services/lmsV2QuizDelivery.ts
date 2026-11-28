@@ -53,7 +53,13 @@ function id(value: string | number): string {
 export async function loadLmsQuizWorkspace(
   courseId: string | number, quizId: string | number,
 ): Promise<LmsQuizWorkspace> {
-  const { sb, userId } = await authorized();
+  return readQuizWorkspace(await authorized(), courseId, quizId);
+}
+
+async function readQuizWorkspace(
+  { sb, userId }: Awaited<ReturnType<typeof authorized>>,
+  courseId: string | number, quizId: string | number,
+): Promise<LmsQuizWorkspace> {
   const course = id(courseId), quizKey = id(quizId);
   const { data: quiz, error: quizError } = await sb.from('quizzes')
     .select('id,course_id,title,description,max_attempts,time_limit_seconds,enforce_time_limit,pool_pick_count')
@@ -98,16 +104,27 @@ export async function loadLmsQuizWorkspace(
 /** RPC enforces attempt limit and server-selected question pools. Never start while merely browsing. */
 export async function beginLmsQuizAttempt(opts: {
   courseId: string | number; quizId: string | number;
-}): Promise<LmsWriteResult> {
+}, isCurrent?: () => boolean): Promise<LmsWriteResult> {
   try {
-    const workspace = await loadLmsQuizWorkspace(opts.courseId, opts.quizId);
+    const owner = await authorized();
+    const workspace = await readQuizWorkspace(owner, opts.courseId, opts.quizId);
+    const { sb, userId } = owner;
+    const { data, error: sessionError } = await sb.auth.getSession();
+    const token = data?.session?.access_token;
+    if (sessionError || !token || data.session.user?.id !== userId || isCurrent?.() === false)
+      return fail('登入或測驗已變更，請重新開啟測驗。', 'no_user');
     if (workspace.attempt && !workspace.attempt.submitted_at)
       return { success: true, summary: '恢復上次尚未完成的作答',
         data: { attemptId: workspace.attempt.id, resumed: true } };
     if (workspace.attemptCount >= (workspace.quiz.max_attempts ?? 1))
       return fail('已達這份測驗的作答次數上限', 'over_quota');
-    const { sb, userId } = await authorized();
-    const { data: attemptId, error } = await sb.rpc('start_quiz_attempt', { p_quiz_id: id(opts.quizId) });
+    // The RPC consumes an attempt for its bearer. Bind it to the checked token even if
+    // the shared client's session changes while the request is being dispatched.
+    const { data: verified, error: authError } = await sb.auth.getUser(token);
+    if (authError || verified?.user?.id !== userId || isCurrent?.() === false)
+      return fail('登入或測驗已變更，請重新開啟測驗。', 'no_user');
+    const { data: attemptId, error } = await sb.rpc('start_quiz_attempt', { p_quiz_id: id(opts.quizId) })
+      .setHeader('Authorization', 'Bearer ' + token);
     if (error) return readError(error);
     if (!attemptId) return fail('作答可能已開始，但沒有取得確認碼，請重新讀取', 'supabase_error');
     const { data: receipt, error: receiptError } = await sb.from('quiz_attempts')

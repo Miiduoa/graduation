@@ -261,6 +261,104 @@ describe('Nuni additive classroom configuration', () => {
   });
 });
 
+describe('independent school sign-in capability', () => {
+  it.each(['pending', 'rejected'] as const)(
+    'answers locally without waiting for a %s platform providers request',
+    async (transport) => {
+      vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', 'true');
+      if (transport === 'pending') fetcher.mockImplementation(() => new Promise(() => {}));
+      else fetcher.mockRejectedValue(new TypeError('Platform providers unavailable'));
+
+      const result = await handleNuni(
+        request('api/nuni/sign-in-options?scope=school&schoolId=pu'),
+        ['sign-in-options'],
+      );
+      expect(result.status).toBe(200);
+      expect(await result.json()).toEqual({ studentId: true });
+      expect(result.headers.get('cache-control')).toContain('no-store');
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['true', 'false'])(
+    'does not require platform or OAuth configuration with classroom enabled=%s',
+    async (classroomEnabled) => {
+      vi.stubEnv('NUNI_CLASSROOM_ENABLED', classroomEnabled);
+      vi.stubEnv('CAMPUS_BACKEND', 'firebase');
+      vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', 'true');
+      vi.stubEnv('WEB_PUBLIC_ORIGIN', '');
+      vi.stubEnv('NUNI_API_BASE_URL', '');
+      vi.stubEnv('PLATFORM_GOOGLE_LOGIN_ENABLED', '');
+      vi.stubEnv('PLATFORM_GOOGLE_CLIENT_SECRET', '');
+      vi.stubEnv('BFF_SESSION_SECRET', '');
+
+      for (const query of ['scope=school', 'schoolId=pu&scope=school']) {
+        const result = await handleNuni(request(`api/nuni/sign-in-options?${query}`), ['sign-in-options']);
+        expect(result.status).toBe(200);
+        expect(await result.json()).toEqual({ studentId: true });
+      }
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { schoolFlag: '', schoolId: 'pu' },
+    { schoolFlag: 'false', schoolId: 'pu' },
+    { schoolFlag: 'true', schoolId: 'ntu' },
+    { schoolFlag: 'true', schoolId: 'unknown-campus' },
+  ])('keeps school access closed for $schoolId with school flag "$schoolFlag"', async ({ schoolFlag, schoolId }) => {
+    vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', schoolFlag);
+    const result = await handleNuni(
+      request(`api/nuni/sign-in-options?scope=school&schoolId=${schoolId}`),
+      ['sign-in-options'],
+    );
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual({ studentId: false });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { classroom: 'true', school: 'true' },
+    { classroom: 'true', school: 'false' },
+    { classroom: 'false', school: 'true' },
+    { classroom: 'false', school: 'false' },
+  ])('rejects invalid query before any provider lookup (classroom=$classroom, school=$school)', async ({ classroom, school }) => {
+    vi.stubEnv('NUNI_CLASSROOM_ENABLED', classroom);
+    vi.stubEnv('CAMPUS_BACKEND', 'firebase');
+    vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', school);
+    for (const query of [
+      'scope=',
+      'scope=all',
+      'scope=School',
+      'scope=school&scope=school',
+      'scope=school&scope=platform',
+      'scope=school&schoolId=pu&schoolId=pu',
+      'scope=school&schoolId=pu&schoolId=ntu',
+      'scope=school&schoolId=',
+      'scope=school&schoolId=PU',
+      'scope=school&schoolId=pu%2Fadmin',
+      'scope=school&unexpected=true',
+      'schoolId=pu&schoolId=pu',
+      'schoolId=',
+      'unexpected=true',
+    ]) {
+      const result = await handleNuni(request(`api/nuni/sign-in-options?${query}`), ['sign-in-options']);
+      expect(result.status, query).toBe(400);
+      expect(await result.json(), query).toEqual({ error: 'INVALID_INPUT' });
+    }
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('keeps the unscoped provider failure distinct from a closed Google integration', async () => {
+    vi.stubEnv('SCHOOL_STUDENT_ID_LOGIN_ENABLED', 'true');
+    fetcher.mockImplementation(() => response({ error: { code: 'PROVIDERS_UNAVAILABLE' } }, 503));
+    const result = await handleNuni(request('api/nuni/sign-in-options?schoolId=pu'), ['sign-in-options']);
+    expect(result.status).toBe(503);
+    expect(await result.json()).toEqual({ error: 'PROVIDERS_UNAVAILABLE' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('Nuni browser session boundary', () => {
   it('only advertises Google when both the Web and the API are configured', async () => {
     vi.stubEnv('PLATFORM_GOOGLE_CLIENT_SECRET', '');

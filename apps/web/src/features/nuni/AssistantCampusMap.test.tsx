@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { AssistantTaskStep } from '@campus/shared/src/assistantTaskPlan';
 import { Assistant } from './Assistant';
+import { browserRequest } from './Session';
 import type { V2Card } from './assistant/types';
 
 const auth = vi.hoisted(() => ({ context: 'a'.repeat(43), account: 'alice', school: 'pu', authenticated: true }));
@@ -15,6 +16,7 @@ vi.mock('@/lib/useCampusBrowseContext', () => ({ useCampusBrowseContext: () => (
 vi.mock('@/components/SiteShell', () => ({ SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main> }));
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear(); Element.prototype.scrollIntoView = vi.fn();
+  vi.mocked(browserRequest).mockClear();
 });
 afterEach(() => {
   vi.unstubAllGlobals(); vi.restoreAllMocks();
@@ -144,3 +146,24 @@ it('preserves a newly typed draft while a slow map request completes', async () 
   expect((field as HTMLTextAreaElement).value).toBe('圖書館在哪裡');
   expect(requests).toHaveLength(1);
 });
+
+
+it.each(['teacher', 'merchant', 'club', 'school', 'platform'].flatMap(profile => [
+  ['任垣樓在哪裡', { kind: 'place', query: '任垣樓' }],
+  ['下一堂課在哪裡呢', { kind: 'next-class' }],
+  ['查下一堂課，教室在哪裡', { kind: 'next-class' }],
+].map(([question, task]) => ({ profile, question: question as string, task }))))(
+  '$profile uses the scoped map read for $question without a model or student-source fallback', async ({ profile, question, task }) => {
+    const requests = mockServer(); render(<Assistant />);
+    const selector = await screen.findByLabelText('目前要處理');
+    fireEvent.change(selector, { target: { value: profile } });
+    await submit(question);
+    await screen.findByText(mapStep().summary);
+    expect(requests.map(request => request.action)).toEqual(['map-read']);
+    expect(requests[0].body).toEqual({ schoolId: 'pu', conversationId: expect.any(String), task });
+    expect(JSON.stringify(requests[0].body)).not.toMatch(/history|consent|role|question/);
+    expect(browserRequest).not.toHaveBeenCalled();
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  },
+);

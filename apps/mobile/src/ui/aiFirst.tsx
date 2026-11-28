@@ -15,6 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTabBarContentBottomPadding } from './navigationTheme';
 import { getThemeVersion, subscribeToTheme, theme } from './theme';
+import { pageTitleFont } from './styles';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export const aiTokens = {
@@ -104,9 +105,9 @@ function useVisualStyles() {
 }
 
 // ──────────────────────────────────────────────
-// AI Mark — breath animation
+// AI Mark — minimal field-guide glyph
 // ──────────────────────────────────────────────
-export function AIMark({ size = 28 }: { size?: number }) {
+export function AIMark({ size = 24 }: { size?: number }) {
   useVisualTheme();
   return (
     <View
@@ -114,13 +115,11 @@ export function AIMark({ size = 28 }: { size?: number }) {
       style={{
         width: size,
         height: size,
-        borderRadius: aiTokens.radius.sm,
-        backgroundColor: aiTokens.aiSoft,
         alignItems: 'center',
         justifyContent: 'center',
       }}
     >
-      <Ionicons name="chatbubble-outline" size={Math.round(size * 0.55)} color={aiTokens.ai} />
+      <Ionicons name="chatbubble-outline" size={Math.round(size * 0.72)} color={aiTokens.ai} />
     </View>
   );
 }
@@ -135,10 +134,13 @@ export function AIScreen({
   keyboardShouldPersistTaps = 'handled',
   keyboardDismissMode = Platform.OS === 'ios' ? 'interactive' : 'on-drag',
   automaticallyAdjustKeyboardInsets = Platform.OS === 'ios',
+  delayContentTouches,
   ...rest
 }: {
   children: React.ReactNode;
   bottomPadding?: number;
+  // iOS UIScrollView; RN's ScrollViewProps currently omit this.
+  delayContentTouches?: boolean;
 } & ScrollViewProps) {
   useVisualTheme();
   const defaultPadding = useTabBarContentBottomPadding();
@@ -149,6 +151,7 @@ export function AIScreen({
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
         {...rest}
+        {...(delayContentTouches === undefined ? null : { delayContentTouches })}
         keyboardShouldPersistTaps={keyboardShouldPersistTaps}
         keyboardDismissMode={keyboardDismissMode}
         automaticallyAdjustKeyboardInsets={automaticallyAdjustKeyboardInsets}
@@ -179,7 +182,7 @@ export function AIHero({
   return (
     <View style={styles.hero}>
       {eyebrow ? <Text style={styles.heroEyebrow}>{eyebrow}</Text> : null}
-      <Text style={styles.heroTitle}>{title}</Text>
+      <Text accessibilityRole="header" style={styles.heroTitle}>{title}</Text>
       {subtitle ? <Text style={styles.heroSub}>{subtitle}</Text> : null}
     </View>
   );
@@ -247,6 +250,7 @@ export function AISection({
 // ──────────────────────────────────────────────
 export function AICard({
   title,
+  titleTestID,
   icon,
   badge,
   badgeTone = 'ai',
@@ -259,6 +263,7 @@ export function AICard({
   style,
 }: {
   title?: string;
+  titleTestID?: string;
   icon?: string;
   badge?: string;
   badgeTone?: 'ai' | 'success' | 'warning' | 'danger' | 'muted';
@@ -272,14 +277,14 @@ export function AICard({
 }) {
   const styles = useVisualStyles();
   const Container = onPress ? TouchableOpacity : View;
-  const containerProps = onPress ? { activeOpacity: 0.85, onPress } : {};
+  const containerProps = onPress ? { activeOpacity: 0.85, onPress, accessibilityRole: 'button' as const } : {};
 
   const badgeMap = {
-    ai: { bg: aiTokens.aiSoft, color: aiTokens.ai },
-    success: { bg: aiTokens.successSoft, color: aiTokens.success },
-    warning: { bg: aiTokens.warningSoft, color: aiTokens.warning },
-    danger: { bg: aiTokens.dangerSoft, color: aiTokens.danger },
-    muted: { bg: aiTokens.panel, color: aiTokens.muted },
+    ai: { bg: aiTokens.aiSoft, color: aiTokens.ai, isStatus: true },
+    success: { bg: aiTokens.successSoft, color: aiTokens.success, isStatus: true },
+    warning: { bg: aiTokens.warningSoft, color: aiTokens.warning, isStatus: true },
+    danger: { bg: aiTokens.dangerSoft, color: aiTokens.danger, isStatus: true },
+    muted: { bg: 'transparent', color: aiTokens.muted, isStatus: false },
   };
   const badgeStyle = badgeMap[badgeTone];
 
@@ -289,18 +294,43 @@ export function AICard({
         <View style={styles.cardHeader}>
           {icon ? (
             <View style={styles.cardIcon}>
-              <Text style={{ fontSize: 16 }}>{icon}</Text>
+              <Text style={{ fontSize: 15 }}>{icon}</Text>
             </View>
           ) : null}
-          {title ? <Text style={styles.cardTitle}>{title}</Text> : <View style={{ flex: 1 }} />}
-          {badge ? (
-            <View style={[styles.cardBadge, { backgroundColor: badgeStyle.bg }]}>
-              <Text style={[styles.cardBadgeText, { color: badgeStyle.color }]}>{badge}</Text>
+          {title ? (
+            <View
+              testID={titleTestID}
+              collapsable={false}
+              accessible
+              accessibilityRole="header"
+              accessibilityLabel={title}
+              style={{ flex: 1 }}
+            >
+              <Text accessible={false} style={[styles.cardTitle, titleTestID ? { flex: 0 } : undefined]}>
+                {title}
+              </Text>
             </View>
+          ) : (
+            <View style={{ flex: 1 }} />
+          )}
+          {badge ? (
+            badgeStyle.isStatus ? (
+              <View style={[styles.cardBadge, { backgroundColor: badgeStyle.bg }]}>
+                <Text style={[styles.cardBadgeText, { color: badgeStyle.color }]}>{badge}</Text>
+              </View>
+            ) : (
+              <Text style={[styles.cardBadgeText, { color: badgeStyle.color }]}>{badge}</Text>
+            )
           ) : null}
           {onPin ? (
-            <TouchableOpacity onPress={onPin} hitSlop={8} style={{ marginLeft: 8 }}>
-              <Text style={{ fontSize: 18 }}>📌</Text>
+            <TouchableOpacity
+              onPress={onPin}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="釘選"
+              style={{ marginLeft: 8, padding: 2 }}
+            >
+              <Ionicons name="pin-outline" size={16} color={aiTokens.muted} />
             </TouchableOpacity>
           ) : null}
         </View>
@@ -316,7 +346,7 @@ export function AICard({
 }
 
 // ──────────────────────────────────────────────
-// AIRow — 列表中的行（icon + 主文 + tag + chevron）
+// AIRow — 扁平列表列（細線對齊文字）
 // ──────────────────────────────────────────────
 export function AIRow({
   icon,
@@ -328,6 +358,7 @@ export function AIRow({
   onPress,
   static: isStatic = false,
   disabled = false,
+  testID,
 }: {
   icon?: string;
   title: string;
@@ -338,14 +369,15 @@ export function AIRow({
   onPress?: () => void;
   static?: boolean;
   disabled?: boolean;
+  testID?: string;
 }) {
   const styles = useVisualStyles();
   const tagMap = {
-    ai: { bg: aiTokens.aiSoft, color: aiTokens.ai },
-    success: { bg: aiTokens.successSoft, color: aiTokens.success },
-    warning: { bg: aiTokens.warningSoft, color: aiTokens.warning },
-    danger: { bg: aiTokens.dangerSoft, color: aiTokens.danger },
-    muted: { bg: aiTokens.panel, color: aiTokens.muted },
+    ai: { bg: aiTokens.aiSoft, color: aiTokens.ai, isStatus: true },
+    success: { bg: aiTokens.successSoft, color: aiTokens.success, isStatus: true },
+    warning: { bg: aiTokens.warningSoft, color: aiTokens.warning, isStatus: true },
+    danger: { bg: aiTokens.dangerSoft, color: aiTokens.danger, isStatus: true },
+    muted: { bg: 'transparent', color: aiTokens.muted, isStatus: false },
   };
   const tagStyle = tagMap[tagTone];
 
@@ -357,50 +389,84 @@ export function AIRow({
   const interactive = !isStatic && !disabled && typeof onPress === 'function';
   const sectionCtx = React.useContext(AISectionContext);
 
-  // 在 AISection 容器內：iOS insetGrouped 樣式 — 無邊框、hairline 分隔、首末圓角
   const groupedStyle: ViewStyle = sectionCtx.inGroup
     ? {
         backgroundColor: 'transparent',
         marginHorizontal: 0,
         marginBottom: 0,
         borderWidth: 0,
+        borderBottomWidth: 0,
         borderRadius: 0,
-        borderTopWidth: sectionCtx.isFirst ? 0 : StyleSheet.hairlineWidth,
-        borderTopColor: aiTokens.border,
-        paddingVertical: 12,
+        paddingVertical: 0,
       }
     : {};
 
+  const showTopHairline = sectionCtx.inGroup && !sectionCtx.isFirst;
+
   return (
     <TouchableOpacity
-      activeOpacity={interactive ? 0.6 : 1}
+      testID={testID}
+      accessible
+      activeOpacity={interactive ? 0.65 : 1}
       onPress={interactive ? onPress : undefined}
       disabled={!interactive}
       accessibilityRole={interactive ? 'button' : undefined}
       accessibilityState={disabled ? { disabled: true } : undefined}
-      style={[styles.row, groupedStyle, disabled && { opacity: 0.55 }]}
+      accessibilityLabel={title}
+      accessibilityHint={subtitle}
+      style={[styles.row, groupedStyle, disabled && { opacity: 0.52 }]}
     >
-      {icon ? <Text style={{ fontSize: 20, marginRight: 12 }}>{icon}</Text> : null}
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text style={styles.rowSub} numberOfLines={1}>
-            {subtitle}
-          </Text>
-        ) : null}
-      </View>
-      {tag ? (
-        <View style={[styles.rowTag, { backgroundColor: tagStyle.bg }]}>
-          <Text style={[styles.rowTagText, { color: tagStyle.color }]}>{tag}</Text>
+      {icon ? (
+        <View
+          accessible={false}
+          style={{ width: 24, marginRight: 10, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Text accessible={false} style={{ fontSize: 16 }}>{icon}</Text>
         </View>
       ) : null}
-      {right ?? null}
-      {/* iOS chevron：在 group 內可點時顯示，與 SF Symbols chevron.right 對齊 */}
-      {sectionCtx.inGroup && interactive && !right && !tag ? (
-        <Text style={{ fontSize: 16, color: aiTokens.muted, marginLeft: 6 }}>›</Text>
-      ) : null}
+      <View
+        accessible={false}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingVertical: sectionCtx.inGroup ? 13 : 0,
+          borderTopWidth: showTopHairline ? StyleSheet.hairlineWidth : 0,
+          borderTopColor: aiTokens.border,
+        }}
+      >
+        <View accessible={false} style={{ flex: 1, minWidth: 0 }}>
+          <Text accessible={false} style={styles.rowTitle} numberOfLines={1}>
+            {title}
+          </Text>
+          {subtitle ? (
+            <Text accessible={false} style={styles.rowSub} numberOfLines={1}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+        {tag ? (
+          tagStyle.isStatus ? (
+            <View accessible={false} style={[styles.rowTag, { backgroundColor: tagStyle.bg }]}>
+              <Text accessible={false} style={[styles.rowTagText, { color: tagStyle.color }]}>{tag}</Text>
+            </View>
+          ) : (
+            <Text accessible={false} style={[styles.rowTagText, { color: tagStyle.color, marginLeft: 8 }]}>{tag}</Text>
+          )
+        ) : null}
+        {right ?? null}
+        {sectionCtx.inGroup && interactive && !right && !tag ? (
+          <Ionicons
+            name="chevron-forward"
+            size={15}
+            color={aiTokens.muted}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+            style={{ marginLeft: 6 }}
+          />
+        ) : null}
+      </View>
     </TouchableOpacity>
   );
 }
@@ -499,14 +565,14 @@ export function AIChip({
       onPress={onPress}
       disabled={!chipInteractive}
       accessibilityRole={chipInteractive ? 'button' : undefined}
-      accessibilityState={chipInteractive ? undefined : { disabled: true }}
-      // iOS Chip 視覺較緊湊，但仍用 hitSlop 延伸到 44pt 觸控目標
-      hitSlop={chipInteractive ? { top: 8, bottom: 8, left: 4, right: 4 } : undefined}
+      accessibilityState={{ selected: active, disabled: !chipInteractive }}
       style={{
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        minHeight: 32,
-        borderRadius: aiTokens.radius.pill,
+        paddingHorizontal: 13,
+        paddingVertical: 7,
+        minHeight: chipInteractive ? 44 : 32,
+        minWidth: chipInteractive ? 44 : undefined,
+        justifyContent: 'center',
+        borderRadius: aiTokens.radius.md,
         borderWidth: 1,
         borderColor: active ? aiTokens.ai : aiTokens.border,
         backgroundColor: active ? aiTokens.aiSoft : aiTokens.surface,
@@ -516,22 +582,11 @@ export function AIChip({
         opacity: chipInteractive ? 1 : 0.55,
       }}
     >
-      {/* iOS Capsule 不一定有 indicator dot；保留但隱藏在非 active 時 */}
-      {active ? (
-        <View
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: 3,
-            backgroundColor: aiTokens.ai,
-          }}
-        />
-      ) : null}
       <Text
         style={{
           fontSize: 13,
           color: active ? aiTokens.ai : aiTokens.text,
-          fontWeight: '500',
+          fontWeight: active ? '600' : '500',
         }}
       >
         {label}
@@ -546,55 +601,57 @@ export function AIChip({
 const createStyles = () =>
   StyleSheet.create({
     hero: {
-      margin: aiTokens.space.md,
-      marginTop: aiTokens.space.lg,
-      paddingVertical: aiTokens.space.md,
+      marginHorizontal: aiTokens.space.md,
+      marginTop: aiTokens.space.md,
+      marginBottom: aiTokens.space.sm,
+      paddingTop: aiTokens.space.sm,
+      paddingBottom: aiTokens.space.md,
       backgroundColor: aiTokens.bg,
-      borderRadius: aiTokens.radius.lg,
-      overflow: 'hidden',
-      position: 'relative',
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: aiTokens.border,
     },
     heroEyebrow: {
-      fontSize: 11,
+      fontSize: theme.typography.overline.fontSize,
+      lineHeight: theme.typography.overline.lineHeight,
       color: aiTokens.ai,
-      fontWeight: '700',
-      letterSpacing: 0.5,
+      fontWeight: '600',
+      letterSpacing: 0.6,
       textTransform: 'uppercase',
     } as TextStyle,
     heroTitle: {
+      fontFamily: pageTitleFont,
       fontSize: theme.typography.hero.fontSize,
-      fontWeight: '600',
+      fontWeight: theme.typography.hero.fontWeight ?? '700',
       color: aiTokens.text,
-      letterSpacing: -0.4,
-      marginTop: 6,
+      letterSpacing: theme.typography.hero.letterSpacing ?? -0.4,
+      marginTop: 4,
       lineHeight: theme.typography.hero.lineHeight,
     } as TextStyle,
     heroSub: {
-      // iOS subhead：15pt / 20 line-height
-      fontSize: 15,
-      color: aiTokens.muted,
-      marginTop: 8,
-      lineHeight: 20,
+      fontSize: theme.typography.bodySmall.fontSize,
+      color: aiTokens.textSecondary,
+      marginTop: 6,
+      lineHeight: theme.typography.bodySmall.lineHeight,
     },
 
     sectionHead: {
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'baseline',
       marginBottom: aiTokens.space.sm,
-      paddingHorizontal: aiTokens.space.xs,
+      paddingHorizontal: 2,
     },
     sectionTitle: {
-      fontSize: 18,
+      fontSize: theme.typography.h3.fontSize,
+      lineHeight: theme.typography.h3.lineHeight,
       fontWeight: '600',
       color: aiTokens.text,
-      letterSpacing: 0,
+      letterSpacing: theme.typography.h3.letterSpacing,
     } as TextStyle,
     sectionSub: {
-      fontSize: 13,
+      fontSize: 12,
       color: aiTokens.muted,
       marginTop: 2,
     },
-    // iOS insetGrouped 群組容器：圓角白底 + overflow hidden 把 row 分隔線切齊
     sectionGroup: {
       backgroundColor: aiTokens.surface,
       borderRadius: aiTokens.radius.md,
@@ -606,42 +663,39 @@ const createStyles = () =>
     card: {
       backgroundColor: aiTokens.surface,
       borderRadius: aiTokens.radius.lg,
-      borderWidth: 1,
+      borderWidth: StyleSheet.hairlineWidth,
       borderColor: aiTokens.border,
       marginHorizontal: aiTokens.space.md,
       marginBottom: aiTokens.space.sm,
-      padding: aiTokens.space.md,
+      padding: 15,
       overflow: 'hidden',
     },
     cardHeader: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: 10,
-      marginTop: 2,
+      marginBottom: 8,
     },
     cardIcon: {
-      width: 32,
-      height: 32,
-      borderRadius: 10,
-      backgroundColor: aiTokens.aiSoft,
+      width: 22,
       alignItems: 'center',
       justifyContent: 'center',
-      marginRight: 10,
+      marginRight: 8,
     },
     cardTitle: {
       flex: 1,
-      fontSize: 15,
+      fontSize: theme.typography.h3.fontSize,
+      lineHeight: theme.typography.h3.lineHeight,
       fontWeight: '600',
       color: aiTokens.text,
     },
     cardBadge: {
       paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: aiTokens.radius.pill,
+      paddingVertical: 2,
+      borderRadius: aiTokens.radius.sm,
     },
     cardBadgeText: {
       fontSize: 11,
-      fontWeight: '700',
+      fontWeight: '600',
     },
     cardBody: { gap: 4 },
     cardFooter: {
@@ -649,53 +703,50 @@ const createStyles = () =>
       justifyContent: 'space-between',
       alignItems: 'center',
       marginTop: 10,
-      paddingTop: 10,
-      borderTopWidth: 1,
+      paddingTop: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: aiTokens.border,
-      borderStyle: 'solid',
     },
-    cardSource: { fontSize: 11, color: aiTokens.muted },
+    cardSource: { fontSize: 12, color: aiTokens.muted },
     cardConf: {
       paddingHorizontal: 8,
       paddingVertical: 2,
-      borderRadius: aiTokens.radius.pill,
+      borderRadius: aiTokens.radius.sm,
     },
-    cardConfText: { fontSize: 10, fontWeight: '700' },
+    cardConfText: { fontSize: 10, fontWeight: '600' },
 
     row: {
-      // iOS Inset Cell：白底 + 圓角 + 細邊；卡與卡間距小（接近 insetGrouped 視覺）
       flexDirection: 'row',
       alignItems: 'center',
-      paddingHorizontal: aiTokens.space.md,
-      paddingVertical: 14,
-      minHeight: 44, // iOS HIG 觸控目標
+      paddingHorizontal: 15,
+      paddingVertical: 13,
+      minHeight: 48,
       backgroundColor: aiTokens.surface,
       marginHorizontal: aiTokens.space.md,
-      borderRadius: aiTokens.radius.md,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: aiTokens.border,
-      marginBottom: 6,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: aiTokens.border,
     },
     rowTitle: {
-      // iOS body：15pt / 500 / label
-      fontSize: 15,
+      fontSize: theme.typography.body.fontSize,
+      lineHeight: theme.typography.body.lineHeight,
       fontWeight: '500',
       color: aiTokens.text,
     },
     rowSub: {
-      fontSize: 12,
+      fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: theme.typography.bodySmall.lineHeight,
       color: aiTokens.muted,
-      marginTop: 2,
+      marginTop: 1,
     },
     rowTag: {
       paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: aiTokens.radius.pill,
+      paddingVertical: 2,
+      borderRadius: aiTokens.radius.sm,
       marginLeft: 8,
     },
     rowTagText: {
       fontSize: 11,
-      fontWeight: '700',
+      fontWeight: '600',
     },
   });
 
@@ -744,7 +795,7 @@ export function AIDetailHeader({
             </Text>
           ) : null}
           {!hideHeading && subtitle ? (
-            <Text style={detailStyles.subtitle} numberOfLines={2}>
+            <Text accessibilityLabel={subtitle} style={detailStyles.subtitle} numberOfLines={2}>
               {subtitle}
             </Text>
           ) : null}
@@ -772,6 +823,7 @@ export function AIDetailScreen({
   bottomPadding,
   scrollRef,
   onScroll,
+  testID,
   keyboardShouldPersistTaps = 'handled',
   keyboardDismissMode = Platform.OS === 'ios' ? 'interactive' : 'on-drag',
   automaticallyAdjustKeyboardInsets = Platform.OS === 'ios',
@@ -784,6 +836,7 @@ export function AIDetailScreen({
   bottomPadding?: number;
   scrollRef?: React.Ref<ScrollView>;
   onScroll?: ScrollViewProps['onScroll'];
+  testID?: string;
   keyboardShouldPersistTaps?: ScrollViewProps['keyboardShouldPersistTaps'];
   keyboardDismissMode?: ScrollViewProps['keyboardDismissMode'];
   automaticallyAdjustKeyboardInsets?: ScrollViewProps['automaticallyAdjustKeyboardInsets'];
@@ -797,7 +850,7 @@ export function AIDetailScreen({
   const headingInContent =
     width / fontScale < 360 || title.length > 24 || (subtitle?.length ?? 0) > 40;
   return (
-    <View style={{ flex: 1, backgroundColor: aiTokens.bg }}>
+    <View testID={testID} collapsable={false} style={{ flex: 1, backgroundColor: aiTokens.bg }}>
       <AIDetailHeader
         title={title}
         subtitle={subtitle}
@@ -821,7 +874,11 @@ export function AIDetailScreen({
             <Text style={detailStyles.title} accessibilityRole="header">
               {title}
             </Text>
-            {subtitle ? <Text style={detailStyles.subtitle}>{subtitle}</Text> : null}
+            {subtitle ? (
+              <Text accessibilityLabel={subtitle} style={detailStyles.subtitle}>
+                {subtitle}
+              </Text>
+            ) : null}
           </View>
         ) : null}
         {children}
@@ -831,7 +888,7 @@ export function AIDetailScreen({
 }
 
 // ──────────────────────────────────────────────
-// AIInsightBanner — AI 摘要橫條（畫面頂部用）
+// AIInsightBanner — 摘要便條（畫面頂部用）
 // ──────────────────────────────────────────────
 export function AIInsightBanner({
   text,
@@ -846,28 +903,45 @@ export function AIInsightBanner({
   return (
     <View
       style={{
-        margin: aiTokens.space.md,
-        padding: aiTokens.space.md,
-        backgroundColor: aiTokens.aiSurface,
+        marginHorizontal: aiTokens.space.md,
+        marginVertical: aiTokens.space.sm,
+        padding: 14,
+        backgroundColor: aiTokens.surface,
         borderRadius: aiTokens.radius.md,
-        borderWidth: 1,
-        borderColor: aiTokens.aiSoft,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: aiTokens.border,
+        borderLeftWidth: 3,
+        borderLeftColor: aiTokens.ai,
         flexDirection: 'row',
-        gap: 12,
+        gap: 10,
         alignItems: 'flex-start',
       }}
     >
-      <AIMark size={28} />
+      <AIMark size={20} />
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 11, color: aiTokens.ai, fontWeight: '700', letterSpacing: 0.4 }}>
+        <Text
+          style={{
+            fontSize: theme.typography.overline.fontSize,
+            color: aiTokens.ai,
+            fontWeight: '600',
+            letterSpacing: 0.5,
+          }}
+        >
           摘要
         </Text>
-        <Text style={{ fontSize: 13, color: aiTokens.text, marginTop: 4, lineHeight: 19 }}>
+        <Text
+          style={{
+            fontSize: theme.typography.bodySmall.fontSize,
+            color: aiTokens.text,
+            marginTop: 3,
+            lineHeight: theme.typography.bodySmall.lineHeight,
+          }}
+        >
           {text}
         </Text>
-        <View style={{ flexDirection: 'row', marginTop: 8, alignItems: 'center', gap: 8 }}>
-          {source ? <Text style={{ fontSize: 11, color: aiTokens.muted }}>{source}</Text> : null}
-        </View>
+        {source ? (
+          <Text style={{ fontSize: 11, color: aiTokens.muted, marginTop: 6 }}>{source}</Text>
+        ) : null}
       </View>
     </View>
   );
@@ -877,7 +951,7 @@ export function AIInsightBanner({
 // AIEmptyState — 空狀態（沒資料時）
 // ──────────────────────────────────────────────
 export function AIEmptyState({
-  icon = '✨',
+  icon,
   title,
   subtitle,
   action,
@@ -892,17 +966,22 @@ export function AIEmptyState({
     <View
       style={{
         alignItems: 'center',
-        paddingVertical: aiTokens.space.xl * 1.5,
+        paddingVertical: aiTokens.space.xl * 1.4,
         paddingHorizontal: aiTokens.space.xl,
       }}
     >
-      <Text style={{ fontSize: 56 }}>{icon}</Text>
+      {icon && icon !== '✨' ? (
+        <Text style={{ fontSize: 28 }}>{icon}</Text>
+      ) : (
+        <Ionicons name="document-text-outline" size={28} color={aiTokens.muted} />
+      )}
       <Text
         style={{
-          fontSize: 17,
-          fontWeight: '700',
+          fontSize: theme.typography.h2.fontSize,
+          lineHeight: theme.typography.h2.lineHeight,
+          fontWeight: '600',
           color: aiTokens.text,
-          marginTop: 16,
+          marginTop: 12,
           textAlign: 'center',
         }}
       >
@@ -911,17 +990,17 @@ export function AIEmptyState({
       {subtitle ? (
         <Text
           style={{
-            fontSize: 13,
+            fontSize: theme.typography.bodySmall.fontSize,
             color: aiTokens.muted,
-            marginTop: 6,
+            marginTop: 5,
             textAlign: 'center',
-            lineHeight: 19,
+            lineHeight: theme.typography.bodySmall.lineHeight,
           }}
         >
           {subtitle}
         </Text>
       ) : null}
-      {action ? <View style={{ marginTop: 16 }}>{action}</View> : null}
+      {action ? <View style={{ marginTop: 14 }}>{action}</View> : null}
     </View>
   );
 }
@@ -940,9 +1019,9 @@ const createDetailStyles = () =>
   StyleSheet.create({
     header: {
       paddingHorizontal: aiTokens.space.sm,
-      paddingBottom: 12,
+      paddingBottom: 10,
       backgroundColor: aiTokens.bg,
-      borderBottomWidth: 1,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: aiTokens.border,
     },
     headerRow: {
@@ -972,6 +1051,7 @@ const createDetailStyles = () =>
       justifyContent: 'center',
     },
     title: {
+      fontFamily: pageTitleFont,
       fontSize: 17,
       fontWeight: '600',
       color: aiTokens.text,

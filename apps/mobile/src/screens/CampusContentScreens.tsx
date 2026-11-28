@@ -20,6 +20,11 @@ import { usePersonalImportScope } from '../state/personalImportScope';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { useCampusEvents } from '../hooks/useCampusEvents';
+import { useCampusEventShortlist } from '../state/campusEventShortlist';
+import {
+  EventSaveButton, EventShortlistError, EventShortlistTabs, SavedEventList,
+} from '../components/CampusEventShortlist';
+import type { SavedCampusEvent } from '@campus/shared/src/campusEventShortlist';
 import {
   type CampusAnnouncementFeed,
   loadCampusAnnouncementFeed,
@@ -45,6 +50,7 @@ import {
   verifiedOfficialAnnouncementUrl,
 } from '@campus/shared/src/campusAnnouncements';
 import { parseCampusAnnouncementSource } from '../services/campusAnnouncementSource';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { getRawAppEnv } from '../services/release';
 import { safeNavigate } from '../utils/safeNavigate';
 import { exportAndShareICalFile } from '../services/ical';
@@ -60,11 +66,13 @@ import {
 } from '@campus/shared/src/campusEventTime';
 
 type Props = {
+  publicBrowse?: boolean;
   navigation?: {
     goBack?: () => void;
+    setParams?: (params: { saved?: string }) => void;
     navigate?: (screen: string, params?: Record<string, unknown>) => void;
   };
-  route?: { key?: string; params?: { id?: string; announcementId?: string; eventId?: string; source?: string; sourceKind?: string; schoolId?: string } };
+  route?: { key?: string; params?: { id?: string; announcementId?: string; eventId?: string; source?: string; sourceKind?: string; schoolId?: string; saved?: string } };
 };
 
 function useContent<T>(
@@ -264,8 +272,10 @@ function ContentFilter({
 }) {
   return (
     <Pressable
+      accessible
       accessibilityRole="button"
-      accessibilityLabel={`篩選：${label}`}
+      accessibilityLabel={label}
+      accessibilityHint="篩選此類內容"
       accessibilityState={{ selected }}
       onPress={onPress}
       style={({ pressed }) => ({
@@ -282,6 +292,7 @@ function ContentFilter({
       })}
     >
       <Text
+        accessible={false}
         style={{
           color: selected ? aiTokens.ai : aiTokens.text,
           fontSize: 14,
@@ -308,6 +319,7 @@ function ContentSearch({
       <Text style={{ color: aiTokens.text, fontSize: 15, fontWeight: '600' }}>搜尋{kind}</Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <TextInput
+          testID={kind === '公告' ? 'announcement-search' : 'event-search'}
           accessibilityLabel={`搜尋${kind}`}
           placeholder={kind === '公告' ? '標題、內容或發布單位' : '名稱、介紹、地點或主辦單位'}
           placeholderTextColor={aiTokens.muted}
@@ -335,7 +347,10 @@ function ContentSearch({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`清除${kind}搜尋`}
-            onPress={() => onChange('')}
+            onPress={() => {
+              Keyboard.dismiss();
+              onChange('');
+            }}
             style={{
               minHeight: 44,
               minWidth: 44,
@@ -374,9 +389,10 @@ function ContentRow({
   const tags = labels.filter((label): label is string => Boolean(label));
   return (
     <Pressable
+      accessible
       accessibilityRole="button"
-      accessibilityLabel={[title, pinned && '置頂', ...tags, subtitle].filter(Boolean).join('，')}
-      accessibilityHint={`開啟${kind}詳情`}
+      accessibilityLabel={[title, pinned && '置頂'].filter(Boolean).join('，')}
+      accessibilityHint={[...tags, subtitle].filter(Boolean).join('，') || `開啟${kind}詳情`}
       onPress={() => {
         Keyboard.dismiss();
         onPress();
@@ -400,7 +416,10 @@ function ContentRow({
             paddingVertical: 2,
           }}
         >
-          <Text style={{ color: aiTokens.text, fontSize: 12, lineHeight: 18, fontWeight: '700' }}>
+          <Text
+            accessible={false}
+            style={{ color: aiTokens.text, fontSize: 12, lineHeight: 18, fontWeight: '700' }}
+          >
             置頂
           </Text>
         </View>
@@ -410,6 +429,7 @@ function ContentRow({
           {tags.map((label) => (
             <Text
               key={label}
+              accessible={false}
               style={{ color: aiTokens.ai, fontSize: 12, lineHeight: 18, fontWeight: '600' }}
             >
               {label}
@@ -417,12 +437,18 @@ function ContentRow({
           ))}
         </View>
       ) : null}
-      <Text style={{ color: aiTokens.text, fontSize: 17, lineHeight: 25, fontWeight: '600' }}>
+      <Text
+        accessible={false}
+        style={{ color: aiTokens.text, fontSize: 17, lineHeight: 25, fontWeight: '600' }}
+      >
         {title}
       </Text>
-      <Text style={{ color: aiTokens.muted, fontSize: 13, lineHeight: 20 }}>{subtitle}</Text>
+      <Text accessible={false} style={{ color: aiTokens.muted, fontSize: 13, lineHeight: 20 }}>
+        {subtitle}
+      </Text>
       {preview ? (
         <Text
+          accessible={false}
           numberOfLines={2}
           style={{ color: aiTokens.textSecondary, fontSize: 14, lineHeight: 22 }}
         >
@@ -725,11 +751,11 @@ export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
   const { sourceKind, schoolId } = route?.params ?? {};
   const exact = sourceKind !== undefined;
   const load = useCallback(async (currentSchool: string, itemId: string) => {
-    if (schoolId !== undefined && schoolId !== currentSchool) return null;
+    if (schoolId !== undefined && toPublicSchoolId(schoolId) !== toPublicSchoolId(currentSchool)) return null;
     if (!exact) return loadCampusAnnouncement(currentSchool, itemId);
     const source = parseCampusAnnouncementSource({ kind: sourceKind, id: itemId });
     if (!source || schoolId === undefined) return null;
-    return loadCampusAnnouncement(currentSchool, itemId, source.kind);
+    return loadCampusAnnouncement(schoolId, itemId, source.kind);
   }, [exact, sourceKind, schoolId]);
   const content = useContent(load, id, JSON.stringify([sourceKind, schoolId]), !exact);
   const announcement = content.value;
@@ -850,12 +876,35 @@ function useCampusEventClock(eventTime?: CampusEventTime) {
   return now;
 }
 
-function CampusEventsContent({ navigation }: Props) {
-  const content = useCampusEvents();
+function CampusEventsContent({ navigation, route, publicBrowse }: Props) {
+  const { school } = useSchool();
+  const shortlist = useCampusEventShortlist();
+  const requestedSaved = route?.params?.saved === '1';
+  const [savedView, setSavedView] = useState(requestedSaved);
+  const [browseOpened, setBrowseOpened] = useState(!requestedSaved);
+  const content = useCampusEvents(browseOpened);
+  const selectView = (saved: boolean) => {
+    Keyboard.dismiss();
+    if (!saved) setBrowseOpened(true);
+    setSavedView(saved);
+  };
+  useEffect(() => {
+    if (requestedSaved) {
+      setSavedView(true);
+      navigation?.setParams?.({ saved: undefined });
+    }
+  }, [requestedSaved, navigation]);
+  const openEvent = ({ id, source, schoolId }: SavedCampusEvent) => {
+    if (content.current()) safeNavigate(navigation, '活動詳情', { id, source, schoolId });
+  };
   const registrations = useEventRegistrations(
-    content.items
-      .filter((event) => event.source === 'school-club-events' && event.appRegistrationConfigured)
-      .map((event) => event.id),
+    publicBrowse
+      ? []
+      : content.items
+          .filter(
+            (event) => event.source === 'school-club-events' && event.appRegistrationConfigured,
+          )
+          .map((event) => event.id),
   );
   const [period, setPeriod] = useState<'all' | 'ongoing' | 'upcoming' | 'past' | 'undated'>('all');
   const [search, setSearch] = useState('');
@@ -888,7 +937,19 @@ function CampusEventsContent({ navigation }: Props) {
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
     >
-      {!content.loaded && !content.items.length ? (
+      <EventShortlistTabs
+        saved={savedView}
+        count={shortlist.items.length}
+        onChange={selectView}
+      />
+      <EventShortlistError shortlist={shortlist} />
+      {savedView ? (
+        <SavedEventList
+          shortlist={shortlist}
+          onOpen={openEvent}
+          onExplore={() => selectView(false)}
+        />
+      ) : !content.loaded && !content.items.length ? (
         <ReadState
           loading={content.loading}
           error={content.error}
@@ -943,36 +1004,52 @@ function CampusEventsContent({ navigation }: Props) {
             subtitle={`已載入 ${content.items.length} 場；篩選與日期排序僅適用已載入的活動。`}
           >
             {visible.length ? (
-              visible.map((row, index) => (
-                <ContentRow
-                  key={`${row.source}:${row.id}`}
-                  first={index === 0}
-                  kind="活動"
-                  labels={[
-                    campusEventPhaseLabel(campusEventPhase(row, now)),
-                    row.source === 'school-club-events' && row.appRegistrationConfigured
-                      ? registrations.uid
-                        ? eventRegistrationLabel(
-                            registrations.states.find((state) => state.eventId === row.id),
-                          )
-                        : '登入確認報名'
-                      : undefined,
-                  ]}
-                  title={row.title}
-                  subtitle={[dateLabel(row.startsAt), row.location, row.organizer]
-                    .filter(Boolean)
-                    .join(' · ')}
-                  preview={row.description}
-                  onPress={() => {
-                    if (content.current())
-                      safeNavigate(navigation, '活動詳情', {
-                        id: row.id,
-                        source: row.source,
-                        schoolId: row.schoolId,
-                      });
-                  }}
-                />
-              ))
+              visible.map((row, index) => {
+                const entry = {
+                  schoolId: school.id,
+                  id: row.id,
+                  source: row.source,
+                  title: row.title,
+                };
+                return (
+                  <View
+                    key={`${row.source}:${row.id}`}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'flex-start',
+                      paddingRight: 8,
+                      borderTopWidth: index ? StyleSheet.hairlineWidth : 0,
+                      borderTopColor: aiTokens.border,
+                    }}
+                  >
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <ContentRow
+                        first
+                        kind="活動"
+                        labels={[
+                          campusEventPhaseLabel(campusEventPhase(row, now)),
+                          row.source === 'school-club-events' && row.appRegistrationConfigured
+                            ? !publicBrowse && registrations.uid
+                              ? eventRegistrationLabel(
+                                  registrations.states.find((state) => state.eventId === row.id),
+                                )
+                              : '登入確認報名'
+                            : undefined,
+                        ]}
+                        title={row.title}
+                        subtitle={[dateLabel(row.startsAt), row.location, row.organizer]
+                          .filter(Boolean)
+                          .join(' · ')}
+                        preview={row.description}
+                        onPress={() => openEvent(entry)}
+                      />
+                    </View>
+                    <View style={{ paddingTop: 4 }}>
+                      <EventSaveButton event={entry} shortlist={shortlist} />
+                    </View>
+                  </View>
+                );
+              })
             ) : (
               <AICard
                 title={content.items.length ? '已載入的活動中沒有符合項目' : '目前沒有活動資訊'}
@@ -1044,7 +1121,7 @@ export function CampusEventDetailScreen(props: Props) {
   );
 }
 
-function ScopedCampusEventDetail({ navigation, route }: Props) {
+function ScopedCampusEventDetail({ navigation, route, publicBrowse }: Props) {
   const scope = usePersonalImportScope();
   const revokedOwner = useRevokedCampusEventDraftOwner();
   const calendarScope = scope?.owner === revokedOwner ? null : scope;
@@ -1062,9 +1139,12 @@ function ScopedCampusEventDetail({ navigation, route }: Props) {
   }, [routeSchoolId, school.id, selectionReady]);
   const id = route?.params?.id ?? route?.params?.eventId ?? '';
   const source = route?.params?.source;
+  const shortlist = useCampusEventShortlist();
   const loader = useCallback(
     (schoolId: string, eventId: string) =>
-      boundSchool !== schoolId ? Promise.resolve(null) : loadCampusEvent(schoolId, eventId, source),
+      !boundSchool || toPublicSchoolId(boundSchool) !== toPublicSchoolId(schoolId)
+        ? Promise.resolve(null)
+        : loadCampusEvent(schoolId, eventId, source),
     [source, boundSchool],
   );
   const content = useContent(
@@ -1154,15 +1234,36 @@ function ScopedCampusEventDetail({ navigation, route }: Props) {
                 {dateLabel(event.startsAt)}
                 {event.endsAt ? ` 至 ${dateLabel(event.endsAt)}` : ''}
               </Text>
-              <Text style={{ color: aiTokens.muted }}>地點：{event.location || '尚未公布'}</Text>
-              <Text style={{ color: aiTokens.muted }}>主辦：{event.organizer || '尚未公布'}</Text>
+              <Text
+                accessibilityLabel={event.location || '尚未公布'}
+                style={{ color: aiTokens.muted }}
+              >
+                地點：{event.location || '尚未公布'}
+              </Text>
+              <Text
+                accessibilityLabel={event.organizer || '尚未公布'}
+                style={{ color: aiTokens.muted }}
+              >
+                主辦：{event.organizer || '尚未公布'}
+              </Text>
               {event.fee != null ? (
                 <Text style={{ color: aiTokens.muted }}>
                   費用：{event.fee === 0 ? '免費' : `NT$ ${event.fee}`}
                 </Text>
               ) : null}
+              <EventSaveButton
+                event={{
+                  schoolId: school.id,
+                  id: event.id,
+                  source: event.source,
+                  title: event.title,
+                }}
+                shortlist={shortlist}
+                showLabel
+              />
             </View>
           </AICard>
+          <EventShortlistError shortlist={shortlist} />
           {suggestion ? (
             <AICard title="nuni · 安排這場活動">
               <View style={{ gap: 10 }}>
@@ -1191,7 +1292,15 @@ function ScopedCampusEventDetail({ navigation, route }: Props) {
             </Text>
           </AICard>
           {event.source === 'school-club-events' && event.appRegistrationConfigured ? (
-            <EventRegistrationPanel eventId={event.id} />
+            publicBrowse ? (
+              <AICard title="App 報名">
+                <Text style={{ color: aiTokens.text, lineHeight: 22 }}>
+                  請登入目前學校的帳號，再確認報名資格與狀態。
+                </Text>
+              </AICard>
+            ) : (
+              <EventRegistrationPanel eventId={event.id} />
+            )
           ) : (
             <AICard title="報名方式">
               <View style={{ gap: 8 }}>

@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        numpy-version: ['1.26.4', '2.5.4']
+        numpy-version: ['1.26.4', '2.5.5']
     timeout-minutes: 25
     defaults:
       run:

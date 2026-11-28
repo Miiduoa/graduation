@@ -28,6 +28,8 @@ const renew = require('./agent/tools/renewBook');
 const seat = require('./agent/tools/reserveSeat');
 const washing = require('./agent/tools/reserveWashingMachine');
 const { resolveWashReserveInput } = require('./lib/campusWriteIntentResolve');
+const cancelWashing = require('./agent/tools/cancelWashingReservation');
+const getMyWashingReservations = require('./agent/tools/getMyWashingReservations');
 const executeAgentWrite = require('./agent/handlers/executeAgentWrite');
 const { resolveReserveSeatInput } = require('./lib/campusWriteIntentResolve');
 const { libraryLoanVersion } = require('./agent/libraryLoanSource');
@@ -1560,3 +1562,297 @@ test('leave status respects selected campus and account while returning the newe
     assert.equal(result.items[0].requestId, expectedId);
   }
 });
+async function washingRecordSnapshot() {
+  return collectionRecordSnapshot([
+    'schools/pu/washingReservations', 'schools/pu/washingMachines',
+    'schools/nthu/washingReservations', 'schools/nthu/washingMachines',
+  ]);
+}
+
+test('washing cancellation rejects a stale expected reservation version without changing service records', async () => {
+  const reservation = await washing.execute(scope(), washingInput);
+  const before = await washingRecordSnapshot();
+  await assert.rejects(cancelWashing.execute(scope(), {
+    reservationId: reservation.reservationId,
+    expectedReservationVersion: 'f'.repeat(64),
+  }), { code: 'failed-precondition' });
+  assert.deepEqual(await washingRecordSnapshot(), before);
+});
+
+test('washing cancellation returns a complete receipt matching the canonical cancelled reservation', async () => {
+  const reservation = await washing.execute(scope(), washingInput);
+  const receipt = await cancelWashing.execute(scope(), { reservationId: reservation.reservationId });
+  const saved = await read(`schools/pu/washingReservations/${reservation.reservationId}`);
+  assert.equal(saved.status, 'cancelled');
+  assert.ok(saved.cancelledAt instanceof Timestamp);
+  const machine = await read('schools/pu/washingMachines/M1');
+  assert.equal(machine.status, 'available');
+  assert.equal(machine.reservedBy, null);
+  assert.equal(machine.activeReservationId, null);
+  assert.deepEqual(receipt, {
+    success: true,
+    reservationId: reservation.reservationId,
+    machineId: saved.machineId,
+    dormitory: saved.dormitory,
+    startTime: saved.startTime,
+    reservedUntil: saved.reservedUntil.toDate().toISOString(),
+    status: 'cancelled',
+    schoolId: 'pu',
+    userId: 'alice',
+  });
+});
+
+
+async function washingCancellationProposal(reservationId = null) {
+  const id = reservationId || (await washing.execute(scope(), washingInput)).reservationId;
+  const source = await getMyWashingReservations.execute(scope(), { reservationId: id });
+  assert.equal(source.ok, true);
+  assert.equal(source.complete, true);
+  assert.equal(source.reservations.length, 1);
+  assert.equal(source.reservations[0].reservationId, id);
+  assert.match(source.reservations[0].reservationVersion, /^[a-f0-9]{64}$/);
+  const reviewed = source.reservations[0];
+  const input = {
+    reservationId: id,
+    machineId: reviewed.machineId,
+    dormitory: reviewed.dormitory,
+    startTime: reviewed.startTime,
+    reservedUntil: reviewed.reservedUntil,
+    expectedReservationVersion: reviewed.reservationVersion,
+  };
+  await db.doc('users/alice/settings/assistantPermissions').set({ cancelWashingReservation: true });
+  const action = await proposal(
+    { actionProposals: [{ toolName: 'cancelWashingReservation', input }] },
+    { seedLeavePermission: false },
+  );
+  action.data.toolName = 'cancelWashingReservation';
+  action.data.input = input;
+  return action;
+}
+
+async function assertUnverifiedWashingClaim(action) {
+  const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+  assert.equal(run.actionClaims['0'].status, 'unverified');
+  assert.ok(run.actionClaims['0'].startedAt instanceof Timestamp);
+  assert.equal(run.steps.some((step) => step.output?.success === true), false);
+}
+
+async function assertWashingReceipt(receipt, reservationId) {
+  const row = await read(`schools/pu/washingReservations/${reservationId}`);
+  assert.equal(row.status, 'cancelled');
+  assert.ok(row.cancelledAt instanceof Timestamp);
+  for (const [key, value] of Object.entries({
+    success: true, toolName: 'cancelWashingReservation', reservationId,
+    machineId: row.machineId, dormitory: row.dormitory, startTime: row.startTime,
+    reservedUntil: row.reservedUntil.toDate().toISOString(),
+    status: 'cancelled', schoolId: 'pu', userId: 'alice',
+  })) assert.equal(receipt[key], value, `washing receipt ${key}`);
+}
+
+test('an Agent washing cancellation uses the canonical reader and completes one verified receipt without rewriting on repeat', async () => {
+  const action = await washingCancellationProposal();
+  const id = action.data.input.reservationId;
+  const receipt = await executeAgentWrite.run(action);
+  await assertWashingReceipt(receipt, id);
+  const machine = await read('schools/pu/washingMachines/M1');
+  assert.equal(machine.status, 'available');
+  assert.equal(machine.reservedBy, null);
+  assert.equal(machine.activeReservationId, null);
+  const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+  assert.equal(run.actionClaims['0'].status, 'completed');
+  assert.equal(run.steps.length, 1);
+  assert.deepEqual(run.steps[0].input, action.data.input);
+  assert.deepEqual(run.steps[0].output, receipt);
+  assert.deepEqual(run.toolCalls, run.steps);
+
+  const committed = await washingRecordSnapshot();
+  const committedRuns = await collectionRecordSnapshot(['users/alice/agentRuns']);
+  await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+  await assert.rejects(cancelWashing.execute(scope(), { reservationId: id }), {
+    code: 'failed-precondition',
+  });
+  const source = await getMyWashingReservations.execute(scope(), { reservationId: id });
+  assert.equal(source.ok, true);
+  assert.equal(source.reservations.length, 1);
+  assert.equal(source.reservations[0].status, 'cancelled');
+  assert.deepEqual(await washingRecordSnapshot(), committed);
+  assert.deepEqual(await collectionRecordSnapshot(['users/alice/agentRuns']), committedRuns);
+});
+
+for (const newerUid of ['alice', 'bob']) {
+  test(`an Agent washing cancellation of an old active record cannot release ${newerUid === 'alice' ? 'its owner’s' : 'another member’s'} newer reservation`, async () => {
+    const old = await washing.execute(scope(), washingInput);
+    await cancelWashing.execute(scope(), { reservationId: old.reservationId });
+    const newer = await washing.execute(scope(newerUid), washingInput);
+    // Preserve a legacy still-active old record while the machine belongs to a
+    // newer reservation, matching the existing callable regression above.
+    await db.doc(`schools/pu/washingReservations/${old.reservationId}`).update({ status: 'reserved' });
+    const action = await washingCancellationProposal(old.reservationId);
+    const watched = [
+      db.doc('schools/pu/washingMachines/M1'),
+      db.doc(`schools/pu/washingReservations/${newer.reservationId}`),
+    ];
+    const before = await db.getAll(...watched);
+    const receipt = await executeAgentWrite.run(action);
+    await assertWashingReceipt(receipt, old.reservationId);
+    const afterCancel = await db.getAll(...watched);
+    afterCancel.forEach((snapshot, index) => {
+      assert.deepEqual(snapshot.data(), before[index].data());
+      assert.equal(snapshot.updateTime.isEqual(before[index].updateTime), true,
+        `old cancellation must not rewrite ${snapshot.ref.path}`);
+    });
+    assert.equal(afterCancel[0].data().activeReservationId, newer.reservationId);
+    assert.equal(afterCancel[0].data().reservedBy, newerUid);
+  });
+}
+
+for (const caller of ['another user', 'another school', 'anonymous']) {
+  test(`an Agent washing cancellation rejects ${caller} without claiming or changing the original proposal`, async () => {
+    const action = await washingCancellationProposal();
+    const before = await washingRecordSnapshot();
+    const runBefore = await collectionRecordSnapshot(['users/alice/agentRuns', 'users/bob/agentRuns']);
+    if (caller === 'another user') {
+      await db.doc('users/bob/settings/assistantPermissions').set({ cancelWashingReservation: true });
+      action.auth = { uid: 'bob' };
+    } else if (caller === 'another school') {
+      await db.doc('schools/nthu/members/alice').set({ status: 'active' });
+      action.data.context.schoolId = 'nthu';
+    } else {
+      action.auth = null;
+    }
+    await assert.rejects(executeAgentWrite.run(action), {
+      code: caller === 'anonymous' ? 'unauthenticated' : 'permission-denied',
+    });
+    assert.deepEqual(await washingRecordSnapshot(), before);
+    assert.deepEqual(await collectionRecordSnapshot(['users/alice/agentRuns', 'users/bob/agentRuns']), runBefore);
+  });
+}
+
+for (const change of blockedAccountChanges) {
+  test(`an Agent washing cancellation stops after a committed claim when the account becomes ${change.label}`, async () => {
+    const action = await washingCancellationProposal();
+    const before = await washingRecordSnapshot();
+    await assert.rejects(runAfterCommittedClaim(action, change), { code: change.code });
+    assert.deepEqual(await washingRecordSnapshot(), before);
+    await assertUnverifiedWashingClaim(action);
+  });
+}
+
+for (const change of [
+  { label: 'active profile', apply: (account) => account.update({ status: 'active' }) },
+  { label: 'missing root profile with active membership', apply: (account) => account.delete() },
+]) {
+  test(`an Agent washing cancellation preserves ${change.label} compatibility after the claim`, async () => {
+    const action = await washingCancellationProposal();
+    const receipt = await runAfterCommittedClaim(action, change);
+    await assertWashingReceipt(receipt, action.data.input.reservationId);
+    assert.equal((await read(`users/alice/agentRuns/${action.data.agentRunId}`)).actionClaims['0'].status, 'completed');
+  });
+}
+
+test('an Agent washing cancellation rechecks permission after its proposal claim commits', async () => {
+  const action = await washingCancellationProposal();
+  const before = await washingRecordSnapshot();
+  await assert.rejects(runAfterCommittedClaim(action, {
+    apply: () => db.doc('users/alice/settings/assistantPermissions').update({ cancelWashingReservation: false }),
+  }), { code: 'permission-denied' });
+  assert.deepEqual(await washingRecordSnapshot(), before);
+  await assertUnverifiedWashingClaim(action);
+});
+
+test('an Agent washing cancellation with permission already revoked never claims its proposal', async () => {
+  const action = await washingCancellationProposal();
+  await db.doc('users/alice/settings/assistantPermissions').update({ cancelWashingReservation: false });
+  const before = await washingRecordSnapshot();
+  const runBefore = await collectionRecordSnapshot(['users/alice/agentRuns']);
+  await assert.rejects(executeAgentWrite.run(action), { code: 'permission-denied' });
+  assert.deepEqual(await washingRecordSnapshot(), before);
+  assert.deepEqual(await collectionRecordSnapshot(['users/alice/agentRuns']), runBefore);
+});
+
+for (const change of [
+  { label: 'a changed start time', patch: { startTime: '10:00' }, code: 'failed-precondition' },
+  { label: 'a changed owner', patch: { userId: 'bob' }, code: 'permission-denied' },
+  { label: 'a conflicting source school', patch: { schoolId: 'nthu' }, code: 'failed-precondition' },
+]) {
+  test(`an Agent washing cancellation rejects ${change.label} after the draft without rewriting either resource`, async () => {
+    const action = await washingCancellationProposal();
+    await db.doc(`schools/pu/washingReservations/${action.data.input.reservationId}`).update(change.patch);
+    const before = await washingRecordSnapshot();
+    await assert.rejects(executeAgentWrite.run(action), { code: change.code });
+    assert.deepEqual(await washingRecordSnapshot(), before);
+    await assertUnverifiedWashingClaim(action);
+  });
+}
+
+test('an Agent washing cancellation requires a source version even if a stored proposal omits it', async () => {
+  const action = await washingCancellationProposal();
+  const input = { ...action.data.input };
+  delete input.expectedReservationVersion;
+  action.data.input = input;
+  await db.doc(`users/alice/agentRuns/${action.data.agentRunId}`).update({
+    actionProposals: [{ toolName: 'cancelWashingReservation', input }],
+  });
+  const before = await washingRecordSnapshot();
+  await assert.rejects(executeAgentWrite.run(action), { code: 'failed-precondition' });
+  assert.deepEqual(await washingRecordSnapshot(), before);
+  await assertUnverifiedWashingClaim(action);
+});
+
+/** Inject ABORTED after a real service transaction stages its writes. Only the
+ * actual Firestore SDK retries the callback; the Transaction is never replaced. */
+async function runWashingCancellationWithRetry(action, change) {
+  const originalRunTransaction = db.runTransaction;
+  const runRef = db.doc(`users/alice/agentRuns/${action.data.agentRunId}`);
+  let claimed = false;
+  let interceptedService = false;
+  let attempts = 0;
+  let firstAttemptStaged = false;
+  db.runTransaction = async function (callback, ...options) {
+    if (claimed && !interceptedService) {
+      interceptedService = true;
+      return originalRunTransaction.call(this, async (tx) => {
+        attempts++;
+        if (attempts === 2) await change.apply(db.doc('users/alice'));
+        const result = await callback(tx);
+        if (attempts === 1) {
+          firstAttemptStaged = true;
+          assert.equal(result.success, true);
+          assert.equal(result.status, 'cancelled');
+          throw Object.assign(new Error('force washing cancellation transaction retry'), { code: 10 });
+        }
+        return result;
+      }, ...options);
+    }
+    const result = await originalRunTransaction.call(this, callback, ...options);
+    if (!claimed && (await runRef.get()).data()?.actionClaims?.['0']?.status === 'started') claimed = true;
+    return result;
+  };
+  try {
+    return await executeAgentWrite.run(action);
+  } finally {
+    db.runTransaction = originalRunTransaction;
+    assert.equal(claimed, true);
+    assert.equal(interceptedService, true);
+    assert.equal(firstAttemptStaged, true);
+    assert.equal(attempts, 2, 'the real Firestore SDK must retry after injected ABORTED');
+  }
+}
+
+for (const change of [
+  { label: 'a disabled account', apply: (account) => account.update({ status: 'disabled' }), code: 'failed-precondition' },
+  { label: 'an account deletion marker', apply: (account) => account.update({ accountDeletionInProgress: true }), code: 'failed-precondition' },
+  {
+    label: 'revoked Agent cancellation permission',
+    apply: () => db.doc('users/alice/settings/assistantPermissions').update({ cancelWashingReservation: false }),
+    code: 'permission-denied',
+  },
+]) {
+  test(`an injected ABORTED makes washing cancellation recheck ${change.label} on the real SDK retry`, async () => {
+    const action = await washingCancellationProposal();
+    const before = await washingRecordSnapshot();
+    await assert.rejects(runWashingCancellationWithRetry(action, change), { code: change.code });
+    assert.deepEqual(await washingRecordSnapshot(), before);
+    await assertUnverifiedWashingClaim(action);
+  });
+}

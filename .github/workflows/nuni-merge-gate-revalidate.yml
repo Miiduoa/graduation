@@ -1,0 +1,66 @@
+name: nuni gate evidence revalidation
+on:
+  workflow_run:
+    workflows: [CI, CodeQL, Course access review, E2E Tests (Maestro), Mobile Agent Regression, Campus Spatial Browser, Preview Deploy, nuni gate review evidence changed]
+    # requested is not emitted for reruns. in_progress is essential here.
+    types: [requested, in_progress, completed]
+  issue_comment:
+    types: [edited, deleted]
+  schedule:
+    # Thread resolution changes do not have an Actions event. Native PR protections block
+    # immediately; polling also withdraws old pilot checks when an event is unavailable.
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  actions: read
+  checks: read
+jobs:
+  inspect:
+    if: >-
+      github.repository == 'Miiduoa/graduation' && github.ref == 'refs/heads/main' &&
+      (github.event_name != 'issue_comment' || github.event.issue.pull_request)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      needs_revocation: ${{ steps.inspect.outputs.needs_revocation }}
+    steps:
+      - name: Fetch only trusted default-branch revision
+        run: |
+          set -euo pipefail
+          git init -q
+          git fetch --no-tags --depth=1 https://github.com/Miiduoa/graduation.git "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Inspect published pilot evidence without App credentials
+        id: inspect
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+          NUNI_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: node scripts/merge-gate/revalidate.mjs inspect
+  revoke:
+    needs: inspect
+    if: needs.inspect.outputs.needs_revocation == 'true'
+    # Share the publisher lock. Neither workflow may restore a check being withdrawn.
+    concurrency:
+      group: nuni-merge-gate-publisher
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: nuni-merge-gate
+    steps:
+      - name: Fetch only trusted default-branch revision
+        run: |
+          set -euo pipefail
+          git init -q
+          git fetch --no-tags --depth=1 https://github.com/Miiduoa/graduation.git "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Revalidate again and withdraw only invalid App checks
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+          NUNI_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          NUNI_GATE_PRIVATE_KEY: ${{ secrets.NUNI_GATE_PRIVATE_KEY }}
+        run: node scripts/merge-gate/revalidate.mjs revoke

@@ -1,5 +1,5 @@
 # 07_me_features.yaml
-# 「我的」已改為隱藏 Tab：由左上角頭像開啟 HeaderDrawer
+# 從已登入學生的頭像選單驗證名片與成就紀錄。
 
 appId: ${APP_ID}
 name: Me Features (Header Drawer)
@@ -9,12 +9,9 @@ tags:
 
 ---
 
-- launchApp
-
-- extendedWaitUntil:
-    visible:
-      id: 'tab-Today'
-    timeout: 45000
+- runFlow: ../helpers/sign-in-student.yaml
+- tapOn:
+    id: tab-校園
 
 - waitForAnimationToEnd:
     timeout: 2500
@@ -27,12 +24,24 @@ tags:
 - waitForAnimationToEnd:
     timeout: 1500
 
-- tapOn:
-    id: 'header-avatar-button'
-
-- extendedWaitUntil:
-    visible: '個人'
-    timeout: 8000
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: 'header-avatar-button'
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - extendedWaitUntil:
+          visible:
+            id: header-drawer-panel
+          timeout: 8000
+- assertVisible:
+    id: header-drawer-panel
+- assertVisible:
+    id: header-drawer-identity
+- assertVisible:
+    id: drawer-section-個人
+- assertVisible: '個人資料'
 
 - takeScreenshot: drawer_open
 
@@ -51,19 +60,40 @@ tags:
 
 - takeScreenshot: qr_code_screen
 
-- back
+- tapOn: '返回'
 
 - tapOn:
-    id: 'header-avatar-button'
-    optional: true
+    id: tab-校園
+
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: 'header-avatar-button'
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - extendedWaitUntil:
+          visible:
+            id: header-drawer-panel
+          timeout: 8000
+- assertVisible:
+    id: header-drawer-panel
+- assertVisible:
+    id: header-drawer-identity
+
+- scrollUntilVisible:
+    element:
+      text: '成就與積分'
+    direction: DOWN
+    timeout: 20000
 
 - tapOn:
     text: '成就與積分'
 
 - extendedWaitUntil:
-    visible: '成就與積分'
+    visible: '成就紀錄'
     timeout: 8000
 
 - takeScreenshot: achievements_screen
 
-- back
+- tapOn: '返回'

@@ -1,0 +1,91 @@
+.loading {
+  box-sizing: border-box;
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 12px;
+  color: var(--muted);
+}
+
+.card {
+  min-height: 124px;
+  padding-block: clamp(20px, 3vw, 32px);
+  border-block-start: 1px solid var(--border);
+}
+
+.compact {
+  padding-block: 16px;
+}
+
+.icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.message {
+  max-width: 100%;
+  margin: 0;
+  font-size: var(--font-body-size, 0.9375rem);
+  font-weight: 500;
+  line-height: 1.65;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+
+.track {
+  display: block;
+  width: 112px;
+  max-width: 100%;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--border);
+}
+
+.track > span {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand);
+  animation: activity 1200ms ease-in-out infinite alternate;
+}
+
+@keyframes activity {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(150%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track > span {
+    animation: none;
+    transform: translateX(75%);
+  }
+}
+
+:global(:root[data-reduced-motion='true']) .track > span {
+  animation: none;
+  transform: translateX(75%);
+}
+
+@media (forced-colors: active) {
+  .card {
+    border-color: CanvasText;
+  }
+  .track {
+    background: Canvas;
+    border: 1px solid CanvasText;
+  }
+  .track > span {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+}

@@ -1,64 +1,95 @@
-# 02_authentication.yaml
-# 從頭像抽屜進入學號登入或個人資料（無底部「我的」Tab）
-
 appId: ${APP_ID}
-name: Authentication Flow
-tags:
-  - smoke
-  - auth
-
+name: Real emulator authentication and sign-out boundary
+tags: [smoke, auth]
 ---
-- launchApp
-
+- runFlow: ../helpers/open-emulator-login.yaml
+- inputText: 'incorrect-emulator-fixture-password'
+# Same overlay as the seeded sign-in: submit by tapping the visible control
+# instead of Maestro hideKeyboard, which iOS password keyboards do not expose.
+- tapOn:
+    id: maestro-sign-in
+    enabled: true
 - extendedWaitUntil:
     visible:
-      id: 'tab-Today'
-    timeout: 45000
-
-- waitForAnimationToEnd:
-    timeout: 2500
-
+      id: maestro-login-error
+    timeout: 20000
+- assertNotVisible:
+    id: tab-Today
+# Recover from the rejected password in the same visible form. Relaunching
+# here depends on the test-only trigger being recreated after a failed login
+# and never exercises the user's actual retry path.
+- assertVisible:
+    id: maestro-emulator-login
+- tapOn:
+    id: maestro-password
+- clearText
+- inputText: 'campus-test-1234' # gitleaks:allow public loopback emulator fixture
+- assertVisible:
+    id: maestro-password
+    text: '^campus-test-1234$'
+- tapOn:
+    id: maestro-sign-in
+    enabled: true
+    retryTapIfNoChange: true
 - extendedWaitUntil:
     visible:
-      id: 'header-avatar-button'
-    timeout: 120000
-
-- waitForAnimationToEnd:
-    timeout: 1500
-
-# 開啟抽屜
-- tapOn:
-    id: 'header-avatar-button'
-
+      id: tab-Today
+    timeout: 40000
+- assertNotVisible:
+    id: login-landing
+- assertNotVisible:
+    id: maestro-emulator-login
+- assertNotVisible:
+    id: maestro-login-error
 - extendedWaitUntil:
-    visible: '個人'
-    timeout: 8000
-
-- takeScreenshot: drawer_auth_entry
-
-# 個人入口（未登入 → SSOLogin；已登入 → 編輯個人資料）
+    visible:
+      id: student-today
+    timeout: 30000
 - tapOn:
-    text: '個人資料'
-
+    id: tab-我的
 - extendedWaitUntil:
-    visible: '編輯個人資料'
-    timeout: 6000
-    optional: true
-
+    visible: '目前登入帳號'
+    timeout: 15000
+- assertVisible: '測試學生甲'
+- scrollUntilVisible:
+    element:
+      text: '^個人資料$'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '個人資料'
 - extendedWaitUntil:
-    visible: '學號登入'
-    timeout: 6000
-    optional: true
-
-- takeScreenshot: auth_profile_or_login_screen
-
-# 若為登入表單：輕觸欄位確認 testID（不送出真實登入，避免 E2E 依賴後端）
+    visible: '基本資訊'
+    timeout: 15000
+- assertVisible: '測試學生甲'
+- takeScreenshot: authenticated_seeded_profile
+- tapOn: '返回'
+- scrollUntilVisible:
+    element:
+      text: '^登出學校帳號$'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '^登出學校帳號$'
+- extendedWaitUntil:
+    visible: '確定要登出學校帳號嗎？Google 帳號會保留登入。'
+    timeout: 10000
 - tapOn:
-    id: 'student-id-input'
-    optional: true
-
-- tapOn:
-    id: 'student-password-input'
-    optional: true
-
-- back
+    text: '^確定登出$'
+- extendedWaitUntil:
+    visible:
+      id: login-landing
+    timeout: 30000
+- assertNotVisible:
+    id: tab-Today
+# A stale school deep link after logout must not restore private navigation.
+- runFlow:
+    file: ../helpers/open-campus-link.yaml
+    env:
+      CAMPUS_LINK: campus://groups
+- extendedWaitUntil:
+    visible:
+      id: login-landing
+    timeout: 20000
+- assertNotVisible:
+    id: tab-Today
+- assertNotVisible: '群組加入碼'
+- takeScreenshot: signed_out_private_route_blocked

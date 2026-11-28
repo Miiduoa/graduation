@@ -7,13 +7,14 @@ import { SiteShell } from '@/components/SiteShell';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { useTeacherCourse } from '@/lib/useTeacherCourse';
+import { parseAssignmentFocusId, teacherSubmissionListHref } from '@/components/teaching/assignmentDeepLink';
 import { TeacherAssignments } from '@/components/teaching/TeacherAssignments';
 import styles from '../../../home.module.css';
 import local from './teacherCourse.module.css';
 
 export default function TeacherCoursePage(props: {
   params: Promise<{ courseId: string }>;
-  searchParams?: Promise<{ school?: string; schoolId?: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string; assignmentId?: string }>;
 }) {
   const { courseId } = use(props.params);
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
@@ -26,6 +27,7 @@ export default function TeacherCoursePage(props: {
   const workspace =
     state?.status === 'ready' && state.data && 'modules' in state.data ? state.data : null;
   const path = `/teacher/course/${encodeURIComponent(courseId)}`;
+  const assignmentId = parseAssignmentFocusId(searchParams?.assignmentId);
   const studentPath = `/course/${encodeURIComponent(courseId)}`;
   return (
     <SiteShell
@@ -38,7 +40,7 @@ export default function TeacherCoursePage(props: {
         <p role="status">確認登入狀態…</p>
       ) : !signedIn ? (
         <SchoolAccountRequired
-          returnUrl={`${path}${q}`}
+          returnUrl={assignmentId ? teacherSubmissionListHref(courseId, assignmentId, q) : `${path}${q}`}
           alternative="授課請先到課程空間，從你負責的那門課進去。"
         />
       ) : state?.status === 'error' ? (

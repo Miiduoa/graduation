@@ -32,8 +32,17 @@ export type AssistantCalendarContext = {
 export type AssistantCalendarWriteCheck = {
   isCurrent: () => boolean;
   matches: (ledger: PersonalImportLedger) => boolean;
+  /** Prevent concurrently prepared alternatives from creating a second work interval. */
+  conflictsWithJournalEntry?: (entry: AssistantCalendarJournalEntry) => boolean;
   message: string;
 };
+/** Fresh evidence for one new write. A failure blocks; it can never select another time. */
+export type AssistantCalendarAvailabilityResult =
+  | { kind: 'ready'; writeCheck: AssistantCalendarWriteCheck }
+  | { kind: 'blocked' | 'changed' | 'unavailable'; message: string };
+export type AssistantCalendarAvailabilityCheck = (context: AssistantCalendarContext,
+  signal: AbortSignal) => Promise<AssistantCalendarAvailabilityResult>;
+export type AssistantCalendarTaskOptions = { availabilityCheck?: AssistantCalendarAvailabilityCheck };
 export type AssistantCalendarProposal = AssistantCalendarJournalProposal;
 export type AssistantCalendarTask = { proposal: AssistantCalendarProposal } & (
   | { state: 'review' }
@@ -51,6 +60,9 @@ const attempted = new Set<string>();
 // A deserialized proposal never inherits the original review button's write
 // authority. Every fresh proposal can be confirmed only once in this process.
 const freshProposals = new WeakSet<AssistantCalendarProposal>();
+// In-memory only: never serialized with the proposal, and absent from restored copies.
+const availabilityChecks = new WeakMap<AssistantCalendarProposal, AssistantCalendarAvailabilityCheck>();
+const AVAILABILITY_UNAVAILABLE = '目前無法重新核對這個時段，這次沒有建立行程。請重新提出需求。';
 const UNKNOWN = '尚未確認這筆行程是否已保存。請重新核對同一筆紀錄；目前不會再次建立行程。';
 const JOURNAL_WARNING = '本次核對結果尚未更新到操作紀錄。已保留原操作 ID，稍後只會重新核對，不會再次建立。';
 
@@ -74,16 +86,25 @@ export function sameAssistantCalendarEvent(first: AssistantCalendarEvent, second
   return keys.every((key) => first[key] === second[key]);
 }
 
+/** Only a fresh in-memory proposal can carry a source recheck at confirmation. */
+export function hasAssistantCalendarAvailabilityCheck(proposal: AssistantCalendarProposal): boolean {
+  return availabilityChecks.has(proposal);
+}
+
 export function createAssistantCalendarTask(event: AssistantCalendarEvent, context: AssistantCalendarContext,
-  origin?: AssistantCalendarJournalOrigin): AssistantCalendarTask {
+  origin?: AssistantCalendarJournalOrigin, options?: AssistantCalendarTaskOptions): AssistantCalendarTask {
   const owner = assistantCalendarOwner(context);
   if (!owner) throw new AssistantCalendarScopeError();
+  const availabilityCheck = options?.availabilityCheck;
+  if (availabilityCheck !== undefined && typeof availabilityCheck !== 'function')
+    throw new CalendarBlocked('行程的時段核對設定無效，這次不會建立行程。');
   const proposal = {
     owner, schoolId: context.schoolId, mutationId: `aev_${createPersonalImportId()}`,
     createdAt: new Date().toISOString(), event: Object.freeze(parseAssistantCalendarEvent(event)),
     ...(origin !== undefined ? { origin: parseAssistantCalendarOrigin(origin) } : {}),
   };
   freshProposals.add(proposal);
+  if (availabilityCheck) availabilityChecks.set(proposal, availabilityCheck);
   return { state: 'review', proposal: Object.freeze(proposal) };
 }
 
@@ -238,6 +259,11 @@ export async function confirmAssistantCalendarTask(proposal: AssistantCalendarPr
   let replay = false;
   let dispatched = false;
   let canonical = proposal;
+  let gateDone = false;
+  const availabilityCheck = availabilityChecks.get(proposal);
+  availabilityChecks.delete(proposal);
+  const gate = new AbortController();
+  const checks: AssistantCalendarWriteCheck[] = writeCheck ? [writeCheck] : [];
   let previous: AssistantCalendarTask | undefined;
   let latest: AssistantCalendarTask | undefined;
   const useExisting = (entry: AssistantCalendarJournalEntry) => {
@@ -250,21 +276,36 @@ export async function confirmAssistantCalendarTask(proposal: AssistantCalendarPr
   const active = () => mayWrite && current(proposal, context);
   // The event's own durable write changes the calendar version. Readback and
   // journal observation retain the account guard rather than this write guard.
-  const canWrite = () => active() && (!writeCheck || writeCheck.isCurrent());
+  const canWrite = () => active() && checks.every((check) => check.isCurrent());
   const verifyWrite = (ledger: PersonalImportLedger) => {
-    if (writeCheck && (!writeCheck.isCurrent() || !writeCheck.matches(ledger)))
-      throw new CalendarBlocked(writeCheck.message);
+    for (const check of checks) {
+      if (!check.isCurrent() || !check.matches(ledger)) throw new CalendarBlocked(check.message);
+    }
   };
   const result = await bounded(proposal, context, async () => {
+    if (availabilityCheck) {
+      // Runs for a new write only, immediately before the mutable ledger lock.
+      let gated: AssistantCalendarAvailabilityResult;
+      try { gated = await availabilityCheck(context, gate.signal); }
+      catch { gated = { kind: 'unavailable', message: AVAILABILITY_UNAVAILABLE }; }
+      scopeFor(proposal, context);
+      gateDone = true;
+      if (gated.kind !== 'ready') return { proposal, state: 'blocked', message: gated.message };
+      checks.push(gated.writeCheck);
+      if (!canWrite()) return { proposal, state: 'blocked', message: gated.writeCheck.message };
+    }
     try {
       const record = recordFor(proposal);
       await mutatePersonalImportLedger(scope, canWrite, async (ledger) => {
         scopeFor(proposal, context);
-        const known = matchingEntry(await readAssistantCalendarJournal(scope, active), proposal);
+        const journal = await readAssistantCalendarJournal(scope, active);
+        const known = matchingEntry(journal, proposal);
         if (known) {
           useExisting(known);
           return { ledger, result: undefined };
         }
+        if (checks.some((check) => check.conflictsWithJournalEntry && journal.some(check.conflictsWithJournalEntry)))
+          throw new CalendarBlocked('這個時間範圍已有符合的行程操作，請重新核對原紀錄。');
         const existing = ledger.records.find((row) => row.id === proposal.mutationId);
         if (existing) {
           if (proposal.origin) throw new CalendarBlocked('這筆行程沒有可核對的原批次來源紀錄，這次不會把它冒認為作業安排或重新建立。');
@@ -309,8 +350,8 @@ export async function confirmAssistantCalendarTask(proposal: AssistantCalendarPr
       });
     } catch (error) {
       scopeFor(proposal, context);
-      if (!dispatched && writeCheck && !writeCheck.isCurrent())
-        return { proposal, state: 'blocked', message: writeCheck.message };
+      const stale = checks.find((check) => !check.isCurrent());
+      if (!dispatched && stale) return { proposal, state: 'blocked', message: stale.message };
       if (!dispatched && error instanceof CalendarBlocked)
         return { proposal, state: 'blocked', message: error.message };
       if (!dispatched && error instanceof AssistantCalendarJournalError)
@@ -320,9 +361,11 @@ export async function confirmAssistantCalendarTask(proposal: AssistantCalendarPr
     }
     latest = withHistory(await readBack(canonical, context, replay), previous);
     return persistObservation(latest, context, active);
-  }, () => { mayWrite = false; }, () => latest ? journalWarning(latest)
+  }, () => { mayWrite = false; gate.abort(); }, () => latest ? journalWarning(latest)
+    : availabilityCheck && !gateDone ? { proposal, state: 'blocked', message: AVAILABILITY_UNAVAILABLE }
     : withHistory({ proposal: canonical, state: 'unknown', reason: 'unavailable', message: UNKNOWN }, previous));
   mayWrite = false;
+  gate.abort();
   return result;
 }
 

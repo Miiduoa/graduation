@@ -268,7 +268,7 @@ function ScopedCreatorProfile({
 
   return (
     <FlatList
-      key={tab === 'media' ? 'media' : 'list'}
+      key={own ? 'owner' : tab === 'media' ? 'media' : 'list'}
       testID="creator-profile-list"
       style={styles.root}
       contentContainerStyle={styles.listContent}

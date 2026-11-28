@@ -16,13 +16,7 @@ import {
 import type { HomeCourse } from '@/lib/homeOverview';
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
-import {
-  TEACHER_TODAY_DUE_TITLE,
-  TEACHER_TODAY_EMPTY_GRADING,
-  TEACHER_TODAY_GRADING_TITLE,
-  TEACHER_TODAY_UNSIGNED,
-  TODAY_FLOW_CLASS_TITLE,
-} from '@/lib/todayCourseWork';
+import { TEACHER_TODAY_DUE_TITLE, TODAY_FLOW_CLASS_TITLE } from '@/lib/todayCourseWork';
 import { assignmentHref, courseWeekHref, todayClassesFromSchedule } from '@/lib/todayScreen';
 import styles from './StudentToday.module.css';
 
@@ -38,25 +32,40 @@ type Props = {
   now: Date;
   unsigned: boolean;
   classes: TodayClass[];
+  timetableStatus: 'loading' | 'ready' | 'error' | 'empty' | 'unsigned-scope';
+  timetableSchoolId?: string | null;
+  timetableScopeKey?: string;
+  onRetryTimetable: () => void;
   teachingCourses: readonly HomeCourse[];
   upcomingTodos: TodayTodo[];
+  coursesLoading: boolean;
+  coursesError: string;
+  onRetryCourses: () => void;
   timetableHref: string;
   importHref: string;
 };
 
-/** Teacher-facing today stream: classes, grading entry points, upcoming student work. */
+/** Teacher-facing timetable, course workspaces, and upcoming assignments. */
 export function TeacherToday({
   assistant,
   workspaces,
   now,
   unsigned,
   classes,
+  timetableStatus,
+  timetableSchoolId,
+  timetableScopeKey,
+  onRetryTimetable,
   teachingCourses,
-  upcomingTodos,
+  upcomingTodos = [],
+  coursesLoading,
+  coursesError,
+  onRetryCourses,
   timetableHref,
   importHref,
 }: Props) {
   const sortedClasses = sortTodayClasses(classes, now);
+  const courses = teachingCourses.filter(isTeachingCourse);
   const todos = sortTodayTodos(upcomingTodos).slice(0, 5);
 
   return (
@@ -65,15 +74,19 @@ export function TeacherToday({
         <h1 className={styles.title}>今天</h1>
         <p className={styles.date}>{formatTodayHeaderDate(now)}</p>
       </header>
+      {assistant}
       {workspaces}
       {unsigned ? (
         <>
-          <p className={styles.empty}>{TEACHER_TODAY_UNSIGNED}</p>
-          {assistant}
+          <p className={styles.empty}>登入後，接續你的課表與已獲授權的授課課程。</p>
         </>
       ) : (
         <div className={styles.flow}>
-          <section className={styles.section} aria-labelledby="teacher-class-title">
+          <section
+            className={styles.section}
+            aria-labelledby="teacher-class-title"
+            aria-busy={timetableStatus === 'loading'}
+          >
             <div className={styles.sectionHeading}>
               <h2 id="teacher-class-title" className={styles.sectionTitle}>
                 {TODAY_FLOW_CLASS_TITLE}
@@ -82,26 +95,87 @@ export function TeacherToday({
                 {TODAY_COPY.viewFullTimetable}
               </Link>
             </div>
-            {sortedClasses.length === 0 ? (
+            {timetableStatus === 'error' && (
+              <>
+                <p className={styles.empty} role="alert">
+                  {TODAY_COPY.timetableUnavailable}
+                </p>
+                <button type="button" className={styles.retry} onClick={onRetryTimetable}>
+                  重新讀取課表
+                </button>
+              </>
+            )}
+            {timetableStatus === 'loading' && (
+              <p className={styles.empty} role="status">
+                正在確認今天的課表…
+              </p>
+            )}
+            {timetableStatus === 'unsigned-scope' ? (
+              <>
+                <p className={styles.empty}>先選擇校園，就能查看或建立這所學校的課表。</p>
+                <Link className={styles.import} href={timetableHref}>
+                  選校園、整理課表
+                </Link>
+              </>
+            ) : timetableStatus === 'empty' ? (
+              <>
+                <p className={styles.empty}>還沒有課表，加入上課時間後就能查看每天的安排。</p>
+                <Link className={styles.import} href={importHref}>
+                  匯入我的課表
+                </Link>
+              </>
+            ) : sortedClasses.length > 0 ? (
+              <TodayClassRows
+                key={timetableScopeKey ?? timetableSchoolId}
+                classes={sortedClasses}
+                now={now}
+                timetableHref={timetableHref}
+                timetableSchoolId={timetableSchoolId}
+              />
+            ) : timetableStatus === 'ready' ? (
               <p className={styles.empty}>
                 今天沒有排課。 <Link href={timetableHref}>查看課表</Link>
                 {' · '}
                 <Link href={importHref}>整理課表</Link>
               </p>
-            ) : (
-              <TodayClassRows classes={sortedClasses} now={now} timetableHref={timetableHref} />
-            )}
+            ) : null}
           </section>
 
-          <section className={styles.section} aria-labelledby="teacher-grading-title">
+          <section
+            className={styles.section}
+            aria-labelledby="teacher-grading-title"
+            aria-busy={coursesLoading}
+          >
             <h2 id="teacher-grading-title" className={styles.sectionTitle}>
-              {TEACHER_TODAY_GRADING_TITLE}
+              授課課程
             </h2>
-            {teachingCourses.length === 0 ? (
-              <p className={styles.empty}>{TEACHER_TODAY_EMPTY_GRADING}</p>
-            ) : (
+            <p className={styles.empty}>進入課程，查看學生繳交、批改作業與整理教材。</p>
+            {coursesLoading && (
+              <p className={styles.empty} role="status">
+                正在確認授課課程…
+              </p>
+            )}
+            {coursesError && (
+              <>
+                <p className={styles.empty} role="alert">
+                  {coursesError}
+                </p>
+                <button
+                  type="button"
+                  className={styles.retry}
+                  onClick={onRetryCourses}
+                  disabled={coursesLoading}
+                >
+                  {coursesLoading ? '重新讀取中…' : '重新讀取授課課程'}
+                </button>
+              </>
+            )}
+            {!coursesLoading && !coursesError && courses.length === 0 && (
+              <p className={styles.empty}>目前沒有已確認的授課課程，請確認登入帳號與課程權限。</p>
+            )}
+            {courses.length > 0 && (
               <ul className={styles.list}>
-                {teachingCourses.map((course) => {
+                {courses.map((course) => {
                   // School LMS workspaces keep their own destination. nuni courses
                   // open the teacher workspace with assignment management.
                   const courseHref = course.href || courseWeekHref(course.id).replace(/#week$/, '');
@@ -123,13 +197,11 @@ export function TeacherToday({
             )}
           </section>
 
-          <section className={styles.section} aria-labelledby="teacher-due-title">
-            <h2 id="teacher-due-title" className={styles.sectionTitle}>
-              {TEACHER_TODAY_DUE_TITLE}
-            </h2>
-            {todos.length === 0 ? (
-              <p className={styles.empty}>目前沒有即將到期的學生作業。</p>
-            ) : (
+          {todos.length > 0 && (
+            <section className={styles.section} aria-labelledby="teacher-due-title">
+              <h2 id="teacher-due-title" className={styles.sectionTitle}>
+                {TEACHER_TODAY_DUE_TITLE}
+              </h2>
               <ul className={styles.list}>
                 {todos.map((item) => (
                   <li key={item.id}>
@@ -144,9 +216,8 @@ export function TeacherToday({
                   </li>
                 ))}
               </ul>
-            )}
-          </section>
-          {assistant}
+            </section>
+          )}
         </div>
       )}
     </div>
@@ -160,6 +231,9 @@ type BoundProps = {
   unsigned: boolean;
   teachingCourses: readonly HomeCourse[];
   upcomingTodos: TodayTodo[];
+  coursesLoading: boolean;
+  coursesError: string;
+  onRetryCourses: () => void;
 };
 
 /** Bound teacher today stream using the same personal timetable sources as StudentTodayPage. */
@@ -178,7 +252,17 @@ export function TeacherTodayPage(props: BoundProps) {
     schoolId,
     now,
   });
-  const classes = todayClassesFromSchedule(schedule.today, now);
+  const classes = scope.loading ? [] : todayClassesFromSchedule(schedule.today, now);
+  const timetableStatus: Props['timetableStatus'] =
+    scope.loading || !records.loaded
+      ? 'loading'
+      : records.error
+        ? 'error'
+        : scope.scope.schoolId === 'personal' && classes.length === 0
+          ? 'unsigned-scope'
+          : timetableRecords.length === 0
+            ? 'empty'
+            : 'ready';
   return (
     <TeacherToday
       assistant={props.assistant}
@@ -186,8 +270,15 @@ export function TeacherTodayPage(props: BoundProps) {
       now={now}
       unsigned={props.unsigned}
       classes={classes}
+      timetableStatus={timetableStatus}
+      timetableSchoolId={schoolId}
+      timetableScopeKey={records.scopeKey}
+      onRetryTimetable={records.retry}
       teachingCourses={props.teachingCourses}
       upcomingTodos={props.upcomingTodos}
+      coursesLoading={props.coursesLoading}
+      coursesError={props.coursesError}
+      onRetryCourses={props.onRetryCourses}
       timetableHref={timetableHref}
       importHref={importHref}
     />

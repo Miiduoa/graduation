@@ -1,3 +1,4 @@
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { collection, getDocsFromServer, limit, query, where } from 'firebase/firestore';
 import { getOfficialCampusMapUrl } from '@campus/shared/src/campusMapLookup';
 import { parseCampusMapRecord } from '@campus/shared/src/campusMapRecords';
@@ -112,24 +113,25 @@ export async function readCampusMap(input: {
   const unique = published.filter(place => ids.get(place.id) === 1);
   if (unique.length !== published.length) incomplete = true;
   const publishedIds = new Set(unique.map(place => place.id));
-  const places = withProvidenceCampusPlaces(schoolId, unique).flatMap(rawPlace => {
+  const publicSchoolId = toPublicSchoolId(schoolId)!;
+  const places = withProvidenceCampusPlaces(publicSchoolId, unique).flatMap(rawPlace => {
     const place = safePlace(rawPlace);
     if (place) return [place];
     incomplete = true;
     return [];
   });
-  if (!unique.length && hasBundledCampusPlaces(schoolId)) source = 'bundled-providence';
+  if (!unique.length && hasBundledCampusPlaces(publicSchoolId)) source = 'bundled-providence';
   const matches: { item: CampusMapItem; matchKind: CampusMapMatchDetails['matchKind'] }[] = [];
   for (const place of places) {
     const details = campusMapMatchDetails(schoolId, args.query, place, places);
     if (!details) continue;
     const { match, matchKind } = details;
     const itemSource = publishedIds.has(place.id) ? source : 'bundled-providence';
-    const sourceUrl = providencePlaceSourceUrl(schoolId, place);
+    const sourceUrl = providencePlaceSourceUrl(publicSchoolId, place);
     const item: CampusMapItem = { ...place, schoolId, facilities: place.facilities ?? [],
       source: itemSource, sourcePath: campusMapSourcePath(schoolId, itemSource),
       href: campusMapHref(schoolId, args.query, place.id), match,
-      verification: sourceUrl ? isProvidencePendingVerification(schoolId, place) ? 'single-source' : 'cross-checked' : 'published',
+      verification: sourceUrl ? isProvidencePendingVerification(publicSchoolId, place) ? 'single-source' : 'cross-checked' : 'published',
       ...(sourceUrl ? { sourceUrl } : {}) };
     matches.push({ item, matchKind });
   }
@@ -145,7 +147,7 @@ export async function readCampusMap(input: {
   const items = candidates.slice(0, args.limit);
   const partial = incomplete || candidates.length > args.limit;
   const available = places.length > 0;
-  const officialMapUrl = getOfficialCampusMapUrl(schoolId);
+  const officialMapUrl = getOfficialCampusMapUrl(publicSchoolId);
   const result: CampusMapRead = { version: 1, kind: 'map', schoolId, query: args.query, limit: args.limit,
     checkedAt: new Date(now).toISOString(), source, sourcePath: campusMapSourcePath(schoolId, source),
     status: available ? 'ready' : 'unavailable', items, partial,

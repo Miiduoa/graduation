@@ -1,7 +1,9 @@
+/* global process, URL */
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import {
@@ -156,4 +158,142 @@ test('CLI emits a build ID only on successful verification', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('build-only requests bind the selected commit before either native build starts', () => {
+  const request = {
+    ...env,
+    BUILD_PLATFORM: 'all',
+    BUILD_ONLY_SHA: env.GITHUB_SHA,
+    SUBMIT_TO_STORE: 'false',
+  };
+  verifyReleaseRequest(request);
+  for (const patch of [
+    { GITHUB_SHA: 'b'.repeat(40) },
+    { BUILD_ONLY_SHA: 'main' },
+    { SUBMIT_TO_STORE: 'true' },
+    { BUILD_PROFILE: 'preview' },
+    { BUILD_PROFILE: 'production-device' },
+  ])
+    assert.throws(() => verifyReleaseRequest({ ...request, ...patch }));
+
+  // Manual Release dispatches retain their original behavior when the new input is omitted.
+  verifyReleaseRequest({ ...env, SUBMIT_TO_STORE: 'true' });
+  verifyReleaseRequest({ ...env, BUILD_PROFILE: 'preview', SUBMIT_TO_STORE: 'false' });
+});
+
+test('the production command watches its own build-only run and propagates failures', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'production-command-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const checkout = join(dir, 'checkout');
+  const bin = join(dir, 'bin');
+  const log = join(dir, 'calls');
+  mkdirSync(checkout);
+  mkdirSync(bin);
+  const git = (...args) => {
+    const result = spawnSync('git', args, { cwd: checkout, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  git('init', '-q');
+  git(
+    '-c',
+    'user.name=Test',
+    '-c',
+    'user.email=test@example.invalid',
+    '-c',
+    'commit.gpgsign=false',
+    'commit',
+    '--allow-empty',
+    '-qm',
+    'Build source',
+  );
+  const commit = git('rev-parse', 'HEAD');
+  const repository = 'Miiduoa/graduation';
+  const api = ['api', '--hostname', 'github.com', '-H', 'X-GitHub-Api-Version: 2026-03-10'];
+  const ref = [...api, 'repos/' + repository + '/git/ref/heads/main', '--jq', '.object.sha'];
+  const dispatch = [
+    ...api,
+    '--method',
+    'POST',
+    'repos/' + repository + '/actions/workflows/release.yml/dispatches',
+    '-f',
+    'ref=main',
+    '-f',
+    'inputs[platform]=all',
+    '-f',
+    'inputs[profile]=production',
+    '-f',
+    'inputs[submit]=false',
+    '-f',
+    'inputs[build_only_sha]=' + commit,
+    '--jq',
+    '.workflow_run_id',
+  ];
+  const watch = [
+    'run',
+    'watch',
+    '1324',
+    '--repo',
+    'github.com/' + repository,
+    '--exit-status',
+    '--interval',
+    '15',
+  ];
+  writeFileSync(
+    join(bin, 'gh'),
+    `#!/usr/bin/env node
+const args = process.argv.slice(2);
+require('node:fs').appendFileSync(process.env.CALL_LOG, JSON.stringify(args) + '\\n');
+if (args[0] === 'run') process.exit(Number(process.env.WATCH_STATUS || 0));
+if (args.includes('POST')) {
+  console.log(process.env.RUN_ID || '1324');
+  process.exit(Number(process.env.DISPATCH_STATUS || 0));
+}
+console.log(process.env.MAIN_SHA);
+`,
+    { mode: 0o755 },
+  );
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(manifest.scripts['release:production'], 'node scripts/release-production.mjs');
+  const launcher = fileURLToPath(new URL('../scripts/release-production.mjs', import.meta.url));
+  const run = (overrides = {}) => {
+    writeFileSync(log, '');
+    const result = spawnSync(process.execPath, [launcher], {
+      cwd: checkout,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: bin + delimiter + process.env.PATH,
+        CALL_LOG: log,
+        MAIN_SHA: commit,
+        ...overrides,
+      },
+    });
+    return {
+      ...result,
+      calls: readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse),
+    };
+  };
+
+  const success = run();
+  assert.equal(success.status, 0, success.stderr);
+  assert.deepEqual(success.calls, [ref, dispatch, watch]);
+  assert.match(success.stdout, /github\.com\/Miiduoa\/graduation\/actions\/runs\/1324/);
+  const failed = run({ WATCH_STATUS: '9' });
+  assert.equal(failed.status, 9);
+  assert.deepEqual(failed.calls, success.calls);
+  const refused = run({ DISPATCH_STATUS: '4' });
+  assert.equal(refused.status, 4);
+  assert.deepEqual(refused.calls, [ref, dispatch]);
+  const missing = run({ RUN_ID: 'null' });
+  assert.notEqual(missing.status, 0);
+  assert.deepEqual(missing.calls, [ref, dispatch]);
+  const moved = run({ MAIN_SHA: 'f'.repeat(40) });
+  assert.notEqual(moved.status, 0);
+  assert.deepEqual(moved.calls, [ref]);
+  writeFileSync(join(checkout, 'local.js'), 'pending changes');
+  const dirty = run();
+  assert.notEqual(dirty.status, 0);
+  assert.deepEqual(dirty.calls, []);
 });

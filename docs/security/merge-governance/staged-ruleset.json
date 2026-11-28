@@ -1,0 +1,100 @@
+{
+  "name": "nuni — Independent review and verified CI (additive staging)",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "~DEFAULT_BRANCH"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": true,
+        "required_review_thread_resolution": true,
+        "require_extra_approval_for_unattributed_changes": true,
+        "allowed_merge_methods": [
+          "merge"
+        ]
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "CI Summary",
+            "integration_id": 15368
+          },
+          {
+            "context": "Security Gates",
+            "integration_id": 15368
+          },
+          {
+            "context": "Lint & Type Check",
+            "integration_id": 15368
+          },
+          {
+            "context": "Web Tests",
+            "integration_id": 15368
+          },
+          {
+            "context": "Mobile Tests",
+            "integration_id": 15368
+          },
+          {
+            "context": "Assistant Integration Tests",
+            "integration_id": 15368
+          },
+          {
+            "context": "Functions Tests",
+            "integration_id": 15368
+          },
+          {
+            "context": "Firestore Rules Tests",
+            "integration_id": 15368
+          },
+          {
+            "context": "Build Web",
+            "integration_id": 15368
+          },
+          {
+            "context": "Build Mobile",
+            "integration_id": 15368
+          },
+          {
+            "context": "Analyze (javascript-typescript)",
+            "integration_id": 15368
+          },
+          {
+            "context": "CodeQL",
+            "integration_id": 57789
+          }
+        ]
+      }
+    },
+    {
+      "type": "copilot_code_review",
+      "parameters": {
+        "review_on_push": true,
+        "review_draft_pull_requests": false
+      }
+    }
+  ]
+}

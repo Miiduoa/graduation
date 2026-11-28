@@ -32,11 +32,13 @@ async def assert_results_visible(page, target, report):
     geometry = await title.evaluate('''title => {
       const nav = document.querySelector('nav[aria-label="主要導覽"]');
       const navBox = nav?.getBoundingClientRect();
+      const titleBox = title.getBoundingClientRect();
       const viewport = window.visualViewport;
       const top = viewport?.offsetTop ?? 0;
       const bottom = top + (viewport?.height ?? innerHeight);
       const fixedNavigation = nav && getComputedStyle(nav).position === 'fixed'
-        && navBox.bottom > top && navBox.top < bottom;
+        && navBox.bottom > top && navBox.top < bottom
+        && navBox.right > titleBox.left && navBox.left < titleBox.right;
       const visibleBottom = fixedNavigation ? Math.min(bottom, navBox.top) : bottom;
       const range = document.createRange();
       range.selectNodeContents(title);
@@ -64,7 +66,10 @@ async def assert_results_visible(page, target, report):
 
 async def check_directory_submit(page, config, report, capture):
     for destination, name, term in [('生活', '生活服務搜尋', '借書'), ('交流', '交流服務搜尋', '訊息')]:
-        await page.get_by_role('navigation', name='主要導覽', exact=True).get_by_role('link', name=destination, exact=True).click()
+        if destination == '生活':
+            await page.get_by_role('button', name='查看生活服務', exact=True).click()
+        else:
+            await page.get_by_role('navigation', name='主要導覽', exact=True).get_by_role('link', name=destination, exact=True).click()
         form = page.get_by_role('search', name=name, exact=True)
         field = form.get_by_role('searchbox', name='快速找服務', exact=True)
         results = page.locator('[id="' + await field.get_attribute('aria-controls') + '"]')
@@ -111,8 +116,6 @@ async def check_directory_submit(page, config, report, capture):
         })''')
         assert all(row['width'] >= 43.5 and row['height'] >= 43.5 for row in sizes), sizes
         if config.get('motion') == 'reduce' or config.get('system_motion') == 'reduce':
-            # The global reduced-motion rule retains a 0.01ms duration for
-            # transition events; this control removes transition properties.
             await expect(form.get_by_role('button', name='查看結果', exact=True)).to_have_css('transition-property', 'none')
     report['checks'].append('Life and Connect: live filtering preserves input; IME Enter/Escape preserves composition; explicit search reaches visible named results for matches, empty, public-only and all services; reset returns to input; 44px controls and reduced motion stay intact')
 

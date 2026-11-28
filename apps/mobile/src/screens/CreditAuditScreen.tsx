@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Linking, ScrollView, Text, View, Pressable } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen, Card, Pill, Button, LoadingState, ErrorState, AuthGuard } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin } from '../services/demoSession';
 import { useSchool } from '../state/school';
@@ -12,7 +13,6 @@ import {
   type PUCreditCat,
   type DeptGradRequirement,
   PU_CATEGORY_LABELS,
-  PU_CATEGORY_COLORS,
   PU_DEFAULT_REQUIREMENT,
   PU_DEPARTMENTS,
   matchDepartment,
@@ -53,6 +53,7 @@ const CATEGORY_ORDER: PUCreditCat[] = [
 ];
 
 export function CreditAuditScreen(props: Props) {
+  useThemeVersion();
   const auth = useAuth();
   const { school } = useSchool();
   const uid = auth.user?.uid ?? null;
@@ -423,7 +424,7 @@ export function CreditAuditScreen(props: Props) {
                     height: '100%',
                     width: `${Math.round(totalPct * 100)}%`,
                     backgroundColor:
-                      remaining <= 0 && !deptIsUnknown ? '#34C759' : theme.colors.accent,
+                      remaining <= 0 && !deptIsUnknown ? theme.colors.success : theme.colors.accent,
                     borderRadius: 7,
                   }}
                 />
@@ -545,7 +546,14 @@ export function CreditAuditScreen(props: Props) {
             const done = isPu && reqVal > 0 ? rem <= 0 : false;
 
             return (
-              <View key={k} style={{ marginBottom: 16 }}>
+              <View
+                key={k}
+                style={{
+                  paddingVertical: 10,
+                  borderBottomWidth: StyleSheet.hairlineWidth,
+                  borderBottomColor: theme.colors.separator,
+                }}
+              >
                 <View
                   style={{
                     flexDirection: 'row',
@@ -553,15 +561,7 @@ export function CreditAuditScreen(props: Props) {
                     alignItems: 'center',
                   }}
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                    <View
-                      style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: 5,
-                        backgroundColor: PU_CATEGORY_COLORS[k],
-                      }}
-                    />
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
                     <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
                       {PU_CATEGORY_LABELS[k]}
                     </Text>
@@ -571,7 +571,7 @@ export function CreditAuditScreen(props: Props) {
                   </View>
                   <Text
                     style={{
-                      color: done ? '#34C759' : theme.colors.muted,
+                      color: done ? theme.colors.success : theme.colors.muted,
                       fontWeight: '600',
                       fontSize: 14,
                     }}
@@ -596,14 +596,13 @@ export function CreditAuditScreen(props: Props) {
                     style={{
                       height: '100%',
                       width: `${Math.round(pct * 100)}%`,
-                      backgroundColor: PU_CATEGORY_COLORS[k],
-                      opacity: 0.85,
+                      backgroundColor: done ? theme.colors.success : theme.colors.accent,
                       borderRadius: 4,
                     }}
                   />
                 </View>
                 {b.failedCourses > 0 ? (
-                  <Text style={{ color: '#f43f5e', fontSize: 12, marginTop: 4 }}>
+                  <Text style={{ color: theme.colors.danger, fontSize: 12, marginTop: 4 }}>
                     有 {b.failedCourses} 門未通過
                   </Text>
                 ) : null}
@@ -679,10 +678,10 @@ export function CreditAuditScreen(props: Props) {
                             style={{
                               color:
                                 weightedAvg >= 80
-                                  ? '#34C759'
+                                  ? theme.colors.success
                                   : weightedAvg >= 60
                                     ? theme.colors.muted
-                                    : '#f43f5e',
+                                    : theme.colors.danger,
                               fontSize: 13,
                               fontWeight: '600',
                             }}
@@ -770,9 +769,9 @@ export function CreditAuditScreen(props: Props) {
                               paddingHorizontal: 12,
                               paddingVertical: 10,
                               borderRadius: theme.radius.sm,
-                              backgroundColor: passed ? 'transparent' : 'rgba(255,45,85,0.05)',
-                              borderBottomWidth: i < semGrades.length - 1 ? 1 : 0,
-                              borderBottomColor: theme.colors.surface2,
+                              backgroundColor: passed ? 'transparent' : theme.colors.dangerSoft,
+                              borderBottomWidth: i < semGrades.length - 1 ? StyleSheet.hairlineWidth : 0,
+                              borderBottomColor: theme.colors.separator,
                             }}
                           >
                             <View style={{ flex: 4 }}>
@@ -799,15 +798,17 @@ export function CreditAuditScreen(props: Props) {
                                 style={{
                                   paddingHorizontal: 6,
                                   paddingVertical: 2,
-                                  borderRadius: 4,
-                                  backgroundColor: PU_CATEGORY_COLORS[cat] + '18',
+                                  borderRadius: theme.radius.sm,
+                                  backgroundColor: theme.colors.surface2,
+                                  borderWidth: StyleSheet.hairlineWidth,
+                                  borderColor: theme.colors.border,
                                 }}
                               >
                                 <Text
                                   style={{
                                     fontSize: 11,
-                                    fontWeight: '700',
-                                    color: PU_CATEGORY_COLORS[cat],
+                                    fontWeight: '600',
+                                    color: theme.colors.textSecondary,
                                   }}
                                 >
                                   {PU_CATEGORY_LABELS[cat]}
@@ -833,11 +834,11 @@ export function CreditAuditScreen(props: Props) {
                                 fontWeight: '700',
                                 color: passed
                                   ? numeric !== null && numeric >= 80
-                                    ? '#34C759'
+                                    ? theme.colors.success
                                     : theme.colors.text
                                   : numeric === null
                                     ? theme.colors.muted
-                                    : '#f43f5e',
+                                    : theme.colors.danger,
                               }}
                             >
                               {scoreDisplay(g)}
@@ -870,15 +871,12 @@ export function CreditAuditScreen(props: Props) {
                 <View
                   key={k}
                   style={{
-                    padding: 12,
-                    borderRadius: theme.radius.md,
-                    backgroundColor: theme.colors.surface2,
-                    borderLeftWidth: 3,
-                    borderLeftColor: PU_CATEGORY_COLORS[k],
-                    marginBottom: 8,
+                    paddingVertical: 10,
+                    borderBottomWidth: StyleSheet.hairlineWidth,
+                    borderBottomColor: theme.colors.separator,
                   }}
                 >
-                  <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>
                     {PU_CATEGORY_LABELS[k]}：粗估還需約 {rem} 學分
                   </Text>
                 </View>
@@ -899,15 +897,12 @@ export function CreditAuditScreen(props: Props) {
                   {peRem > 0 ? (
                     <View
                       style={{
-                        padding: 12,
-                        borderRadius: theme.radius.md,
-                        backgroundColor: theme.colors.surface2,
-                        borderLeftWidth: 3,
-                        borderLeftColor: PU_CATEGORY_COLORS.pe,
-                        marginBottom: 8,
+                        paddingVertical: 10,
+                        borderBottomWidth: StyleSheet.hairlineWidth,
+                        borderBottomColor: theme.colors.separator,
                       }}
                     >
-                      <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
+                      <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>
                         體育：粗估還需約 {peRem} 門
                       </Text>
                     </View>
@@ -915,15 +910,12 @@ export function CreditAuditScreen(props: Props) {
                   {svcRem > 0 ? (
                     <View
                       style={{
-                        padding: 12,
-                        borderRadius: theme.radius.md,
-                        backgroundColor: theme.colors.surface2,
-                        borderLeftWidth: 3,
-                        borderLeftColor: PU_CATEGORY_COLORS.service,
-                        marginBottom: 8,
+                        paddingVertical: 10,
+                        borderBottomWidth: StyleSheet.hairlineWidth,
+                        borderBottomColor: theme.colors.separator,
                       }}
                     >
-                      <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
+                      <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>
                         服務學習：粗估還需約 {svcRem} 門
                       </Text>
                     </View>

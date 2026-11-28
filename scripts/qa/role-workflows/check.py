@@ -79,6 +79,25 @@ class Scenario:
     def checked(self, detail):
         self.report['checks'].append(detail)
 
+    async def capture(self, filename):
+        async def paint_ready():
+            await self.page.evaluate('''async () => {
+              await document.fonts.ready;
+              await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            }''')
+
+        await paint_ready()
+        try:
+            await self.page.screenshot(path=str(OUTPUT / filename), full_page=True, animations='disabled')
+        except Exception as error:
+            # Chromium can reject the first surface capture while a headed
+            # window is settling. Retry only that protocol error, once, with
+            # the exact same capture extent; never substitute a smaller image.
+            if 'Page.captureScreenshot' not in str(error) or 'Unable to capture screenshot' not in str(error):
+                raise
+            await paint_ready()
+            await self.page.screenshot(path=str(OUTPUT / filename), full_page=True, animations='disabled')
+
     async def layout(self, name):
         metrics = await self.page.evaluate('''() => ({
           viewport: innerWidth, document: document.documentElement.scrollWidth,
@@ -89,7 +108,7 @@ class Scenario:
         assert metrics['document'] <= metrics['viewport'] + 1, metrics
         assert not metrics['smallButtons'], metrics
         filename = f"{self.report['width']}-{self.report['theme']}-{self.report['name']}-{name}.png"
-        await self.page.screenshot(path=str(OUTPUT / filename), full_page=True)
+        await self.capture(filename)
         self.report['screenshots'].append(filename)
         self.checked(name + ': no horizontal overflow; all visible buttons at least 44px')
 
@@ -138,7 +157,7 @@ class Scenario:
         if failure:
             self.report.update({'status': 'failed', 'error': repr(failure)})
             prefix = f"{self.report['width']}-{self.report['theme']}-{self.report['name']}-failure"
-            await self.page.screenshot(path=str(OUTPUT / (prefix + '.png')), full_page=True)
+            await self.capture(prefix + '.png')
             (OUTPUT / (prefix + '.html')).write_text(await self.page.content(), encoding='utf-8')
             (OUTPUT / (prefix + '-aria.yml')).write_text(
                 await self.page.locator('body').aria_snapshot(), encoding='utf-8')

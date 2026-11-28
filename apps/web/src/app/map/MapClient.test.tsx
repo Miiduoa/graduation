@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import MapClient from './MapClient';
+import { getAssistantLibraryCatalog } from '@campus/shared/src/assistantLibraryCatalog';
 import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
 import { loadMapFavorites, loadMapLocations, setMapFavorite, type MapLocation } from './mapService';
 
@@ -78,6 +79,24 @@ beforeEach(() => {
   window.history.replaceState({}, '', '/map');
 });
 
+it('resolves the Agent’s official library map link without changing the selected alias for data or favorites', async () => {
+  const school = 'tw-pu';
+  const catalog = getAssistantLibraryCatalog(school)!;
+  // The BFF integration test asserts this same schoolId/query on the returned
+  // map link. Mount the destination with the request parameters used by MapPage.
+  const destination = new URL('/map?' + new URLSearchParams({ schoolId: school, query: catalog.name }), 'https://nuni.invalid');
+  const selectedSchool = destination.searchParams.get('schoolId')!;
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school={selectedSchool} query={destination.searchParams.get('query')!} />);
+  await sourceSettled();
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  expect(screen.getByRole('region', { name: '地點詳情' })).toBeTruthy();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-library');
+  expect(loadMapLocations).toHaveBeenCalledWith(school);
+  expect(loadMapFavorites).toHaveBeenCalledWith('alice', school);
+  expect(setMapFavorite).not.toHaveBeenCalled();
+});
+
 it('requires a new spatial choice when a live map source reuses the focused ID', async () => {
   const original = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
   const replacement = { ...original, lat: original.lat + 0.002 };
@@ -149,6 +168,26 @@ it.each(['coordinates', 'building', 'floor', 'unchanged'] as const)('revalidates
   expect(new URL(apple()!.getAttribute('href')!).searchParams.get('daddr')).toBe(replacement.lat + ',' + replacement.lng);
 });
 
+
+it('allows a fresh explicit place selection after the old marker was revoked', async () => {
+  state.user = null;
+  const original = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" />);
+  fireEvent.click(screen.getByRole('button', { name: '查看' + original.name }));
+  const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(mapState().selected.id).toBe(original.id);
+  await act(async () => source.resolve([library, gate]));
+  expect(mapState().selected).toBeNull();
+  expect(screen.getByText(/已停用地點導航/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '查看' + library.name }));
+  expect(mapState().selected).toEqual(library);
+  expect(screen.queryByText(/已停用地點導航/)).toBeNull();
+  expect(new URL(screen.getByRole('link', { name: '從目前位置導航' }).getAttribute('href')!).searchParams.get('destination'))
+    .toBe(library.lat + ',' + library.lng);
+});
+
 it('keeps a confirmed selected marker visible across filters until the detail is closed', async () => {
   render(<MapClient school="other-school" focus={gate.id} />);
   await screen.findByRole('button', { name: '查看' + gate.name });
@@ -166,6 +205,7 @@ it('keeps a confirmed selected marker visible across filters until the detail is
   expect(mapState().selected).toBeNull();
   expect(ids()).toEqual([library.id]);
 });
+
 
 it('resolves classroom deep links to a unique real building while retaining the original room wording', async () => {
   vi.mocked(loadMapLocations).mockResolvedValue([]);
@@ -375,14 +415,18 @@ it('does not offer a provisional classroom destination while the campus source i
   expect(result.getByRole('status').textContent).toContain('尚未確認這間教室的位置');
   expect(result.queryByRole('button', { name: '定位主顧樓' })).toBeNull();
   expect(result.queryByText(/可對應「主顧樓」的位置/)).toBeNull();
+
   expect(result.queryByRole('link', { name: /地圖前往/ })).toBeNull();
+
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
 
   await act(async () => source.resolve([]));
   expect(result.queryByRole('status')).toBeNull();
   expect(result.getByText(/可對應「主顧樓」的位置/)).toBeTruthy();
+
   expect(result.getByRole('link', { name: '使用 Google 地圖前往主顧樓' })).toBeTruthy();
   expect(result.getByRole('link', { name: '使用 Apple 地圖前往主顧樓' })).toBeTruthy();
+
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-zhugu');
 });
 
@@ -396,7 +440,9 @@ it.each(['PH303', 'ZZ303'])('does not confirm classroom %s from bundled data aft
   expect(await result.findByText(/暫時無法確認這間教室的位置/)).toBeTruthy();
   expect(result.queryByText(/可對應「主顧樓」的位置/)).toBeNull();
   expect(result.queryByText(/目前地點資料無法確認/)).toBeNull();
+
   expect(result.queryByRole('link', { name: /地圖前往/ })).toBeNull();
+
   expect(result.queryByRole('button', { name: '定位主顧樓' })).toBeNull();
   expect(result.getByRole('link', { name: '核對校方地圖' })).toBeTruthy();
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
@@ -635,12 +681,16 @@ it('marks single-source places as pending and can reset to the whole campus', as
   expect(screen.queryByRole('region', { name: '地點詳情' })).toBeNull();
 });
 
-it.each([false, true])('includes pending source warnings in both providers for a two-point route (reverse=%s)', async (reverse) => {
+it.each([
+  ['pu', false], ['pu', true], ['tw-pu', false], ['tw-pu', true],
+] as const)('includes pending source warnings in both providers for a two-point route (school=%s, reverse=%s)', async (school, reverse) => {
   const parking = PROVIDENCE_CAMPUS_PLACES.find((place) => place.name === 'P1 停車場')!;
   vi.mocked(loadMapLocations).mockResolvedValue([parking, library]);
   const ids = reverse ? [library.id, parking.id] : [parking.id, library.id];
-  render(<MapClient school="pu" route={ids.join(',')} focus={parking.id} />);
+  render(<MapClient school={school} route={ids.join(',')} focus={parking.id} />);
   await sourceSettled();
+  expect(loadMapLocations).toHaveBeenCalledWith(school);
+  expect(loadMapFavorites).toHaveBeenCalledWith('alice', school);
   const routeCard = screen.getByRole('region', { name: '步行導航' });
   for (const name of ['開啟步行導航', '使用 Apple 地圖規劃路線']) {
     const link = within(routeCard).getByRole('link', { name });
@@ -1008,14 +1058,16 @@ it.each([false, true])('does not expose conflicting markers even when filtering 
   expect(screen.queryByRole('link', { name: '從目前位置導航' })).toBeNull();
 });
 
-it('keeps both login returns in sync with manually changed and cleared routes', async () => {
+
+it.each(['pu', 'tw-pu'])('keeps both login returns in sync with manually changed and cleared routes (%s)', async (school) => {
+
   state.user = null;
-  render(<MapClient school="pu" route="gate,library" focus="library" />);
+  render(<MapClient school={school} route="gate,library" focus="library" />);
   await sourceSettled();
   const returnRoutes = () => ['用 Google 帳號收藏', '查看學校帳號的既有收藏'].map((name) => {
     const login = new URL(screen.getByRole('link', { name }).getAttribute('href')!, window.location.origin);
     const destination = new URL(login.searchParams.get('returnUrl')!, window.location.origin);
-    expect(destination.searchParams.get('schoolId')).toBe('pu');
+    expect(destination.searchParams.get('schoolId')).toBe(school);
     return destination.searchParams.get('route');
   });
   expect(returnRoutes()).toEqual(['gate,library', 'gate,library']);
@@ -1133,7 +1185,9 @@ it('obtains position only on request and orders nearby locations by measured str
   }
 });
 
+
 it.each([[91, 120], [-91, 120], [24, 181], [24, -181], [NaN, 120], [24, Infinity], [0, 0], [-0, 0]])(
+
   'rejects invalid GPS coordinates (%s, %s), clears the nearby filter and permits retry',
   async (latitude, longitude) => {
     state.user = null;
@@ -1146,7 +1200,9 @@ it.each([[91, 120], [-91, 120], [24, 181], [24, -181], [NaN, 120], [24, Infinity
       render(<MapClient school="pu" />);
       await sourceSettled();
       fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+
       act(() => callbacks[0]({ coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition));
+
       const nearby = screen.getByRole('button', { name: '附近 1 公里' });
       fireEvent.click(nearby);
       expect(nearby.getAttribute('aria-pressed')).toBe('true');
@@ -1154,7 +1210,9 @@ it.each([[91, 120], [-91, 120], [24, 181], [24, -181], [NaN, 120], [24, Infinity
       fireEvent.click(screen.getByRole('button', { name: '更新我的位置' }));
       expect(nearby.getAttribute('aria-pressed')).toBe('false');
       expect(nearby.hasAttribute('disabled')).toBe(true);
+
       act(() => callbacks[1]({ coords: { latitude, longitude, accuracy: 10 } } as GeolocationPosition));
+
       expect(screen.getByText('定位結果無效，請重新取得位置。')).toBeTruthy();
       expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
@@ -1164,7 +1222,9 @@ it.each([[91, 120], [-91, 120], [24, 181], [24, -181], [NaN, 120], [24, Infinity
       expect(apple.searchParams.has('saddr')).toBe(false);
 
       fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
+
       act(() => callbacks[2]({ coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition));
+
       expect(nearby.hasAttribute('disabled')).toBe(false);
       expect(nearby.getAttribute('aria-pressed')).toBe('false');
       expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
@@ -1173,6 +1233,7 @@ it.each([[91, 120], [-91, 120], [24, 181], [24, -181], [NaN, 120], [24, Infinity
     }
   },
 );
+
 
 it.each([101, 1000, -1, NaN, Infinity, undefined])(
   'does not use a low-quality or malformed GPS fix (accuracy %s m) for nearby results or navigation',
@@ -1208,6 +1269,7 @@ it.each([101, 1000, -1, NaN, Infinity, undefined])(
   },
 );
 
+
 it('recovers when geolocation throws synchronously and ignores callbacks from the failed request', async () => {
   state.user = null;
   const callbacks: PositionCallback[] = [];
@@ -1225,13 +1287,17 @@ it('recovers when geolocation throws synchronously and ignores callbacks from th
     fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
     expect(screen.getByText('目前無法取得位置，請確認定位與網路後再試一次。')).toBeTruthy();
     expect(screen.getByRole('button', { name: '查看我的位置' }).hasAttribute('disabled')).toBe(false);
+
     const position = { coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition;
+
     act(() => callbacks[0](position));
     expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '查看我的位置' }));
     act(() => callbacks[1](position));
     expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
+
     act(() => callbacks[1]({ coords: { latitude: library.lat, longitude: library.lng, accuracy: 10 } } as GeolocationPosition));
+
     expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).myLocation).toEqual({ lat: gate.lat, lng: gate.lng });
     expect(screen.queryByText('目前無法取得位置，請確認定位與網路後再試一次。')).toBeNull();
   } finally {
@@ -1247,7 +1313,9 @@ it('restores every campus place when clearing the overview filters while keeping
   Object.defineProperty(navigator, 'geolocation', {
     configurable: true,
     value: { getCurrentPosition: (callback: PositionCallback) => {
+
       callback({ coords: { latitude: gate.lat, longitude: gate.lng, accuracy: 10 } } as GeolocationPosition);
+
     } },
   });
   try {

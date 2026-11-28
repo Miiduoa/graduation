@@ -5,11 +5,8 @@
 appId: ${APP_ID}
 name: Campus App E2E Tests
 
-# Environment variables
-env:
-  TEST_EMAIL: test@example.com
-  TEST_PASSWORD: testpassword123
-  SCHOOL_CODE: NCHU
+# Authenticated flows use the public demo-campus-one emulator fixture through
+# helpers/sign-in-student.yaml. No production credentials are accepted.
 
 # Flows directory
 flows:

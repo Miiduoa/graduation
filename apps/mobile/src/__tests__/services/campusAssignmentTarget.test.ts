@@ -125,6 +125,36 @@ test('a unique 140-character title still opens from the plan card and a full-tit
   })?.params.assignmentId).toBe('work_1');
 });
 
+test('a unique plan preview opens only when explicitly marked as a preview', () => {
+  const value = snapshot();
+  const prefix = '長'.repeat(130);
+  value.assignments.items[0].title = prefix + '期末報告';
+  expect(resolveCampusAssignmentTarget({
+    assignment: { ...assignment, title: prefix }, snapshot: value, scope, now,
+  })).toBeNull();
+  expect(resolveCampusAssignmentTarget({
+    assignment: { ...assignment, title: prefix, titleFormat: 'preview' }, snapshot: value, scope, now,
+  })?.params.assignmentId).toBe('work_1');
+});
+
+test.each([false, true])('a plan preview never selects between colliding long titles (reverse: %s)', (reverse) => {
+  const value = snapshot();
+  const prefix = '長'.repeat(130);
+  const fullTitle = prefix + '期末報告';
+  value.assignments.items[0].title = fullTitle;
+  value.assignments.items.push({
+    ...assignment, title: prefix + '另'.repeat(10), source: { ...source, assignmentId: 'work_2' },
+  });
+  value.assignments.count = 2;
+  if (reverse) value.assignments.items.reverse();
+  expect(resolveCampusAssignmentTarget({
+    assignment: { ...assignment, title: prefix, titleFormat: 'preview' }, snapshot: value, scope, now,
+  })).toBeNull();
+  expect(resolveCampusAssignmentTarget({
+    assignment: { ...assignment, title: fullTitle }, snapshot: value, scope, now,
+  })?.params.assignmentId).toBe('work_1');
+});
+
 test('the live snapshot parser retains only valid handoff references', async () => {
   jest.spyOn(Date, 'now').mockReturnValue(now);
   mockCallable.mockResolvedValueOnce({ data: snapshot() });

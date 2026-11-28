@@ -41,6 +41,13 @@ jest.mock('../state/nuniSession', () => ({
     signInGeneration: mockSignInGeneration,
     error: mockSessionError,
   }),
+  useOptionalNuniSession: () => ({
+    pendingLogout: mockPendingLogout,
+    loading: mockVerifying,
+    session: mockPlatformSession,
+    signInGeneration: mockSignInGeneration,
+    error: mockSessionError,
+  }),
 }));
 jest.mock('../services/publicCampusContent', () => ({
   loadCampusEvent: jest.fn(),

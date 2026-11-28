@@ -6,7 +6,9 @@ tags:
 
 ---
 # Guest access must not depend on a Google or university login.
-- launchApp
+- launchApp:
+    clearState: true
+    stopApp: true
 - extendedWaitUntil:
     visible:
       id: login-landing
@@ -18,20 +20,52 @@ tags:
 - takeScreenshot: guest_startup
 
 # Google is the primary entry before school import and the public-service directory.
-# Scroll to the account itself; the optional school-provider hint is farther down.
+# Scroll the landing page itself; a nested composer field must not steal the swipe.
 # Check the heading before scrolling to its action; they need not share a viewport.
-# Stop when each target is fully visible, without an extra centering swipe.
-- scrollUntilVisible:
-    element:
-      text: 'Google 帳號'
-    direction: DOWN
-    centerElement: false
+- hideKeyboard
+- retry:
+    maxRetries: 8
+    commands:
+      - runFlow:
+          when:
+            notVisible:
+              id: login-google-account
+          commands:
+            - swipe:
+                from:
+                  id: login-landing
+                direction: UP
+                duration: 500
+      - assertVisible:
+          id: login-google-account
 - assertVisible: 'Google 帳號'
+# The heading can sit on screen while the action is still under the test-login overlay.
+- retry:
+    maxRetries: 8
+    commands:
+      - runFlow:
+          when:
+            notVisible: '登入或建立帳號|確認 Google 帳號|處理未完成的登出|查看登入問題'
+          commands:
+            - swipe:
+                from:
+                  id: login-landing
+                direction: UP
+                duration: 400
+      - assertVisible:
+          id: '^login-start$'
+          enabled: true
+      - assertVisible:
+          text: '登入或建立帳號|確認 Google 帳號|處理未完成的登出|查看登入問題'
+          enabled: true
+# iOS reports the control visible when only its top edge is on screen. The tap
+# then aims at a point below the window and never leaves the landing page.
 - scrollUntilVisible:
     element:
-      id: login-start
+      id: '^login-start$'
     direction: DOWN
-    centerElement: false
+    centerElement: true
+    timeout: 20000
 # Assert the visible terminal state rather than a non-interactive page container.
 # A remote session failure is not a successful login; recovery must remain usable.
 # The first iOS tap can report a hierarchy change while still on the landing page.
@@ -44,12 +78,18 @@ tags:
             visible:
               id: login-landing
           commands:
+            - scrollUntilVisible:
+                element:
+                  id: '^login-start$'
+                direction: DOWN
+                centerElement: true
+                timeout: 20000
             - assertVisible:
-                id: login-start
+                id: '^login-start$'
                 enabled: true
             - waitForAnimationToEnd
             - tapOn:
-                id: login-start
+                id: '^login-start$'
                 enabled: true
                 retryTapIfNoChange: true
       - extendedWaitUntil:
@@ -132,11 +172,11 @@ tags:
 - takeScreenshot: personal_import_entry
 - runFlow: ../helpers/return-to-landing.yaml
 
-# Retain the public map entry assertion after bringing it into the viewport.
+# The guest shortcuts are above the account and school import sections.
 - scrollUntilVisible:
     element:
       id: public-Map
-    direction: DOWN
+    direction: UP
     centerElement: true
 - assertVisible:
     id: public-Map

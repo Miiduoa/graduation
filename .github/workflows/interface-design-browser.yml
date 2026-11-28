@@ -5,6 +5,12 @@ on:
     branches: [main, develop]
     paths:
       - 'apps/web/src/components/AppHeader*'
+      - 'apps/web/src/components/AppFrame*'
+      - 'apps/web/src/components/SiteShell*'
+      - 'apps/web/src/components/OfflineBanner*'
+      - 'apps/web/src/components/UpdateBanner*'
+      - 'apps/web/src/components/PWAInstallBanner*'
+      - 'apps/web/src/components/SystemNotice*'
       - 'apps/web/src/components/CampusServiceMenu*'
       - 'apps/web/src/components/ServiceDirectory*'
       - 'apps/web/src/components/TodayCampusEntry*'
@@ -12,6 +18,7 @@ on:
       - 'apps/web/src/components/QuickCampusEntry*'
       - 'apps/web/src/components/VoiceDictationButton*'
       - 'apps/web/src/components/PageRecovery*'
+      - 'apps/web/src/components/PageLoadingCard*'
       - 'apps/web/src/app/error.tsx'
       - 'apps/web/src/app/not-found.tsx'
       - 'apps/web/src/app/search/**'
@@ -19,6 +26,17 @@ on:
       - 'apps/web/src/components/academic/**'
       - 'apps/web/src/components/today/**'
       - 'apps/web/src/components/ui/**'
+      - 'apps/web/src/features/nuni/AssignmentFileFields*'
+      - 'apps/web/src/features/nuni/CourseLearning.module.css'
+      - 'apps/web/src/features/nuni/NuniApp.module.css'
+      - 'apps/web/src/features/nuni/PhotoPdfEditor*'
+      - 'apps/web/src/features/nuni/photoPdf*'
+      - 'apps/web/src/app/community/_components/StudyBuddyTab*'
+      - 'apps/web/src/app/community/_components/CommunityForm*'
+      - 'apps/web/src/app/community/_components/useCommunityFormSession*'
+      - 'apps/web/src/lib/community/firestore.ts'
+      - 'apps/web/src/app/page.tsx'
+      - 'packages/shared/src/assignmentFiles.ts'
       - 'apps/web/src/components/timetable/CourseEditor*'
       - 'apps/web/src/components/timetable/timetable.module.css'
       - 'apps/web/src/components/imports/PersonalImportCenter*'
@@ -55,7 +73,7 @@ jobs:
   browser:
     name: Navigation, motion and feedback on desktop and mobile
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       TZ: Asia/Taipei
       NEXT_TELEMETRY_DISABLED: '1'
@@ -85,6 +103,9 @@ jobs:
         # Keep the existing interface suite headless. A separate headed browser
         # measures real notification focus changes on this display.
         run: xvfb-run -a -s "-screen 0 1920x1440x24" python scripts/qa/interface-design/check.py
+      - name: Verify teacher tasks, attachment feedback and real community forms
+        if: success() || failure()
+        run: python scripts/qa/interface-design/task_flow.py
       - name: Upload rendered evidence and source hashes
         if: always()
         uses: actions/upload-artifact@v7

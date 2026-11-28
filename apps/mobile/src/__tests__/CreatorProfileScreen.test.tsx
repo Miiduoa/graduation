@@ -222,3 +222,73 @@ test('a denied pin read is retried, never treated as an empty pin', async () => 
   expect(await view.findByLabelText('置頂到個人頁')).toBeTruthy();
   expect(readCreatorPin).toHaveBeenCalledTimes(2);
 });
+
+test('changing tabs cannot submit again while the first write is unresolved', async () => {
+  const card = { headline: '', bio: '已發布簡介', linkUrl: '' };
+  const finishWrites: Array<(value: typeof card) => void> = [];
+  jest.mocked(readCreatorCard).mockResolvedValue(card);
+  jest.mocked(saveCreatorCard).mockImplementation(() => new Promise((resolve) => {
+    finishWrites.push(resolve);
+  }));
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+  try {
+    fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+    fireEvent.changeText(view.getByLabelText('個人簡介'), '第一筆尚未確認');
+    fireEvent.press(view.getByLabelText('儲存簡介'));
+    expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+    for (const tab of ['相片與影片', '我的收藏', '貼文']) {
+      await act(async () => { fireEvent.press(view.getByLabelText(tab)); });
+      const reopen = view.queryByLabelText('編輯社群簡介');
+      if (reopen) fireEvent.press(reopen);
+      const input = view.queryByLabelText('個人簡介');
+      if (input) fireEvent.changeText(input, '第二筆不應送出');
+      const save = view.queryByLabelText('儲存簡介');
+      if (save) fireEvent.press(save);
+      expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+    }
+  } finally {
+    view.unmount();
+    await act(async () => { for (const finish of finishWrites) finish(card); });
+  }
+});
+
+test('an owner first read survives all tabs and post refresh without a replacement read', async () => {
+  const card = { headline: '', bio: '首次成功的簡介', linkUrl: 'https://example.org/' };
+  let resolveFirst!: (value: typeof card) => void;
+  jest.mocked(readCreatorCard)
+    .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }));
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+  for (const tab of ['相片與影片', '我的收藏', '貼文']) {
+    await act(async () => { fireEvent.press(view.getByLabelText(tab)); });
+  }
+  await act(async () => { fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh'); });
+  expect(readCreatorCard).toHaveBeenCalledTimes(1);
+  await act(async () => { resolveFirst(card); });
+  expect(view.getByText(card.bio)).toBeTruthy();
+  expect(view.getByLabelText('查看作品連結')).toBeTruthy();
+});
+
+test.each(['相片與影片', '我的收藏', '貼文'])(
+  'an uncertain draft survives %s and can only be settled by committed confirmation', async (tab) => {
+    const card = { headline: '', bio: '原先的簡介', linkUrl: '' };
+    const draft = { ...card, bio: '尚待核對的簡介' };
+    jest.mocked(readCreatorCard).mockResolvedValueOnce(card).mockResolvedValueOnce(draft);
+    jest.mocked(saveCreatorCard).mockRejectedValueOnce(new Error('unavailable'));
+    const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+    fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+    fireEvent.changeText(view.getByLabelText('個人簡介'), draft.bio);
+    await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+    await act(async () => { fireEvent.press(view.getByLabelText(tab)); });
+    await act(async () => { fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh'); });
+    expect(view.getByLabelText('個人簡介').props.value).toBe(draft.bio);
+    expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+    expect(readCreatorCard).toHaveBeenCalledTimes(1);
+    fireEvent.press(view.getByLabelText('取消編輯'));
+    fireEvent.press(view.getByLabelText('編輯社群簡介'));
+    expect(view.getByLabelText('個人簡介').props.value).toBe(draft.bio);
+    await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+    expect(readCreatorCard).toHaveBeenLastCalledWith('pu', 'alice', { requireCommitted: true });
+    expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+    expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  },
+);

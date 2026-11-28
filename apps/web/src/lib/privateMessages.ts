@@ -18,10 +18,13 @@ import {
   type SnapshotMetadata,
   type Transaction,
 } from 'firebase/firestore';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { callWithHostedFallback } from './callableFallback';
 import { parseDmPhotoPath } from './dmPhotos';
 import { deriveDmConversationId } from './conversationAccess';
 import { getAuth, getDb, isFirebaseConfigured } from './firebase';
+import { teacherSubmissionListHref } from '@/components/teaching/assignmentDeepLink';
+import { dormAnnouncementHref } from './dormAnnouncementLink';
 import { leaveRequestHref, parseLeaveRequestId } from './leaveRequestLink';
 import {
   courseHrefFromData,
@@ -699,9 +702,15 @@ export function parseNotification(
   )
     throw new MessagingError('permission');
   const data = object(row.data);
-  const schoolId = text(row.schoolId) || text(data.schoolId);
+  const schoolId = text(data.schoolId) || text(row.schoolId);
   if (!schoolId) return 'unscoped';
-  if (schoolId !== session.schoolId) return null;
+  // Compare campus aliases, but keep the payload's actual school document ID in the link.
+  const expectedSchool = toPublicSchoolId(session.schoolId);
+  const belongsElsewhere = [row.schoolId, data.schoolId].some((value) =>
+    value != null && value !== '' &&
+    (typeof value !== 'string' || toPublicSchoolId(value) !== expectedSchool),
+  );
+  if (belongsElsewhere) return null;
   if (typeof row.title !== 'string' || typeof row.body !== 'string')
     throw new MessagingError('unavailable');
   return {
@@ -826,6 +835,11 @@ export function notificationDestination(
     schoolParams.set('schoolId', schoolId);
   }
   const schoolSearch = schoolId ? `?${schoolParams.toString()}` : '';
+  if (notification.type === 'announcement' && data.channel === 'dormitory') {
+    const id = safeNoticeId(data.dormAnnouncementId);
+    if (!schoolId || (data.dormAnnouncementId != null && data.dormAnnouncementId !== '' && !id)) return null;
+    return { href: dormAnnouncementHref(schoolId, id), label: '查看本棟公告' };
+  }
   if (notification.type === 'announcement') {
     const announcementId = safeNoticeId(data.announcementId);
     // 校園公告通知來自 schools/{schoolId}/announcements，不能改開同編號的舊集合。
@@ -869,24 +883,34 @@ export function notificationDestination(
       label: '查看訂單／取餐',
     };
   }
+  // An older course link can carry a saved browsing campus. The inbox has
+  // already verified which school owns this notification.
+  function academicDestination(href: string, label: string) {
+    if (!schoolId) return { href, label };
+    const destination = new URL(href, 'https://campus.local');
+    destination.searchParams.delete('school');
+    destination.searchParams.set('campus', schoolId);
+    destination.searchParams.set('schoolId', schoolId);
+    return { href: destination.pathname + destination.search + destination.hash, label };
+  }
   if (notification.type === 'live_session') {
     const groupId = safeNoticeId(data.groupId) || safeNoticeId(data.courseId);
     if (!groupId) return null;
     const sessionId = safeNoticeId(data.sessionId);
     const base = `/course/${encodeURIComponent(groupId)}/attendance`;
-    return {
-      href: sessionId ? `${base}?sessionId=${encodeURIComponent(sessionId)}` : base,
-      label: '開啟點名',
-    };
+    return academicDestination(
+      sessionId ? `${base}?sessionId=${encodeURIComponent(sessionId)}` : base,
+      '開啟點名',
+    );
   }
   if (notification.type === 'assignment_submission') {
     const courseId = safeNoticeId(data.groupId) || safeNoticeId(data.courseId);
     if (!courseId) return null;
     const assignmentId = safeNoticeId(data.assignmentId);
     const href = assignmentId
-      ? `/teacher/course/${encodeURIComponent(courseId)}?assignmentId=${encodeURIComponent(assignmentId)}`
+      ? teacherSubmissionListHref(courseId, assignmentId)
       : `/teacher/course/${encodeURIComponent(courseId)}`;
-    return { href, label: '查看待批改繳交' };
+    return academicDestination(href, '查看待批改繳交');
   }
   if (notification.type === 'leave') {
     const requestId = parseLeaveRequestId(data.leaveRequestId) || parseLeaveRequestId(data.requestId);
@@ -898,10 +922,10 @@ export function notificationDestination(
       notification.data,
       notification.type === 'feedback' ? 'assignment' : notification.type,
     );
-    if (work) return { href: work, label: courseWorkOpenLabel(work) };
+    if (work) return academicDestination(work, courseWorkOpenLabel(work));
     const course = courseHrefFromData(notification.data);
-    if (course) return { href: course, label: courseWorkOpenLabel(course) };
-    return { href: '/grades?tab=feedback', label: '查看課業成績與回饋' };
+    if (course) return academicDestination(course, courseWorkOpenLabel(course));
+    return academicDestination('/grades?tab=feedback', '查看課業成績與回饋');
   }
   if (notification.type === 'message') {
     const conversationId = data.conversationId;
@@ -910,14 +934,14 @@ export function notificationDestination(
       !conversationId.includes('/') &&
       conversationId !== '.' &&
       conversationId !== '..'
-      ? { href: `/dms/${encodeURIComponent(conversationId)}`, label: '開啟對話' }
+      ? { href: `/dms/${encodeURIComponent(conversationId)}${schoolSearch}`, label: '開啟對話' }
       : null;
   }
   if (isAssignmentNotificationType(notification.type) || isMaterialNotificationType(notification.type)) {
     const href =
       courseWorkHrefFromData(notification.data, notification.type) ||
       courseHrefFromData(notification.data);
-    if (href) return { href, label: courseWorkOpenLabel(href) };
+    if (href) return academicDestination(href, courseWorkOpenLabel(href));
   }
   return null;
 }

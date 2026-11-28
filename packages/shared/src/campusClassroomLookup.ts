@@ -1,3 +1,4 @@
+import { toPublicSchoolId } from './schoolIds';
 import {
   PROVIDENCE_BUS_STOPS,
   PROVIDENCE_CAMPUS_PLACES,
@@ -52,6 +53,15 @@ function comparisonText(value: unknown): string {
   return normalizeCampusClassroomQuery(value).normalize('NFKC').toLocaleLowerCase('zh-TW');
 }
 
+/** Two consecutive floor markers without a room are ambiguous, not a room.
+ * For example 3F-4F or 3樓4F can describe a floor range. Do not choose a
+ * building destination from that notation alone. A three-digit room such
+ * as 303F is still valid, and no floor or room position is inferred. */
+function hasOnlyTwoFloorMarkers(suffix: string): boolean {
+  const floor = '(?:b?\\d{1,2}\\s*f|(?:地下|地上)?(?:\\d{1,2}|[一二三四五六七八九十]{1,3})樓)';
+  return new RegExp('^[\\s:：,，·#/–—-]*' + floor + '[\\s,，:：·/–—-]*' + floor + '(?:\\s*(?:教室|室))?$', 'u').test(suffix);
+}
+
 function comparablePublicName(value: unknown): string {
   if (typeof value !== 'string') return '';
   return withoutClassroomControlCharacters(value).normalize('NFKC').toLocaleLowerCase('zh-TW')
@@ -70,7 +80,7 @@ function isRoomSuffix(value: string): boolean {
   const floor = '(?:b?\\d{1,2}\\s*f|(?:地下|地上)?(?:\\d{1,2}|[一二三四五六七八九十]{1,3})樓)';
   // Bare 3F / B1F is a floor designation, even if the generic room
   // pattern could interpret its final F as an alphabetic room suffix.
-  if (new RegExp(`^${floor}(?:\\s*(?:教室|室))?$`, 'u').test(suffix)) return false;
+  if (hasOnlyTwoFloorMarkers(suffix) || new RegExp(`^${floor}(?:\\s*(?:教室|室))?$`, 'u').test(suffix)) return false;
   if (new RegExp(`^${room}$`, 'u').test(suffix)) return true;
   // A timetable may explicitly write floor and room together (3F303 / 3樓303).
   // Accept only an immediately following numeric room, not arbitrary letter suffixes;
@@ -405,11 +415,12 @@ const VERIFIED_PROVIDENCE_CODE_BY_PLACE_ID = new Map<string, string>([
 ]);
 
 function matchesVerifiedCodeRoomSuffix(suffix: string): boolean {
-  return !VERIFIED_CODE_FLOOR_ONLY_SUFFIX.test(suffix) &&
+  return !hasOnlyTwoFloorMarkers(suffix) && !VERIFIED_CODE_FLOOR_ONLY_SUFFIX.test(suffix) &&
     (VERIFIED_CODE_ROOM_SUFFIX.test(suffix) || VERIFIED_CODE_FLOOR_ROOM_SUFFIX.test(suffix));
 }
 
-function matchesSourcedProvidenceCode(query: string, published: CampusMapPlaceLike): boolean {
+function matchesSourcedProvidenceCode(query: string, published: CampusMapPlaceLike | undefined): boolean {
+  if (!published) return false;
   const code = VERIFIED_PROVIDENCE_CODE_BY_PLACE_ID.get(published.id);
   return code !== undefined && query.startsWith(code) &&
     matchesVerifiedCodeRoomSuffix(query.slice(code.length));
@@ -448,6 +459,9 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
   if (!query) return { query, status: 'empty', matches: [] };
   const school = validSchoolId(schoolId);
   if (!school) return { query, status: 'unmatched', matches: [] };
+  // Only catalog metadata uses the public alias. Candidate school markers
+  // still have to match the exact bound school above and below.
+  const publicSchool = toPublicSchoolId(school)!;
   const comparable = comparisonText(query);
   // Imported map records are runtime data even when TypeScript callers use the
   // CampusMapPlaceLike interface. A single null row or a numeric ID must not
@@ -489,21 +503,21 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     // Classroom identity accepts normalized names and verified bilingual aliases.
     // Once the supplied name is verified, use the catalog name for attribution's
     // exact-name check while preserving its coordinate check and the original POI.
-    const published = school === 'pu' ? PUBLISHED_PROVIDENCE_PLACES.get(location.id) : undefined;
+    const published = publicSchool === 'pu' ? PUBLISHED_PROVIDENCE_PLACES.get(location.id) : undefined;
     const aliases = published ? PROVIDENCE_ENGLISH_ALIASES.get(published.id) : undefined;
     if (
       published &&
       // Source identity and source category are both necessary: a matching
       // ID/name/coordinate does not make a restaurant a classroom building.
       (isExplicitNonClassroomCategory(published.category) ||
-        (!isSourcedBuildingLabel(school, published, location.name) &&
+        (!isSourcedBuildingLabel(publicSchool, published, location.name) &&
           !aliases?.some((name) => campusPlaceNameMatchesQuery(name, location.name))) ||
-        !providencePlaceSourceUrl(school, {
+        !providencePlaceSourceUrl(publicSchool, {
           ...location,
           name: published.name,
           // A verified bilingual building label describes this same outdoor
           // POI for classroom lookup only. Never change the original marker.
-          building: isSourcedBuildingLabel(school, published, location.building) ||
+          building: isSourcedBuildingLabel(publicSchool, published, location.building) ||
             aliases?.some((name) => comparisonText(name) === comparisonText(location.building))
             ? published.building
             : location.building,
@@ -515,17 +529,17 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     ) continue;
     // A nearby transit stop can be named after a hall or carry its building
     // field in Firestore. Never promote that stop into a classroom destination.
-    if (hasTransitStopIdentity(location, school) || isExplicitNonClassroomCategory(location.category) ||
-        closerToPublishedStopThanSourcedHall(school, location, published)) continue;
+    if (hasTransitStopIdentity(location, publicSchool) || isExplicitNonClassroomCategory(location.category) ||
+        closerToPublishedStopThanSourcedHall(publicSchool, location, published)) continue;
     // A sourced clinic, chapel or sports POI must not navigate to another
     // building through an unsourced Firestore `building` override.
-    const building = sourcedBuildingLabel(school, published, location.building);
+    const building = sourcedBuildingLabel(publicSchool, published, location.building);
     // Only public fields accepted by the existing resolver and legacy codes
     // can outrank names supplied by the catalog.
     if (
-      (!published || isSourcedBuildingLabel(school, published, location.name)) &&
+      (!published || isSourcedBuildingLabel(publicSchool, published, location.name)) &&
       [location.name, building].some((name) =>
-        nameMatchesRoom(comparable, name) || nameMatchesVerifiedCode(school, comparable, name)
+        nameMatchesRoom(comparable, name) || nameMatchesVerifiedCode(publicSchool, comparable, name)
       )
     ) {
       primaryMatches.push(location);

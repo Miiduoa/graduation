@@ -36,6 +36,7 @@ test('overdue uses the actual instant, not the displayed date', () => {
 
 test('missing and invalid timestamps are unknown, never overdue or a fabricated date', () => {
   expect(titles('undated')).toEqual(['無日期', '壞日期']);
+  expect(assignmentDeadlineLabel(tasks[7], now)).toContain('未提供');
   expect(assignmentDeadlineLabel(tasks[8], now)).toContain('格式無法核對');
   expect(assignmentDeadlineLabel(tasks[0], now)).toContain('期限已過');
 });

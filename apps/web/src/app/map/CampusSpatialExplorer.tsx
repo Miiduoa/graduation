@@ -17,7 +17,7 @@ import type { CampusSpatialScene } from './campusSpatialScene';
 import { appleWalkingDirectionsUrl, isUsableMapCoordinate, walkingDirectionsUrl, type MapLocation } from './mapService';
 import { isProvidencePendingVerification, providencePlaceSourceUrl } from './providenceCampus';
 import { PROVIDENCE_CAMPUS_PLACES, PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
-import { MAX_VERTICES, MAX_WAYS, parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
+import { parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
 import { reuseUnchangedProvidenceFootprints } from './footprintSnapshotEquality';
 import { isSupportedUtf8JsonMediaType } from './jsonMediaType';
 import BuildingPlanPreview from './buildingPlans/BuildingPlanPreview';
@@ -31,6 +31,10 @@ type Props = {
   onSelect: (location: MapLocation) => void;
 };
 
+// 0: enter/leave viewport; 1e-9: zero-area edge touch <-> any visible
+// pixel (still representable as float32 in browser engines); 0.01: legacy
+// coarse visibility step.
+const VIEWPORT_THRESHOLDS = [0, 1e-9, 0.01];
 // Reuse a single empty array to avoid recreating a WebGL context whenever
 // the footprint status or the visible map selection changes.
 const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
@@ -69,6 +73,10 @@ const MAX_DECLARED_FOOTPRINT_BYTES = 2_000_000;
 // The public endpoint's 500 KB ceiling makes this generous for real responses.
 const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 
+// Response.json() buffers the entire document before our snapshot validator
+// runs. Bound the *actual decoded bytes* so untrusted downstream responses
+// cannot exhaust mobile memory even without a reliable Content-Length.
+// A JSON-only response cannot expose the original byte count.
 function isWellFormedUtf8(bytes: Uint8Array): boolean {
   for (let i = 0; i < bytes.length;) {
     const b = bytes[i];
@@ -88,95 +96,6 @@ function isWellFormedUtf8(bytes: Uint8Array): boolean {
     i += need + 1;
   }
   return true;
-}
-
-function isPlainFootprintObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-function validateParsedFootprintJson(payload: unknown): void {
-  const invalidShape = () => new Error('Invalid parsed building outline response');
-  const maxTotalVertices = MAX_WAYS * MAX_VERTICES;
-  // An outline contributes three nodes per vertex. Leave room for building
-  // fields and snapshot metadata, and bound recursion to the snapshot depth.
-  const maxNodes = maxTotalVertices * 4;
-  const maxDepth = 5;
-  let nodes = 0;
-  let bytes = 0;
-  const addBytes = (count: number) => {
-    bytes += count;
-    if (bytes > MAX_DECLARED_FOOTPRINT_BYTES) {
-      throw new Error('Building outline response exceeded byte limit');
-    }
-  };
-  const countString = (value: string) => {
-    addBytes(2); // Quotes.
-    for (let i = 0; i < value.length; i += 1) {
-      const code = value.charCodeAt(i);
-      if (code === 0x22 || code === 0x5c || code === 8 || code === 9 ||
-          code === 10 || code === 12 || code === 13) addBytes(2);
-      else if (code < 0x20) addBytes(6);
-      else if (code <= 0x7f) addBytes(1);
-      else if (code <= 0x7ff) addBytes(2);
-      else if (code >= 0xd800 && code <= 0xdfff) {
-        const next = value.charCodeAt(i + 1);
-        if (code <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
-          addBytes(4);
-          i += 1;
-        } else addBytes(6); // JSON.stringify escapes lone surrogates.
-      } else addBytes(3);
-    }
-  };
-  const ownValue = (container: object, key: string | number): unknown => {
-    const descriptor = Object.getOwnPropertyDescriptor(container, key);
-    if (!descriptor || !('value' in descriptor)) throw invalidShape();
-    return descriptor.value;
-  };
-  const visit = (value: unknown, depth: number): void => {
-    nodes += 1;
-    if (nodes > maxNodes || depth > maxDepth) throw invalidShape();
-    if (typeof value === 'string') {
-      countString(value);
-    } else if (value === null || typeof value === 'boolean' ||
-        (typeof value === 'number' && Number.isFinite(value))) {
-      addBytes(String(value).length);
-    } else if (Array.isArray(value)) {
-      if (Object.getPrototypeOf(value) !== Array.prototype || value.length > maxNodes - nodes) throw invalidShape();
-      addBytes(2 + Math.max(0, value.length - 1)); // Brackets and commas.
-      for (let i = 0; i < value.length; i += 1) visit(ownValue(value, i), depth + 1);
-    } else if (isPlainFootprintObject(value)) {
-      addBytes(2); // Braces.
-      let first = true;
-      for (const key in value) {
-        if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
-        addBytes(first ? 1 : 2); // Colon and optional comma.
-        first = false;
-        countString(key);
-        visit(ownValue(value, key), depth + 1);
-      }
-    } else {
-      throw invalidShape();
-    }
-  };
-
-  if (!isPlainFootprintObject(payload)) throw invalidShape();
-  visit(payload, 0);
-  const { buildings } = payload;
-  if (!Array.isArray(buildings) || buildings.length > MAX_WAYS) throw invalidShape();
-  let totalVertices = 0;
-  for (const building of buildings) {
-    if (!isPlainFootprintObject(building)) throw invalidShape();
-    const { outline } = building;
-    if (!Array.isArray(outline) || outline.length < 3 || outline.length > MAX_VERTICES) throw invalidShape();
-    totalVertices += outline.length;
-    if (totalVertices > maxTotalVertices) throw invalidShape();
-    for (const pair of outline) {
-      if (!Array.isArray(pair) || pair.length !== 2 ||
-          !Number.isFinite(pair[0]) || !Number.isFinite(pair[1])) throw invalidShape();
-    }
-  }
 }
 
 async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
@@ -283,17 +202,10 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
         return JSON.parse(raw) as unknown;
       }
     }
-    // JSON-only bridges expose the parsed value without its original bytes.
-    // The outer gate caps declared lengths. Treat the header as advisory
-    // here because re-serializing JSON cannot recover the original length.
-    if (signal?.aborted) throw new Error('Building outline read aborted');
-    if (response.bodyUsed || typeof response.json !== 'function') {
-      throw new Error('Building outline response body unavailable');
-    }
-    const payload: unknown = await response.json();
-    if (signal?.aborted) throw new Error('Building outline read aborted');
-    validateParsedFootprintJson(payload);
-    return payload;
+    // JSON-only bridges expose no raw bytes. Their body can exceed the size
+    // cap and cannot be compared to Content-Length, so json() is not a safe
+    // fallback for trusted OSM geometry. Keep POIs and external directions.
+    throw new Error('Building outline response bytes unavailable');
   }
   // A mobile pagehide/unmount/timeout may arrive after the fetch headers but
   // while response-body streaming is still pending. Abort the *reader* as well
@@ -780,8 +692,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       }
       return (element as HTMLElement).isContentEditable === true;
     };
-    // A positive observer entry already reflects dialog clipping. Only
-    // recovery from a stale hidden entry also checks the dialog scrollport.
+    // Visual geometry handles keyboard coverage; isOffscreen separately checks
+    // measured dialog clipping even when a positive observer has become stale.
+    // Recovering a hidden observation must prove both intersections together.
     const measureVisualViewportVisibility = (clipToDialog = false): boolean | null => {
       try {
         const viewport = window.visualViewport;
@@ -796,11 +709,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           if (!clipToDialog) return false;
         }
         // The visitor explicitly restarted 3D while the viewport read this
-        // way. Ignore that exact (possibly stale) geometry until it changes,
-        // unless an editable has since taken focus or a keyboard appeared.
+        // way. Ignore it as an occlusion signal until it changes, an editable
+        // gains focus, or a keyboard overlaps. Positive geometry can still
+        // recover a hidden observation inside both the viewport and dialog.
         if (ignoredViewportRef.current !== null) {
-          if (viewportSignature(viewport) === ignoredViewportRef.current) return null;
-          ignoredViewportRef.current = null;
+          if (viewportSignature(viewport) !== ignoredViewportRef.current) ignoredViewportRef.current = null;
+          else if (!clipToDialog) return null;
         }
         const visible = intersectsVisibleCanvas(left, top, left + width, top + height);
         if (clipToDialog) return visible;
@@ -853,35 +767,64 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // target is never proof that our map entered the viewport.
           // A throwing target getter is not an omitted target: a broken or
           // foreign callback must never wake an offscreen WebGL context.
-          // Browsers can queue several threshold crossings before a single
-          // callback, especially during a fast scroll. The last matching
-          // entry reflects the latest known visibility; selecting the first
-          // can start WebGL after the host has already left the viewport.
-          let entry: IntersectionObserverEntry | undefined;
-          for (let index = entries.length - 1; index >= 0; index -= 1) {
-            const candidate = entries[index];
+          const hostEntries = entries.filter((entry) => {
             try {
-              // Queued reports from before an explicit overlay resume must
-              // not undo that recovery. Compare against the same time origin
-              // as IntersectionObserverEntry.time (performance.now).
-              const observedAt = candidate.time;
-              if (Number.isFinite(observedAt) && observedAt < ignoreObserverBefore) continue;
-              const target = candidate.target;
-              if (!target || target === host) {
-                entry = candidate;
-                break;
+              const target = entry.target;
+              if (target && target !== host) return false;
+              // A report queued before the most recent overlay tap must not
+              // undo the recovery, even when delivered alongside fresh entries.
+              if (ignoreObserverBefore > 0) {
+                const observedAt = entry.time;
+                if (Number.isFinite(observedAt) && observedAt < ignoreObserverBefore) return false;
               }
+              return true;
             } catch {
-              // A malformed/foreign target is not evidence for this host.
+              return false;
             }
-          }
-          // An empty callback carries no new visibility evidence. Some mobile
-          // WebView bridges invoke the observer with [] after scrolling; never
-          // turn that no-op into a hidden event that suspends an onscreen map.
-          if (!entry) return;
-          visibility = entry.isIntersecting ? 'visible' : 'hidden';
+          });
+          // W3C IO §3.2.5–3.2.6 append transitions to a queue before delivery.
+          // Use the last host entry even when timestamps are rounded,
+          // missing or repeated; the first can describe an obsolete state.
+          const latest = hostEntries[hostEntries.length - 1];
+          if (!latest) return;
+          // Fall back to the original boolean when the optional rectangle
+          // is unavailable. A valid zero-area intersection is an edge touch.
+          const readIntersection = (entry: IntersectionObserverEntry) => {
+            let intersects: boolean;
+            try {
+              const intersecting = entry.isIntersecting;
+              if (typeof intersecting !== 'boolean') return undefined;
+              intersects = intersecting;
+            } catch { return undefined; }
+            if (intersects) {
+              try {
+                const rect = entry.intersectionRect;
+                if (rect) {
+                  const { width, height, x, y, left, top, right, bottom } = rect;
+                  if (Number.isFinite(width) && Number.isFinite(height) &&
+                      width >= 0 && height >= 0 &&
+                      [x, y, left, top, right, bottom].every((value) => value === undefined || Number.isFinite(value)) &&
+                      !(left !== undefined && right !== undefined && right < left) &&
+                      !(top !== undefined && bottom !== undefined && bottom < top)) {
+                    intersects = width > 0 && height > 0 &&
+                      (left === undefined || right === undefined || right > left) &&
+                      (top === undefined || bottom === undefined || bottom > top);
+                  }
+                }
+              } catch { /* Legacy observer boolean still applies. */ }
+            }
+            return intersects;
+          };
+          const intersects = readIntersection(latest);
+          if (intersects === undefined) return;
+          visibility = intersects ? 'visible' : 'hidden';
           if (observing) syncVisibility();
-        });
+        }, { threshold: VIEWPORT_THRESHOLDS });
+        // An edge-touch (isIntersecting=true, zero area) and a sliver of
+        // visible area (for example 0.5%) are both intersecting. A tiny
+        // positive threshold guarantees a callback across that boundary in
+        // both directions, so WebGL starts once any pixel shows and pauses
+        // again when only the edge touches.
         intersection = current;
         current.observe(host);
         observing = true;

@@ -1074,6 +1074,24 @@ describe('firestore security rules', () => {
     });
   }
 
+  test('dorm notification recipients can mark read or delete while the server controls the tap receipt', async () => {
+    const id = 'dorm_' + 'a'.repeat(64);
+    const inbox = (uid) => `users/${uid}/notifications/${id}`;
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob']) {
+        await db.doc('users/' + uid).set({ status: 'active' });
+        await db.doc(inbox(uid)).set({ read: false, data: { deliveryKey: 'receipt-' + uid } });
+      }
+    });
+    const db = testEnv.authenticatedContext('bob').firestore();
+    await assertSucceeds(db.doc(inbox('bob')).get());
+    await assertFails(db.doc(inbox('alice')).get());
+    await assertFails(db.doc(inbox('bob')).update({ 'data.deliveryKey': 'receipt-alice' }));
+    await assertSucceeds(db.doc(inbox('bob')).update({ read: true, readAt: serverTimestamp() }));
+    await assertSucceeds(db.doc(inbox('bob')).delete());
+    await assertFails(db.doc(inbox('bob')).set({ read: true, data: { deliveryKey: 'receipt-alice' } }));
+  });
+
   test('feedback is private and can only be written by the server', async () => {
     await seedFirestore(async (db) => {
       await db
@@ -1804,6 +1822,36 @@ describe('firestore security rules', () => {
         status: 'confirmed',
       }),
     );
+  });
+
+  test('本人既有訂單相容性：active、轉學生與缺少新欄位的舊帳號可讀取，停權與刪帳仍拒絕', async () => {
+    const mirror = 'users/alice/schools/pu/orders/existing';
+    const receipt = { userId: 'alice', schoolId: 'pu', status: 'confirmed', queueNumber: 7, createdAt: new Date() };
+    await seedFirestore(async (db) => {
+      await db.doc(mirror).set(receipt);
+    });
+    const db = testEnv.authenticatedContext('alice').firestore();
+    for (const profile of [
+      { status: 'active', schoolId: 'pu' },
+      { status: 'active', schoolId: 'nthu', primarySchoolId: 'nthu' },
+      { displayName: '舊帳號' },
+    ]) {
+      await seedFirestore(async (admin) => { await admin.doc('users/alice').set(profile); });
+      const order = await assertSucceeds(db.doc(mirror).get());
+      assert.equal(order.data().queueNumber, 7);
+      await assertSucceeds(db.collection('users/alice/schools/pu/orders').orderBy('createdAt', 'desc').limit(30).get());
+    }
+    for (const accountState of [
+      { accountDeletionInProgress: true },
+      ...['deleted', 'disabled', 'suspended', 'inactive'].map((status) => ({ status })),
+    ]) {
+      await seedFirestore(async (admin) => { await admin.doc('users/alice').set(accountState); });
+      await assertFails(db.doc(mirror).get());
+      await assertFails(db.collection('users/alice/schools/pu/orders').orderBy('createdAt', 'desc').limit(30).get());
+    }
+    await seedFirestore(async (admin) => { await admin.doc('users/alice').set({ status: 'active' }); });
+    assert.equal((await assertSucceeds(db.doc(mirror).get())).data().queueNumber, 7);
+    await assertFails(testEnv.authenticatedContext('bob').firestore().doc(mirror).get());
   });
 
   test('prevent owners from forging canonical or mirrored order receipts, including cancellation writes', async () => {

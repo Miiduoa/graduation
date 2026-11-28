@@ -19,8 +19,12 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
     value: {
-      request: (_key: string, fn: () => unknown) => {
-        const task = lock.then(fn);
+      request: (
+        _key: string,
+        options: LockOptions | (() => unknown),
+        callback?: () => unknown,
+      ) => {
+        const task = lock.then(typeof options === 'function' ? options : callback);
         lock = task.then(
           () => undefined,
           () => undefined,
@@ -109,6 +113,15 @@ it('undo preserves records imported later and records edited after the batch', a
   expect(await undoPersonalImports(scope, first.batchId)).toBe(0);
   expect(readPersonalImports(scope).map((row) => row.grade)).toEqual(['88', '90']);
   await expect(changePersonalImport(scope, original, null)).rejects.toThrow('另一個頁面');
+});
+it('does not write if a cancelled undo callback is reached', async () => {
+  const { batchId } = await savePersonalImportBatch(scope, rows());
+  const original = readPersonalImports(scope);
+  const controller = new AbortController();
+  const undo = undoPersonalImports(scope, batchId, () => true, controller.signal);
+  controller.abort();
+  await expect(undo).rejects.toMatchObject({ name: 'AbortError' });
+  expect(readPersonalImports(scope)).toEqual(original);
 });
 it('blocks stale queued operations after an account switch', async () => {
   let active = true;

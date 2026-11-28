@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
 import type { V2ActionState, V2Card, V2Turn } from './types';
 import { buildPlanRevisionQuestion, getPlanRevisionEvents, hasUnresolvedAssistantAction, isUnattemptedCalendarPlan } from './planRevision';
 
@@ -10,6 +11,16 @@ function card(id = 'calendar-1', args: Record<string, unknown> = event): V2Card 
 function turn(cards: V2Card[] = [card()]): V2Turn {
   return { question: 'private-original-question', reply: { answer: 'private-answer',
     steps: [{ name: 'private-step', status: 'ok', summary: 'private-summary' }], cards } };
+}
+type VerifiedState = Extract<V2ActionState, { status: 'verified' }>;
+function verified(value = card()): VerifiedState {
+  return { status: 'verified', local: 'ready', receipt: createAssistantCalendarReceipt({
+    schoolId: value.schoolId, mutationId: value.mutationId, event: value.args, storage: 'synced',
+    revision: 1, verifiedAt: '2030-11-04T02:30:00.000Z',
+    record: { ...value.args, id: value.mutationId, batchId: value.mutationId, kind: 'events',
+      schoolId: value.schoolId, academicYear: '', semester: '', importedAt: '2030-11-04T02:29:00.000Z',
+      source: { type: 'paste', line: 1, rawText: '', name: '助理確認' } },
+  }) };
 }
 const statuses: V2ActionState['status'][] = ['executing', 'checking', 'unknown', 'blocked', 'conflict',
   'absent', 'cancelled', 'superseded', 'handoff', 'verified'];
@@ -32,7 +43,8 @@ describe('unattempted calendar plan eligibility', () => {
   });
 
   it.each(statuses)('does not revise a card with %s state', status => {
-    expect(isUnattemptedCalendarPlan(turn(), { 'calendar-1': { status } as V2ActionState })).toBe(false);
+    const state = status === 'verified' ? verified() : { status } as V2ActionState;
+    expect(isUnattemptedCalendarPlan(turn(), { 'calendar-1': state })).toBe(false);
   });
 });
 
@@ -42,8 +54,31 @@ describe('unresolved action guard', () => {
   });
   it('allows empty or settled state collections', () => {
     expect(hasUnresolvedAssistantAction({})).toBe(false);
-    expect(hasUnresolvedAssistantAction(Object.fromEntries(['cancelled', 'superseded', 'handoff', 'verified']
-      .map((status, index) => [String(index), { status } as V2ActionState])))).toBe(false);
+    expect(hasUnresolvedAssistantAction({
+      cancelled: { status: 'cancelled' }, superseded: { status: 'superseded' },
+      handoff: { status: 'handoff', href: '/calendar', message: '開啟服務' },
+      verified: verified(),
+    })).toBe(false);
+  });
+
+  it.each([
+    { name: 'local unavailable', patch: { local: 'unavailable' as const, localMessage: '此裝置尚未更新' } },
+    { name: 'follow-up warning', patch: { verificationWarning: '安排追蹤尚未接續' } },
+    { name: 'both incomplete', patch: { local: 'unavailable' as const, verificationWarning: '這次查核未完成' } },
+  ])('blocks replanning for a verified receipt with $name until its original recheck completes', ({ patch }) => {
+    const original = card(), ready = verified(original);
+    const incomplete: VerifiedState = { ...ready, ...patch };
+    const states = { [original.mutationId]: incomplete, settled: verified(card('calendar-settled')) };
+    const before = JSON.stringify(states);
+    expect(hasUnresolvedAssistantAction(states)).toBe(true);
+    expect(isUnattemptedCalendarPlan(turn([original]), states)).toBe(false);
+    expect(JSON.stringify(states)).toBe(before);
+    expect(incomplete.receipt).toBe(ready.receipt);
+
+    const checked = { ...states, [original.mutationId]: ready };
+    expect(hasUnresolvedAssistantAction(checked)).toBe(false);
+    // Clearing a warning never makes an executed plan eligible for a new preview.
+    expect(isUnattemptedCalendarPlan(turn([original]), checked)).toBe(false);
   });
 });
 

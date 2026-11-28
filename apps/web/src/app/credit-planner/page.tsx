@@ -123,7 +123,7 @@ export default function CreditPlannerPage() {
     <AcademicPage
       kind="grades"
       title="學分規劃"
-      subtitle="從學分目標到每學期課程，建立屬於自己的修課安排。"
+      subtitle="設定畢業學分目標，試算各學期要修的課。"
       closedAlternative="學分請先到學校的 e 校園或向系辦確認；下方個人試算仍可使用。"
       workspace={({ userId, schoolId, schoolName }) => (
         <>

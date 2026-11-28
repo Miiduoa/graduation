@@ -294,9 +294,9 @@ it('keeps each campus course and fallback isolated through NTU–NCKU–NTU navi
 });
 
 it.each([
-  ['ntu', '加入課程', '/classroom'],
+  ['ntu', '加入 nuni 課程', '/classroom'],
   ['ntu', '查看行事曆', '/calendar'],
-  ['all', '加入課程', '/classroom'],
+  ['all', '加入 nuni 課程', '/classroom'],
   ['all', '查看行事曆', '/calendar'],
 ])('continues the %s home journey through %s despite a saved PU preference', async (campus, label, path) => {
   const owner = prepare('platform');
@@ -339,4 +339,34 @@ it.each([
   resolveCatalog(new Response(JSON.stringify({ schools: catalog }), { status: 200 }));
   await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe(`${owner}|${expectedCampus}`));
   expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(`|${ACCOUNT}`))!)).toEqual({ schoolId: 'pu' });
+});
+
+it.each(['guest', 'platform'] as const)('scopes the first overlap and its event link on the %s homepage', async (identity) => {
+  const owner = prepare(identity);
+  await seedImport(owner);
+  const eventId = 'event +/& 甲';
+  await savePersonalImportBatch({ owner, schoolId: 'ntu' }, [{
+    id: eventId, kind: 'events', title: '小組討論', schoolId: 'ntu',
+    academicYear: '', semester: '', date: '2026-11-02', startTime: '09:30', endTime: '11:00',
+    source: { type: 'paste', line: 1, rawText: '' },
+  }]);
+  const view = render(<App />);
+  await classHref(owner);
+  if (identity === 'guest') {
+    expect(screen.queryByTestId('today-conflict')).toBeNull();
+    return;
+  }
+  const card = await screen.findByTestId('today-conflict');
+  expect(card.textContent).toContain(TITLE);
+  expect(card.textContent).toContain('小組討論');
+  expect(card.textContent).toContain('09:30–10:00');
+  expect(card.compareDocumentPosition(screen.getByTestId('today-unified-flow')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const url = new URL(within(card).getByRole('link').getAttribute('href')!, 'https://fixture.invalid');
+  expect(url.pathname).toBe('/calendar');
+  expect(url.searchParams.get('eventId')).toBe(eventId);
+  expect(url.searchParams.get('campus')).toBe('ntu');
+  state.search = 'campus=ncku';
+  view.rerender(<App />);
+  await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe(owner + '|ncku'));
+  expect(screen.queryByTestId('today-conflict')).toBeNull();
 });

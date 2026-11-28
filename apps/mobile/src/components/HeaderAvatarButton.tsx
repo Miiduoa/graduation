@@ -7,9 +7,9 @@
 import React from 'react';
 import { Pressable, View, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useThemeVersion } from '../ui/useThemeStyleSheet';
 import { useAuth } from '../state/auth';
-import { useNotifications } from '../state/notifications';
+import { useOptionalNotifications } from '../state/notifications';
 import { headerDrawer } from './HeaderDrawer';
 import { theme } from '../ui/theme';
 
@@ -18,8 +18,9 @@ export interface HeaderAvatarButtonProps {
 }
 
 export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
+  useThemeVersion();
   const auth = useAuth();
-  const notifs = useNotifications();
+  const notifs = useOptionalNotifications();
   const initial = (auth.profile?.displayName ?? auth.user?.email ?? '訪')
     .trim()
     .charAt(0)
@@ -37,9 +38,9 @@ export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
       })}
     >
       <View>
-        <LinearGradient
-          colors={[...theme.gradients.avatar]}
+        <View
           style={{
+            backgroundColor: theme.colors.surface2,
             width: size,
             height: size,
             borderRadius: size / 2,
@@ -50,7 +51,7 @@ export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
           {auth.user ? (
             <Text
               style={{
-                color: theme.colors.onAccent,
+                color: theme.colors.text,
                 fontSize: size * 0.45,
                 fontWeight: '700',
               }}
@@ -58,11 +59,11 @@ export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
               {initial}
             </Text>
           ) : (
-            <Ionicons name="person-outline" size={size * 0.5} color={theme.colors.onAccent} />
+            <Ionicons name="person-outline" size={size * 0.5} color={theme.colors.text} />
           )}
-        </LinearGradient>
+        </View>
         {/* 紅點：未讀通知 */}
-        {notifs.unreadCount > 0 ? (
+        {(notifs?.unreadCount ?? 0) > 0 ? (
           <View
             style={{
               position: 'absolute',
@@ -79,8 +80,8 @@ export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
               borderColor: theme.colors.bg,
             }}
           >
-            <Text style={{ color: theme.colors.onAccent, fontSize: 9, fontWeight: '700' }}>
-              {notifs.unreadCount > 9 ? '9+' : notifs.unreadCount}
+            <Text style={{ color: theme.colors.onDanger, fontSize: 9, fontWeight: '700' }}>
+              {notifs && notifs.unreadCount > 9 ? '9+' : notifs?.unreadCount}
             </Text>
           </View>
         ) : null}

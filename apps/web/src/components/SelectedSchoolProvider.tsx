@@ -23,6 +23,8 @@ export type BrowseSchool = {
   name: string;
   shortName?: string;
   code?: string;
+  aliases?: readonly string[];
+  domains?: readonly string[];
   status?: 'open' | 'not-open';
 };
 

@@ -1012,6 +1012,14 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 
 - **第二次隔離回饋與範圍收斂**：優化 helper 之精確 SHA `d6ada6323a898d2bd7f1953b2a3edbd2d350af8b`，Firestore Actions #44867873317 仍因 Rules 1000 expressions 上限導致 4/550 失敗（546 通過），涉及非教師評閱路徑、合法首次評分與原子更正。為先恢復原有功能，保留上一版已驗證的敏感讀取／互評權限檢查，但恢復未改前的教師 grade update 與 gradeRevision create 原始謂詞；**教師校籍衝突期間寫入成績及修訂仍是未修復風險**，不得把本補丁宣稱涵蓋寫入撤權。後續需重構 grade 規則分支以留出 expression budget，或將校籍核驗透過不可偽造的資料模型整合後重跑 atomic correction。新 SHA 回歸仍需核對，正式發布不可用未驗證提交。
 
+
+### 2026-11-21｜全分支整合：保留安全提交歷史並補完教師成績寫入撤權
+
+- 以 `main 67ed7458339e4db981ed016926affa465d995d2f` 整合安全分支 `92cabab8b3e871093cf2b64a58404c1375ae0960`；後者已包含 `8f94c3670b97d98c6c5ed451626133e87a1a59ad`、`a5d2ac48b7092e254728976f901fcb6f6d9d5cd9`、`ad94b4f6a4018ff73077def6d1f0ec8716c400f9`，使用真正 merge 保留四個分支的來源歷史。規則、測試及本文三檔無文字衝突。
+- 前述教師成績更新／原子修訂建立仍使用舊管理謂詞的缺口於本整合修補：`isActiveCurrentGroupMember` 單次核對現存群組、有效群組會員及既有 canonical 帳號／雙校籍／學校會員條件；`canManageCurrentGroup` 在此結果上檢查原有四種管理角色，避免同一帳號／會員校驗被重複展開。首次正式評分、歷史首次評分及原子修訂建立均使用此謂詞，原成績欄位限制、回答不可變及 audit 原子一致性檢查保留。
+- 新增三項真正 Firebase Emulator 回歸，使用同一登入 client 依次重放雙向校籍衝突、停用帳號、刪帳中、帳號文件刪除、學校撤權及課程撤權，核對首次兩種評分及原子更正均拒絕，恢復合法資格後可成功。合成初始分數與不可變學生回答也有斷言。
+- 本機 Node `22.23.5`、Firebase CLI `15.34.1`，Firestore／Storage Emulator 執行 `node --test --test-name-pattern="course assignment submissions|firestore security rules|campus story" backend/tests/security-rules.test.js`：**131/131 通過，0 失敗、0 略過**。包含正常教師首次發佈、歷史首次評分、原子成績更正、互評及所有本分支新增授權回歸；合法更正未因 1000 expressions 限制被拒絕。
+- 額外核對完整檔案時，本機既有 Storage story draft upload 正向案例出現 `storage/unauthorized`，同一環境改用精確 `main 67ed7458` 的原規則與原測試亦同樣失敗（會員查詢出現 null）；不是把此項算入通過，也未為讓測試通過而放寬 Storage。其完整整合 CI／跨產品 Emulator 仍須在總整合 head 獨立核實。本節不表示合併至遠端 main 或部署，指定 App 的精確 head 審查依既有規則執行。
 ### 2026-11-21｜同儕互評教師備註整筆 GET 的敏感欄位隔離（新分支候選）
 
 - 來源缺口：`groups/{groupId}/assignments/{assignmentId}/peerReviews/{reviewerId}` 對學生評閱者與被評閱者 GET 會返回**完整**文件，包括同份收據混放的 `teacherNotes`。既有合成案例實際包含 `teacherNotes: 'Restricted teacher note'`，先前卻將學生 GET 視為成功。這是可由 Rules 與資料模式推斷的敏感資訊暴露路徑，**不是**正式環境有外洩的證據。Firebase 官方明確指出 Rules 無法做欄位級讀取遮蔽（https://firebase.google.com/docs/firestore/security/rules-fields）。
@@ -1058,6 +1066,13 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **封版注意**：這是修補後程式及測試的精確 `08d6f10d...` 成功，不代表後續文件交接提交或完整整合 head 的所有檢查已成功。若本段落作為新提交推送，新 SHA 的定向 CI 亦須重查；完整 PR CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、指定 App 5504170 的精確 head 核可、正式部署及可回復驗證仍未完成。舊校教師的其他 legacy `canManageGroup` 呼叫與 grading write、簽發檔案 URL 撤權和真 Storage CAS 仍待獨立處理。
 
 
+### 2026-11-22｜全分支續整合：保留目前撤權及互評修補與原子成績驗證
+
+- 本輪以已驗證整合候選 `000fd11ca9736878e86dacc0a3727f547d25736e` 為起點，真正合併安全來源 `6d42b9dbb4995037cbdefb556f05f5b9758d4a9d`，保留雙方追加的歷史紀錄。來源新增的互評 `reviewerId`／作業收據衍生讀權、混放 `teacherNotes` 的學生 GET 拒絕、作業設定與群組管理的即時轉校撤權，均與既有整合的 `isActiveCurrentGroupMember` 單次驗權及 `canManageCurrentGroup` 管理角色檢查共同保留。首次評分、歷史首次評分與原子成績修訂繼續使用整合版的即時撤權條件；前述各獨立來源紀錄中「grading write 尚未處理」描述的是其當時候選，不能覆蓋本整合已完成的修補。
+- 四個 RED 重現分支是獨立測試提交，並非安全來源 head 的祖先；本輪亦以真正 merge 保留 `817b8b746048bb2cfca48af5ccf3bfe2a483ee32`（作業設定）、`33e9706109a0ab987f2d8255ab71ac00d043400b`（群組管理）、`53b3fece25940350dbebe7a8e8613fc2b595607e`（互評指派收據）及 `ab069ac8a4ac3858b6c3c5c2267b705191eadbe5`（互評明確 owner）來源歷史。這四次合併前後的實際 tree 完全相同；未以測試重現分支回退已修補的 Rules。唯一測試文字衝突保留後續已加入的 mis-keyed assignment regression。
+- 程式與測試精確本地提交 `02b56d2c490ab5e130dbfe70f87b6bb00affbcdd`，tree `60eca1f9f9a171ff49a4815ab22974f9f352ba99`。使用 Node `22.23.5`、Firebase CLI `15.34.1`、Rules testing `5.0.0`、Firebase `12.8.0`、Java 21，真正 Firestore `1.22.0`／Storage rules `1.1.3` Emulator。`node --test backend/tests/club-admin-rules.test.cjs` 為 **5/5**；`node --test --test-name-pattern="firestore security rules|course assignment submissions|campus story" backend/tests/security-rules.test.js` 為 **137/137**，兩者均 **0 failed／0 skipped**，同一 emulators:exec 終態 exit 0。包含所有本輪新增安全案例、合法首次評分／原子更正、同登入狀態撤權及恢復；預期拒絕測試的 PERMISSION_DENIED 訊息不算失敗。
+- 本機較廣範圍執行的既有 Storage 正向案例 `only a story draft owner can replace its photo before publication` 仍出現 `storage/unauthorized`／Storage member lookup null，觀察到具體失敗後停止該較廣測試；未將其算入成功。以原 `000fd11c` 的原始 Rules、原始測試及相同工具鏈亦重現同一案例失敗。本輪沒有更改 Storage 規則、刪除測試或放寬授權；最終整合版本仍需在標準 GitHub CI 完整重跑跨產品 Emulator。
+- 本節是來源整合與本機回歸紀錄，沒有代替最終總整合 SHA 的 CI、CodeQL、Maestro 或指定 App 5504170「審查通過」。沒有推送 main、操作正式資料、遷移、金鑰或部署；歷史含 teacherNotes／錯綁／缺少 canonical 校籍的資料須依既有資料邊界處理。
 ### 2026-11-22｜校籍轉換後的舊校群組建立權限重放（隔離驗證候選）
 
 - **來源缺口**：`groups/{groupId}` 的 create 僅檢查 target `schoolId` 的 membership 與 creator UID。若 canonical `users/{uid}.schoolId/primarySchoolId` 已轉校但舊校 membership 仍 active，持有舊登入狀態者仍可建立舊校群組，造成權限撤銷與新資源建立不一致。此為來源／合成身份的授權缺口，沒有正式環境利用證據。
@@ -1148,3 +1163,11 @@ Firestore 規則採回 merge-base `40cbb474d2d435a784f5356b08a0984059903d82`。�
 | 互評更新 | 恢復客戶端首次送出時間、重送刷新及單獨修改留言或分數。規則保護 `reviewerId` 與 `submissionOwnerId`，其餘更新沿用基準。 |
 
 兩版規則使用同一批測試資料與預期。未受指派的他人資料、撤權後依會籍控制的巢狀提交、目標校資格不足時的群組權限，以及舊按讚收據的建立權屬與禁止列舉，仍依基準拒絕。
+
+
+### 2026-11-23｜全分支整合沿用 #743 已審查的存取行為
+
+- 本輪以 `main b75017aa56c4211931662cf6b61933b47aeb0211` 整合 #738 的 `a3447cb016b7180d976884468e1c497a0cbfa7ff`。#743 最終 head `01509da46ef36c942b78a33ad2da681767a91190` 已取得指定 App 5504170 的「審查通過」後合入 main；其「相容範圍收斂」決策優先於上文較早候選紀錄。
+- 逐段比較本次自動合併的 Rules 與兩個來源：222 行差異均會重新加入 #743 已撤回的校籍一致性、根集合發布旗標、互評欄位及教師寫入額外限制。因此 `backend/firestore/firestore.rules` 沿用本輪 main 的完整原式，不把歷史修補的已驗證敘述當成目前主線行為。新增功能所需的 `_puTronClassLmsCache` 已在兩邊明確設定 `allow read, write: if false`，仍由伺服器處理。
+- 測試保留 main 的目標校資格、舊資料及 merge-base 相容矩陣；另保留 #738 獨有的本人歷史訂單相容測試，涵蓋轉學生／缺新欄位舊帳號讀取、停權／刪帳拒絕與跨帳號拒讀。俱樂部測試沿用 main，避免只以新增 canonical fixture 掩蓋舊會員相容性。
+- 兩邊的歷史來源及驗證紀錄均保留。以上是本輪衝突決策；最終整合 SHA 的 Emulator、完整 CI、CodeQL 與指定 App 審查須另行核對，不繼承 #743 或舊 #738 的成功狀態。

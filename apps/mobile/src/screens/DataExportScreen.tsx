@@ -114,9 +114,14 @@ function ExportEditor({
         !data.coverage ||
         data.coverage.scope !== 'selected-categories' ||
         typeof data.coverage.truncated !== 'boolean' ||
+        !Array.isArray(data.coverage.truncatedSections) ||
+        data.coverage.truncatedSections.some(
+          (section) => typeof section !== 'string' || !section.trim(),
+        ) ||
+        data.coverage.truncated !== (data.coverage.truncatedSections.length > 0) ||
         !Array.isArray(data.coverage.categories) ||
         data.coverage.categories.length !== selected.length ||
-        data.coverage.categories.some((category) => !selected.includes(category))
+        selected.some((category) => !data.coverage.categories.includes(category))
       ) {
         throw new Error('Unconfirmed export scope');
       }
@@ -166,11 +171,18 @@ function ExportEditor({
   const busy = Boolean(progress);
   return (
     <AIDetailScreen
+      testID="data-export-screen"
       title="匯出我的資料"
-      subtitle="選擇內容，將資料保存到自己的裝置。"
       onBack={() => navigation?.goBack?.()}
     >
-      <AICard title="這次匯出的範圍">
+      <AICard title="這次匯出的範圍" titleTestID="data-export-scope">
+        <Text
+          testID="data-export-instructions"
+          accessibilityLabel="選擇內容，將資料保存到自己的裝置。"
+          style={{ color: aiTokens.text, fontSize: 16, lineHeight: 24, marginBottom: 12 }}
+        >
+          選擇內容，將資料保存到自己的裝置。
+        </Text>
         <Text style={{ color: aiTokens.muted, lineHeight: 23 }}>
           目前學校：{schoolName}
           。個人資料、群組與作業等帳號紀錄可能跨越學校；校園紀錄與失物招領限目前學校。
@@ -204,6 +216,7 @@ function ExportEditor({
               key={item.id}
               accessibilityRole="checkbox"
               accessibilityLabel={item.name}
+              accessibilityHint={item.description}
               accessibilityState={{ checked, disabled: busy }}
               disabled={busy}
               onPress={() => {

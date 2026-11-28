@@ -4,6 +4,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleSheet,
   Switch,
   Text,
   TextInput,
@@ -30,6 +31,7 @@ import {
 import { PersonalMonthCalendar } from './PersonalMonthCalendar';
 import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
+import { TextAction } from '../ui/interactive/TextAction';
 import { useRevokedCampusEventDraftOwner } from '../state/personalImportAuthority';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { useNuniSession } from '../state/nuniSession';
@@ -85,7 +87,11 @@ type LoadState =
   | { status: 'error'; message: string }
   | { status: 'ready'; records: PersonalImportRecord[]; syncEnabled: boolean };
 
-type FocusParams = { eventId?: string } | undefined;
+type FocusParams = { eventId?: string; eventScope?: string } | undefined;
+
+export function PublicPersonalCalendar() {
+  return <PersonalCalendarScreen stackTitled />;
+}
 
 function useCalendarAccount(scope: PersonalImportScope | null) {
   const platform = useNuniSession(true);
@@ -191,6 +197,7 @@ export function CampusEventCalendarDraftScreen() {
       nuniGeneration={campusEvent.owner.startsWith('nuni:') ? nuniGeneration : undefined}
       schoolName={school.name}
       initialDraft={campusEvent.draft}
+      stackTitled
     />
   );
 }
@@ -212,7 +219,7 @@ function parsePersonalImportKey(key: string): { owner: string; schoolId: string 
   }
 }
 
-export default function PersonalCalendarScreen() {
+export default function PersonalCalendarScreen({ stackTitled = false }: { stackTitled?: boolean }) {
   const scope = usePersonalImportScope();
   const {
     knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseJustSignedOut,
@@ -251,7 +258,11 @@ export default function PersonalCalendarScreen() {
   useLayoutEffect(() => {
     if (workspaceUid || !nuniWorkspace) lastWorkspaceUid.current = workspaceUid;
   }, [workspaceUid, nuniWorkspace]);
-  const focusEventId = (route.params as FocusParams)?.eventId;
+  const params = route.params as FocusParams;
+  const focusEventId = params?.eventScope === undefined ||
+    (verifiedScope && params.eventScope === JSON.stringify(verifiedScope))
+    ? params?.eventId
+    : undefined;
   return (
     <PersonalCalendarWorkspace
       key={JSON.stringify([
@@ -262,6 +273,7 @@ export default function PersonalCalendarScreen() {
       scope={verifiedScope}
       writesRevoked={writesRevoked}
       writeGeneration={firebaseLogoutGeneration}
+      stackTitled={stackTitled}
       nuniGeneration={nuniWorkspace ? nuniGeneration : undefined}
       schoolName={school?.name || '未指定校園'}
       focusEventId={focusEventId}
@@ -271,6 +283,7 @@ export default function PersonalCalendarScreen() {
 
 function PersonalCalendarWorkspace({
   scopeKey,
+  stackTitled,
   scope,
   writesRevoked,
   writeGeneration,
@@ -280,6 +293,7 @@ function PersonalCalendarWorkspace({
   initialDraft,
 }: {
   scopeKey: string;
+  stackTitled: boolean;
   scope: PersonalImportScope | null;
   writesRevoked: boolean;
   writeGeneration: number;
@@ -708,7 +722,7 @@ function PersonalCalendarWorkspace({
     options?: { multiline?: boolean; placeholder?: string },
   ) => (
     <View style={{ gap: 6 }}>
-      <Text style={{ color: theme.colors.muted, fontSize: 13 }}>{label}</Text>
+      <Text style={{ color: theme.colors.textSecondary, fontSize: 13, fontWeight: '600' }}>{label}</Text>
       <TextInput
         accessibilityLabel={label}
         value={value}
@@ -719,7 +733,7 @@ function PersonalCalendarWorkspace({
         style={{
           borderWidth: 1,
           borderColor: theme.colors.border,
-          borderRadius: 8,
+          borderRadius: theme.radius.md,
           paddingHorizontal: 12,
           paddingVertical: 10,
           color: theme.colors.text,
@@ -742,15 +756,27 @@ function PersonalCalendarWorkspace({
         entry.status === 'limit_deferred');
 
     return (
-      <View style={{ gap: 8, marginTop: 8 }} accessibilityLabel={`提醒設定 ${record.title}`}>
+      <View
+        style={{
+          gap: 8,
+          marginTop: 4,
+          paddingTop: 12,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.colors.separator,
+        }}
+        accessibilityLabel={`提醒設定 ${record.title}`}
+      >
+        <Text style={{ color: theme.colors.textSecondary, fontSize: 13, fontWeight: '600' }}>
+          此裝置提醒
+        </Text>
         <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 18 }}>
           {PERSONAL_EVENT_REMINDER_DEVICE_NOTE}
         </Text>
         {reminderBlocked ? (
-          <View style={{ gap: 8 }}>
-            <Text style={{ color: theme.colors.danger, fontSize: 12 }}>{reminderBlocked}</Text>
-            <Button
-              text="重試提醒同步"
+          <View style={{ gap: 4 }}>
+            <Text style={{ color: theme.colors.danger, fontSize: 13 }}>{reminderBlocked}</Text>
+            <TextAction
+              label="重試提醒同步"
               disabled={!canMutate || busy}
               onPress={() => {
                 if (!scope) return;
@@ -774,13 +800,14 @@ function PersonalCalendarWorkspace({
             />
           </View>
         ) : null}
-        <Text style={{ color: theme.colors.text, fontSize: 13 }}>
+        <Text style={{ color: theme.colors.text, fontSize: 14 }}>
           {entry ? reminderPreferenceLabel(entry.preference) : '此裝置提醒：關閉'}
         </Text>
-        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{status}</Text>
+        <Text style={{ color: theme.colors.muted, fontSize: 13 }}>{status}</Text>
         {record.allDay ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Button
+            <Chip
+              selected={enabled}
               text={
                 enabled
                   ? `關閉此裝置提醒`
@@ -804,15 +831,17 @@ function PersonalCalendarWorkspace({
         ) : (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {TIMED_LEAD_OPTIONS.map((lead) => {
-              const selected =
+              const selected = !!(
                 enabled &&
                 entry?.preference.enabled &&
                 entry.preference.mode === 'timed' &&
-                entry.preference.leadMinutes === lead;
+                entry.preference.leadMinutes === lead
+              );
               const label = lead === 0 ? '開始時' : `提前 ${lead} 分`;
               return (
-                <Button
+                <Chip
                   key={lead}
+                  selected={selected}
                   text={selected ? `✓ ${label}` : label}
                   disabled={!canMutate || busy}
                   onPress={() => {
@@ -830,8 +859,8 @@ function PersonalCalendarWorkspace({
               );
             })}
             {enabled ? (
-              <Button
-                text="關閉此裝置提醒"
+              <TextAction
+                label="關閉此裝置提醒"
                 disabled={!canMutate || busy}
                 onPress={() => {
                   if (!scope) return;
@@ -844,9 +873,9 @@ function PersonalCalendarWorkspace({
           </View>
         )}
         {needsRetry ? (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Button
-              text="重試此裝置提醒"
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: 20 }}>
+            <TextAction
+              label="重試此裝置提醒"
               disabled={!canMutate || busy}
               onPress={() => {
                 if (!scope) return;
@@ -856,8 +885,8 @@ function PersonalCalendarWorkspace({
               }}
             />
             {Platform.OS !== 'web' ? (
-              <Button
-                text="開啟系統通知設定"
+              <TextAction
+                label="開啟系統通知設定"
                 disabled={busy}
                 onPress={openPersonalReminderSettings}
               />
@@ -884,43 +913,70 @@ function PersonalCalendarWorkspace({
       </Screen>
     );
   }
+  const hairline = StyleSheet.hairlineWidth;
+  const meta = { color: theme.colors.muted, fontSize: 13, lineHeight: 19 } as const;
+
   return (
-    <Screen title={initialDraft ? undefined : '個人行事曆'}>
+    <Screen title={initialDraft || stackTitled ? undefined : '個人行事曆'}>
       <ScrollView contentContainerStyle={{ gap: 16, paddingBottom: 40 }}>
-        <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-          這裡是 {schoolName} 的個人行程，不是學校正式紀錄。
-          {load.status === 'ready'
-            ? personalEventPersistenceCopy(load.syncEnabled)
-            : '確認帳號與校園後再編輯。'}
-        </Text>
-        <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20 }}>
-          匯入或匯出行事曆檔只是整理自己的安排，不會完成報名，也不會自動設定提醒。提醒需在此裝置另行開啟。
-        </Text>
+        <View style={{ gap: 6 }}>
+          <Text style={{ color: theme.colors.textSecondary, lineHeight: 22 }}>
+            這裡是 {schoolName} 的個人行程，不是學校正式紀錄。
+            {load.status === 'ready'
+              ? personalEventPersistenceCopy(load.syncEnabled)
+              : '確認帳號與校園後再編輯。'}
+          </Text>
+          <Text style={meta}>
+            匯入或匯出行事曆檔只是整理自己的安排，不會完成報名，也不會自動設定提醒。提醒需在此裝置另行開啟。
+          </Text>
+        </View>
         {!fromCampusEvent && (
           <>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              <Button text="新增行程" disabled={!canMutate} onPress={openCreate} />
-              <Button
-                text="從截圖或檔案匯入"
-                onPress={() => {
-                  safeNavigate(navigation, 'PersonalImport', { kind: 'events' });
-                }}
-              />
-              <Button text="匯出所選月份" disabled={!ready} onPress={exportCurrentList} />
+            <View style={{ gap: 4 }}>
+              <Button text="新增行程" kind="primary" disabled={!canMutate} onPress={openCreate} />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: 20 }}>
+                <TextAction
+                  label="從截圖或檔案匯入"
+                  onPress={() => {
+                    safeNavigate(navigation, 'PersonalImport', { kind: 'events' });
+                  }}
+                />
+                <TextAction label="匯出所選月份" disabled={!ready} onPress={exportCurrentList} />
+              </View>
             </View>
-            <Text style={{ color: theme.colors.text, fontSize: 18 }}>{month}</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              <Button text="上一月" onPress={() => changeMonth(shiftCalendarMonth(month, -1))} />
-              <Button text="回今天" onPress={goToday} />
-              <Button text="下一月" onPress={() => changeMonth(shiftCalendarMonth(month, 1))} />
-              <Button text="月格" onPress={() => setCalendarView('month')} />
-              <Button
-                text="列表"
-                onPress={() => {
-                  setCalendarView('list');
-                  setSelectedDate('');
-                }}
-              />
+            <View
+              style={{
+                gap: 4,
+                paddingTop: 12,
+                borderTopWidth: hairline,
+                borderTopColor: theme.colors.separator,
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 20, fontWeight: '700' }}>
+                  {month}
+                </Text>
+                <View style={{ flexDirection: 'row', columnGap: 16 }}>
+                  <TextAction label="上一月" onPress={() => changeMonth(shiftCalendarMonth(month, -1))} />
+                  <TextAction label="回今天" onPress={goToday} />
+                  <TextAction label="下一月" onPress={() => changeMonth(shiftCalendarMonth(month, 1))} />
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Chip
+                  text="月格"
+                  selected={calendarView === 'month'}
+                  onPress={() => setCalendarView('month')}
+                />
+                <Chip
+                  text="列表"
+                  selected={calendarView === 'list'}
+                  onPress={() => {
+                    setCalendarView('list');
+                    setSelectedDate('');
+                  }}
+                />
+              </View>
             </View>
             {ready && calendarView === 'month' ? (
               <PersonalMonthCalendar
@@ -934,10 +990,12 @@ function PersonalCalendarWorkspace({
               />
             ) : null}
             {selectedDate ? (
-              <View>
-                <Text style={{ color: theme.colors.text }}>{selectedDate} 的行程</Text>
-                <Button
-                  text="查看整月列表"
+              <View style={{ gap: 2 }}>
+                <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 16, fontWeight: '600' }}>
+                  {selectedDate} 的行程
+                </Text>
+                <TextAction
+                  label="查看整月列表"
                   onPress={() => {
                     setSelectedDate('');
                     setCalendarView('list');
@@ -956,24 +1014,22 @@ function PersonalCalendarWorkspace({
             <Text style={{ color: theme.colors.danger }}>
               {load.message} 讀取失敗時不會清空或覆寫現有資料；暫時無法新增或刪除。
             </Text>
-            <Button text="重試讀取" onPress={() => void refresh()} />
+            <TextAction label="重試讀取" onPress={() => void refresh()} />
           </>
         ) : null}
-        {notice ? <Text style={{ color: theme.colors.accent }}>{notice}</Text> : null}
+        {notice ? <Text style={{ color: theme.colors.accent, fontWeight: '600' }}>{notice}</Text> : null}
         {formError ? <Text style={{ color: theme.colors.danger }}>{formError}</Text> : null}
 
         {(mode === 'create' || mode === 'edit') && (
           <View
             style={{
               gap: 12,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              borderRadius: 12,
-              padding: 14,
-              backgroundColor: theme.colors.surface,
+              paddingTop: 16,
+              borderTopWidth: hairline,
+              borderTopColor: theme.colors.separator,
             }}
           >
-            <Text style={{ fontSize: 17, fontWeight: '700', color: theme.colors.text }}>
+            <Text accessibilityRole="header" style={{ fontSize: 18, fontWeight: '700', color: theme.colors.text }}>
               {fromCampusEvent
                 ? '確認活動行程'
                 : mode === 'create'
@@ -1005,6 +1061,7 @@ function PersonalCalendarWorkspace({
               <Switch
                 value={draft.allDay}
                 disabled={saving}
+                trackColor={{ true: theme.colors.accent }}
                 onValueChange={(allDay) =>
                   setDraft({
                     ...draft,
@@ -1033,25 +1090,36 @@ function PersonalCalendarWorkspace({
               </Text>
             ))}
             {verifiedKey && mode === 'edit' && baseline ? reminderControls(baseline) : null}
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <View style={{ gap: 4 }}>
               {mode === 'create' ? (
                 <Button
                   text={saving ? '儲存中…' : '儲存行程'}
+                  kind="primary"
                   disabled={!canMutate || draftIssues.length > 0}
                   onPress={saveCreate}
                 />
               ) : (
-                <>
-                  <Button
-                    text={saving ? '儲存中…' : '儲存修改'}
-                    disabled={!canMutate || draftIssues.length > 0}
-                    onPress={saveEdit}
-                  />
-                  <Button text="刪除這筆" disabled={!canMutate} onPress={removeSelected} />
-                  <Button text="匯出這筆" disabled={!ready} onPress={exportSelectedOnly} />
-                </>
+                <Button
+                  text={saving ? '儲存中…' : '儲存修改'}
+                  kind="primary"
+                  disabled={!canMutate || draftIssues.length > 0}
+                  onPress={saveEdit}
+                />
               )}
-              <Button text="取消" disabled={saving} onPress={cancelForm} />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: 20 }}>
+                {mode === 'edit' ? (
+                  <>
+                    <TextAction label="匯出這筆" disabled={!ready} onPress={exportSelectedOnly} />
+                    <TextAction
+                      label="刪除這筆"
+                      tone="danger"
+                      disabled={!canMutate}
+                      onPress={removeSelected}
+                    />
+                  </>
+                ) : null}
+                <TextAction label="取消" tone="neutral" disabled={saving} onPress={cancelForm} />
+              </View>
             </View>
           </View>
         )}
@@ -1062,46 +1130,97 @@ function PersonalCalendarWorkspace({
             按「新增行程」直接建立，或從截圖／檔案匯入。
           </Text>
         ) : null}
-        {(calendarView === 'list' || selectedDate ? events : []).map((event) => (
-          <Pressable
-            key={event.id}
-            accessibilityRole="button"
-            disabled={!ready || saving}
-            onPress={() => openEdit(event)}
-            style={{
-              gap: 4,
-              padding: 14,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: baseline?.id === event.id ? theme.colors.accent : theme.colors.border,
-              backgroundColor: theme.colors.surface,
-            }}
-          >
-            <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
-              {event.date}
-              {event.endDate && event.endDate !== event.date
-                ? ` 至 ${event.endDate}${event.allDay ? '（不含結束日）' : ''}`
-                : ''}
-            </Text>
-            <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '600' }}>
-              {event.title}
-            </Text>
-            <Text style={{ color: theme.colors.muted }}>
-              {event.allDay ? '全天' : `${event.startTime}–${event.endTime}`} ·{' '}
-              {event.location || '地點未填'}
-            </Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-              {personalEventSourceLabel(event)}
-            </Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-              {reminders[event.id]
-                ? reminderPreferenceLabel(reminders[event.id]!.preference)
-                : '此裝置提醒：關閉'}
-            </Text>
-          </Pressable>
-        ))}
+        <View>
+          {(calendarView === 'list' || selectedDate ? events : []).map((event) => {
+            const isOpen = baseline?.id === event.id;
+            return (
+              <Pressable
+                key={event.id}
+                accessibilityRole="button"
+                accessibilityState={isOpen ? { selected: true } : undefined}
+                disabled={!ready || saving}
+                onPress={() => openEdit(event)}
+                style={({ pressed }) => ({
+                  gap: 3,
+                  paddingVertical: 14,
+                  paddingLeft: isOpen ? 10 : 0,
+                  borderTopWidth: hairline,
+                  borderTopColor: theme.colors.separator,
+                  borderLeftWidth: isOpen ? 3 : 0,
+                  borderLeftColor: theme.colors.accent,
+                  backgroundColor: pressed ? theme.colors.surfaceMuted : 'transparent',
+                })}
+              >
+                <Text style={{ color: theme.colors.text, fontSize: 17, lineHeight: 24, fontWeight: '700' }}>
+                  {event.title}
+                </Text>
+                <Text style={{ color: theme.colors.textSecondary, fontSize: 14 }}>
+                  {event.date}
+                  {event.endDate && event.endDate !== event.date
+                    ? ` 至 ${event.endDate}${event.allDay ? '（不含結束日）' : ''}`
+                    : ''}
+                </Text>
+                <Text style={{ color: theme.colors.textSecondary, fontSize: 14 }}>
+                  {event.allDay ? '全天' : `${event.startTime}–${event.endTime}`} ·{' '}
+                  {event.location || '地點未填'}
+                </Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                  {personalEventSourceLabel(event)}
+                </Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                  {reminders[event.id]
+                    ? reminderPreferenceLabel(reminders[event.id]!.preference)
+                    : '此裝置提醒：關閉'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </ScrollView>
     </Screen>
+  );
+}
+
+
+/** Single-choice chip: forest fill only when selected. */
+function Chip({
+  text,
+  selected,
+  onPress,
+  disabled = false,
+}: {
+  text: string;
+  selected: boolean;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected, disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={{
+        minHeight: 44,
+        justifyContent: 'center',
+        paddingHorizontal: 14,
+        borderRadius: theme.radius.md,
+        borderWidth: 1,
+        borderColor: selected ? theme.colors.accent : theme.colors.border,
+        backgroundColor: selected ? theme.colors.accent : 'transparent',
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      <Text
+        style={{
+          fontSize: 14,
+          fontWeight: selected ? '700' : '400',
+          color: selected ? theme.colors.onAccent : theme.colors.text,
+        }}
+      >
+        {text}
+      </Text>
+    </Pressable>
   );
 }
 

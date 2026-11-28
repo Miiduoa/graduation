@@ -11,16 +11,29 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { School } from '@campus/shared/src';
-import { normalizeSchoolQuery, searchSchools } from '@campus/shared/src/schools';
+import {
+  matchingSchoolEnglishName,
+  normalizeSchoolQuery,
+  searchSchools,
+} from '@campus/shared/src/schools';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 import { useSchool } from '../state/school';
 import { fetchSchoolDirectory } from '../services/schoolDirectory';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 
-export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }) {
+export function SchoolBrowsingControl({
+  compact = false,
+  destination,
+}: {
+  compact?: boolean;
+  destination?: { title: string; onChoose: (schoolId: string) => void; onCancel: () => void };
+}) {
+  const reducedMotion = useReducedMotion();
   const s = useThemeStyleSheet(createStyles);
   const { school, setSelection } = useSchool();
   const [open, setOpen] = useState(false);
@@ -29,11 +42,15 @@ export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [searchFocused, setSearchFocused] = useState(false);
+  const { fontScale, height } = useWindowDimensions();
+  const compactSearch = searchFocused && (fontScale >= 1.5 || height < 520);
   const searchInput = useRef<TextInput>(null);
   const resultsList = useRef<FlatList<School>>(null);
+  const picking = useRef(false);
 
+  const visible = open || !!destination;
   useEffect(() => {
-    if (!open) return;
+    if (!visible) return;
     let active = true;
     void fetchSchoolDirectory().then(
       (schools) => {
@@ -46,7 +63,7 @@ export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }
     return () => {
       active = false;
     };
-  }, [open, attempt]);
+  }, [visible, attempt]);
 
   const matches = useMemo(() => {
     const found = searchSchools(query, directory ?? []);
@@ -58,9 +75,195 @@ export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }
     resultsList.current?.scrollToOffset({ offset: 0, animated: false });
   }, [query]);
   const closePicker = () => {
+    if (picking.current) return;
     Keyboard.dismiss();
-    setOpen(false);
+    if (destination) destination.onCancel();
+    else setOpen(false);
   };
+
+  const closeControl = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={destination ? `取消開啟${destination.title}` : '關閉校園選擇'}
+      onPress={closePicker}
+      style={({ pressed }) => [s.button, pressed && s.pressed]}
+    >
+      <Text style={s.buttonText}>{destination ? '取消' : '關閉'}</Text>
+    </Pressable>
+  );
+
+  const picker = (
+    <SafeAreaView style={s.modal}>
+      <KeyboardAvoidingView
+        style={s.modalContent}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        {!compactSearch && (
+          <View style={s.modalHeading}>
+            <Text accessibilityRole="header" style={s.modalTitle}>
+              {destination ? `選擇校園 · ${destination.title}` : '選擇瀏覽校園'}
+            </Text>
+            {closeControl}
+          </View>
+        )}
+        {!compactSearch && (
+          <Text style={s.pickerNote}>
+            {destination
+              ? `選擇學校後，直接開啟該校的${destination.title}。`
+              : '切換公開校園資訊，已登入的學校帳號與個人資料權限會維持原設定。'}
+          </Text>
+        )}
+        <View style={compactSearch && s.compactSearchBar}>
+          <View
+            style={[
+              s.searchBox,
+              compactSearch && s.compactSearchBox,
+              searchFocused && s.searchFocused,
+            ]}
+          >
+            <TextInput
+              testID="school-picker-search"
+              ref={searchInput}
+              accessibilityLabel="搜尋學校"
+              placeholder="搜尋學校名稱或代碼"
+              placeholderTextColor={theme.colors.muted}
+              value={query}
+              onChangeText={setQuery}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
+              onSubmitEditing={() => Keyboard.dismiss()}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardAppearance={theme.mode}
+              selectionColor={theme.colors.accent}
+              returnKeyType="search"
+              style={s.search}
+            />
+            {query.length ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="清除學校搜尋"
+                onPress={() => {
+                  setQuery('');
+                  searchInput.current?.focus();
+                }}
+                style={({ pressed }) => [s.clearSearch, pressed && s.pressed]}
+              >
+                <Text style={s.buttonText}>{compactSearch ? '×' : '清除'}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {compactSearch && closeControl}
+        </View>
+        {directory === null && !error ? (
+          <View style={{ padding: 28, gap: 12 }}>
+            <ActivityIndicator color={theme.colors.accent} />
+            <Text style={{ color: theme.colors.muted, textAlign: 'center' }}>
+              正在讀取學校目錄…
+            </Text>
+          </View>
+        ) : error ? (
+          <View style={{ padding: 28, gap: 14 }}>
+            <Text accessibilityRole="alert" style={{ color: theme.colors.text }}>
+              無法讀取學校目錄，請檢查網路後重試。
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setDirectory(null);
+                setError(false);
+                setAttempt((value) => value + 1);
+              }}
+              style={({ pressed }) => [s.button, pressed && s.pressed]}
+            >
+              <Text style={s.buttonText}>重新讀取</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={s.results}>
+            <Text accessibilityLiveRegion="polite" style={s.resultCaption}>
+              {matches.length} 所學校{compactSearch ? '' : ' · 點選後切換公開資訊'}
+            </Text>
+            <FlatList
+              ref={resultsList}
+              data={matches}
+              keyExtractor={(entry) => entry.id}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              contentContainerStyle={s.resultList}
+              ListEmptyComponent={
+                <Text style={s.emptyResult}>找不到符合的學校，請換個關鍵字。</Text>
+              }
+              renderItem={({ item: entry }) => {
+                const englishName = matchingSchoolEnglishName(entry, query);
+                return (
+                  <Pressable
+                    accessibilityRole="button"
+                    testID={`school-picker-option-${entry.id}`}
+                    accessibilityLabel={`選擇${entry.name}`}
+                    accessibilityHint={englishName ?? undefined}
+                    accessibilityState={{ selected: entry.id === school.id }}
+                    onPress={() => {
+                      if (picking.current) return;
+                      picking.current = true;
+                      destination?.onChoose(entry.id);
+                      setSelection({
+                        schoolId: entry.id,
+                        code: entry.code,
+                        schoolName: entry.name,
+                        shortName: entry.shortName ?? null,
+                        themeColor: entry.themeColor ?? null,
+                        domains: entry.domains ?? null,
+                      });
+                      Keyboard.dismiss();
+                      setOpen(false);
+                    }}
+                    style={({ pressed }) => [
+                      s.schoolRow,
+                      entry.id === school.id && s.selectedSchool,
+                      pressed && s.pressed,
+                    ]}
+                  >
+                    <View style={{ flex: 1, paddingRight: 12 }}>
+                      <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 15 }}>
+                        {entry.name}
+                      </Text>
+                      {englishName && <Text style={s.englishName}>{englishName}</Text>}
+                      {!!entry.code && <Text style={s.schoolCode}>{entry.code}</Text>}
+                    </View>
+                    {entry.id === school.id ? (
+                      <Text style={s.selectedLabel}>目前選擇</Text>
+                    ) : (
+                      <Text
+                        style={s.rowArrow}
+                        accessibilityElementsHidden
+                        importantForAccessibility="no"
+                      >
+                        →
+                      </Text>
+                    )}
+                  </Pressable>
+                );
+              }}
+            />
+          </View>
+        )}
+        {!destination && !compactSearch && (
+          <View style={s.modalFooter}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="完成校園選擇"
+              onPress={closePicker}
+              style={({ pressed }) => [s.doneButton, pressed && s.donePressed]}
+            >
+              <Text style={s.doneText}>完成</Text>
+            </Pressable>
+          </View>
+        )}
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+  if (destination) return picker;
 
   return (
     <>
@@ -72,9 +275,12 @@ export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }
         ) : null}
         <Pressable
           accessibilityRole="button"
+          accessible
+          collapsable={false}
           testID="school-picker-open"
           accessibilityLabel={school.id ? `目前瀏覽${school.name}，選擇其他學校` : '選擇我的學校'}
           onPress={() => {
+            picking.current = false;
             setQuery('');
             setDirectory(null);
             setError(false);
@@ -87,8 +293,12 @@ export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }
             pressed && s.pressed,
           ]}
         >
-          <Text style={[s.schoolName, compact && s.compactSchoolName]}>{school.id ? school.name : '選擇我的學校'}</Text>
-          <Text style={s.changeSchool}>{school.id ? (compact ? '切換' : '選擇其他學校') : '搜尋學校'}</Text>
+          <Text style={[s.schoolName, compact && s.compactSchoolName]}>
+            {school.id ? school.name : '選擇我的學校'}
+          </Text>
+          <Text style={s.changeSchool}>
+            {school.id ? (compact ? '切換' : '選擇其他學校') : '搜尋學校'}
+          </Text>
         </Pressable>
         {!compact ? (
           <Text style={s.browsingNote}>
@@ -98,162 +308,11 @@ export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }
       </View>
       <Modal
         visible={open}
-        animationType="slide"
+        animationType={reducedMotion ? 'none' : 'slide'}
         presentationStyle="pageSheet"
         onRequestClose={closePicker}
       >
-        <SafeAreaView style={s.modal}>
-          <KeyboardAvoidingView
-            style={s.modalContent}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <View style={s.modalHeading}>
-              <Text accessibilityRole="header" style={s.modalTitle}>
-                選擇瀏覽校園
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="關閉校園選擇"
-                onPress={closePicker}
-                style={({ pressed }) => [s.button, pressed && s.pressed]}
-              >
-                <Text style={s.buttonText}>關閉</Text>
-              </Pressable>
-            </View>
-            <Text style={s.pickerNote}>
-              切換公開校園資訊，已登入的學校帳號與個人資料權限會維持原設定。
-            </Text>
-            <View style={[s.searchBox, searchFocused && s.searchFocused]}>
-              <TextInput
-                testID="school-picker-search"
-                ref={searchInput}
-                accessibilityLabel="搜尋學校"
-                placeholder="搜尋學校名稱或代碼"
-                placeholderTextColor={theme.colors.muted}
-                value={query}
-                onChangeText={setQuery}
-                onFocus={() => setSearchFocused(true)}
-                onBlur={() => setSearchFocused(false)}
-                onSubmitEditing={() => Keyboard.dismiss()}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardAppearance={theme.mode}
-                selectionColor={theme.colors.accent}
-                returnKeyType="search"
-                style={s.search}
-              />
-              {query.length ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="清除學校搜尋"
-                  onPress={() => {
-                    setQuery('');
-                    searchInput.current?.focus();
-                  }}
-                  style={({ pressed }) => [s.clearSearch, pressed && s.pressed]}
-                >
-                  <Text style={s.buttonText}>清除</Text>
-                </Pressable>
-              ) : null}
-            </View>
-            {directory === null && !error ? (
-              <View style={{ padding: 28, gap: 12 }}>
-                <ActivityIndicator color={theme.colors.accent} />
-                <Text style={{ color: theme.colors.muted, textAlign: 'center' }}>
-                  正在讀取學校目錄…
-                </Text>
-              </View>
-            ) : error ? (
-              <View style={{ padding: 28, gap: 14 }}>
-                <Text accessibilityRole="alert" style={{ color: theme.colors.text }}>
-                  無法讀取學校目錄，請檢查網路後重試。
-                </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => {
-                    setDirectory(null);
-                    setError(false);
-                    setAttempt((value) => value + 1);
-                  }}
-                  style={({ pressed }) => [s.button, pressed && s.pressed]}
-                >
-                  <Text style={s.buttonText}>重新讀取</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <View style={s.results}>
-                <Text accessibilityLiveRegion="polite" style={s.resultCaption}>
-                  {matches.length} 所學校 · 點選後切換公開資訊
-                </Text>
-                <FlatList
-                  ref={resultsList}
-                  data={matches}
-                  keyExtractor={(entry) => entry.id}
-                  keyboardShouldPersistTaps="handled"
-                  keyboardDismissMode="on-drag"
-                  contentContainerStyle={s.resultList}
-                  ListEmptyComponent={
-                    <Text style={s.emptyResult}>找不到符合的學校，請換個關鍵字。</Text>
-                  }
-                  renderItem={({ item: entry }) => (
-                    <Pressable
-                      accessibilityRole="button"
-                      testID={`school-picker-option-${entry.id}`}
-                      accessibilityLabel={`選擇${entry.name}`}
-                      accessibilityState={{ selected: entry.id === school.id }}
-                      onPress={() => {
-                        setSelection({
-                          schoolId: entry.id,
-                          code: entry.code,
-                          schoolName: entry.name,
-                          shortName: entry.shortName ?? null,
-                          themeColor: entry.themeColor ?? null,
-                          domains: entry.domains ?? null,
-                        });
-                        closePicker();
-                      }}
-                      style={({ pressed }) => [
-                        s.schoolRow,
-                        entry.id === school.id && s.selectedSchool,
-                        pressed && s.pressed,
-                      ]}
-                    >
-                      <View style={{ flex: 1, paddingRight: 12 }}>
-                        <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 15 }}>
-                          {entry.name}
-                        </Text>
-                        <Text style={{ color: theme.colors.muted, marginTop: 3, fontSize: 12 }}>
-                          {entry.code}
-                        </Text>
-                      </View>
-                      {entry.id === school.id ? (
-                        <Text style={s.selectedLabel}>目前選擇</Text>
-                      ) : (
-                        <Text
-                          style={s.rowArrow}
-                          accessibilityElementsHidden
-                          importantForAccessibility="no"
-                        >
-                          →
-                        </Text>
-                      )}
-                    </Pressable>
-                  )}
-                />
-              </View>
-            )}
-            <View style={s.modalFooter}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="完成校園選擇"
-                onPress={closePicker}
-                style={({ pressed }) => [s.doneButton, pressed && s.donePressed]}
-              >
-                <Text style={s.doneText}>完成</Text>
-              </Pressable>
-            </View>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
+        {picker}
       </Modal>
     </>
   );
@@ -272,10 +331,8 @@ const createStyles = () =>
       minHeight: 44,
       paddingVertical: 8,
       paddingHorizontal: 12,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      borderRadius: 10,
-      backgroundColor: theme.colors.surface,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
     },
     compactSchoolName: { fontSize: 14, lineHeight: 22, flex: 1 },
     eyebrow: { color: theme.colors.muted, fontSize: 12, fontWeight: '500' },
@@ -331,6 +388,14 @@ const createStyles = () =>
       borderRadius: 6,
     },
     buttonText: { color: theme.colors.accent, fontSize: 14, lineHeight: 22, fontWeight: '600' },
+    compactSearchBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginHorizontal: 12,
+      paddingVertical: 8,
+      gap: 4,
+    },
+    compactSearchBox: { flex: 1, minWidth: 0, marginHorizontal: 0 },
     searchBox: {
       marginHorizontal: 18,
       flexDirection: 'row',
@@ -374,16 +439,15 @@ const createStyles = () =>
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingVertical: 15,
-      paddingHorizontal: 12,
-      marginBottom: 4,
-      borderWidth: 1,
-      borderColor: 'transparent',
+      paddingVertical: 14,
+      paddingHorizontal: 8,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: theme.colors.border,
-      minHeight: 68,
-      borderRadius: 8,
+      minHeight: 64,
     },
-    selectedSchool: { backgroundColor: theme.colors.surface2, borderColor: theme.colors.accent },
+    englishName: { color: theme.colors.textSecondary, marginTop: 4, fontSize: 14, lineHeight: 21 },
+    schoolCode: { color: theme.colors.muted, marginTop: 3, fontSize: 12 },
+    selectedSchool: { borderLeftWidth: 2, borderLeftColor: theme.colors.accent, backgroundColor: theme.colors.surface2 },
     selectedLabel: { color: theme.colors.accent, fontSize: 12, fontWeight: '600', flexShrink: 1 },
     rowArrow: { color: theme.colors.muted, fontSize: 21 },
     modalFooter: {

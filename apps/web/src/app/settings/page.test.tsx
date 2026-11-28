@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { browserRequest } from '@/features/nuni/Session';
 import SettingsPage from './page';
+import { defaultNotificationPreferences } from '@campus/shared/src/notifications';
 import {
   AGENT_DELETE_MODEL_ACTION,
   AGENT_MODEL_DELETED_TEXT,
@@ -296,6 +297,172 @@ it('requires reloading after an unconfirmed notification save and then verifies 
   fireEvent.click(save);
   await waitFor(() => expect(state.success).toHaveBeenCalledWith('通知設定已同步'));
 });
+function serveNotificationDoc(read: () => Record<string, unknown> | undefined) {
+  state.read.mockImplementation(async (path: string) => {
+    const notifications = path.endsWith('/notifications');
+    const data = notifications ? read() : state.profiles.a;
+    return { exists: () => !!data, data: () => data };
+  });
+}
+
+async function openNotifications() {
+  render(<SettingsPage />);
+  fireEvent.click(screen.getByRole('button', { name: '通知' }));
+  const save = screen.getByRole('button', { name: '儲存通知設定' }) as HTMLButtonElement;
+  await waitFor(() => expect(save.disabled).toBe(false));
+  return save;
+}
+
+const timeInput = (label: '開始時間' | '結束時間') =>
+  screen.getByLabelText(label) as HTMLInputElement;
+
+it('blocks an enabled quiet-hours save with an incomplete time, focuses it, and saves once fixed', async () => {
+  let stored: Record<string, unknown> | undefined;
+  serveNotificationDoc(() => stored);
+  state.saveNotifications.mockImplementation(async (_uid: string, value: object) => {
+    stored = { ...value, updatedAt: { seconds: 1 } };
+  });
+  const save = await openNotifications();
+  fireEvent.click(screen.getByRole('switch', { name: '勿擾時段' }));
+  fireEvent.change(timeInput('結束時間'), { target: { value: '' } });
+  fireEvent.change(timeInput('開始時間'), { target: { value: '' } });
+  fireEvent.click(save);
+  expect(state.saveNotifications).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(timeInput('開始時間'));
+  expect(timeInput('開始時間').getAttribute('aria-invalid')).toBe('true');
+  expect(timeInput('結束時間').getAttribute('aria-invalid')).toBe('true');
+  expect(screen.getByText(/勿擾開始時間/)).toBeTruthy();
+  expect(screen.getByText(/勿擾結束時間/)).toBeTruthy();
+
+  fireEvent.change(timeInput('開始時間'), { target: { value: '22:30' } });
+  expect(screen.queryByText(/勿擾開始時間/)).toBeNull();
+  expect(screen.getByText(/勿擾結束時間/)).toBeTruthy();
+  fireEvent.click(save);
+  expect(state.saveNotifications).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(timeInput('結束時間'));
+
+  fireEvent.change(timeInput('結束時間'), { target: { value: '07:15' } });
+  expect(screen.queryByText(/勿擾結束時間/)).toBeNull();
+  fireEvent.click(save);
+  await waitFor(() => expect(state.success).toHaveBeenCalledWith('通知設定已同步'));
+  expect(state.saveNotifications).toHaveBeenCalledTimes(1);
+  expect(state.saveNotifications.mock.calls[0][1]).toMatchObject({
+    quietHoursEnabled: true,
+    quietHoursStart: '22:30',
+    quietHoursEnd: '07:15',
+  });
+});
+
+it.each(['勿擾時段', '推播通知'])(
+  'saves the %s switch with an unfinished time using the loaded server times and valid edits',
+  async (name) => {
+    let stored: Record<string, unknown> | undefined = {
+      ...defaultNotificationPreferences,
+      quietHoursEnabled: true,
+      quietHoursStart: '21:15',
+      quietHoursEnd: '06:45',
+      updatedAt: { seconds: 1 },
+    };
+    serveNotificationDoc(() => stored);
+    state.saveNotifications.mockImplementation(async (_uid: string, value: object) => {
+      stored = { ...value, updatedAt: { seconds: 2 } };
+    });
+    const save = await openNotifications();
+    expect(timeInput('開始時間').value).toBe('21:15');
+    fireEvent.change(timeInput('開始時間'), { target: { value: '' } });
+    fireEvent.change(timeInput('結束時間'), { target: { value: '07:30' } });
+    fireEvent.click(screen.getByRole('switch', { name }));
+    fireEvent.click(save);
+    await waitFor(() => expect(state.success).toHaveBeenCalledWith('通知設定已同步'));
+    expect(state.saveNotifications.mock.calls[0][1]).toMatchObject({
+      enabled: name !== '推播通知',
+      quietHoursEnabled: name !== '勿擾時段',
+      quietHoursStart: '21:15',
+      quietHoursEnd: '07:30',
+    });
+    if (name === '推播通知') fireEvent.click(screen.getByRole('switch', { name }));
+    expect(timeInput('開始時間').value).toBe('21:15');
+    expect(timeInput('結束時間').value).toBe('07:30');
+  },
+);
+
+it('falls back to default hours only when the stored hours were invalid', async () => {
+  let stored: Record<string, unknown> = {
+    ...defaultNotificationPreferences,
+    quietHoursStart: 'late',
+    quietHoursEnd: '',
+  };
+  serveNotificationDoc(() => stored);
+  state.saveNotifications.mockImplementation(async (_uid: string, value: object) => {
+    stored = { ...value };
+  });
+  const save = await openNotifications();
+  fireEvent.click(screen.getByRole('switch', { name: '推播通知' }));
+  fireEvent.click(save);
+  await waitFor(() => expect(state.success).toHaveBeenCalledWith('通知設定已同步'));
+  expect(state.saveNotifications.mock.calls[0][1]).toMatchObject({
+    enabled: false,
+    quietHoursStart: '22:00',
+    quietHoursEnd: '08:00',
+  });
+});
+
+it('keeps an unfinished draft time when quiet hours are switched off and back on before saving', async () => {
+  const save = await openNotifications();
+  fireEvent.click(screen.getByRole('switch', { name: '勿擾時段' }));
+  fireEvent.change(timeInput('開始時間'), { target: { value: '' } });
+  fireEvent.click(screen.getByRole('switch', { name: '勿擾時段' }));
+  expect(timeInput('開始時間').disabled).toBe(true);
+  fireEvent.click(screen.getByRole('switch', { name: '勿擾時段' }));
+  expect(timeInput('開始時間').disabled).toBe(false);
+  expect(timeInput('開始時間').value).toBe('');
+  fireEvent.click(save);
+  expect(state.saveNotifications).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(timeInput('開始時間'));
+});
+
+it('confirms a notification save by known values, ignoring server timestamps and key order, but rejects a mismatch', async () => {
+  let stored: Record<string, unknown> | undefined;
+  let revision = 0;
+  let mismatch = false;
+  serveNotificationDoc(() => stored);
+  state.saveNotifications.mockImplementation(async (_uid: string, value: Record<string, unknown>) => {
+    const entries = Object.entries(mismatch ? { ...value, announcements: !value.announcements } : value);
+    stored = { updatedAt: { seconds: ++revision, nanoseconds: 0 }, ...Object.fromEntries(entries.reverse()) };
+  });
+  const save = await openNotifications();
+  fireEvent.click(screen.getByRole('switch', { name: '公告' }));
+  fireEvent.click(save);
+  await waitFor(() => expect(state.success).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('switch', { name: '公告' }));
+  fireEvent.click(save);
+  await waitFor(() => expect(state.success).toHaveBeenCalledTimes(2));
+  expect(state.error).not.toHaveBeenCalled();
+
+  mismatch = true;
+  fireEvent.click(screen.getByRole('switch', { name: '活動' }));
+  fireEvent.click(save);
+  await waitFor(() =>
+    expect(state.error).toHaveBeenCalledWith('通知設定尚未確認', expect.any(String)),
+  );
+  expect(state.success).toHaveBeenCalledTimes(2);
+});
+
+it('does not confirm a partial receipt whose omitted preference would have its default value', async () => {
+  let stored: Record<string, unknown> | undefined;
+  serveNotificationDoc(() => stored);
+  state.saveNotifications.mockImplementation(async (_uid: string, value: Record<string, unknown>) => {
+    stored = { ...value };
+    delete stored.announcements;
+  });
+  const save = await openNotifications();
+  fireEvent.click(save);
+  await waitFor(() =>
+    expect(state.error).toHaveBeenCalledWith('通知設定尚未確認', expect.any(String)),
+  );
+  expect(state.success).not.toHaveBeenCalled();
+});
+
 it('shows assistant write permissions defaulting off and can save an enabled toggle', async () => {
   render(<SettingsPage />);
   fireEvent.click(screen.getByRole('button', { name: '助理權限' }));
@@ -639,4 +806,16 @@ it('separates Google actions from school permissions when both identities are si
   expect(screen.getByRole('switch', { name: '送出請假申請' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '儲存 AI 代辦權限' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '儲存助理權限' })).toBeTruthy();
+});
+
+it('keeps a voluntary home-screen entry in general settings after an install suggestion was dismissed', async () => {
+  state.user = null;
+  localStorage.setItem('pwa-install-dismissed', 'true');
+  render(<SettingsPage />);
+  const installation = screen.getByRole('region', { name: '把 nuni 放在主畫面' });
+  expect(installation).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '查看加入方式' }));
+  expect(screen.getByRole('button', { name: '收起加入方式' }).getAttribute('aria-expanded')).toBe('true');
+  expect(localStorage.getItem('pwa-install-dismissed')).toBe('true');
+  expect(state.saveProfile).not.toHaveBeenCalled();
 });

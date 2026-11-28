@@ -1,111 +1,160 @@
-# 08_settings.yaml
-# 頭像抽屜 → 一般設定（SettingsScreen）
-
 appId: ${APP_ID}
-name: Settings Flow
-tags:
-  - smoke
-  - settings
-
+name: Authenticated settings, theme, accessibility and language
+tags: [smoke, settings]
 ---
-- launchApp
-
-- extendedWaitUntil:
-    visible:
-      id: 'tab-Today'
-    timeout: 45000
-
-- waitForAnimationToEnd:
-    timeout: 2500
-
-- extendedWaitUntil:
-    visible:
-      id: 'header-avatar-button'
-    timeout: 120000
-
-- waitForAnimationToEnd:
-    timeout: 1500
-
-- tapOn:
-    id: 'header-avatar-button'
-
-- extendedWaitUntil:
-    visible: '個人'
-    timeout: 8000
-
+- runFlow: ../helpers/sign-in-student.yaml
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: tab-我的
+      - waitForAnimationToEnd
+      - extendedWaitUntil:
+          visible:
+            id: me-home
+          timeout: 10000
 - scrollUntilVisible:
     element:
-      text: '一般設定'
+      id: me-open-settings
+    direction: DOWN
+    centerElement: true
+    timeout: 20000
+# The row sits under the tab bar until centered. Extra centering swipes leave
+# it moving, so wait then retry the tap until 目前登入帳號 is on screen.
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible:
+    id: me-open-settings
+    enabled: true
+- assertVisible: '使用設定'
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          id: me-open-settings
+          enabled: true
+          retryTapIfNoChange: true
+      - waitForAnimationToEnd
+      - extendedWaitUntil:
+          visible:
+            id: settings-screen
+          timeout: 15000
+      - extendedWaitUntil:
+          visible:
+            id: settings-current-account
+          timeout: 15000
+- assertVisible:
+    id: settings-current-account
+- assertVisible: '目前登入帳號'
+- assertVisible: '測試學生甲'
+- scrollUntilVisible:
+    element:
+      text: '^深色$'
     direction: DOWN
     timeout: 20000
-
-- tapOn:
-    text: '一般設定'
-
-- extendedWaitUntil:
-    visible: '主題模式'
-    timeout: 10000
-
-- takeScreenshot: settings_screen
-
-- tapOn:
-    text: '深色'
-    optional: true
-
-- takeScreenshot: settings_dark_mode_optional
-
-- tapOn:
-    text: '無障礙設定'
-
-- extendedWaitUntil:
-    visible: '文字大小'
-    timeout: 10000
-
-- takeScreenshot: accessibility_settings
-
-- tapOn:
-    text: '大'
-    optional: true
-
-- takeScreenshot: accessibility_large_text
-
-- back
-
-- tapOn:
-    text: '語言設定'
-
-- extendedWaitUntil:
-    visible: '可用語言'
-    timeout: 10000
-    optional: true
-
-- takeScreenshot: language_settings
-
-- tapOn:
-    text: 'English'
-    optional: true
-
-- takeScreenshot: settings_english
-
-- tapOn:
-    text: '繁體中文'
-    optional: true
-
-- back
-
+- tapOn: '^深色$'
+- assertVisible: '目前使用深色模式。'
+- tapOn: '^淺色$'
+- assertVisible: '目前使用淺色模式。'
 - scrollUntilVisible:
     element:
-      text: '匯出我的資料'
+      id: settings-accessibility
     direction: DOWN
-
+    centerElement: true
+    timeout: 20000
+- assertVisible:
+    id: settings-accessibility
+- assertVisible: '無障礙設定'
 - tapOn:
-    text: '匯出我的資料'
-
+    id: settings-accessibility
 - extendedWaitUntil:
-    visible: '資料匯出'
+    visible: '閱讀與操作'
     timeout: 10000
-    optional: true
-
+- assertVisible: 'VoiceOver 螢幕閱讀器'
+- takeScreenshot: accessibility_settings
+- tapOn: '返回'
+- scrollUntilVisible:
+    element:
+      id: settings-language
+    direction: DOWN
+    centerElement: true
+    timeout: 20000
+- assertVisible:
+    id: settings-language
+- assertVisible: '介面語言'
+- tapOn:
+    id: settings-language
+- extendedWaitUntil:
+    visible: 'English'
+    timeout: 10000
+- tapOn: 'English'
+- takeScreenshot: settings_english
+- tapOn: '繁體中文'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn: '返回'
+# Language return keeps the previous Settings scroll offset. The account card
+# is then off-screen and omitted from the iOS tree, so identify the settings
+# shell first and scroll up until 目前登入帳號 is on screen again.
+- waitForAnimationToEnd:
+    timeout: 5000
+- extendedWaitUntil:
+    visible:
+      id: settings-screen
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      id: settings-current-account
+    direction: UP
+    timeout: 20000
+- assertVisible:
+    id: settings-current-account
+- assertVisible: '目前登入帳號'
+- assertVisible: '測試學生甲'
+# Do not center the export row: centering parks it under the sticky header
+# (tap 200,108 hits「設定」) or overscrolls to the page bottom. If a previous
+# attempt left the list at the end, search upward as well.
+- retry:
+    maxRetries: 2
+    commands:
+      - runFlow:
+          when:
+            notVisible:
+              id: settings-export-data
+          commands:
+            - scrollUntilVisible:
+                element:
+                  id: settings-export-data
+                direction: DOWN
+                timeout: 12000
+      - runFlow:
+          when:
+            notVisible:
+              id: settings-export-data
+          commands:
+            - scrollUntilVisible:
+                element:
+                  id: settings-export-data
+                direction: UP
+                timeout: 12000
+      - assertVisible:
+          id: settings-export-data
+      - assertVisible: '匯出我的資料'
+      - waitForAnimationToEnd
+      - tapOn:
+          id: settings-export-data
+          retryTapIfNoChange: true
+      - extendedWaitUntil:
+          visible:
+            id: data-export-screen
+          timeout: 15000
+- assertVisible:
+    id: data-export-screen
+- assertVisible:
+    id: data-export-instructions
+- assertVisible: '選擇內容，將資料保存到自己的裝置。'
+- assertVisible:
+    id: data-export-scope
+- assertNotVisible:
+    id: settings-export-data
 - takeScreenshot: data_export
-
-- back

@@ -79,8 +79,14 @@ beforeEach(async () => {
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
     value: {
-      request: (key: string, action: () => unknown) => {
-        const next = (queues.get(key) || Promise.resolve()).then(action);
+      request: (
+        key: string,
+        options: LockOptions | (() => unknown),
+        callback?: () => unknown,
+      ) => {
+        const next = (queues.get(key) || Promise.resolve()).then(
+          typeof options === 'function' ? options : callback,
+        );
         queues.set(
           key,
           next.catch(() => {}),
@@ -198,6 +204,64 @@ describe('personal import synchronization panel', () => {
     expect(remote.records).toEqual([]);
     expect(readPersonalImports(initialScope)).toHaveLength(1);
   });
+
+  it('pauses when storage can update the ledger but cannot add another key', async () => {
+    await setPersonalImportSyncEnabled(initialScope, true, () => true);
+    const key = personalImportsStorageKey(initialScope);
+    const before = localStorage.getItem(key)!;
+    const setItem = Storage.prototype.setItem;
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      name,
+      value,
+    ) {
+      if (this.getItem(name) === null || value.length > before.length + 1) {
+        throw new DOMException('quota', 'QuotaExceededError');
+      }
+      setItem.call(this, name, value);
+    });
+
+    try {
+      render(<PersonalImportSyncPanel scope={initialScope} />);
+      fireEvent.click(screen.getByRole('button', { name: '暫停這台裝置同步' }));
+      await screen.findByRole('button', { name: '開啟帳號同步' });
+      expect(readPersonalImportSyncState(initialScope).enabled).toBe(false);
+      expect(write.mock.calls.map(([name]) => name)).toEqual([key]);
+      expect(browserRequest).not.toHaveBeenCalled();
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it.each(['account', 'school'] as const)(
+    'discards the queued pause when the %s changes before acquiring the lock',
+    async (change) => {
+      await setPersonalImportSyncEnabled(initialScope, true, () => true);
+      const key = personalImportsStorageKey(initialScope);
+      const before = localStorage.getItem(key);
+      const held = deferred<void>();
+      const lock = navigator.locks.request(key, () => held.promise);
+      const view = render(<PersonalImportSyncPanel scope={context.scope} />);
+      fireEvent.click(screen.getByRole('button', { name: '暫停這台裝置同步' }));
+      expect(isDisabled('正在暫停…')).toBe(true);
+
+      if (change === 'account') {
+        context.scope = { ...initialScope, owner: 'platform:two' };
+        context.sessionState.session = { platformAccountId: 'two', context: 'context-two' };
+      } else {
+        context.scope = { ...initialScope, schoolId: 'ntu' };
+      }
+      view.rerender(<PersonalImportSyncPanel scope={context.scope} />);
+      await act(async () => {
+        held.resolve();
+        await lock;
+        await navigator.locks.request(key, () => {});
+      });
+
+      expect(localStorage.getItem(key)).toBe(before);
+      expect(browserRequest).not.toHaveBeenCalled();
+    },
+  );
 
   it('shows the request error and supports retry without discarding local changes', async () => {
     vi.mocked(browserRequest).mockRejectedValueOnce(new Error('連線中斷'));

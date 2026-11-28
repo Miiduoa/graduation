@@ -11,7 +11,19 @@
  *  - 配對 (buddy match)：web 端不做，導向到 mobile 設定課表後再啟用。
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { isReadAccessDeniedError } from '@campus/shared/src/signedInSocialReads';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Modal } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
+import { Input, Select, Textarea } from '@/components/ui/Input';
+import {
+  COMMUNITY_FORM_PENDING_COPY,
+  preventCommunityFormEnter,
+  useCommunityCompletionFocus,
+  useCommunityFormSession,
+} from './useCommunityFormSession';
+import formStyles from './CommunityForm.module.css';
+import modalStyles from '@/components/ui/Modal.module.css';
 import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
 import { useAuth } from '@/components/AuthGuard';
 import {
@@ -108,9 +120,14 @@ export function StudyBuddyTab(props: { schoolId: string }) {
       </div>
 
       {subTab === 'review' ? (
-        <CourseReviewSection schoolId={schoolId} myUid={user?.uid ?? null} />
+        <CourseReviewSection
+          key={JSON.stringify([schoolId, user?.uid])}
+          schoolId={schoolId}
+          myUid={user?.uid ?? null}
+        />
       ) : (
         <StudyGroupSection
+          key={JSON.stringify([schoolId, user?.uid])}
           schoolId={schoolId}
           myUid={user?.uid ?? null}
           myName={user?.displayName ?? null}
@@ -126,24 +143,40 @@ export function StudyBuddyTab(props: { schoolId: string }) {
 
 // ─── Course Reviews ─────────────────────────────────────
 
-function CourseReviewSection(props: { schoolId: string; myUid: string | null }) {
+export function CourseReviewSection(props: {
+  schoolId: string;
+  myUid: string | null;
+}) {
   const { schoolId, myUid } = props;
   const [reviews, setReviews] = useState<CourseReviewDoc[]>([]);
   const [filter, setFilter] = useState('');
-  const [showModal, setShowModal] = useState(false);
+  const helpfulPending = useRef(new Set<string>());
+  const [helpfulBusy, setHelpfulBusy] = useState(new Set<string>());
+  const filterRef = useRef<HTMLInputElement>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const writeReviewRef = useRef<HTMLButtonElement>(null);
+  const firstReviewRef = useRef<HTMLButtonElement>(null);
+  const restoreReviewFocus = useCommunityCompletionFocus(writeReviewRef);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isCurrent: () => boolean) => {
     if (!schoolId) {
       setReviews([]);
       return;
     }
     const rows = await listCourseReviews(schoolId, { lim: 80 });
+    if (!isCurrent()) return;
+    const firstReview = firstReviewRef.current;
+    if (rows.length > 0 && firstReview && firstReview.ownerDocument.activeElement === firstReview) {
+      writeReviewRef.current?.focus({ preventScroll: true });
+    }
     setReviews(rows);
   }, [schoolId]);
 
-  const { loading, error, refresh } = useCommunityLoad(
+  const clearDeniedData = useCallback(() => setReviews([]), []);
+  const { loading, loaded, error, denied, refresh } = useCommunityLoad(
     load,
     '暫時無法讀取課程評價，請確認連線後重試。',
+    clearDeniedData,
   );
 
   const filtered = useMemo(() => {
@@ -152,8 +185,6 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
     return reviews.filter((r) => `${r.courseName} ${r.courseCode}`.toLowerCase().includes(q));
   }, [reviews, filter]);
   const agg = useMemo(() => aggregateReviews(filtered), [filtered]);
-
-  if (error) return <CommunityLoadError message={error} retry={refresh} />;
 
   return (
     <div>
@@ -167,7 +198,9 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
         }}
       >
         <input
+          ref={filterRef}
           type="search"
+          aria-label="篩選課程名稱或代碼"
           className="input"
           placeholder="篩選課程名稱／代碼"
           value={filter}
@@ -175,26 +208,52 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
           style={{ flex: '1 1 160px', minWidth: 0, maxWidth: 420 }}
         />
         <button
+          ref={writeReviewRef}
           type="button"
           className="btn primary"
-          onClick={() => setShowModal(true)}
+          onClick={() => setFormOpen(true)}
           style={{ fontSize: 13, padding: '8px 16px' }}
         >
           ＋ 寫評價
         </button>
       </div>
 
-      {agg.totalCount > 0 && <ReviewSummary agg={agg} />}
+      {error && <CommunityLoadError message={error} retry={refresh} />}
+      {!denied && agg.totalCount > 0 && <ReviewSummary agg={agg} />}
 
-      {loading ? (
+      {denied ? null : !loaded && loading ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
           載入中…
         </div>
-      ) : filtered.length === 0 ? (
-        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>💬</div>
-          <div style={{ fontWeight: 700, color: 'var(--text)' }}>尚無評價</div>
-          <div style={{ fontSize: 12, marginTop: 6 }}>點上方「＋ 寫評價」分享你修過的課</div>
+      ) : !loaded && error ? null : filtered.length === 0 ? (
+        <div className={formStyles.empty}>
+          <h3>{filter.trim() ? '找不到符合的課程評價' : '尚無評價'}</h3>
+          <p role="status">
+            {filter.trim()
+              ? `沒有符合「${filter.trim()}」的課程名稱或代碼。試試其他關鍵字。`
+              : '分享修課心得，幫助同學準備下一學期。'}
+          </p>
+          {filter.trim() ? (
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setFilter('');
+                filterRef.current?.focus();
+              }}
+            >
+              清除搜尋
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              ref={firstReviewRef}
+              variant="primary"
+              onClick={() => setFormOpen(true)}
+            >
+              寫第一則評價
+            </Button>
+          )}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -203,16 +262,33 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
               key={r.id}
               review={r}
               myUid={myUid}
+              helpfulBusy={helpfulBusy.has(r.id)}
               onHelpful={async () => {
                 if (!myUid) {
                   alert('請先登入');
                   return;
                 }
+                if (helpfulPending.current.has(r.id)) return;
+                helpfulPending.current.add(r.id);
+                setHelpfulBusy(new Set(helpfulPending.current));
                 try {
-                  await toggleReviewHelpful(schoolId, r.id, myUid);
-                  await refresh();
+                  const helped = await toggleReviewHelpful(schoolId, r.id, myUid);
+                  setReviews((current) => current.map((review) => {
+                    if (review.id !== r.id) return review;
+                    const helpfulBy = Array.isArray(review.helpfulBy) ? review.helpfulBy : [];
+                    if (helpfulBy.includes(myUid) === helped) return review;
+                    return {
+                      ...review,
+                      helpfulBy: helped ? [...helpfulBy, myUid] : helpfulBy.filter((uid) => uid !== myUid),
+                      helpful: Math.max(0, (review.helpful ?? helpfulBy.length) + (helped ? 1 : -1)),
+                    };
+                  }));
+                  void refresh();
                 } catch {
                   alert('這次未能操作，請稍後再試。');
+                } finally {
+                  helpfulPending.current.delete(r.id);
+                  setHelpfulBusy(new Set(helpfulPending.current));
                 }
               }}
             />
@@ -220,14 +296,15 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
         </div>
       )}
 
-      {showModal && (
+      {formOpen && (
         <ReviewModal
           schoolId={schoolId}
           myUid={myUid}
-          onClose={() => setShowModal(false)}
-          onSubmitted={async () => {
-            setShowModal(false);
-            await refresh();
+          onClose={() => setFormOpen(false)}
+          onSubmitted={(dismissed) => {
+            restoreReviewFocus();
+            if (!dismissed) setFormOpen(false);
+            void refresh();
           }}
         />
       )}
@@ -319,10 +396,12 @@ function StatPill({ label, value }: { label: string; value: string }) {
 function ReviewCard({
   review,
   myUid,
+  helpfulBusy,
   onHelpful,
 }: {
   review: CourseReviewDoc;
   myUid: string | null;
+  helpfulBusy: boolean;
   onHelpful: () => void | Promise<void>;
 }) {
   const helpedByMe = !!(
@@ -399,6 +478,7 @@ function ReviewCard({
       ) : null}
       <button
         type="button"
+        disabled={helpfulBusy}
         onClick={() => void onHelpful()}
         style={{
           marginTop: 10,
@@ -418,11 +498,12 @@ function ReviewCard({
   );
 }
 
-function ReviewModal(props: {
+export function ReviewModal(props: {
+  open?: boolean;
   schoolId: string;
   myUid: string | null;
   onClose: () => void;
-  onSubmitted: () => void;
+  onSubmitted: (dismissed: boolean) => void;
 }) {
   const [courseName, setCourseName] = useState('');
   const [courseCode, setCourseCode] = useState('');
@@ -433,254 +514,255 @@ function ReviewModal(props: {
   const [comment, setComment] = useState('');
   const [tagsRaw, setTagsRaw] = useState('');
   const [anonymous, setAnonymous] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [validated, setValidated] = useState(false);
+  const courseRef = useRef<HTMLInputElement>(null);
+  const ratingRef = useRef<HTMLInputElement>(null);
+  const formId = useId();
+  const session = useCommunityFormSession(props.onClose);
 
-  const submit = async () => {
+  function submit() {
+    if (session.busy) return;
     if (!props.myUid) {
-      alert('請先登入');
+      session.setError('請先登入後再送出評價。');
       return;
     }
+    setValidated(true);
     if (!courseName.trim()) {
-      alert('請填課程名稱');
+      courseRef.current?.focus();
       return;
     }
     if (rating < 1) {
-      alert('請至少給 1 顆星');
+      ratingRef.current?.focus();
       return;
     }
-    setBusy(true);
-    try {
-      await submitCourseReview({
-        schoolId: props.schoolId,
-        courseCode: courseCode.trim() || courseName.trim(),
-        courseName: courseName.trim(),
-        rating,
-        difficulty,
-        workload,
-        usefulness,
-        comment: comment.trim(),
-        tags: tagsRaw
-          .split(/[,，、\s]+/)
-          .map((t) => t.trim())
-          .filter(Boolean),
-        anonymous,
-        authorUid: anonymous ? null : props.myUid,
-        aliasSnapshot: anonymous ? '匿名同學' : undefined,
-      });
-      props.onSubmitted();
-    } catch {
-      alert('這次未能送出，請稍後再試。');
-    } finally {
-      setBusy(false);
-    }
-  };
+    void session.submit(
+      () =>
+        submitCourseReview({
+          schoolId: props.schoolId,
+          courseCode: courseCode.trim() || courseName.trim(),
+          courseName: courseName.trim(),
+          rating,
+          difficulty,
+          workload,
+          usefulness,
+          comment: comment.trim(),
+          tags: tagsRaw
+            .split(/[,，、\s]+/)
+            .map((tag) => tag.trim())
+            .filter(Boolean),
+          anonymous,
+          authorUid: anonymous ? null : props.myUid,
+          aliasSnapshot: anonymous ? '匿名同學' : undefined,
+        }),
+      props.onSubmitted,
+      '暫時無法確認送出結果，內容已保留。請先查看列表是否已出現，再決定是否重試。',
+    );
+  }
 
   return (
-    <div
-      role="dialog"
-      aria-modal
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 999,
-        background: 'rgba(0,0,0,0.4)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
-      }}
-      onClick={props.onClose}
-    >
-      <div
-        className="card"
-        style={{ padding: 24, width: '100%', maxWidth: 540, maxHeight: '90vh', overflowY: 'auto' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>寫課程評價</h2>
-          <button
+    <Modal
+      isOpen={props.open ?? true}
+      onClose={session.requestClose}
+      title="寫課程評價"
+      size="lg"
+      description="分享修課經驗。課程名稱與整體評分為必填，其餘可略過。"
+      initialFocusRef={courseRef}
+      footer={
+        <>
+          <Button
             type="button"
-            onClick={props.onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 18,
-              color: 'var(--muted)',
-            }}
+            variant="ghost"
+            onClick={session.requestClose}
           >
-            ×
-          </button>
-        </div>
-
-        <Label>課程名稱 *</Label>
-        <input
-          className="input"
-          value={courseName}
-          onChange={(e) => setCourseName(e.target.value)}
-          placeholder="例：程式設計（一）"
-          style={{ width: '100%' }}
-        />
-
-        <Label>課程代碼（可選）</Label>
-        <input
-          className="input"
-          value={courseCode}
-          onChange={(e) => setCourseCode(e.target.value)}
-          placeholder="例：CSIE1001"
-          style={{ width: '100%' }}
-        />
-
-        <Label>整體評分 *</Label>
-        <StarRow rating={rating} onChange={setRating} size={26} />
-
-        <Label>難度</Label>
-        <StarRow rating={difficulty} onChange={setDifficulty} size={20} />
-
-        <Label>工作量</Label>
-        <StarRow rating={workload} onChange={setWorkload} size={20} />
-
-        <Label>實用性</Label>
-        <StarRow rating={usefulness} onChange={setUsefulness} size={20} />
-
-        <Label>評論</Label>
-        <textarea
-          className="input"
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          rows={4}
-          placeholder="分享給學弟妹這門課的真實感受⋯"
-          style={{
-            width: '100%',
-            boxSizing: 'border-box',
-            resize: 'vertical',
-            fontFamily: 'inherit',
-          }}
-        />
-
-        <Label>標籤（逗號分隔，最多 6 個）</Label>
-        <input
-          className="input"
-          value={tagsRaw}
-          onChange={(e) => setTagsRaw(e.target.value)}
-          placeholder="例：必修, 老師很罩, 期末 project"
-          style={{ width: '100%' }}
-        />
-
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 13,
-            marginTop: 14,
-            cursor: 'pointer',
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={anonymous}
-            onChange={(e) => setAnonymous(e.target.checked)}
-          />
-          匿名評價
-        </label>
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
-          <button type="button" className="btn" onClick={props.onClose}>
             取消
-          </button>
-          <button type="button" className="btn primary" disabled={busy} onClick={submit}>
-            {busy ? '送出中…' : '送出評價'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Label({ children }: { children: React.ReactNode }) {
-  return (
-    <label
-      style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}
+          </Button>
+          <Button
+            type="submit"
+            form={formId}
+            variant="primary"
+            loading={session.busy}
+            onKeyDown={preventCommunityFormEnter}
+          >
+            {session.busy ? '送出中…' : '送出評價'}
+          </Button>
+        </>
+      }
     >
-      {children}
-    </label>
+      <form
+        id={formId}
+        noValidate
+        onKeyDown={preventCommunityFormEnter}
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+      >
+        <fieldset className={formStyles.fields} disabled={session.busy}>
+          <Input
+            ref={courseRef}
+            label="課程名稱"
+            required
+            value={courseName}
+            placeholder="例：程式設計（一）"
+            onChange={(event) => setCourseName(event.target.value)}
+            error={validated && !courseName.trim() ? '請填寫課程名稱。' : undefined}
+          />
+          <Input
+            label="課程代碼（選填）"
+            value={courseCode}
+            placeholder="例：CSIE1001"
+            onChange={(event) => setCourseCode(event.target.value)}
+          />
+          <StarRow
+            label="整體評分"
+            rating={rating}
+            onChange={setRating}
+            required
+            firstRef={ratingRef}
+            error={validated && rating < 1 ? '請選擇整體評分。' : undefined}
+          />
+          <StarRow label="難度" rating={difficulty} onChange={setDifficulty} />
+          <StarRow label="工作量" rating={workload} onChange={setWorkload} />
+          <StarRow label="實用性" rating={usefulness} onChange={setUsefulness} />
+          <Textarea
+            label="評論（選填）"
+            value={comment}
+            rows={4}
+            placeholder="分享課程內容、上課方式與準備建議。"
+            onChange={(event) => setComment(event.target.value)}
+          />
+          <Input
+            label="標籤（選填）"
+            value={tagsRaw}
+            hint="以逗號分隔，最多 6 個。"
+            placeholder="例：必修、實作課程"
+            onChange={(event) => setTagsRaw(event.target.value)}
+          />
+          <label className={formStyles.checkbox}>
+            <input
+              type="checkbox"
+              checked={anonymous}
+              onChange={(event) => setAnonymous(event.target.checked)}
+            />
+            匿名評價
+          </label>
+        </fieldset>
+        {session.busy && (
+          <p role="status" className={modalStyles.notice}>
+            {session.slow ? COMMUNITY_FORM_PENDING_COPY : '正在送出評價，請稍候。'}
+          </p>
+        )}
+        {session.error && (
+          <p role="alert" className={modalStyles.error}>
+            {session.error}
+          </p>
+        )}
+      </form>
+    </Modal>
   );
 }
 
 function StarRow({
+  label,
   rating,
   onChange,
-  size = 24,
+  required = false,
+  error,
+  firstRef,
 }: {
+  label: string;
   rating: number;
-  onChange: (r: number) => void;
-  size?: number;
+  onChange: (rating: number) => void;
+  required?: boolean;
+  error?: string;
+  firstRef?: React.RefObject<HTMLInputElement | null>;
 }) {
+  const id = useId();
   return (
-    <div style={{ display: 'flex', gap: 6 }}>
-      {[1, 2, 3, 4, 5].map((n) => (
-        <button
-          key={n}
-          type="button"
-          onClick={() => onChange(n)}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--warning)',
-            fontSize: size,
-            padding: 0,
-          }}
-          aria-label={`${n} 顆星`}
-        >
-          {n <= rating ? '★' : '☆'}
-        </button>
-      ))}
-    </div>
+    <fieldset
+      className={formStyles.rating}
+      role="radiogroup"
+      aria-labelledby={`${id}-label`}
+      aria-describedby={error ? `${id}-error` : `${id}-hint`}
+      aria-required={required || undefined}
+      aria-invalid={!!error || undefined}
+    >
+      <legend id={`${id}-label`}>
+        {label}
+        {required ? '（必填）' : '（選填）'}
+      </legend>
+      <div className={formStyles.stars}>
+        {[1, 2, 3, 4, 5].map((value) => (
+          <label key={value} className={formStyles.star}>
+            <input
+              ref={value === 1 ? firstRef : undefined}
+              type="radio"
+              name={id}
+              value={value}
+              checked={rating === value}
+              required={required}
+              aria-label={`${value} 顆星`}
+              aria-describedby={error ? `${id}-error` : `${id}-hint`}
+              onChange={() => onChange(value)}
+            />
+            <span aria-hidden="true">{value <= rating ? '★' : '☆'}</span>
+          </label>
+        ))}
+      </div>
+      <p id={`${id}-hint`} className={formStyles.hint}>
+        {rating ? `已選 ${rating}／5` : '尚未評分'}
+      </p>
+      {error && (
+        <p id={`${id}-error`} role="alert" className={formStyles.error}>
+          {error}
+        </p>
+      )}
+    </fieldset>
   );
 }
 
 // ─── Study Groups ───────────────────────────────────────
 
-function StudyGroupSection(props: {
+export function StudyGroupSection(props: {
   schoolId: string;
   myUid: string | null;
   myName: string | null;
 }) {
   const { schoolId, myUid, myName } = props;
   const [groups, setGroups] = useState<WebStudyGroup[]>([]);
-  const [showModal, setShowModal] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const joinPending = useRef(new Set<string>());
+  const [joinBusy, setJoinBusy] = useState(new Set<string>());
+  const createGroupRef = useRef<HTMLButtonElement>(null);
+  const restoreGroupFocus = useCommunityCompletionFocus(createGroupRef);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isCurrent: () => boolean) => {
     if (!schoolId) {
       setGroups([]);
       return;
     }
-    const db = getDb();
+    const groupsCollection = collection(getDb(), 'schools', schoolId, 'studyGroups');
+    let snap;
     try {
-      const snap = await getDocs(
-        query(
-          collection(db, 'schools', schoolId, 'studyGroups'),
-          orderBy('createdAt', 'desc'),
-          limit(60),
-        ),
-      );
-      setGroups(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WebStudyGroup, 'id'>) })));
-    } catch {
-      const snap = await getDocs(
-        query(collection(db, 'schools', schoolId, 'studyGroups'), limit(60)),
-      );
+      snap = await getDocs(query(groupsCollection, orderBy('createdAt', 'desc'), limit(60)));
+    } catch (error) {
+      if (!isCurrent() || isReadAccessDeniedError(error)) throw error;
+      snap = await getDocs(query(groupsCollection, limit(60)));
+    }
+    if (isCurrent()) {
       setGroups(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WebStudyGroup, 'id'>) })));
     }
   }, [schoolId]);
 
-  const { loading, error, refresh } = useCommunityLoad(
+  const clearDeniedData = useCallback(() => setGroups([]), []);
+  const { loading, loaded, error, denied, refresh } = useCommunityLoad(
     load,
     '暫時無法讀取讀書會，請確認連線後重試。',
+    clearDeniedData,
   );
 
   const onJoin = async (g: WebStudyGroup) => {
+    if (joinPending.current.has(g.id)) return;
     if (!myUid) {
       alert('請先登入');
       return;
@@ -693,19 +775,27 @@ function StudyGroupSection(props: {
       alert('讀書會已滿員');
       return;
     }
+    joinPending.current.add(g.id);
+    setJoinBusy(new Set(joinPending.current));
     try {
       const db: Firestore = getDb();
       await updateDoc(doc(db, 'schools', schoolId, 'studyGroups', g.id), {
         members: arrayUnion(myUid),
         updatedAt: serverTimestamp(),
       });
-      await refresh();
+      setGroups((current) => current.map((group) =>
+        group.id === g.id && !group.members.includes(myUid)
+          ? { ...group, members: [...group.members, myUid] }
+          : group,
+      ));
+      void refresh();
     } catch {
       alert('這次未能加入，請稍後再試。');
+    } finally {
+      joinPending.current.delete(g.id);
+      setJoinBusy(new Set(joinPending.current));
     }
   };
-
-  if (error) return <CommunityLoadError message={error} retry={refresh} />;
 
   return (
     <div>
@@ -719,23 +809,25 @@ function StudyGroupSection(props: {
         }}
       >
         <div style={{ flex: 1, fontSize: 13, color: 'var(--muted)' }}>
-          跨平台讀書會列表，點下方按鈕建立新讀書會（資料寫入 schools/{schoolId}/studyGroups）
+          找同學一起準備課程，約好每週讀書的時間與地點。
         </div>
         <button
+          ref={createGroupRef}
           type="button"
           className="btn primary"
-          onClick={() => setShowModal(true)}
+          onClick={() => setFormOpen(true)}
           style={{ fontSize: 13, padding: '8px 16px' }}
         >
           ＋ 建立讀書會
         </button>
       </div>
 
-      {loading ? (
+      {error && <CommunityLoadError message={error} retry={refresh} />}
+      {denied ? null : !loaded && loading ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
           載入中…
         </div>
-      ) : groups.length === 0 ? (
+      ) : !loaded && error ? null : groups.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
           <div style={{ fontSize: 32, marginBottom: 8 }}>👥</div>
           <div style={{ fontWeight: 700, color: 'var(--text)' }}>暫無讀書會</div>
@@ -801,7 +893,7 @@ function StudyGroupSection(props: {
                 <button
                   type="button"
                   className="btn primary"
-                  disabled={isMember || isFull}
+                  disabled={joinBusy.has(g.id) || isMember || isFull}
                   onClick={() => onJoin(g)}
                   style={{
                     marginTop: 10,
@@ -822,15 +914,16 @@ function StudyGroupSection(props: {
         </div>
       )}
 
-      {showModal && (
+      {formOpen && (
         <CreateGroupModal
           schoolId={schoolId}
           myUid={myUid}
           myName={myName}
-          onClose={() => setShowModal(false)}
-          onCreated={async () => {
-            setShowModal(false);
-            await refresh();
+          onClose={() => setFormOpen(false)}
+          onCreated={(dismissed) => {
+            restoreGroupFocus();
+            if (!dismissed) setFormOpen(false);
+            void refresh();
           }}
         />
       )}
@@ -838,12 +931,13 @@ function StudyGroupSection(props: {
   );
 }
 
-function CreateGroupModal(props: {
+export function CreateGroupModal(props: {
+  open?: boolean;
   schoolId: string;
   myUid: string | null;
   myName: string | null;
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (dismissed: boolean) => void;
 }) {
   const [name, setName] = useState('');
   const [courseName, setCourseName] = useState('');
@@ -853,232 +947,169 @@ function CreateGroupModal(props: {
   const [day, setDay] = useState(3);
   const [startHour, setStartHour] = useState(14);
   const [endHour, setEndHour] = useState(16);
-  const [busy, setBusy] = useState(false);
+  const [validated, setValidated] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const courseRef = useRef<HTMLInputElement>(null);
+  const endRef = useRef<HTMLSelectElement>(null);
+  const formId = useId();
+  const session = useCommunityFormSession(props.onClose);
+  const hours = Array.from({ length: 16 }, (_, index) => {
+    const hour = index + 7;
+    return { value: String(hour), label: `${String(hour).padStart(2, '0')}:00` };
+  });
 
-  const submit = async () => {
+  function submit() {
+    if (session.busy) return;
     if (!props.myUid) {
-      alert('請先登入');
+      session.setError('請先登入後再建立讀書會。');
       return;
     }
-    if (!name.trim() || !courseName.trim()) {
-      alert('讀書會名稱與課程名稱必填');
+    setValidated(true);
+    if (!name.trim()) {
+      nameRef.current?.focus();
+      return;
+    }
+    if (!courseName.trim()) {
+      courseRef.current?.focus();
       return;
     }
     if (endHour <= startHour) {
-      alert('結束時間要晚於開始時間。');
+      endRef.current?.focus();
       return;
     }
-    setBusy(true);
-    try {
-      const db: Firestore = getDb();
-      await addDoc(collection(db, 'schools', props.schoolId, 'studyGroups'), {
-        name: name.trim(),
-        courseName: courseName.trim(),
-        courseCode: courseCode.trim() || courseName.trim(),
-        location: location.trim() || '待定',
-        style,
-        dayOfWeek: day,
-        startHour,
-        endHour,
-        maxMembers: 6,
-        members: [props.myUid],
-        organizerUid: props.myUid,
-        organizerName: props.myName ?? '組長',
-        createdAt: serverTimestamp(),
-      });
-      props.onCreated();
-    } catch {
-      alert('這次未能建立，請稍後再試。');
-    } finally {
-      setBusy(false);
-    }
-  };
+    void session.submit(
+      () =>
+        addDoc(collection(getDb(), 'schools', props.schoolId, 'studyGroups'), {
+          name: name.trim(),
+          courseName: courseName.trim(),
+          courseCode: courseCode.trim() || courseName.trim(),
+          location: location.trim() || '待定',
+          style,
+          dayOfWeek: day,
+          startHour,
+          endHour,
+          maxMembers: 6,
+          members: [props.myUid],
+          organizerUid: props.myUid,
+          organizerName: props.myName ?? '組長',
+          createdAt: serverTimestamp(),
+        }),
+      props.onCreated,
+      '暫時無法確認建立結果，內容已保留。請先查看列表是否已出現，再決定是否重試。',
+    );
+  }
 
   return (
-    <div
-      role="dialog"
-      aria-modal
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 999,
-        background: 'rgba(0,0,0,0.4)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
-      }}
-      onClick={props.onClose}
-    >
-      <div
-        className="card"
-        style={{ padding: 24, width: '100%', maxWidth: 540, maxHeight: '90vh', overflowY: 'auto' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>建立讀書會</h2>
-          <button
+    <Modal
+      isOpen={props.open ?? true}
+      onClose={session.requestClose}
+      title="建立讀書會"
+      size="lg"
+      description="先決定課程與時間，最多 6 位同學一起參加。"
+      initialFocusRef={nameRef}
+      footer={
+        <>
+          <Button
             type="button"
-            onClick={props.onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 18,
-              color: 'var(--muted)',
-            }}
+            variant="ghost"
+            onClick={session.requestClose}
           >
-            ×
-          </button>
-        </div>
-
-        <Label>讀書會名稱 *</Label>
-        <input
-          className="input"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="例：演算法戰隊"
-          style={{ width: '100%' }}
-        />
-
-        <Label>課程名稱 *</Label>
-        <input
-          className="input"
-          value={courseName}
-          onChange={(e) => setCourseName(e.target.value)}
-          placeholder="例：演算法"
-          style={{ width: '100%' }}
-        />
-
-        <Label>課程代碼（可選）</Label>
-        <input
-          className="input"
-          value={courseCode}
-          onChange={(e) => setCourseCode(e.target.value)}
-          placeholder="例：CSIE2001"
-          style={{ width: '100%' }}
-        />
-
-        <Label>地點</Label>
-        <input
-          className="input"
-          value={location}
-          onChange={(e) => setLocation(e.target.value)}
-          style={{ width: '100%' }}
-        />
-
-        <Label>風格</Label>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {(
-            ['collaborative', 'tutorial', 'discussion', 'practice'] as WebStudyGroup['style'][]
-          ).map((k) => {
-            const on = style === k;
-            return (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setStyle(k)}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 999,
-                  border: on ? '1px solid var(--brand)' : '1px solid var(--border)',
-                  background: on ? 'var(--brand)' : 'var(--surface)',
-                  color: on ? 'var(--on-brand)' : 'var(--text)',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontWeight: 700,
-                }}
-              >
-                {STYLE_LABEL[k]}
-              </button>
-            );
-          })}
-        </div>
-
-        <Label>每週見面時間</Label>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {[1, 2, 3, 4, 5, 6, 7].map((d) => {
-            const on = day === d;
-            return (
-              <button
-                key={d}
-                type="button"
-                onClick={() => setDay(d)}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 999,
-                  border: on ? '1px solid var(--brand)' : '1px solid var(--border)',
-                  background: on ? 'var(--brand)' : 'var(--surface)',
-                  color: on ? 'var(--on-brand)' : 'var(--text)',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontWeight: 700,
-                }}
-              >
-                {DAY_LABELS[d]}
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-          <div style={{ flex: 1 }}>
-            <Label>開始</Label>
-            <HourInput value={startHour} onChange={setStartHour} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <Label>結束</Label>
-            <HourInput value={endHour} onChange={setEndHour} />
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
-          <button type="button" className="btn" onClick={props.onClose}>
             取消
-          </button>
-          <button type="button" className="btn primary" disabled={busy} onClick={submit}>
-            {busy ? '建立中…' : '建立讀書會'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function HourInput({ value, onChange }: { value: number; onChange: (h: number) => void }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <button
-        type="button"
-        onClick={() => onChange(Math.max(7, value - 1))}
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 16,
-          border: '1px solid var(--border)',
-          background: 'var(--surface)',
-          cursor: 'pointer',
+          </Button>
+          <Button
+            type="submit"
+            form={formId}
+            variant="primary"
+            loading={session.busy}
+            onKeyDown={preventCommunityFormEnter}
+          >
+            {session.busy ? '建立中…' : '建立讀書會'}
+          </Button>
+        </>
+      }
+    >
+      <form
+        id={formId}
+        noValidate
+        onKeyDown={preventCommunityFormEnter}
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
         }}
       >
-        −
-      </button>
-      <span style={{ flex: 1, textAlign: 'center', fontWeight: 700, fontSize: 16 }}>
-        {String(value).padStart(2, '0')}:00
-      </span>
-      <button
-        type="button"
-        onClick={() => onChange(Math.min(22, value + 1))}
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 16,
-          border: '1px solid var(--border)',
-          background: 'var(--surface)',
-          cursor: 'pointer',
-        }}
-      >
-        +
-      </button>
-    </div>
+        <fieldset className={formStyles.fields} disabled={session.busy}>
+          <Input
+            ref={nameRef}
+            label="讀書會名稱"
+            required
+            value={name}
+            placeholder="例：演算法讀書會"
+            onChange={(event) => setName(event.target.value)}
+            error={validated && !name.trim() ? '請填寫讀書會名稱。' : undefined}
+          />
+          <Input
+            ref={courseRef}
+            label="課程名稱"
+            required
+            value={courseName}
+            placeholder="例：演算法"
+            onChange={(event) => setCourseName(event.target.value)}
+            error={validated && !courseName.trim() ? '請填寫課程名稱。' : undefined}
+          />
+          <Input
+            label="課程代碼（選填）"
+            value={courseCode}
+            placeholder="例：CSIE2001"
+            onChange={(event) => setCourseCode(event.target.value)}
+          />
+          <Input
+            label="地點"
+            value={location}
+            onChange={(event) => setLocation(event.target.value)}
+          />
+          <Select
+            label="讀書方式"
+            value={style}
+            options={Object.entries(STYLE_LABEL).map(([value, label]) => ({ value, label }))}
+            onChange={(event) => setStyle(event.target.value as WebStudyGroup['style'])}
+          />
+          <Select
+            label="每週見面日"
+            value={day}
+            options={DAY_LABELS.slice(1).map((label, index) => ({
+              value: String(index + 1),
+              label,
+            }))}
+            onChange={(event) => setDay(Number(event.target.value))}
+          />
+          <div className={formStyles.columns}>
+            <Select
+              label="開始時間"
+              value={startHour}
+              options={hours}
+              onChange={(event) => setStartHour(Number(event.target.value))}
+            />
+            <Select
+              ref={endRef}
+              label="結束時間"
+              value={endHour}
+              options={hours}
+              onChange={(event) => setEndHour(Number(event.target.value))}
+              error={validated && endHour <= startHour ? '結束時間要晚於開始時間。' : undefined}
+            />
+          </div>
+        </fieldset>
+        {session.busy && (
+          <p role="status" className={modalStyles.notice}>
+            {session.slow ? COMMUNITY_FORM_PENDING_COPY : '正在建立讀書會，請稍候。'}
+          </p>
+        )}
+        {session.error && (
+          <p role="alert" className={modalStyles.error}>
+            {session.error}
+          </p>
+        )}
+      </form>
+    </Modal>
   );
 }

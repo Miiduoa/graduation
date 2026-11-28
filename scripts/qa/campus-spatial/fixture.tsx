@@ -19,6 +19,11 @@ const sameNameNonStop: MapLocation = {
   lng: stop.lng,
 };
 const places = withProvidenceCampusPlaces('pu', [...catalog, sameNameNonStop]);
+// Keep the QA oracle tied to fixture input IDs, independently of the
+// disambiguated marker/chooser labels rendered by the production component.
+Object.defineProperty(window, '__campusSpatialFixturePlaceNames', {
+  value: Object.freeze(Object.fromEntries(places.map(({ id, name }) => [id, name]))),
+});
 function Fixture() {
   const [selected, setSelected] = useState<MapLocation | null>(null);
   return (

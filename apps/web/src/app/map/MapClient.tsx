@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { useLocationHash } from '@/lib/useLocationHash';
@@ -122,14 +123,17 @@ function MapContent({
 }) {
   const canFavorite = Boolean(uid || platformAccountId);
   const hash = useLocationHash();
+  // Only static public metadata uses the canonical ID. Remote locations,
+  // favorites, and links retain the actual selected campus.
+  const publicSchool = toPublicSchoolId(school) ?? school;
   const fallbackMapUrl = buildCampusMapSearchUrl(schoolName);
-  const officialMapUrl = getOfficialCampusMapUrl(school);
+  const officialMapUrl = getOfficialCampusMapUrl(publicSchool);
   // 有內建地點的學校先直接顯示，外部來源只是補充；外部卡住或失敗都不擋住清單。
-  const bundled = hasBundledCampusPlaces(school);
+  const bundled = hasBundledCampusPlaces(publicSchool);
   const initialPlaces = () => ({
     status: bundled ? ('ready' as const) : ('loading' as const),
     source: 'loading' as const,
-    locations: bundled ? withProvidenceCampusPlaces(school, []) : [],
+    locations: bundled ? withProvidenceCampusPlaces(publicSchool, []) : [],
   });
   const [placeState, setPlaceState] = useState<{
     status: 'loading' | 'error' | 'ready';
@@ -157,14 +161,14 @@ function MapContent({
           setPlaceState({
             status: 'ready',
             source: 'ready',
-            locations: withProvidenceCampusPlaces(school, loaded),
+            locations: withProvidenceCampusPlaces(publicSchool, loaded),
           });
       },
       () => {
         if (!active) return;
         setPlaceState((previous) =>
           bundled
-            ? { status: 'ready', source: 'error', locations: previous.locations.length ? previous.locations : withProvidenceCampusPlaces(school, []) }
+            ? { status: 'ready', source: 'error', locations: previous.locations.length ? previous.locations : withProvidenceCampusPlaces(publicSchool, []) }
             : { status: 'error', source: 'error', locations: [] },
         );
       },
@@ -172,7 +176,7 @@ function MapContent({
     return () => {
       active = false;
     };
-  }, [school, placeAttempt, bundled]);
+  }, [school, publicSchool, placeAttempt, bundled]);
   const [category, setCategory] = useState('全部');
   const initialQuery = normalizeCampusClassroomQuery(query);
   const [search, setSearch] = useState(initialQuery);
@@ -345,9 +349,11 @@ function MapContent({
   const returnUrl = encodeURIComponent(`/map?${returnParams}${hash}`);
   const platformLoginHref = `/login?returnUrl=${returnUrl}`;
   const schoolLoginHref = `/login?reconnect=school&returnUrl=${returnUrl}`;
-  const pendingRoutePlaces = routeLocations?.filter((place) => isProvidencePendingVerification(school, place)) ?? [];
-  const selectLocation = useCallback((location: MapLocation) => setSelection({ ...location }), []);
-  const walkFrom = myLocation ?? (school === 'pu' ? PROVIDENCE_WALK_ORIGIN : null);
+
+  const pendingRoutePlaces = routeLocations?.filter((place) => isProvidencePendingVerification(publicSchool, place)) ?? [];
+  const selectLocation = useCallback((location: MapLocation) => setSelection({ ...location }), [setSelection]);
+  const walkFrom = myLocation ?? (bundled ? PROVIDENCE_WALK_ORIGIN : null);
+
   const walkFromGate = Boolean(walkFrom && !myLocation);
   // `selected` is the unique current-source marker; an ID lookup on the
   // full list would pick the first duplicate instead of the confirmed place.
@@ -384,11 +390,14 @@ function MapContent({
       navigator.geolocation.getCurrentPosition(
         ({ coords }) => {
           if (!finishRequest()) return;
+
           if (!isUsableMapCoordinate({ lat: coords.latitude, lng: coords.longitude })) {
+
             setPositionStatus('error');
             setPositionError('定位結果無效，請重新取得位置。');
             return;
           }
+
           // Building-level navigation needs a reasonably precise fix. This is a
           // product cutoff, not a guarantee that a reported fix is correct.
           if (!Number.isFinite(coords.accuracy) || coords.accuracy < 0 || coords.accuracy > 100) {
@@ -396,6 +405,7 @@ function MapContent({
             setPositionError('定位精度不足（需在 100 公尺內），請到空曠處重新定位，或手動選擇起點。');
             return;
           }
+
           setMyLocation({ lat: coords.latitude, lng: coords.longitude });
           setPositionStatus('idle');
         },
@@ -646,7 +656,7 @@ function MapContent({
             <p>可對應「{classroomPlace.name}」的位置。抵達後請依課表與現場標示確認教室。</p>
             <p id={classroomNoteId}>
               導航終點是建築地點標記，並非已核實的入口或室內教室；路線由第三方地圖規劃。
-              {isProvidencePendingVerification(school, classroomPlace) && (
+              {isProvidencePendingVerification(publicSchool, classroomPlace) && (
                 <strong>這個地點只有單一資料來源，位置待再次確認。</strong>
               )}
             </p>
@@ -691,7 +701,9 @@ function MapContent({
           </> : (
             <p>目前地點資料無法確認這間教室的位置。請改用建築全名搜尋，或核對校方地圖。</p>
           )}
+
           {(placeState.source === 'error' || (placeState.source === 'ready' && (classroom.status !== 'matched' || !classroomPlace))) && (
+
             <div className={styles.actions}>
               <button className="btn" type="button" onClick={() => {
                 searchInputRef.current?.focus();
@@ -762,7 +774,7 @@ function MapContent({
           </button>
         </div>
       )}
-      {school === 'pu' && (
+      {bundled && (
         <section className={`card ${styles.source}`} aria-label="地圖資料來源">
           <details>
             <summary>靜宜地圖資料來源與步行分鐘算法</summary>
@@ -865,7 +877,7 @@ function MapContent({
             )}
             <p id={detailNoteId}>
               導航目的地為地點標記，並非已核實的校舍入口或室內教室；請依現場指標確認。
-              {isProvidencePendingVerification(school, selected) && (
+              {isProvidencePendingVerification(publicSchool, selected) && (
                 <strong>這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。</strong>
               )}
             </p>
@@ -893,17 +905,17 @@ function MapContent({
                   查看即時到站
                 </Link>
               )}
-              {providencePlaceSourceUrl(school, selected) && (
+              {providencePlaceSourceUrl(publicSchool, selected) && (
                 <a
                   className="btn"
-                  href={providencePlaceSourceUrl(school, selected)!}
+                  href={providencePlaceSourceUrl(publicSchool, selected)!}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   查看地點來源 ↗
                 </a>
               )}
-              {hasOfficialProvidenceLibraryGuide(school, selected) && (
+              {hasOfficialProvidenceLibraryGuide(publicSchool, selected) && (
                 <a
                   className="btn"
                   href={PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL}
@@ -1030,7 +1042,7 @@ function MapContent({
                 >
                   <span className={styles.locationName}>
                     {location.name}
-                    {isProvidencePendingVerification(school, location) && (
+                    {isProvidencePendingVerification(publicSchool, location) && (
                       <span className={styles.pending}>待確認</span>
                     )}
                   </span>

@@ -321,8 +321,8 @@ export default function AdminReportsPage() {
 
   return (
     <RequireAdmin>
-      <h1 style={{ marginTop: 0 }}>商用對齊：成績／測驗／互動課堂報表</h1>
-      <p style={{ color: '#3C3C43', lineHeight: 1.6 }}>
+      <h2>商用對齊：成績／測驗／互動課堂報表</h2>
+      <p style={{ color: 'var(--muted)', lineHeight: 1.6 }}>
         報表底層為 view／materialized view，RLS 仍由各業務表強制；平台管理員以 admin_* RPC 取得；
         大量匯出請以「入列匯出任務」走非同步 Worker（避免瀏覽器拖慢）。
       </p>
@@ -365,7 +365,7 @@ export default function AdminReportsPage() {
             type="button"
             disabled={exportBusy || (!courseId && viewMode !== 'engagement')}
             onClick={() => void enqueueExportJob(reportKindOf(viewMode), 'csv')}
-            style={{ ...primaryBtnStyle, background: '#0ea5e9', borderColor: '#0ea5e9' }}>
+            style={{ ...primaryBtnStyle, background: 'var(--info)', borderColor: 'var(--info)' }}>
             入列 CSV 匯出
           </button>
           <button
@@ -384,11 +384,11 @@ export default function AdminReportsPage() {
         </p>
       ) : null}
 
-      <div style={{ marginTop: 24, padding: 20, borderRadius: 16, border: '1px solid #E5E5EA', background: '#fff' }}>
+      <div style={{ marginTop: 24, padding: 20, borderRadius: 16, border: '1px solid var(--border)', background: 'var(--surface)' }}>
         {viewMode === 'engagement' ? (
           <EngagementView rows={engagement} csvDownload={csvDownload} />
         ) : !courseId ? (
-          <p style={{ color: '#8E8E93' }}>請選擇課程。</p>
+          <p style={{ color: 'var(--muted)' }}>請選擇課程。</p>
         ) : viewMode === 'rollup' ? (
           <RollupView series={series} csvDownload={(r) => csvDownload(r, `rollup-${courseId.slice(0, 8)}.csv`)} />
         ) : viewMode === 'detail' ? (
@@ -406,7 +406,7 @@ export default function AdminReportsPage() {
 const selectStyle: React.CSSProperties = {
   padding: '10px 12px',
   borderRadius: 10,
-  border: '1px solid #d1d5db',
+  border: '1px solid var(--border-strong)',
   fontSize: 14,
   minWidth: 220,
 };
@@ -416,7 +416,7 @@ const primaryBtnStyle: React.CSSProperties = {
   borderRadius: 10,
   border: '1px solid var(--brand)',
   background: 'var(--brand)',
-  color: '#fff',
+  color: 'var(--on-brand)',
   fontWeight: 700,
   cursor: 'pointer',
 };
@@ -436,11 +436,11 @@ function RollupView({
   series: { idx: string; pct: number }[];
   csvDownload: (rows: Record<string, unknown>[]) => void;
 }) {
-  if (series.length === 0) return <p style={{ color: '#8E8E93' }}>此課程尚無可用的加權彙總列。</p>;
+  if (series.length === 0) return <p style={{ color: 'var(--muted)' }}>此課程尚無可用的加權彙總列。</p>;
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <p style={{ color: '#8E8E93', fontSize: 13 }}>注意：以序號呈現並非去識別化保證；正式環境請再做資料最小化／遮罩。</p>
+        <p style={{ color: 'var(--muted)', fontSize: 13 }}>注意：以序號呈現並非去識別化保證；正式環境請再做資料最小化／遮罩。</p>
         <button type="button" style={smallBtnStyle} onClick={() => csvDownload(series.map((s) => ({ ...s })))}>
           下載 CSV
         </button>
@@ -448,7 +448,7 @@ function RollupView({
       <div style={{ width: '100%', height: 360 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={series} margin={{ left: 8, right: 8 }}>
-            <CartesianGrid strokeDasharray="4 8" stroke="#E5E5EA" />
+            <CartesianGrid strokeDasharray="4 8" stroke="var(--border)" />
             <XAxis dataKey="idx" tick={{ fontSize: 11 }} />
             <YAxis domain={[0, 100]} unit="%" width={52} />
             <Tooltip formatter={(value: number) => [`${value?.toFixed(2)}%`, 'weighted']} />
@@ -474,7 +474,7 @@ function DetailView({
 }) {
   if (itemAvgSeries.length === 0) {
     return (
-      <p style={{ color: '#8E8E93' }}>
+      <p style={{ color: 'var(--muted)' }}>
         {itemScores.length === 0
           ? '此課程尚無可讀取之項目級分數，或所有列缺 score／max_points。'
           : '無法將分數換算為平均達成率（請確認評分項目有合理 max_points）。'}
@@ -484,7 +484,7 @@ function DetailView({
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <p style={{ color: '#8E8E93', fontSize: 13 }}>
+        <p style={{ color: 'var(--muted)', fontSize: 13 }}>
           各評分項目以「(score clamp 至 max)／max」之平均達成率表示；可由「入列 CSV／XLSX 匯出」做大量匯出。
         </p>
         <button
@@ -497,7 +497,7 @@ function DetailView({
       <div style={{ width: '100%', height: 380 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={itemAvgSeries} margin={{ left: 8, right: 8 }}>
-            <CartesianGrid strokeDasharray="4 8" stroke="#E5E5EA" />
+            <CartesianGrid strokeDasharray="4 8" stroke="var(--border)" />
             <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-25} height={90} dx={6} dy={16} />
             <YAxis domain={[0, 100]} unit="%" width={52} />
             <Tooltip formatter={(value: number) => [`${value?.toFixed(2)}%`, 'avg 達成率']} />
@@ -519,7 +519,7 @@ function QuizView({
   courseId: string;
   csvDownload: (rows: Record<string, unknown>[], filename: string) => void;
 }) {
-  if (rows.length === 0) return <p style={{ color: '#8E8E93' }}>此課程尚無試卷紀錄。</p>;
+  if (rows.length === 0) return <p style={{ color: 'var(--muted)' }}>此課程尚無試卷紀錄。</p>;
   const series = rows.map((r) => ({
     name: r.quiz_title.length > 24 ? r.quiz_title.slice(0, 22) + '…' : r.quiz_title,
     avg: r.avg_score ?? 0,
@@ -528,7 +528,7 @@ function QuizView({
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <p style={{ color: '#8E8E93', fontSize: 13 }}>每張試卷的繳交人數、平均分數。</p>
+        <p style={{ color: 'var(--muted)', fontSize: 13 }}>每張試卷的繳交人數、平均分數。</p>
         <button
           type="button"
           style={smallBtnStyle}
@@ -539,20 +539,20 @@ function QuizView({
       <div style={{ width: '100%', height: 320 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={series}>
-            <CartesianGrid strokeDasharray="4 8" stroke="#E5E5EA" />
+            <CartesianGrid strokeDasharray="4 8" stroke="var(--border)" />
             <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-25} height={90} dy={16} interval={0} />
             <YAxis />
             <Tooltip />
             <Legend />
             <Bar name="avg score" dataKey="avg" fill="var(--brand)" />
-            <Bar name="繳交人次" dataKey="students" fill="#0ea5e9" />
+            <Bar name="繳交人次" dataKey="students" fill="var(--info)" />
           </BarChart>
         </ResponsiveContainer>
       </div>
       <div style={{ overflowX: 'auto', marginTop: 16 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ background: '#F2F2F7' }}>
+            <tr style={{ background: 'var(--bg-soft)' }}>
               <th style={cellStyle}>試卷</th>
               <th style={cellStyle}>人次</th>
               <th style={cellStyle}>繳交 attempt</th>
@@ -588,11 +588,11 @@ function LiveView({
   courseId: string;
   csvDownload: (rows: Record<string, unknown>[], filename: string) => void;
 }) {
-  if (rows.length === 0) return <p style={{ color: '#8E8E93' }}>此課程尚無 live session。</p>;
+  if (rows.length === 0) return <p style={{ color: 'var(--muted)' }}>此課程尚無 live session。</p>;
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <p style={{ color: '#8E8E93', fontSize: 13 }}>每場 live session 的簽到統計。</p>
+        <p style={{ color: 'var(--muted)', fontSize: 13 }}>每場 live session 的簽到統計。</p>
         <button
           type="button"
           style={smallBtnStyle}
@@ -603,7 +603,7 @@ function LiveView({
       <div style={{ overflowX: 'auto', marginTop: 16 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ background: '#F2F2F7' }}>
+            <tr style={{ background: 'var(--bg-soft)' }}>
               <th style={cellStyle}>session</th>
               <th style={cellStyle}>開始</th>
               <th style={cellStyle}>結束</th>
@@ -639,7 +639,7 @@ function EngagementView({
   rows: EngagementRow[];
   csvDownload: (rows: Record<string, unknown>[], filename: string) => void;
 }) {
-  if (rows.length === 0) return <p style={{ color: '#8E8E93' }}>尚無數據（或 MV 需重整）。</p>;
+  if (rows.length === 0) return <p style={{ color: 'var(--muted)' }}>尚無數據（或 MV 需重整）。</p>;
   const top = rows.slice(0, 30).map((r) => ({
     name: r.course_title.length > 22 ? r.course_title.slice(0, 20) + '…' : r.course_title,
     forum: r.forum_posts_7d,
@@ -649,7 +649,7 @@ function EngagementView({
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <p style={{ color: '#8E8E93', fontSize: 13 }}>近 7 日：討論貼文／作答／簽到，依「總和」由多至少排序。</p>
+        <p style={{ color: 'var(--muted)', fontSize: 13 }}>近 7 日：討論貼文／作答／簽到，依「總和」由多至少排序。</p>
         <button
           type="button"
           style={smallBtnStyle}
@@ -660,12 +660,12 @@ function EngagementView({
       <div style={{ width: '100%', height: 380 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={top}>
-            <CartesianGrid strokeDasharray="4 8" stroke="#E5E5EA" />
+            <CartesianGrid strokeDasharray="4 8" stroke="var(--border)" />
             <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-25} height={90} dy={16} interval={0} />
             <YAxis />
             <Tooltip />
             <Legend />
-            <Bar dataKey="forum" name="討論" fill="#0ea5e9" stackId="a" />
+            <Bar dataKey="forum" name="討論" fill="var(--info)" stackId="a" />
             <Bar dataKey="quiz" name="作答" fill="var(--success)" stackId="a" />
             <Bar dataKey="live" name="簽到" fill="var(--warning)" stackId="a" />
           </BarChart>
@@ -679,14 +679,14 @@ const smallBtnStyle: React.CSSProperties = {
   padding: '6px 12px',
   fontSize: 12,
   borderRadius: 8,
-  border: '1px solid #d1d5db',
-  background: '#fff',
+  border: '1px solid var(--border-strong)',
+  background: 'var(--surface)',
   cursor: 'pointer',
 };
 
 const cellStyle: React.CSSProperties = {
   padding: 8,
-  border: '1px solid #E5E5EA',
+  border: '1px solid var(--border)',
   textAlign: 'left',
   fontSize: 12,
 };

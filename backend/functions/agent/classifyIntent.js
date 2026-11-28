@@ -1,4 +1,5 @@
 'use strict';
+const { washingReservationIntent } = require('./washingReservationSelection');
 
 const cases = require('./cases.json');
 const {
@@ -194,6 +195,9 @@ function classifyIntent(text) {
 
   // 2) 多語別名 → 中文正規化（不蓋掉原文，只用來分類）
   const normalized = normalizeMultilingualAliases(text);
+
+  const washingIntent = washingReservationIntent(normalized);
+  if (washingIntent) return { name: washingIntent, confidence: 1, source: 'keyword_fallback' };
 
   const rich = classifyRichIntent(normalized);
   const table = cases.intentConfidence || {};

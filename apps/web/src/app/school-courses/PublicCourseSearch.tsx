@@ -24,7 +24,7 @@ import courseStyles from './schoolCourses.module.css';
 type CourseSearch = { query: string; filters?: PublicCourseFilters };
 type SearchResult = CourseSearch & (
   | { status: 'loading' | 'error' }
-  | { status: 'ready'; courses: PublicCatalogCourse[]; truncated: boolean; sourceUrl: string; fetchedAt?: string; unresolvedCount?: number }
+  | { status: 'ready'; courses: PublicCatalogCourse[]; truncated: boolean; sourceUrl: string; fetchedAt?: string; checkedAt: number; unresolvedCount?: number }
 );
 
 const QUERY_LENGTH_NOTICE = '搜尋文字最多 80 個字，請縮短後再查詢。';
@@ -372,7 +372,7 @@ function PublicCourseSearchForm({
       if (pending.current?.controller === controller && !controller.signal.aborted) {
         setResult({
           status: 'ready', ...search, courses: data.courses, truncated: data.truncated,
-          sourceUrl: data.sourceUrl, fetchedAt: data.fetchedAt, unresolvedCount: data.unresolvedCount,
+          sourceUrl: data.sourceUrl, fetchedAt: data.fetchedAt, checkedAt: Date.now(), unresolvedCount: data.unresolvedCount,
         });
       }
     } catch {
@@ -442,10 +442,17 @@ function PublicCourseSearchForm({
 
   // Match native's source-freshness guidance: a successful search does not
   // establish that the university has published an up-to-date offering.
-  const [now, setNow] = useState<number | null>(null);
+  // The accepted response establishes the initial comparison clock. Refresh
+  // it on return to the page and once a minute while timestamped results are
+  // visible, without refetching or changing the original source provenance.
+  const hasFreshnessClock = result?.status === 'ready' && Boolean(result.fetchedAt);
   useEffect(() => {
-    const update = () => setNow(Date.now());
-    update();
+    if (!hasFreshnessClock) return;
+    const update = () => {
+      const now = Date.now();
+      setResult(current => current?.status === 'ready' && current.fetchedAt && current.checkedAt !== now
+        ? { ...current, checkedAt: now } : current);
+    };
     const timer = window.setInterval(update, 60_000);
     window.addEventListener('focus', update);
     document.addEventListener('visibilitychange', update);
@@ -454,9 +461,9 @@ function PublicCourseSearchForm({
       window.removeEventListener('focus', update);
       document.removeEventListener('visibilitychange', update);
     };
-  }, []);
-  const fetchedAt = result?.status === 'ready' ? result.fetchedAt : undefined;
-  const fetchAgeMs = fetchedAt && now !== null ? now - Date.parse(fetchedAt) : null;
+  }, [hasFreshnessClock]);
+  const fetchAgeMs = result?.status === 'ready' && result.fetchedAt
+    ? result.checkedAt - Date.parse(result.fetchedAt) : null;
   const fetchIsOld = fetchAgeMs !== null && fetchAgeMs > 24 * 60 * 60 * 1000;
   // Allow a small client/server clock skew without presenting false warnings.
   const fetchIsFuture = fetchAgeMs !== null && fetchAgeMs < -5 * 60 * 1000;

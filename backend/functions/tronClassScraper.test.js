@@ -6,6 +6,7 @@ jest.mock('https', () => ({
 
 const https = require('https');
 const {
+  tcLogin,
   tcFetchCourses,
   tcFetchProfile,
   tcFetchIdentityProfile,
@@ -40,6 +41,18 @@ function mockHttpsResponse({ status = 200, headers = {}, body = '{}', delayMs, a
   });
 }
 
+function mockFailedCasLogin(errorPage, indexPage = '<html>Not signed in</html>') {
+  jest.spyOn(console, 'log').mockImplementation(() => {});
+  jest.spyOn(console, 'warn').mockImplementation(() => {});
+  mockHttpsResponse({ status: 503 }); // Native login falls back to CAS.
+  mockHttpsResponse({
+    body: '<form action="https://identity.pu.edu.tw/auth/login"><input type="hidden" name="state" value="opaque"></form>',
+  });
+  mockHttpsResponse({ body: errorPage });
+  mockHttpsResponse({ body: indexPage });
+  mockHttpsResponse({ status: 401 }); // No authenticated profile exists.
+}
+
 describe('tronClassScraper', () => {
   beforeEach(() => {
     https.request.mockReset();
@@ -50,6 +63,44 @@ describe('tronClassScraper', () => {
     jest.restoreAllMocks();
     jest.useRealTimers();
     setCampusHttpFetch(null);
+  });
+
+  test.each([
+    ['nested elements', '<span id="error-message">請<span>稍後</span>再試<br>聯絡管理員</span>', '請稍後再試 聯絡管理員'],
+    ['HTML entities', '<span id="error-message">請稍後&nbsp;重試 &amp; 通知管理員</span>', '請稍後 重試 & 通知管理員'],
+    ['non-visible content', '<span id="error-message"><script>script-private</script><style>style-private</style><template>template-private</template><noscript>noscript-private</noscript><textarea>form-private</textarea>請<span hidden>hidden-private</span><span aria-hidden="true">aria-private</span><span style="display: none">display-private</span><span style="visibility: hidden">visibility-private</span>稍後重試</span>', '請稍後重試'],
+    ['hidden ancestor', '<div hidden><span id="error-message">hidden-private</span></div><span id="error-message">請稍後重試</span>', '請稍後重試'],
+    ['encoded tag-like text', '<span id="error-message">&lt;script&gt;alert(1)&lt;/script&gt;</span>', 'scriptalert(1)/script'],
+    ['numeric entities', '<span id="error-message">&#60;img src=x onerror=alert(1)&#62;</span>', 'img src=x onerror=alert(1)'],
+    ['one-time entity decoding', '<span id="error-message">&amp;lt;script&amp;gt;</span>', '&lt;script&gt;'],
+  ])('returns only CAS error text from %s', async (_label, html, expected) => {
+    mockFailedCasLogin(html);
+    await expect(tcLogin('student', 'test-password')).resolves.toEqual({
+      success: false, cookies: {}, session: null, error: `TronClass CAS：${expected}`,
+    });
+    expect(https.request).toHaveBeenCalledTimes(5);
+  });
+
+  test.each([
+    '<span id="error-message">請重試 <scr<script>ipt>alert(1)</scr</script>ipt></span>',
+    '<span id="error-message">請重試 <</>script>alert(1)<</>/script></span>',
+  ])('never reconstructs markup from malformed CAS HTML: %s', async html => {
+    mockFailedCasLogin(html);
+    const result = await tcLogin('student', 'test-password');
+    expect(result).toMatchObject({ success: false, cookies: {}, session: null });
+    expect(result.error).toContain('TronClass CAS：請重試');
+    expect(result.error).not.toMatch(/[<>]/);
+  });
+
+  test.each([
+    ['<span id="error-message">Invalid credentials</span>', '<html>Not signed in</html>', 'TronClass CAS 帳號或密碼錯誤'],
+    ['<span id="error-message"><script>private()</script></span>', '<a href="/auth/realms/pu">Sign in</a>', 'TronClass CAS session 未建立'],
+    ['<div>No error message</div>', '<html>Not signed in</html>', 'TronClass CAS 登入失敗，無法取得使用者 ID'],
+  ])('preserves credential and session failure results', async (errorPage, indexPage, expected) => {
+    mockFailedCasLogin(errorPage, indexPage);
+    await expect(tcLogin('student', 'test-password')).resolves.toEqual({
+      success: false, cookies: {}, session: null, error: expected,
+    });
   });
 
   test('fetches courses through current my-courses endpoint first', async () => {

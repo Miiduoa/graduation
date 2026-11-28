@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { listStoryViewers, type CampusStoryDoc } from '../../services/stories';
+import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 
 type ViewerPage = Awaited<ReturnType<typeof listStoryViewers>>;
 type Cursor = ViewerPage['nextCursor'];
@@ -28,6 +30,7 @@ export function StoryAudiencePanel(props: StoryAudiencePanelProps) {
 }
 
 function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
+  const styles = useThemeStyleSheet(createStyles);
   const expiresAt = typeof story.expiresAt === 'number' && Number.isFinite(story.expiresAt)
     ? story.expiresAt : null;
   const initiallyExpired = expiresAt !== null && Date.now() >= expiresAt;
@@ -209,7 +212,7 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
           onPress={onBack}
           style={styles.back}
         >
-          <Ionicons name="arrow-back" color="#fff" size={22} />
+          <Ionicons name="arrow-back" color={theme.colors.text} size={22} />
         </Pressable>
         <View style={styles.titleBlock}>
           <Text accessibilityRole="header" style={styles.title}>
@@ -226,7 +229,7 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
           onPress={refresh}
           style={styles.refresh}
         >
-          <Ionicons name="refresh" color="#d6f4e7" size={20} />
+          <Ionicons name="refresh" color={theme.colors.accent} size={20} />
         </Pressable>
       </View>
       {count > 0 && (
@@ -244,7 +247,7 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
               importantForAccessibility="no-hide-descendants"
               accessibilityElementsHidden
             >
-              <Ionicons name="person-outline" color="#cce6da" size={19} />
+              <Ionicons name="person-outline" color={theme.colors.textSecondary} size={19} />
             </View>
             <Text style={styles.name}>{item.displayName}</Text>
           </View>
@@ -260,7 +263,7 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
               </Text>
             ) : status === 'loading' ? (
               <View style={styles.loading} accessibilityLiveRegion="polite">
-                <ActivityIndicator color="#b8e7d4" />
+                <ActivityIndicator color={theme.colors.accent} />
                 <Text style={styles.status}>
                   {request.cursor ? '正在載入更多觀看者…' : '正在載入觀看名單…'}
                 </Text>
@@ -331,56 +334,42 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  panel: { flex: 1, paddingHorizontal: 4 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
-  back: {
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 22,
-    backgroundColor: '#242928',
-  },
-  titleBlock: { flex: 1, gap: 3 },
-  refresh: {
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 22,
-    backgroundColor: '#20342d',
-  },
-  title: { fontSize: 23, fontWeight: '700', color: '#fff' },
-  subtitle: { fontSize: 14, color: '#c2cbc8' },
-  summary: { fontSize: 14, color: '#c2cbc8', marginVertical: 10 },
-  row: {
-    paddingVertical: 10,
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#3a403e',
-  },
-  avatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#25372f',
-  },
-  name: { flex: 1, fontSize: 16, color: '#fff' },
-  footer: { gap: 12, paddingVertical: 18 },
-  loading: { alignItems: 'center', gap: 8 },
-  status: { color: '#c2cbc8', fontSize: 16, textAlign: 'center', paddingVertical: 8 },
-  retryScope: { color: '#d6f4e7', fontSize: 14, textAlign: 'center' },
-  action: {
-    minHeight: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 12,
-    backgroundColor: '#20342d',
-  },
-  actionText: { color: '#d6f4e7', fontSize: 16, fontWeight: '600' },
-});
+const createStyles = () =>
+  StyleSheet.create({
+    panel: { flex: 1, paddingHorizontal: 4, backgroundColor: theme.colors.bg },
+    header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 },
+    back: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+    titleBlock: { flex: 1, gap: 3 },
+    refresh: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+    title: { fontSize: 23, fontWeight: '700', color: theme.colors.text },
+    subtitle: { fontSize: 14, color: theme.colors.textSecondary },
+    summary: { fontSize: 14, color: theme.colors.textSecondary, marginVertical: 10 },
+    row: {
+      paddingVertical: 10,
+      flexDirection: 'row',
+      gap: 12,
+      alignItems: 'center',
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.separator,
+    },
+    avatar: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.colors.surface2,
+    },
+    name: { flex: 1, fontSize: 16, color: theme.colors.text },
+    footer: { gap: 4, paddingVertical: 18 },
+    loading: { alignItems: 'center', gap: 8 },
+    status: {
+      color: theme.colors.textSecondary,
+      fontSize: 16,
+      textAlign: 'center',
+      paddingVertical: 8,
+    },
+    retryScope: { color: theme.colors.textSecondary, fontSize: 14, textAlign: 'center' },
+    action: { minHeight: 44, justifyContent: 'center', alignItems: 'center' },
+    actionText: { color: theme.colors.accent, fontSize: 16, fontWeight: '700' },
+  });

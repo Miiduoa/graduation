@@ -162,3 +162,11 @@ it('filters loaded items locally and hides raw English internals', () => {
     '這次沒有存成報名紀錄',
   );
 });
+
+it('keeps the saved view in return links with the campus context and only when it is on', () => {
+  expect(readCampusEventFilters({ saved: '1', q: '講座' })).toEqual({ q: '講座', view: 'all', saved: true });
+  expect(readCampusEventFilters({ saved: 'true' })).toEqual({ q: '', view: 'all' });
+  expect(buildCampusEventListHref('?schoolId=nthu&campus=nthu&saved=1&x=1', { q: '', view: 'all', saved: true }))
+    .toBe('/events?schoolId=nthu&campus=nthu&saved=1');
+  expect(buildCampusEventListHref('?schoolId=nthu&saved=1')).toBe('/events?schoolId=nthu');
+});

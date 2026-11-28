@@ -78,7 +78,7 @@ function ServiceDirectory() {
     [],
   );
   const schoolSearch = useCampusNavigationSearch(params);
-  const options = useSignInOptions();
+  const options = useSignInOptions(undefined, true, 'school');
   const queryString = params.toString();
   const schoolParams = new URLSearchParams(schoolSearch);
   const requestedCampus = schoolParams.get('campus') || schoolParams.get('schoolId');
@@ -444,7 +444,7 @@ function ServiceDirectory() {
     );
   }
   return (
-    <SiteShell title="所有服務" subtitle="先選常用服務，或直接搜尋你要做的事。">
+    <SiteShell title="所有服務">
       <div ref={directory} className={styles.directory}>
         <form
           className={styles.searchPanel}

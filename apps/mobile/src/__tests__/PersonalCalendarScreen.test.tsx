@@ -49,6 +49,7 @@ let mockScope: { owner: string; schoolId: string } | null = {
 };
 
 const mockNavigate = jest.fn();
+let mockFocusParams: { eventId: string; eventScope: string } | undefined;
 
 let mockPendingLogout = false;
 let mockSession: { platformAccountId: string } | null = {
@@ -87,7 +88,7 @@ jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void | (() => void)) =>
     require('react').useEffect(() => mockCalendarFocused ? callback() : undefined, [callback, mockCalendarFocused]),
   useNavigation: () => ({ navigate: mockNavigate }),
-  useRoute: () => ({ params: undefined }),
+  useRoute: () => ({ params: mockFocusParams }),
 }));
 jest.mock('../utils/safeNavigate', () => ({
   safeNavigate: (_nav: unknown, route: string, params?: unknown) => mockNavigate(route, params),
@@ -164,6 +165,7 @@ beforeEach(async () => {
   mockAuth = { user: null, loading: false };
   mockSchool = { id: 'pu', name: '靜宜大學' };
   mockNavigate.mockReset();
+  mockFocusParams = undefined;
   mockEnableTimed.mockReset();
   mockEnableAllDay.mockReset();
   mockDisableReminder.mockReset();
@@ -571,6 +573,26 @@ it('選取單日後仍匯出所選整月，包含跨月活動並保留原始起�
   expect(content).not.toContain('SUMMARY:其他月份');
 });
 
+
+it('a Today handoff cannot open a colliding event id after an account switch', async () => {
+  const scope = mockScope!;
+  const row = {
+    id: 'same-device-id', batchId: 'events', importedAt: '2026-10-19T01:00:00Z',
+    kind: 'events', schoolId: 'pu', academicYear: '', semester: '', title: '目前帳號的私事',
+    allDay: false, date: '2026-10-20', startTime: '09:00', endTime: '11:00',
+    source: { type: 'paste', line: 1, rawText: '' },
+  };
+  await AsyncStorage.setItem(personalImportStorageKey(scope), JSON.stringify({ version: 1, records: [row], batches: [] }));
+  mockFocusParams = { eventId: row.id, eventScope: JSON.stringify({ ...scope, owner: 'nuni:another-account' }) };
+  const screen = renderCalendar();
+  await waitUntilEditable(screen);
+  expect(screen.queryByLabelText('標題')).toBeNull();
+  mockFocusParams = { eventId: row.id, eventScope: JSON.stringify(scope) };
+  screen.rerender(<PersonalCalendarScreen />);
+  await screen.findByDisplayValue('目前帳號的私事');
+  expect((await loadPersonalImports(scope)).records).toEqual([row]);
+});
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (error: unknown) => void;
@@ -643,32 +665,6 @@ it.each(['availability', 'write'])('blocks an old export after same-account reva
   expect(exportMock.mock.calls[1][2]?.()).toBe(true);
 });
 
-it('hides the loaded month grid during Nuni revalidation and retains the unsaved draft', async () => {
-  mockUseLiveScope = true;
-  const title = '驗證後才能顯示的行程';
-  const draftTitle = '尚未儲存的草稿';
-  const view = await fillAndSave(title);
-  fireEvent.press(view.getByText('月格'));
-  await fillDraft(view, draftTitle);
-  expect(view.getByLabelText('2026-10-20')).toBeTruthy();
-  expect(view.getByText(title)).toBeTruthy();
-
-  // A mounted screen can lose verification before its focus-driven refresh runs.
-  mockCalendarFocused = false;
-  mockNuniLoading = true;
-  view.rerender(<PersonalCalendarScreen />);
-  expect(view.queryByLabelText('2026-10-20')).toBeNull();
-  expect(view.queryByText(title)).toBeNull();
-  expect(view.getByLabelText('標題').props.value).toBe(draftTitle);
-  expect(view.getByRole('button', { name: '儲存行程' })).toBeDisabled();
-
-  mockNuniLoading = false;
-  mockCalendarFocused = true;
-  view.rerender(<PersonalCalendarScreen />);
-  expect(await view.findByText(title)).toBeTruthy();
-  expect(view.getByLabelText('標題').props.value).toBe(draftTitle);
-});
-
 it('keeps the unsaved draft when Nuni revalidates with a null session while Firebase stays signed in', async () => {
   mockUseLiveScope = true;
   mockAuth = { user: { uid: 'firebase-student' }, loading: false };
@@ -711,6 +707,32 @@ it('drops the unsaved draft when the signed-in account actually switches during 
   mockCalendarFocused = true;
   view.rerender(<PersonalCalendarScreen />);
   expect(view.queryByLabelText('標題')).toBeNull();
+});
+
+it('hides the loaded month grid during Nuni revalidation and retains the unsaved draft', async () => {
+  mockUseLiveScope = true;
+  const title = '驗證後才能顯示的行程';
+  const draftTitle = '尚未儲存的草稿';
+  const view = await fillAndSave(title);
+  fireEvent.press(view.getByText('月格'));
+  await fillDraft(view, draftTitle);
+  expect(view.getByLabelText('2026-10-20')).toBeTruthy();
+  expect(view.getByText(title)).toBeTruthy();
+
+  // A mounted screen can lose verification before its focus-driven refresh runs.
+  mockCalendarFocused = false;
+  mockNuniLoading = true;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(view.queryByLabelText('2026-10-20')).toBeNull();
+  expect(view.queryByText(title)).toBeNull();
+  expect(view.getByLabelText('標題').props.value).toBe(draftTitle);
+  expect(view.getByRole('button', { name: '儲存行程' })).toBeDisabled();
+
+  mockNuniLoading = false;
+  mockCalendarFocused = true;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(await view.findByText(title)).toBeTruthy();
+  expect(view.getByLabelText('標題').props.value).toBe(draftTitle);
 });
 
 it('keeps the ordinary draft after an interactive login to the same Nuni account', async () => {

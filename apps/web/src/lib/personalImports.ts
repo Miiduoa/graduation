@@ -66,7 +66,7 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
     records: () => adopted?.ledger.records ?? parsePersonalImportRecords(scope, raw),
     sync: () => adopted?.ledger.sync ?? parseLedgerSyncState(scope, raw),
     assertSnapshot,
-    write(state: PersonalImportLocalState) {
+    prepareWrite(state: PersonalImportLocalState) {
       // Keep a v1 commit marker while legacy recovery data may still exist.
       // Expo owns the undo history. Carry it through Web writes from the same
       // ledger snapshot as the records before retiring an adopted checkpoint.
@@ -75,11 +75,13 @@ function readPersonalImportLedger(scope: PersonalImportScope) {
       const published = recovery.detachJournal(shouldMarkCommit
         ? serializePersonalImportBrowserCommit(ledger)
         : JSON.stringify(ledger));
-      assertSnapshot();
-      writePersonalImportBrowserPrimary(localStorage, key, published);
-      if (firstWrite && adopted) recovery.retire(published, adopted.source);
-      firstWrite = false;
-      primary = published;
+      return () => {
+        assertSnapshot();
+        writePersonalImportBrowserPrimary(localStorage, key, published);
+        if (firstWrite && adopted) recovery.retire(published, adopted.source);
+        firstWrite = false;
+        primary = published;
+      };
     },
   };
 }
@@ -136,6 +138,9 @@ export function readPersonalImportSyncState(scope: PersonalImportScope): Persona
   return readPersonalImportLedger(scope).sync();
 }
 
+const PERSONAL_IMPORT_SYNC_LOCK_UNAVAILABLE = '目前瀏覽器無法安全同步，請使用最新版瀏覽器。';
+const canLockPersonalImportSync = () => typeof navigator.locks?.request === 'function';
+
 export async function withPersonalImportSyncLock<T>(
   scope: PersonalImportScope,
   action: (
@@ -144,9 +149,15 @@ export async function withPersonalImportSyncLock<T>(
     assertSnapshot: () => void,
   ) => Promise<{ state: PersonalImportLocalState; result: T }>,
   active = () => true,
+  waitTimeoutMs?: number,
 ): Promise<T> {
-  if (!navigator.locks) throw new Error('目前瀏覽器無法安全同步，請使用最新版瀏覽器。');
-  return navigator.locks.request(personalImportsStorageKey(scope), async () => {
+  if (!canLockPersonalImportSync()) throw new Error(PERSONAL_IMPORT_SYNC_LOCK_UNAVAILABLE);
+  const key = personalImportsStorageKey(scope);
+  const controller = waitTimeoutMs === undefined ? undefined : new AbortController();
+  const timeout = controller && setTimeout(() => controller.abort(), waitTimeoutMs);
+  const run = async () => {
+    clearTimeout(timeout);
+    controller?.signal.throwIfAborted();
     if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
     const ledger = readPersonalImportLedger(scope);
     let persisted: PersonalImportLocalState = {
@@ -154,10 +165,14 @@ export async function withPersonalImportSyncLock<T>(
       sync: ledger.sync(),
     };
     const checkpoint = async (state: PersonalImportLocalState) => {
+      const changed = JSON.stringify(persisted) !== JSON.stringify(state);
+      // Finish serialization before the final account check, then verify the
+      // primary and recovery snapshots immediately before publishing.
+      const write = changed ? ledger.prepareWrite(state) : null;
       if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
-      if (JSON.stringify(persisted) === JSON.stringify(state)) return;
+      if (!write) return;
       try {
-        ledger.write(state);
+        write();
       } catch {
         throw new Error('裝置空間不足，這次同步未能保存；原資料仍保留，請先下載備份。');
       }
@@ -167,38 +182,52 @@ export async function withPersonalImportSyncLock<T>(
     const { state, result } = await action(persisted, checkpoint, ledger.assertSnapshot);
     await checkpoint(state);
     return result;
-  });
+  };
+  if (!controller) return navigator.locks.request(key, run);
+  try {
+    return await navigator.locks.request(key, { signal: controller.signal }, run);
+  } catch (error) {
+    if (controller.signal.aborted)
+      throw new Error('等待其他分頁完成個人紀錄操作已逾時，請稍後再試。');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function mutate<T>(
   scope: PersonalImportScope,
   action: (rows: PersonalImportRecord[]) => { rows: PersonalImportRecord[]; result: T },
   active = () => true,
+  signal?: AbortSignal,
 ): Promise<T> {
   // A Web Lock covers the whole read/modify/write, including other open tabs.
   if (!navigator.locks)
     throw new Error('目前瀏覽器無法安全儲存。請用最新版瀏覽器開啟 HTTPS 網站後重試；草稿還在。');
-  return navigator.locks.request(personalImportsStorageKey(scope), () => {
+  const write = () => {
+    signal?.throwIfAborted();
     if (!active()) throw new Error('帳號或校園已切換，請重新開啟匯入。');
     const ledger = readPersonalImportLedger(scope);
     const { rows, result } = action(ledger.records());
     if (rows.length > PERSONAL_IMPORT_LIMIT)
       throw new Error('這台裝置已存滿 2,000 筆，請先匯出備份並移除不再需要的紀錄。');
     try {
-      ledger.write({ records: rows, sync: ledger.sync() });
+      ledger.prepareWrite({ records: rows, sync: ledger.sync() })();
     } catch {
       throw new Error('這次沒有存成，可能是裝置空間不足或瀏覽器禁止儲存。草稿還在，請稍後再試。');
     }
     window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
     return result;
-  });
+  };
+  const key = personalImportsStorageKey(scope);
+  return signal ? navigator.locks.request(key, { signal }, write) : navigator.locks.request(key, write);
 }
 
 export async function savePersonalImportBatch(
   scope: PersonalImportScope,
   rows: PersonalImportRow[],
   active = () => true,
-  options: { restoreBackup?: boolean } = {},
+  options: { restoreBackup?: boolean; signal?: AbortSignal } = {},
 ) {
   if (!rows.length || rows.some((row) => row.schoolId !== scope.schoolId))
     throw new Error('請確認校園與要匯入的資料。');
@@ -224,6 +253,7 @@ export async function savePersonalImportBatch(
       };
     },
     active,
+    options.signal,
   );
 }
 
@@ -231,6 +261,7 @@ export async function undoPersonalImports(
   scope: PersonalImportScope,
   batchId: string,
   active = () => true,
+  signal?: AbortSignal,
 ) {
   return mutate(
     scope,
@@ -239,6 +270,7 @@ export async function undoPersonalImports(
       return { rows: next, result: rows.length - next.length };
     },
     active,
+    signal,
   );
 }
 
@@ -247,6 +279,7 @@ export async function changePersonalImport(
   original: PersonalImportRecord,
   revised: PersonalImportRow | null,
   active = () => true,
+  signal?: AbortSignal,
 ) {
   return mutate(
     scope,
@@ -270,5 +303,6 @@ export async function changePersonalImport(
       return { rows: plan.records, result: undefined };
     },
     active,
+    signal,
   );
 }

@@ -12,6 +12,7 @@ import { formatPublicCampusRead } from './publicCampus';
 import { formatCampusMapRead, parseCampusMapArguments, parseCampusMapResult } from './campusMap';
 import { formatPublicSocialRead, parsePublicSocialResult } from './publicSocial';
 import { formatSchoolInfoRead, parseSchoolInfoResult } from './schoolInfo';
+import { formatLibraryCatalogRead, parseLibraryCatalogResult } from './libraryCatalog';
 import { isRoleWorkspaceTool, parseRoleWorkspaceResult, formatRoleWorkspaceResult,
   roleWorkspaceModelSummary, roleWorkspaceGuidance, ROLE_WORKSPACE_TIMEOUT_MS } from './roleWorkspaceReads';
 import { connectedServiceClauses, connectedServiceRead, connectedServiceReadKey, connectedServiceReads, publicPostActionRequested } from './connectedServiceReads';
@@ -251,7 +252,10 @@ export async function run(input: RunInput) {
   const requiredReads = !input.planRevision && !hasPublicClause && !hasConnectedReads && !reads.length && !writeIntent(executionQuestion) && !personalSlotSelect(executionQuestion)
     ? informationReads(executionQuestion, now).filter(read => allowed(read.name)) : [];
   const informationResults: InformationResult[] = [];
-  const campusPrelude = input.planRevision ? null : campusInfoPrelude(executionQuestion);
+  const preludeKind = input.planRevision ? null : campusInfoPrelude(executionQuestion);
+  // The exact library directory read replaces the generic library shortcut; a route request keeps its own prelude.
+  const campusPrelude = preludeKind === 'library' && requestedConnectedReads.some(read => read.tool === 'get_library_catalog')
+    ? null : preludeKind;
   const signal = AbortSignal.any([
     input.signal,
     AbortSignal.timeout(input.previewDeadlineMs ?? 55000),
@@ -450,6 +454,7 @@ export async function run(input: RunInput) {
         try {
           if (isRoleWorkspaceTool(tool)) parseRoleWorkspaceResult(tool, result, input.binding.schoolId, request.args);
           else if (tool === 'get_public_social') parsePublicSocialResult(result, input.binding.schoolId, request.args);
+          else if (tool === 'get_library_catalog') parseLibraryCatalogResult(result, input.binding.schoolId, request.args);
           else parseSchoolInfoResult(result, input.binding.schoolId, request.args);
           return true;
         } catch { return false; }
@@ -505,13 +510,18 @@ export async function run(input: RunInput) {
     }
     const taskRequest = input.planRevision ? null : crossServiceRequest(input.question, now, input.binding.schoolId);
     if (taskRequest) {
+      // Check the parsed task as well as the conversational guide. A wording
+      // difference must not move professional work into another task context.
+      if (profile.id !== 'student' && taskRequest.operations.some(operation =>
+        operation.workSession && operation.workSession.profileId !== profile.id))
+        throw new V2Error(409, 'TASK_CONTEXT_MISMATCH');
       const eventMapSelections: Record<string, import('./publicEvent').PublicEventTarget> = {};
       const merchantSelections: Record<string, import('./roleWorkspaceReads').MerchantTarget> = {};
       const result = await runCrossService({ request: taskRequest, tools, binding: input.binding, signal, now,
         onEventMapSelection: (stepId, target) => { eventMapSelections[stepId] = target; },
         onMerchantSelection: (stepId, target) => { merchantSelections[stepId] = target; } });
       const taskRetry = issueTaskRetry({ question: input.question, request: taskRequest, plan: result.taskPlan,
-        binding: input.binding, secret: input.secret, now, eventMapSelections, merchantSelections });
+        binding: input.binding, secret: input.secret, now, taskProfile: profile.id, eventMapSelections, merchantSelections });
       steps.push(...result.steps);
       stopReason = result.stopReason;
       log('assistant.completed');
@@ -1252,6 +1262,15 @@ export function partialAnswer(
           : formatSchoolInfoRead(read as ReturnType<typeof parseSchoolInfoResult>));
         pages.add(read.href);
       } catch { /* Unverified public content cannot contribute facts or links. */ }
+      continue;
+    }
+    if (e.tool === 'get_library_catalog') {
+      try {
+        const schoolId = typeof result.schoolId === 'string' ? result.schoolId : '';
+        const read = parseLibraryCatalogResult(result, schoolId, result.query);
+        lines.push(formatLibraryCatalogRead(read));
+        pages.add(read.href);
+      } catch { /* An unverified library payload cannot contribute names or URLs. */ }
       continue;
     }
     if (e.tool === 'get_public_courses') {

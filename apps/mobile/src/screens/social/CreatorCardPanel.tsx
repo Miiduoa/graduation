@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   CREATOR_CARD_LIMITS, EMPTY_CREATOR_CARD, validateCreatorCard, type CreatorCard,
 } from '@campus/shared/src/creatorCard';
-import { readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
+import { isCreatorCardAccessDenied, readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 
@@ -60,7 +60,9 @@ function ScopedCreatorCardPanel({
   // resolves the uncertain write. The ref also guards stale button callbacks.
   const pendingWrite = useRef<{ draft: CreatorCard; expected: CreatorCard } | null>(null);
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
-  const savingFlight = useRef(false);
+  const savingFlight = useRef<object | null>(null);
+  const readBlocked = useRef(false);
+  const cardVersion = useRef(0);
   const [openingLink, setOpeningLink] = useState(false);
   const openingLinkFlight = useRef(false);
   const [linkError, setLinkError] = useState('');
@@ -76,19 +78,45 @@ function ScopedCreatorCardPanel({
     return () => { mounted.current = false; };
   }, []);
 
+  const blockDeniedRead = useCallback((error: unknown) => {
+    const invalidScope = error instanceof Error && error.message === 'Creator card scope mismatch';
+    if (!isCreatorCardAccessDenied(error) && !invalidScope) return false;
+    readBlocked.current = true;
+    currentPortfolioLink.current = '';
+    setLinkError('');
+    if (pendingWrite.current) setNeedsConfirmation(true);
+    setState({ status: 'error' });
+    return true;
+  }, []);
+
+  const acceptCard = useCallback((value: CreatorCard | null) => {
+    if (readBlocked.current) return;
+    cardVersion.current += 1;
+    currentPortfolioLink.current = value?.linkUrl ?? '';
+    setLinkError('');
+    setState({ status: 'ready', value });
+  }, []);
+
   useEffect(() => {
     let live = true;
+    const version = cardVersion.current;
     setState({ status: 'loading' });
     void readCreatorCard(schoolId, ownerUid).then((value) => {
-      if (live) setState({ status: 'ready', value });
-    }).catch(() => {
-      if (live) setState({ status: 'error' });
+      if (!live || cardVersion.current !== version) return;
+      // An explicit fresh display read can restore access. Its contents never
+      // settle the separate pending write, even when they match the draft.
+      readBlocked.current = false;
+      acceptCard(value);
+    }).catch((error: unknown) => {
+      if (!live) return;
+      if (blockDeniedRead(error) || cardVersion.current !== version) return;
+      setState({ status: 'error' });
     });
     return () => { live = false; };
-  }, [schoolId, ownerUid, attempt]);
+  }, [schoolId, ownerUid, attempt, acceptCard, blockDeniedRead]);
 
   const beginEdit = () => {
-    if (!own || savingFlight.current || state.status !== 'ready') return;
+    if (!own || readBlocked.current || savingFlight.current || state.status !== 'ready') return;
     if (!pendingWrite.current) {
       replaceDraft(state.value ?? EMPTY_CREATOR_CARD);
       setFeedback('');
@@ -109,29 +137,29 @@ function ScopedCreatorCardPanel({
 
   const confirmPreviousSave = async () => {
     const submitted = pendingWrite.current;
-    if (!mounted.current || !own || !submitted || savingFlight.current || state.status !== 'ready') return;
-    savingFlight.current = true;
+    if (!mounted.current || !own || !submitted || readBlocked.current || savingFlight.current || state.status !== 'ready') return;
+    const operation = {};
+    savingFlight.current = operation;
     setSaving(true);
     setFeedback('');
     let latest: CreatorCard | null;
     try {
-      latest = await readCreatorCard(schoolId, ownerUid);
-    } catch {
-      if (mounted.current) {
+      latest = await readCreatorCard(schoolId, ownerUid, { requireCommitted: true });
+    } catch (error) {
+      if (mounted.current && pendingWrite.current === submitted && savingFlight.current === operation) {
+        blockDeniedRead(error);
         setFeedback('仍無法核對伺服器資料，草稿已保留，請稍後重試核對。');
       }
       return;
     } finally {
-      if (mounted.current) {
-        savingFlight.current = false;
+      if (mounted.current && savingFlight.current === operation) {
+        savingFlight.current = null;
         setSaving(false);
       }
     }
-    if (!mounted.current) return;
+    if (!mounted.current || pendingWrite.current !== submitted || readBlocked.current) return;
 
-    currentPortfolioLink.current = latest?.linkUrl ?? '';
-    setLinkError('');
-    setState({ status: 'ready', value: latest });
+    acceptCard(latest);
     pendingWrite.current = null;
     setNeedsConfirmation(false);
     const { expected } = submitted;
@@ -153,7 +181,7 @@ function ScopedCreatorCardPanel({
   };
 
   const submit = async () => {
-    if (!mounted.current || !own || pendingWrite.current || savingFlight.current || state.status !== 'ready') return;
+    if (!mounted.current || !own || readBlocked.current || pendingWrite.current || savingFlight.current || state.status !== 'ready') return;
     const submittedDraft = currentDraft.current;
     let expected: CreatorCard;
     try {
@@ -163,24 +191,29 @@ function ScopedCreatorCardPanel({
       return;
     }
 
-    savingFlight.current = true;
+    const submitted = { draft: submittedDraft, expected };
+    const operation = {};
+    // Own this write before sending it, including the time its Promise has
+    // not settled. Tab changes and ordinary reads cannot release this ticket.
+    pendingWrite.current = submitted;
+    savingFlight.current = operation;
     setSaving(true);
     setFeedback('');
     try {
       const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft);
-      if (!mounted.current) return;
-      currentPortfolioLink.current = confirmed.linkUrl;
-      setLinkError('');
-      setState({ status: 'ready', value: confirmed });
+      if (!mounted.current || pendingWrite.current !== submitted || readBlocked.current) return;
+      acceptCard(confirmed);
+      pendingWrite.current = null;
+      setNeedsConfirmation(false);
       finishSave(submittedDraft);
-    } catch {
-      if (!mounted.current) return;
-      pendingWrite.current = { draft: submittedDraft, expected };
+    } catch (error) {
+      if (!mounted.current || pendingWrite.current !== submitted || savingFlight.current !== operation) return;
+      blockDeniedRead(error);
       setNeedsConfirmation(true);
       setFeedback('無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
     } finally {
-      if (mounted.current) {
-        savingFlight.current = false;
+      if (mounted.current && savingFlight.current === operation) {
+        savingFlight.current = null;
         setSaving(false);
       }
     }
@@ -189,7 +222,7 @@ function ScopedCreatorCardPanel({
   const openPortfolioLink = async (url: string) => {
     // Linking is an OS handoff: even a valid HTTPS URL may be rejected. Prevent
     // a second tap from launching another handoff while the first is pending.
-    if (openingLinkFlight.current) return;
+    if (!mounted.current || readBlocked.current || currentPortfolioLink.current !== url || openingLinkFlight.current) return;
     openingLinkFlight.current = true;
     setOpeningLink(true);
     setLinkError('');

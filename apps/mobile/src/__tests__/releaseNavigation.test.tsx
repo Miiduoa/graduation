@@ -1218,7 +1218,7 @@ test.each(['AIAgentConsole', 'AIAgentObservatory'])(
 test('Map retired DormitoryScreen is not registered and does not open an unavailable dorm page', async () => {
   const { view, navigation } = await mount(MapStack);
   act(() => navigation.navigate('DormitoryScreen'));
-  expect(navigation.getCurrentRoute()?.name).toBe('CampusHome');
+  expect(navigation.getCurrentRoute()?.name).toBe('Explore');
   expect(view.queryByText(/尚未開放/)).toBeNull();
   expect(view.queryByText('前往靜宜住宿服務組官網')).toBeNull();
 });
@@ -1231,7 +1231,31 @@ test('Map has a dedicated dormitory workspace route', async () => {
   expect(await view.findByText('住得安心，事情好處理')).toBeTruthy();
 });
 
-test('Map opens the real selected-school career page and returns to life', async () => {
+test('opening a resident parcel notice keeps the current dorm draft on the back stack', async () => {
+  Object.assign(Constants.expoConfig!.extra!, {
+    release: { releasedSchoolIds: ['pu'], features: { enabled: true, sso: true } },
+  });
+  const { view, navigation } = await mount(MapStack);
+  act(() => navigation.navigate('Dormitory'));
+  const draft = await view.findByLabelText('宿舍／學苑');
+  fireEvent.changeText(draft, '尚未儲存的住宿備忘');
+  const original = navigation.getCurrentRoute()?.key;
+  act(() => navigation.navigate('Dormitory', { notificationView: 'parcels', sourceSchoolId: 'tw-pu' }));
+  expect(navigation.getCurrentRoute()?.key).not.toBe(original);
+  await view.findByText('校方登錄包裹');
+  const noticeScreen = navigation.getCurrentRoute()?.key;
+  fireEvent.press(view.getByText('查看宿舍總覽'));
+  expect(navigation.getCurrentRoute()?.key).toBe(original);
+  expect((await view.findByLabelText('宿舍／學苑')).props.value).toBe('尚未儲存的住宿備忘');
+  act(() => navigation.navigate('Dormitory', { notificationView: 'parcels', sourceSchoolId: 'tw-pu' }));
+  expect(navigation.getCurrentRoute()?.key).toBe(noticeScreen);
+  await view.findByText('校方登錄包裹');
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.key).toBe(original);
+  expect((await view.findByLabelText('宿舍／學苑')).props.value).toBe('尚未儲存的住宿備忘');
+});
+
+test('Map opens the real selected-school career page and returns to Explore', async () => {
   mockSchool = 'ncku';
   const { view, navigation } = await mount(MapStack);
   act(() => navigation.navigate('Career'));
@@ -1241,7 +1265,7 @@ test('Map opens the real selected-school career page and returns to life', async
   expect(view.getByRole('button', { name: '前往成大生涯發展與就業輔導組' })).toBeTruthy();
   expect(view.queryByText('新增紀錄')).toBeNull();
   act(() => navigation.goBack());
-  expect(navigation.getCurrentRoute()?.name).toBe('CampusHome');
+  expect(navigation.getCurrentRoute()?.name).toBe('Explore');
 });
 
 test('Map school information keeps real official housing and career services after retiring old routes', async () => {
@@ -1284,6 +1308,21 @@ test('HomeworkSubmit mounts the live text submission page', async () => {
   expect(view.getByText('HomeworkSubmitScreen')).toBeTruthy();
   expect(view.queryByText(/此入口尚未提供線上繳交/)).toBeNull();
 });
+test.each([
+  ['QuizTaking', 'QuizTakingScreen'],
+  ['HomeworkSubmit', 'HomeworkSubmitScreen'],
+])('%s stays mounted during a same-account profile refresh', async (route, label) => {
+  const { view, navigation } = await mount(LearnStack);
+  act(() => navigation.navigate(route, { courseId: 'course-a', hwId: 'hw-a', quizId: 'quiz-a' }));
+  const before = view.getByText(label);
+  view.rerender(
+    <mockAuthContext.Provider value={{ ...mockAuth, profile: { ...mockAuth.profile } }}>
+      <NavigationContainer ref={navigation}><LearnStack /></NavigationContainer>
+    </mockAuthContext.Provider>,
+  );
+  expect(view.getByText(label)).toBe(before);
+});
+
 test('assignment deep links open the live text submission page', async () => {
   const { view, navigation } = await mount(MessagesStack);
   act(() => navigation.navigate('AssignmentDetail', { assignmentId: 'A001', groupId: 'G001' }));
@@ -1391,7 +1430,7 @@ test.each([
   ['community', 'CampusSocialScreen', '訊息', 'Inbox'],
   ['post/shared-post', 'PostDetail', '訊息', 'Inbox'],
   ['notifications', 'Notifications', '訊息', 'Inbox'],
-  ['career?schoolId=pu', 'Career', '校園', 'CampusHome'],
+  ['career?schoolId=pu', 'Career', '校園', 'Explore'],
   ['settings', 'Settings', '我的', 'MeHome'],
   ['personal-timetable', 'PersonalTimetable', '學習', 'LearnHome'],
   ['grades', 'Grades', '學習', 'LearnHome'],
@@ -1606,7 +1645,7 @@ test.each(['root', 'safe'] as const)(
   },
 );
 
-test('career announcements open Today while life preserves the selected-school career page', async () => {
+test('career announcements open Today while Explore preserves the selected-school career page', async () => {
   mockSchool = 'ncku';
   const Tabs = createBottomTabNavigator<RootTabParamList, undefined>();
   const navigation = createNavigationContainerRef<RootTabParamList>();
@@ -1626,7 +1665,7 @@ test('career announcements open Today while life preserves the selected-school c
   );
   await waitFor(() => expect(navigation.isReady()).toBe(true));
   act(() => navigation.navigate('校園'));
-  expect(navigation.getCurrentRoute()?.name).toBe('CampusHome');
+  expect(navigation.getCurrentRoute()?.name).toBe('Explore');
   act(() => navigation.navigate('校園', { screen: 'Career' }));
   expect(await view.findByRole('button', { name: '前往成大生涯發展與就業輔導組' })).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '查看校方公告' }));
@@ -1637,13 +1676,13 @@ test('career announcements open Today while life preserves the selected-school c
   act(() => navigation.navigate('校園'));
   expect(navigation.getCurrentRoute()?.name).toBe('Career');
   act(() => navigation.goBack());
-  expect(navigation.getCurrentRoute()?.name).toBe('CampusHome');
+  expect(navigation.getCurrentRoute()?.name).toBe('Explore');
   state = navigation.getRootState();
   expect(state.routes[state.index].name).toBe('校園');
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
-test('club discovery and details keep the life stack and return through the same directory', async () => {
+test('club discovery and details keep the Explore stack and return through the same directory', async () => {
   const { navigation, view, onUnhandledAction } = await mountRootTabs();
   act(() => safeNavigate(navigation, 'Clubs'));
   expect(navigation.getCurrentRoute()?.name).toBe('Clubs');
@@ -1658,14 +1697,14 @@ test('club discovery and details keep the life stack and return through the same
   act(() => navigation.goBack());
   expect(navigation.getCurrentRoute()).toMatchObject({ name: 'Clubs', key: directoryKey });
   act(() => navigation.goBack());
-  expect(navigation.getCurrentRoute()?.name).toBe('CampusHome');
+  expect(navigation.getCurrentRoute()?.name).toBe('Explore');
   const state = navigation.getRootState();
   expect(state.routes[state.index].name).toBe('校園');
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
 test.each(['clubs', 'clubs/photo'])(
-  'cold club link %s returns to life without sending an unhandled action',
+  'cold club link %s returns to Explore without sending an unhandled action',
   async (path) => {
     const Tabs = createBottomTabNavigator<RootTabParamList, undefined>();
     const navigation = createNavigationContainerRef<RootTabParamList>();
@@ -1691,7 +1730,7 @@ test.each(['clubs', 'clubs/photo'])(
     await waitFor(() => expect(navigation.isReady()).toBe(true));
     expect(navigation.getCurrentRoute()?.name).toBe(path === 'clubs' ? 'Clubs' : 'ClubDetail');
     act(() => navigation.goBack());
-    expect(navigation.getCurrentRoute()?.name).toBe('CampusHome');
+    expect(navigation.getCurrentRoute()?.name).toBe('Explore');
     expect(onUnhandledAction).not.toHaveBeenCalled();
   },
 );

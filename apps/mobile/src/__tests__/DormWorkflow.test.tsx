@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 const mockCall = jest.fn();
 jest.mock('../firebase', () => ({
-  getAuthInstance: () => ({ currentUser: { uid: 'fixture' } }),
+  getAuthInstance: () => ({ currentUser: { uid: 'staff' } }),
 }));
 jest.mock('../services/nuniWebFn', () => ({
   postNuniWebFn: (_name: string, data: unknown) => mockCall(data),
@@ -20,6 +20,54 @@ beforeEach(() => {
   );
 });
 afterEach(() => jest.clearAllMocks());
+test('resident notifications read the current building bulletin or leave decision, including when staff receive them', async () => {
+  let headline = '今晚停水';
+  mockCall.mockImplementation(async (data) => data.action === 'config'
+    ? { enabled: true, repairs: true, packages: true, role: 'dorm_staff' }
+    : { announcements: [{ id: 'a', title: headline, building: 'A', body: '請提前儲水。' }],
+        leaves: [{ id: 'l', date: '2026-11-25', building: 'A', room: '101', status: 'approved', history: [], reason: '返家' }] });
+  const incoming = (section: 'announcements' | 'leave') => (
+    <DormWorkflow schoolId="tw-pu" uid="resident" residentSection={section} notificationParams={{ notificationView: section }} />
+  );
+  const view = render(incoming('announcements'));
+  await view.findByText('今晚停水 · A');
+  expect(view.queryByText('返家')).toBeNull();
+  headline = '供水已恢復';
+  view.rerender(incoming('announcements'));
+  await view.findByText('供水已恢復 · A');
+  view.rerender(incoming('leave'));
+  await view.findByText('2026-11-25 · A 101 · 已核可');
+  expect(view.queryByText('供水已恢復 · A')).toBeNull();
+  expect(mockCall).toHaveBeenCalledWith({ action: 'mine', schoolId: 'pu' });
+  expect(mockCall).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'workspace' }));
+});
+
+test('a bulletin tap shows only its verified ID, then handles a failed read and a move out of the building', async () => {
+  const selected = { id: 'selected', title: '電梯維修', building: 'A', body: '請改走樓梯。' };
+  const other = { id: 'other', title: '另一則公告', building: 'B', body: '新棟別公告。' };
+  let bulletins = [other, selected];
+  let offline = false;
+  mockCall.mockImplementation(async (data) => {
+    if (data.action === 'config') return { enabled: true };
+    if (offline) throw new Error('offline');
+    return { announcements: bulletins };
+  });
+  const incoming = () => <DormWorkflow schoolId="pu" uid="resident" residentSection="announcements"
+    notificationParams={{ notificationView: 'announcements', dormAnnouncementId: selected.id }} />;
+  const view = render(incoming());
+  await view.findByText('請改走樓梯。');
+  expect(view.queryByText('新棟別公告。')).toBeNull();
+  offline = true;
+  view.rerender(incoming());
+  await view.findByText('無法讀取宿舍紀錄，請稍後再試。');
+  expect(view.queryByText('請改走樓梯。')).toBeNull();
+  offline = false;
+  bulletins = [other];
+  fireEvent.press(view.getByText('重新讀取'));
+  await view.findByText('目前查不到這則宿舍公告，可能已移除或不屬於目前住宿棟別。');
+  expect(view.queryByText('新棟別公告。')).toBeNull();
+});
+
 test('mobile converts an edited memo to a real ticket without losing location', async () => {
   const view = render(
     <DormWorkflow
@@ -424,23 +472,42 @@ test('failed config also hides the mobile memo submission form', async () => {
   expect(view.queryByText('送給宿舍輔導員')).toBeNull();
 });
 
-test.each([0, 1])(
-  'reports announcement push delivery honestly (%i delivered)',
-  async (delivered) => {
+test.each([undefined, 0, 1])(
+  'reports only confirmed provider acceptance (%s accepted)',
+  async (acceptedRecipients) => {
+    let pending = acceptedRecipients === 1;
     mockCall.mockImplementation(async (data) =>
       data.action === 'config'
         ? { enabled: true, packages: true }
         : ['mine', 'workspace'].includes(data.action)
           ? { repairs: [], leaves: [], packages: [], residents: [] }
-          : { success: true, delivered, recipients: 1 },
+          : pending ? { acceptedRecipients: 0, recipients: 1, pendingRecipients: 1 }
+          : { success: true, delivered: 1, acceptedRecipients, recipients: 1 },
     );
     const view = render(<DormWorkflow schoolId="pu" uid="staff" />);
     fireEvent.press(await view.findByText('開啟輔導員工作台'));
     fireEvent.press(await view.findByText('住宿生'));
-  fireEvent.press(await view.findByText('預覽公告'));
+    fireEvent.press(await view.findByText('預覽公告'));
+    expect(view.getByText('請填寫要發布公告的棟別。')).toBeTruthy();
+    expect(view.queryByText('確認發布本棟公告')).toBeNull();
+    fireEvent.changeText(view.getByLabelText('公告棟別'), 'A');
+    fireEvent.changeText(view.getByLabelText('公告標題'), '停水');
+    fireEvent.changeText(view.getByLabelText('公告內容'), '週三上午施工');
+    fireEvent.press(view.getByText('預覽公告'));
     fireEvent.press(view.getByText('確認發布本棟公告'));
+    if (pending) {
+      await view.findByText('公告已發布。名冊共 1 人，推播服務已受理 0 人。還有 1 人待處理。');
+      await waitFor(() => expect(view.getByText('繼續傳送待處理的推播')).toBeEnabled());
+      pending = false;
+      fireEvent.press(view.getByText('繼續傳送待處理的推播'));
+      await waitFor(() => expect(mockCall.mock.calls.filter(([row]) => row.action === 'announce')).toHaveLength(3));
+      const [first, continued, retry] = mockCall.mock.calls.filter(([row]) => row.action === 'announce');
+      expect(continued[0].key).toBe(first[0].key);
+      expect(retry[0].key).toBe(first[0].key);
+    }
     expect(
-      await view.findByText(delivered ? '公告已發布，推播 1/1 人。' : '公告已發布，推播尚未送出。'),
+      await view.findByText(acceptedRecipients === undefined ? '公告已發布，可在宿舍頁查看。推播結果尚未確認。'
+        : acceptedRecipients ? '公告已發布。名冊共 1 人，推播服務已受理其中 1 人的通知。' : '公告已發布，目前沒有推播受理紀錄。'),
     ).toBeTruthy();
   },
 );

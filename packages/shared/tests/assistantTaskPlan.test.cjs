@@ -188,12 +188,15 @@ describe('assistant connected service capabilities', () => {
   });
 
   test('does not label source links, unconnected private services or school writers as data or execution', () => {
-    for (const id of ['library', 'notifications', 'messages', 'community',
+    for (const id of ['notifications', 'messages', 'community',
       'school-lms', 'dormitory', 'leave', 'grades', 'app-orders', 'admin', 'career']) {
       const capability = getAssistantServiceCapability(id);
       assert.deepEqual(capability.modes, ['handoff'], id);
       assert.deepEqual(capability.tools, ['list_campus_services', 'propose_open_page'], id);
     }
+    assert.deepEqual(getAssistantServiceCapability('library').modes, ['read', 'handoff']);
+    assert.deepEqual(getAssistantServiceCapability('library').tools,
+      ['get_library_catalog', 'list_campus_services', 'propose_open_page']);
     assert.deepEqual(getAssistantServiceCapability('bus').modes, ['read']);
     assert.deepEqual(getAssistantServiceCapability('map').modes, ['read']);
     assert.deepEqual(getAssistantServiceCapability('map').tools, ['get_campus_map']);

@@ -74,12 +74,6 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install playwright==1.57.0
-          if sudo apt-get -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 -o Acquire::Retries=5 update &&
-            sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 -o Acquire::Retries=5 install -y fonts-noto-cjk; then
-            echo 'Pre-installed Noto CJK fonts.'
-          else
-            echo 'Font pre-install failed; continuing with the existing Playwright installer.'
-          fi
           bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk
       - name: Bundle actual role components with isolated API
         run: node scripts/qa/role-workflows/build.mjs

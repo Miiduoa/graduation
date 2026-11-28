@@ -37,12 +37,12 @@ export default function AdminMembersPage() {
 
   return (
     <RequireAdmin>
-      <h1 style={{ marginTop: 0 }}>課程成員（快照）</h1>
-      <p style={{ color: '#8E8E93' }}>上限 300 筆；如需完整報表請在 SQL／BI 工具處理。</p>
+      <h2>課程成員（快照）</h2>
+      <p style={{ color: 'var(--muted)' }}>上限 300 筆；如需完整報表請在 SQL／BI 工具處理。</p>
       {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
-      <div style={{ overflowX: 'auto', background: '#fff', borderRadius: 12, border: '1px solid #E5E5EA' }}>
+      <div style={{ overflowX: 'auto', background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--border)' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
-          <thead style={{ background: '#F2F2F7', textAlign: 'left' }}>
+          <thead style={{ background: 'var(--bg-soft)', textAlign: 'left' }}>
             <tr>
               <th style={{ padding: 10 }}>課程</th>
               <th style={{ padding: 10 }}>成員</th>
@@ -52,7 +52,7 @@ export default function AdminMembersPage() {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={`${r.course_id}:${r.user_id}`} style={{ borderTop: '1px solid #E5E5EA' }}>
+              <tr key={`${r.course_id}:${r.user_id}`} style={{ borderTop: '1px solid var(--border)' }}>
                 <td style={{ padding: 10 }}>{r.courses?.title ?? r.course_id.slice(0, 8)}</td>
                 <td style={{ padding: 10 }}>{r.profiles?.display_name ?? '—'}</td>
                 <td style={{ padding: 10, fontFamily: 'monospace', fontSize: 12 }}>{r.user_id}</td>

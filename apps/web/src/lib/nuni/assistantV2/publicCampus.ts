@@ -1,6 +1,6 @@
 import { assistantServiceHref } from '@campus/shared/src/assistantServices';
 import { findSchoolById } from '@campus/shared/src/schools';
-import { object, text, V2Error, type Obj } from './contracts';
+import { object, text, V2Error } from './contracts';
 
 export type PublicCampusKind = 'announcements' | 'events';
 export type PublicCampusTool = 'get_campus_announcements' | 'get_campus_events';
@@ -38,20 +38,7 @@ export function publicCampusToolKind(name: unknown): PublicCampusKind | null {
 
 /** Whole, generic read requests only. Dates, named subjects, writes and negation
  * are not silently reduced to an unfiltered recent feed. */
-export function parsePublicCampusRead(question: string): {
-  kind: PublicCampusKind;
-  tool: PublicCampusTool;
-  args: Obj;
-} | null {
-  if (typeof question !== 'string' || !question.trim() || question.length > 120 ||
-      /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(question)) return null;
-  let value = question.normalize('NFKC').trim().replace(/[。！？!?]+$/, '').replace(/\s+/g, '');
-  value = value.replace(/^(?:(?:麻煩你|麻煩|請問|請|幫我|替我|我想|想|查詢|查看|查一下|看一下|列出|顯示|查|看|看看|核對|有什麼|有哪些|目前的|目前|最近的|最近|最新的|最新|近期的|近期))*/, '');
-  value = value.replace(/(?:目前|最近|最新|近期)?(?:有哪些|有什麼|資訊|資料)?(?:嗎|呢)?$/, '');
-  const kind = /^(?:校園|學校)?公告$/.test(value) ? 'announcements'
-    : /^(?:校園|學校)?活動$/.test(value) ? 'events' : null;
-  return kind ? { kind, tool: kind === 'announcements' ? 'get_campus_announcements' : 'get_campus_events', args: {} } : null;
-}
+export { parsePublicCampusRead } from '@campus/shared/src/assistantPublicReadIntent';
 
 export function publicCampusSourcePath(schoolId: string, source: PublicCampusSource): string {
   return source === 'legacy-events' ? 'events'

@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import { mkdir, readFile, writeFile, rm, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { waitForChromePort } from './credit-scenario-adoption-chrome.mjs';
 
 // 只執行實際元件＋合成資料，不載入 Firebase、校務連線或正式帳號。
 const root = process.cwd();
@@ -65,6 +66,7 @@ const server = createServer(async (req, res) => {
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
 let chrome, socket;
+let logs = '';
 const profile = await mkdtemp(path.join(os.tmpdir(), 'credit-adoption-chrome-'));
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(fn, label) {
@@ -80,9 +82,8 @@ try {
   chrome = spawn(binary, ['--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage',
     '--disable-background-networking','--disable-component-update','--disable-sync','--no-first-run',
     '--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
-  let logs = ''; chrome.stderr.on('data', (chunk) => { logs += chunk.toString(); });
-  let port;
-  await until(async () => { try { port = (await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]; return true; } catch { return false; } }, 'Chrome 啟動');
+  chrome.stderr.on('data', (chunk) => { logs += chunk.toString(); });
+  const port = await waitForChromePort(chrome, profile);
   const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
   const page = targets.find((target) => target.type === 'page'); assert.ok(page, '找不到測試分頁');
   socket = new WebSocket(page.webSocketDebuggerUrl);
@@ -221,12 +222,13 @@ try {
     window.__creditProbeClicks === 1 && window.__creditInjected === undefined);
   await callInPage(() => document.getElementById('credit-security-probe')?.remove());
   assert.deepEqual(report.errors, [], '瀏覽器出現例外或非本機請求');
-  await writeFile(path.join(output, 'chrome.log'), logs);
   console.log(JSON.stringify({ passed: report.checks.length, screenshots: report.screenshots.length, sourceHead: report.sourceHead }));
 } catch (error) {
   report.errors.push(error instanceof Error ? error.stack : String(error));
+  if (logs) console.error(logs);
   console.error(error); process.exitCode = 1;
 } finally {
+  await writeFile(path.join(output, 'chrome.log'), logs);
   await writeFile(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
   socket?.close(); chrome?.kill('SIGTERM'); server.close();
   await rm(profile, { recursive: true, force: true }).catch(() => {});

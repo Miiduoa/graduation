@@ -32,6 +32,8 @@ import {
   readPersonalImportDraft,
   readPersonalImportPartialDraft,
 } from '@/lib/personalImportDrafts';
+const originalShow = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
 const context = vi.hoisted(() => ({
   owner: 'guest',
   schoolId: 'pu',
@@ -63,9 +65,6 @@ vi.mock('@/lib/personalImportAi', () => ({
   deletePersonalImportAiModelCache: vi.fn(),
 }));
 vi.mock('@/lib/personalImportImagePreview', () => ({ createPersonalImportImagePreview: vi.fn() }));
-const dialogDescriptors = ['showModal', 'close'].map(
-  (name) => [name, Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name)] as const,
-);
 beforeEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
@@ -91,26 +90,40 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/import?kind=grades');
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
-    value: { request: (_key: string, fn: () => unknown) => Promise.resolve().then(fn) },
+    value: {
+      request: (
+        _key: string,
+        options: LockOptions | (() => unknown),
+        callback?: () => unknown,
+      ) => Promise.resolve().then(typeof options === 'function' ? options : callback),
+    },
   });
   Element.prototype.scrollIntoView = vi.fn();
-  // jsdom has no native top layer; real focus containment is checked in browser QA.
+  // jsdom checks the application's undo lifecycle. Native modality and keyboard
+  // containment are verified by the shared dialog's browser tests.
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
-    value: function (this: HTMLDialogElement) { this.setAttribute('open', ''); },
+    writable: true,
+    value: vi.fn(function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    }),
   });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', {
     configurable: true,
-    value: function (this: HTMLDialogElement) { this.removeAttribute('open'); },
+    writable: true,
+    value: vi.fn(function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    }),
   });
 });
 afterEach(() => {
   cleanup();
+  if (originalShow) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShow);
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+  if (originalClose) Object.defineProperty(HTMLDialogElement.prototype, 'close', originalClose);
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
+  document.body.style.removeProperty('overflow');
   document.documentElement.removeAttribute('data-reduced-motion');
-  for (const [name, descriptor] of dialogDescriptors) {
-    if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
-    else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
-  }
 });
 
 it('uses the current motion preference each time an import preview is revealed', async () => {
@@ -253,12 +266,7 @@ async function savedRecordsForEditing() {
 }
 
 function holdRecordWrite() {
-  let release!: () => void;
-  const request = vi.fn((_key: string, action: () => unknown) => new Promise((resolve, reject) => {
-    release = () => { void Promise.resolve().then(action).then(resolve, reject); };
-  }));
-  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } });
-  return { request, release: () => release() };
+  return holdPersonalImportLock();
 }
 
 it('opens saved-record editing at the first field and restores its opener on a clean cancel', async () => {
@@ -512,6 +520,7 @@ it.each(['account', 'school', 'pause'] as const)(
     else context.loading = true;
     view.rerender(<PersonalImportCenter />);
     expect(screen.queryByRole('dialog')).toBeNull();
+    expect(lock.request.mock.calls[0][1].signal?.aborted).toBe(true);
     await act(async () => { lock.release(); });
     expect(readPersonalImports(originalScope).find((row) => row.id === original.id)?.grade).toBe('85');
     if (change === 'pause') {
@@ -519,7 +528,7 @@ it.each(['account', 'school', 'pause'] as const)(
       view.rerender(<PersonalImportCenter />);
       const resumed = screen.getByRole('dialog', { name: '編輯 資料庫' });
       expect((within(resumed).getByLabelText('成績') as HTMLInputElement).value).toBe('88');
-      expect(within(resumed).getByRole('alert').textContent).toContain('帳號或校園已切換');
+      expect(within(resumed).getByRole('alert').textContent).toBe('正在確認帳號與校園，這次等待已停止。');
     } else {
       expect(screen.queryByRole('dialog')).toBeNull();
       expect(readPersonalImports(context)).toHaveLength(0);
@@ -805,6 +814,163 @@ it('asks before undoing and keeps records when the person chooses not to', async
   expect(readPersonalImports(context)).toHaveLength(1);
 });
 
+it.each(['escape', 'backdrop'] as const)(
+  'returns to the undo opener on %s without deleting records',
+  async (dismiss) => {
+    render(<PersonalImportCenter />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+    await screen.findByText(personalImportSavedNotice(1));
+    const opener = screen.getByRole('button', { name: '撤銷上次匯入' });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = screen.getByRole('dialog', { name: '撤銷上次匯入？' });
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '先不要' }));
+    expect(document.getElementById(dialog.getAttribute('aria-describedby')!)?.textContent).toBe(
+      personalImportUndoBody(1),
+    );
+    if (dismiss === 'escape') {
+      fireEvent(dialog, new Event('cancel', { cancelable: true }));
+    } else {
+      fireEvent(
+        dialog,
+        new MouseEvent('pointerdown', { bubbles: true, clientX: -10, clientY: -10 }),
+      );
+      fireEvent.click(dialog, { clientX: -10, clientY: -10 });
+    }
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+    expect(document.body.style.overflow).toBe('');
+    expect(readPersonalImports(context)).toHaveLength(1);
+  },
+);
+
+function holdPersonalImportLock() {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const request = vi.fn((_key: string, { signal }: LockOptions, action: () => unknown) =>
+    new Promise((resolve, reject) => {
+      const cancel = () => reject(signal?.reason);
+      signal?.addEventListener('abort', cancel, { once: true });
+      void gate.then(() => {
+        signal?.removeEventListener('abort', cancel);
+        if (!signal?.aborted) resolve(action());
+      }).catch(reject);
+    }),
+  );
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } });
+  return { release, request };
+}
+
+it.each(['release', 'cancel'] as const)(
+  'closes the undo modal while waiting for the lock (%s)',
+  async (outcome) => {
+    render(<PersonalImportCenter />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+    await screen.findByText(personalImportSavedNotice(1));
+    const lock = holdPersonalImportLock();
+    await confirmUndo();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.body.style.overflow).toBe('');
+    expect(lock.request).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: '撤銷上次匯入' })).toHaveProperty('disabled', true);
+    expect(readPersonalImports(context)).toHaveLength(1);
+    expect(screen.queryByText(personalImportUndoneNotice(1))).toBeNull();
+    const search = screen.getByRole('searchbox', { name: '搜尋個人紀錄' });
+    fireEvent.change(search, { target: { value: '查無這門課' } });
+    expect(screen.getByText('還沒有符合的個人紀錄。')).toBeTruthy();
+    fireEvent.change(search, { target: { value: '資料庫' } });
+    expect(screen.getByRole('button', { name: '編輯 資料庫' })).toBeTruthy();
+
+    if (outcome === 'cancel') {
+      fireEvent.click(screen.getByRole('button', { name: '取消等待' }));
+      await screen.findByText('已取消等待，這次操作未變更個人紀錄。');
+      expect(lock.request.mock.calls[0][1].signal?.aborted).toBe(true);
+    }
+    await act(async () => lock.release());
+    if (outcome === 'release') {
+      await screen.findByText(personalImportUndoneNotice(1));
+      expect(readPersonalImports(context)).toHaveLength(0);
+    } else {
+      expect(readPersonalImports(context)).toHaveLength(1);
+      expect(screen.getByRole('button', { name: '撤銷上次匯入' })).toHaveProperty('disabled', false);
+    }
+    expect(screen.queryByRole('button', { name: '取消等待' })).toBeNull();
+  },
+);
+
+it('reports an unsuccessful undo on the page and preserves the batch for a later retry', async () => {
+  render(<PersonalImportCenter />);
+  await prepare();
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText(personalImportSavedNotice(1));
+  const setItem = Storage.prototype.setItem;
+  const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+    this: Storage,
+    key,
+    value,
+  ) {
+    if (this === localStorage && key === personalImportsStorageKey(context))
+      throw new DOMException('Full', 'QuotaExceededError');
+    setItem.call(this, key, value);
+  });
+  await confirmUndo();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  await screen.findByText(/這次沒有存成/);
+  expect(readPersonalImports(context)).toHaveLength(1);
+  expect(screen.queryByText(personalImportUndoneNotice(1))).toBeNull();
+  write.mockRestore();
+  await confirmUndo();
+  await screen.findByText(personalImportUndoneNotice(1));
+  expect(readPersonalImports(context)).toHaveLength(0);
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('hides the portalled confirmation while the account scope is being revalidated', async () => {
+  const view = render(<PersonalImportCenter />);
+  await prepare();
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await screen.findByText(personalImportSavedNotice(1));
+  fireEvent.click(screen.getByRole('button', { name: '撤銷上次匯入' }));
+  expect(screen.getByRole('dialog', { name: '撤銷上次匯入？' })).toBeTruthy();
+  context.loading = true;
+  view.rerender(<PersonalImportCenter />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.body.style.overflow).toBe('');
+  expect(screen.getByText('正在確認資料儲存位置…')).toBeTruthy();
+  context.loading = false;
+  view.rerender(<PersonalImportCenter />);
+  expect(screen.getByRole('dialog', { name: '撤銷上次匯入？' })).toBeTruthy();
+  expect(readPersonalImports(context)).toHaveLength(1);
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '先不要' }));
+});
+
+it.each(['owner', 'schoolId'] as const)(
+  'does not complete an old undo after the %s changes',
+  async (field) => {
+    const view = render(<PersonalImportCenter />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+    await screen.findByText(personalImportSavedNotice(1));
+    const originalScope = { owner: context.owner, schoolId: context.schoolId };
+    const lock = holdPersonalImportLock();
+    await confirmUndo();
+    context[field] = field === 'owner' ? 'platform:another' : 'nthu';
+    view.rerender(<PersonalImportCenter />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(lock.request.mock.calls[0][1].signal?.aborted).toBe(true);
+    await act(async () => lock.release());
+    expect(readPersonalImports(originalScope)).toHaveLength(1);
+    expect(readPersonalImports(context)).toHaveLength(0);
+    expect(screen.queryByText(personalImportUndoneNotice(1))).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  },
+);
+
 it('shows a Chinese notice when the screenshot file cannot be opened', async () => {
   const { recognizePersonalImportImage } = await import('@/lib/personalImportOcr');
   vi.mocked(recognizePersonalImportImage).mockRejectedValue(
@@ -1025,6 +1191,66 @@ it('restores all kinds and original terms only after review, without adopting a 
   await screen.findByText(personalImportSavedNotice(0));
   expect(readPersonalImports(context)).toHaveLength(3);
 });
+it('cancels a queued backup restore and keeps the reviewed draft for retry', async () => {
+  render(<PersonalImportCenter />);
+  uploadBackup();
+  const confirm = await screen.findByRole('button', { name: '確認匯入 3 筆' });
+  const lock = holdPersonalImportLock();
+  fireEvent.click(confirm);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '取消等待' }));
+  await screen.findByText('已取消等待，這次操作未變更個人紀錄。');
+  await act(async () => lock.release());
+  expect(readPersonalImports(context)).toEqual([]);
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 3 筆' }));
+  await screen.findByText(personalImportSavedNotice(3));
+  expect(readPersonalImports(context)).toHaveLength(3);
+});
+
+it('cancels a queued removal and keeps the record open for editing', async () => {
+  await savePersonalImportBatch(context, [backupRecords()[0]]);
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 備份成績' }));
+  const editor = screen.getByRole('dialog', { name: '編輯 備份成績' });
+  const lock = holdPersonalImportLock();
+  fireEvent.click(within(editor).getByRole('button', { name: '移除這筆' }));
+  const confirmation = screen.getByRole('dialog', { name: '移除「備份成績」？' });
+  fireEvent.click(within(confirmation).getByRole('button', { name: '確認移除' }));
+  fireEvent.click(within(confirmation).getByRole('button', { name: '取消等待' }));
+  await within(editor).findByText('已取消等待，這次操作未變更個人紀錄。');
+  await waitFor(() => expect(confirmation.textContent).toContain('已取消等待，這次操作未變更個人紀錄。'));
+  expect(lock.request.mock.calls[0][1].signal?.aborted).toBe(true);
+  await act(async () => lock.release());
+  expect(readPersonalImports(context)).toHaveLength(1);
+  expect(screen.getByRole('dialog', { name: '編輯 備份成績' })).toBe(editor);
+  expect(screen.getByRole('dialog', { name: '移除「備份成績」？' })).toBe(confirmation);
+  fireEvent.click(within(confirmation).getByRole('button', { name: '確認移除' }));
+  await screen.findByText('已移除這筆個人紀錄。');
+  expect(readPersonalImports(context)).toEqual([]);
+});
+
+it('cancels a queued record edit without losing the unsaved values or allowing a late write', async () => {
+  const original = (await savedRecordsForEditing())[0];
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  const editor = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  const grade = within(editor).getByLabelText('成績') as HTMLInputElement;
+  fireEvent.change(grade, { target: { value: '88' } });
+  const lock = holdPersonalImportLock();
+  fireEvent.submit(within(editor).getByRole('form', { name: '修改個人紀錄' }));
+  fireEvent.click(within(editor).getByRole('button', { name: '取消等待' }));
+  await within(editor).findByText('已取消等待，這次操作未變更個人紀錄。');
+  expect(lock.request.mock.calls[0][1].signal?.aborted).toBe(true);
+  await act(async () => lock.release());
+  expect(readPersonalImports(context)[0]).toEqual(original);
+  expect(grade.value).toBe('88');
+  expect((grade.closest('fieldset') as HTMLFieldSetElement).disabled).toBe(false);
+  fireEvent.submit(within(editor).getByRole('form', { name: '修改個人紀錄' }));
+  await screen.findByText('個人紀錄已更新。');
+  expect(readPersonalImports(context).find((record) => record.id === original.id)?.grade).toBe('88');
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
 it('rejects a wrong-school or corrupt backup without replacing existing records', async () => {
   await savePersonalImportBatch(context, [backupRecords()[0]]);
   render(<PersonalImportCenter />);
@@ -1589,7 +1815,8 @@ it('keeps the local fallback download notice visible when cloud image consent is
   window.history.replaceState(null, '', '/import?kind=timetable');
   context.session = {
     platformAccountId: 'pa_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
-    context: 'verified-account-context', isPlatformOperator: false,
+    context: 'verified-account-context',
+    isPlatformOperator: false,
   };
   vi.mocked(browserRequest).mockResolvedValue({ workspaces: [] });
   render(<PersonalImportCenter />);

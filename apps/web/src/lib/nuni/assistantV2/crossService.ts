@@ -6,7 +6,8 @@ import {
 } from '@campus/shared/src/assistantTaskPlan';
 import { assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
 import { formatImportedAcademicSummary, type ImportedAcademicSummary } from '@campus/shared/src/importedAcademicSummary';
-import { bounded, clip, isSessionInvalidation, type Binding, type Card, type Obj, type Step, V2Error } from './contracts';
+import { bounded, clip, eventArgs, isSessionInvalidation, type Binding, type Card, type Obj, type Step, V2Error } from './contracts';
+import { eventInterval } from './actions';
 import { directReadAnswer, directReadCourseworkTargets, type DirectRead } from './directRead';
 import { informationAnswer } from './information';
 import { parseAssistantPublicCourseResults } from '@campus/shared/src/assistantPublicCourseResults';
@@ -17,6 +18,7 @@ import { formatPublicCampusRead, parsePublicCampusResult, publicCampusToolKind }
 import { formatLostFoundRead, parseLostFoundResult } from './lostFound';
 import { formatPublicSocialRead, parsePublicSocialResult } from './publicSocial';
 import { formatSchoolInfoRead, parseSchoolInfoResult } from './schoolInfo';
+import { formatLibraryCatalogRead, parseLibraryCatalogResult } from './libraryCatalog';
 import { isRoleWorkspaceTool, parseRoleWorkspaceResult, formatRoleWorkspaceResult,
   roleWorkspaceTaskStatus, ROLE_WORKSPACE_TIMEOUT_MS } from './roleWorkspaceReads';
 import { formatCampusMapRead, parseCampusMapArguments, parseCampusMapResult, type CampusMapRead } from './campusMap';
@@ -41,6 +43,43 @@ const label = (value: unknown, fallback = '未提供') => typeof value === 'stri
   ? clip(value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').trim(), 240) : fallback;
 const partial = (value: Obj) => value.partial === true || value.truncated === true ||
   value.incomplete === true || Boolean(value.nextCursor) || Number(value.unplaced || 0) > 0;
+
+/** Select from the verified free-time result, then reserve only the requested
+ * duration. Pending cards also occupy time without being treated as saved. */
+function workSessionEvent(operation: CrossServiceOperation, value: unknown, cards: readonly Card[], now: number): Obj | null {
+  const work = operation.workSession;
+  const source = unwrap(value);
+  if (!work || source.source !== 'personal-imports' || !Array.isArray(source.slots) || partial(source))
+    throw new V2Error(502, 'INVALID_WORK_SESSION_SOURCE');
+  const duration = work.minutes * 60000;
+  const earliest = Date.parse(`${work.date}T${work.from}:00+08:00`);
+  const latest = Date.parse(`${work.date}T${work.to}:00+08:00`);
+  const busy = cards.filter(card => card.tool === 'propose_personal_event')
+    .map(card => eventInterval(eventArgs(card.args))).sort((left, right) => left[0] - right[0]);
+  const slots = rows(source.slots).map(slot => {
+    if (slot.date !== work.date || typeof slot.startTime !== 'string' || typeof slot.endTime !== 'string' ||
+        !/^([01]\d|2[0-3]):[0-5]\d$/.test(slot.startTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(slot.endTime))
+      throw new V2Error(502, 'INVALID_WORK_SESSION_SOURCE');
+    const start = Date.parse(`${work.date}T${slot.startTime}:00+08:00`);
+    const end = Date.parse(`${work.date}T${slot.endTime}:00+08:00`);
+    if (start < earliest || end > latest || start >= end || !Number.isFinite(start + end))
+      throw new V2Error(502, 'INVALID_WORK_SESSION_SOURCE');
+    return { start, end };
+  }).sort((left, right) => left.start - right.start);
+  const event = (start: number) => ({ title: work.title, date: work.date, allDay: false,
+    startTime: new Date(start + 28800000).toISOString().slice(11, 16),
+    endTime: new Date(start + duration + 28800000).toISOString().slice(11, 16) });
+  for (const slot of slots) {
+    let cursor = Math.max(slot.start, Math.ceil((now + 1) / 60000) * 60000);
+    for (const [start, end] of busy) {
+      if (end <= cursor || start >= slot.end) continue;
+      if (Math.min(start, slot.end) - cursor >= duration) return event(cursor);
+      cursor = Math.max(cursor, end);
+    }
+    if (slot.end - cursor >= duration) return event(cursor);
+  }
+  return null;
+}
 
 function mapStepStatus(read: CampusMapRead): AssistantTaskStep['status'] {
   if (read.status !== 'ready' || read.resolution === 'unmatched') return 'blocked';
@@ -132,6 +171,8 @@ function readSummary(operation: CrossServiceOperation, value: unknown, now: numb
     return formatPublicSocialRead(parsePublicSocialResult(value, schoolId, operation.args));
   if (operation.tool === 'get_school_info')
     return formatSchoolInfoRead(parseSchoolInfoResult(value, schoolId, operation.args));
+  if (operation.tool === 'get_library_catalog')
+    return formatLibraryCatalogRead(parseLibraryCatalogResult(value, schoolId, operation.args));
   if (operation.tool === 'get_lost_found')
     return formatLostFoundRead(parseLostFoundResult(value, schoolId, operation.args));
   const campusKind = publicCampusToolKind(operation.tool);
@@ -199,7 +240,8 @@ function readPlanCourseworkTargets(
 ): AssistantCourseworkTarget[] {
   // A prepared plan keeps its original confirmation/revision path. A new source
   // button must not quietly replace an existing calendar or food proposal.
-  if (request.operations.some(operation => operation.kind === 'study' || operation.kind === 'event' || operation.kind === 'reorder')) return [];
+  if (request.operations.some(operation => operation.kind === 'study' || operation.kind === 'event' ||
+      operation.kind === 'work-session' || operation.kind === 'reorder')) return [];
   const work = request.operations.filter(operation => operation.kind === 'read' && operation.tool === 'get_due_work' &&
     (operation.directRead?.kind === 'due-work' || operation.informationRead?.kind === 'work'));
   // The existing pronoun follow-up can select a sole candidate automatically.
@@ -298,7 +340,7 @@ export async function runCrossService(input: {
     const service = getAssistantService(operation.serviceId)!;
     const step: AssistantTaskStep = { id: operation.id, label: operation.label || service.label,
       serviceId: operation.serviceId, dependsOn: [...operation.dependsOn], status: 'blocked', summary: '' };
-    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'merchant', 'bus', 'cafeteria', 'orders', 'clubs', 'import', 'announcements', 'events', 'lost-found', 'map', 'public-social', 'school-info'].includes(operation.serviceId))
+    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'merchant', 'bus', 'cafeteria', 'orders', 'clubs', 'import', 'announcements', 'events', 'lost-found', 'map', 'public-social', 'school-info', 'library'].includes(operation.serviceId))
       step.label += `（${scopeName}）`;
     taskPlan.steps.push(step);
     const dependencies = operation.dependsOn.map(id => taskPlan.steps.find(previous => previous.id === id));
@@ -350,28 +392,43 @@ export async function runCrossService(input: {
           const result = unwrap(value);
           step.status = result.unavailable ? 'blocked' : partial(result) || result.hasTimetableSource === false ? 'partial' : 'completed';
           const sourceSummary = publicCampusToolKind(operation.tool) ||
-            ['get_lost_found', 'get_public_social', 'get_school_info'].includes(operation.tool || '');
+            ['get_lost_found', 'get_public_social', 'get_school_info', 'get_library_catalog'].includes(operation.tool || '');
           step.summary = result.unavailable && !sourceSummary
             ? '目前沒有接通可讀取的來源，這項查詢尚未完成。' : readSummary(operation, value, now, binding.schoolId);
           if (operation.tool === 'get_lost_found') step.href = parseLostFoundResult(value, binding.schoolId, operation.args).href;
           else if (operation.tool === 'get_public_social') step.href = parsePublicSocialResult(value, binding.schoolId, operation.args).href;
           else if (operation.tool === 'get_school_info') step.href = parseSchoolInfoResult(value, binding.schoolId, operation.args).href;
+          else if (operation.tool === 'get_library_catalog') step.href = parseLibraryCatalogResult(value, binding.schoolId, operation.args).href;
           else if (sourceSummary) step.href = assistantServiceHref(operation.serviceId, binding.schoolId) || undefined;
           if (partial(result) && !sourceSummary) step.summary += '\n資料尚未完整讀取，這一步保留為部分完成。';
         }
       } else if (operation.kind === 'map-location') {
         const source = operation.dependsOn.length === 1
           ? request.operations.find(previous => previous.id === operation.dependsOn[0]) : undefined;
-        if (!source || !results.has(source.id) || (operation.mapSource?.kind === 'event'
-          ? source.tool !== 'get_campus_events' : !source.directRead || source.tool !== 'get_schedule')) {
+        if (!source || !results.has(source.id)) {
           step.summary = '尚未確認這次地點查詢對應的來源，沒有猜測地點。';
           continue;
         }
-        const boundEvent = input.eventMapSelections?.[operation.id];
-        if (operation.mapSource?.kind === 'event' && boundEvent) step.label = '查原選定活動的位置';
-        const selected = operation.mapSource?.kind === 'event'
-          ? eventMapSource(results.get(source.id), binding.schoolId, operation.mapSource.index, boundEvent)
-          : nextClassMapSource(results.get(source.id), source.directRead!, binding.schoolId, now);
+        const sourceResult = results.get(source.id);
+        let selected: { query: string; title: string; target?: PublicEventTarget } |
+          { reason: string; target?: PublicEventTarget };
+        let sourceLabel: string;
+        if (operation.mapSource?.kind === 'event' && source.tool === 'get_campus_events') {
+          sourceLabel = '活動地點';
+          const boundEvent = input.eventMapSelections?.[operation.id];
+          if (boundEvent) step.label = '查原選定活動的位置';
+          selected = eventMapSource(sourceResult, binding.schoolId, operation.mapSource.index, boundEvent);
+        } else if (operation.mapSource?.kind === 'library' && source.tool === 'get_library_catalog') {
+          sourceLabel = '官方館名';
+          const { library } = parseLibraryCatalogResult(sourceResult, binding.schoolId);
+          selected = library ? { title: '圖書館', query: library.name } : { reason: '這個校園尚無可核對的官方館名。' };
+        } else if (!operation.mapSource && source.tool === 'get_schedule' && source.directRead) {
+          sourceLabel = '課表教室';
+          selected = nextClassMapSource(sourceResult, source.directRead, binding.schoolId, now);
+        } else {
+          step.summary = '尚未確認這次地點查詢對應的來源，沒有猜測地點。';
+          continue;
+        }
         if ('target' in selected && selected.target)
           input.onEventMapSelection?.(operation.id, parsePublicEventTarget(selected.target));
         if ('reason' in selected) {
@@ -383,21 +440,53 @@ export async function runCrossService(input: {
         const read = parseCampusMapResult(value, binding.schoolId, args);
         results.set(operation.id, value);
         step.status = mapStepStatus(read);
-        step.summary = `${label(selected.title)}｜${operation.mapSource?.kind === 'event' ? '活動地點' : '課表教室'}：${label(selected.query)}\n` + formatCampusMapRead(read);
+        step.summary = `${label(selected.title)}｜${sourceLabel}：${label(selected.query)}\n` + formatCampusMapRead(read);
         const href = taskMapHref(read);
         if (href) step.href = href;
       } else if (operation.kind === 'free-time') {
         const value = await call('find_free_time', operation.args, operation.question);
         const originalSlots = rows(unwrap(value).slots);
-        const slots = input.availableAfter === undefined ? originalSlots : originalSlots.filter(row =>
+        let slots = input.availableAfter === undefined ? originalSlots : originalSlots.filter(row =>
           typeof row.date === 'string' && typeof row.startTime === 'string' &&
           Date.parse(row.date + 'T' + row.startTime + ':00+08:00') >= input.availableAfter!);
-        results.set(operation.id, input.availableAfter === undefined ? value : { ...unwrap(value), slots });
+        if (operation.workSession) {
+          const availableAfter = Math.ceil((Math.max(now, input.availableAfter ?? now) + 1) / 60000) * 60000;
+          slots = originalSlots.flatMap(row => {
+            const start = Math.max(Date.parse(row.date + 'T' + row.startTime + ':00+08:00'), availableAfter);
+            const end = Date.parse(row.date + 'T' + row.endTime + ':00+08:00');
+            return end - start >= operation.workSession!.minutes * 60000
+              ? [{ ...row, startTime: new Date(start + 28800000).toISOString().slice(11, 16), minutes: (end - start) / 60000 }] : [];
+          });
+        }
+        results.set(operation.id, input.availableAfter === undefined && !operation.workSession ? value : { ...unwrap(value), slots });
         step.status = slots.length ? 'completed' : 'blocked';
         step.summary = slots.length ? '已核對同步課表與個人行程，可用時段：' + slots.slice(0, 5)
           .map(row => `${label(row.date)} ${label(row.startTime)}–${label(row.endTime)}`).join('、')
           : originalSlots.length ? '原查詢時段已經過去，沒有可接續安排的未來空檔。'
           : '指定日期與時段內沒有符合長度的空檔，尚未安排。';
+      } else if (operation.kind === 'work-session') {
+        const source = operation.dependsOn.map(id => request.operations.find(previous => previous.id === id))
+          .find(previous => previous?.kind === 'free-time');
+        if (!source || !results.has(source.id)) {
+          step.summary = '尚未核對這次工作安排的可用時段，沒有建立行程。';
+          continue;
+        }
+        const event = workSessionEvent(operation, results.get(source.id), tools.cards, Math.max(now, input.availableAfter ?? now));
+        if (!event) {
+          step.summary = '指定時間內沒有符合長度的未來空檔，或已被本次其他待確認行程占用，尚未建立行程。';
+          continue;
+        }
+        const proposal = unwrap(await call('propose_personal_event', event, operation.question));
+        const cards = tools.cards.slice(beforeCards);
+        if (!cards.length) {
+          step.status = proposal.unavailable === 'WRITES_DISABLED' ? 'handoff' : 'blocked';
+          step.href = assistantServiceHref('calendar', binding.schoolId) || undefined;
+          step.summary = '已核對可用時段；目前尚未開放新增個人行程，請到個人行事曆接續。';
+          continue;
+        }
+        step.status = 'ready';
+        step.cardIds = cards.map(card => card.mutationId);
+        step.summary = `已核對同步課表與個人行程，準備「${label(event.title)}」${event.date} ${event.startTime}–${event.endTime}，共 ${operation.workSession!.minutes} 分鐘。確認後才會儲存為你的個人行程；工作本身仍待處理。`;
       } else if (operation.kind === 'study') {
         const pending = pendingTasks(operation);
         if (!pending.length) {

@@ -6,7 +6,7 @@
 main() {
 set -euo pipefail
 umask 077
-TRONCLASS_PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+TRONCLASS_PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$TRONCLASS_PROJECT_ROOT"
 
 # env.sh pins the listeners to loopback. Check the requested host before

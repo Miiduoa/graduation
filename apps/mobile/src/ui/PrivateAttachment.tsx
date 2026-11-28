@@ -5,7 +5,7 @@ import { cachePrivateBlob } from '../services/privateFileCache';
 import * as Sharing from 'expo-sharing';
 import { isPrivateFileObjectPath, resolvePrivateMedia } from '../services/privateFiles';
 
-export function PrivateAttachment({ path }: { path: string }) {
+export function PrivateAttachment({ path, label }: { path: string; label?: string }) {
   const [busy, setBusy] = useState(false);
   async function open() {
     setBusy(true);
@@ -37,7 +37,7 @@ export function PrivateAttachment({ path }: { path: string }) {
     <View>
     {/\.(png|jpe?g|webp|gif|avif)$/i.test(path) && <PrivateImage uri={path} style={{ width: 300, height: 220 }} resizeMode="contain" />}
     <Pressable accessibilityRole="button" disabled={busy} onPress={() => void open()}>
-      <Text>{busy ? '下載中…' : path.split('/').pop()}</Text>
+      <Text>{busy ? '下載中…' : label || path.split('/').pop()}</Text>
     </Pressable>
     </View>
   );

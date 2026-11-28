@@ -100,6 +100,9 @@ overrides:
   brace-expansion@^1.0.0: 1.1.21
 
 patchedDependencies:
+  llama.rn@0.4.8:
+    hash: e3eccfca9c2fa56f0560e06c606b986ac6af416f63e14a854350617a64a91a59
+    path: patches/llama.rn@0.4.8.patch
   next@16.4.5:
     hash: 64abe6b3a391d1001b29f27b3a3920e79d0eaaba9c2b74a2a0f07eaecf4230a8
     path: patches/next@16.4.5.patch
@@ -284,7 +287,7 @@ importers:
         version: 0.11.1
       llama.rn:
         specifier: ^0.4.8
-        version: 0.4.8(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
+        version: 0.4.8(patch_hash=e3eccfca9c2fa56f0560e06c606b986ac6af416f63e14a854350617a64a91a59)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
       react:
         specifier: 19.1.0
         version: 19.1.0
@@ -17886,7 +17889,7 @@ snapshots:
 
   lines-and-columns@1.2.4: {}
 
-  llama.rn@0.4.8(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0):
+  llama.rn@0.4.8(patch_hash=e3eccfca9c2fa56f0560e06c606b986ac6af416f63e14a854350617a64a91a59)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0):
     dependencies:
       react: 19.1.0
       react-native: 0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0)

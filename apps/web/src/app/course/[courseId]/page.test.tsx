@@ -20,6 +20,10 @@ const auth = vi.hoisted(() => ({
   loading: false,
 }));
 const school = vi.hoisted(() => ({ selectedSchoolId: 'school-a', loading: false }));
+vi.mock('next/navigation', async (original) => ({
+  ...await original<typeof import('next/navigation')>(),
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => auth }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({ useOptionalSelectedSchool: () => school }));
 vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
@@ -583,4 +587,36 @@ it('rejects selection of more than six attachments', async () => {
     expect(region.getByText('單次最多選取 6 個附件')).toBeTruthy();
     expect((region.getByRole('button', { name: '繳交作業' }) as HTMLButtonElement).disabled).toBe(true);
   } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; }
+});
+
+it('labels generated files by their submission order and keeps the filename of a named attachment', async () => {
+  vi.mocked(loadCourseWork).mockResolvedValue(coursework({ assignments: [
+    assignment('A', { submittedAt: '2026-11-23T07:24:00Z', attachments: [
+      'groups/course/assignments/A/submissions/alice/report.pdf',
+      'groups/course/assignments/A/submissions/alice/1795488100000-1-0123456789abcdef0123456789abcdef.docx',
+    ] }),
+  ] }));
+  await mount();
+  const receipt = within(screen.getByRole('region', { name: '作業 A' }));
+  expect(receipt.getByRole('button', { name: '下載 report.pdf' })).toBeTruthy();
+  expect(receipt.getByRole('button', { name: '下載 附件 2.docx' })).toBeTruthy();
+});
+
+it('keeps the notification campus and assignment through school sign-in', async () => {
+  auth.user = null;
+  window.history.replaceState(null, '', '/course/course?campus=ntu&schoolId=ntu&unrelated=old#assignment-A');
+  await mount();
+  const link = screen.getByRole('link', { name: '登入帳號' });
+  const href = link.getAttribute('href')!;
+  const login = new URL(href, window.location.origin);
+  expect(login.searchParams.get('campus')).toBe('ntu');
+  expect(login.searchParams.get('returnUrl')).toBe('/course/course?schoolId=ntu&campus=ntu#assignment-A');
+  const assign = vi.fn();
+  vi.stubGlobal('location', { ...window.location, search: window.location.search, hash: window.location.hash, assign });
+  try {
+    fireEvent.click(link);
+    expect(assign).toHaveBeenCalledWith(href);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

@@ -1,0 +1,659 @@
+{
+  "schema": "nuni.integration-sources/v1",
+  "repository": "Miiduoa/graduation",
+  "capturedAt": "2026-11-26T05:00:57.809Z",
+  "main": "b04c38dc8074c8eb26a46c11c322a6322fbef73c",
+  "targetPullRequest": 768,
+  "targetBranch": "integration/all-branches-20261124-final",
+  "targetHeadBeforeIntegration": "d694323053176adc2691f93455ee3bef89e436af",
+  "localCodeCandidate": {
+    "commit": "ab6787be8027cc51870c8071ecf59cc4b909465a",
+    "tree": "5a6805f33fa152ad94429a7d243d57285a2ed30b",
+    "sourceHeadsVerified": 34,
+    "missingSourceHeads": 0,
+    "mergeCommitsCreated": 32,
+    "netChangedFiles": 90
+  },
+  "sourceHeads": [
+    {
+      "branch": "chore/independent-merge-governance-20261125",
+      "commit": "31264f10b8d4a1e08a8e93b759cbe5f6a394d971",
+      "pullRequest": 797,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/31264f10b8d4a1e08a8e93b759cbe5f6a394d971",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/agent-role-orchestration-20261123",
+      "commit": "f0c7207e0eb8cba2b7303101ce62a5ad5cc60de9",
+      "pullRequest": 751,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/f0c7207e0eb8cba2b7303101ce62a5ad5cc60de9",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/agent-role-workflows-20261124",
+      "commit": "139c4dff9533e40d5ef629b1f5602eaf2b9a3c6b",
+      "pullRequest": 761,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/139c4dff9533e40d5ef629b1f5602eaf2b9a3c6b",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/agent-washing-cancellation-cloud-20261117",
+      "commit": "2b24410374c5c3c44e722895cecf85817507e162",
+      "pullRequest": 703,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/2b24410374c5c3c44e722895cecf85817507e162",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/assistant-campus-awareness-20261124",
+      "commit": "f789531657e8bd37c5ab7fd0d67c788f526b373c",
+      "pullRequest": 762,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/f789531657e8bd37c5ab7fd0d67c788f526b373c",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/campus-first-identity-entry-20261124",
+      "commit": "bc5beb427983b31cd2b74d14ebada2615cec95df",
+      "pullRequest": 791,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/bc5beb427983b31cd2b74d14ebada2615cec95df",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/contextual-campus-next-step-20261124",
+      "commit": "b73068c71d211373c3cfc29a8ef3119df250b76a",
+      "pullRequest": 774,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/b73068c71d211373c3cfc29a8ef3119df250b76a",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/mobile-coursework-review-20261124",
+      "commit": "9b0fffd2988ef18047f103b83552a2f39e41299a",
+      "pullRequest": 760,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/9b0fffd2988ef18047f103b83552a2f39e41299a",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/notification-workflows-20261124",
+      "commit": "0dbf3265b5838291b4cf300c2c1858b74c9a068e",
+      "pullRequest": 766,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/0dbf3265b5838291b4cf300c2c1858b74c9a068e",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/nuni-ai-workspace-20261124",
+      "commit": "7aad96f9217e39557b740179c6e2062020e0555c",
+      "pullRequest": 788,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/7aad96f9217e39557b740179c6e2062020e0555c",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/nuni-campus-context-followthrough",
+      "commit": "76a92fc65c0eadf13b0298eb830cada97440e8fa",
+      "pullRequest": 775,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/76a92fc65c0eadf13b0298eb830cada97440e8fa",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/nuni-feedback-and-recovery-20261124",
+      "commit": "8f062b6e7e92972e98ab96a0d18c095d19024962",
+      "pullRequest": 763,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/8f062b6e7e92972e98ab96a0d18c095d19024962",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/nuni-first-value-20261123",
+      "commit": "f4446a787ef2fae0b398fe729d46e8443c819a16",
+      "pullRequest": 757,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/f4446a787ef2fae0b398fe729d46e8443c819a16",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/nuni-system-experience-20261123",
+      "commit": "f3ffb64e17083ca97a45fd8d8121eca5b254f098",
+      "pullRequest": 754,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/f3ffb64e17083ca97a45fd8d8121eca5b254f098",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/nuni-task-flow-20261121",
+      "commit": "e86b783cdf87247fa31b380d74fe485bb76189c1",
+      "pullRequest": 739,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/e86b783cdf87247fa31b380d74fe485bb76189c1",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "feat/school-first-account-entry-20261124",
+      "commit": "44dfbc47e4568a586a9fa75a93bb986818fd8c09",
+      "pullRequest": 792,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/44dfbc47e4568a586a9fa75a93bb986818fd8c09",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "fix/campus-map-location-recovery-20261125",
+      "commit": "429d532def73613e68061a0c70fc760dfa5ee106",
+      "pullRequest": 795,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/429d532def73613e68061a0c70fc760dfa5ee106",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "fix/campus-walking-snapshot-coherence-20261125",
+      "commit": "61621e19770fab26c9a8e801aeef57a35b48cfeb",
+      "pullRequest": 794,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/61621e19770fab26c9a8e801aeef57a35b48cfeb",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "fix/mobile-list-refresh-state-20261124",
+      "commit": "e5902774040727291ba50624fd68a91624e39451",
+      "pullRequest": 786,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/e5902774040727291ba50624fd68a91624e39451",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "fix/mobile-nonblocking-http-metrics-20261124",
+      "commit": "cbe5c7550f1ac962491361455e41f4bc8413c089",
+      "pullRequest": 782,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/cbe5c7550f1ac962491361455e41f4bc8413c089",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "fix/mobile-voice-mute-lifecycle-20261125",
+      "commit": "0f8523d83c07772cefe88c8abb39c2daaad2ddb7",
+      "pullRequest": 793,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/0f8523d83c07772cefe88c8abb39c2daaad2ddb7",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "fix/shared-ci-regressions-20261126",
+      "commit": "774f611ef734ce2b57183445aec2b06db752db9b",
+      "pullRequest": 805,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/774f611ef734ce2b57183445aec2b06db752db9b",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "fix/shared-photo-pdf-budget-20261126",
+      "commit": "b8d62e3f6ebd6682c4fec6a48ac6916d3bf872eb",
+      "pullRequest": 803,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/b8d62e3f6ebd6682c4fec6a48ac6916d3bf872eb",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "fix/shared-request-lifecycle-20261124",
+      "commit": "9d3b9122fa78550b4ce58d9ee33aa0eaf631bdf4",
+      "pullRequest": 780,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/9d3b9122fa78550b4ce58d9ee33aa0eaf631bdf4",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "fix/tronclass-availability-evidence-20261126",
+      "commit": "209ff34ae89d44a2383135dff8517e415090c283",
+      "pullRequest": 801,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/209ff34ae89d44a2383135dff8517e415090c283",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "integration/all-branches-20261121",
+      "commit": "af3dd016b237ecee8a9c71b9ed95141b0c882434",
+      "pullRequest": 738,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/af3dd016b237ecee8a9c71b9ed95141b0c882434",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "integration/all-branches-20261123",
+      "commit": "7ec464c88284a23a05f34ff3c8f0cdd5835e3fac",
+      "pullRequest": 753,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/7ec464c88284a23a05f34ff3c8f0cdd5835e3fac",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "integration/all-branches-20261124-final",
+      "commit": "d694323053176adc2691f93455ee3bef89e436af",
+      "pullRequest": 768,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/d694323053176adc2691f93455ee3bef89e436af",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "integration/all-branches-followup-20261124",
+      "commit": "a9b5ddcb9903a815e45319e7adb70dc3a396a92f",
+      "pullRequest": 764,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/a9b5ddcb9903a815e45319e7adb70dc3a396a92f",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "integration/campus-services-20261106",
+      "commit": "fff7e74ea547112f64704ecdefa971867dbb0a83",
+      "pullRequest": 515,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/fff7e74ea547112f64704ecdefa971867dbb0a83",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "integration/reliability-spatial-batch-20261125",
+      "commit": "95addc73cb96c9e5e9fd89eef1c20e0cdf629c0d",
+      "pullRequest": 796,
+      "draftAtSnapshot": false,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/95addc73cb96c9e5e9fd89eef1c20e0cdf629c0d",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "integration/reliability-spatial-tronclass-20261126",
+      "commit": "654b77e1d570f3988d3fafa2feb070a4128ab392",
+      "pullRequest": 804,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/654b77e1d570f3988d3fafa2feb070a4128ab392",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "main",
+      "commit": "b04c38dc8074c8eb26a46c11c322a6322fbef73c",
+      "pullRequest": null,
+      "draftAtSnapshot": null,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/b04c38dc8074c8eb26a46c11c322a6322fbef73c",
+      "ancestorOfLocalCodeCandidate": true
+    },
+    {
+      "branch": "security/nuni-merge-gate-pilot-20261125",
+      "commit": "8cfc9f182b734c143b7f8ba261c4328684137bac",
+      "pullRequest": 798,
+      "draftAtSnapshot": true,
+      "evidenceUrl": "https://github.com/Miiduoa/graduation/commit/8cfc9f182b734c143b7f8ba261c4328684137bac",
+      "ancestorOfLocalCodeCandidate": true
+    }
+  ],
+  "changesFromTargetHead": [
+    {
+      "status": "A",
+      "path": ".github/copilot-instructions.md"
+    },
+    {
+      "status": "M",
+      "path": ".github/workflows/campus-spatial-browser.yml"
+    },
+    {
+      "status": "M",
+      "path": ".github/workflows/maestro-e2e.yml"
+    },
+    {
+      "status": "M",
+      "path": ".github/workflows/mobile-agent-regression.yml"
+    },
+    {
+      "status": "A",
+      "path": ".github/workflows/nuni-merge-gate-revalidate.yml"
+    },
+    {
+      "status": "A",
+      "path": ".github/workflows/nuni-merge-gate-review-events.yml"
+    },
+    {
+      "status": "A",
+      "path": ".github/workflows/nuni-merge-gate-tests.yml"
+    },
+    {
+      "status": "A",
+      "path": ".github/workflows/nuni-merge-gate.yml"
+    },
+    {
+      "status": "M",
+      "path": ".gitleaksignore"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/README.md"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/config.yaml"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/flows/01_onboarding.yaml"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/flows/02_authentication.yaml"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/flows/03_announcements.yaml"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/flows/04_events.yaml"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/flows/05_map.yaml"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/flows/06_cafeteria.yaml"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/flows/07_me_features.yaml"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/flows/08_settings.yaml"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/flows/09_messages.yaml"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/flows/10_full_user_journey.yaml"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/flows/11_navigation_ai_first.yaml"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/flows/12_campus_hub_and_social.yaml"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/.maestro/flows/demo_oral_v4.yaml"
+    },
+    {
+      "status": "A",
+      "path": "apps/mobile/.maestro/helpers/open-emulator-login.yaml"
+    },
+    {
+      "status": "A",
+      "path": "apps/mobile/.maestro/helpers/select-pu.yaml"
+    },
+    {
+      "status": "A",
+      "path": "apps/mobile/.maestro/helpers/sign-in-student.yaml"
+    },
+    {
+      "status": "A",
+      "path": "apps/mobile/e2e/MaestroApp.tsx"
+    },
+    {
+      "status": "A",
+      "path": "apps/mobile/e2e/emulatorConfig.ts"
+    },
+    {
+      "status": "A",
+      "path": "apps/mobile/index.maestro.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/jest.setup.js"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/__tests__/AssistantCalendarAction.test.tsx"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/__tests__/AssistantCalendarBatchAction.test.tsx"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/__tests__/PersonalCalendarScreen.test.tsx"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/__tests__/PersonalImportScreen.test.tsx"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/__tests__/assistantCalendarBatchExecution.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/__tests__/assistantCalendarExecution.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/__tests__/features/campusAssistantCalendarBatchIntegration.test.tsx"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/__tests__/features/campusAssistantCourseworkStudyScreen.test.tsx"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/__tests__/features/campusAssistantPlanStudyScreen.test.tsx"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/__tests__/features/nuniCourseworkStudy.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/__tests__/features/nuniCourseworkStudyAvailability.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/__tests__/personalImports.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/screens/CampusContentScreens.tsx"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/screens/PersonalCalendarScreen.tsx"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/services/personalImportRollbackJournal.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/mobile/src/services/personalImports.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/web/src/app/login/page.test.tsx"
+    },
+    {
+      "status": "M",
+      "path": "apps/web/src/app/map/MapClient.test.tsx"
+    },
+    {
+      "status": "M",
+      "path": "apps/web/src/app/map/MapClient.tsx"
+    },
+    {
+      "status": "M",
+      "path": "apps/web/src/app/map/campusWalkingAudit.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/web/src/app/map/campusWalkingAudit.ts"
+    },
+    {
+      "status": "A",
+      "path": "apps/web/src/app/map/campusWalkingEntrance.test.ts"
+    },
+    {
+      "status": "A",
+      "path": "apps/web/src/app/map/campusWalkingEntrance.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/web/src/app/map/campusWalkingGraph.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/web/src/app/map/campusWalkingGraph.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/web/src/app/map/campusWalkingOsm.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/web/src/components/imports/PersonalImportCenter.test.tsx"
+    },
+    {
+      "status": "A",
+      "path": "apps/web/src/lib/photoPdfBudget.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/web/src/lib/server/fnDispatch.tronClassLms.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/web/src/lib/server/tronClassLmsHandler.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/web/src/lib/server/tronClassSubmissionAvailability.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "apps/web/src/lib/server/tronClassSubmissionAvailability.ts"
+    },
+    {
+      "status": "A",
+      "path": "docs/security/merge-governance.md"
+    },
+    {
+      "status": "A",
+      "path": "docs/security/merge-governance/staged-ruleset.json"
+    },
+    {
+      "status": "A",
+      "path": "docs/security/nuni-merge-gate.md"
+    },
+    {
+      "status": "M",
+      "path": "packages/shared/src/photoPdfBudget.ts"
+    },
+    {
+      "status": "A",
+      "path": "scripts/maestro/emulator-config.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/maestro/emulator-env.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/maestro/seed-content.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/maestro/start-emulators.sh"
+    },
+    {
+      "status": "A",
+      "path": "scripts/maestro/verify-emulator.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/attest-environment.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/gate.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/gate.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/maestro-reports.py"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/maestro-reports.test.py"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/maestro-suite.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/policy-integrity.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/policy.json"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/pr-scope.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/pr-scope.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/publish-denial.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/revalidate.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/revalidate.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/ruleset-proof.mjs"
+    },
+    {
+      "status": "A",
+      "path": "scripts/merge-gate/ruleset-proof.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "scripts/security/gitleaks-history-aliases.json"
+    },
+    {
+      "status": "M",
+      "path": "scripts/security/verify-gitleaks-history.mjs"
+    },
+    {
+      "status": "M",
+      "path": "scripts/security/verify-gitleaks-history.test.mjs"
+    }
+  ],
+  "boundaries": [
+    "This is a fixed source snapshot, not a claim about future branch updates.",
+    "Local ancestry and merge compatibility do not establish CI, designated App approval, or production deployment.",
+    "Governance proposals remain inactive; publicationEnabled=false and existing native rulesets remain authoritative.",
+    "Full-suite results must be recorded against the final published tree/head; earlier heads are not accepted as final validation."
+  ]
+}

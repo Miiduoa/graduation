@@ -9,7 +9,6 @@ import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
-import { hasReadySchoolSession } from '../app/SchoolSessionBoundary';
 import { toPublicSchoolId } from '../data/schoolIds';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
@@ -92,13 +91,20 @@ export default function MyOrdersScreen({ navigation, route }: Props) {
   const auth = useAuth();
   const { school, selectionReady } = useSchool();
   const sourceSchool = route?.params?.schoolId;
+  // 本人訂單依登入身分授權，不依個人檔案校別或學號登入開關。
+  // 帳號停權、刪除等限制仍由 Firestore 的 isSelf / isSignedIn 驗證。
   let content;
   if (auth.loading || auth.profileLoading || selectionReady === false) {
     content = <ActivityIndicator accessibilityLabel="確認帳號與學校" color={aiTokens.ai} />;
-  } else if (!auth.user || !hasReadySchoolSession(auth, school.id)) {
+  } else if (
+    !auth.user ||
+    auth.tokenExpired ||
+    !auth.profile ||
+    auth.profile.uid !== auth.user.uid
+  ) {
     content = (
       <AICard title="登入後查看訂單">
-        <Text style={{ color: aiTokens.muted }}>請使用目前學校的帳號登入。</Text>
+        <Text style={{ color: aiTokens.muted }}>請重新登入後查看本人的訂單。</Text>
       </AICard>
     );
   } else if (sourceSchool && toPublicSchoolId(sourceSchool) !== toPublicSchoolId(school.id)) {

@@ -122,6 +122,11 @@ export function useAccessibility() {
   return ctx;
 }
 
+/** Shared chrome also runs in previews that omit this provider. */
+export function useOptionalAccessibility() {
+  return useContext(AccessibilityContext);
+}
+
 export function useTextScale(): number {
   return useAccessibility().textScale;
 }

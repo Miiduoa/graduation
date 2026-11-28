@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -9,7 +9,7 @@ import test from 'node:test';
 const python = spawnSync('bash', ['-c', 'command -v python3'], { encoding: 'utf8' }).stdout.trim();
 
 function assertLauncherEnvironment(scenario) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-'));
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-'));
   const capture = path.join(dir, 'captured.json');
   const cleared = ['FIREBASE_SERVICE_ACCOUNT_JSON', 'GOOGLE_APPLICATION_CREDENTIALS',
     'FIREBASE_CONFIG', 'GOOGLE_CLOUD_PROJECT', 'NEXT_PUBLIC_FUNCTIONS_BASE_URL',
@@ -79,7 +79,7 @@ for (const scenario of scenarios) {
 }
 
 test('launcher stores session keys in a private temporary directory', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-dir-'));
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-dir-'));
   const capture = path.join(dir, 'captured.json');
   try {
     writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
@@ -122,7 +122,7 @@ process.exit(0);
 });
 
 test('launcher rejects a trailing slash on a symbolic link runtime directory', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-link-'));
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-link-'));
   const target = path.join(dir, 'real');
   const link = path.join(dir, 'link');
   mkdirSync(target);
@@ -317,7 +317,7 @@ for (const mode of [0o300, 0o700, 0o755, 0o2700, 0o2750]) {
 }
 
 test('launcher refuses a symbolic link session key file', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-key-'));
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-key-'));
   const runtime = path.join(dir, 'runtime');
   mkdirSync(runtime, { mode: 0o700 });
   writeFileSync(path.join(dir, 'outside.key'), 'x'.repeat(64));
@@ -350,7 +350,7 @@ process.exit(0);
 });
 
 test('launcher rejects a symbolic-link component written as link/.', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-dot-'));
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-dot-'));
   const target = path.join(dir, 'real');
   const link = path.join(dir, 'link');
   mkdirSync(target);
@@ -380,7 +380,7 @@ process.exit(0);
 });
 
 test('launcher rejects a runtime path whose intermediate component is a symbolic link', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-mid-'));
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-mid-'));
   const real = path.join(dir, 'real');
   const link = path.join(dir, 'link');
   mkdirSync(path.join(real, 'runtime'), { recursive: true, mode: 0o700 });
@@ -411,8 +411,8 @@ process.exit(0);
 
 test('launcher resolves a relative runtime directory against the repository root', () => {
   const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-rel-'));
-  const expected = path.join(dir, 'runtime');
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-rel-'));
+  const expected = path.join(dir, 'runtime?');
   mkdirSync(expected, { mode: 0o700 });
   const relative = path.relative(repoRoot, expected);
   const capture = path.join(dir, 'captured.json');
@@ -428,6 +428,7 @@ process.exit(73);
 process.exit(0);
 `, { mode: 0o700 });
     const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      cwd: dir,
       encoding: 'utf8',
       env: {
         PATH: `${dir}:${process.env.PATH}`,
@@ -464,8 +465,10 @@ function writeSessionKey(file, mode = 0o600) {
   writeFileSync(file, 'x'.repeat(64), { mode });
 }
 
-test('launcher does not glob a literal * path component against the working tree', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-glob-'));
+test('launcher does not glob a literal * path component against the repository root', () => {
+  const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
+  const decoy = mkdtempSync(path.join(repoRoot, 'tronclass-glob-decoy-'));
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-glob-'));
   const real = path.join(dir, 'real');
   mkdirSync(path.join(real, 'runtime'), { recursive: true, mode: 0o700 });
   const star = path.join(dir, '*');
@@ -490,13 +493,15 @@ process.exit(0);
     });
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, /symbolic link/i);
+    assert.equal(lstatSync(decoy).isDirectory(), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(decoy, { recursive: true, force: true });
   }
 });
 
 test('launcher reuses an existing session key only when it is a private regular file', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-reuse-'));
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-reuse-'));
   const runtime = path.join(dir, 'runtime');
   mkdirSync(runtime, { mode: 0o700 });
   writeSessionKey(path.join(runtime, 'bff-session.key'));
@@ -573,7 +578,7 @@ process.exit(status ?? 1);
 });
 
 test('launcher refuses a reused session key that is not mode 0600', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-mode-'));
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-mode-'));
   const runtime = path.join(dir, 'runtime');
   mkdirSync(runtime, { mode: 0o700 });
   writeSessionKey(path.join(runtime, 'bff-session.key'), 0o644);
@@ -596,7 +601,7 @@ test('launcher refuses a reused session key that is not mode 0600', () => {
 });
 
 test('launcher refuses a hard-linked session key file', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-nlink-'));
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-nlink-'));
   const runtime = path.join(dir, 'runtime');
   mkdirSync(runtime, { mode: 0o700 });
   const outside = path.join(dir, 'outside.key');
@@ -629,7 +634,7 @@ echo ${logTestRunId}
 }
 
 test('launcher refuses a symbolic link log file', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-log-'));
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-log-'));
   const runtime = path.join(dir, 'runtime');
   mkdirSync(runtime, { mode: 0o700 });
   writeSessionKey(path.join(runtime, 'bff-session.key'));
@@ -657,7 +662,7 @@ test('launcher refuses a symbolic link log file', () => {
   }
 });
 test('launcher refuses a hard-linked log file without truncating the other link', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-log-hl-'));
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'tronclass-launcher-log-hl-'));
   const runtime = path.join(dir, 'runtime');
   mkdirSync(runtime, { mode: 0o700 });
   writeSessionKey(path.join(runtime, 'bff-session.key'));

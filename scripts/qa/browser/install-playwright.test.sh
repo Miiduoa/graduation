@@ -25,11 +25,15 @@ set -euo pipefail
 printf 'python:%s\n' "$*" >> "$MOCK_LOG"
 if [[ "$*" == '-m playwright install-deps chromium' ]]; then
   [[ "${MOCK_ROOT:-0}" == 1 ]]
+  if [[ "${MOCK_SLOW_DEPS:-0}" == 1 ]]; then /bin/sleep 3.5; fi
   count="$(grep -c '^python:-m playwright install-deps chromium$' "$MOCK_LOG" || true)"
   if [[ "${MOCK_PROCESS_TEST:-0}" == 1 ]]; then
     if (( count == 1 )); then
       # Simulate apt retaining its lock and ignoring TERM in sudo's session.
       exec flock --no-fork -n "$MOCK_LOCK" bash -c '
+        # Keep the child in this process group even when SHELLOPTS inherits
+        # job control. The fixture models the sudo session boundary only.
+        set +m
         trap "" TERM
         touch "$MOCK_LOCK.interrupted"
         echo locked >> "$MOCK_LOG"
@@ -159,6 +163,9 @@ if [[ "$1" == bash ]]; then
   ' signal-test "$code" "${@:5}"
 fi
 [[ "$1" == env && "$2" == PLAYWRIGHT_INSTALL_ATTEMPT=* && "$3" == timeout ]]
+if [[ "${MOCK_STAGE_TAMPER:-0}" == 1 && "${!#}" == */fonts-noto-cjk.deb ]]; then
+  printf 'changed after download verification' > "${!#}"
+fi
 export "$2"
 shift 2
 args=("$@")
@@ -182,9 +189,37 @@ if [[ "${MOCK_SLOW_FONT:-0}" == 1 ]]; then
 fi
 (( count > MOCK_APT_FAILS ))
 MOCK
+cat > "$mock_dir/bin/apt-cache" <<'MOCK'
+#!/usr/bin/env bash
+[[ "$*" == '--no-all-versions show fonts-noto-cjk' ]] || exit 1
+printf 'Package: fonts-noto-cjk\nSHA256: %s\n' "${MOCK_APT_SHA:-other-candidate}"
+MOCK
+cat > "$mock_dir/bin/dpkg-query" <<'MOCK'
+#!/usr/bin/env bash
+[[ "${MOCK_NOBLE_INSTALLED:-0}" == 1 ]] || exit 1
+printf 'install ok installed 1:20230817+repack1-3'
+MOCK
+cat > "$mock_dir/bin/curl" <<'MOCK'
+#!/usr/bin/env bash
+set -eu
+[[ "${MOCK_ROOT:-0}" == 0 && "$*" == '--fail --silent --show-error --proto =https --connect-timeout 8 --max-time 75 --output '* ]]
+[[ "${!#}" == 'https://archive.ubuntu.com/ubuntu/pool/main/f/fonts-noto-cjk/fonts-noto-cjk_20230817+repack1-3_all.deb' ]]
+printf 'prefetch\n' >> "$MOCK_LOG"
+case "${MOCK_ARCHIVE:-offline}" in
+  ok) printf 'Noble font fixture' > "${@: -2:1}" ;;
+  corrupt) printf 'corrupt' > "${@: -2:1}" ;;
+  offline) exit 22 ;;
+esac
+MOCK
 cat > "$mock_dir/bin/dpkg" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "$1" == --install ]]; then
+  [[ "${MOCK_ROOT:-0}" == 1 && "$#" == 2 && "$2" == */fonts-noto-cjk.deb ]]
+  printf 'dpkg:%s\n' "$*" >> "$MOCK_LOG"
+  [[ "$(cat "$2")" == 'Noble font fixture' ]]
+  exit "${MOCK_LOCAL_DPKG_FAIL:-0}"
+fi
 [[ "$*" == '--configure -a' && "${MOCK_ROOT:-0}" == 1 ]]
 printf 'dpkg:%s\n' "$*" >> "$MOCK_LOG"
 if [[ "${MOCK_REPAIR_FAIL:-0}" == 1 ]]; then exit 1; fi
@@ -253,9 +288,9 @@ printf 'timeout-command:%s:%s\n' "$limit" "${line//$'\n'/ }" >> "$MOCK_LOG"
 # Privileged attempts run through the installer's process-group recorder.
 inner="$1"
 if [[ "$1" == bash && "${4:-}" == record-process-group ]]; then inner="${7:-}"; fi
-if [[ "${MOCK_SLOW_FONT:-0}" == 1 && "$inner" == apt-get ]]; then
-  # Scale one minute to one second: a 90-second font transfer outlasts the
-  # former 60-second deadline but fits within the 180-second deadline.
+if [[ ( "${MOCK_SLOW_FONT:-0}" == 1 && "$inner" == apt-get ) ||
+      ( "${MOCK_SLOW_DEPS:-0}" == 1 && "$inner" == */python ) ]]; then
+  # Scale one minute to one second for a slow font download or dependency unpack.
   exec "$REAL_TIMEOUT" --kill-after=0.2s "$((${limit%s} / 60))s" "$@"
 fi
 if [[ "${MOCK_PROCESS_TEST:-0}" == 1 ]]; then
@@ -301,7 +336,7 @@ bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1
 [[ "$(grep -c '^dpkg:--configure -a$' "$MOCK_LOG")" -eq 2 ]]
 assert_recovery_deadlines 2
 # Both privileged commands must place timeout inside sudo, preserving Python's path.
-[[ "$(grep -c "^sudo:timeout --kill-after=5s 180s bash -c .* record-process-group [^ ]*/process-group [^ ]* $mock_dir/bin/python -m playwright install-deps chromium\$" "$MOCK_LOG")" -eq 2 ]]
+[[ "$(grep -c "^sudo:timeout --kill-after=5s 360s bash -c .* record-process-group [^ ]*/process-group [^ ]* $mock_dir/bin/python -m playwright install-deps chromium\$" "$MOCK_LOG")" -eq 2 ]]
 [[ "$(grep -c '^sudo:timeout --kill-after=5s 180s bash -c .* record-process-group [^ ]*/process-group [^ ]* apt-get ' "$MOCK_LOG")" -eq 2 ]]
 # Ordinary failures never signal any process group.
 [[ "$(grep -c '^sudo:pidfd' "$MOCK_LOG" || true)" -eq 0 ]]
@@ -382,6 +417,53 @@ bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1
 [[ "$(grep -c '^apt:' "$MOCK_LOG")" -eq 1 ]]
 [[ "$(grep -c '^sleep:' "$MOCK_LOG" || true)" -eq 0 ]]
 export MOCK_SLOW_FONT=0
+: > "$MOCK_LOG"
+MOCK_SLOW_DEPS=1 bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1
+[[ "$(grep -c '^python:-m playwright install-deps chromium$' "$MOCK_LOG")" -eq 1 ]]
+[[ "$(grep -c '^sleep:' "$MOCK_LOG" || true)" -eq 0 ]]
+
+# Exercise the real SHA-256 check on a small local fixture. Ordinary scenarios
+# above simulate a different candidate without using network or APT metadata.
+official_sha=7d64b985f6fe128c99eae5610d5c047338e572bdcfb2bb09736be01b824a7f6c
+fixture_sha="$(printf 'Noble font fixture' | sha256sum | cut -d' ' -f1)"
+sed "s/$official_sha/$fixture_sha/" "$script_dir/install-playwright.sh" > "$mock_dir/scripts/qa/browser/fixture-install.sh"
+export MOCK_APT_SHA="$fixture_sha"
+for mode in ok corrupt offline; do
+  export MOCK_ARCHIVE="$mode"
+  : > "$MOCK_LOG"
+  bash "$mock_dir/scripts/qa/browser/fixture-install.sh" --fonts-noto-cjk >/dev/null 2>&1
+  [[ "$(grep -c '^prefetch$' "$MOCK_LOG")" -eq 1 ]]
+  if [[ "$mode" == ok ]]; then
+    grep -q '^dpkg:--install /.*/fonts-noto-cjk.deb$' "$MOCK_LOG"
+    [[ "$(grep -c '^apt:' "$MOCK_LOG" || true)" -eq 0 ]]
+  else
+    grep -q '^apt:.*install -y fonts-noto-cjk$' "$MOCK_LOG"
+    [[ "$(grep -c '^dpkg:--install' "$MOCK_LOG" || true)" -eq 0 ]]
+  fi
+done
+: > "$MOCK_LOG"
+MOCK_NOBLE_INSTALLED=1 bash "$mock_dir/scripts/qa/browser/fixture-install.sh" --fonts-noto-cjk >/dev/null 2>&1
+[[ "$(grep -c '^prefetch$' "$MOCK_LOG" || true)" -eq 0 ]]
+grep -q '^apt:.*install -y fonts-noto-cjk$' "$MOCK_LOG"
+: > "$MOCK_LOG"
+if MOCK_ARCHIVE=ok MOCK_LOCAL_DPKG_FAIL=1 bash "$mock_dir/scripts/qa/browser/fixture-install.sh" --fonts-noto-cjk >/dev/null 2>&1; then
+  echo 'A persistent verified-package installation failure was silently accepted' >&2
+  exit 1
+fi
+[[ "$(grep -c '^dpkg:--install' "$MOCK_LOG")" -eq 3 ]]
+[[ "$(grep -c '^apt:' "$MOCK_LOG" || true)" -eq 0 ]]
+
+# A caller-owned download may change before elevation. Never install bytes that
+# fail the checksum of the private copy, even after bounded installation retries.
+: > "$MOCK_LOG"
+if MOCK_ARCHIVE=ok MOCK_STAGE_TAMPER=1 bash "$mock_dir/scripts/qa/browser/fixture-install.sh" --fonts-noto-cjk >/dev/null 2>&1; then
+  echo 'A changed verified-package download was installed after elevation' >&2
+  exit 1
+fi
+[[ "$(grep -c '^prefetch$' "$MOCK_LOG")" -eq 1 ]]
+[[ "$(grep -c '^dpkg:--install' "$MOCK_LOG" || true)" -eq 0 ]]
+[[ "$(grep -c '^apt:' "$MOCK_LOG" || true)" -eq 0 ]]
+unset MOCK_APT_SHA MOCK_ARCHIVE
 
 # Bad parameters fail before any installation attempt.
 : > "$MOCK_LOG"
@@ -507,6 +589,21 @@ kill -KILL "$(cat "$MOCK_LOCK.child-pid")" 2>/dev/null || true
 rm -f "$MOCK_LOCK.child-pid"
 export MOCK_PROCESS_TEST=0 MOCK_CHILD_ONLY_TIMEOUT=0 MOCK_DPKG_HANG=0
 
+# Inherited Bash job control must not move the fixture child to an unrelated
+# process group. The same actual timeout still has to release the real lock.
+export MOCK_PROCESS_TEST=1 MOCK_LOCK="$mock_dir/monitor.lock"
+: > "$MOCK_LOG"
+if ! bash -c 'set -m; export SHELLOPTS; bash "$1" --fonts-noto-cjk' _ \
+  "$script_dir/install-playwright.sh" > "$mock_dir/monitor-output.log" 2>&1; then
+  cat "$mock_dir/monitor-output.log" "$MOCK_LOG" >&2
+  exit 1
+fi
+grep -q '^locked$' "$MOCK_LOG"
+grep -q '^recovered$' "$MOCK_LOG"
+[[ "$(grep -c '^python:-m playwright install-deps chromium$' "$MOCK_LOG")" -eq 2 ]]
+[[ ! -e "$MOCK_LOCK.interrupted" ]]
+flock -n "$MOCK_LOCK" true
+
 # A delayed lock release after timeout gets a bounded retry, not an apt retry
 # while the database is still locked. Keep actual lock acquisition in dpkg.
 export MOCK_PROCESS_TEST=0 MOCK_TIMEOUT_FAILS=1 MOCK_DELAY_LOCK_RELEASE=1 MOCK_LOCK="$mock_dir/delayed.lock"
@@ -561,4 +658,4 @@ assert_recovery_deadlines 1
 grep -q 'could not recover interrupted package configuration' "$mock_dir/repair-output.log"
 
 [[ ! -s "$MOCK_LOG.raw-signal" ]]
-echo 'Browser installation bounded retry tests: 20/20 passed'
+echo 'Browser installation bounded retry tests: 24/24 passed'

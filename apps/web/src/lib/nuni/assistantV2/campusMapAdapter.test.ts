@@ -68,6 +68,35 @@ describe('map reader uses the current page sources', () => {
     expect(result.items[0]).not.toHaveProperty('floor');
   });
 
+  it('keeps the bound alias on public reads and links while matching bundled bilingual names', async () => {
+    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot() as never);
+    const result = await read('Anthony Kuo Hall 303', guard(), 'tw-pu');
+    expect(result).toMatchObject({
+      schoolId: 'tw-pu', source: 'bundled-providence', resolution: 'matched', partial: false,
+      items: [{ id: 'pu-renyuan', schoolId: 'tw-pu', match: 'building', verification: 'cross-checked' }],
+    });
+    expect(result.href).toContain('schoolId=tw-pu');
+    expect(result.items[0].href).toContain('schoolId=tw-pu');
+    expect(vi.mocked(getDocsFromServer).mock.calls[0][0]).toMatchObject({ path: 'schools/tw-pu/pois' });
+    expect(vi.mocked(getDocsFromServer).mock.calls[1][0]).toMatchObject({
+      path: 'pois', constraints: expect.arrayContaining([{ field: 'schoolId', op: '==', value: 'tw-pu' }]),
+    });
+  });
+
+  it('keeps public-name precedence for the bound alias without querying another school', async () => {
+    const query = 'Anthony Kuo Hall 303';
+    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([
+      doc('alias-public-stop', published({ schoolId: 'tw-pu', name: query, category: '公車站' }), 'schools/tw-pu/pois'),
+    ]) as never);
+    const result = await read(query, guard(), 'tw-pu');
+    expect(result).toMatchObject({
+      schoolId: 'tw-pu', resolution: 'matched', partial: false,
+      items: [{ id: 'alias-public-stop', schoolId: 'tw-pu', match: 'place' }],
+    });
+    expect(getDocsFromServer).toHaveBeenCalledOnce();
+    expect(vi.mocked(getDocsFromServer).mock.calls[0][0]).toMatchObject({ path: 'schools/tw-pu/pois' });
+  });
+
   it('retains bundled places as explicitly incomplete if the public source fails, without probing a legacy collection', async () => {
     vi.mocked(getDocsFromServer).mockRejectedValueOnce(new Error('permission-denied'));
     const result = await read('PH101');

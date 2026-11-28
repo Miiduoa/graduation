@@ -24,7 +24,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
@@ -42,10 +41,23 @@ import {
   generateRotatingQR,
   subscribeToSession,
   updateStudentStatus,
-  getStatusColor,
   getStatusLabel,
 } from '../services/smartAttendanceEngine';
 import { SESSION_FOCUS_MISSING, parseSessionFocusId } from './sessionDeepLink';
+
+/** 出席狀態色：取自即時 theme 語意色（隨深淺色切換） */
+function statusTone(status: AttendanceStatus): { fg: string; soft: string } {
+  switch (status) {
+    case 'present':
+      return { fg: theme.colors.success, soft: theme.colors.successSoft };
+    case 'late':
+      return { fg: theme.colors.warning, soft: theme.colors.warningSoft };
+    case 'absent':
+      return { fg: theme.colors.danger, soft: theme.colors.dangerSoft };
+    default:
+      return { fg: theme.colors.info, soft: theme.colors.infoSoft };
+  }
+}
 
 // ============================================================================
 // TYPES
@@ -100,18 +112,9 @@ function RotatingQRDisplay({ sessionId, secret }: { sessionId: string; secret: s
           <Ionicons name={'shield-checkmark' as any} size={14} color={theme.colors.success} />
           <Text style={s.qrBadgeText}>定時更新</Text>
         </View>
-        <View
-          style={[
-            s.qrBadge,
-            {
-              backgroundColor: theme.colors.surface,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-            },
-          ]}
-        >
-          <Ionicons name={'time-outline' as any} size={14} color={theme.colors.accent} />
-          <Text style={[s.qrBadgeText, { color: theme.colors.text }]}>{countdown}s</Text>
+        <View style={s.qrBadge}>
+          <Ionicons name={'time-outline' as any} size={14} color={theme.colors.textSecondary} />
+          <Text style={[s.qrBadgeText, { color: theme.colors.textSecondary }]}>{countdown}s</Text>
         </View>
       </View>
     </View>
@@ -155,13 +158,14 @@ function StudentRecordItem({
   onStatusChange?: (studentId: string, status: AttendanceStatus) => void;
 }) {
   const s = useThemeStyleSheet(createStyles);
-  const statusColor = getStatusColor(record.status);
+  const tone = statusTone(record.status);
+  const statusColor = tone.fg;
   const statusLabel = getStatusLabel(record.status);
 
   return (
-    <View style={[s.recordItem, { borderLeftColor: statusColor }]}>
-      <View style={[s.recordAvatar, { backgroundColor: statusColor }]}>
-        <Text style={s.recordAvatarText}>{record.studentName[0]}</Text>
+    <View style={s.recordItem}>
+      <View style={[s.recordAvatar, { backgroundColor: tone.soft }]}>
+        <Text style={[s.recordAvatarText, { color: statusColor }]}>{record.studentName[0]}</Text>
       </View>
       <View style={s.recordContent}>
         <Text style={s.recordName}>{record.studentName}</Text>
@@ -180,6 +184,9 @@ function StudentRecordItem({
       {isTeacher && record.status === 'absent' && onStatusChange && (
         <TouchableOpacity
           style={s.recordAction}
+          accessibilityRole="button"
+          accessibilityLabel={`將${record.studentName}標記為請假`}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           onPress={() => onStatusChange(record.studentId, 'excused')}
         >
           <Ionicons name={'checkmark' as any} size={16} color={theme.colors.success} />
@@ -415,9 +422,9 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
             {loading && !invalidSessionLink ? '載入點名資料...' : missingMessage}
           </Text>
           {!loading && !invalidSessionLink ? (
-            <TouchableOpacity onPress={loadSession}><Text>重試</Text></TouchableOpacity>
+            <TouchableOpacity onPress={loadSession} style={s.fallbackAction} accessibilityRole="button"><Text style={s.fallbackActionText}>重試</Text></TouchableOpacity>
           ) : null}
-          <TouchableOpacity onPress={() => navigation.goBack()}><Text>返回</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={s.fallbackAction} accessibilityRole="button"><Text style={s.fallbackActionText}>返回</Text></TouchableOpacity>
         </View>
       </View>
     );
@@ -430,11 +437,11 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
     <View style={[s.container, { paddingTop: insets.top }]}>
       {/* ── Header ── */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={s.headerBack}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={s.headerBack} accessibilityRole="button" accessibilityLabel="返回" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Ionicons name={'chevron-back' as any} size={24} color={theme.colors.text} />
         </TouchableOpacity>
         <View style={s.headerCenter}>
-          <Text style={s.headerTitle} numberOfLines={1}>
+          <Text style={s.headerTitle} numberOfLines={1} accessibilityRole="header">
             {session.courseName}
           </Text>
           <View style={s.headerMeta}>
@@ -453,7 +460,7 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
 
       <ScrollView
         style={s.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent} />}
         contentContainerStyle={{
           paddingBottom: insets.bottom + TAB_BAR_CONTENT_BOTTOM_PADDING + 40,
         }}
@@ -465,20 +472,20 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
           <>
             {/* Stats */}
             <View style={s.statsRow}>
-              <View style={[s.statCard, { backgroundColor: '#ECFDF5' }]}>
-                <Text style={[s.statNum, { color: '#34C759' }]}>{stats.present}</Text>
+              <View style={s.statCard}>
+                <Text style={[s.statNum, { color: theme.colors.success }]}>{stats.present}</Text>
                 <Text style={s.statLabel}>出席</Text>
               </View>
-              <View style={[s.statCard, { backgroundColor: '#FEF3C7' }]}>
-                <Text style={[s.statNum, { color: '#FF9500' }]}>{stats.late}</Text>
+              <View style={s.statCard}>
+                <Text style={[s.statNum, { color: theme.colors.warning }]}>{stats.late}</Text>
                 <Text style={s.statLabel}>遲到</Text>
               </View>
-              <View style={[s.statCard, { backgroundColor: '#FEE2E2' }]}>
-                <Text style={[s.statNum, { color: '#FF3B30' }]}>{stats.absent}</Text>
+              <View style={s.statCard}>
+                <Text style={[s.statNum, { color: theme.colors.danger }]}>{stats.absent}</Text>
                 <Text style={s.statLabel}>缺席</Text>
               </View>
-              <View style={[s.statCard, { backgroundColor: theme.colors.surface2 }]}>
-                <Text style={[s.statNum, { color: theme.colors.accent }]}>{stats.rate}%</Text>
+              <View style={s.statCard}>
+                <Text style={[s.statNum, { color: theme.colors.text }]}>{stats.rate}%</Text>
                 <Text style={s.statLabel}>出席率</Text>
               </View>
             </View>
@@ -515,7 +522,7 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
 
             {/* Student List */}
             <View style={s.filterRow}>
-              <Text style={s.sectionTitle}>學生列表 ({session.records.length})</Text>
+              <Text style={s.sectionTitle} accessibilityRole="header">學生列表 ({session.records.length})</Text>
               <View style={s.filterTabs}>
                 {(['all', 'present', 'late', 'absent'] as const).map((f) => (
                   <TouchableOpacity
@@ -543,14 +550,16 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                 <Text style={s.emptyText}>等待學生簽到...</Text>
               </View>
             ) : (
-              filteredRecords.map((record) => (
-                <StudentRecordItem
-                  key={record.id}
-                  record={record}
-                  isTeacher
-                  onStatusChange={handleStatusChange}
-                />
-              ))
+              <View style={s.recordGroup}>
+                {filteredRecords.map((record) => (
+                  <StudentRecordItem
+                    key={record.id}
+                    record={record}
+                    isTeacher
+                    onStatusChange={handleStatusChange}
+                  />
+                ))}
+              </View>
             )}
           </>
         ) : (
@@ -564,7 +573,7 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                 <View style={s.successIcon}>
                   <Ionicons
                     name={'checkmark-circle' as any}
-                    size={72}
+                    size={56}
                     color={theme.colors.success}
                   />
                 </View>
@@ -603,7 +612,7 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
               <>
                 {/* Course info */}
                 <View style={s.studentCourseCard}>
-                  <Ionicons name={'book' as any} size={22} color={theme.colors.accent} />
+                  <Ionicons name={'book-outline' as any} size={22} color={theme.colors.accent} />
                   <View style={{ marginLeft: 12, flex: 1 }}>
                     <Text style={s.studentCourseName}>{session.courseName}</Text>
                     <Text style={s.studentCourseTeacher}>{session.teacherName}</Text>
@@ -735,7 +744,7 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
 // ============================================================================
 
 const createStyles = () => StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
+  container: { flex: 1, backgroundColor: theme.colors.bg },
 
   // Loading
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -762,7 +771,7 @@ const createStyles = () => StyleSheet.create({
     backgroundColor: theme.colors.muted,
     marginRight: 6,
   },
-  liveActive: { backgroundColor: '#34C759' },
+  liveActive: { backgroundColor: theme.colors.success },
   headerSubtitle: { fontSize: 12, color: theme.colors.muted },
   endBtn: {
     backgroundColor: theme.colors.dangerSoft,
@@ -777,14 +786,15 @@ const createStyles = () => StyleSheet.create({
   // Stats
   statsRow: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.separator,
   },
   statCard: {
     flex: 1,
-    borderRadius: 12,
-    padding: 12,
+    paddingVertical: 12,
     alignItems: 'center',
   },
   statNum: { fontSize: 22, fontWeight: '700' },
@@ -792,9 +802,10 @@ const createStyles = () => StyleSheet.create({
 
   // Mode Display
   modeDisplayCard: {
-    margin: 16,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 16,
+    marginHorizontal: 16,
+    marginVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.separator,
     overflow: 'hidden',
   },
 
@@ -804,10 +815,8 @@ const createStyles = () => StyleSheet.create({
   qrBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.successSoft,
-    paddingHorizontal: 10,
+    paddingHorizontal: 6,
     paddingVertical: 5,
-    borderRadius: 20,
     gap: 4,
   },
   qrBadgeText: { color: theme.colors.success, fontSize: 11, fontWeight: '600' },
@@ -824,14 +833,14 @@ const createStyles = () => StyleSheet.create({
   codeDigitBox: {
     width: 48,
     height: 60,
-    backgroundColor: theme.colors.background,
-    borderRadius: 12,
+    backgroundColor: theme.colors.surface,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: theme.colors.accent,
+    borderColor: theme.colors.border,
   },
-  codeDigit: { fontSize: 28, fontWeight: '700', color: theme.colors.accent },
+  codeDigit: { fontSize: 28, fontWeight: '700', color: theme.colors.text },
   codeHint: { fontSize: 13, color: theme.colors.muted, marginTop: 16 },
 
   // Manual mode
@@ -846,8 +855,6 @@ const createStyles = () => StyleSheet.create({
     alignSelf: 'center',
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 20,
     gap: 4,
     marginBottom: 8,
   },
@@ -867,23 +874,29 @@ const createStyles = () => StyleSheet.create({
   filterTab: {
     paddingHorizontal: 10,
     paddingVertical: 5,
+    minHeight: 32,
+    justifyContent: 'center',
     borderRadius: 14,
-    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
-  filterTabActive: { backgroundColor: theme.colors.accent },
+  filterTabActive: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
   filterTabText: { fontSize: 11, color: theme.colors.text, fontWeight: '600' },
   filterTabTextActive: { color: theme.colors.onAccent },
 
   // Record Item
+  recordGroup: {
+    marginHorizontal: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.separator,
+  },
   recordItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 16,
-    marginBottom: 8,
-    padding: 12,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 12,
-    borderLeftWidth: 3,
+    minHeight: 56,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.separator,
   },
   recordAvatar: {
     width: 36,
@@ -892,7 +905,7 @@ const createStyles = () => StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  recordAvatarText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
+  recordAvatarText: { fontWeight: '700', fontSize: 14 },
   recordContent: { flex: 1, marginLeft: 12 },
   recordName: { fontSize: 14, fontWeight: '600', color: theme.colors.text },
   recordMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 2, gap: 8 },
@@ -902,7 +915,7 @@ const createStyles = () => StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: theme.colors.successSoft,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -914,12 +927,10 @@ const createStyles = () => StyleSheet.create({
   successCard: {
     alignItems: 'center',
     margin: 16,
-    padding: 32,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 20,
+    paddingVertical: 24,
   },
   successIcon: {},
-  successTitle: { fontSize: 24, fontWeight: '700', color: theme.colors.success, marginTop: 12 },
+  successTitle: { fontSize: 22, fontWeight: '700', color: theme.colors.success, marginTop: 12 },
   successMessage: { fontSize: 14, color: theme.colors.muted, marginTop: 8 },
   successTime: { fontSize: 32, fontWeight: '700', color: theme.colors.text, marginTop: 8 },
   sessionInfoBox: {
@@ -936,21 +947,20 @@ const createStyles = () => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     margin: 16,
-    padding: 16,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 16,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.separator,
   },
   studentCourseName: { fontSize: 16, fontWeight: '700', color: theme.colors.text },
   studentCourseTeacher: { fontSize: 12, color: theme.colors.muted, marginTop: 2 },
   liveTag: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
+    paddingHorizontal: 4,
     paddingVertical: 4,
-    backgroundColor: '#ECFDF5',
-    borderRadius: 10,
   },
-  liveTagText: { fontSize: 11, fontWeight: '600', color: '#34C759' },
+  liveTagText: { fontSize: 11, fontWeight: '600', color: theme.colors.success },
 
   // Student input
   studentInputSection: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 24 },
@@ -967,7 +977,7 @@ const createStyles = () => StyleSheet.create({
     alignItems: 'center',
   },
   studentDigitSmall: { width: 38, height: 46 },
-  studentDigitFilled: { borderColor: theme.colors.accent },
+  studentDigitFilled: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
   studentDigitText: { fontSize: 22, fontWeight: '700', color: theme.colors.text },
   hiddenInput: { position: 'absolute', width: 1, height: 1, opacity: 0 },
 
@@ -1002,5 +1012,7 @@ const createStyles = () => StyleSheet.create({
   },
   scanHint: { fontSize: 13, color: theme.colors.muted, marginTop: 12 },
   orText: { fontSize: 13, color: theme.colors.muted, marginTop: 20, marginBottom: 12 },
+  fallbackAction: { minHeight: 44, paddingHorizontal: 16, justifyContent: 'center', marginTop: 8 },
+  fallbackActionText: { color: theme.colors.accent, fontSize: 15, fontWeight: '600' },
   fallbackLabel: { fontSize: 14, fontWeight: '600', color: theme.colors.text, marginBottom: 4 },
 });

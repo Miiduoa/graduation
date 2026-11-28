@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { answerAssistantLocally, canAnswerAssistantLocally, type LocalAssistantResult } from '@/lib/assistantLocalActions';
-import { AssistantServiceLinks } from './AssistantServiceLinks';
+import { LocalAssistantLinks } from './AssistantServiceLinks';
 
 /** Available with the older public-service assistant, independent of model credentials. */
 export function AssistantLocalEntry({ owner, schoolId }: { owner: string; schoolId: string }) {
@@ -15,7 +15,7 @@ function LocalEntry({ owner, schoolId }: { owner: string; schoolId: string }) {
   return (
     <details>
       <summary style={{ minHeight: 44, paddingBlock: 12 }}>查詢課表、行程與個人紀錄</summary>
-      <p>可以問「我今天有什麼課」「下一堂課在哪裡」「明天有什麼行程」，也能查看匯入成績或開啟服務。資料由這台裝置直接整理。</p>
+      <p>可以問「我今天有什麼課」「下一堂課在哪裡」「今天的課表和行程有衝突嗎？」，也能查看匯入成績或開啟服務。資料由這台裝置直接整理。</p>
       <form aria-label="裝置服務查詢" onSubmit={(event) => {
         event.preventDefault();
         const result = answerAssistantLocally(question, { owner, schoolId });
@@ -28,7 +28,7 @@ function LocalEntry({ owner, schoolId }: { owner: string; schoolId: string }) {
       </form>
       {reply && <div role="status">
         <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{reply.content}</p>
-        <AssistantServiceLinks serviceIds={reply.serviceIds} schoolId={schoolId} audience={owner.startsWith('platform:') ? 'platform' : 'school'} />
+        <LocalAssistantLinks result={reply} schoolId={schoolId} audience={owner.startsWith('platform:') ? 'platform' : 'school'} />
       </div>}
     </details>
   );

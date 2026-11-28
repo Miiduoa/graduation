@@ -2,6 +2,14 @@ import { doc, getDocFromServer, serverTimestamp, setDoc } from 'firebase/firesto
 import { getDb } from '../firebase';
 import { EMPTY_CREATOR_CARD, readCreatorCardFields, validateCreatorCard, type CreatorCard } from '@campus/shared/src/creatorCard';
 
+export function isCreatorCardAccessDenied(error: unknown): boolean {
+  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
+  const denied = /^(?:firestore\/)?(?:permission-denied|unauthenticated)$/;
+  return (typeof code === 'string' && denied.test(code)) ||
+    (typeof message === 'string' &&
+      (denied.test(message) || message === 'Missing or insufficient permissions.'));
+}
+
 function cardRef(schoolId: string, ownerUid: string) {
   if (!schoolId || !ownerUid || schoolId.includes('/') || ownerUid.includes('/')) {
     throw new Error('Invalid creator card scope');

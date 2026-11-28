@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import React, {
   createContext,
   useContext,
@@ -8,11 +7,24 @@ import React, {
   useEffect,
   useMemo,
 } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View, Dimensions } from 'react-native';
+import {
+  AccessibilityInfo,
+  Animated,
+  AppState,
+  Easing,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { theme, softShadowStyle } from './theme';
 import { useThemeMode } from '../state/theme';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 
 type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -47,119 +59,300 @@ export function useToast(): ToastContextType {
 }
 
 const TYPE_CONFIG: Record<ToastType, { color: string; icon: string }> = {
-  success: { get color() { return theme.colors.success; }, icon: 'checkmark-circle' },
-  error: { get color() { return theme.colors.danger; }, icon: 'close-circle' },
-  warning: { get color() { return theme.colors.warning; }, icon: 'warning' },
-  info: { get color() { return theme.colors.accent; }, icon: 'information-circle' },
+  success: {
+    get color() {
+      return theme.colors.success;
+    },
+    icon: 'checkmark-circle',
+  },
+  error: {
+    get color() {
+      return theme.colors.danger;
+    },
+    icon: 'close-circle',
+  },
+  warning: {
+    get color() {
+      return theme.colors.warning;
+    },
+    icon: 'warning',
+  },
+  info: {
+    get color() {
+      return theme.colors.accent;
+    },
+    icon: 'information-circle',
+  },
 };
 
-function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
-  useThemeMode();
-  const translateY = useRef(new Animated.Value(-80)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(0.9)).current;
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+type NotificationActivity = { active: boolean; screenReader: boolean | null };
+
+function useNotificationActivity(): NotificationActivity {
+  const [active, setActive] = useState(() => AppState.currentState === 'active');
+  const [screenReader, setScreenReader] = useState<boolean | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    let readerChanged = false;
+    const appSubscription = AppState.addEventListener('change', (state) => {
+      if (mounted) setActive(state === 'active');
+    });
+    const readerSubscription = AccessibilityInfo.addEventListener(
+      'screenReaderChanged',
+      (enabled) => {
+        readerChanged = true;
+        if (mounted) setScreenReader(enabled);
+      },
+    );
+    void AccessibilityInfo.isScreenReaderEnabled().then(
+      (enabled) => {
+        if (mounted && !readerChanged) setScreenReader(enabled);
+      },
+      () => {
+        // Keep the notification available if the reading preference is unknown.
+      },
+    );
+    return () => {
+      mounted = false;
+      appSubscription.remove();
+      readerSubscription.remove();
+    };
+  }, []);
+  return { active, screenReader };
+}
+
+/** Only visible, uninterrupted reading time consumes the notification's duration. */
+function useForegroundExpiry(duration: number, running: boolean, onExpire: () => void) {
+  const remaining = useRef(duration);
+  useEffect(() => {
+    if (!running || duration <= 0) return;
+    const started = Date.now();
+    const timeout = setTimeout(onExpire, Math.max(0, remaining.current));
+    return () => {
+      clearTimeout(timeout);
+      remaining.current = Math.max(0, remaining.current - Math.max(0, Date.now() - started));
+    };
+  }, [duration, running, onExpire]);
+}
+
+function notificationDuration(toast: Toast): number {
+  if (toast.duration !== undefined) {
+    return Number.isFinite(toast.duration) && toast.duration > 0
+      ? Math.min(toast.duration, 2_147_483_647)
+      : 0;
+  }
+  // An action stays available until it is taken or the person closes the card.
+  if (toast.action) return 0;
+  return Math.max(3500, Math.min(12000, toast.message.length * 80));
+}
+
+function ToastItem({
+  toast,
+  onDismiss,
+  activity,
+  reducedMotion,
+  maxMessageHeight,
+  canExpire = true,
+  snackbar = false,
+}: {
+  toast: Toast;
+  onDismiss: (id: string) => void;
+  activity: NotificationActivity;
+  reducedMotion: boolean;
+  maxMessageHeight: number;
+  canExpire?: boolean;
+  snackbar?: boolean;
+}) {
+  const translateY = useRef(new Animated.Value(reducedMotion ? 0 : snackbar ? 8 : -8)).current;
+  const opacity = useRef(new Animated.Value(reducedMotion ? 1 : 0)).current;
+  const [exiting, setExiting] = useState(false);
+  const [touching, setTouching] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [messageHeight, setMessageHeight] = useState(0);
+  const closing = useRef(false);
+  const announced = useRef(false);
+  const hide = useCallback(() => {
+    if (closing.current) return;
+    closing.current = true;
+    setExiting(true);
+  }, []);
+
+  useEffect(() => {
+    let current = true;
+    if (reducedMotion) {
+      translateY.setValue(0);
+      opacity.setValue(exiting ? 0 : 1);
+      if (exiting) onDismiss(toast.id);
+      return;
+    }
+    const animation = Animated.parallel([
+      Animated.timing(translateY, {
+        toValue: exiting ? (snackbar ? 6 : -6) : 0,
+        duration: exiting ? 160 : 180,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        toValue: exiting ? 0 : 1,
+        duration: exiting ? 160 : 180,
+        useNativeDriver: true,
+      }),
+    ]);
+    animation.start(({ finished }) => {
+      if (current && finished && exiting) onDismiss(toast.id);
+    });
+    return () => {
+      current = false;
+      animation.stop();
+    };
+  }, [exiting, reducedMotion, translateY, opacity, onDismiss, toast.id, snackbar]);
+
+  useForegroundExpiry(
+    notificationDuration(toast),
+    canExpire &&
+      activity.active &&
+      activity.screenReader === false &&
+      !touching &&
+      !focused &&
+      messageHeight <= maxMessageHeight &&
+      !exiting,
+    hide,
+  );
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios' || !activity.active || !activity.screenReader || announced.current)
+      return;
+    announced.current = true;
+    AccessibilityInfo.announceForAccessibility(toast.message);
+  }, [activity.active, activity.screenReader, toast.message]);
 
   const config = TYPE_CONFIG[toast.type ?? 'info'];
   const color = config.color;
+  const textColor = snackbar ? theme.colors.bg : theme.colors.text;
+  const actionColor = snackbar ? theme.colors.bg : color;
   const displayIcon = toast.icon || config.icon;
-
-  const show = useCallback(() => {
-    Animated.parallel([
-      Animated.spring(translateY, { toValue: 0, friction: 9, tension: 80, useNativeDriver: true }),
-      Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
-      Animated.spring(scale, { toValue: 1, friction: 9, tension: 80, useNativeDriver: true }),
-    ]).start();
-  }, []);
-
-  const hide = useCallback(() => {
-    Animated.parallel([
-      Animated.timing(translateY, { toValue: -80, duration: 250, useNativeDriver: true }),
-      Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }),
-      Animated.timing(scale, { toValue: 0.9, duration: 200, useNativeDriver: true }),
-    ]).start(() => onDismiss(toast.id));
-  }, [onDismiss, toast.id]);
-
-  useEffect(() => {
-    show();
-    const duration = toast.duration ?? 3500;
-    if (duration > 0) timerRef.current = setTimeout(hide, duration);
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
 
   return (
     <Animated.View
+      accessibilityElementsHidden={exiting}
+      importantForAccessibility={exiting ? 'no-hide-descendants' : 'auto'}
+      pointerEvents={exiting ? 'none' : 'auto'}
+      onTouchStart={() => setTouching(true)}
+      onTouchEnd={() => setTouching(false)}
+      onTouchCancel={() => setTouching(false)}
       style={{
-        // iOS HUD / Notification Capsule：BlurView + 半透明 chrome + soft 陰影
         borderRadius: theme.radius.lg,
         overflow: 'hidden',
         ...softShadowStyle(theme.shadows.soft),
-        transform: [{ translateY }, { scale }],
+        transform: [{ translateY }],
         opacity,
       }}
     >
       <BlurView
-        intensity={80}
+        intensity={snackbar ? 0 : 80}
         tint={theme.mode === 'dark' ? 'dark' : 'light'}
         style={{
-          backgroundColor:
-            theme.colors.chromeTabBar,
+          backgroundColor: snackbar ? theme.colors.text : theme.colors.chromeTabBar,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.border,
-          borderLeftWidth: 3,
-          borderLeftColor: color,
+          borderLeftWidth: snackbar ? StyleSheet.hairlineWidth : 3,
+          borderLeftColor: snackbar ? theme.colors.border : color,
         }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 }}>
-        <View
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: 10,
-            backgroundColor: `${color}12`,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Ionicons name={displayIcon as any} size={18} color={color} />
-        </View>
-
-        <View style={{ flex: 1 }}>
-          <Text
-            style={{ fontSize: 14, color: theme.colors.text, fontWeight: '500', lineHeight: 20 }}
-            numberOfLines={2}
-          >
-            {toast.message}
-          </Text>
-          {toast.action && (
-            <Pressable onPress={toast.action.onPress} style={{ marginTop: 4 }}>
-              <Text style={{ fontSize: 13, fontWeight: '600', color }}>{toast.action.text}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', padding: 12, gap: 8 }}>
+          {!snackbar && (
+            <View
+              accessible={false}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 9,
+                marginTop: 5,
+                backgroundColor: `${color}12`,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Ionicons
+                name={displayIcon as React.ComponentProps<typeof Ionicons>['name']}
+                size={18}
+                color={color}
+              />
+            </View>
+          )}
+          <View style={{ flex: 1, minWidth: 0, paddingTop: 8 }}>
+            <ScrollView
+              style={{ maxHeight: maxMessageHeight, flexGrow: 0 }}
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
+              onContentSizeChange={(_width, contentHeight) => setMessageHeight(contentHeight)}
+            >
+              <Text
+                accessibilityLiveRegion={activity.active ? 'polite' : 'none'}
+                style={{ fontSize: 14, color: textColor, fontWeight: '500', lineHeight: 21 }}
+              >
+                {toast.message}
+              </Text>
+            </ScrollView>
+            {toast.action && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={toast.action.text}
+                accessibilityState={{ disabled: exiting }}
+                disabled={exiting}
+                onFocus={() => setFocused(true)}
+                onBlur={() => setFocused(false)}
+                onPress={() => {
+                  if (closing.current) return;
+                  hide();
+                  toast.action?.onPress();
+                }}
+                style={({ pressed }) => ({
+                  alignSelf: 'flex-start',
+                  minHeight: 44,
+                  minWidth: 44,
+                  maxWidth: '100%',
+                  paddingVertical: 10,
+                  justifyContent: 'center',
+                  opacity: pressed ? 0.65 : 1,
+                })}
+              >
+                <Text
+                  style={{
+                    fontSize: 14,
+                    fontWeight: '600',
+                    color: actionColor,
+                    textDecorationLine: 'underline',
+                  }}
+                >
+                  {toast.action.text}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+          {toast.dismissible !== false && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="關閉通知"
+              accessibilityState={{ disabled: exiting }}
+              disabled={exiting}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              onPress={hide}
+              style={({ pressed }) => ({
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.6 : 1,
+              })}
+            >
+              <Ionicons name="close" size={18} color={snackbar ? textColor : theme.colors.muted} />
             </Pressable>
           )}
         </View>
-
-        {toast.dismissible !== false && (
-          <Pressable
-            onPress={() => {
-              if (timerRef.current) clearTimeout(timerRef.current);
-              hide();
-            }}
-            style={({ pressed }) => ({
-              width: 28,
-              height: 28,
-              borderRadius: 14,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
-            })}
-            hitSlop={8}
-          >
-            <Ionicons name="close" size={16} color={theme.colors.muted} />
-          </Pressable>
-        )}
-      </View>
       </BlurView>
     </Animated.View>
   );
@@ -168,6 +361,45 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
 function useSafeInsets() {
   const context = React.useContext(SafeAreaInsetsContext);
   return context ?? { top: 0, bottom: 0, left: 0, right: 0 };
+}
+
+function ToastStack({
+  toasts,
+  onDismiss,
+  activity,
+  reducedMotion,
+  maxHeight,
+}: {
+  toasts: Toast[];
+  onDismiss: (id: string) => void;
+  activity: NotificationActivity;
+  reducedMotion: boolean;
+  maxHeight: number;
+}) {
+  const [scrolled, setScrolled] = useState(false);
+  return (
+    <ScrollView
+      style={{ flexGrow: 0 }}
+      contentContainerStyle={{ gap: 8 }}
+      keyboardShouldPersistTaps="handled"
+      scrollEventThrottle={16}
+      onScroll={({ nativeEvent }) => setScrolled(nativeEvent.contentOffset.y > 1)}
+    >
+      {toasts.map((toast, index) => (
+        <ToastItem
+          key={toast.id}
+          toast={toast}
+          onDismiss={onDismiss}
+          activity={activity}
+          reducedMotion={reducedMotion}
+          maxMessageHeight={Math.max(44, maxHeight * 0.4)}
+          // Later cards may be below the fold. They receive their full reading
+          // time only after reaching the front of the stack.
+          canExpire={index === 0 && !scrolled}
+        />
+      ))}
+    </ScrollView>
+  );
 }
 
 export function ToastProvider({
@@ -179,6 +411,9 @@ export function ToastProvider({
 }) {
   useThemeMode();
   const insets = useSafeInsets();
+  const { height } = useWindowDimensions();
+  const reducedMotion = useReducedMotion();
+  const activity = useNotificationActivity();
   const [toasts, setToasts] = useState<Toast[]>([]);
   const idCounter = useRef(0);
 
@@ -193,7 +428,6 @@ export function ToastProvider({
     },
     [maxToasts],
   );
-
   const success = useCallback(
     (message: string, config?: Partial<ToastConfig>) =>
       show({ ...config, message, type: 'success' }),
@@ -217,30 +451,36 @@ export function ToastProvider({
     [],
   );
   const dismissAll = useCallback(() => setToasts([]), []);
-
   const contextValue = useMemo(
     () => ({ show, success, error, warning, info, dismiss, dismissAll }),
     [show, success, error, warning, info, dismiss, dismissAll],
   );
+  const maxHeight = Math.max(44, height - insets.top - insets.bottom - 24);
 
   return (
     <ToastContext.Provider value={contextValue}>
       {children}
-      <View
-        style={{
-          position: 'absolute',
-          top: insets.top + 8,
-          left: 16,
-          right: 16,
-          zIndex: 9999,
-          gap: 8,
-        }}
-        pointerEvents="box-none"
-      >
-        {toasts.map((toast) => (
-          <ToastItem key={toast.id} toast={toast} onDismiss={dismiss} />
-        ))}
-      </View>
+      {toasts.length > 0 && (
+        <View
+          style={{
+            position: 'absolute',
+            top: insets.top + 8,
+            left: 16,
+            right: 16,
+            zIndex: 9999,
+            maxHeight,
+          }}
+          pointerEvents="box-none"
+        >
+          <ToastStack
+            toasts={toasts}
+            onDismiss={dismiss}
+            activity={activity}
+            reducedMotion={reducedMotion}
+            maxHeight={maxHeight}
+          />
+        </View>
+      )}
     </ToastContext.Provider>
   );
 }
@@ -263,79 +503,49 @@ export function useSnackbar(): SnackbarContextType {
 export function SnackbarProvider({ children }: { children: React.ReactNode }) {
   useThemeMode();
   const insets = useSafeInsets();
-  const [config, setConfig] = useState<SnackbarConfig | null>(null);
-  const [visible, setVisible] = useState(false);
-  const translateY = useRef(new Animated.Value(100)).current;
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const dismiss = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    Animated.timing(translateY, { toValue: 100, duration: 200, useNativeDriver: true }).start(
-      () => {
-        setVisible(false);
-        setConfig(null);
-      },
-    );
-  }, [translateY]);
-
-  const show = useCallback(
-    (newConfig: SnackbarConfig) => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      setConfig(newConfig);
-      setVisible(true);
-      Animated.spring(translateY, {
-        toValue: 0,
-        friction: 9,
-        tension: 80,
-        useNativeDriver: true,
-      }).start();
-      const duration = newConfig.duration ?? 4000;
-      if (duration > 0) timerRef.current = setTimeout(dismiss, duration);
-    },
-    [translateY, dismiss],
-  );
+  const { height } = useWindowDimensions();
+  const reducedMotion = useReducedMotion();
+  const activity = useNotificationActivity();
+  const [notification, setNotification] = useState<Toast | null>(null);
+  const sequence = useRef(0);
+  const show = useCallback((config: SnackbarConfig) => {
+    setNotification({
+      ...config,
+      duration:
+        config.duration ??
+        (config.action ? 0 : Math.max(4000, Math.min(12000, config.message.length * 80))),
+      id: `snackbar-${++sequence.current}`,
+    });
+  }, []);
+  const dismiss = useCallback(() => setNotification(null), []);
+  const dismissNotification = useCallback((id: string) => {
+    setNotification((current) => (current?.id === id ? null : current));
+  }, []);
+  const context = useMemo(() => ({ show, dismiss }), [show, dismiss]);
 
   return (
-    <SnackbarContext.Provider value={{ show, dismiss }}>
+    <SnackbarContext.Provider value={context}>
       {children}
-      {visible && config && (
-        <Animated.View
+      {notification && (
+        <View
           style={{
             position: 'absolute',
             left: 16,
             right: 16,
             bottom: insets.bottom + 90,
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: theme.colors.text,
-            borderRadius: theme.radius.md,
-            paddingVertical: 14,
-            paddingHorizontal: 18,
-            ...softShadowStyle(theme.shadows.soft),
             zIndex: 9999,
-            transform: [{ translateY }],
           }}
         >
-          <Text
-            style={{ flex: 1, fontSize: 14, color: theme.colors.bg, fontWeight: '500' }}
-            numberOfLines={2}
-          >
-            {config.message}
-          </Text>
-          {config.action && (
-            <Pressable
-              onPress={() => {
-                config.action?.onPress();
-                dismiss();
-              }}
-              style={{ marginLeft: 14 }}
-            >
-              <Text style={{ fontSize: 14, fontWeight: '700', color: theme.colors.accent }}>
-                {config.action.text}
-              </Text>
-            </Pressable>
-          )}
-        </Animated.View>
+          <ToastItem
+            key={notification.id}
+            toast={notification}
+            onDismiss={dismissNotification}
+            activity={activity}
+            reducedMotion={reducedMotion}
+            maxMessageHeight={Math.max(44, (height - insets.top - insets.bottom - 180) * 0.5)}
+            snackbar
+          />
+        </View>
       )}
     </SnackbarContext.Provider>
   );

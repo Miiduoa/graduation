@@ -1,6 +1,7 @@
 import { parseAssistantCalendarEvent, type AssistantCalendarEvent } from '@campus/shared/src/assistantExecution';
 import { createPlanProtection } from '@/lib/assistantPlanProtection';
 import type { V2ActionStates, V2Card, V2Turn } from './types';
+import { isAssistantCalendarActionReady } from './execution';
 
 const EVENT_FIELDS = ['title', 'date', 'endDate', 'allDay', 'startTime', 'endTime'] as const;
 export type PlanRevisionEvent = Omit<AssistantCalendarEvent, 'location'>;
@@ -42,7 +43,8 @@ export function isUnattemptedCalendarPlan(turn: V2Turn, states: V2ActionStates):
 
 export function hasUnresolvedAssistantAction(states: V2ActionStates): boolean {
   return Object.values(states).some(state =>
-    ['unknown', 'executing', 'checking', 'conflict', 'absent', 'blocked'].includes(state.status));
+    ['unknown', 'executing', 'checking', 'conflict', 'absent', 'blocked'].includes(state.status) ||
+    (state.status === 'verified' && !isAssistantCalendarActionReady(state)));
 }
 
 /** A new preview request only; this never rewrites a signed confirmation card. */

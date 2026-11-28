@@ -255,12 +255,15 @@ test('my account shows the shared load-failure copy when the signed-in profile c
 
 test('my account uses the signed-in profile without invented grades, identity or demo tools', () => {
   const view = render(<MeAiFirstScreen />);
+  expect(view.getByTestId('me-home').props.accessibilityLabel).toBe('陳同學');
   expect(view.getByText('陳同學')).toBeTruthy();
   expect(view.getByText('資訊系 · 學號 A123')).toBeTruthy();
   expect(view.getByText('student-a@example.edu')).toBeTruthy();
   expect(view.queryByText('開啟課表助理')).toBeNull();
   expect(view.queryByText(/王小明|3\.63|61%|78|明年 6 月|seed|示範工具|12 場/)).toBeNull();
   expect(view.queryByText('課程與成績')).toBeNull();
+  fireEvent.press(view.getByText('收藏的活動'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, '活動總覽', { saved: '1' });
   fireEvent.press(view.getByText('使用設定'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Settings');
   fireEvent.press(view.getByText('個人資料'));
@@ -272,7 +275,7 @@ test('confirming logout calls the real sign-out flow without navigating to a fak
   const view = render(<MeAiFirstScreen />);
   fireEvent.press(view.getByText('登出學校帳號'));
   await act(async () =>
-    alert.mock.calls[0][2]?.find((item) => item.text === '登出學校帳號')?.onPress?.(),
+    alert.mock.calls[0][2]?.find((item) => item.text === '確定登出')?.onPress?.(),
   );
   expect(mockAuth.signOutWithWarning).toHaveBeenCalledTimes(1);
   expect(mockNavigation.navigate).not.toHaveBeenCalled();
@@ -283,7 +286,7 @@ test('a logout confirmation belonging to an old account cannot sign out the new 
   const alert = jest.spyOn(Alert, 'alert');
   const view = render(<MeAiFirstScreen />);
   fireEvent.press(view.getByText('登出學校帳號'));
-  const confirm = alert.mock.calls[0][2]?.find((item) => item.text === '登出學校帳號')?.onPress;
+  const confirm = alert.mock.calls[0][2]?.find((item) => item.text === '確定登出')?.onPress;
   mockAuth.user = { uid: 'student-b', email: 'student-b@example.edu' };
   view.rerender(<MeAiFirstScreen />);
   expect(view.queryByText('陳同學')).toBeNull();
@@ -298,7 +301,7 @@ test('a rejected sign-out stays on the account page and reports the failure', as
   const view = render(<MeAiFirstScreen />);
   fireEvent.press(view.getByText('登出學校帳號'));
   await act(async () =>
-    alert.mock.calls[0][2]?.find((item) => item.text === '登出學校帳號')?.onPress?.(),
+    alert.mock.calls[0][2]?.find((item) => item.text === '確定登出')?.onPress?.(),
   );
   expect(alert).toHaveBeenLastCalledWith('無法登出', '請稍後重試。');
   expect(view.getByText('陳同學')).toBeTruthy();
