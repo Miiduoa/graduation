@@ -1243,6 +1243,57 @@ it.each(['origin', 'destination', 'origin-building', 'destination-floor', 'uncha
   }
 });
 
+it('rejects a shared walking route between distinct IDs at the same coordinates', async () => {
+  const alias = { ...gate, id: 'same-position', name: '同座標測試點' };
+  vi.mocked(loadMapLocations).mockResolvedValue([gate, alias, library]);
+  render(<MapClient school="other-school" route="gate,same-position" />);
+  await screen.findByRole('button', { name: '查看同座標測試點' });
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route).toBeNull();
+  expect(screen.getByText(/無法確認兩個不同的有效位置/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看同座標測試點' }));
+  expect(screen.queryByRole('button', { name: '設為終點' })).toBeNull();
+  expect(screen.getByText(/起點與終點必須為不同位置/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為終點' }));
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route.map((place: MapLocation) => place.id))
+    .toEqual(['gate', 'library']);
+});
+
+it('keeps a confirmed classroom destination when a co-located origin is selected', async () => {
+  const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  const alias = { ...gate, id: 'same-position', name: '同座標測試點', lat: classroom.lat, lng: classroom.lng };
+  vi.mocked(loadMapLocations).mockResolvedValue([classroom, alias, library]);
+  render(<MapClient school="pu" query="PH303" />);
+  await sourceSettled();
+  fireEvent.click(screen.getByRole('button', { name: '選擇步行起點' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看同座標測試點' }));
+  expect((screen.getByRole('button', { name: '設為起點' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/起點與終點必須為不同位置/)).toBeTruthy();
+  expect(screen.getByRole('region', { name: '已選擇步行終點' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).route.map((place: MapLocation) => place.id))
+    .toEqual(['library', classroom.id]);
+});
+
+it('does not offer a classroom route shortcut from a co-located marker', async () => {
+  const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  const alias = { ...gate, id: 'same-position', name: '同座標測試點', lat: classroom.lat, lng: classroom.lng };
+  vi.mocked(loadMapLocations).mockResolvedValue([classroom, alias, library]);
+  render(<MapClient school="pu" query="PH303" focus={alias.id} />);
+  await sourceSettled();
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  const card = within(screen.getByRole('region', { name: '教室定位結果' }));
+  expect(card.queryByRole('button', { name: '將主顧樓設為終點' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+  expect(card.getByRole('link', { name: '使用 Google 地圖前往主顧樓' })).toBeTruthy();
+});
+
 it('does not resolve a shared route with duplicate endpoint IDs', async () => {
   vi.mocked(loadMapLocations).mockResolvedValue([
     library, gate, { ...gate, name: '測試用重複識別碼', lat: gate.lat + 0.002 },
