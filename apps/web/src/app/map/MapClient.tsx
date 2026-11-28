@@ -75,6 +75,12 @@ function confirmedRoutePlace(locations: readonly MapLocation[], chosen: MapLocat
     isUsableMapCoordinate(place) ? place : null;
 }
 
+// Distinct catalogue IDs can refer to the same outdoor marker (e.g. different floors).
+// Do not offer a zero-distance walking route or infer an indoor connection.
+function distinctWalkingPlaces(from: MapLocation, to: MapLocation): boolean {
+  return from.id !== to.id && (from.lat !== to.lat || from.lng !== to.lng);
+}
+
 export default function MapClient(props: MapProps) {
   const { user, loading, error } = useAuth();
   const platform = useOptionalNuniSession();
@@ -328,7 +334,7 @@ function MapContent({
     if (!ids || ids.length !== 2 || ids[0] === ids[1]) return null;
     const from = confirmedRoutePlace(locations, locations.find((location) => location.id === ids[0]) ?? null);
     const to = confirmedRoutePlace(locations, locations.find((location) => location.id === ids[1]) ?? null);
-    return from && to ? [from, to] : null;
+    return from && to && distinctWalkingPlaces(from, to) ? [from, to] : null;
   }, [route, locations, placeState.source]);
   // A resolved shared route is editable just like a manually planned route.
   // Pending or invalid shared links must never supply an origin.
@@ -340,7 +346,7 @@ function MapContent({
   const awaitingOrigin = !routeNeedsConfirmation && !routeStart && Boolean(routeEnd);
   const routeLocations = useMemo<[MapLocation, MapLocation] | null>(() => {
     if (routeDraft === null) return deepLinkRoute;
-    return routeStart && routeEnd && routeStart.id !== routeEnd.id ? [routeStart, routeEnd] : null;
+    return routeStart && routeEnd && distinctWalkingPlaces(routeStart, routeEnd) ? [routeStart, routeEnd] : null;
   }, [deepLinkRoute, routeDraft, routeStart, routeEnd]);
   // Only a user-initiated classroom route edit moves focus. Loading a shared
   // route or refreshing the catalogue must not interrupt keyboard navigation.
@@ -393,7 +399,7 @@ function MapContent({
     if (!classroomLinkActive || placeState.source !== 'ready' || !routeStart ||
         routeNeedsConfirmation || !classroomIds.has(candidate.id) || routeStart.id === candidate.id) return null;
     const destination = confirmedRoutePlace(locations, candidate);
-    if (!destination) return null;
+    if (!destination || !distinctWalkingPlaces(routeStart, destination)) return null;
     if (classroom.status === 'ambiguous' &&
         (typeof selection !== 'object' || selection === null || selected?.id !== destination.id)) return null;
     return { from: routeStart, to: destination };
@@ -870,7 +876,7 @@ function MapContent({
       {placeState.source === 'ready' && route && !deepLinkRoute && routeDraft === null && (
         <div className={styles.notice}>
           <p role="status">
-            這個連結的起點或終點已不在目前地點資料中，或無法唯一確認有效位置。請從下方列表重新選擇。
+            這個連結的起點或終點已不在目前地點資料中，或無法確認兩個不同的有效位置。請從下方列表重新選擇。
           </p>
           <button className="btn" type="button" onClick={clearRoute}>
             清除路線
@@ -1005,6 +1011,10 @@ function MapContent({
                 <strong>這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。</strong>
               )}
             </p>
+            {((awaitingOrigin && routeEnd && !distinctWalkingPlaces(routeEnd, selected)) ||
+              (routeStart && !routeNeedsConfirmation && !distinctWalkingPlaces(routeStart, selected))) && (
+              <p className={styles.note}>起點與終點必須為不同位置；同一座標不代表已核實的室內動線。</p>
+            )}
             <div className={styles.actions}>
               <a
                 className="btn"
@@ -1051,10 +1061,10 @@ function MapContent({
               )}
               <button
                 className="btn"
-                disabled={awaitingOrigin && routeEnd?.id === selected.id}
+                disabled={awaitingOrigin && routeEnd !== null && !distinctWalkingPlaces(routeEnd, selected)}
                 onClick={() => {
                   if (awaitingOrigin && routeEnd) {
-                    if (routeEnd.id === selected.id) return;
+                    if (!distinctWalkingPlaces(routeEnd, selected)) return;
                     classroomRouteFocusPending.current = true;
                     setRouteDraft({ from: { ...selected }, to: { ...routeEnd } });
                   } else {
@@ -1065,10 +1075,11 @@ function MapContent({
               >
                 設為起點
               </button>
-              {routeStart && !routeNeedsConfirmation && routeStart.id !== selected.id && (
+              {routeStart && !routeNeedsConfirmation && distinctWalkingPlaces(routeStart, selected) && (
                 <button
                   className="btn"
                   onClick={() => {
+                    if (!distinctWalkingPlaces(routeStart, selected)) return;
                     setRouteDraft({ from: routeStart, to: selected });
                     setNotice('');
                   }}
