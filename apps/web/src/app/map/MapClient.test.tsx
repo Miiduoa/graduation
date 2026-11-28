@@ -1075,6 +1075,40 @@ it('keeps a place card mounted for the same selection and replaces it for a diff
   expect(screen.getByRole('heading', { name: '正門' })).toBeTruthy();
 });
 
+it.each(['origin', 'destination'] as const)('warns before login would discard a partial walking draft (%s)', async (endpoint) => {
+  state.user = null;
+  const classroom = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  vi.mocked(loadMapLocations).mockResolvedValue([library, gate, classroom]);
+  render(<MapClient school="pu" focus={endpoint === 'origin' ? 'gate' : undefined}
+    query={endpoint === 'destination' ? 'PH303' : undefined} />);
+  await sourceSettled();
+  const loginLinks = () => [
+    screen.getByRole('link', { name: '用 Google 帳號收藏' }),
+    screen.getByRole('link', { name: '查看學校帳號的既有收藏' }),
+  ];
+  const notice = () => screen.queryByText(/目前的步行規劃無法保留至登入後/);
+  expect(notice()).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: endpoint === 'origin' ? '設為起點' : '選擇步行起點' }));
+  expect(notice()).toBeTruthy();
+  for (const link of loginLinks()) {
+    expect(document.getElementById(link.getAttribute('aria-describedby')!)).toBe(notice());
+    const login = new URL(link.getAttribute('href')!, window.location.origin);
+    expect(new URL(login.searchParams.get('returnUrl')!, window.location.origin).searchParams.has('route')).toBe(false);
+  }
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  fireEvent.click(screen.getByRole('button', { name: endpoint === 'origin' ? '設為終點' : '設為起點' }));
+  expect(screen.getByRole('region', { name: '步行導航' })).toBeTruthy();
+  expect(notice()).toBeNull();
+  for (const link of loginLinks()) {
+    expect(link.hasAttribute('aria-describedby')).toBe(false);
+    const login = new URL(link.getAttribute('href')!, window.location.origin);
+    expect(new URL(login.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('route'))
+      .toBe(endpoint === 'origin' ? 'gate,library' : 'library,pu-zhugu');
+  }
+  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  expect(notice()).toBeNull();
+});
+
 it('offers Google favorites and keeps an explicit school flow for existing cloud favorites', async () => {
   state.user = null;
   window.history.replaceState({}, '', '/map?schoolId=pu&route=gate%2Clibrary#directions');

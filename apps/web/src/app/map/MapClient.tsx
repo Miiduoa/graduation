@@ -196,6 +196,7 @@ function MapContent({
   const routeNoteId = useId();
   const detailNoteId = useId();
   const classroomNoteId = useId();
+  const loginRouteNoteId = useId();
   const [selection, setSelection] = useState<MapLocation | '' | 'revoked' | null>(null);
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [nearbyOnly, setNearbyOnly] = useState(false);
@@ -382,6 +383,8 @@ function MapContent({
   if (returnFocus) returnParams.set('focus', returnFocus);
   const returnQuery = normalizeCampusClassroomQuery(search);
   if (returnQuery) returnParams.set('query', returnQuery);
+  // Partial or revoked drafts cannot be represented by the two-ID route contract.
+  const loginDiscardsRoute = Boolean((routeDraft?.from || routeDraft?.to) && !returnParams.has('route'));
   const returnUrl = encodeURIComponent(`/map?${returnParams}${hash}`);
   const platformLoginHref = `/login?returnUrl=${returnUrl}`;
   const schoolLoginHref = `/login?reconnect=school&returnUrl=${returnUrl}`;
@@ -1121,12 +1124,23 @@ function MapContent({
           <h2>
             地點列表 <span>{filtered.length} 個</span>
           </h2>
-          {!canFavorite && !authLoading && <Link href={platformLoginHref}>用 Google 帳號收藏</Link>}
+          {!canFavorite && !authLoading && (
+            <Link href={platformLoginHref} aria-describedby={loginDiscardsRoute ? loginRouteNoteId : undefined}>
+              用 Google 帳號收藏
+            </Link>
+          )}
         </div>
         {!canFavorite && !authLoading && (
           <p className={styles.note}>
             地圖與導航不需登入；登入 Google 後可在此裝置收藏地點。
-            {' '}<Link href={schoolLoginHref}>查看學校帳號的既有收藏</Link>
+            {' '}<Link href={schoolLoginHref} aria-describedby={loginDiscardsRoute ? loginRouteNoteId : undefined}>
+              查看學校帳號的既有收藏
+            </Link>
+          </p>
+        )}
+        {!canFavorite && !authLoading && loginDiscardsRoute && (
+          <p id={loginRouteNoteId} className={styles.note} role="status">
+            目前的步行規劃無法保留至登入後；建議先完成起點與終點的確認，或登入後重新規劃。
           </p>
         )}
         {platformAccountId && (
