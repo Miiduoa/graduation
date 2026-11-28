@@ -119,6 +119,8 @@ test('waits for the close animation, then performs only the first selected desti
   const panel = view.getByTestId('header-drawer-panel');
   expect(panel).toBeTruthy();
   expect(panel.props.collapsable).toBe(false);
+  expect(panel.props.accessibilityViewIsModal).toBe(true);
+  expect(typeof panel.props.onAccessibilityEscape).toBe('function');
   expect(panel.props.style).toEqual(expect.objectContaining({ flex: 1, flexDirection: 'row' }));
   const sheet = view.getByTestId('header-drawer-sheet');
   expect(sheet.props.collapsable).toBe(false);

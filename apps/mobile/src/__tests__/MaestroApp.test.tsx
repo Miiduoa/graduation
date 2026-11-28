@@ -36,6 +36,7 @@ jest.mock('firebase/auth', () => ({
 }));
 
 import { MaestroApp } from '../../e2e/MaestroApp';
+import { publishSchoolSessionReady } from '../app/SchoolSessionBoundary';
 
 const emulatorAuth = {
   app: { options: { projectId: 'demo-campus-one' } },
@@ -52,6 +53,7 @@ beforeEach(() => {
   jest.mocked(getAuthInstance).mockReturnValue(emulatorAuth as ReturnType<typeof getAuthInstance>);
   jest.mocked(signInWithEmailAndPassword).mockReset();
   jest.mocked(signOut).mockReset();
+  publishSchoolSessionReady(false);
 });
 
 test('keeps the real app visible and offers an in-window emulator login control', () => {
@@ -82,9 +84,10 @@ test('does not open the overlay from a crafted campus URI', async () => {
 test('password return key dismisses the keyboard and signs in the seeded fixture', async () => {
   const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
   const getIdToken = jest.fn().mockResolvedValue('token');
-  jest.mocked(signInWithEmailAndPassword).mockResolvedValue({
-    user: { uid: 'test-student-a', getIdToken },
-  } as never);
+  jest.mocked(signInWithEmailAndPassword).mockImplementation(async () => {
+    queueMicrotask(() => publishSchoolSessionReady(true));
+    return { user: { uid: 'test-student-a', getIdToken } } as never;
+  });
 
   const view = openLogin();
   fireEvent.changeText(view.getByTestId('maestro-email'), 's0000001@test.campus-one.local');
@@ -96,6 +99,49 @@ test('password return key dismisses the keyboard and signs in the seeded fixture
   expect(getIdToken).toHaveBeenCalledWith(true);
   await waitFor(() => expect(view.queryByTestId('maestro-emulator-login')).toBeNull());
   dismiss.mockRestore();
+});
+
+test('iOS native typing updates the password used for emulator sign-in', async () => {
+  const getIdToken = jest.fn().mockResolvedValue('token');
+  jest.mocked(signInWithEmailAndPassword).mockImplementation(async () => {
+    queueMicrotask(() => publishSchoolSessionReady(true));
+    return { user: { uid: 'test-student-a', getIdToken } } as never;
+  });
+
+  const view = openLogin();
+  fireEvent.changeText(view.getByTestId('maestro-email'), 's0000001@test.campus-one.local');
+  fireEvent(view.getByTestId('maestro-password'), 'change', {
+    nativeEvent: { text: 'campus-test-1234' },
+  });
+  fireEvent.press(view.getByTestId('maestro-sign-in'));
+
+  await waitFor(() =>
+    expect(signInWithEmailAndPassword).toHaveBeenCalledWith(
+      emulatorAuth,
+      's0000001@test.campus-one.local',
+      'campus-test-1234',
+    ),
+  );
+  await waitFor(() => expect(view.queryByTestId('maestro-emulator-login')).toBeNull());
+});
+
+test('keeps the overlay until the school session is ready after Firebase Auth succeeds', async () => {
+  const getIdToken = jest.fn().mockResolvedValue('token');
+  jest.mocked(signInWithEmailAndPassword).mockResolvedValue({
+    user: { uid: 'test-student-a', getIdToken },
+  } as never);
+
+  const view = openLogin();
+  fireEvent.changeText(view.getByTestId('maestro-email'), 's0000001@test.campus-one.local');
+  fireEvent.changeText(view.getByTestId('maestro-password'), 'campus-test-1234');
+  fireEvent.press(view.getByTestId('maestro-sign-in'));
+
+  await waitFor(() => expect(getIdToken).toHaveBeenCalledWith(true));
+  expect(view.getByTestId('maestro-emulator-login')).toBeTruthy();
+  await act(async () => {
+    publishSchoolSessionReady(true);
+  });
+  await waitFor(() => expect(view.queryByTestId('maestro-emulator-login')).toBeNull());
 });
 
 test('tapping sign-in while the password field is focused still submits', async () => {

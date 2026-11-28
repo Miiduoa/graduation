@@ -72,7 +72,7 @@ import { MessagesStack } from './src/screens/MessagesStack';
 import { MeStack } from './src/screens/MeStack';
 import { OnboardingScreen, hasSeenOnboarding } from './src/screens/OnboardingScreen';
 import { PreAuthStack } from './src/screens/PreAuthStack';
-import { hasReadySchoolSession } from './src/app/SchoolSessionBoundary';
+import { hasReadySchoolSession, publishSchoolSessionReady } from './src/app/SchoolSessionBoundary';
 import { AssistantContinuationHost } from './src/components/AssistantContinuationHost';
 import { preAuthLinking } from './src/app/preAuthLinking';
 import { StudentCardLinkHandler } from './src/app/StudentCardLinkHandler';
@@ -369,6 +369,14 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   const { schoolId: selectedSchoolId, selectionReady } = useSchool();
   const schoolId = selectionReady ? selectedSchoolId : null;
   const schoolSessionReady = hasReadySchoolSession(auth, schoolId);
+  useEffect(() => {
+    publishSchoolSessionReady(schoolSessionReady);
+  }, [schoolSessionReady]);
+  useEffect(() => {
+    return () => {
+      publishSchoolSessionReady(false);
+    };
+  }, []);
   const platform = useNuniSession();
   const guestIdentity = JSON.stringify([auth.user?.uid ?? null, platform.session?.platformAccountId ?? null]);
   const userId = schoolSessionReady ? auth.user!.uid : null;
