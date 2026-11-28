@@ -84,17 +84,28 @@ it.each([
 
 it('rechecks freshness after the device clock advances while the page stays open', async () => {
   const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  const fetcher = vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-23T04:00:00.000Z' }));
   try {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-23T04:00:00.000Z' })));
+    vi.stubGlobal('fetch', fetcher);
     render(<PublicCourseSearch {...props} />);
-    submit('005076');
-    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    // Flush the accepted response and its passive focus subscription before
+    // simulating a return to the page; a visible heading alone is not that barrier.
+    await act(async () => { submit('005076'); });
+    expect(screen.getByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
+    now.mockReturnValue(Date.parse('2026-11-24T04:00:00.000Z'));
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
     expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
     now.mockReturnValue(Date.parse('2026-11-24T04:00:01.000Z'));
     await act(async () => {
       window.dispatchEvent(new Event('focus'));
     });
     expect(screen.getByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: '官方課程目錄' }).getAttribute('href'))
+      .toBe('https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall');
+    expect(fetcher).toHaveBeenCalledTimes(1);
   } finally {
     now.mockRestore();
   }
