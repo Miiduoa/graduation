@@ -14,6 +14,7 @@ const suffix = `${process.pid}_${randomUUID().replaceAll('-', '').slice(0, 10)}`
 const schema = `tronclass_closure_${suffix}`;
 const workerRole = `tc_worker_${suffix}`;
 const closerRole = `tc_closer_${suffix}`;
+const migratorRole = `tc_migrator_${suffix}`;
 type Client = {
   connect(): Promise<void>;
   end(): Promise<void>;
@@ -49,9 +50,20 @@ describe.skipIf(!port)('real PostgreSQL platform closure outbox', () => {
     control = await connect('tc_setup');
     await control.query(`CREATE SCHEMA ${schema}; CREATE TABLE ${schema}.platform_accounts (id text PRIMARY KEY, state text NOT NULL)`);
     await control.query("INSERT INTO platform_accounts (id, state) VALUES ($1,'active'),($2,'closed')", [a, c]);
-    const migration = await readFile(path.resolve(process.cwd(), '../../deploy/nuni-api/tronclass-account-closure/001_tronclass_account_closure_outbox.sql'), 'utf8');
+    const migration = await readFile(path.resolve(process.cwd(), '../../deploy/nuni-api/tronclass-account-closure/284_tronclass_account_closure_outbox.sql'), 'utf8');
+    expect(migration).not.toMatch(/FROM\s+platform_accounts/i);
+    expect(migration).not.toMatch(/^(SELECT|INSERT INTO|UPDATE|DELETE FROM)\b/im);
+    await control.query(`CREATE ROLE ${migratorRole};
+      REVOKE ALL ON TABLE platform_accounts FROM PUBLIC;
+      GRANT USAGE, CREATE ON SCHEMA ${schema} TO ${migratorRole};
+      GRANT TRIGGER, REFERENCES ON TABLE platform_accounts TO ${migratorRole}`);
     await control.query('BEGIN');
-    try { await control.query(migration); await control.query('COMMIT'); }
+    try {
+      await control.query(`SET ROLE ${migratorRole}`);
+      await control.query(migration);
+      await control.query('RESET ROLE');
+      await control.query('COMMIT');
+    }
     catch (error) { await control.query('ROLLBACK'); throw error; }
     initialEvents = await events();
     await control.query(`CREATE ROLE ${workerRole}; CREATE ROLE ${closerRole};
@@ -77,7 +89,7 @@ describe.skipIf(!port)('real PostgreSQL platform closure outbox', () => {
     if (control) {
       try {
         await control.query('ROLLBACK; RESET ROLE');
-        await control.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE; DROP ROLE IF EXISTS ${workerRole}; DROP ROLE IF EXISTS ${closerRole}`);
+        await control.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE; DROP ROLE IF EXISTS ${workerRole}; DROP ROLE IF EXISTS ${closerRole}; DROP ROLE IF EXISTS ${migratorRole}`);
       } finally { await control.end(); }
     }
   });
@@ -91,8 +103,31 @@ describe.skipIf(!port)('real PostgreSQL platform closure outbox', () => {
     expect(await events()).toHaveLength(1);
   });
 
-  it('backfills only authoritative already-closed rows when the candidate migration is applied', () => {
-    expect(initialEvents).toEqual([expect.objectContaining({ platform_account_id: c, reason: 'closed', attempts: 0 })]);
+  it('applies 284 as a migrator with only TRIGGER and REFERENCES on platform_accounts and does not backfill', async () => {
+    expect(initialEvents).toEqual([]);
+    await first.query(`SET ROLE ${migratorRole}`);
+    try {
+      expect((await first.query(`SELECT
+        has_table_privilege(current_user, 'platform_accounts', 'TRIGGER') AS has_trigger,
+        has_table_privilege(current_user, 'platform_accounts', 'REFERENCES') AS has_references,
+        has_table_privilege(current_user, 'platform_accounts', 'SELECT') AS has_select,
+        has_table_privilege(current_user, 'platform_accounts', 'INSERT') AS has_insert,
+        has_table_privilege(current_user, 'platform_accounts', 'UPDATE') AS has_update,
+        has_table_privilege(current_user, 'platform_accounts', 'DELETE') AS has_delete`)).rows)
+        .toEqual([{ has_trigger: true, has_references: true, has_select: false, has_insert: false,
+          has_update: false, has_delete: false }]);
+      await expect(first.query('SELECT id FROM platform_accounts')).rejects.toMatchObject({ code: '42501' });
+      await expect(first.query(`INSERT INTO tronclass_account_closure_outbox (platform_account_id, reason)
+        SELECT id, state FROM platform_accounts WHERE state IN ('closed', 'deleted')
+        ON CONFLICT (platform_account_id) DO NOTHING`)).rejects.toMatchObject({ code: '42501' });
+    } finally { await first.query('RESET ROLE'); }
+    expect((await control.query(`SELECT
+      (SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass('platform_accounts')) AS table_owner,
+      (SELECT proowner::regrole::text FROM pg_proc
+        WHERE oid = to_regprocedure('enqueue_tronclass_account_closure()')) AS function_owner`)).rows)
+      .toEqual([{ table_owner: 'box', function_owner: migratorRole }]);
+    await close();
+    expect(await events()).toEqual([expect.objectContaining({ platform_account_id: a, reason: 'closed', attempts: 0 })]);
   });
 
   it('records an inserted closed account while leaving active inserts alone', async () => {
