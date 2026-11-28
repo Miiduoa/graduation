@@ -154,7 +154,7 @@ export function normalizeTronClassSubmissionAvailability(
   let draft: TronClassSubmissionAvailability['draft'] = { state: 'unknown', submissionId: null, count: null };
   // Missing flags never prove that there is no school draft. A returned version
   // can prefill a new POST in the school UI, but is not a draft to update by PUT.
-  if (rows.every(row => typeof row.is_draft === 'boolean' && typeof row.is_redo === 'boolean' &&
+  if (knownHistory && rows.every(row => typeof row.is_draft === 'boolean' && typeof row.is_redo === 'boolean' &&
     typeof row.submit_by_instructor === 'boolean' &&
     (!row.is_draft || (row.marked_submitted === false && !row.is_redo && !row.submit_by_instructor)))) {
     const drafts = rows.filter(row => row.is_draft === true);
