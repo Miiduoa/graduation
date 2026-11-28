@@ -804,6 +804,22 @@ test('legacy teacher LMS copy still shows the current teacher-unavailable notice
   expect(view.queryByText(/暫未開放|純數字學號/)).toBeNull();
 });
 
+test('the school-account settings shortcut precedes personal content and opens the actual settings route', () => {
+  mockAuthUser = { uid: 'firebase-a', displayName: '同學' };
+  mockAuthProfile = { uid: 'firebase-a', displayName: '同學' };
+  const view = render(<MeAiFirstScreen />);
+  expect(view.getByTestId('me-home').props.accessibilityLabel).toBe('同學');
+  const settings = view.getByRole('button', { name: '使用設定' });
+  expect(settings.props.testID).toBe('me-open-settings');
+  expect(view.getAllByRole('button', { name: '使用設定' })).toHaveLength(1);
+  const buttons = view.getAllByRole('button');
+  expect(buttons.indexOf(settings)).toBeLessThan(
+    buttons.indexOf(view.getByRole('button', { name: '收藏的活動' })),
+  );
+  fireEvent.press(settings);
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Settings');
+});
+
 test('school-account me page opens the timetable assistant only with a verified nuni session', () => {
   mockAuthUser = { uid: 'firebase-a', displayName: '同學', email: 'a@pu.edu.tw' };
   mockAuthProfile = { uid: 'firebase-a', displayName: '同學', department: '資訊系' };

@@ -164,6 +164,21 @@ export default function MeAiFirstScreen() {
       </View>
 
       <View style={s.section}>
+        <Text accessibilityRole="header" style={s.sectionTitle}>設定與協助</Text>
+        <View style={s.list}>
+          <AccountRow
+            first
+            testID="me-open-settings"
+            title="使用設定"
+            subtitle="外觀、通知、助理權限與資料管理"
+            onPress={go('Settings')}
+            styles={s}
+          />
+          <AccountRow title="幫助與回饋" onPress={go('Help')} styles={s} />
+        </View>
+      </View>
+
+      <View style={s.section}>
         <Text accessibilityRole="header" style={s.sectionTitle}>我的內容</Text>
         <View style={s.list}>
           <AccountRow
@@ -208,21 +223,6 @@ export default function MeAiFirstScreen() {
               styles={s}
             />
           ) : null}
-        </View>
-      </View>
-
-      <View style={s.section}>
-        <Text accessibilityRole="header" style={s.sectionTitle}>設定與協助</Text>
-        <View style={s.list}>
-          <AccountRow
-            first
-            testID="me-open-settings"
-            title="使用設定"
-            subtitle="外觀、通知、助理權限與資料管理"
-            onPress={go('Settings')}
-            styles={s}
-          />
-          <AccountRow title="幫助與回饋" onPress={go('Help')} styles={s} />
         </View>
       </View>
 

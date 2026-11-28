@@ -25,14 +25,20 @@ tags: [smoke, settings]
     timeout: 5000
 - assertVisible:
     id: me-open-settings
+    enabled: true
 - assertVisible: '使用設定'
 - retry:
     maxRetries: 2
     commands:
       - tapOn:
           id: me-open-settings
+          enabled: true
           retryTapIfNoChange: true
       - waitForAnimationToEnd
+      - extendedWaitUntil:
+          visible:
+            id: settings-screen
+          timeout: 15000
       - extendedWaitUntil:
           visible:
             id: settings-current-account
@@ -147,4 +153,8 @@ tags: [smoke, settings]
 - assertVisible:
     id: data-export-instructions
 - assertVisible: '選擇內容，將資料保存到自己的裝置。'
+- assertVisible:
+    id: data-export-scope
+- assertNotVisible:
+    id: settings-export-data
 - takeScreenshot: data_export

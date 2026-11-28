@@ -306,7 +306,7 @@ export function AICard({
               accessibilityLabel={title}
               style={{ flex: 1 }}
             >
-              <Text accessible={false} style={styles.cardTitle}>
+              <Text accessible={false} style={[styles.cardTitle, titleTestID ? { flex: 0 } : undefined]}>
                 {title}
               </Text>
             </View>
