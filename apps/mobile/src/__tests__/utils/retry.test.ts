@@ -72,6 +72,36 @@ describe('withRetry abort listener lifecycle', () => {
     expect(add).not.toHaveBeenCalled();
   });
 
+  it('skips retry policy and notifications if the active request fails after cancellation', async () => {
+    const controller = new AbortController();
+    let rejectRequest!: (error: Error) => void;
+    const fn = jest.fn(
+      () =>
+        new Promise<string>((_, reject) => {
+          rejectRequest = reject;
+        }),
+    );
+    const shouldRetry = jest.fn(() => true);
+    const onRetry = jest.fn();
+    const timersBefore = jest.getTimerCount();
+
+    const result = withRetry(fn, {
+      ...config,
+      signal: controller.signal,
+      shouldRetry,
+      onRetry,
+    });
+    const assertion = expect(result).rejects.toThrow('Aborted');
+    controller.abort();
+    rejectRequest(new Error('network'));
+    await assertion;
+
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(shouldRetry).not.toHaveBeenCalled();
+    expect(onRetry).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(timersBefore);
+  });
+
   it('preserves retry behavior without an abort signal', async () => {
     const fn = jest.fn().mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce('ok');
     const result = withRetry(fn, config);
