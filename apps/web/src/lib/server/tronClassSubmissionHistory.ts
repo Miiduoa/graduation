@@ -24,8 +24,11 @@ function createdAt(value: unknown, now: number): string | null {
   return instant !== null && instant <= now + 60_000 ? new Date(instant).toISOString() : null;
 }
 function stateOf(row: Record<string, unknown>): TronClassSubmissionHistoryEntry['state'] {
-  if (row.is_draft === true && row.is_redo === true) return 'unknown';
-  if (row.is_draft === true) return 'draft';
+  if (row.is_draft === true) {
+    // A draft must not simultaneously be a formal, returned or teacher-created record.
+    return row.is_redo === false && row.marked_submitted === false &&
+      row.submit_by_instructor === false ? 'draft' : 'unknown';
+  }
   if (row.is_redo === true) return 'returned';
   // Never repeat the upstream client's !undefined -> submitted inference.
   if (row.is_draft !== false || row.is_redo !== false) return 'unknown';
