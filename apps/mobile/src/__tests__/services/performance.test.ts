@@ -328,6 +328,56 @@ describe('performance collection privacy', () => {
     },
   );
 
+  it('ignores unstarted and repeated stops without resetting an active measurement', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(0);
+    try {
+      const trace = performance.newTrace('one-shot');
+      const metric = performance.newHttpMetric('https://example.test/data', 'GET');
+
+      trace.stop();
+      await metric.stop();
+      expect(performance.getDataStore().getTraces()).toHaveLength(0);
+      expect(performance.getDataStore().getHttpMetrics()).toHaveLength(0);
+
+      trace.start();
+      await metric.start();
+      clock.mockReturnValue(60);
+      trace.start();
+      await metric.start();
+      clock.mockReturnValue(100);
+      trace.stop();
+      await metric.stop();
+
+      clock.mockReturnValue(200);
+      trace.start();
+      await metric.start();
+      trace.stop();
+      await metric.stop();
+      expect(performance.getDataStore().getTraces()).toHaveLength(1);
+      expect(performance.getDataStore().getHttpMetrics()).toHaveLength(1);
+      expect(performance.getDataStore().getTraces()[0].duration).toBe(100);
+      expect(performance.getDataStore().getHttpMetrics()[0].duration).toBe(100);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('does not record a negative elapsed duration when the wall clock moves backwards', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(100);
+    try {
+      const trace = performance.startTrace('clock-adjustment');
+      const metric = performance.newHttpMetric('https://example.test/data', 'GET');
+      await metric.start();
+      clock.mockReturnValue(50);
+      trace.stop();
+      await metric.stop();
+      expect(performance.getDataStore().getTraces()[0].duration).toBe(0);
+      expect(performance.getDataStore().getHttpMetrics()[0].duration).toBe(0);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('does not revive pending metrics or traces after disabling and re-enabling collection', async () => {
     const trace = performance.startTrace('pending');
     const metric = performance.newHttpMetric('https://example.test/data', 'GET');

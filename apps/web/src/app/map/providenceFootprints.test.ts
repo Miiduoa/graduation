@@ -251,6 +251,7 @@ describe('Providence OSM building outlines', () => {
       { building: '0' }, { building: 'none' }, { building: 'unknown' },
       { building: 'construction' }, { building: 'proposed' },
       { building: 'demolished' }, { building: 'roof' }, { building: 'ruins' },
+      { building: 'removed' }, { building: 'razed' }, { building: ' RAZED ' },
       { building: 'maybe' }, { building: '   ' }, { building: 1 },
     ]) {
       expect(parseProvidenceOsmFootprints({

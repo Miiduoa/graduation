@@ -181,7 +181,7 @@ function outlineNearPoi(outline: readonly [number, number][], place: { lat: numb
 // A matching way ID alone must not turn explicit negative tags into a campus block.
 const NON_BUILDING_VOLUMES = new Set([
   'no', 'false', '0', 'none', 'unknown', 'maybe',
-  'proposed', 'planned', 'construction', 'demolished', 'destroyed',
+  'proposed', 'planned', 'construction', 'demolished', 'destroyed', 'removed', 'razed',
   'ruins', 'ruined', 'collapsed', 'abandoned', 'disused', 'derelict', 'roof', 'bridge',
 ]);
 // A way can retain building=yes while carrying a lifecycle tag for a removed,

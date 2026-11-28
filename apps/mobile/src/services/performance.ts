@@ -26,7 +26,7 @@ interface PerformanceTrace {
 // Mock trace for development
 class MockTrace implements PerformanceTrace {
   private name: string;
-  private startTime: number = 0;
+  private startTime: number | null = null;
   private attributes: Map<string, string> = new Map();
   private metrics: Map<string, number> = new Map();
   private stopped: boolean = false;
@@ -39,6 +39,7 @@ class MockTrace implements PerformanceTrace {
   }
 
   start(): void {
+    if (this.startTime !== null || this.stopped) return;
     this.startTime = Date.now();
     if (__DEV__ && this.canRecord()) {
       console.log(`[Perf] Trace started: ${this.name}`);
@@ -46,10 +47,10 @@ class MockTrace implements PerformanceTrace {
   }
 
   stop(): void {
-    if (this.stopped) return;
+    if (this.stopped || this.startTime === null) return;
     this.stopped = true;
     if (!this.canRecord()) return;
-    const duration = Date.now() - this.startTime;
+    const duration = Math.max(0, Date.now() - this.startTime);
 
     if (__DEV__) {
       console.log(`[Perf] Trace stopped: ${this.name} (${duration}ms)`);
@@ -134,11 +135,12 @@ function httpErrorKind(error: unknown): string {
 class MockHttpMetric implements HttpMetric {
   private url: string;
   private method: string;
-  private startTime: number = 0;
+  private startTime: number | null = null;
   private responseCode: number = 0;
   private requestSize: number = 0;
   private responseSize: number = 0;
   private contentType: string = '';
+  private stopped = false;
   private attributes: Map<string, string> = new Map();
 
   constructor(
@@ -171,12 +173,15 @@ class MockHttpMetric implements HttpMetric {
   }
 
   async start(): Promise<void> {
+    if (this.startTime !== null || this.stopped) return;
     this.startTime = Date.now();
   }
 
   async stop(measurement?: { durationMs: number }): Promise<void> {
+    if (this.stopped || this.startTime === null) return;
+    this.stopped = true;
     if (!this.canRecord()) return;
-    const duration = measurement?.durationMs ?? Date.now() - this.startTime;
+    const duration = measurement?.durationMs ?? Math.max(0, Date.now() - this.startTime);
 
     if (__DEV__) {
       console.log(`[Perf] HTTP: ${this.method} ${this.url}`);

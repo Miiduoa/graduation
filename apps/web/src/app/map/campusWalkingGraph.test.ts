@@ -128,6 +128,43 @@ describe('audited outdoor campus walking graph', () => {
     expect(route({ ...graph, edges: [...graph.edges, { ...graph.edges[0], osmWayId: 0 }] })).toBeNull();
   });
 
+  it('rejects missing-GPS and physically zero-length segments in live and cached routes', () => {
+    const wideBounds = { south: -90, north: 90, west: -180, east: 180 };
+    const solve = (nodes: CampusWalkingGraph['nodes']) => findCampusWalkingRoute({
+      ...graph, nodes, edges: [graph.edges[0]],
+    }, 'fixture', wideBounds, 1, 2, now);
+    const template = route(graph)!;
+    const invalidPairs = [
+      [{ id: 1, lat: 0, lng: 0 }, { id: 2, lat: 0, lng: 0.001 }],
+      [{ id: 1, lat: 10, lng: -180 }, { id: 2, lat: 10, lng: 180 }],
+      [{ id: 1, lat: 90, lng: 1 }, { id: 2, lat: 90, lng: 2 }],
+      [{ id: 1, lat: -90, lng: 1 }, { id: 2, lat: -90, lng: 2 }],
+    ];
+    for (const nodes of invalidPairs) {
+      expect(solve(nodes)).toBeNull();
+      const distanceMeters = nodes[0].lat === 0 ? 6371000 * Math.PI / 180 * 0.001 : 0;
+      expect(isCampusWalkingRouteCurrent({
+        ...template, nodes, osmWayIds: [101], distanceMeters,
+      }, 'fixture', now)).toBe(false);
+    }
+    for (const nodes of [
+      [{ id: 1, lat: 0, lng: 1 }, { id: 2, lat: 0, lng: 1.001 }],
+      [{ id: 1, lat: 1, lng: 0 }, { id: 2, lat: 1.001, lng: 0 }],
+      [{ id: 1, lat: 10, lng: 179.999 }, { id: 2, lat: 10, lng: -179.999 }],
+    ]) {
+      const result = solve(nodes)!;
+      expect(result.distanceMeters).toBeGreaterThan(0);
+      expect(isCampusWalkingRouteCurrent(result, 'fixture', now)).toBe(true);
+    }
+  });
+
+  it('only returns the documented coordinate fields, not extra upstream node metadata', () => {
+    const nodes = graph.nodes.map(node => ({ ...node, internalMetadata: 'synthetic-not-for-route' }));
+    const result = route({ ...graph, nodes })!;
+    expect(result.nodes).toEqual(route(graph)!.nodes);
+    expect(route({ ...graph, nodes }, 1, 1)?.nodes).toEqual([graph.nodes[0]]);
+  });
+
   it('does not mutate the source and preserves the explicit same-node result', () => {
     const result = route(graph, 1, 1);
     expect(result?.distanceMeters).toBe(0);
