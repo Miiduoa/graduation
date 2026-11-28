@@ -16,7 +16,7 @@ PREVIOUS_MIGRATION = 'apps/api/src/migrations/283_platform_assistant_permissions
 MANIFEST = HERE / 'source.json'
 INPUT_TREE_PREFIX = '2e7cc189'
 STALE_283_CANDIDATE_TREE = '2d7a325c5d4cd185d0ba32c6603a1e703684199b'
-SQL_SHA256 = '9c5057739cf89222bc69ee2bcbfffbf74b0705d522d4478f75fc01a2d826381a'
+SQL_SHA256 = '915ada63acd28f1ddd78d81395d27dffed3ce193064a12b4718afc1a7af102d7'
 
 
 def sha(value):

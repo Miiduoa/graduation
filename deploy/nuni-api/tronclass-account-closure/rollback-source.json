@@ -8,7 +8,7 @@
   ],
   "staleRollbackDockerfile": "deploy/nuni-api/composed/Dockerfile.rollback",
   "migrations": {
-    "deploy/nuni-api/tronclass-account-closure/284_tronclass_account_closure_outbox.sql": "9c5057739cf89222bc69ee2bcbfffbf74b0705d522d4478f75fc01a2d826381a"
+    "deploy/nuni-api/tronclass-account-closure/284_tronclass_account_closure_outbox.sql": "915ada63acd28f1ddd78d81395d27dffed3ce193064a12b4718afc1a7af102d7"
   },
   "behavior": "緊急相容回滾：現況正式映像加上相同 284 SQL；資料庫不倒退。不使用 be815455 或 composed/Dockerfile.rollback。"
 }
